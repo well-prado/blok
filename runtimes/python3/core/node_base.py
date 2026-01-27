@@ -30,9 +30,10 @@ class NodeBase(ABC):
         ctx.config = self.blueprintMapper(ctx.config, ctx)
 
         response = await self.run(ctx)
-        if response.error is not None:
-            raise Exception(response.error)
-        
+        # Don't raise exception - let the response flow through with error info
+        # if response.error is not None:
+        #     raise Exception(response.error)
+
         ctx.response = response
 
         return response

@@ -20,3 +20,12 @@ class NanoServiceResponse(ResponseContext):
         self.data = data
         self.error = None
         self.success = True
+
+    def to_dict(self) -> dict:
+        """Convert NanoServiceResponse to dictionary for JSON serialization"""
+        return {
+            "data": self.data,
+            "error": self.error.to_dict() if self.error else None,
+            "success": self.success,
+            "contentType": self.contentType,
+        }

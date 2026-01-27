@@ -1,10 +1,31 @@
 import type { CallOptions, NodeRequest, NodeResponse } from "./NodeGrpcClient";
 import type ParamsDictionary from "./types/ParamsDictionary";
+import * as path from "node:path";
+import * as fs from "node:fs";
 
 const grpc = require("@grpc/grpc-js");
 const protoLoader = require("@grpc/proto-loader");
 
-const packageDefinition = protoLoader.loadSync(`${__dirname}/proto/node.proto`, {
+// Try multiple paths to find the proto file (handles both source and dist builds)
+function findProtoPath(): string {
+	const possiblePaths = [
+		path.join(__dirname, "proto", "node.proto"), // dist path
+		path.join(__dirname, "..", "proto", "node.proto"), // source path
+		path.join(__dirname, "..", "..", "proto", "node.proto"), // alternate source path
+	];
+
+	for (const protoPath of possiblePaths) {
+		if (fs.existsSync(protoPath)) {
+			return protoPath;
+		}
+	}
+
+	throw new Error(
+		`Could not find node.proto. Tried: ${possiblePaths.join(", ")}`
+	);
+}
+
+const packageDefinition = protoLoader.loadSync(findProtoPath(), {
 	keepCase: true,
 	longs: String,
 	enums: String,

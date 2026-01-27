@@ -3,8 +3,10 @@ from typing import Optional, Dict, Any
 class GlobalError(Exception):
     def __init__(self, msg: Optional[str] = None):
         Exception.__init__(self)
-        self.context: Dict[str, Any] = {'message': msg}
-        self.message: str = msg
+        # Convert exception objects to string for JSON serialization
+        msg_str = str(msg) if msg is not None else None
+        self.context: Dict[str, Any] = {'message': msg_str}
+        self.message: str = msg_str
         self.code = 500
 
     def setCode(self, code: Optional[int] = None) -> None:

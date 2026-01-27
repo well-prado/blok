@@ -40,11 +40,27 @@ integration/
 **Required:**
 - Node.js 18+
 - Python 3.8+ (for Python runtime tests)
+  - Required packages: `grpcio`, `grpcio-tools` (see `runtimes/python3/requirements.txt`)
 - Docker (for Docker runtime tests)
 
 **Optional:**
 - Go 1.21+ (for building Go runtime images)
 - Java 17+ (for building Java runtime images)
+
+### Python3 Runtime Setup
+
+Before running Python3 integration tests, install dependencies:
+
+```bash
+cd runtimes/python3
+pip install -r requirements.txt
+```
+
+The tests will automatically:
+1. Start Python3 gRPC server on port 50051
+2. Wait for server to be ready
+3. Run tests
+4. Clean up server after tests
 
 ### Run All Integration Tests
 

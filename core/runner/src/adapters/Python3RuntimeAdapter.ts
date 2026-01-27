@@ -32,18 +32,24 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 		const startTime = performance.now();
 
 		try {
-			const context = this.createContext(ctx);
+			// Get node config from node.config or ctx.config[nodeName] or default to empty object
+			const nodeConfig = node.config || (ctx.config as Record<string, unknown>)?.[node.name] as Record<string, unknown> || {};
+			const context = this.createContext(ctx, nodeConfig);
 			const nodeRequest = this.createNodeRequest(node, context);
 			const client = new NodeGrpcNativeClient(this.host, this.port);
 			const response = await client.call(nodeRequest);
-			const parsedResponse = this.parseNodeResponse(response);
+			const parsedResponse = this.parseNodeResponse(response) as Record<string, unknown>;
 
 			const duration_ms = performance.now() - startTime;
 
+			// Check if the Python node reported an error
+			const nodeSuccess = parsedResponse.success !== false;
+			const nodeErrors = parsedResponse.error || null;
+
 			return {
-				success: true,
+				success: nodeSuccess,
 				data: parsedResponse,
-				errors: null,
+				errors: nodeErrors,
 				metrics: {
 					duration_ms,
 				},
@@ -90,7 +96,7 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 	/**
 	 * Create the context object to send to Python runtime
 	 */
-	private createContext(ctx: Context): unknown {
+	private createContext(ctx: Context, config: Record<string, unknown>): unknown {
 		return {
 			request: {
 				body: ctx.request.body,
@@ -105,6 +111,7 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 			response: ctx.response,
 			vars: ctx.vars,
 			env: ctx.env,
+			config: config,
 		};
 	}
 }

@@ -44,7 +44,7 @@ class NanoService(NodeBase):
 
         # Process node custom logic
         result = await self.handle(ctx, config)
-        self.validator.validate(result, self.output_schema)
+        self.validator.validate(result.data, self.output_schema)
         end = time.time()
 
         logging.info(f"Executed node: {self.name} in {(end - start) * 1000:.2f}ms")

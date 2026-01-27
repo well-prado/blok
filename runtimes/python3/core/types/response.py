@@ -9,9 +9,19 @@ class ResponseContext:
         self.contentType: str = contentType
 
     def to_dict(self):
+        # Handle error - could be GlobalError object or already a dict
+        error_dict = None
+        if self.error:
+            if hasattr(self.error, 'to_dict'):
+                error_dict = self.error.to_dict()
+            elif isinstance(self.error, dict):
+                error_dict = self.error
+            else:
+                error_dict = {"message": str(self.error)}
+
         return {
             "data": self.data,
-            "error": self.error.to_dict() if self.error else None,
+            "error": error_dict,
             "success": self.success,
             "contentType": self.contentType
         }
