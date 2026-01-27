@@ -244,6 +244,9 @@ importers:
       ejs:
         specifier: ^3.1.10
         version: 3.1.10
+      zod:
+        specifier: ^3.24.2
+        version: 3.24.2
     devDependencies:
       '@babel/cli':
         specifier: ^7.0.0

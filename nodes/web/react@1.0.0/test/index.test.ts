@@ -1,21 +1,29 @@
+/**
+ * React Node Tests - Updated for Function-First Implementation
+ *
+ * Tests migrated from class-based to function-first pattern.
+ * All existing behavior is preserved.
+ */
+
 import fs from "node:fs";
 import path from "node:path";
+import type { INanoServiceResponse } from "@nanoservice-ts/runner";
 import { beforeAll, expect, test } from "vitest";
-import Node from "../index";
+import ReactNode from "../index";
 import ctx from "./helper";
 
-let node: Node;
 let rootDir: string;
 
 beforeAll(() => {
-	node = new Node();
-	node.name = "api-call";
 	rootDir = path.resolve(__dirname, ".");
 });
 
-// Validate Hello World from Node
+// Validate React rendering from Node
 test("Render index.html page", async () => {
-	const response = await node.handle(ctx(), { react_app: "./dist/app/index.merged.min.js" });
+	const context = ctx();
+	const inputs = { react_app: "./dist/app/index.merged.min.js" };
+
+	const response = (await ReactNode.handle(context, inputs)) as INanoServiceResponse;
 	const mockup_file = path.resolve(rootDir, "index.mockup.html");
 	const message: string = fs.readFileSync(mockup_file, "utf8");
 
