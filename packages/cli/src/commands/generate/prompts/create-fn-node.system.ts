@@ -45,10 +45,138 @@ Formatting:
 * The output must be a single valid TypeScript module.
 * Export the node as default: \`export default defineNode({...})\`
 
+Real-World Examples to Guide You:
+
+**Example 1: API Call Node**
+
+\`\`\`typescript
+import type { Context } from "@nanoservice-ts/shared";
+import { z } from "zod";
+import { defineNode } from "@nanoservice-ts/runner";
+
+export default defineNode({
+	name: "api-call",
+	description: "Makes HTTP API calls with automatic JSON handling",
+
+	input: z.object({
+		url: z.string().url("Must be a valid URL"),
+		method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("GET"),
+		headers: z.record(z.string()).optional(),
+		body: z.any().optional(),
+		timeout: z.number().positive().optional().default(30000),
+	}),
+
+	output: z.object({
+		status: z.number().int().min(100).max(599),
+		statusText: z.string(),
+		data: z.any(),
+		headers: z.record(z.string()),
+		duration: z.number(),
+	}),
+
+	async execute(ctx, input) {
+		const startTime = performance.now();
+
+		ctx.logger.log(\`Making \${input.method} request to \${input.url}\`);
+
+		const response = await fetch(input.url, {
+			method: input.method,
+			headers: {
+				"Content-Type": "application/json",
+				...input.headers,
+			},
+			body: input.body ? JSON.stringify(input.body) : undefined,
+			signal: AbortSignal.timeout(input.timeout),
+		});
+
+		const contentType = response.headers.get("content-type") || "";
+		let data: unknown;
+
+		if (contentType.includes("application/json")) {
+			data = await response.json();
+		} else {
+			data = await response.text();
+		}
+
+		const duration = performance.now() - startTime;
+
+		ctx.logger.log(\`Request completed in \${duration.toFixed(2)}ms with status \${response.status}\`);
+
+		if (ctx.vars) {
+			ctx.vars["api-response"] = { status: response.status, data };
+		}
+
+		return {
+			status: response.status,
+			statusText: response.statusText,
+			data,
+			headers: Object.fromEntries(response.headers.entries()),
+			duration,
+		};
+	},
+});
+\`\`\`
+
+**Example 2: Fetch User Node**
+
+\`\`\`typescript
+import type { Context } from "@nanoservice-ts/shared";
+import { z } from "zod";
+import { defineNode } from "@nanoservice-ts/runner";
+
+export default defineNode({
+	name: "fetch-user",
+	description: "Fetches user profile by ID from database",
+
+	input: z.object({
+		userId: z.string().uuid("userId must be a valid UUID"),
+		includeMetadata: z.boolean().optional().default(false),
+	}),
+
+	output: z.object({
+		user: z.object({
+			id: z.string().uuid(),
+			name: z.string().min(1),
+			email: z.string().email(),
+			createdAt: z.string().datetime(),
+			metadata: z.record(z.unknown()).optional(),
+		}),
+	}),
+
+	async execute(ctx, input) {
+		ctx.logger.log(\`Fetching user: \${input.userId}\`);
+
+		// Simulate database fetch
+		const user = await fetchUserFromDatabase(input.userId, input.includeMetadata);
+
+		// Store in context for downstream nodes
+		if (ctx.vars) {
+			ctx.vars["current-user"] = user;
+		}
+
+		return { user };
+	},
+});
+
+async function fetchUserFromDatabase(userId: string, includeMetadata: boolean) {
+	// Your database logic here
+	return {
+		id: userId,
+		name: "John Doe",
+		email: "john@example.com",
+		createdAt: new Date().toISOString(),
+		...(includeMetadata && {
+			metadata: { lastLogin: new Date().toISOString(), loginCount: 42 },
+		}),
+	};
+}
+\`\`\`
+
 Template to follow (adapt and fill based on the user's request):
 
-import { defineNode } from "@nanoservice-ts/runner";
+import type { Context } from "@nanoservice-ts/shared";
 import { z } from "zod";
+import { defineNode } from "@nanoservice-ts/runner";
 
 /**
  * [Brief description of what this node does]
@@ -85,7 +213,7 @@ export default defineNode({
 		// - Read previous node output: const prev = ctx.vars["previous-node-key"];
 		// - Write for future nodes: ctx.vars["this-node-key"] = someValue;
 		// - Use input.* fields that match the input schema (TypeScript infers the type automatically)
-		// - Log messages: ctx.logger.info("Processing request");
+		// - Log messages: ctx.logger.log("Processing request");
 		// - Access environment: const apiKey = ctx.env.API_KEY;
 
 		// TODO: Implement business logic here

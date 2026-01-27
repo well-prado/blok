@@ -1,16 +1,27 @@
-import { NanoServiceResponse } from "@nanoservice-ts/runner";
-import type { Context, GlobalError } from "@nanoservice-ts/shared";
+/**
+ * API Call Node Tests - Updated for Function-First Implementation
+ *
+ * Tests migrated from class-based to function-first pattern.
+ * All existing behavior is preserved.
+ */
+
+import type { Context } from "@nanoservice-ts/shared";
+import type { GlobalError } from "@nanoservice-ts/shared";
+import type { INanoServiceResponse } from "@nanoservice-ts/runner";
 import { describe, expect, it, vi } from "vitest";
-import ApiCall, { type InputType } from "../index";
+import ApiCallNode from "../index";
 import { runApiCall } from "../util";
 
-// ✅ Correct way to mock `runApiCall` in Vitest
+// Mock the util function
 vi.mock("../util", () => ({
-	runApiCall: vi.fn(), // Directly mock the function
+	runApiCall: vi.fn(),
 }));
 
-describe("ApiCall Node", () => {
+describe("ApiCall Node - Function-First", () => {
 	const mockContext: Context = {
+		id: "test-id",
+		workflow_name: "test-workflow",
+		workflow_path: "/test",
 		request: {
 			method: "POST",
 			body: { default: "data" },
@@ -20,8 +31,26 @@ describe("ApiCall Node", () => {
 		},
 		response: {
 			data: {},
+			success: true,
+			error: null,
+		},
+		error: {
+			message: [],
 		},
 		vars: {},
+		config: {
+			"api-call": {}, // Node configuration
+		},
+		logger: {
+			log: vi.fn(),
+			info: vi.fn(),
+			error: vi.fn(),
+			warn: vi.fn(),
+			debug: vi.fn(),
+		},
+		env: {},
+		eventLogger: null,
+		_PRIVATE_: null,
 	} as unknown as Context;
 
 	const validInputs = {
@@ -33,42 +62,79 @@ describe("ApiCall Node", () => {
 	};
 
 	it("should successfully make an API call and return response", async () => {
-		const apiCallNode = new ApiCall();
 		const mockResult = { success: true, data: { message: "API Response" } };
 
-		// ✅ Correct way to mock function in Vitest
+		// Mock the API call
 		vi.mocked(runApiCall).mockResolvedValue(mockResult);
 
-		const result = await apiCallNode.handle(mockContext, validInputs);
-		expect(result).toBeInstanceOf(NanoServiceResponse);
+		// Execute the node using handle()
+		const result = (await ApiCallNode.handle(mockContext, validInputs)) as INanoServiceResponse;
+
+		// Check the result structure
 		expect(result.success).toBe(true);
 		expect(result.data).toEqual(mockResult);
+		expect(result.error).toBeNull();
 	});
 
-	it("should use ctx.response.data as the body if inputs.body is undefined", async () => {
-		const apiCallNode = new ApiCall();
+	it("should use ctx.response.data as the body if inputs.body is empty", async () => {
 		mockContext.response.data = { fallback: "data" };
-		const inputsWithoutBody: InputType = { ...validInputs, body: {} };
+		const inputsWithoutBody = { ...validInputs, body: {} };
 
 		const mockResult = { success: true, data: { fallback: "data" } };
 		vi.mocked(runApiCall).mockResolvedValue(mockResult);
 
-		const result = await apiCallNode.handle(mockContext, inputsWithoutBody);
-		expect(result).toBeInstanceOf(NanoServiceResponse);
+		const result = (await ApiCallNode.handle(mockContext, inputsWithoutBody)) as INanoServiceResponse;
+
 		expect(result.success).toBe(true);
 		expect(result.data).toEqual(mockResult);
+		expect(result.error).toBeNull();
 	});
 
 	it("should return an error if the API call fails", async () => {
-		const apiCallNode = new ApiCall();
 		const mockError = new Error("API request failed");
 
 		vi.mocked(runApiCall).mockRejectedValue(mockError);
 
-		const result = await apiCallNode.handle(mockContext, validInputs);
-		expect(result).toBeInstanceOf(NanoServiceResponse);
+		const result = (await ApiCallNode.handle(mockContext, validInputs)) as INanoServiceResponse;
+
 		expect(result.success).toBe(false);
 		expect(result.error).toBeDefined();
 		expect((result.error as GlobalError).message).toBe("API request failed");
+		expect((result.error as GlobalError).context.code).toBe(500); // Runtime error = 500
+	});
+
+	it("should validate input with Zod and reject invalid URLs", async () => {
+		const invalidInputs = {
+			...validInputs,
+			url: "not-a-valid-url",
+		};
+
+		const result = (await ApiCallNode.handle(mockContext, invalidInputs)) as INanoServiceResponse;
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBeDefined();
+		expect((result.error as GlobalError).context.code).toBe(400); // Validation error = 400
+	});
+
+	it("should use default values for optional fields", async () => {
+		const minimalInputs = {
+			url: "https://api.example.com",
+		};
+
+		const mockResult = { success: true };
+		vi.mocked(runApiCall).mockResolvedValue(mockResult);
+
+		const result = (await ApiCallNode.handle(mockContext, minimalInputs)) as INanoServiceResponse;
+
+		expect(result.success).toBe(true);
+
+		// Verify runApiCall was called with defaults
+		expect(vi.mocked(runApiCall)).toHaveBeenCalledWith(
+			"https://api.example.com",
+			"GET", // default
+			{}, // default headers
+			mockContext.response.data, // default body from context
+			"json", // default responseType
+		);
 	});
 });

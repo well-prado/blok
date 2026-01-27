@@ -138,8 +138,17 @@ export class FunctionNode<
 	 * @returns GlobalError instance
 	 */
 	private mapErrorToGlobalError(error: unknown): GlobalError {
-		if (error instanceof z.ZodError) {
-			return this.zodErrorToGlobalError(error);
+		// Duck typing check for ZodError - more reliable than instanceof across module boundaries
+		// ZodError has: { name: "ZodError", issues: [...] }
+		if (
+			error &&
+			typeof error === "object" &&
+			"issues" in error &&
+			Array.isArray((error as { issues: unknown }).issues) &&
+			"name" in error &&
+			(error as { name: unknown }).name === "ZodError"
+		) {
+			return this.zodErrorToGlobalError(error as ZodError);
 		}
 
 		if (error instanceof Error) {
