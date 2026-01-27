@@ -2,6 +2,47 @@ import { z } from "zod";
 import type { ConditionElseOpts } from "../components/AddElse";
 import type { ConditionOpts } from "../components/AddIf";
 
+/**
+ * RuntimeKind represents all supported runtime environments
+ * Synced with @nanoservice-ts/runner RuntimeKind type
+ */
+export const RuntimeKindSchema = z.enum([
+	"nodejs",
+	"bun",
+	"python3",
+	"go",
+	"java",
+	"rust",
+	"php",
+	"csharp",
+	"docker",
+	"wasm",
+]);
+
+export type RuntimeKind = z.infer<typeof RuntimeKindSchema>;
+
+/**
+ * Node type enum - includes both legacy types and new runtime types
+ */
+export const NodeTypeSchema = z.enum([
+	"local",
+	"module",
+	// Legacy runtime types (backward compatible)
+	"runtime.python3",
+	// New runtime types
+	"runtime.nodejs",
+	"runtime.bun",
+	"runtime.go",
+	"runtime.java",
+	"runtime.rust",
+	"runtime.php",
+	"runtime.csharp",
+	"runtime.docker",
+	"runtime.wasm",
+]);
+
+export type NodeType = z.infer<typeof NodeTypeSchema>;
+
 export const StepOptsSchema = z.object({
 	name: z
 		.string({
@@ -15,8 +56,9 @@ export const StepOptsSchema = z.object({
 			invalid_type_error: "Node must be a string",
 		})
 		.min(5),
-	type: z.enum(["local", "module", "runtime.python3"]),
+	type: NodeTypeSchema,
 	inputs: z.object({}).optional(),
+	runtime: RuntimeKindSchema.optional(),
 });
 
 export type StepOpts = z.infer<typeof StepOptsSchema>;

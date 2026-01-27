@@ -8,7 +8,15 @@ import figlet from "figlet";
 import fsExtra from "fs-extra";
 import color from "picocolors";
 import { manager as pm } from "../../services/package-manager.js";
-import { python3_file } from "./utils/Examples.js";
+import {
+	go_dockerfile,
+	go_mod_file,
+	go_node_file,
+	java_dockerfile,
+	java_node_file,
+	java_pom_file,
+	python3_file,
+} from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);
 
@@ -71,8 +79,13 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 					p.select({
 						message: "Select the nanoservice runtime",
 						options: [
-							{ label: "Typescript", value: "typescript", hint: "recommended" },
-							{ label: "Python3", value: "python3", hint: "Alpha - Limited to MacOS and Linux" },
+							{ label: "TypeScript/Node.js", value: "typescript", hint: "recommended" },
+							{ label: "Python 3", value: "python3", hint: "Production - gRPC" },
+							{ label: "Go", value: "go", hint: "Production - Docker" },
+							{ label: "Java", value: "java", hint: "Production - Docker" },
+							{ label: "Rust", value: "rust", hint: "Coming soon" },
+							{ label: "PHP", value: "php", hint: "Coming soon" },
+							{ label: "C# / .NET", value: "csharp", hint: "Coming soon" },
 						],
 					}),
 			},
@@ -97,7 +110,17 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			);
 		}
 
-		if (node_runtime !== "python3") {
+		// Show info for coming soon runtimes
+		if (node_runtime === "rust" || node_runtime === "php" || node_runtime === "csharp") {
+			console.log(
+				color.yellow(
+					`⚠️  ${node_runtime.toUpperCase()} runtime is coming soon! Please use TypeScript, Python, Go, or Java for now.`,
+				),
+			);
+			process.exit(0);
+		}
+
+		if (node_runtime === "typescript") {
 			const nanoctlNodeExtension = await p.group(
 				{
 					nodeType: () =>
@@ -248,15 +271,136 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			fsExtra.writeFileSync(`${dirPath}/__init__.py`, "");
 		}
 
+		if (node_runtime === "go") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				// Validate the project
+				const currentDir = `${process.cwd()}/runtimes/go`;
+				const nodeProjectDirExists = fsExtra.existsSync(currentDir);
+				if (!nodeProjectDirExists) {
+					// Create runtimes/go directory if it doesn't exist
+					fsExtra.ensureDirSync(currentDir);
+				}
+
+				// Prepare the node
+				const currentNodesDir = `${currentDir}/nodes`;
+				if (!isDefault) {
+					fsExtra.ensureDirSync(currentNodesDir);
+				} else {
+					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
+					if (!nodeDirExists) {
+						fsExtra.ensureDirSync(currentNodesDir);
+					}
+				}
+
+				dirPath = path.join(currentNodesDir, nodeName);
+			}
+
+			if (!isDefault) s.message("Creating Go node files...");
+
+			// Copy the node files
+			if (!currentPath) {
+				const nodeDirExists = fsExtra.existsSync(dirPath);
+				if (nodeDirExists) throw new Error("ops2");
+			}
+
+			fsExtra.ensureDirSync(dirPath);
+
+			// Write Go files with node name replacement
+			const goNodeContent = go_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const goModContent = go_mod_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const goDockerContent = go_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+
+			fsExtra.writeFileSync(`${dirPath}/main.go`, goNodeContent);
+			fsExtra.writeFileSync(`${dirPath}/go.mod`, goModContent);
+			fsExtra.writeFileSync(`${dirPath}/go.sum`, "");
+			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, goDockerContent);
+
+			// Create README
+			const readmeContent = `# ${nodeName}\n\nGo-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
+		}
+
+		if (node_runtime === "java") {
+			let dirPath = process.cwd();
+			if (!currentPath) {
+				// Validate the project
+				const currentDir = `${process.cwd()}/runtimes/java`;
+				const nodeProjectDirExists = fsExtra.existsSync(currentDir);
+				if (!nodeProjectDirExists) {
+					// Create runtimes/java directory if it doesn't exist
+					fsExtra.ensureDirSync(currentDir);
+				}
+
+				// Prepare the node
+				const currentNodesDir = `${currentDir}/nodes`;
+				if (!isDefault) {
+					fsExtra.ensureDirSync(currentNodesDir);
+				} else {
+					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
+					if (!nodeDirExists) {
+						fsExtra.ensureDirSync(currentNodesDir);
+					}
+				}
+
+				dirPath = path.join(currentNodesDir, nodeName);
+			}
+
+			if (!isDefault) s.message("Creating Java node files...");
+
+			// Copy the node files
+			if (!currentPath) {
+				const nodeDirExists = fsExtra.existsSync(dirPath);
+				if (nodeDirExists) throw new Error("ops2");
+			}
+
+			fsExtra.ensureDirSync(dirPath);
+
+			// Create Maven directory structure
+			const srcDir = `${dirPath}/src/main/java/com/blok/nodes`;
+			fsExtra.ensureDirSync(srcDir);
+
+			// Write Java files with node name replacement
+			const javaNodeContent = java_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const javaPomContent = java_pom_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const javaDockerContent = java_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+
+			fsExtra.writeFileSync(`${srcDir}/HelloWorldNode.java`, javaNodeContent);
+			fsExtra.writeFileSync(`${dirPath}/pom.xml`, javaPomContent);
+			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, javaDockerContent);
+
+			// Create README
+			const readmeContent = `# ${nodeName}\n\nJava-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
+		}
+
 		if (!isDefault) s.stop(`Node "${nodeName}" created successfully.`);
-		if (!currentPath && node_runtime === "typescript")
+
+		// Show navigation instructions based on runtime
+		if (!currentPath && node_runtime === "typescript") {
 			console.log(`\nNavigate to the node directory by running: cd src/nodes/${nodeName}`);
-		if (!currentPath && node_runtime === "python3")
+			console.log(
+				`${currentPath ? "\n" : ""}Run the command "npm run build" or "npm run build:dev" to build the project.`,
+			);
+		}
+
+		if (!currentPath && node_runtime === "python3") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/python3/nodes/${nodeName}`);
-		console.log(
-			`${currentPath ? "\n" : ""}Run the command "npm run build" or "npm run build:dev" to build the project.`,
-		);
-		console.log("For more documentation, visit https://blok.build/docs/d/core-concepts/nodes");
+		}
+
+		if (!currentPath && node_runtime === "go") {
+			console.log(`\nNavigate to the node directory by running: cd runtimes/go/nodes/${nodeName}`);
+			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
+			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+		}
+
+		if (!currentPath && node_runtime === "java") {
+			console.log(`\nNavigate to the node directory by running: cd runtimes/java/nodes/${nodeName}`);
+			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
+			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+		}
+
+		console.log("\nFor more documentation, visit https://blok.build/docs/d/core-concepts/nodes");
 	} catch (error) {
 		if (!isDefault) s.stop("An error occurred");
 

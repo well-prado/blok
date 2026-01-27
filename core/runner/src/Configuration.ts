@@ -2,9 +2,12 @@
 // import { z } from "zod";
 import type { NodeBase } from "@nanoservice-ts/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
-import NodeRuntime from "./NodeRuntime";
-import type RunnerNode from "./RunnerNode";
+import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
+import { RuntimeRegistry } from "./RuntimeRegistry";
+import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
+import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
+import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
 import type Flow from "./types/Flow";
@@ -30,6 +33,26 @@ export default class Configuration implements Config {
 		this.version = "";
 		this.name = "";
 		this.trigger = {};
+		this.initializeRuntimeRegistry();
+	}
+
+	/**
+	 * Initialize the RuntimeRegistry with built-in adapters
+	 */
+	private initializeRuntimeRegistry(): void {
+		const registry = RuntimeRegistry.getInstance();
+
+		// Register NodeJS runtime adapter if not already registered
+		if (!registry.has("nodejs")) {
+			registry.register(new NodeJsRuntimeAdapter());
+		}
+
+		// Register Python3 runtime adapter if not already registered
+		if (!registry.has("python3")) {
+			const host = process.env.RUNTIME_PYTHON3_HOST || "localhost";
+			const port = process.env.RUNTIME_PYTHON3_PORT ? Number.parseInt(process.env.RUNTIME_PYTHON3_PORT) : 50051;
+			registry.register(new Python3RuntimeAdapter(host, port));
+		}
 	}
 
 	public async init(workflowNameInPath: string, opts?: GlobalOptions) {
@@ -190,19 +213,31 @@ export default class Configuration implements Config {
 	}
 
 	async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
-		const host = process.env.RUNTIME_PYTHON3_HOST || "localhost";
-		const port =
-			process.env.RUNTIME_PYTHON3_PORT !== undefined ? Number.parseInt(process.env.RUNTIME_PYTHON3_PORT) : 50051;
+		// Determine the runtime kind
+		// For backward compatibility: "runtime.python3" type maps to "python3" runtime
+		const runtimeKind = node.runtime || "python3";
 
-		const runtime = new NodeRuntime();
-		runtime.assignHostAndPort(host, port);
-		(runtime as unknown as RunnerNode).node = node.node;
-		runtime.name = node.name;
-		runtime.active = node.active !== undefined ? node.active : true;
-		runtime.stop = node.stop !== undefined ? node.stop : false;
-		runtime.set_var = node.set_var !== undefined ? node.set_var : false;
+		// Get the runtime adapter from registry
+		const registry = RuntimeRegistry.getInstance();
+		const adapter = registry.get(runtimeKind);
 
-		return runtime as unknown as RunnerNode;
+		// Create a minimal node instance to pass to the adapter
+		// The adapter will execute this node
+		const targetNode = new (class extends RunnerNode {
+			async run() {
+				return { success: false, data: null, error: null };
+			}
+		})();
+		targetNode.node = node.node;
+		targetNode.name = node.name;
+		targetNode.type = node.type;
+		targetNode.runtime = runtimeKind;
+		targetNode.active = node.active !== undefined ? node.active : true;
+		targetNode.stop = node.stop !== undefined ? node.stop : false;
+		targetNode.set_var = node.set_var !== undefined ? node.set_var : false;
+
+		// Wrap in RuntimeAdapterNode to integrate with existing Runner
+		return new RuntimeAdapterNode(adapter, targetNode) as RunnerNode;
 	}
 
 	protected async moduleResolver(node: RunnerNode, opts: GlobalOptions): Promise<RunnerNode> {

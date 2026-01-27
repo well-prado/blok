@@ -6,6 +6,14 @@ import ResolverBase from "./ResolverBase";
 import Runner from "./Runner";
 import TriggerBase from "./TriggerBase";
 
+// Runtime adapters
+import { RuntimeRegistry } from "./RuntimeRegistry";
+import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
+import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "./adapters/RuntimeAdapter";
+import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
+import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
+import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
+
 // types
 
 import NanoService from "./NanoService";
@@ -37,6 +45,13 @@ export {
 	LocalStorage,
 	ResolverBase,
 	TriggerBase,
+	// Runtime adapters
+	RuntimeRegistry,
+	RuntimeAdapterNode,
+	NodeJsRuntimeAdapter,
+	Python3RuntimeAdapter,
+	DockerRuntimeAdapter,
+	// Types
 	Condition,
 	Conditions,
 	Config,
@@ -59,3 +74,6 @@ export {
 	Average,
 	TriggerResponse,
 };
+
+// Export types
+export type { RuntimeAdapter, RuntimeKind, ExecutionResult };

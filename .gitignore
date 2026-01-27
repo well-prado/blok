@@ -150,3 +150,30 @@ python3_runtime/
 */**/images/examples
 
 memory-bank
+
+# Go build artifacts
+examples/runtimes/go/server/server
+examples/runtimes/go/nodes/*/main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Java build artifacts
+examples/runtimes/java/target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# Test artifacts
+test-results/
+*.test
+.vitest-cache/
+
+# Runtime container artifacts
+.docker-runtime-cache/

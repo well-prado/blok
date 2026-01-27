@@ -22,6 +22,24 @@
 			"recommended": true
 		}
 	},
+	"overrides": [
+		{
+			"include": ["**/__tests__/**/*.ts", "**/*.test.ts", "**/*.spec.ts"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					},
+					"complexity": {
+						"noForEach": "off"
+					},
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		}
+	],
 	"javascript": {
 		"formatter": {
 			"quoteStyle": "double",

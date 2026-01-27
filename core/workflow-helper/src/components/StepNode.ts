@@ -22,6 +22,7 @@ export default class StepNode extends HelperResponse {
 			name: config.name,
 			node: config.node,
 			type: config.type,
+			runtime: config.runtime,
 		});
 
 		const helperResponse = new StepNode();
