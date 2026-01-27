@@ -20,6 +20,7 @@ create
 	.option("-n, --name <value>", "Name of the Node code snippet")
 	.option("-p, --prompt <value>", "Prompt for AI code generation")
 	.option("-t, --type <value>", "Type of code snippet (default: 'class')")
+	.option("-s, --style <value>", "Node style: 'function' (default, defineNode) or 'class' (extends NanoService)")
 	.option("-u, --update", "Update existing Node code snippet")
 	.option(
 		"-k, --api-key <value>",
@@ -63,15 +64,18 @@ create
 				let node: NodeInformation = <NodeInformation>{};
 				let cleaned = "";
 				let nodeType = "class";
+				const nodeStyle = options.style || "function"; // Default to function-first
 
 				if (!options.update) {
-					s.start("Generating Node code snippet...");
+					s.start(`Generating ${nodeStyle === "function" ? "function-first" : "class-based"} Node code snippet...`);
 					// Generate the Node code snippet using AI
 					const generator = new NodeGenerator();
 					node = await generator.generateNode(
 						options.name.toLowerCase().replace(/\s+/g, "-"),
 						options.prompt,
 						options.apiKey || process.env.OPENAI_API_KEY,
+						false,
+						nodeStyle,
 					);
 					cleaned = node.code.replace(/^```typescript\s*([\s\S]*?)\s*```$/gm, "$1");
 					nodeType = options.type || "class";
@@ -121,7 +125,7 @@ create
 						rl.prompt();
 					});
 
-					s.start("Updating Node code...");
+					s.start(`Updating ${nodeStyle === "function" ? "function-first" : "class-based"} Node code...`);
 					// Generate the Node code snippet using AI
 					const generator = new NodeGenerator();
 					node = await generator.generateNode(
@@ -129,6 +133,7 @@ create
 						multilineInput,
 						options.apiKey || process.env.OPENAI_API_KEY,
 						true,
+						nodeStyle,
 					);
 					cleaned = node.code.replace(/^```typescript\s*([\s\S]*?)\s*```$/gm, "$1");
 					nodeType = options.type || "class";
@@ -140,6 +145,7 @@ create
 					nodeType,
 					cleaned,
 					options.apiKey || process.env.OPENAI_API_KEY,
+					nodeStyle,
 				);
 
 				// Register the new node in Nodes.ts
@@ -162,6 +168,15 @@ create
 				}
 
 				s.stop(`Node code snippet "${node.nodeName}" generated and registered successfully!`);
+
+				// Show style-specific success message
+				if (nodeStyle === "function") {
+					console.log(color.cyan("\n✨ Function-First Node Generated!"));
+					console.log("  • Type-safe with Zod validation");
+					console.log("  • 60% less boilerplate than class-based");
+					console.log("  • AI-friendly for code generation");
+					console.log("\n📖 Learn more: https://blok.build/docs/nodes/function-first\n");
+				}
 			},
 		});
 	});

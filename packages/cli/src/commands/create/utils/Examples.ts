@@ -332,6 +332,48 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\
 CMD ["java", "-jar", "app.jar"]
 `;
 
+const function_first_node_file = `import { defineNode } from "@nanoservice-ts/runner";
+import { z } from "zod";
+
+/**
+ * A function-first node that demonstrates the modern defineNode pattern.
+ * This node is type-safe, validated, and requires 60% less boilerplate.
+ */
+export default defineNode({
+	name: "{{NODE_NAME}}",
+	description: "A function-first node with Zod validation",
+
+	// Input schema using Zod - automatically validated
+	input: z.object({
+		message: z.string().optional().default("Hello World"),
+	}),
+
+	// Output schema using Zod - automatically validated
+	output: z.object({
+		message: z.string(),
+		timestamp: z.string(),
+	}),
+
+	// Execute function - type-safe with inferred types from Zod schemas
+	async execute(ctx, input) {
+		// Your business logic here
+		// - ctx.vars: Access workflow variables
+		// - ctx.request: Access HTTP request data
+		// - ctx.logger: Log messages
+		// - ctx.env: Access environment variables
+
+		// Example: Store data for downstream nodes
+		ctx.vars["processed-message"] = input.message;
+
+		// Return type-safe output (validated automatically)
+		return {
+			message: \`Processed: \${input.message}\`,
+			timestamp: new Date().toISOString(),
+		};
+	},
+});
+`;
+
 export {
 	node_file,
 	package_dependencies,
@@ -347,4 +389,5 @@ export {
 	java_node_file,
 	java_pom_file,
 	java_dockerfile,
+	function_first_node_file,
 };

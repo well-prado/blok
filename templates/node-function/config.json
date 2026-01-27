@@ -1,0 +1,55 @@
+{
+	"name": "node-name",
+	"version": "1.0.0",
+	"description": "A function-first node built with defineNode API",
+	"group": "API",
+	"config": {
+		"type": "object",
+		"properties": {
+			"inputs": {
+				"type": "object",
+				"properties": {
+					"message": {
+						"type": "string",
+						"description": "The message to process"
+					}
+				},
+				"required": []
+			}
+		},
+		"required": ["inputs"],
+		"example": {
+			"inputs": {
+				"message": "Hello from function-first node!"
+			}
+		}
+	},
+	"input": {
+		"type": "object",
+		"properties": {
+			"message": {
+				"type": "string"
+			}
+		},
+		"description": "Input data with optional message field"
+	},
+	"output": {
+		"type": "object",
+		"properties": {
+			"message": {
+				"type": "string"
+			},
+			"timestamp": {
+				"type": "string"
+			}
+		},
+		"description": "Processed message with timestamp"
+	},
+	"steps": {
+		"type": "boolean",
+		"default": false
+	},
+	"functions": {
+		"type": "array"
+	}
+}

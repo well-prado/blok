@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import createNodeSystemPrompt from "./prompts/create-node.system.js";
+import createFnNodeSystemPrompt from "./prompts/create-fn-node.system.js";
 
 type NodeInformation = {
 	nodeName: string;
@@ -12,16 +13,18 @@ type NodeInformation = {
 export type { NodeInformation };
 
 export default class NodeGenerator {
-	async generateNode(nodeName: string, userPrompt: string, apiKey: string, update = false): Promise<NodeInformation> {
+	async generateNode(nodeName: string, userPrompt: string, apiKey: string, update = false, nodeStyle = "function"): Promise<NodeInformation> {
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
 		});
 
-		let prompt = createNodeSystemPrompt.prompt;
+		// Select the appropriate prompt based on node style
+		const promptTemplate = nodeStyle === "function" ? createFnNodeSystemPrompt : createNodeSystemPrompt;
+		let prompt = promptTemplate.prompt;
 
 		if (update) {
-			// Read class file and get the code
+			// Read existing file and get the code
 			const dirName = nodeName.toLowerCase().replace(/\s+/g, "-");
 			const dirPath = process.cwd();
 			const nodeDir = `${dirPath}/src/nodes`;
@@ -29,7 +32,7 @@ export default class NodeGenerator {
 			const filePath = `${currentDir}/index.ts`;
 
 			const code = fs.readFileSync(filePath, "utf8");
-			prompt = `${createNodeSystemPrompt.updatePrompt} \n\n ${code}`;
+			prompt = `${promptTemplate.updatePrompt} \n\n ${code}`;
 		}
 
 		const { text } = await generateText({

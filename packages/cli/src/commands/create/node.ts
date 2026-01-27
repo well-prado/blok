@@ -16,6 +16,7 @@ import {
 	java_node_file,
 	java_pom_file,
 	python3_file,
+	function_first_node_file,
 } from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);
@@ -30,6 +31,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 	let nodeName: string = opts.name ? opts.name : "";
 	let nodeType = "";
 	let template = "";
+	let nodeStyle = opts.style || ""; // "function" or "class"
 	let node_runtime = "";
 	let selectedManager = "npm";
 
@@ -131,11 +133,19 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 								{ label: "Class", value: "class" },
 							],
 						}),
+					nodeStyle: () =>
+						p.select({
+							message: "Select the node style",
+							options: [
+								{ label: "Function-First (defineNode)", value: "function", hint: "recommended" },
+								{ label: "Class-Based (extends NanoService)", value: "class" },
+							],
+						}),
 					template: () =>
 						p.select({
 							message: "Select the template",
 							options: [
-								{ label: "Class", value: "class", hint: "recommended" },
+								{ label: "Standard", value: "class", hint: "recommended" },
 								{ label: "UI - EJS + ReactJS + TailwindCSS", value: "ui" },
 							],
 						}),
@@ -149,6 +159,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			);
 
 			nodeType = nanoctlNodeExtension.nodeType;
+			nodeStyle = nanoctlNodeExtension.nodeStyle;
 			template = nanoctlNodeExtension.template;
 		}
 	}
@@ -193,12 +204,19 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			}
 
 			if (nodeType === "module") {
-				if (template === "class") {
-					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node`, dirPath);
-				}
+				// Copy template based on node style
+				if (nodeStyle === "function") {
+					// Use function-first template
+					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-function`, dirPath);
+				} else {
+					// Use class-based template
+					if (template === "class") {
+						fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node`, dirPath);
+					}
 
-				if (template === "ui") {
-					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-ui`, dirPath);
+					if (template === "ui") {
+						fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-ui`, dirPath);
+					}
 				}
 
 				// Change project name in package.json
@@ -208,6 +226,14 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				packageJsonContent.version = "1.0.0";
 				packageJsonContent.author = "";
 				fsExtra.writeFileSync(packageJson, JSON.stringify(packageJsonContent, null, 2));
+
+				// Update index.ts node name for function-first nodes
+				if (nodeStyle === "function") {
+					const indexPath = `${dirPath}/index.ts`;
+					let indexContent = fsExtra.readFileSync(indexPath, "utf8");
+					indexContent = indexContent.replace(/node-name/g, nodeName);
+					fsExtra.writeFileSync(indexPath, indexContent);
+				}
 
 				// Get the package manager
 				manager = await pm.getManager(selectedManager as string);
@@ -222,18 +248,25 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			}
 
 			if (nodeType === "class") {
-				if (template === "class") {
-					fsExtra.ensureDirSync(dirPath);
-					fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node/index.ts`, `${dirPath}/index.ts`);
-				}
+				fsExtra.ensureDirSync(dirPath);
 
-				if (template === "ui") {
-					fsExtra.ensureDirSync(dirPath);
-					fsExtra.ensureDirSync(`${dirPath}/app`);
-					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-ui/app`, `${dirPath}/app`);
-					fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/index.ts`, `${dirPath}/index.ts`);
-					fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/inputSchema.ts`, `${dirPath}/inputSchema.ts`);
-					fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/index.html`, `${dirPath}/index.html`);
+				if (nodeStyle === "function") {
+					// Use function-first inline template for class-type nodes
+					const functionNodeContent = function_first_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+					fsExtra.writeFileSync(`${dirPath}/index.ts`, functionNodeContent);
+				} else {
+					// Use class-based template
+					if (template === "class") {
+						fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node/index.ts`, `${dirPath}/index.ts`);
+					}
+
+					if (template === "ui") {
+						fsExtra.ensureDirSync(`${dirPath}/app`);
+						fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-ui/app`, `${dirPath}/app`);
+						fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/index.ts`, `${dirPath}/index.ts`);
+						fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/inputSchema.ts`, `${dirPath}/inputSchema.ts`);
+						fsExtra.copyFileSync(`${GITHUB_REPO_LOCAL}/templates/node-ui/index.html`, `${dirPath}/index.html`);
+					}
 				}
 			}
 		}
@@ -382,6 +415,15 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			console.log(
 				`${currentPath ? "\n" : ""}Run the command "npm run build" or "npm run build:dev" to build the project.`,
 			);
+
+			// Show style-specific tips
+			if (nodeStyle === "function") {
+				console.log(color.cyan("\n✨ Function-First Node Created!"));
+				console.log("  • Type-safe with Zod validation");
+				console.log("  • 60% less boilerplate than class-based");
+				console.log("  • AI-friendly for code generation");
+				console.log("\n📖 Learn more: https://blok.build/docs/nodes/function-first");
+			}
 		}
 
 		if (!currentPath && node_runtime === "python3") {

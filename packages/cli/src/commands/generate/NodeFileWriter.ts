@@ -105,11 +105,13 @@ export default class NodeFileWriter {
 	 * If the directory does not exist, it will be created.
 	 * If the file already exists, it will be overwritten.
 	 *
-	 * @param directoryPath - The path of the directory where the file will be created.
-	 * @param fileName - The name of the file to be created.
+	 * @param nodeName - The name of the node to be created.
+	 * @param nodeType - The type of node ("module" or "class").
 	 * @param fileContent - The content to write into the file.
+	 * @param apiKey - The API key for AI generation.
+	 * @param nodeStyle - The node style ("function" or "class"). Defaults to "class".
 	 */
-	public async generateFile(nodeName: string, nodeType: string, fileContent: string, apiKey: string): Promise<string> {
+	public async generateFile(nodeName: string, nodeType: string, fileContent: string, apiKey: string, nodeStyle = "class"): Promise<string> {
 		try {
 			const dirName = nodeName.toLowerCase().replace(/\s+/g, "-");
 			const dirPath = process.cwd();
@@ -139,7 +141,13 @@ export default class NodeFileWriter {
 				console.log("- README.md");
 				console.log("- package.json\n");
 
-				fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node`, currentDir);
+				// Copy template based on node style
+				if (nodeStyle === "function") {
+					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node-function`, currentDir);
+					console.log(color.cyan("✨ Using function-first template (defineNode API)\n"));
+				} else {
+					fsExtra.copySync(`${GITHUB_REPO_LOCAL}/templates/node`, currentDir);
+				}
 				fs.writeFileSync(filePath, fileContent, "utf8");
 
 				const configFileContent = fs.readFileSync(`${currentDir}/config.json`, "utf8");
@@ -198,6 +206,19 @@ Take the class name from the source code and use it to register the node in Node
 					name: string;
 					version: string;
 				}[] = [];
+
+				// Ensure zod is included for function-first nodes
+				if (nodeStyle === "function") {
+					packageJson.dependencies = packageJson.dependencies || {};
+					if (!packageJson.dependencies.zod) {
+						packageJson.dependencies.zod = "^3.24.1";
+						installedDependencies.push({
+							name: "zod",
+							version: "^3.24.1",
+						});
+					}
+				}
+
 				if (dependencies) {
 					const depList = dependencies
 						.map((dep) => {
