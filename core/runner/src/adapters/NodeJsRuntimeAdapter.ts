@@ -31,10 +31,15 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 			const duration_ms = performance.now() - startTime;
 
 			// Convert ResponseContext to ExecutionResult
+			// response.data is the actual NanoServiceResponse object
+			// Check if response.data.error exists (not response.error)
+			const responseData = response.data as { error?: unknown; success?: boolean; data?: unknown };
+			const hasError = responseData?.error !== null && responseData?.error !== undefined;
+
 			return {
-				success: response.success ?? true,
+				success: hasError ? false : (responseData?.success ?? true),
 				data: response.data,
-				errors: response.error || null,
+				errors: responseData?.error || null,
 				metrics: {
 					duration_ms,
 				},
