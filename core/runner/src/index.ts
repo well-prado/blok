@@ -14,6 +14,9 @@ import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
 
+// Function-first node API
+import { defineNode, FunctionNode, type FnNodeDefinition } from "./defineNode";
+
 // types
 
 import NanoService from "./NanoService";
@@ -51,6 +54,9 @@ export {
 	NodeJsRuntimeAdapter,
 	Python3RuntimeAdapter,
 	DockerRuntimeAdapter,
+	// Function-first API
+	defineNode,
+	FunctionNode,
 	// Types
 	Condition,
 	Conditions,
@@ -76,4 +82,4 @@ export {
 };
 
 // Export types
-export type { RuntimeAdapter, RuntimeKind, ExecutionResult };
+export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
