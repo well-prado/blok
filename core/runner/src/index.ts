@@ -35,6 +35,7 @@ import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
 // Hot Module Replacement (HMR)
 import { FileWatcher } from "./hmr/FileWatcher";
 import { HotReloadManager } from "./hmr/HotReloadManager";
+import { HmrDevConsole } from "./hmr/HmrDevConsole";
 
 // Security
 import { AuthMiddleware, JWTAuthProvider, APIKeyAuthProvider } from "./security/AuthMiddleware";
@@ -120,6 +121,7 @@ export {
 	// HMR
 	FileWatcher,
 	HotReloadManager,
+	HmrDevConsole,
 	// Security
 	AuthMiddleware,
 	JWTAuthProvider,

@@ -1,6 +1,7 @@
+import type { Server } from "node:http";
 import { type Step, Workflow } from "@nanoservice-ts/helper";
 import type { TriggerOpts } from "@nanoservice-ts/helper/dist/types/TriggerOpts";
-import type { GlobalOptions, ParamsDictionary, TriggerResponse } from "@nanoservice-ts/runner";
+import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@nanoservice-ts/runner";
 import { TriggerBase } from "@nanoservice-ts/runner";
 import { NodeMap } from "@nanoservice-ts/runner";
 import { DefaultLogger } from "@nanoservice-ts/runner";
@@ -24,6 +25,7 @@ export default class HttpTrigger extends TriggerBase {
 	private port: string | number = process.env.PORT || 4000;
 	private initializer = 0;
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
+	private server: Server | null = null;
 	protected tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-http-workflow",
 		process.env.PROJECT_VERSION || "0.0.1",
@@ -48,6 +50,29 @@ export default class HttpTrigger extends TriggerBase {
 
 	loadWorkflows() {
 		this.nodeMap.workflows = workflows;
+	}
+
+	/**
+	 * Gracefully stop the HTTP server, waiting for in-flight requests to complete.
+	 */
+	async stop(): Promise<void> {
+		await this.waitForInFlightRequests();
+		return new Promise<void>((resolve) => {
+			if (this.server) {
+				this.server.close(() => {
+					this.server = null;
+					resolve();
+				});
+			} else {
+				resolve();
+			}
+		});
+	}
+
+	protected override async onHmrNodeChange(event: HMREvent): Promise<void> {
+		this.hmr?.invalidateModule(event.filePath);
+		this.loadNodes();
+		console.log(`[HMR] Node reloaded: ${event.relativePath}`);
 	}
 
 	getApp(): Express {
@@ -269,8 +294,14 @@ export default class HttpTrigger extends TriggerBase {
 				});
 			});
 
-			this.app.listen(this.port, () => {
+			this.server = this.app.listen(this.port, async () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
+
+				// Enable HMR in development mode
+				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+					await this.enableHotReload();
+				}
+
 				done(this.endCounter(this.initializer));
 			});
 		});

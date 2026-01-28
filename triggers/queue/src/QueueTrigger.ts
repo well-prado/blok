@@ -179,6 +179,11 @@ export abstract class QueueTrigger extends TriggerBase {
 				`Queue trigger started. Listening to ${queueWorkflows.length} topic(s)`,
 			);
 
+			// Enable HMR in development mode
+			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+				await this.enableHotReload();
+			}
+
 			return this.endCounter(startTime);
 		} catch (error) {
 			this.logger.error(`Failed to start queue trigger: ${(error as Error).message}`);
@@ -192,6 +197,14 @@ export abstract class QueueTrigger extends TriggerBase {
 	async stop(): Promise<void> {
 		await this.adapter.disconnect();
 		this.logger.log("Queue trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		this.logger.log("[HMR] Queue workflow changed, reloading...");
+		await this.waitForInFlightRequests();
+		await this.stop();
+		this.loadWorkflows();
+		await this.listen();
 	}
 
 	/**

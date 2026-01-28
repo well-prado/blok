@@ -150,6 +150,15 @@ export class HotReloadManager extends EventEmitter {
 	}
 
 	/**
+	 * Generate a cache-busted path for ESM dynamic import().
+	 * Node.js does not expose an ESM module cache, so we append
+	 * a timestamp query string to force re-evaluation.
+	 */
+	invalidateEsmModule(modulePath: string): string {
+		return `${modulePath}?t=${Date.now()}`;
+	}
+
+	/**
 	 * Invalidate all modules matching a pattern
 	 */
 	invalidateModules(pattern: string | RegExp): number {

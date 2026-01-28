@@ -232,6 +232,11 @@ export abstract class WebhookTrigger extends TriggerBase {
 			this.logger.log(`Webhook trigger initialized. ${this.webhookWorkflows.length} workflow(s) registered`);
 		}
 
+		// Enable HMR in development mode
+		if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+			await this.enableHotReload();
+		}
+
 		return this.endCounter(startTime);
 	}
 
@@ -241,6 +246,12 @@ export abstract class WebhookTrigger extends TriggerBase {
 	async stop(): Promise<void> {
 		this.webhookWorkflows = [];
 		this.logger.log("Webhook trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		this.loadWorkflows();
+		this.webhookWorkflows = this.getWebhookWorkflows();
+		this.logger.log(`[HMR] Webhook workflows reloaded. ${this.webhookWorkflows.length} workflow(s) registered`);
 	}
 
 	/**

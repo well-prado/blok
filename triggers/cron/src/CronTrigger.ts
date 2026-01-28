@@ -185,6 +185,11 @@ export abstract class CronTrigger extends TriggerBase {
 
 			this.logger.log(`Cron trigger started. ${this.jobs.size} job(s) scheduled`);
 
+			// Enable HMR in development mode
+			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+				await this.enableHotReload();
+			}
+
 			return this.endCounter(startTime);
 		} catch (error) {
 			this.logger.error(`Failed to start cron trigger: ${(error as Error).message}`);
@@ -202,6 +207,14 @@ export abstract class CronTrigger extends TriggerBase {
 		}
 		this.jobs.clear();
 		this.logger.log("Cron trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		this.logger.log("[HMR] Cron workflow changed, reloading...");
+		await this.waitForInFlightRequests();
+		await this.stop();
+		this.loadWorkflows();
+		await this.listen();
 	}
 
 	/**

@@ -25,7 +25,10 @@ export async function devProject(opts: OptionValues) {
 	];
 
 	for (const { cmd, args, name } of processes) {
-		const child = spawn(cmd, args, { stdio: "inherit" });
+		const child = spawn(cmd, args, {
+			stdio: "inherit",
+			env: { ...process.env, BLOK_HMR: "true", NODE_ENV: "development" },
+		});
 
 		console.log(`✅ ${name} started (PID: ${child.pid})`);
 

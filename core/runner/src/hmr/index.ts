@@ -38,3 +38,5 @@ export type { FileWatcherConfig, HMREvent, HMREventType } from "./FileWatcher";
 
 export { HotReloadManager } from "./HotReloadManager";
 export type { HotReloadManagerConfig, HotReloadStats, ReloadHandler } from "./HotReloadManager";
+
+export { HmrDevConsole } from "./HmrDevConsole";

@@ -251,6 +251,11 @@ export abstract class WorkerTrigger extends TriggerBase {
 				`Worker trigger started. Processing ${workerWorkflows.length} queue(s)`,
 			);
 
+			// Enable HMR in development mode
+			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+				await this.enableHotReload();
+			}
+
 			return this.endCounter(startTime);
 		} catch (error) {
 			this.logger.error(`Failed to start worker trigger: ${(error as Error).message}`);
@@ -270,6 +275,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 		await this.adapter.disconnect();
 		this.destroyMonitoring();
 		this.logger.log("Worker trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		this.logger.log("[HMR] Worker workflow changed, reloading...");
+		await this.waitForInFlightRequests();
+		await this.stop();
+		this.loadWorkflows();
+		await this.listen();
 	}
 
 	/**

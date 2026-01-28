@@ -175,6 +175,11 @@ export abstract class PubSubTrigger extends TriggerBase {
 				`Pub/Sub trigger started. Listening to ${pubsubWorkflows.length} subscription(s)`,
 			);
 
+			// Enable HMR in development mode
+			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+				await this.enableHotReload();
+			}
+
 			return this.endCounter(startTime);
 		} catch (error) {
 			this.logger.error(`Failed to start pub/sub trigger: ${(error as Error).message}`);
@@ -188,6 +193,14 @@ export abstract class PubSubTrigger extends TriggerBase {
 	async stop(): Promise<void> {
 		await this.adapter.disconnect();
 		this.logger.log("Pub/Sub trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		this.logger.log("[HMR] Pub/Sub workflow changed, reloading...");
+		await this.waitForInFlightRequests();
+		await this.stop();
+		this.loadWorkflows();
+		await this.listen();
 	}
 
 	/**

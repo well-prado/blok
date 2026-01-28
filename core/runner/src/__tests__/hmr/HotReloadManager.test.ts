@@ -100,4 +100,30 @@ describe("HotReloadManager", () => {
 		const stats = manager.getStats();
 		expect(stats.uptime).toBeGreaterThanOrEqual(40);
 	});
+
+	it("should return cache-busted path from invalidateEsmModule", () => {
+		manager = new HotReloadManager();
+
+		const before = Date.now();
+		const result = manager.invalidateEsmModule("/path/to/module.ts");
+		const after = Date.now();
+
+		expect(result).toMatch(/^\/path\/to\/module\.ts\?t=\d+$/);
+
+		// Extract the timestamp and verify it's reasonable
+		const timestamp = Number.parseInt(result.split("?t=")[1], 10);
+		expect(timestamp).toBeGreaterThanOrEqual(before);
+		expect(timestamp).toBeLessThanOrEqual(after);
+	});
+
+	it("should produce unique cache-busted paths on successive calls", async () => {
+		manager = new HotReloadManager();
+
+		const result1 = manager.invalidateEsmModule("/path/to/module.ts");
+		await new Promise((r) => setTimeout(r, 5));
+		const result2 = manager.invalidateEsmModule("/path/to/module.ts");
+
+		// Timestamps should differ
+		expect(result1).not.toBe(result2);
+	});
 });

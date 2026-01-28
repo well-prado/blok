@@ -204,6 +204,11 @@ export abstract class SSETrigger extends TriggerBase {
 		// Start history cleanup
 		this.startHistoryCleanup();
 
+		// Enable HMR in development mode
+		if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+			await this.enableHotReload();
+		}
+
 		return this.endCounter(startTime);
 	}
 
@@ -227,6 +232,13 @@ export abstract class SSETrigger extends TriggerBase {
 		this.activeConnections = 0;
 
 		this.logger.log("SSE trigger stopped");
+	}
+
+	protected override async onHmrWorkflowChange(): Promise<void> {
+		// Lightweight: refresh workflow list without disconnecting clients
+		this.loadWorkflows();
+		this.sseWorkflows = this.getSSEWorkflows();
+		this.logger.log(`[HMR] SSE workflows reloaded. ${this.sseWorkflows.length} workflow(s) registered`);
 	}
 
 	/**
