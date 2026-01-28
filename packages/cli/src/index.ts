@@ -24,6 +24,7 @@ import "./commands/install/index.js";
 import "./commands/search/index.js";
 import "./commands/generate/index.js";
 import "./commands/config/index.js";
+import "./commands/migrate/index.js";
 import { Command } from "commander";
 
 const version = await getPackageVersion();
@@ -106,6 +107,7 @@ async function main() {
 		const node = new Command("node")
 			.description("Create a new Node")
 			.option("-n, --name <value>", "Create a default Node")
+			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "create node",
@@ -119,6 +121,7 @@ async function main() {
 		node
 			.command(".")
 			.description("Create a new Node")
+			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "create node",

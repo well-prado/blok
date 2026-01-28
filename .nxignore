@@ -1,0 +1,2 @@
+# Ignore template directories to avoid duplicate project name conflicts
+templates/
