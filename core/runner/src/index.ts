@@ -38,12 +38,22 @@ import { HotReloadManager } from "./hmr/HotReloadManager";
 import { AuthMiddleware, JWTAuthProvider, APIKeyAuthProvider } from "./security/AuthMiddleware";
 import { RBAC, createDefaultRBAC } from "./security/RBAC";
 import { AuditLogger, ConsoleAuditSink, FileAuditSink, InMemoryAuditSink } from "./security/AuditLogger";
+import { OAuthOIDCProvider, TokenCache } from "./security/OAuthProvider";
+import { SecretManager, EnvironmentSecretProvider, InMemorySecretProvider, VaultSecretProvider, AWSSecretsProvider, GCPSecretProvider } from "./security/SecretManager";
 
 // OpenAPI
 import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
 
 // Integrations
 import { SentryIntegration } from "./integrations/SentryIntegration";
+
+// Cache
+import { InMemoryCache, NodeResultCache } from "./cache/NodeResultCache";
+
+// Testing Framework
+import { NodeTestHarness } from "./testing/TestHarness";
+import { WorkflowTestRunner } from "./testing/WorkflowTestRunner";
+import { TestLogger } from "./testing/TestLogger";
 
 // types
 
@@ -110,10 +120,27 @@ export {
 	ConsoleAuditSink,
 	FileAuditSink,
 	InMemoryAuditSink,
+	// OAuth 2.0 / OIDC
+	OAuthOIDCProvider,
+	TokenCache,
+	// Secret Management
+	SecretManager,
+	EnvironmentSecretProvider,
+	InMemorySecretProvider,
+	VaultSecretProvider,
+	AWSSecretsProvider,
+	GCPSecretProvider,
 	// OpenAPI
 	OpenAPIGenerator,
 	// Integrations
 	SentryIntegration,
+	// Cache
+	InMemoryCache,
+	NodeResultCache,
+	// Testing
+	NodeTestHarness,
+	WorkflowTestRunner,
+	TestLogger,
 	// Types
 	Condition,
 	Conditions,
@@ -234,6 +261,30 @@ export type {
 	AuditLoggerConfig,
 } from "./security/AuditLogger";
 
+// OAuth 2.0 / OIDC types
+export type {
+	OAuthOIDCConfig,
+	OIDCDiscoveryDocument,
+	JWK,
+	JWKS,
+	TokenCacheStats,
+} from "./security/OAuthProvider";
+
+// Secret Management types
+export type {
+	SecretProvider,
+	SecretMetadata,
+	SecretAccessEvent,
+	SecretManagerConfig,
+	SecretCacheConfig,
+	SecretProviderConfig,
+	EnvironmentProviderConfig,
+	InMemoryProviderConfig,
+	VaultProviderConfig,
+	AWSSecretsProviderConfig,
+	GCPSecretProviderConfig,
+} from "./security/SecretManager";
+
 // OpenAPI types
 export type {
 	OpenAPIGeneratorConfig,
@@ -250,3 +301,26 @@ export type {
 	SentryTransaction,
 	SentrySpan,
 } from "./integrations/SentryIntegration";
+
+// Cache types
+export type {
+	CacheProvider,
+	CacheEntry,
+	CacheSetOptions,
+	CacheStats,
+	InMemoryCacheConfig,
+	CacheKeyStrategy,
+	CustomKeyFn,
+	CacheResult,
+	NodeResultCacheConfig,
+} from "./cache/NodeResultCache";
+
+// Testing types
+export type { LogEntry } from "./testing/TestLogger";
+export type { TestContextOverrides, TestResult, TestMetrics } from "./testing/TestHarness";
+export type {
+	WorkflowTestConfig,
+	WorkflowTestResult,
+	ExecutionTrace,
+	WorkflowExecuteOptions,
+} from "./testing/WorkflowTestRunner";

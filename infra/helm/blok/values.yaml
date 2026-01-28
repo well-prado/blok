@@ -1,0 +1,221 @@
+## Blok Helm Chart - Default Values
+## Ref: https://github.com/nicholasgriffintn/blok
+
+# -- Number of replicas for the Blok deployment
+replicaCount: 1
+
+image:
+  # -- Container image repository
+  repository: blok/runtime
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion
+  tag: ""
+
+# -- Override the name of the chart
+nameOverride: ""
+# -- Override the full name of the chart
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use (generated if not set and create is true)
+  name: ""
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Additional pod annotations
+podAnnotations: {}
+
+# -- Additional pod labels
+podLabels: {}
+
+## Trigger configurations
+triggers:
+  http:
+    # -- Enable HTTP trigger
+    enabled: true
+    # -- HTTP trigger port
+    port: 4000
+  grpc:
+    # -- Enable gRPC trigger
+    enabled: false
+    # -- gRPC trigger port
+    port: 50051
+  websocket:
+    # -- Enable WebSocket trigger
+    enabled: false
+    # -- WebSocket trigger port
+    port: 4001
+
+## Runtime configurations
+runtimes:
+  nodejs:
+    # -- Enable Node.js runtime
+    enabled: true
+  python3:
+    # -- Enable Python3 runtime sidecar
+    enabled: false
+    # -- Python3 runtime image
+    image: blok/runtime-python3
+    # -- Python3 runtime gRPC port
+    port: 50051
+  docker:
+    # -- Enable Docker runtime
+    enabled: false
+
+## Environment variables
+# -- Extra environment variables to inject into the Blok container
+env: {}
+  # BLOK_LOG_LEVEL: "info"
+  # BLOK_TELEMETRY_ENABLED: "true"
+
+## Secret references
+secrets:
+  # -- Create a Kubernetes Secret with the provided keys
+  create: false
+  # -- Name of an existing Secret to use (overrides create)
+  name: ""
+  # -- Key-value pairs for the secret data
+  keys: {}
+
+## Service configuration
+service:
+  # -- Kubernetes Service type
+  type: ClusterIP
+  # -- Service port
+  port: 80
+  # -- Target port on the container
+  targetPort: 4000
+
+## Ingress configuration
+ingress:
+  # -- Enable ingress
+  enabled: false
+  # -- Ingress class name
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: blok.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  # -- TLS configuration for ingress
+  tls: []
+  #  - secretName: blok-tls
+  #    hosts:
+  #      - blok.local
+
+## Resource limits
+resources:
+  limits:
+    # -- CPU limit
+    cpu: 500m
+    # -- Memory limit
+    memory: 512Mi
+  requests:
+    # -- CPU request
+    cpu: 100m
+    # -- Memory request
+    memory: 128Mi
+
+## Autoscaling
+autoscaling:
+  # -- Enable Horizontal Pod Autoscaler
+  enabled: false
+  # -- Minimum replicas
+  minReplicas: 1
+  # -- Maximum replicas
+  maxReplicas: 10
+  # -- Target CPU utilization percentage
+  targetCPUUtilizationPercentage: 80
+  # -- Target memory utilization percentage
+  targetMemoryUtilizationPercentage: 80
+
+## Health checks
+healthCheck:
+  liveness:
+    # -- Liveness probe path
+    path: /health-check
+    # -- Initial delay before starting liveness probes
+    initialDelaySeconds: 10
+    # -- Period between liveness probes
+    periodSeconds: 15
+    # -- Timeout for liveness probes
+    timeoutSeconds: 5
+    # -- Number of consecutive failures before marking unhealthy
+    failureThreshold: 3
+  readiness:
+    # -- Readiness probe path
+    path: /health-check
+    # -- Initial delay before starting readiness probes
+    initialDelaySeconds: 5
+    # -- Period between readiness probes
+    periodSeconds: 10
+    # -- Timeout for readiness probes
+    timeoutSeconds: 3
+    # -- Number of consecutive failures before marking not ready
+    failureThreshold: 3
+
+## Monitoring
+monitoring:
+  # -- Enable monitoring features
+  enabled: false
+  serviceMonitor:
+    # -- Create a Prometheus ServiceMonitor
+    enabled: false
+    # -- Scrape interval
+    interval: 30s
+    # -- Metrics endpoint path
+    path: /metrics
+  prometheus:
+    # -- Enable Prometheus annotations on the service
+    enabled: false
+
+## Persistence (for workflow/node storage)
+persistence:
+  # -- Enable persistent storage
+  enabled: false
+  # -- Storage class name (empty string uses default)
+  storageClass: ""
+  # -- Access modes
+  accessModes:
+    - ReadWriteOnce
+  # -- Storage size
+  size: 1Gi
+
+# -- Node selector for pod assignment
+nodeSelector: {}
+
+# -- Tolerations for pod assignment
+tolerations: []
+
+# -- Affinity rules for pod assignment
+affinity: {}
+
+## Pod security context
+podSecurityContext:
+  # -- Run containers as non-root
+  runAsNonRoot: true
+  # -- User ID to run as
+  runAsUser: 1000
+  # -- Group ID for file system access
+  fsGroup: 1000
+
+## Container security context
+securityContext:
+  # -- Prevent privilege escalation
+  allowPrivilegeEscalation: false
+  # -- Mount root filesystem as read-only
+  readOnlyRootFilesystem: true
+  capabilities:
+    # -- Drop all capabilities
+    drop:
+      - ALL

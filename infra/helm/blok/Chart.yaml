@@ -1,0 +1,15 @@
+apiVersion: v2
+name: blok
+description: Blok - Language-agnostic workflow orchestration framework
+type: application
+version: 0.1.0
+appVersion: "0.1.26"
+keywords:
+  - blok
+  - workflow
+  - orchestration
+  - nanoservices
+  - serverless
+home: https://github.com/nicholasgriffintn/blok
+maintainers:
+  - name: Blok Team

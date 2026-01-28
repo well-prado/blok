@@ -1,0 +1,152 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "blok.fullname" . }}
+  labels:
+    {{- include "blok.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "blok.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.secrets.create }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if .Values.monitoring.prometheus.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.triggers.http.port | quote }}
+        prometheus.io/path: {{ .Values.monitoring.serviceMonitor.path | default "/metrics" | quote }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "blok.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "blok.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "blok.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            {{- if .Values.triggers.http.enabled }}
+            - name: http
+              containerPort: {{ .Values.triggers.http.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.triggers.grpc.enabled }}
+            - name: grpc
+              containerPort: {{ .Values.triggers.grpc.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.triggers.websocket.enabled }}
+            - name: websocket
+              containerPort: {{ .Values.triggers.websocket.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if .Values.triggers.http.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.healthCheck.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.healthCheck.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.healthCheck.readiness.failureThreshold }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "blok.configMapName" . }}
+            {{- if or .Values.secrets.create .Values.secrets.name }}
+            - secretRef:
+                name: {{ include "blok.secretName" . }}
+            {{- end }}
+          env:
+            - name: BLOK_HTTP_PORT
+              value: {{ .Values.triggers.http.port | quote }}
+            {{- if .Values.triggers.grpc.enabled }}
+            - name: BLOK_GRPC_PORT
+              value: {{ .Values.triggers.grpc.port | quote }}
+            {{- end }}
+            {{- if .Values.triggers.websocket.enabled }}
+            - name: BLOK_WS_PORT
+              value: {{ .Values.triggers.websocket.port | quote }}
+            {{- end }}
+            {{- if .Values.runtimes.python3.enabled }}
+            - name: BLOK_PYTHON3_RUNTIME_HOST
+              value: "localhost"
+            - name: BLOK_PYTHON3_RUNTIME_PORT
+              value: {{ .Values.runtimes.python3.port | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.persistence.enabled }}
+            - name: workflows
+              mountPath: /app/workflows
+            {{- end }}
+        {{- if .Values.runtimes.python3.enabled }}
+        - name: python3-runtime
+          image: {{ .Values.runtimes.python3.image }}:{{ default .Chart.AppVersion .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: python3-grpc
+              containerPort: {{ .Values.runtimes.python3.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.persistence.enabled }}
+            - name: workflows
+              mountPath: /app/workflows
+            {{- end }}
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.persistence.enabled }}
+        - name: workflows
+          persistentVolumeClaim:
+            claimName: {{ include "blok.fullname" . }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

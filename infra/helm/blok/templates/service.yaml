@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "blok.fullname" . }}
+  labels:
+    {{- include "blok.labels" . | nindent 4 }}
+  {{- if .Values.monitoring.prometheus.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.service.targetPort | quote }}
+    prometheus.io/path: {{ .Values.monitoring.serviceMonitor.path | default "/metrics" | quote }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+    {{- if .Values.triggers.grpc.enabled }}
+    - port: {{ .Values.triggers.grpc.port }}
+      targetPort: {{ .Values.triggers.grpc.port }}
+      protocol: TCP
+      name: grpc
+    {{- end }}
+    {{- if .Values.triggers.websocket.enabled }}
+    - port: {{ .Values.triggers.websocket.port }}
+      targetPort: {{ .Values.triggers.websocket.port }}
+      protocol: TCP
+      name: websocket
+    {{- end }}
+  selector:
+    {{- include "blok.selectorLabels" . | nindent 4 }}
