@@ -1,0 +1,391 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Blok Workflow",
+	"description": "Schema for Blok workflow JSON files",
+	"type": "object",
+	"required": ["name", "version", "trigger", "steps", "nodes"],
+	"properties": {
+		"name": {
+			"type": "string",
+			"minLength": 1,
+			"description": "Name of the workflow"
+		},
+		"description": {
+			"type": "string",
+			"description": "Human-readable description of what this workflow does"
+		},
+		"version": {
+			"type": "string",
+			"pattern": "^\\d+\\.\\d+\\.\\d+$",
+			"description": "Semantic version (e.g., 1.0.0)"
+		},
+		"trigger": {
+			"type": "object",
+			"description": "Trigger configuration for the workflow",
+			"properties": {
+				"http": {
+					"$ref": "#/definitions/httpTrigger"
+				},
+				"grpc": {
+					"$ref": "#/definitions/grpcTrigger"
+				},
+				"manual": {
+					"type": "object",
+					"description": "Manual trigger (no auto-invocation)"
+				},
+				"cron": {
+					"$ref": "#/definitions/cronTrigger"
+				},
+				"queue": {
+					"$ref": "#/definitions/queueTrigger"
+				},
+				"pubsub": {
+					"$ref": "#/definitions/pubsubTrigger"
+				},
+				"worker": {
+					"$ref": "#/definitions/workerTrigger"
+				},
+				"webhook": {
+					"$ref": "#/definitions/webhookTrigger"
+				},
+				"websocket": {
+					"$ref": "#/definitions/websocketTrigger"
+				},
+				"sse": {
+					"$ref": "#/definitions/sseTrigger"
+				}
+			},
+			"minProperties": 1,
+			"maxProperties": 1,
+			"additionalProperties": false
+		},
+		"steps": {
+			"type": "array",
+			"description": "Ordered list of workflow steps",
+			"items": {
+				"$ref": "#/definitions/step"
+			},
+			"minItems": 1
+		},
+		"nodes": {
+			"type": "object",
+			"description": "Node configurations keyed by step name",
+			"additionalProperties": {
+				"$ref": "#/definitions/nodeConfig"
+			}
+		}
+	},
+	"definitions": {
+		"step": {
+			"type": "object",
+			"required": ["name", "node", "type"],
+			"properties": {
+				"name": {
+					"type": "string",
+					"minLength": 3,
+					"description": "Unique name for this step"
+				},
+				"node": {
+					"type": "string",
+					"minLength": 3,
+					"description": "Node package or path to execute"
+				},
+				"type": {
+					"type": "string",
+					"enum": [
+						"local",
+						"module",
+						"runtime.nodejs",
+						"runtime.python3",
+						"runtime.go",
+						"runtime.java",
+						"runtime.rust",
+						"runtime.php",
+						"runtime.csharp",
+						"runtime.ruby"
+					],
+					"description": "How the node should be resolved"
+				},
+				"runtime": {
+					"type": "string",
+					"enum": [
+						"nodejs",
+						"bun",
+						"python3",
+						"go",
+						"java",
+						"rust",
+						"php",
+						"csharp",
+						"ruby",
+						"docker",
+						"wasm"
+					],
+					"description": "Runtime to use for execution"
+				}
+			},
+			"additionalProperties": false
+		},
+		"nodeConfig": {
+			"type": "object",
+			"description": "Configuration for a node step",
+			"properties": {
+				"inputs": {
+					"type": "object",
+					"description": "Input values for the node"
+				},
+				"set_var": {
+					"type": "boolean",
+					"description": "Whether to store the result in context variables"
+				},
+				"conditions": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/condition"
+					},
+					"description": "Conditional execution branches"
+				},
+				"steps": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/step"
+					},
+					"description": "Nested steps for flow nodes"
+				}
+			}
+		},
+		"condition": {
+			"type": "object",
+			"required": ["type"],
+			"properties": {
+				"type": {
+					"type": "string",
+					"enum": ["if", "else"],
+					"description": "Condition type"
+				},
+				"condition": {
+					"type": "string",
+					"description": "JavaScript expression to evaluate (e.g., ctx.request.query.type === 'admin')"
+				},
+				"steps": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/step"
+					},
+					"description": "Steps to execute when condition is true"
+				},
+				"error": {
+					"type": "string",
+					"description": "Error message when condition fails"
+				}
+			}
+		},
+		"httpTrigger": {
+			"type": "object",
+			"required": ["method", "path"],
+			"properties": {
+				"method": {
+					"type": "string",
+					"enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY"],
+					"description": "HTTP method"
+				},
+				"path": {
+					"type": "string",
+					"description": "URL path pattern (e.g., /api/users/:id)"
+				},
+				"accept": {
+					"type": "string",
+					"description": "Expected content type (e.g., application/json)"
+				},
+				"jwt_secret": {
+					"type": "string",
+					"description": "JWT secret for authentication"
+				}
+			}
+		},
+		"grpcTrigger": {
+			"type": "object",
+			"required": ["service", "method"],
+			"properties": {
+				"service": {
+					"type": "string",
+					"description": "gRPC service name"
+				},
+				"method": {
+					"type": "string",
+					"description": "gRPC method name"
+				}
+			}
+		},
+		"cronTrigger": {
+			"type": "object",
+			"required": ["schedule"],
+			"properties": {
+				"schedule": {
+					"type": "string",
+					"description": "Cron expression (e.g., '*/5 * * * *' for every 5 minutes)"
+				},
+				"timezone": {
+					"type": "string",
+					"description": "IANA timezone (e.g., America/New_York)"
+				},
+				"overlap": {
+					"type": "boolean",
+					"default": false,
+					"description": "Allow overlapping executions"
+				}
+			}
+		},
+		"queueTrigger": {
+			"type": "object",
+			"required": ["provider", "topic"],
+			"properties": {
+				"provider": {
+					"type": "string",
+					"enum": ["kafka", "rabbitmq", "sqs", "redis", "beanstalk"],
+					"description": "Queue provider"
+				},
+				"topic": {
+					"type": "string",
+					"description": "Queue topic/name"
+				},
+				"subscription": {
+					"type": "string",
+					"description": "Subscription name"
+				},
+				"consumerGroup": {
+					"type": "string",
+					"description": "Consumer group ID"
+				},
+				"ack": {
+					"type": "boolean",
+					"default": true,
+					"description": "Auto-acknowledge messages"
+				},
+				"deadLetterQueue": {
+					"type": "string",
+					"description": "Dead letter queue topic"
+				}
+			}
+		},
+		"pubsubTrigger": {
+			"type": "object",
+			"required": ["provider", "topic"],
+			"properties": {
+				"provider": {
+					"type": "string",
+					"enum": ["gcp", "aws", "azure", "redis", "nats"],
+					"description": "Pub/Sub provider"
+				},
+				"topic": {
+					"type": "string",
+					"description": "Topic name"
+				},
+				"subscription": {
+					"type": "string",
+					"description": "Subscription name"
+				}
+			}
+		},
+		"workerTrigger": {
+			"type": "object",
+			"required": ["queue"],
+			"properties": {
+				"queue": {
+					"type": "string",
+					"description": "Worker queue name"
+				},
+				"concurrency": {
+					"type": "number",
+					"minimum": 1,
+					"description": "Max concurrent jobs"
+				},
+				"timeout": {
+					"type": "number",
+					"description": "Job timeout in milliseconds"
+				},
+				"retries": {
+					"type": "number",
+					"minimum": 0,
+					"description": "Number of retry attempts"
+				}
+			}
+		},
+		"webhookTrigger": {
+			"type": "object",
+			"required": ["source", "events"],
+			"properties": {
+				"source": {
+					"type": "string",
+					"description": "Webhook source (e.g., github, stripe, shopify)"
+				},
+				"events": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Events to listen for"
+				},
+				"secret": {
+					"type": "string",
+					"description": "Webhook signing secret"
+				},
+				"path": {
+					"type": "string",
+					"description": "Webhook endpoint path"
+				}
+			}
+		},
+		"websocketTrigger": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string",
+					"description": "WebSocket endpoint path"
+				},
+				"events": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Events to handle"
+				},
+				"maxConnections": {
+					"type": "number",
+					"description": "Maximum concurrent connections"
+				},
+				"heartbeatInterval": {
+					"type": "number",
+					"description": "Heartbeat interval in milliseconds"
+				}
+			}
+		},
+		"sseTrigger": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string",
+					"description": "SSE endpoint path"
+				},
+				"events": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Events to emit"
+				},
+				"channels": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "SSE channels"
+				},
+				"retryInterval": {
+					"type": "number",
+					"description": "Client retry interval in milliseconds"
+				}
+			}
+		}
+	}
+}

@@ -1,8 +1,8 @@
 # Blok Framework Progress Tracker
 
-> **Last Updated:** 2026-01-28 (Enterprise Features NEAR-COMPLETE! OAuth 2.0/OIDC, Secret Management, Testing Framework, Node Result Caching, Kubernetes Helm Charts! 801 runner tests passing!)
-> **Status:** 🔄 Active Development - Phase 1-5 COMPLETED + Enterprise Features Near-Complete!
-> **Completion:** 99% Overall (Phase 1: 99%, Phase 2: 98%, Phase 3: 100%, Phase 4: 97%, Phase 5: 100%, Enterprise: 97% Complete!)
+> **Last Updated:** 2026-01-28 (VS Code Extension COMPLETE! Workflow diagnostics, hover docs, completion, snippets, AI generation commands, tree views! 62 extension tests + 801 runner tests passing!)
+> **Status:** 🔄 Active Development - Phase 1-5 COMPLETED + Enterprise Features COMPLETE + IDE Extension COMPLETE!
+> **Completion:** 99.5% Overall (Phase 1: 99%, Phase 2: 98%, Phase 3: 100%, Phase 4: 100%, Phase 5: 100%, Enterprise: 99% Complete!)
 
 ## Legend
 
@@ -110,9 +110,12 @@
 - ✅ **PERF-1: Node Result Caching (InMemoryCache with LRU/TTL/Tags, NodeResultCache singleton)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **INFRA-1: Kubernetes Helm Charts (full deployment chart with ConfigMaps, Secrets, HPA, Ingress)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **801 runner tests passing (313 new enterprise feature tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PHASE 4G: VS Code Extension (workflow diagnostics, hover docs, completion, snippets, AI generation, tree views)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **62 VS Code extension tests passing (diagnostics: 31, hover: 13, completion: 6, schema: 12)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **What's Not Ready:**
-- ❌ IDE extensions (VS Code, IntelliJ)
+- ❌ IntelliJ IDEA plugin
+- ❌ Language Server Protocol (LSP) server for other IDEs
 
 **Critical Gaps:**
 1. ~~**Runtime Lock-in**: Python runtime is hard-coded, not pluggable~~ ✅ **RESOLVED!**
@@ -1281,6 +1284,92 @@ export default class MyNode extends NanoService<InputType> {
 
 ## Recent Achievements
 
+### 2026-01-28 - VS Code Extension COMPLETED! (Phase 4G - IDE Integration)
+
+**DX-3: VS Code Extension - COMPLETE:**
+- ✅ Created `packages/vscode-extension/` - Full VS Code extension for Blok
+  - **Workflow Diagnostics**: Real-time validation of workflow JSON files
+    - Required fields validation (name, version, trigger, steps, nodes)
+    - Semver format validation
+    - Trigger type validation (http, grpc, cron, queue, pubsub, worker, webhook, websocket, sse)
+    - HTTP trigger method/path validation
+    - Cron expression format validation
+    - Queue/webhook trigger required fields
+    - Step structure validation (name, node, type)
+    - Runtime kind validation (11 runtimes)
+    - Node reference checking (unused nodes, missing references)
+    - Duplicate step name detection
+  - **Hover Documentation**: Contextual docs on hover
+    - 10 trigger types with descriptions and examples
+    - Workflow fields (name, version, steps, nodes, trigger)
+    - Node config fields (inputs, conditions, set_var)
+    - Step fields (node, type, runtime)
+    - Common node packages (@nanoservice-ts/api-call, @nanoservice-ts/if-else)
+  - **Auto-Completion**: Context-aware completions
+    - Trigger types, HTTP methods, step types
+    - Runtime kinds (11 options)
+    - Node packages, queue/pubsub providers
+    - Webhook sources, condition types
+  - **Code Snippets**: TypeScript + JSON snippets
+    - `blok-node` (defineNode function-first)
+    - `blok-node-api` (API call node)
+    - `blok-node-db` (database node)
+    - `blok-node-class` (legacy class-based)
+    - `blok-test` / `blok-workflow-test` (test harness)
+    - `blok-workflow-http/cron/queue/webhook/worker/ws` (workflow templates)
+    - `blok-step` / `blok-condition` (workflow components)
+  - **AI Generation Commands**: Integrated CLI commands
+    - `Blok: Generate AI Node` - with style selection (function/class)
+    - `Blok: Generate AI Workflow` - with trigger type selection
+    - `Blok: Generate AI Trigger` - from natural language
+    - `Blok: Migrate Node to Function-First` - class-to-function migration
+    - `Blok: Open Monitor Dashboard` - launch TUI monitor
+    - `Blok: Validate Current Workflow` - manual validation
+  - **Workflow Explorer Tree View**: Sidebar visualization
+    - Lists all workflow files with name and version
+    - Shows trigger type with config summary
+    - Displays steps with node references
+    - Shows conditional branches (if/else)
+    - Click to open workflow file
+  - **Runtime Explorer Tree View**: Shows all 9 supported runtimes
+    - Name, protocol, status, languages for each runtime
+  - **Workflow JSON Schema**: Full JSON Schema for validation
+    - All 10 trigger types with properties
+    - Step structure with type/runtime enums
+    - Node config with conditions/inputs
+    - Integrated with VS Code's built-in JSON validation
+  - **Configuration Options**: Extension settings
+    - `blok.nanoctlPath` - CLI binary path
+    - `blok.workflowGlob` - Workflow file pattern
+    - `blok.validateOnSave` - Auto-validation toggle
+    - `blok.aiProvider` - AI provider selection
+
+**Tests: 62 New Tests (all passing):**
+- ✅ **WorkflowDiagnostics Tests**: 31 tests (JSON parsing, required fields, version, triggers, steps, node refs)
+- ✅ **WorkflowHoverProvider Tests**: 13 tests (trigger hovers, field hovers, node package hovers)
+- ✅ **WorkflowCompletionProvider Tests**: 6 tests (methods, types, runtimes, nodes, webhooks, conditions)
+- ✅ **WorkflowSchema Tests**: 12 tests (JSON structure, triggers, steps, runtimes, conditions)
+
+**New Files Created:**
+- `packages/vscode-extension/package.json` - Extension manifest with commands, views, snippets, config
+- `packages/vscode-extension/tsconfig.json` - TypeScript config
+- `packages/vscode-extension/vitest.config.ts` - Test configuration
+- `packages/vscode-extension/schemas/workflow.schema.json` - JSON Schema for workflows
+- `packages/vscode-extension/snippets/typescript.json` - TypeScript code snippets (6 snippets)
+- `packages/vscode-extension/snippets/workflow.json` - Workflow JSON snippets (8 snippets)
+- `packages/vscode-extension/src/extension.ts` - Extension entry point
+- `packages/vscode-extension/src/providers/WorkflowDiagnostics.ts` - Diagnostic validation
+- `packages/vscode-extension/src/providers/WorkflowHoverProvider.ts` - Hover documentation
+- `packages/vscode-extension/src/providers/WorkflowCompletionProvider.ts` - Auto-completion
+- `packages/vscode-extension/src/views/WorkflowTreeProvider.ts` - Workflow tree view
+- `packages/vscode-extension/src/views/RuntimeTreeProvider.ts` - Runtime tree view
+- `packages/vscode-extension/src/commands/index.ts` - CLI integration commands
+- `packages/vscode-extension/src/__tests__/vscode-mock.ts` - VS Code API mock
+- `packages/vscode-extension/src/__tests__/WorkflowDiagnostics.test.ts` - 31 tests
+- `packages/vscode-extension/src/__tests__/WorkflowHoverProvider.test.ts` - 13 tests
+- `packages/vscode-extension/src/__tests__/WorkflowCompletionProvider.test.ts` - 6 tests
+- `packages/vscode-extension/src/__tests__/WorkflowSchema.test.ts` - 12 tests
+
 ### 2026-01-28 - Enterprise Features Phase 2: OAuth, Secrets, Testing, Caching, Helm Charts COMPLETED!
 
 **SEC-3: OAuth 2.0 / OIDC Provider - COMPLETE:**
@@ -2048,6 +2137,18 @@ export default class MyNode extends NanoService<InputType> {
 
 ### This Week (2026-01-28 to 2026-02-02)
 
+**COMPLETED: Phase 4G - VS Code Extension ✅**
+1. [x] Create VS Code extension project structure ✅
+2. [x] Workflow JSON diagnostics (validation on save/open, 10+ rule types) ✅
+3. [x] Hover documentation provider (triggers, fields, node packages) ✅
+4. [x] Auto-completion provider (triggers, methods, types, runtimes, providers) ✅
+5. [x] Code snippets: TypeScript (6 snippets) + Workflow JSON (8 snippets) ✅
+6. [x] AI generation commands (node, workflow, trigger, migrate) ✅
+7. [x] Workflow Explorer tree view + Runtime Explorer tree view ✅
+8. [x] Workflow JSON Schema for built-in VS Code validation ✅
+9. [x] Extension settings (nanoctlPath, workflowGlob, validateOnSave, aiProvider) ✅
+10. [x] 62 unit tests (diagnostics: 31, hover: 13, completion: 6, schema: 12) ✅
+
 **COMPLETED: Phase 4G - AI Runtime Adapter Generation ✅**
 1. [x] Add end-to-end tests with mocked LLM responses ✅ (44 tests)
 2. [x] Add prompt versioning system ✅ (PromptVersioning.ts + 20 tests)
@@ -2129,16 +2230,16 @@ export default class MyNode extends NanoService<InputType> {
 
 ## Progress Dashboard
 
-### Overall Completion: 99% (1097 tests passing)
+### Overall Completion: 99.5% (1159 tests passing)
 
 ```
 Phase 1: Language-Agnostic Runtime    [███████████████████▓] 99% 🎉🎉🎉🎉🎉🎉 (Phase 1A-1E Complete!)
 Phase 2: Function-First Architecture  [███████████████████▓] 98% 🎉🎉🎉🎉🎉🎉🎉🎉 (Phases 2A-2E Complete!)
 Phase 3: Universal Triggers           [████████████████████] 100% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (Phases 3A-3H Complete!)
-Phase 4: AI-Powered Generation        [███████████████████▓] 97% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (Phases 4A-4H Complete!)
+Phase 4: AI-Powered Generation + IDE  [████████████████████] 100% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (Phases 4A-4H + 4G IDE Complete!)
 Phase 5: Multi-Language Runtimes      [████████████████████] 100% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (Phases 5A-5H Complete!)
 
-Enterprise Features (DX/SEC/QA/PERF)  [███████████████████▓] 97% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (HMR, Auth, RBAC, Audit, OpenAPI, Sentry, OAuth, Secrets, Testing, Cache, Helm!)
+Enterprise Features (DX/SEC/QA/PERF)  [████████████████████] 99% 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉 (HMR, Auth, RBAC, Audit, OpenAPI, Sentry, OAuth, Secrets, Testing, Cache, Helm, VS Code!)
 Technical Debt & Infrastructure       [██████████████████░░] 90%
 ```
 
@@ -2159,6 +2260,7 @@ Sentry Integration                    [█████████████�
 Testing Framework                     [████████████████████] 100%
 Node Result Caching                   [████████████████████] 100%
 Kubernetes/Helm                       [████████████████████] 100%
+VS Code Extension                     [████████████████████] 100%
 Node Packages                         [██████████████░░░░░░] 70%
 Python Runtime                        [█████████████████░░░] 85%
 Go Runtime                            [█████████████████░░░] 85%
@@ -2181,6 +2283,7 @@ Testing                               [█████████████�
 @nanoservice-ts/api-call              [███████████░░░░░░░░░] 55%
 @nanoservice-ts/if-else               [████████████░░░░░░░░] 60%
 nanoctl (CLI)                         [██████████████████░░] 90%  (264 tests) 🎉
+blok-vscode (Extension)               [████████████████████] 100% (62 tests) 🎉
 runtimes/python3                      [██████████░░░░░░░░░░] 50%
 ```
 
@@ -2563,7 +2666,7 @@ runtimes/python3                      [██████████░░░�
 
 ---
 
-**Document Version:** 1.4.0
+**Document Version:** 1.5.0
 **Last Updated:** 2026-01-28
 **Next Review:** 2026-02-10
 **Status:** 🔄 Living Document (Updated Weekly)

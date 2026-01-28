@@ -1,0 +1,160 @@
+{
+	"name": "blok-vscode",
+	"displayName": "Blok Workflow Framework",
+	"description": "VS Code extension for the Blok workflow orchestration framework - workflow validation, code snippets, AI generation, and workflow visualization",
+	"version": "0.1.0",
+	"publisher": "deskree",
+	"license": "Apache-2.0",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": ["Programming Languages", "Snippets", "Linters", "Other"],
+	"keywords": [
+		"blok",
+		"nanoservice",
+		"workflow",
+		"orchestration",
+		"typescript"
+	],
+	"activationEvents": [
+		"workspaceContains:**/workflows/**/*.json",
+		"workspaceContains:**/nanoservice.json",
+		"workspaceContains:**/nanoctl.config.*"
+	],
+	"main": "./dist/extension.js",
+	"icon": "images/blok-icon.png",
+	"contributes": {
+		"commands": [
+			{
+				"command": "blok.generateNode",
+				"title": "Blok: Generate AI Node",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.generateWorkflow",
+				"title": "Blok: Generate AI Workflow",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.generateTrigger",
+				"title": "Blok: Generate AI Trigger",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.validateWorkflow",
+				"title": "Blok: Validate Current Workflow",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.openMonitor",
+				"title": "Blok: Open Monitor Dashboard",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.refreshWorkflows",
+				"title": "Blok: Refresh Workflow Explorer",
+				"icon": "$(refresh)",
+				"category": "Blok"
+			},
+			{
+				"command": "blok.migrateNode",
+				"title": "Blok: Migrate Node to Function-First",
+				"category": "Blok"
+			}
+		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "blok-explorer",
+					"title": "Blok",
+					"icon": "$(circuit-board)"
+				}
+			]
+		},
+		"views": {
+			"blok-explorer": [
+				{
+					"id": "blokWorkflows",
+					"name": "Workflows"
+				},
+				{
+					"id": "blokRuntimes",
+					"name": "Runtimes"
+				}
+			]
+		},
+		"menus": {
+			"view/title": [
+				{
+					"command": "blok.refreshWorkflows",
+					"when": "view == blokWorkflows",
+					"group": "navigation"
+				}
+			],
+			"editor/context": [
+				{
+					"command": "blok.validateWorkflow",
+					"when": "resourceExtname == .json",
+					"group": "blok"
+				}
+			]
+		},
+		"snippets": [
+			{
+				"language": "typescript",
+				"path": "./snippets/typescript.json"
+			},
+			{
+				"language": "json",
+				"path": "./snippets/workflow.json"
+			}
+		],
+		"jsonValidation": [
+			{
+				"fileMatch": "**/workflows/**/*.json",
+				"url": "./schemas/workflow.schema.json"
+			}
+		],
+		"configuration": {
+			"title": "Blok",
+			"properties": {
+				"blok.nanoctlPath": {
+					"type": "string",
+					"default": "nanoctl",
+					"description": "Path to the nanoctl CLI binary"
+				},
+				"blok.workflowGlob": {
+					"type": "string",
+					"default": "**/workflows/**/*.json",
+					"description": "Glob pattern for workflow JSON files"
+				},
+				"blok.validateOnSave": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically validate workflow files on save"
+				},
+				"blok.aiProvider": {
+					"type": "string",
+					"enum": ["openai", "anthropic"],
+					"default": "openai",
+					"description": "AI provider for code generation"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --sourcemap",
+		"watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --sourcemap --watch",
+		"lint": "biome check src/",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"devDependencies": {
+		"@types/vscode": "^1.85.0",
+		"@types/node": "^20.0.0",
+		"esbuild": "^0.20.0",
+		"vitest": "^3.0.0",
+		"typescript": "^5.5.0"
+	}
+}
