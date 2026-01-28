@@ -23,6 +23,28 @@ import { RateLimiter } from "./monitoring/RateLimiter";
 import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 
+// Marketplace infrastructure
+import { RuntimeCatalog } from "./marketplace/RuntimeCatalog";
+import { RuntimeDiscovery } from "./marketplace/RuntimeDiscovery";
+import { RuntimeHealthMonitor } from "./marketplace/RuntimeHealthMonitor";
+import { RuntimeMetricsDashboard } from "./marketplace/RuntimeMetricsDashboard";
+import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
+
+// Hot Module Replacement (HMR)
+import { FileWatcher } from "./hmr/FileWatcher";
+import { HotReloadManager } from "./hmr/HotReloadManager";
+
+// Security
+import { AuthMiddleware, JWTAuthProvider, APIKeyAuthProvider } from "./security/AuthMiddleware";
+import { RBAC, createDefaultRBAC } from "./security/RBAC";
+import { AuditLogger, ConsoleAuditSink, FileAuditSink, InMemoryAuditSink } from "./security/AuditLogger";
+
+// OpenAPI
+import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
+
+// Integrations
+import { SentryIntegration } from "./integrations/SentryIntegration";
+
 // types
 
 import NanoService from "./NanoService";
@@ -69,6 +91,29 @@ export {
 	CircuitBreaker,
 	CircuitOpenError,
 	TriggerMetricsCollector,
+	// Marketplace
+	RuntimeCatalog,
+	RuntimeDiscovery,
+	RuntimeHealthMonitor,
+	RuntimeMetricsDashboard,
+	RuntimeAutoScaler,
+	// HMR
+	FileWatcher,
+	HotReloadManager,
+	// Security
+	AuthMiddleware,
+	JWTAuthProvider,
+	APIKeyAuthProvider,
+	RBAC,
+	createDefaultRBAC,
+	AuditLogger,
+	ConsoleAuditSink,
+	FileAuditSink,
+	InMemoryAuditSink,
+	// OpenAPI
+	OpenAPIGenerator,
+	// Integrations
+	SentryIntegration,
 	// Types
 	Condition,
 	Conditions,
@@ -116,3 +161,92 @@ export type {
 	ErrorStats,
 	ThroughputStats,
 } from "./monitoring/TriggerMetricsCollector";
+export type {
+	RuntimePackageManifest,
+	RuntimeNodeInfo,
+	CatalogSearchOptions,
+	CatalogSearchResult,
+	CatalogStats,
+} from "./marketplace/RuntimeCatalog";
+export type {
+	CompatibilityInfo,
+	DiscoveryResult,
+	ResolveOptions,
+} from "./marketplace/RuntimeDiscovery";
+export type {
+	RuntimeHealthStatus,
+	HealthMonitorConfig,
+	HealthCheckRecord,
+	HealthChangeListener,
+} from "./marketplace/RuntimeHealthMonitor";
+export type {
+	RuntimeExecutionMetrics,
+	LatencyPercentiles,
+	ThroughputMetrics,
+	ResourceMetrics,
+	DashboardSnapshot,
+	AggregateMetrics,
+} from "./marketplace/RuntimeMetricsDashboard";
+export type {
+	ScalingPolicy,
+	ScalingDecision,
+	ScalingMetrics,
+	ScalingHistory,
+	AutoScalerConfig,
+	ScalingListener,
+} from "./marketplace/RuntimeAutoScaler";
+
+// HMR types
+export type {
+	FileWatcherConfig,
+	HMREvent,
+	HMREventType,
+} from "./hmr/FileWatcher";
+export type {
+	HotReloadManagerConfig,
+	HotReloadStats,
+	ReloadHandler,
+} from "./hmr/HotReloadManager";
+
+// Security types
+export type {
+	AuthMiddlewareConfig,
+	AuthProvider,
+	AuthIdentity,
+	AuthRequest,
+	AuthResult,
+	JWTAuthProviderConfig,
+	APIKeyAuthProviderConfig,
+	APIKeyInfo,
+} from "./security/AuthMiddleware";
+export type {
+	Action,
+	Permission,
+	RoleDefinition,
+	AccessCheckResult,
+	RBACPolicy,
+} from "./security/RBAC";
+export type {
+	AuditEntry,
+	AuditCategory,
+	AuditSeverity,
+	AuditSink,
+	AuditLoggerConfig,
+} from "./security/AuditLogger";
+
+// OpenAPI types
+export type {
+	OpenAPIGeneratorConfig,
+	OpenAPISecurityScheme,
+	WorkflowDefinition,
+	OpenAPISpec,
+} from "./openapi/OpenAPIGenerator";
+
+// Integration types
+export type {
+	SentryConfig,
+	WorkflowErrorContext,
+	SentryClient,
+	SentryTransaction,
+	SentrySpan,
+} from "./integrations/SentryIntegration";

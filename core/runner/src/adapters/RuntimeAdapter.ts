@@ -13,6 +13,7 @@ export type RuntimeKind =
 	| "rust"
 	| "php"
 	| "csharp"
+	| "ruby"
 	| "docker"
 	| "wasm";
 

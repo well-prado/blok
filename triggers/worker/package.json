@@ -1,0 +1,40 @@
+{
+	"name": "@nanoservice-ts/trigger-worker",
+	"version": "0.0.1",
+	"description": "Worker-based trigger for Blok workflows - supports background job processing with concurrency, retries, and scheduling",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "rm -rf dist && npx tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"author": "Deskree Technologies Inc.",
+	"license": "Apache-2.0",
+	"dependencies": {
+		"@nanoservice-ts/helper": "workspace:*",
+		"@nanoservice-ts/runner": "workspace:*",
+		"@nanoservice-ts/shared": "workspace:*",
+		"@opentelemetry/api": "^1.8.0",
+		"uuid": "^10.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.13.14",
+		"@types/uuid": "^10.0.0",
+		"typescript": "^5.1.3",
+		"vitest": "^3.1.4"
+	},
+	"peerDependencies": {
+		"bullmq": "^5.31.1",
+		"ioredis": "^5.4.1"
+	},
+	"peerDependenciesMeta": {
+		"bullmq": {
+			"optional": true
+		},
+		"ioredis": {
+			"optional": true
+		}
+	}
+}

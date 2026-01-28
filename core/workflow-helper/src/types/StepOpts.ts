@@ -15,6 +15,7 @@ export const RuntimeKindSchema = z.enum([
 	"rust",
 	"php",
 	"csharp",
+	"ruby",
 	"docker",
 	"wasm",
 ]);
@@ -37,6 +38,7 @@ export const NodeTypeSchema = z.enum([
 	"runtime.rust",
 	"runtime.php",
 	"runtime.csharp",
+	"runtime.ruby",
 	"runtime.docker",
 	"runtime.wasm",
 ]);
