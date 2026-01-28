@@ -395,14 +395,14 @@ importers:
   templates/node-function:
     dependencies:
       '@nanoservice-ts/helper':
-        specifier: ^0.1.5
-        version: 0.1.5
+        specifier: workspace:*
+        version: link:../../core/workflow-helper
       '@nanoservice-ts/runner':
-        specifier: ^0.1.26
-        version: 0.1.26
+        specifier: workspace:*
+        version: link:../../core/runner
       '@nanoservice-ts/shared':
-        specifier: ^0.0.9
-        version: 0.0.9
+        specifier: workspace:*
+        version: link:../../core/shared
       zod:
         specifier: ^3.24.1
         version: 3.24.2

@@ -31,15 +31,29 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 			const duration_ms = performance.now() - startTime;
 
 			// Convert ResponseContext to ExecutionResult
-			// response.data is the actual NanoServiceResponse object
-			// Check if response.data.error exists (not response.error)
-			const responseData = response.data as { error?: unknown; success?: boolean; data?: unknown };
-			const hasError = responseData?.error !== null && responseData?.error !== undefined;
+			// Response can be either:
+			// 1. ResponseContext with nested data: { data: { success, data, error } }
+			// 2. Direct response: { success, data, error }
+			const responseData = response.data as { error?: unknown; success?: boolean; data?: unknown } | null | undefined;
+			const topLevelResponse = response as { error?: unknown; success?: boolean; data?: unknown };
+
+			// Check for errors at both nested level (response.data.error) and top level (response.error)
+			const nestedError = responseData?.error !== null && responseData?.error !== undefined;
+			const topLevelError = topLevelResponse?.error !== null && topLevelResponse?.error !== undefined;
+			const hasError = nestedError || topLevelError;
+
+			// Determine success: check both levels, default to true if not specified
+			const nestedSuccess = responseData?.success;
+			const topLevelSuccess = topLevelResponse?.success;
+			const success = hasError ? false : (nestedSuccess ?? topLevelSuccess ?? true);
+
+			// Get error from whichever level has it
+			const errorValue = responseData?.error || topLevelResponse?.error || null;
 
 			return {
-				success: hasError ? false : (responseData?.success ?? true),
+				success,
 				data: response.data,
-				errors: responseData?.error || null,
+				errors: errorValue,
 				metrics: {
 					duration_ms,
 				},

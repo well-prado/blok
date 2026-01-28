@@ -1,5 +1,6 @@
 import { type HelperResponse, Workflow } from "@nanoservice-ts/helper";
 import { beforeAll, expect, test } from "vitest";
+import path from "node:path";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
 
@@ -7,6 +8,9 @@ let locator: WorkflowLocator = <WorkflowLocator>{};
 const storage: LocalStorage = new LocalStorage();
 
 beforeAll(async () => {
+	// Set WORKFLOWS_PATH to the http trigger workflows directory for tests
+	const workflowsPath = path.resolve(__dirname, "../../../triggers/http/workflows");
+	process.env.WORKFLOWS_PATH = workflowsPath;
 	locator = createLocator();
 });
 
@@ -43,11 +47,17 @@ function createLocator(): WorkflowLocator {
 }
 
 test("Load JSON example", async () => {
-	expect(async () => await storage.get("countries", locator, "json")).not.toThrow();
+	// Test that loading countries from JSON doesn't throw
+	const result = await storage.get("countries", locator, "json");
+	expect(result).toBeDefined();
+	expect(result.name).toBeDefined();
 });
 
 test("Load Helper example", async () => {
-	expect(async () => await storage.get("countries-helper", locator)).not.toThrow();
+	// Test that loading countries-helper from locator doesn't throw
+	const result = await storage.get("countries-helper", locator);
+	expect(result).toBeDefined();
+	expect(result.name).toBeDefined();
 });
 
 test("Compare JSON vs Helper", async () => {
@@ -58,7 +68,10 @@ test("Compare JSON vs Helper", async () => {
 });
 
 test("Load YAML example", async () => {
-	expect(async () => await storage.get("countries", locator, "yaml")).not.toThrow();
+	// Test that loading countries from YAML doesn't throw
+	const result = await storage.get("countries", locator, "yaml");
+	expect(result).toBeDefined();
+	expect(result.name).toBeDefined();
 });
 
 test("Compare YAML vs Helper", async () => {
@@ -69,7 +82,10 @@ test("Compare YAML vs Helper", async () => {
 });
 
 test("Load XML example", async () => {
-	expect(async () => await storage.get("countries", locator, "xml")).not.toThrow();
+	// Test that loading countries from XML doesn't throw
+	const result = await storage.get("countries", locator, "xml");
+	expect(result).toBeDefined();
+	expect(result.name).toBeDefined();
 });
 
 test("Compare XML vs Helper", async () => {
@@ -80,7 +96,10 @@ test("Compare XML vs Helper", async () => {
 });
 
 test("Load TOML example", async () => {
-	expect(async () => await storage.get("countries", locator, "toml")).not.toThrow();
+	// Test that loading countries from TOML doesn't throw
+	const result = await storage.get("countries", locator, "toml");
+	expect(result).toBeDefined();
+	expect(result.name).toBeDefined();
 });
 
 test("Compare TOML vs Helper", async () => {

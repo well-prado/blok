@@ -18,9 +18,9 @@
 		"vitest": "^3.1.4"
 	},
 	"dependencies": {
-		"@nanoservice-ts/shared": "^0.0.9",
-		"@nanoservice-ts/runner": "^0.1.26",
-		"@nanoservice-ts/helper": "^0.1.5",
+		"@nanoservice-ts/shared": "workspace:*",
+		"@nanoservice-ts/runner": "workspace:*",
+		"@nanoservice-ts/helper": "workspace:*",
 		"zod": "^3.24.1"
 	},
 	"private": true

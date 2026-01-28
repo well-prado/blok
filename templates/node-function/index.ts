@@ -29,7 +29,8 @@ export default defineNode({
 		// - ctx.env: Access environment variables
 
 		// Example: Store data for downstream nodes
-		ctx.vars["processed-message"] = input.message;
+		if (!ctx.vars) ctx.vars = {};
+		ctx.vars["processed-message"] = { value: input.message };
 
 		// Return type-safe output (validated automatically)
 		return {
