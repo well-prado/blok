@@ -13,6 +13,8 @@ import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "./adapters/Ru
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
+import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
+import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
 
 // Function-first node API
 import { defineNode, FunctionNode, type FnNodeDefinition } from "./defineNode";
@@ -43,6 +45,12 @@ import { SecretManager, EnvironmentSecretProvider, InMemorySecretProvider, Vault
 
 // OpenAPI
 import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
+
+// GraphQL
+import { GraphQLSchemaGenerator } from "./graphql/GraphQLSchemaGenerator";
+
+// Visualization
+import { WorkflowVisualizer } from "./visualization/WorkflowVisualizer";
 
 // Integrations
 import { SentryIntegration } from "./integrations/SentryIntegration";
@@ -92,6 +100,8 @@ export {
 	NodeJsRuntimeAdapter,
 	Python3RuntimeAdapter,
 	DockerRuntimeAdapter,
+	BunRuntimeAdapter,
+	WasmRuntimeAdapter,
 	// Function-first API
 	defineNode,
 	FunctionNode,
@@ -132,6 +142,10 @@ export {
 	GCPSecretProvider,
 	// OpenAPI
 	OpenAPIGenerator,
+	// GraphQL
+	GraphQLSchemaGenerator,
+	// Visualization
+	WorkflowVisualizer,
 	// Integrations
 	SentryIntegration,
 	// Cache
@@ -292,6 +306,25 @@ export type {
 	WorkflowDefinition,
 	OpenAPISpec,
 } from "./openapi/OpenAPIGenerator";
+
+// GraphQL types
+export type {
+	GraphQLGeneratorConfig,
+	GqlWorkflowDefinition,
+	GqlFieldDef,
+	GraphQLSchemaJSON,
+	GraphQLTypeInfo,
+	GraphQLFieldInfo,
+} from "./graphql/GraphQLSchemaGenerator";
+
+// Visualization types
+export type {
+	VisualizerConfig,
+	WorkflowDef as VisualizerWorkflowDef,
+	StepDef as VisualizerStepDef,
+	ConditionDef as VisualizerConditionDef,
+	WorkflowSummary,
+} from "./visualization/WorkflowVisualizer";
 
 // Integration types
 export type {

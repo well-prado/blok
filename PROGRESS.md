@@ -1,8 +1,8 @@
 # Blok Framework Progress Tracker
 
-> **Last Updated:** 2026-01-28 (VS Code Extension COMPLETE! Workflow diagnostics, hover docs, completion, snippets, AI generation commands, tree views! 62 extension tests + 801 runner tests passing!)
-> **Status:** 🔄 Active Development - Phase 1-5 COMPLETED + Enterprise Features COMPLETE + IDE Extension COMPLETE!
-> **Completion:** 99.5% Overall (Phase 1: 99%, Phase 2: 98%, Phase 3: 100%, Phase 4: 100%, Phase 5: 100%, Enterprise: 99% Complete!)
+> **Last Updated:** 2026-01-28 (Workflow Visualization + GraphQL Schema Generation COMPLETE! 913 runner tests + 89 LSP tests + 62 extension tests = 1064 total tests passing!)
+> **Status:** 🔄 Active Development - Phase 1-5 COMPLETED + Enterprise Features COMPLETE + IDE + LSP + All Runtimes + Visualization + GraphQL COMPLETE!
+> **Completion:** 99.8% Overall (Phase 1: 100%, Phase 2: 100%, Phase 3: 100%, Phase 4: 100%, Phase 5: 100%, Enterprise: 99% Complete!)
 
 ## Legend
 
@@ -112,10 +112,17 @@
 - ✅ **801 runner tests passing (313 new enterprise feature tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **PHASE 4G: VS Code Extension (workflow diagnostics, hover docs, completion, snippets, AI generation, tree views)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **62 VS Code extension tests passing (diagnostics: 31, hover: 13, completion: 6, schema: 12)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **DX-3: LSP Server (Language Server Protocol for any editor - Neovim, IntelliJ, Sublime, Emacs, etc.)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **89 LSP server tests passing (diagnostics: 36, hover: 26, completion: 15, constants: 12)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **BunRuntimeAdapter (dual-mode: in-process under Bun, subprocess under Node.js)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **WasmRuntimeAdapter (WebAssembly module execution with LRU cache, 3 execution strategies)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **833 runner tests passing (32 new Bun + WASM adapter tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **DX-2: Workflow Visualization (Mermaid, DOT/Graphviz, ASCII, workflow summary)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **QA-2: GraphQL Schema Generation from workflows (SDL, typed I/O, subscriptions)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **913 runner tests passing (80 new visualization + GraphQL tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **What's Not Ready:**
-- ❌ IntelliJ IDEA plugin
-- ❌ Language Server Protocol (LSP) server for other IDEs
+- ❌ IntelliJ IDEA plugin (can use LSP server as backend)
 
 **Critical Gaps:**
 1. ~~**Runtime Lock-in**: Python runtime is hard-coded, not pluggable~~ ✅ **RESOLVED!**
@@ -129,9 +136,9 @@
 
 ## Phase-by-Phase Breakdown
 
-### Phase 1: Language-Agnostic Atomic Runner (99% Complete) 🎉🎉🎉🎉🎉🎉
+### Phase 1: Language-Agnostic Atomic Runner (100% Complete) 🎉🎉🎉🎉🎉🎉
 
-#### Status: ✅ Phase 1A-1E Complete! Docker, Multi-Runtime, Adapter Switching Integration Tests Done!
+#### Status: ✅ Phase 1A-1E Complete! All 11 RuntimeKind adapters implemented (Node.js, Bun, Python3, Go, Java, Rust, Docker, WASM + SDK runtimes)!
 
 **Goal:** Make runner truly runtime-agnostic with pluggable adapters.
 
@@ -1284,6 +1291,98 @@ export default class MyNode extends NanoService<InputType> {
 
 ## Recent Achievements
 
+### 2026-01-28 - Workflow Visualization + GraphQL Schema Generation COMPLETED!
+
+**DX-2: Workflow Visualization - COMPLETE:**
+- ✅ Created `core/runner/src/visualization/WorkflowVisualizer.ts` - Multi-format workflow diagram generator
+  - **Mermaid Output**: Full Mermaid graph syntax for GitHub README, docs, Mermaid Live Editor
+    - Trigger nodes (hexagon), step nodes (box), condition nodes (diamond), end nodes (ellipse)
+    - CSS class definitions for color-coded node types
+    - Subgraph support for multi-workflow diagrams
+    - Theme support (default, dark, forest, neutral)
+    - Configurable direction (TB, LR, BT, RL)
+  - **DOT/Graphviz Output**: Full DOT syntax for SVG/PNG rendering
+    - Colored fill for each node type (green trigger, blue step, orange condition, grey end)
+    - Cluster subgraphs for multi-workflow layouts
+    - Dashed edges for condition branches
+  - **ASCII Output**: Terminal-friendly box drawing characters
+    - Unicode box borders, step icons (⚡ trigger, ▪️ step, ◆ condition, ⏹ end)
+    - Flow arrows (│ ▼) between steps
+  - **Workflow Summary**: Structured metadata extraction
+    - Trigger type and detail, step count (including nested), node count
+    - Condition detection, runtime extraction from step types
+  - **All 10 trigger types**: HTTP, gRPC, Cron, Queue, PubSub, Webhook, WebSocket, SSE, Worker, Manual
+  - Configurable: showTrigger, showTypes, showConditions, title
+
+**QA-2: GraphQL Schema Generation - COMPLETE:**
+- ✅ Created `core/runner/src/graphql/GraphQLSchemaGenerator.ts` - GraphQL SDL generator from workflows
+  - **Query generation**: GET HTTP endpoints → Query fields, gRPC → Query fields
+  - **Mutation generation**: POST/PUT/PATCH/DELETE HTTP endpoints → Mutation fields
+  - **Subscription generation**: WebSocket/SSE endpoints → Subscription fields
+  - **Typed inputs/outputs**: Maps workflow inputs/outputs to GraphQL types
+    - string→String, integer→Int, float→Float, boolean→Boolean, array→[T], datetime→DateTime, object→JSON
+    - Required field support (! suffix)
+    - Field descriptions via triple-quote docstrings
+  - **Path parameter extraction**: `:param` → required String! arguments
+  - **Built-in types**: BlokError (message, origin, code), WorkflowMetadata
+  - **Custom scalars**: JSON, DateTime, plus configurable custom scalars
+  - **JSON representation**: `toJSON()` for programmatic schema introspection
+  - **Custom type registration**: `addCustomType()` for extending schema
+  - Configurable: schemaName, includeSubscriptions, includeMetadata, customScalars
+
+**Tests: 80 New Tests (all passing):**
+- ✅ **WorkflowVisualizer Tests**: 42 tests (Mermaid output, DOT output, ASCII output, summaries, all 10 triggers, conditions, multi-workflow, themes, config options)
+- ✅ **GraphQLSchemaGenerator Tests**: 38 tests (Query/Mutation/Subscription generation, typed I/O, path params, custom types, JSON output, naming conventions, combined schema)
+
+**New Files Created:**
+- `core/runner/src/visualization/WorkflowVisualizer.ts` - Multi-format workflow visualization
+- `core/runner/src/visualization/__tests__/WorkflowVisualizer.test.ts` - 42 tests
+- `core/runner/src/graphql/GraphQLSchemaGenerator.ts` - GraphQL SDL generation
+- `core/runner/src/graphql/__tests__/GraphQLSchemaGenerator.test.ts` - 38 tests
+
+**Updated Files:**
+- `core/runner/src/index.ts` - Added imports and exports for WorkflowVisualizer and GraphQLSchemaGenerator
+
+**Total Tests: 913 runner + 89 LSP + 62 extension = 1064 tests passing!**
+
+### 2026-01-28 - Bun + WASM Runtime Adapters COMPLETED! (All 11 RuntimeKind Implementations)
+
+**BunRuntimeAdapter - COMPLETE:**
+- ✅ Created `core/runner/src/adapters/BunRuntimeAdapter.ts` - Dual-mode Bun execution
+  - **In-Process Mode**: When running under Bun runtime, executes nodes directly (zero overhead, same as NodeJsRuntimeAdapter)
+  - **Subprocess Mode**: When running under Node.js, spawns `bun eval` subprocess with 30s timeout
+  - Runtime detection via `"Bun" in globalThis`
+  - JSON payload serialization/deserialization between processes
+  - Error handling for subprocess failures, timeouts, and invalid output
+  - Performance timing with `performance.now()`
+
+**WasmRuntimeAdapter - COMPLETE:**
+- ✅ Created `core/runner/src/adapters/WasmRuntimeAdapter.ts` - WebAssembly module execution
+  - **Module Caching**: LRU cache with configurable max size (default 50) and max age (default 10 min)
+  - **3 Execution Strategies**:
+    1. `__blok_execute` - Blok-native WASM interface
+    2. `execute(ptr, len)` - Standard pointer/length interface
+    3. `_start` - WASI-compatible entry point
+  - **Host Imports**: Memory management, console logging, input/output buffers
+  - **WASI Stubs**: Minimal wasi_snapshot_preview1 compatibility (fd_write, proc_exit, etc.)
+  - `clearCache()` and `getCacheStats()` public methods
+  - Configurable via constructor options: `maxCacheSize`, `maxCacheAge`
+
+**Tests: 32 New Tests (all passing):**
+- ✅ **BunRuntimeAdapter Tests**: 17 tests (adapter properties, in-process execution, error handling, performance, concurrent execution, subprocess mode)
+- ✅ **WasmRuntimeAdapter Tests**: 15 tests (adapter properties, constructor options, cache management, error handling, valid WASM loading, cache eviction, context handling)
+
+**Updated Files:**
+- `core/runner/src/index.ts` - Added BunRuntimeAdapter and WasmRuntimeAdapter imports and exports
+
+**New Files Created:**
+- `core/runner/src/adapters/BunRuntimeAdapter.ts` - Dual-mode Bun runtime adapter
+- `core/runner/src/adapters/WasmRuntimeAdapter.ts` - WebAssembly runtime adapter with caching
+- `core/runner/src/adapters/__tests__/BunRuntimeAdapter.test.ts` - 17 tests
+- `core/runner/src/adapters/__tests__/WasmRuntimeAdapter.test.ts` - 15 tests
+
+**Total Tests: 833 runner + 89 LSP + 62 extension = 984 tests passing!**
+
 ### 2026-01-28 - VS Code Extension COMPLETED! (Phase 4G - IDE Integration)
 
 **DX-3: VS Code Extension - COMPLETE:**
@@ -1369,6 +1468,63 @@ export default class MyNode extends NanoService<InputType> {
 - `packages/vscode-extension/src/__tests__/WorkflowHoverProvider.test.ts` - 13 tests
 - `packages/vscode-extension/src/__tests__/WorkflowCompletionProvider.test.ts` - 6 tests
 - `packages/vscode-extension/src/__tests__/WorkflowSchema.test.ts` - 12 tests
+
+### 2026-01-28 - LSP Server COMPLETED! (DX-3 - Language Server Protocol)
+
+**DX-3: LSP Server - COMPLETE:**
+- ✅ Created `packages/lsp-server/` - Full LSP server for Blok workflow files
+  - **Works with any LSP-compatible editor**: Neovim, IntelliJ, Sublime Text, Emacs, Helix, etc.
+  - **Workflow Diagnostics**: Same validation as VS Code extension via LSP protocol
+    - Required fields validation (name, version, trigger, steps, nodes)
+    - Semver format validation
+    - Trigger type validation (all 10 types)
+    - HTTP trigger method/path validation
+    - Cron expression format validation
+    - Queue/webhook/pubsub/worker trigger required fields
+    - Step structure validation (name, node, type)
+    - Runtime kind validation (11 runtimes)
+    - Node reference checking (unused nodes, missing references)
+    - Duplicate step name detection
+  - **Hover Documentation**: Rich contextual docs on hover
+    - 10 trigger types with descriptions and examples
+    - Workflow fields (name, version, steps, nodes, trigger, inputs, conditions, set_var)
+    - Step fields (node, type, runtime)
+    - Common node packages (@nanoservice-ts/api-call, @nanoservice-ts/if-else)
+    - HTTP method values, runtime type values
+  - **Auto-Completion**: Context-aware completions
+    - Trigger types, HTTP methods, step types
+    - Runtime kinds (11 options)
+    - Node packages, queue/pubsub providers
+    - Webhook sources, condition types
+    - Top-level keys, HTTP-specific keys, step-specific keys
+  - **Server Features**:
+    - stdio communication (default, works with all editors)
+    - Incremental text document sync
+    - Configurable workflow file patterns
+    - Diagnostics limit per file
+    - Workspace folder support
+  - **Shared Constants Module**: IDE-agnostic constants for triggers, runtimes, docs
+    - Can be shared between LSP server and VS Code extension
+
+**Tests: 89 New Tests (all passing):**
+- ✅ **Diagnostics Tests**: 36 tests (JSON parsing, required fields, version, triggers, steps, node refs, source)
+- ✅ **Hover Tests**: 26 tests (trigger hovers, field hovers, step hovers, value hovers, edge cases, ranges)
+- ✅ **Completion Tests**: 15 tests (triggers, methods, types, runtimes, nodes, providers, sources, conditions, keys)
+- ✅ **Constants Tests**: 12 tests (all constants arrays, docs coverage, provider lists)
+
+**New Files Created:**
+- `packages/lsp-server/package.json` - Package manifest with bin entry for blok-lsp
+- `packages/lsp-server/tsconfig.json` - TypeScript config
+- `packages/lsp-server/vitest.config.ts` - Test configuration
+- `packages/lsp-server/src/server.ts` - Main LSP server entry point (stdio, TextDocuments)
+- `packages/lsp-server/src/constants.ts` - Shared constants (triggers, runtimes, docs)
+- `packages/lsp-server/src/diagnostics.ts` - Workflow validation via LSP diagnostics
+- `packages/lsp-server/src/completion.ts` - Auto-completion via LSP
+- `packages/lsp-server/src/hover.ts` - Hover documentation via LSP
+- `packages/lsp-server/src/__tests__/diagnostics.test.ts` - 36 tests
+- `packages/lsp-server/src/__tests__/completion.test.ts` - 15 tests
+- `packages/lsp-server/src/__tests__/hover.test.ts` - 26 tests
+- `packages/lsp-server/src/__tests__/constants.test.ts` - 12 tests
 
 ### 2026-01-28 - Enterprise Features Phase 2: OAuth, Secrets, Testing, Caching, Helm Charts COMPLETED!
 

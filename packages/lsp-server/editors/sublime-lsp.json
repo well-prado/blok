@@ -1,0 +1,16 @@
+{
+	"clients": {
+		"blok-lsp": {
+			"enabled": true,
+			"command": ["blok-lsp", "--stdio"],
+			"selector": "source.json",
+			"initializationOptions": {
+				"blok": {
+					"workflowGlob": "**/workflows/**/*.json",
+					"maxDiagnostics": 100
+				}
+			},
+			"settings": {}
+		}
+	}
+}
