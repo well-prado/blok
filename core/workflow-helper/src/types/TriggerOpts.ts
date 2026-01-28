@@ -30,14 +30,19 @@ export const QueueTriggerOptsSchema = z.object({
 });
 export type QueueTriggerOpts = z.infer<typeof QueueTriggerOptsSchema>;
 
-// Pub/Sub Trigger Options (Redis, NATS, Google Pub/Sub, AWS SNS)
-export const PubSubProviderSchema = z.enum(["redis", "nats", "google", "aws", "azure"]);
+// Pub/Sub Trigger Options (GCP Pub/Sub, AWS SNS, Azure Service Bus)
+export const PubSubProviderSchema = z.enum(["gcp", "aws", "azure"]);
 export type PubSubProvider = z.infer<typeof PubSubProviderSchema>;
 
 export const PubSubTriggerOptsSchema = z.object({
 	provider: PubSubProviderSchema,
-	channel: z.string().describe("Channel or topic to subscribe to"),
-	pattern: z.string().optional().describe("Pattern for pattern-based subscriptions"),
+	topic: z.string().describe("Topic name to subscribe to"),
+	subscription: z.string().describe("Subscription name (GCP) or SQS queue URL (AWS) or Service Bus subscription (Azure)"),
+	ack: z.boolean().default(true).describe("Whether to acknowledge messages after processing"),
+	maxMessages: z.number().default(10).describe("Maximum messages to receive at once"),
+	ackDeadline: z.number().default(30).describe("Acknowledgment deadline in seconds"),
+	deadLetterTopic: z.string().optional().describe("Dead letter topic for failed messages"),
+	filter: z.string().optional().describe("Message filter expression"),
 });
 export type PubSubTriggerOpts = z.infer<typeof PubSubTriggerOptsSchema>;
 
