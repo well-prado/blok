@@ -12,6 +12,34 @@ import {
 	StepInputs,
 	StepOpts,
 } from "./types/StepOpts";
+import {
+	// HTTP (legacy)
+	TriggerOpts,
+	TriggerOptsSchema,
+	HttpTriggerOptsSchema,
+	// Queue
+	QueueProvider,
+	QueueProviderSchema,
+	QueueTriggerOpts,
+	QueueTriggerOptsSchema,
+	// Pub/Sub
+	PubSubProvider,
+	PubSubProviderSchema,
+	PubSubTriggerOpts,
+	PubSubTriggerOptsSchema,
+	// Worker
+	WorkerTriggerOpts,
+	WorkerTriggerOptsSchema,
+	// Cron
+	CronTriggerOpts,
+	CronTriggerOptsSchema,
+	// Webhook
+	WebhookTriggerOpts,
+	WebhookTriggerOptsSchema,
+	// Triggers enum
+	TriggersSchema,
+	TriggersEnum,
+} from "./types/TriggerOpts";
 
 export {
 	AddElse,
@@ -27,4 +55,24 @@ export {
 	StepOpts,
 	Trigger,
 	Workflow,
+	// Trigger types
+	TriggerOpts,
+	TriggerOptsSchema,
+	HttpTriggerOptsSchema,
+	QueueProvider,
+	QueueProviderSchema,
+	QueueTriggerOpts,
+	QueueTriggerOptsSchema,
+	PubSubProvider,
+	PubSubProviderSchema,
+	PubSubTriggerOpts,
+	PubSubTriggerOptsSchema,
+	WorkerTriggerOpts,
+	WorkerTriggerOptsSchema,
+	CronTriggerOpts,
+	CronTriggerOptsSchema,
+	WebhookTriggerOpts,
+	WebhookTriggerOptsSchema,
+	TriggersSchema,
+	TriggersEnum,
 };
