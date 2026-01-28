@@ -14,18 +14,18 @@
  * - Dead letter handling
  */
 
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import crypto from "node:crypto";
+import type { HelperResponse, WebhookTriggerOpts } from "@nanoservice-ts/helper";
 import {
-	TriggerBase,
-	NodeMap,
 	DefaultLogger,
 	type GlobalOptions,
-	type TriggerResponse,
 	type NanoService,
+	NodeMap,
+	TriggerBase,
+	type TriggerResponse,
 } from "@nanoservice-ts/runner";
-import type { HelperResponse, WebhookTriggerOpts } from "@nanoservice-ts/helper";
-import { trace, metrics, type Span, SpanStatusCode } from "@opentelemetry/api";
-import crypto from "crypto";
+import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -97,7 +97,7 @@ const sourceHandlers: Record<string, WebhookSourceHandler> = {
 		getSignature: (headers) => headers["x-hub-signature-256"] || headers["x-hub-signature"],
 		verifySignature: (rawBody, signature, secret) => {
 			const hmac = crypto.createHmac("sha256", secret);
-			const digest = "sha256=" + hmac.update(rawBody).digest("hex");
+			const digest = `sha256=${hmac.update(rawBody).digest("hex")}`;
 			const sigBuffer = Buffer.from(signature);
 			const digestBuffer = Buffer.from(digest);
 			// Length check first to avoid timing attack on length
@@ -124,8 +124,8 @@ const sourceHandlers: Record<string, WebhookSourceHandler> = {
 				{} as Record<string, string>,
 			);
 
-			const timestamp = parts["t"];
-			const expectedSig = parts["v1"];
+			const timestamp = parts.t;
+			const expectedSig = parts.v1;
 
 			if (!timestamp || !expectedSig) {
 				return { valid: false, error: "Invalid Stripe signature format" };
@@ -164,8 +164,7 @@ const sourceHandlers: Record<string, WebhookSourceHandler> = {
 	},
 
 	custom: {
-		getEventType: (headers, body) =>
-			headers["x-event-type"] || (body as { event?: string })?.event || "custom",
+		getEventType: (headers, body) => headers["x-event-type"] || (body as { event?: string })?.event || "custom",
 		getSignature: (headers) => headers["x-signature"] || headers["x-webhook-signature"],
 		verifySignature: (rawBody, signature, secret) => {
 			// Default: HMAC-SHA256
@@ -174,8 +173,7 @@ const sourceHandlers: Record<string, WebhookSourceHandler> = {
 			const valid = signature === digest || signature === `sha256=${digest}`;
 			return { valid, error: valid ? undefined : "Invalid signature" };
 		},
-		getEventId: (headers, body) =>
-			headers["x-event-id"] || (body as { id?: string })?.id || uuid(),
+		getEventId: (headers, body) => headers["x-event-id"] || (body as { id?: string })?.id || uuid(),
 	},
 };
 
@@ -231,9 +229,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 		if (this.webhookWorkflows.length === 0) {
 			this.logger.log("No workflows with webhook triggers found");
 		} else {
-			this.logger.log(
-				`Webhook trigger initialized. ${this.webhookWorkflows.length} workflow(s) registered`,
-			);
+			this.logger.log(`Webhook trigger initialized. ${this.webhookWorkflows.length} workflow(s) registered`);
 		}
 
 		return this.endCounter(startTime);
@@ -281,9 +277,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 		// Find matching workflow
 		const workflow = this.findMatchingWorkflow(event);
 		if (!workflow) {
-			this.logger.log(
-				`No matching workflow for webhook: ${source}/${event.eventType}`,
-			);
+			this.logger.log(`No matching workflow for webhook: ${source}/${event.eventType}`);
 			return null;
 		}
 
@@ -365,7 +359,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 	protected async executeWorkflow(
 		event: WebhookEvent,
 		workflow: WebhookWorkflowModel,
-		config: WebhookTriggerOpts,
+		_config: WebhookTriggerOpts,
 	): Promise<TriggerResponse> {
 		const executionId = uuid();
 
@@ -402,7 +396,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 
 					// Store webhook context in vars
 					if (!ctx.vars) ctx.vars = {};
-					ctx.vars["_webhook_event"] = {
+					ctx.vars._webhook_event = {
 						id: event.id,
 						source: event.source,
 						eventType: event.eventType,
@@ -410,9 +404,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 						hasSignature: String(!!event.signature),
 					};
 
-					ctx.logger.log(
-						`Processing webhook: ${event.source}/${event.eventType} (${event.id})`,
-					);
+					ctx.logger.log(`Processing webhook: ${event.source}/${event.eventType} (${event.id})`);
 
 					// Execute workflow
 					const response: TriggerResponse = await this.run(ctx);
@@ -436,9 +428,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 						success: "true",
 					});
 
-					ctx.logger.log(
-						`Webhook processed in ${(end - start).toFixed(2)}ms: ${event.id}`,
-					);
+					ctx.logger.log(`Webhook processed in ${(end - start).toFixed(2)}ms: ${event.id}`);
 
 					resolve(response);
 				} catch (error) {
@@ -457,10 +447,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 						workflow_name: this.configuration?.name || "unknown",
 					});
 
-					this.logger.error(
-						`Webhook failed ${event.id}: ${errorMessage}`,
-						(error as Error).stack,
-					);
+					this.logger.error(`Webhook failed ${event.id}: ${errorMessage}`, (error as Error).stack);
 
 					throw error;
 				} finally {

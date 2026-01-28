@@ -74,6 +74,28 @@ export const WebhookTriggerOptsSchema = z.object({
 });
 export type WebhookTriggerOpts = z.infer<typeof WebhookTriggerOptsSchema>;
 
+// WebSocket Trigger Options (real-time bidirectional)
+export const WebSocketTriggerOptsSchema = z.object({
+	events: z.array(z.string()).default(["*"]).describe("Event names to listen for (supports wildcards)"),
+	rooms: z.array(z.string()).optional().describe("Room/channel filters"),
+	path: z.string().optional().describe("WebSocket endpoint path"),
+	maxConnections: z.number().default(10000).describe("Maximum concurrent connections"),
+	heartbeatInterval: z.number().default(30000).describe("Heartbeat interval in milliseconds"),
+	messageRateLimit: z.number().default(100).describe("Max messages per second per client"),
+});
+export type WebSocketTriggerOpts = z.infer<typeof WebSocketTriggerOptsSchema>;
+
+// SSE Trigger Options (Server-Sent Events)
+export const SSETriggerOptsSchema = z.object({
+	events: z.array(z.string()).default(["*"]).describe("Event names to emit"),
+	channels: z.array(z.string()).optional().describe("Channel filters"),
+	path: z.string().optional().describe("SSE endpoint path"),
+	maxConnections: z.number().default(10000).describe("Maximum concurrent connections"),
+	heartbeatInterval: z.number().default(30000).describe("Heartbeat interval in milliseconds"),
+	retryInterval: z.number().default(3000).describe("Client retry interval in milliseconds"),
+});
+export type SSETriggerOpts = z.infer<typeof SSETriggerOptsSchema>;
+
 // All trigger types
 export const TriggersSchema = z.enum([
 	"http",

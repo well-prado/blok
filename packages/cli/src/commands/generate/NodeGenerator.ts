@@ -6,6 +6,8 @@ import createFnNodeSystemPrompt from "./prompts/create-fn-node.system.js";
 import * as CompilationValidator from "./validators/CompilationValidator.js";
 import * as NodeValidator from "./validators/NodeValidator.js";
 import type { NodeValidationContext } from "./validators/NodeValidator.js";
+import { GenerationAnalytics } from "./GenerationAnalytics.js";
+import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 
 type NodeInformation = {
 	nodeName: string;
@@ -16,6 +18,8 @@ type NodeInformation = {
 		errors: string[];
 		warnings: string[];
 		attempts: number;
+		promptVersion?: string;
+		durationMs?: number;
 	};
 };
 
@@ -25,6 +29,11 @@ export default class NodeGenerator {
 	private readonly MAX_VALIDATION_ATTEMPTS = 3;
 
 	async generateNode(nodeName: string, userPrompt: string, apiKey: string, update = false, nodeStyle = "function"): Promise<NodeInformation> {
+		const analytics = GenerationAnalytics.getInstance();
+		const getElapsed = analytics.startTimer();
+		const promptId = nodeStyle === "function" ? "create-fn-node" : "create-node";
+		const promptVersion = getVersionStamp(promptId);
+
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
@@ -34,6 +43,9 @@ export default class NodeGenerator {
 		const promptTemplate = nodeStyle === "function" ? createFnNodeSystemPrompt : createNodeSystemPrompt;
 		let prompt = promptTemplate.prompt;
 		let existingCode: string | null = null;
+
+		// Register prompt content for hash tracking
+		registerPromptContent(promptId, prompt);
 
 		if (update) {
 			// Read existing file and get the code
@@ -53,6 +65,7 @@ export default class NodeGenerator {
 		let validationErrors: string[] = [];
 		let validationWarnings: string[] = [];
 		let isValid = false;
+		const allErrors: string[] = [];
 
 		while (attempts < this.MAX_VALIDATION_ATTEMPTS && !isValid) {
 			attempts++;
@@ -96,11 +109,27 @@ export default class NodeGenerator {
 				}
 			}
 
+			// Track errors across all attempts
+			allErrors.push(...validationErrors);
+
 			// Log attempt
 			if (!isValid && attempts < this.MAX_VALIDATION_ATTEMPTS) {
 				console.log(`⚠️  Validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`);
 			}
 		}
+
+		// Record analytics event
+		const durationMs = getElapsed();
+		analytics.recordEvent({
+			type: "node",
+			subtype: nodeStyle,
+			name: nodeName,
+			success: isValid,
+			attempts,
+			durationMs,
+			errors: allErrors,
+			promptVersion,
+		});
 
 		return {
 			nodeName,
@@ -111,28 +140,126 @@ export default class NodeGenerator {
 				errors: validationErrors,
 				warnings: validationWarnings,
 				attempts,
+				promptVersion,
+				durationMs,
 			},
 		};
 	}
 
 	/**
-	 * Create a feedback prompt based on validation errors
+	 * Create a feedback prompt with semantic error analysis
 	 */
 	private createFeedbackPrompt(originalPrompt: string, previousCode: string, errors: string[]): string {
+		// Analyze errors semantically for better guidance
+		const analyzedErrors = errors.map((err, i) => {
+			const guidance = this.getSemanticGuidance(err);
+			return `${i + 1}. ${err}${guidance ? `\n   💡 Fix: ${guidance}` : ""}`;
+		});
+
 		const feedback = [
 			originalPrompt,
 			"",
-			"❌ The previous generation had validation errors:",
-			...errors.map((err, i) => `${i + 1}. ${err}`),
+			"❌ The previous generation had validation errors. Here's what went wrong and how to fix it:",
+			"",
+			...analyzedErrors,
 			"",
 			"Previous code:",
 			"```typescript",
 			previousCode,
 			"```",
 			"",
-			"Please fix these errors and regenerate the code.",
+			"Please fix ALL the errors listed above and regenerate the complete code.",
+			"Make sure to:",
+			"- Import defineNode from '@nanoservice-ts/runner'",
+			"- Import z from 'zod'",
+			"- Import Context type from '@nanoservice-ts/shared'",
+			"- Use z.object({...}) for input and output schemas",
+			"- Make the execute function async",
+			"- Export as default: export default defineNode({...})",
+			"- Return a plain object matching the output schema (no NanoServiceResponse)",
 		].join("\n");
 
 		return feedback;
+	}
+
+	/**
+	 * Provide semantic guidance for common error patterns
+	 */
+	private getSemanticGuidance(error: string): string | null {
+		const errorLower = error.toLowerCase();
+
+		// Missing imports
+		if (errorLower.includes("missing") && errorLower.includes("definenode")) {
+			return "Add: import { defineNode } from '@nanoservice-ts/runner';";
+		}
+		if (errorLower.includes("missing") && errorLower.includes("zod")) {
+			return "Add: import { z } from 'zod';";
+		}
+		if (errorLower.includes("cannot find") && errorLower.includes("definenode")) {
+			return "Ensure defineNode is imported from '@nanoservice-ts/runner'";
+		}
+
+		// Schema issues
+		if (errorLower.includes("z.object") || errorLower.includes("zod schema")) {
+			return "Use z.object({...}) for both input and output schemas with proper Zod types";
+		}
+
+		// Execute function
+		if (errorLower.includes("execute") && errorLower.includes("async")) {
+			return "The execute function must be async: async execute(ctx, input) { ... }";
+		}
+		if (errorLower.includes("execute") && errorLower.includes("missing")) {
+			return "Add execute property: async execute(ctx, input) { return { ... }; }";
+		}
+
+		// Export issues
+		if (errorLower.includes("export") && errorLower.includes("default")) {
+			return "Use: export default defineNode({...}) at the end of the file";
+		}
+
+		// Type errors
+		if (errorLower.includes("type") && errorLower.includes("not assignable")) {
+			return "Check that the return type of execute() matches the output Zod schema exactly";
+		}
+
+		// NanoServiceResponse misuse
+		if (errorLower.includes("nanoserviceresponse") || errorLower.includes("setsuccess")) {
+			return "Do NOT use NanoServiceResponse in function-first nodes. Just return a plain object.";
+		}
+
+		// Context access
+		if (errorLower.includes("ctx.request") || errorLower.includes("context")) {
+			return "Use ctx.request.body, ctx.request.query, ctx.request.params for HTTP data; ctx.vars for cross-node data";
+		}
+
+		// Compilation errors
+		if (errorLower.includes("cannot find module") || errorLower.includes("module not found")) {
+			return "Check import paths. Use '@nanoservice-ts/runner' for defineNode and '@nanoservice-ts/shared' for Context/GlobalError";
+		}
+
+		// Property access errors
+		if (errorLower.includes("property") && errorLower.includes("does not exist")) {
+			return "Verify property names match your Zod schemas. Use z.infer<typeof schema> for type inference.";
+		}
+
+		// Missing name/description
+		if (errorLower.includes("name") && errorLower.includes("missing")) {
+			return "Add a 'name' property with a kebab-case identifier, e.g., name: 'my-node'";
+		}
+		if (errorLower.includes("description") && errorLower.includes("missing")) {
+			return "Add a 'description' property describing what the node does";
+		}
+
+		// Duplicate identifier
+		if (errorLower.includes("duplicate identifier") || errorLower.includes("already declared")) {
+			return "Remove duplicate variable/function declarations. Each identifier must be unique in its scope.";
+		}
+
+		// Implicit any
+		if (errorLower.includes("implicit") && errorLower.includes("any")) {
+			return "Add explicit type annotations. Use z.infer<typeof inputSchema> for input types.";
+		}
+
+		return null;
 	}
 }

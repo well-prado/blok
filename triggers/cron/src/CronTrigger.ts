@@ -10,17 +10,17 @@
  * Uses the 'cron' package for cron parsing and scheduling.
  */
 
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import type { CronTriggerOpts, HelperResponse } from "@nanoservice-ts/helper";
 import {
-	TriggerBase,
-	NodeMap,
 	DefaultLogger,
 	type GlobalOptions,
-	type TriggerResponse,
 	type NanoService,
+	NodeMap,
+	TriggerBase,
+	type TriggerResponse,
 } from "@nanoservice-ts/runner";
-import type { HelperResponse, CronTriggerOpts } from "@nanoservice-ts/helper";
-import { trace, metrics, type Span, SpanStatusCode } from "@opentelemetry/api";
+import type { Context, MetricsType, RequestContext } from "@nanoservice-ts/shared";
+import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { CronJob } from "cron";
 import { v4 as uuid } from "uuid";
 
@@ -153,9 +153,7 @@ export abstract class CronTrigger extends TriggerBase {
 				const config = workflow.config.trigger?.cron as CronTriggerOpts;
 				const jobId = `cron-${workflow.path}-${uuid().slice(0, 8)}`;
 
-				this.logger.log(
-					`Scheduling workflow: ${workflow.path} with schedule: ${config.schedule} (${config.timezone})`,
-				);
+				this.logger.log(`Scheduling workflow: ${workflow.path} with schedule: ${config.schedule} (${config.timezone})`);
 
 				const job = new CronJob(
 					config.schedule,
@@ -185,9 +183,7 @@ export abstract class CronTrigger extends TriggerBase {
 				this.logger.log(`Job ${jobId} started. Next run: ${scheduledJob.nextRun}`);
 			}
 
-			this.logger.log(
-				`Cron trigger started. ${this.jobs.size} job(s) scheduled`,
-			);
+			this.logger.log(`Cron trigger started. ${this.jobs.size} job(s) scheduled`);
 
 			return this.endCounter(startTime);
 		} catch (error) {
@@ -294,7 +290,7 @@ export abstract class CronTrigger extends TriggerBase {
 		// Check for overlap
 		if (scheduledJob.running && !scheduledJob.overlap) {
 			this.logger.log(`Skipping ${jobId}: previous execution still running (overlap disabled)`);
-			return { ctx: {} as Context, metrics: {} as any };
+			return { ctx: {} as Context, metrics: {} as MetricsType };
 		}
 
 		const executionId = uuid();
@@ -351,7 +347,7 @@ export abstract class CronTrigger extends TriggerBase {
 
 					// Store cron context in vars
 					if (!ctx.vars) ctx.vars = {};
-					ctx.vars["_cron_context"] = {
+					ctx.vars._cron_context = {
 						jobId,
 						scheduledTime: scheduledTime.toISOString(),
 						executionTime: executionTime.toISOString(),
@@ -360,9 +356,7 @@ export abstract class CronTrigger extends TriggerBase {
 						manual: String(manual),
 					};
 
-					ctx.logger.log(
-						`Executing cron job: ${jobId} (${manual ? "manual" : "scheduled"})`,
-					);
+					ctx.logger.log(`Executing cron job: ${jobId} (${manual ? "manual" : "scheduled"})`);
 
 					// Execute workflow
 					const response: TriggerResponse = await this.run(ctx);
@@ -391,9 +385,7 @@ export abstract class CronTrigger extends TriggerBase {
 						success: "true",
 					});
 
-					ctx.logger.log(
-						`Cron job completed in ${(end - start).toFixed(2)}ms: ${jobId}`,
-					);
+					ctx.logger.log(`Cron job completed in ${(end - start).toFixed(2)}ms: ${jobId}`);
 
 					resolve(response);
 				} catch (error) {
@@ -412,12 +404,9 @@ export abstract class CronTrigger extends TriggerBase {
 						manual: String(manual),
 					});
 
-					this.logger.error(
-						`Cron job failed ${jobId}: ${errorMessage}`,
-						(error as Error).stack,
-					);
+					this.logger.error(`Cron job failed ${jobId}: ${errorMessage}`, (error as Error).stack);
 
-					resolve({ ctx: {} as Context, metrics: {} as any });
+					resolve({ ctx: {} as Context, metrics: {} as MetricsType });
 				} finally {
 					scheduledJob.running = false;
 					span.end();

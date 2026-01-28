@@ -1,0 +1,111 @@
+# Docker Compose for Blok Integration Testing
+# Usage: docker compose -f infra/testing/docker-compose.yml up -d
+# Teardown: docker compose -f infra/testing/docker-compose.yml down -v
+
+services:
+  # --- Databases ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: blok-test-postgres
+    environment:
+      POSTGRES_USER: blok
+      POSTGRES_PASSWORD: blok_test
+      POSTGRES_DB: blok_test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blok"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blok-test
+
+  redis:
+    image: redis:7-alpine
+    container_name: blok-test-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blok-test
+
+  # --- Queue Brokers ---
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: blok-test-kafka
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9094:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - blok-test
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: blok-test-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: blok
+      RABBITMQ_DEFAULT_PASS: blok_test
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - blok-test
+
+  # --- Pub/Sub ---
+  nats:
+    image: nats:2.10-alpine
+    container_name: blok-test-nats
+    command: ["--jetstream"]
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - blok-test
+
+  # --- Python Runtime (gRPC) ---
+  python-runtime:
+    build:
+      context: ../../runtimes/python3
+      dockerfile: Dockerfile
+    container_name: blok-test-python
+    ports:
+      - "50052:50051"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import grpc; ch = grpc.insecure_channel(\"localhost:50051\"); grpc.channel_ready_future(ch).result(timeout=2)' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - blok-test
+
+networks:
+  blok-test:
+    driver: bridge

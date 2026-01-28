@@ -1,12 +1,13 @@
+import type { ZodError, z } from "zod";
+
+import type Condition from "./types/Condition";
 import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
-import type { Schema } from "jsonschema";
-import { z, type ZodError } from "zod";
-import NanoService from "./NanoService";
 import type { INanoServiceResponse } from "./NanoServiceResponse";
-import NanoServiceResponse from "./NanoServiceResponse";
-import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
+import NanoService from "./NanoService";
+import NanoServiceResponse from "./NanoServiceResponse";
+import type { Schema } from "jsonschema";
 
 /**
  * Function-first node definition with Zod schema validation
@@ -58,10 +59,7 @@ export interface FnNodeDefinition<
 	 * @param input - Type-safe input (validated against input schema)
 	 * @returns Type-safe output (will be validated against output schema)
 	 */
-	execute: (
-		ctx: Context,
-		input: z.infer<TInput>,
-	) => Promise<z.infer<TOutput>> | z.infer<TOutput>;
+	execute: (ctx: Context, input: z.infer<TInput>) => Promise<z.infer<TOutput>> | z.infer<TOutput>;
 }
 
 /**
@@ -74,10 +72,9 @@ export interface FnNodeDefinition<
  * - Error mapping (ZodError → GlobalError)
  * - Response wrapping (NanoServiceResponse)
  */
-export class FunctionNode<
-	TInput extends z.ZodTypeAny,
-	TOutput extends z.ZodTypeAny,
-> extends NanoService<z.infer<TInput>> {
+export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTypeAny> extends NanoService<
+	z.infer<TInput>
+> {
 	private definition: FnNodeDefinition<TInput, TOutput>;
 
 	constructor(definition: FnNodeDefinition<TInput, TOutput>) {
@@ -262,9 +259,8 @@ export class FunctionNode<
  * @param definition - Node definition with Zod schemas
  * @returns FunctionNode instance compatible with existing runner
  */
-export function defineNode<
-	TInput extends z.ZodTypeAny,
-	TOutput extends z.ZodTypeAny,
->(definition: FnNodeDefinition<TInput, TOutput>): FunctionNode<TInput, TOutput> {
+export function defineNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTypeAny>(
+	definition: FnNodeDefinition<TInput, TOutput>,
+): FunctionNode<TInput, TOutput> {
 	return new FunctionNode(definition);
 }

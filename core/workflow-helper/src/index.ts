@@ -36,6 +36,12 @@ import {
 	// Webhook
 	WebhookTriggerOpts,
 	WebhookTriggerOptsSchema,
+	// WebSocket
+	WebSocketTriggerOpts,
+	WebSocketTriggerOptsSchema,
+	// SSE
+	SSETriggerOpts,
+	SSETriggerOptsSchema,
 	// Triggers enum
 	TriggersSchema,
 	TriggersEnum,
@@ -73,6 +79,10 @@ export {
 	CronTriggerOptsSchema,
 	WebhookTriggerOpts,
 	WebhookTriggerOptsSchema,
+	WebSocketTriggerOpts,
+	WebSocketTriggerOptsSchema,
+	SSETriggerOpts,
+	SSETriggerOptsSchema,
 	TriggersSchema,
 	TriggersEnum,
 };

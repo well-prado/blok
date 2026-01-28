@@ -17,6 +17,12 @@ import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
 // Function-first node API
 import { defineNode, FunctionNode, type FnNodeDefinition } from "./defineNode";
 
+// Monitoring infrastructure
+import { HealthCheck } from "./monitoring/HealthCheck";
+import { RateLimiter } from "./monitoring/RateLimiter";
+import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
+import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
+
 // types
 
 import NanoService from "./NanoService";
@@ -57,6 +63,12 @@ export {
 	// Function-first API
 	defineNode,
 	FunctionNode,
+	// Monitoring
+	HealthCheck,
+	RateLimiter,
+	CircuitBreaker,
+	CircuitOpenError,
+	TriggerMetricsCollector,
 	// Types
 	Condition,
 	Conditions,
@@ -83,3 +95,24 @@ export {
 
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
+export type {
+	HealthStatus,
+	HealthCheckResult,
+	DependencyHealth,
+	DependencyCheckFn,
+} from "./monitoring/HealthCheck";
+export type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
+export type {
+	CircuitState,
+	CircuitBreakerConfig,
+	CircuitBreakerStats,
+	CircuitBreakerEvent,
+	CircuitBreakerEventType,
+	CircuitBreakerListener,
+} from "./monitoring/CircuitBreaker";
+export type {
+	TriggerMetrics,
+	LatencyStats,
+	ErrorStats,
+	ThroughputStats,
+} from "./monitoring/TriggerMetricsCollector";

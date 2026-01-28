@@ -4,14 +4,38 @@ import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";
 import DefaultLogger from "./DefaultLogger";
 import Runner from "./Runner";
+import { CircuitBreaker } from "./monitoring/CircuitBreaker";
+import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
+import { HealthCheck } from "./monitoring/HealthCheck";
+import type { DependencyCheckFn } from "./monitoring/HealthCheck";
+import { RateLimiter } from "./monitoring/RateLimiter";
+import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
+import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 import type TriggerResponse from "./types/TriggerResponse";
 
 export default abstract class TriggerBase extends Trigger {
 	public configuration: Configuration;
 
+	/** Health check instance for this trigger */
+	protected healthCheck: HealthCheck;
+
+	/** Rate limiter instance - null if rate limiting is disabled */
+	protected rateLimiter: RateLimiter | null = null;
+
+	/** Circuit breaker instance - null if circuit breaker is disabled */
+	protected circuitBreaker: CircuitBreaker | null = null;
+
+	/** Enhanced metrics collector */
+	protected metricsCollector: TriggerMetricsCollector;
+
 	constructor() {
 		super();
 		this.configuration = new Configuration();
+		this.healthCheck = new HealthCheck();
+		this.metricsCollector = new TriggerMetricsCollector(
+			this.constructor.name,
+			this.configuration.name || "unknown",
+		);
 	}
 
 	abstract listen(): Promise<number>;
@@ -193,5 +217,74 @@ export default abstract class TriggerBase extends Trigger {
 
 	endCounter(start: number) {
 		return performance.now() - start;
+	}
+
+	// --- Monitoring Infrastructure ---
+
+	/**
+	 * Enable rate limiting for this trigger.
+	 */
+	enableRateLimiting(config: RateLimitConfig): void {
+		this.rateLimiter = new RateLimiter(config);
+	}
+
+	/**
+	 * Check rate limit for a given key. Returns the result without blocking.
+	 */
+	checkRateLimit(key: string): RateLimitResult {
+		if (!this.rateLimiter) {
+			return { allowed: true, remaining: Number.MAX_SAFE_INTEGER, retryAfterMs: 0, limit: 0 };
+		}
+		return this.rateLimiter.consume(key);
+	}
+
+	/**
+	 * Enable circuit breaker for this trigger.
+	 */
+	enableCircuitBreaker(config: CircuitBreakerConfig): void {
+		this.circuitBreaker = new CircuitBreaker(config);
+	}
+
+	/**
+	 * Register a dependency health check (e.g., database, queue broker).
+	 */
+	registerHealthDependency(name: string, checkFn: DependencyCheckFn): void {
+		this.healthCheck.registerDependency(name, checkFn);
+	}
+
+	/**
+	 * Get full health status including all dependencies.
+	 */
+	async getHealth() {
+		return this.healthCheck.check();
+	}
+
+	/**
+	 * Get liveness probe result.
+	 */
+	getLiveness() {
+		return this.healthCheck.liveness();
+	}
+
+	/**
+	 * Get readiness probe result.
+	 */
+	async getReadiness() {
+		return this.healthCheck.readiness();
+	}
+
+	/**
+	 * Get enhanced trigger metrics snapshot.
+	 */
+	getTriggerMetrics() {
+		return this.metricsCollector.getMetrics();
+	}
+
+	/**
+	 * Clean up monitoring resources on shutdown.
+	 */
+	destroyMonitoring(): void {
+		this.rateLimiter?.destroy();
+		this.circuitBreaker?.destroy();
 	}
 }
