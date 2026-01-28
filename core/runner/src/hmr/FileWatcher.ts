@@ -9,7 +9,7 @@
 
 import { watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, extname, join, relative } from "node:path";
+import { extname, join, relative } from "node:path";
 import { EventEmitter } from "node:events";
 
 export type HMREventType = "node:change" | "node:add" | "node:remove" | "workflow:change" | "workflow:add" | "workflow:remove" | "trigger:change" | "config:change";
@@ -86,7 +86,7 @@ export class FileWatcher extends EventEmitter {
 	async stop(): Promise<void> {
 		this.running = false;
 
-		for (const [path, watcher] of this.watchers) {
+		for (const [_path, watcher] of this.watchers) {
 			watcher.close();
 		}
 		this.watchers.clear();

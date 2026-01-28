@@ -34,11 +34,9 @@ export class WasmRuntimeAdapter implements RuntimeAdapter {
 
 	private moduleCache = new Map<string, CachedModule>();
 	private maxCacheSize: number;
-	private maxCacheAge: number;
 
 	constructor(options?: { maxCacheSize?: number; maxCacheAge?: number }) {
 		this.maxCacheSize = options?.maxCacheSize ?? 50;
-		this.maxCacheAge = options?.maxCacheAge ?? 10 * 60 * 1000; // 10 minutes
 	}
 
 	/**

@@ -451,7 +451,10 @@ export class InMemoryAuditSink implements AuditSink {
 		if (filter.severity) results = results.filter((e) => e.severity === filter.severity);
 		if (filter.actorSub) results = results.filter((e) => e.actor?.sub === filter.actorSub);
 		if (filter.action) results = results.filter((e) => e.action === filter.action);
-		if (filter.since) results = results.filter((e) => e.timestamp >= filter.since);
+		if (filter.since) {
+			const since = filter.since;
+			results = results.filter((e) => e.timestamp >= since);
+		}
 		if (filter.limit) results = results.slice(-filter.limit);
 
 		return results;

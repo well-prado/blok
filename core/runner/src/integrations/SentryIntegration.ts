@@ -108,7 +108,8 @@ export class SentryIntegration {
 		if (this.initialized) return true;
 
 		try {
-			// Dynamic import to avoid hard dependency
+			// Dynamic import to avoid hard dependency — @sentry/node is optional
+			// @ts-expect-error: @sentry/node types not installed; loaded lazily at runtime
 			const Sentry = await import("@sentry/node");
 
 			Sentry.init({
@@ -143,7 +144,7 @@ export class SentryIntegration {
 				setTag: (key: string, value: string) => Sentry.setTag(key, value),
 				setUser: (user) => Sentry.setUser(user),
 				startTransaction: (context) => {
-					return Sentry.startSpan(context, (span) => span) as unknown as SentryTransaction;
+					return Sentry.startSpan(context, (span: unknown) => span) as unknown as SentryTransaction;
 				},
 				flush: (timeout: number) => Sentry.flush(timeout),
 			};

@@ -237,11 +237,14 @@ export class JWTAuthProvider implements AuthProvider {
 			const now = Math.floor(Date.now() / 1000);
 			const tolerance = this.config.clockToleranceSec || 30;
 
-			if (payload.exp && payload.exp + tolerance < now) {
+			const exp = typeof payload.exp === "number" ? payload.exp : undefined;
+			const nbf = typeof payload.nbf === "number" ? payload.nbf : undefined;
+
+			if (exp && exp + tolerance < now) {
 				return { authenticated: false, error: "Token expired", statusCode: 401 };
 			}
 
-			if (payload.nbf && payload.nbf - tolerance > now) {
+			if (nbf && nbf - tolerance > now) {
 				return { authenticated: false, error: "Token not yet valid", statusCode: 401 };
 			}
 
@@ -266,17 +269,19 @@ export class JWTAuthProvider implements AuthProvider {
 					? [payload[rolesClaim] as string]
 					: [];
 
+			const iat = typeof payload.iat === "number" ? payload.iat : undefined;
+
 			return {
 				authenticated: true,
 				identity: {
-					sub: payload.sub || "unknown",
+					sub: typeof payload.sub === "string" ? payload.sub : "unknown",
 					name: payload.name as string | undefined,
 					email: payload.email as string | undefined,
 					roles,
 					claims: payload,
 					provider: "jwt",
-					issuedAt: payload.iat,
-					expiresAt: payload.exp,
+					issuedAt: iat,
+					expiresAt: exp,
 				},
 			};
 		} catch (err) {

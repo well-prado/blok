@@ -395,7 +395,7 @@ export class OpenAPIGenerator {
 
 		// Convert inputs config to JSON schema
 		const properties: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(nodeConfig.inputs)) {
+		for (const [_key, value] of Object.entries(nodeConfig.inputs)) {
 			if (typeof value === "string" && value.startsWith("{{") && value.endsWith("}}")) {
 				// Template reference - this is a dynamic input from request body
 				const ref = value.slice(2, -2).trim();
