@@ -15,7 +15,9 @@
 		"start": "node dist/index.js",
 		"reload": "node -r ts-node/register --env-file=.env.local ./src/index.ts",
 		"build": "rimraf ./dist && tsc && copyfiles -u 1 proto/** dist/proto",
-		"build:proto": "npx buf generate ."
+		"build:proto": "npx buf generate .",
+		"test": "vitest run",
+		"test:dev": "vitest"
 	},
 	"devDependencies": {
 		"@bufbuild/buf": "^1.50.0",
@@ -26,7 +28,8 @@
 		"nodemon": "^3.1.9",
 		"rimraf": "^6.0.1",
 		"ts-node": "^10.9.2",
-		"typescript": "^5.7.2"
+		"typescript": "^5.7.2",
+		"vitest": "^4.0.18"
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "^2.2.3",

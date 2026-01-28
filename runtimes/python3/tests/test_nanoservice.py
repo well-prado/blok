@@ -40,16 +40,18 @@ class TestNanoServiceMethods(unittest.TestCase):
         self.service.setSchemas({}, {})
 
         response = asyncio.run(self.service.run(self.ctx))
-        self.assertTrue(response['success'])
-        self.assertIn('data', response)
-        self.assertIsNone(response['error'])
+        self.assertTrue(response.success)
+        self.assertIsNotNone(response.data)
+        self.assertIsNone(response.error)
 
     def test_run_validation_error(self):
         self.service.name = "test_service"
-        self.service.blueprintMapper = MagicMock(return_value={})
-        self.service.setSchemas({"type": "object", "properties": {"name": {"type": "string"}}}, {"type": "object"})
-
-        self.ctx.request['body'] = {"name": 123}  # Invalid input
+        # blueprintMapper returns invalid config (string instead of object)
+        self.service.blueprintMapper = MagicMock(return_value="not_an_object")
+        self.service.setSchemas(
+            {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+            {"type": "object"}
+        )
 
         with self.assertRaises(ValidationError):
             asyncio.run(self.service.run(self.ctx))

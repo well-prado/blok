@@ -15,7 +15,9 @@
 		"reload": "node -r ts-node/register --env-file=.env.local ./src/index.ts",
 		"build": "rimraf ./dist && tsc && copyfiles -u 1 src/nodes/**/*.html src/nodes/**/*.md dist/",
 		"infra:dev": "rimraf ./dist && tsc && copyfiles -u 1 src/nodes/**/*.html src/nodes/**/*.md dist/ && docker compose --file ./infra/docker-compose.yml up --build --watch",
-		"infra:build": "tsc --watch -p tsconfig.json --diagnostics"
+		"infra:build": "tsc --watch -p tsconfig.json --diagnostics",
+		"test": "vitest run",
+		"test:dev": "vitest"
 	},
 	"devDependencies": {
 		"@types/body-parser": "^1.19.5",
@@ -26,7 +28,8 @@
 		"nodemon": "^3.1.9",
 		"rimraf": "^6.0.1",
 		"ts-node": "^10.9.2",
-		"typescript": "^5.8.2"
+		"typescript": "^5.8.2",
+		"vitest": "^4.0.18"
 	},
 	"dependencies": {
 		"@nanoservice-ts/api-call": "^0.1.29",

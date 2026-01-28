@@ -30,16 +30,17 @@ class NodeBaseTest(unittest.TestCase):
         self.assertIsNone(response.error)
         self.assertEqual(self.ctx.response, response)
 
-    def test_process_error(self):
+    def test_process_error_flows_through(self):
         self.node.name = 'test_node'
         response = ResponseContext()
         response.success = False
         response.data = None
         response.error = "Error occurred"
         self.node.run = AsyncMock(return_value=response)
-        with self.assertRaises(Exception) as context:
-            asyncio.run(self.node.process(self.ctx))
-        self.assertEqual(str(context.exception), "Error occurred")
+        result = asyncio.run(self.node.process(self.ctx))
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "Error occurred")
+        self.assertIsNone(result.data)
 
     def test_blueprintMapper_string(self):
         self.node.name = 'test_node'
