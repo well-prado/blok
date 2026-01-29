@@ -1,68 +1,39 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
 import pg from "pg";
-
-type PostgresQueryInputs = {
-	user: string;
-	password: string;
-	host: string;
-	query: string;
-	set_var?: boolean;
-};
+import { z } from "zod";
 
 type Table = {
 	total: number;
 	data: unknown[];
 };
 
-// This is the main class that will be exported
-// This class will be used to create a new instance of the node
-// This class must be created using the extends NanoService
-export default class PostgresQuery extends NanoService<PostgresQueryInputs> {
-	constructor() {
-		super();
+export default defineNode({
+	name: "postgres-query",
+	description: "Executes SQL queries against a PostgreSQL database",
 
-		// Set the input "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				user: { type: "string" },
-				password: { type: "string" },
-				host: { type: "string" },
-				query: { type: "string" },
-				set_var: { type: "boolean" },
-			},
-			required: ["user", "password", "host", "query"],
-		};
+	input: z.object({
+		user: z.string(),
+		password: z.string(),
+		host: z.string(),
+		query: z.string(),
+		set_var: z.boolean().optional(),
+	}),
 
-		// Set the output "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.outputSchema = {};
-	}
+	output: z.any(),
 
-	async handle(ctx: Context, inputs: PostgresQueryInputs): Promise<INanoServiceResponse> {
-		// Create a new instance of the response
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	async execute(_ctx, input) {
+		const { Client } = pg;
+		const client = new Client({
+			user: input.user,
+			password: input.password,
+			host: input.host,
+			port: 5432,
+			database: "dvdrental",
+		});
 
 		try {
-			const { Client } = pg;
-			const client = new Client({
-				user: inputs.user as string,
-				password: inputs.password as string,
-				host: inputs.host as string,
-				port: 5432,
-				database: "dvdrental",
-			});
-
 			await client.connect();
-			const result = await client.query(inputs.query as string);
+			const result = await client.query(input.query);
 			await client.end();
 
 			if (Array.isArray(result)) {
@@ -74,29 +45,22 @@ export default class PostgresQuery extends NanoService<PostgresQueryInputs> {
 						total: data.rows.length,
 						data: [...data.rows],
 					};
-
 					tables.push(table);
 				}
 
-				response.setSuccess(tables as unknown as JsonLikeObject);
-			} else {
-				response.setSuccess({
-					total: result.rowCount as number,
-					data: result.rows,
-				});
+				return tables;
 			}
+
+			return {
+				total: result.rowCount as number,
+				data: result.rows,
+			};
 		} catch (error: unknown) {
+			// Preserve AggregateError handling from original implementation
 			let message = (error as Error).message;
-			if (error instanceof AggregateError) message = (error as AggregateError).errors[0];
-			const nodeError: GlobalError = new GlobalError(message);
-			nodeError.setCode(500);
-			nodeError.setStack((error as Error).stack);
-			nodeError.setName(this.name);
-			nodeError.setJson(undefined); // Return a custom JSON object here
-
-			response.setError(nodeError); // Set the error
+			if (error instanceof AggregateError)
+				message = (error as AggregateError).errors[0];
+			throw new Error(message);
 		}
-
-		return response;
-	}
-}
+	},
+});

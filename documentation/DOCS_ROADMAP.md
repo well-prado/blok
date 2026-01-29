@@ -235,7 +235,7 @@ docs/
 | 1.4 | Project Structure | P0 | Full codebase analysis | - [ ] |
 | 1.5 | Configuration | P0 | Configuration.ts, .env files, docker-compose | - [ ] |
 | 1.6 | How Blok Works | P0 | core/runner/src/index.ts, TriggerBase.ts | - [ ] |
-| 1.7 | Nodes | P0 | defineNode.ts, NanoService.ts, NodeBase.ts | - [ ] |
+| 1.7 | Nodes | P0 | defineNode.ts, NanoService.ts, NodeBase.ts | - [ ] | **NOTE:** All 28 TS nodes now use `defineNode()`. Document function-first as the standard, class-based as legacy. |
 | 1.8 | Workflows | P0 | workflow-helper/, examples/workflows/ | - [ ] |
 | 1.9 | Triggers Overview | P0 | triggers/http/, TriggerBase.ts | - [ ] |
 | 1.10 | Context & Data Flow | P0 | core/shared/src/types/Context.ts | - [ ] |
@@ -248,7 +248,7 @@ docs/
 > 4. **Data flow between runtime adapters** — HttpRuntimeAdapter sends resolved inputs (from config) as the request body. Python3RuntimeAdapter sends resolved inputs as `request.body` in gRPC context. Both extract `result.data` and store it in `ctx.vars[stepName]`.
 > 5. **ctx.request.body** — Contains the original HTTP request body for the first node. For runtime adapter nodes, `request.body` may contain resolved inputs from the Mapper, not the original HTTP body.
 > 6. **ctx.config[nodeName]** — The workflow JSON `nodes` section maps to `ctx.config`. Each node's `inputs` are resolved by the Mapper before `handle()` is called.
-| 1.11 | Function-First Nodes | P0 | defineNode.ts, FUNCTION_FIRST_NODES.md | - [ ] |
+| 1.11 | Function-First Nodes | P0 | defineNode.ts, FUNCTION_FIRST_NODES.md | - [ ] | **NOTE:** Migration complete. All nodes use `defineNode()` with Zod schemas. `contentType` support added. CLI templates default to function-first. |
 | 1.12 | Input/Output Schemas | P0 | Zod schemas, StepOpts.ts | - [ ] |
 | 1.13 | HTTP Trigger | P0 | triggers/http/ | - [ ] |
 | 1.14 | CLI: create | P0 | packages/cli/src/commands/create/ | - [ ] |

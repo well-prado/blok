@@ -37,6 +37,7 @@ function root(relPath: string): string {
 export default defineNode({
 	name: "react",
 	description: "Renders React applications by loading a compiled bundle and rendering it in an HTML template",
+	contentType: "text/html",
 
 	input: inputSchema,
 	output: outputSchema,
@@ -82,8 +83,6 @@ export default defineNode({
 			ctx: btoa(JSON.stringify(ctxCloned)),
 		});
 
-		// Note: To set content type to "text/html", the runner needs to support
-		// a contentType property in the response or node config
 		return html;
 	},
 });

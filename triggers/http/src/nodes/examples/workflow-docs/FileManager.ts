@@ -1,38 +1,24 @@
 import fs from "node:fs";
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode } from "@nanoservice-ts/runner";
+import { z } from "zod";
 
-type InputType = {
-	path: string;
-};
+export default defineNode({
+	name: "file-manager",
+	description: "Reads file content from a given path",
 
-export default class FileManager extends NanoService<InputType> {
-	constructor() {
-		super();
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				path: { type: "string" },
-			},
-			required: ["path"],
-		};
-	}
+	input: z.object({
+		path: z.string(),
+	}),
 
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	output: z.object({
+		content: z.string(),
+	}),
 
-		try {
-			const content: string = fs.readFileSync(inputs.path, { encoding: "utf8", flag: "r" });
-			response.setSuccess({
-				content: content,
-			});
-		} catch (error: unknown) {
-			const nodeError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			response.setError(nodeError);
-		}
-
-		return response;
-	}
-}
+	async execute(_ctx, input) {
+		const content: string = fs.readFileSync(input.path, {
+			encoding: "utf8",
+			flag: "r",
+		});
+		return { content };
+	},
+});

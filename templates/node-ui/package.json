@@ -31,9 +31,10 @@
 	},
 	"dependencies": {
 		"@nanoservice-ts/shared": "^0.0.9",
-		"@nanoservice-ts/runner": "^0.1.21",
+		"@nanoservice-ts/runner": "workspace:*",
 		"@nanoservice-ts/helper": "^0.1.4",
-		"ejs": "^3.1.10"
+		"ejs": "^3.1.10",
+		"zod": "^3.24.2"
 	},
 	"private": true
 }

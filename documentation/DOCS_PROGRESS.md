@@ -173,6 +173,7 @@
 
 | Date | Update |
 |------|--------|
+| 2026-01-29 | All 28 TypeScript nodes migrated to function-first (defineNode). Function-first is now the standard for all TS nodes. |
 | 2026-01-29 | Added critical learnings from E2E validation: ctx.vars data flow, runtime adapter architecture, Python3 adapter notes |
 | 2026-01-29 | Initial documentation roadmap and progress tracker created |
 

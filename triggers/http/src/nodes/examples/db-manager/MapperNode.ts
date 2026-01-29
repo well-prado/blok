@@ -1,39 +1,17 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode } from "@nanoservice-ts/runner";
+import { z } from "zod";
 
-type InputType = {
-	model: object;
-};
+export default defineNode({
+	name: "mapper-node",
+	description: "Passes through the input model as the output",
 
-export default class MapperNode extends NanoService<InputType> {
-	constructor() {
-		super();
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				model: { type: "object" },
-			},
-			required: ["model"],
-		};
-	}
+	input: z.object({
+		model: z.record(z.unknown()),
+	}),
 
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	output: z.record(z.unknown()),
 
-		try {
-			response.setSuccess(inputs.model as JsonLikeObject);
-		} catch (error: unknown) {
-			const nodeError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			response.setError(nodeError);
-		}
-
-		return response;
-	}
-}
+	async execute(_ctx, input) {
+		return input.model;
+	},
+});

@@ -1,12 +1,6 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
+import { defineNode } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
-
-type InputType = Record<string, never>;
+import { z } from "zod";
 
 type ChainEntry = { language: string; order: number; timestamp?: string };
 
@@ -17,10 +11,41 @@ type ChainEntry = { language: string; order: number; timestamp?: string };
  * and by chain-init for the init step) to produce a verification report
  * confirming all runtimes executed correctly.
  */
-export default class ChainVerify extends NanoService<InputType> {
-	async handle(ctx: Context, _inputs: InputType): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+export default defineNode({
+	name: "chain-verify",
+	description:
+		"Verifies that all runtimes executed correctly in a cross-runtime chain test",
 
+	input: z.object({}),
+
+	output: z.object({
+		status: z.enum(["PASS", "FAIL"]),
+		summary: z.object({
+			totalRuntimes: z.number(),
+			chainLength: z.number(),
+			allRuntimesInChain: z.boolean(),
+			allRuntimesInVars: z.boolean(),
+			origin: z.string(),
+		}),
+		chain: z.array(
+			z.object({
+				language: z.string(),
+				order: z.number(),
+				timestamp: z.string().optional(),
+			}),
+		),
+		verification: z.record(
+			z.object({
+				inChain: z.boolean(),
+				inVars: z.boolean(),
+				chainOrder: z.number().nullable(),
+				stepName: z.string(),
+			}),
+		),
+		vars: z.record(z.unknown()),
+	}),
+
+	async execute(ctx: Context, _input) {
 		const vars = (ctx.vars ?? {}) as Record<string, unknown>;
 
 		// Step name → runtime language mapping
@@ -42,7 +67,9 @@ export default class ChainVerify extends NanoService<InputType> {
 		let origin = "unknown";
 
 		for (const stepName of Object.keys(stepToRuntime)) {
-			const stepVars = vars[stepName] as Record<string, unknown> | undefined;
+			const stepVars = vars[stepName] as
+				| Record<string, unknown>
+				| undefined;
 			if (!stepVars) continue;
 
 			const stepChain = (stepVars.chain ?? []) as ChainEntry[];
@@ -59,12 +86,19 @@ export default class ChainVerify extends NanoService<InputType> {
 
 		const verification: Record<
 			string,
-			{ inChain: boolean; inVars: boolean; chainOrder: number | null; stepName: string }
+			{
+				inChain: boolean;
+				inVars: boolean;
+				chainOrder: number | null;
+				stepName: string;
+			}
 		> = {};
 
 		for (const [stepName, runtime] of Object.entries(stepToRuntime)) {
 			const chainIndex = chainLanguages.indexOf(runtime);
-			const stepVars = vars[stepName] as Record<string, unknown> | undefined;
+			const stepVars = vars[stepName] as
+				| Record<string, unknown>
+				| undefined;
 
 			verification[runtime] = {
 				inChain: chainIndex >= 0,
@@ -77,8 +111,10 @@ export default class ChainVerify extends NanoService<InputType> {
 		const allInChain = Object.values(verification).every((v) => v.inChain);
 		const allInVars = Object.values(verification).every((v) => v.inVars);
 
-		response.setSuccess({
-			status: allInChain && allInVars ? "PASS" : "FAIL",
+		return {
+			status: (allInChain && allInVars ? "PASS" : "FAIL") as
+				| "PASS"
+				| "FAIL",
 			summary: {
 				totalRuntimes: expectedRuntimes.length,
 				chainLength: finalChain.length,
@@ -89,8 +125,6 @@ export default class ChainVerify extends NanoService<InputType> {
 			chain: finalChain,
 			verification,
 			vars,
-		} as unknown as JsonLikeObject);
-
-		return response;
-	}
-}
+		};
+	},
+});

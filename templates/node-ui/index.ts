@@ -1,103 +1,70 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode } from "@nanoservice-ts/runner";
+import type { Context } from "@nanoservice-ts/shared";
 import ejs from "ejs";
-import { inputSchema } from "./inputSchema";
-
-type InputType = {
-	react_app: string;
-	title?: string;
-	scripts?: string;
-	metas?: string;
-	index_html?: string;
-	styles?: string;
-	root_element?: string;
-};
+import { z } from "zod";
 
 const rootDir = path.resolve(__dirname, ".");
 
-export default class React extends NanoService<InputType> {
-	constructor() {
-		super();
+function root(relPath: string): string {
+	return path.resolve(rootDir, relPath);
+}
 
-		// Set the input "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.inputSchema = inputSchema;
+export default defineNode({
+	name: "react",
+	description: "Renders React applications by loading a compiled bundle and rendering it in an HTML template",
+	contentType: "text/html",
 
-		// Set the output "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.outputSchema = {};
+	input: z.object({
+		react_app: z.string(),
+		title: z.string().optional().default("React App"),
+		scripts: z.string().optional().default(""),
+		metas: z.string().optional().default(""),
+		index_html: z.string().optional().default("index.html"),
+		styles: z.string().optional().default(""),
+		root_element: z.string().optional().default("root"),
+	}),
 
-		// Set html content type
-		this.contentType = "text/html";
-	}
+	output: z.string(),
 
-	/**
-	 * Relative path to root
-	 */
-	root(relPath: string): string {
-		return path.resolve(rootDir, relPath);
-	}
-
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		// Create a new instance of the response
-		const response = new NanoServiceResponse();
-		let file_path = inputs.react_app;
-		if (file_path === undefined || file_path === "") file_path = "./app/index.merged.min.js";
+	async execute(ctx: Context, input) {
+		const file_path = input.react_app || "./app/index.merged.min.js";
 		const react_script_template = '<script type="text/babel">REACT_SCRIPT</script>';
 
-		const title = inputs.title || "React App";
-		const scripts = inputs.scripts || "";
-		const metas = inputs.metas || "";
-		const index_html = inputs.index_html || "index.html";
-		const styles = inputs.styles || "";
-		const root_element = inputs.root_element || "root";
+		// Load React script from the current module location
+		const min_file = root(file_path);
+		let react_app = fs.readFileSync(min_file, "utf8");
+		react_app = react_script_template.replace("REACT_SCRIPT", `\n${react_app}\n`);
 
-		try {
-			// Load React script from the current module location
-			const min_file = this.root(file_path);
-			let react_app = fs.readFileSync(min_file, "utf8");
-			react_app = react_script_template.replace("REACT_SCRIPT", `\n${react_app}\n`);
+		// Read index.html file from the current module location
+		const content = fs.readFileSync(root(input.index_html), "utf8");
+		const render = ejs.compile(content, { client: false });
+		const ctxCloned = {
+			config: ctx.config,
+			inputs: input,
+			response: ctx.response,
+			request: {
+				body: ctx.request.body,
+				headers: ctx.request.headers,
+				url: ctx.request.url,
+				originalUrl: ctx.request.originalUrl,
+				query: ctx.request.query,
+				params: ctx.request.params,
+				cookies: ctx.request.cookies,
+			},
+		};
 
-			// Read index.html file from the current module location
-			const content = fs.readFileSync(this.root(index_html), "utf8");
-			const render = ejs.compile(content, { client: false });
-			const ctxCloned = {
-				config: ctx.config,
-				inputs: inputs,
-				response: ctx.response,
-				request: {
-					body: ctx.request.body,
-					headers: ctx.request.headers,
-					url: ctx.request.url,
-					originalUrl: ctx.request.originalUrl,
-					query: ctx.request.query,
-					params: ctx.request.params,
-					cookies: ctx.request.cookies,
-				},
-			};
+		const html = render({
+			title: input.title,
+			metas: input.metas,
+			styles: input.styles,
+			scripts: input.scripts,
+			root_element: input.root_element,
+			react_app,
+			ctx: btoa(JSON.stringify(ctxCloned)),
+		});
 
-			const html = render({
-				title,
-				metas,
-				styles,
-				scripts,
-				root_element,
-				react_app,
-				ctx: btoa(JSON.stringify(ctxCloned)),
-			});
-
-			// Your code here
-			response.setSuccess(html); // Set the success
-		} catch (error: unknown) {
-			const nodeError: GlobalError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			nodeError.setStack((error as Error).stack);
-			nodeError.setName(this.name);
-			response.setError(nodeError); // Set the error
-		}
-
-		return response;
-	}
-}
+		return html;
+	},
+});

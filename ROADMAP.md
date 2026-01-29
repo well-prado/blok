@@ -248,19 +248,20 @@ class FunctionNode extends NanoService<I> {
 
 ### Implementation Tasks
 
-**Phase 2A: Core defineNode API (Week 1-2)**
-- [ ] Create `FnNodeDefinition<I, O>` interface
-- [ ] Implement `defineNode<I, O>()` helper
-- [ ] Add `FunctionNode` wrapper class
-- [ ] Implement Zod input/output validation
-- [ ] Add `GlobalError` mapping for Zod errors
-- [ ] Write comprehensive unit tests
+**Phase 2A: Core defineNode API (Week 1-2)** ✅
+- [x] Create `FnNodeDefinition<I, O>` interface
+- [x] Implement `defineNode<I, O>()` helper
+- [x] Add `FunctionNode` wrapper class
+- [x] Implement Zod input/output validation
+- [x] Add `GlobalError` mapping for Zod errors
+- [x] Write comprehensive unit tests
+- [x] Add `contentType` support to `FnNodeDefinition` (e.g. `"text/html"`, `"application/pdf"`)
 
-**Phase 2B: CLI Template Updates (Week 2-3)**
-- [ ] Create new functional node template
+**Phase 2B: CLI Template Updates (Week 2-3)** ✅
+- [x] Create new functional node template
 - [ ] Add `--style=function|class` flag to `nanoctl create node`
 - [ ] Update `NodeFileWriter` to support both templates
-- [ ] Default to function-first for new projects
+- [x] Default to function-first for new projects
 - [ ] Add migration script for class → function conversion
 
 **Phase 2C: AI Generation Prompts (Week 3-4)**
@@ -270,10 +271,10 @@ class FunctionNode extends NanoService<I> {
 - [ ] Create validation for AI-generated schemas
 - [ ] Add feedback loop for prompt refinement
 
-**Phase 2D: Node Migration (Week 4-6)**
-- [ ] Convert `@nanoservice-ts/api-call` to function-first
-- [ ] Convert `@nanoservice-ts/if-else` to function-first
-- [ ] Convert HTTP example nodes to function-first
+**Phase 2D: Node Migration (Week 4-6)** ✅
+- [x] Convert `@nanoservice-ts/api-call` to function-first
+- [x] Convert `@nanoservice-ts/if-else` to function-first
+- [x] Convert HTTP example nodes to function-first (all 25 nodes migrated)
 - [ ] Create migration guide for node authors
 - [ ] Add deprecation warnings to class-based pattern
 
@@ -290,6 +291,25 @@ class FunctionNode extends NanoService<I> {
 - [ ] Create template repository
 - [ ] Add community showcase
 - [ ] Collect feedback and iterate
+
+**Phase 2G: Full Node Migration to Function-First** ✅
+All 28 TypeScript nodes migrated from class-based (`extends NanoService<T>`) to function-first (`defineNode()`) pattern:
+
+| Batch | Nodes | Status |
+|-------|-------|--------|
+| 0 - Infrastructure | `contentType` support in `defineNode`, react@1.0.0 fix | ✅ |
+| 1 - CLI Templates | `templates/node`, `templates/node-ui` | ✅ |
+| 2 - Core Nodes | `chain-init`, `chain-verify`, `runtime-bridge`, `Nodes.ts` registration fix | ✅ |
+| 3 - Simple Nodes | `DirectoryManager`, `FileManager`, `ErrorNode`, `MapperNode`, `Base64ToPDF` | ✅ |
+| 4 - Medium Nodes | `SaveImageBase64`, `ArrayMap`, `MemoryStorage`, `OpenAI`, `QueryGenerator` | ✅ |
+| 5 - UI Nodes | `WorkflowUI`, `DashboardGeneratorUI`, `DatabaseUI`, `WeatherUI`, `ImageCaptureUI`, `FeedbackUI` | ✅ |
+| 6 - Complex Nodes | `MongoQuery`, `PostgresQuery`, `MastraAgent`, `MultipleQueryGenerator`, `DashboardChartsGenerator` | ✅ |
+
+Key changes:
+- `Nodes.ts` updated: removed `new` keyword (defineNode returns instances, not classes)
+- `triggers/http/package.json` updated: `api-call` and `if-else` switched to `workspace:*`
+- `groupBy` and `runJs` extracted as standalone functions (from class methods)
+- `contentType` field added to `FnNodeDefinition` interface for non-JSON responses
 
 ### Success Metrics
 - ✅ 100% backward compatibility maintained

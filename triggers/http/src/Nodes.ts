@@ -8,11 +8,11 @@ import RuntimeBridge from "./nodes/runtime-bridge/index";
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@nanoservice-ts/api-call": new ApiCall(),
-	"@nanoservice-ts/if-else": new IfElse(),
-	"chain-init": new ChainInit(),
-	"chain-verify": new ChainVerify(),
-	"runtime-bridge": new RuntimeBridge(),
+	"@nanoservice-ts/api-call": ApiCall,
+	"@nanoservice-ts/if-else": IfElse,
+	"chain-init": ChainInit,
+	"chain-verify": ChainVerify,
+	"runtime-bridge": RuntimeBridge,
 };
 
 export default nodes;

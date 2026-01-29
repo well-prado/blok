@@ -53,6 +53,9 @@ export interface FnNodeDefinition<
 	/** Zod schema for output validation */
 	output: TOutput;
 
+	/** Response content type (e.g. "text/html", "application/pdf"). Defaults to "application/json" */
+	contentType?: string;
+
 	/**
 	 * Node execution logic
 	 * @param ctx - Workflow context
@@ -81,6 +84,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		super();
 		this.definition = definition;
 		this.name = definition.name;
+
+		// Set content type if specified (e.g. "text/html", "application/pdf")
+		if (definition.contentType) {
+			this.contentType = definition.contentType;
+		}
 
 		// Convert Zod schemas to JSON Schema for backward compatibility
 		// This allows existing tools that expect JSON Schema to continue working

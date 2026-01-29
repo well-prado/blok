@@ -1,74 +1,37 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import type { Context } from "@nanoservice-ts/shared";
+import { z } from "zod";
 import InMemory from "./InMemory";
 
-type InputType = {
-	action: string; // "get" | "set" | "delete" | "clear"
-	key?: string;
-	value?: object;
-};
+export default defineNode({
+	name: "memory-storage",
+	description: "In-memory key-value storage with get, set, delete, and clear operations",
 
-export default class MemoryStorage extends NanoService<InputType> {
-	constructor() {
-		super();
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				action: {
-					type: "string",
-					enum: ["get", "get-all", "set", "delete", "clear"],
-				},
-				key: { type: "string" },
-				value: { type: "object" },
-			},
-			required: ["action"],
-		};
-	}
+	input: z.object({
+		action: z.enum(["get", "get-all", "set", "delete", "clear"]),
+		key: z.string().optional(),
+		value: z.record(z.unknown()).optional(),
+	}),
 
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	output: z.any(),
 
-		try {
-			const cache = InMemory.getInstance();
+	async execute(ctx: Context, input) {
+		const cache = InMemory.getInstance();
 
-			switch (inputs.action) {
-				case "get": {
-					const value = cache.get(inputs.key as string);
-					response.setSuccess(value as unknown as JsonLikeObject);
-					break;
-				}
-				case "get-all": {
-					response.setSuccess(cache.getAll() as unknown as JsonLikeObject);
-					break;
-				}
-				case "set": {
-					cache.set(inputs.key as string, inputs.value as JsonLikeObject);
-					response.setSuccess(inputs.value as JsonLikeObject);
-					break;
-				}
-				case "delete": {
-					cache.delete(inputs.key as string);
-					response.setSuccess(ctx.response.data as JsonLikeObject);
-					break;
-				}
-				case "clear": {
-					cache.clear();
-					response.setSuccess(ctx.response.data as JsonLikeObject);
-					break;
-				}
-			}
-		} catch (error: unknown) {
-			const nodeError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			response.setError(nodeError);
+		switch (input.action) {
+			case "get":
+				return cache.get(input.key as string);
+			case "get-all":
+				return cache.getAll();
+			case "set":
+				cache.set(input.key as string, input.value as JsonLikeObject);
+				return input.value;
+			case "delete":
+				cache.delete(input.key as string);
+				return ctx.response.data;
+			case "clear":
+				cache.clear();
+				return ctx.response.data;
 		}
-
-		return response;
-	}
-}
+	},
+});

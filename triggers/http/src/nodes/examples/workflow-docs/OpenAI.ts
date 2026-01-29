@@ -1,75 +1,49 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode } from "@nanoservice-ts/runner";
 import { generateText } from "ai";
+import { z } from "zod";
 import InMemory from "./InMemory";
 
-type InputType = {
-	cache_key: string;
-	system: string[];
-	prompt: string[];
-};
+export default defineNode({
+	name: "openai",
+	description: "Generates text using OpenAI GPT-4o with optional caching",
+	contentType: "text/html",
 
-export default class OpenAI extends NanoService<InputType> {
-	constructor() {
-		super();
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				cache_key: { type: "string" },
-				system: {
-					type: "array",
-					items: {
-						type: "string",
-					},
-				},
-				prompt: {
-					type: "array",
-					items: {
-						type: "string",
-					},
-				},
-			},
-			required: ["prompt"],
-		};
+	input: z.object({
+		cache_key: z.string().optional(),
+		system: z.array(z.string()).optional(),
+		prompt: z.array(z.string()),
+	}),
 
-		this.contentType = "text/html";
-	}
+	output: z.any(),
 
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	async execute(_ctx, input) {
+		const cache = InMemory.getInstance();
+		const cachedValue =
+			input.cache_key !== undefined && input.cache_key !== ""
+				? cache.get(input.cache_key)
+				: undefined;
 
-		try {
-			const cache = InMemory.getInstance();
-			const cachedValue =
-				inputs.cache_key !== undefined && inputs.cache_key !== "" ? cache.get(inputs.cache_key) : undefined;
-
-			if (cachedValue) {
-				response.setSuccess(cachedValue);
-			} else {
-				const openai = createOpenAI({
-					compatibility: "strict",
-					apiKey: process.env.OPENAI_API_KEY,
-				});
-
-				const { text } = await generateText({
-					model: openai("gpt-4o"),
-					system: inputs.system?.join(","),
-					prompt: inputs.prompt.join(","),
-					temperature: 0.2,
-				});
-
-				cache.set(inputs.cache_key, text);
-
-				response.setSuccess(text);
-			}
-		} catch (error: unknown) {
-			const nodeError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			response.setError(nodeError);
+		if (cachedValue) {
+			return cachedValue;
 		}
 
-		return response;
-	}
-}
+		const openai = createOpenAI({
+			compatibility: "strict",
+			apiKey: process.env.OPENAI_API_KEY,
+		});
+
+		const { text } = await generateText({
+			model: openai("gpt-4o"),
+			system: input.system?.join(","),
+			prompt: input.prompt.join(","),
+			temperature: 0.2,
+		});
+
+		if (input.cache_key) {
+			cache.set(input.cache_key, text);
+		}
+
+		return text;
+	},
+});

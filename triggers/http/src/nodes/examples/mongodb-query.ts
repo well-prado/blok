@@ -1,103 +1,79 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
-import { MongoClient, ObjectId, type OptionalId, type Sort } from "mongodb";
+import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import type { Context } from "@nanoservice-ts/shared";
+import { MongoClient, ObjectId, type Sort } from "mongodb";
+import { z } from "zod";
 
-type InputType = {
-	collection: string;
-	data?: OptionalId<JsonLikeObject>;
-	id?: string;
-	limit?: number;
-	skip?: number;
-	sort?: Sort;
-	filter?: JsonLikeObject;
-};
+export default defineNode({
+	name: "mongo-query",
+	description: "Performs CRUD operations on MongoDB based on HTTP method",
 
-export default class MongoQuery extends NanoService<InputType> {
-	constructor() {
-		super();
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-04/schema#",
-			type: "object",
-			properties: {
-				collection: { type: "string" },
-				data: { type: "object" },
-				id: { type: "string" },
-				limit: { type: "number" },
-				skip: { type: "number" },
-				sort: { type: "object" },
-				filter: { type: "object" },
-			},
-			required: ["collection"],
-		};
-	}
+	input: z.object({
+		collection: z.string(),
+		data: z.record(z.unknown()).optional(),
+		id: z.string().optional(),
+		limit: z.number().optional(),
+		skip: z.number().optional(),
+		sort: z.record(z.unknown()).optional(),
+		filter: z.record(z.unknown()).optional(),
+	}),
 
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	output: z.any(),
+
+	async execute(ctx: Context, input) {
 		const client = new MongoClient(process.env.MONGODB_URI as string);
 
 		try {
 			await client.connect();
 			const db = client.db(process.env.MONGODB_DATABASE);
-			const collection = db.collection(inputs.collection as string);
+			const collection = db.collection(input.collection);
 
-			// Determine action based on HTTP method
 			const method = ctx.request.method as unknown as string;
 
 			switch (method) {
 				case "POST": {
-					if (inputs.data === undefined) {
+					if (input.data === undefined) {
 						throw new Error("Data is required for POST method");
 					}
-					const result_post = await collection.insertOne(inputs.data);
-					response.setSuccess({ insertedId: result_post.insertedId.toString() });
-					break;
+					const result_post = await collection.insertOne(
+						input.data as JsonLikeObject,
+					);
+					return {
+						insertedId: result_post.insertedId.toString(),
+					};
 				}
 				case "GET": {
-					if (inputs.id !== "undefined") {
-						// Fetch a single document by ID
-						const result = await collection.findOne({ _id: new ObjectId(inputs.id) });
-						response.setSuccess(result as unknown as JsonLikeObject);
-					} else {
-						// Fetch all with a limit (default: 10)
-						const result = await collection
-							.find(inputs.filter || {})
-							.sort(inputs.sort || {})
-							.skip(inputs.skip || 0)
-							.limit(inputs.limit || 10)
-							.toArray();
-						response.setSuccess(result as unknown as JsonLikeObject);
+					if (input.id !== "undefined") {
+						const result = await collection.findOne({
+							_id: new ObjectId(input.id),
+						});
+						return result;
 					}
-					break;
+					const result = await collection
+						.find(input.filter || {})
+						.sort((input.sort as Sort) || {})
+						.skip(input.skip || 0)
+						.limit(input.limit || 10)
+						.toArray();
+					return result;
 				}
 				case "PUT": {
 					const result_put = await collection.updateOne(
-						{ _id: new ObjectId(inputs.id as string) },
-						{ $set: inputs.data },
+						{ _id: new ObjectId(input.id as string) },
+						{ $set: input.data },
 					);
-					response.setSuccess({ modifiedCount: result_put.modifiedCount });
-					break;
+					return { modifiedCount: result_put.modifiedCount };
 				}
 				case "DELETE": {
-					const result = await collection.deleteOne({ _id: new ObjectId(inputs.id as string) });
-					response.setSuccess({ deletedCount: result.deletedCount });
-					break;
+					const result = await collection.deleteOne({
+						_id: new ObjectId(input.id as string),
+					});
+					return { deletedCount: result.deletedCount };
 				}
 				default:
 					throw new Error("Invalid HTTP method");
 			}
-		} catch (error: unknown) {
-			const nodeError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			response.setError(nodeError);
 		} finally {
 			await client.close();
 		}
-
-		return response;
-	}
-}
+	},
+});

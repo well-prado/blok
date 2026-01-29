@@ -1,51 +1,18 @@
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { defineNode } from "@nanoservice-ts/runner";
+import { z } from "zod";
 
-type ErrorNodeInputs = {
-	message: string;
-};
+export default defineNode({
+	name: "error-node",
+	description: "Intentionally throws an error for testing error handling",
+	contentType: "text/html",
 
-export default class ErrorNode extends NanoService<ErrorNodeInputs> {
-	constructor() {
-		super();
+	input: z.object({
+		message: z.string(),
+	}),
 
-		// Set the input "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.inputSchema = {
-			$schema: "http://json-schema.org/draft-07/schema#",
-			title: "Generated schema for Root",
-			type: "object",
-			properties: {
-				message: {
-					type: "string",
-				},
-			},
-			required: ["message"],
-		};
+	output: z.never(),
 
-		// Set the output "JSON Schema Format" here for automated validation
-		// Learn JSON Schema: https://json-schema.org/learn/getting-started-step-by-step
-		this.outputSchema = {};
-
-		// Set html content type
-		this.contentType = "text/html";
-	}
-
-	async handle(ctx: Context, inputs: ErrorNodeInputs): Promise<INanoServiceResponse> {
-		// Create a new instance of the response
-		const response = new NanoServiceResponse();
-		const message = inputs.message as string;
-
-		try {
-			throw new Error(message);
-		} catch (error: unknown) {
-			const nodeError: GlobalError = new GlobalError((error as Error).message);
-			nodeError.setCode(500);
-			nodeError.setStack((error as Error).stack);
-			nodeError.setName(this.name);
-			response.setError(nodeError); // Set the error
-		}
-
-		return response;
-	}
-}
+	async execute(_ctx, input) {
+		throw new Error(input.message);
+	},
+});

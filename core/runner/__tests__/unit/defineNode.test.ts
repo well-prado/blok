@@ -82,6 +82,52 @@ describe("defineNode", () => {
 			expect(node.name).toBe("my-custom-node");
 		});
 
+		it("should set contentType when provided", () => {
+			const node = defineNode({
+				name: "html-node",
+				description: "Returns HTML",
+				contentType: "text/html",
+				input: z.object({}),
+				output: z.string(),
+				async execute(ctx, input) {
+					return "<h1>Hello</h1>";
+				},
+			});
+
+			expect(node.contentType).toBe("text/html");
+		});
+
+		it("should use NodeBase default contentType when not provided", () => {
+			const node = defineNode({
+				name: "json-node",
+				description: "Returns JSON",
+				input: z.object({ value: z.number() }),
+				output: z.object({ result: z.number() }),
+				async execute(ctx, input) {
+					return { result: input.value };
+				},
+			});
+
+			// NodeBase defaults contentType to empty string ""
+			// The runner/trigger sets the actual content type based on the response
+			expect(node.contentType).toBe("");
+		});
+
+		it("should support application/pdf contentType", () => {
+			const node = defineNode({
+				name: "pdf-node",
+				description: "Returns PDF",
+				contentType: "application/pdf",
+				input: z.object({ base64: z.string() }),
+				output: z.string(),
+				async execute(ctx, input) {
+					return Buffer.from(input.base64, "base64").toString();
+				},
+			});
+
+			expect(node.contentType).toBe("application/pdf");
+		});
+
 		it("should have input and output schemas", () => {
 			const node = defineNode({
 				name: "test-node",

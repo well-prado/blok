@@ -1,12 +1,6 @@
-import {
-	type INanoServiceResponse,
-	type JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-} from "@nanoservice-ts/runner";
+import { defineNode } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
-
-type InputType = Record<string, never>;
+import { z } from "zod";
 
 /**
  * ChainInit node — starts a cross-runtime chain test.
@@ -14,10 +8,25 @@ type InputType = Record<string, never>;
  * Initializes the chain data structure with the first entry (nodejs)
  * so downstream nodes in other languages can append to it.
  */
-export default class ChainInit extends NanoService<InputType> {
-	async handle(ctx: Context, _inputs: InputType): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+export default defineNode({
+	name: "chain-init",
+	description:
+		"Initializes a cross-runtime chain test with the first entry (nodejs)",
 
+	input: z.object({}),
+
+	output: z.object({
+		chain: z.array(
+			z.object({
+				language: z.string(),
+				order: z.number(),
+				timestamp: z.string(),
+			}),
+		),
+		origin: z.string(),
+	}),
+
+	async execute(ctx: Context, _input) {
 		const entry = {
 			language: "nodejs",
 			order: 1,
@@ -35,8 +44,6 @@ export default class ChainInit extends NanoService<InputType> {
 		}
 		(ctx.vars as Record<string, unknown>).init = data;
 
-		response.setSuccess(data as unknown as JsonLikeObject);
-
-		return response;
-	}
-}
+		return data;
+	},
+});
