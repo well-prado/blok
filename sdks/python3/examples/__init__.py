@@ -4,7 +4,7 @@ from examples.api_call_node import ApiCallNode
 from examples.transform_data_node import TransformDataNode
 
 HELLO_WORLD_NODE_NAME = "hello-world"
-API_CALL_NODE_NAME = "api-call"
+API_CALL_NODE_NAME = "api_call"
 TRANSFORM_DATA_NODE_NAME = "transform-data"
 CHAIN_TEST_NODE_NAME = "chain-test"
 

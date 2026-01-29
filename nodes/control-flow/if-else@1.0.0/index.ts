@@ -38,6 +38,9 @@ export default defineNode({
 	name: "if-else",
 	description: "Evaluates conditions and returns the matching branch's steps for execution",
 
+	// This is a flow control node — the runner uses processFlow() instead of process()
+	flow: true,
+
 	// Input: Array of conditions (if, else if, else)
 	input: z.array(conditionSchema),
 

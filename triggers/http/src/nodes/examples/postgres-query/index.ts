@@ -1,4 +1,4 @@
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { defineNode } from "@nanoservice-ts/runner";
 import pg from "pg";
 import { z } from "zod";
 

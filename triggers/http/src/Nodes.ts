@@ -3,6 +3,7 @@ import IfElse from "@nanoservice-ts/if-else";
 import type { NodeBase } from "@nanoservice-ts/shared";
 import ChainInit from "./nodes/chain-init/index";
 import ChainVerify from "./nodes/chain-verify/index";
+import ExampleNodes from "./nodes/examples/index";
 import RuntimeBridge from "./nodes/runtime-bridge/index";
 
 const nodes: {
@@ -13,6 +14,7 @@ const nodes: {
 	"chain-init": ChainInit,
 	"chain-verify": ChainVerify,
 	"runtime-bridge": RuntimeBridge,
+	...ExampleNodes,
 };
 
 export default nodes;

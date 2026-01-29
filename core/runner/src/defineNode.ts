@@ -2,7 +2,7 @@ import type { ZodError, z } from "zod";
 
 import type Condition from "./types/Condition";
 import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import { GlobalError, NodeBase } from "@nanoservice-ts/shared";
 import type { INanoServiceResponse } from "./NanoServiceResponse";
 import type JsonLikeObject from "./types/JsonLikeObject";
 import NanoService from "./NanoService";
@@ -56,6 +56,9 @@ export interface FnNodeDefinition<
 	/** Response content type (e.g. "text/html", "application/pdf"). Defaults to "application/json" */
 	contentType?: string;
 
+	/** Whether this is a flow control node (e.g. if-else) that returns sub-steps to execute */
+	flow?: boolean;
+
 	/**
 	 * Node execution logic
 	 * @param ctx - Workflow context
@@ -90,6 +93,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			this.contentType = definition.contentType;
 		}
 
+		// Set flow flag for control flow nodes (e.g. if-else) that return sub-steps
+		if (definition.flow) {
+			this.flow = true;
+		}
+
 		// Convert Zod schemas to JSON Schema for backward compatibility
 		// This allows existing tools that expect JSON Schema to continue working
 		this.inputSchema = this.zodToJsonSchema(definition.input);
@@ -119,13 +127,20 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			// Step 2: Execute user's function
 			const result = await this.definition.execute(ctx, validatedInput);
 
-			// Step 3: Validate output with Zod
+			// Step 3: If execute() returns an array of NodeBase instances (flow nodes
+			// like if-else), return them directly. The runner's processFlow() expects
+			// handle() to return NanoService[] for flow nodes, not a wrapped response.
+			if (Array.isArray(result) && result.length > 0 && result[0] instanceof NodeBase) {
+				return result as NanoService<z.infer<TInput>>[];
+			}
+
+			// Step 4: Validate output with Zod
 			const validatedOutput = this.definition.output.parse(result);
 
-			// Step 4: Success!
+			// Step 5: Success!
 			response.setSuccess(validatedOutput as JsonLikeObject);
 		} catch (error) {
-			// Step 5: Map errors to GlobalError
+			// Step 6: Map errors to GlobalError
 			const globalError = this.mapErrorToGlobalError(error);
 			response.setError(globalError);
 		}
@@ -211,16 +226,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 	 * @param zodSchema - Zod schema to convert
 	 * @returns JSON Schema representation
 	 */
-	private zodToJsonSchema(zodSchema: z.ZodTypeAny): Schema {
-		// Basic conversion - this is a simplified implementation
-		// For full Zod to JSON Schema conversion, we could use zod-to-json-schema library
-
-		// For now, return a permissive schema that allows the Zod validation to be the source of truth
-		return {
-			type: "object",
-			// The actual validation happens via Zod in handle(),
-			// so we use a permissive JSON Schema here
-		};
+	private zodToJsonSchema(_zodSchema: z.ZodTypeAny): Schema {
+		// Return a permissive schema — the actual validation happens via Zod in handle().
+		// Using {} (no type constraint) instead of { type: "object" } so that nodes
+		// accepting arrays (e.g. if-else conditions) also pass the JSON Schema pre-check.
+		return {};
 	}
 }
 

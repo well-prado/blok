@@ -26,25 +26,31 @@ class ApiCallNode(NodeHandler):
     """
 
     def execute(self, ctx: Context, config: Dict[str, Any]) -> Any:
-        url = config.get("url")
-        if not url:
-            raise NodeError.configuration("'url' is required in node config")
+        # The runner resolves workflow inputs and puts them in ctx.request.body.
+        # Read from there first (standard HTTP SDK pattern), fall back to config.
+        body = ctx.request.body_map() or {}
+        inputs = body if body.get("url") else config.get("inputs", config)
 
-        method = (config.get("method") or "GET").upper()
-        timeout = config.get("timeout", 10)
+        url = inputs.get("url")
+        if not url:
+            raise NodeError.configuration("'url' is required in node inputs")
+
+        method = (inputs.get("method") or "GET").upper()
+        timeout = inputs.get("timeout", 10)
 
         # Build request
         req_body = None
         if method in ("POST", "PUT", "PATCH"):
-            body_map = ctx.request.body_map()
-            if body_map and "body" in body_map:
-                req_body = json.dumps(body_map["body"]).encode("utf-8")
+            payload = inputs.get("body") or body.get("body")
+            if payload:
+                req_body = json.dumps(payload).encode("utf-8")
 
         req = urllib.request.Request(url, data=req_body, method=method)
         req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "BlokSDK/1.0")
 
-        # Add configured headers
-        extra_headers = config.get("headers")
+        # Add configured headers (may override defaults above)
+        extra_headers = inputs.get("headers")
         if isinstance(extra_headers, dict):
             for k, v in extra_headers.items():
                 req.add_header(k, str(v))
