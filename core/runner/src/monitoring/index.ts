@@ -43,3 +43,26 @@ export {
 	type PrometheusBootstrapConfig,
 	type PrometheusBootstrapResult,
 } from "./PrometheusBootstrap";
+
+export {
+	DistributedTracer,
+	type DistributedTracerConfig,
+	type WorkflowSpanAttributes,
+	type NodeSpanAttributes,
+	type TraceContext,
+} from "./DistributedTracer";
+
+export {
+	bootstrapTracing,
+	resetTracingBootstrap,
+	type TracingExporterType,
+	type TracingBootstrapConfig,
+	type TracingBootstrapResult,
+} from "./TracingBootstrap";
+
+export {
+	StructuredLogger,
+	type LogLevel,
+	type LogEntry,
+	type StructuredLoggerConfig,
+} from "./StructuredLogger";

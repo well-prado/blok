@@ -56,7 +56,10 @@
 		"@opentelemetry/sdk-metrics": "^1.30.0",
 		"@opentelemetry/exporter-prometheus": "^0.57.0",
 		"@opentelemetry/resources": "^1.30.0",
-		"@opentelemetry/semantic-conventions": "^1.30.0"
+		"@opentelemetry/semantic-conventions": "^1.30.0",
+		"@opentelemetry/sdk-trace-node": "^1.30.0",
+		"@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+		"@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0"
 	},
 	"peerDependenciesMeta": {
 		"@opentelemetry/sdk-metrics": {
@@ -69,6 +72,15 @@
 			"optional": true
 		},
 		"@opentelemetry/semantic-conventions": {
+			"optional": true
+		},
+		"@opentelemetry/sdk-trace-node": {
+			"optional": true
+		},
+		"@opentelemetry/exporter-trace-otlp-http": {
+			"optional": true
+		},
+		"@opentelemetry/exporter-trace-otlp-grpc": {
 			"optional": true
 		}
 	},

@@ -74,9 +74,28 @@ services:
     depends_on:
       - prometheus
       - loki
+      - tempo
     restart: unless-stopped
     networks:
       - shared-network
+  tempo:
+    container_name: tempo
+    hostname: tempo
+    image: grafana/tempo:2.7.0
+    ports:
+      - "3201:3200"   # Tempo HTTP API (3200 taken by nginx)
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "9411:9411"   # Zipkin receiver
+    volumes:
+      - "./tempo.yaml:/etc/tempo/tempo.yaml"
+      - "tempo-data:/var/tempo"
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+    restart: unless-stopped
+    networks:
+      - shared-network
+
   loki:
     container_name: loki
     hostname: loki
@@ -85,7 +104,7 @@ services:
       - "3100:3100"
     volumes:
       - "./loki-config.yaml:/mnt/config/loki-config.yaml"
-    command: 
+    command:
       - -config.file=/mnt/config/loki-config.yaml
     restart: unless-stopped
     networks:
@@ -126,6 +145,7 @@ services:
   #     - shared-network
 volumes:
   grafana-data:
+  tempo-data:
 networks:
   shared-network:
     external: true

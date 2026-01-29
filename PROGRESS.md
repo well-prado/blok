@@ -1,7 +1,7 @@
 # Blok Framework Progress Tracker
 
-> **Last Updated:** 2026-01-29 (Prometheus Metrics Bridge + Grafana Dashboards + 1051 runner tests passing!)
-> **Status:** 🔄 Active Development - All Phases COMPLETE + Enterprise COMPLETE + DX Tooling COMPLETE + Observability Stack!
+> **Last Updated:** 2026-01-29 (PERF-2 Complete: Distributed Tracing + Structured Logging + APM Integration + 1137 runner tests passing!)
+> **Status:** 🔄 Active Development - All Phases COMPLETE + Enterprise COMPLETE + DX Tooling COMPLETE + Full Observability Stack!
 > **Completion:** 100% Overall (Phase 1-5: 100%, Enterprise: 100%, DX: 100%, Observability: 100%!)
 
 ## Legend
@@ -138,6 +138,12 @@
 - ✅ **OBS-3: Grafana Dashboards (blok-overview, blok-triggers, blok-system — ready to provision)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **OBS-4: Prometheus config + Docker Compose (scrape jobs for all 9 trigger types)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **1051 runner tests passing (30 new Prometheus observability tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PERF-2: DistributedTracer (OpenTelemetry span instrumentation for workflows, nodes, and runtime adapters)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PERF-2: TracingBootstrap (dynamic OTel TracerProvider with OTLP/Console exporters, sampling, batch processing)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PERF-2: StructuredLogger (JSON logging with trace context correlation, child loggers, level filtering)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PERF-2: APMIntegration (DataDog, New Relic, generic OTLP — unified vendor bridge via TracingBootstrap)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **OBS-5: Grafana Tempo tracing backend (Docker Compose + datasource + blok-tracing dashboard)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **1137 runner tests passing (86 new distributed tracing + structured logging + APM tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **What's Not Ready:**
 - All core features implemented, only polish and documentation remain
@@ -1319,6 +1325,87 @@ export default class MyNode extends NanoService<InputType> {
 ---
 
 ## Recent Achievements
+
+### 2026-01-29 - PERF-2 COMPLETE: Distributed Tracing + Structured Logging + APM Integration!
+
+**PERF-2: Distributed Tracing (OpenTelemetry) - COMPLETE:**
+- ✅ Created `DistributedTracer.ts` - Full span instrumentation for workflow orchestration
+  - `startWorkflowSpan()` / `endWorkflowSpan()` — root SERVER spans with workflow name, path, request ID, trigger context
+  - `startNodeSpan()` / `endNodeSpan()` — child INTERNAL spans with node name, type, runtime kind, input/output sizes
+  - `startRuntimeSpan()` / `endRuntimeSpan()` — CLIENT spans for cross-runtime calls (gRPC, Docker, HTTP)
+  - `extractTraceContext()` — extracts trace_id/span_id for log correlation
+  - `getTraceHeaders()` — W3C traceparent headers for cross-service propagation
+  - `addSpanEvent()` / `setSpanAttribute()` — custom span annotations
+  - Error recording with `recordException()` and `SpanStatusCode.ERROR`
+  - Configurable: `traceNodes`, `recordPayloads`, `maxAttributeLength`
+  - Stats tracking: workflowSpanCount, nodeSpanCount, errorSpanCount
+
+- ✅ Created `TracingBootstrap.ts` - Dynamic OTel TracerProvider configuration
+  - Dynamic imports for optional peer dependencies (`@opentelemetry/sdk-trace-node`, OTLP exporters)
+  - OTLP HTTP (`exporter-trace-otlp-http`) and gRPC (`exporter-trace-otlp-grpc`) support
+  - Console exporter for development/debugging
+  - Configurable sampling ratio via `TraceIdRatioBasedSampler`
+  - `BatchSpanProcessor` with configurable batch size and export delay
+  - Env var support: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_ENDPOINT`
+  - Graceful shutdown and force-flush methods
+  - Single-initialization guard (prevents double-init warnings)
+
+**PERF-2: Structured Logging - COMPLETE:**
+- ✅ Created `StructuredLogger.ts` - Production JSON structured logging
+  - JSON output compatible with Grafana Loki, ELK Stack, CloudWatch, DataDog Logs
+  - Log levels: debug, info, warn, error, fatal with priority-based filtering
+  - Auto-injects OpenTelemetry trace_id/span_id from active span for log-trace correlation
+  - `withSpan()` for explicit span-correlated logging
+  - `child()` for request-scoped loggers with inherited context fields
+  - Default transport: stdout for info/warn, stderr for error/fatal
+  - Custom transport function support (callback-based)
+  - NDJSON export via `getLogsAsNDJSON()`
+  - Ring buffer (1000 entries) with automatic trimming
+  - Respects `CONSOLE_LOG_ACTIVE=false` and `BLOK_LOG_LEVEL` env vars
+  - Runtime level adjustment via `setLevel()` / `isLevelEnabled()`
+
+**PERF-2: APM Integration (DataDog + New Relic) - COMPLETE:**
+- ✅ Created `APMIntegration.ts` - Unified APM vendor bridge
+  - **DataDog**: OTLP export to DataDog Agent (port 4318), zero-config local setup
+  - **New Relic**: OTLP export with api-key header, US and EU region support
+  - **Generic OTLP**: Any OTLP-compatible backend (Jaeger, Tempo, Honeycomb, etc.)
+  - Lazy initialization via `init()` with vendor-specific configuration
+  - `getEndpointInfo()` for diagnostics and debugging
+  - `forceFlush()` and `shutdown()` for graceful lifecycle management
+  - Delegates to `TracingBootstrap` for actual OpenTelemetry setup
+
+**OBS-5: Grafana Tempo Tracing Infrastructure - COMPLETE:**
+- ✅ Added Grafana Tempo service to Docker Compose (v2.7.0)
+  - OTLP gRPC (4317), OTLP HTTP (4318), Zipkin (9411) receivers
+  - Jaeger thrift receivers (14268, 14250, 6831, 6832)
+  - Service graph and span metrics generation → Prometheus remote write
+- ✅ Enabled Tempo datasource in Grafana provisioning
+  - Trace-to-logs linking (Loki integration via trace_id/span_id)
+  - Service graph node map visualization
+  - Streaming search enabled
+- ✅ Created `blok-tracing.json` Grafana dashboard
+  - Trace search panel (by service, duration, tags)
+  - Workflow execution duration (p50/p95/p99 from span metrics)
+  - Node execution duration (average per node, bar chart)
+  - Span rate by operation (ops/s)
+  - Error spans by operation
+  - Service dependency graph (node map)
+  - Runtime adapter latency (p95)
+  - Trace error rate stat panel (with thresholds)
+
+**Tests: 86 New Tests (all passing):**
+- ✅ **DistributedTracer Tests**: 28 tests (workflow spans, node spans, runtime spans, events, attributes, trace context, headers, stats, full workflow traces)
+- ✅ **TracingBootstrap Tests**: 9 tests (init, double-init prevention, console exporter, config options, gRPC protocol, env vars, reset)
+- ✅ **StructuredLogger Tests**: 31 tests (levels, filtering, structured fields, Error extraction, default fields, child loggers, NDJSON, trace context, CONSOLE_LOG_ACTIVE, transports, BLOK_LOG_LEVEL)
+- ✅ **APMIntegration Tests**: 18 tests (construction, init, vendor endpoints, DataDog, New Relic US/EU, OTLP, shutdown, flush, lifecycle, unknown vendor)
+
+**Impact:**
+- ✅ **PERF-2 Observability: 100% COMPLETE** — Distributed tracing, structured logging, APM, Prometheus metrics, Sentry error tracking all operational
+- ✅ **1137 Runner Tests Passing** (86 new + 1051 existing)
+- ✅ **4 Grafana Dashboards**: blok-overview, blok-triggers, blok-system, blok-tracing
+- ✅ **Full Observability Stack**: Prometheus (metrics) + Tempo (traces) + Loki (logs) + Grafana (visualization)
+
+---
 
 ### 2026-01-28 - HMR Trigger Integration COMPLETE + Runner Build Fixed!
 
