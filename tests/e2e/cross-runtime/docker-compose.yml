@@ -19,7 +19,7 @@ services:
       PORT: "8080"
       VERSION: "1.0.0"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -35,7 +35,7 @@ services:
       VERSION: "1.0.0"
       RUST_LOG: info
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -50,7 +50,7 @@ services:
       PORT: "8080"
       VERSION: "1.0.0"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -65,7 +65,7 @@ services:
       PORT: "8080"
       VERSION: "1.0.0"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -80,7 +80,7 @@ services:
       PORT: "8080"
       VERSION: "1.0.0"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -95,7 +95,22 @@ services:
       PORT: "8080"
       VERSION: "1.0.0"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-python3:
+    build:
+      context: ../../../sdks/python3
+      dockerfile: Dockerfile
+    ports:
+      - "9007:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
       interval: 5s
       timeout: 3s
       retries: 10

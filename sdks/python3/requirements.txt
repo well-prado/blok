@@ -1,0 +1,2 @@
+# Blok Nanoservice Python3 SDK
+# No external dependencies required - uses Python standard library only

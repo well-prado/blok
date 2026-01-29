@@ -42,7 +42,7 @@ ENV ENABLE_CORS=false
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD php -r "echo file_get_contents('http://localhost:${PORT}/health');" || exit 1
+    CMD php -r "echo file_get_contents('http://127.0.0.1:${PORT}/health');" || exit 1
 
 # Run the server
 CMD ["php", "bin/serve.php"]

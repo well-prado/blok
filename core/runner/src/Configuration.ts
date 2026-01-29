@@ -7,7 +7,6 @@ import type RunnerNodeBase from "./RunnerNodeBase";
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
-import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
 import type { RuntimeKind } from "./adapters/RuntimeAdapter";
 import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import type Condition from "./types/Condition";
@@ -49,14 +48,8 @@ export default class Configuration implements Config {
 			registry.register(new NodeJsRuntimeAdapter());
 		}
 
-		// Register Python3 runtime adapter if not already registered
-		if (!registry.has("python3")) {
-			const host = process.env.RUNTIME_PYTHON3_HOST || "localhost";
-			const port = process.env.RUNTIME_PYTHON3_PORT ? Number.parseInt(process.env.RUNTIME_PYTHON3_PORT) : 50051;
-			registry.register(new Python3RuntimeAdapter(host, port));
-		}
-
 		// Register HTTP-based runtime adapters for all SDK languages
+		// Python3 now uses HttpRuntimeAdapter (same as Go/Rust/Java/C#/PHP/Ruby)
 		const httpRuntimes: Array<{
 			kind: RuntimeKind;
 			hostEnv: string;
@@ -69,6 +62,7 @@ export default class Configuration implements Config {
 			{ kind: "csharp", hostEnv: "RUNTIME_CSHARP_HOST", portEnv: "RUNTIME_CSHARP_PORT", defaultPort: 9004 },
 			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", portEnv: "RUNTIME_PHP_PORT", defaultPort: 9005 },
 			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", portEnv: "RUNTIME_RUBY_PORT", defaultPort: 9006 },
+			{ kind: "python3", hostEnv: "RUNTIME_PYTHON3_HOST", portEnv: "RUNTIME_PYTHON3_PORT", defaultPort: 9007 },
 		];
 
 		for (const rt of httpRuntimes) {

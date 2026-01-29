@@ -28,6 +28,7 @@ export interface HttpRuntimeAdapterOptions {
  *   RUNTIME_CSHARP_HOST / RUNTIME_CSHARP_PORT
  *   RUNTIME_PHP_HOST / RUNTIME_PHP_PORT
  *   RUNTIME_RUBY_HOST / RUNTIME_RUBY_PORT
+ *   RUNTIME_PYTHON3_HOST / RUNTIME_PYTHON3_PORT
  */
 export class HttpRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind: RuntimeKind;

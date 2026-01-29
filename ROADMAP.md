@@ -10,8 +10,9 @@
 4. [Phase 3: Scalability - Universal Trigger System](#phase-3-scalability---universal-trigger-system)
 5. [Phase 4: Intelligence - AI-Powered Code Generation](#phase-4-intelligence---ai-powered-code-generation)
 6. [Phase 5: Enterprise - Multi-Language Runtime Ecosystem](#phase-5-enterprise---multi-language-runtime-ecosystem)
-7. [Technical Debt & Infrastructure](#technical-debt--infrastructure)
-8. [Timeline & Milestones](#timeline--milestones)
+7. [Phase 6: Enterprise Protocol - gRPC Migration for All SDKs](#phase-6-enterprise-protocol---grpc-migration-for-all-sdks)
+8. [Technical Debt & Infrastructure](#technical-debt--infrastructure)
+9. [Timeline & Milestones](#timeline--milestones)
 
 ---
 
@@ -709,13 +710,13 @@ Complete the vision of true language agnosticism with production-ready runtimes 
 
 ### Current State
 - ✅ Node.js runtime (in-process)
-- ✅ Python 3 runtime (gRPC)
-- ❌ Go runtime
-- ❌ Java runtime
-- ❌ Rust runtime
-- ❌ PHP runtime
-- ❌ C# / .NET runtime
-- ❌ Ruby runtime
+- ✅ Python 3 runtime (HTTP SDK — migrated from gRPC)
+- ✅ Go runtime (HTTP SDK)
+- ✅ Java runtime (HTTP SDK)
+- ✅ Rust runtime (HTTP SDK)
+- ✅ PHP runtime (HTTP SDK)
+- ✅ C# / .NET runtime (HTTP SDK)
+- ✅ Ruby runtime (HTTP SDK)
 - ❌ Elixir runtime
 
 ### Target Architecture
@@ -726,13 +727,13 @@ Complete the vision of true language agnosticism with production-ready runtimes 
 |----------|-----------|------|------|--------|------|--------|
 | Node.js  | ✅ | ✅ | ✅ | ✅ | 🔄 | Production |
 | Bun      | ✅ | ✅ | ✅ | ✅ | ❌ | Beta |
-| Python 3 | ❌ | ✅ | ✅ | ✅ | 🔄 | Production |
-| Go       | ❌ | 🔄 | ✅ | 🔄 | 🔄 | SDK + HttpAdapter |
-| Java     | ❌ | 🔄 | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
-| Rust     | ❌ | 🔄 | ✅ | 🔄 | ✅ | SDK + HttpAdapter |
-| C# / .NET| ❌ | 🔄 | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
-| PHP      | ❌ | ❌ | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
-| Ruby     | ❌ | ❌ | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
+| Python 3 | ❌ | ❌ | ✅ | ✅ | ❌ | Production (HTTP SDK) |
+| Go       | ❌ | ❌ | ✅ | ✅ | 🔄 | Production (HTTP SDK) |
+| Java     | ❌ | ❌ | ✅ | ✅ | ❌ | Production (HTTP SDK) |
+| Rust     | ❌ | 🔄 | ✅ | ✅ | ✅ | Production (HTTP SDK, optional gRPC) |
+| C# / .NET| ❌ | ❌ | ✅ | ✅ | ❌ | Production (HTTP SDK) |
+| PHP      | ❌ | ❌ | ✅ | ✅ | ❌ | Production (HTTP SDK) |
+| Ruby     | ❌ | ❌ | ✅ | ✅ | ❌ | Production (HTTP SDK) |
 | Elixir   | ❌ | ❌ | 🔄 | 🔄 | ❌ | Future |
 
 #### 5.2 Runtime SDK Structure
@@ -906,6 +907,206 @@ message NodeResponse {
 - Runtime adapter architecture stable
 - Protocol buffers finalized
 - Docker infrastructure ready
+
+---
+
+## Phase 6: Enterprise Protocol - gRPC Migration for All SDKs
+
+### Objective
+Migrate all language SDK runtimes from HTTP to gRPC as the primary inter-service communication protocol, delivering enterprise-grade performance, streaming, and formal contract enforcement across the entire runtime ecosystem.
+
+### Rationale
+
+HTTP served as the pragmatic choice for rapid SDK development — every language has HTTP built in, debugging is trivial, and the SDK pattern is uniform. With all 7 SDKs now production-ready on HTTP, the foundation is stable enough to layer gRPC on top for enterprise workloads that demand:
+
+1. **Binary serialization** — Protobuf is 3-10x smaller on the wire than JSON for structured data
+2. **HTTP/2 multiplexing** — Single TCP connection handles thousands of concurrent RPCs
+3. **Bidirectional streaming** — Nodes can stream partial results (LLM token streaming, large dataset processing)
+4. **Formal schema contracts** — Proto files give compile-time type safety across all 7+ languages
+5. **Deadline propagation** — Native timeout cascading across service boundaries
+6. **Code generation** — Auto-generated clients and servers from a single `.proto` source of truth
+
+### Current State
+- ✅ All 7 SDKs running on HTTP (`POST /execute`, `GET /health`)
+- ✅ gRPC trigger system exists (`triggers/grpc/`) for external workflow invocation
+- ✅ Rust SDK has optional gRPC server (`ENABLE_GRPC=false` by default)
+- ✅ Proto definitions exist (`core/runner/proto/node.proto`)
+- ✅ Legacy Python3 gRPC adapter available as reference implementation
+- ❌ No SDK-to-runner gRPC communication in production
+
+### Target Architecture
+
+#### 6.1 Unified Proto Service Definition
+
+```protobuf
+// proto/runtime.proto (v2 — universal)
+syntax = "proto3";
+package blok.runtime.v2;
+
+service RuntimeService {
+  // Unary — standard node execution
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+
+  // Server streaming — progressive results (LLM tokens, batch processing)
+  rpc ExecuteStream(ExecuteRequest) returns (stream ExecuteResponse);
+
+  // Health checking
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Node discovery
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+}
+
+message ExecuteRequest {
+  string node_name = 1;
+  Context context = 2;
+  map<string, bytes> config = 3;
+}
+
+message ExecuteResponse {
+  bool success = 1;
+  bytes data = 2;                    // JSON-encoded response data
+  repeated Error errors = 3;
+  Metrics metrics = 4;
+  map<string, bytes> vars = 5;      // Updated ctx.vars
+  bool is_partial = 6;              // true for streaming chunks
+}
+
+message Context {
+  string id = 1;
+  string workflow_name = 2;
+  string workflow_path = 3;
+  Request request = 4;
+  Response response = 5;
+  map<string, bytes> vars = 6;
+  map<string, string> env = 7;
+}
+
+message Metrics {
+  double duration_ms = 1;
+  double cpu_ms = 2;
+  int64 memory_bytes = 3;
+}
+```
+
+#### 6.2 GrpcRuntimeAdapter
+
+```typescript
+// New adapter alongside HttpRuntimeAdapter
+class GrpcRuntimeAdapter implements RuntimeAdapter {
+  kind: RuntimeKind;
+  private client: RuntimeServiceClient;
+  private transport: GrpcTransport;
+
+  async execute(node: RunnerNode, ctx: Context): Promise<ExecutionResult> {
+    const request = this.buildExecuteRequest(node, ctx);
+    const response = await this.client.execute(request, {
+      deadline: Date.now() + this.timeoutMs,
+    });
+    return this.parseExecuteResponse(response);
+  }
+
+  async executeStream(node: RunnerNode, ctx: Context): AsyncIterable<ExecutionResult> {
+    const request = this.buildExecuteRequest(node, ctx);
+    for await (const chunk of this.client.executeStream(request)) {
+      yield this.parseExecuteResponse(chunk);
+    }
+  }
+}
+```
+
+#### 6.3 Dual-Protocol SDK Pattern
+
+Each SDK will support both HTTP and gRPC, with a configuration switch:
+
+```
+SDK Container
+├── HTTP server (:8080)     — Always available (backward compat, debugging)
+├── gRPC server (:50051)    — Enabled via ENABLE_GRPC=true
+└── Shared node registry    — Same nodes serve both protocols
+```
+
+### Implementation Tasks
+
+**Phase 6A: Proto v2 Design & Code Generation (Future)**
+- [ ] Design `runtime.proto` v2 with streaming support
+- [ ] Set up proto code generation for all 7 languages (Go, Rust, Java, C#, PHP, Ruby, Python)
+- [ ] Create shared proto package/module per language
+- [ ] Add proto linting and breaking-change detection (buf)
+- [ ] Document proto evolution policy
+
+**Phase 6B: GrpcRuntimeAdapter in Runner (Future)**
+- [ ] Implement `GrpcRuntimeAdapter` in TypeScript runner
+- [ ] Support unary and server-streaming RPCs
+- [ ] Add deadline/timeout propagation
+- [ ] Add connection pooling and keepalive
+- [ ] Add fallback to HTTP on gRPC failure (graceful degradation)
+- [ ] Update `Configuration.ts` to support protocol selection per runtime
+- [ ] Unit tests for adapter
+
+**Phase 6C: Go SDK gRPC Server (Future)**
+- [ ] Add gRPC server to Go SDK (using `google.golang.org/grpc`)
+- [ ] Dual-listen on HTTP (:8080) and gRPC (:50051)
+- [ ] Share node registry between both servers
+- [ ] Add streaming support for compatible nodes
+- [ ] Integration tests
+
+**Phase 6D: Rust SDK gRPC Server (Future)**
+- [ ] Promote existing optional gRPC server to production-ready
+- [ ] Update to proto v2 service definition
+- [ ] Add streaming support (tonic streaming)
+- [ ] Integration tests
+
+**Phase 6E: Java SDK gRPC Server (Future)**
+- [ ] Add gRPC server to Java SDK (using `grpc-java` or `armeria`)
+- [ ] Dual-listen on HTTP and gRPC
+- [ ] Add streaming support
+- [ ] Integration tests
+
+**Phase 6F: C# SDK gRPC Server (Future)**
+- [ ] Add gRPC server to C# SDK (using `Grpc.AspNetCore`)
+- [ ] Dual-listen via ASP.NET Kestrel (HTTP + gRPC on same port or separate)
+- [ ] Add streaming support
+- [ ] Integration tests
+
+**Phase 6G: PHP SDK gRPC Server (Future)**
+- [ ] Evaluate PHP gRPC options (`grpc` PECL extension, `spiral/roadrunner`)
+- [ ] Add gRPC server to PHP SDK
+- [ ] Integration tests
+
+**Phase 6H: Ruby SDK gRPC Server (Future)**
+- [ ] Add gRPC server to Ruby SDK (using `grpc` gem)
+- [ ] Dual-listen on HTTP and gRPC
+- [ ] Integration tests
+
+**Phase 6I: Python3 SDK gRPC Server (Future)**
+- [ ] Add gRPC server to Python3 SDK (using `grpcio`)
+- [ ] Dual-listen on HTTP and gRPC
+- [ ] Add streaming support
+- [ ] Integration tests
+
+**Phase 6J: Cross-Runtime gRPC Integration Tests (Future)**
+- [ ] Update cross-runtime chain test to run over gRPC
+- [ ] Benchmark gRPC vs HTTP latency per runtime
+- [ ] Benchmark gRPC vs HTTP throughput under load
+- [ ] Test streaming across runtimes
+- [ ] Test deadline propagation across chain
+- [ ] Test graceful fallback to HTTP
+- [ ] Document performance characteristics
+
+### Success Metrics
+- ✅ All 7 SDKs support dual-protocol (HTTP + gRPC)
+- ✅ < 1ms overhead per gRPC runtime hop (vs ~2ms HTTP)
+- ✅ Streaming support for LLM and batch nodes
+- ✅ Proto schema enforced at compile time across all languages
+- ✅ Zero breaking changes — HTTP remains the default, gRPC is opt-in
+- ✅ Graceful degradation: gRPC failure falls back to HTTP automatically
+
+### Dependencies
+- All HTTP SDKs stable and production-tested
+- Proto v2 design reviewed and approved
+- gRPC infrastructure (load balancers, health checks) validated
+- Streaming use cases identified and prioritized
 
 ---
 
@@ -1132,6 +1333,23 @@ message NodeResponse {
 - Runtime marketplace
 - Enterprise support
 
+### 2027 Q2-Q3 (Apr - Sep): Enterprise Protocol - gRPC Migration
+**Milestone: Dual-Protocol Runtime Ecosystem**
+- ✅ Proto v2 service definition finalized
+- ✅ GrpcRuntimeAdapter in runner with fallback to HTTP
+- ✅ All 7 SDKs support gRPC alongside HTTP
+- ✅ Streaming support for LLM and batch nodes
+- ✅ gRPC benchmarks show < 1ms per runtime hop
+
+**Deliverables:**
+- `runtime.proto` v2 with streaming, health, and node discovery RPCs
+- GrpcRuntimeAdapter with deadline propagation and connection pooling
+- gRPC servers in Go, Rust, Java, C#, PHP, Ruby, Python3 SDKs
+- Dual-protocol Docker containers (HTTP :8080 + gRPC :50051)
+- gRPC vs HTTP benchmark suite
+- Cross-runtime gRPC chain E2E tests
+- Enterprise deployment guide (gRPC load balancing, TLS)
+
 ---
 
 ## Success Metrics (Overall)
@@ -1168,31 +1386,57 @@ message NodeResponse {
 
 ## Appendix: Architecture Diagrams
 
-### A. Runtime Adapter Architecture
+### A. Runtime Adapter Architecture (Current — HTTP)
 ```
-┌──────────────────────────────────────────────────────────┐
-│                Workflow Orchestrator                       │
-│                                                           │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │              RuntimeRegistry                        │  │
-│  │  ┌──────────────────────────────────────────────┐  │  │
-│  │  │ NodeJS | Python | Go | Rust | Java | C# | …  │  │  │
-│  │  └──────────────────────────────────────────────┘  │  │
-│  └────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
-     │          │          │         │         │
-     ▼          ▼          ▼         ▼         ▼
-┌──────────┐ ┌──────────┐ ┌────────────────────────────┐
-│  NodeJS  │ │  Python  │ │    HttpRuntimeAdapter      │
-│ In-Proc  │ │  gRPC    │ │  (Go|Rust|Java|C#|PHP|Ruby)│
-│ Adapter  │ │ Adapter  │ │  POST /execute, GET /health│
-└──────────┘ └──────────┘ └────────────────────────────┘
-     │          │          │         │         │
-     ▼          ▼          ▼         ▼         ▼
-┌──────────┐ ┌──────────┐ ┌──────┐ ┌──────┐ ┌──────┐
-│ TS Nodes │ │ Python   │ │ Go   │ │ Rust │ │ Java │ ...
-│  Local   │ │ gRPC Srv │ │ SDK  │ │ SDK  │ │ SDK  │
-└──────────┘ └──────────┘ └──────┘ └──────┘ └──────┘
+┌───────────────────────────────────────────────────────────────┐
+│                    Workflow Orchestrator                       │
+│                                                               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                   RuntimeRegistry                       │  │
+│  │  ┌─────────────────────────────────────────────────┐   │  │
+│  │  │ NodeJS | Go | Rust | Java | C# | PHP | Ruby | Py│   │  │
+│  │  └─────────────────────────────────────────────────┘   │  │
+│  └────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
+     │              │         │        │       │      │      │
+     ▼              ▼         ▼        ▼       ▼      ▼      ▼
+┌──────────┐  ┌──────────────────────────────────────────────────┐
+│  NodeJS  │  │              HttpRuntimeAdapter                   │
+│ In-Proc  │  │  (Go | Rust | Java | C# | PHP | Ruby | Python3) │
+│ Adapter  │  │         POST /execute, GET /health               │
+└──────────┘  └──────────────────────────────────────────────────┘
+     │              │         │        │       │      │      │
+     ▼              ▼         ▼        ▼       ▼      ▼      ▼
+┌──────────┐  ┌──────┐ ┌──────┐ ┌──────┐ ┌────┐ ┌────┐ ┌──────┐
+│ TS Nodes │  │ Go   │ │ Rust │ │ Java │ │ C# │ │PHP │ │Ruby  │ ...
+│  Local   │  │ :9001│ │ :9002│ │ :9003│ │9004│ │9005│ │:9006 │
+└──────────┘  └──────┘ └──────┘ └──────┘ └────┘ └────┘ └──────┘
+```
+
+### A2. Runtime Adapter Architecture (Future — Dual Protocol)
+```
+┌───────────────────────────────────────────────────────────────┐
+│                    Workflow Orchestrator                       │
+│                                                               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │                   RuntimeRegistry                       │  │
+│  │  Protocol selection: HTTP (default) | gRPC (opt-in)    │  │
+│  └────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
+     │              │                    │
+     ▼              ▼                    ▼
+┌──────────┐  ┌──────────────┐    ┌──────────────┐
+│  NodeJS  │  │  HttpRuntime │    │  GrpcRuntime │
+│ In-Proc  │  │   Adapter    │    │   Adapter    │
+│ Adapter  │  │ POST /execute│    │ rpc Execute  │
+└──────────┘  └──────────────┘    └──────────────┘
+                    │                    │
+                    ▼                    ▼
+              ┌──────────────────────────────┐
+              │        SDK Container          │
+              │  HTTP :8080  |  gRPC :50051   │
+              │     Shared Node Registry      │
+              └──────────────────────────────┘
 ```
 
 ### B. Trigger System Architecture
@@ -1245,7 +1489,7 @@ message NodeResponse {
 
 ---
 
-**Document Version:** 1.2.0
+**Document Version:** 1.3.0
 **Last Updated:** 2026-01-29
 **Next Review:** 2026-04-27
 **Owner:** Blok Core Team

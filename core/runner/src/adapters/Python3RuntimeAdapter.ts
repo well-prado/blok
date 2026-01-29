@@ -5,11 +5,13 @@ import type { NodeRequest, NodeResponse } from "../NodeGrpcClient";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
 
 /**
- * Python3RuntimeAdapter executes Python nodes via gRPC
+ * @deprecated Use HttpRuntimeAdapter with kind="python3" instead.
+ * This gRPC adapter is kept for backward compatibility with existing
+ * deployments using the runtimes/python3 gRPC server. New deployments
+ * should use the HTTP-based sdks/python3 SDK with HttpRuntimeAdapter.
  *
+ * Python3RuntimeAdapter executes Python nodes via gRPC.
  * This adapter communicates with a Python gRPC server that hosts Python nodes.
- * It maintains the existing gRPC protocol and is fully backward compatible
- * with existing Python nodes.
  */
 export class Python3RuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "python3";
