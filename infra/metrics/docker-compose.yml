@@ -68,6 +68,7 @@ services:
       - "grafana-data:/var/lib/grafana"
       - "./datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml"
       - "./dashboard.json:/var/lib/grafana/dashboards/dashboard.json"
+      - "./dashboards/:/var/lib/grafana/dashboards/blok/"
       - "./default.yaml:/etc/grafana/provisioning/dashboards/default.yaml"
     privileged: true
     depends_on:

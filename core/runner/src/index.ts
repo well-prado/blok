@@ -22,6 +22,8 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 // Monitoring infrastructure
 import { HealthCheck } from "./monitoring/HealthCheck";
+import { bootstrapPrometheus, resetPrometheusBootstrap } from "./monitoring/PrometheusBootstrap";
+import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 
@@ -127,6 +129,9 @@ export {
 	CircuitBreaker,
 	CircuitOpenError,
 	TriggerMetricsCollector,
+	PrometheusMetricsBridge,
+	bootstrapPrometheus,
+	resetPrometheusBootstrap,
 	// Marketplace
 	RuntimeCatalog,
 	RuntimeDiscovery,
@@ -228,6 +233,14 @@ export type {
 	ErrorStats,
 	ThroughputStats,
 } from "./monitoring/TriggerMetricsCollector";
+export type {
+	PrometheusMetricsBridgeConfig,
+	ExecutionLabels,
+} from "./monitoring/PrometheusMetricsBridge";
+export type {
+	PrometheusBootstrapConfig,
+	PrometheusBootstrapResult,
+} from "./monitoring/PrometheusBootstrap";
 export type {
 	RuntimePackageManifest,
 	RuntimeNodeInfo,

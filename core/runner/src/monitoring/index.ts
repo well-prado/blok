@@ -30,3 +30,16 @@ export {
 	type ErrorStats,
 	type ThroughputStats,
 } from "./TriggerMetricsCollector";
+
+export {
+	PrometheusMetricsBridge,
+	type PrometheusMetricsBridgeConfig,
+	type ExecutionLabels,
+} from "./PrometheusMetricsBridge";
+
+export {
+	bootstrapPrometheus,
+	resetPrometheusBootstrap,
+	type PrometheusBootstrapConfig,
+	type PrometheusBootstrapResult,
+} from "./PrometheusBootstrap";

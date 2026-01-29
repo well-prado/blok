@@ -7,9 +7,7 @@
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"files": [
-		"dist"
-	],
+	"files": ["dist"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
@@ -53,6 +51,26 @@
 		"uuid": "^11.0.3",
 		"yaml": "^2.7.0",
 		"zod": "^3.24.2"
+	},
+	"peerDependencies": {
+		"@opentelemetry/sdk-metrics": "^1.30.0",
+		"@opentelemetry/exporter-prometheus": "^0.57.0",
+		"@opentelemetry/resources": "^1.30.0",
+		"@opentelemetry/semantic-conventions": "^1.30.0"
+	},
+	"peerDependenciesMeta": {
+		"@opentelemetry/sdk-metrics": {
+			"optional": true
+		},
+		"@opentelemetry/exporter-prometheus": {
+			"optional": true
+		},
+		"@opentelemetry/resources": {
+			"optional": true
+		},
+		"@opentelemetry/semantic-conventions": {
+			"optional": true
+		}
 	},
 	"private": false
 }

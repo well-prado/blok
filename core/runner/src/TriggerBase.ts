@@ -10,6 +10,7 @@ import { CircuitBreaker } from "./monitoring/CircuitBreaker";
 import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
 import { HealthCheck } from "./monitoring/HealthCheck";
 import type { DependencyCheckFn } from "./monitoring/HealthCheck";
+import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
@@ -30,6 +31,9 @@ export default abstract class TriggerBase extends Trigger {
 	/** Enhanced metrics collector */
 	protected metricsCollector: TriggerMetricsCollector;
 
+	/** Prometheus metrics bridge for exporting to /metrics */
+	protected metricsBridge: PrometheusMetricsBridge;
+
 	/** Hot reload manager - null if HMR is disabled */
 	protected hmr: HotReloadManager | null = null;
 
@@ -40,10 +44,15 @@ export default abstract class TriggerBase extends Trigger {
 		super();
 		this.configuration = new Configuration();
 		this.healthCheck = new HealthCheck();
-		this.metricsCollector = new TriggerMetricsCollector(
-			this.constructor.name,
-			this.configuration.name || "unknown",
+		this.metricsCollector = new TriggerMetricsCollector(this.constructor.name, this.configuration.name || "unknown");
+		this.metricsBridge = new PrometheusMetricsBridge(
+			{
+				triggerType: this.constructor.name,
+				triggerName: this.configuration.name || "unknown",
+			},
+			this.metricsCollector,
 		);
+		this.metricsBridge.initialize();
 	}
 
 	abstract listen(): Promise<number>;
@@ -180,6 +189,8 @@ export default abstract class TriggerBase extends Trigger {
 
 	async run(ctx: Context): Promise<TriggerResponse> {
 		this.inFlightRequests++;
+		const runStart = performance.now();
+		let runSuccess = true;
 		try {
 			const start = performance.now();
 			const defaultMeter = metrics.getMeter("default");
@@ -313,7 +324,16 @@ export default abstract class TriggerBase extends Trigger {
 				ctx: context,
 				metrics: average,
 			};
+		} catch (err) {
+			runSuccess = false;
+			throw err;
 		} finally {
+			const durationMs = performance.now() - runStart;
+			this.metricsBridge.recordExecution(durationMs, runSuccess, {
+				workflow_name: this.configuration.name || "",
+				workflow_version: `${this.configuration.version}`,
+				env: process.env.NODE_ENV || "development",
+			});
 			this.inFlightRequests--;
 		}
 	}
@@ -421,5 +441,6 @@ export default abstract class TriggerBase extends Trigger {
 	destroyMonitoring(): void {
 		this.rateLimiter?.destroy();
 		this.circuitBreaker?.destroy();
+		this.metricsBridge.destroy();
 	}
 }
