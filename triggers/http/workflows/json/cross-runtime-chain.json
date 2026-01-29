@@ -1,0 +1,101 @@
+{
+	"name": "Cross-Runtime Chain Test",
+	"description": "Tests all 8 language runtimes by chaining nodes that pass ctx.response.data between them",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "init",
+			"node": "chain-init",
+			"type": "module"
+		},
+		{
+			"name": "go",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "rust",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "java",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "csharp",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "php",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "ruby",
+			"node": "runtime-bridge",
+			"type": "module"
+		},
+		{
+			"name": "python",
+			"node": "chain-test",
+			"type": "runtime.python3"
+		}
+	],
+	"nodes": {
+		"init": {
+			"inputs": {}
+		},
+		"go": {
+			"inputs": {
+				"url": "http://localhost:9001",
+				"node_name": "chain-test"
+			}
+		},
+		"rust": {
+			"inputs": {
+				"url": "http://localhost:9002",
+				"node_name": "chain-test"
+			}
+		},
+		"java": {
+			"inputs": {
+				"url": "http://localhost:9003",
+				"node_name": "chain-test"
+			}
+		},
+		"csharp": {
+			"inputs": {
+				"url": "http://localhost:9004",
+				"node_name": "chain-test"
+			}
+		},
+		"php": {
+			"inputs": {
+				"url": "http://localhost:9005",
+				"node_name": "chain-test"
+			}
+		},
+		"ruby": {
+			"inputs": {
+				"url": "http://localhost:9006",
+				"node_name": "chain-test"
+			}
+		},
+		"python": {
+			"inputs": {
+				"chain": "js/ctx.response.data.chain",
+				"origin": "js/ctx.response.data.origin"
+			}
+		}
+	}
+}

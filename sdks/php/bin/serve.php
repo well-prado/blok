@@ -6,6 +6,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use Blok\Nanoservice\Config\ServerConfig;
 use Blok\Nanoservice\Examples\ApiCallNode;
+use Blok\Nanoservice\Examples\ChainTestNode;
 use Blok\Nanoservice\Examples\HelloWorldNode;
 use Blok\Nanoservice\Examples\TransformDataNode;
 use Blok\Nanoservice\Node\NodeRegistry;
@@ -19,6 +20,7 @@ $registry = new NodeRegistry($config->version);
 $registry->register('hello-world', new HelloWorldNode());
 $registry->register('api-call', new ApiCallNode());
 $registry->register('transform-data', new TransformDataNode());
+$registry->register('chain-test', new ChainTestNode());
 
 echo sprintf("Registered %d nodes: %s\n", $registry->count(), implode(', ', $registry->nodeNames()));
 

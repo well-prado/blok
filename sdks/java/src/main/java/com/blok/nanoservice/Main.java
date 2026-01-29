@@ -6,6 +6,7 @@ import com.blok.nanoservice.middleware.LoggingMiddleware;
 import com.blok.nanoservice.middleware.RecoveryMiddleware;
 import com.blok.nanoservice.node.NodeRegistry;
 import com.blok.nanoservice.nodes.ApiCallNode;
+import com.blok.nanoservice.nodes.ChainTestNode;
 import com.blok.nanoservice.nodes.HelloWorldNode;
 import com.blok.nanoservice.nodes.TransformDataNode;
 import com.blok.nanoservice.server.RuntimeServer;
@@ -27,6 +28,7 @@ public class Main {
         registry.register("hello-world", new HelloWorldNode());
         registry.register("api-call", new ApiCallNode());
         registry.register("transform-data", new TransformDataNode());
+        registry.register("chain-test", new ChainTestNode());
 
         // Add middleware
         Logger logger = new Logger(config.getLogLevel());

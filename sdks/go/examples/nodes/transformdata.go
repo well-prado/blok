@@ -137,6 +137,7 @@ const (
 	HelloWorldNodeName    = "hello-world"
 	ApiCallNodeName       = "api-call"
 	TransformDataNodeName = "transform-data"
+	ChainTestNodeName     = "chain-test"
 )
 
 // RegisterAll registers all example nodes with the registry.
@@ -144,6 +145,7 @@ func RegisterAll(registry *nanoservice.NodeRegistry) {
 	registry.Register(HelloWorldNodeName, &HelloWorldNode{})
 	registry.Register(ApiCallNodeName, &ApiCallNode{})
 	registry.Register(TransformDataNodeName, &TransformDataNode{})
+	registry.Register(ChainTestNodeName, &ChainTestNode{})
 }
 
 // RegisterDefaults is an alias for RegisterAll for convenience.

@@ -1,0 +1,101 @@
+version: "3.8"
+
+# Cross-Runtime Chain Test Infrastructure
+# Runs all SDK runtime containers for end-to-end testing.
+#
+# Usage:
+#   docker compose up -d --build
+#   docker compose ps          # wait for all "healthy"
+#   docker compose down
+
+services:
+  sdk-go:
+    build:
+      context: ../../../sdks/go
+      dockerfile: Dockerfile
+    ports:
+      - "9001:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-rust:
+    build:
+      context: ../../../sdks/rust
+      dockerfile: Dockerfile
+    ports:
+      - "9002:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-java:
+    build:
+      context: ../../../sdks/java
+      dockerfile: Dockerfile
+    ports:
+      - "9003:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-csharp:
+    build:
+      context: ../../../sdks/csharp
+      dockerfile: Dockerfile
+    ports:
+      - "9004:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-php:
+    build:
+      context: ../../../sdks/php
+      dockerfile: Dockerfile
+    ports:
+      - "9005:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sdk-ruby:
+    build:
+      context: ../../../sdks/ruby
+      dockerfile: Dockerfile
+    ports:
+      - "9006:8080"
+    environment:
+      PORT: "8080"
+      VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

@@ -10,6 +10,7 @@ from nodes.generate_pdf.node import GeneratePDF
 from nodes.test_simple.node import TestSimple
 from nodes.test_context.node import TestContext
 from nodes.test_error.node import TestError
+from nodes.chain_test.node import ChainTest
 
 nodes = {
     "api_call": ApiCall(),
@@ -19,6 +20,7 @@ nodes = {
     "test-simple": TestSimple(),
     "test-context": TestContext(),
     "test-error": TestError(),
+    "chain-test": ChainTest(),
 }
 
 def get_nodes():
