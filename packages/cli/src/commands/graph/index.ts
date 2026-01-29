@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import * as p from "@clack/prompts";
+import type { VisualizerWorkflowDef } from "@nanoservice-ts/runner";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
 import { loadWorkflows } from "../../services/workflow-loader.js";
 
@@ -46,7 +47,7 @@ program
 				});
 
 				for (const wf of workflows) {
-					graph.addWorkflow(wf.def as Record<string, unknown>);
+					graph.addWorkflow(wf.def as unknown as VisualizerWorkflowDef);
 				}
 
 				let output: string;

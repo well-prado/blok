@@ -28,6 +28,7 @@
 	},
 	"keywords": ["nanoctl", "cli", "nanoservice", "nanoservice-ts"],
 	"dependencies": {
+		"@nanoservice-ts/runner": "workspace:*",
 		"@clack/prompts": "^0.9.1",
 		"chalk": "^5.4.1",
 		"commander": "^13.1.0",
