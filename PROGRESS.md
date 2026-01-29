@@ -1,8 +1,8 @@
 # Blok Framework Progress Tracker
 
-> **Last Updated:** 2026-01-29 (PERF-2 Complete: Distributed Tracing + Structured Logging + APM Integration + 1137 runner tests passing!)
-> **Status:** 🔄 Active Development - All Phases COMPLETE + Enterprise COMPLETE + DX Tooling COMPLETE + Full Observability Stack!
-> **Completion:** 100% Overall (Phase 1-5: 100%, Enterprise: 100%, DX: 100%, Observability: 100%!)
+> **Last Updated:** 2026-01-29 (INFRA-3 Complete: CloudWatch + Azure Monitor integrations + 1189 runner tests passing!)
+> **Status:** 🔄 Active Development - All Phases COMPLETE + Enterprise COMPLETE + DX Tooling COMPLETE + Full Observability Stack + INFRA-3 Monitoring COMPLETE!
+> **Completion:** 100% Overall (Phase 1-5: 100%, Enterprise: 100%, DX: 100%, Observability: 100%, INFRA-3: 100%!)
 
 ## Legend
 
@@ -1404,6 +1404,48 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ **1137 Runner Tests Passing** (86 new + 1051 existing)
 - ✅ **4 Grafana Dashboards**: blok-overview, blok-triggers, blok-system, blok-tracing
 - ✅ **Full Observability Stack**: Prometheus (metrics) + Tempo (traces) + Loki (logs) + Grafana (visualization)
+
+### 2026-01-29 - INFRA-3 Monitoring COMPLETE (CloudWatch + Azure Monitor)
+
+**INFRA-3: CloudWatch Integration - COMPLETE:**
+- ✅ Created `CloudWatchIntegration.ts` - AWS CloudWatch metrics, logs, and traces
+  - **Metrics**: Publishes to CloudWatch Metrics via `@aws-sdk/client-cloudwatch` (PutMetricData)
+  - **Logs**: Sends structured JSON logs to CloudWatch Logs via `@aws-sdk/client-cloudwatch-logs` (PutLogEvents)
+  - **Traces**: OTLP export via ADOT Collector → AWS X-Ray (reuses TracingBootstrap)
+  - Configurable namespace, log group, log stream, region, sampling ratio
+  - `putMetric()` with custom dimensions (Service, Environment, user-defined)
+  - `putLog()` with sequence token tracking for ordered log delivery
+  - `logWorkflowError()` with full context (workflow name, path, request ID, node name)
+  - `recordWorkflowExecution()` convenience method (duration + error count metrics)
+  - Lazy dynamic imports — `@aws-sdk/*` packages are optional peer dependencies
+  - Graceful degradation: returns false if SDK not installed
+  - Auto-creates log group and log stream on init
+  - Stats tracking: metricsPublished, logsPublished, metricErrors, logErrors
+
+**INFRA-3: Azure Monitor Integration - COMPLETE:**
+- ✅ Created `AzureMonitorIntegration.ts` - Azure Application Insights
+  - **Two export modes**:
+    - `"azure"` (default): Uses `@azure/monitor-opentelemetry-exporter` for native Azure trace export
+    - `"otlp"`: Uses generic OTLP exporter with Azure ingestion endpoint + instrumentation key header
+  - **Custom telemetry** via `applicationinsights` SDK (optional):
+    - `trackEvent()` - custom events (e.g., WorkflowCompleted, WorkflowFailed)
+    - `trackException()` - exception tracking with properties
+    - `trackMetric()` - numeric metrics with custom properties
+  - `recordWorkflowExecution()` convenience method (event + duration + error metrics)
+  - Connection string parsing (extracts IngestionEndpoint + InstrumentationKey)
+  - Falls back to `APPLICATIONINSIGHTS_CONNECTION_STRING` env var
+  - Lazy dynamic imports — Azure packages are optional peer dependencies
+  - Graceful degradation: returns false if SDK/connection string not available
+  - Stats tracking: eventsTracked, exceptionsTracked, metricsTracked
+
+**Tests: 49 New Integration Tests (all passing):**
+- ✅ **CloudWatchIntegration Tests**: 25 tests (construction, init, putMetric, putLog, logWorkflowError, recordWorkflowExecution, stats, lifecycle, mocked SDK operations, sequence token tracking, error handling)
+- ✅ **AzureMonitorIntegration Tests**: 24 tests (construction, init, trackEvent, trackException, trackMetric, recordWorkflowExecution, stats, lifecycle, connection string parsing, mocked telemetry client, malformed connection strings)
+
+**Impact:**
+- ✅ **INFRA-3 Monitoring: 100% COMPLETE** — Prometheus, Grafana, Structured Logging, CloudWatch, Azure Monitor all operational
+- ✅ **1189 Runner Tests Passing** (49 new + 1140 existing)
+- ✅ **Cloud Provider Coverage**: AWS (CloudWatch + X-Ray), Azure (Application Insights), DataDog, New Relic, Sentry, Prometheus/Grafana, generic OTLP
 
 ---
 
