@@ -1,0 +1,65 @@
+[package]
+name = "nanoservice-rs"
+version = "1.0.0"
+edition = "2021"
+description = "Blok Runtime SDK for Rust — Build workflow nodes in Rust for the Blok orchestration framework"
+license = "MIT"
+repository = "https://github.com/nickincloud/nanoservice-rs"
+keywords = ["blok", "workflow", "runtime", "nanoservice", "orchestration"]
+categories = ["web-programming", "network-programming"]
+readme = "README.md"
+
+[[bin]]
+name = "nanoservice"
+path = "src/main.rs"
+
+[lib]
+name = "nanoservice"
+path = "src/lib.rs"
+
+[features]
+default = ["http"]
+http = ["axum", "tower", "tower-http"]
+grpc = ["tonic", "prost", "base64"]
+full = ["http", "grpc"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP server (feature-gated)
+axum = { version = "0.7", features = ["json"], optional = true }
+tower = { version = "0.4", features = ["timeout"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+
+# gRPC server (feature-gated)
+tonic = { version = "0.12", optional = true }
+prost = { version = "0.13", optional = true }
+base64 = { version = "0.22", optional = true }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+async-trait = "0.1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP client for example nodes
+reqwest = { version = "0.12", features = ["json"] }
+
+[dev-dependencies]
+axum-test = "14"
+tokio-test = "0.4"
+reqwest = { version = "0.12", features = ["json"] }
+
+[build-dependencies]
+tonic-build = { version = "0.12", optional = true }
+
+[package.metadata.docs.rs]
+all-features = true

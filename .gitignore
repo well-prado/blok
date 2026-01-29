@@ -177,3 +177,30 @@ test-results/
 
 # Runtime container artifacts
 .docker-runtime-cache/
+
+# ── SDK build artifacts ──────────────────────────────────────────────────
+
+# Go SDK
+sdks/go/cmd/server/server
+sdks/go/examples/*/main
+
+# Rust SDK
+sdks/rust/target/
+
+# Java SDK (Maven)
+sdks/java/target/
+
+# C# SDK (.NET)
+sdks/csharp/**/bin/
+sdks/csharp/**/obj/
+
+# PHP SDK (Composer)
+sdks/php/vendor/
+sdks/php/.phpunit.cache/
+sdks/php/composer.lock
+
+# Ruby SDK (Bundler)
+sdks/ruby/vendor/
+sdks/ruby/.bundle/
+sdks/ruby/Gemfile.lock
+sdks/ruby/pkg/
