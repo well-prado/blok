@@ -11,7 +11,7 @@
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
-		"build": "rm -rf dist && mkdir dist && copyfiles -u 1 proto/** dist/proto && npx tsc",
+		"build": "rm -rf dist && npx tsc",
 		"build:dev": "pnpm run build && tsc --watch",
 		"test:dev": "vitest",
 		"test": "vitest run",
@@ -19,12 +19,9 @@
 		"test:integration:dev": "vitest --config vitest.integration.config.ts",
 		"test:integration:coverage": "vitest run --config vitest.integration.config.ts --coverage",
 		"test:all": "vitest run && vitest run --config vitest.integration.config.ts",
-		"typecheck": "tsc --noEmit --incremental",
-		"build:proto": "npx buf generate ."
+		"typecheck": "tsc --noEmit --incremental"
 	},
 	"devDependencies": {
-		"@bufbuild/buf": "^1.50.0",
-		"@bufbuild/protoc-gen-es": "^2.2.3",
 		"@types/lodash": "^4.14.196",
 		"@types/node": "^22.13.4",
 		"@vitest/coverage-v8": "^4.0.18",
@@ -36,11 +33,6 @@
 		"vitest": "^3.1.4"
 	},
 	"dependencies": {
-		"@bufbuild/protobuf": "^2.2.3",
-		"@connectrpc/connect": "^2.0.1",
-		"@connectrpc/connect-node": "^2.0.1",
-		"@grpc/grpc-js": "^1.13.0",
-		"@grpc/proto-loader": "^0.7.13",
 		"@nanoservice-ts/helper": "workspace:*",
 		"@nanoservice-ts/shared": "workspace:*",
 		"@opentelemetry/api": "^1.9.0",

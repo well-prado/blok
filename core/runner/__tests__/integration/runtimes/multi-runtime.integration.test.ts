@@ -2,7 +2,7 @@
  * Multi-Runtime Workflow Integration Tests
  *
  * Tests workflow execution across multiple runtime adapters:
- * 1. ✅ NodeJS → Python3 data flow (in-process → gRPC)
+ * 1. ✅ NodeJS → Python3 data flow (in-process → HTTP)
  * 2. ✅ NodeJS → Docker data flow (in-process → HTTP container)
  * 3. ✅ Context propagation across runtime boundaries
  * 4. ✅ Error propagation across runtimes
@@ -12,7 +12,7 @@
  * 8. ✅ Mixed runtime workflow patterns
  *
  * Requires: NodeJS adapter always available
- * Optional: Python3 gRPC server, Docker for container-based runtimes
+ * Optional: Python3 HTTP SDK container on port 9007
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
@@ -20,19 +20,17 @@ import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
-import { Python3RuntimeAdapter } from "../../../src/adapters/Python3RuntimeAdapter";
+import { HttpRuntimeAdapter } from "../../../src/adapters/HttpRuntimeAdapter";
 import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
 import type { RuntimeAdapter, ExecutionResult } from "../../../src/adapters/RuntimeAdapter";
 import NanoService from "../../../src/NanoService";
 import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
 import RunnerNode from "../../../src/RunnerNode";
-import { startPython3Server, type GrpcServerHandle } from "../utils/grpc";
 
 // ============================================================================
 // Test Configuration
 // ============================================================================
 
-let python3Server: GrpcServerHandle | null = null;
 let python3Available = false;
 
 // ============================================================================
@@ -203,33 +201,29 @@ beforeAll(async () => {
 		registry.register(new NodeJsRuntimeAdapter());
 	}
 
-	// Try to start Python3 gRPC server
+	// Check if Python3 HTTP SDK is reachable (running in Docker on port 9007)
+	const python3Host = process.env.RUNTIME_PYTHON3_HOST || "localhost";
+	const python3Port = process.env.RUNTIME_PYTHON3_PORT ? Number.parseInt(process.env.RUNTIME_PYTHON3_PORT) : 9007;
 	try {
-		python3Server = await startPython3Server({
-			port: 50053, // Different port to avoid conflicts
-			startupTimeout: 10000,
-			verbose: process.env.VERBOSE === "true",
+		const healthResponse = await fetch(`http://${python3Host}:${python3Port}/health`, {
+			signal: AbortSignal.timeout(3000),
 		});
-		python3Available = true;
+		if (healthResponse.ok) {
+			python3Available = true;
 
-		if (!registry.has("python3")) {
-			registry.register(new Python3RuntimeAdapter("localhost", 50053));
-		} else {
-			registry.replace(new Python3RuntimeAdapter("localhost", 50053));
+			if (!registry.has("python3")) {
+				registry.register(new HttpRuntimeAdapter("python3", python3Host, python3Port));
+			} else {
+				registry.replace(new HttpRuntimeAdapter("python3", python3Host, python3Port));
+			}
+
+			console.log("✅ Python3 HTTP SDK available for multi-runtime tests");
 		}
-
-		console.log("✅ Python3 gRPC server available for multi-runtime tests");
 	} catch {
 		python3Available = false;
-		console.warn("⚠️  Python3 gRPC server not available - Python cross-runtime tests will be skipped");
+		console.warn("⚠️  Python3 HTTP SDK not available - Python cross-runtime tests will be skipped");
 	}
 }, 20000);
-
-afterAll(async () => {
-	if (python3Server) {
-		await python3Server.stop();
-	}
-}, 10000);
 
 // ============================================================================
 // Tests

@@ -56,9 +56,9 @@ beforeAll(() => {
   process.env.NODE_ENV = 'test';
   process.env.LOG_LEVEL = 'error'; // Reduce noise in tests
 
-  // Runtime configuration for tests
+  // Runtime configuration for tests (HTTP SDK ports)
   process.env.RUNTIME_PYTHON3_HOST = 'localhost';
-  process.env.RUNTIME_PYTHON3_PORT = '50051';
+  process.env.RUNTIME_PYTHON3_PORT = '9007';
 
   console.log('\n✅ Integration test environment ready\n');
 });

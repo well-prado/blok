@@ -68,8 +68,8 @@ describe("CostEstimator", () => {
 			expect(getRuntimeCategory("bun")).toBe("in-process");
 		});
 
-		it("should categorize python3 as grpc", () => {
-			expect(getRuntimeCategory("python3")).toBe("grpc");
+		it("should categorize python3 as docker", () => {
+			expect(getRuntimeCategory("python3")).toBe("docker");
 		});
 
 		it("should categorize go as docker", () => {
@@ -118,7 +118,7 @@ describe("CostEstimator", () => {
 			expect(validator.category).toBe("in-process");
 
 			const mlModel = estimate.nodes.find((n) => n.nodeName === "ml-model")!;
-			expect(mlModel.category).toBe("grpc");
+			expect(mlModel.category).toBe("docker");
 
 			const transformer = estimate.nodes.find((n) => n.nodeName === "transformer")!;
 			expect(transformer.category).toBe("docker");

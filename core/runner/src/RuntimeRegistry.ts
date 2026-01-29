@@ -7,7 +7,7 @@ import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
  * ```typescript
  * const registry = RuntimeRegistry.getInstance();
  * registry.register(new NodeJsRuntimeAdapter());
- * registry.register(new Python3RuntimeAdapter());
+ * registry.register(new HttpRuntimeAdapter("python3", "localhost", 9007));
  *
  * const adapter = registry.get("nodejs");
  * const result = await adapter.execute(node, ctx);

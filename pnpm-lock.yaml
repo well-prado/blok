@@ -32,21 +32,6 @@ importers:
 
   core/runner:
     dependencies:
-      '@bufbuild/protobuf':
-        specifier: ^2.2.3
-        version: 2.2.5
-      '@connectrpc/connect':
-        specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)
-      '@connectrpc/connect-node':
-        specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
-      '@grpc/grpc-js':
-        specifier: ^1.13.0
-        version: 1.13.2
-      '@grpc/proto-loader':
-        specifier: ^0.7.13
-        version: 0.7.13
       '@nanoservice-ts/helper':
         specifier: workspace:*
         version: link:../workflow-helper
@@ -99,12 +84,6 @@ importers:
         specifier: ^3.24.2
         version: 3.24.2
     devDependencies:
-      '@bufbuild/buf':
-        specifier: ^1.50.0
-        version: 1.50.1
-      '@bufbuild/protoc-gen-es':
-        specifier: ^2.2.3
-        version: 2.2.5(@bufbuild/protobuf@2.2.5)
       '@types/lodash':
         specifier: ^4.14.196
         version: 4.17.16

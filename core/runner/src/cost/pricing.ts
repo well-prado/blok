@@ -20,10 +20,9 @@ export interface RuntimeCostModel {
 /** Map RuntimeKind to cost category */
 export function getRuntimeCategory(runtimeKind: string, stepType?: string): RuntimeCostCategory {
 	if (runtimeKind === "wasm") return "wasm";
-	if (runtimeKind === "python3" || stepType === "runtime.python3") return "grpc";
 	if (runtimeKind === "nodejs" || runtimeKind === "bun" || stepType === "local" || stepType === "module")
 		return "in-process";
-	// go, java, rust, php, csharp, ruby, docker
+	// go, java, rust, php, csharp, ruby, python3, docker — all use HTTP SDK containers
 	return "docker";
 }
 

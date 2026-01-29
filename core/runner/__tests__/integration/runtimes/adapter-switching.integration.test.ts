@@ -19,7 +19,7 @@ import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
-import { Python3RuntimeAdapter } from "../../../src/adapters/Python3RuntimeAdapter";
+import { HttpRuntimeAdapter } from "../../../src/adapters/HttpRuntimeAdapter";
 import { DockerRuntimeAdapter } from "../../../src/adapters/DockerRuntimeAdapter";
 import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
 import type { RuntimeAdapter, ExecutionResult, RuntimeKind } from "../../../src/adapters/RuntimeAdapter";
@@ -177,7 +177,7 @@ describe("Adapter Switching & Backward Compatibility", () => {
 		});
 
 		it("should register a Python3 adapter", () => {
-			const adapter = new Python3RuntimeAdapter("localhost", 50051);
+			const adapter = new HttpRuntimeAdapter("python3", "localhost", 9007);
 			registry.register(adapter);
 
 			expect(registry.has("python3")).toBe(true);
@@ -200,7 +200,7 @@ describe("Adapter Switching & Backward Compatibility", () => {
 
 		it("should register multiple adapters", () => {
 			registry.register(new NodeJsRuntimeAdapter());
-			registry.register(new Python3RuntimeAdapter("localhost", 50051));
+			registry.register(new HttpRuntimeAdapter("python3", "localhost", 9007));
 			registry.register(new MockRuntimeAdapter("go"));
 			registry.register(new MockRuntimeAdapter("java"));
 

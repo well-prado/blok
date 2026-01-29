@@ -13,7 +13,6 @@ import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
 import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
-import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
 
@@ -118,7 +117,6 @@ export {
 	RuntimeRegistry,
 	RuntimeAdapterNode,
 	NodeJsRuntimeAdapter,
-	Python3RuntimeAdapter,
 	DockerRuntimeAdapter,
 	HttpRuntimeAdapter,
 	BunRuntimeAdapter,
