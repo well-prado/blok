@@ -1,0 +1,429 @@
+{
+	"name": "SendGrid Email Integration",
+	"description": "Sends transactional emails via SendGrid with support for templates, dynamic data, attachments, and delivery tracking. Routes between template-based and custom HTML email modes.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/email/send",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "validate-email-request",
+			"node": "@nanoservice-ts/json-validator",
+			"type": "module"
+		},
+		{
+			"name": "route-email-mode",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"validate-email-request": {
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["to", "subject"],
+					"properties": {
+						"to": {
+							"oneOf": [
+								{ "type": "string", "format": "email" },
+								{
+									"type": "array",
+									"items": {
+										"type": "object",
+										"required": ["email"],
+										"properties": {
+											"email": { "type": "string", "format": "email" },
+											"name": { "type": "string" }
+										}
+									},
+									"minItems": 1,
+									"maxItems": 100
+								}
+							]
+						},
+						"subject": { "type": "string", "minLength": 1 },
+						"templateId": { "type": "string" },
+						"templateData": { "type": "object" },
+						"htmlContent": { "type": "string" },
+						"textContent": { "type": "string" },
+						"from": {
+							"type": "object",
+							"properties": {
+								"email": { "type": "string", "format": "email" },
+								"name": { "type": "string" }
+							}
+						},
+						"replyTo": {
+							"type": "object",
+							"properties": {
+								"email": { "type": "string", "format": "email" },
+								"name": { "type": "string" }
+							}
+						},
+						"cc": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"email": { "type": "string", "format": "email" },
+									"name": { "type": "string" }
+								}
+							}
+						},
+						"bcc": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"email": { "type": "string", "format": "email" },
+									"name": { "type": "string" }
+								}
+							}
+						},
+						"attachments": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"required": ["content", "filename", "type"],
+								"properties": {
+									"content": { "type": "string" },
+									"filename": { "type": "string" },
+									"type": { "type": "string" },
+									"disposition": {
+										"type": "string",
+										"enum": ["attachment", "inline"]
+									}
+								}
+							}
+						},
+						"categories": {
+							"type": "array",
+							"items": { "type": "string" }
+						},
+						"sendAt": { "type": "integer" },
+						"trackOpens": { "type": "boolean" },
+						"trackClicks": { "type": "boolean" }
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		"route-email-mode": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.request.body.templateId !== undefined && ctx.request.body.templateId !== ''",
+					"steps": [
+						{
+							"name": "send-template-email",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-template-result",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "send-custom-email",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-custom-result",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"send-template-email": {
+			"inputs": {
+				"url": "https://api.sendgrid.com/v3/mail/send",
+				"method": "POST",
+				"headers": {
+					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}",
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"personalizations": [
+						{
+							"to": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to : [{ email: ctx.request.body.to }]",
+							"cc": "js/ctx.request.body.cc || []",
+							"bcc": "js/ctx.request.body.bcc || []",
+							"subject": "${ctx.request.body.subject}",
+							"dynamic_template_data": "js/ctx.request.body.templateData || {}"
+						}
+					],
+					"from": {
+						"email": "js/ctx.request.body.from?.email || process.env.FROM_EMAIL",
+						"name": "js/ctx.request.body.from?.name || process.env.FROM_NAME"
+					},
+					"reply_to": "js/ctx.request.body.replyTo || undefined",
+					"template_id": "${ctx.request.body.templateId}",
+					"attachments": "js/ctx.request.body.attachments || undefined",
+					"categories": "js/ctx.request.body.categories || ['transactional']",
+					"send_at": "js/ctx.request.body.sendAt || undefined",
+					"tracking_settings": {
+						"open_tracking": {
+							"enable": "js/ctx.request.body.trackOpens !== false"
+						},
+						"click_tracking": {
+							"enable": "js/ctx.request.body.trackClicks !== false"
+						}
+					}
+				},
+				"responseType": "application/json"
+			}
+		},
+		"send-custom-email": {
+			"inputs": {
+				"url": "https://api.sendgrid.com/v3/mail/send",
+				"method": "POST",
+				"headers": {
+					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}",
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"personalizations": [
+						{
+							"to": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to : [{ email: ctx.request.body.to }]",
+							"cc": "js/ctx.request.body.cc || []",
+							"bcc": "js/ctx.request.body.bcc || []",
+							"subject": "${ctx.request.body.subject}"
+						}
+					],
+					"from": {
+						"email": "js/ctx.request.body.from?.email || process.env.FROM_EMAIL",
+						"name": "js/ctx.request.body.from?.name || process.env.FROM_NAME"
+					},
+					"reply_to": "js/ctx.request.body.replyTo || undefined",
+					"content": [
+						{
+							"type": "text/plain",
+							"value": "js/ctx.request.body.textContent || ''"
+						},
+						{
+							"type": "text/html",
+							"value": "js/ctx.request.body.htmlContent || ctx.request.body.textContent || ''"
+						}
+					],
+					"attachments": "js/ctx.request.body.attachments || undefined",
+					"categories": "js/ctx.request.body.categories || ['transactional']",
+					"send_at": "js/ctx.request.body.sendAt || undefined",
+					"tracking_settings": {
+						"open_tracking": {
+							"enable": "js/ctx.request.body.trackOpens !== false"
+						},
+						"click_tracking": {
+							"enable": "js/ctx.request.body.trackClicks !== false"
+						}
+					}
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-template-result": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.statusCode >= 200 && ctx.response.statusCode < 300",
+					"steps": [
+						{
+							"name": "log-template-success",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "template-success-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "log-template-failure",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "template-error-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"route-custom-result": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.statusCode >= 200 && ctx.response.statusCode < 300",
+					"steps": [
+						{
+							"name": "log-custom-success",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "custom-success-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "log-custom-failure",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "custom-error-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"log-template-success": {
+			"inputs": {
+				"url": "${process.env.LOGGING_API_URL}/api/logs",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.LOGGING_API_KEY}"
+				},
+				"body": {
+					"level": "info",
+					"service": "email",
+					"action": "send_template_email",
+					"status": "success",
+					"templateId": "${ctx.request.body.templateId}",
+					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1",
+					"messageId": "${ctx.response.headers['x-message-id']}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"log-template-failure": {
+			"inputs": {
+				"url": "${process.env.LOGGING_API_URL}/api/logs",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.LOGGING_API_KEY}"
+				},
+				"body": {
+					"level": "error",
+					"service": "email",
+					"action": "send_template_email",
+					"status": "failed",
+					"templateId": "${ctx.request.body.templateId}",
+					"error": "js/ctx.response.data"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"log-custom-success": {
+			"inputs": {
+				"url": "${process.env.LOGGING_API_URL}/api/logs",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.LOGGING_API_KEY}"
+				},
+				"body": {
+					"level": "info",
+					"service": "email",
+					"action": "send_custom_email",
+					"status": "success",
+					"subject": "${ctx.request.body.subject}",
+					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1",
+					"messageId": "${ctx.response.headers['x-message-id']}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"log-custom-failure": {
+			"inputs": {
+				"url": "${process.env.LOGGING_API_URL}/api/logs",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.LOGGING_API_KEY}"
+				},
+				"body": {
+					"level": "error",
+					"service": "email",
+					"action": "send_custom_email",
+					"status": "failed",
+					"subject": "${ctx.request.body.subject}",
+					"error": "js/ctx.response.data"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"template-success-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "Template email sent successfully.",
+					"messageId": "${ctx.response.headers['x-message-id']}",
+					"templateId": "${ctx.request.body.templateId}",
+					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1"
+				}
+			}
+		},
+		"template-error-response": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "EMAIL_SEND_FAILED",
+					"message": "Failed to send template email.",
+					"details": "js/ctx.response.data"
+				}
+			}
+		},
+		"custom-success-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "Email sent successfully.",
+					"messageId": "${ctx.response.headers['x-message-id']}",
+					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1"
+				}
+			}
+		},
+		"custom-error-response": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "EMAIL_SEND_FAILED",
+					"message": "Failed to send email.",
+					"details": "js/ctx.response.data"
+				}
+			}
+		}
+	}
+}

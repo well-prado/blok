@@ -1,0 +1,635 @@
+{
+	"$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"metadata": {
+		"description": "Blok Framework - Azure ARM Deployment Template. Deploys the Blok workflow orchestration platform using Azure Container Instances with VNet integration, Log Analytics, and optional Application Gateway."
+	},
+	"parameters": {
+		"environment": {
+			"type": "string",
+			"defaultValue": "dev",
+			"allowedValues": ["dev", "staging", "prod"],
+			"metadata": {
+				"description": "Deployment environment"
+			}
+		},
+		"appName": {
+			"type": "string",
+			"defaultValue": "blok",
+			"minLength": 2,
+			"maxLength": 21,
+			"metadata": {
+				"description": "Application name used as prefix for all resources"
+			}
+		},
+		"location": {
+			"type": "string",
+			"defaultValue": "[resourceGroup().location]",
+			"metadata": {
+				"description": "Azure region for all resources"
+			}
+		},
+		"containerImage": {
+			"type": "string",
+			"metadata": {
+				"description": "Full container image URI (e.g., myregistry.azurecr.io/blok:v1.0.0)"
+			}
+		},
+		"containerPort": {
+			"type": "int",
+			"defaultValue": 4000,
+			"minValue": 1,
+			"maxValue": 65535,
+			"metadata": {
+				"description": "Port the Blok application listens on"
+			}
+		},
+		"metricsPort": {
+			"type": "int",
+			"defaultValue": 9091,
+			"minValue": 1,
+			"maxValue": 65535,
+			"metadata": {
+				"description": "Port for Prometheus metrics endpoint"
+			}
+		},
+		"cpuCores": {
+			"type": "string",
+			"defaultValue": "1.0",
+			"allowedValues": ["0.5", "1.0", "2.0", "4.0"],
+			"metadata": {
+				"description": "CPU cores for the container"
+			}
+		},
+		"memoryGb": {
+			"type": "string",
+			"defaultValue": "1.5",
+			"allowedValues": ["0.5", "1.0", "1.5", "2.0", "4.0", "8.0", "16.0"],
+			"metadata": {
+				"description": "Memory in GB for the container"
+			}
+		},
+		"instanceCount": {
+			"type": "int",
+			"defaultValue": 2,
+			"minValue": 1,
+			"maxValue": 20,
+			"metadata": {
+				"description": "Number of container instances to deploy"
+			}
+		},
+		"enableApplicationGateway": {
+			"type": "bool",
+			"defaultValue": false,
+			"metadata": {
+				"description": "Enable Azure Application Gateway for load balancing"
+			}
+		},
+		"enableMonitoring": {
+			"type": "bool",
+			"defaultValue": true,
+			"metadata": {
+				"description": "Enable Log Analytics workspace and monitoring"
+			}
+		},
+		"registryServer": {
+			"type": "string",
+			"defaultValue": "",
+			"metadata": {
+				"description": "Container registry server (e.g., myregistry.azurecr.io). Leave empty for public images."
+			}
+		},
+		"registryUsername": {
+			"type": "securestring",
+			"defaultValue": "",
+			"metadata": {
+				"description": "Container registry username"
+			}
+		},
+		"registryPassword": {
+			"type": "securestring",
+			"defaultValue": "",
+			"metadata": {
+				"description": "Container registry password"
+			}
+		},
+		"vnetAddressPrefix": {
+			"type": "string",
+			"defaultValue": "10.0.0.0/16",
+			"metadata": {
+				"description": "Address prefix for the virtual network"
+			}
+		},
+		"logRetentionDays": {
+			"type": "int",
+			"defaultValue": 30,
+			"minValue": 7,
+			"maxValue": 730,
+			"metadata": {
+				"description": "Log Analytics workspace retention in days"
+			}
+		}
+	},
+	"variables": {
+		"namePrefix": "[concat(parameters('appName'), '-', parameters('environment'))]",
+		"vnetName": "[concat(variables('namePrefix'), '-vnet')]",
+		"aciSubnetName": "[concat(variables('namePrefix'), '-aci-subnet')]",
+		"appGwSubnetName": "[concat(variables('namePrefix'), '-appgw-subnet')]",
+		"logAnalyticsName": "[concat(variables('namePrefix'), '-logs')]",
+		"appGwName": "[concat(variables('namePrefix'), '-appgw')]",
+		"appGwPublicIpName": "[concat(variables('namePrefix'), '-appgw-pip')]",
+		"nsgName": "[concat(variables('namePrefix'), '-nsg')]",
+		"aciSubnetPrefix": "10.0.1.0/24",
+		"appGwSubnetPrefix": "10.0.2.0/24",
+		"usePrivateRegistry": "[not(empty(parameters('registryServer')))]",
+		"registryCredentials": [
+			{
+				"server": "[parameters('registryServer')]",
+				"username": "[parameters('registryUsername')]",
+				"password": "[parameters('registryPassword')]"
+			}
+		],
+		"isProduction": "[equals(parameters('environment'), 'prod')]",
+		"nodeEnv": "[if(variables('isProduction'), 'production', parameters('environment'))]",
+		"commonTags": {
+			"Project": "[parameters('appName')]",
+			"Environment": "[parameters('environment')]",
+			"ManagedBy": "arm-template",
+			"Framework": "blok"
+		}
+	},
+	"resources": [
+		{
+			"type": "Microsoft.Network/networkSecurityGroups",
+			"apiVersion": "2023-11-01",
+			"name": "[variables('nsgName')]",
+			"location": "[parameters('location')]",
+			"tags": "[variables('commonTags')]",
+			"properties": {
+				"securityRules": [
+					{
+						"name": "AllowHTTPInbound",
+						"properties": {
+							"priority": 100,
+							"direction": "Inbound",
+							"access": "Allow",
+							"protocol": "Tcp",
+							"sourceAddressPrefix": "*",
+							"sourcePortRange": "*",
+							"destinationAddressPrefix": "*",
+							"destinationPortRange": "[string(parameters('containerPort'))]",
+							"description": "Allow HTTP traffic to Blok application"
+						}
+					},
+					{
+						"name": "AllowMetricsInbound",
+						"properties": {
+							"priority": 110,
+							"direction": "Inbound",
+							"access": "Allow",
+							"protocol": "Tcp",
+							"sourceAddressPrefix": "VirtualNetwork",
+							"sourcePortRange": "*",
+							"destinationAddressPrefix": "*",
+							"destinationPortRange": "[string(parameters('metricsPort'))]",
+							"description": "Allow metrics scraping from VNet"
+						}
+					},
+					{
+						"name": "AllowHealthProbe",
+						"properties": {
+							"priority": 120,
+							"direction": "Inbound",
+							"access": "Allow",
+							"protocol": "Tcp",
+							"sourceAddressPrefix": "AzureLoadBalancer",
+							"sourcePortRange": "*",
+							"destinationAddressPrefix": "*",
+							"destinationPortRange": "*",
+							"description": "Allow Azure health probes"
+						}
+					}
+				]
+			}
+		},
+		{
+			"type": "Microsoft.Network/virtualNetworks",
+			"apiVersion": "2023-11-01",
+			"name": "[variables('vnetName')]",
+			"location": "[parameters('location')]",
+			"tags": "[variables('commonTags')]",
+			"dependsOn": [
+				"[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+			],
+			"properties": {
+				"addressSpace": {
+					"addressPrefixes": ["[parameters('vnetAddressPrefix')]"]
+				},
+				"subnets": [
+					{
+						"name": "[variables('aciSubnetName')]",
+						"properties": {
+							"addressPrefix": "[variables('aciSubnetPrefix')]",
+							"networkSecurityGroup": {
+								"id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+							},
+							"delegations": [
+								{
+									"name": "aciDelegation",
+									"properties": {
+										"serviceName": "Microsoft.ContainerInstance/containerGroups"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "[variables('appGwSubnetName')]",
+						"properties": {
+							"addressPrefix": "[variables('appGwSubnetPrefix')]"
+						}
+					}
+				]
+			}
+		},
+		{
+			"condition": "[parameters('enableMonitoring')]",
+			"type": "Microsoft.OperationalInsights/workspaces",
+			"apiVersion": "2023-09-01",
+			"name": "[variables('logAnalyticsName')]",
+			"location": "[parameters('location')]",
+			"tags": "[variables('commonTags')]",
+			"properties": {
+				"sku": {
+					"name": "PerGB2018"
+				},
+				"retentionInDays": "[parameters('logRetentionDays')]",
+				"features": {
+					"searchVersion": 1,
+					"enableLogAccessUsingOnlyResourcePermissions": true
+				},
+				"workspaceCapping": {
+					"dailyQuotaGb": "[if(variables('isProduction'), 10, 1)]"
+				}
+			}
+		},
+		{
+			"copy": {
+				"name": "containerGroupCopy",
+				"count": "[parameters('instanceCount')]"
+			},
+			"type": "Microsoft.ContainerInstance/containerGroups",
+			"apiVersion": "2023-05-01",
+			"name": "[concat(variables('namePrefix'), '-aci-', copyIndex())]",
+			"location": "[parameters('location')]",
+			"tags": "[union(variables('commonTags'), createObject('InstanceIndex', string(copyIndex())))]",
+			"dependsOn": [
+				"[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+				"[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+			],
+			"properties": {
+				"osType": "Linux",
+				"restartPolicy": "Always",
+				"sku": "Standard",
+				"imageRegistryCredentials": "[if(variables('usePrivateRegistry'), variables('registryCredentials'), createArray())]",
+				"subnetIds": [
+					{
+						"id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('aciSubnetName'))]"
+					}
+				],
+				"containers": [
+					{
+						"name": "[concat(variables('namePrefix'), '-app')]",
+						"properties": {
+							"image": "[parameters('containerImage')]",
+							"resources": {
+								"requests": {
+									"cpu": "[float(parameters('cpuCores'))]",
+									"memoryInGB": "[float(parameters('memoryGb'))]"
+								},
+								"limits": {
+									"cpu": "[float(parameters('cpuCores'))]",
+									"memoryInGB": "[float(parameters('memoryGb'))]"
+								}
+							},
+							"ports": [
+								{
+									"port": "[parameters('containerPort')]",
+									"protocol": "TCP"
+								},
+								{
+									"port": "[parameters('metricsPort')]",
+									"protocol": "TCP"
+								}
+							],
+							"environmentVariables": [
+								{
+									"name": "NODE_ENV",
+									"value": "[variables('nodeEnv')]"
+								},
+								{
+									"name": "APP_NAME",
+									"value": "[parameters('appName')]"
+								},
+								{
+									"name": "WORKFLOWS_PATH",
+									"value": "/app/workflows"
+								},
+								{
+									"name": "CONSOLE_LOG_ACTIVE",
+									"value": "true"
+								},
+								{
+									"name": "PORT",
+									"value": "[string(parameters('containerPort'))]"
+								},
+								{
+									"name": "INSTANCE_INDEX",
+									"value": "[string(copyIndex())]"
+								}
+							],
+							"livenessProbe": {
+								"httpGet": {
+									"path": "/health",
+									"port": "[parameters('containerPort')]",
+									"scheme": "http"
+								},
+								"initialDelaySeconds": 30,
+								"periodSeconds": 30,
+								"failureThreshold": 3,
+								"successThreshold": 1,
+								"timeoutSeconds": 5
+							},
+							"readinessProbe": {
+								"httpGet": {
+									"path": "/health",
+									"port": "[parameters('containerPort')]",
+									"scheme": "http"
+								},
+								"initialDelaySeconds": 15,
+								"periodSeconds": 10,
+								"failureThreshold": 3,
+								"successThreshold": 1,
+								"timeoutSeconds": 5
+							}
+						}
+					}
+				],
+				"diagnostics": {
+					"logAnalytics": "[if(parameters('enableMonitoring'), createObject('workspaceId', reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2023-09-01').customerId, 'workspaceKey', listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2023-09-01').primarySharedKey, 'logType', 'ContainerInsights', 'metadata', createObject('cluster-name', concat(variables('namePrefix'), '-aci'))), null())]"
+				},
+				"ipAddress": {
+					"type": "Private",
+					"ports": [
+						{
+							"port": "[parameters('containerPort')]",
+							"protocol": "TCP"
+						},
+						{
+							"port": "[parameters('metricsPort')]",
+							"protocol": "TCP"
+						}
+					]
+				}
+			}
+		},
+		{
+			"condition": "[parameters('enableApplicationGateway')]",
+			"type": "Microsoft.Network/publicIPAddresses",
+			"apiVersion": "2023-11-01",
+			"name": "[variables('appGwPublicIpName')]",
+			"location": "[parameters('location')]",
+			"tags": "[variables('commonTags')]",
+			"sku": {
+				"name": "Standard",
+				"tier": "Regional"
+			},
+			"properties": {
+				"publicIPAllocationMethod": "Static",
+				"dnsSettings": {
+					"domainNameLabel": "[concat(variables('namePrefix'), '-app')]"
+				}
+			}
+		},
+		{
+			"condition": "[parameters('enableApplicationGateway')]",
+			"type": "Microsoft.Network/applicationGateways",
+			"apiVersion": "2023-11-01",
+			"name": "[variables('appGwName')]",
+			"location": "[parameters('location')]",
+			"tags": "[variables('commonTags')]",
+			"dependsOn": [
+				"[resourceId('Microsoft.Network/publicIPAddresses', variables('appGwPublicIpName'))]",
+				"[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+				"containerGroupCopy"
+			],
+			"properties": {
+				"sku": {
+					"name": "[if(variables('isProduction'), 'Standard_v2', 'Standard_v2')]",
+					"tier": "Standard_v2"
+				},
+				"autoscaleConfiguration": {
+					"minCapacity": "[if(variables('isProduction'), 2, 1)]",
+					"maxCapacity": "[if(variables('isProduction'), 10, 3)]"
+				},
+				"gatewayIPConfigurations": [
+					{
+						"name": "gatewayIpConfig",
+						"properties": {
+							"subnet": {
+								"id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('appGwSubnetName'))]"
+							}
+						}
+					}
+				],
+				"frontendIPConfigurations": [
+					{
+						"name": "frontendIpConfig",
+						"properties": {
+							"publicIPAddress": {
+								"id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('appGwPublicIpName'))]"
+							}
+						}
+					}
+				],
+				"frontendPorts": [
+					{
+						"name": "httpPort",
+						"properties": {
+							"port": 80
+						}
+					}
+				],
+				"backendAddressPools": [
+					{
+						"name": "blokBackendPool",
+						"properties": {
+							"backendAddresses": [
+								{
+									"ipAddress": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', concat(variables('namePrefix'), '-aci-0')), '2023-05-01').ipAddress.ip]"
+								}
+							]
+						}
+					}
+				],
+				"backendHttpSettingsCollection": [
+					{
+						"name": "blokHttpSettings",
+						"properties": {
+							"port": "[parameters('containerPort')]",
+							"protocol": "Http",
+							"cookieBasedAffinity": "Disabled",
+							"requestTimeout": 120,
+							"probe": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/probes/healthProbe')]"
+							}
+						}
+					}
+				],
+				"httpListeners": [
+					{
+						"name": "httpListener",
+						"properties": {
+							"frontendIPConfiguration": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/frontendIPConfigurations/frontendIpConfig')]"
+							},
+							"frontendPort": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/frontendPorts/httpPort')]"
+							},
+							"protocol": "Http"
+						}
+					}
+				],
+				"requestRoutingRules": [
+					{
+						"name": "httpRoutingRule",
+						"properties": {
+							"priority": 100,
+							"ruleType": "Basic",
+							"httpListener": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/httpListeners/httpListener')]"
+							},
+							"backendAddressPool": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/backendAddressPools/blokBackendPool')]"
+							},
+							"backendHttpSettings": {
+								"id": "[concat(resourceId('Microsoft.Network/applicationGateways', variables('appGwName')), '/backendHttpSettingsCollection/blokHttpSettings')]"
+							}
+						}
+					}
+				],
+				"probes": [
+					{
+						"name": "healthProbe",
+						"properties": {
+							"protocol": "Http",
+							"host": "127.0.0.1",
+							"port": "[parameters('containerPort')]",
+							"path": "/health",
+							"interval": 30,
+							"timeout": 10,
+							"unhealthyThreshold": 3,
+							"pickHostNameFromBackendHttpSettings": true,
+							"match": {
+								"statusCodes": ["200"]
+							}
+						}
+					}
+				]
+			}
+		}
+	],
+	"outputs": {
+		"containerGroupIps": {
+			"type": "array",
+			"copy": {
+				"count": "[parameters('instanceCount')]",
+				"input": {
+					"instanceIndex": "[copyIndex()]",
+					"name": "[concat(variables('namePrefix'), '-aci-', copyIndex())]",
+					"privateIp": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', concat(variables('namePrefix'), '-aci-', copyIndex())), '2023-05-01').ipAddress.ip]"
+				}
+			},
+			"metadata": {
+				"description": "Private IP addresses of all container instances"
+			}
+		},
+		"primaryContainerIp": {
+			"type": "string",
+			"value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', concat(variables('namePrefix'), '-aci-0')), '2023-05-01').ipAddress.ip]",
+			"metadata": {
+				"description": "Private IP address of the primary container instance"
+			}
+		},
+		"applicationGatewayFqdn": {
+			"condition": "[parameters('enableApplicationGateway')]",
+			"type": "string",
+			"value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('appGwPublicIpName')), '2023-11-01').dnsSettings.fqdn]",
+			"metadata": {
+				"description": "Fully qualified domain name of the Application Gateway"
+			}
+		},
+		"applicationGatewayPublicIp": {
+			"condition": "[parameters('enableApplicationGateway')]",
+			"type": "string",
+			"value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('appGwPublicIpName')), '2023-11-01').ipAddress]",
+			"metadata": {
+				"description": "Public IP address of the Application Gateway"
+			}
+		},
+		"applicationGatewayUrl": {
+			"condition": "[parameters('enableApplicationGateway')]",
+			"type": "string",
+			"value": "[concat('http://', reference(resourceId('Microsoft.Network/publicIPAddresses', variables('appGwPublicIpName')), '2023-11-01').dnsSettings.fqdn)]",
+			"metadata": {
+				"description": "HTTP URL of the Application Gateway"
+			}
+		},
+		"logAnalyticsWorkspaceId": {
+			"condition": "[parameters('enableMonitoring')]",
+			"type": "string",
+			"value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2023-09-01').customerId]",
+			"metadata": {
+				"description": "Log Analytics workspace customer ID"
+			}
+		},
+		"logAnalyticsWorkspaceName": {
+			"condition": "[parameters('enableMonitoring')]",
+			"type": "string",
+			"value": "[variables('logAnalyticsName')]",
+			"metadata": {
+				"description": "Log Analytics workspace name"
+			}
+		},
+		"vnetId": {
+			"type": "string",
+			"value": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+			"metadata": {
+				"description": "Virtual network resource ID"
+			}
+		},
+		"vnetName": {
+			"type": "string",
+			"value": "[variables('vnetName')]",
+			"metadata": {
+				"description": "Virtual network name"
+			}
+		},
+		"deploymentInfo": {
+			"type": "object",
+			"value": {
+				"environment": "[parameters('environment')]",
+				"appName": "[parameters('appName')]",
+				"containerImage": "[parameters('containerImage')]",
+				"instanceCount": "[parameters('instanceCount')]",
+				"cpuCores": "[parameters('cpuCores')]",
+				"memoryGb": "[parameters('memoryGb')]",
+				"containerPort": "[parameters('containerPort')]",
+				"metricsPort": "[parameters('metricsPort')]"
+			},
+			"metadata": {
+				"description": "Summary of deployment configuration"
+			}
+		}
+	}
+}

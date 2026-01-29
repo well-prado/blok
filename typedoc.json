@@ -1,0 +1,41 @@
+{
+	"$schema": "https://typedoc.org/schema.json",
+	"entryPoints": [
+		"./core/runner/src/index.ts",
+		"./core/shared/src/index.ts",
+		"./core/workflow-helper/src/index.ts"
+	],
+	"out": "./docs/ref",
+	"plugin": ["typedoc-plugin-markdown"],
+	"theme": "markdown",
+	"readme": "none",
+	"excludePrivate": true,
+	"excludeInternal": true,
+	"categorizeByGroup": true,
+	"entryPointStrategy": "expand",
+	"name": "Blok Framework API Reference",
+	"includeVersion": true,
+	"disableSources": false,
+	"excludeExternals": true,
+	"excludeNotDocumented": false,
+	"navigation": {
+		"includeCategories": true,
+		"includeGroups": true
+	},
+	"categoryOrder": [
+		"Core",
+		"Runtime",
+		"Triggers",
+		"Security",
+		"Monitoring",
+		"Testing",
+		"*"
+	],
+	"sort": ["source-order", "alphabetical"],
+	"validation": {
+		"notExported": true,
+		"invalidLink": true,
+		"notDocumented": false
+	},
+	"tsconfig": "./tsconfig.json"
+}

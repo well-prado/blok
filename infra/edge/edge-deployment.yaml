@@ -1,0 +1,189 @@
+# Blok Edge Deployment Configuration
+#
+# Deploy Blok workflows at the edge for ultra-low latency.
+# Supports Cloudflare Workers, AWS Lambda@Edge, Vercel Edge, and Fly.io.
+
+apiVersion: blok/v1
+kind: EdgeDeployment
+metadata:
+  name: blok-edge
+  version: "1.0.0"
+
+# ─── Edge Runtime Configuration ──────────────────────────
+runtime:
+  # Primary edge platform
+  platform: cloudflare-workers # cloudflare-workers | lambda-edge | vercel-edge | fly-io | deno-deploy
+
+  # Runtime settings
+  settings:
+    maxExecutionTime: 30s
+    memoryLimit: 128MB
+    environment: production
+
+# ─── Cloudflare Workers Configuration ────────────────────
+cloudflareWorkers:
+  name: blok-edge-worker
+  compatibilityDate: "2026-01-01"
+  routes:
+    - pattern: "api.example.com/edge/*"
+      zone: example.com
+
+  # KV namespaces for caching
+  kvNamespaces:
+    - binding: WORKFLOW_CACHE
+      id: "${CF_KV_WORKFLOW_CACHE_ID}"
+    - binding: NODE_CACHE
+      id: "${CF_KV_NODE_CACHE_ID}"
+
+  # Durable Objects for stateful workflows
+  durableObjects:
+    - name: WorkflowState
+      className: BlokWorkflowState
+    - name: RateLimiter
+      className: BlokRateLimiter
+
+  # R2 for artifact storage
+  r2Buckets:
+    - binding: ARTIFACTS
+      bucketName: blok-edge-artifacts
+
+  # Environment variables
+  vars:
+    BLOK_RUNTIME: edge
+    LOG_LEVEL: info
+
+  # Build settings
+  build:
+    command: pnpm run build:edge
+    cwd: .
+    upload:
+      format: modules
+      main: dist/edge/worker.mjs
+
+# ─── AWS Lambda@Edge Configuration ───────────────────────
+lambdaEdge:
+  functionName: blok-edge-handler
+  runtime: nodejs22.x
+  memorySize: 256
+  timeout: 5
+
+  # CloudFront distribution
+  cloudfront:
+    distributionId: "${CF_DISTRIBUTION_ID}"
+    eventType: origin-request # viewer-request | origin-request | origin-response | viewer-response
+
+  # Deployment regions (Lambda@Edge replicates to all)
+  regions:
+    - us-east-1 # Required for Lambda@Edge
+
+  # IAM role
+  role: arn:aws:iam::${AWS_ACCOUNT_ID}:role/blok-edge-role
+
+  # Layers
+  layers:
+    - arn:aws:lambda:us-east-1:${AWS_ACCOUNT_ID}:layer:blok-core:1
+
+# ─── Fly.io Configuration ────────────────────────────────
+flyIo:
+  app: blok-edge
+  primaryRegion: iad
+
+  # Deploy to multiple regions
+  regions:
+    - iad # US East (Ashburn)
+    - lhr # EU (London)
+    - nrt # Asia (Tokyo)
+    - syd # Oceania (Sydney)
+    - gru # South America (Sao Paulo)
+
+  # Machine configuration
+  machines:
+    cpus: 1
+    memory: 256MB
+    autoStop: true
+    autoStart: true
+    minMachinesRunning: 1
+
+  # Scaling
+  scaling:
+    minMachines: 1
+    maxMachines: 10
+
+  # Health checks
+  healthChecks:
+    - type: http
+      port: 4000
+      path: /health
+      interval: 10s
+      timeout: 5s
+      gracePeriod: 30s
+
+  # Volumes for persistent state
+  volumes:
+    - name: blok_data
+      size: 1GB
+      region: iad
+
+# ─── Edge-Specific Workflow Optimizations ─────────────────
+optimizations:
+  # Pre-warm workflows at edge locations
+  preWarm:
+    enabled: true
+    workflows:
+      - name: "api-gateway"
+        regions: all
+      - name: "auth-check"
+        regions: all
+      - name: "data-transform"
+        regions: ["us-east-1", "eu-west-1"]
+
+  # Edge caching for node results
+  caching:
+    enabled: true
+    strategy: stale-while-revalidate
+    defaultTTL: 60s
+    maxTTL: 3600s
+    bypassHeaders:
+      - "Cache-Control: no-cache"
+      - "X-Blok-No-Cache: true"
+
+  # Code splitting for edge bundles
+  bundling:
+    treeshake: true
+    minify: true
+    sourcemaps: false
+    maxBundleSize: 1MB
+    excludeModules:
+      - "@nanoservice-ts/trigger-queue" # Not available at edge
+      - "@nanoservice-ts/trigger-pubsub"
+      - "@nanoservice-ts/trigger-worker"
+
+# ─── Edge Monitoring ──────────────────────────────────────
+monitoring:
+  # Real-time metrics per edge location
+  metrics:
+    enabled: true
+    provider: prometheus
+    pushGateway: "https://metrics.example.com/push"
+    labels:
+      service: blok-edge
+      environment: production
+
+  # Edge-specific alerts
+  alerts:
+    - name: edge-latency-high
+      condition: "p99_latency > 100ms"
+      severity: warning
+    - name: edge-error-rate
+      condition: "error_rate > 0.5%"
+      severity: critical
+    - name: edge-cold-start
+      condition: "cold_start_rate > 10%"
+      severity: warning
+
+  # Distributed tracing across edge and origin
+  tracing:
+    enabled: true
+    samplingRate: 0.05
+    propagation: w3c
+    exportTo: opentelemetry

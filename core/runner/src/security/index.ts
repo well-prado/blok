@@ -7,6 +7,9 @@
  * - RBAC: Role-based access control with hierarchical roles
  * - AuditLogger: Comprehensive audit trail with multiple sinks
  * - SecretManager: Unified secret management across multiple providers
+ * - EncryptionAtRest: AES-256-GCM encryption/decryption with key rotation
+ * - PIIDetector: PII detection and masking for text and structured data
+ * - TLSConfig: TLS/SSL configuration with mTLS and certificate management
  *
  * @example
  * ```typescript
@@ -130,3 +133,30 @@ export type {
 	AWSSecretsProviderConfig,
 	GCPSecretProviderConfig,
 } from "./SecretManager";
+
+// Encryption at Rest
+export { EncryptionAtRest } from "./EncryptionAtRest";
+export type {
+	EncryptedPayload,
+	EncryptionConfig,
+	KeyDerivationConfig,
+} from "./EncryptionAtRest";
+
+// PII Detection
+export { PIIDetector, PIIType } from "./PIIDetector";
+export type {
+	PIIPattern,
+	PIIMatch,
+	PIIScanResult,
+	PIIDetectorConfig,
+} from "./PIIDetector";
+
+// TLS Configuration
+export { TLSConfig } from "./TLSConfig";
+export type {
+	TLSConfigOptions,
+	TLSValidationResult,
+	CertificateInfo,
+	SelfSignedOptions,
+	MutualTLSOptions,
+} from "./TLSConfig";

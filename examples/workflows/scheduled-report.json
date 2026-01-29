@@ -1,0 +1,223 @@
+{
+	"name": "Scheduled Report Generator",
+	"description": "Cron-triggered workflow that queries a database, aggregates data into a summary, generates a formatted report, and emails it to the configured recipients.",
+	"version": "1.0.0",
+	"trigger": {
+		"cron": {
+			"schedule": "0 8 * * 1",
+			"timezone": "America/New_York",
+			"description": "Runs every Monday at 8:00 AM Eastern"
+		}
+	},
+	"steps": [
+		{
+			"name": "query-sales-data",
+			"node": "postgres-query",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "query-user-metrics",
+			"node": "postgres-query",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "query-support-tickets",
+			"node": "postgres-query",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "aggregate-data",
+			"node": "data-transformer",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "route-data-check",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"query-sales-data": {
+			"inputs": {
+				"host": "${process.env.DB_HOST}",
+				"port": 5432,
+				"database": "${process.env.DB_NAME}",
+				"user": "${process.env.DB_USER}",
+				"password": "${process.env.DB_PASSWORD}",
+				"query": "SELECT DATE_TRUNC('day', created_at) AS date, COUNT(*) AS order_count, SUM(total_amount) AS revenue, AVG(total_amount) AS avg_order_value FROM orders WHERE created_at >= NOW() - INTERVAL '7 days' GROUP BY DATE_TRUNC('day', created_at) ORDER BY date ASC"
+			}
+		},
+		"query-user-metrics": {
+			"inputs": {
+				"host": "${process.env.DB_HOST}",
+				"port": 5432,
+				"database": "${process.env.DB_NAME}",
+				"user": "${process.env.DB_USER}",
+				"password": "${process.env.DB_PASSWORD}",
+				"query": "SELECT COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS new_users, COUNT(*) FILTER (WHERE last_login >= NOW() - INTERVAL '7 days') AS active_users, COUNT(*) AS total_users FROM users"
+			}
+		},
+		"query-support-tickets": {
+			"inputs": {
+				"host": "${process.env.DB_HOST}",
+				"port": 5432,
+				"database": "${process.env.DB_NAME}",
+				"user": "${process.env.DB_USER}",
+				"password": "${process.env.DB_PASSWORD}",
+				"query": "SELECT COUNT(*) AS total_tickets, COUNT(*) FILTER (WHERE status = 'resolved') AS resolved_tickets, COUNT(*) FILTER (WHERE status = 'open') AS open_tickets, AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600) AS avg_resolution_hours FROM support_tickets WHERE created_at >= NOW() - INTERVAL '7 days'"
+			}
+		},
+		"aggregate-data": {
+			"inputs": {
+				"records": {
+					"sales": "js/ctx.vars['query-sales-data'].data",
+					"users": "js/ctx.vars['query-user-metrics'].data",
+					"support": "js/ctx.vars['query-support-tickets'].data"
+				},
+				"aggregations": {
+					"totalRevenue": "js/ctx.vars['query-sales-data'].data.reduce((sum, row) => sum + row.revenue, 0)",
+					"totalOrders": "js/ctx.vars['query-sales-data'].data.reduce((sum, row) => sum + row.order_count, 0)",
+					"avgOrderValue": "js/ctx.vars['query-sales-data'].data.reduce((sum, row) => sum + row.avg_order_value, 0) / ctx.vars['query-sales-data'].data.length"
+				}
+			}
+		},
+		"route-data-check": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data && ctx.response.data.totalRevenue !== undefined",
+					"steps": [
+						{
+							"name": "generate-report-html",
+							"node": "template-renderer",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "email-report",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "store-report-archive",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "log-completion",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "notify-no-data",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"generate-report-html": {
+			"inputs": {
+				"template": "weekly-report",
+				"data": {
+					"reportDate": "js/new Date().toISOString().split('T')[0]",
+					"periodStart": "js/new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]",
+					"periodEnd": "js/new Date().toISOString().split('T')[0]",
+					"sales": {
+						"dailyBreakdown": "js/ctx.vars['query-sales-data'].data",
+						"totalRevenue": "js/ctx.vars['aggregate-data'].totalRevenue",
+						"totalOrders": "js/ctx.vars['aggregate-data'].totalOrders",
+						"avgOrderValue": "js/ctx.vars['aggregate-data'].avgOrderValue"
+					},
+					"users": "js/ctx.vars['query-user-metrics'].data[0]",
+					"support": "js/ctx.vars['query-support-tickets'].data[0]"
+				},
+				"format": "html"
+			}
+		},
+		"email-report": {
+			"inputs": {
+				"url": "https://api.sendgrid.com/v3/mail/send",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}"
+				},
+				"body": {
+					"personalizations": [
+						{
+							"to": [
+								{
+									"email": "${process.env.REPORT_RECIPIENT_EMAIL}",
+									"name": "${process.env.REPORT_RECIPIENT_NAME}"
+								}
+							],
+							"subject": "Weekly Business Report - ${ctx.vars['generate-report-html'].reportDate}"
+						}
+					],
+					"from": {
+						"email": "${process.env.FROM_EMAIL}",
+						"name": "Automated Reports"
+					},
+					"content": [
+						{
+							"type": "text/html",
+							"value": "${ctx.vars['generate-report-html'].html}"
+						}
+					]
+				},
+				"responseType": "application/json"
+			}
+		},
+		"store-report-archive": {
+			"inputs": {
+				"url": "${process.env.STORAGE_API_URL}/api/reports",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.STORAGE_API_KEY}"
+				},
+				"body": {
+					"reportType": "weekly-summary",
+					"generatedAt": "js/new Date().toISOString()",
+					"data": "js/ctx.vars['aggregate-data']",
+					"html": "${ctx.vars['generate-report-html'].html}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"log-completion": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "Weekly report generated and sent successfully.",
+					"reportDate": "js/ctx.vars['generate-report-html'].reportDate",
+					"recipientCount": 1
+				}
+			}
+		},
+		"notify-no-data": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "Weekly report generation skipped: no data available for the reporting period."
+				},
+				"responseType": "application/json"
+			}
+		}
+	}
+}

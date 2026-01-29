@@ -1,0 +1,172 @@
+# Blok Multi-Region Deployment Configuration
+#
+# This configuration defines how to deploy Blok across multiple cloud regions
+# for high availability, disaster recovery, and low-latency global access.
+#
+# Supports: AWS, GCP, Azure multi-region patterns
+
+apiVersion: blok/v1
+kind: MultiRegionDeployment
+metadata:
+  name: blok-multi-region
+  version: "1.0.0"
+
+# ─── Global Settings ──────────────────────────────────────
+global:
+  app: blok
+  image: ghcr.io/deskree/blok:latest
+  replicas: 3
+  port: 4000
+  healthCheck:
+    path: /health
+    interval: 10s
+    timeout: 5s
+  dns:
+    provider: route53 # route53 | cloudflare | azure-dns
+    domain: blok.example.com
+    routing: latency # latency | geolocation | weighted | failover
+
+# ─── Region Definitions ──────────────────────────────────
+regions:
+  # Primary region (US East)
+  - name: us-east-1
+    provider: aws
+    role: primary
+    replicas: 3
+    config:
+      vpc_cidr: "10.0.0.0/16"
+      instance_type: t3.medium
+      min_instances: 2
+      max_instances: 10
+      auto_scaling:
+        target_cpu: 70
+        target_memory: 80
+        scale_in_cooldown: 300
+        scale_out_cooldown: 60
+    services:
+      redis:
+        enabled: true
+        cluster_mode: true
+        node_type: cache.r6g.large
+        replicas: 2
+      database:
+        enabled: true
+        engine: aurora-postgresql
+        instance_class: db.r6g.large
+        multi_az: true
+        read_replicas: 1
+
+  # Secondary region (EU West)
+  - name: eu-west-1
+    provider: aws
+    role: secondary
+    replicas: 2
+    config:
+      vpc_cidr: "10.1.0.0/16"
+      instance_type: t3.medium
+      min_instances: 1
+      max_instances: 8
+      auto_scaling:
+        target_cpu: 70
+        target_memory: 80
+    services:
+      redis:
+        enabled: true
+        cluster_mode: true
+        node_type: cache.r6g.large
+        replicas: 1
+      database:
+        enabled: true
+        engine: aurora-postgresql
+        instance_class: db.r6g.large
+        read_replicas: 1
+        # Cross-region read replica from primary
+        replication_source: us-east-1
+
+  # Tertiary region (AP Southeast)
+  - name: ap-southeast-1
+    provider: aws
+    role: secondary
+    replicas: 2
+    config:
+      vpc_cidr: "10.2.0.0/16"
+      instance_type: t3.medium
+      min_instances: 1
+      max_instances: 6
+      auto_scaling:
+        target_cpu: 70
+        target_memory: 80
+    services:
+      redis:
+        enabled: true
+        cluster_mode: false
+        node_type: cache.r6g.large
+      database:
+        enabled: true
+        engine: aurora-postgresql
+        instance_class: db.r6g.large
+        read_replicas: 0
+        replication_source: us-east-1
+
+# ─── Cross-Region Configuration ──────────────────────────
+crossRegion:
+  # Data replication strategy
+  replication:
+    strategy: async # async | sync | eventual
+    maxLagSeconds: 30
+    conflictResolution: last-write-wins
+
+  # Failover configuration
+  failover:
+    automatic: true
+    healthCheckInterval: 10s
+    failoverThreshold: 3 # consecutive failures
+    failbackDelay: 300s # wait before failing back
+    notifyOnFailover:
+      - ops-team@example.com
+
+  # Traffic routing
+  routing:
+    algorithm: latency-based
+    weights:
+      us-east-1: 50
+      eu-west-1: 30
+      ap-southeast-1: 20
+    stickySessions:
+      enabled: true
+      duration: 3600s
+
+  # Cross-region networking
+  networking:
+    peering: true
+    encryption: true
+    bandwidth_limit: 1Gbps
+
+# ─── Monitoring ───────────────────────────────────────────
+monitoring:
+  global_dashboard: true
+  metrics:
+    provider: prometheus
+    federation: true
+    retention: 30d
+  alerting:
+    latency_threshold_ms: 200
+    error_rate_threshold: 0.01
+    failover_alert: critical
+    replication_lag_alert: warning
+  tracing:
+    provider: opentelemetry
+    sampling_rate: 0.1
+    cross_region_correlation: true
+
+# ─── Disaster Recovery ────────────────────────────────────
+disasterRecovery:
+  rpo: 5m # Recovery Point Objective
+  rto: 15m # Recovery Time Objective
+  backup:
+    enabled: true
+    frequency: hourly
+    retention: 30d
+    cross_region: true
+    encryption: AES-256
+  runbook: docs/compliance/SECURITY-HARDENING.md

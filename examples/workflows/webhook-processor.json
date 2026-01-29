@@ -1,0 +1,326 @@
+{
+	"name": "GitHub Webhook Processor",
+	"description": "Processes GitHub webhook events: verifies the webhook signature, parses the event payload, routes by event type (push, pull_request, issues), executes the appropriate handler, and returns an acknowledgement.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/webhooks/github",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "verify-signature",
+			"node": "hmac-verify",
+			"type": "module"
+		},
+		{
+			"name": "route-signature-check",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"verify-signature": {
+			"inputs": {
+				"payload": "js/JSON.stringify(ctx.request.body)",
+				"signature": "${ctx.request.headers['x-hub-signature-256']}",
+				"secret": "${process.env.GITHUB_WEBHOOK_SECRET}",
+				"algorithm": "sha256"
+			}
+		},
+		"route-signature-check": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.valid === true",
+					"steps": [
+						{
+							"name": "parse-event",
+							"node": "mapper",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-event-type",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "signature-invalid",
+							"node": "error",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"parse-event": {
+			"inputs": {
+				"model": {
+					"eventType": "${ctx.request.headers['x-github-event']}",
+					"deliveryId": "${ctx.request.headers['x-github-delivery']}",
+					"action": "${ctx.request.body.action}",
+					"repository": "${ctx.request.body.repository.full_name}",
+					"sender": "${ctx.request.body.sender.login}"
+				}
+			}
+		},
+		"route-event-type": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.request.headers['x-github-event'] === 'push'",
+					"steps": [
+						{
+							"name": "process-push",
+							"node": "mapper",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "notify-push",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "trigger-ci-pipeline",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "push-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "if",
+					"condition": "ctx.request.headers['x-github-event'] === 'pull_request'",
+					"steps": [
+						{
+							"name": "process-pull-request",
+							"node": "mapper",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "notify-pull-request",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "pr-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "if",
+					"condition": "ctx.request.headers['x-github-event'] === 'issues'",
+					"steps": [
+						{
+							"name": "process-issue",
+							"node": "mapper",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "notify-issue",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "issue-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "log-unhandled-event",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "unhandled-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"process-push": {
+			"inputs": {
+				"model": {
+					"branch": "js/ctx.request.body.ref.replace('refs/heads/', '')",
+					"commits": "js/ctx.request.body.commits.length",
+					"headCommit": "${ctx.request.body.head_commit.message}",
+					"pusher": "${ctx.request.body.pusher.name}",
+					"compareUrl": "${ctx.request.body.compare}"
+				}
+			}
+		},
+		"notify-push": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "New push to ${ctx.vars['parse-event'].repository} on branch ${ctx.vars['process-push'].branch} by ${ctx.vars['process-push'].pusher}: ${ctx.vars['process-push'].headCommit} (${ctx.vars['process-push'].commits} commits)"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"trigger-ci-pipeline": {
+			"inputs": {
+				"url": "${process.env.CI_PIPELINE_TRIGGER_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.CI_API_TOKEN}"
+				},
+				"body": {
+					"repository": "${ctx.vars['parse-event'].repository}",
+					"branch": "${ctx.vars['process-push'].branch}",
+					"commitSha": "${ctx.request.body.head_commit.id}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"push-response": {
+			"inputs": {
+				"model": {
+					"status": "processed",
+					"event": "push",
+					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+					"branch": "${ctx.vars['process-push'].branch}",
+					"commits": "js/ctx.vars['process-push'].commits"
+				}
+			}
+		},
+		"process-pull-request": {
+			"inputs": {
+				"model": {
+					"prNumber": "js/ctx.request.body.number",
+					"title": "${ctx.request.body.pull_request.title}",
+					"action": "${ctx.request.body.action}",
+					"author": "${ctx.request.body.pull_request.user.login}",
+					"baseBranch": "${ctx.request.body.pull_request.base.ref}",
+					"headBranch": "${ctx.request.body.pull_request.head.ref}",
+					"url": "${ctx.request.body.pull_request.html_url}"
+				}
+			}
+		},
+		"notify-pull-request": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "PR #${ctx.vars['process-pull-request'].prNumber} ${ctx.vars['process-pull-request'].action} in ${ctx.vars['parse-event'].repository}: ${ctx.vars['process-pull-request'].title} by ${ctx.vars['process-pull-request'].author}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"pr-response": {
+			"inputs": {
+				"model": {
+					"status": "processed",
+					"event": "pull_request",
+					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+					"prNumber": "js/ctx.vars['process-pull-request'].prNumber",
+					"action": "${ctx.vars['process-pull-request'].action}"
+				}
+			}
+		},
+		"process-issue": {
+			"inputs": {
+				"model": {
+					"issueNumber": "js/ctx.request.body.issue.number",
+					"title": "${ctx.request.body.issue.title}",
+					"action": "${ctx.request.body.action}",
+					"author": "${ctx.request.body.issue.user.login}",
+					"labels": "js/ctx.request.body.issue.labels.map(l => l.name)",
+					"url": "${ctx.request.body.issue.html_url}"
+				}
+			}
+		},
+		"notify-issue": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "Issue #${ctx.vars['process-issue'].issueNumber} ${ctx.vars['process-issue'].action} in ${ctx.vars['parse-event'].repository}: ${ctx.vars['process-issue'].title} by ${ctx.vars['process-issue'].author}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"issue-response": {
+			"inputs": {
+				"model": {
+					"status": "processed",
+					"event": "issues",
+					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+					"issueNumber": "js/ctx.vars['process-issue'].issueNumber",
+					"action": "${ctx.vars['process-issue'].action}"
+				}
+			}
+		},
+		"log-unhandled-event": {
+			"inputs": {
+				"url": "${process.env.LOGGING_API_URL}/api/logs",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.LOGGING_API_KEY}"
+				},
+				"body": {
+					"level": "info",
+					"message": "Unhandled GitHub event type received",
+					"metadata": {
+						"eventType": "${ctx.vars['parse-event'].eventType}",
+						"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+						"repository": "${ctx.vars['parse-event'].repository}"
+					}
+				},
+				"responseType": "application/json"
+			}
+		},
+		"unhandled-response": {
+			"inputs": {
+				"model": {
+					"status": "acknowledged",
+					"event": "${ctx.vars['parse-event'].eventType}",
+					"deliveryId": "${ctx.vars['parse-event'].deliveryId}",
+					"message": "Event type not currently handled."
+				}
+			}
+		},
+		"signature-invalid": {
+			"inputs": {
+				"message": "Invalid webhook signature. Request rejected.",
+				"statusCode": 401
+			}
+		}
+	}
+}

@@ -1,0 +1,175 @@
+{
+	"name": "User Registration",
+	"description": "Complete user registration workflow: validates input, checks for existing users, creates the user record, sends a welcome email, and returns the response.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/users/register",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "validate-input",
+			"node": "@nanoservice-ts/json-validator",
+			"type": "module"
+		},
+		{
+			"name": "check-existing-user",
+			"node": "@nanoservice-ts/api-call",
+			"type": "module"
+		},
+		{
+			"name": "route-user-check",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"validate-input": {
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["email", "password", "firstName", "lastName"],
+					"properties": {
+						"email": {
+							"type": "string",
+							"format": "email"
+						},
+						"password": {
+							"type": "string",
+							"minLength": 8
+						},
+						"firstName": {
+							"type": "string",
+							"minLength": 1
+						},
+						"lastName": {
+							"type": "string",
+							"minLength": 1
+						}
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		"check-existing-user": {
+			"inputs": {
+				"url": "${process.env.USER_SERVICE_URL}/api/users?email=${ctx.request.body.email}",
+				"method": "GET",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-user-check": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.users && ctx.response.data.users.length > 0",
+					"steps": [
+						{
+							"name": "user-already-exists",
+							"node": "error",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "hash-password",
+							"node": "hash-password",
+							"type": "module"
+						},
+						{
+							"name": "create-user",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "send-welcome-email",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "format-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"user-already-exists": {
+			"inputs": {
+				"message": "A user with this email address already exists.",
+				"statusCode": 409
+			}
+		},
+		"hash-password": {
+			"inputs": {
+				"password": "${ctx.request.body.password}",
+				"algorithm": "bcrypt",
+				"rounds": 12
+			}
+		},
+		"create-user": {
+			"inputs": {
+				"url": "${process.env.USER_SERVICE_URL}/api/users",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"body": {
+					"email": "${ctx.request.body.email}",
+					"passwordHash": "${ctx.response.data.hash}",
+					"firstName": "${ctx.request.body.firstName}",
+					"lastName": "${ctx.request.body.lastName}",
+					"role": "user",
+					"status": "active"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"send-welcome-email": {
+			"inputs": {
+				"url": "${process.env.EMAIL_SERVICE_URL}/api/send",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}"
+				},
+				"body": {
+					"to": "${ctx.request.body.email}",
+					"from": "${process.env.FROM_EMAIL}",
+					"templateId": "${process.env.WELCOME_EMAIL_TEMPLATE_ID}",
+					"dynamicTemplateData": {
+						"firstName": "${ctx.request.body.firstName}",
+						"loginUrl": "${process.env.APP_URL}/login"
+					}
+				},
+				"responseType": "application/json"
+			}
+		},
+		"format-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "User registered successfully.",
+					"user": {
+						"id": "${ctx.response.data.id}",
+						"email": "${ctx.request.body.email}",
+						"firstName": "${ctx.request.body.firstName}",
+						"lastName": "${ctx.request.body.lastName}"
+					}
+				}
+			}
+		}
+	}
+}

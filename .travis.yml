@@ -1,0 +1,186 @@
+# =============================================================================
+# Blok Framework - Travis CI Pipeline
+# =============================================================================
+# Mirrors the GitHub Actions CI pipeline with Travis CI syntax.
+# =============================================================================
+
+language: node_js
+
+node_js:
+  - "22"
+
+os: linux
+dist: jammy
+
+env:
+  global:
+    - PNPM_VERSION=10.14.0
+    - HUSKY=0
+
+# ---------------------------------------------------------------------------
+# Cache: pnpm store
+# ---------------------------------------------------------------------------
+cache:
+  directories:
+    - $HOME/.local/share/pnpm/store
+
+# ---------------------------------------------------------------------------
+# Install: enable corepack + pnpm
+# ---------------------------------------------------------------------------
+install:
+  - corepack enable
+  - corepack prepare pnpm@${PNPM_VERSION} --activate
+  - pnpm install --frozen-lockfile
+
+# ---------------------------------------------------------------------------
+# Jobs (Build Stages)
+# ---------------------------------------------------------------------------
+jobs:
+  include:
+    # ===== Stage: Lint =====
+    - stage: lint
+      name: "Lint & Format"
+      script:
+        - npx biome ci .
+
+    # ===== Stage: Build =====
+    - stage: build
+      name: "Build & Typecheck"
+      script:
+        - pnpm run build
+        - pnpm --filter nanoctl run typecheck
+        - pnpm --filter @nanoservice-ts/helper run typecheck
+
+    # ===== Stage: Test =====
+    - stage: test
+      name: "Test Runner"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/runner run test
+
+    - stage: test
+      name: "Test CLI"
+      script:
+        - pnpm run build:cli
+        - pnpm run cli:test
+
+    - stage: test
+      name: "Test Helper"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/helper run test
+
+    - stage: test
+      name: "Test Trigger: cron"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-cron run test
+
+    - stage: test
+      name: "Test Trigger: webhook"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-webhook run test
+
+    - stage: test
+      name: "Test Trigger: websocket"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-websocket run test
+
+    - stage: test
+      name: "Test Trigger: sse"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-sse run test
+
+    - stage: test
+      name: "Test Trigger: queue"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-queue run test
+
+    - stage: test
+      name: "Test Trigger: pubsub"
+      script:
+        - pnpm run core:build:dev
+        - pnpm --filter @nanoservice-ts/trigger-pubsub run test
+
+    # ===== Stage: Integration =====
+    - stage: integration
+      name: "Integration Tests"
+      if: branch = main AND type = push
+      services:
+        - redis
+        - docker
+      before_script:
+        - corepack enable
+        - corepack prepare pnpm@${PNPM_VERSION} --activate
+        - pnpm install --frozen-lockfile
+        # Start RabbitMQ and NATS via Docker
+        - >
+          docker run -d --name blok-rabbitmq
+          -p 5673:5672 -p 15673:15672
+          -e RABBITMQ_DEFAULT_USER=blok
+          -e RABBITMQ_DEFAULT_PASS=blok_test
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 5
+          rabbitmq:3.13-management-alpine
+        - >
+          docker run -d --name blok-nats
+          -p 4223:4222 -p 8223:8222
+          nats:2.10-alpine --jetstream --http_port 8222
+        # Wait for services
+        - echo "Waiting for services..."
+        - sleep 15
+        - redis-cli ping || true
+        - curl -sf http://blok:blok_test@localhost:15673/api/healthchecks/node || true
+        - curl -sf http://localhost:8223/healthz || true
+      script:
+        - pnpm run build
+        - >
+          REDIS_URL=redis://localhost:6379
+          RABBITMQ_URL=amqp://blok:blok_test@localhost:5673
+          NATS_URL=nats://localhost:4223
+          pnpm --filter @nanoservice-ts/runner run test:integration
+      after_script:
+        - docker stop blok-rabbitmq blok-nats || true
+        - docker rm blok-rabbitmq blok-nats || true
+
+    # ===== Stage: Deploy =====
+    - stage: deploy
+      name: "Deploy"
+      if: branch = main AND type = push
+      services:
+        - docker
+      script:
+        - export COMMIT_SHA=$(git rev-parse --short HEAD)
+        - echo "Building Docker image..."
+        - docker build -t blok:${COMMIT_SHA} -f dockerfiles/Dockerfile .
+        - docker tag blok:${COMMIT_SHA} blok:latest
+        - echo "Docker image built successfully - blok:${COMMIT_SHA}"
+        # Uncomment and configure for registry push:
+        # - echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+        # - docker tag blok:${COMMIT_SHA} ${DOCKER_REGISTRY}/blok:${COMMIT_SHA}
+        # - docker push ${DOCKER_REGISTRY}/blok:${COMMIT_SHA}
+        # - docker push ${DOCKER_REGISTRY}/blok:latest
+
+# ---------------------------------------------------------------------------
+# Stage ordering
+# ---------------------------------------------------------------------------
+stages:
+  - lint
+  - build
+  - test
+  - integration
+  - deploy
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+notifications:
+  email:
+    on_success: never
+    on_failure: always

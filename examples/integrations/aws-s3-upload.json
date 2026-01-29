@@ -1,0 +1,138 @@
+{
+	"name": "AWS S3 File Upload",
+	"description": "Handles file uploads to AWS S3: validates the upload request, generates a presigned URL for direct client upload, and optionally processes the file after upload (thumbnail generation, virus scanning, metadata extraction).",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/files/upload",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "validate-upload-request",
+			"node": "@nanoservice-ts/json-validator",
+			"type": "module"
+		},
+		{
+			"name": "generate-file-key",
+			"node": "mapper",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "generate-presigned-url",
+			"node": "aws-s3-presign",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "create-file-record",
+			"node": "@nanoservice-ts/api-call",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "format-upload-response",
+			"node": "mapper",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"validate-upload-request": {
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["fileName", "contentType", "fileSize"],
+					"properties": {
+						"fileName": { "type": "string", "minLength": 1 },
+						"contentType": {
+							"type": "string",
+							"enum": [
+								"image/jpeg",
+								"image/png",
+								"image/gif",
+								"image/webp",
+								"application/pdf",
+								"text/csv",
+								"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+							]
+						},
+						"fileSize": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 52428800
+						},
+						"folder": { "type": "string" },
+						"metadata": { "type": "object" }
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		"generate-file-key": {
+			"inputs": {
+				"model": {
+					"fileKey": "js/`${ctx.request.body.folder || 'uploads'}/${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${ctx.request.body.fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`",
+					"bucket": "${process.env.AWS_S3_BUCKET}",
+					"region": "${process.env.AWS_REGION}"
+				}
+			}
+		},
+		"generate-presigned-url": {
+			"inputs": {
+				"bucket": "${process.env.AWS_S3_BUCKET}",
+				"key": "${ctx.vars['generate-file-key'].fileKey}",
+				"contentType": "${ctx.request.body.contentType}",
+				"expiresIn": 3600,
+				"region": "${process.env.AWS_REGION}",
+				"accessKeyId": "${process.env.AWS_ACCESS_KEY_ID}",
+				"secretAccessKey": "${process.env.AWS_SECRET_ACCESS_KEY}",
+				"conditions": {
+					"contentLengthRange": [1, 52428800],
+					"acl": "private"
+				},
+				"metadata": "js/ctx.request.body.metadata || {}"
+			}
+		},
+		"create-file-record": {
+			"inputs": {
+				"url": "${process.env.FILE_SERVICE_URL}/api/files",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"body": {
+					"fileName": "${ctx.request.body.fileName}",
+					"fileKey": "${ctx.vars['generate-file-key'].fileKey}",
+					"bucket": "${process.env.AWS_S3_BUCKET}",
+					"contentType": "${ctx.request.body.contentType}",
+					"fileSize": "js/ctx.request.body.fileSize",
+					"uploadedBy": "${ctx.request.headers['x-user-id']}",
+					"status": "pending_upload",
+					"metadata": "js/ctx.request.body.metadata || {}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"format-upload-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"fileId": "${ctx.vars['create-file-record'].id}",
+					"uploadUrl": "${ctx.vars['generate-presigned-url'].url}",
+					"fileKey": "${ctx.vars['generate-file-key'].fileKey}",
+					"expiresAt": "js/new Date(Date.now() + 3600 * 1000).toISOString()",
+					"uploadMethod": "PUT",
+					"uploadHeaders": {
+						"Content-Type": "${ctx.request.body.contentType}"
+					},
+					"callbackUrl": "${process.env.API_BASE_URL}/api/files/${ctx.vars['create-file-record'].id}/confirm",
+					"maxFileSize": 52428800
+				}
+			}
+		}
+	}
+}

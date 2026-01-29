@@ -1,0 +1,225 @@
+{
+	"name": "Data Processing Pipeline",
+	"description": "End-to-end data processing pipeline: fetches data from an external API, transforms and validates it, stores results in a database, and sends a completion notification.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/pipeline/run",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "fetch-source-data",
+			"node": "@nanoservice-ts/api-call",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "route-fetch-result",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"fetch-source-data": {
+			"inputs": {
+				"url": "${ctx.request.body.sourceUrl}",
+				"method": "GET",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.SOURCE_API_KEY}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-fetch-result": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data && ctx.response.data.records && ctx.response.data.records.length > 0",
+					"steps": [
+						{
+							"name": "transform-data",
+							"node": "data-transformer",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "validate-transformed-data",
+							"node": "@nanoservice-ts/json-validator",
+							"type": "module"
+						},
+						{
+							"name": "route-validation",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "no-data-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"transform-data": {
+			"inputs": {
+				"records": "js/ctx.response.data.records",
+				"mapping": {
+					"id": "$.record_id",
+					"name": "$.full_name",
+					"email": "$.email_address",
+					"createdAt": "$.created_date",
+					"status": "$.account_status"
+				},
+				"filters": {
+					"excludeNull": true,
+					"trimStrings": true
+				}
+			}
+		},
+		"validate-transformed-data": {
+			"inputs": {
+				"schema": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["id", "name", "email"],
+						"properties": {
+							"id": { "type": "string" },
+							"name": { "type": "string", "minLength": 1 },
+							"email": { "type": "string", "format": "email" }
+						}
+					}
+				},
+				"data": "js/ctx.response.data.transformedRecords"
+			}
+		},
+		"route-validation": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.valid === true",
+					"steps": [
+						{
+							"name": "store-records",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "send-success-notification",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "format-success-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "send-failure-notification",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "format-error-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"store-records": {
+			"inputs": {
+				"url": "${process.env.DATABASE_API_URL}/api/records/batch",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.DATABASE_API_KEY}"
+				},
+				"body": {
+					"collection": "${ctx.request.body.targetCollection}",
+					"records": "js/ctx.vars['transform-data'].transformedRecords",
+					"upsert": true
+				},
+				"responseType": "application/json"
+			}
+		},
+		"send-success-notification": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "Data pipeline completed successfully. Records processed: ${ctx.vars['store-records'].insertedCount}. Source: ${ctx.request.body.sourceUrl}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"send-failure-notification": {
+			"inputs": {
+				"url": "${process.env.SLACK_WEBHOOK_URL}",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json"
+				},
+				"body": {
+					"text": "Data pipeline validation failed. Source: ${ctx.request.body.sourceUrl}. Check logs for details."
+				},
+				"responseType": "application/json"
+			}
+		},
+		"format-success-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "Pipeline completed successfully.",
+					"stats": {
+						"fetched": "js/ctx.vars['fetch-source-data'].records.length",
+						"transformed": "js/ctx.vars['transform-data'].transformedRecords.length",
+						"stored": "js/ctx.vars['store-records'].insertedCount"
+					}
+				}
+			}
+		},
+		"format-error-response": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"message": "Pipeline failed during data validation.",
+					"errors": "js/ctx.response.data.errors"
+				}
+			}
+		},
+		"no-data-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"message": "No records found at the source. Nothing to process.",
+					"stats": {
+						"fetched": 0,
+						"transformed": 0,
+						"stored": 0
+					}
+				}
+			}
+		}
+	}
+}

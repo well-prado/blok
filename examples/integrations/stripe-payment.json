@@ -1,0 +1,291 @@
+{
+	"name": "Stripe Payment Integration",
+	"description": "Processes a payment through Stripe: creates a customer (if new), creates a PaymentIntent, confirms the charge, and returns the result. Handles both successful payments and failures with appropriate error responses.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/payments/charge",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "validate-payment-request",
+			"node": "@nanoservice-ts/json-validator",
+			"type": "module"
+		},
+		{
+			"name": "resolve-customer",
+			"node": "@nanoservice-ts/api-call",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "route-customer-lookup",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"validate-payment-request": {
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["amount", "currency", "paymentMethodId", "customer"],
+					"properties": {
+						"amount": { "type": "number", "minimum": 50 },
+						"currency": {
+							"type": "string",
+							"enum": ["usd", "eur", "gbp", "cad", "aud"]
+						},
+						"paymentMethodId": { "type": "string" },
+						"customer": {
+							"type": "object",
+							"required": ["email"],
+							"properties": {
+								"email": { "type": "string", "format": "email" },
+								"name": { "type": "string" },
+								"stripeCustomerId": { "type": "string" }
+							}
+						},
+						"description": { "type": "string" },
+						"metadata": { "type": "object" },
+						"idempotencyKey": { "type": "string" }
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		"resolve-customer": {
+			"inputs": {
+				"url": "https://api.stripe.com/v1/customers/search",
+				"method": "GET",
+				"headers": {
+					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
+					"Content-Type": "application/x-www-form-urlencoded"
+				},
+				"params": {
+					"query": "email:'${ctx.request.body.customer.email}'"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-customer-lookup": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.data && ctx.response.data.data.length > 0",
+					"steps": [
+						{
+							"name": "use-existing-customer",
+							"node": "mapper",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "create-payment-intent-existing",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-payment-result-existing",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "create-stripe-customer",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "create-payment-intent-new",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-payment-result-new",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"use-existing-customer": {
+			"inputs": {
+				"model": {
+					"customerId": "js/ctx.vars['resolve-customer'].data[0].id"
+				}
+			}
+		},
+		"create-stripe-customer": {
+			"inputs": {
+				"url": "https://api.stripe.com/v1/customers",
+				"method": "POST",
+				"headers": {
+					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
+					"Content-Type": "application/x-www-form-urlencoded"
+				},
+				"body": {
+					"email": "${ctx.request.body.customer.email}",
+					"name": "${ctx.request.body.customer.name}",
+					"payment_method": "${ctx.request.body.paymentMethodId}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"create-payment-intent-existing": {
+			"inputs": {
+				"url": "https://api.stripe.com/v1/payment_intents",
+				"method": "POST",
+				"headers": {
+					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Idempotency-Key": "${ctx.request.body.idempotencyKey}"
+				},
+				"body": {
+					"amount": "js/ctx.request.body.amount",
+					"currency": "${ctx.request.body.currency}",
+					"customer": "${ctx.vars['use-existing-customer'].customerId}",
+					"payment_method": "${ctx.request.body.paymentMethodId}",
+					"confirm": "true",
+					"description": "${ctx.request.body.description}",
+					"receipt_email": "${ctx.request.body.customer.email}",
+					"metadata[source]": "blok_workflow",
+					"metadata[workflow]": "stripe-payment-integration"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"create-payment-intent-new": {
+			"inputs": {
+				"url": "https://api.stripe.com/v1/payment_intents",
+				"method": "POST",
+				"headers": {
+					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Idempotency-Key": "${ctx.request.body.idempotencyKey}"
+				},
+				"body": {
+					"amount": "js/ctx.request.body.amount",
+					"currency": "${ctx.request.body.currency}",
+					"customer": "${ctx.vars['create-stripe-customer'].id}",
+					"payment_method": "${ctx.request.body.paymentMethodId}",
+					"confirm": "true",
+					"description": "${ctx.request.body.description}",
+					"receipt_email": "${ctx.request.body.customer.email}",
+					"metadata[source]": "blok_workflow",
+					"metadata[workflow]": "stripe-payment-integration"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-payment-result-existing": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.status === 'succeeded'",
+					"steps": [
+						{
+							"name": "payment-success-existing",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "payment-failed-existing",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"route-payment-result-new": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.status === 'succeeded'",
+					"steps": [
+						{
+							"name": "payment-success-new",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "payment-failed-new",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"payment-success-existing": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"paymentIntentId": "${ctx.vars['create-payment-intent-existing'].id}",
+					"status": "${ctx.vars['create-payment-intent-existing'].status}",
+					"amount": "js/ctx.vars['create-payment-intent-existing'].amount",
+					"currency": "${ctx.vars['create-payment-intent-existing'].currency}",
+					"customerId": "${ctx.vars['use-existing-customer'].customerId}",
+					"receiptUrl": "${ctx.vars['create-payment-intent-existing'].charges.data[0].receipt_url}"
+				}
+			}
+		},
+		"payment-success-new": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"paymentIntentId": "${ctx.vars['create-payment-intent-new'].id}",
+					"status": "${ctx.vars['create-payment-intent-new'].status}",
+					"amount": "js/ctx.vars['create-payment-intent-new'].amount",
+					"currency": "${ctx.vars['create-payment-intent-new'].currency}",
+					"customerId": "${ctx.vars['create-stripe-customer'].id}",
+					"receiptUrl": "${ctx.vars['create-payment-intent-new'].charges.data[0].receipt_url}"
+				}
+			}
+		},
+		"payment-failed-existing": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "PAYMENT_FAILED",
+					"paymentIntentId": "${ctx.vars['create-payment-intent-existing'].id}",
+					"status": "${ctx.vars['create-payment-intent-existing'].status}",
+					"failureMessage": "${ctx.vars['create-payment-intent-existing'].last_payment_error.message}"
+				}
+			}
+		},
+		"payment-failed-new": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "PAYMENT_FAILED",
+					"paymentIntentId": "${ctx.vars['create-payment-intent-new'].id}",
+					"status": "${ctx.vars['create-payment-intent-new'].status}",
+					"failureMessage": "${ctx.vars['create-payment-intent-new'].last_payment_error.message}"
+				}
+			}
+		}
+	}
+}

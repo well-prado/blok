@@ -1,0 +1,317 @@
+{
+	"name": "E-Commerce Checkout",
+	"description": "Complete e-commerce checkout flow: validates the cart, checks inventory for all items, processes payment through Stripe, creates the order record, and sends an order confirmation email.",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/checkout",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"name": "validate-cart",
+			"node": "@nanoservice-ts/json-validator",
+			"type": "module"
+		},
+		{
+			"name": "calculate-totals",
+			"node": "cart-calculator",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "check-inventory",
+			"node": "@nanoservice-ts/api-call",
+			"type": "module",
+			"set_var": true
+		},
+		{
+			"name": "route-inventory-check",
+			"node": "@nanoservice-ts/if-else",
+			"type": "module"
+		}
+	],
+	"nodes": {
+		"validate-cart": {
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["items", "customer", "shippingAddress", "paymentMethod"],
+					"properties": {
+						"items": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"type": "object",
+								"required": ["productId", "quantity", "price"],
+								"properties": {
+									"productId": { "type": "string" },
+									"quantity": { "type": "integer", "minimum": 1 },
+									"price": { "type": "number", "minimum": 0 }
+								}
+							}
+						},
+						"customer": {
+							"type": "object",
+							"required": ["id", "email"],
+							"properties": {
+								"id": { "type": "string" },
+								"email": { "type": "string", "format": "email" }
+							}
+						},
+						"shippingAddress": {
+							"type": "object",
+							"required": ["line1", "city", "state", "postalCode", "country"],
+							"properties": {
+								"line1": { "type": "string" },
+								"line2": { "type": "string" },
+								"city": { "type": "string" },
+								"state": { "type": "string" },
+								"postalCode": { "type": "string" },
+								"country": { "type": "string" }
+							}
+						},
+						"paymentMethod": {
+							"type": "object",
+							"required": ["type", "token"],
+							"properties": {
+								"type": { "type": "string", "enum": ["card", "bank_transfer"] },
+								"token": { "type": "string" }
+							}
+						}
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		"calculate-totals": {
+			"inputs": {
+				"items": "js/ctx.request.body.items",
+				"shippingAddress": "js/ctx.request.body.shippingAddress",
+				"couponCode": "${ctx.request.body.couponCode}",
+				"taxRateApiUrl": "${process.env.TAX_SERVICE_URL}/api/rates"
+			}
+		},
+		"check-inventory": {
+			"inputs": {
+				"url": "${process.env.INVENTORY_SERVICE_URL}/api/inventory/check-batch",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"body": {
+					"items": "js/ctx.request.body.items.map(item => ({ productId: item.productId, requestedQuantity: item.quantity }))"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-inventory-check": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.allAvailable === true",
+					"steps": [
+						{
+							"name": "process-payment",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "route-payment-result",
+							"node": "@nanoservice-ts/if-else",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "inventory-unavailable-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"process-payment": {
+			"inputs": {
+				"url": "https://api.stripe.com/v1/payment_intents",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}"
+				},
+				"body": {
+					"amount": "js/Math.round(ctx.vars['calculate-totals'].totalAmount * 100)",
+					"currency": "usd",
+					"payment_method": "${ctx.request.body.paymentMethod.token}",
+					"confirm": true,
+					"metadata[customer_id]": "${ctx.request.body.customer.id}",
+					"metadata[order_source]": "checkout_workflow",
+					"receipt_email": "${ctx.request.body.customer.email}",
+					"shipping[name]": "${ctx.request.body.customer.name}",
+					"shipping[address][line1]": "${ctx.request.body.shippingAddress.line1}",
+					"shipping[address][city]": "${ctx.request.body.shippingAddress.city}",
+					"shipping[address][state]": "${ctx.request.body.shippingAddress.state}",
+					"shipping[address][postal_code]": "${ctx.request.body.shippingAddress.postalCode}",
+					"shipping[address][country]": "${ctx.request.body.shippingAddress.country}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"route-payment-result": {
+			"conditions": [
+				{
+					"type": "if",
+					"condition": "ctx.response.data.status === 'succeeded'",
+					"steps": [
+						{
+							"name": "reserve-inventory",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "create-order",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module",
+							"set_var": true
+						},
+						{
+							"name": "send-confirmation-email",
+							"node": "@nanoservice-ts/api-call",
+							"type": "module"
+						},
+						{
+							"name": "checkout-success-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				},
+				{
+					"type": "else",
+					"steps": [
+						{
+							"name": "payment-failed-response",
+							"node": "mapper",
+							"type": "module"
+						}
+					]
+				}
+			]
+		},
+		"reserve-inventory": {
+			"inputs": {
+				"url": "${process.env.INVENTORY_SERVICE_URL}/api/inventory/reserve",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"body": {
+					"items": "js/ctx.request.body.items.map(item => ({ productId: item.productId, quantity: item.quantity }))",
+					"reservationTtl": 3600,
+					"paymentIntentId": "${ctx.vars['process-payment'].id}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"create-order": {
+			"inputs": {
+				"url": "${process.env.ORDER_SERVICE_URL}/api/orders",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
+				},
+				"body": {
+					"customerId": "${ctx.request.body.customer.id}",
+					"items": "js/ctx.request.body.items",
+					"shippingAddress": "js/ctx.request.body.shippingAddress",
+					"subtotal": "js/ctx.vars['calculate-totals'].subtotal",
+					"tax": "js/ctx.vars['calculate-totals'].tax",
+					"shipping": "js/ctx.vars['calculate-totals'].shippingCost",
+					"discount": "js/ctx.vars['calculate-totals'].discount",
+					"totalAmount": "js/ctx.vars['calculate-totals'].totalAmount",
+					"paymentIntentId": "${ctx.vars['process-payment'].id}",
+					"paymentStatus": "paid",
+					"status": "confirmed"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"send-confirmation-email": {
+			"inputs": {
+				"url": "https://api.sendgrid.com/v3/mail/send",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"Authorization": "Bearer ${process.env.SENDGRID_API_KEY}"
+				},
+				"body": {
+					"personalizations": [
+						{
+							"to": [{ "email": "${ctx.request.body.customer.email}" }],
+							"dynamic_template_data": {
+								"orderId": "${ctx.vars['create-order'].orderId}",
+								"customerName": "${ctx.request.body.customer.name}",
+								"items": "js/ctx.request.body.items",
+								"subtotal": "js/ctx.vars['calculate-totals'].subtotal",
+								"tax": "js/ctx.vars['calculate-totals'].tax",
+								"shipping": "js/ctx.vars['calculate-totals'].shippingCost",
+								"total": "js/ctx.vars['calculate-totals'].totalAmount",
+								"shippingAddress": "js/ctx.request.body.shippingAddress",
+								"orderTrackingUrl": "${process.env.APP_URL}/orders/${ctx.vars['create-order'].orderId}"
+							}
+						}
+					],
+					"from": {
+						"email": "${process.env.FROM_EMAIL}",
+						"name": "${process.env.STORE_NAME}"
+					},
+					"template_id": "${process.env.ORDER_CONFIRMATION_TEMPLATE_ID}"
+				},
+				"responseType": "application/json"
+			}
+		},
+		"checkout-success-response": {
+			"inputs": {
+				"model": {
+					"success": true,
+					"orderId": "${ctx.vars['create-order'].orderId}",
+					"status": "confirmed",
+					"paymentStatus": "paid",
+					"total": "js/ctx.vars['calculate-totals'].totalAmount",
+					"currency": "usd",
+					"estimatedDelivery": "js/new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]"
+				}
+			}
+		},
+		"inventory-unavailable-response": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "INVENTORY_UNAVAILABLE",
+					"message": "One or more items in your cart are no longer available.",
+					"unavailableItems": "js/ctx.vars['check-inventory'].unavailableItems"
+				}
+			}
+		},
+		"payment-failed-response": {
+			"inputs": {
+				"model": {
+					"success": false,
+					"error": "PAYMENT_FAILED",
+					"message": "Payment could not be processed. Please check your payment details and try again.",
+					"paymentStatus": "${ctx.vars['process-payment'].status}"
+				}
+			}
+		}
+	}
+}
