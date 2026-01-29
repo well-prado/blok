@@ -5,6 +5,7 @@
  * - AuthMiddleware: Pluggable auth with JWT and API Key providers
  * - OAuthOIDCProvider: OAuth 2.0 / OIDC authentication with JWKS verification
  * - RBAC: Role-based access control with hierarchical roles
+ * - ABAC: Attribute-based access control with policy engine
  * - AuditLogger: Comprehensive audit trail with multiple sinks
  * - SecretManager: Unified secret management across multiple providers
  * - EncryptionAtRest: AES-256-GCM encryption/decryption with key rotation
@@ -85,6 +86,22 @@ export type {
 	AccessCheckResult,
 	RBACPolicy,
 } from "./RBAC";
+
+// Authorization (ABAC)
+export { ABACEngine, createDefaultABAC } from "./ABAC";
+export type {
+	ABACOperator,
+	ABACEffect,
+	ABACCondition,
+	ABACConditionGroup,
+	ABACPolicyTarget,
+	ABACPolicy,
+	SubjectAttributes,
+	ResourceAttributes,
+	EnvironmentAttributes,
+	ABACRequest,
+	ABACResult,
+} from "./ABAC";
 
 // OAuth 2.0 / OIDC
 export { OAuthOIDCProvider, TokenCache } from "./OAuthProvider";

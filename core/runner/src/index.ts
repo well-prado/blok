@@ -39,6 +39,7 @@ import { FileWatcher } from "./hmr/FileWatcher";
 import { HmrDevConsole } from "./hmr/HmrDevConsole";
 import { HotReloadManager } from "./hmr/HotReloadManager";
 
+import { ABACEngine, createDefaultABAC } from "./security/ABAC";
 import { AuditLogger, ConsoleAuditSink, FileAuditSink, InMemoryAuditSink } from "./security/AuditLogger";
 // Security
 import { APIKeyAuthProvider, AuthMiddleware, JWTAuthProvider } from "./security/AuthMiddleware";
@@ -148,6 +149,8 @@ export {
 	APIKeyAuthProvider,
 	RBAC,
 	createDefaultRBAC,
+	ABACEngine,
+	createDefaultABAC,
 	AuditLogger,
 	ConsoleAuditSink,
 	FileAuditSink,
@@ -306,6 +309,19 @@ export type {
 	AccessCheckResult,
 	RBACPolicy,
 } from "./security/RBAC";
+export type {
+	ABACOperator,
+	ABACEffect,
+	ABACCondition,
+	ABACConditionGroup,
+	ABACPolicyTarget,
+	ABACPolicy,
+	SubjectAttributes,
+	ResourceAttributes,
+	EnvironmentAttributes,
+	ABACRequest,
+	ABACResult,
+} from "./security/ABAC";
 export type {
 	AuditEntry,
 	AuditCategory,

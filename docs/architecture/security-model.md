@@ -687,6 +687,197 @@ app.use(async (req, res, next) => {
 });
 ```
 
+## Authorization (ABAC)
+
+The `ABACEngine` provides Attribute-Based Access Control, complementing RBAC with fine-grained, attribute-driven policies. ABAC evaluates attributes of the **subject** (user), **resource**, **action**, and **environment** to make access decisions.
+
+### When to Use ABAC vs RBAC
+
+| Use Case | RBAC | ABAC |
+|---|---|---|
+| Role-based permissions (admin, viewer, developer) | ✅ | |
+| Resource ownership checks (user owns this workflow) | | ✅ |
+| Time-based restrictions (business hours only) | | ✅ |
+| IP/network restrictions | | ✅ |
+| Data classification (public, internal, secret) | | ✅ |
+| Department/team-based access | | ✅ |
+| Combine multiple attributes in one decision | | ✅ |
+
+### Policy Structure
+
+```typescript
+import { ABACEngine, createDefaultABAC } from "@nanoservice-ts/runner";
+
+const engine = new ABACEngine();
+
+engine.addPolicy({
+  id: "business-hours-engineering",
+  description: "Engineering can execute workflows during business hours",
+  effect: "allow",
+  priority: 100,
+  target: {
+    resource: "workflow",
+    actions: ["execute"],
+  },
+  conditions: {
+    all: [
+      { attribute: "subject.department", operator: "in", value: ["engineering", "devops"] },
+      { attribute: "environment.hour", operator: "gte", value: 9 },
+      { attribute: "environment.hour", operator: "lt", value: 17 },
+    ],
+  },
+});
+```
+
+### Evaluation Model
+
+Policies are evaluated in priority order (highest first). **Deny always takes precedence** — the first matching deny policy short-circuits the evaluation. Otherwise, at least one matching allow policy is required. If no policy matches, the default effect (`deny` by default) applies.
+
+```typescript
+const result = engine.evaluate({
+  subject: { sub: "user-1", roles: ["developer"], department: "engineering" },
+  resource: { type: "workflow", id: "/api/users", owner: "user-1" },
+  action: "execute",
+  environment: { hour: 14, ip: "10.0.0.1" },
+});
+
+// result.allowed: boolean
+// result.matchedPolicy: the policy that determined the decision
+// result.evaluatedPolicies: all policies that were evaluated
+// result.reason: human-readable explanation
+```
+
+### Attribute Paths
+
+Conditions reference attributes using dot-notation paths:
+
+| Root | Examples |
+|---|---|
+| `subject.*` | `subject.sub`, `subject.roles`, `subject.department`, `subject.clearanceLevel` |
+| `resource.*` | `resource.type`, `resource.id`, `resource.owner`, `resource.classification` |
+| `action` | The action string itself (e.g., `"execute"`, `"read"`) |
+| `environment.*` | `environment.ip`, `environment.hour`, `environment.dayOfWeek`, `environment.blocked` |
+
+### Comparison Operators
+
+| Operator | Description | Example |
+|---|---|---|
+| `equals` | Strict equality | `{ attribute: "subject.dept", operator: "equals", value: "eng" }` |
+| `not_equals` | Strict inequality | `{ attribute: "subject.dept", operator: "not_equals", value: "hr" }` |
+| `in` | Value is in array | `{ attribute: "subject.dept", operator: "in", value: ["eng", "ops"] }` |
+| `not_in` | Value is not in array | `{ attribute: "subject.dept", operator: "not_in", value: ["hr"] }` |
+| `contains` | Array contains value / string contains substring | `{ attribute: "subject.roles", operator: "contains", value: "admin" }` |
+| `not_contains` | Negation of contains | `{ attribute: "subject.roles", operator: "not_contains", value: "blocked" }` |
+| `matches` | Regex match | `{ attribute: "resource.id", operator: "matches", value: "^/api/.*" }` |
+| `gt` / `lt` / `gte` / `lte` | Numeric comparisons | `{ attribute: "environment.hour", operator: "gte", value: 9 }` |
+| `between` | Inclusive numeric range | `{ attribute: "environment.hour", operator: "between", value: [9, 17] }` |
+| `exists` / `not_exists` | Attribute presence | `{ attribute: "resource.owner", operator: "exists" }` |
+
+### Logical Operators
+
+Conditions are grouped using `all` (AND), `any` (OR), and `none` (NOR). Groups can be nested:
+
+```typescript
+conditions: {
+  all: [
+    // Must be engineering OR devops
+    {
+      any: [
+        { attribute: "subject.department", operator: "equals", value: "engineering" },
+        { attribute: "subject.department", operator: "equals", value: "devops" },
+      ],
+    },
+    // AND must be business hours
+    {
+      all: [
+        { attribute: "environment.hour", operator: "gte", value: 9 },
+        { attribute: "environment.hour", operator: "lt", value: 17 },
+      ],
+    },
+  ],
+  // AND must NOT be blocked
+  none: [
+    { attribute: "environment.blocked", operator: "equals", value: true },
+  ],
+}
+```
+
+### Attribute-to-Attribute Comparison
+
+Use `valueRef` to compare one attribute against another (instead of a static value):
+
+```typescript
+// Resource owner must match the requesting subject
+{
+  attribute: "resource.owner",
+  operator: "equals",
+  valueRef: "subject.sub",
+}
+```
+
+### Default Policies
+
+The `createDefaultABAC()` factory provides four policies:
+
+| Policy | Effect | Priority | Description |
+|---|---|---|---|
+| `admin-override` | allow | 1000 | Admin role bypasses all attribute checks |
+| `block-denied-ips` | deny | 900 | Deny access when `environment.blocked` is true |
+| `resource-owner-access` | allow | 500 | Resource owners have full access (uses `valueRef`) |
+| `service-execute` | allow | 100 | Service accounts can execute workflows |
+
+### Combining RBAC + ABAC
+
+For production deployments, compose both systems:
+
+```typescript
+import { createDefaultRBAC, ABACEngine } from "@nanoservice-ts/runner";
+
+const rbac = createDefaultRBAC();
+const abac = new ABACEngine();
+
+// Add ABAC policies...
+abac.addPolicy({ /* ... */ });
+
+// In request handler:
+app.use(async (req, res, next) => {
+  const identity = req.auth;
+
+  // 1. RBAC: role-based check
+  const rbacResult = rbac.canAccessWorkflow(identity.roles, req.path, "execute");
+  if (!rbacResult.allowed) {
+    return res.status(403).json({ error: rbacResult.reason });
+  }
+
+  // 2. ABAC: attribute-based check
+  const abacResult = abac.evaluate({
+    subject: { sub: identity.sub, roles: identity.roles, ...identity.claims },
+    resource: { type: "workflow", id: req.path },
+    action: "execute",
+    environment: { ip: req.ip, hour: new Date().getHours() },
+  });
+  if (!abacResult.allowed) {
+    return res.status(403).json({ error: abacResult.reason });
+  }
+
+  next();
+});
+```
+
+### Serialization
+
+ABAC configurations can be exported and imported as JSON:
+
+```typescript
+// Export
+const config = abac.toJSON();
+fs.writeFileSync("abac-policies.json", JSON.stringify(config, null, 2));
+
+// Import
+const config = JSON.parse(fs.readFileSync("abac-policies.json", "utf-8"));
+abac.fromJSON(config);
+```
+
 ## See Also
 
 - [Trigger System](/docs/architecture/trigger-system) -- how triggers integrate with authentication

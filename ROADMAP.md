@@ -997,7 +997,7 @@ message NodeResponse {
 - [ ] OAuth 2.0 / OIDC support
 - [ ] API key management
 - [ ] Role-based access control (RBAC)
-- [ ] Attribute-based access control (ABAC)
+- [x] Attribute-based access control (ABAC)
 
 **SEC-2: Data Protection**
 - [ ] Encryption at rest
