@@ -5,8 +5,10 @@ import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
 import { RuntimeRegistry } from "./RuntimeRegistry";
+import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
+import type { RuntimeKind } from "./adapters/RuntimeAdapter";
 import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
@@ -52,6 +54,29 @@ export default class Configuration implements Config {
 			const host = process.env.RUNTIME_PYTHON3_HOST || "localhost";
 			const port = process.env.RUNTIME_PYTHON3_PORT ? Number.parseInt(process.env.RUNTIME_PYTHON3_PORT) : 50051;
 			registry.register(new Python3RuntimeAdapter(host, port));
+		}
+
+		// Register HTTP-based runtime adapters for all SDK languages
+		const httpRuntimes: Array<{
+			kind: RuntimeKind;
+			hostEnv: string;
+			portEnv: string;
+			defaultPort: number;
+		}> = [
+			{ kind: "go", hostEnv: "RUNTIME_GO_HOST", portEnv: "RUNTIME_GO_PORT", defaultPort: 9001 },
+			{ kind: "rust", hostEnv: "RUNTIME_RUST_HOST", portEnv: "RUNTIME_RUST_PORT", defaultPort: 9002 },
+			{ kind: "java", hostEnv: "RUNTIME_JAVA_HOST", portEnv: "RUNTIME_JAVA_PORT", defaultPort: 9003 },
+			{ kind: "csharp", hostEnv: "RUNTIME_CSHARP_HOST", portEnv: "RUNTIME_CSHARP_PORT", defaultPort: 9004 },
+			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", portEnv: "RUNTIME_PHP_PORT", defaultPort: 9005 },
+			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", portEnv: "RUNTIME_RUBY_PORT", defaultPort: 9006 },
+		];
+
+		for (const rt of httpRuntimes) {
+			if (!registry.has(rt.kind)) {
+				const host = process.env[rt.hostEnv] || "localhost";
+				const port = process.env[rt.portEnv] ? Number.parseInt(process.env[rt.portEnv] as string) : rt.defaultPort;
+				registry.register(new HttpRuntimeAdapter(rt.kind, host, port));
+			}
 		}
 	}
 
@@ -207,19 +232,44 @@ export default class Configuration implements Config {
 				resolver: async (node: RunnerNode, opts: GlobalOptions) => await this.localResolver(node),
 			},
 			"runtime.python3": {
-				resolver: async (node: RunnerNode, opts: GlobalOptions) => await this.runtimeResolver(node),
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.go": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.rust": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.java": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.csharp": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.php": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			"runtime.ruby": {
+				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
 			},
 		};
 	}
 
 	async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
-		// Determine the runtime kind
-		// For backward compatibility: "runtime.python3" type maps to "python3" runtime
-		const runtimeKind = node.runtime || "python3";
+		// Determine the runtime kind from explicit field or type string
+		// e.g., "runtime.go" → "go", "runtime.python3" → "python3"
+		let runtimeKind: string | undefined = node.runtime;
+		if (!runtimeKind && node.type?.startsWith("runtime.")) {
+			runtimeKind = node.type.substring("runtime.".length);
+		}
+		// Backward compatibility: default to "python3" if nothing specified
+		if (!runtimeKind) {
+			runtimeKind = "python3";
+		}
 
 		// Get the runtime adapter from registry
 		const registry = RuntimeRegistry.getInstance();
-		const adapter = registry.get(runtimeKind);
+		const adapter = registry.get(runtimeKind as RuntimeKind);
 
 		// Create a minimal node instance to pass to the adapter
 		// The adapter will execute this node
@@ -231,7 +281,7 @@ export default class Configuration implements Config {
 		targetNode.node = node.node;
 		targetNode.name = node.name;
 		targetNode.type = node.type;
-		targetNode.runtime = runtimeKind;
+		targetNode.runtime = runtimeKind as RuntimeKind;
 		targetNode.active = node.active !== undefined ? node.active : true;
 		targetNode.stop = node.stop !== undefined ? node.stop : false;
 		targetNode.set_var = node.set_var !== undefined ? node.set_var : false;

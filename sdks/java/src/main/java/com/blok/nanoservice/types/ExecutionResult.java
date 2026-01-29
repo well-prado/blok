@@ -18,6 +18,7 @@ public class ExecutionResult {
     private Object errors;
     private List<String> logs;
     private ExecutionMetrics metrics;
+    private Map<String, Object> vars;
 
     public ExecutionResult() {
     }
@@ -136,6 +137,25 @@ public class ExecutionResult {
         this.metrics = metrics;
     }
 
+    public Map<String, Object> getVars() {
+        return vars;
+    }
+
+    public void setVars(Map<String, Object> vars) {
+        this.vars = vars;
+    }
+
+    /**
+     * Fluent setter to attach context variables to this result.
+     *
+     * @param vars the context variables
+     * @return this result
+     */
+    public ExecutionResult withVars(Map<String, Object> vars) {
+        this.vars = vars;
+        return this;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -145,12 +165,13 @@ public class ExecutionResult {
                 Objects.equals(data, that.data) &&
                 Objects.equals(errors, that.errors) &&
                 Objects.equals(logs, that.logs) &&
-                Objects.equals(metrics, that.metrics);
+                Objects.equals(metrics, that.metrics) &&
+                Objects.equals(vars, that.vars);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(success, data, errors, logs, metrics);
+        return Objects.hash(success, data, errors, logs, metrics, vars);
     }
 
     @Override
@@ -161,6 +182,7 @@ public class ExecutionResult {
                 ", errors=" + errors +
                 ", logs=" + logs +
                 ", metrics=" + metrics +
+                ", vars=" + vars +
                 '}';
     }
 }

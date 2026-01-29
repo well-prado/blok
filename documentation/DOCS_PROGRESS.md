@@ -41,7 +41,7 @@
 | 1.7 | Nodes | [ ] | [nodes.md](modules/nodes.md) | - | What nodes are, how they work |
 | 1.8 | Workflows | [ ] | [workflow-helper.md](modules/workflow-helper.md) | - | Workflow structure and execution |
 | 1.9 | Triggers Overview | [ ] | [triggers.md](modules/triggers.md) | - | All trigger types at a glance |
-| 1.10 | Context & Data Flow | [ ] | [core-shared.md](modules/core-shared.md) | - | How data moves through workflows |
+| 1.10 | Context & Data Flow | [ ] | [core-shared.md](modules/core-shared.md) | - | **HIGH PRIORITY** — Critical learnings from E2E: ctx.vars vs ctx.response.data, Mapper resolution, runtime adapter data flow. See DOCS_ROADMAP.md for details. |
 
 ### Building Nodes
 | # | Page | Status | Module Reference | Assigned | Notes |
@@ -85,9 +85,9 @@
 
 | # | Page | Status | Module Reference | Assigned | Notes |
 |---|------|--------|-----------------|----------|-------|
-| 3.1 | Runtime Architecture | [ ] | [runtime-adapters.md](modules/runtime-adapters.md) | - | |
+| 3.1 | Runtime Architecture | [ ] | [runtime-adapters.md](modules/runtime-adapters.md) | - | **KEY CONTENT**: 3 adapter types (NodeJS/Python3/HTTP), workflow type mapping, env vars, ExecutionResult contract. See DOCS_ROADMAP.md Phase 3 notes. |
 | 3.2 | Node.js Runtime | [ ] | [runtime-adapters.md](modules/runtime-adapters.md) | - | |
-| 3.3 | Python 3 Runtime | [ ] | [runtime-python.md](modules/runtime-python.md) | - | |
+| 3.3 | Python 3 Runtime | [ ] | [runtime-python.md](modules/runtime-python.md) | - | Document gRPC protocol, config.inputs behavior, resolved inputs as request.body |
 | 3.4 | Go SDK | [ ] | [sdk-go.md](modules/sdk-go.md) | - | |
 | 3.5 | Java SDK | [ ] | [sdk-java.md](modules/sdk-java.md) | - | |
 | 3.6 | Rust SDK | [ ] | [sdk-rust.md](modules/sdk-rust.md) | - | |
@@ -173,6 +173,7 @@
 
 | Date | Update |
 |------|--------|
+| 2026-01-29 | Added critical learnings from E2E validation: ctx.vars data flow, runtime adapter architecture, Python3 adapter notes |
 | 2026-01-29 | Initial documentation roadmap and progress tracker created |
 
 ---

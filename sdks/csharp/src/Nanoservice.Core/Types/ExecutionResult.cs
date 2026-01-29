@@ -26,6 +26,10 @@ public class ExecutionResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ExecutionMetrics? Metrics { get; set; }
 
+    [JsonPropertyName("vars")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object?>? Vars { get; set; }
+
     /// <summary>
     /// Create a successful result with the given data.
     /// </summary>
@@ -86,6 +90,15 @@ public class ExecutionResult
     public ExecutionResult WithMetrics(ExecutionMetrics metrics)
     {
         Metrics = metrics;
+        return this;
+    }
+
+    /// <summary>
+    /// Attach context variables to the result.
+    /// </summary>
+    public ExecutionResult WithVars(Dictionary<string, object?> vars)
+    {
+        Vars = vars;
         return this;
     }
 }

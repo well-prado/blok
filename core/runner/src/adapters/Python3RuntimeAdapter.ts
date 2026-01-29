@@ -46,9 +46,12 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 			const nodeSuccess = parsedResponse.success !== false;
 			const nodeErrors = parsedResponse.error || null;
 
+			// Extract just the data portion for consistency with HttpRuntimeAdapter
+			const nodeData = (parsedResponse.data !== undefined) ? parsedResponse.data : parsedResponse;
+
 			return {
 				success: nodeSuccess,
-				data: parsedResponse,
+				data: nodeData,
 				errors: nodeErrors,
 				metrics: {
 					duration_ms,
@@ -97,9 +100,16 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 	 * Create the context object to send to Python runtime
 	 */
 	private createContext(ctx: Context, config: Record<string, unknown>): unknown {
+		// Use resolved inputs from config when available (populated by the Mapper),
+		// otherwise fall back to the original request body
+		const resolvedInputs = config?.inputs as Record<string, unknown> | undefined;
+		const requestBody = (resolvedInputs && Object.keys(resolvedInputs).length > 0)
+			? resolvedInputs
+			: ctx.request.body;
+
 		return {
 			request: {
-				body: ctx.request.body,
+				body: requestBody,
 				headers: ctx.request.headers,
 				params: ctx.request.params,
 				query: ctx.request.query,
@@ -111,7 +121,7 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 			response: ctx.response,
 			vars: ctx.vars,
 			env: ctx.env,
-			config: config,
+			config: (config?.inputs as Record<string, unknown>) ?? config,
 		};
 	}
 }

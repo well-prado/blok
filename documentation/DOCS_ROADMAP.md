@@ -239,6 +239,15 @@ docs/
 | 1.8 | Workflows | P0 | workflow-helper/, examples/workflows/ | - [ ] |
 | 1.9 | Triggers Overview | P0 | triggers/http/, TriggerBase.ts | - [ ] |
 | 1.10 | Context & Data Flow | P0 | core/shared/src/types/Context.ts | - [ ] |
+
+> **CRITICAL LEARNINGS for page 1.10 (Context & Data Flow):**
+>
+> 1. **ctx.vars vs ctx.response.data** — `ctx.response.data` only holds the PREVIOUS node's output and gets overwritten each step (`RunnerSteps.ts` line 33: `ctx.response = model.data`). For cross-step data persistence, always use `ctx.vars`.
+> 2. **ctx.vars pattern** — Each step can store output in `ctx.vars[stepName]`. Downstream steps read via `js/ctx.vars['prevStep'].fieldName` expressions in workflow JSON inputs. RuntimeAdapterNode auto-saves `result.data` to `ctx.vars[this.name]`.
+> 3. **set_var / ctx.vars lifecycle** — `ctx.vars` is an object that persists throughout the entire workflow execution. Any node can read/write to it. The Mapper (blueprintMapper) resolves `js/` expressions before each node executes.
+> 4. **Data flow between runtime adapters** — HttpRuntimeAdapter sends resolved inputs (from config) as the request body. Python3RuntimeAdapter sends resolved inputs as `request.body` in gRPC context. Both extract `result.data` and store it in `ctx.vars[stepName]`.
+> 5. **ctx.request.body** — Contains the original HTTP request body for the first node. For runtime adapter nodes, `request.body` may contain resolved inputs from the Mapper, not the original HTTP body.
+> 6. **ctx.config[nodeName]** — The workflow JSON `nodes` section maps to `ctx.config`. Each node's `inputs` are resolved by the Mapper before `handle()` is called.
 | 1.11 | Function-First Nodes | P0 | defineNode.ts, FUNCTION_FIRST_NODES.md | - [ ] |
 | 1.12 | Input/Output Schemas | P0 | Zod schemas, StepOpts.ts | - [ ] |
 | 1.13 | HTTP Trigger | P0 | triggers/http/ | - [ ] |
@@ -265,6 +274,33 @@ docs/
 
 ### Phase 3: Multi-Language Runtimes
 **Goal:** Full documentation for every language SDK and runtime adapter.
+
+> **KEY LEARNINGS for Phase 3 (Runtime Documentation):**
+>
+> **3 Adapter Types with different protocols:**
+> - **NodeJsRuntimeAdapter** — In-process execution, no serialization
+> - **Python3RuntimeAdapter** — gRPC (base64-encoded JSON), sends resolved inputs as `request.body` in context, passes `config.inputs` to Python NanoService `handle()`, extracts `parsedResponse.data`
+> - **HttpRuntimeAdapter** — HTTP POST to `/execute` (Go, Rust, Java, C#, PHP, Ruby), sends resolved inputs from `ctx.config[node.name].inputs` as request body, returns `ExecutionResult` with vars support
+>
+> **Workflow type mapping:**
+> - `"type": "module"` → NodeJS in-process
+> - `"type": "runtime.python3"` → Python3 gRPC adapter
+> - `"type": "runtime.go"` → HttpRuntimeAdapter (Go SDK container)
+> - Same pattern for `runtime.rust`, `runtime.java`, `runtime.csharp`, `runtime.php`, `runtime.ruby`
+>
+> **RuntimeAdapterNode behavior:**
+> - Acts as bridge between RuntimeAdapter and RunnerNode
+> - Auto-saves `result.data` to `ctx.vars[this.name]` after each execution
+> - Merges SDK-returned `result.vars` into `ctx.vars` if present
+>
+> **Environment variables per runtime:**
+> - `RUNTIME_{LANG}_HOST` (default: `localhost`)
+> - `RUNTIME_{LANG}_PORT` (Go=9001, Rust=9002, Java=9003, C#=9004, PHP=9005, Ruby=9006)
+>
+> **SDK ExecutionResult contract (all SDKs must return):**
+> ```json
+> { "success": true, "data": {...}, "errors": null, "vars": {...}, "logs": [], "metrics": { "duration_ms": 5 } }
+> ```
 
 | # | Page | Priority | Source Files | Status |
 |---|------|----------|-------------|--------|
@@ -455,6 +491,9 @@ actual code here
 | `core/shared/src/NodeBase.ts` | Node base class |
 | `core/workflow-helper/src/index.ts` | Workflow builder API |
 | `core/workflow-helper/src/types/` | Workflow/trigger/step types |
+| `core/runner/src/RunnerSteps.ts` | Step execution flow, ctx.response overwrite behavior |
+| `core/runner/src/RuntimeAdapterNode.ts` | Runtime adapter bridge, ctx.vars auto-save |
+| `core/shared/src/NodeBase.ts` | blueprintMapper, js/ expression resolution |
 
 ### Runtime Sources
 | File | What to Document |
@@ -464,7 +503,9 @@ actual code here
 | `core/runner/src/adapters/Python3RuntimeAdapter.ts` | Python adapter |
 | `core/runner/src/adapters/DockerRuntimeAdapter.ts` | Docker adapter |
 | `core/runner/src/adapters/BunRuntimeAdapter.ts` | Bun adapter |
+| `core/runner/src/adapters/HttpRuntimeAdapter.ts` | HTTP adapter (Go, Rust, Java, C#, PHP, Ruby) |
 | `core/runner/src/adapters/WasmRuntimeAdapter.ts` | WASM adapter |
+| `core/runner/src/RuntimeAdapterNode.ts` | Bridge between RuntimeAdapter and RunnerNode, ctx.vars auto-save |
 | `sdks/go/` | Go SDK reference |
 | `sdks/java/` | Java SDK reference |
 | `sdks/rust/` | Rust SDK reference |
@@ -476,7 +517,8 @@ actual code here
 
 ---
 
-**Document Version:** 1.0.0
+**Document Version:** 1.1.0
 **Created:** 2026-01-29
+**Last Updated:** 2026-01-29
 **Owner:** Blok Core Team
-**Status:** Planning
+**Status:** Planning (enriched with runtime + context data flow learnings from E2E validation)

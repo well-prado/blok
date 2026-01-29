@@ -124,7 +124,14 @@ public class NodeRegistry {
             long memUsed = Math.max(0, memAfter - memBefore);
 
             ExecutionMetrics metrics = new ExecutionMetrics(durationMs, null, memUsed);
-            return ExecutionResult.success(data).withMetrics(metrics);
+            ExecutionResult result = ExecutionResult.success(data).withMetrics(metrics);
+
+            // Include context vars so the runner can propagate them downstream
+            if (ctx.getVars() != null && !ctx.getVars().isEmpty()) {
+                result.setVars(ctx.getVars());
+            }
+
+            return result;
 
         } catch (NodeException e) {
             long durationNanos = System.nanoTime() - startNanos;

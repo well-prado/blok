@@ -102,8 +102,8 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 			expect(result.data).toBeDefined();
 
 			const data = result.data as any;
-			expect(data.data.result).toContain("Python3 processed");
-			expect(data.data.count).toBe(42);
+			expect(data.result).toContain("Python3 processed");
+			expect(data.count).toBe(42);
 			expect(result.metrics?.duration_ms).toBeGreaterThan(0);
 			expect(duration).toBeLessThan(1000); // Should be < 1s with gRPC
 
@@ -123,8 +123,8 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 			// Assert
 			expect(result.success).toBe(true);
 			const data = result.data as any;
-			expect(data.data.result).toContain("Python3 processed");
-			expect(data.data.count).toBe(1); // Default value
+			expect(data.result).toContain("Python3 processed");
+			expect(data.count).toBe(1); // Default value
 		});
 	});
 
@@ -144,11 +144,11 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 			// Assert
 			expect(result.success).toBe(true);
 			const data = result.data as any;
-			expect(data.data.vars).toBeDefined();
-			expect(data.data.vars.python_message).toBe("Hello from Python3");
-			expect(data.data.vars.python_count).toBe(42);
+			expect(data.vars).toBeDefined();
+			expect(data.vars.python_message).toBe("Hello from Python3");
+			expect(data.vars.python_count).toBe(42);
 
-			console.log("✅ Context variables propagated:", data.data.vars);
+			console.log("✅ Context variables propagated:", data.vars);
 		});
 
 		it("should read ctx.vars from previous operations in Python3", async () => {
@@ -166,9 +166,9 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 			// Assert
 			expect(result.success).toBe(true);
 			const data = result.data as any;
-			expect(data.data.result).toContain("Test message from context");
+			expect(data.result).toContain("Test message from context");
 
-			console.log("✅ Context read successful:", data.data.result);
+			console.log("✅ Context read successful:", data.result);
 		});
 	});
 
@@ -252,7 +252,7 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 
 			// Update ctx.vars with written values
 			const writeData = writeResult.data as any;
-			ctx.vars = { ...ctx.vars, ...writeData.data.vars };
+			ctx.vars = { ...ctx.vars, ...writeData.vars };
 
 			// Second node reads from context
 			const readNode = createRunnerNode("test-context", {
@@ -263,8 +263,8 @@ describe("Python3RuntimeAdapter Integration Tests", () => {
 			// Assert
 			expect(readResult.success).toBe(true);
 			const readData = readResult.data as any;
-			expect(readData.data.vars.python_message).toBe("Hello from Python3");
-			expect(readData.data.vars.python_count).toBe(42);
+			expect(readData.vars.python_message).toBe("Hello from Python3");
+			expect(readData.vars.python_count).toBe(42);
 
 			console.log("✅ Context maintained across sequence");
 		});

@@ -122,7 +122,7 @@ func (r *NodeRegistry) Execute(req *ExecutionRequest) *ExecutionResult {
 		return errResult
 	}
 
-	return &ExecutionResult{
+	result := &ExecutionResult{
 		Success: true,
 		Data:    data,
 		Errors:  nil,
@@ -131,6 +131,13 @@ func (r *NodeRegistry) Execute(req *ExecutionRequest) *ExecutionResult {
 			MemoryBytes: Uint64Ptr(memUsed),
 		},
 	}
+
+	// Include context vars so the runner can propagate them downstream
+	if len(req.Context.Vars) > 0 {
+		result.Vars = req.Context.Vars
+	}
+
+	return result
 }
 
 // Health returns the health status of the registry.

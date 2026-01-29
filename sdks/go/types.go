@@ -150,11 +150,18 @@ type ExecutionRequest struct {
 
 // ExecutionResult is the response returned to the Blok runner.
 type ExecutionResult struct {
-	Success bool              `json:"success"`
-	Data    interface{}       `json:"data"`
-	Errors  interface{}       `json:"errors"`
-	Logs    []string          `json:"logs,omitempty"`
-	Metrics *ExecutionMetrics `json:"metrics,omitempty"`
+	Success bool                   `json:"success"`
+	Data    interface{}            `json:"data"`
+	Errors  interface{}            `json:"errors"`
+	Logs    []string               `json:"logs,omitempty"`
+	Metrics *ExecutionMetrics      `json:"metrics,omitempty"`
+	Vars    map[string]interface{} `json:"vars,omitempty"`
+}
+
+// WithVars attaches context variables to the result.
+func (r *ExecutionResult) WithVars(vars map[string]interface{}) *ExecutionResult {
+	r.Vars = vars
+	return r
 }
 
 // NewSuccessResult creates a successful execution result.

@@ -138,6 +138,8 @@ pub struct ExecutionResult {
     pub logs: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<ExecutionMetrics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vars: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl ExecutionResult {
@@ -149,6 +151,7 @@ impl ExecutionResult {
             errors: None,
             logs: None,
             metrics: None,
+            vars: None,
         }
     }
 
@@ -160,6 +163,7 @@ impl ExecutionResult {
             errors: None,
             logs: None,
             metrics: Some(metrics),
+            vars: None,
         }
     }
 
@@ -171,6 +175,7 @@ impl ExecutionResult {
             errors: Some(serde_json::json!({ "message": message })),
             logs: None,
             metrics: None,
+            vars: None,
         }
     }
 
@@ -185,6 +190,7 @@ impl ExecutionResult {
             })),
             logs: None,
             metrics: None,
+            vars: None,
         }
     }
 
@@ -197,6 +203,12 @@ impl ExecutionResult {
     /// Attach metrics to the result.
     pub fn with_metrics(mut self, metrics: ExecutionMetrics) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// Attach context variables to the result.
+    pub fn with_vars(mut self, vars: HashMap<String, serde_json::Value>) -> Self {
+        self.vars = Some(vars);
         self
     }
 }

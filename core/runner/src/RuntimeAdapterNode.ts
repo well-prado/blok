@@ -34,6 +34,24 @@ export class RuntimeAdapterNode extends RunnerNode {
 	async run(ctx: Context): Promise<ResponseContext> {
 		const result = await this.adapter.execute(this.targetNode, ctx);
 
+		// Ensure ctx.vars exists
+		if (!ctx.vars) {
+			(ctx as Record<string, unknown>).vars = {};
+		}
+		const vars = ctx.vars as Record<string, unknown>;
+
+		// Merge SDK-returned vars into ctx.vars (if the SDK server includes them)
+		if (result.vars && typeof result.vars === "object") {
+			Object.assign(vars, result.vars);
+		}
+
+		// Auto-save the step's result data into ctx.vars[stepName]
+		// This ensures each runtime step's output is accessible downstream,
+		// even if the SDK server doesn't explicitly return vars
+		if (result.data != null) {
+			vars[this.name] = result.data;
+		}
+
 		// Convert errors to GlobalError if present
 		let error: GlobalError | null = null;
 		if (result.errors) {

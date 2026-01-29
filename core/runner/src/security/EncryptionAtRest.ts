@@ -32,7 +32,7 @@
  * ```
  */
 
-import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:crypto";
+import { type CipherGCM, type DecipherGCM, createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Types & Interfaces
@@ -181,7 +181,7 @@ export class EncryptionAtRest {
 
 		const cipher = createCipheriv(this.algorithm, derivedKey, iv, {
 			authTagLength: AUTH_TAG_LENGTH_BYTES,
-		});
+		} as Parameters<typeof createCipheriv>[3]) as CipherGCM;
 
 		const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 
@@ -224,7 +224,7 @@ export class EncryptionAtRest {
 
 		const decipher = createDecipheriv(this.algorithm, derivedKey, iv, {
 			authTagLength: AUTH_TAG_LENGTH_BYTES,
-		});
+		} as Parameters<typeof createDecipheriv>[3]) as DecipherGCM;
 		decipher.setAuthTag(tag);
 
 		const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);

@@ -1,6 +1,6 @@
 # Blok Framework Progress Tracker
 
-> **Last Updated:** 2026-01-29 (SEC-1 ABAC COMPLETE: Last code task done! All roadmap code items shipped!)
+> **Last Updated:** 2026-01-29 (E2E VALIDATED: 8-runtime cross-language chain PASS — ctx.vars data flow + Python3 adapter fixes!)
 > **Status:** ✅ DEPLOYMENT READY - All Phases, Enterprise, DX, Observability, Security, Compliance, Infrastructure, and Documentation COMPLETE!
 > **Completion:** 100% Overall (Phase 1-5: 100%, Enterprise: 100%, DX: 100%, Observability: 100%, Infrastructure: 100%, Documentation: 100%!)
 
@@ -163,6 +163,12 @@
 - ✅ **PERF-3: Multi-Region Deployment (3-region active-active, RPO 5m/RTO 15m)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **PERF-3: Edge Deployment (Cloudflare Workers, Lambda@Edge, Fly.io configs)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **PERF-3: Production Docker Compose (3-replica Blok, Redis, RabbitMQ, NATS, Nginx, monitoring stack)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **PHASE 1G: HttpRuntimeAdapter — native `runtime.go/rust/java/csharp/php/ruby` workflow types (no more runtime-bridge URLs!)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **Cross-runtime-chain workflow uses native types: `{ "type": "runtime.go" }` instead of URL-based runtime-bridge** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **35 HttpRuntimeAdapter tests passing (data flow, health checks, error handling, all 6 runtime kinds)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **E2E VALIDATED: All 8 runtimes chain correctly via ctx.vars (NodeJS→Go→Rust→Java→C#→PHP→Ruby→Python3 — PASS!)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **ctx.vars data flow pattern: each step stores output in ctx.vars[stepName], downstream reads via js/ expressions** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **Python3RuntimeAdapter fixed: resolved inputs as request.body, config.inputs to NanoService, data extraction** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **What's Not Ready:**
 - ✅ All roadmap items complete! Framework is deployment-ready.
@@ -181,7 +187,7 @@
 
 ### Phase 1: Language-Agnostic Atomic Runner (100% Complete) 🎉🎉🎉🎉🎉🎉
 
-#### Status: ✅ Phase 1A-1E Complete! All 11 RuntimeKind adapters implemented (Node.js, Bun, Python3, Go, Java, Rust, Docker, WASM + SDK runtimes)!
+#### Status: ✅ Phase 1A-1G Complete! All 11 RuntimeKind adapters implemented (Node.js, Bun, Python3, Go, Java, Rust, Docker, WASM + SDK runtimes) + HttpRuntimeAdapter for native SDK types!
 
 **Goal:** Make runner truly runtime-agnostic with pluggable adapters.
 
@@ -283,6 +289,31 @@ async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
 - ✅ Performance benchmarks (< 5ms overhead) - NodeJS < 1ms achieved! 🚀
 - ✅ Backward compatibility tests (all existing workflows pass) 🎉
 - ✅ Load testing (1000 sequential + 100 concurrent via registry) 🎉
+
+**✅ What Was Completed (Phase 1G — HttpRuntimeAdapter, 2026-01-29):**
+
+| Component | File Path | Status | Completed |
+|-----------|-----------|--------|-----------|
+| HttpRuntimeAdapter | `core/runner/src/adapters/HttpRuntimeAdapter.ts` | ✅ Complete | 2026-01-29 |
+| 6 HTTP adapters auto-registered | `core/runner/src/Configuration.ts` | ✅ Complete | 2026-01-29 |
+| `runtime.go/rust/java/csharp/php/ruby` node types | `core/runner/src/Configuration.ts` | ✅ Complete | 2026-01-29 |
+| runtimeResolver parses kind from type | `core/runner/src/Configuration.ts` | ✅ Complete | 2026-01-29 |
+| Cross-runtime-chain native types | `triggers/http/workflows/json/cross-runtime-chain.json` | ✅ Complete | 2026-01-29 |
+| HttpRuntimeAdapter unit tests (35) | `core/runner/src/adapters/__tests__/HttpRuntimeAdapter.test.ts` | ✅ Complete | 2026-01-29 |
+| Exports from runner index | `core/runner/src/index.ts` | ✅ Complete | 2026-01-29 |
+| E2E: 8-runtime chain PASS | `triggers/http/workflows/json/cross-runtime-chain.json` | ✅ Complete | 2026-01-29 |
+| ctx.vars data flow (chain-init) | `triggers/http/src/nodes/chain-init/index.ts` | ✅ Complete | 2026-01-29 |
+| ctx.vars data flow (chain-verify) | `triggers/http/src/nodes/chain-verify/index.ts` | ✅ Complete | 2026-01-29 |
+| Python3RuntimeAdapter fixes | `core/runner/src/adapters/Python3RuntimeAdapter.ts` | ✅ Complete | 2026-01-29 |
+
+**Key Achievement:** Workflows now use `"type": "runtime.go"` instead of the `runtime-bridge` workaround with explicit URLs. The engine internally routes to the correct SDK container via `HttpRuntimeAdapter`, reading host/port from environment variables (`RUNTIME_GO_HOST`, `RUNTIME_GO_PORT`, etc.).
+
+**E2E Validation (Cross-Runtime Chain — PASS):**
+- All 8 runtimes chain correctly: NodeJS → Go → Rust → Java → C# → PHP → Ruby → Python3
+- Each runtime appends its language entry to a shared chain array via `ctx.vars`
+- Data flow uses `js/ctx.vars['prevStep'].chain` expressions (not `ctx.response.data`)
+- Python3RuntimeAdapter sends resolved inputs as `request.body` and passes `config.inputs` (not full config wrapper) to Python NanoService
+- Chain-verify node reads `ctx.vars` directly to produce verification report with PASS/FAIL status
 
 ---
 
@@ -1344,6 +1375,62 @@ export default class MyNode extends NanoService<InputType> {
 ---
 
 ## Recent Achievements
+
+### 2026-01-29 - E2E VALIDATED: 8-Runtime Cross-Language Chain — PASS!
+
+**E2E Cross-Runtime Chain Test — ALL 8 RUNTIMES PASS:**
+- ✅ Ran live E2E test: `POST http://localhost:4000/cross-runtime-chain` against all 8 SDK containers
+- ✅ Chain result: NodeJS → Go → Rust → Java → C# → PHP → Ruby → Python3 (chain length 8, all verified)
+- ✅ Each runtime correctly appended its language entry with order and timestamp
+- ✅ Origin "blok-cross-runtime-test" propagated through all steps via `ctx.vars`
+- ✅ Chain-verify node confirmed PASS status with full verification report
+
+**Critical Data Flow Discovery — ctx.vars vs ctx.response.data:**
+- `ctx.response.data` only holds the PREVIOUS node's output and gets overwritten each step (RunnerSteps.ts line 33: `ctx.response = model.data`)
+- `ctx.vars` persists across ALL steps and is the correct mechanism for chaining data between nodes
+- Workflow inputs now use `js/ctx.vars['prevStep'].chain` instead of `js/ctx.response.data.chain`
+- RuntimeAdapterNode auto-saves `result.data` to `ctx.vars[this.name]` for downstream access
+
+**Python3RuntimeAdapter Fixes (3 changes):**
+- Fixed `createContext()` to use resolved inputs as `request.body` when available (instead of original HTTP body)
+- Changed to return `parsedResponse.data` instead of full parsedResponse (consistency with HttpRuntimeAdapter)
+- Changed config to send `config.inputs` instead of full config wrapper to Python NanoService (matches what `handle(ctx, inputs)` expects)
+
+**Files Modified:**
+- `core/runner/src/adapters/Python3RuntimeAdapter.ts` — 3 data flow fixes
+- `triggers/http/src/nodes/chain-init/index.ts` — Stores output in `ctx.vars['init']`
+- `triggers/http/src/nodes/chain-verify/index.ts` — Reads all `ctx.vars` directly for verification
+- `triggers/http/workflows/json/cross-runtime-chain.json` — All inputs use `ctx.vars['prevStep']` pattern
+- `triggers/http/package.json` — Changed to `workspace:*` for local runner linking
+
+---
+
+### 2026-01-29 - Phase 1G: HttpRuntimeAdapter — Native SDK Runtime Types!
+
+**Phase 1G: First-Class HTTP Runtime Adapters - COMPLETE:**
+- ✅ Created `HttpRuntimeAdapter.ts` — Lightweight adapter connecting to pre-existing SDK containers via HTTP
+  - Implements `RuntimeAdapter` interface with `execute()` and `checkHealth()`
+  - POSTs `ExecutionRequest` to `{baseUrl}/execute`, returns `ExecutionResult`
+  - Critical data flow: places `ctx.response.data` into `context.request.body` so SDK nodes read previous-step output
+  - Configurable timeout (default 30s), error wrapping, duration metrics
+- ✅ Modified `Configuration.ts` — 3 changes:
+  - Registered 6 HTTP adapters (Go, Rust, Java, C#, PHP, Ruby) from env vars in `initializeRuntimeRegistry()`
+  - Added `runtime.go/rust/java/csharp/php/ruby` to `nodeTypes()`
+  - Updated `runtimeResolver()` to parse kind from `node.type` string (e.g., `"runtime.go"` → `"go"`)
+- ✅ Updated `cross-runtime-chain.json` — Native runtime types replace `runtime-bridge` workaround
+  - Before: `{ "node": "runtime-bridge", "type": "module", "inputs": { "url": "http://localhost:9001" } }`
+  - After: `{ "node": "chain-test", "type": "runtime.go" }`
+- ✅ Exported `HttpRuntimeAdapter` and `HttpRuntimeAdapterOptions` from runner index
+
+**Tests: 35 New Tests (all passing):**
+- ✅ **Adapter Properties**: 5 tests (kind, different kinds, execute method, base URL, custom host/port)
+- ✅ **Execute Success**: 5 tests (basic success, POST to /execute, SDK metrics, logs, null success)
+- ✅ **Execute Data Flow**: 6 tests (ctx.response.data → request.body, null data, node name, workflow context, vars/env, clean response)
+- ✅ **Execute Error Cases**: 7 tests (ECONNREFUSED, HTTP errors, SDK failure, timeout, invalid JSON, duration on error, error name/stack)
+- ✅ **Health Check**: 5 tests (healthy, "ok" status, unhealthy, HTTP error, unreachable)
+- ✅ **All Runtime Kinds**: 7 tests (creation + execution for Go, Rust, Java, C#, PHP, Ruby)
+
+---
 
 ### 2026-01-29 - SEC-1 ABAC COMPLETE: Attribute-Based Access Control!
 

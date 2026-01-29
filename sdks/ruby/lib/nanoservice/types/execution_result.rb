@@ -4,19 +4,20 @@ module Nanoservice
   module Types
     # ExecutionResult is the response returned to the Blok runner after node execution.
     class ExecutionResult
-      attr_accessor :success, :data, :errors, :logs, :metrics
+      attr_accessor :success, :data, :errors, :logs, :metrics, :vars
 
       # @param success [Boolean] Whether execution succeeded
       # @param data [Object] Result data payload
       # @param errors [Object, nil] Error information
       # @param logs [Array<String>, nil] Log lines captured during execution
       # @param metrics [ExecutionMetrics, nil] Performance metrics
-      def initialize(success:, data:, errors: nil, logs: nil, metrics: nil)
+      def initialize(success:, data:, errors: nil, logs: nil, metrics: nil, vars: nil)
         @success = success
         @data    = data
         @errors  = errors
         @logs    = logs
         @metrics = metrics
+        @vars    = vars
       end
 
       # Create a successful result.
@@ -73,6 +74,14 @@ module Nanoservice
         self
       end
 
+      # Attach context variables to the result.
+      # @param vars [Hash] Context variables
+      # @return [self]
+      def with_vars(vars)
+        @vars = vars
+        self
+      end
+
       # Build an ExecutionResult from a Hash (JSON-parsed).
       # @param hash [Hash] the parsed JSON hash
       # @return [ExecutionResult]
@@ -84,7 +93,8 @@ module Nanoservice
           data:    hash["data"],
           errors:  hash["errors"],
           logs:    hash["logs"],
-          metrics: hash["metrics"] ? ExecutionMetrics.from_hash(hash["metrics"]) : nil
+          metrics: hash["metrics"] ? ExecutionMetrics.from_hash(hash["metrics"]) : nil,
+          vars: hash["vars"]
         )
       end
 
@@ -99,6 +109,7 @@ module Nanoservice
         h["errors"]  = @errors  unless @errors.nil?
         h["logs"]    = @logs    unless @logs.nil?
         h["metrics"] = @metrics.to_hash unless @metrics.nil?
+        h["vars"] = @vars unless @vars.nil?
         h
       end
     end

@@ -15,7 +15,7 @@ type InputType = Record<string, never>;
  * so downstream nodes in other languages can append to it.
  */
 export default class ChainInit extends NanoService<InputType> {
-	async handle(_ctx: Context, _inputs: InputType): Promise<INanoServiceResponse> {
+	async handle(ctx: Context, _inputs: InputType): Promise<INanoServiceResponse> {
 		const response = new NanoServiceResponse();
 
 		const entry = {
@@ -24,10 +24,18 @@ export default class ChainInit extends NanoService<InputType> {
 			timestamp: new Date().toISOString(),
 		};
 
-		response.setSuccess({
+		const data = {
 			chain: [entry],
 			origin: "blok-cross-runtime-test",
-		} as unknown as JsonLikeObject);
+		};
+
+		// Store in ctx.vars so downstream nodes can access via ctx.vars['init']
+		if (!ctx.vars) {
+			(ctx as Record<string, unknown>).vars = {};
+		}
+		(ctx.vars as Record<string, unknown>).init = data;
+
+		response.setSuccess(data as unknown as JsonLikeObject);
 
 		return response;
 	}

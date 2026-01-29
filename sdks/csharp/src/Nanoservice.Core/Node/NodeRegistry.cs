@@ -67,11 +67,19 @@ public class NodeRegistry
             stopwatch.Stop();
             var memAfter = GC.GetTotalMemory(false);
 
-            return ExecutionResult.Ok(data).WithMetrics(new ExecutionMetrics
+            var result = ExecutionResult.Ok(data).WithMetrics(new ExecutionMetrics
             {
                 DurationMs = stopwatch.Elapsed.TotalMilliseconds,
                 MemoryBytes = Math.Max(0, memAfter - memBefore)
             });
+
+            // Include context vars so the runner can propagate them downstream
+            if (request.Context.Vars is { Count: > 0 })
+            {
+                result.Vars = request.Context.Vars;
+            }
+
+            return result;
         }
         catch (Exception ex)
         {

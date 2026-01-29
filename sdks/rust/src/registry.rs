@@ -66,13 +66,18 @@ impl NodeRegistry {
         match wrapped.execute(&mut req.context, &req.node.config).await {
             Ok(data) => {
                 let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-                ExecutionResult::success_with_metrics(
+                let mut result = ExecutionResult::success_with_metrics(
                     data,
                     ExecutionMetrics {
                         duration_ms: Some(duration_ms),
                         ..Default::default()
                     },
-                )
+                );
+                // Include context vars so the runner can propagate them downstream
+                if !req.context.vars.is_empty() {
+                    result.vars = Some(req.context.vars.clone());
+                }
+                result
             }
             Err(err) => {
                 let duration_ms = start.elapsed().as_secs_f64() * 1000.0;

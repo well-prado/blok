@@ -101,13 +101,20 @@ final class NodeRegistry
             $durationMs = (hrtime(true) - $startTime) / 1_000_000;
             $memoryBytes = memory_get_peak_usage(true);
 
-            return ExecutionResult::successWithMetrics(
+            $result = ExecutionResult::successWithMetrics(
                 $data,
                 new ExecutionMetrics(
                     durationMs: round($durationMs, 3),
                     memoryBytes: $memoryBytes,
                 ),
             );
+
+            // Include context vars so the runner can propagate them downstream
+            if (!empty($req->context->vars)) {
+                $result->withVars($req->context->vars);
+            }
+
+            return $result;
         } catch (\Throwable $e) {
             $durationMs = (hrtime(true) - $startTime) / 1_000_000;
             $memoryBytes = memory_get_peak_usage(true);

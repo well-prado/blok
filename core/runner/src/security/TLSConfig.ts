@@ -494,7 +494,7 @@ export class TLSConfig {
 		// `selfsigned` or `node-forge` are often used.  This implementation
 		// provides a functional placeholder that works with Node.js built-ins.
 
-		const { createSign, createHash, randomBytes: cryptoRandomBytes } = require("node:crypto");
+		const { createSign, randomBytes: cryptoRandomBytes } = require("node:crypto");
 
 		// Serial number (20 bytes, positive)
 		const serial = cryptoRandomBytes(20);

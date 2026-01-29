@@ -11,6 +11,7 @@ import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
+import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
@@ -119,6 +120,7 @@ export {
 	NodeJsRuntimeAdapter,
 	Python3RuntimeAdapter,
 	DockerRuntimeAdapter,
+	HttpRuntimeAdapter,
 	BunRuntimeAdapter,
 	WasmRuntimeAdapter,
 	// Function-first API
@@ -215,6 +217,7 @@ export {
 
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
+export type { HttpRuntimeAdapterOptions } from "./adapters/HttpRuntimeAdapter";
 export type {
 	HealthStatus,
 	HealthCheckResult,

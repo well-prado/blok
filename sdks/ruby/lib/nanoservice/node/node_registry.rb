@@ -67,7 +67,13 @@ module Nanoservice
           duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000.0
 
           metrics = Types::ExecutionMetrics.new(duration_ms: duration_ms)
-          Types::ExecutionResult.success_with_metrics(data, metrics)
+          result = Types::ExecutionResult.success_with_metrics(data, metrics)
+
+          # Include context vars so the runner can propagate them downstream
+          ctx_vars = execution_request.context.vars
+          result.with_vars(ctx_vars) if ctx_vars && !ctx_vars.empty?
+
+          result
         rescue Errors::NodeError => e
           duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000.0
           result = Types::ExecutionResult.error_with_details(e.message, e.to_hash)

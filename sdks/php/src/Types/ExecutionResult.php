@@ -16,6 +16,8 @@ final class ExecutionResult
         /** @var string[]|null */
         public ?array $logs = null,
         public ?ExecutionMetrics $metrics = null,
+        /** @var array<string, mixed>|null */
+        public ?array $vars = null,
     ) {}
 
     /**
@@ -87,6 +89,17 @@ final class ExecutionResult
     }
 
     /**
+     * Attach context variables to the result.
+     *
+     * @param array<string, mixed> $vars
+     */
+    public function withVars(array $vars): self
+    {
+        $this->vars = $vars;
+        return $this;
+    }
+
+    /**
      * Create an ExecutionResult from an associative array.
      */
     public static function fromArray(array $data): self
@@ -97,6 +110,7 @@ final class ExecutionResult
             errors: $data['errors'] ?? null,
             logs: $data['logs'] ?? null,
             metrics: isset($data['metrics']) ? ExecutionMetrics::fromArray($data['metrics']) : null,
+            vars: $data['vars'] ?? null,
         );
     }
 
@@ -119,6 +133,9 @@ final class ExecutionResult
         }
         if ($this->metrics !== null) {
             $result['metrics'] = $this->metrics->toArray();
+        }
+        if ($this->vars !== null) {
+            $result['vars'] = $this->vars;
         }
 
         return $result;

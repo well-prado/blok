@@ -30,6 +30,8 @@ export type ExecutionResult = {
 		cpu_ms?: number;
 		memory_bytes?: number;
 	};
+	/** Variables set by the SDK node during execution, to be merged into ctx.vars */
+	vars?: Record<string, unknown>;
 };
 
 /**

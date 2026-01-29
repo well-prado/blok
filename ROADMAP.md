@@ -147,6 +147,19 @@ class RuntimeRegistry {
 - [ ] Add troubleshooting guide for runtime issues
 - [ ] Create video tutorials for runtime development
 
+**Phase 1G: HTTP Runtime Adapters — Native SDK Support (Week 8-9)**
+- [x] Implement `HttpRuntimeAdapter` for pre-existing SDK containers (Go, Rust, Java, C#, PHP, Ruby)
+- [x] Register 6 HTTP adapters from env vars (`RUNTIME_{LANG}_HOST` / `RUNTIME_{LANG}_PORT`)
+- [x] Add `runtime.go`, `runtime.rust`, `runtime.java`, `runtime.csharp`, `runtime.php`, `runtime.ruby` to `nodeTypes()`
+- [x] Parse runtime kind from `type` string in `runtimeResolver()` (e.g., `"runtime.go"` → `"go"`)
+- [x] Update cross-runtime-chain workflow to use native types (no more `runtime-bridge` workaround)
+- [x] Unit tests for HttpRuntimeAdapter (35 tests passing)
+- [x] Export `HttpRuntimeAdapter` and `HttpRuntimeAdapterOptions` from runner index
+- [x] E2E validation: all 8 runtimes chain correctly via `ctx.vars` (NodeJS → Go → Rust → Java → C# → PHP → Ruby → Python3 — PASS)
+- [x] `ctx.vars` data flow pattern validated: each step reads from previous step's vars, not `ctx.response.data`
+- [x] Python3RuntimeAdapter improved: sends resolved inputs as `request.body`, extracts `parsedResponse.data`, passes `config.inputs` to Python NanoService
+- [x] Chain-init and chain-verify nodes store/read from `ctx.vars` directly
+
 ### Success Metrics
 - ✅ Zero breaking changes to existing workflows
 - ✅ New runtime can be added in < 1 day
@@ -714,12 +727,12 @@ Complete the vision of true language agnosticism with production-ready runtimes 
 | Node.js  | ✅ | ✅ | ✅ | ✅ | 🔄 | Production |
 | Bun      | ✅ | ✅ | ✅ | ✅ | ❌ | Beta |
 | Python 3 | ❌ | ✅ | ✅ | ✅ | 🔄 | Production |
-| Go       | ❌ | 🔄 | 🔄 | 🔄 | 🔄 | Planned |
-| Java     | ❌ | 🔄 | 🔄 | 🔄 | ❌ | Planned |
-| Rust     | ❌ | 🔄 | 🔄 | 🔄 | ✅ | Planned |
-| C# / .NET| ❌ | 🔄 | 🔄 | 🔄 | ❌ | Planned |
-| PHP      | ❌ | ❌ | 🔄 | 🔄 | ❌ | Planned |
-| Ruby     | ❌ | ❌ | 🔄 | 🔄 | ❌ | Planned |
+| Go       | ❌ | 🔄 | ✅ | 🔄 | 🔄 | SDK + HttpAdapter |
+| Java     | ❌ | 🔄 | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
+| Rust     | ❌ | 🔄 | ✅ | 🔄 | ✅ | SDK + HttpAdapter |
+| C# / .NET| ❌ | 🔄 | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
+| PHP      | ❌ | ❌ | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
+| Ruby     | ❌ | ❌ | ✅ | 🔄 | ❌ | SDK + HttpAdapter |
 | Elixir   | ❌ | ❌ | 🔄 | 🔄 | ❌ | Future |
 
 #### 5.2 Runtime SDK Structure
@@ -1157,29 +1170,29 @@ message NodeResponse {
 
 ### A. Runtime Adapter Architecture
 ```
-┌─────────────────────────────────────────┐
-│         Workflow Orchestrator           │
-│                                         │
-│  ┌──────────────────────────────────┐  │
-│  │      RuntimeRegistry             │  │
-│  │  ┌────────────────────────────┐  │  │
-│  │  │ NodeJS | Python | Go | ... │  │  │
-│  │  └────────────────────────────┘  │  │
-│  └──────────────────────────────────┘  │
-└─────────────────────────────────────────┘
-         │         │         │
-         ▼         ▼         ▼
-┌─────────────┐ ┌──────────┐ ┌──────────┐
-│   NodeJS    │ │  Python  │ │    Go    │
-│  In-Process │ │   gRPC   │ │  Docker  │
-│   Adapter   │ │  Adapter │ │  Adapter │
-└─────────────┘ └──────────┘ └──────────┘
-         │         │         │
-         ▼         ▼         ▼
-┌─────────────┐ ┌──────────┐ ┌──────────┐
-│  TS Nodes   │ │  Python  │ │   Go     │
-│   Local     │ │  gRPC    │ │Container │
-└─────────────┘ └──────────┘ └──────────┘
+┌──────────────────────────────────────────────────────────┐
+│                Workflow Orchestrator                       │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │              RuntimeRegistry                        │  │
+│  │  ┌──────────────────────────────────────────────┐  │  │
+│  │  │ NodeJS | Python | Go | Rust | Java | C# | …  │  │  │
+│  │  └──────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+     │          │          │         │         │
+     ▼          ▼          ▼         ▼         ▼
+┌──────────┐ ┌──────────┐ ┌────────────────────────────┐
+│  NodeJS  │ │  Python  │ │    HttpRuntimeAdapter      │
+│ In-Proc  │ │  gRPC    │ │  (Go|Rust|Java|C#|PHP|Ruby)│
+│ Adapter  │ │ Adapter  │ │  POST /execute, GET /health│
+└──────────┘ └──────────┘ └────────────────────────────┘
+     │          │          │         │         │
+     ▼          ▼          ▼         ▼         ▼
+┌──────────┐ ┌──────────┐ ┌──────┐ ┌──────┐ ┌──────┐
+│ TS Nodes │ │ Python   │ │ Go   │ │ Rust │ │ Java │ ...
+│  Local   │ │ gRPC Srv │ │ SDK  │ │ SDK  │ │ SDK  │
+└──────────┘ └──────────┘ └──────┘ └──────┘ └──────┘
 ```
 
 ### B. Trigger System Architecture
@@ -1232,8 +1245,8 @@ message NodeResponse {
 
 ---
 
-**Document Version:** 1.0.0
-**Last Updated:** 2026-01-27
+**Document Version:** 1.2.0
+**Last Updated:** 2026-01-29
 **Next Review:** 2026-04-27
 **Owner:** Blok Core Team
 **Status:** 🟢 Active Development
