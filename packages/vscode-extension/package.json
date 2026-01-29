@@ -99,6 +99,26 @@
 				}
 			]
 		},
+		"languages": [
+			{
+				"id": "blok-workflow",
+				"aliases": ["Blok Workflow"],
+				"filenamePatterns": ["**/workflows/**/*.json", "*.workflow.json"],
+				"configuration": "../syntax/language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "blok-workflow",
+				"scopeName": "source.blok-workflow",
+				"path": "../syntax/syntaxes/blok-workflow.tmLanguage.json"
+			},
+			{
+				"scopeName": "source.blok-workflow",
+				"path": "../syntax/syntaxes/blok-workflow.tmLanguage.json",
+				"injectTo": ["source.json"]
+			}
+		],
 		"snippets": [
 			{
 				"language": "typescript",

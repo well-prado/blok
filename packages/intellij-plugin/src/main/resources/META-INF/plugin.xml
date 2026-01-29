@@ -1,0 +1,43 @@
+<idea-plugin>
+    <id>com.blok.intellij</id>
+    <name>Blok Workflow Support</name>
+    <version>0.1.0</version>
+    <vendor email="support@blok.dev" url="https://blok.dev">Blok</vendor>
+
+    <description><![CDATA[
+        Language support for Blok workflow JSON files via the Blok LSP server.
+
+        <h3>Features</h3>
+        <ul>
+            <li>Diagnostics and validation for workflow JSON files</li>
+            <li>Auto-completion for workflow keys, trigger types, and node references</li>
+            <li>Hover documentation for workflow elements</li>
+            <li>Go-to-definition for node references</li>
+        </ul>
+
+        <h3>Requirements</h3>
+        <ul>
+            <li>The <code>blok-lsp</code> binary must be available on your PATH</li>
+            <li>Install via: <code>npm install -g @blok/lsp-server</code></li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.redhat.devtools.lsp4ij</depends>
+
+    <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+        <server id="blokLsp"
+                name="Blok LSP"
+                factoryClass="com.blok.intellij.BlokLspServerFactory">
+            <description><![CDATA[
+                Provides language support for Blok workflow JSON files.
+            ]]></description>
+        </server>
+        <languageMapping language="JSON"
+                         serverId="blokLsp"
+                         languageId="blok-workflow">
+            <fileNamePattern name="workflows/**/*.json" />
+            <fileNamePattern name="*.workflow.json" />
+        </languageMapping>
+    </extensions>
+</idea-plugin>

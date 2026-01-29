@@ -25,6 +25,9 @@ import "./commands/search/index.js";
 import "./commands/generate/index.js";
 import "./commands/config/index.js";
 import "./commands/migrate/index.js";
+import "./commands/graph/index.js";
+import "./commands/profile/index.js";
+import "./commands/cost/index.js";
 import { Command } from "commander";
 
 const version = await getPackageVersion();

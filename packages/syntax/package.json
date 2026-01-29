@@ -1,0 +1,7 @@
+{
+	"name": "@blok/syntax",
+	"version": "0.1.0",
+	"description": "TextMate grammar for Blok workflow JSON files",
+	"license": "MIT",
+	"files": ["syntaxes/", "language-configuration.json"]
+}

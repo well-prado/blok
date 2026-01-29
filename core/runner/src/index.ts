@@ -6,43 +6,50 @@ import ResolverBase from "./ResolverBase";
 import Runner from "./Runner";
 import TriggerBase from "./TriggerBase";
 
+import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 // Runtime adapters
 import { RuntimeRegistry } from "./RuntimeRegistry";
-import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
-import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "./adapters/RuntimeAdapter";
+import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
+import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import { Python3RuntimeAdapter } from "./adapters/Python3RuntimeAdapter";
-import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
-import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
+import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
 
 // Function-first node API
-import { defineNode, FunctionNode, type FnNodeDefinition } from "./defineNode";
+import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 
+import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 // Monitoring infrastructure
 import { HealthCheck } from "./monitoring/HealthCheck";
 import { RateLimiter } from "./monitoring/RateLimiter";
-import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 
+import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
 // Marketplace infrastructure
 import { RuntimeCatalog } from "./marketplace/RuntimeCatalog";
 import { RuntimeDiscovery } from "./marketplace/RuntimeDiscovery";
 import { RuntimeHealthMonitor } from "./marketplace/RuntimeHealthMonitor";
 import { RuntimeMetricsDashboard } from "./marketplace/RuntimeMetricsDashboard";
-import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
 
 // Hot Module Replacement (HMR)
 import { FileWatcher } from "./hmr/FileWatcher";
-import { HotReloadManager } from "./hmr/HotReloadManager";
 import { HmrDevConsole } from "./hmr/HmrDevConsole";
+import { HotReloadManager } from "./hmr/HotReloadManager";
 
-// Security
-import { AuthMiddleware, JWTAuthProvider, APIKeyAuthProvider } from "./security/AuthMiddleware";
-import { RBAC, createDefaultRBAC } from "./security/RBAC";
 import { AuditLogger, ConsoleAuditSink, FileAuditSink, InMemoryAuditSink } from "./security/AuditLogger";
+// Security
+import { APIKeyAuthProvider, AuthMiddleware, JWTAuthProvider } from "./security/AuthMiddleware";
 import { OAuthOIDCProvider, TokenCache } from "./security/OAuthProvider";
-import { SecretManager, EnvironmentSecretProvider, InMemorySecretProvider, VaultSecretProvider, AWSSecretsProvider, GCPSecretProvider } from "./security/SecretManager";
+import { RBAC, createDefaultRBAC } from "./security/RBAC";
+import {
+	AWSSecretsProvider,
+	EnvironmentSecretProvider,
+	GCPSecretProvider,
+	InMemorySecretProvider,
+	SecretManager,
+	VaultSecretProvider,
+} from "./security/SecretManager";
 
 // OpenAPI
 import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
@@ -50,8 +57,16 @@ import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
 // GraphQL
 import { GraphQLSchemaGenerator } from "./graphql/GraphQLSchemaGenerator";
 
+import { NodeDependencyGraph } from "./visualization/NodeDependencyGraph";
 // Visualization
 import { WorkflowVisualizer } from "./visualization/WorkflowVisualizer";
+
+// Performance Profiling
+import { PerformanceProfiler } from "./monitoring/PerformanceProfiler";
+
+// Cost Estimation
+import { CostEstimator } from "./cost/CostEstimator";
+import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
 
 // Integrations
 import { SentryIntegration } from "./integrations/SentryIntegration";
@@ -61,8 +76,8 @@ import { InMemoryCache, NodeResultCache } from "./cache/NodeResultCache";
 
 // Testing Framework
 import { NodeTestHarness } from "./testing/TestHarness";
-import { WorkflowTestRunner } from "./testing/WorkflowTestRunner";
 import { TestLogger } from "./testing/TestLogger";
+import { WorkflowTestRunner } from "./testing/WorkflowTestRunner";
 
 // types
 
@@ -148,6 +163,15 @@ export {
 	GraphQLSchemaGenerator,
 	// Visualization
 	WorkflowVisualizer,
+	NodeDependencyGraph,
+	// Performance Profiling
+	PerformanceProfiler,
+	// Cost Estimation
+	CostEstimator,
+	PRICING,
+	DEFAULT_DURATIONS,
+	DEFAULT_MEMORY,
+	getRuntimeCategory,
 	// Integrations
 	SentryIntegration,
 	// Cache
@@ -327,6 +351,34 @@ export type {
 	ConditionDef as VisualizerConditionDef,
 	WorkflowSummary,
 } from "./visualization/WorkflowVisualizer";
+
+// Node Dependency Graph types
+export type {
+	StepRef,
+	DependencyNode,
+	DependencyEdge,
+	DependencyGraphConfig,
+	DependencyStats,
+} from "./visualization/NodeDependencyGraph";
+
+// Performance Profiler types
+export type {
+	NodeProfile,
+	WorkflowProfile,
+	ProfileConfig,
+} from "./monitoring/PerformanceProfiler";
+
+// Cost Estimation types
+export type {
+	NodeCostEstimate,
+	WorkflowCostEstimate,
+	CostEstimatorConfig,
+} from "./cost/CostEstimator";
+export type {
+	CloudProvider,
+	RuntimeCostCategory,
+	RuntimeCostModel,
+} from "./cost/pricing";
 
 // Integration types
 export type {

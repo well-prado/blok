@@ -1,0 +1,97 @@
+*blok.txt*    Blok workflow support for Neovim
+
+==============================================================================
+CONTENTS                                                      *blok-contents*
+
+    1. Introduction .......................... |blok-introduction|
+    2. Installation .......................... |blok-installation|
+    3. Configuration ......................... |blok-configuration|
+    4. Commands .............................. |blok-commands|
+    5. Keymaps ............................... |blok-keymaps|
+    6. LSP ................................... |blok-lsp|
+
+==============================================================================
+1. INTRODUCTION                                           *blok-introduction*
+
+Blok.nvim provides language support for Blok workflow JSON files, including
+LSP integration, filetype detection, syntax highlighting, and keymaps for
+CLI commands.
+
+==============================================================================
+2. INSTALLATION                                           *blok-installation*
+
+Using lazy.nvim: >lua
+    {
+        "blok-dev/blok.nvim",
+        ft = "blok-workflow",
+        opts = {},
+    }
+<
+
+Using packer.nvim: >lua
+    use {
+        "blok-dev/blok.nvim",
+        config = function()
+            require("blok").setup()
+        end,
+    }
+<
+
+Prerequisites:
+- `blok-lsp` binary on your PATH: `npm install -g @blok/lsp-server`
+- Optional: `nvim-lspconfig` for managed LSP setup
+
+==============================================================================
+3. CONFIGURATION                                         *blok-configuration*
+
+Call `require("blok").setup(opts)` with any of these options:
+>lua
+    require("blok").setup({
+        lsp = {
+            cmd = { "blok-lsp", "--stdio" },
+            filetypes = { "blok-workflow" },
+            root_markers = { "package.json", ".git" },
+        },
+        keymaps = {
+            graph = "<leader>bv",   -- Show dependency graph
+            profile = "<leader>bp", -- Show performance profile
+            cost = "<leader>bc",    -- Show cost estimate
+        },
+    })
+<
+
+==============================================================================
+4. COMMANDS                                                 *blok-commands*
+
+The plugin provides keymaps that invoke the Blok CLI:
+
+- `nanoctl graph --format ascii`  - Dependency graph visualization
+- `nanoctl profile --format table` - Performance profiling
+- `nanoctl cost --format table`   - Cost estimation
+
+==============================================================================
+5. KEYMAPS                                                   *blok-keymaps*
+
+Default keymaps (normal mode):
+
+    `<leader>bv`    Show workflow dependency graph
+    `<leader>bp`    Show performance profile
+    `<leader>bc`    Show cost estimate
+
+All keymaps can be customized or disabled via configuration.
+
+==============================================================================
+6. LSP                                                         *blok-lsp*
+
+The plugin auto-configures the Blok LSP server. If `nvim-lspconfig` is
+installed, it registers a `blok_lsp` server configuration. Otherwise, it
+falls back to `vim.lsp.start()` (Neovim 0.10+).
+
+LSP features provided:
+- Diagnostics (validation errors)
+- Auto-completion (workflow keys, trigger types, node references)
+- Hover documentation
+- Go-to-definition for node references
+
+==============================================================================
+vim:tw=78:ts=4:ft=help:norl:
