@@ -1,0 +1,196 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState, useEffect, useMemo } from "react";
+import { ArrowLeft, Loader2, Activity } from "lucide-react";
+import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { DurationBadge } from "@/components/shared/DurationBadge";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { TraceTimeline } from "@/components/trace/TraceTimeline";
+import { TraceGraph } from "@/components/trace/TraceGraph";
+import { NodeDetail } from "@/components/trace/NodeDetail";
+import { LogViewer } from "@/components/trace/LogViewer";
+import { EventLog } from "@/components/trace/EventLog";
+import { formatTimestamp } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
+
+export const Route = createFileRoute("/runs/$runId")({
+  component: RunTracePage,
+});
+
+function RunTracePage() {
+  const { runId } = Route.useParams();
+  const { data, isLoading, error } = useRunDetail(runId);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"timeline" | "graph" | "logs" | "events">("timeline");
+
+  // Subscribe to SSE for live updates
+  useTraceStream(runId);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      switch (e.key) {
+        case "1":
+          setActiveTab("timeline");
+          break;
+        case "2":
+          setActiveTab("graph");
+          break;
+        case "3":
+          setActiveTab("logs");
+          break;
+        case "4":
+          setActiveTab("events");
+          break;
+        case "Escape":
+          setSelectedNodeId(null);
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const selectedNode = useMemo(() => {
+    if (!data || !selectedNodeId) return null;
+    return data.nodes.find((n) => n.id === selectedNodeId) || null;
+  }, [data, selectedNodeId]);
+
+  const nodeNames = useMemo(() => {
+    if (!data) return [];
+    return [...new Set(data.nodes.map((n) => n.nodeName))];
+  }, [data]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-6 h-6 text-zinc-500 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="p-6">
+        <EmptyState
+          icon={<Activity className="w-12 h-12" />}
+          title="Run not found"
+          description={`No run with ID "${runId}" was found.`}
+        />
+      </div>
+    );
+  }
+
+  const { run, nodes, logs } = data;
+
+  const tabs = [
+    { key: "timeline" as const, label: "Timeline", shortcut: "1" },
+    { key: "graph" as const, label: "Graph", shortcut: "2" },
+    { key: "logs" as const, label: "Logs", shortcut: "3" },
+    { key: "events" as const, label: "Events", shortcut: "4" },
+  ];
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+        <div className="flex items-center gap-3 mb-1">
+          <Link
+            to="/workflows/$name"
+            params={{ name: run.workflowName }}
+            className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <span className="text-sm text-zinc-500">{run.workflowName}</span>
+          <span className="text-zinc-700">/</span>
+          <span className="text-sm font-mono text-zinc-400">{run.id.slice(0, 12)}</span>
+          <StatusBadge status={run.status} />
+          <DurationBadge
+            ms={run.status === "running" ? run.startedAt : run.durationMs}
+            running={run.status === "running"}
+          />
+        </div>
+        <div className="flex items-center gap-4 text-xs text-zinc-500 ml-9">
+          <span>Trigger: <span className="text-zinc-400 font-mono">{run.triggerSummary}</span></span>
+          <span>Started: <span className="text-zinc-400">{formatTimestamp(run.startedAt)}</span></span>
+          <span>Nodes: <span className="text-zinc-400">{run.completedNodes}/{run.nodeCount}</span></span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex-shrink-0 flex gap-0 border-b border-zinc-800 px-4">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={cn(
+              "px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
+              activeTab === tab.key
+                ? "border-blue-500 text-zinc-100"
+                : "border-transparent text-zinc-500 hover:text-zinc-300",
+            )}
+          >
+            {tab.label}
+            <span className="ml-1.5 text-[10px] text-zinc-600">{tab.shortcut}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Content area */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Main panel */}
+        <div className={cn(
+          "overflow-y-auto transition-all",
+          selectedNode ? "flex-1" : "w-full",
+        )}>
+          {activeTab === "timeline" && (
+            <div className="p-4">
+              <TraceTimeline
+                run={run}
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+              />
+            </div>
+          )}
+
+          {activeTab === "graph" && (
+            <div className="p-4">
+              <TraceGraph
+                run={run}
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+              />
+            </div>
+          )}
+
+          {activeTab === "logs" && (
+            <div className="h-full">
+              <LogViewer logs={logs} nodeNames={nodeNames} />
+            </div>
+          )}
+
+          {activeTab === "events" && (
+            <div className="p-4">
+              <EventLog runId={runId} />
+            </div>
+          )}
+        </div>
+
+        {/* Detail panel */}
+        {selectedNode && (
+          <div className="w-80 border-l border-zinc-800 bg-zinc-950/50 overflow-hidden flex-shrink-0">
+            <NodeDetail
+              node={selectedNode}
+              logs={logs}
+              onClose={() => setSelectedNodeId(null)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

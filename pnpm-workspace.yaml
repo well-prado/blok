@@ -4,6 +4,7 @@ packages:
   - triggers/*
   - templates/**/**
   - packages/*
+  - apps/*
 
 onlyBuiltDependencies:
   - '@biomejs/biome'

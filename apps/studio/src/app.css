@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-925: #111113;
+
+  --color-status-pending: #71717a;
+  --color-status-running: #3b82f6;
+  --color-status-completed: #22c55e;
+  --color-status-failed: #ef4444;
+  --color-status-cancelled: #a855f7;
+  --color-status-skipped: #6b7280;
+
+  --color-log-debug: #71717a;
+  --color-log-info: #3b82f6;
+  --color-log-warn: #f59e0b;
+  --color-log-error: #ef4444;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* SSE pulse animation for running nodes */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/* Growing bar animation for running timeline bars */
+@keyframes grow-bar {
+  from {
+    width: 60%;
+  }
+  to {
+    width: 100%;
+  }
+}
+.animate-grow-bar {
+  animation: grow-bar 2s ease-in-out infinite alternate;
+}
+
+/* Monospace for code/payloads */
+.font-mono {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
+}
