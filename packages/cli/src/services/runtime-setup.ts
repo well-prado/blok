@@ -61,7 +61,8 @@ export async function setupRuntime(
 	const nodesDir = path.join(projectRuntimeDir, "nodes");
 	fsExtra.ensureDirSync(nodesDir);
 
-	// 3. Language-specific setup
+	// 3. Language-specific setup (may return an override startCmd)
+	let startCmdOverride: string | undefined;
 	switch (runtime.kind) {
 		case "python3":
 			await setupPython3(blokctlRuntimeDir, projectRuntimeDir, spinner);
@@ -73,7 +74,7 @@ export async function setupRuntime(
 			await setupRust(blokctlRuntimeDir, spinner);
 			break;
 		case "java":
-			await setupJava(blokctlRuntimeDir, spinner);
+			startCmdOverride = await setupJava(blokctlRuntimeDir, spinner);
 			break;
 		case "csharp":
 			await setupCSharp(blokctlRuntimeDir, spinner);
@@ -90,7 +91,7 @@ export async function setupRuntime(
 
 	return {
 		port: runtime.defaultPort,
-		startCmd: runtime.startCmd,
+		startCmd: startCmdOverride || runtime.startCmd,
 		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,
 		label: runtime.label,
@@ -154,11 +155,27 @@ async function setupRust(sdkDir: string, spinner: SpinnerHandler): Promise<void>
 
 /**
  * Java: download dependencies and package with Maven.
+ * Returns an override startCmd if the default `java` isn't in PATH (e.g., macOS Homebrew).
  */
-async function setupJava(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
+async function setupJava(sdkDir: string, spinner: SpinnerHandler): Promise<string | undefined> {
 	spinner.message("Building Java project with Maven...");
 	await exec("mvn package -q -DskipTests", { cwd: sdkDir, timeout: 300000 });
 	spinner.message("Java project built.");
+
+	// Resolve the correct java binary (macOS ships a stub at /usr/bin/java that fails)
+	const javaCandidates = ["java", "/opt/homebrew/opt/openjdk/bin/java"];
+	for (const javaBin of javaCandidates) {
+		try {
+			await exec(`${javaBin} --version`, { timeout: 5000 });
+			if (javaBin !== "java") {
+				return `${javaBin} -jar target/blok-java-1.0.0.jar`;
+			}
+			return undefined; // default startCmd works
+		} catch {
+			// try next candidate
+		}
+	}
+	return undefined;
 }
 
 /**

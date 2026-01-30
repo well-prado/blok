@@ -69,7 +69,11 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Java",
 		installHint: "Install JDK 17+: https://adoptium.net/",
 		defaultPort: 9003,
-		commands: ["java --version", "/opt/homebrew/opt/openjdk/bin/java --version", "/usr/libexec/java_home -v 17+ 2>/dev/null && java --version"],
+		commands: [
+			"java --version",
+			"/opt/homebrew/opt/openjdk/bin/java --version",
+			"/usr/libexec/java_home -v 17+ 2>/dev/null && java --version",
+		],
 		toolchain: "java + mvn",
 		installDeps: "mvn package -q -DskipTests",
 		startCmd: "java -jar target/blok-java-1.0.0.jar",
@@ -88,7 +92,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["dotnet --version"],
 		toolchain: "dotnet",
 		installDeps: "dotnet restore",
-		startCmd: "dotnet run",
+		startCmd: "dotnet run --project src/Blok.Core",
 		sdkDir: "csharp",
 	},
 	{

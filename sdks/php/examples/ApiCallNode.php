@@ -74,8 +74,9 @@ final class ApiCallNode implements NodeHandler
         // Parse status code from response headers
         $statusCode = 200;
         $responseHeaders = [];
-        if (isset($http_response_header) && is_array($http_response_header)) {
-            foreach ($http_response_header as $header) {
+        $rawHeaders = http_get_last_response_headers();
+        if (is_array($rawHeaders)) {
+            foreach ($rawHeaders as $header) {
                 if (preg_match('/^HTTP\/[\d.]+ (\d{3})/', $header, $matches)) {
                     $statusCode = (int) $matches[1];
                 } else {
