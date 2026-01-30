@@ -42,7 +42,7 @@ const options: Partial<SimpleGitOptions> = {
 
 const git: SimpleGit = simpleGit(options);
 
-export async function createProject(opts: OptionValues, version: string, currentPath = false) {
+export async function createProject(opts: OptionValues, version: string, currentPath = false, localRepoPath?: string) {
 	const availableManagers = await pm.getAvailableManagers();
 	let manager = await pm.getManager();
 	const isDefault = opts.name !== undefined;
@@ -211,14 +211,24 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		if (!isDefault) s.message("Gathering project files");
 
-		const githubLocalExists = fsExtra.existsSync(GITHUB_REPO_LOCAL);
-		if (githubLocalExists) {
-			fsExtra.removeSync(GITHUB_REPO_LOCAL);
-		}
-		if (GITHUB_REPO_RELEASE_TAG) {
-			await git.clone(GITHUB_REPO_REMOTE, GITHUB_REPO_LOCAL, ["--branch", GITHUB_REPO_RELEASE_TAG, "--depth", "1"]);
+		// Determine the repo source: local path or cloned remote
+		const repoSource = localRepoPath ? path.resolve(localRepoPath) : GITHUB_REPO_LOCAL;
+
+		if (localRepoPath) {
+			if (!fsExtra.existsSync(repoSource)) {
+				throw new Error(`Local repo path not found: ${repoSource}`);
+			}
+			console.log(color.dim(`  Using local repo: ${repoSource}`));
 		} else {
-			await git.clone(GITHUB_REPO_REMOTE, GITHUB_REPO_LOCAL);
+			const githubLocalExists = fsExtra.existsSync(GITHUB_REPO_LOCAL);
+			if (githubLocalExists) {
+				fsExtra.removeSync(GITHUB_REPO_LOCAL);
+			}
+			if (GITHUB_REPO_RELEASE_TAG) {
+				await git.clone(GITHUB_REPO_REMOTE, GITHUB_REPO_LOCAL, ["--branch", GITHUB_REPO_RELEASE_TAG, "--depth", "1"]);
+			} else {
+				await git.clone(GITHUB_REPO_REMOTE, GITHUB_REPO_LOCAL);
+			}
 		}
 
 		if (!isDefault) s.message("Copying project files...");
@@ -231,7 +241,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		fsExtra.copySync(`${GITHUB_REPO_LOCAL}/triggers/${trigger}`, dirPath);
+		fsExtra.copySync(`${repoSource}/triggers/${trigger}`, dirPath);
 
 		if (!isDefault) {
 			s.message("Installing example workflows and nodes");
@@ -240,7 +250,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		const workflowsDir = `${dirPath}/workflows`;
 
 		fsExtra.ensureDirSync(nodesDir);
-		fsExtra.copySync(`${GITHUB_REPO_LOCAL}/workflows`, workflowsDir);
+		fsExtra.copySync(`${repoSource}/workflows`, workflowsDir);
 
 		// Add permissions to the directory
 		try {
@@ -253,7 +263,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		fsExtra.ensureDirSync(`${dirPath}/infra`);
 		fsExtra.ensureDirSync(`${dirPath}/infra/metrics`);
-		fsExtra.copySync(`${GITHUB_REPO_LOCAL}/infra/metrics`, `${dirPath}/infra/metrics`);
+		fsExtra.copySync(`${repoSource}/infra/metrics`, `${dirPath}/infra/metrics`);
 		fsExtra.removeSync(`${dirPath}/public/metric`);
 
 		// Examples
@@ -269,11 +279,11 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.ensureDirSync(`${dirPath}/infra/postgresql`);
 			fsExtra.ensureDirSync(`${dirPath}/infra/milvus`);
 
-			fsExtra.copySync(`${GITHUB_REPO_LOCAL}/infra/development`, `${dirPath}/infra/postgresql`);
-			fsExtra.copySync(`${GITHUB_REPO_LOCAL}/infra/milvus`, `${dirPath}/infra/milvus`);
+			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/postgresql`);
+			fsExtra.copySync(`${repoSource}/infra/milvus`, `${dirPath}/infra/milvus`);
 
 			fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, node_file);
-			fsExtra.copySync(`${GITHUB_REPO_LOCAL}/sdk`, `${dirPath}/public/sdk`);
+			fsExtra.copySync(`${repoSource}/sdk`, `${dirPath}/public/sdk`);
 		}
 
 		// Create .env.local file
@@ -315,7 +325,7 @@ export async function createProject(opts: OptionValues, version: string, current
 				if (!rt) continue;
 
 				try {
-					const config = await setupRuntime(rt, GITHUB_REPO_LOCAL, dirPath, s);
+					const config = await setupRuntime(rt, repoSource, dirPath, s);
 					runtimeConfigs.push(config);
 				} catch (error) {
 					console.log(color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${(error as Error).message}`));

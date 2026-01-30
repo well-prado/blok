@@ -85,12 +85,13 @@ async function main() {
 		const project = new Command("project")
 			.description("Create a new Project")
 			.option("-n, --name <value>", "Create a default Project")
+			.option("-l, --local <path>", "Use a local repo path instead of cloning from remote")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "create project",
 					args: options,
 					execution: async () => {
-						createProject(options, version, false);
+						createProject(options, version, false, options.local);
 					},
 				});
 			});
@@ -103,7 +104,7 @@ async function main() {
 					command: "create project .",
 					args: options,
 					execution: async () => {
-						createProject(options, version, true);
+						createProject(options, version, true, project.opts().local);
 					},
 				});
 			});
