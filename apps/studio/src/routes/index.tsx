@@ -2,7 +2,6 @@ import { LiveFeed } from "@/components/dashboard/LiveFeed";
 import { StatsOverview } from "@/components/dashboard/StatsOverview";
 import { WorkflowCard } from "@/components/dashboard/WorkflowCard";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { useGlobalStream } from "@/hooks/useGlobalStream";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, Workflow } from "lucide-react";
@@ -13,7 +12,6 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
 	const { data: workflows, isLoading, error } = useWorkflows();
-	useGlobalStream();
 
 	if (isLoading) {
 		return (

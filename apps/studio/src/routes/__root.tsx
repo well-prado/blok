@@ -3,6 +3,7 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { NotificationToast } from "@/components/shared/NotificationToast";
+import { useGlobalStream } from "@/hooks/useGlobalStream";
 import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 
@@ -15,6 +16,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootLayout() {
+	// Global SSE stream — lives at the root so it persists across page navigations
+	useGlobalStream();
+
 	return (
 		<div className="h-screen flex flex-col bg-zinc-950">
 			<div className="flex flex-1 overflow-hidden">

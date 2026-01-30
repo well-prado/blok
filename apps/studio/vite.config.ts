@@ -32,6 +32,17 @@ export default defineConfig({
       "/__blok": {
         target: "http://localhost:4000",
         changeOrigin: true,
+        // Prevent proxy from timing out long-lived SSE connections
+        timeout: 0,
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            // Disable buffering for SSE streams
+            if (proxyRes.headers["content-type"]?.includes("text/event-stream")) {
+              proxyRes.headers["cache-control"] = "no-cache";
+              proxyRes.headers["x-accel-buffering"] = "no";
+            }
+          });
+        },
       },
     },
   },

@@ -100,23 +100,32 @@ export default class HttpTrigger extends TriggerBase {
 				}
 			});
 
-			/*
-			 * You can add your own middleware or routes with custom ExpressJS logic
-			 * to extend this project.
-			 */
-			this.app.use("/", apps);
-
 			// --- Blok Studio: Trace API ---
+			// Must be registered BEFORE AppRoutes and the catch-all workflow handler
+			// so that /__blok/* requests are handled by the trace router, not treated
+			// as workflow lookups.
 			if (process.env.BLOK_TRACE_ENABLED !== "false") {
 				const traceRouter = express.Router();
 				registerTraceRoutes(traceRouter);
 				this.app.use("/__blok", traceRouter);
 			}
 
+			/*
+			 * You can add your own middleware or routes with custom ExpressJS logic
+			 * to extend this project.
+			 */
+			this.app.use("/", apps);
+
 			this.app.use(["/:workflow", "/"], async (req: Request, res: Response): Promise<void> => {
 				const id: string = (req.query?.requestId as string) || (uuid() as string);
 				req.query.requestId = undefined;
 				let workflowNameInPath: string = req.params.workflow;
+
+				// Skip internal paths — these are handled by dedicated routers above
+				if (workflowNameInPath === "__blok") {
+					res.status(404).json({ error: "Not found" });
+					return;
+				}
 
 				let remoteNodeExecution = false;
 				let runtimeWorkflow: RuntimeWorkflow | undefined;

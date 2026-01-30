@@ -771,20 +771,31 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
 		res.flushHeaders();
 
-		// Replay past events (respecting Last-Event-ID for reconnection)
+		// Immediate acknowledgment so the browser fires onopen without waiting
+		res.write(`event: connected\ndata: ${JSON.stringify({ runId, timestamp: Date.now() })}\n\n`);
+		res.write("retry: 3000\n\n");
+
+		// Replay past events (respecting Last-Event-ID for reconnection).
+		// Cap fresh connections to last 50 events to avoid blocking the stream.
+		// The client fetches full run state via GET /runs/:runId.
+		const MAX_REPLAY_EVENTS = 50;
 		const lastEventId = req.headers["last-event-id"] as string | undefined;
 		const existingEvents = t.getEvents(runId);
 
+		let eventsToReplay: RunEvent[];
 		if (lastEventId) {
+			// Reconnection — replay all events since the last received (uncapped)
 			const idx = existingEvents.findIndex((e) => e.id === lastEventId);
-			const eventsToReplay = idx >= 0 ? existingEvents.slice(idx + 1) : existingEvents;
-			for (const event of eventsToReplay) {
-				writeSSE(res, event);
-			}
+			eventsToReplay = idx >= 0 ? existingEvents.slice(idx + 1) : existingEvents;
 		} else {
-			for (const event of existingEvents) {
-				writeSSE(res, event);
-			}
+			// Fresh connection — only replay the most recent events
+			eventsToReplay = existingEvents.length > MAX_REPLAY_EVENTS
+				? existingEvents.slice(-MAX_REPLAY_EVENTS)
+				: existingEvents;
+		}
+
+		for (const event of eventsToReplay) {
+			writeSSE(res, event);
 		}
 
 		// If run already finished, close stream
@@ -811,7 +822,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		// Heartbeat to keep connection alive
 		const heartbeat = setInterval(() => {
 			res.write(":heartbeat\n\n");
-		}, 15000);
+		}, 5000);
 
 		// Cleanup on disconnect
 		req.on("close", () => {
@@ -836,6 +847,10 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		res.setHeader("X-Accel-Buffering", "no");
 		res.flushHeaders();
 
+		// Immediate acknowledgment so the browser fires onopen without waiting
+		res.write(`event: connected\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+		res.write("retry: 3000\n\n");
+
 		const onEvent = (event: RunEvent) => {
 			if (workflowFilter && !workflowFilter.includes(event.workflowName)) return;
 			writeSSE(res, event);
@@ -846,7 +861,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		// Heartbeat
 		const heartbeat = setInterval(() => {
 			res.write(":heartbeat\n\n");
-		}, 15000);
+		}, 5000);
 
 		req.on("close", () => {
 			t.removeListener("event", onEvent);

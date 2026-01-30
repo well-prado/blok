@@ -176,6 +176,18 @@ docs/
 │   ├── Edge Deployment
 │   └── Multi-Region
 │
+├── Blok Studio/
+│   ├── Overview & Quick Start
+│   ├── Dashboard & Navigation
+│   ├── Workflow Runs & Trace Inspector
+│   ├── Trace Graph & Timeline
+│   ├── Run Diff & Comparison
+│   ├── Metrics & Performance Analytics
+│   ├── Custom Dashboards
+│   ├── Webhooks & Notifications
+│   ├── Command Palette & Keyboard Shortcuts
+│   └── Extending the Studio
+│
 ├── Advanced/
 │   ├── Hot Module Replacement
 │   ├── Node Result Caching
@@ -366,21 +378,39 @@ docs/
 | 6.9 | AI Code Generation | P1 | packages/cli/src/commands/generate/ | - [ ] |
 | 6.10 | Migration Guides | P1 | docs/migration/ | - [ ] |
 
-### Phase 7: Advanced Topics & Examples
+### Phase 7: Blok Studio (Trace UI)
+**Goal:** Document the built-in real-time workflow trace UI for developers.
+
+| # | Page | Priority | Source Files | Status |
+|---|------|----------|-------------|--------|
+| 7.1 | Studio Overview & Quick Start | P1 | apps/studio/, vite.config.ts | - [ ] |
+| 7.2 | Dashboard & Navigation | P1 | routes/index.tsx, components/layout/ | - [ ] |
+| 7.3 | Workflow Runs & Trace Inspector | P1 | routes/runs/, components/runs/ | - [ ] |
+| 7.4 | Trace Graph & Timeline | P1 | components/trace/TraceGraph.tsx, TraceTimeline.tsx | - [ ] |
+| 7.5 | Run Diff & Comparison | P1 | routes/runs/diff.tsx, components/trace/DiffView.tsx | - [ ] |
+| 7.6 | Metrics & Performance Analytics | P1 | routes/metrics.tsx, components/metrics/ | - [ ] |
+| 7.7 | Custom Dashboards | P1 | routes/dashboards.tsx, components/dashboard/ | - [ ] |
+| 7.8 | Webhooks & Notifications | P2 | routes/webhooks.tsx, components/shared/NotificationToast.tsx | - [ ] |
+| 7.9 | Command Palette & Keyboard Shortcuts | P2 | components/shared/CommandPalette.tsx | - [ ] |
+| 7.10 | Extending the Studio | P2 | lib/api.ts, lib/sse.ts, types.ts | - [ ] |
+
+> **NOTE:** The Studio is a complete React 19 SPA with 70 frontend tests. It connects to the runner's trace API (`/__blok/*`) via Vite proxy and provides real-time observability via SSE. Run with `pnpm --filter @blok/studio run dev` on `localhost:5555`.
+
+### Phase 8: Advanced Topics & Examples
 **Goal:** Deep-dive content and real-world recipes.
 
 | # | Page | Priority | Source Files | Status |
 |---|------|----------|-------------|--------|
-| 7.1 | HMR / Hot Reload | P2 | hmr/ | - [ ] |
-| 7.2 | Node Result Caching | P2 | cache/NodeResultCache.ts | - [ ] |
-| 7.3 | Cost Estimation | P2 | cost/CostEstimator.ts | - [ ] |
-| 7.4 | GraphQL Generation | P2 | graphql/GraphQLSchemaGenerator.ts | - [ ] |
-| 7.5 | OpenAPI Generation | P2 | openapi/OpenAPIGenerator.ts | - [ ] |
-| 7.6 | Workflow Visualization | P2 | visualization/ | - [ ] |
-| 7.7 | Performance Profiling | P2 | monitoring/PerformanceProfiler.ts | - [ ] |
-| 7.8 | Compliance Guides | P2 | docs/compliance/ | - [ ] |
-| 7.9 | E-commerce Example | P2 | examples/templates/ecommerce/ | - [ ] |
-| 7.10 | Event-Driven Example | P2 | examples/workflows/ | - [ ] |
+| 8.1 | HMR / Hot Reload | P2 | hmr/ | - [ ] |
+| 8.2 | Node Result Caching | P2 | cache/NodeResultCache.ts | - [ ] |
+| 8.3 | Cost Estimation | P2 | cost/CostEstimator.ts | - [ ] |
+| 8.4 | GraphQL Generation | P2 | graphql/GraphQLSchemaGenerator.ts | - [ ] |
+| 8.5 | OpenAPI Generation | P2 | openapi/OpenAPIGenerator.ts | - [ ] |
+| 8.6 | Workflow Visualization | P2 | visualization/ | - [ ] |
+| 8.7 | Performance Profiling | P2 | monitoring/PerformanceProfiler.ts | - [ ] |
+| 8.8 | Compliance Guides | P2 | docs/compliance/ | - [ ] |
+| 8.9 | E-commerce Example | P2 | examples/templates/ecommerce/ | - [ ] |
+| 8.10 | Event-Driven Example | P2 | examples/workflows/ | - [ ] |
 
 ---
 
@@ -394,8 +424,9 @@ docs/
 | Phase 4: Security | 9 | P1/P2 |
 | Phase 5: Observability | 12 | P1/P2 |
 | Phase 6: Tools & Deploy | 10 | P1/P2 |
-| Phase 7: Advanced | 10 | P2 |
-| **Total** | **80 pages** | |
+| Phase 7: Blok Studio | 10 | P1/P2 |
+| Phase 8: Advanced | 10 | P2 |
+| **Total** | **90 pages** | |
 
 ---
 
@@ -515,10 +546,36 @@ actual code here
 | `runtimes/python3/` | Python runtime |
 | `runtimes/proto/node.proto` | gRPC protocol definition |
 
+### Blok Studio Sources
+| File | What to Document |
+|------|-----------------|
+| `apps/studio/package.json` | Studio dependencies, scripts (`dev`, `build`, `test`) |
+| `apps/studio/vite.config.ts` | Dev server port (5555), API proxy to backend (4000) |
+| `apps/studio/vitest.config.ts` | Test configuration (jsdom, path aliases) |
+| `apps/studio/src/main.tsx` | React entry point, TanStack Router setup |
+| `apps/studio/src/routes/` | All page routes (dashboard, runs, metrics, webhooks, etc.) |
+| `apps/studio/src/lib/api.ts` | REST API client, `fetchJson` helper, `ApiError` class |
+| `apps/studio/src/lib/sse.ts` | SSE client for real-time run/global event streams |
+| `apps/studio/src/lib/formatters.ts` | Duration, bytes, time, percent formatting utilities |
+| `apps/studio/src/lib/constants.ts` | Status colors, labels, event type mappings |
+| `apps/studio/src/stores/connection.ts` | Zustand store for SSE connection state |
+| `apps/studio/src/stores/notifications.ts` | Zustand store for notification management |
+| `apps/studio/src/components/trace/TraceGraph.tsx` | @xyflow/react workflow trace graph |
+| `apps/studio/src/components/trace/TraceTimeline.tsx` | Timeline view of node executions |
+| `apps/studio/src/components/trace/DiffView.tsx` | Side-by-side run comparison |
+| `apps/studio/src/components/metrics/` | Recharts-based metrics visualizations |
+| `apps/studio/src/components/dashboard/` | Custom dashboard grid, widgets, live feed |
+| `apps/studio/src/components/shared/CommandPalette.tsx` | Cmd+K global search |
+| `apps/studio/src/components/shared/ErrorBoundary.tsx` | Error boundary with retry |
+| `apps/studio/src/components/shared/JsonViewer.tsx` | Collapsible JSON tree viewer |
+| `apps/studio/src/types.ts` | All TypeScript types (runs, workflows, metrics, events) |
+| `apps/studio/src/__tests__/` | 70 frontend tests (formatters, API, stores, components) |
+| `core/runner/src/tracing/` | Backend trace collection and API endpoints |
+
 ---
 
-**Document Version:** 1.1.0
+**Document Version:** 1.2.0
 **Created:** 2026-01-29
-**Last Updated:** 2026-01-29
+**Last Updated:** 2026-01-30
 **Owner:** Blok Core Team
-**Status:** Planning (enriched with runtime + context data flow learnings from E2E validation)
+**Status:** Planning (enriched with runtime + context data flow learnings from E2E validation, Blok Studio source mapping added)

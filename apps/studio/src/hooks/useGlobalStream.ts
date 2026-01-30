@@ -1,20 +1,27 @@
 import { connectGlobalStream } from "@/lib/sse";
 import { useConnectionStore } from "@/stores/connection";
+import { useLiveFeedStore } from "@/stores/liveFeed";
 import { useNotificationStore } from "@/stores/notifications";
 import type { RunEvent } from "@/types";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Subscribe to the global SSE stream for live dashboard updates.
- * Invalidates relevant queries when events arrive.
- * Emits notifications on run completions/failures.
+ * Should be called once in the root layout so the connection persists
+ * across page navigations.
+ *
+ * - Debounces query invalidations to avoid thundering-herd HTTP refetches.
+ * - Pushes events to the shared live feed store for LiveFeed component.
+ * - Emits notifications on run completions/failures.
  */
 export function useGlobalStream(enabled = true) {
 	const queryClient = useQueryClient();
 	const { setStatus, incrementStreams, decrementStreams } = useConnectionStore();
 	const addNotification = useNotificationStore((s) => s.addNotification);
 	const notificationsEnabled = useNotificationStore((s) => s.enabled);
+	const pushEvent = useLiveFeedStore((s) => s.pushEvent);
+	const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
 		if (!enabled) return;
@@ -22,11 +29,23 @@ export function useGlobalStream(enabled = true) {
 		incrementStreams();
 		setStatus("connecting");
 
-		const disconnect = connectGlobalStream({
-			onEvent: (event: RunEvent) => {
-				// Invalidate workflow and run queries to trigger refetch
+		// Batch query invalidations in 500ms windows to avoid
+		// firing N*2 HTTP requests per second during rapid events.
+		const scheduleInvalidation = () => {
+			if (invalidateTimer.current) return;
+			invalidateTimer.current = setTimeout(() => {
+				invalidateTimer.current = null;
 				queryClient.invalidateQueries({ queryKey: ["workflows"] });
 				queryClient.invalidateQueries({ queryKey: ["runs"] });
+			}, 500);
+		};
+
+		const disconnect = connectGlobalStream({
+			onEvent: (event: RunEvent) => {
+				scheduleInvalidation();
+
+				// Push to shared live feed store (consumed by LiveFeed component)
+				pushEvent(event);
 
 				// Emit notifications for run completions/failures
 				if (notificationsEnabled) {
@@ -60,8 +79,12 @@ export function useGlobalStream(enabled = true) {
 		return () => {
 			disconnect();
 			decrementStreams();
+			if (invalidateTimer.current) {
+				clearTimeout(invalidateTimer.current);
+				invalidateTimer.current = null;
+			}
 		};
-	}, [enabled, queryClient, setStatus, incrementStreams, decrementStreams, addNotification, notificationsEnabled]);
+	}, [enabled, queryClient, setStatus, incrementStreams, decrementStreams, addNotification, notificationsEnabled, pushEvent]);
 }
 
 function formatMs(ms: number): string {

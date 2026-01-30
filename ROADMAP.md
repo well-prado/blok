@@ -1130,6 +1130,90 @@ SDK Container
 
 ---
 
+## Blok Studio — Real-Time Workflow Trace UI
+
+### Objective
+Provide a built-in, developer-facing web UI for real-time workflow observability — trace inspection, performance metrics, run comparison, and operational dashboards — without requiring external tooling.
+
+### Current State ✅ Complete
+Blok Studio is a production-ready React SPA (`apps/studio/`) that connects to the runner's trace API via a Vite proxy and SSE streams.
+
+### Architecture
+- **Frontend:** React 19, TypeScript, Vite 6, TanStack Router/Query/Table, Zustand, Tailwind CSS v4
+- **Visualization:** @xyflow/react (trace graphs), Recharts (metrics charts)
+- **Data:** REST API at `/__blok/*`, SSE streams for real-time updates
+- **Dev server:** `localhost:5555`, proxies API to backend at `localhost:4000`
+
+### Implementation Status
+
+**Phase 1: Real-Time Tracing System (Backend)** ✅
+- [x] Trace collection middleware in runner (`RunnerSteps.ts`)
+- [x] REST API: `/health`, `/config`, `/workflows`, `/runs`, `/runs/:id`, `/search`, `/metrics`
+- [x] SSE streaming: per-run events (`/runs/:id/stream`) and global feed (`/stream`)
+- [x] Run replay (`POST /runs/:id/replay`)
+- [x] Run diff comparison (`GET /runs/diff?a=...&b=...`)
+- [x] Export (JSON/CSV), tagging, webhook management
+- [x] PII sanitization with configurable payload size limiting (`BLOK_TRACE_PAYLOAD_MAX_KB`)
+
+**Phase 2: SSE & Event Architecture** ✅
+- [x] `EventSource`-based SSE client with reconnect logic
+- [x] Global event stream for dashboard live feed
+- [x] Per-run event stream for trace detail page
+- [x] Zustand stores for connection state and notifications
+
+**Phase 3: Studio Frontend App** ✅
+- [x] Vite + React 19 + TanStack Router SPA
+- [x] Dashboard with workflow cards, stats overview, live feed
+- [x] Runs list with status filters, search, virtualized table
+- [x] Run detail page with trace graph, timeline, node detail panel
+- [x] JSON viewer, log viewer, event log, request builder
+- [x] Command palette (Cmd+K) for global search
+- [x] Notification system with toast UI
+
+**Phase 4: Advanced Features** ✅
+- [x] Run diff view (side-by-side comparison)
+- [x] AI error explanation (`POST /runs/:id/explain`)
+- [x] Metrics dashboard: execution timeline, duration distribution, node performance, workflow breakdown
+- [x] Custom dashboards with draggable widget grid
+- [x] Webhook management UI (create, delete, configure events)
+- [x] Tag management for runs
+
+**Phase 5: Quality & Polish** ✅
+- [x] Fix all 49 Biome lint errors across 16 source files
+- [x] Use semantic `<dialog>` elements for modals
+- [x] ErrorBoundary component with retry, wrapping root layout
+- [x] Accessibility: ARIA labels on icon buttons, `aria-hidden` on decorative elements, `aria-expanded` on collapsibles, dialog roles
+- [x] Keyboard navigation support in command palette and modals
+
+**Phase 6: Frontend Tests** ✅
+- [x] Vitest + Testing Library + jsdom test infrastructure
+- [x] 70 tests across 4 test files (formatters, API client, Zustand stores, React components)
+- [x] TypeScript compiles cleanly, Biome lint passes
+- [x] Test scripts added to `package.json` (`test`, `test:dev`)
+
+### Pages & Routes
+
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — workflow cards, stats, live feed |
+| `/runs/` | All runs — filterable, searchable, virtualized table |
+| `/runs/:runId` | Run detail — trace graph, timeline, node detail, logs |
+| `/runs/diff` | Run comparison — side-by-side diff view |
+| `/workflows/:name` | Workflow detail — run history, configuration |
+| `/metrics` | Performance analytics — charts, distributions, breakdowns |
+| `/dashboards` | Custom dashboards — draggable widget grid |
+| `/webhooks` | Webhook management — create, configure, delete |
+
+### Success Metrics
+- ✅ Zero external dependencies for trace observability
+- ✅ Real-time updates via SSE (< 100ms event-to-render)
+- ✅ 70 frontend tests passing
+- ✅ Zero Biome lint errors
+- ✅ Accessible UI (ARIA, keyboard navigation, semantic HTML)
+- ✅ Full TypeScript strict mode compliance
+
+---
+
 ## Technical Debt & Infrastructure
 
 ### Developer Experience
@@ -1143,7 +1227,7 @@ SDK Container
 
 **DX-2: Enhanced CLI**
 - [ ] Add interactive TUI for monitoring
-- [ ] Add workflow visualization
+- [x] Add workflow visualization (Blok Studio — trace graph, metrics charts)
 - [ ] Add node dependency graph
 - [ ] Add performance profiling
 - [ ] Add cost estimation
@@ -1275,11 +1359,12 @@ SDK Container
 ## Timeline & Milestones
 
 ### 2026 Q1 (Jan - Mar): Foundation
-**Milestone: Language-Agnostic Core**
+**Milestone: Language-Agnostic Core + Blok Studio**
 - ✅ Runtime adapter system complete
 - ✅ NodeJS + Python adapters production-ready
 - ✅ Docker adapter beta
 - ✅ Migration path documented
+- ✅ Blok Studio trace UI complete (6 phases, 70 frontend tests)
 
 **Deliverables:**
 - Runtime adapter architecture
@@ -1287,6 +1372,7 @@ SDK Container
 - Python3 runtime adapter refactored
 - Docker/generic adapter
 - Migration guide
+- Blok Studio — real-time trace UI with dashboard, metrics, run diff, custom dashboards, webhooks
 
 ### 2026 Q2 (Apr - Jun): Modern DX
 **Milestone: Function-First Architecture**
@@ -1509,8 +1595,8 @@ SDK Container
 
 ---
 
-**Document Version:** 1.3.0
-**Last Updated:** 2026-01-29
+**Document Version:** 1.4.0
+**Last Updated:** 2026-01-30
 **Next Review:** 2026-04-27
 **Owner:** Blok Core Team
 **Status:** 🟢 Active Development

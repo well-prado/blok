@@ -1,30 +1,19 @@
 import { EVENT_COLORS, EVENT_LABELS } from "@/lib/constants";
 import { formatRelativeTime } from "@/lib/formatters";
-import { connectGlobalStream } from "@/lib/sse";
 import { cn } from "@/lib/utils";
-import type { RunEvent } from "@/types";
+import { useLiveFeedStore } from "@/stores/liveFeed";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 
-interface LiveFeedProps {
-	maxEvents?: number;
-}
-
-export function LiveFeed({ maxEvents = 50 }: LiveFeedProps) {
-	const [events, setEvents] = useState<RunEvent[]>([]);
+/**
+ * Displays a live feed of recent workflow events.
+ * Consumes events from the shared live feed store, which is populated
+ * by the global SSE stream managed in useGlobalStream (root layout).
+ * No duplicate SSE connection — single source of truth.
+ */
+export function LiveFeed() {
+	const events = useLiveFeedStore((s) => s.events);
 	const bottomRef = useRef<HTMLDivElement>(null);
-
-	useEffect(() => {
-		const disconnect = connectGlobalStream({
-			onEvent: (event) => {
-				setEvents((prev) => {
-					const next = [event, ...prev];
-					return next.length > maxEvents ? next.slice(0, maxEvents) : next;
-				});
-			},
-		});
-		return disconnect;
-	}, [maxEvents]);
 
 	if (events.length === 0) {
 		return <div className="text-center py-8 text-zinc-600 text-xs">Waiting for events...</div>;
