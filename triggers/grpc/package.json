@@ -21,7 +21,7 @@
 	},
 	"devDependencies": {
 		"@bufbuild/buf": "^1.50.0",
-		"@bufbuild/protoc-gen-es": "^2.2.3",
+		"@bufbuild/protoc-gen-es": "^2.11.0",
 		"@connectrpc/protoc-gen-connect-es": "^1.6.1",
 		"@types/node": "^22.13.4",
 		"copyfiles": "^2.4.1",
