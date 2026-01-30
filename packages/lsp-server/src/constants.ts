@@ -3,7 +3,18 @@
  * These are IDE-agnostic and used by both the LSP server and VS Code extension.
  */
 
-export const VALID_TRIGGERS = ["http", "grpc", "manual", "cron", "queue", "pubsub", "worker", "webhook", "websocket", "sse"] as const;
+export const VALID_TRIGGERS = [
+	"http",
+	"grpc",
+	"manual",
+	"cron",
+	"queue",
+	"pubsub",
+	"worker",
+	"webhook",
+	"websocket",
+	"sse",
+] as const;
 
 export const VALID_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY"] as const;
 
@@ -20,7 +31,19 @@ export const VALID_STEP_TYPES = [
 	"runtime.ruby",
 ] as const;
 
-export const VALID_RUNTIMES = ["nodejs", "bun", "python3", "go", "java", "rust", "php", "csharp", "ruby", "docker", "wasm"] as const;
+export const VALID_RUNTIMES = [
+	"nodejs",
+	"bun",
+	"python3",
+	"go",
+	"java",
+	"rust",
+	"php",
+	"csharp",
+	"ruby",
+	"docker",
+	"wasm",
+] as const;
 
 export const QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk"] as const;
 
@@ -72,12 +95,14 @@ export const TRIGGER_DOCS: Record<string, HoverDoc> = {
 	},
 	queue: {
 		title: "Queue Trigger",
-		description: "Triggers workflow when messages arrive on a queue. Supports Kafka, RabbitMQ, SQS, Redis, and Beanstalk.",
+		description:
+			"Triggers workflow when messages arrive on a queue. Supports Kafka, RabbitMQ, SQS, Redis, and Beanstalk.",
 		example: `"queue": {\n  "provider": "kafka",\n  "topic": "user-events",\n  "consumerGroup": "blok-workers"\n}`,
 	},
 	pubsub: {
 		title: "Pub/Sub Trigger",
-		description: "Triggers workflow on pub/sub messages. Supports GCP Pub/Sub, AWS SNS, Azure Service Bus, Redis, and NATS.",
+		description:
+			"Triggers workflow on pub/sub messages. Supports GCP Pub/Sub, AWS SNS, Azure Service Bus, Redis, and NATS.",
 		example: `"pubsub": {\n  "provider": "gcp",\n  "topic": "notifications",\n  "subscription": "blok-sub"\n}`,
 	},
 	worker: {

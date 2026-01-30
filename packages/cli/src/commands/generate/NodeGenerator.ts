@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import createNodeSystemPrompt from "./prompts/create-node.system.js";
+import { GenerationAnalytics } from "./GenerationAnalytics.js";
+import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 import createFnNodeSystemPrompt from "./prompts/create-fn-node.system.js";
+import createNodeSystemPrompt from "./prompts/create-node.system.js";
 import * as CompilationValidator from "./validators/CompilationValidator.js";
 import * as NodeValidator from "./validators/NodeValidator.js";
 import type { NodeValidationContext } from "./validators/NodeValidator.js";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
-import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 
 type NodeInformation = {
 	nodeName: string;
@@ -28,7 +28,13 @@ export type { NodeInformation };
 export default class NodeGenerator {
 	private readonly MAX_VALIDATION_ATTEMPTS = 3;
 
-	async generateNode(nodeName: string, userPrompt: string, apiKey: string, update = false, nodeStyle = "function"): Promise<NodeInformation> {
+	async generateNode(
+		nodeName: string,
+		userPrompt: string,
+		apiKey: string,
+		update = false,
+		nodeStyle = "function",
+	): Promise<NodeInformation> {
 		const analytics = GenerationAnalytics.getInstance();
 		const getElapsed = analytics.startTimer();
 		const promptId = nodeStyle === "function" ? "create-fn-node" : "create-node";
@@ -114,7 +120,9 @@ export default class NodeGenerator {
 
 			// Log attempt
 			if (!isValid && attempts < this.MAX_VALIDATION_ATTEMPTS) {
-				console.log(`⚠️  Validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`);
+				console.log(
+					`⚠️  Validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`,
+				);
 			}
 		}
 

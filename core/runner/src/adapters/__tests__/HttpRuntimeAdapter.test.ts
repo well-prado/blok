@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { HttpRuntimeAdapter } from "../HttpRuntimeAdapter";
 import type { Context } from "@nanoservice-ts/shared";
-import type RunnerNode from "../../RunnerNode";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";
+import type RunnerNode from "../../RunnerNode";
+import { HttpRuntimeAdapter } from "../HttpRuntimeAdapter";
 
 // Mock global fetch
 global.fetch = vi.fn();
@@ -343,9 +343,7 @@ describe("HttpRuntimeAdapter", () => {
 
 	describe("execute() - Error Cases", () => {
 		it("should handle network errors (ECONNREFUSED)", async () => {
-			vi.mocked(fetch).mockRejectedValueOnce(
-				new Error("fetch failed: ECONNREFUSED"),
-			);
+			vi.mocked(fetch).mockRejectedValueOnce(new Error("fetch failed: ECONNREFUSED"));
 
 			const result = await adapter.execute(mockNode, mockContext);
 
@@ -391,9 +389,7 @@ describe("HttpRuntimeAdapter", () => {
 				timeoutMs: 100,
 			});
 
-			vi.mocked(fetch).mockRejectedValueOnce(
-				new DOMException("The operation was aborted", "AbortError"),
-			);
+			vi.mocked(fetch).mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
 
 			const result = await slowAdapter.execute(mockNode, mockContext);
 
@@ -443,10 +439,7 @@ describe("HttpRuntimeAdapter", () => {
 			const healthy = await adapter.checkHealth();
 
 			expect(healthy).toBe(true);
-			expect(fetch).toHaveBeenCalledWith(
-				"http://localhost:9001/health",
-				expect.objectContaining({ method: "GET" }),
-			);
+			expect(fetch).toHaveBeenCalledWith("http://localhost:9001/health", expect.objectContaining({ method: "GET" }));
 		});
 
 		it("should return true for status 'ok'", async () => {

@@ -35,12 +35,7 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 	private baseUrl: string;
 	private timeoutMs: number;
 
-	constructor(
-		kind: RuntimeKind,
-		host: string,
-		port: number,
-		options?: HttpRuntimeAdapterOptions,
-	) {
+	constructor(kind: RuntimeKind, host: string, port: number, options?: HttpRuntimeAdapterOptions) {
 		this.kind = kind;
 		this.baseUrl = `http://${host}:${port}`;
 		this.timeoutMs = options?.timeoutMs ?? 30000;

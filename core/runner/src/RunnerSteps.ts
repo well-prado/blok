@@ -66,9 +66,10 @@ export default abstract class RunnerSteps {
 						// --- Trace: complete or fail node ---
 						if (tracker && nodeRunId) {
 							if (ctx.response.error) {
-								const errMsg = typeof ctx.response.error === "string"
-									? ctx.response.error
-									: (ctx.response.error as Error).message || "Node error";
+								const errMsg =
+									typeof ctx.response.error === "string"
+										? ctx.response.error
+										: (ctx.response.error as Error).message || "Node error";
 								tracker.failNode(nodeRunId, new Error(errMsg));
 							} else {
 								tracker.completeNode(nodeRunId, sanitize(ctx.response.data));
@@ -81,10 +82,7 @@ export default abstract class RunnerSteps {
 						if (tracker && nodeRunId) {
 							const existing = tracker.getNodeRun(nodeRunId);
 							if (existing && existing.status === "running") {
-								tracker.failNode(
-									nodeRunId,
-									nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)),
-								);
+								tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
 							}
 						}
 						throw nodeErr;

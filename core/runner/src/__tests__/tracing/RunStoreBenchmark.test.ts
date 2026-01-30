@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
-import { SqliteRunStore } from "../../tracing/SqliteRunStore";
-import type { RunStore } from "../../tracing/RunStore";
-import type { WorkflowRun, NodeRun, RunEvent, TraceLogEntry } from "../../tracing/types";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
+import type { RunStore } from "../../tracing/RunStore";
+import { SqliteRunStore } from "../../tracing/SqliteRunStore";
+import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "../../tracing/types";
 
 function makeRun(i: number): WorkflowRun {
 	return {
@@ -66,7 +66,11 @@ function makeLog(runId: string, index: number): TraceLogEntry {
 	};
 }
 
-function benchmark(label: string, fn: () => void, iterations = 1): { label: string; totalMs: number; avgMs: number; opsPerSec: number } {
+function benchmark(
+	label: string,
+	fn: () => void,
+	iterations = 1,
+): { label: string; totalMs: number; avgMs: number; opsPerSec: number } {
 	const start = performance.now();
 	for (let i = 0; i < iterations; i++) {
 		fn();
@@ -97,7 +101,9 @@ function runBenchmarkSuite(storeName: string, store: RunStore) {
 					store.saveRun(run);
 				}
 			});
-			console.log(`  [${storeName}] ${result.label}: ${result.totalMs}ms for ${RUN_COUNT} runs (${result.avgMs}ms avg)`);
+			console.log(
+				`  [${storeName}] ${result.label}: ${result.totalMs}ms for ${RUN_COUNT} runs (${result.avgMs}ms avg)`,
+			);
 			// Each save should be under 1ms on average
 			expect(result.avgMs).toBeLessThan(RUN_COUNT);
 		});
@@ -143,79 +149,115 @@ function runBenchmarkSuite(storeName: string, store: RunStore) {
 
 		it("read: getRun (single)", () => {
 			const targetId = runs[Math.floor(runs.length / 2)].id;
-			const result = benchmark("getRun", () => {
-				store.getRun(targetId);
-			}, 1000);
+			const result = benchmark(
+				"getRun",
+				() => {
+					store.getRun(targetId);
+				},
+				1000,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${1000} lookups`);
 			// Single lookup should be under 1ms
 			expect(result.avgMs).toBeLessThan(1);
 		});
 
 		it("read: getRuns (paginated)", () => {
-			const result = benchmark("getRuns (limit 50)", () => {
-				store.getRuns({ limit: 50, offset: 0, sort: "desc" });
-			}, 100);
+			const result = benchmark(
+				"getRuns (limit 50)",
+				() => {
+					store.getRuns({ limit: 50, offset: 0, sort: "desc" });
+				},
+				100,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${100} queries`);
 			// Paginated list should be under 20ms for in-memory, 50ms for SQLite
 			expect(result.avgMs).toBeLessThan(50);
 		});
 
 		it("read: getRuns with filters", () => {
-			const result = benchmark("getRuns (workflow + status)", () => {
-				store.getRuns({ workflow: "workflow-0", status: "completed", limit: 20, sort: "desc" });
-			}, 100);
+			const result = benchmark(
+				"getRuns (workflow + status)",
+				() => {
+					store.getRuns({ workflow: "workflow-0", status: "completed", limit: 20, sort: "desc" });
+				},
+				100,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${100} queries`);
 			expect(result.avgMs).toBeLessThan(50);
 		});
 
 		it("read: getNodeRuns", () => {
 			const targetId = runs[0].id;
-			const result = benchmark("getNodeRuns", () => {
-				store.getNodeRuns(targetId);
-			}, 500);
+			const result = benchmark(
+				"getNodeRuns",
+				() => {
+					store.getNodeRuns(targetId);
+				},
+				500,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${500} lookups`);
 			expect(result.avgMs).toBeLessThan(5);
 		});
 
 		it("read: getEvents", () => {
 			const targetId = runs[0].id;
-			const result = benchmark("getEvents", () => {
-				store.getEvents(targetId);
-			}, 500);
+			const result = benchmark(
+				"getEvents",
+				() => {
+					store.getEvents(targetId);
+				},
+				500,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${500} lookups`);
 			expect(result.avgMs).toBeLessThan(5);
 		});
 
 		it("read: getLogs", () => {
 			const targetId = runs[0].id;
-			const result = benchmark("getLogs", () => {
-				store.getLogs(targetId);
-			}, 500);
+			const result = benchmark(
+				"getLogs",
+				() => {
+					store.getLogs(targetId);
+				},
+				500,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${500} lookups`);
 			expect(result.avgMs).toBeLessThan(5);
 		});
 
 		it("aggregation: getWorkflowSummaries", () => {
-			const result = benchmark("getWorkflowSummaries", () => {
-				store.getWorkflowSummaries();
-			}, 50);
+			const result = benchmark(
+				"getWorkflowSummaries",
+				() => {
+					store.getWorkflowSummaries();
+				},
+				50,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${50} queries`);
 			// Aggregation may be slower
 			expect(result.avgMs).toBeLessThan(100);
 		});
 
 		it("aggregation: getMetrics", () => {
-			const result = benchmark("getMetrics", () => {
-				store.getMetrics();
-			}, 50);
+			const result = benchmark(
+				"getMetrics",
+				() => {
+					store.getMetrics();
+				},
+				50,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${50} queries`);
 			expect(result.avgMs).toBeLessThan(100);
 		});
 
 		it("aggregation: getActiveRunCount", () => {
-			const result = benchmark("getActiveRunCount", () => {
-				store.getActiveRunCount();
-			}, 1000);
+			const result = benchmark(
+				"getActiveRunCount",
+				() => {
+					store.getActiveRunCount();
+				},
+				1000,
+			);
 			console.log(`  [${storeName}] ${result.label}: ${result.avgMs}ms avg over ${1000} queries`);
 			expect(result.avgMs).toBeLessThan(5);
 		});
@@ -236,7 +278,9 @@ describe("RunStore Performance Benchmarks", () => {
 	// === InMemoryRunStore ===
 	describe("InMemoryRunStore", () => {
 		const store = new InMemoryRunStore();
-		afterEach(() => { /* keep data between tests */ });
+		afterEach(() => {
+			/* keep data between tests */
+		});
 
 		runBenchmarkSuite("InMemory", store);
 	});
@@ -254,7 +298,9 @@ describe("RunStore Performance Benchmarks", () => {
 			}
 		});
 
-		afterEach(() => { /* keep data between tests */ });
+		afterEach(() => {
+			/* keep data between tests */
+		});
 
 		// We need to initialize store before running suite
 		const dir = mkdtempSync(join(tmpdir(), "blok-bench-"));

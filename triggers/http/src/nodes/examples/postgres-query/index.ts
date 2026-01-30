@@ -58,8 +58,7 @@ export default defineNode({
 		} catch (error: unknown) {
 			// Preserve AggregateError handling from original implementation
 			let message = (error as Error).message;
-			if (error instanceof AggregateError)
-				message = (error as AggregateError).errors[0];
+			if (error instanceof AggregateError) message = (error as AggregateError).errors[0];
 			throw new Error(message);
 		}
 	},

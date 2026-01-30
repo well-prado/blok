@@ -9,10 +9,10 @@
  * - Metrics collection (connections, messages, latency)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { HelperResponse } from "@nanoservice-ts/helper";
 import type { NanoService } from "@nanoservice-ts/runner";
-import { WebSocketTrigger, type WebSocketEvent } from "./WebSocketTrigger";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type WebSocketEvent, WebSocketTrigger } from "./WebSocketTrigger";
 
 /**
  * Concrete test trigger exposing monitoring methods from TriggerBase
@@ -291,9 +291,7 @@ describe("WebSocket Trigger - Monitoring Integration", () => {
 
 		it("should broadcast to all clients", async () => {
 			const sockets = Array.from({ length: 5 }, () => createMockSocket());
-			const clients = await Promise.all(
-				sockets.map((s) => trigger.handleConnection(s, {})),
-			);
+			const clients = await Promise.all(sockets.map((s) => trigger.handleConnection(s, {})));
 
 			const sent = trigger.broadcastToAll("notification", { message: "Server restart" });
 			expect(sent).toBe(5);
@@ -322,9 +320,13 @@ describe("WebSocket Trigger - Monitoring Integration", () => {
 
 			// With valid auth
 			const socket2 = createMockSocket();
-			const authedClient = await trigger.handleConnection(socket2, {}, {
-				authorization: "Bearer valid-token",
-			});
+			const authedClient = await trigger.handleConnection(
+				socket2,
+				{},
+				{
+					authorization: "Bearer valid-token",
+				},
+			);
 			expect(authedClient).not.toBeNull();
 			expect(authedClient!.id).toBe("auth-user-1");
 		});

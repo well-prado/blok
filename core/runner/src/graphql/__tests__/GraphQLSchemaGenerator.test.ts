@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { GraphQLSchemaGenerator, type GqlWorkflowDefinition } from "../GraphQLSchemaGenerator";
+import { beforeEach, describe, expect, it } from "vitest";
+import { type GqlWorkflowDefinition, GraphQLSchemaGenerator } from "../GraphQLSchemaGenerator";
 
 // -- Fixtures --
 
@@ -353,7 +353,7 @@ describe("GraphQLSchemaGenerator", () => {
 
 	describe("generate - custom types", () => {
 		it("should include custom type definitions", () => {
-			gen.addCustomType("Address", 'type Address {\n  street: String!\n  city: String!\n}');
+			gen.addCustomType("Address", "type Address {\n  street: String!\n  city: String!\n}");
 			gen.addWorkflow(getWorkflow);
 			const schema = gen.generate();
 

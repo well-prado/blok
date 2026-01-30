@@ -19,17 +19,17 @@
  *    - Ack on success, retry or DLQ on failure
  */
 
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import type { HelperResponse, WorkerTriggerOpts } from "@nanoservice-ts/helper";
 import {
-	TriggerBase,
-	NodeMap,
 	DefaultLogger,
 	type GlobalOptions,
-	type TriggerResponse,
 	type NanoService,
+	NodeMap,
+	TriggerBase,
+	type TriggerResponse,
 } from "@nanoservice-ts/runner";
-import type { HelperResponse, WorkerTriggerOpts } from "@nanoservice-ts/helper";
-import { trace, metrics, type Span, SpanStatusCode } from "@opentelemetry/api";
+import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -82,10 +82,7 @@ export interface WorkerAdapter {
 	 * @param config Worker trigger configuration
 	 * @param handler Callback for each job
 	 */
-	process(
-		config: WorkerTriggerOpts,
-		handler: (job: WorkerJob) => Promise<void>,
-	): Promise<void>;
+	process(config: WorkerTriggerOpts, handler: (job: WorkerJob) => Promise<void>): Promise<void>;
 
 	/**
 	 * Add a job to a queue (for programmatic dispatching)
@@ -213,17 +210,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 			this.logger.log(`Connected to ${this.adapter.provider} worker system`);
 
 			// Register health dependency
-			this.registerHealthDependency(
-				`worker-${this.adapter.provider}`,
-				async () => {
-					const healthy = await this.adapter.healthCheck();
-					return {
-						status: healthy ? ("healthy" as const) : ("unhealthy" as const),
-						lastChecked: Date.now(),
-						message: healthy ? "Connected" : "Connection lost",
-					};
-				},
-			);
+			this.registerHealthDependency(`worker-${this.adapter.provider}`, async () => {
+				const healthy = await this.adapter.healthCheck();
+				return {
+					status: healthy ? ("healthy" as const) : ("unhealthy" as const),
+					lastChecked: Date.now(),
+					message: healthy ? "Connected" : "Connection lost",
+				};
+			});
 
 			// Find all workflows with worker triggers
 			const workerWorkflows = this.getWorkerWorkflows();
@@ -247,9 +241,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 				});
 			}
 
-			this.logger.log(
-				`Worker trigger started. Processing ${workerWorkflows.length} queue(s)`,
-			);
+			this.logger.log(`Worker trigger started. Processing ${workerWorkflows.length} queue(s)`);
 
 			// Enable HMR in development mode
 			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
@@ -343,11 +335,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 	/**
 	 * Handle an incoming job
 	 */
-	protected async handleJob(
-		job: WorkerJob,
-		workflow: WorkerWorkflowModel,
-		config: WorkerTriggerOpts,
-	): Promise<void> {
+	protected async handleJob(job: WorkerJob, workflow: WorkerWorkflowModel, config: WorkerTriggerOpts): Promise<void> {
 		const jobId = job.id || uuid();
 		const defaultMeter = metrics.getMeter("default");
 		const workerJobs = defaultMeter.createCounter("worker_jobs_processed", {
@@ -426,9 +414,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 					success: "true",
 				});
 
-				ctx.logger.log(
-					`Job completed in ${(end - start).toFixed(2)}ms: ${jobId}`,
-				);
+				ctx.logger.log(`Job completed in ${(end - start).toFixed(2)}ms: ${jobId}`);
 
 				// Mark job as completed
 				await job.complete();
@@ -481,10 +467,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 	/**
 	 * Execute workflow with a timeout
 	 */
-	protected async executeWithTimeout(
-		ctx: Context,
-		timeoutMs: number,
-	): Promise<TriggerResponse> {
+	protected async executeWithTimeout(ctx: Context, timeoutMs: number): Promise<TriggerResponse> {
 		return new Promise<TriggerResponse>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				reject(new Error(`Job timed out after ${timeoutMs}ms`));

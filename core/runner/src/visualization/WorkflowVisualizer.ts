@@ -196,7 +196,7 @@ export class WorkflowVisualizer {
 			if (this.workflows.length > 1) {
 				lines.push(`  subgraph cluster_${this.sanitizeId(workflow.name)} {`);
 				lines.push(`    label="${workflow.name} v${workflow.version}";`);
-				lines.push('    style=dashed;');
+				lines.push("    style=dashed;");
 			}
 
 			for (const node of nodes) {
@@ -377,7 +377,7 @@ export class WorkflowVisualizer {
 
 				for (const cond of step.conditions) {
 					if (cond.steps && cond.steps.length > 0) {
-						const branchLabel = cond.type === "if" ? (cond.expression || "true") : "else";
+						const branchLabel = cond.type === "if" ? cond.expression || "true" : "else";
 
 						let condPrevId = condId;
 						for (const subStep of cond.steps) {
@@ -489,11 +489,14 @@ export class WorkflowVisualizer {
 		let arrow: string;
 		switch (edge.style) {
 			case "dashed":
-				arrow = edge.label ? `-. "${edge.label}" .->` : "-.->"; break;
+				arrow = edge.label ? `-. "${edge.label}" .->` : "-.->";
+				break;
 			case "dotted":
-				arrow = edge.label ? `-. "${edge.label}" .->` : "-.->"; break;
+				arrow = edge.label ? `-. "${edge.label}" .->` : "-.->";
+				break;
 			default:
-				arrow = edge.label ? `-- "${edge.label}" -->` : "-->"; break;
+				arrow = edge.label ? `-- "${edge.label}" -->` : "-->";
+				break;
 		}
 
 		return `${from} ${arrow} ${to}`;
@@ -539,11 +542,16 @@ export class WorkflowVisualizer {
 
 	private asciiIcon(type: GraphNode["type"]): string {
 		switch (type) {
-			case "trigger": return "⚡";
-			case "step": return "▪️";
-			case "condition": return "◆";
-			case "end": return "⏹";
-			default: return "•";
+			case "trigger":
+				return "⚡";
+			case "step":
+				return "▪️";
+			case "condition":
+				return "◆";
+			case "end":
+				return "⏹";
+			default:
+				return "•";
 		}
 	}
 

@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import createRuntimeSystemPrompt from "./prompts/create-runtime.system.js";
 import { GenerationAnalytics } from "./GenerationAnalytics.js";
 import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
+import createRuntimeSystemPrompt from "./prompts/create-runtime.system.js";
 
 export type RuntimeInformation = {
 	language: string;
@@ -99,7 +99,9 @@ export default class RuntimeGenerator {
 
 			// Log attempt
 			if (!isValid && attempts < this.MAX_VALIDATION_ATTEMPTS) {
-				console.log(`\u26a0\ufe0f  Runtime validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`);
+				console.log(
+					`\u26a0\ufe0f  Runtime validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`,
+				);
 			}
 		}
 
@@ -138,17 +140,16 @@ export default class RuntimeGenerator {
 	/**
 	 * Validate runtime structure based on language
 	 */
-	validateRuntimeStructure(
-		code: string,
-		language: string,
-	): { valid: boolean; errors: string[]; warnings: string[] } {
+	validateRuntimeStructure(code: string, language: string): { valid: boolean; errors: string[]; warnings: string[] } {
 		const errors: string[] = [];
 		const warnings: string[] = [];
 
 		// Check for file markers (must have multiple files)
 		const fileCount = (code.match(/\/\/ FILE:/gi) || []).length;
 		if (fileCount < 2) {
-			errors.push("Runtime must contain multiple files (use // FILE: <path> markers). Expected at least SDK core + server + Dockerfile.");
+			errors.push(
+				"Runtime must contain multiple files (use // FILE: <path> markers). Expected at least SDK core + server + Dockerfile.",
+			);
 		}
 
 		// Check for HTTP endpoints
@@ -165,13 +166,7 @@ export default class RuntimeGenerator {
 		}
 
 		// Check for node handler interface/trait
-		const handlerPatterns = [
-			"NodeHandler",
-			"node_handler",
-			"Handler",
-			"execute",
-			"Execute",
-		];
+		const handlerPatterns = ["NodeHandler", "node_handler", "Handler", "execute", "Execute"];
 		const hasHandler = handlerPatterns.some((p) => code.includes(p));
 		if (!hasHandler) {
 			errors.push("Missing NodeHandler interface/trait - nodes must implement an execute method");
@@ -452,7 +447,13 @@ export default class RuntimeGenerator {
 			const entries = fs.readdirSync(dir, { withFileTypes: true });
 			for (const entry of entries) {
 				const fullPath = `${dir}/${entry.name}`;
-				if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules" && entry.name !== "target" && entry.name !== "build") {
+				if (
+					entry.isDirectory() &&
+					!entry.name.startsWith(".") &&
+					entry.name !== "node_modules" &&
+					entry.name !== "target" &&
+					entry.name !== "build"
+				) {
 					readDir(fullPath);
 				} else if (entry.isFile()) {
 					try {

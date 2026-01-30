@@ -10,11 +10,11 @@
  * - Backward compatibility with NanoService
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { z } from "zod";
-import { defineNode, FunctionNode, type FnNodeDefinition } from "../../src/defineNode";
 import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { type FnNodeDefinition, FunctionNode, defineNode } from "../../src/defineNode";
 
 // Test helper to create a minimal Context
 function createTestContext(): Context {

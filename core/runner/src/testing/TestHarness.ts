@@ -1,5 +1,5 @@
 import type { Context, ResponseContext } from "@nanoservice-ts/shared";
-import NanoService from "../NanoService";
+import type NanoService from "../NanoService";
 import type { INanoServiceResponse } from "../NanoServiceResponse";
 import type { FunctionNode } from "../defineNode";
 import type JsonLikeObject from "../types/JsonLikeObject";
@@ -175,10 +175,7 @@ export class NodeTestHarness<I = any, O = any> {
 		let result: TestResult<O>;
 
 		try {
-			const response = (await this.node.handle(
-				ctx,
-				input as JsonLikeObject,
-			)) as INanoServiceResponse;
+			const response = (await this.node.handle(ctx, input as JsonLikeObject)) as INanoServiceResponse;
 
 			const endTime = performance.now();
 			const logger = ctx.logger as TestLogger;
@@ -232,9 +229,7 @@ export class NodeTestHarness<I = any, O = any> {
 	 */
 	assertOutput(result: TestResult<O>, expected: Partial<O>): void {
 		if (!result.success) {
-			throw new Error(
-				`Cannot assert output: node execution failed with error: ${this.formatError(result.error)}`,
-			);
+			throw new Error(`Cannot assert output: node execution failed with error: ${this.formatError(result.error)}`);
 		}
 
 		if (result.data === null) {
@@ -253,9 +248,7 @@ export class NodeTestHarness<I = any, O = any> {
 
 			if (actualStr !== expectedStr) {
 				throw new Error(
-					`Output mismatch for key "${key}":\n` +
-						`  expected: ${expectedStr}\n` +
-						`  received: ${actualStr}`,
+					`Output mismatch for key "${key}":\n` + `  expected: ${expectedStr}\n` + `  received: ${actualStr}`,
 				);
 			}
 		}
@@ -269,9 +262,7 @@ export class NodeTestHarness<I = any, O = any> {
 	 */
 	assertSuccess(result: TestResult<O>): void {
 		if (!result.success) {
-			throw new Error(
-				`Expected node to succeed, but it failed with error: ${this.formatError(result.error)}`,
-			);
+			throw new Error(`Expected node to succeed, but it failed with error: ${this.formatError(result.error)}`);
 		}
 	}
 
@@ -284,9 +275,7 @@ export class NodeTestHarness<I = any, O = any> {
 	 */
 	assertError(result: TestResult<O>, errorMatch?: string | RegExp): void {
 		if (result.success) {
-			throw new Error(
-				`Expected node to fail, but it succeeded with data: ${JSON.stringify(result.data)}`,
-			);
+			throw new Error(`Expected node to fail, but it succeeded with data: ${JSON.stringify(result.data)}`);
 		}
 
 		if (errorMatch !== undefined) {
@@ -294,15 +283,11 @@ export class NodeTestHarness<I = any, O = any> {
 
 			if (typeof errorMatch === "string") {
 				if (!errorMsg.includes(errorMatch)) {
-					throw new Error(
-						`Expected error to contain "${errorMatch}", but got: "${errorMsg}"`,
-					);
+					throw new Error(`Expected error to contain "${errorMatch}", but got: "${errorMsg}"`);
 				}
 			} else {
 				if (!errorMatch.test(errorMsg)) {
-					throw new Error(
-						`Expected error to match ${errorMatch}, but got: "${errorMsg}"`,
-					);
+					throw new Error(`Expected error to match ${errorMatch}, but got: "${errorMsg}"`);
 				}
 			}
 		}
@@ -328,11 +313,7 @@ export class NodeTestHarness<I = any, O = any> {
 		const expectedStr = JSON.stringify(expected);
 
 		if (actualStr !== expectedStr) {
-			throw new Error(
-				`Context var "${key}" mismatch:\n` +
-					`  expected: ${expectedStr}\n` +
-					`  received: ${actualStr}`,
-			);
+			throw new Error(`Context var "${key}" mismatch:\n` + `  expected: ${expectedStr}\n` + `  received: ${actualStr}`);
 		}
 	}
 

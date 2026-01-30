@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { RunTracker } from "../../tracing/RunTracker";
-import type { StartRunOptions, StartNodeOptions, RunEvent } from "../../tracing/types";
+import type { RunEvent, StartNodeOptions, StartRunOptions } from "../../tracing/types";
 
 function makeRunOpts(overrides?: Partial<StartRunOptions>): StartRunOptions {
 	return {

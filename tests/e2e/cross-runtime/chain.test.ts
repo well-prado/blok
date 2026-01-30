@@ -21,16 +21,7 @@
 const BLOK_URL = process.env.BLOK_URL || "http://localhost:4000";
 const WORKFLOW_PATH = "cross-runtime-chain";
 
-const EXPECTED_LANGUAGES = [
-	"nodejs",
-	"go",
-	"rust",
-	"java",
-	"csharp",
-	"php",
-	"ruby",
-	"python3",
-];
+const EXPECTED_LANGUAGES = ["nodejs", "go", "rust", "java", "csharp", "php", "ruby", "python3"];
 
 interface SdkEndpoint {
 	name: string;
@@ -86,11 +77,8 @@ async function checkSdkHealth(): Promise<void> {
 				signal: AbortSignal.timeout(5000),
 			});
 			assert(res.ok, `HTTP ${res.status}`);
-			const body = await res.json() as Record<string, unknown>;
-			assert(
-				body.status === "healthy" || body.status === "ok",
-				`status=${body.status}`,
-			);
+			const body = (await res.json()) as Record<string, unknown>;
+			assert(body.status === "healthy" || body.status === "ok", `status=${body.status}`);
 			// Check that chain-test node is registered
 			if (Array.isArray(body.nodes_loaded)) {
 				assert(
@@ -196,10 +184,7 @@ async function runChainTest(): Promise<void> {
 		const chain = (data as Record<string, unknown>).chain as Array<Record<string, unknown>>;
 
 		for (let i = 0; i < chain.length; i++) {
-			assert(
-				chain[i].order === i + 1,
-				`Entry ${i}: expected order ${i + 1}, got ${chain[i].order}`,
-			);
+			assert(chain[i].order === i + 1, `Entry ${i}: expected order ${i + 1}, got ${chain[i].order}`);
 		}
 	});
 
@@ -207,10 +192,7 @@ async function runChainTest(): Promise<void> {
 		assert(chainResponse !== null, "No response to validate");
 		const data = (chainResponse as Record<string, unknown>).data || chainResponse;
 		const origin = (data as Record<string, unknown>).origin;
-		assert(
-			origin === "blok-cross-runtime-test",
-			`Expected origin "blok-cross-runtime-test", got "${origin}"`,
-		);
+		assert(origin === "blok-cross-runtime-test", `Expected origin "blok-cross-runtime-test", got "${origin}"`);
 	});
 }
 
@@ -255,7 +237,7 @@ async function runIndividualSdkTests(): Promise<void> {
 				signal: AbortSignal.timeout(10000),
 			});
 
-			const body = await res.json() as Record<string, unknown>;
+			const body = (await res.json()) as Record<string, unknown>;
 			assert(body.success === true, `${sdk.name} chain-test failed: ${JSON.stringify(body)}`);
 			assert(body.data !== null, `${sdk.name} returned null data`);
 
@@ -265,10 +247,7 @@ async function runIndividualSdkTests(): Promise<void> {
 				(data.chain as unknown[]).length === 2,
 				`${sdk.name} should have 2 entries, got ${(data.chain as unknown[]).length}`,
 			);
-			assert(
-				data.origin === "standalone-test",
-				`${sdk.name} origin mismatch: ${data.origin}`,
-			);
+			assert(data.origin === "standalone-test", `${sdk.name} origin mismatch: ${data.origin}`);
 		});
 	}
 }

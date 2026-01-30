@@ -749,7 +749,11 @@ export abstract class SSETrigger extends TriggerBase {
 							data,
 						});
 					};
-					(ctx.vars as Record<string, unknown>)._sse_broadcast = (channel: string, eventName: string, data: unknown) => {
+					(ctx.vars as Record<string, unknown>)._sse_broadcast = (
+						channel: string,
+						eventName: string,
+						data: unknown,
+					) => {
 						this.broadcastToChannel(channel, {
 							id: uuid(),
 							event: eventName,
@@ -841,9 +845,7 @@ export abstract class SSETrigger extends TriggerBase {
 		setInterval(() => {
 			const now = Date.now();
 			for (const [channel, history] of this.eventHistory) {
-				const filtered = history.filter(
-					(entry) => now - entry.timestamp.getTime() < this.historyRetentionMs,
-				);
+				const filtered = history.filter((entry) => now - entry.timestamp.getTime() < this.historyRetentionMs);
 				if (filtered.length === 0) {
 					this.eventHistory.delete(channel);
 				} else {

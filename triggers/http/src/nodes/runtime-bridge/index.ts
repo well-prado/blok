@@ -1,4 +1,4 @@
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
 import { z } from "zod";
 
@@ -11,8 +11,7 @@ import { z } from "zod";
  */
 export default defineNode({
 	name: "runtime-bridge",
-	description:
-		"Forwards execution to an external SDK container via HTTP",
+	description: "Forwards execution to an external SDK container via HTTP",
 
 	input: z.object({
 		url: z.string(),
@@ -77,9 +76,7 @@ export default defineNode({
 		};
 
 		if (!result.success) {
-			throw new Error(
-				`SDK node "${input.node_name}" at ${input.url} failed: ${JSON.stringify(result.errors)}`,
-			);
+			throw new Error(`SDK node "${input.node_name}" at ${input.url} failed: ${JSON.stringify(result.errors)}`);
 		}
 
 		return result.data as Record<string, unknown>;

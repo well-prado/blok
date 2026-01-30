@@ -189,7 +189,7 @@ describe("WorkflowHoverProvider (LSP)", () => {
 		});
 
 		it("should return null for empty line", () => {
-			const text = '{\n\n}';
+			const text = "{\n\n}";
 			const hover = getHover(text, 1, 0);
 			expect(hover).toBeNull();
 		});

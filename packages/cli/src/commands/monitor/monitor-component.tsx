@@ -321,9 +321,7 @@ const TriggersPanel: React.FC<{ triggers: TriggerStatus[] }> = ({ triggers }) =>
 				{triggers.map((t) => (
 					<Text key={t.name}>
 						{`  │ ${t.name.slice(0, 22).padEnd(22)} │ ${t.type.padEnd(8)} │ ${statusIndicator(t.status).padEnd(17)} │ ${fmt(t.requests, 0).padStart(8)} │ ${fmt(t.avgLatencyMs, 0).padStart(8)}ms │ ${
-							t.errors > 0
-								? chalk.red(t.errors.toString().padStart(6))
-								: chalk.green("     0")
+							t.errors > 0 ? chalk.red(t.errors.toString().padStart(6)) : chalk.green("     0")
 						} │`}
 					</Text>
 				))}
@@ -336,11 +334,14 @@ const TriggersPanel: React.FC<{ triggers: TriggerStatus[] }> = ({ triggers }) =>
 // --- Runtime Status Panel ---
 const RuntimesPanel: React.FC<{ runtimes: RuntimeStatus[] }> = ({ runtimes }) => {
 	// Default runtimes if none from Prometheus
-	const displayRuntimes = runtimes.length > 0 ? runtimes : [
-		{ kind: "nodejs", status: "active" as const, executions: 0, avgDurationMs: 0, errors: 0 },
-		{ kind: "python3", status: "inactive" as const, executions: 0, avgDurationMs: 0, errors: 0 },
-		{ kind: "docker", status: "inactive" as const, executions: 0, avgDurationMs: 0, errors: 0 },
-	];
+	const displayRuntimes =
+		runtimes.length > 0
+			? runtimes
+			: [
+					{ kind: "nodejs", status: "active" as const, executions: 0, avgDurationMs: 0, errors: 0 },
+					{ kind: "python3", status: "inactive" as const, executions: 0, avgDurationMs: 0, errors: 0 },
+					{ kind: "docker", status: "inactive" as const, executions: 0, avgDurationMs: 0, errors: 0 },
+				];
 
 	return (
 		<Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
@@ -352,9 +353,7 @@ const RuntimesPanel: React.FC<{ runtimes: RuntimeStatus[] }> = ({ runtimes }) =>
 						<Text>{statusIndicator(rt.status)}</Text>
 						<Text dimColor>Exec: {fmt(rt.executions, 0)}</Text>
 						<Text dimColor>Avg: {fmt(rt.avgDurationMs, 0)}ms</Text>
-						<Text dimColor>
-							Err: {rt.errors > 0 ? chalk.red(rt.errors.toString()) : "0"}
-						</Text>
+						<Text dimColor>Err: {rt.errors > 0 ? chalk.red(rt.errors.toString()) : "0"}</Text>
 					</Box>
 				))}
 			</Box>
@@ -434,8 +433,14 @@ const WorkflowsPanel: React.FC<{
 const Monitor: React.FC<{ host?: string; token?: string }> = ({ host, token }) => {
 	const [workflows, setWorkflows] = useState<WorkflowMetrics[]>([]);
 	const [system, setSystem] = useState<SystemMetrics>({
-		uptime: 0, totalRequests: 0, totalErrors: 0, avgResponseMs: 0,
-		memoryUsageMb: 0, cpuUsagePct: 0, activeWorkflows: 0, errorRate: 0,
+		uptime: 0,
+		totalRequests: 0,
+		totalErrors: 0,
+		avgResponseMs: 0,
+		memoryUsageMb: 0,
+		cpuUsagePct: 0,
+		activeWorkflows: 0,
+		errorRate: 0,
 	});
 	const [triggers, setTriggers] = useState<TriggerStatus[]>([]);
 	const [runtimes] = useState<RuntimeStatus[]>([]);
@@ -501,9 +506,7 @@ const Monitor: React.FC<{ host?: string; token?: string }> = ({ host, token }) =
 					{"  "}
 					{chalk.yellow(`Avg: ${fmt(system.avgResponseMs, 0)}ms`)}
 					{"  "}
-					{system.totalErrors > 0
-						? chalk.red(`Errors: ${fmt(system.totalErrors, 0)}`)
-						: chalk.green("Errors: 0")}
+					{system.totalErrors > 0 ? chalk.red(`Errors: ${fmt(system.totalErrors, 0)}`) : chalk.green("Errors: 0")}
 					{"  "}
 					{chalk.blue(`Mem: ${fmt(system.memoryUsageMb)}MB`)}
 					{"  "}
@@ -513,18 +516,10 @@ const Monitor: React.FC<{ host?: string; token?: string }> = ({ host, token }) =
 
 			{/* Active View */}
 			<Box marginTop={1} flexDirection="column">
-				{view === "workflows" && (
-					<WorkflowsPanel workflows={workflows} sortBy={sortBy} />
-				)}
-				{view === "system" && (
-					<SystemPanel system={system} />
-				)}
-				{view === "triggers" && (
-					<TriggersPanel triggers={triggers} />
-				)}
-				{view === "runtimes" && (
-					<RuntimesPanel runtimes={runtimes} />
-				)}
+				{view === "workflows" && <WorkflowsPanel workflows={workflows} sortBy={sortBy} />}
+				{view === "system" && <SystemPanel system={system} />}
+				{view === "triggers" && <TriggersPanel triggers={triggers} />}
+				{view === "runtimes" && <RuntimesPanel runtimes={runtimes} />}
 			</Box>
 		</Box>
 	);

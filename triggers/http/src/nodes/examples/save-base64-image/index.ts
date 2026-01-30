@@ -34,9 +34,7 @@ export default defineNode({
 		let imageExtension = "png";
 
 		if (base64Image.includes(";base64,")) {
-			const matches = base64Image.match(
-				/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/,
-			);
+			const matches = base64Image.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
 			if (matches && matches.length === 3) {
 				imageExtension = matches[1];
 				base64Data = matches[2];
@@ -46,10 +44,7 @@ export default defineNode({
 		}
 
 		const buffer = Buffer.from(base64Data, "base64");
-		const fullFilePath = path.join(
-			outputPath,
-			`${fileName}.${imageExtension}`,
-		);
+		const fullFilePath = path.join(outputPath, `${fileName}.${imageExtension}`);
 
 		fs.writeFileSync(fullFilePath, buffer);
 

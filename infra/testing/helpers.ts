@@ -82,11 +82,7 @@ export function createDeferred<T = void>(): {
 /**
  * Retry a function until it succeeds or max attempts reached.
  */
-export async function retry<T>(
-	fn: () => Promise<T>,
-	maxAttempts = 3,
-	delayMs = 1000,
-): Promise<T> {
+export async function retry<T>(fn: () => Promise<T>, maxAttempts = 3, delayMs = 1000): Promise<T> {
 	let lastError: Error | undefined;
 	for (let i = 0; i < maxAttempts; i++) {
 		try {

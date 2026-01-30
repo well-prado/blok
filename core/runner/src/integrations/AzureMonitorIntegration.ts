@@ -261,11 +261,7 @@ export class AzureMonitorIntegration {
 	/**
 	 * Record a workflow execution as both a custom event and metric.
 	 */
-	recordWorkflowExecution(
-		workflowName: string,
-		durationMs: number,
-		success: boolean,
-	): void {
+	recordWorkflowExecution(workflowName: string, durationMs: number, success: boolean): void {
 		this.trackEvent(success ? "WorkflowCompleted" : "WorkflowFailed", {
 			workflowName,
 			durationMs: String(durationMs),

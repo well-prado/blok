@@ -32,7 +32,14 @@
  * ```
  */
 
-import { type CipherGCM, type DecipherGCM, createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:crypto";
+import {
+	type CipherGCM,
+	type DecipherGCM,
+	createCipheriv,
+	createDecipheriv,
+	pbkdf2Sync,
+	randomBytes,
+} from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Types & Interfaces

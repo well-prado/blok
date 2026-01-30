@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { TriggerMetricsCollector } from "../../src/monitoring/TriggerMetricsCollector";
 
 describe("TriggerMetricsCollector", () => {

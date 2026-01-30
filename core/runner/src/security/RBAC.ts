@@ -267,12 +267,7 @@ export class RBAC {
 		}
 	}
 
-	private matchesPermission(
-		perm: Permission,
-		resource: string,
-		action: Action,
-		resourceId?: string,
-	): boolean {
+	private matchesPermission(perm: Permission, resource: string, action: Action, resourceId?: string): boolean {
 		// Check resource type
 		if (perm.resource !== resource && perm.resource !== "*") return false;
 
@@ -306,9 +301,7 @@ export function createDefaultRBAC(): RBAC {
 	rbac.addRole({
 		name: "admin",
 		description: "Full access to all resources",
-		permissions: [
-			{ resource: "*", actions: ["*"] },
-		],
+		permissions: [{ resource: "*", actions: ["*"] }],
 	});
 
 	rbac.addRole({

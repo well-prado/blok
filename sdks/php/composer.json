@@ -1,34 +1,34 @@
 {
-    "name": "blok/nanoservice-php",
-    "description": "PHP SDK for building Blok nanoservice nodes",
-    "type": "library",
-    "license": "MIT",
-    "keywords": ["blok", "nanoservice", "workflow", "microservice", "node"],
-    "require": {
-        "php": ">=8.2",
-        "react/http": "^1.9",
-        "react/socket": "^1.15"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^10"
-    },
-    "autoload": {
-        "psr-4": {
-            "Blok\\Nanoservice\\": "src/",
-            "Blok\\Nanoservice\\Examples\\": "examples/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Blok\\Nanoservice\\Tests\\": "tests/"
-        }
-    },
-    "scripts": {
-        "test": "phpunit",
-        "serve": "php bin/serve.php"
-    },
-    "config": {
-        "sort-packages": true
-    },
-    "minimum-stability": "stable"
+	"name": "blok/nanoservice-php",
+	"description": "PHP SDK for building Blok nanoservice nodes",
+	"type": "library",
+	"license": "MIT",
+	"keywords": ["blok", "nanoservice", "workflow", "microservice", "node"],
+	"require": {
+		"php": ">=8.2",
+		"react/http": "^1.9",
+		"react/socket": "^1.15"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^10"
+	},
+	"autoload": {
+		"psr-4": {
+			"Blok\\Nanoservice\\": "src/",
+			"Blok\\Nanoservice\\Examples\\": "examples/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"Blok\\Nanoservice\\Tests\\": "tests/"
+		}
+	},
+	"scripts": {
+		"test": "phpunit",
+		"serve": "php bin/serve.php"
+	},
+	"config": {
+		"sort-packages": true
+	},
+	"minimum-stability": "stable"
 }

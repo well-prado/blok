@@ -1,8 +1,8 @@
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import type { Context } from "@nanoservice-ts/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./RuntimeAdapter";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
@@ -52,11 +52,7 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 	private healthCheckInterval?: NodeJS.Timeout;
 	private nextPort = 9000;
 
-	constructor(
-		kind: RuntimeKind = "docker",
-		image: string,
-		poolConfig?: Partial<PoolConfig>,
-	) {
+	constructor(kind: RuntimeKind = "docker", image: string, poolConfig?: Partial<PoolConfig>) {
 		this.kind = kind;
 		this.image = image;
 		this.poolConfig = {
@@ -156,9 +152,7 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 
 		try {
 			// Run container with port mapping
-			const { stdout } = await execAsync(
-				`docker run -d --name ${containerName} -p ${port}:8080 --rm ${this.image}`,
-			);
+			const { stdout } = await execAsync(`docker run -d --name ${containerName} -p ${port}:8080 --rm ${this.image}`);
 
 			const containerId = stdout.trim();
 
@@ -186,11 +180,7 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 	/**
 	 * Wait for container to be healthy
 	 */
-	private async waitForHealth(
-		container: ContainerInstance,
-		maxAttempts = 30,
-		delay = 1000,
-	): Promise<void> {
+	private async waitForHealth(container: ContainerInstance, maxAttempts = 30, delay = 1000): Promise<void> {
 		for (let i = 0; i < maxAttempts; i++) {
 			try {
 				const healthy = await this.checkHealth(container);
@@ -232,10 +222,7 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 	/**
 	 * Execute a request in a container
 	 */
-	private async executeInContainer(
-		container: ContainerInstance,
-		request: unknown,
-	): Promise<ExecutionResult> {
+	private async executeInContainer(container: ContainerInstance, request: unknown): Promise<ExecutionResult> {
 		const response = await fetch(`http://localhost:${container.port}/execute`, {
 			method: "POST",
 			headers: {
@@ -373,9 +360,7 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 		}
 
 		// Stop all containers
-		const shutdownPromises = Array.from(this.pool.values()).map((container) =>
-			this.recycleContainer(container),
-		);
+		const shutdownPromises = Array.from(this.pool.values()).map((container) => this.recycleContainer(container));
 
 		await Promise.allSettled(shutdownPromises);
 

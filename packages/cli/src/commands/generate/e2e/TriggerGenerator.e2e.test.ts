@@ -6,7 +6,7 @@
  * and the 3-attempt feedback loop without requiring an actual OpenAI API key.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -24,8 +24,8 @@ vi.mock("../validators/CompilationValidator.js", () => ({
 }));
 
 import { generateText } from "ai";
-import * as CompilationValidator from "../validators/CompilationValidator.js";
 import TriggerGenerator from "../TriggerGenerator.js";
+import * as CompilationValidator from "../validators/CompilationValidator.js";
 
 const mockedGenerateText = vi.mocked(generateText);
 const mockedValidateCode = vi.mocked(CompilationValidator.validateCode);
@@ -173,7 +173,8 @@ describe("TriggerGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
 			const result = await generator.generateTrigger(
-				"kafka-queue", "queue",
+				"kafka-queue",
+				"queue",
 				"Create a Kafka queue trigger that consumes user events",
 				"test-api-key",
 			);
@@ -193,7 +194,8 @@ describe("TriggerGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
 			const result = await generator.generateTrigger(
-				"daily-cron", "cron",
+				"daily-cron",
+				"cron",
 				"Create a daily cron trigger",
 				"test-api-key",
 			);
@@ -210,7 +212,8 @@ describe("TriggerGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
 			const result = await generator.generateTrigger(
-				"github-webhook", "webhook",
+				"github-webhook",
+				"webhook",
 				"Create a GitHub webhook trigger",
 				"test-api-key",
 			);
@@ -267,9 +270,7 @@ describe("TriggerGenerator E2E", () => {
 			// Second: passes
 			mockedValidateCode.mockReturnValueOnce({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"kafka-queue", "queue", "Create a queue trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("kafka-queue", "queue", "Create a queue trigger", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(2);
@@ -285,9 +286,7 @@ describe("TriggerGenerator E2E", () => {
 			// Second: all passes
 			mockedValidateCode.mockReturnValueOnce({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"kafka-queue", "queue", "Create a queue trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("kafka-queue", "queue", "Create a queue trigger", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(2);
@@ -314,7 +313,10 @@ describe("TriggerGenerator E2E", () => {
 			// Structural validation will catch the missing createContext every time
 
 			const result = await generator.generateTrigger(
-				"broken-trigger", "queue", "Create a broken trigger", "test-api-key",
+				"broken-trigger",
+				"queue",
+				"Create a broken trigger",
+				"test-api-key",
 			);
 
 			expect(result.validationResult!.valid).toBe(false);
@@ -334,9 +336,7 @@ describe("TriggerGenerator E2E", () => {
 			// Attempt 3: passes
 			mockedValidateCode.mockReturnValueOnce({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"kafka-queue", "queue", "Create a queue trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("kafka-queue", "queue", "Create a queue trigger", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(3);
@@ -349,9 +349,7 @@ describe("TriggerGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: wrappedCode } as never);
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"kafka-queue", "queue", "Create a queue trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("kafka-queue", "queue", "Create a queue trigger", "test-api-key");
 
 			expect(result.code).not.toContain("```");
 		});
@@ -387,9 +385,7 @@ describe("TriggerGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_QUEUE_TRIGGER } as never);
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"test-trigger", "queue", "Create a test trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("test-trigger", "queue", "Create a test trigger", "test-api-key");
 
 			expect(result.validationResult!.promptVersion).toContain("create-trigger@");
 		});
@@ -398,9 +394,7 @@ describe("TriggerGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_QUEUE_TRIGGER } as never);
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateTrigger(
-				"test-trigger", "queue", "Create a test trigger", "test-api-key",
-			);
+			const result = await generator.generateTrigger("test-trigger", "queue", "Create a test trigger", "test-api-key");
 
 			expect(result.validationResult!.durationMs).toBeGreaterThanOrEqual(0);
 		});

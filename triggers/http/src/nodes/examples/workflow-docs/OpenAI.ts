@@ -20,9 +20,7 @@ export default defineNode({
 	async execute(_ctx, input) {
 		const cache = InMemory.getInstance();
 		const cachedValue =
-			input.cache_key !== undefined && input.cache_key !== ""
-				? cache.get(input.cache_key)
-				: undefined;
+			input.cache_key !== undefined && input.cache_key !== "" ? cache.get(input.cache_key) : undefined;
 
 		if (cachedValue) {
 			return cachedValue;

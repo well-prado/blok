@@ -111,7 +111,13 @@ export default class NodeFileWriter {
 	 * @param apiKey - The API key for AI generation.
 	 * @param nodeStyle - The node style ("function" or "class"). Defaults to "class".
 	 */
-	public async generateFile(nodeName: string, nodeType: string, fileContent: string, apiKey: string, nodeStyle = "class"): Promise<string> {
+	public async generateFile(
+		nodeName: string,
+		nodeType: string,
+		fileContent: string,
+		apiKey: string,
+		nodeStyle = "class",
+	): Promise<string> {
 		try {
 			const dirName = nodeName.toLowerCase().replace(/\s+/g, "-");
 			const dirPath = process.cwd();

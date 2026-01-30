@@ -1,3 +1,4 @@
+import type { Context } from "@nanoservice-ts/shared";
 /**
  * Cross-Language Integration Tests (Phase 5G)
  *
@@ -5,16 +6,11 @@
  * into polyglot workflows. Uses MockRuntimeAdapter to simulate real runtimes
  * without requiring Docker containers or external processes.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import type { Context } from "@nanoservice-ts/shared";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../src/RunnerNode";
-import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
-import type {
-	RuntimeAdapter,
-	RuntimeKind,
-	ExecutionResult,
-} from "../../../src/adapters/RuntimeAdapter";
+import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
+import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../../../src/adapters/RuntimeAdapter";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,11 +33,7 @@ function createContext(vars: Record<string, unknown> = {}): Context {
 	} as unknown as Context;
 }
 
-function createRunnerNode(
-	nodeName: string,
-	runtime: RuntimeKind,
-	config: Record<string, unknown> = {},
-): RunnerNode {
+function createRunnerNode(nodeName: string, runtime: RuntimeKind, config: Record<string, unknown> = {}): RunnerNode {
 	const node = new RunnerNode();
 	node.node = nodeName;
 	node.name = nodeName;
@@ -259,16 +251,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 		});
 
 		it("should preserve context vars across all language boundaries", async () => {
-			const runtimes: RuntimeKind[] = [
-				"nodejs",
-				"python3",
-				"go",
-				"java",
-				"rust",
-				"php",
-				"csharp",
-				"ruby",
-			];
+			const runtimes: RuntimeKind[] = ["nodejs", "python3", "go", "java", "rust", "php", "csharp", "ruby"];
 			const adapters: MockRuntimeAdapter[] = [];
 
 			for (const kind of runtimes) {
@@ -348,16 +331,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 		});
 
 		it("should handle 50 concurrent cross-runtime executions", async () => {
-			const runtimes: RuntimeKind[] = [
-				"nodejs",
-				"python3",
-				"go",
-				"java",
-				"rust",
-				"php",
-				"csharp",
-				"ruby",
-			];
+			const runtimes: RuntimeKind[] = ["nodejs", "python3", "go", "java", "rust", "php", "csharp", "ruby"];
 
 			for (const kind of runtimes) {
 				registry.register(new MockRuntimeAdapter(kind));
@@ -410,22 +384,16 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 			const ctx = createContext();
 
 			// Step 1: NodeJS succeeds
-			const nodejsResult = await registry
-				.get("nodejs")
-				.execute(createRunnerNode("step-1", "nodejs"), ctx);
+			const nodejsResult = await registry.get("nodejs").execute(createRunnerNode("step-1", "nodejs"), ctx);
 			expect(nodejsResult.success).toBe(true);
 
 			// Step 2: Rust fails
-			const rustResult = await registry
-				.get("rust")
-				.execute(createRunnerNode("step-2", "rust"), ctx);
+			const rustResult = await registry.get("rust").execute(createRunnerNode("step-2", "rust"), ctx);
 			expect(rustResult.success).toBe(false);
 			expect((rustResult.errors as any).message).toContain("rust execution failed");
 
 			// Step 3: Ruby still succeeds (error doesn't propagate)
-			const rubyResult = await registry
-				.get("ruby")
-				.execute(createRunnerNode("step-3", "ruby"), ctx);
+			const rubyResult = await registry.get("ruby").execute(createRunnerNode("step-3", "ruby"), ctx);
 			expect(rubyResult.success).toBe(true);
 		});
 
@@ -444,9 +412,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 			const node = createRunnerNode("crash-node", "php");
 			const ctx = createContext();
 
-			await expect(registry.get("php").execute(node, ctx)).rejects.toThrow(
-				"php crashed unexpectedly",
-			);
+			await expect(registry.get("php").execute(node, ctx)).rejects.toThrow("php crashed unexpectedly");
 		});
 	});
 
@@ -483,16 +449,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 
 	describe("Performance Across Runtimes", () => {
 		it("should route 1000 sequential executions across 8 runtimes in < 500ms", async () => {
-			const runtimes: RuntimeKind[] = [
-				"nodejs",
-				"python3",
-				"go",
-				"java",
-				"rust",
-				"php",
-				"csharp",
-				"ruby",
-			];
+			const runtimes: RuntimeKind[] = ["nodejs", "python3", "go", "java", "rust", "php", "csharp", "ruby"];
 			for (const kind of runtimes) {
 				registry.register(new MockRuntimeAdapter(kind));
 			}

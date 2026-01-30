@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { TokenCache, OAuthOIDCProvider } from "../../security/OAuthProvider";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthIdentity } from "../../security/AuthMiddleware";
+import { OAuthOIDCProvider, TokenCache } from "../../security/OAuthProvider";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,10 +23,7 @@ function makeIdentity(sub: string, overrides?: Partial<AuthIdentity>): AuthIdent
  * The signature part is just a placeholder -- no real signing.
  * Useful for testing the authenticate() parsing path without network calls.
  */
-function buildFakeJWT(
-	header: Record<string, unknown>,
-	payload: Record<string, unknown>,
-): string {
+function buildFakeJWT(header: Record<string, unknown>, payload: Record<string, unknown>): string {
 	const h = Buffer.from(JSON.stringify(header)).toString("base64url");
 	const p = Buffer.from(JSON.stringify(payload)).toString("base64url");
 	const s = Buffer.from("fake-signature-bytes").toString("base64url");
@@ -596,7 +593,7 @@ describe("OAuthOIDCProvider", () => {
 			});
 
 			const result = await provider.authenticate({
-				headers: { authorization: "Digest username=\"user\"" },
+				headers: { authorization: 'Digest username="user"' },
 			});
 
 			expect(result.authenticated).toBe(false);
@@ -761,10 +758,7 @@ describe("OAuthOIDCProvider", () => {
 			// The token is a valid 3-part structure but won't verify.
 			// We just want to confirm Bearer stripping works (it won't return
 			// "Invalid Bearer token format").
-			const token = buildFakeJWT(
-				{ alg: "RS256", typ: "JWT" },
-				{ sub: "user" },
-			);
+			const token = buildFakeJWT({ alg: "RS256", typ: "JWT" }, { sub: "user" });
 
 			const result = await provider.authenticate({
 				headers: { authorization: `Bearer ${token}` },
@@ -781,10 +775,7 @@ describe("OAuthOIDCProvider", () => {
 				clientId: "app",
 			});
 
-			const token = buildFakeJWT(
-				{ alg: "RS256", typ: "JWT" },
-				{ sub: "user" },
-			);
+			const token = buildFakeJWT({ alg: "RS256", typ: "JWT" }, { sub: "user" });
 
 			const result = await provider.authenticate({
 				headers: { authorization: `bearer ${token}` },
@@ -800,10 +791,7 @@ describe("OAuthOIDCProvider", () => {
 				clientId: "app",
 			});
 
-			const token = buildFakeJWT(
-				{ alg: "RS256", typ: "JWT" },
-				{ sub: "user" },
-			);
+			const token = buildFakeJWT({ alg: "RS256", typ: "JWT" }, { sub: "user" });
 
 			const result = await provider.authenticate({
 				headers: { authorization: `BEARER ${token}` },
@@ -854,10 +842,7 @@ describe("OAuthOIDCProvider", () => {
 				allowedAlgorithms: ["RS256", "ES256"],
 			});
 
-			const token = buildFakeJWT(
-				{ alg: "none", typ: "JWT" },
-				{ sub: "attacker" },
-			);
+			const token = buildFakeJWT({ alg: "none", typ: "JWT" }, { sub: "attacker" });
 
 			const result = await provider.authenticate({
 				headers: { authorization: `Bearer ${token}` },
@@ -963,10 +948,7 @@ describe("OAuthOIDCProvider", () => {
 				clientId: "app",
 			});
 
-			const token = buildFakeJWT(
-				{ alg: "RS256", typ: "JWT" },
-				{ sub: "user" },
-			);
+			const token = buildFakeJWT({ alg: "RS256", typ: "JWT" }, { sub: "user" });
 
 			const result = await provider.authenticate({
 				headers: { authorization: `Bearer ${token}` },

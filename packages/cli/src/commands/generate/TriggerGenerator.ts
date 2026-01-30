@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import createTriggerSystemPrompt from "./prompts/create-trigger.system.js";
-import * as CompilationValidator from "./validators/CompilationValidator.js";
 import { GenerationAnalytics } from "./GenerationAnalytics.js";
 import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
+import createTriggerSystemPrompt from "./prompts/create-trigger.system.js";
+import * as CompilationValidator from "./validators/CompilationValidator.js";
 
 export type TriggerInformation = {
 	triggerName: string;
@@ -104,7 +104,9 @@ export default class TriggerGenerator {
 
 			// Log attempt
 			if (!isValid && attempts < this.MAX_VALIDATION_ATTEMPTS) {
-				console.log(`⚠️  Trigger validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`);
+				console.log(
+					`⚠️  Trigger validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`,
+				);
 			}
 		}
 
@@ -170,7 +172,10 @@ export default class TriggerGenerator {
 		}
 
 		// Check for ctx.request population
-		if (!code.includes(".request") || (!code.includes("ctx.request") && !code.includes("context.request") && !code.includes(".request ="))) {
+		if (
+			!code.includes(".request") ||
+			(!code.includes("ctx.request") && !code.includes("context.request") && !code.includes(".request ="))
+		) {
 			warnings.push("Should populate ctx.request with event data");
 		}
 

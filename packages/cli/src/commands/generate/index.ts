@@ -11,9 +11,9 @@ import { getPreferredEditor } from "../../services/utils.js";
 import NodeFileWriter from "./NodeFileWriter.js";
 import NodeGenerator, { type NodeInformation } from "./NodeGenerator.js";
 import RegisterNode from "./RegisterNode.js";
-import WorkflowGenerator from "./WorkflowGenerator.js";
-import TriggerGenerator from "./TriggerGenerator.js";
 import RuntimeGenerator, { isSupportedLanguage } from "./RuntimeGenerator.js";
+import TriggerGenerator from "./TriggerGenerator.js";
+import WorkflowGenerator from "./WorkflowGenerator.js";
 
 // Generate command for AI vibe coding
 
@@ -239,7 +239,9 @@ create
 				const triggerType = options.trigger || "auto";
 				const apiKey = options.apiKey || process.env.OPENAI_API_KEY;
 
-				s.start(`Generating workflow "${workflowName}" with ${triggerType === "auto" ? "auto-detected" : triggerType} trigger...`);
+				s.start(
+					`Generating workflow "${workflowName}" with ${triggerType === "auto" ? "auto-detected" : triggerType} trigger...`,
+				);
 
 				const generator = new WorkflowGenerator();
 				const result = await generator.generateWorkflow(
@@ -330,7 +332,9 @@ create
 				}
 
 				if (!options.type) {
-					console.error("The --type option is required. Valid types: queue, pubsub, cron, webhook, websocket, sse, custom");
+					console.error(
+						"The --type option is required. Valid types: queue, pubsub, cron, webhook, websocket, sse, custom",
+					);
 					process.exit(1);
 				}
 
@@ -459,7 +463,9 @@ create
 				console.log("");
 
 				if (!options.language) {
-					console.error("The --language option is required. Valid languages: go, java, rust, python, csharp, php, ruby");
+					console.error(
+						"The --language option is required. Valid languages: go, java, rust, python, csharp, php, ruby",
+					);
 					process.exit(1);
 				}
 
@@ -484,7 +490,13 @@ create
 				}
 
 				const isUpdate = !!options.update;
-				p.intro(color.inverse(isUpdate ? ` Update Existing ${language.toUpperCase()} Runtime ` : ` Generate ${language.toUpperCase()} Runtime SDK `));
+				p.intro(
+					color.inverse(
+						isUpdate
+							? ` Update Existing ${language.toUpperCase()} Runtime `
+							: ` Generate ${language.toUpperCase()} Runtime SDK `,
+					),
+				);
 				const s = p.spinner();
 
 				const apiKey = options.apiKey || process.env.OPENAI_API_KEY;

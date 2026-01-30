@@ -137,7 +137,7 @@ export default defineNode({
 
 			// We're just documenting current behavior here
 			expect(result).toBeDefined();
-			expect(typeof result.success).toBe('boolean');
+			expect(typeof result.success).toBe("boolean");
 		});
 
 		it("should pass for code with proper async/await usage", () => {

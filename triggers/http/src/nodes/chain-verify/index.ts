@@ -13,8 +13,7 @@ type ChainEntry = { language: string; order: number; timestamp?: string };
  */
 export default defineNode({
 	name: "chain-verify",
-	description:
-		"Verifies that all runtimes executed correctly in a cross-runtime chain test",
+	description: "Verifies that all runtimes executed correctly in a cross-runtime chain test",
 
 	input: z.object({}),
 
@@ -67,9 +66,7 @@ export default defineNode({
 		let origin = "unknown";
 
 		for (const stepName of Object.keys(stepToRuntime)) {
-			const stepVars = vars[stepName] as
-				| Record<string, unknown>
-				| undefined;
+			const stepVars = vars[stepName] as Record<string, unknown> | undefined;
 			if (!stepVars) continue;
 
 			const stepChain = (stepVars.chain ?? []) as ChainEntry[];
@@ -96,9 +93,7 @@ export default defineNode({
 
 		for (const [stepName, runtime] of Object.entries(stepToRuntime)) {
 			const chainIndex = chainLanguages.indexOf(runtime);
-			const stepVars = vars[stepName] as
-				| Record<string, unknown>
-				| undefined;
+			const stepVars = vars[stepName] as Record<string, unknown> | undefined;
 
 			verification[runtime] = {
 				inChain: chainIndex >= 0,
@@ -112,9 +107,7 @@ export default defineNode({
 		const allInVars = Object.values(verification).every((v) => v.inVars);
 
 		return {
-			status: (allInChain && allInVars ? "PASS" : "FAIL") as
-				| "PASS"
-				| "FAIL",
+			status: (allInChain && allInVars ? "PASS" : "FAIL") as "PASS" | "FAIL",
 			summary: {
 				totalRuntimes: expectedRuntimes.length,
 				chainLength: finalChain.length,

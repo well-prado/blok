@@ -141,10 +141,7 @@ export interface AuthResult {
 /**
  * Authentication handler function type
  */
-export type AuthHandler = (
-	request: unknown,
-	headers: Record<string, string>,
-) => Promise<AuthResult> | AuthResult;
+export type AuthHandler = (request: unknown, headers: Record<string, string>) => Promise<AuthResult> | AuthResult;
 
 /**
  * Workflow model with WebSocket trigger configuration
@@ -240,9 +237,7 @@ export abstract class WebSocketTrigger extends TriggerBase {
 		if (this.websocketWorkflows.length === 0) {
 			this.logger.log("No workflows with WebSocket triggers found");
 		} else {
-			this.logger.log(
-				`WebSocket trigger initialized. ${this.websocketWorkflows.length} workflow(s) registered`,
-			);
+			this.logger.log(`WebSocket trigger initialized. ${this.websocketWorkflows.length} workflow(s) registered`);
 		}
 
 		// Start heartbeat monitoring
@@ -362,11 +357,7 @@ export abstract class WebSocketTrigger extends TriggerBase {
 	/**
 	 * Handle WebSocket message
 	 */
-	async handleMessage(
-		clientId: string,
-		data: string | Buffer,
-		isBinary: boolean,
-	): Promise<TriggerResponse | null> {
+	async handleMessage(clientId: string, data: string | Buffer, isBinary: boolean): Promise<TriggerResponse | null> {
 		const client = this.clients.get(clientId);
 		if (!client) {
 			this.logger.error(`Message from unknown client: ${clientId}`);
@@ -656,8 +647,7 @@ export abstract class WebSocketTrigger extends TriggerBase {
 		const workflows: WebSocketWorkflowModel[] = [];
 
 		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			const workflowConfig = (workflow as unknown as { _config: WebSocketWorkflowModel["config"] })
-				._config;
+			const workflowConfig = (workflow as unknown as { _config: WebSocketWorkflowModel["config"] })._config;
 
 			if (workflowConfig?.trigger) {
 				const triggerType = Object.keys(workflowConfig.trigger)[0];

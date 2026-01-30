@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HealthCheck } from "../../src/monitoring/HealthCheck";
 import type { DependencyHealth } from "../../src/monitoring/HealthCheck";
 

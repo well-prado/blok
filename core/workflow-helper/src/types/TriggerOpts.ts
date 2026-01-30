@@ -37,7 +37,9 @@ export type PubSubProvider = z.infer<typeof PubSubProviderSchema>;
 export const PubSubTriggerOptsSchema = z.object({
 	provider: PubSubProviderSchema,
 	topic: z.string().describe("Topic name to subscribe to"),
-	subscription: z.string().describe("Subscription name (GCP) or SQS queue URL (AWS) or Service Bus subscription (Azure)"),
+	subscription: z
+		.string()
+		.describe("Subscription name (GCP) or SQS queue URL (AWS) or Service Bus subscription (Azure)"),
 	ack: z.boolean().default(true).describe("Whether to acknowledge messages after processing"),
 	maxMessages: z.number().default(10).describe("Maximum messages to receive at once"),
 	ackDeadline: z.number().default(30).describe("Acknowledgment deadline in seconds"),

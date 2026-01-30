@@ -17,9 +17,9 @@
  * ```
  */
 
-import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 import type { WorkerTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 
 /**
  * Internal job representation
@@ -78,10 +78,7 @@ export class InMemoryAdapter implements WorkerAdapter {
 		this.connected = false;
 	}
 
-	async process(
-		config: WorkerTriggerOpts,
-		handler: (job: WorkerJob) => Promise<void>,
-	): Promise<void> {
+	async process(config: WorkerTriggerOpts, handler: (job: WorkerJob) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected. Call connect() first.");
 		}
@@ -152,9 +149,7 @@ export class InMemoryAdapter implements WorkerAdapter {
 		const jobs = this.jobs.get(queue)!;
 
 		// Insert sorted by priority (higher first)
-		const insertIdx = jobs.findIndex(
-			(j) => j.status === "waiting" && j.priority < job.priority,
-		);
+		const insertIdx = jobs.findIndex((j) => j.status === "waiting" && j.priority < job.priority);
 		if (insertIdx >= 0) {
 			jobs.splice(insertIdx, 0, job);
 		} else {

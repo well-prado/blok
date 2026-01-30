@@ -264,11 +264,15 @@ export class GenerationAnalytics {
 	 * Serialize all events to JSON for persistence
 	 */
 	toJSON(): string {
-		return JSON.stringify({
-			events: this.events,
-			stats: this.getStats(),
-			exportedAt: new Date().toISOString(),
-		}, null, 2);
+		return JSON.stringify(
+			{
+				events: this.events,
+				stats: this.getStats(),
+				exportedAt: new Date().toISOString(),
+			},
+			null,
+			2,
+		);
 	}
 
 	/**

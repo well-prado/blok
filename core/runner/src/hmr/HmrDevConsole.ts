@@ -40,7 +40,9 @@ export class HmrDevConsole {
 		const uptime = Math.round(stats.uptime / 1000);
 		console.log("\n  [HMR] Stats:");
 		console.log(`    Total reloads: ${stats.totalReloads}`);
-		console.log(`    Nodes: ${stats.nodeReloads} | Workflows: ${stats.workflowReloads} | Triggers: ${stats.triggerReloads}`);
+		console.log(
+			`    Nodes: ${stats.nodeReloads} | Workflows: ${stats.workflowReloads} | Triggers: ${stats.triggerReloads}`,
+		);
 		console.log(`    Errors: ${stats.errors}`);
 		console.log(`    Uptime: ${uptime}s\n`);
 	}

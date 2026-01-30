@@ -329,22 +329,18 @@ export class RuntimeAutoScaler {
 		const metrics = this.collectMetrics(runtime);
 
 		// Base recommendations on current observed load
-		const recommendedTargetRps = metrics.currentRps > 0
-			? Math.ceil(metrics.currentRps * 1.5)
-			: DEFAULT_POLICY.targetRps;
+		const recommendedTargetRps =
+			metrics.currentRps > 0 ? Math.ceil(metrics.currentRps * 1.5) : DEFAULT_POLICY.targetRps;
 
-		const recommendedTargetLatency = metrics.currentLatencyP95 > 0
-			? Math.ceil(metrics.currentLatencyP95 * 1.25)
-			: DEFAULT_POLICY.targetLatencyMs;
+		const recommendedTargetLatency =
+			metrics.currentLatencyP95 > 0 ? Math.ceil(metrics.currentLatencyP95 * 1.25) : DEFAULT_POLICY.targetLatencyMs;
 
-		const recommendedMinInstances = metrics.currentRps > 0
-			? Math.max(1, Math.ceil(metrics.currentRps / recommendedTargetRps))
-			: DEFAULT_POLICY.minInstances;
+		const recommendedMinInstances =
+			metrics.currentRps > 0
+				? Math.max(1, Math.ceil(metrics.currentRps / recommendedTargetRps))
+				: DEFAULT_POLICY.minInstances;
 
-		const recommendedMaxInstances = Math.max(
-			recommendedMinInstances * 3,
-			DEFAULT_POLICY.maxInstances,
-		);
+		const recommendedMaxInstances = Math.max(recommendedMinInstances * 3, DEFAULT_POLICY.maxInstances);
 
 		return {
 			runtime,
@@ -396,23 +392,18 @@ export class RuntimeAutoScaler {
 		return {
 			currentRps: executionMetrics.throughput.requestsPerSecond,
 			currentLatencyP95: executionMetrics.latency.p95,
-			currentCpuUtilization: executionMetrics.resourceUsage.avgCpuMs > 0
-				? Math.min(100, (executionMetrics.resourceUsage.avgCpuMs / 1000) * 100)
-				: 0,
-			instanceUtilization: maxInstances > 0
-				? (currentInstances / maxInstances) * 100
-				: 0,
+			currentCpuUtilization:
+				executionMetrics.resourceUsage.avgCpuMs > 0
+					? Math.min(100, (executionMetrics.resourceUsage.avgCpuMs / 1000) * 100)
+					: 0,
+			instanceUtilization: maxInstances > 0 ? (currentInstances / maxInstances) * 100 : 0,
 		};
 	}
 
 	/**
 	 * Create a no-change decision with the given reason.
 	 */
-	private createNoChangeDecision(
-		runtime: RuntimeKind,
-		currentInstances: number,
-		reason: string,
-	): ScalingDecision {
+	private createNoChangeDecision(runtime: RuntimeKind, currentInstances: number, reason: string): ScalingDecision {
 		return {
 			runtime,
 			action: "no_change",

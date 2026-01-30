@@ -7,12 +7,20 @@
  * Uses Node.js fs.watch with debouncing to avoid duplicate events.
  */
 
-import { watch, type FSWatcher } from "node:fs";
+import { EventEmitter } from "node:events";
+import { type FSWatcher, watch } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
-import { EventEmitter } from "node:events";
 
-export type HMREventType = "node:change" | "node:add" | "node:remove" | "workflow:change" | "workflow:add" | "workflow:remove" | "trigger:change" | "config:change";
+export type HMREventType =
+	| "node:change"
+	| "node:add"
+	| "node:remove"
+	| "workflow:change"
+	| "workflow:add"
+	| "workflow:remove"
+	| "trigger:change"
+	| "config:change";
 
 export interface HMREvent {
 	type: HMREventType;

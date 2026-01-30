@@ -1,7 +1,7 @@
 import { Command } from "commander";
+import { program } from "../../services/commander.js";
 import type { OptionValues } from "..//../services/commander.js";
 import { migrateNode } from "./node.js";
-import { program } from "../../services/commander.js";
 
 const migrate = new Command("migrate").description("Migrate nodes and workflows to newer patterns");
 

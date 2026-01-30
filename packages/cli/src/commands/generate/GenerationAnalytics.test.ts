@@ -4,7 +4,7 @@
  * Tests the analytics tracking system for AI code generation metrics
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { GenerationAnalytics } from "./GenerationAnalytics.js";
 
 describe("GenerationAnalytics", () => {
@@ -53,13 +53,23 @@ describe("GenerationAnalytics", () => {
 
 		it("should track multiple events", () => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "node1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "node1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "workflow", subtype: "http", name: "wf1",
-				success: false, attempts: 3, durationMs: 5000, errors: ["Error 1"],
+				type: "workflow",
+				subtype: "http",
+				name: "wf1",
+				success: false,
+				attempts: 3,
+				durationMs: 5000,
+				errors: ["Error 1"],
 				promptVersion: "v1",
 			});
 
@@ -85,23 +95,43 @@ describe("GenerationAnalytics", () => {
 		beforeEach(() => {
 			// 3 successes, 1 failure
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n2",
-				success: true, attempts: 2, durationMs: 3000, errors: ["Missing import"],
+				type: "node",
+				subtype: "function",
+				name: "n2",
+				success: true,
+				attempts: 2,
+				durationMs: 3000,
+				errors: ["Missing import"],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "workflow", subtype: "http", name: "w1",
-				success: true, attempts: 1, durationMs: 2000, errors: [],
+				type: "workflow",
+				subtype: "http",
+				name: "w1",
+				success: true,
+				attempts: 1,
+				durationMs: 2000,
+				errors: [],
 				promptVersion: "v2",
 			});
 			analytics.recordEvent({
-				type: "trigger", subtype: "queue", name: "t1",
-				success: false, attempts: 3, durationMs: 8000, errors: ["Missing TriggerBase", "Missing createContext"],
+				type: "trigger",
+				subtype: "queue",
+				name: "t1",
+				success: false,
+				attempts: 3,
+				durationMs: 8000,
+				errors: ["Missing TriggerBase", "Missing createContext"],
 				promptVersion: "v1",
 			});
 		});
@@ -159,18 +189,33 @@ describe("GenerationAnalytics", () => {
 	describe("getEvents - filtering", () => {
 		beforeEach(() => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "workflow", subtype: "http", name: "w1",
-				success: false, attempts: 3, durationMs: 5000, errors: ["Error"],
+				type: "workflow",
+				subtype: "http",
+				name: "w1",
+				success: false,
+				attempts: 3,
+				durationMs: 5000,
+				errors: ["Error"],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "trigger", subtype: "queue", name: "t1",
-				success: true, attempts: 2, durationMs: 3000, errors: ["Retried"],
+				type: "trigger",
+				subtype: "queue",
+				name: "t1",
+				success: true,
+				attempts: 2,
+				durationMs: 3000,
+				errors: ["Retried"],
 				promptVersion: "v2",
 			});
 		});
@@ -209,23 +254,43 @@ describe("GenerationAnalytics", () => {
 		it("should calculate first-attempt success rate correctly", () => {
 			// 2 first-attempt successes out of 4 total
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n2",
-				success: true, attempts: 2, durationMs: 3000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n2",
+				success: true,
+				attempts: 2,
+				durationMs: 3000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n3",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n3",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n4",
-				success: false, attempts: 3, durationMs: 8000, errors: ["Error"],
+				type: "node",
+				subtype: "function",
+				name: "n4",
+				success: false,
+				attempts: 3,
+				durationMs: 8000,
+				errors: ["Error"],
 				promptVersion: "v1",
 			});
 
@@ -236,23 +301,43 @@ describe("GenerationAnalytics", () => {
 	describe("getSuccessRateByPromptVersion", () => {
 		it("should break down success rate by prompt version", () => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "create-fn-node@1.0.0",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n2",
-				success: false, attempts: 3, durationMs: 5000, errors: ["Error"],
+				type: "node",
+				subtype: "function",
+				name: "n2",
+				success: false,
+				attempts: 3,
+				durationMs: 5000,
+				errors: ["Error"],
 				promptVersion: "create-fn-node@1.0.0",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n3",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n3",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "create-fn-node@2.0.0",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n4",
-				success: true, attempts: 2, durationMs: 3000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n4",
+				success: true,
+				attempts: 2,
+				durationMs: 3000,
+				errors: [],
 				promptVersion: "create-fn-node@2.0.0",
 			});
 
@@ -271,8 +356,13 @@ describe("GenerationAnalytics", () => {
 	describe("serialization", () => {
 		it("should serialize to JSON", () => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 
@@ -327,14 +417,22 @@ describe("GenerationAnalytics", () => {
 	describe("error pattern normalization", () => {
 		it("should normalize TypeScript error codes in top errors", () => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: false, attempts: 3, durationMs: 5000,
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: false,
+				attempts: 3,
+				durationMs: 5000,
 				errors: ['TS2304: Cannot find name "defineNode"', "TS2307: Cannot find module '@nanoservice-ts/runner'"],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n2",
-				success: false, attempts: 3, durationMs: 5000,
+				type: "node",
+				subtype: "function",
+				name: "n2",
+				success: false,
+				attempts: 3,
+				durationMs: 5000,
 				errors: ['TS2304: Cannot find name "z"'],
 				promptVersion: "v1",
 			});
@@ -349,8 +447,13 @@ describe("GenerationAnalytics", () => {
 	describe("clear", () => {
 		it("should clear all events", () => {
 			analytics.recordEvent({
-				type: "node", subtype: "function", name: "n1",
-				success: true, attempts: 1, durationMs: 1000, errors: [],
+				type: "node",
+				subtype: "function",
+				name: "n1",
+				success: true,
+				attempts: 1,
+				durationMs: 1000,
+				errors: [],
 				promptVersion: "v1",
 			});
 

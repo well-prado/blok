@@ -95,7 +95,9 @@ describe("NodeGenerator", () => {
 	describe("createFeedbackPrompt (via reflection)", () => {
 		const generator = new NodeGenerator();
 		const createFeedback = (originalPrompt: string, previousCode: string, errors: string[]) =>
-			(generator as unknown as { createFeedbackPrompt: (o: string, c: string, e: string[]) => string }).createFeedbackPrompt(originalPrompt, previousCode, errors);
+			(
+				generator as unknown as { createFeedbackPrompt: (o: string, c: string, e: string[]) => string }
+			).createFeedbackPrompt(originalPrompt, previousCode, errors);
 
 		it("should include original prompt", () => {
 			const result = createFeedback("Create a user fetcher node", "code", ["error"]);

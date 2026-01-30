@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { v4 as uuid } from "uuid";
-import type { RunStore } from "./RunStore";
 import { InMemoryRunStore } from "./InMemoryRunStore";
+import type { RunStore } from "./RunStore";
 import { createStore } from "./createStore";
 import type {
 	Dashboard,
@@ -441,10 +441,7 @@ export class RunTracker extends EventEmitter {
 			const headers: Record<string, string> = { "Content-Type": "application/json" };
 			if (webhook.secret) {
 				const crypto = require("node:crypto") as typeof import("node:crypto");
-				headers["X-Blok-Signature"] = crypto
-					.createHmac("sha256", webhook.secret)
-					.update(body)
-					.digest("hex");
+				headers["X-Blok-Signature"] = crypto.createHmac("sha256", webhook.secret).update(body).digest("hex");
 			}
 
 			// Fire-and-forget HTTP POST

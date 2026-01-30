@@ -26,10 +26,10 @@
  * ```
  */
 
-import { createHash, createPublicKey, createVerify, type KeyObject } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { type KeyObject, createHash, createPublicKey, createVerify } from "node:crypto";
 
-import type { AuthProvider, AuthRequest, AuthResult, AuthIdentity } from "./AuthMiddleware";
+import type { AuthIdentity, AuthProvider, AuthRequest, AuthResult } from "./AuthMiddleware";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -219,7 +219,7 @@ export class TokenCache {
 	private misses = 0;
 	private evictions = 0;
 
-	constructor(maxSize: number = 1000) {
+	constructor(maxSize = 1000) {
 		this.maxSize = maxSize;
 	}
 
@@ -354,7 +354,14 @@ export class OAuthOIDCProvider implements AuthProvider {
 	private config: Required<
 		Pick<
 			OAuthOIDCConfig,
-			"issuerUrl" | "clientId" | "allowedAlgorithms" | "rolesClaim" | "scopesClaim" | "clockToleranceSec" | "cacheJWKS" | "cacheDiscovery"
+			| "issuerUrl"
+			| "clientId"
+			| "allowedAlgorithms"
+			| "rolesClaim"
+			| "scopesClaim"
+			| "clockToleranceSec"
+			| "cacheJWKS"
+			| "cacheDiscovery"
 		>
 	> &
 		OAuthOIDCConfig;
@@ -415,9 +422,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 			const identity = await this.verifyJWT(raw);
 			if (identity) {
 				// Cache with TTL derived from token expiry
-				const ttlMs = identity.expiresAt
-					? (identity.expiresAt - Math.floor(Date.now() / 1000)) * 1000
-					: 300_000; // 5 min fallback
+				const ttlMs = identity.expiresAt ? (identity.expiresAt - Math.floor(Date.now() / 1000)) * 1000 : 300_000; // 5 min fallback
 				if (ttlMs > 0) {
 					this.tokenCache.set(tokenHash, identity, ttlMs);
 				}
@@ -425,8 +430,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 			}
 
 			// Fall back to introspection for opaque tokens
-			const introspectionEndpoint =
-				this.config.introspectionEndpoint ?? (await this.resolveIntrospectionEndpoint());
+			const introspectionEndpoint = this.config.introspectionEndpoint ?? (await this.resolveIntrospectionEndpoint());
 
 			if (introspectionEndpoint) {
 				const introspectionResult = await this.introspectToken(raw, introspectionEndpoint);
@@ -477,9 +481,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`OIDC discovery failed: ${response.status} ${response.statusText} from ${url}`,
-			);
+			throw new Error(`OIDC discovery failed: ${response.status} ${response.statusText} from ${url}`);
 		}
 
 		const doc = (await response.json()) as OIDCDiscoveryDocument;
@@ -519,9 +521,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 		});
 
 		if (!response.ok) {
-			throw new Error(
-				`JWKS fetch failed: ${response.status} ${response.statusText} from ${jwksUri}`,
-			);
+			throw new Error(`JWKS fetch failed: ${response.status} ${response.statusText} from ${jwksUri}`);
 		}
 
 		const jwks = (await response.json()) as JWKS;
@@ -552,17 +552,12 @@ export class OAuthOIDCProvider implements AuthProvider {
 	 * @param introspectionEndpoint - URL of the introspection endpoint
 	 * @returns Resolved AuthIdentity when the token is active, otherwise `null`
 	 */
-	async introspectToken(
-		token: string,
-		introspectionEndpoint: string,
-	): Promise<AuthIdentity | null> {
+	async introspectToken(token: string, introspectionEndpoint: string): Promise<AuthIdentity | null> {
 		if (!this.config.clientSecret) {
 			return null;
 		}
 
-		const credentials = Buffer.from(
-			`${this.config.clientId}:${this.config.clientSecret}`,
-		).toString("base64");
+		const credentials = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString("base64");
 
 		const response = await fetch(introspectionEndpoint, {
 			method: "POST",
@@ -698,12 +693,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 	 * @param signature    - Raw signature bytes
 	 * @returns `true` if the signature is valid
 	 */
-	private verifySignature(
-		alg: string,
-		key: KeyObject,
-		signingInput: string,
-		signature: Buffer,
-	): boolean {
+	private verifySignature(alg: string, key: KeyObject, signingInput: string, signature: Buffer): boolean {
 		switch (alg) {
 			case "RS256": {
 				const verifier = createVerify("RSA-SHA256");
@@ -748,20 +738,13 @@ export class OAuthOIDCProvider implements AuthProvider {
 				trimmed = Buffer.concat([Buffer.from([0x00]), trimmed]);
 			}
 
-			return Buffer.concat([
-				Buffer.from([0x02, trimmed.length]),
-				trimmed,
-			]);
+			return Buffer.concat([Buffer.from([0x02, trimmed.length]), trimmed]);
 		};
 
 		const rDer = encodeInteger(r);
 		const sDer = encodeInteger(s);
 
-		return Buffer.concat([
-			Buffer.from([0x30, rDer.length + sDer.length]),
-			rDer,
-			sDer,
-		]);
+		return Buffer.concat([Buffer.from([0x30, rDer.length + sDer.length]), rDer, sDer]);
 	}
 
 	// -----------------------------------------------------------------------

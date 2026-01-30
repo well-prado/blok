@@ -53,7 +53,7 @@ export function DashboardGrid({ widgets, metrics, isEditing, onRemoveWidget, onC
 									type="button"
 									onClick={() => onConfigureWidget(widget.id)}
 									className="p-0.5 text-zinc-600 hover:text-zinc-300 transition-colors"
-								aria-label="Configure widget"
+									aria-label="Configure widget"
 								>
 									<Settings2 className="w-3 h-3" />
 								</button>
@@ -61,7 +61,7 @@ export function DashboardGrid({ widgets, metrics, isEditing, onRemoveWidget, onC
 									type="button"
 									onClick={() => onRemoveWidget(widget.id)}
 									className="p-0.5 text-zinc-600 hover:text-red-400 transition-colors"
-								aria-label="Remove widget"
+									aria-label="Remove widget"
 								>
 									<X className="w-3 h-3" />
 								</button>

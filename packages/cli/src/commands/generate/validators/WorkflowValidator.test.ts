@@ -31,7 +31,7 @@ describe("WorkflowValidator", () => {
 				version: "1.0.0",
 				trigger: { http: { method: "GET", path: "/" } },
 				steps: [{ name: "step1", node: "some-node", type: "module" }],
-				nodes: { "step1": { inputs: {} } },
+				nodes: { step1: { inputs: {} } },
 			});
 
 			const result = validateWorkflow(workflow);
@@ -50,7 +50,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("name"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("name"))).toBe(true);
 		});
 
 		it("should fail for missing version", () => {
@@ -64,7 +64,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("version"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("version"))).toBe(true);
 		});
 
 		it("should warn for non-semver version", () => {
@@ -78,7 +78,7 @@ describe("WorkflowValidator", () => {
 			});
 
 			const result = validateWorkflow(workflow);
-			expect(result.warnings.some(w => w.includes("semver"))).toBe(true);
+			expect(result.warnings.some((w) => w.includes("semver"))).toBe(true);
 		});
 
 		it("should fail for missing trigger", () => {
@@ -92,7 +92,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("trigger"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("trigger"))).toBe(true);
 		});
 
 		it("should fail for missing steps", () => {
@@ -106,7 +106,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("steps"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("steps"))).toBe(true);
 		});
 
 		it("should fail for empty steps array", () => {
@@ -121,7 +121,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("steps"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("steps"))).toBe(true);
 		});
 
 		it("should fail for missing nodes", () => {
@@ -135,7 +135,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("nodes"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("nodes"))).toBe(true);
 		});
 	});
 
@@ -152,7 +152,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("exactly one"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("exactly one"))).toBe(true);
 		});
 
 		it("should fail for invalid trigger type", () => {
@@ -167,7 +167,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("Invalid trigger type"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("Invalid trigger type"))).toBe(true);
 		});
 
 		it("should pass for valid http trigger", () => {
@@ -196,7 +196,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("Invalid HTTP method"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("Invalid HTTP method"))).toBe(true);
 		});
 
 		it("should pass for valid queue trigger", () => {
@@ -225,7 +225,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("provider"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("provider"))).toBe(true);
 		});
 
 		it("should fail for queue trigger with invalid provider", () => {
@@ -240,7 +240,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("Invalid queue provider"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("Invalid queue provider"))).toBe(true);
 		});
 
 		it("should pass for valid cron trigger", () => {
@@ -269,7 +269,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("Invalid cron expression"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("Invalid cron expression"))).toBe(true);
 		});
 
 		it("should pass for valid pubsub trigger", () => {
@@ -298,7 +298,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("subscription"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("subscription"))).toBe(true);
 		});
 
 		it("should pass for valid webhook trigger", () => {
@@ -327,7 +327,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("events"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("events"))).toBe(true);
 		});
 
 		it("should pass for valid websocket trigger", () => {
@@ -372,7 +372,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("name"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("name"))).toBe(true);
 		});
 
 		it("should fail for step missing node", () => {
@@ -387,7 +387,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("node"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("node"))).toBe(true);
 		});
 
 		it("should fail for duplicate step names", () => {
@@ -405,7 +405,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("Duplicate"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("Duplicate"))).toBe(true);
 		});
 	});
 
@@ -422,7 +422,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("missing-node") && e.includes("no matching"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("missing-node") && e.includes("no matching"))).toBe(true);
 		});
 
 		it("should pass when all steps have matching nodes", () => {
@@ -459,7 +459,7 @@ describe("WorkflowValidator", () => {
 						conditions: [
 							{
 								type: "if",
-								condition: "ctx.request.method.toLowerCase() === \"get\"",
+								condition: 'ctx.request.method.toLowerCase() === "get"',
 								steps: [{ name: "get-data", node: "fetch", type: "module" }],
 							},
 							{
@@ -499,7 +499,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("condition"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("condition"))).toBe(true);
 		});
 
 		it("should fail when conditional step has no matching node entry", () => {
@@ -528,7 +528,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("missing-step"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("missing-step"))).toBe(true);
 		});
 
 		it("should fail when else is not last condition", () => {
@@ -559,7 +559,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("else") && e.includes("last"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("else") && e.includes("last"))).toBe(true);
 		});
 
 		it("should warn when no else branch exists", () => {
@@ -584,7 +584,7 @@ describe("WorkflowValidator", () => {
 			});
 
 			const result = validateWorkflow(workflow);
-			expect(result.warnings.some(w => w.includes("else"))).toBe(true);
+			expect(result.warnings.some((w) => w.includes("else"))).toBe(true);
 		});
 
 		it("should fail for condition with empty steps array", () => {
@@ -609,7 +609,7 @@ describe("WorkflowValidator", () => {
 
 			const result = validateWorkflow(workflow);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("at least one step"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("at least one step"))).toBe(true);
 		});
 	});
 
@@ -622,9 +622,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					http: { method: "GET", path: "/", accept: "application/json" },
 				},
-				steps: [
-					{ name: "get-countries-api", node: "@nanoservice-ts/api-call", type: "module" },
-				],
+				steps: [{ name: "get-countries-api", node: "@nanoservice-ts/api-call", type: "module" }],
 				nodes: {
 					"get-countries-api": {
 						inputs: {
@@ -650,9 +648,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					http: { method: "*", path: "/:function?/:id?", accept: "application/json" },
 				},
-				steps: [
-					{ name: "filter-request", node: "@nanoservice-ts/if-else", type: "module" },
-				],
+				steps: [{ name: "filter-request", node: "@nanoservice-ts/if-else", type: "module" }],
 				nodes: {
 					"filter-request": {
 						conditions: [
@@ -667,7 +663,7 @@ describe("WorkflowValidator", () => {
 									{ name: "generate-sentiment", node: "generate-sentiment", type: "runtime.python3" },
 									{ name: "save-feedback", node: "memory-storage", type: "module" },
 								],
-								condition: "ctx.request.method.toLowerCase() === \"post\" && ctx.request.params.function === \"create\"",
+								condition: 'ctx.request.method.toLowerCase() === "post" && ctx.request.params.function === "create"',
 							},
 							{
 								type: "else",
@@ -700,9 +696,7 @@ describe("WorkflowValidator", () => {
 						ack: true,
 					},
 				},
-				steps: [
-					{ name: "process-event", node: "event-handler", type: "module" },
-				],
+				steps: [{ name: "process-event", node: "event-handler", type: "module" }],
 				nodes: {
 					"process-event": {
 						inputs: { eventType: "${ctx.request.body.type}" },
@@ -722,9 +716,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					cron: { schedule: "0 8 * * *", timezone: "America/New_York", overlap: false },
 				},
-				steps: [
-					{ name: "fetch-metrics", node: "@nanoservice-ts/api-call", type: "module" },
-				],
+				steps: [{ name: "fetch-metrics", node: "@nanoservice-ts/api-call", type: "module" }],
 				nodes: {
 					"fetch-metrics": {
 						inputs: { url: "${ctx.env.METRICS_API_URL}", method: "GET" },

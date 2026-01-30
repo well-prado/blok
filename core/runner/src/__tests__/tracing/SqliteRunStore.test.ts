@@ -1,6 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { SqliteRunStore } from "../../tracing/SqliteRunStore";
 import { runStoreTests } from "./RunStore.shared";
 

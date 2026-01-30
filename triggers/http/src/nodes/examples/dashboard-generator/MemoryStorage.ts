@@ -1,4 +1,4 @@
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
 import { z } from "zod";
 import InMemory from "./InMemory";

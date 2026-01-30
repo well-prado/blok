@@ -340,7 +340,7 @@ export class InMemoryCache implements CacheProvider {
 		while (this.store.size > this.maxSize) {
 			// Find the entry with the lowest priority among the oldest entries
 			let lowestKey: string | null = null;
-			let lowestPriority = Infinity;
+			let lowestPriority = Number.POSITIVE_INFINITY;
 
 			const entries = Array.from(this.store.entries());
 			for (const [key, internal] of entries) {
@@ -482,9 +482,7 @@ export class NodeResultCache {
 		this.customKeyFn = config.customKeyFn;
 
 		if (this.keyStrategy === "custom" && typeof this.customKeyFn !== "function") {
-			throw new Error(
-				'NodeResultCache: "custom" key strategy requires a customKeyFn to be provided.',
-			);
+			throw new Error('NodeResultCache: "custom" key strategy requires a customKeyFn to be provided.');
 		}
 	}
 

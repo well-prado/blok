@@ -1,18 +1,13 @@
+import { type CompletionItem, CompletionItemKind, InsertTextFormat, MarkupKind } from "vscode-languageserver";
 import {
-	CompletionItem,
-	CompletionItemKind,
-	InsertTextFormat,
-	MarkupKind,
-} from "vscode-languageserver";
-import {
-	VALID_TRIGGERS,
-	VALID_HTTP_METHODS,
-	VALID_STEP_TYPES,
-	VALID_RUNTIMES,
-	QUEUE_PROVIDERS,
-	PUBSUB_PROVIDERS,
-	WEBHOOK_SOURCES,
 	NODE_PACKAGES,
+	PUBSUB_PROVIDERS,
+	QUEUE_PROVIDERS,
+	VALID_HTTP_METHODS,
+	VALID_RUNTIMES,
+	VALID_STEP_TYPES,
+	VALID_TRIGGERS,
+	WEBHOOK_SOURCES,
 } from "./constants";
 
 /**

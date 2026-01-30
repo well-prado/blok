@@ -9,44 +9,32 @@
  * metrics aggregation, auto-scaling policies, and end-to-end
  * marketplace lifecycle operations.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-	RuntimeCatalog,
-	type RuntimePackageManifest,
-	type CatalogSearchOptions,
-} from "../../../src/marketplace/RuntimeCatalog";
-import {
-	RuntimeDiscovery,
-	type CompatibilityInfo,
-} from "../../../src/marketplace/RuntimeDiscovery";
-import {
-	RuntimeHealthMonitor,
-	type HealthMonitorConfig,
-} from "../../../src/marketplace/RuntimeHealthMonitor";
-import {
-	RuntimeMetricsDashboard,
-	type RuntimeExecutionMetrics,
-} from "../../../src/marketplace/RuntimeMetricsDashboard";
+import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
+import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../../../src/adapters/RuntimeAdapter";
 import {
 	RuntimeAutoScaler,
-	type ScalingPolicy,
 	type ScalingDecision,
+	type ScalingPolicy,
 } from "../../../src/marketplace/RuntimeAutoScaler";
-import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
-import type {
-	RuntimeKind,
-	ExecutionResult,
-	RuntimeAdapter,
-} from "../../../src/adapters/RuntimeAdapter";
+import {
+	type CatalogSearchOptions,
+	RuntimeCatalog,
+	type RuntimePackageManifest,
+} from "../../../src/marketplace/RuntimeCatalog";
+import { type CompatibilityInfo, RuntimeDiscovery } from "../../../src/marketplace/RuntimeDiscovery";
+import { type HealthMonitorConfig, RuntimeHealthMonitor } from "../../../src/marketplace/RuntimeHealthMonitor";
+import {
+	type RuntimeExecutionMetrics,
+	RuntimeMetricsDashboard,
+} from "../../../src/marketplace/RuntimeMetricsDashboard";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createTestManifest(
-	overrides: Partial<RuntimePackageManifest> = {},
-): RuntimePackageManifest {
+function createTestManifest(overrides: Partial<RuntimePackageManifest> = {}): RuntimePackageManifest {
 	return {
 		name: overrides.name ?? "test-package",
 		version: overrides.version ?? "1.0.0",
@@ -76,9 +64,7 @@ function createTestManifest(
 	};
 }
 
-function createTestExecutionResult(
-	overrides: Partial<ExecutionResult> = {},
-): ExecutionResult {
+function createTestExecutionResult(overrides: Partial<ExecutionResult> = {}): ExecutionResult {
 	return {
 		success: overrides.success ?? true,
 		data: overrides.data ?? { result: "ok" },
@@ -220,11 +206,7 @@ describe("RuntimeCatalog", () => {
 		catalog.publish(createTestManifest({ name: "rated-mid", rating: 3.5 }));
 
 		const result = catalog.search({ sortBy: "rating", sortOrder: "asc" });
-		expect(result.packages.map((p) => p.name)).toEqual([
-			"rated-low",
-			"rated-mid",
-			"rated-high",
-		]);
+		expect(result.packages.map((p) => p.name)).toEqual(["rated-low", "rated-mid", "rated-high"]);
 	});
 
 	it("should sort by updated descending", () => {
@@ -259,12 +241,8 @@ describe("RuntimeCatalog", () => {
 		catalog.setRating("rateable", "1.0.0", 5);
 		expect(catalog.get("rateable")!.rating).toBe(5);
 
-		expect(() => catalog.setRating("rateable", "1.0.0", -1)).toThrow(
-			"Rating must be between 0 and 5",
-		);
-		expect(() => catalog.setRating("rateable", "1.0.0", 6)).toThrow(
-			"Rating must be between 0 and 5",
-		);
+		expect(() => catalog.setRating("rateable", "1.0.0", -1)).toThrow("Rating must be between 0 and 5");
+		expect(() => catalog.setRating("rateable", "1.0.0", 6)).toThrow("Rating must be between 0 and 5");
 	});
 
 	it("should unpublish a version", () => {
@@ -282,29 +260,35 @@ describe("RuntimeCatalog", () => {
 	});
 
 	it("should return correct aggregate stats via getStats", () => {
-		catalog.publish(createTestManifest({
-			name: "stats-a",
-			version: "1.0.0",
-			runtime: "nodejs",
-			downloads: 100,
-			rating: 4,
-			verified: true,
-		}));
-		catalog.publish(createTestManifest({
-			name: "stats-a",
-			version: "2.0.0",
-			runtime: "nodejs",
-			downloads: 200,
-			rating: 5,
-			verified: true,
-		}));
-		catalog.publish(createTestManifest({
-			name: "stats-b",
-			runtime: "python3",
-			downloads: 50,
-			rating: 3,
-			verified: false,
-		}));
+		catalog.publish(
+			createTestManifest({
+				name: "stats-a",
+				version: "1.0.0",
+				runtime: "nodejs",
+				downloads: 100,
+				rating: 4,
+				verified: true,
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "stats-a",
+				version: "2.0.0",
+				runtime: "nodejs",
+				downloads: 200,
+				rating: 5,
+				verified: true,
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "stats-b",
+				runtime: "python3",
+				downloads: 50,
+				rating: 3,
+				verified: false,
+			}),
+		);
 
 		const stats = catalog.getStats();
 		expect(stats.totalPackages).toBe(2);
@@ -449,26 +433,34 @@ describe("RuntimeDiscovery", () => {
 	});
 
 	it("should findAlternatives returning packages with shared tags", () => {
-		catalog.publish(createTestManifest({
-			name: "original",
-			runtime: "nodejs",
-			tags: ["auth", "security", "jwt"],
-		}));
-		catalog.publish(createTestManifest({
-			name: "alt-auth",
-			runtime: "nodejs",
-			tags: ["auth", "oauth"],
-		}));
-		catalog.publish(createTestManifest({
-			name: "alt-security",
-			runtime: "nodejs",
-			tags: ["security", "encryption"],
-		}));
-		catalog.publish(createTestManifest({
-			name: "unrelated",
-			runtime: "nodejs",
-			tags: ["database", "orm"],
-		}));
+		catalog.publish(
+			createTestManifest({
+				name: "original",
+				runtime: "nodejs",
+				tags: ["auth", "security", "jwt"],
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "alt-auth",
+				runtime: "nodejs",
+				tags: ["auth", "oauth"],
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "alt-security",
+				runtime: "nodejs",
+				tags: ["security", "encryption"],
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "unrelated",
+				runtime: "nodejs",
+				tags: ["database", "orm"],
+			}),
+		);
 
 		const alternatives = discovery.findAlternatives("original", "nodejs");
 
@@ -484,27 +476,33 @@ describe("RuntimeDiscovery", () => {
 	});
 
 	it("should recommend packages sorted by composite score", () => {
-		catalog.publish(createTestManifest({
-			name: "popular",
-			runtime: "nodejs",
-			downloads: 10000,
-			rating: 4.5,
-			tags: ["web"],
-		}));
-		catalog.publish(createTestManifest({
-			name: "niche",
-			runtime: "nodejs",
-			downloads: 10,
-			rating: 5,
-			tags: ["web"],
-		}));
-		catalog.publish(createTestManifest({
-			name: "average",
-			runtime: "nodejs",
-			downloads: 1000,
-			rating: 3.5,
-			tags: ["web"],
-		}));
+		catalog.publish(
+			createTestManifest({
+				name: "popular",
+				runtime: "nodejs",
+				downloads: 10000,
+				rating: 4.5,
+				tags: ["web"],
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "niche",
+				runtime: "nodejs",
+				downloads: 10,
+				rating: 5,
+				tags: ["web"],
+			}),
+		);
+		catalog.publish(
+			createTestManifest({
+				name: "average",
+				runtime: "nodejs",
+				downloads: 1000,
+				rating: 3.5,
+				tags: ["web"],
+			}),
+		);
 
 		const recommended = discovery.recommend("nodejs");
 		expect(recommended).toHaveLength(3);
@@ -698,14 +696,20 @@ describe("RuntimeMetricsDashboard", () => {
 
 	it("should recordExecution tracking failure metrics", () => {
 		dashboard.recordExecution("nodejs", createTestExecutionResult({ success: true }));
-		dashboard.recordExecution("nodejs", createTestExecutionResult({
-			success: false,
-			errors: { message: "fail" },
-		}));
-		dashboard.recordExecution("nodejs", createTestExecutionResult({
-			success: false,
-			errors: { message: "fail" },
-		}));
+		dashboard.recordExecution(
+			"nodejs",
+			createTestExecutionResult({
+				success: false,
+				errors: { message: "fail" },
+			}),
+		);
+		dashboard.recordExecution(
+			"nodejs",
+			createTestExecutionResult({
+				success: false,
+				errors: { message: "fail" },
+			}),
+		);
 
 		const metrics = dashboard.getMetrics("nodejs");
 		expect(metrics).toBeDefined();
@@ -755,17 +759,26 @@ describe("RuntimeMetricsDashboard", () => {
 	});
 
 	it("should getSnapshot including aggregate metrics", () => {
-		dashboard.recordExecution("nodejs", createTestExecutionResult({
-			metrics: { duration_ms: 50 },
-		}));
-		dashboard.recordExecution("python3", createTestExecutionResult({
-			metrics: { duration_ms: 100 },
-		}));
-		dashboard.recordExecution("go", createTestExecutionResult({
-			success: false,
-			errors: "err",
-			metrics: { duration_ms: 200 },
-		}));
+		dashboard.recordExecution(
+			"nodejs",
+			createTestExecutionResult({
+				metrics: { duration_ms: 50 },
+			}),
+		);
+		dashboard.recordExecution(
+			"python3",
+			createTestExecutionResult({
+				metrics: { duration_ms: 100 },
+			}),
+		);
+		dashboard.recordExecution(
+			"go",
+			createTestExecutionResult({
+				success: false,
+				errors: "err",
+				metrics: { duration_ms: 200 },
+			}),
+		);
 
 		const snapshot = dashboard.getSnapshot();
 		expect(snapshot.timestamp).toBeGreaterThan(0);
@@ -798,17 +811,26 @@ describe("RuntimeMetricsDashboard", () => {
 
 	it("should getTopRuntimes by latency", () => {
 		// fast nodejs
-		dashboard.recordExecution("nodejs", createTestExecutionResult({
-			metrics: { duration_ms: 10 },
-		}));
+		dashboard.recordExecution(
+			"nodejs",
+			createTestExecutionResult({
+				metrics: { duration_ms: 10 },
+			}),
+		);
 		// slow python
-		dashboard.recordExecution("python3", createTestExecutionResult({
-			metrics: { duration_ms: 500 },
-		}));
+		dashboard.recordExecution(
+			"python3",
+			createTestExecutionResult({
+				metrics: { duration_ms: 500 },
+			}),
+		);
 		// medium go
-		dashboard.recordExecution("go", createTestExecutionResult({
-			metrics: { duration_ms: 100 },
-		}));
+		dashboard.recordExecution(
+			"go",
+			createTestExecutionResult({
+				metrics: { duration_ms: 100 },
+			}),
+		);
 
 		const top = dashboard.getTopRuntimes("latency", 3);
 		expect(top).toHaveLength(3);
@@ -907,9 +929,12 @@ describe("RuntimeAutoScaler", () => {
 
 		// Record many executions to push RPS high
 		for (let i = 0; i < 500; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 50, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 50, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		const decision = scaler.evaluate("nodejs");
@@ -935,9 +960,12 @@ describe("RuntimeAutoScaler", () => {
 
 		// Record executions with high latency
 		for (let i = 0; i < 20; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		const decision = scaler.evaluate("nodejs");
@@ -962,9 +990,12 @@ describe("RuntimeAutoScaler", () => {
 		});
 
 		// Record minimal executions with low latency
-		dashboard.recordExecution("nodejs", createTestExecutionResult({
-			metrics: { duration_ms: 5, cpu_ms: 1, memory_bytes: 512 },
-		}));
+		dashboard.recordExecution(
+			"nodejs",
+			createTestExecutionResult({
+				metrics: { duration_ms: 5, cpu_ms: 1, memory_bytes: 512 },
+			}),
+		);
 
 		const decision = scaler.evaluate("nodejs");
 		expect(decision.runtime).toBe("nodejs");
@@ -988,9 +1019,12 @@ describe("RuntimeAutoScaler", () => {
 
 		// Record moderate executions with acceptable latency
 		for (let i = 0; i < 5; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 100, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 100, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		const decision = scaler.evaluate("nodejs");
@@ -1014,9 +1048,12 @@ describe("RuntimeAutoScaler", () => {
 
 		// Record high-latency executions to trigger scale_up
 		for (let i = 0; i < 20; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		// First evaluation should scale up
@@ -1046,9 +1083,12 @@ describe("RuntimeAutoScaler", () => {
 
 		// Record high-latency executions
 		for (let i = 0; i < 20; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 500, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		const decision = scaler.evaluate("nodejs");
@@ -1088,9 +1128,12 @@ describe("RuntimeAutoScaler", () => {
 	it("should getRecommendedPolicy returning reasonable defaults based on metrics", () => {
 		// Record some metrics to give the recommender data
 		for (let i = 0; i < 50; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 100 + Math.random() * 100, cpu_ms: 20, memory_bytes: 2048 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 100 + Math.random() * 100, cpu_ms: 20, memory_bytes: 2048 },
+				}),
+			);
 		}
 
 		const recommended = scaler.getRecommendedPolicy("nodejs");
@@ -1191,11 +1234,13 @@ describe("End-to-End Marketplace Flow", () => {
 		catalog.publish(manifest);
 
 		// Step 2: Author publishes a newer version
-		catalog.publish(createTestManifest({
-			...manifest,
-			version: "1.1.0",
-			description: "JWT authentication middleware with OAuth2 support",
-		}));
+		catalog.publish(
+			createTestManifest({
+				...manifest,
+				version: "1.1.0",
+				description: "JWT authentication middleware with OAuth2 support",
+			}),
+		);
 
 		// Step 3: User searches the marketplace
 		const searchResult = catalog.search({ query: "auth", runtime: "nodejs" });
@@ -1240,15 +1285,17 @@ describe("End-to-End Marketplace Flow", () => {
 
 			// Publish 3 packages per runtime
 			for (let i = 1; i <= 3; i++) {
-				catalog.publish(createTestManifest({
-					name: `${runtime}-pkg-${i}`,
-					version: "1.0.0",
-					runtime,
-					description: `Package ${i} for ${runtime}`,
-					tags: ["utility", runtime],
-					downloads: Math.floor(Math.random() * 1000),
-					rating: Math.floor(Math.random() * 5) + 1,
-				}));
+				catalog.publish(
+					createTestManifest({
+						name: `${runtime}-pkg-${i}`,
+						version: "1.0.0",
+						runtime,
+						description: `Package ${i} for ${runtime}`,
+						tags: ["utility", runtime],
+						downloads: Math.floor(Math.random() * 1000),
+						rating: Math.floor(Math.random() * 5) + 1,
+					}),
+				);
 			}
 		}
 
@@ -1303,9 +1350,12 @@ describe("End-to-End Marketplace Flow", () => {
 
 		// Phase 1: Normal load - record moderate executions
 		for (let i = 0; i < 10; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 50, cpu_ms: 10, memory_bytes: 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 50, cpu_ms: 10, memory_bytes: 1024 },
+				}),
+			);
 		}
 
 		const normalDecision = scaler.evaluate("nodejs");
@@ -1316,9 +1366,12 @@ describe("End-to-End Marketplace Flow", () => {
 		// Phase 2: High latency load - record slow executions
 		dashboard.reset();
 		for (let i = 0; i < 100; i++) {
-			dashboard.recordExecution("nodejs", createTestExecutionResult({
-				metrics: { duration_ms: 500, cpu_ms: 50, memory_bytes: 1024 * 1024 },
-			}));
+			dashboard.recordExecution(
+				"nodejs",
+				createTestExecutionResult({
+					metrics: { duration_ms: 500, cpu_ms: 50, memory_bytes: 1024 * 1024 },
+				}),
+			);
 		}
 
 		const highLatencyDecision = scaler.evaluate("nodejs");

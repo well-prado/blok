@@ -1,12 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { HelperResponse } from "@nanoservice-ts/helper";
 import type { NanoService } from "@nanoservice-ts/runner";
-import {
-	SSETrigger,
-	type SSEClient,
-	type SSEEvent,
-	type SSEConnectionEvent,
-} from "./SSETrigger";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type SSEClient, type SSEConnectionEvent, type SSEEvent, SSETrigger } from "./SSETrigger";
 
 // Mock implementations
 class TestSSETrigger extends SSETrigger {
@@ -262,12 +257,7 @@ describe("SSETrigger", () => {
 			const mockWrite = vi.fn().mockReturnValue(true);
 			const mockClose = vi.fn();
 
-			const client = await trigger.handleConnection(
-				mockWrite,
-				mockClose,
-				{ "last-event-id": "event-100" },
-				{},
-			);
+			const client = await trigger.handleConnection(mockWrite, mockClose, { "last-event-id": "event-100" }, {});
 
 			expect(client?.lastEventId).toBe("event-100");
 		});

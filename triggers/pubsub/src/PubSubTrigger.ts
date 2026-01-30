@@ -18,17 +18,17 @@
  *    - Ack/nack based on response
  */
 
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import type { HelperResponse, PubSubProvider, PubSubTriggerOpts } from "@nanoservice-ts/helper";
 import {
-	TriggerBase,
-	NodeMap,
 	DefaultLogger,
 	type GlobalOptions,
-	type TriggerResponse,
 	type NanoService,
+	NodeMap,
+	TriggerBase,
+	type TriggerResponse,
 } from "@nanoservice-ts/runner";
-import type { HelperResponse, PubSubTriggerOpts, PubSubProvider } from "@nanoservice-ts/helper";
-import { trace, metrics, type Span, SpanStatusCode } from "@opentelemetry/api";
+import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -69,10 +69,7 @@ export interface PubSubAdapter {
 	disconnect(): Promise<void>;
 
 	/** Subscribe to a topic and receive messages */
-	subscribe(
-		config: PubSubTriggerOpts,
-		handler: (message: PubSubMessage) => Promise<void>,
-	): Promise<void>;
+	subscribe(config: PubSubTriggerOpts, handler: (message: PubSubMessage) => Promise<void>): Promise<void>;
 
 	/** Unsubscribe from a topic */
 	unsubscribe(subscription: string): Promise<void>;
@@ -171,9 +168,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 				});
 			}
 
-			this.logger.log(
-				`Pub/Sub trigger started. Listening to ${pubsubWorkflows.length} subscription(s)`,
-			);
+			this.logger.log(`Pub/Sub trigger started. Listening to ${pubsubWorkflows.length} subscription(s)`);
 
 			// Enable HMR in development mode
 			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
@@ -301,9 +296,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 					success: "true",
 				});
 
-				ctx.logger.log(
-					`Message processed in ${(end - start).toFixed(2)}ms: ${id}`,
-				);
+				ctx.logger.log(`Message processed in ${(end - start).toFixed(2)}ms: ${id}`);
 
 				// Acknowledge message if configured
 				if (config.ack !== false) {
@@ -327,10 +320,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 					workflow_name: this.configuration?.name || "unknown",
 				});
 
-				this.logger.error(
-					`Failed to process message ${id}: ${errorMessage}`,
-					(error as Error).stack,
-				);
+				this.logger.error(`Failed to process message ${id}: ${errorMessage}`, (error as Error).stack);
 
 				// Nack message
 				if (config.ack !== false) {

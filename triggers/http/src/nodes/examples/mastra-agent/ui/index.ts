@@ -26,10 +26,8 @@ export default defineNode({
 
 	async execute(ctx: Context, input) {
 		let file_path = input.file_path;
-		if (file_path === undefined || file_path === "")
-			file_path = "./app/index.js";
-		const react_script_template =
-			'<script type="text/babel">REACT_SCRIPT</script>';
+		if (file_path === undefined || file_path === "") file_path = "./app/index.js";
+		const react_script_template = '<script type="text/babel">REACT_SCRIPT</script>';
 
 		const view_path = input.view_path || "index.html";
 		const title = input.title;
@@ -37,10 +35,7 @@ export default defineNode({
 		// Load React script from the current module location
 		const min_file = root(file_path);
 		let react_script = fs.readFileSync(min_file, "utf8");
-		react_script = react_script_template.replace(
-			"REACT_SCRIPT",
-			`\n${react_script}\n`,
-		);
+		react_script = react_script_template.replace("REACT_SCRIPT", `\n${react_script}\n`);
 
 		// Read index.html file from the current module location
 		const content = fs.readFileSync(root(view_path), "utf8");

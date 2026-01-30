@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { DockerRuntimeAdapter } from "../DockerRuntimeAdapter";
-import type { Context } from "@nanoservice-ts/shared";
-import type RunnerNode from "../../RunnerNode";
-import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";
 import { exec } from "node:child_process";
+import type { Context } from "@nanoservice-ts/shared";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";
+import type RunnerNode from "../../RunnerNode";
+import { DockerRuntimeAdapter } from "../DockerRuntimeAdapter";
 
 // Mock child_process exec
 vi.mock("node:child_process", () => ({
@@ -123,9 +123,7 @@ describe("DockerRuntimeAdapter", () => {
 			await vi.runOnlyPendingTimersAsync();
 
 			// Should have attempted to create containers
-			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) =>
-				call[0].includes("docker run"),
-			);
+			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) => call[0].includes("docker run"));
 			expect(dockerRunCalls.length).toBeGreaterThanOrEqual(2);
 		});
 	});
@@ -250,9 +248,7 @@ describe("DockerRuntimeAdapter", () => {
 		it("should handle container creation failure", async () => {
 			vi.mocked(exec).mockImplementation((cmd: string, callback: any) => {
 				if (cmd.includes("docker run") && callback) {
-					setImmediate(() =>
-						callback(new Error("Docker image not found"), { stdout: "", stderr: "error" }),
-					);
+					setImmediate(() => callback(new Error("Docker image not found"), { stdout: "", stderr: "error" }));
 				}
 				return null as any;
 			});
@@ -391,9 +387,7 @@ describe("DockerRuntimeAdapter", () => {
 			await vi.runOnlyPendingTimersAsync();
 			await resultPromise;
 
-			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) =>
-				call[0].includes("docker run"),
-			);
+			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) => call[0].includes("docker run"));
 			expect(dockerRunCalls.length).toBeGreaterThanOrEqual(1);
 		});
 
@@ -417,9 +411,7 @@ describe("DockerRuntimeAdapter", () => {
 			await result2Promise;
 
 			// Should not create new containers (reuse existing)
-			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) =>
-				call[0].includes("docker run"),
-			);
+			const dockerRunCalls = vi.mocked(exec).mock.calls.filter((call) => call[0].includes("docker run"));
 			expect(dockerRunCalls.length).toBe(0);
 		});
 
@@ -589,9 +581,7 @@ describe("DockerRuntimeAdapter", () => {
 			await adapter.shutdown();
 
 			// Should have called docker stop
-			const dockerStopCalls = vi.mocked(exec).mock.calls.filter((call) =>
-				call[0].includes("docker stop"),
-			);
+			const dockerStopCalls = vi.mocked(exec).mock.calls.filter((call) => call[0].includes("docker stop"));
 			expect(dockerStopCalls.length).toBeGreaterThanOrEqual(1);
 		});
 

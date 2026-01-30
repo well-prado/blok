@@ -41,7 +41,7 @@ function CopyButton({ text }: { text: string }) {
 			onClick={handleCopy}
 			className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
 			title="Copy to clipboard"
-		aria-label="Copy to clipboard"
+			aria-label="Copy to clipboard"
 		>
 			{copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
 		</button>
@@ -158,7 +158,12 @@ function JsonCollapsible({
 					<span className="text-zinc-500">: </span>
 				</>
 			)}
-			<button type="button" onClick={onToggle} className="inline-flex items-center hover:text-zinc-300 text-zinc-500" aria-expanded={expanded}>
+			<button
+				type="button"
+				onClick={onToggle}
+				className="inline-flex items-center hover:text-zinc-300 text-zinc-500"
+				aria-expanded={expanded}
+			>
 				{expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
 				<span className="text-zinc-400">{bracket[0]}</span>
 			</button>

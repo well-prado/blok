@@ -72,13 +72,7 @@ export default defineNode({
 
 			// If condition has a JavaScript expression, evaluate it
 			if (condition.condition !== undefined && condition.condition.trim() !== "") {
-				const result = runJs(
-					condition.condition,
-					ctx,
-					ctx.response.data as ParamsDictionary,
-					{},
-					ctx.vars || {},
-				);
+				const result = runJs(condition.condition, ctx, ctx.response.data as ParamsDictionary, {}, ctx.vars || {});
 
 				// If condition matches, use these steps and break
 				if (result) {

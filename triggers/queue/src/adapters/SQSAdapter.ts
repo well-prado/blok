@@ -13,9 +13,9 @@
  * - SQS_VISIBILITY_TIMEOUT: Visibility timeout in seconds (default: 30)
  */
 
-import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 import type { QueueTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
 /**
  * SQS connection configuration
@@ -42,9 +42,9 @@ export class SQSAdapter implements QueueAdapter {
 	constructor(config?: Partial<SQSConfig>) {
 		this.config = {
 			region: config?.region || process.env.AWS_REGION || "us-east-1",
-			waitTimeSeconds: config?.waitTimeSeconds ?? parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
-			maxNumberOfMessages: config?.maxNumberOfMessages ?? parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
-			visibilityTimeout: config?.visibilityTimeout ?? parseInt(process.env.SQS_VISIBILITY_TIMEOUT || "30", 10),
+			waitTimeSeconds: config?.waitTimeSeconds ?? Number.parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
+			maxNumberOfMessages: config?.maxNumberOfMessages ?? Number.parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
+			visibilityTimeout: config?.visibilityTimeout ?? Number.parseInt(process.env.SQS_VISIBILITY_TIMEOUT || "30", 10),
 		};
 	}
 
@@ -94,10 +94,7 @@ export class SQSAdapter implements QueueAdapter {
 	/**
 	 * Subscribe to an SQS queue (starts long polling)
 	 */
-	async subscribe(
-		config: QueueTriggerOpts,
-		handler: (message: QueueMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: QueueTriggerOpts, handler: (message: QueueMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to AWS SQS. Call connect() first.");
 		}
@@ -160,7 +157,7 @@ export class SQSAdapter implements QueueAdapter {
 						raw: msg,
 						topic: queueUrl,
 						timestamp: msg.Attributes?.SentTimestamp
-							? new Date(parseInt(msg.Attributes.SentTimestamp))
+							? new Date(Number.parseInt(msg.Attributes.SentTimestamp))
 							: new Date(),
 						ack: async () => {
 							const deleteCommand = new DeleteMessageCommand({
@@ -188,9 +185,7 @@ export class SQSAdapter implements QueueAdapter {
 					try {
 						await handler(queueMessage);
 					} catch (error) {
-						console.error(
-							`[SQSAdapter] Error processing message: ${(error as Error).message}`,
-						);
+						console.error(`[SQSAdapter] Error processing message: ${(error as Error).message}`);
 					}
 				}
 			}

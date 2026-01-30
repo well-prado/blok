@@ -2,9 +2,9 @@
  * Shared test suite for RunStore implementations.
  * Tests all interface methods against any RunStore backend.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { RunStore } from "../../tracing/RunStore";
-import type { WorkflowRun, NodeRun, RunEvent, TraceLogEntry } from "../../tracing/types";
+import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "../../tracing/types";
 
 function makeRun(id: string, overrides?: Partial<WorkflowRun>): WorkflowRun {
 	return {
@@ -367,16 +367,20 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 
 			it("should include node performance", () => {
 				store.saveRun(makeRun("run_1"));
-				store.saveNodeRun(makeNodeRun("node_1", "run_1", {
-					nodeName: "fetch",
-					status: "completed",
-					durationMs: 25,
-				}));
-				store.saveNodeRun(makeNodeRun("node_2", "run_1", {
-					nodeName: "transform",
-					status: "completed",
-					durationMs: 5,
-				}));
+				store.saveNodeRun(
+					makeNodeRun("node_1", "run_1", {
+						nodeName: "fetch",
+						status: "completed",
+						durationMs: 25,
+					}),
+				);
+				store.saveNodeRun(
+					makeNodeRun("node_2", "run_1", {
+						nodeName: "transform",
+						status: "completed",
+						durationMs: 5,
+					}),
+				);
 
 				const metrics = store.getMetrics();
 				expect(metrics.nodePerformance).toHaveLength(2);

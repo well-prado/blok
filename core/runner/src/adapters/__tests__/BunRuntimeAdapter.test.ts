@@ -3,16 +3,16 @@
  * Tests in-process and subprocess Bun node execution
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { BunRuntimeAdapter } from "../BunRuntimeAdapter";
-import type RunnerNode from "../../RunnerNode";
 import type { Context } from "@nanoservice-ts/shared";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	createMockContext,
-	assertValidExecutionResult,
 	assertExecutionTimeWithinRange,
+	assertValidExecutionResult,
+	createMockContext,
 	measureExecutionTime,
 } from "../../../test/helpers/test-utils";
+import type RunnerNode from "../../RunnerNode";
+import { BunRuntimeAdapter } from "../BunRuntimeAdapter";
 
 describe("BunRuntimeAdapter", () => {
 	let adapter: BunRuntimeAdapter;
@@ -172,9 +172,7 @@ describe("BunRuntimeAdapter", () => {
 			const delayMs = 50;
 			const mockNode = createDelayedMockNode(delayMs);
 
-			const { result, duration } = await measureExecutionTime(() =>
-				adapter.execute(mockNode, mockContext),
-			);
+			const { result, duration } = await measureExecutionTime(() => adapter.execute(mockNode, mockContext));
 
 			expect(result.metrics?.duration_ms).toBeDefined();
 			assertExecutionTimeWithinRange(result.metrics!.duration_ms!, duration, 20);

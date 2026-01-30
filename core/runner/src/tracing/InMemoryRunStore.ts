@@ -120,18 +120,21 @@ export class InMemoryRunStore implements RunStore {
 	// === Aggregations ===
 
 	getWorkflowSummaries(): WorkflowSummary[] {
-		const summaries = new Map<string, {
-			name: string;
-			path: string;
-			triggerTypes: Set<string>;
-			totalRuns: number;
-			recentRuns: number;
-			lastRunAt?: number;
-			lastRunStatus?: WorkflowRunStatus;
-			errorCount: number;
-			totalDuration: number;
-			durations: number[];
-		}>();
+		const summaries = new Map<
+			string,
+			{
+				name: string;
+				path: string;
+				triggerTypes: Set<string>;
+				totalRuns: number;
+				recentRuns: number;
+				lastRunAt?: number;
+				lastRunStatus?: WorkflowRunStatus;
+				errorCount: number;
+				totalDuration: number;
+				durations: number[];
+			}
+		>();
 
 		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
@@ -180,7 +183,8 @@ export class InMemoryRunStore implements RunStore {
 				lastRunStatus: s.lastRunStatus,
 				errorRate: s.totalRuns > 0 ? s.errorCount / s.totalRuns : 0,
 				avgDurationMs: s.durations.length > 0 ? s.totalDuration / s.durations.length : 0,
-				p95DurationMs: sortedDurations.length > 0 ? sortedDurations[p95Index] || sortedDurations[sortedDurations.length - 1] : 0,
+				p95DurationMs:
+					sortedDurations.length > 0 ? sortedDurations[p95Index] || sortedDurations[sortedDurations.length - 1] : 0,
 			};
 		});
 	}
@@ -232,9 +236,7 @@ export class InMemoryRunStore implements RunStore {
 		for (let i = bucketCount - 1; i >= 0; i--) {
 			const bucketStart = now - (i + 1) * bucketSize;
 			const bucketEnd = now - i * bucketSize;
-			const bucketRuns = allRuns.filter(
-				(r) => r.startedAt >= bucketStart && r.startedAt < bucketEnd,
-			);
+			const bucketRuns = allRuns.filter((r) => r.startedAt >= bucketStart && r.startedAt < bucketEnd);
 			executionTimeline.push({
 				bucket: new Date(bucketStart).toISOString(),
 				total: bucketRuns.length,
@@ -275,9 +277,7 @@ export class InMemoryRunStore implements RunStore {
 			name,
 			totalRuns: data.total,
 			errorRate: data.total > 0 ? data.failed / data.total : 0,
-			avgDurationMs: data.durations.length > 0
-				? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
-				: 0,
+			avgDurationMs: data.durations.length > 0 ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length : 0,
 		}));
 
 		// Node performance
@@ -299,9 +299,7 @@ export class InMemoryRunStore implements RunStore {
 
 		const nodePerformance = Array.from(nodeMap.entries()).map(([nodeName, data]) => ({
 			nodeName,
-			avgDurationMs: data.durations.length > 0
-				? data.durations.reduce((a, b) => a + b, 0) / data.durations.length
-				: 0,
+			avgDurationMs: data.durations.length > 0 ? data.durations.reduce((a, b) => a + b, 0) / data.durations.length : 0,
 			maxDurationMs: data.durations.length > 0 ? Math.max(...data.durations) : 0,
 			errorRate: data.total > 0 ? data.failed / data.total : 0,
 			executionCount: data.total,

@@ -1,8 +1,8 @@
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileWatcher, type HMREvent } from "../../hmr/FileWatcher";
-import { mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 describe("FileWatcher", () => {
 	let testDir: string;
@@ -73,10 +73,7 @@ describe("FileWatcher", () => {
 		await new Promise((r) => setTimeout(r, 100));
 		writeFileSync(nodeFile, "// modified content");
 
-		const event = await Promise.race([
-			changePromise,
-			new Promise<null>((r) => setTimeout(() => r(null), 2000)),
-		]);
+		const event = await Promise.race([changePromise, new Promise<null>((r) => setTimeout(() => r(null), 2000))]);
 
 		if (event) {
 			expect(event.type).toBe("node:change");
@@ -103,10 +100,7 @@ describe("FileWatcher", () => {
 		await new Promise((r) => setTimeout(r, 100));
 		writeFileSync(join(testDir, "nodes", "new-node.ts"), "// new node");
 
-		const event = await Promise.race([
-			addPromise,
-			new Promise<null>((r) => setTimeout(() => r(null), 2000)),
-		]);
+		const event = await Promise.race([addPromise, new Promise<null>((r) => setTimeout(() => r(null), 2000))]);
 
 		if (event) {
 			expect(event.type).toBe("node:add");

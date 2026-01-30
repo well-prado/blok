@@ -325,9 +325,7 @@ describe("AzureMonitorIntegration", () => {
 		it("should record successful workflow execution", () => {
 			mockAzure.recordWorkflowExecution("get-user", 42, true);
 
-			expect(mockClient.trackEvent).toHaveBeenCalledWith(
-				expect.objectContaining({ name: "WorkflowCompleted" }),
-			);
+			expect(mockClient.trackEvent).toHaveBeenCalledWith(expect.objectContaining({ name: "WorkflowCompleted" }));
 			expect(mockClient.trackMetric).toHaveBeenCalledWith(
 				expect.objectContaining({ name: "WorkflowDuration", value: 42 }),
 			);
@@ -340,9 +338,7 @@ describe("AzureMonitorIntegration", () => {
 		it("should record failed workflow execution with error metric", () => {
 			mockAzure.recordWorkflowExecution("get-user", 100, false);
 
-			expect(mockClient.trackEvent).toHaveBeenCalledWith(
-				expect.objectContaining({ name: "WorkflowFailed" }),
-			);
+			expect(mockClient.trackEvent).toHaveBeenCalledWith(expect.objectContaining({ name: "WorkflowFailed" }));
 			// Duration metric + error metric
 			expect(mockClient.trackMetric).toHaveBeenCalledTimes(2);
 

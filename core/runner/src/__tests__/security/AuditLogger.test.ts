@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	type AuditEntry,
 	AuditLogger,
+	type AuditSink,
 	ConsoleAuditSink,
 	InMemoryAuditSink,
-	type AuditEntry,
-	type AuditSink,
 } from "../../security/AuditLogger";
 
 describe("AuditLogger", () => {
@@ -216,7 +216,9 @@ describe("AuditLogger", () => {
 	it("should handle sink errors gracefully", async () => {
 		const failingSink: AuditSink = {
 			name: "failing",
-			write: async () => { throw new Error("Sink failed"); },
+			write: async () => {
+				throw new Error("Sink failed");
+			},
 		};
 
 		logger = new AuditLogger({ sinks: [failingSink], bufferSize: 1, flushIntervalMs: 0 });
@@ -230,9 +232,30 @@ describe("AuditLogger", () => {
 describe("InMemoryAuditSink", () => {
 	it("should query entries by category", () => {
 		const sink = new InMemoryAuditSink();
-		sink.write({ id: "1", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "login", success: true });
-		sink.write({ id: "2", timestamp: new Date().toISOString(), category: "authz", severity: "info", action: "check", success: true });
-		sink.write({ id: "3", timestamp: new Date().toISOString(), category: "auth", severity: "warn", action: "logout", success: true });
+		sink.write({
+			id: "1",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "login",
+			success: true,
+		});
+		sink.write({
+			id: "2",
+			timestamp: new Date().toISOString(),
+			category: "authz",
+			severity: "info",
+			action: "check",
+			success: true,
+		});
+		sink.write({
+			id: "3",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "warn",
+			action: "logout",
+			success: true,
+		});
 
 		const results = sink.query({ category: "auth" });
 		expect(results.length).toBe(2);
@@ -240,8 +263,22 @@ describe("InMemoryAuditSink", () => {
 
 	it("should query entries by severity", () => {
 		const sink = new InMemoryAuditSink();
-		sink.write({ id: "1", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "login", success: true });
-		sink.write({ id: "2", timestamp: new Date().toISOString(), category: "auth", severity: "error", action: "fail", success: false });
+		sink.write({
+			id: "1",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "login",
+			success: true,
+		});
+		sink.write({
+			id: "2",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "error",
+			action: "fail",
+			success: false,
+		});
 
 		const results = sink.query({ severity: "error" });
 		expect(results.length).toBe(1);
@@ -251,7 +288,14 @@ describe("InMemoryAuditSink", () => {
 	it("should limit results", () => {
 		const sink = new InMemoryAuditSink();
 		for (let i = 0; i < 10; i++) {
-			sink.write({ id: `${i}`, timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "test", success: true });
+			sink.write({
+				id: `${i}`,
+				timestamp: new Date().toISOString(),
+				category: "auth",
+				severity: "info",
+				action: "test",
+				success: true,
+			});
 		}
 
 		const results = sink.query({ limit: 3 });
@@ -260,7 +304,14 @@ describe("InMemoryAuditSink", () => {
 
 	it("should clear entries", () => {
 		const sink = new InMemoryAuditSink();
-		sink.write({ id: "1", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "test", success: true });
+		sink.write({
+			id: "1",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "test",
+			success: true,
+		});
 		expect(sink.getEntries().length).toBe(1);
 
 		sink.clear();
@@ -269,10 +320,38 @@ describe("InMemoryAuditSink", () => {
 
 	it("should enforce max entries (ring buffer)", () => {
 		const sink = new InMemoryAuditSink(3);
-		sink.write({ id: "1", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "a", success: true });
-		sink.write({ id: "2", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "b", success: true });
-		sink.write({ id: "3", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "c", success: true });
-		sink.write({ id: "4", timestamp: new Date().toISOString(), category: "auth", severity: "info", action: "d", success: true });
+		sink.write({
+			id: "1",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "a",
+			success: true,
+		});
+		sink.write({
+			id: "2",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "b",
+			success: true,
+		});
+		sink.write({
+			id: "3",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "c",
+			success: true,
+		});
+		sink.write({
+			id: "4",
+			timestamp: new Date().toISOString(),
+			category: "auth",
+			severity: "info",
+			action: "d",
+			success: true,
+		});
 
 		const entries = sink.getEntries();
 		expect(entries.length).toBe(3);

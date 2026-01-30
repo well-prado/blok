@@ -5,9 +5,9 @@
  * All existing behavior is preserved.
  */
 
+import type { INanoServiceResponse } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
 import type { GlobalError } from "@nanoservice-ts/shared";
-import type { INanoServiceResponse } from "@nanoservice-ts/runner";
 import { describe, expect, it, vi } from "vitest";
 import ApiCallNode from "../index";
 import { runApiCall } from "../util";

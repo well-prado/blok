@@ -9,9 +9,9 @@
  * - RABBITMQ_PREFETCH: Number of messages to prefetch (default: 1)
  */
 
-import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 import type { QueueTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
 /**
  * RabbitMQ connection configuration
@@ -36,7 +36,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 	constructor(config?: Partial<RabbitMQConfig>) {
 		this.config = {
 			url: config?.url || process.env.RABBITMQ_URL || "amqp://localhost",
-			prefetch: config?.prefetch ?? parseInt(process.env.RABBITMQ_PREFETCH || "1", 10),
+			prefetch: config?.prefetch ?? Number.parseInt(process.env.RABBITMQ_PREFETCH || "1", 10),
 		};
 	}
 
@@ -102,19 +102,14 @@ export class RabbitMQAdapter implements QueueAdapter {
 			this.connected = false;
 			console.log("[RabbitMQAdapter] Disconnected from RabbitMQ");
 		} catch (error) {
-			console.error(
-				`[RabbitMQAdapter] Error disconnecting: ${(error as Error).message}`,
-			);
+			console.error(`[RabbitMQAdapter] Error disconnecting: ${(error as Error).message}`);
 		}
 	}
 
 	/**
 	 * Subscribe to a RabbitMQ queue
 	 */
-	async subscribe(
-		config: QueueTriggerOpts,
-		handler: (message: QueueMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: QueueTriggerOpts, handler: (message: QueueMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to RabbitMQ. Call connect() first.");
 		}
@@ -155,9 +150,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 					headers,
 					raw: msg,
 					topic: queue,
-					timestamp: msg.properties.timestamp
-						? new Date(msg.properties.timestamp)
-						: new Date(),
+					timestamp: msg.properties.timestamp ? new Date(msg.properties.timestamp) : new Date(),
 					ack: async () => {
 						this.channel.ack(msg);
 					},
@@ -170,9 +163,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 				try {
 					await handler(queueMessage);
 				} catch (error) {
-					console.error(
-						`[RabbitMQAdapter] Error processing message: ${(error as Error).message}`,
-					);
+					console.error(`[RabbitMQAdapter] Error processing message: ${(error as Error).message}`);
 					// Let the handler decide whether to ack/nack
 				}
 			},

@@ -6,7 +6,7 @@
  * prompt building, semantic guidance, and feedback loop.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock external AI dependencies
 vi.mock("@ai-sdk/openai", () => ({
@@ -18,8 +18,8 @@ vi.mock("ai", () => ({
 }));
 
 import { generateText } from "ai";
-import RuntimeGenerator, { isSupportedLanguage } from "./RuntimeGenerator.js";
 import { GenerationAnalytics } from "./GenerationAnalytics.js";
+import RuntimeGenerator, { isSupportedLanguage } from "./RuntimeGenerator.js";
 
 const mockedGenerateText = vi.mocked(generateText);
 
@@ -474,11 +474,7 @@ func main() {
 			mockedGenerateText.mockResolvedValueOnce({ text: invalidCode } as never);
 			mockedGenerateText.mockResolvedValueOnce({ text: validGoRuntime } as never);
 
-			const result = await generator.generateRuntime(
-				"go",
-				"Generate a Go runtime",
-				"test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Generate a Go runtime", "test-api-key");
 
 			expect(result.validationResult?.valid).toBe(true);
 			expect(result.validationResult?.attempts).toBe(2);
@@ -490,11 +486,7 @@ func main() {
 
 			mockedGenerateText.mockResolvedValue({ text: invalidCode } as never);
 
-			const result = await generator.generateRuntime(
-				"go",
-				"Generate something",
-				"test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Generate something", "test-api-key");
 
 			expect(result.validationResult?.valid).toBe(false);
 			expect(result.validationResult?.attempts).toBe(3);

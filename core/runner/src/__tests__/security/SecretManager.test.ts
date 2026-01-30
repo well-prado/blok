@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	EnvironmentSecretProvider,
 	InMemorySecretProvider,
-	SecretManager,
 	type SecretAccessEvent,
+	SecretManager,
 } from "../../security/SecretManager";
 
 // ---------------------------------------------------------------------------
@@ -534,10 +534,7 @@ describe("SecretManager", () => {
 
 		it("should initialize with multiple providers in order", () => {
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment", config: { prefix: "TEST_" } },
-				],
+				providers: [{ type: "memory" }, { type: "environment", config: { prefix: "TEST_" } }],
 			});
 
 			const providers = manager.getProviders();
@@ -605,10 +602,7 @@ describe("SecretManager", () => {
 		it("should use first provider that has the secret (provider chain)", async () => {
 			setTestEnv("SM_CHAIN_KEY", "from-env");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
 			// Set in memory provider (first in chain)
@@ -622,10 +616,7 @@ describe("SecretManager", () => {
 		it("should fall through to next provider when first does not have the secret", async () => {
 			setTestEnv("SM_FALLTHROUGH", "from-env");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
 			// Memory provider does not have SM_FALLTHROUGH
@@ -651,9 +642,7 @@ describe("SecretManager", () => {
 				providers: [{ type: "memory" }],
 			});
 
-			await expect(manager.getSecretOrThrow("MISSING")).rejects.toThrow(
-				"Secret 'MISSING' not found in any provider"
-			);
+			await expect(manager.getSecretOrThrow("MISSING")).rejects.toThrow("Secret 'MISSING' not found in any provider");
 		});
 	});
 
@@ -671,10 +660,7 @@ describe("SecretManager", () => {
 
 		it("should write to the first provider in a multi-provider setup", async () => {
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
 			await manager.setSecret("SET_CHAIN", "chain-value");
@@ -701,10 +687,7 @@ describe("SecretManager", () => {
 		it("should delete a secret from all providers", async () => {
 			setTestEnv("SM_DEL_MULTI", "env-val");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
 			const memProvider = manager.getProviders()[0] as InMemorySecretProvider;
@@ -758,10 +741,7 @@ describe("SecretManager", () => {
 			setTestEnv("SM_LIST_SHARED", "env-val");
 			setTestEnv("SM_LIST_ENV_ONLY", "env-only");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment", config: { prefix: "SM_LIST_" } },
-				],
+				providers: [{ type: "memory" }, { type: "environment", config: { prefix: "SM_LIST_" } }],
 			});
 			const memProvider = manager.getProviders()[0] as InMemorySecretProvider;
 			await memProvider.set("SHARED", "mem-val");
@@ -829,10 +809,7 @@ describe("SecretManager", () => {
 		it("should check providers when not in cache", async () => {
 			setTestEnv("SM_EXISTS_ENV", "yes");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
 			expect(await manager.exists("SM_EXISTS_ENV")).toBe(true);
@@ -975,9 +952,7 @@ describe("SecretManager", () => {
 			await memProvider.set("DB_USER", "admin");
 			await memProvider.set("DB_PASS", "s3cret");
 
-			const result = await manager.resolveTemplate(
-				"postgres://${secret:DB_USER}:${secret:DB_PASS}@host/db"
-			);
+			const result = await manager.resolveTemplate("postgres://${secret:DB_USER}:${secret:DB_PASS}@host/db");
 			expect(result).toBe("postgres://admin:s3cret@host/db");
 		});
 
@@ -986,9 +961,7 @@ describe("SecretManager", () => {
 				providers: [{ type: "memory" }],
 			});
 
-			const result = await manager.resolveTemplate(
-				"key=${secret:MISSING_KEY}"
-			);
+			const result = await manager.resolveTemplate("key=${secret:MISSING_KEY}");
 			expect(result).toBe("key=");
 		});
 
@@ -1009,24 +982,17 @@ describe("SecretManager", () => {
 			const memProvider = manager.getProviders()[0] as InMemorySecretProvider;
 			await memProvider.set("TOKEN", "abc123");
 
-			const result = await manager.resolveTemplate(
-				"${secret:TOKEN}-${secret:TOKEN}"
-			);
+			const result = await manager.resolveTemplate("${secret:TOKEN}-${secret:TOKEN}");
 			expect(result).toBe("abc123-abc123");
 		});
 
 		it("should resolve from environment provider in a chain", async () => {
 			setTestEnv("SM_TPL_HOST", "db.example.com");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 			});
 
-			const result = await manager.resolveTemplate(
-				"host=${secret:SM_TPL_HOST}"
-			);
+			const result = await manager.resolveTemplate("host=${secret:SM_TPL_HOST}");
 			expect(result).toBe("host=db.example.com");
 		});
 
@@ -1037,9 +1003,7 @@ describe("SecretManager", () => {
 			const memProvider = manager.getProviders()[0] as InMemorySecretProvider;
 			await memProvider.set("FOUND", "yes");
 
-			const result = await manager.resolveTemplate(
-				"found=${secret:FOUND}&missing=${secret:NOPE}"
-			);
+			const result = await manager.resolveTemplate("found=${secret:FOUND}&missing=${secret:NOPE}");
 			expect(result).toBe("found=yes&missing=");
 		});
 
@@ -1108,9 +1072,7 @@ describe("SecretManager", () => {
 			// Second get - from cache
 			await manager.getSecret("AUDIT_CACHED");
 
-			const cachedEvent = events.find(
-				(e) => e.operation === "get" && e.key === "AUDIT_CACHED" && e.cached === true
-			);
+			const cachedEvent = events.find((e) => e.operation === "get" && e.key === "AUDIT_CACHED" && e.cached === true);
 			expect(cachedEvent).toBeDefined();
 			expect(cachedEvent!.provider).toBe("cache");
 		});
@@ -1180,9 +1142,7 @@ describe("SecretManager", () => {
 
 			await manager.exists("AUDIT_EXISTS");
 
-			const existsEvent = events.find(
-				(e) => e.operation === "exists" && e.key === "AUDIT_EXISTS"
-			);
+			const existsEvent = events.find((e) => e.operation === "exists" && e.key === "AUDIT_EXISTS");
 			expect(existsEvent).toBeDefined();
 			expect(existsEvent!.success).toBe(true);
 		});
@@ -1199,7 +1159,7 @@ describe("SecretManager", () => {
 			await manager.getSecret("AUDIT_NOT_FOUND");
 
 			const noneEvent = events.find(
-				(e) => e.operation === "get" && e.key === "AUDIT_NOT_FOUND" && e.provider === "none"
+				(e) => e.operation === "get" && e.key === "AUDIT_NOT_FOUND" && e.provider === "none",
 			);
 			expect(noneEvent).toBeDefined();
 			expect(noneEvent!.success).toBe(true);
@@ -1264,10 +1224,7 @@ describe("SecretManager", () => {
 		it("should continue to next provider if first provider throws on get", async () => {
 			setTestEnv("SM_ERR_FALLBACK", "env-fallback");
 			const manager = new SecretManager({
-				providers: [
-					{ type: "memory" },
-					{ type: "environment" },
-				],
+				providers: [{ type: "memory" }, { type: "environment" }],
 				auditLog: true,
 			});
 
@@ -1285,9 +1242,7 @@ describe("SecretManager", () => {
 			expect(value).toBe("env-fallback");
 
 			// Should have a failure event for the memory provider
-			const failEvent = events.find(
-				(e) => e.provider === "memory" && e.success === false
-			);
+			const failEvent = events.find((e) => e.provider === "memory" && e.success === false);
 			expect(failEvent).toBeDefined();
 			expect(failEvent!.error).toBe("Provider failure");
 
@@ -1308,7 +1263,7 @@ describe("SecretManager", () => {
 			};
 
 			await expect(manager.setSecret("FAIL_SET", "val")).rejects.toThrow(
-				"Failed to set secret 'FAIL_SET' in any provider"
+				"Failed to set secret 'FAIL_SET' in any provider",
 			);
 
 			// Restore

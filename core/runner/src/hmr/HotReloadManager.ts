@@ -231,10 +231,7 @@ export class HotReloadManager extends EventEmitter {
 				this.emit("disabled", {
 					reason: `Too many consecutive errors (${this.consecutiveErrors})`,
 				});
-				this.emit(
-					"log",
-					`[HMR] Hot reload disabled after ${this.consecutiveErrors} consecutive errors`,
-				);
+				this.emit("log", `[HMR] Hot reload disabled after ${this.consecutiveErrors} consecutive errors`);
 			}
 		}
 	}

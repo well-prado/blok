@@ -116,7 +116,11 @@ export function CommandPalette() {
 
 			{/* Palette */}
 			<div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] pointer-events-none">
-				<dialog open className="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden pointer-events-auto" aria-label="Search">
+				<dialog
+					open
+					className="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden pointer-events-auto"
+					aria-label="Search"
+				>
 					{/* Search input */}
 					<div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
 						<Search className="w-4 h-4 text-zinc-500 flex-shrink-0" />

@@ -1,10 +1,5 @@
-import { Hover, MarkupKind, Range, Position } from "vscode-languageserver";
-import {
-	TRIGGER_DOCS,
-	FIELD_DOCS,
-	STEP_FIELD_DOCS,
-	type HoverDoc,
-} from "./constants";
+import { type Hover, MarkupKind, Position, Range } from "vscode-languageserver";
+import { FIELD_DOCS, type HoverDoc, STEP_FIELD_DOCS, TRIGGER_DOCS } from "./constants";
 
 /**
  * Provides hover documentation for Blok workflow JSON files via LSP.
@@ -80,7 +75,8 @@ export function getHover(text: string, line: number, character: number): Hover |
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
-					value: "**@nanoservice-ts/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
+					value:
+						"**@nanoservice-ts/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
 				},
 				range,
 			};
@@ -89,7 +85,8 @@ export function getHover(text: string, line: number, character: number): Hover |
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
-					value: "**@nanoservice-ts/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
+					value:
+						"**@nanoservice-ts/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
 				},
 				range,
 			};
@@ -99,7 +96,10 @@ export function getHover(text: string, line: number, character: number): Hover |
 	return null;
 }
 
-function findQuotedWordAt(line: string, character: number): { word: string; startChar: number; endChar: number } | null {
+function findQuotedWordAt(
+	line: string,
+	character: number,
+): { word: string; startChar: number; endChar: number } | null {
 	// Find all quoted strings in the line and check if cursor is inside one
 	const regex = /"([^"]*)"/g;
 

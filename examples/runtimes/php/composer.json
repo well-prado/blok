@@ -1,23 +1,23 @@
 {
-    "name": "blok/php-runtime",
-    "description": "Blok PHP Runtime SDK - HTTP server with /execute and /health endpoints for running Blok workflow nodes",
-    "type": "project",
-    "license": "MIT",
-    "require": {
-        "php": ">=8.2",
-        "react/http": "^1.9",
-        "react/socket": "^1.15"
-    },
-    "autoload": {
-        "psr-4": {
-            "Blok\\": "src/"
-        }
-    },
-    "scripts": {
-        "start": "php index.php"
-    },
-    "config": {
-        "optimize-autoloader": true,
-        "sort-packages": true
-    }
+	"name": "blok/php-runtime",
+	"description": "Blok PHP Runtime SDK - HTTP server with /execute and /health endpoints for running Blok workflow nodes",
+	"type": "project",
+	"license": "MIT",
+	"require": {
+		"php": ">=8.2",
+		"react/http": "^1.9",
+		"react/socket": "^1.15"
+	},
+	"autoload": {
+		"psr-4": {
+			"Blok\\": "src/"
+		}
+	},
+	"scripts": {
+		"start": "php index.php"
+	},
+	"config": {
+		"optimize-autoloader": true,
+		"sort-packages": true
+	}
 }

@@ -13,13 +13,7 @@ function runJs(
 	func: Record<string, unknown> = {},
 	vars: Record<string, unknown> = {},
 ): unknown {
-	return Function(
-		"ctx",
-		"data",
-		"func",
-		"vars",
-		`"use strict";return (${str});`,
-	)(ctx, data, func, vars);
+	return Function("ctx", "data", "func", "vars", `"use strict";return (${str});`)(ctx, data, func, vars);
 }
 
 export default defineNode({
@@ -34,8 +28,7 @@ export default defineNode({
 	output: z.array(z.unknown()),
 
 	async execute(ctx, input) {
-		if (!Array.isArray(input.array))
-			throw new Error("Array is not an array");
+		if (!Array.isArray(input.array)) throw new Error("Array is not an array");
 
 		return input.array.map((data) => {
 			return runJs(input.map, ctx, data, {}, ctx.vars ?? {});

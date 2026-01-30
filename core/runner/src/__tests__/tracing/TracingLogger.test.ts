@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { TracingLogger } from "../../tracing/TracingLogger";
-import { RunTracker } from "../../tracing/RunTracker";
 import type { LoggerContext } from "@nanoservice-ts/shared";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RunTracker } from "../../tracing/RunTracker";
+import { TracingLogger } from "../../tracing/TracingLogger";
 
 function createMockLogger(): LoggerContext {
 	return {

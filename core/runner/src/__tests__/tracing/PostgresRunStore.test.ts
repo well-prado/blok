@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runStoreTests } from "./RunStore.shared";
 
 /**
@@ -29,7 +29,7 @@ vi.mock("pg", () => ({
 }));
 
 import { PostgresRunStore } from "../../tracing/PostgresRunStore";
-import type { WorkflowRun, NodeRun, RunEvent, TraceLogEntry, Dashboard } from "../../tracing/types";
+import type { Dashboard, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "../../tracing/types";
 
 function createTestStore(): PostgresRunStore {
 	return new PostgresRunStore({

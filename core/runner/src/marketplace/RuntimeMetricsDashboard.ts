@@ -6,7 +6,7 @@
  * following the same patterns as TriggerMetricsCollector.
  */
 
-import type { RuntimeKind, ExecutionResult } from "../adapters/RuntimeAdapter";
+import type { ExecutionResult, RuntimeKind } from "../adapters/RuntimeAdapter";
 
 export interface LatencyPercentiles {
 	count: number;
@@ -194,10 +194,7 @@ export class RuntimeMetricsDashboard {
 	/**
 	 * Get top runtimes ranked by a specific metric.
 	 */
-	getTopRuntimes(
-		by: "executions" | "successRate" | "latency",
-		limit = 10,
-	): RuntimeExecutionMetrics[] {
+	getTopRuntimes(by: "executions" | "successRate" | "latency", limit = 10): RuntimeExecutionMetrics[] {
 		const all = this.getAllMetrics();
 
 		switch (by) {
@@ -224,11 +221,7 @@ export class RuntimeMetricsDashboard {
 	 * @param windowCount - Number of time windows to return (default: 10)
 	 * @returns Array of execution counts, one per time window (oldest first)
 	 */
-	getExecutionTrend(
-		runtime: RuntimeKind,
-		intervalMs = 60_000,
-		windowCount = 10,
-	): number[] {
+	getExecutionTrend(runtime: RuntimeKind, intervalMs = 60_000, windowCount = 10): number[] {
 		const data = this.metrics.get(runtime);
 		if (!data) {
 			return new Array(windowCount).fill(0);
@@ -332,14 +325,10 @@ export class RuntimeMetricsDashboard {
 	 */
 	private computeResourceMetrics(data: RuntimeMetricsData): ResourceMetrics {
 		const avgCpuMs =
-			data.cpuSamples.length > 0
-				? data.cpuSamples.reduce((a, b) => a + b, 0) / data.cpuSamples.length
-				: 0;
+			data.cpuSamples.length > 0 ? data.cpuSamples.reduce((a, b) => a + b, 0) / data.cpuSamples.length : 0;
 
 		const avgMemoryBytes =
-			data.memorySamples.length > 0
-				? data.memorySamples.reduce((a, b) => a + b, 0) / data.memorySamples.length
-				: 0;
+			data.memorySamples.length > 0 ? data.memorySamples.reduce((a, b) => a + b, 0) / data.memorySamples.length : 0;
 
 		return {
 			avgCpuMs,

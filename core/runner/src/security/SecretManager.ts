@@ -535,7 +535,7 @@ export class VaultSecretProvider implements SecretProvider {
 		if (metadata) {
 			body.options = {};
 			if (metadata.version) {
-				(body.options as Record<string, unknown>).cas = parseInt(metadata.version, 10);
+				(body.options as Record<string, unknown>).cas = Number.parseInt(metadata.version, 10);
 			}
 		}
 
@@ -727,9 +727,7 @@ export class AWSSecretsProvider implements SecretProvider {
 		const { GetSecretValueCommand } = await this.getSDK();
 
 		try {
-			const result = await client.send(
-				new GetSecretValueCommand({ SecretId: key })
-			);
+			const result = await client.send(new GetSecretValueCommand({ SecretId: key }));
 			return result.SecretString ?? null;
 		} catch (err: unknown) {
 			if (this.isAWSError(err, "ResourceNotFoundException")) {
@@ -756,7 +754,7 @@ export class AWSSecretsProvider implements SecretProvider {
 					SecretId: key,
 					SecretString: value,
 					...(metadata?.description ? { Description: metadata.description } : {}),
-				})
+				}),
 			);
 		} catch (err: unknown) {
 			if (this.isAWSError(err, "ResourceNotFoundException")) {
@@ -796,7 +794,7 @@ export class AWSSecretsProvider implements SecretProvider {
 				new DeleteSecretCommand({
 					SecretId: key,
 					ForceDeleteWithoutRecovery: true,
-				})
+				}),
 			);
 		} catch (err: unknown) {
 			if (!this.isAWSError(err, "ResourceNotFoundException")) {
@@ -823,9 +821,7 @@ export class AWSSecretsProvider implements SecretProvider {
 			};
 
 			if (prefix) {
-				params.Filters = [
-					{ Key: "name", Values: [prefix] },
-				];
+				params.Filters = [{ Key: "name", Values: [prefix] }];
 			}
 
 			const result = await client.send(new ListSecretsCommand(params));
@@ -903,7 +899,7 @@ export class AWSSecretsProvider implements SecretProvider {
 			return await import("@aws-sdk/client-secrets-manager");
 		} catch {
 			throw new Error(
-				"AWS Secrets Manager SDK not found. Install it with: npm install @aws-sdk/client-secrets-manager"
+				"AWS Secrets Manager SDK not found. Install it with: npm install @aws-sdk/client-secrets-manager",
 			);
 		}
 	}
@@ -912,12 +908,7 @@ export class AWSSecretsProvider implements SecretProvider {
 	 * Type-safe check for AWS SDK error names
 	 */
 	private isAWSError(err: unknown, code: string): boolean {
-		return (
-			typeof err === "object" &&
-			err !== null &&
-			"name" in err &&
-			(err as { name: string }).name === code
-		);
+		return typeof err === "object" && err !== null && "name" in err && (err as { name: string }).name === code;
 	}
 }
 
@@ -1105,9 +1096,7 @@ export class GCPSecretProvider implements SecretProvider {
 			this.client = new SecretManagerServiceClient(options);
 			return this.client;
 		} catch {
-			throw new Error(
-				"GCP Secret Manager SDK not found. Install it with: npm install @google-cloud/secret-manager"
-			);
+			throw new Error("GCP Secret Manager SDK not found. Install it with: npm install @google-cloud/secret-manager");
 		}
 	}
 
@@ -1122,12 +1111,7 @@ export class GCPSecretProvider implements SecretProvider {
 	 * Check for specific gRPC error codes from the GCP SDK
 	 */
 	private isGCPError(err: unknown, code: number): boolean {
-		return (
-			typeof err === "object" &&
-			err !== null &&
-			"code" in err &&
-			(err as { code: number }).code === code
-		);
+		return typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === code;
 	}
 }
 
@@ -1382,7 +1366,7 @@ export class SecretManager extends EventEmitter {
 			matches.map(async (m) => ({
 				placeholder: m.placeholder,
 				value: (await this.getSecret(m.key)) ?? "",
-			}))
+			})),
 		);
 
 		let result = template;

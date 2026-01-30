@@ -187,7 +187,9 @@ export class WasmRuntimeAdapter implements RuntimeAdapter {
 				fd_read: () => 0,
 				fd_close: () => 0,
 				fd_seek: () => 0,
-				proc_exit: () => { /* no-op */ },
+				proc_exit: () => {
+					/* no-op */
+				},
 				environ_get: () => 0,
 				environ_sizes_get: () => 0,
 				clock_time_get: () => 0,
@@ -287,7 +289,7 @@ export class WasmRuntimeAdapter implements RuntimeAdapter {
 	 */
 	private evictOldest(): void {
 		let oldestKey: string | null = null;
-		let oldestTime = Infinity;
+		let oldestTime = Number.POSITIVE_INFINITY;
 
 		for (const [key, value] of this.moduleCache) {
 			if (value.lastUsed < oldestTime) {

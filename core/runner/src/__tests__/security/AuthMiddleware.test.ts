@@ -1,20 +1,18 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
-	AuthMiddleware,
-	JWTAuthProvider,
 	APIKeyAuthProvider,
-	type AuthRequest,
 	type APIKeyInfo,
+	AuthMiddleware,
+	type AuthRequest,
+	JWTAuthProvider,
 } from "../../security/AuthMiddleware";
 
 // Helper: create a valid JWT token
 function createJWT(payload: Record<string, unknown>, secret: string): string {
 	const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
 	const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-	const signature = createHmac("sha256", secret)
-		.update(`${header}.${body}`)
-		.digest("base64url");
+	const signature = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
 	return `${header}.${body}.${signature}`;
 }
 
@@ -70,10 +68,7 @@ describe("JWTAuthProvider", () => {
 	it("should reject token with invalid signature", async () => {
 		const provider = new JWTAuthProvider({ secret });
 
-		const token = createJWT(
-			{ sub: "user-123", exp: Math.floor(Date.now() / 1000) + 3600 },
-			"wrong-secret",
-		);
+		const token = createJWT({ sub: "user-123", exp: Math.floor(Date.now() / 1000) + 3600 }, "wrong-secret");
 
 		const result = await provider.authenticate({
 			headers: { authorization: `Bearer ${token}` },
@@ -190,9 +185,7 @@ describe("JWTAuthProvider", () => {
 
 describe("APIKeyAuthProvider", () => {
 	it("should authenticate valid API key from header", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["test-key-123", { name: "test-service", roles: ["admin"] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["test-key-123", { name: "test-service", roles: ["admin"] }]]);
 
 		const provider = new APIKeyAuthProvider({ keys });
 
@@ -207,9 +200,7 @@ describe("APIKeyAuthProvider", () => {
 	});
 
 	it("should authenticate from query parameter", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["query-key", { name: "query-svc", roles: ["viewer"] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["query-key", { name: "query-svc", roles: ["viewer"] }]]);
 
 		const provider = new APIKeyAuthProvider({ keys });
 
@@ -223,9 +214,7 @@ describe("APIKeyAuthProvider", () => {
 	});
 
 	it("should reject invalid API key", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["valid-key", { name: "svc", roles: [] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["valid-key", { name: "svc", roles: [] }]]);
 
 		const provider = new APIKeyAuthProvider({ keys });
 
@@ -239,11 +228,14 @@ describe("APIKeyAuthProvider", () => {
 
 	it("should reject expired API key", async () => {
 		const keys = new Map<string, APIKeyInfo>([
-			["expired-key", {
-				name: "svc",
-				roles: [],
-				expiresAt: Math.floor(Date.now() / 1000) - 100,
-			}],
+			[
+				"expired-key",
+				{
+					name: "svc",
+					roles: [],
+					expiresAt: Math.floor(Date.now() / 1000) - 100,
+				},
+			],
 		]);
 
 		const provider = new APIKeyAuthProvider({ keys });
@@ -257,9 +249,7 @@ describe("APIKeyAuthProvider", () => {
 	});
 
 	it("should use custom header name", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["custom-key", { name: "svc", roles: [] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["custom-key", { name: "svc", roles: [] }]]);
 
 		const provider = new APIKeyAuthProvider({
 			keys,
@@ -309,15 +299,10 @@ describe("AuthMiddleware", () => {
 	const secret = "test-secret-key-for-hmac-256";
 
 	it("should try providers in order", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["my-key", { name: "api-svc", roles: ["service"] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["my-key", { name: "api-svc", roles: ["service"] }]]);
 
 		const middleware = new AuthMiddleware({
-			providers: [
-				new JWTAuthProvider({ secret }),
-				new APIKeyAuthProvider({ keys }),
-			],
+			providers: [new JWTAuthProvider({ secret }), new APIKeyAuthProvider({ keys })],
 		});
 
 		const result = await middleware.authenticate({
@@ -392,9 +377,7 @@ describe("AuthMiddleware", () => {
 	});
 
 	it("should provide Express-compatible middleware", async () => {
-		const keys = new Map<string, APIKeyInfo>([
-			["my-key", { name: "svc", roles: ["admin"] }],
-		]);
+		const keys = new Map<string, APIKeyInfo>([["my-key", { name: "svc", roles: ["admin"] }]]);
 
 		const middleware = new AuthMiddleware({
 			providers: [new APIKeyAuthProvider({ keys })],

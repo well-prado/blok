@@ -1,10 +1,10 @@
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import open from "open";
 import * as p from "@clack/prompts";
+import open from "open";
 import color from "picocolors";
 // @ts-ignore
 import serveHandler from "serve-handler";
@@ -58,11 +58,7 @@ async function checkBackendHealth(backendUrl: string): Promise<boolean> {
  * Reverse-proxy a request to the Blok backend.
  * Handles REST + SSE streams transparently via pipe.
  */
-function proxyRequest(
-	req: http.IncomingMessage,
-	res: http.ServerResponse,
-	backendUrl: string,
-) {
+function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, backendUrl: string) {
 	const targetUrl = new URL(req.url!, backendUrl);
 	const client = targetUrl.protocol === "https:" ? https : http;
 
@@ -110,10 +106,7 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	// Resolve Studio static assets
 	const staticPath = resolveStaticPath();
 	if (!staticPath) {
-		p.log.error(
-			`Studio assets not found.\n` +
-				`  Build them first: ${color.cyan("pnpm --filter @blok/studio build")}`,
-		);
+		p.log.error(`Studio assets not found.\n` + `  Build them first: ${color.cyan("pnpm --filter @blok/studio build")}`);
 		process.exit(1);
 	}
 
@@ -125,8 +118,7 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	if (!healthy) {
 		s.stop(color.yellow("Backend not reachable"));
 		p.log.warn(
-			`Blok backend not found at ${color.cyan(backendUrl)}\n` +
-				`  Start it first: ${color.cyan("nanoctl dev")}`,
+			`Blok backend not found at ${color.cyan(backendUrl)}\n` + `  Start it first: ${color.cyan("nanoctl dev")}`,
 		);
 		p.log.info("Starting Studio anyway — it will connect when the backend is up.");
 	} else {

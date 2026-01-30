@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SentryIntegration, type SentryClient } from "../../integrations/SentryIntegration";
+import { type SentryClient, SentryIntegration } from "../../integrations/SentryIntegration";
 
 // Mock Sentry client for testing
 function createMockClient(): SentryClient & { events: Array<{ type: string; data: unknown }> } {

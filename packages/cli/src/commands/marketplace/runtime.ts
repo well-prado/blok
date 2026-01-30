@@ -3,12 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 
-import type {
-	RuntimePackageManifest,
-	CatalogSearchOptions,
-	CatalogStats,
-	RuntimeKind,
-} from "@nanoservice-ts/runner";
+import type { CatalogSearchOptions, CatalogStats, RuntimeKind, RuntimePackageManifest } from "@nanoservice-ts/runner";
 
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";
@@ -216,9 +211,7 @@ export class RuntimeMarketplaceCommand {
 	 * @param options - Publish options including manifest path, Docker image, and runtime
 	 * @returns Result object with success status, package ID, and version
 	 */
-	async publish(
-		options: MarketplacePublishOptions,
-	): Promise<{ success: boolean; packageId: string; version: string }> {
+	async publish(options: MarketplacePublishOptions): Promise<{ success: boolean; packageId: string; version: string }> {
 		try {
 			// Step 1: Read and validate manifest file
 			const manifestPath = path.resolve(options.manifestPath);
@@ -556,9 +549,7 @@ export default new Command()
 					}
 
 					const output =
-						listOptions.format === "json"
-							? marketplace.formatJson(packages)
-							: marketplace.formatTable(packages);
+						listOptions.format === "json" ? marketplace.formatJson(packages) : marketplace.formatTable(packages);
 
 					logger.stop(`Found ${packages.length} package(s):\n\n${output}`);
 				} catch (error) {

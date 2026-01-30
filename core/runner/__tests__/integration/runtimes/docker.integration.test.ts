@@ -15,19 +15,14 @@
  * Tests are automatically skipped when Docker is unavailable.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import type { Context } from "@nanoservice-ts/shared";
-import { DockerRuntimeAdapter } from "../../../src/adapters/DockerRuntimeAdapter";
-import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
-import RunnerNode from "../../../src/RunnerNode";
-import {
-	buildDockerImage,
-	imageExists,
-	stopContainer,
-	cleanupTestContainers,
-} from "../helpers/dockerTestUtils";
-import * as path from "node:path";
 import * as fs from "node:fs";
+import * as path from "node:path";
+import type { Context } from "@nanoservice-ts/shared";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import RunnerNode from "../../../src/RunnerNode";
+import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
+import { DockerRuntimeAdapter } from "../../../src/adapters/DockerRuntimeAdapter";
+import { buildDockerImage, cleanupTestContainers, imageExists, stopContainer } from "../helpers/dockerTestUtils";
 
 // ============================================================================
 // Test Configuration
@@ -233,9 +228,7 @@ describe("DockerRuntimeAdapter Integration Tests", () => {
 					const result2 = await adapter.execute(node, ctx);
 					expect(result2.success).toBe(true);
 					// Reuse should be faster (container already running)
-					expect(result2.metrics?.duration_ms).toBeLessThan(
-						(result.metrics?.duration_ms ?? 0) + 1000,
-					);
+					expect(result2.metrics?.duration_ms).toBeLessThan((result.metrics?.duration_ms ?? 0) + 1000);
 
 					console.log("✅ Container health check and reuse working");
 				} finally {
@@ -341,10 +334,7 @@ describe("DockerRuntimeAdapter Integration Tests", () => {
 				try {
 					const concurrentCount = 3;
 					const promises = Array.from({ length: concurrentCount }, (_, i) =>
-						adapter.execute(
-							createRunnerNode(`concurrent-${i}`),
-							createContext({ index: i }),
-						),
+						adapter.execute(createRunnerNode(`concurrent-${i}`), createContext({ index: i })),
 					);
 
 					const results = await Promise.all(promises);

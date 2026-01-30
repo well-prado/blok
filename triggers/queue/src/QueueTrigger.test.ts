@@ -5,7 +5,7 @@
  * Note: Actual queue connectivity tests require running queue services.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Test the adapter interfaces and mock implementations
 describe("QueueTrigger", () => {
@@ -105,7 +105,7 @@ describe("RabbitMQAdapter", () => {
 
 		const config = {
 			url: process.env.RABBITMQ_URL || "amqp://localhost",
-			prefetch: parseInt(process.env.RABBITMQ_PREFETCH || "1", 10),
+			prefetch: Number.parseInt(process.env.RABBITMQ_PREFETCH || "1", 10),
 		};
 
 		expect(config.url).toBe("amqp://user:pass@localhost:5672");
@@ -129,8 +129,8 @@ describe("SQSAdapter", () => {
 
 		const config = {
 			region: process.env.AWS_REGION || "us-east-1",
-			waitTimeSeconds: parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
-			maxNumberOfMessages: parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
+			waitTimeSeconds: Number.parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
+			maxNumberOfMessages: Number.parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
 		};
 
 		expect(config.region).toBe("eu-west-1");
@@ -158,9 +158,9 @@ describe("RedisAdapter", () => {
 
 		const config = {
 			host: process.env.REDIS_HOST || "localhost",
-			port: parseInt(process.env.REDIS_PORT || "6379", 10),
+			port: Number.parseInt(process.env.REDIS_PORT || "6379", 10),
 			password: process.env.REDIS_PASSWORD,
-			db: parseInt(process.env.REDIS_DB || "0", 10),
+			db: Number.parseInt(process.env.REDIS_DB || "0", 10),
 		};
 
 		expect(config.host).toBe("redis.example.com");

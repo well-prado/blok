@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { validateFunctionFirstStructure, validateExports, type NodeValidationContext } from "./NodeValidator.js";
+import { type NodeValidationContext, validateExports, validateFunctionFirstStructure } from "./NodeValidator.js";
 
 describe("NodeValidator", () => {
 	describe("validateFunctionFirstStructure", () => {
@@ -63,7 +63,7 @@ export default class TestNode extends NanoService {
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("defineNode"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("defineNode"))).toBe(true);
 		});
 
 		it("should fail for node missing execute function", () => {
@@ -90,7 +90,7 @@ export default defineNode({
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("execute"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("execute"))).toBe(true);
 		});
 
 		it("should fail for node missing name property", () => {
@@ -120,7 +120,7 @@ export default defineNode({
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("name"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("name"))).toBe(true);
 		});
 
 		it("should fail for node missing description property", () => {
@@ -150,7 +150,7 @@ export default defineNode({
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("description"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("description"))).toBe(true);
 		});
 
 		it("should fail for node missing input schema", () => {
@@ -180,7 +180,7 @@ export default defineNode({
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("input"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("input"))).toBe(true);
 		});
 
 		it("should fail for node missing output schema", () => {
@@ -210,7 +210,7 @@ export default defineNode({
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("output"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("output"))).toBe(true);
 		});
 
 		it("should pass for node with complex input/output schemas", () => {
@@ -321,7 +321,7 @@ export { myNode };
 
 			expect(result.valid).toBe(false);
 			expect(result.errors).toBeDefined();
-			expect(result.errors.some(err => err.includes("default export"))).toBe(true);
+			expect(result.errors.some((err) => err.includes("default export"))).toBe(true);
 		});
 	});
 });

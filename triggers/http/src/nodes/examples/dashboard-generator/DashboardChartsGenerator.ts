@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai";
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -76,50 +76,23 @@ export default defineNode({
 				structuredOutputs: true,
 			}),
 			schemaName: "queries",
-			schemaDescription:
-				"Generate SQL queries for data visualization in a PostgreSQL",
+			schemaDescription: "Generate SQL queries for data visualization in a PostgreSQL",
 			schema: z.object({
 				prompt: z.string(),
 				charts: z.array(
 					z.object({
-						type: z
-							.string()
-							.describe(
-								"bar | line | pie | doughnut | scatter",
-							),
-						title: z
-							.string()
-							.describe(
-								"Descriptive Chart Title from QUERIES",
-							),
+						type: z.string().describe("bar | line | pie | doughnut | scatter"),
+						title: z.string().describe("Descriptive Chart Title from QUERIES"),
 						description: z.string(),
-						xAxis: z
-							.string()
-							.describe(
-								"Column name for x-axis (if applicable)",
-							),
-						yAxis: z
-							.string()
-							.describe(
-								"Column name for y-axis (if applicable)",
-							),
+						xAxis: z.string().describe("Column name for x-axis (if applicable)"),
+						yAxis: z.string().describe("Column name for y-axis (if applicable)"),
 						series: z.array(
 							z.object({
-								name: z
-									.string()
-									.describe("Label for series"),
-								dataKey: z
-									.string()
-									.describe(
-										"Column name representing the series data",
-									),
+								name: z.string().describe("Label for series"),
+								dataKey: z.string().describe("Column name representing the series data"),
 							}),
 						),
-						data: z
-							.array(z.object({}))
-							.describe(
-								"Insert the data from the QUERIES",
-							),
+						data: z.array(z.object({})).describe("Insert the data from the QUERIES"),
 					}),
 				),
 			}),
@@ -132,8 +105,7 @@ export default defineNode({
 		result.object.charts = result.object.charts.map((charts, index) => {
 			return {
 				...charts,
-				data: (records[index] as unknown as JsonLikeObject)
-					.data as unknown as JsonLikeObject[],
+				data: (records[index] as unknown as JsonLikeObject).data as unknown as JsonLikeObject[],
 			};
 		});
 

@@ -15,7 +15,18 @@ export interface WorkflowValidationResult {
 	warnings: string[];
 }
 
-const VALID_TRIGGER_TYPES = ["http", "grpc", "manual", "cron", "queue", "pubsub", "worker", "webhook", "sse", "websocket"];
+const VALID_TRIGGER_TYPES = [
+	"http",
+	"grpc",
+	"manual",
+	"cron",
+	"queue",
+	"pubsub",
+	"worker",
+	"webhook",
+	"sse",
+	"websocket",
+];
 const VALID_STEP_TYPES = ["module", "local", "runtime.python3", "runtime.go", "runtime.java"];
 const VALID_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY", "*"];
 const VALID_QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk"];
@@ -240,7 +251,9 @@ function validateSteps(steps: unknown[], stepNames: Set<string>, errors: string[
 		if (!step.type || typeof step.type !== "string") {
 			errors.push(`Step "${step.name}" is missing required "type" field`);
 		} else if (!VALID_STEP_TYPES.includes(step.type as string)) {
-			warnings.push(`Step "${step.name}" has unusual type "${step.type}". Common types: ${VALID_STEP_TYPES.join(", ")}`);
+			warnings.push(
+				`Step "${step.name}" has unusual type "${step.type}". Common types: ${VALID_STEP_TYPES.join(", ")}`,
+			);
 		}
 
 		if (stepNames.has(step.name as string)) {

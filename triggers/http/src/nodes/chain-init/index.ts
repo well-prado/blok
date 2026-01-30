@@ -10,8 +10,7 @@ import { z } from "zod";
  */
 export default defineNode({
 	name: "chain-init",
-	description:
-		"Initializes a cross-runtime chain test with the first entry (nodejs)",
+	description: "Initializes a cross-runtime chain test with the first entry (nodejs)",
 
 	input: z.object({}),
 

@@ -1,13 +1,13 @@
 import type { ZodError, z } from "zod";
 
-import type Condition from "./types/Condition";
 import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError, NodeBase } from "@nanoservice-ts/shared";
-import type { INanoServiceResponse } from "./NanoServiceResponse";
-import type JsonLikeObject from "./types/JsonLikeObject";
-import NanoService from "./NanoService";
-import NanoServiceResponse from "./NanoServiceResponse";
 import type { Schema } from "jsonschema";
+import NanoService from "./NanoService";
+import type { INanoServiceResponse } from "./NanoServiceResponse";
+import NanoServiceResponse from "./NanoServiceResponse";
+import type Condition from "./types/Condition";
+import type JsonLikeObject from "./types/JsonLikeObject";
 
 /**
  * Function-first node definition with Zod schema validation

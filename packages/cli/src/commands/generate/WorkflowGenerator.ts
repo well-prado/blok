@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import createWorkflowSystemPrompt from "./prompts/create-workflow.system.js";
-import * as WorkflowValidator from "./validators/WorkflowValidator.js";
 import { GenerationAnalytics } from "./GenerationAnalytics.js";
 import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
+import createWorkflowSystemPrompt from "./prompts/create-workflow.system.js";
+import * as WorkflowValidator from "./validators/WorkflowValidator.js";
 
 export type WorkflowInformation = {
 	workflowName: string;
@@ -95,7 +95,9 @@ export default class WorkflowGenerator {
 
 			// Log attempt
 			if (!isValid && attempts < this.MAX_VALIDATION_ATTEMPTS) {
-				console.log(`⚠️  Workflow validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`);
+				console.log(
+					`⚠️  Workflow validation failed (attempt ${attempts}/${this.MAX_VALIDATION_ATTEMPTS}). Retrying with feedback...`,
+				);
 			}
 		}
 
@@ -132,11 +134,7 @@ export default class WorkflowGenerator {
 	 * Build an enhanced prompt with trigger type context
 	 */
 	private buildEnhancedPrompt(userPrompt: string, triggerType: string, workflowName: string): string {
-		const parts = [
-			`Create a workflow named "${workflowName}" with the following requirements:`,
-			"",
-			userPrompt,
-		];
+		const parts = [`Create a workflow named "${workflowName}" with the following requirements:`, "", userPrompt];
 
 		if (triggerType && triggerType !== "auto") {
 			parts.push("");

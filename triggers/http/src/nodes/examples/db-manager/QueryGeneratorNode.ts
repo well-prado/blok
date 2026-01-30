@@ -31,8 +31,7 @@ export default defineNode({
 		// Format column information
 		const tableSchema = columns
 			.map(
-				(col) =>
-					`${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
+				(col) => `${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
 			)
 			.join(", ");
 

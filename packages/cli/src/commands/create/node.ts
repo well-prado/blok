@@ -9,26 +9,26 @@ import fsExtra from "fs-extra";
 import color from "picocolors";
 import { manager as pm } from "../../services/package-manager.js";
 import {
+	csharp_csproj_file,
+	csharp_dockerfile,
+	csharp_node_file,
+	function_first_node_file,
 	go_dockerfile,
 	go_mod_file,
 	go_node_file,
 	java_dockerfile,
 	java_node_file,
 	java_pom_file,
-	rust_node_file,
-	rust_cargo_file,
-	rust_dockerfile,
-	csharp_node_file,
-	csharp_csproj_file,
-	csharp_dockerfile,
-	php_node_file,
 	php_composer_file,
 	php_dockerfile,
-	ruby_node_file,
-	ruby_gemfile,
-	ruby_dockerfile,
+	php_node_file,
 	python3_file,
-	function_first_node_file,
+	ruby_dockerfile,
+	ruby_gemfile,
+	ruby_node_file,
+	rust_cargo_file,
+	rust_dockerfile,
+	rust_node_file,
 } from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);

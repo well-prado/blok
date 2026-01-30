@@ -6,8 +6,8 @@
  * notifications following the same patterns as TriggerMetricsCollector.
  */
 
+import type { RuntimeRegistry } from "../RuntimeRegistry";
 import type { RuntimeKind } from "../adapters/RuntimeAdapter";
-import { RuntimeRegistry } from "../RuntimeRegistry";
 
 export interface RuntimeHealthStatus {
 	runtime: RuntimeKind;
@@ -36,11 +36,7 @@ export interface HealthCheckRecord {
 	error?: string;
 }
 
-export type HealthChangeListener = (
-	runtime: RuntimeKind,
-	oldStatus: string,
-	newStatus: string,
-) => void;
+export type HealthChangeListener = (runtime: RuntimeKind, oldStatus: string, newStatus: string) => void;
 
 const DEFAULT_CONFIG: HealthMonitorConfig = {
 	checkIntervalMs: 30_000,

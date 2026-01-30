@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	type CacheEntry,
+	type CacheProvider,
+	type CacheSetOptions,
+	type CacheStats,
 	InMemoryCache,
 	NodeResultCache,
-	type CacheProvider,
-	type CacheStats,
-	type CacheSetOptions,
-	type CacheEntry,
 } from "../../cache/NodeResultCache";
 
 // ---------------------------------------------------------------------------
@@ -647,9 +647,7 @@ describe("NodeResultCache", () => {
 			const instance = NodeResultCache.getInstance();
 			const executeFn = vi.fn().mockRejectedValue(new Error("execution failed"));
 
-			await expect(
-				instance.wrapExecution("myNode", { x: 1 }, executeFn),
-			).rejects.toThrow("execution failed");
+			await expect(instance.wrapExecution("myNode", { x: 1 }, executeFn)).rejects.toThrow("execution failed");
 		});
 
 		it("should clean up inflight map even when execution throws", async () => {
@@ -903,8 +901,7 @@ describe("NodeResultCache", () => {
 		describe("custom strategy", () => {
 			it("should use the provided custom key function", async () => {
 				const provider = new InMemoryCache({ maxSize: 100 });
-				const customKeyFn = (nodeName: string, input: unknown) =>
-					`custom:${nodeName}:${JSON.stringify(input)}`;
+				const customKeyFn = (nodeName: string, input: unknown) => `custom:${nodeName}:${JSON.stringify(input)}`;
 
 				const instance = NodeResultCache.configure({
 					provider,
@@ -921,9 +918,7 @@ describe("NodeResultCache", () => {
 			it("should throw when custom strategy is used without customKeyFn", () => {
 				expect(() => {
 					NodeResultCache.configure({ keyStrategy: "custom" });
-				}).toThrow(
-					'NodeResultCache: "custom" key strategy requires a customKeyFn to be provided.',
-				);
+				}).toThrow('NodeResultCache: "custom" key strategy requires a customKeyFn to be provided.');
 			});
 		});
 	});

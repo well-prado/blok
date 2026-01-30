@@ -49,15 +49,15 @@ export type CircuitBreakerListener = (event: CircuitBreakerEvent) => void;
 
 export class CircuitBreaker {
 	private state: CircuitState = "CLOSED";
-	private failures: number = 0;
-	private successes: number = 0;
-	private consecutiveFailures: number = 0;
-	private halfOpenAttempts: number = 0;
+	private failures = 0;
+	private successes = 0;
+	private consecutiveFailures = 0;
+	private halfOpenAttempts = 0;
 	private lastFailure: number | null = null;
 	private lastSuccess: number | null = null;
 	private lastStateChange: number = Date.now();
-	private totalRequests: number = 0;
-	private totalRejected: number = 0;
+	private totalRequests = 0;
+	private totalRejected = 0;
 	private failureTimestamps: number[] = [];
 	private config: CircuitBreakerConfig;
 	private listeners: CircuitBreakerListener[] = [];
@@ -233,9 +233,7 @@ export class CircuitBreaker {
 			return;
 		}
 
-		const failureCount = this.config.failureWindowMs
-			? this.failureTimestamps.length
-			: this.consecutiveFailures;
+		const failureCount = this.config.failureWindowMs ? this.failureTimestamps.length : this.consecutiveFailures;
 
 		if (this.state === "CLOSED" && failureCount >= this.config.failureThreshold) {
 			this.transitionTo("OPEN");

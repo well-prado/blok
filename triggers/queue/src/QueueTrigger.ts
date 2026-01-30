@@ -20,17 +20,17 @@
  *    - Ack/nack based on response
  */
 
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@nanoservice-ts/helper";
 import {
-	TriggerBase,
-	NodeMap,
 	DefaultLogger,
 	type GlobalOptions,
-	type TriggerResponse,
 	type NanoService,
+	NodeMap,
+	TriggerBase,
+	type TriggerResponse,
 } from "@nanoservice-ts/runner";
-import type { HelperResponse, QueueTriggerOpts, QueueProvider } from "@nanoservice-ts/helper";
-import { trace, metrics, type Span, SpanStatusCode } from "@opentelemetry/api";
+import type { Context, RequestContext } from "@nanoservice-ts/shared";
+import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -73,10 +73,7 @@ export interface QueueAdapter {
 	disconnect(): Promise<void>;
 
 	/** Subscribe to a topic/queue and receive messages */
-	subscribe(
-		config: QueueTriggerOpts,
-		handler: (message: QueueMessage) => Promise<void>,
-	): Promise<void>;
+	subscribe(config: QueueTriggerOpts, handler: (message: QueueMessage) => Promise<void>): Promise<void>;
 
 	/** Unsubscribe from a topic/queue */
 	unsubscribe(topic: string): Promise<void>;
@@ -166,18 +163,14 @@ export abstract class QueueTrigger extends TriggerBase {
 			// Subscribe to each topic
 			for (const workflow of queueWorkflows) {
 				const config = workflow.config.trigger?.queue as QueueTriggerOpts;
-				this.logger.log(
-					`Subscribing to topic: ${config.topic} for workflow: ${workflow.path}`,
-				);
+				this.logger.log(`Subscribing to topic: ${config.topic} for workflow: ${workflow.path}`);
 
 				await this.adapter.subscribe(config, async (message) => {
 					await this.handleMessage(message, workflow, config);
 				});
 			}
 
-			this.logger.log(
-				`Queue trigger started. Listening to ${queueWorkflows.length} topic(s)`,
-			);
+			this.logger.log(`Queue trigger started. Listening to ${queueWorkflows.length} topic(s)`);
 
 			// Enable HMR in development mode
 			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
@@ -306,9 +299,7 @@ export abstract class QueueTrigger extends TriggerBase {
 					success: "true",
 				});
 
-				ctx.logger.log(
-					`Message processed in ${(end - start).toFixed(2)}ms: ${id}`,
-				);
+				ctx.logger.log(`Message processed in ${(end - start).toFixed(2)}ms: ${id}`);
 
 				// Acknowledge message if configured
 				if (config.ack !== false) {
@@ -331,10 +322,7 @@ export abstract class QueueTrigger extends TriggerBase {
 					workflow_name: this.configuration?.name || "unknown",
 				});
 
-				this.logger.error(
-					`Failed to process message ${id}: ${errorMessage}`,
-					(error as Error).stack,
-				);
+				this.logger.error(`Failed to process message ${id}: ${errorMessage}`, (error as Error).stack);
 
 				// Nack message (requeue for retry)
 				if (config.ack !== false) {

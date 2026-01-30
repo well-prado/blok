@@ -1,6 +1,6 @@
+import path from "node:path";
 import { type HelperResponse, Workflow } from "@nanoservice-ts/helper";
 import { beforeAll, expect, test } from "vitest";
-import path from "node:path";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
 

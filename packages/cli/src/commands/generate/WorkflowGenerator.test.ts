@@ -11,7 +11,9 @@ describe("WorkflowGenerator", () => {
 	describe("buildEnhancedPrompt (via reflection)", () => {
 		const generator = new WorkflowGenerator();
 		const buildPrompt = (userPrompt: string, triggerType: string, workflowName: string) =>
-			(generator as unknown as { buildEnhancedPrompt: (u: string, t: string, n: string) => string }).buildEnhancedPrompt(userPrompt, triggerType, workflowName);
+			(
+				generator as unknown as { buildEnhancedPrompt: (u: string, t: string, n: string) => string }
+			).buildEnhancedPrompt(userPrompt, triggerType, workflowName);
 
 		it("should include workflow name and user prompt", () => {
 			const result = buildPrompt("Fetch user data from API", "http", "user-api");
@@ -70,7 +72,9 @@ describe("WorkflowGenerator", () => {
 	describe("createFeedbackPrompt (via reflection)", () => {
 		const generator = new WorkflowGenerator();
 		const createFeedback = (originalPrompt: string, previousJson: string, errors: string[]) =>
-			(generator as unknown as { createFeedbackPrompt: (o: string, j: string, e: string[]) => string }).createFeedbackPrompt(originalPrompt, previousJson, errors);
+			(
+				generator as unknown as { createFeedbackPrompt: (o: string, j: string, e: string[]) => string }
+			).createFeedbackPrompt(originalPrompt, previousJson, errors);
 
 		it("should include original prompt in feedback", () => {
 			const result = createFeedback("Build a user API", "{}", ["Missing name field"]);

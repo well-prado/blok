@@ -5,8 +5,8 @@
  * InMemoryAdapter, and BullMQAdapter configuration.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { WorkerJob, WorkerAdapter, WorkerQueueStats } from "./WorkerTrigger";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "./WorkerTrigger";
 import { InMemoryAdapter } from "./adapters/InMemoryAdapter";
 
 // ============================================================================
@@ -184,9 +184,13 @@ describe("InMemoryAdapter", () => {
 
 		it("should accept custom job ID", async () => {
 			await adapter.connect();
-			const jobId = await adapter.addJob("test-queue", { data: 1 }, {
-				jobId: "custom-id-123",
-			});
+			const jobId = await adapter.addJob(
+				"test-queue",
+				{ data: 1 },
+				{
+					jobId: "custom-id-123",
+				},
+			);
 			expect(jobId).toBe("custom-id-123");
 		});
 
@@ -202,9 +206,13 @@ describe("InMemoryAdapter", () => {
 
 		it("should add delayed jobs", async () => {
 			await adapter.connect();
-			await adapter.addJob("delayed-queue", { data: 1 }, {
-				delay: 5000,
-			});
+			await adapter.addJob(
+				"delayed-queue",
+				{ data: 1 },
+				{
+					delay: 5000,
+				},
+			);
 
 			const stats = await adapter.getQueueStats("delayed-queue");
 			expect(stats.delayed).toBe(1);
@@ -212,9 +220,7 @@ describe("InMemoryAdapter", () => {
 		});
 
 		it("should throw when not connected", async () => {
-			await expect(
-				adapter.addJob("test-queue", { data: 1 }),
-			).rejects.toThrow("Not connected");
+			await expect(adapter.addJob("test-queue", { data: 1 })).rejects.toThrow("Not connected");
 		});
 	});
 
@@ -224,13 +230,10 @@ describe("InMemoryAdapter", () => {
 
 			const processedJobs: WorkerJob[] = [];
 
-			await adapter.process(
-				{ queue: "process-queue", concurrency: 1, retries: 3, priority: 0 },
-				async (job) => {
-					processedJobs.push(job);
-					await job.complete();
-				},
-			);
+			await adapter.process({ queue: "process-queue", concurrency: 1, retries: 3, priority: 0 }, async (job) => {
+				processedJobs.push(job);
+				await job.complete();
+			});
 
 			await adapter.addJob("process-queue", { item: "test-1" });
 
@@ -246,13 +249,10 @@ describe("InMemoryAdapter", () => {
 
 			const processedOrder: number[] = [];
 
-			await adapter.process(
-				{ queue: "seq-queue", concurrency: 1, retries: 3, priority: 0 },
-				async (job) => {
-					processedOrder.push(job.data as number);
-					await job.complete();
-				},
-			);
+			await adapter.process({ queue: "seq-queue", concurrency: 1, retries: 3, priority: 0 }, async (job) => {
+				processedOrder.push(job.data as number);
+				await job.complete();
+			});
 
 			await adapter.addJob("seq-queue", 1);
 			await adapter.addJob("seq-queue", 2);
@@ -266,12 +266,9 @@ describe("InMemoryAdapter", () => {
 		it("should track queue stats correctly", async () => {
 			await adapter.connect();
 
-			await adapter.process(
-				{ queue: "stats-queue", concurrency: 1, retries: 3, priority: 0 },
-				async (job) => {
-					await job.complete();
-				},
-			);
+			await adapter.process({ queue: "stats-queue", concurrency: 1, retries: 3, priority: 0 }, async (job) => {
+				await job.complete();
+			});
 
 			await adapter.addJob("stats-queue", { a: 1 });
 			await adapter.addJob("stats-queue", { a: 2 });
@@ -286,12 +283,9 @@ describe("InMemoryAdapter", () => {
 		it("should handle job failures", async () => {
 			await adapter.connect();
 
-			await adapter.process(
-				{ queue: "fail-queue", concurrency: 1, retries: 0, priority: 0 },
-				async (job) => {
-					await job.fail(new Error("test failure"), false);
-				},
-			);
+			await adapter.process({ queue: "fail-queue", concurrency: 1, retries: 0, priority: 0 }, async (job) => {
+				await job.fail(new Error("test failure"), false);
+			});
 
 			await adapter.addJob("fail-queue", { data: "will-fail" }, { retries: 0 });
 
@@ -306,17 +300,14 @@ describe("InMemoryAdapter", () => {
 
 			let attemptCount = 0;
 
-			await adapter.process(
-				{ queue: "retry-queue", concurrency: 1, retries: 3, priority: 0 },
-				async (job) => {
-					attemptCount++;
-					if (attemptCount < 2) {
-						await job.fail(new Error("temporary failure"), true);
-					} else {
-						await job.complete();
-					}
-				},
-			);
+			await adapter.process({ queue: "retry-queue", concurrency: 1, retries: 3, priority: 0 }, async (job) => {
+				attemptCount++;
+				if (attemptCount < 2) {
+					await job.fail(new Error("temporary failure"), true);
+				} else {
+					await job.complete();
+				}
+			});
 
 			await adapter.addJob("retry-queue", { data: "retry-me" }, { retries: 3 });
 
@@ -331,13 +322,10 @@ describe("InMemoryAdapter", () => {
 
 			const processed: string[] = [];
 
-			await adapter.process(
-				{ queue: "stop-queue", concurrency: 1, retries: 3, priority: 0 },
-				async (job) => {
-					processed.push(job.id);
-					await job.complete();
-				},
-			);
+			await adapter.process({ queue: "stop-queue", concurrency: 1, retries: 3, priority: 0 }, async (job) => {
+				processed.push(job.id);
+				await job.complete();
+			});
 
 			await adapter.addJob("stop-queue", { first: true });
 			await new Promise((resolve) => setTimeout(resolve, 200));
@@ -353,10 +341,7 @@ describe("InMemoryAdapter", () => {
 
 		it("should throw when processing without connection", async () => {
 			await expect(
-				adapter.process(
-					{ queue: "q", concurrency: 1, retries: 0, priority: 0 },
-					async () => {},
-				),
+				adapter.process({ queue: "q", concurrency: 1, retries: 0, priority: 0 }, async () => {}),
 			).rejects.toThrow("Not connected");
 		});
 	});
@@ -404,9 +389,9 @@ describe("BullMQAdapter", () => {
 
 		const config = {
 			host: process.env.REDIS_HOST || "localhost",
-			port: parseInt(process.env.REDIS_PORT || "6379", 10),
+			port: Number.parseInt(process.env.REDIS_PORT || "6379", 10),
 			password: process.env.REDIS_PASSWORD,
-			db: parseInt(process.env.REDIS_DB || "0", 10),
+			db: Number.parseInt(process.env.REDIS_DB || "0", 10),
 		};
 
 		expect(config.host).toBe("redis.example.com");
@@ -430,7 +415,7 @@ describe("BullMQAdapter", () => {
 
 		const config = {
 			host: process.env.REDIS_HOST || "localhost",
-			port: parseInt(process.env.REDIS_PORT || "6379", 10),
+			port: Number.parseInt(process.env.REDIS_PORT || "6379", 10),
 		};
 
 		expect(config.host).toBe("localhost");
@@ -501,12 +486,12 @@ describe("Exponential Backoff", () => {
 			return exponential;
 		});
 
-		expect(delays[0]).toBe(1000);   // 1s
-		expect(delays[1]).toBe(2000);   // 2s
-		expect(delays[2]).toBe(4000);   // 4s
-		expect(delays[3]).toBe(8000);   // 8s
-		expect(delays[4]).toBe(16000);  // 16s
-		expect(delays[5]).toBe(30000);  // capped at 30s
+		expect(delays[0]).toBe(1000); // 1s
+		expect(delays[1]).toBe(2000); // 2s
+		expect(delays[2]).toBe(4000); // 4s
+		expect(delays[3]).toBe(8000); // 8s
+		expect(delays[4]).toBe(16000); // 16s
+		expect(delays[5]).toBe(30000); // capped at 30s
 	});
 
 	it("should cap at maximum delay", () => {

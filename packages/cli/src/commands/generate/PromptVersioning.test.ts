@@ -7,10 +7,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	PROMPT_VERSIONS,
-	getPromptVersion,
-	getAllPromptVersions,
-	getVersionStamp,
 	computeContentHash,
+	getAllPromptVersions,
+	getPromptVersion,
+	getVersionStamp,
 	registerPromptContent,
 } from "./PromptVersioning.js";
 

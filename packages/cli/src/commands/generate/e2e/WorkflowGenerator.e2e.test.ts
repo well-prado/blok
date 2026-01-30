@@ -6,7 +6,7 @@
  * and the 3-attempt feedback loop without requiring an actual OpenAI API key.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -322,12 +322,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: VALID_HTTP_WORKFLOW,
 			} as never);
 
-			const result = await generator.generateWorkflow(
-				"user-api",
-				"Create a user API",
-				"test-api-key",
-				"http",
-			);
+			const result = await generator.generateWorkflow("user-api", "Create a user API", "test-api-key", "http");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(2);
@@ -345,12 +340,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: VALID_HTTP_WORKFLOW,
 			} as never);
 
-			await generator.generateWorkflow(
-				"test-workflow",
-				"Create a test workflow",
-				"test-api-key",
-				"http",
-			);
+			await generator.generateWorkflow("test-workflow", "Create a test workflow", "test-api-key", "http");
 
 			// Second call should contain feedback
 			const secondCallArgs = mockedGenerateText.mock.calls[1][0] as Record<string, unknown>;
@@ -387,12 +377,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: VALID_HTTP_WORKFLOW,
 			} as never);
 
-			const result = await generator.generateWorkflow(
-				"user-api",
-				"Create a user API",
-				"test-api-key",
-				"http",
-			);
+			const result = await generator.generateWorkflow("user-api", "Create a user API", "test-api-key", "http");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(2);
@@ -405,12 +390,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: "This is not valid JSON at all {{{",
 			} as never);
 
-			const result = await generator.generateWorkflow(
-				"broken-workflow",
-				"Create something",
-				"test-api-key",
-				"http",
-			);
+			const result = await generator.generateWorkflow("broken-workflow", "Create something", "test-api-key", "http");
 
 			expect(result.validationResult!.valid).toBe(false);
 			expect(result.validationResult!.errors.some((e: string) => e.includes("Invalid JSON"))).toBe(true);
@@ -424,12 +404,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: VALID_QUEUE_WORKFLOW,
 			} as never);
 
-			await generator.generateWorkflow(
-				"event-processor",
-				"Process events",
-				"test-api-key",
-				"queue",
-			);
+			await generator.generateWorkflow("event-processor", "Process events", "test-api-key", "queue");
 
 			const callArgs = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>;
 			const prompt = callArgs.prompt as string;
@@ -442,12 +417,7 @@ describe("WorkflowGenerator E2E", () => {
 				text: VALID_HTTP_WORKFLOW,
 			} as never);
 
-			await generator.generateWorkflow(
-				"auto-workflow",
-				"Create an API",
-				"test-api-key",
-				"auto",
-			);
+			await generator.generateWorkflow("auto-workflow", "Create an API", "test-api-key", "auto");
 
 			const callArgs = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>;
 			const prompt = callArgs.prompt as string;

@@ -7,7 +7,7 @@
  * and the 3-attempt feedback loop without requiring an actual OpenAI API key.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -497,9 +497,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should generate a valid Go runtime on first attempt", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a Go runtime SDK for Blok", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a Go runtime SDK for Blok", "test-api-key");
 
 			expect(result.language).toBe("go");
 			expect(result.validationResult).toBeDefined();
@@ -511,9 +509,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should parse multiple files from Go runtime output", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a Go runtime SDK", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a Go runtime SDK", "test-api-key");
 
 			expect(result.files.length).toBeGreaterThanOrEqual(4);
 
@@ -529,9 +525,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should generate a valid Java runtime on first attempt", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_JAVA_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"java", "Create a Java runtime SDK for Blok", "test-api-key",
-			);
+			const result = await generator.generateRuntime("java", "Create a Java runtime SDK for Blok", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(1);
@@ -541,9 +535,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should parse Java-specific files", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_JAVA_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"java", "Create a Java runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("java", "Create a Java runtime", "test-api-key");
 
 			const filePaths = result.files.map((f) => f.path);
 			expect(filePaths.some((p) => p.endsWith(".java"))).toBe(true);
@@ -556,9 +548,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should generate a valid Rust runtime on first attempt", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_RUST_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"rust", "Create a Rust runtime SDK for Blok", "test-api-key",
-			);
+			const result = await generator.generateRuntime("rust", "Create a Rust runtime SDK for Blok", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(1);
@@ -567,9 +557,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should parse Rust-specific files", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_RUST_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"rust", "Create a Rust runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("rust", "Create a Rust runtime", "test-api-key");
 
 			const filePaths = result.files.map((f) => f.path);
 			expect(filePaths.some((p) => p.endsWith(".rs"))).toBe(true);
@@ -582,9 +570,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should generate a valid Python runtime on first attempt", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_PYTHON_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"python", "Create a Python runtime SDK for Blok", "test-api-key",
-			);
+			const result = await generator.generateRuntime("python", "Create a Python runtime SDK for Blok", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(1);
@@ -593,9 +579,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should parse Python-specific files", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_PYTHON_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"python", "Create a Python runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("python", "Create a Python runtime", "test-api-key");
 
 			const filePaths = result.files.map((f) => f.path);
 			expect(filePaths.some((p) => p.endsWith(".py"))).toBe(true);
@@ -608,9 +592,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should fail when output has no file markers", async () => {
 			mockedGenerateText.mockResolvedValue({ text: INVALID_RUNTIME_NO_FILES } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(false);
 			expect(result.validationResult!.errors.some((e) => e.includes("multiple files"))).toBe(true);
@@ -619,9 +601,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should fail when /execute endpoint is missing", async () => {
 			mockedGenerateText.mockResolvedValue({ text: INVALID_RUNTIME_MISSING_ENDPOINTS } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(false);
 			expect(result.validationResult!.errors.some((e) => e.includes("/execute"))).toBe(true);
@@ -630,14 +610,14 @@ describe("RuntimeGenerator E2E", () => {
 		it("should fail when NodeHandler/Registry is missing", async () => {
 			mockedGenerateText.mockResolvedValue({ text: INVALID_RUNTIME_NO_HANDLER } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(false);
-			expect(result.validationResult!.errors.some((e) =>
-				e.toLowerCase().includes("nodehandler") || e.toLowerCase().includes("registry"),
-			)).toBe(true);
+			expect(
+				result.validationResult!.errors.some(
+					(e) => e.toLowerCase().includes("nodehandler") || e.toLowerCase().includes("registry"),
+				),
+			).toBe(true);
 		});
 	});
 
@@ -646,9 +626,7 @@ describe("RuntimeGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: INVALID_RUNTIME_NO_FILES } as never);
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a Go runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a Go runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(2);
@@ -670,9 +648,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should exhaust all 3 attempts when runtime keeps failing", async () => {
 			mockedGenerateText.mockResolvedValue({ text: INVALID_RUNTIME_NO_FILES } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a broken runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a broken runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(false);
 			expect(result.validationResult!.attempts).toBe(3);
@@ -684,9 +660,7 @@ describe("RuntimeGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: INVALID_RUNTIME_MISSING_ENDPOINTS } as never);
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a Go runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a Go runtime", "test-api-key");
 
 			expect(result.validationResult!.valid).toBe(true);
 			expect(result.validationResult!.attempts).toBe(3);
@@ -744,9 +718,7 @@ describe("RuntimeGenerator E2E", () => {
 			const wrappedCode = `\`\`\`go\n${VALID_GO_RUNTIME}\n\`\`\``;
 			mockedGenerateText.mockResolvedValueOnce({ text: wrappedCode } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a Go runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a Go runtime", "test-api-key");
 
 			expect(result.rawCode).not.toContain("```");
 			expect(result.validationResult!.valid).toBe(true);
@@ -776,9 +748,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should include prompt version in validation result", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a runtime", "test-api-key");
 
 			expect(result.validationResult!.promptVersion).toContain("create-runtime@");
 		});
@@ -786,9 +756,7 @@ describe("RuntimeGenerator E2E", () => {
 		it("should include duration in validation result", async () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_GO_RUNTIME } as never);
 
-			const result = await generator.generateRuntime(
-				"go", "Create a runtime", "test-api-key",
-			);
+			const result = await generator.generateRuntime("go", "Create a runtime", "test-api-key");
 
 			expect(result.validationResult!.durationMs).toBeGreaterThanOrEqual(0);
 		});
@@ -805,7 +773,7 @@ describe("RuntimeGenerator E2E", () => {
 				"// FILE: lib.go",
 				"package lib",
 				"",
-				"func Hello() string { return \"hello\" }",
+				'func Hello() string { return "hello" }',
 			].join("\n");
 
 			const files = generator.parseFiles(code, "go");

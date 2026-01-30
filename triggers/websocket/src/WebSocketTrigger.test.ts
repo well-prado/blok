@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { HelperResponse } from "@nanoservice-ts/helper";
 import type { NanoService } from "@nanoservice-ts/runner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	WebSocketTrigger,
-	type WebSocketClient,
-	type WebSocketMessage,
-	type WebSocketEvent,
 	type AuthResult,
+	type WebSocketClient,
+	type WebSocketEvent,
+	type WebSocketMessage,
+	WebSocketTrigger,
 } from "./WebSocketTrigger";
 
 // Mock implementations
@@ -281,7 +281,7 @@ describe("WebSocketTrigger", () => {
 
 			expect(success).toBe(true);
 			expect(mockSocket.send).toHaveBeenCalledWith(
-				JSON.stringify({ event: "notification", data: { message: "Hello" } })
+				JSON.stringify({ event: "notification", data: { message: "Hello" } }),
 			);
 		});
 

@@ -5,10 +5,10 @@
  * and invoking them with mock Request/Response objects. This validates
  * the full API surface without needing Express or an HTTP server.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { registerTraceRoutes } from "../../tracing/TraceRouter";
-import { RunTracker } from "../../tracing/RunTracker";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
+import { RunTracker } from "../../tracing/RunTracker";
+import { registerTraceRoutes } from "../../tracing/TraceRouter";
 
 // --- Mock infrastructure ---
 
@@ -54,13 +54,15 @@ class MockRequest {
 	body?: unknown;
 	private listeners: Map<string, (() => void)[]> = new Map();
 
-	constructor(opts?: Partial<{
-		method: string;
-		params: Record<string, string>;
-		query: Record<string, string | undefined>;
-		headers: Record<string, string | string[] | undefined>;
-		body: unknown;
-	}>) {
+	constructor(
+		opts?: Partial<{
+			method: string;
+			params: Record<string, string>;
+			query: Record<string, string | undefined>;
+			headers: Record<string, string | string[] | undefined>;
+			body: unknown;
+		}>,
+	) {
 		this.method = opts?.method || "GET";
 		this.params = opts?.params || {};
 		this.query = opts?.query || {};
@@ -247,7 +249,9 @@ describe("TraceRouter", () => {
 			const res = new MockResponse();
 			let nextCalled = false;
 
-			router.middlewares[0](req, res, () => { nextCalled = true; });
+			router.middlewares[0](req, res, () => {
+				nextCalled = true;
+			});
 
 			expect(res.headersMap.get("Access-Control-Allow-Origin")).toBe("*");
 			expect(res.headersMap.get("Access-Control-Allow-Methods")).toContain("GET");
@@ -259,7 +263,9 @@ describe("TraceRouter", () => {
 			const res = new MockResponse();
 			let nextCalled = false;
 
-			router.middlewares[0](req, res, () => { nextCalled = true; });
+			router.middlewares[0](req, res, () => {
+				nextCalled = true;
+			});
 
 			expect(res.sentStatus).toBe(204);
 			expect(nextCalled).toBe(false);
@@ -1280,9 +1286,10 @@ describe("TraceRouter", () => {
 			const originalFetch = globalThis.fetch;
 			globalThis.fetch = vi.fn().mockResolvedValue({
 				ok: true,
-				json: () => Promise.resolve({
-					choices: [{ message: { content: "The error was caused by a connection timeout to the database." } }],
-				}),
+				json: () =>
+					Promise.resolve({
+						choices: [{ message: { content: "The error was caused by a connection timeout to the database." } }],
+					}),
 			});
 
 			const req = new MockRequest({
@@ -1342,9 +1349,10 @@ describe("TraceRouter", () => {
 			const originalFetch = globalThis.fetch;
 			globalThis.fetch = vi.fn().mockResolvedValue({
 				ok: true,
-				json: () => Promise.resolve({
-					choices: [{ message: { content: "The db-query node failed due to a connection timeout." } }],
-				}),
+				json: () =>
+					Promise.resolve({
+						choices: [{ message: { content: "The db-query node failed due to a connection timeout." } }],
+					}),
 			});
 
 			// Find the failed node in run2

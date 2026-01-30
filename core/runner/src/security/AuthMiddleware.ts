@@ -151,7 +151,13 @@ export class AuthMiddleware {
 	 */
 	expressMiddleware() {
 		return async (
-			req: { headers: Record<string, string>; query: Record<string, string>; path: string; method: string; auth?: AuthIdentity },
+			req: {
+				headers: Record<string, string>;
+				query: Record<string, string>;
+				path: string;
+				method: string;
+				auth?: AuthIdentity;
+			},
 			res: { status: (code: number) => { json: (body: unknown) => void } },
 			next: () => void,
 		) => {
@@ -176,9 +182,7 @@ export class AuthMiddleware {
 	}
 
 	private isExcludedPath(path: string): boolean {
-		return (this.config.excludePaths || []).some(
-			(excluded) => path === excluded || path.startsWith(`${excluded}/`),
-		);
+		return (this.config.excludePaths || []).some((excluded) => path === excluded || path.startsWith(`${excluded}/`));
 	}
 }
 

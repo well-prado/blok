@@ -4,7 +4,7 @@
  * Tests the PubSubTrigger base class and adapter interfaces.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("PubSubTrigger", () => {
 	describe("PubSubMessage Interface", () => {
@@ -93,7 +93,7 @@ describe("AWSSNSAdapter", () => {
 
 		const config = {
 			region: process.env.AWS_REGION || "us-east-1",
-			waitTimeSeconds: parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
+			waitTimeSeconds: Number.parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
 		};
 
 		expect(config.region).toBe("eu-central-1");

@@ -6,7 +6,7 @@
  * and code cleanup without requiring an actual OpenAI API key.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -29,9 +29,9 @@ vi.mock("../validators/NodeValidator.js", () => ({
 }));
 
 import { generateText } from "ai";
+import NodeGenerator from "../NodeGenerator.js";
 import * as CompilationValidator from "../validators/CompilationValidator.js";
 import * as NodeValidator from "../validators/NodeValidator.js";
-import NodeGenerator from "../NodeGenerator.js";
 
 const mockedGenerateText = vi.mocked(generateText);
 const mockedValidateCode = vi.mocked(CompilationValidator.validateCode);
@@ -110,8 +110,11 @@ describe("NodeGenerator E2E", () => {
 			mockValidPass();
 
 			const result = await generator.generateNode(
-				"fetch-user", "Create a node that fetches user data from an API",
-				"test-api-key", false, "function",
+				"fetch-user",
+				"Create a node that fetches user data from an API",
+				"test-api-key",
+				false,
+				"function",
 			);
 
 			expect(result.nodeName).toBe("fetch-user");
@@ -127,8 +130,11 @@ describe("NodeGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
 			const result = await generator.generateNode(
-				"hello-node", "Create a hello world node",
-				"test-api-key", false, "class",
+				"hello-node",
+				"Create a hello world node",
+				"test-api-key",
+				false,
+				"class",
 			);
 
 			expect(result.nodeName).toBe("hello-node");
@@ -197,8 +203,11 @@ describe("NodeGenerator E2E", () => {
 			mockValidPass();
 
 			const result = await generator.generateNode(
-				"fetch-user", "Create a node that fetches user data",
-				"test-api-key", false, "function",
+				"fetch-user",
+				"Create a node that fetches user data",
+				"test-api-key",
+				false,
+				"function",
 			);
 
 			expect(result.validationResult!.attempts).toBe(2);
@@ -228,8 +237,11 @@ describe("NodeGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: false, errors: ["Missing imports"], warnings: [] });
 
 			const result = await generator.generateNode(
-				"broken-node", "Create something broken",
-				"test-api-key", false, "function",
+				"broken-node",
+				"Create something broken",
+				"test-api-key",
+				false,
+				"function",
 			);
 
 			expect(result.validationResult!.valid).toBe(false);
@@ -248,8 +260,11 @@ describe("NodeGenerator E2E", () => {
 			mockValidPass();
 
 			const result = await generator.generateNode(
-				"fetch-user", "Create a user fetcher",
-				"test-api-key", false, "function",
+				"fetch-user",
+				"Create a user fetcher",
+				"test-api-key",
+				false,
+				"function",
 			);
 
 			expect(result.validationResult!.attempts).toBe(3);
@@ -270,10 +285,7 @@ describe("NodeGenerator E2E", () => {
 				suggestions: [],
 			});
 
-			const result = await generator.generateNode(
-				"test-node", "Create test node",
-				"test-api-key", false, "function",
-			);
+			const result = await generator.generateNode("test-node", "Create test node", "test-api-key", false, "function");
 
 			expect(result.validationResult!.valid).toBe(false);
 			expect(result.validationResult!.errors.some((e: string) => e.toLowerCase().includes("definenode"))).toBe(true);
@@ -283,10 +295,7 @@ describe("NodeGenerator E2E", () => {
 			mockedGenerateText.mockResolvedValueOnce({ text: VALID_CLASS_BASED_NODE } as never);
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 
-			const result = await generator.generateNode(
-				"test-node", "Create test node",
-				"test-api-key", false, "class",
-			);
+			const result = await generator.generateNode("test-node", "Create test node", "test-api-key", false, "class");
 
 			expect(result.validationResult!.valid).toBe(true);
 			// NodeValidator.validateFunctionFirstStructure should NOT be called for class style
@@ -301,8 +310,11 @@ describe("NodeGenerator E2E", () => {
 			mockValidPass();
 
 			const result = await generator.generateNode(
-				"fetch-user", "Create a user fetcher",
-				"test-api-key", false, "function",
+				"fetch-user",
+				"Create a user fetcher",
+				"test-api-key",
+				false,
+				"function",
 			);
 
 			expect(result.code).toBe(wrappedCode);

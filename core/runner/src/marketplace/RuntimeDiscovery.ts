@@ -6,10 +6,10 @@
  * intelligent package recommendations for the Blok marketplace.
  */
 
+import type { RuntimeRegistry } from "../RuntimeRegistry";
 import type { RuntimeKind } from "../adapters/RuntimeAdapter";
-import { RuntimeRegistry } from "../RuntimeRegistry";
 import type { RuntimePackageManifest } from "./RuntimeCatalog";
-import { RuntimeCatalog } from "./RuntimeCatalog";
+import type { RuntimeCatalog } from "./RuntimeCatalog";
 
 export interface CompatibilityInfo {
 	compatible: boolean;
@@ -140,7 +140,7 @@ export class RuntimeDiscovery {
 	checkCompatibility(manifest: RuntimePackageManifest): CompatibilityInfo {
 		const warnings: string[] = [];
 		let runtimeAvailable = false;
-		let blokVersionMatch = true;
+		const blokVersionMatch = true;
 		let protocolSupported = true;
 
 		// Check if the runtime adapter is registered
@@ -196,9 +196,7 @@ export class RuntimeDiscovery {
 		// Filter by tags if provided
 		if (tags && tags.length > 0) {
 			candidates = candidates.filter((pkg) =>
-				tags.some((tag) =>
-					pkg.tags.some((pkgTag) => pkgTag.toLowerCase() === tag.toLowerCase()),
-				),
+				tags.some((tag) => pkg.tags.some((pkgTag) => pkgTag.toLowerCase() === tag.toLowerCase())),
 			);
 		}
 

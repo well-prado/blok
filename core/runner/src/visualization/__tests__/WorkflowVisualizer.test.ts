@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { WorkflowVisualizer, type WorkflowDef } from "../WorkflowVisualizer";
+import { beforeEach, describe, expect, it } from "vitest";
+import { type WorkflowDef, WorkflowVisualizer } from "../WorkflowVisualizer";
 
 // -- Fixtures --
 
@@ -348,9 +348,9 @@ describe("WorkflowVisualizer", () => {
 			viz.addWorkflow(httpWorkflow);
 			const output = viz.toDot();
 
-			expect(output).toContain('#4CAF50'); // trigger green
-			expect(output).toContain('#2196F3'); // step blue
-			expect(output).toContain('#9E9E9E'); // end grey
+			expect(output).toContain("#4CAF50"); // trigger green
+			expect(output).toContain("#2196F3"); // step blue
+			expect(output).toContain("#9E9E9E"); // end grey
 		});
 
 		it("should use subgraphs for multiple workflows", () => {
@@ -374,7 +374,7 @@ describe("WorkflowVisualizer", () => {
 			const output = viz.toDot();
 
 			expect(output).toContain("shape=diamond");
-			expect(output).toContain('#FF9800'); // condition orange
+			expect(output).toContain("#FF9800"); // condition orange
 		});
 
 		it("should use dashed edges for condition branches", () => {
@@ -461,9 +461,15 @@ describe("WorkflowVisualizer", () => {
 
 		it("should return summaries for all trigger types", () => {
 			viz.addWorkflows([
-				httpWorkflow, cronWorkflow, queueWorkflow,
-				webhookWorkflow, wsWorkflow, grpcWorkflow,
-				pubsubWorkflow, sseWorkflow, workerWorkflow,
+				httpWorkflow,
+				cronWorkflow,
+				queueWorkflow,
+				webhookWorkflow,
+				wsWorkflow,
+				grpcWorkflow,
+				pubsubWorkflow,
+				sseWorkflow,
+				workerWorkflow,
 				manualWorkflow,
 			]);
 			const summaries = viz.getSummary();

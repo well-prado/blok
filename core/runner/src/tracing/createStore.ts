@@ -1,5 +1,5 @@
-import type { RunStore } from "./RunStore";
 import { InMemoryRunStore } from "./InMemoryRunStore";
+import type { RunStore } from "./RunStore";
 
 export type StoreType = "memory" | "sqlite" | "postgres";
 
@@ -33,10 +33,9 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 	const type = opts?.type || (process.env.BLOK_TRACE_STORE as StoreType) || "memory";
 	const sqlitePath = opts?.sqlitePath || process.env.BLOK_TRACE_SQLITE_PATH || ".blok/trace.db";
 
-	const retentionDays = opts?.retentionDays ??
-		(process.env.BLOK_TRACE_RETENTION_DAYS
-			? Number.parseInt(process.env.BLOK_TRACE_RETENTION_DAYS, 10)
-			: 7);
+	const retentionDays =
+		opts?.retentionDays ??
+		(process.env.BLOK_TRACE_RETENTION_DAYS ? Number.parseInt(process.env.BLOK_TRACE_RETENTION_DAYS, 10) : 7);
 
 	let store: RunStore;
 
@@ -46,18 +45,17 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 			if (!connectionString) {
 				throw new Error(
 					"PostgresRunStore requires a connection string.\n" +
-					"Set BLOK_TRACE_DATABASE_URL environment variable or pass postgresUrl option.\n" +
-					"Example: BLOK_TRACE_DATABASE_URL=postgres://user:pass@localhost:5432/blok",
+						"Set BLOK_TRACE_DATABASE_URL environment variable or pass postgresUrl option.\n" +
+						"Example: BLOK_TRACE_DATABASE_URL=postgres://user:pass@localhost:5432/blok",
 				);
 			}
 
-			const poolSize = opts?.postgresPoolSize ??
-				(process.env.BLOK_TRACE_PG_POOL_SIZE
-					? Number.parseInt(process.env.BLOK_TRACE_PG_POOL_SIZE, 10)
-					: 5);
+			const poolSize =
+				opts?.postgresPoolSize ??
+				(process.env.BLOK_TRACE_PG_POOL_SIZE ? Number.parseInt(process.env.BLOK_TRACE_PG_POOL_SIZE, 10) : 5);
 
-			const ssl = opts?.postgresSsl ??
-				(process.env.BLOK_TRACE_PG_SSL === "true" ? { rejectUnauthorized: false } : false);
+			const ssl =
+				opts?.postgresSsl ?? (process.env.BLOK_TRACE_PG_SSL === "true" ? { rejectUnauthorized: false } : false);
 
 			// Dynamic import to avoid hard dependency
 			const { PostgresRunStore } = require("./PostgresRunStore") as typeof import("./PostgresRunStore");
@@ -69,10 +67,13 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 
 			// Apply retention policy after initialization completes
 			if (retentionDays > 0) {
-				(store as import("./PostgresRunStore").PostgresRunStore).ready().then(() => {
-					const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-					store.deleteRunsBefore(cutoff);
-				}).catch(() => {});
+				(store as import("./PostgresRunStore").PostgresRunStore)
+					.ready()
+					.then(() => {
+						const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+						store.deleteRunsBefore(cutoff);
+					})
+					.catch(() => {});
 			}
 
 			return store;

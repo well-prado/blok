@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
 import { generateObject } from "ai";
 import { z } from "zod";
 
@@ -77,8 +77,7 @@ export default defineNode({
 		for (const group of grouped) {
 			tableSchema.push(`Table: ${group.table_name}`);
 			const tableSchemaGroup: string[] = group.items.map(
-				(col) =>
-					`- ${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
+				(col) => `- ${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
 			);
 
 			for (const col of tableSchemaGroup) {
@@ -92,8 +91,7 @@ export default defineNode({
 				structuredOutputs: true,
 			}),
 			schemaName: "queries",
-			schemaDescription:
-				"Generate SQL queries for data visualization in a PostgreSQL",
+			schemaDescription: "Generate SQL queries for data visualization in a PostgreSQL",
 			schema: z.object({
 				prompt: z.string(),
 				queries: z.array(

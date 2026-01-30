@@ -11,7 +11,12 @@ describe("TriggerGenerator", () => {
 	describe("validateTriggerStructure (via reflection)", () => {
 		// Access private method through bracket notation for testing
 		const generator = new TriggerGenerator();
-		const validate = (code: string) => (generator as unknown as { validateTriggerStructure: (code: string) => { valid: boolean; errors: string[]; warnings: string[] } }).validateTriggerStructure(code);
+		const validate = (code: string) =>
+			(
+				generator as unknown as {
+					validateTriggerStructure: (code: string) => { valid: boolean; errors: string[]; warnings: string[] };
+				}
+			).validateTriggerStructure(code);
 
 		it("should pass for valid trigger code", () => {
 			const validCode = `
@@ -64,7 +69,7 @@ export default class MyTrigger {
 
 			const result = validate(code);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("TriggerBase"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("TriggerBase"))).toBe(true);
 		});
 
 		it("should fail for trigger missing loadNodes", () => {
@@ -87,7 +92,7 @@ export default class MyTrigger extends TriggerBase {
 
 			const result = validate(code);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("loadNodes"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("loadNodes"))).toBe(true);
 		});
 
 		it("should fail for trigger missing loadWorkflows", () => {
@@ -110,7 +115,7 @@ export default class MyTrigger extends TriggerBase {
 
 			const result = validate(code);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("loadWorkflows"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("loadWorkflows"))).toBe(true);
 		});
 
 		it("should fail for trigger missing createContext", () => {
@@ -135,7 +140,7 @@ export default class MyTrigger extends TriggerBase {
 
 			const result = validate(code);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("createContext"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("createContext"))).toBe(true);
 		});
 
 		it("should fail for constructor without super()", () => {
@@ -159,7 +164,7 @@ export default class MyTrigger extends TriggerBase {
 
 			const result = validate(code);
 			expect(result.valid).toBe(false);
-			expect(result.errors.some(e => e.includes("super()"))).toBe(true);
+			expect(result.errors.some((e) => e.includes("super()"))).toBe(true);
 		});
 
 		it("should warn when request data is not populated on context", () => {
@@ -185,14 +190,16 @@ export default class MyTrigger extends TriggerBase {
 
 			const result = validate(code);
 			expect(result.valid).toBe(true);
-			expect(result.warnings.some(w => w.includes("ctx.request") || w.includes("event data"))).toBe(true);
+			expect(result.warnings.some((w) => w.includes("ctx.request") || w.includes("event data"))).toBe(true);
 		});
 	});
 
 	describe("buildEnhancedPrompt (via reflection)", () => {
 		const generator = new TriggerGenerator();
 		const buildPrompt = (userPrompt: string, triggerType: string, triggerName: string) =>
-			(generator as unknown as { buildEnhancedPrompt: (u: string, t: string, n: string) => string }).buildEnhancedPrompt(userPrompt, triggerType, triggerName);
+			(
+				generator as unknown as { buildEnhancedPrompt: (u: string, t: string, n: string) => string }
+			).buildEnhancedPrompt(userPrompt, triggerType, triggerName);
 
 		it("should include trigger type in prompt", () => {
 			const result = buildPrompt("Process user events", "queue", "user-queue");

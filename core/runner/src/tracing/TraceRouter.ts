@@ -1,5 +1,5 @@
-import type { RunEvent, WorkflowRun, NodeRun, TraceLogEntry } from "./types";
 import { RunTracker } from "./RunTracker";
+import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
 
 /**
  * Minimal interfaces matching the Express API surface used by trace routes.
@@ -456,7 +456,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const path = parts[1] || "/";
 
 		// Determine the host to call (use the incoming request's Host header)
-		const host = req.headers.host as string || "localhost:4000";
+		const host = (req.headers.host as string) || "localhost:4000";
 		const protocol = "http";
 		const url = `${protocol}://${host}${path}`;
 
@@ -466,7 +466,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const finalUrl = overrides.path ? `${protocol}://${host}${overrides.path}` : url;
 		const customHeaders: Record<string, string> = {
 			"Content-Type": "application/json",
-			...(overrides.headers as Record<string, string> || {}),
+			...((overrides.headers as Record<string, string>) || {}),
 		};
 		const body = overrides.body !== undefined ? JSON.stringify(overrides.body) : undefined;
 
@@ -609,21 +609,23 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 		// Search workflows
 		const allWorkflows = t.getWorkflowSummaries();
-		const matchedWorkflows = allWorkflows.filter((w) =>
-			w.name.toLowerCase().includes(query) ||
-			w.path.toLowerCase().includes(query) ||
-			w.triggerTypes.some((tt) => tt.toLowerCase().includes(query)),
+		const matchedWorkflows = allWorkflows.filter(
+			(w) =>
+				w.name.toLowerCase().includes(query) ||
+				w.path.toLowerCase().includes(query) ||
+				w.triggerTypes.some((tt) => tt.toLowerCase().includes(query)),
 		);
 
 		// Search runs (by ID, workflow name, trigger summary, or error message)
 		const { runs: allRuns } = t.getRuns({ limit: 200 });
 		const matchedRuns = allRuns
-			.filter((r) =>
-				r.id.toLowerCase().includes(query) ||
-				r.workflowName.toLowerCase().includes(query) ||
-				r.triggerSummary.toLowerCase().includes(query) ||
-				r.error?.message.toLowerCase().includes(query) ||
-				r.status.toLowerCase().includes(query),
+			.filter(
+				(r) =>
+					r.id.toLowerCase().includes(query) ||
+					r.workflowName.toLowerCase().includes(query) ||
+					r.triggerSummary.toLowerCase().includes(query) ||
+					r.error?.message.toLowerCase().includes(query) ||
+					r.status.toLowerCase().includes(query),
 			)
 			.slice(0, 20);
 
@@ -789,9 +791,8 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 			eventsToReplay = idx >= 0 ? existingEvents.slice(idx + 1) : existingEvents;
 		} else {
 			// Fresh connection — only replay the most recent events
-			eventsToReplay = existingEvents.length > MAX_REPLAY_EVENTS
-				? existingEvents.slice(-MAX_REPLAY_EVENTS)
-				: existingEvents;
+			eventsToReplay =
+				existingEvents.length > MAX_REPLAY_EVENTS ? existingEvents.slice(-MAX_REPLAY_EVENTS) : existingEvents;
 		}
 
 		for (const event of eventsToReplay) {
@@ -800,7 +801,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 		// If run already finished, close stream
 		if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
-			res.write("event: stream-end\ndata: {\"reason\":\"run_finished\"}\n\n");
+			res.write('event: stream-end\ndata: {"reason":"run_finished"}\n\n');
 			res.end();
 			return;
 		}
@@ -812,7 +813,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 			// Auto-close when run finishes
 			if (event.type === "RUN_COMPLETED" || event.type === "RUN_FAILED") {
-				res.write("event: stream-end\ndata: {\"reason\":\"run_finished\"}\n\n");
+				res.write('event: stream-end\ndata: {"reason":"run_finished"}\n\n');
 				res.end();
 			}
 		};
@@ -836,9 +837,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 	 * Optionally filtered by workflow names.
 	 */
 	router.get("/stream", (req: TraceRequest, res: TraceResponse) => {
-		const workflowFilter = req.query.workflows
-			? req.query.workflows.split(",").map((w: string) => w.trim())
-			: null;
+		const workflowFilter = req.query.workflows ? req.query.workflows.split(",").map((w: string) => w.trim()) : null;
 
 		// Set SSE headers
 		res.setHeader("Content-Type", "text/event-stream");
@@ -889,50 +888,84 @@ function escapeCsv(value: unknown): string {
 
 function runsToCsv(runs: WorkflowRun[]): string {
 	const headers = [
-		"id", "workflowName", "workflowPath", "triggerType", "triggerSummary",
-		"status", "startedAt", "finishedAt", "durationMs", "nodeCount",
-		"completedNodes", "error", "tags",
+		"id",
+		"workflowName",
+		"workflowPath",
+		"triggerType",
+		"triggerSummary",
+		"status",
+		"startedAt",
+		"finishedAt",
+		"durationMs",
+		"nodeCount",
+		"completedNodes",
+		"error",
+		"tags",
 	];
 	const rows = runs.map((r) => [
-		r.id, r.workflowName, r.workflowPath, r.triggerType, r.triggerSummary,
-		r.status, new Date(r.startedAt).toISOString(),
+		r.id,
+		r.workflowName,
+		r.workflowPath,
+		r.triggerType,
+		r.triggerSummary,
+		r.status,
+		new Date(r.startedAt).toISOString(),
 		r.finishedAt ? new Date(r.finishedAt).toISOString() : "",
-		r.durationMs ?? "", r.nodeCount, r.completedNodes,
-		r.error?.message ?? "", (r.tags || []).join(";"),
+		r.durationMs ?? "",
+		r.nodeCount,
+		r.completedNodes,
+		r.error?.message ?? "",
+		(r.tags || []).join(";"),
 	]);
 	return `${[headers.join(","), ...rows.map((row) => row.map(escapeCsv).join(","))].join("\n")}\n`;
 }
 
 function singleRunToCsv(run: WorkflowRun, nodes: NodeRun[], logs: TraceLogEntry[]): string {
 	let csv = "# Run Summary\n";
-	csv += "id,workflowName,triggerType,triggerSummary,status,startedAt,finishedAt,durationMs,nodeCount,completedNodes,error\n";
+	csv +=
+		"id,workflowName,triggerType,triggerSummary,status,startedAt,finishedAt,durationMs,nodeCount,completedNodes,error\n";
 	csv += `${[
-		run.id, run.workflowName, run.triggerType, run.triggerSummary,
-		run.status, new Date(run.startedAt).toISOString(),
+		run.id,
+		run.workflowName,
+		run.triggerType,
+		run.triggerSummary,
+		run.status,
+		new Date(run.startedAt).toISOString(),
 		run.finishedAt ? new Date(run.finishedAt).toISOString() : "",
-		run.durationMs ?? "", run.nodeCount, run.completedNodes,
+		run.durationMs ?? "",
+		run.nodeCount,
+		run.completedNodes,
 		run.error?.message ?? "",
-	].map(escapeCsv).join(",")}\n`;
+	]
+		.map(escapeCsv)
+		.join(",")}\n`;
 
 	csv += "\n# Nodes\n";
 	csv += "id,nodeName,nodeType,runtimeKind,status,startedAt,finishedAt,durationMs,stepIndex,depth,error\n";
 	for (const n of nodes) {
 		csv += `${[
-			n.id, n.nodeName, n.nodeType, n.runtimeKind ?? "",
-			n.status, new Date(n.startedAt).toISOString(),
+			n.id,
+			n.nodeName,
+			n.nodeType,
+			n.runtimeKind ?? "",
+			n.status,
+			new Date(n.startedAt).toISOString(),
 			n.finishedAt ? new Date(n.finishedAt).toISOString() : "",
-			n.durationMs ?? "", n.stepIndex, n.depth,
+			n.durationMs ?? "",
+			n.stepIndex,
+			n.depth,
 			n.error?.message ?? "",
-		].map(escapeCsv).join(",")}\n`;
+		]
+			.map(escapeCsv)
+			.join(",")}\n`;
 	}
 
 	csv += "\n# Logs\n";
 	csv += "id,nodeName,level,message,timestamp\n";
 	for (const l of logs) {
-		csv += `${[
-			l.id, l.nodeName ?? "", l.level, l.message,
-			new Date(l.timestamp).toISOString(),
-		].map(escapeCsv).join(",")}\n`;
+		csv += `${[l.id, l.nodeName ?? "", l.level, l.message, new Date(l.timestamp).toISOString()]
+			.map(escapeCsv)
+			.join(",")}\n`;
 	}
 
 	return csv;
@@ -948,7 +981,10 @@ function buildNodeErrorContext(
 ): string {
 	const timeline = allNodes
 		.sort((a, b) => a.stepIndex - b.stepIndex)
-		.map((n) => `  [${n.stepIndex}] ${n.nodeName} (${n.nodeType}${n.runtimeKind ? `, ${n.runtimeKind}` : ""}) → ${n.status}${n.durationMs ? ` (${n.durationMs}ms)` : ""}`)
+		.map(
+			(n) =>
+				`  [${n.stepIndex}] ${n.nodeName} (${n.nodeType}${n.runtimeKind ? `, ${n.runtimeKind}` : ""}) → ${n.status}${n.durationMs ? ` (${n.durationMs}ms)` : ""}`,
+		)
 		.join("\n");
 
 	const logLines = nodeLogs
@@ -997,11 +1033,17 @@ function buildRunErrorContext(
 ): string {
 	const timeline = allNodes
 		.sort((a, b) => a.stepIndex - b.stepIndex)
-		.map((n) => `  [${n.stepIndex}] ${n.nodeName} (${n.nodeType}${n.runtimeKind ? `, ${n.runtimeKind}` : ""}) → ${n.status}${n.durationMs ? ` (${n.durationMs}ms)` : ""}`)
+		.map(
+			(n) =>
+				`  [${n.stepIndex}] ${n.nodeName} (${n.nodeType}${n.runtimeKind ? `, ${n.runtimeKind}` : ""}) → ${n.status}${n.durationMs ? ` (${n.durationMs}ms)` : ""}`,
+		)
 		.join("\n");
 
 	const failedDetails = failedNodes
-		.map((n) => `### ${n.nodeName}\n- Error: ${n.error?.message || "Unknown"}\n${n.error?.stack ? `- Stack: ${n.error.stack.split("\n").slice(0, 5).join("\n")}` : ""}${n.inputs ? `\n- Input: ${JSON.stringify(n.inputs, null, 2).slice(0, 500)}` : ""}`)
+		.map(
+			(n) =>
+				`### ${n.nodeName}\n- Error: ${n.error?.message || "Unknown"}\n${n.error?.stack ? `- Stack: ${n.error.stack.split("\n").slice(0, 5).join("\n")}` : ""}${n.inputs ? `\n- Input: ${JSON.stringify(n.inputs, null, 2).slice(0, 500)}` : ""}`,
+		)
 		.join("\n\n");
 
 	const errorLogs = logs
@@ -1046,7 +1088,8 @@ async function callOpenAI(apiKey: string, model: string, prompt: string): Promis
 			messages: [
 				{
 					role: "system",
-					content: "You are an expert workflow debugging assistant for Blok, a workflow orchestration framework. Provide concise, actionable debugging advice. Use markdown formatting for readability.",
+					content:
+						"You are an expert workflow debugging assistant for Blok, a workflow orchestration framework. Provide concise, actionable debugging advice. Use markdown formatting for readability.",
 				},
 				{ role: "user", content: prompt },
 			],
@@ -1057,7 +1100,9 @@ async function callOpenAI(apiKey: string, model: string, prompt: string): Promis
 
 	if (!response.ok) {
 		const err = await response.json().catch(() => ({}));
-		throw new Error((err as { error?: { message?: string } }).error?.message || `OpenAI API returned ${response.status}`);
+		throw new Error(
+			(err as { error?: { message?: string } }).error?.message || `OpenAI API returned ${response.status}`,
+		);
 	}
 
 	const data = (await response.json()) as {

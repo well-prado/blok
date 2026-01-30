@@ -5,11 +5,11 @@
  * work correctly together as integrated into TriggerBase.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CircuitBreaker, CircuitOpenError } from "../../src/monitoring/CircuitBreaker";
 import { HealthCheck } from "../../src/monitoring/HealthCheck";
 import type { DependencyHealth } from "../../src/monitoring/HealthCheck";
 import { RateLimiter } from "../../src/monitoring/RateLimiter";
-import { CircuitBreaker, CircuitOpenError } from "../../src/monitoring/CircuitBreaker";
 import { TriggerMetricsCollector } from "../../src/monitoring/TriggerMetricsCollector";
 
 describe("Monitoring Infrastructure Integration", () => {
@@ -256,11 +256,7 @@ describe("Monitoring Infrastructure Integration", () => {
 			}
 
 			expect(circuitBreaker.getState()).toBe("CLOSED");
-			expect(stateChanges).toEqual([
-				"CLOSED -> OPEN",
-				"OPEN -> HALF_OPEN",
-				"HALF_OPEN -> CLOSED",
-			]);
+			expect(stateChanges).toEqual(["CLOSED -> OPEN", "OPEN -> HALF_OPEN", "HALF_OPEN -> CLOSED"]);
 		});
 
 		it("should re-open from HALF_OPEN on failure", async () => {

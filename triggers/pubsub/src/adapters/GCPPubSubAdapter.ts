@@ -10,9 +10,9 @@
  * - PUBSUB_EMULATOR_HOST: Pub/Sub emulator host for local development (optional)
  */
 
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 import type { PubSubTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 
 /**
  * GCP Pub/Sub configuration
@@ -85,19 +85,14 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			this.connected = false;
 			console.log("[GCPPubSubAdapter] Disconnected from GCP Pub/Sub");
 		} catch (error) {
-			console.error(
-				`[GCPPubSubAdapter] Error disconnecting: ${(error as Error).message}`,
-			);
+			console.error(`[GCPPubSubAdapter] Error disconnecting: ${(error as Error).message}`);
 		}
 	}
 
 	/**
 	 * Subscribe to a GCP Pub/Sub topic
 	 */
-	async subscribe(
-		config: PubSubTriggerOpts,
-		handler: (message: PubSubMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: PubSubTriggerOpts, handler: (message: PubSubMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to GCP Pub/Sub. Call connect() first.");
 		}
@@ -144,9 +139,7 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			try {
 				await handler(pubsubMessage);
 			} catch (error) {
-				console.error(
-					`[GCPPubSubAdapter] Error processing message: ${(error as Error).message}`,
-				);
+				console.error(`[GCPPubSubAdapter] Error processing message: ${(error as Error).message}`);
 			}
 		};
 

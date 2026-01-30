@@ -3,15 +3,12 @@
  * Tests WebAssembly module execution, caching, and error handling
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { WasmRuntimeAdapter } from "../WasmRuntimeAdapter";
-import type RunnerNode from "../../RunnerNode";
-import {
-	createMockContext,
-	assertValidExecutionResult,
-} from "../../../test/helpers/test-utils";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assertValidExecutionResult, createMockContext } from "../../../test/helpers/test-utils";
+import type RunnerNode from "../../RunnerNode";
+import { WasmRuntimeAdapter } from "../WasmRuntimeAdapter";
 
 describe("WasmRuntimeAdapter", () => {
 	let adapter: WasmRuntimeAdapter;
@@ -276,8 +273,14 @@ function buildMinimalWasmModule(): Buffer {
 	// WASM magic number: \0asm
 	// Version: 1
 	const bytes: number[] = [
-		0x00, 0x61, 0x73, 0x6d, // magic: \0asm
-		0x01, 0x00, 0x00, 0x00, // version: 1
+		0x00,
+		0x61,
+		0x73,
+		0x6d, // magic: \0asm
+		0x01,
+		0x00,
+		0x00,
+		0x00, // version: 1
 	];
 
 	return Buffer.from(bytes);

@@ -9,9 +9,9 @@
  * - Metrics collection (connections, events, channels)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { HelperResponse } from "@nanoservice-ts/helper";
 import type { NanoService } from "@nanoservice-ts/runner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SSETrigger } from "./SSETrigger";
 
 /**
@@ -276,9 +276,7 @@ describe("SSE Trigger - Monitoring Integration", () => {
 
 		it("should broadcast to all connected clients", async () => {
 			const mocks = Array.from({ length: 4 }, () => createMockWriter());
-			const clients = await Promise.all(
-				mocks.map((m) => trigger.handleConnection(m.write, m.close)),
-			);
+			const clients = await Promise.all(mocks.map((m) => trigger.handleConnection(m.write, m.close)));
 
 			const sent = trigger.broadcastToAll({
 				id: "broadcast-1",
@@ -334,11 +332,7 @@ describe("SSE Trigger - Monitoring Integration", () => {
 
 			// Reconnect with Last-Event-ID
 			const mock2 = createMockWriter();
-			const client2 = await trigger.handleConnection(
-				mock2.write,
-				mock2.close,
-				{ "last-event-id": "evt-1" },
-			);
+			const client2 = await trigger.handleConnection(mock2.write, mock2.close, { "last-event-id": "evt-1" });
 
 			expect(client2).not.toBeNull();
 			// The client should receive missed events after evt-1

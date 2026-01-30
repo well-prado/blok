@@ -1,11 +1,5 @@
-import { Diagnostic, DiagnosticSeverity, Range, Position } from "vscode-languageserver";
-import {
-	VALID_TRIGGERS,
-	VALID_HTTP_METHODS,
-	VALID_STEP_TYPES,
-	VALID_RUNTIMES,
-	type WorkflowJson,
-} from "./constants";
+import { type Diagnostic, DiagnosticSeverity, Position, Range } from "vscode-languageserver";
+import { VALID_HTTP_METHODS, VALID_RUNTIMES, VALID_STEP_TYPES, VALID_TRIGGERS, type WorkflowJson } from "./constants";
 
 /**
  * Provides workflow validation diagnostics for the LSP server.
@@ -127,7 +121,7 @@ function validateTrigger(text: string, workflow: WorkflowJson, diagnostics: Diag
 	}
 
 	const triggerType = triggerKeys[0];
-	if (!VALID_TRIGGERS.includes(triggerType as typeof VALID_TRIGGERS[number])) {
+	if (!VALID_TRIGGERS.includes(triggerType as (typeof VALID_TRIGGERS)[number])) {
 		const range = findKeyRange(text, triggerType);
 		diagnostics.push({
 			severity: DiagnosticSeverity.Error,
@@ -149,7 +143,10 @@ function validateTrigger(text: string, workflow: WorkflowJson, diagnostics: Diag
 					message: 'HTTP trigger requires "method" field',
 					source: "blok",
 				});
-			} else if (typeof httpConfig.method === "string" && !VALID_HTTP_METHODS.includes(httpConfig.method as typeof VALID_HTTP_METHODS[number])) {
+			} else if (
+				typeof httpConfig.method === "string" &&
+				!VALID_HTTP_METHODS.includes(httpConfig.method as (typeof VALID_HTTP_METHODS)[number])
+			) {
 				const range = findValueRange(text, "method", httpConfig.method as string);
 				diagnostics.push({
 					severity: DiagnosticSeverity.Error,
@@ -341,7 +338,7 @@ function validateSteps(text: string, workflow: WorkflowJson, diagnostics: Diagno
 				message: `Step "${step.name || i}" is missing required "type" field`,
 				source: "blok",
 			});
-		} else if (!VALID_STEP_TYPES.includes(step.type as typeof VALID_STEP_TYPES[number])) {
+		} else if (!VALID_STEP_TYPES.includes(step.type as (typeof VALID_STEP_TYPES)[number])) {
 			diagnostics.push({
 				severity: DiagnosticSeverity.Error,
 				range: findValueRange(text, "type", step.type),
@@ -350,7 +347,11 @@ function validateSteps(text: string, workflow: WorkflowJson, diagnostics: Diagno
 			});
 		}
 
-		if (step.runtime && typeof step.runtime === "string" && !VALID_RUNTIMES.includes(step.runtime as typeof VALID_RUNTIMES[number])) {
+		if (
+			step.runtime &&
+			typeof step.runtime === "string" &&
+			!VALID_RUNTIMES.includes(step.runtime as (typeof VALID_RUNTIMES)[number])
+		) {
 			diagnostics.push({
 				severity: DiagnosticSeverity.Error,
 				range: findValueRange(text, "runtime", step.runtime),

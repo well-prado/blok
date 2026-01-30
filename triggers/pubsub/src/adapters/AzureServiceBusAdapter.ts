@@ -9,9 +9,9 @@
  * - AZURE_SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE: Fully qualified namespace (if using DefaultAzureCredential)
  */
 
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 import type { PubSubTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 
 /**
  * Azure Service Bus configuration
@@ -35,7 +35,8 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 	constructor(config?: AzureServiceBusConfig) {
 		this.config = {
 			connectionString: config?.connectionString || process.env.AZURE_SERVICE_BUS_CONNECTION_STRING,
-			fullyQualifiedNamespace: config?.fullyQualifiedNamespace || process.env.AZURE_SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE,
+			fullyQualifiedNamespace:
+				config?.fullyQualifiedNamespace || process.env.AZURE_SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE,
 		};
 	}
 
@@ -85,19 +86,14 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			this.connected = false;
 			console.log("[AzureServiceBusAdapter] Disconnected from Azure Service Bus");
 		} catch (error) {
-			console.error(
-				`[AzureServiceBusAdapter] Error disconnecting: ${(error as Error).message}`,
-			);
+			console.error(`[AzureServiceBusAdapter] Error disconnecting: ${(error as Error).message}`);
 		}
 	}
 
 	/**
 	 * Subscribe to an Azure Service Bus topic/subscription or queue
 	 */
-	async subscribe(
-		config: PubSubTriggerOpts,
-		handler: (message: PubSubMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: PubSubTriggerOpts, handler: (message: PubSubMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to Azure Service Bus. Call connect() first.");
 		}
@@ -162,9 +158,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			try {
 				await handler(pubsubMessage);
 			} catch (error) {
-				console.error(
-					`[AzureServiceBusAdapter] Error processing message: ${(error as Error).message}`,
-				);
+				console.error(`[AzureServiceBusAdapter] Error processing message: ${(error as Error).message}`);
 			}
 		};
 

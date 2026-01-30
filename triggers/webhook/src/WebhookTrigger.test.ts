@@ -2,8 +2,8 @@
  * WebhookTrigger Tests
  */
 
-import { describe, it, expect } from "vitest";
 import crypto from "crypto";
+import { describe, expect, it } from "vitest";
 import { sourceHandlers } from "./WebhookTrigger";
 
 describe("WebhookTrigger", () => {
@@ -52,11 +52,7 @@ describe("Source Handlers", () => {
 		});
 
 		it("should reject invalid signature", () => {
-			const result = handler.verifySignature(
-				'{"action":"created"}',
-				"sha256=invalid",
-				"my-secret",
-			);
+			const result = handler.verifySignature('{"action":"created"}', "sha256=invalid", "my-secret");
 			expect(result.valid).toBe(false);
 		});
 

@@ -51,7 +51,7 @@ describe("IfElse Node - Function-First", () => {
 		run?: (ctx: Context, data: ParamsDictionary) => Promise<ResponseContext>;
 	} = {
 		name: "node1",
-		run: async (ctx: Context, data: ParamsDictionary): Promise<ResponseContext> => ({} as ResponseContext),
+		run: async (ctx: Context, data: ParamsDictionary): Promise<ResponseContext> => ({}) as ResponseContext,
 	} as unknown as NodeBase;
 
 	it("should execute the correct steps when if condition is true", async () => {

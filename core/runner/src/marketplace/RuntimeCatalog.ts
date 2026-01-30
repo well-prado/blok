@@ -161,16 +161,7 @@ export class RuntimeCatalog {
 	 * @returns Paginated search results
 	 */
 	search(options: CatalogSearchOptions): CatalogSearchResult {
-		const {
-			query,
-			runtime,
-			tags,
-			verified,
-			sortBy = "name",
-			sortOrder = "asc",
-			limit = 20,
-			offset = 0,
-		} = options;
+		const { query, runtime, tags, verified, sortBy = "name", sortOrder = "asc", limit = 20, offset = 0 } = options;
 
 		let results = this.getAllLatestPackages();
 
@@ -194,9 +185,7 @@ export class RuntimeCatalog {
 		// Filter by tags (package must have all specified tags)
 		if (tags && tags.length > 0) {
 			results = results.filter((pkg) =>
-				tags.every((tag) =>
-					pkg.tags.some((pkgTag) => pkgTag.toLowerCase() === tag.toLowerCase()),
-				),
+				tags.every((tag) => pkg.tags.some((pkgTag) => pkgTag.toLowerCase() === tag.toLowerCase())),
 			);
 		}
 

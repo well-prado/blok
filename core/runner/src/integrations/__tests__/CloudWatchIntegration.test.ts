@@ -129,15 +129,11 @@ describe("CloudWatchIntegration", () => {
 	describe("recordWorkflowExecution()", () => {
 		it("should not throw when not initialized", async () => {
 			// Should be a no-op
-			await expect(
-				cw.recordWorkflowExecution("get-user", 42, true),
-			).resolves.not.toThrow();
+			await expect(cw.recordWorkflowExecution("get-user", 42, true)).resolves.not.toThrow();
 		});
 
 		it("should handle failure execution without throwing", async () => {
-			await expect(
-				cw.recordWorkflowExecution("get-user", 100, false),
-			).resolves.not.toThrow();
+			await expect(cw.recordWorkflowExecution("get-user", 100, false)).resolves.not.toThrow();
 		});
 	});
 
@@ -279,15 +275,12 @@ describe("CloudWatchIntegration", () => {
 		});
 
 		it("should log workflow error with context", async () => {
-			const result = await mockCw.logWorkflowError(
-				new Error("node timeout"),
-				{
-					workflowName: "get-user",
-					workflowPath: "/users/:id",
-					requestId: "req-123",
-					nodeName: "fetch-db",
-				},
-			);
+			const result = await mockCw.logWorkflowError(new Error("node timeout"), {
+				workflowName: "get-user",
+				workflowPath: "/users/:id",
+				requestId: "req-123",
+				nodeName: "fetch-db",
+			});
 			expect(result).toBe(true);
 		});
 

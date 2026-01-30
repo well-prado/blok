@@ -1,7 +1,7 @@
+import path from "node:path";
 import * as p from "@clack/prompts";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
-import path from "node:path";
 import color from "picocolors";
 
 /**

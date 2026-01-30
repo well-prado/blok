@@ -34,15 +34,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
-export type AuditCategory =
-	| "auth"
-	| "authz"
-	| "workflow"
-	| "node"
-	| "trigger"
-	| "config"
-	| "system"
-	| "security";
+export type AuditCategory = "auth" | "authz" | "workflow" | "node" | "trigger" | "config" | "system" | "security";
 
 export type AuditSeverity = "info" | "warn" | "error" | "critical";
 

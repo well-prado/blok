@@ -14,18 +14,18 @@
  * 10. ✅ Concurrent registry access
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { Context } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
-import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
-import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
-import { HttpRuntimeAdapter } from "../../../src/adapters/HttpRuntimeAdapter";
-import { DockerRuntimeAdapter } from "../../../src/adapters/DockerRuntimeAdapter";
-import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
-import type { RuntimeAdapter, ExecutionResult, RuntimeKind } from "../../../src/adapters/RuntimeAdapter";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import NanoService from "../../../src/NanoService";
 import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
 import RunnerNode from "../../../src/RunnerNode";
+import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
+import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
+import { DockerRuntimeAdapter } from "../../../src/adapters/DockerRuntimeAdapter";
+import { HttpRuntimeAdapter } from "../../../src/adapters/HttpRuntimeAdapter";
+import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
+import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../../../src/adapters/RuntimeAdapter";
 
 // ============================================================================
 // Mock Adapters for Testing
@@ -106,11 +106,7 @@ function createContext(config: Record<string, unknown> = {}): Context {
 	};
 }
 
-function createRunnerNode(
-	nodeName: string,
-	runtime?: RuntimeKind,
-	config: Record<string, unknown> = {},
-): RunnerNode {
+function createRunnerNode(nodeName: string, runtime?: RuntimeKind, config: Record<string, unknown> = {}): RunnerNode {
 	const node = new RunnerNode();
 	node.node = nodeName;
 	node.name = nodeName;
@@ -620,9 +616,16 @@ describe("Adapter Switching & Backward Compatibility", () => {
 	describe("RuntimeKind Validation", () => {
 		it("should support all defined RuntimeKind values", () => {
 			const kinds: RuntimeKind[] = [
-				"nodejs", "bun", "python3", "go",
-				"java", "rust", "php", "csharp",
-				"docker", "wasm",
+				"nodejs",
+				"bun",
+				"python3",
+				"go",
+				"java",
+				"rust",
+				"php",
+				"csharp",
+				"docker",
+				"wasm",
 			];
 
 			for (const kind of kinds) {
@@ -633,9 +636,16 @@ describe("Adapter Switching & Backward Compatibility", () => {
 
 		it("should register and retrieve all RuntimeKind adapters", () => {
 			const kinds: RuntimeKind[] = [
-				"nodejs", "bun", "python3", "go",
-				"java", "rust", "php", "csharp",
-				"docker", "wasm",
+				"nodejs",
+				"bun",
+				"python3",
+				"go",
+				"java",
+				"rust",
+				"php",
+				"csharp",
+				"docker",
+				"wasm",
 			];
 
 			for (const kind of kinds) {

@@ -429,11 +429,7 @@ export class OpenAPIGenerator {
 			.replace(/[^a-zA-Z0-9]/g, " ")
 			.trim()
 			.split(/\s+/)
-			.map((word, i) =>
-				i === 0
-					? word.toLowerCase()
-					: word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
-			)
+			.map((word, i) => (i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()))
 			.join("");
 
 		return `${method.toLowerCase()}${cleanName.charAt(0).toUpperCase()}${cleanName.slice(1)}`;
@@ -479,9 +475,7 @@ export class OpenAPIGenerator {
 		}
 
 		if (typeof obj === "object") {
-			const entries = Object.entries(obj as Record<string, unknown>).filter(
-				([, v]) => v !== undefined,
-			);
+			const entries = Object.entries(obj as Record<string, unknown>).filter(([, v]) => v !== undefined);
 			if (entries.length === 0) return "{}";
 			return entries
 				.map(([key, value]) => {

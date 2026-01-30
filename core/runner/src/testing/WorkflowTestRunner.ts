@@ -2,8 +2,8 @@ import type { Context } from "@nanoservice-ts/shared";
 import NanoService from "../NanoService";
 import NanoServiceResponse, { type INanoServiceResponse } from "../NanoServiceResponse";
 import type { FunctionNode } from "../defineNode";
-import type JsonLikeObject from "../types/JsonLikeObject";
 import type Condition from "../types/Condition";
+import type JsonLikeObject from "../types/JsonLikeObject";
 import type { TestContextOverrides, TestResult } from "./TestHarness";
 import { TestLogger } from "./TestLogger";
 
@@ -311,10 +311,7 @@ export class WorkflowTestRunner {
 		});
 
 		try {
-			await Promise.race([
-				this.executeSteps(ctx, this.workflow.steps),
-				timeoutPromise,
-			]);
+			await Promise.race([this.executeSteps(ctx, this.workflow.steps), timeoutPromise]);
 		} catch (error: unknown) {
 			workflowSuccess = false;
 			workflowError = error;
@@ -401,9 +398,7 @@ export class WorkflowTestRunner {
 		const stepInput = step.inputs ?? ctx.response?.data ?? {};
 
 		if (this.config.verbose) {
-			console.log(
-				`[WorkflowTestRunner] Step ${stepIndex}: executing "${step.name}" (node: ${nodeName})`,
-			);
+			console.log(`[WorkflowTestRunner] Step ${stepIndex}: executing "${step.name}" (node: ${nodeName})`);
 		}
 
 		const startTime = performance.now();
@@ -418,10 +413,7 @@ export class WorkflowTestRunner {
 		};
 
 		try {
-			const response = (await node.handle(
-				ctx,
-				stepInput as JsonLikeObject,
-			)) as INanoServiceResponse;
+			const response = (await node.handle(ctx, stepInput as JsonLikeObject)) as INanoServiceResponse;
 
 			const endTime = performance.now();
 			traceEntry.durationMs = endTime - startTime;
@@ -442,9 +434,7 @@ export class WorkflowTestRunner {
 
 				this.trace.push(traceEntry);
 
-				throw new Error(
-					`Node "${step.name}" (${nodeName}) failed: ${response.error?.toString() ?? "Unknown error"}`,
-				);
+				throw new Error(`Node "${step.name}" (${nodeName}) failed: ${response.error?.toString() ?? "Unknown error"}`);
 			}
 
 			// Update context response with node output

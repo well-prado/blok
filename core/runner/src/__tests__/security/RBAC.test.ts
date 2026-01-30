@@ -181,11 +181,13 @@ describe("RBAC", () => {
 		const rbac = new RBAC();
 		rbac.addRole({
 			name: "user-admin",
-			permissions: [{
-				resource: "workflow",
-				actions: ["execute"],
-				resourcePattern: "user-*",
-			}],
+			permissions: [
+				{
+					resource: "workflow",
+					actions: ["execute"],
+					resourcePattern: "user-*",
+				},
+			],
 		});
 
 		expect(rbac.can("user-admin", "workflow", "execute", "user-create").allowed).toBe(true);

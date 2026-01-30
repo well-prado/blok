@@ -1,15 +1,15 @@
 {
-  "name": "@blok/sdk-contract-tests",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Contract tests for Blok multi-language runtime SDKs",
-  "scripts": {
-    "test": "tsx contract.test.ts",
-    "docker:up": "docker compose up -d --build",
-    "docker:down": "docker compose down",
-    "test:full": "npm run docker:up && sleep 10 && npm run test; npm run docker:down"
-  },
-  "dependencies": {
-    "tsx": "^4.7.0"
-  }
+	"name": "@blok/sdk-contract-tests",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Contract tests for Blok multi-language runtime SDKs",
+	"scripts": {
+		"test": "tsx contract.test.ts",
+		"docker:up": "docker compose up -d --build",
+		"docker:down": "docker compose down",
+		"test:full": "npm run docker:up && sleep 10 && npm run test; npm run docker:down"
+	},
+	"dependencies": {
+		"tsx": "^4.7.0"
+	}
 }

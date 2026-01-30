@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-import {
-	createConnection,
-	TextDocuments,
-	ProposedFeatures,
-	InitializeParams,
-	InitializeResult,
-	TextDocumentSyncKind,
-	CompletionParams,
-	HoverParams,
-	DidChangeConfigurationNotification,
-} from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { validateWorkflow } from "./diagnostics";
+import {
+	type CompletionParams,
+	DidChangeConfigurationNotification,
+	type HoverParams,
+	type InitializeParams,
+	type InitializeResult,
+	ProposedFeatures,
+	TextDocumentSyncKind,
+	TextDocuments,
+	createConnection,
+} from "vscode-languageserver/node";
 import { getCompletions } from "./completion";
+import { validateWorkflow } from "./diagnostics";
 import { getHover } from "./hover";
 
 /**
@@ -24,7 +24,7 @@ import { getHover } from "./hover";
  * - Hover: Rich documentation on hover for workflow fields and values
  *
  * Communication: stdio (default) or TCP
- * File types: JSON files matching **/workflows/**\/*.json or blok.workflow.json
+ * File types: JSON files matching **/ workflows; /**\/*.json or blok.workflow.json
  */
 
 // Create connection and document manager
@@ -111,9 +111,7 @@ function getDocumentSettings(resource: string): BlokLspSettings {
 // Document validation
 function isWorkflowFile(uri: string): boolean {
 	// Match workflow files by path pattern
-	return /workflows?[/\\].*\.json$/i.test(uri) ||
-		/\.workflow\.json$/i.test(uri) ||
-		/nanoservice\.json$/i.test(uri);
+	return /workflows?[/\\].*\.json$/i.test(uri) || /\.workflow\.json$/i.test(uri) || /nanoservice\.json$/i.test(uri);
 }
 
 function validateDocument(document: TextDocument): void {

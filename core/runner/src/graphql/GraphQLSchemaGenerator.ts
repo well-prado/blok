@@ -306,12 +306,16 @@ export class GraphQLSchemaGenerator {
 		const pathParams = this.extractPathParams(workflow.trigger.http?.path || "");
 
 		const isGet = workflow.trigger.http?.method === "GET";
-		const hasBody = workflow.trigger.http?.method === "POST" ||
+		const hasBody =
+			workflow.trigger.http?.method === "POST" ||
 			workflow.trigger.http?.method === "PUT" ||
 			workflow.trigger.http?.method === "PATCH";
 		const isDelete = workflow.trigger.http?.method === "DELETE";
 
-		const isQuery = isGet || triggerType === "grpc" || triggerType === "manual" ||
+		const isQuery =
+			isGet ||
+			triggerType === "grpc" ||
+			triggerType === "manual" ||
 			(!workflow.trigger.http && !workflow.trigger.websocket && !workflow.trigger.sse);
 		const isMutation = hasBody || isDelete;
 		const isSubscription = triggerType === "websocket" || triggerType === "sse";
@@ -440,15 +444,19 @@ export class GraphQLSchemaGenerator {
 
 		switch (field.type) {
 			case "string":
-				baseType = "String"; break;
+				baseType = "String";
+				break;
 			case "number":
 			case "float":
-				baseType = "Float"; break;
+				baseType = "Float";
+				break;
 			case "integer":
 			case "int":
-				baseType = "Int"; break;
+				baseType = "Int";
+				break;
 			case "boolean":
-				baseType = "Boolean"; break;
+				baseType = "Boolean";
+				break;
 			case "array":
 				if (field.items) {
 					baseType = `[${this.fieldDefToGraphQLType(field.items)}]`;
@@ -457,10 +465,12 @@ export class GraphQLSchemaGenerator {
 				}
 				break;
 			case "object":
-				baseType = "JSON"; break;
+				baseType = "JSON";
+				break;
 			case "datetime":
 			case "date":
-				baseType = "DateTime"; break;
+				baseType = "DateTime";
+				break;
 			default:
 				baseType = field.type.charAt(0).toUpperCase() + field.type.slice(1);
 				break;

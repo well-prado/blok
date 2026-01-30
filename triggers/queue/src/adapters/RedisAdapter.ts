@@ -12,9 +12,9 @@
  * - REDIS_TLS: Enable TLS (default: false)
  */
 
-import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 import type { QueueTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
 /**
  * Redis connection configuration
@@ -41,9 +41,9 @@ export class RedisAdapter implements QueueAdapter {
 	constructor(config?: Partial<RedisConfig>) {
 		this.config = {
 			host: config?.host || process.env.REDIS_HOST || "localhost",
-			port: config?.port ?? parseInt(process.env.REDIS_PORT || "6379", 10),
+			port: config?.port ?? Number.parseInt(process.env.REDIS_PORT || "6379", 10),
 			password: config?.password || process.env.REDIS_PASSWORD,
-			db: config?.db ?? parseInt(process.env.REDIS_DB || "0", 10),
+			db: config?.db ?? Number.parseInt(process.env.REDIS_DB || "0", 10),
 			tls: config?.tls ?? process.env.REDIS_TLS === "true",
 		};
 	}
@@ -98,19 +98,14 @@ export class RedisAdapter implements QueueAdapter {
 			this.connected = false;
 			console.log("[RedisAdapter] Disconnected from Redis");
 		} catch (error) {
-			console.error(
-				`[RedisAdapter] Error disconnecting: ${(error as Error).message}`,
-			);
+			console.error(`[RedisAdapter] Error disconnecting: ${(error as Error).message}`);
 		}
 	}
 
 	/**
 	 * Subscribe to a BullMQ queue
 	 */
-	async subscribe(
-		config: QueueTriggerOpts,
-		handler: (message: QueueMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: QueueTriggerOpts, handler: (message: QueueMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to Redis. Call connect() first.");
 		}
@@ -173,9 +168,7 @@ export class RedisAdapter implements QueueAdapter {
 			this.workers.set(queueName, worker);
 			console.log(`[RedisAdapter] Subscribed to queue: ${queueName}`);
 		} catch (error) {
-			throw new Error(
-				`Failed to create BullMQ worker: ${(error as Error).message}`,
-			);
+			throw new Error(`Failed to create BullMQ worker: ${(error as Error).message}`);
 		}
 	}
 

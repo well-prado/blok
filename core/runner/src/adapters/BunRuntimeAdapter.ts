@@ -20,8 +20,7 @@ export class BunRuntimeAdapter implements RuntimeAdapter {
 
 	constructor() {
 		// Detect if we're running under Bun
-		this.isBunRuntime = typeof globalThis !== "undefined" &&
-			"Bun" in globalThis;
+		this.isBunRuntime = typeof globalThis !== "undefined" && "Bun" in globalThis;
 	}
 
 	/**

@@ -1,3 +1,4 @@
+import { InMemoryRunStore } from "./InMemoryRunStore";
 import type { RunStore } from "./RunStore";
 import type {
 	Dashboard,
@@ -9,7 +10,6 @@ import type {
 	WorkflowRun,
 	WorkflowSummary,
 } from "./types";
-import { InMemoryRunStore } from "./InMemoryRunStore";
 
 /**
  * PostgreSQL connection configuration.
@@ -54,10 +54,7 @@ export class PostgresRunStore implements RunStore {
 			Pool = require(mod).Pool;
 		} catch {
 			throw new Error(
-				"PostgresRunStore requires 'pg'. Install it:\n" +
-				"  npm install pg\n" +
-				"  # or\n" +
-				"  pnpm add pg",
+				"PostgresRunStore requires 'pg'. Install it:\n" + "  npm install pg\n" + "  # or\n" + "  pnpm add pg",
 			);
 		}
 
@@ -204,10 +201,7 @@ export class PostgresRunStore implements RunStore {
 					await client.query("BEGIN");
 					try {
 						await m.up();
-						await client.query(
-							"INSERT INTO _trace_migrations (version) VALUES ($1)",
-							[m.version],
-						);
+						await client.query("INSERT INTO _trace_migrations (version) VALUES ($1)", [m.version]);
 						await client.query("COMMIT");
 					} catch (err) {
 						await client.query("ROLLBACK");
@@ -224,9 +218,7 @@ export class PostgresRunStore implements RunStore {
 		const client = await this.pool.connect();
 		try {
 			// Load recent runs (last 1000)
-			const { rows: runRows } = await client.query(
-				"SELECT * FROM workflow_runs ORDER BY started_at DESC LIMIT 1000",
-			);
+			const { rows: runRows } = await client.query("SELECT * FROM workflow_runs ORDER BY started_at DESC LIMIT 1000");
 			for (const row of runRows) {
 				this.memory.saveRun(this.rowToRun(row));
 			}
@@ -263,9 +255,7 @@ export class PostgresRunStore implements RunStore {
 			}
 
 			// Load dashboards
-			const { rows: dashRows } = await client.query(
-				"SELECT * FROM dashboards ORDER BY updated_at DESC",
-			);
+			const { rows: dashRows } = await client.query("SELECT * FROM dashboards ORDER BY updated_at DESC");
 			for (const row of dashRows) {
 				this.memory.saveDashboard(this.rowToDashboard(row));
 			}
@@ -279,8 +269,9 @@ export class PostgresRunStore implements RunStore {
 	saveRun(run: WorkflowRun): void {
 		this.memory.saveRun(run);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`INSERT INTO workflow_runs
+			this.pool
+				.query(
+					`INSERT INTO workflow_runs
 				(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 				 status, started_at, finished_at, duration_ms, error_json,
 				 tags_json, metadata_json, node_count, completed_nodes)
@@ -293,23 +284,24 @@ export class PostgresRunStore implements RunStore {
 				 tags_json = EXCLUDED.tags_json,
 				 metadata_json = EXCLUDED.metadata_json,
 				 completed_nodes = EXCLUDED.completed_nodes`,
-				[
-					run.id,
-					run.workflowName,
-					run.workflowPath,
-					run.triggerType,
-					run.triggerSummary,
-					run.status,
-					run.startedAt,
-					run.finishedAt ?? null,
-					run.durationMs ?? null,
-					run.error ? JSON.stringify(run.error) : null,
-					JSON.stringify(run.tags || []),
-					run.metadata ? JSON.stringify(run.metadata) : null,
-					run.nodeCount,
-					run.completedNodes,
-				],
-			).then(() => {}),
+					[
+						run.id,
+						run.workflowName,
+						run.workflowPath,
+						run.triggerType,
+						run.triggerSummary,
+						run.status,
+						run.startedAt,
+						run.finishedAt ?? null,
+						run.durationMs ?? null,
+						run.error ? JSON.stringify(run.error) : null,
+						JSON.stringify(run.tags || []),
+						run.metadata ? JSON.stringify(run.metadata) : null,
+						run.nodeCount,
+						run.completedNodes,
+					],
+				)
+				.then(() => {}),
 		);
 	}
 
@@ -320,30 +312,51 @@ export class PostgresRunStore implements RunStore {
 		const values: unknown[] = [];
 		let paramIdx = 1;
 
-		if (updates.status !== undefined) { setClauses.push(`status = $${paramIdx++}`); values.push(updates.status); }
-		if (updates.finishedAt !== undefined) { setClauses.push(`finished_at = $${paramIdx++}`); values.push(updates.finishedAt); }
-		if (updates.durationMs !== undefined) { setClauses.push(`duration_ms = $${paramIdx++}`); values.push(updates.durationMs); }
-		if (updates.error !== undefined) { setClauses.push(`error_json = $${paramIdx++}`); values.push(JSON.stringify(updates.error)); }
-		if (updates.tags !== undefined) { setClauses.push(`tags_json = $${paramIdx++}`); values.push(JSON.stringify(updates.tags)); }
-		if (updates.completedNodes !== undefined) { setClauses.push(`completed_nodes = $${paramIdx++}`); values.push(updates.completedNodes); }
-		if (updates.metadata !== undefined) { setClauses.push(`metadata_json = $${paramIdx++}`); values.push(JSON.stringify(updates.metadata)); }
+		if (updates.status !== undefined) {
+			setClauses.push(`status = $${paramIdx++}`);
+			values.push(updates.status);
+		}
+		if (updates.finishedAt !== undefined) {
+			setClauses.push(`finished_at = $${paramIdx++}`);
+			values.push(updates.finishedAt);
+		}
+		if (updates.durationMs !== undefined) {
+			setClauses.push(`duration_ms = $${paramIdx++}`);
+			values.push(updates.durationMs);
+		}
+		if (updates.error !== undefined) {
+			setClauses.push(`error_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.error));
+		}
+		if (updates.tags !== undefined) {
+			setClauses.push(`tags_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.tags));
+		}
+		if (updates.completedNodes !== undefined) {
+			setClauses.push(`completed_nodes = $${paramIdx++}`);
+			values.push(updates.completedNodes);
+		}
+		if (updates.metadata !== undefined) {
+			setClauses.push(`metadata_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.metadata));
+		}
 
 		if (setClauses.length === 0) return;
 
 		values.push(runId);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`UPDATE workflow_runs SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`,
-				values,
-			).then(() => {}),
+			this.pool
+				.query(`UPDATE workflow_runs SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`, values)
+				.then(() => {}),
 		);
 	}
 
 	saveNodeRun(nodeRun: NodeRun): void {
 		this.memory.saveNodeRun(nodeRun);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`INSERT INTO node_runs
+			this.pool
+				.query(
+					`INSERT INTO node_runs
 				(id, run_id, node_name, node_type, runtime_kind,
 				 status, started_at, finished_at, duration_ms,
 				 inputs_json, outputs_json, error_json,
@@ -356,25 +369,26 @@ export class PostgresRunStore implements RunStore {
 				 outputs_json = EXCLUDED.outputs_json,
 				 error_json = EXCLUDED.error_json,
 				 metrics_json = EXCLUDED.metrics_json`,
-				[
-					nodeRun.id,
-					nodeRun.runId,
-					nodeRun.nodeName,
-					nodeRun.nodeType,
-					nodeRun.runtimeKind ?? null,
-					nodeRun.status,
-					nodeRun.startedAt,
-					nodeRun.finishedAt ?? null,
-					nodeRun.durationMs ?? null,
-					nodeRun.inputs !== undefined ? JSON.stringify(nodeRun.inputs) : null,
-					nodeRun.outputs !== undefined ? JSON.stringify(nodeRun.outputs) : null,
-					nodeRun.error ? JSON.stringify(nodeRun.error) : null,
-					nodeRun.parentNodeId ?? null,
-					nodeRun.depth,
-					nodeRun.stepIndex,
-					nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
-				],
-			).then(() => {}),
+					[
+						nodeRun.id,
+						nodeRun.runId,
+						nodeRun.nodeName,
+						nodeRun.nodeType,
+						nodeRun.runtimeKind ?? null,
+						nodeRun.status,
+						nodeRun.startedAt,
+						nodeRun.finishedAt ?? null,
+						nodeRun.durationMs ?? null,
+						nodeRun.inputs !== undefined ? JSON.stringify(nodeRun.inputs) : null,
+						nodeRun.outputs !== undefined ? JSON.stringify(nodeRun.outputs) : null,
+						nodeRun.error ? JSON.stringify(nodeRun.error) : null,
+						nodeRun.parentNodeId ?? null,
+						nodeRun.depth,
+						nodeRun.stepIndex,
+						nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
+					],
+				)
+				.then(() => {}),
 		);
 	}
 
@@ -385,63 +399,82 @@ export class PostgresRunStore implements RunStore {
 		const values: unknown[] = [];
 		let paramIdx = 1;
 
-		if (updates.status !== undefined) { setClauses.push(`status = $${paramIdx++}`); values.push(updates.status); }
-		if (updates.finishedAt !== undefined) { setClauses.push(`finished_at = $${paramIdx++}`); values.push(updates.finishedAt); }
-		if (updates.durationMs !== undefined) { setClauses.push(`duration_ms = $${paramIdx++}`); values.push(updates.durationMs); }
-		if (updates.outputs !== undefined) { setClauses.push(`outputs_json = $${paramIdx++}`); values.push(JSON.stringify(updates.outputs)); }
-		if (updates.error !== undefined) { setClauses.push(`error_json = $${paramIdx++}`); values.push(JSON.stringify(updates.error)); }
-		if (updates.metrics !== undefined) { setClauses.push(`metrics_json = $${paramIdx++}`); values.push(JSON.stringify(updates.metrics)); }
+		if (updates.status !== undefined) {
+			setClauses.push(`status = $${paramIdx++}`);
+			values.push(updates.status);
+		}
+		if (updates.finishedAt !== undefined) {
+			setClauses.push(`finished_at = $${paramIdx++}`);
+			values.push(updates.finishedAt);
+		}
+		if (updates.durationMs !== undefined) {
+			setClauses.push(`duration_ms = $${paramIdx++}`);
+			values.push(updates.durationMs);
+		}
+		if (updates.outputs !== undefined) {
+			setClauses.push(`outputs_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.outputs));
+		}
+		if (updates.error !== undefined) {
+			setClauses.push(`error_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.error));
+		}
+		if (updates.metrics !== undefined) {
+			setClauses.push(`metrics_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.metrics));
+		}
 
 		if (setClauses.length === 0) return;
 
 		values.push(nodeRunId);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`UPDATE node_runs SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`,
-				values,
-			).then(() => {}),
+			this.pool.query(`UPDATE node_runs SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`, values).then(() => {}),
 		);
 	}
 
 	saveEvent(event: RunEvent): void {
 		this.memory.saveEvent(event);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`INSERT INTO run_events (id, type, run_id, workflow_name, timestamp, node_name, node_id, payload_json)
+			this.pool
+				.query(
+					`INSERT INTO run_events (id, type, run_id, workflow_name, timestamp, node_name, node_id, payload_json)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 				ON CONFLICT (id) DO NOTHING`,
-				[
-					event.id,
-					event.type,
-					event.runId,
-					event.workflowName,
-					event.timestamp,
-					event.nodeName ?? null,
-					event.nodeId ?? null,
-					event.payload !== undefined ? JSON.stringify(event.payload) : null,
-				],
-			).then(() => {}),
+					[
+						event.id,
+						event.type,
+						event.runId,
+						event.workflowName,
+						event.timestamp,
+						event.nodeName ?? null,
+						event.nodeId ?? null,
+						event.payload !== undefined ? JSON.stringify(event.payload) : null,
+					],
+				)
+				.then(() => {}),
 		);
 	}
 
 	saveLog(entry: TraceLogEntry): void {
 		this.memory.saveLog(entry);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`INSERT INTO log_entries (id, run_id, node_id, node_name, level, message, timestamp, data_json)
+			this.pool
+				.query(
+					`INSERT INTO log_entries (id, run_id, node_id, node_name, level, message, timestamp, data_json)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 				ON CONFLICT (id) DO NOTHING`,
-				[
-					entry.id,
-					entry.runId,
-					entry.nodeId ?? null,
-					entry.nodeName ?? null,
-					entry.level,
-					entry.message,
-					entry.timestamp,
-					entry.data ? JSON.stringify(entry.data) : null,
-				],
-			).then(() => {}),
+					[
+						entry.id,
+						entry.runId,
+						entry.nodeId ?? null,
+						entry.nodeName ?? null,
+						entry.level,
+						entry.message,
+						entry.timestamp,
+						entry.data ? JSON.stringify(entry.data) : null,
+					],
+				)
+				.then(() => {}),
 		);
 	}
 
@@ -494,8 +527,9 @@ export class PostgresRunStore implements RunStore {
 	saveDashboard(dashboard: Dashboard): void {
 		this.memory.saveDashboard(dashboard);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`INSERT INTO dashboards (id, name, description, is_default, created_at, updated_at, widgets_json)
+			this.pool
+				.query(
+					`INSERT INTO dashboards (id, name, description, is_default, created_at, updated_at, widgets_json)
 				VALUES ($1, $2, $3, $4, $5, $6, $7)
 				ON CONFLICT (id) DO UPDATE SET
 				 name = EXCLUDED.name,
@@ -503,16 +537,17 @@ export class PostgresRunStore implements RunStore {
 				 is_default = EXCLUDED.is_default,
 				 updated_at = EXCLUDED.updated_at,
 				 widgets_json = EXCLUDED.widgets_json`,
-				[
-					dashboard.id,
-					dashboard.name,
-					dashboard.description ?? null,
-					dashboard.isDefault,
-					dashboard.createdAt,
-					dashboard.updatedAt,
-					JSON.stringify(dashboard.widgets),
-				],
-			).then(() => {}),
+					[
+						dashboard.id,
+						dashboard.name,
+						dashboard.description ?? null,
+						dashboard.isDefault,
+						dashboard.createdAt,
+						dashboard.updatedAt,
+						JSON.stringify(dashboard.widgets),
+					],
+				)
+				.then(() => {}),
 		);
 	}
 
@@ -527,9 +562,7 @@ export class PostgresRunStore implements RunStore {
 	deleteDashboard(dashboardId: string): boolean {
 		const result = this.memory.deleteDashboard(dashboardId);
 		if (result) {
-			this.enqueueWrite(() =>
-				this.pool.query("DELETE FROM dashboards WHERE id = $1", [dashboardId]).then(() => {}),
-			);
+			this.enqueueWrite(() => this.pool.query("DELETE FROM dashboards WHERE id = $1", [dashboardId]).then(() => {}));
 		}
 		return result;
 	}
@@ -541,17 +574,26 @@ export class PostgresRunStore implements RunStore {
 		const values: unknown[] = [Date.now()];
 		let paramIdx = 2;
 
-		if (updates.name !== undefined) { setClauses.push(`name = $${paramIdx++}`); values.push(updates.name); }
-		if (updates.description !== undefined) { setClauses.push(`description = $${paramIdx++}`); values.push(updates.description); }
-		if (updates.isDefault !== undefined) { setClauses.push(`is_default = $${paramIdx++}`); values.push(updates.isDefault); }
-		if (updates.widgets !== undefined) { setClauses.push(`widgets_json = $${paramIdx++}`); values.push(JSON.stringify(updates.widgets)); }
+		if (updates.name !== undefined) {
+			setClauses.push(`name = $${paramIdx++}`);
+			values.push(updates.name);
+		}
+		if (updates.description !== undefined) {
+			setClauses.push(`description = $${paramIdx++}`);
+			values.push(updates.description);
+		}
+		if (updates.isDefault !== undefined) {
+			setClauses.push(`is_default = $${paramIdx++}`);
+			values.push(updates.isDefault);
+		}
+		if (updates.widgets !== undefined) {
+			setClauses.push(`widgets_json = $${paramIdx++}`);
+			values.push(JSON.stringify(updates.widgets));
+		}
 
 		values.push(dashboardId);
 		this.enqueueWrite(() =>
-			this.pool.query(
-				`UPDATE dashboards SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`,
-				values,
-			).then(() => {}),
+			this.pool.query(`UPDATE dashboards SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`, values).then(() => {}),
 		);
 	}
 
@@ -573,10 +615,9 @@ export class PostgresRunStore implements RunStore {
 		const deleted = this.memory.deleteRunsBefore(timestamp);
 		if (deleted > 0) {
 			this.enqueueWrite(() =>
-				this.pool.query(
-					"DELETE FROM workflow_runs WHERE started_at < $1 AND status != 'running'",
-					[timestamp],
-				).then(() => {}),
+				this.pool
+					.query("DELETE FROM workflow_runs WHERE started_at < $1 AND status != 'running'", [timestamp])
+					.then(() => {}),
 			);
 		}
 		return deleted;
@@ -652,9 +693,9 @@ export class PostgresRunStore implements RunStore {
 			startedAt: Number(row.started_at),
 			finishedAt: row.finished_at != null ? Number(row.finished_at) : undefined,
 			durationMs: row.duration_ms != null ? Number(row.duration_ms) : undefined,
-			error: row.error_json ? parseJson(row.error_json) as WorkflowRun["error"] : undefined,
-			tags: row.tags_json ? parseJson(row.tags_json) as string[] : undefined,
-			metadata: row.metadata_json ? parseJson(row.metadata_json) as Record<string, unknown> : undefined,
+			error: row.error_json ? (parseJson(row.error_json) as WorkflowRun["error"]) : undefined,
+			tags: row.tags_json ? (parseJson(row.tags_json) as string[]) : undefined,
+			metadata: row.metadata_json ? (parseJson(row.metadata_json) as Record<string, unknown>) : undefined,
 			nodeCount: Number(row.node_count),
 			completedNodes: Number(row.completed_nodes),
 		};
@@ -673,11 +714,11 @@ export class PostgresRunStore implements RunStore {
 			durationMs: row.duration_ms != null ? Number(row.duration_ms) : undefined,
 			inputs: row.inputs_json ? parseJson(row.inputs_json) : undefined,
 			outputs: row.outputs_json ? parseJson(row.outputs_json) : undefined,
-			error: row.error_json ? parseJson(row.error_json) as NodeRun["error"] : undefined,
+			error: row.error_json ? (parseJson(row.error_json) as NodeRun["error"]) : undefined,
 			parentNodeId: (row.parent_node_id as string) ?? undefined,
 			depth: Number(row.depth),
 			stepIndex: Number(row.step_index),
-			metrics: row.metrics_json ? parseJson(row.metrics_json) as NodeRun["metrics"] : undefined,
+			metrics: row.metrics_json ? (parseJson(row.metrics_json) as NodeRun["metrics"]) : undefined,
 		};
 	}
 
@@ -703,7 +744,7 @@ export class PostgresRunStore implements RunStore {
 			level: row.level as TraceLogEntry["level"],
 			message: row.message as string,
 			timestamp: Number(row.timestamp),
-			data: row.data_json ? parseJson(row.data_json) as Record<string, unknown> : undefined,
+			data: row.data_json ? (parseJson(row.data_json) as Record<string, unknown>) : undefined,
 		};
 	}
 
@@ -715,7 +756,7 @@ export class PostgresRunStore implements RunStore {
 			isDefault: row.is_default === true,
 			createdAt: Number(row.created_at),
 			updatedAt: Number(row.updated_at),
-			widgets: row.widgets_json ? parseJson(row.widgets_json) as Dashboard["widgets"] : [],
+			widgets: row.widgets_json ? (parseJson(row.widgets_json) as Dashboard["widgets"]) : [],
 		};
 	}
 }

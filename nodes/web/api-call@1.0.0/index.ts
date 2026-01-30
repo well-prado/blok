@@ -57,18 +57,11 @@ export default defineNode({
 	async execute(ctx, input) {
 		// Use ctx.response.data as fallback body if input.body is empty
 		// This maintains backward compatibility with the class-based implementation
-		const body = Object.keys(input.body).length > 0
-			? (input.body as JsonLikeObject)
-			: (ctx.response.data as JsonLikeObject);
+		const body =
+			Object.keys(input.body).length > 0 ? (input.body as JsonLikeObject) : (ctx.response.data as JsonLikeObject);
 
 		// Make the API call using the existing util function
-		const result = await runApiCall(
-			input.url,
-			input.method,
-			input.headers as JsonLikeObject,
-			body,
-			input.responseType,
-		);
+		const result = await runApiCall(input.url, input.method, input.headers as JsonLikeObject, body, input.responseType);
 
 		// Return the result - defineNode wrapper handles success/error automatically
 		return result;

@@ -14,9 +14,9 @@
  * - KAFKA_SASL_PASSWORD: SASL password
  */
 
-import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 import type { QueueTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
 // Dynamic import for optional dependency
 let Kafka: any;
@@ -47,12 +47,11 @@ export class KafkaAdapter implements QueueAdapter {
 	private consumer: any;
 	private connected = false;
 	private config: KafkaConfig;
-	private subscriptions: Map<string, (message: QueueMessage) => Promise<void>> =
-		new Map();
+	private subscriptions: Map<string, (message: QueueMessage) => Promise<void>> = new Map();
 
 	constructor(config?: Partial<KafkaConfig>) {
 		this.config = {
-			brokers: config?.brokers || (process.env.KAFKA_BROKERS?.split(",") || ["localhost:9092"]),
+			brokers: config?.brokers || process.env.KAFKA_BROKERS?.split(",") || ["localhost:9092"],
 			clientId: config?.clientId || process.env.KAFKA_CLIENT_ID || "blok-queue-trigger",
 			ssl: config?.ssl ?? process.env.KAFKA_SSL === "true",
 			sasl: config?.sasl || this.getSaslConfig(),
@@ -63,11 +62,7 @@ export class KafkaAdapter implements QueueAdapter {
 	 * Get SASL configuration from environment
 	 */
 	private getSaslConfig() {
-		const mechanism = process.env.KAFKA_SASL_MECHANISM as
-			| "plain"
-			| "scram-sha-256"
-			| "scram-sha-512"
-			| undefined;
+		const mechanism = process.env.KAFKA_SASL_MECHANISM as "plain" | "scram-sha-256" | "scram-sha-512" | undefined;
 		const username = process.env.KAFKA_SASL_USERNAME;
 		const password = process.env.KAFKA_SASL_PASSWORD;
 
@@ -123,19 +118,14 @@ export class KafkaAdapter implements QueueAdapter {
 			this.subscriptions.clear();
 			console.log("[KafkaAdapter] Disconnected from Kafka");
 		} catch (error) {
-			console.error(
-				`[KafkaAdapter] Error disconnecting: ${(error as Error).message}`,
-			);
+			console.error(`[KafkaAdapter] Error disconnecting: ${(error as Error).message}`);
 		}
 	}
 
 	/**
 	 * Subscribe to a Kafka topic
 	 */
-	async subscribe(
-		config: QueueTriggerOpts,
-		handler: (message: QueueMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: QueueTriggerOpts, handler: (message: QueueMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to Kafka. Call connect() first.");
 		}
@@ -191,9 +181,7 @@ export class KafkaAdapter implements QueueAdapter {
 					topic: msgTopic,
 					partition,
 					offset: message.offset,
-					timestamp: message.timestamp
-						? new Date(parseInt(message.timestamp))
-						: new Date(),
+					timestamp: message.timestamp ? new Date(Number.parseInt(message.timestamp)) : new Date(),
 					ack: async () => {
 						// Kafka uses auto-commit by default
 						// For manual commit, would call: await this.consumer.commitOffsets([...])
@@ -202,8 +190,7 @@ export class KafkaAdapter implements QueueAdapter {
 						// Kafka doesn't have native nack - handled by consumer group rebalance
 						// Could implement retry topic pattern here
 						console.warn(
-							`[KafkaAdapter] Message nack not fully supported in Kafka. ` +
-								`Consider implementing dead letter topic.`,
+							`[KafkaAdapter] Message nack not fully supported in Kafka. ` + `Consider implementing dead letter topic.`,
 						);
 					},
 				};

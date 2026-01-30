@@ -116,10 +116,7 @@ interface CWLogsClient {
 }
 
 export class CloudWatchIntegration {
-	private config: Required<
-		Pick<CloudWatchConfig, "serviceName" | "logGroupName" | "namespace">
-	> &
-		CloudWatchConfig;
+	private config: Required<Pick<CloudWatchConfig, "serviceName" | "logGroupName" | "namespace">> & CloudWatchConfig;
 
 	private cwClient: CWClient | null = null;
 	private cwLogsClient: CWLogsClient | null = null;
@@ -246,11 +243,7 @@ export class CloudWatchIntegration {
 	/**
 	 * Publish workflow execution metrics (duration + error count).
 	 */
-	async recordWorkflowExecution(
-		workflowName: string,
-		durationMs: number,
-		success: boolean,
-	): Promise<void> {
+	async recordWorkflowExecution(workflowName: string, durationMs: number, success: boolean): Promise<void> {
 		await this.putMetric("WorkflowDuration", durationMs, "Milliseconds", {
 			Workflow: workflowName,
 		});
@@ -399,9 +392,7 @@ export class CloudWatchIntegration {
 		if (!this.cwLogsClient || !this.CreateLogGroupCommand || !this.CreateLogStreamCommand) return;
 
 		try {
-			await this.cwLogsClient.send(
-				new this.CreateLogGroupCommand({ logGroupName: this.config.logGroupName }),
-			);
+			await this.cwLogsClient.send(new this.CreateLogGroupCommand({ logGroupName: this.config.logGroupName }));
 		} catch {
 			// ResourceAlreadyExistsException is expected
 		}

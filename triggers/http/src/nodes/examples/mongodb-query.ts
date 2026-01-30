@@ -1,4 +1,4 @@
-import { defineNode, type JsonLikeObject } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
 import type { Context } from "@nanoservice-ts/shared";
 import { MongoClient, ObjectId, type Sort } from "mongodb";
 import { z } from "zod";
@@ -34,9 +34,7 @@ export default defineNode({
 					if (input.data === undefined) {
 						throw new Error("Data is required for POST method");
 					}
-					const result_post = await collection.insertOne(
-						input.data as JsonLikeObject,
-					);
+					const result_post = await collection.insertOne(input.data as JsonLikeObject);
 					return {
 						insertedId: result_post.insertedId.toString(),
 					};

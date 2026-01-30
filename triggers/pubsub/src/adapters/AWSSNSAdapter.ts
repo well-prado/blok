@@ -14,9 +14,9 @@
  * - SQS_MAX_MESSAGES: Max messages per receive (default: 10)
  */
 
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 import type { PubSubTriggerOpts } from "@nanoservice-ts/helper";
 import { v4 as uuid } from "uuid";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 
 /**
  * AWS SNS/SQS configuration
@@ -42,8 +42,8 @@ export class AWSSNSAdapter implements PubSubAdapter {
 	constructor(config?: Partial<AWSSNSConfig>) {
 		this.config = {
 			region: config?.region || process.env.AWS_REGION || "us-east-1",
-			waitTimeSeconds: config?.waitTimeSeconds ?? parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
-			maxNumberOfMessages: config?.maxNumberOfMessages ?? parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
+			waitTimeSeconds: config?.waitTimeSeconds ?? Number.parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
+			maxNumberOfMessages: config?.maxNumberOfMessages ?? Number.parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
 		};
 	}
 
@@ -94,10 +94,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 	 * Subscribe to an SNS topic via SQS queue
 	 * Note: The SQS queue should be pre-configured as an SNS subscription
 	 */
-	async subscribe(
-		config: PubSubTriggerOpts,
-		handler: (message: PubSubMessage) => Promise<void>,
-	): Promise<void> {
+	async subscribe(config: PubSubTriggerOpts, handler: (message: PubSubMessage) => Promise<void>): Promise<void> {
 		if (!this.connected) {
 			throw new Error("Not connected to AWS. Call connect() first.");
 		}
@@ -207,9 +204,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 					try {
 						await handler(pubsubMessage);
 					} catch (error) {
-						console.error(
-							`[AWSSNSAdapter] Error processing message: ${(error as Error).message}`,
-						);
+						console.error(`[AWSSNSAdapter] Error processing message: ${(error as Error).message}`);
 					}
 				}
 			}

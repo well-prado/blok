@@ -131,7 +131,11 @@ export function AddWidgetDialog({ open, onClose, onAdd }: AddWidgetDialogProps) 
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-			<dialog open className="w-full max-w-lg bg-zinc-900 rounded-lg border border-zinc-800 shadow-xl" aria-label="Add Widget">
+			<dialog
+				open
+				className="w-full max-w-lg bg-zinc-900 rounded-lg border border-zinc-800 shadow-xl"
+				aria-label="Add Widget"
+			>
 				{/* Header */}
 				<div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
 					<h2 className="text-sm font-semibold text-zinc-100">Add Widget</h2>

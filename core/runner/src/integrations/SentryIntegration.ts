@@ -214,11 +214,7 @@ export class SentryIntegration {
 	/**
 	 * Capture a trigger error
 	 */
-	captureTriggerError(
-		error: Error,
-		triggerType: string,
-		context?: Record<string, unknown>,
-	): string | null {
+	captureTriggerError(error: Error, triggerType: string, context?: Record<string, unknown>): string | null {
 		if (!this.client) return null;
 
 		this.errorCount++;
@@ -237,10 +233,7 @@ export class SentryIntegration {
 		if (!this.client) return null;
 		this.eventCount++;
 
-		return this.client.captureMessage(
-			context ? `${message} | ${JSON.stringify(context)}` : message,
-			"warning",
-		);
+		return this.client.captureMessage(context ? `${message} | ${JSON.stringify(context)}` : message, "warning");
 	}
 
 	/**

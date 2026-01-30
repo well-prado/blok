@@ -7,13 +7,13 @@
  *   - WorkflowTestRunner: registration, mocking, workflow loading, execution, tracing
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { TestLogger } from "../../testing/TestLogger";
-import { NodeTestHarness } from "../../testing/TestHarness";
-import { WorkflowTestRunner } from "../../testing/WorkflowTestRunner";
 import { defineNode } from "../../defineNode";
+import { NodeTestHarness } from "../../testing/TestHarness";
+import { TestLogger } from "../../testing/TestLogger";
+import { WorkflowTestRunner } from "../../testing/WorkflowTestRunner";
 
 // ---------------------------------------------------------------------------
 // Shared test nodes created via defineNode
@@ -413,9 +413,7 @@ describe("NodeTestHarness", () => {
 			const harness = new NodeTestHarness(failingNode);
 			const result = await harness.execute({ msg: "err" });
 
-			expect(() => harness.assertOutput(result, {} as any)).toThrow(
-				/Cannot assert output.*failed/,
-			);
+			expect(() => harness.assertOutput(result, {} as any)).toThrow(/Cannot assert output.*failed/);
 		});
 
 		it("should allow partial matching (subset of keys)", async () => {
@@ -620,15 +618,11 @@ describe("WorkflowTestRunner", () => {
 		});
 
 		it("should throw for a workflow without steps", () => {
-			expect(() => runner.loadWorkflow({ name: "bad" } as any)).toThrow(
-				/must have a 'steps' array/,
-			);
+			expect(() => runner.loadWorkflow({ name: "bad" } as any)).toThrow(/must have a 'steps' array/);
 		});
 
 		it("should throw for a workflow where steps is not an array", () => {
-			expect(() => runner.loadWorkflow({ steps: "not-an-array" } as any)).toThrow(
-				/must have a 'steps' array/,
-			);
+			expect(() => runner.loadWorkflow({ steps: "not-an-array" } as any)).toThrow(/must have a 'steps' array/);
 		});
 	});
 
@@ -691,9 +685,7 @@ describe("WorkflowTestRunner", () => {
 			});
 
 			runner.loadWorkflow({
-				steps: [
-					{ name: "s1", node: "echo", inputs: { greeting: "hello", count: 42 } },
-				],
+				steps: [{ name: "s1", node: "echo", inputs: { greeting: "hello", count: 42 } }],
 			});
 
 			await runner.execute({});
@@ -979,9 +971,7 @@ describe("WorkflowTestRunner", () => {
 			runner.registerNode("test-add", addNode);
 
 			runner.loadWorkflow({
-				steps: [
-					{ name: "add-step", node: "test-add", inputs: { a: 7, b: 8 } },
-				],
+				steps: [{ name: "add-step", node: "test-add", inputs: { a: 7, b: 8 } }],
 			});
 
 			const result = await runner.execute({});
