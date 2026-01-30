@@ -29,7 +29,7 @@ tokio = { version = "1", features = ["full"] }
 
 # HTTP server (feature-gated)
 axum = { version = "0.7", features = ["json"], optional = true }
-tower = { version = "0.4", features = ["timeout"], optional = true }
+tower = { version = "0.5", features = ["timeout"], optional = true }
 tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
 
 # gRPC server (feature-gated)
