@@ -20,7 +20,7 @@
 		"test:dev": "vitest"
 	},
 	"devDependencies": {
-		"@bufbuild/buf": "^1.50.0",
+		"@bufbuild/buf": "^1.64.0",
 		"@bufbuild/protoc-gen-es": "^2.2.3",
 		"@connectrpc/protoc-gen-connect-es": "^1.6.1",
 		"@types/node": "^22.13.4",
