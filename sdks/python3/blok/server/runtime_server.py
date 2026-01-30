@@ -121,11 +121,13 @@ class RuntimeServer:
         )
         self._server.timeout = self.config.read_timeout_sec
 
-        # Set up graceful shutdown
+        # Set up graceful shutdown.
+        # NOTE: We use sys.exit() instead of self._server.shutdown() because
+        # shutdown() must be called from a different thread than serve_forever().
+        # Calling it from a signal handler in the same thread causes a deadlock.
         def shutdown_handler(signum, frame):
             logger.info("Shutdown signal received, stopping server...")
-            if self._server:
-                self._server.shutdown()
+            sys.exit(0)
 
         signal.signal(signal.SIGTERM, shutdown_handler)
         signal.signal(signal.SIGINT, shutdown_handler)

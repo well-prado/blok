@@ -11,14 +11,15 @@ export async function devProject(opts: OptionValues) {
 	console.log("Starting the development server...");
 	console.log("Current path: ", currentPath);
 
-	// Always start the NodeJS runner
-	const processes: Array<{
+	// Collect runtime processes first, NodeJS runner last so its startup
+	// logs appear after the faster-starting runtimes.
+	const runtimeProcesses: Array<{
 		cmd: string;
 		args: string[];
 		name: string;
 		cwd?: string;
 		env?: Record<string, string>;
-	}> = [{ cmd: "npx", args: ["nodemon@3.1.9"], name: "NodeJS Runner" }];
+	}> = [];
 
 	// Read project runtime config and add configured runtimes
 	const config = readProjectConfig(currentPath);
@@ -36,7 +37,7 @@ export async function devProject(opts: OptionValues) {
 				continue;
 			}
 
-			processes.push({
+			runtimeProcesses.push({
 				cmd,
 				args,
 				name: `${rt.label} Runtime (port ${rt.port})`,
@@ -51,7 +52,7 @@ export async function devProject(opts: OptionValues) {
 		// Legacy fallback: check for old-style Python3 setup
 		const legacyPythonConfig = path.join(currentPath, ".blok", "runtimes", "python3", "nodemon.json");
 		if (fsExtra.existsSync(legacyPythonConfig)) {
-			processes.push({
+			runtimeProcesses.push({
 				cmd: "npx",
 				args: [
 					"nodemon@3.1.9",
@@ -66,11 +67,15 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	for (const { cmd, args, name, cwd, env } of processes) {
+	// Start runtime processes first, then NodeJS runner last
+	const allProcesses = [...runtimeProcesses, { cmd: "npx", args: ["nodemon@3.1.9"], name: "NodeJS Runner" }];
+
+	for (const { cmd, args, name, cwd, env } of allProcesses) {
 		const child = spawn(cmd, args, {
 			stdio: "inherit",
 			cwd: cwd || currentPath,
 			env: { ...process.env, BLOK_HMR: "true", NODE_ENV: "development", ...env },
+			detached: true,
 		});
 
 		console.log(`  ${name} started (PID: ${child.pid})`);
@@ -94,17 +99,33 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// Capture CTRL+C to stop the processes
+	// Capture CTRL+C to stop all processes
 	process.on("SIGINT", () => {
 		console.log("\nStopping processes...");
+
+		// Send SIGTERM to each process group (negative PID kills the entire group)
 		for (const child of runningProcesses) {
-			try {
-				process.kill(child.pid as number, "SIGTERM");
-				console.log(`  Process ${child.pid} stopped.`);
-			} catch (err: unknown) {
-				console.error(`  Error stopping process ${child.pid}: ${(err as Error).message}`);
+			if (child.pid) {
+				try {
+					process.kill(-child.pid, "SIGTERM");
+				} catch {
+					// Process may have already exited
+				}
 			}
 		}
-		process.exit(0);
+
+		// Force-kill any remaining processes after 3 seconds
+		setTimeout(() => {
+			for (const child of runningProcesses) {
+				if (child.pid && !child.killed) {
+					try {
+						process.kill(-child.pid, "SIGKILL");
+					} catch {
+						// Process may have already exited
+					}
+				}
+			}
+			process.exit(0);
+		}, 3000);
 	});
 }
