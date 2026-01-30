@@ -22,7 +22,7 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"dayjs": "^1.11.10",
+		"dayjs": "^1.11.19",
 		"lodash": "^4.17.21"
 	},
 	"private": false
