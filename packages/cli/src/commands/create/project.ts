@@ -302,6 +302,29 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.version = "1.0.0";
 		packageJsonContent.author = "";
 
+		// Replace workspace:* references that only work inside the monorepo
+		const workspacePackageMap: Record<string, string> = {
+			"@blok/api-call": "nodes/web/api-call@1.0.0",
+			"@blok/helper": "core/workflow-helper",
+			"@blok/if-else": "nodes/control-flow/if-else@1.0.0",
+			"@blok/runner": "core/runner",
+			"@blok/shared": "core/shared",
+		};
+
+		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
+			const deps = packageJsonContent[depGroup];
+			if (!deps) continue;
+			for (const [pkg, ver] of Object.entries(deps)) {
+				if (typeof ver === "string" && ver.startsWith("workspace:")) {
+					if (localRepoPath && workspacePackageMap[pkg]) {
+						deps[pkg] = `link:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
+					} else {
+						deps[pkg] = "^0.1.0";
+					}
+				}
+			}
+		}
+
 		// Get the package manager
 		manager = await pm.getManager(selectedManager as string);
 
@@ -315,9 +338,10 @@ export async function createProject(opts: OptionValues, version: string, current
 				...packageJsonContent.scripts,
 				dev: "blokctl dev",
 			};
+			const blokctlRef = localRepoPath ? `link:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
 			packageJsonContent.devDependencies = {
 				...packageJsonContent.devDependencies,
-				blokctl: `^${version}`,
+				blokctl: blokctlRef,
 			};
 
 			for (const kind of nonNodeRuntimes) {

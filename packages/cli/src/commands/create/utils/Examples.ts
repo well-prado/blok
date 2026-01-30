@@ -7,8 +7,8 @@ import ExampleNodes from "./nodes/examples";
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@blok/api-call": new ApiCall(),
-	"@blok/if-else": new IfElse(),
+	"@blok/api-call": ApiCall,
+	"@blok/if-else": IfElse,
 	...ExampleNodes,
 };
 

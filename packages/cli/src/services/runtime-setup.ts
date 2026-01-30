@@ -1,4 +1,4 @@
-import child_process, { spawn } from "node:child_process";
+import child_process from "node:child_process";
 import path from "node:path";
 import util from "node:util";
 import fsExtra from "fs-extra";
@@ -130,26 +130,8 @@ async function setupPython3(sdkDir: string, projectRuntimeDir: string, spinner: 
 	}
 }
 
-function createPythonVenv(sdkDir: string): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn("python3", ["-m", "venv", "python3_runtime"], {
-			cwd: sdkDir,
-			stdio: "inherit",
-			shell: true,
-		});
-
-		proc.on("close", (code) => {
-			if (code === 0) {
-				resolve();
-			} else {
-				reject(new Error(`Failed to create Python3 virtual environment. Exit code: ${code}`));
-			}
-		});
-
-		proc.on("error", (err) => {
-			reject(new Error(`Error creating Python3 virtual environment: ${err.message}`));
-		});
-	});
+async function createPythonVenv(sdkDir: string): Promise<void> {
+	await exec("python3 -m venv python3_runtime", { cwd: sdkDir, timeout: 60000 });
 }
 
 /**

@@ -39,8 +39,14 @@ export const CLI_NAME = "blokctl";
 const validateVersion = async (
 	currentVersion: string,
 ): Promise<{ currentVersion: string; latestVersion: string; isLatest: boolean }> => {
-	const execResponse = await exec(`npm view ${CLI_NAME} version`);
-	const latestVersion = execResponse.stdout;
+	let latestVersion: string;
+	try {
+		const execResponse = await exec(`npm view ${CLI_NAME} version`);
+		latestVersion = execResponse.stdout.trim();
+	} catch {
+		// Package not yet published to npm — skip version check
+		return { currentVersion, latestVersion: currentVersion, isLatest: true };
+	}
 	const [latestMajor, latestMinor, latestPatch] = latestVersion.split(".").map(Number);
 	const [currentMajor, currentMinor, currentPatch] = currentVersion.split(".").map(Number);
 
