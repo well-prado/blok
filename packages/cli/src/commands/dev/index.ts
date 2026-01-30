@@ -19,7 +19,6 @@ function spawnProcess(
 		stdio: "inherit",
 		cwd: cwd || currentPath,
 		env: { ...process.env, BLOK_HMR: "true", NODE_ENV: "development", ...env },
-		detached: true,
 	});
 
 	console.log(`  ${name} started (PID: ${child.pid})`);
@@ -159,15 +158,17 @@ export async function devProject(opts: OptionValues) {
 	// 3. Start NodeJS runner last so its logs appear after all runtimes
 	spawnProcess("npx", ["nodemon@3.1.9"], "NodeJS Runner", currentPath);
 
-	// Capture CTRL+C to stop all processes
-	process.on("SIGINT", () => {
+	// Graceful shutdown: kill any children that didn't exit from the terminal SIGINT
+	let stopping = false;
+	function shutdown() {
+		if (stopping) return;
+		stopping = true;
 		console.log("\nStopping processes...");
 
-		// Send SIGTERM to each process group (negative PID kills the entire group)
 		for (const child of runningProcesses) {
-			if (child.pid) {
+			if (child.pid && child.exitCode === null) {
 				try {
-					process.kill(-child.pid, "SIGTERM");
+					process.kill(child.pid, "SIGTERM");
 				} catch {
 					// Process may have already exited
 				}
@@ -175,11 +176,11 @@ export async function devProject(opts: OptionValues) {
 		}
 
 		// Force-kill any remaining processes after 3 seconds
-		setTimeout(() => {
+		const timer = setTimeout(() => {
 			for (const child of runningProcesses) {
-				if (child.pid && !child.killed) {
+				if (child.pid && child.exitCode === null) {
 					try {
-						process.kill(-child.pid, "SIGKILL");
+						process.kill(child.pid, "SIGKILL");
 					} catch {
 						// Process may have already exited
 					}
@@ -187,5 +188,9 @@ export async function devProject(opts: OptionValues) {
 			}
 			process.exit(0);
 		}, 3000);
-	});
+		timer.unref();
+	}
+
+	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", shutdown);
 }
