@@ -676,17 +676,17 @@ importers:
   triggers/grpc:
     dependencies:
       '@bufbuild/protobuf':
-        specifier: ^2.2.3
-        version: 2.2.5
+        specifier: ^2.11.0
+        version: 2.11.0
       '@connectrpc/connect':
         specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)
+        version: 2.0.2(@bufbuild/protobuf@2.11.0)
       '@connectrpc/connect-fastify':
         specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)
+        version: 2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))(fastify@5.3.3)
       '@connectrpc/connect-node':
         specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+        version: 2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))
       '@nanoservice-ts/api-call':
         specifier: ^0.1.29
         version: 0.1.29
@@ -732,10 +732,10 @@ importers:
         version: 1.50.1
       '@bufbuild/protoc-gen-es':
         specifier: ^2.2.3
-        version: 2.2.5(@bufbuild/protobuf@2.2.5)
+        version: 2.2.5(@bufbuild/protobuf@2.11.0)
       '@connectrpc/protoc-gen-connect-es':
         specifier: ^1.6.1
-        version: 1.6.1(@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.2.5))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+        version: 1.6.1(@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.11.0))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))
       '@types/node':
         specifier: ^22.13.4
         version: 22.13.14
@@ -1925,6 +1925,10 @@ packages:
     resolution: {integrity: sha512-VtPOkrdPHZsKc/clNqyi9WUA8TINkZ4cGk63UUE3u4pmB2k+ZMQRDuIOagv8UVd6j7k0T3+RRIb7beKTebNbcw==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/runtime@7.28.6':
+    resolution: {integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/template@7.27.0':
     resolution: {integrity: sha512-2ncevenBqXI6qRMukPlXwHKHchC7RyMuu4xv5JBXRfOGVcTy1mXCD12qrp7Jsoxll1EV3+9sE4GugBVRjT2jFA==}
     engines: {node: '>=6.9.0'}
@@ -2055,6 +2059,12 @@ packages:
 
   '@bufbuild/protobuf@1.10.0':
     resolution: {integrity: sha512-QDdVFLoN93Zjg36NoQPZfsVH9tZew7wKDKyV5qRdj8ntT4wQCOradQjRaTdwMhWUYsgKsvCINKKm87FdEk96Ag==}
+
+  '@bufbuild/protobuf@1.10.1':
+    resolution: {integrity: sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ==}
+
+  '@bufbuild/protobuf@2.11.0':
+    resolution: {integrity: sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ==}
 
   '@bufbuild/protobuf@2.2.5':
     resolution: {integrity: sha512-/g5EzJifw5GF8aren8wZ/G5oMuPoGeS6MQD3ca8ddcvdXR5UELUfdTZITCGNhNXynY/AYl3Z4plmxdj/tRl/hQ==}
@@ -9146,6 +9156,8 @@ snapshots:
     dependencies:
       regenerator-runtime: 0.14.1
 
+  '@babel/runtime@7.28.6': {}
+
   '@babel/template@7.27.0':
     dependencies:
       '@babel/code-frame': 7.26.2
@@ -9262,13 +9274,17 @@ snapshots:
 
   '@bufbuild/protobuf@1.10.0': {}
 
+  '@bufbuild/protobuf@1.10.1': {}
+
+  '@bufbuild/protobuf@2.11.0': {}
+
   '@bufbuild/protobuf@2.2.5': {}
 
-  '@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.2.5)':
+  '@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.11.0)':
     dependencies:
       '@bufbuild/protoplugin': 2.2.5
     optionalDependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.11.0
     transitivePeerDependencies:
       - supports-color
 
@@ -9441,29 +9457,29 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@connectrpc/connect-fastify@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)':
+  '@connectrpc/connect-fastify@2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))(fastify@5.3.3)':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
-      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
-      '@connectrpc/connect-node': 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+      '@bufbuild/protobuf': 2.11.0
+      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.11.0)
+      '@connectrpc/connect-node': 2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))
       fastify: 5.3.3
 
-  '@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))':
+  '@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
-      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
+      '@bufbuild/protobuf': 2.11.0
+      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.11.0)
 
-  '@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)':
+  '@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0)':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.11.0
 
-  '@connectrpc/protoc-gen-connect-es@1.6.1(@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.2.5))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))':
+  '@connectrpc/protoc-gen-connect-es@1.6.1(@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.11.0))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))':
     dependencies:
-      '@bufbuild/protobuf': 1.10.0
+      '@bufbuild/protobuf': 1.10.1
       '@bufbuild/protoplugin': 1.10.0
     optionalDependencies:
-      '@bufbuild/protoc-gen-es': 2.2.5(@bufbuild/protobuf@2.2.5)
-      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
+      '@bufbuild/protoc-gen-es': 2.2.5(@bufbuild/protobuf@2.11.0)
+      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.11.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -9996,9 +10012,9 @@ snapshots:
 
   '@nanoservice-ts/runner@0.1.26':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
-      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
-      '@connectrpc/connect-node': 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+      '@bufbuild/protobuf': 2.11.0
+      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.11.0)
+      '@connectrpc/connect-node': 2.0.2(@bufbuild/protobuf@2.11.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.11.0))
       '@grpc/grpc-js': 1.13.2
       '@grpc/proto-loader': 0.7.13
       '@nanoservice-ts/helper': 0.1.5
@@ -10781,7 +10797,7 @@ snapshots:
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.28.6
-      '@babel/runtime': 7.27.0
+      '@babel/runtime': 7.28.6
       '@types/aria-query': 5.0.4
       aria-query: 5.3.0
       dom-accessibility-api: 0.5.16
