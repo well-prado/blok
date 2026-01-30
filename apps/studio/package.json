@@ -18,7 +18,7 @@
 		"@xyflow/react": "^12.4.0",
 		"clsx": "^2.1.1",
 		"dagre": "^0.8.5",
-		"lucide-react": "^0.468.0",
+		"lucide-react": "^0.563.0",
 		"react": "^19.0.0",
 		"react-dom": "^19.0.0",
 		"recharts": "^2.15.4",
