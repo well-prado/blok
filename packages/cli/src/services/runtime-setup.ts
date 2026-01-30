@@ -83,7 +83,7 @@ export async function setupRuntime(
 			await setupPhp(blokctlRuntimeDir, spinner);
 			break;
 		case "ruby":
-			await setupRuby(blokctlRuntimeDir, spinner);
+			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner);
 			break;
 	}
 
@@ -198,11 +198,36 @@ async function setupPhp(sdkDir: string, spinner: SpinnerHandler): Promise<void> 
 
 /**
  * Ruby: install Bundler dependencies.
+ * Returns an override startCmd if the system `bundle` is too old (e.g., macOS ships Ruby 2.6).
  */
-async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
+async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<string | undefined> {
+	// Resolve the correct bundle binary (macOS ships Ruby 2.6 + Bundler 1.x)
+	const bundleCandidates = ["bundle", "/opt/homebrew/opt/ruby/bin/bundle"];
+	let resolvedBundle = "bundle";
+
+	for (const bin of bundleCandidates) {
+		try {
+			const { stdout } = await exec(`${bin} --version`, { timeout: 5000 });
+			const match = stdout.match(/(\d+)\./);
+			const major = match ? Number.parseInt(match[1], 10) : 0;
+			// Need Bundler 2+ for modern gemspecs
+			if (major >= 2) {
+				resolvedBundle = bin;
+				break;
+			}
+		} catch {
+			// try next candidate
+		}
+	}
+
 	spinner.message("Installing Ruby dependencies...");
-	await exec("bundle install", { cwd: sdkDir, timeout: 120000 });
+	await exec(`"${resolvedBundle}" install`, { cwd: sdkDir, timeout: 120000 });
 	spinner.message("Ruby dependencies installed.");
+
+	if (resolvedBundle !== "bundle") {
+		return `${resolvedBundle} exec rackup --host 0.0.0.0 --port 8080 config.ru`;
+	}
+	return undefined;
 }
 
 /**

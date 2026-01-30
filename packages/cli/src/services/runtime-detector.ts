@@ -116,7 +116,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Ruby",
 		installHint: "Install Ruby 3.2+: https://ruby-lang.org/en/downloads/",
 		defaultPort: 9006,
-		commands: ["ruby --version"],
+		commands: ["ruby --version", "/opt/homebrew/opt/ruby/bin/ruby --version"],
 		toolchain: "ruby + bundler",
 		installDeps: "bundle install",
 		startCmd: "bundle exec rackup --host 0.0.0.0 --port 8080 config.ru",
