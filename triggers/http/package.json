@@ -34,7 +34,7 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@ai-sdk/openai": "^1.3.22",
+		"@ai-sdk/openai": "^1.3.24",
 		"@nanoservice-ts/api-call": "workspace:*",
 		"@nanoservice-ts/helper": "^0.1.5",
 		"@nanoservice-ts/if-else": "workspace:*",
