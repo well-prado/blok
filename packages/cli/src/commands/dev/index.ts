@@ -19,6 +19,7 @@ function spawnProcess(
 		stdio: "inherit",
 		cwd: cwd || currentPath,
 		env: { ...process.env, BLOK_HMR: "true", NODE_ENV: "development", ...env },
+		detached: true,
 	});
 
 	console.log(`  ${name} started (PID: ${child.pid})`);
@@ -33,6 +34,22 @@ function spawnProcess(
 	});
 
 	return child;
+}
+
+/**
+ * Kill all process groups. Uses POSIX kill(-pgid) to terminate entire
+ * process trees (child + all its descendants).
+ */
+function killAllGroups(signal: NodeJS.Signals) {
+	for (const child of runningProcesses) {
+		if (child.pid && child.exitCode === null) {
+			try {
+				process.kill(-child.pid, signal);
+			} catch {
+				// Process group may have already exited
+			}
+		}
+	}
 }
 
 /**
@@ -158,39 +175,32 @@ export async function devProject(opts: OptionValues) {
 	// 3. Start NodeJS runner last so its logs appear after all runtimes
 	spawnProcess("npx", ["nodemon@3.1.9"], "NodeJS Runner", currentPath);
 
-	// Graceful shutdown: kill any children that didn't exit from the terminal SIGINT
+	// Graceful shutdown: SIGTERM all process groups, then SIGKILL after 3s.
+	// pnpm kills child processes prematurely on SIGINT (pnpm/pnpm#7374),
+	// so we also register a synchronous 'exit' handler as a safety net —
+	// process.kill() is synchronous and works inside 'exit' handlers.
 	let stopping = false;
 	function shutdown() {
 		if (stopping) return;
 		stopping = true;
 		console.log("\nStopping processes...");
 
-		for (const child of runningProcesses) {
-			if (child.pid && child.exitCode === null) {
-				try {
-					process.kill(child.pid, "SIGTERM");
-				} catch {
-					// Process may have already exited
-				}
-			}
-		}
+		killAllGroups("SIGTERM");
 
-		// Force-kill any remaining processes after 3 seconds
-		const timer = setTimeout(() => {
-			for (const child of runningProcesses) {
-				if (child.pid && child.exitCode === null) {
-					try {
-						process.kill(child.pid, "SIGKILL");
-					} catch {
-						// Process may have already exited
-					}
-				}
-			}
+		// Force-kill any remaining process groups after 3 seconds
+		setTimeout(() => {
+			killAllGroups("SIGKILL");
 			process.exit(0);
 		}, 3000);
-		timer.unref();
 	}
 
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
+
+	// Safety net: if the process is killed before the graceful handler
+	// completes (e.g. pnpm killing us), SIGKILL all process groups
+	// synchronously on our way out.
+	process.on("exit", () => {
+		killAllGroups("SIGKILL");
+	});
 }
