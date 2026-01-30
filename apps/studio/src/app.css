@@ -1,80 +1,80 @@
 @import "tailwindcss";
 
 @theme {
-  --color-zinc-925: #111113;
+	--color-zinc-925: #111113;
 
-  --color-status-pending: #71717a;
-  --color-status-running: #3b82f6;
-  --color-status-completed: #22c55e;
-  --color-status-failed: #ef4444;
-  --color-status-cancelled: #a855f7;
-  --color-status-skipped: #6b7280;
+	--color-status-pending: #71717a;
+	--color-status-running: #3b82f6;
+	--color-status-completed: #22c55e;
+	--color-status-failed: #ef4444;
+	--color-status-cancelled: #a855f7;
+	--color-status-skipped: #6b7280;
 
-  --color-log-debug: #71717a;
-  --color-log-info: #3b82f6;
-  --color-log-warn: #f59e0b;
-  --color-log-error: #ef4444;
+	--color-log-debug: #71717a;
+	--color-log-info: #3b82f6;
+	--color-log-warn: #f59e0b;
+	--color-log-error: #ef4444;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+	width: 6px;
+	height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+	background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-radius: 3px;
+	background: #3f3f46;
+	border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+	background: #52525b;
 }
 
 /* SSE pulse animation for running nodes */
 @keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
 }
 .animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
+	animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
 /* Growing bar animation for running timeline bars */
 @keyframes grow-bar {
-  from {
-    width: 60%;
-  }
-  to {
-    width: 100%;
-  }
+	from {
+		width: 60%;
+	}
+	to {
+		width: 100%;
+	}
 }
 .animate-grow-bar {
-  animation: grow-bar 2s ease-in-out infinite alternate;
+	animation: grow-bar 2s ease-in-out infinite alternate;
 }
 
 /* Toast slide-in animation */
 @keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+	from {
+		opacity: 0;
+		transform: translateX(100%);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
 }
 .animate-slide-in {
-  animation: slide-in 0.25s ease-out;
+	animation: slide-in 0.25s ease-out;
 }
 
 /* Monospace for code/payloads */
 .font-mono {
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
+	font-family: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
 }
