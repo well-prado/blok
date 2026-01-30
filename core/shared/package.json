@@ -14,7 +14,7 @@
 	"author": "Deskree Inc",
 	"license": "MIT",
 	"devDependencies": {
-		"@types/lodash": "^4.14.196",
+		"@types/lodash": "^4.17.23",
 		"@types/node": "^22.13.4",
 		"nodemon": "^3.1.9",
 		"ts-node": "^10.9.1",
@@ -23,7 +23,7 @@
 	},
 	"dependencies": {
 		"dayjs": "^1.11.10",
-		"lodash": "^4.17.21"
+		"lodash": "^4.17.23"
 	},
 	"private": false
 }

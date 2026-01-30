@@ -17,7 +17,7 @@
 		"test:dev": "vitest --watch"
 	},
 	"devDependencies": {
-		"@types/lodash": "^4.14.196",
+		"@types/lodash": "^4.17.23",
 		"@types/node": "^22.13.4",
 		"nodemon": "^3.1.9",
 		"rimraf": "^6.0.1",
@@ -29,7 +29,7 @@
 		"@nanoservice-ts/helper": "workspace:*",
 		"@nanoservice-ts/runner": "workspace:*",
 		"@nanoservice-ts/shared": "workspace:*",
-		"lodash": "^4.17.21",
+		"lodash": "^4.17.23",
 		"zod": "^3.24.2"
 	},
 	"private": false
