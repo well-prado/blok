@@ -43,8 +43,11 @@ export function useTraceStream(runId: string) {
 						break;
 
 					case "NODE_STARTED": {
+						const nodeId = event.nodeId || event.id;
+						// Skip if this node already exists (REST fetch + SSE replay overlap)
+						if (updated.nodes.some((n) => n.id === nodeId)) break;
 						const newNode: NodeRun = {
-							id: event.nodeId || event.id,
+							id: nodeId,
 							runId,
 							nodeName: event.nodeName || "",
 							nodeType: (event.payload as Record<string, string>)?.nodeType || "unknown",
@@ -107,6 +110,8 @@ export function useTraceStream(runId: string) {
 					case "LOG_ENTRY": {
 						const logPayload = event.payload as Record<string, unknown> | undefined;
 						if (logPayload) {
+							// Skip if this log already exists (REST fetch + SSE replay overlap)
+							if (updated.logs.some((l) => l.id === event.id)) break;
 							const logEntry: TraceLogEntry = {
 								id: event.id,
 								runId,
