@@ -27,7 +27,7 @@ ENV NODE_ENV=production
 RUN bun run build
 
 # copy production dependencies and source code into final image
-FROM node:23.6.0-slim AS release
+FROM node:25.5.0-slim AS release
 WORKDIR /usr/src/app
 
 COPY --from=install /temp/prod/node_modules node_modules
