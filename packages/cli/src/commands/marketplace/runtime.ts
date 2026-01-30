@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 
-import type { CatalogSearchOptions, CatalogStats, RuntimeKind, RuntimePackageManifest } from "@nanoservice-ts/runner";
+import type { CatalogSearchOptions, CatalogStats, RuntimeKind, RuntimePackageManifest } from "@blok/runner";
 
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";

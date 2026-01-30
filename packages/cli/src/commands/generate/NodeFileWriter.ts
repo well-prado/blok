@@ -6,7 +6,7 @@ import { generateText } from "ai";
 import fsExtra from "fs-extra";
 import color from "picocolors";
 import generateNodeManifestSystemPrompt from "./prompts/create-node-manifest.system.js";
-import generateReadmeFromNanoService from "./prompts/create-readme.system.js";
+import generateReadmeFromBlokService from "./prompts/create-readme.system.js";
 
 export default class NodeFileWriter {
 	public nodeDependencies: string[] = [
@@ -122,7 +122,7 @@ export default class NodeFileWriter {
 			const dirName = nodeName.toLowerCase().replace(/\s+/g, "-");
 			const dirPath = process.cwd();
 			const nodeDir = `${dirPath}/src/nodes`;
-			const HOME_DIR = `${os.homedir()}/.nanoctl`;
+			const HOME_DIR = `${os.homedir()}/.blok`;
 			const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 
 			// Check if the nodes directory exists, if not, create it
@@ -183,7 +183,7 @@ Take the class name from the source code and use it to register the node in Node
 				// Generate README.md using AI
 				const readme = await generateText({
 					model: openai("gpt-4o"),
-					system: `${generateReadmeFromNanoService.prompt} \n${configFileContent}`,
+					system: `${generateReadmeFromBlokService.prompt} \n${configFileContent}`,
 					prompt: `Node information:
 
 Name: ${nodeName} (This is the key in the nodes object)
@@ -202,7 +202,7 @@ Take the class name from the source code and use it to register the node in Node
 				const packageJsonContent = fs.readFileSync(packageJsonPath, "utf8");
 				const packageJson = JSON.parse(packageJsonContent);
 				packageJson.name = nodeName;
-				packageJson.description = `A NanoService node for ${nodeName}`;
+				packageJson.description = `A BlokService node for ${nodeName}`;
 				packageJson.version = "1.0.0";
 
 				// Identify and update dependencies required from the source code returned by AI

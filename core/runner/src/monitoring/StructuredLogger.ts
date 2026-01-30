@@ -14,7 +14,7 @@
  *
  * @example
  * ```typescript
- * import { StructuredLogger } from "@nanoservice-ts/runner";
+ * import { StructuredLogger } from "@blok/runner";
  *
  * const logger = new StructuredLogger({
  *   service: "blok-http",

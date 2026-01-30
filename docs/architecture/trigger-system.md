@@ -20,7 +20,7 @@ All triggers extend the abstract `TriggerBase` class (`core/runner/src/TriggerBa
 - **Hot Module Replacement (HMR)** for development
 
 ```typescript
-import TriggerBase from "@nanoservice-ts/runner/TriggerBase";
+import TriggerBase from "@blok/runner/TriggerBase";
 
 export default class MyCustomTrigger extends TriggerBase {
   async listen(): Promise<number> {
@@ -88,7 +88,7 @@ Blok ships with nine built-in trigger types:
 The most common trigger. Starts an Express server and routes requests to workflows based on URL path matching.
 
 ```typescript
-import HttpTrigger from "@nanoservice-ts/trigger-http";
+import HttpTrigger from "@blok/trigger-http";
 
 const trigger = new HttpTrigger();
 const port = await trigger.listen();
@@ -412,8 +412,8 @@ To create a custom trigger:
 3. Call `this.run(ctx)` for each event
 
 ```typescript
-import TriggerBase from "@nanoservice-ts/runner/TriggerBase";
-import type { Context } from "@nanoservice-ts/shared";
+import TriggerBase from "@blok/runner/TriggerBase";
+import type { Context } from "@blok/shared";
 
 export default class MQTTTrigger extends TriggerBase {
   private client: MQTTClient;

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type HelperResponse, Workflow } from "@nanoservice-ts/helper";
+import { type HelperResponse, Workflow } from "@blok/helper";
 import { beforeAll, expect, test } from "vitest";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
@@ -36,7 +36,7 @@ function createLocator(): WorkflowLocator {
 		})
 		.addStep({
 			name: "get-countries-api",
-			node: "@nanoservice-ts/api-call",
+			node: "@blok/api-call",
 			type: "module",
 			inputs: step1Inputs,
 		}) as HelperResponse;

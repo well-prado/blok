@@ -107,9 +107,9 @@ describe("LSP Constants", () => {
 	describe("NODE_PACKAGES", () => {
 		it("should include core node packages", () => {
 			const names = NODE_PACKAGES.map((n) => n.name);
-			expect(names).toContain("@nanoservice-ts/api-call");
-			expect(names).toContain("@nanoservice-ts/if-else");
-			expect(names).toContain("@nanoservice-ts/react");
+			expect(names).toContain("@blok/api-call");
+			expect(names).toContain("@blok/if-else");
+			expect(names).toContain("@blok/react");
 		});
 	});
 

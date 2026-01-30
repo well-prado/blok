@@ -140,7 +140,7 @@ else
     export WORKFLOWS_PATH="$TRIGGER_DIR/workflows"
     export NODES_PATH="$TRIGGER_DIR/src"
     export CONSOLE_LOG_ACTIVE=false
-    export APP_NAME=nanoservice-http
+    export APP_NAME=blok-http
     export DISABLE_TRIGGER_RUN=false
 
     node dist/index.js > /tmp/blok-e2e-server.log 2>&1 &

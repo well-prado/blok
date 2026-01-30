@@ -4,9 +4,9 @@ import urllib.request
 import urllib.error
 from typing import Any, Dict
 
-from nanoservice.node.node_handler import NodeHandler
-from nanoservice.types.context import Context
-from nanoservice.errors.node_error import NodeError
+from blok.node.node_handler import NodeHandler
+from blok.types.context import Context
+from blok.errors.node_error import NodeError
 
 
 class ApiCallNode(NodeHandler):

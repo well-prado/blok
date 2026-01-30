@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Tests\Testing;
+namespace Blok\Blok\Tests\Testing;
 
-use Blok\Nanoservice\Testing\MockContext;
+use Blok\Blok\Testing\MockContext;
 use PHPUnit\Framework\TestCase;
 
 final class MockContextTest extends TestCase

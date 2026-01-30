@@ -31,7 +31,7 @@ The fastest way to run Blok with all 7 language runtimes:
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/deskree-inc/blok.git
+git clone https://github.com/well-prado/blok.git
 cd blok
 pnpm install
 
@@ -63,7 +63,7 @@ curl http://localhost:4000/health
 ### Path 1: Create a New Project (Recommended for users)
 ```bash
 # Using npx (no global install needed)
-npx nanoctl@latest create project
+npx blokctl@latest create project
 
 # Follow the interactive prompts:
 # 1. Project name
@@ -84,7 +84,7 @@ pnpm run dev
 ### Path 2: Clone the Monorepo (for contributors)
 ```bash
 # Clone the repository
-git clone https://github.com/deskree-inc/blok.git
+git clone https://github.com/well-prado/blok.git
 cd blok
 
 # Install all dependencies
@@ -104,7 +104,7 @@ pnpm http:dev
 ### Path 3: Docker (quickest production-like setup)
 ```bash
 # Clone the repository
-git clone https://github.com/deskree-inc/blok.git
+git clone https://github.com/well-prado/blok.git
 cd blok
 
 # Start production stack
@@ -451,7 +451,7 @@ docker compose -f infra/docker-compose.production.yml --profile monitoring up -d
 **File:** `src/nodes/greet/index.ts`
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 
 export default defineNode({
   name: "greet",
@@ -695,7 +695,7 @@ pnpm doc:generate
 
 ## Project Creation Walkthrough
 
-When a user runs `npx nanoctl@latest create project`, the CLI:
+When a user runs `npx blokctl@latest create project`, the CLI:
 
 1. **Asks for project name** → Creates directory
 2. **Asks for template** → HTTP API (default), gRPC, or blank

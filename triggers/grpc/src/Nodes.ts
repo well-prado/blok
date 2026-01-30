@@ -1,12 +1,12 @@
-import ApiCall from "@nanoservice-ts/api-call";
-import IfElse from "@nanoservice-ts/if-else";
-import type { NodeBase } from "@nanoservice-ts/shared";
+import ApiCall from "@blok/api-call";
+import IfElse from "@blok/if-else";
+import type { NodeBase } from "@blok/shared";
 
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@nanoservice-ts/api-call": new ApiCall(),
-	"@nanoservice-ts/if-else": new IfElse(),
+	"@blok/api-call": new ApiCall(),
+	"@blok/if-else": new IfElse(),
 };
 
 export default nodes;

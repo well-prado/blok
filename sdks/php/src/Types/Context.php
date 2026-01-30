@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Types;
+namespace Blok\Blok\Types;
 
 /**
  * Context represents the workflow execution context passed between nodes.

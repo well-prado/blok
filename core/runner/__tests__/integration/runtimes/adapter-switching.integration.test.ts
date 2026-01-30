@@ -14,11 +14,11 @@
  * 10. ✅ Concurrent registry access
  */
 
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import NanoService from "../../../src/NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
+import BlokService from "../../../src/Blok";
+import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import RunnerNode from "../../../src/RunnerNode";
 import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
@@ -72,14 +72,14 @@ class MockRuntimeAdapter implements RuntimeAdapter {
 /**
  * Simple test node for NodeJS adapter
  */
-class SimpleTestNode extends NanoService<{ value: string }> {
+class SimpleTestNode extends BlokService<{ value: string }> {
 	constructor() {
 		super();
 		this.name = "simple-test";
 	}
 
-	async handle(ctx: Context, inputs: { value: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { value: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		response.setSuccess({ echo: inputs.value, runtime: "nodejs" });
 		return response;
 	}

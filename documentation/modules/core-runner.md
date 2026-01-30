@@ -1,6 +1,6 @@
 # Module Reference: Core Runner
 
-> **Package:** `@nanoservice-ts/runner`
+> **Package:** `@blok/runner`
 > **Path:** `core/runner/`
 > **Purpose:** The workflow execution engine — the heart of Blok
 
@@ -12,11 +12,11 @@ The Runner is the core engine that takes a workflow definition (JSON), resolves 
 
 ```
 core/runner/src/
-├── index.ts                    # Main exports (Runner, NanoService, TriggerBase, etc.)
+├── index.ts                    # Main exports (Runner, BlokService, TriggerBase, etc.)
 ├── Configuration.ts            # Workflow configuration model
 ├── ConfigurationResolver.ts    # Config resolution logic
-├── NanoService.ts              # Core nanoservice abstraction (base class for nodes)
-├── NanoServiceResponse.ts      # Response object wrapper
+├── BlokService.ts              # Core blok abstraction (base class for nodes)
+├── BlokResponse.ts      # Response object wrapper
 ├── Runner.ts                   # Main workflow runner orchestrator
 ├── RunnerNode.ts               # Individual node execution wrapper
 ├── RunnerNodeBase.ts           # Base class for runner nodes
@@ -171,8 +171,8 @@ defineNode<I, O>({
 
 ## Dependencies
 
-- `@nanoservice-ts/shared` (types, base classes)
-- `@nanoservice-ts/helper` (workflow builder)
+- `@blok/shared` (types, base classes)
+- `@blok/helper` (workflow builder)
 - `@connectrpc/connect` (gRPC)
 - `@grpc/grpc-js` (native gRPC)
 - `zod` (schema validation)

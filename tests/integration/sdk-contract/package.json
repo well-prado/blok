@@ -1,6 +1,6 @@
 {
 	"name": "@blok/sdk-contract-tests",
-	"version": "1.0.0",
+	"version": "0.1.0",
 	"private": true,
 	"description": "Contract tests for Blok multi-language runtime SDKs",
 	"scripts": {

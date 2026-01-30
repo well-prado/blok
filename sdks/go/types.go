@@ -1,9 +1,9 @@
-// Package nanoservice provides the Blok nanoservice runtime SDK for Go.
+// Package blok provides the Blok blok runtime SDK for Go.
 //
 // This SDK enables building workflow nodes that integrate with the Blok
 // orchestration framework. Nodes communicate via HTTP (POST /execute, GET /health)
 // and can be deployed as Docker containers.
-package nanoservice
+package blok
 
 import (
 	"encoding/json"

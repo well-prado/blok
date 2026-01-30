@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Errors;
+namespace Blok\Blok\Errors;
 
 /**
  * ErrorCategory classifies the type of error that occurred.

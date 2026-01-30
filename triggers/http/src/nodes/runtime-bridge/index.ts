@@ -1,5 +1,5 @@
-import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import { type JsonLikeObject, defineNode } from "@blok/runner";
+import type { Context } from "@blok/shared";
 import { z } from "zod";
 
 /**

@@ -7,7 +7,7 @@ use crate::registry::NodeRegistry;
 use crate::types::ExecutionRequest;
 
 pub mod proto {
-    tonic::include_proto!("nanoservice.workflow.v1");
+    tonic::include_proto!("blok.workflow.v1");
 }
 
 use proto::node_service_server::{NodeService, NodeServiceServer};
@@ -72,7 +72,7 @@ pub async fn serve_grpc(
     let addr = format!("0.0.0.0:{}", port).parse()?;
     let service = BlokNodeService::new(registry);
 
-    info!("Nanoservice gRPC server listening on port {}", port);
+    info!("Blok gRPC server listening on port {}", port);
 
     tonic::transport::Server::builder()
         .add_service(NodeServiceServer::new(service))

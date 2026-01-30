@@ -1,4 +1,4 @@
-import { AddElse, AddIf, type Step, Workflow } from "@nanoservice-ts/helper";
+import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
 
 const step: Step = Workflow({
 	name: "Empty",
@@ -13,7 +13,7 @@ const step: Step = Workflow({
 	.addCondition({
 		node: {
 			name: "filter-request",
-			node: "@nanoservice-ts/if-else",
+			node: "@blok/if-else",
 			type: "module",
 		},
 		conditions: () => {

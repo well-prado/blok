@@ -11,7 +11,7 @@ RUN go mod download 2>/dev/null || true
 COPY . .
 
 # Build the server binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /nanoservice ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /blok ./cmd/server
 
 # Runtime stage
 FROM alpine:3.19
@@ -20,7 +20,7 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-COPY --from=builder /nanoservice .
+COPY --from=builder /blok .
 
 EXPOSE 8080
 
@@ -30,4 +30,4 @@ ENV VERSION=1.0.0
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["./nanoservice"]
+ENTRYPOINT ["./blok"]

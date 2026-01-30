@@ -17,7 +17,7 @@
 		},
 		{
 			"name": "route-signature-check",
-			"node": "@nanoservice-ts/if-else",
+			"node": "@blok/if-else",
 			"type": "module"
 		}
 	],
@@ -44,7 +44,7 @@
 						},
 						{
 							"name": "route-event-type",
-							"node": "@nanoservice-ts/if-else",
+							"node": "@blok/if-else",
 							"type": "module"
 						}
 					]
@@ -86,12 +86,12 @@
 						},
 						{
 							"name": "notify-push",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
 							"name": "trigger-ci-pipeline",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -113,7 +113,7 @@
 						},
 						{
 							"name": "notify-pull-request",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -135,7 +135,7 @@
 						},
 						{
 							"name": "notify-issue",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -150,7 +150,7 @@
 					"steps": [
 						{
 							"name": "log-unhandled-event",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{

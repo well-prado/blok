@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class LoggerTest < Minitest::Test
   def test_level_filtering_info
-    logger = Nanoservice::Logging::Logger.new(:info)
+    logger = Blok::Logging::Logger.new(:info)
     logger.debug("hidden")
     logger.info("visible1")
     logger.warn("visible2")
@@ -14,7 +14,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_level_filtering_debug
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.debug("visible")
     logger.info("visible")
 
@@ -22,7 +22,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_level_filtering_error
-    logger = Nanoservice::Logging::Logger.new(:error)
+    logger = Blok::Logging::Logger.new(:error)
     logger.debug("hidden")
     logger.info("hidden")
     logger.warn("hidden")
@@ -32,7 +32,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_entries_contain_correct_levels
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.debug("d")
     logger.info("i")
     logger.warn("w")
@@ -43,7 +43,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_entries_contain_messages
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("hello world")
 
     entries = logger.entries
@@ -52,7 +52,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_entries_contain_timestamp
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("test")
 
     entry = logger.entries.first
@@ -61,7 +61,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_info_with_fields
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("test", fields: { "key" => "value" })
 
     entry = logger.entries.first
@@ -69,7 +69,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_lines_format
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("hello")
     logger.error("oops")
 
@@ -82,7 +82,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_lines_with_fields
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("test", fields: { "x" => 1 })
 
     line = logger.lines.first
@@ -91,7 +91,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_clear
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("test")
     assert_equal 1, logger.entries.length
 
@@ -100,7 +100,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_entries_returns_copy
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
     logger.info("test")
 
     entries = logger.entries
@@ -111,7 +111,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_thread_safety
-    logger = Nanoservice::Logging::Logger.new(:debug)
+    logger = Blok::Logging::Logger.new(:debug)
 
     threads = 10.times.map do |i|
       Thread.new { 100.times { logger.info("thread-#{i}") } }
@@ -122,7 +122,7 @@ class LoggerTest < Minitest::Test
   end
 
   def test_log_entry_to_hash
-    entry = Nanoservice::Logging::LogEntry.new(
+    entry = Blok::Logging::LogEntry.new(
       level: :info,
       message: "test message",
       fields: { "key" => "val" }
@@ -136,20 +136,20 @@ class LoggerTest < Minitest::Test
   end
 
   def test_log_level_parse
-    assert_equal :debug, Nanoservice::Logging::LogLevel.parse("DEBUG")
-    assert_equal :info, Nanoservice::Logging::LogLevel.parse("INFO")
-    assert_equal :warn, Nanoservice::Logging::LogLevel.parse("WARN")
-    assert_equal :error, Nanoservice::Logging::LogLevel.parse("ERROR")
-    assert_equal :info, Nanoservice::Logging::LogLevel.parse("unknown")
-    assert_equal :debug, Nanoservice::Logging::LogLevel.parse("debug")
+    assert_equal :debug, Blok::Logging::LogLevel.parse("DEBUG")
+    assert_equal :info, Blok::Logging::LogLevel.parse("INFO")
+    assert_equal :warn, Blok::Logging::LogLevel.parse("WARN")
+    assert_equal :error, Blok::Logging::LogLevel.parse("ERROR")
+    assert_equal :info, Blok::Logging::LogLevel.parse("unknown")
+    assert_equal :debug, Blok::Logging::LogLevel.parse("debug")
   end
 
   def test_log_level_priority
-    assert Nanoservice::Logging::LogLevel.priority(:debug) <
-           Nanoservice::Logging::LogLevel.priority(:info)
-    assert Nanoservice::Logging::LogLevel.priority(:info) <
-           Nanoservice::Logging::LogLevel.priority(:warn)
-    assert Nanoservice::Logging::LogLevel.priority(:warn) <
-           Nanoservice::Logging::LogLevel.priority(:error)
+    assert Blok::Logging::LogLevel.priority(:debug) <
+           Blok::Logging::LogLevel.priority(:info)
+    assert Blok::Logging::LogLevel.priority(:info) <
+           Blok::Logging::LogLevel.priority(:warn)
+    assert Blok::Logging::LogLevel.priority(:warn) <
+           Blok::Logging::LogLevel.priority(:error)
   end
 end

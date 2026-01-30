@@ -35,7 +35,7 @@ class NodeServiceStub(object):
             channel: A grpc.Channel.
         """
         self.ExecuteNode = channel.unary_unary(
-                '/nanoservice.workflow.v1.NodeService/ExecuteNode',
+                '/blok.workflow.v1.NodeService/ExecuteNode',
                 request_serializer=node__pb2.NodeRequest.SerializeToString,
                 response_deserializer=node__pb2.NodeResponse.FromString,
                 _registered_method=True)
@@ -60,9 +60,9 @@ def add_NodeServiceServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'nanoservice.workflow.v1.NodeService', rpc_method_handlers)
+            'blok.workflow.v1.NodeService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('nanoservice.workflow.v1.NodeService', rpc_method_handlers)
+    server.add_registered_method_handlers('blok.workflow.v1.NodeService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -83,7 +83,7 @@ class NodeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/nanoservice.workflow.v1.NodeService/ExecuteNode',
+            '/blok.workflow.v1.NodeService/ExecuteNode',
             node__pb2.NodeRequest.SerializeToString,
             node__pb2.NodeResponse.FromString,
             options,

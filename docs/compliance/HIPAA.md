@@ -68,7 +68,7 @@ import {
   ConsoleAuditSink,
   RBAC,
   SecretManager,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 // Centralized security management configuration
 const securityConfig = {
@@ -121,7 +121,7 @@ securityConfig.secretManager.on("secretAccess", (event) => {
 Implement workforce access controls using RBAC:
 
 ```typescript
-import { RBAC, createDefaultRBAC } from "@nanoservice-ts/runner";
+import { RBAC, createDefaultRBAC } from "@blok/runner";
 
 const rbac = new RBAC();
 
@@ -196,7 +196,7 @@ rbac.addRole({
 ### Information Access Management
 
 ```typescript
-import { AuthMiddleware, OAuthOIDCProvider, RBAC, AuditLogger } from "@nanoservice-ts/runner";
+import { AuthMiddleware, OAuthOIDCProvider, RBAC, AuditLogger } from "@blok/runner";
 
 // Access management middleware
 const auth = new AuthMiddleware({
@@ -324,7 +324,7 @@ import {
   JWTAuthProvider,
   OAuthOIDCProvider,
   RBAC,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 // Unique User Identification (164.312(a)(2)(i))
 // Every request is authenticated with a unique identity
@@ -393,7 +393,7 @@ import {
   FileAuditSink,
   ConsoleAuditSink,
   InMemoryAuditSink,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 // HIPAA-compliant audit logger configuration
 const hipaaAudit = new AuditLogger({
@@ -483,7 +483,7 @@ logHIPAAAccess({
 Ensure ePHI is not improperly altered or destroyed:
 
 ```typescript
-import { EncryptionAtRest } from "@nanoservice-ts/runner";
+import { EncryptionAtRest } from "@blok/runner";
 
 // AES-256-GCM provides authenticated encryption
 // The GCM auth tag ensures data integrity -- tampered data will fail decryption
@@ -558,8 +558,8 @@ const server = createServer(hipaaTLSConfig, app);
 All ePHI must be encrypted at rest using strong encryption:
 
 ```typescript
-import { EncryptionAtRest } from "@nanoservice-ts/runner";
-import { SecretManager } from "@nanoservice-ts/runner";
+import { EncryptionAtRest } from "@blok/runner";
+import { SecretManager } from "@blok/runner";
 
 // HIPAA-compliant encryption configuration
 const encryption = new EncryptionAtRest({
@@ -683,7 +683,7 @@ function logPHITransmission(
 Extend the PIIDetector with HIPAA-specific patterns for PHI detection:
 
 ```typescript
-import { AuditLogger } from "@nanoservice-ts/runner";
+import { AuditLogger } from "@blok/runner";
 
 // HIPAA-specific PHI patterns
 const HIPAA_PHI_PATTERNS = [
@@ -859,7 +859,7 @@ if (scanResult.containsPHI) {
 HIPAA requires maintaining audit logs for a minimum of 6 years:
 
 ```typescript
-import { AuditLogger, FileAuditSink, ConsoleAuditSink } from "@nanoservice-ts/runner";
+import { AuditLogger, FileAuditSink, ConsoleAuditSink } from "@blok/runner";
 
 // HIPAA audit configuration with long-term retention
 const hipaaAudit = new AuditLogger({

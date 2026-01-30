@@ -1,6 +1,6 @@
-# Blok Nanoservice PHP SDK
+# Blok Blok PHP SDK
 
-PHP SDK for building [Blok](https://github.com/deskree/blok) nanoservice nodes. This SDK provides everything needed to create, test, and deploy workflow nodes that execute within the Blok orchestration framework.
+PHP SDK for building [Blok](https://github.com/deskree/blok) blok nodes. This SDK provides everything needed to create, test, and deploy workflow nodes that execute within the Blok orchestration framework.
 
 ## Requirements
 
@@ -10,7 +10,7 @@ PHP SDK for building [Blok](https://github.com/deskree/blok) nanoservice nodes. 
 ## Installation
 
 ```bash
-composer require blok/nanoservice-php
+composer require blok/blok-php
 ```
 
 ## Quick Start
@@ -22,8 +22,8 @@ composer require blok/nanoservice-php
 
 declare(strict_types=1);
 
-use Blok\Nanoservice\Node\NodeHandler;
-use Blok\Nanoservice\Types\Context;
+use Blok\Blok\Node\NodeHandler;
+use Blok\Blok\Types\Context;
 
 class GreetingNode implements NodeHandler
 {
@@ -49,8 +49,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-use Blok\Nanoservice\Node\NodeRegistry;
-use Blok\Nanoservice\Server\Server;
+use Blok\Blok\Node\NodeRegistry;
+use Blok\Blok\Server\Server;
 
 $registry = new NodeRegistry('1.0.0');
 $registry->register('greeting', new GreetingNode());
@@ -68,8 +68,8 @@ PORT=8080 php serve.php
 Or with Docker:
 
 ```bash
-docker build -t my-nanoservice .
-docker run -p 8080:8080 my-nanoservice
+docker build -t my-blok .
+docker run -p 8080:8080 my-blok
 ```
 
 ### 4. Test the Endpoint
@@ -111,8 +111,8 @@ The server reads configuration from environment variables:
 You can also create a `ServerConfig` programmatically:
 
 ```php
-use Blok\Nanoservice\Config\ServerConfig;
-use Blok\Nanoservice\Logging\LogLevel;
+use Blok\Blok\Config\ServerConfig;
+use Blok\Blok\Logging\LogLevel;
 
 $config = new ServerConfig(
     port: 9090,
@@ -132,9 +132,9 @@ Middleware wraps node handlers to add cross-cutting behavior like logging, valid
 ### Creating Middleware
 
 ```php
-use Blok\Nanoservice\Node\NodeHandler;
-use Blok\Nanoservice\Server\Middleware;
-use Blok\Nanoservice\Types\Context;
+use Blok\Blok\Node\NodeHandler;
+use Blok\Blok\Server\Middleware;
+use Blok\Blok\Types\Context;
 
 class TimingMiddleware implements Middleware
 {
@@ -171,7 +171,7 @@ Middleware is applied in registration order. The last registered middleware wrap
 Validate data against JSON Schema (Draft 7 subset):
 
 ```php
-use Blok\Nanoservice\Validation\SchemaValidator;
+use Blok\Blok\Validation\SchemaValidator;
 
 $validator = new SchemaValidator();
 $errors = $validator->validate($data, [
@@ -197,8 +197,8 @@ Supported schema keywords: `type`, `required`, `properties`, `enum`, `minLength`
 Capture structured logs that are returned in the `ExecutionResult.logs` field:
 
 ```php
-use Blok\Nanoservice\Logging\Logger;
-use Blok\Nanoservice\Logging\LogLevel;
+use Blok\Blok\Logging\Logger;
+use Blok\Blok\Logging\LogLevel;
 
 $logger = new Logger(LogLevel::Debug);
 $logger->info('Processing request');
@@ -215,7 +215,7 @@ $result->withLogs($logger->lines());
 Use `NodeException` for structured errors with categories:
 
 ```php
-use Blok\Nanoservice\Errors\NodeException;
+use Blok\Blok\Errors\NodeException;
 
 // Factory methods create exceptions with appropriate codes
 throw NodeException::validation('Name is required');     // 400
@@ -238,7 +238,7 @@ The SDK includes testing utilities for unit testing nodes without starting a ser
 ### Using MockContext
 
 ```php
-use Blok\Nanoservice\Testing\MockContext;
+use Blok\Blok\Testing\MockContext;
 
 $ctx = MockContext::create()
     ->withId('test-1')
@@ -253,8 +253,8 @@ $ctx = MockContext::create()
 ### Using TestRunner
 
 ```php
-use Blok\Nanoservice\Testing\MockContext;
-use Blok\Nanoservice\Testing\TestRunner;
+use Blok\Blok\Testing\MockContext;
+use Blok\Blok\Testing\TestRunner;
 
 $runner = new TestRunner();
 $runner->register('greeting', new GreetingNode());
@@ -274,7 +274,7 @@ $this->assertEquals('Hi, PHPUnit!', $data['message']);
 
 ```php
 use PHPUnit\Framework\TestCase;
-use Blok\Nanoservice\Testing\MockContext;
+use Blok\Blok\Testing\MockContext;
 
 class GreetingNodeTest extends TestCase
 {
@@ -302,7 +302,7 @@ class GreetingNodeTest extends TestCase
 
 ## HTTP Protocol
 
-The nanoservice runtime exposes two endpoints:
+The blok runtime exposes two endpoints:
 
 ### POST /execute
 

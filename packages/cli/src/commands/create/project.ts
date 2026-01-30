@@ -27,9 +27,9 @@ import {
 
 const exec = util.promisify(child_process.exec);
 
-const HOME_DIR = `${os.homedir()}/.nanoctl`;
+const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
-const GITHUB_REPO_REMOTE = "https://github.com/deskree-inc/blok.git";
+const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 const GITHUB_REPO_RELEASE_TAG = "v0.0.1-beta.1";
 
 fsExtra.ensureDirSync(HOME_DIR);
@@ -57,7 +57,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 	if (!isDefault) {
 		console.log(
-			figlet.textSync("nanoservice-ts CLI".toUpperCase(), {
+			figlet.textSync("blok CLI".toUpperCase(), {
 				font: "Digital",
 				horizontalLayout: "default",
 				verticalLayout: "default",
@@ -83,8 +83,8 @@ export async function createProject(opts: OptionValues, version: string, current
 
 			return (await p.text({
 				message: "Please provide a name for the project",
-				placeholder: "nano-service",
-				defaultValue: "nano-service",
+				placeholder: "blok-service",
+				defaultValue: "blok-service",
 			})) as string;
 		};
 
@@ -117,7 +117,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			}),
 		];
 
-		const nanoctlProject = await p.group(
+		const blokctlProject = await p.group(
 			{
 				projectName: () => resolveProjectName(),
 				trigger: () =>
@@ -145,10 +145,10 @@ export async function createProject(opts: OptionValues, version: string, current
 			},
 		);
 
-		projectName = nanoctlProject.projectName;
-		trigger = nanoctlProject.trigger;
-		selectedRuntimeKinds = nanoctlProject.runtimes;
-		selectedManager = nanoctlProject.selectedManager;
+		projectName = blokctlProject.projectName;
+		trigger = blokctlProject.trigger;
+		selectedRuntimeKinds = blokctlProject.runtimes;
+		selectedManager = blokctlProject.selectedManager;
 
 		// Warn about unavailable runtimes
 		const unavailableSelected = selectedRuntimeKinds.filter((kind) => {
@@ -180,7 +180,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			});
 		}
 
-		const nanoctlExamplesProject = await p.group(
+		const blokctlExamplesProject = await p.group(
 			{
 				examples: () =>
 					p.select({
@@ -199,7 +199,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			},
 		);
 
-		examples = nanoctlExamplesProject.examples;
+		examples = blokctlExamplesProject.examples;
 	}
 
 	const s = p.spinner();
@@ -300,14 +300,14 @@ export async function createProject(opts: OptionValues, version: string, current
 		const runtimeConfigs: RuntimeConfig[] = [];
 
 		if (nonNodeRuntimes.length > 0) {
-			// Add nanoctl dev script and devDependency for multi-runtime dev server
+			// Add blokctl dev script and devDependency for multi-runtime dev server
 			packageJsonContent.scripts = {
 				...packageJsonContent.scripts,
-				dev: "nanoctl dev",
+				dev: "blokctl dev",
 			};
 			packageJsonContent.devDependencies = {
 				...packageJsonContent.devDependencies,
-				nanoctl: `^${version}`,
+				blokctl: `^${version}`,
 			};
 
 			for (const kind of nonNodeRuntimes) {
@@ -323,7 +323,7 @@ export async function createProject(opts: OptionValues, version: string, current
 				}
 			}
 
-			// Write .nanoctl/config.json
+			// Write .blok/config.json
 			if (runtimeConfigs.length > 0) {
 				writeProjectConfig(dirPath, runtimeConfigs);
 			}

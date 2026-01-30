@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { OpenAPIGenerator } from "@nanoservice-ts/runner";
+ * import { OpenAPIGenerator } from "@blok/runner";
  *
  * const generator = new OpenAPIGenerator({
  *   title: "My API",

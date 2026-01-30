@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
 
 async function getPerformanceProfiler() {
-	const { PerformanceProfiler } = await import("@nanoservice-ts/runner");
+	const { PerformanceProfiler } = await import("@blok/runner");
 	return PerformanceProfiler;
 }
 

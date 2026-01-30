@@ -1,6 +1,6 @@
-import type { Context } from "@nanoservice-ts/shared";
-import NanoService from "../NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../NanoServiceResponse";
+import type { Context } from "@blok/shared";
+import BlokService from "../Blok";
+import BlokResponse, { type IBlokResponse } from "../BlokResponse";
 import type { FunctionNode } from "../defineNode";
 import type Condition from "../types/Condition";
 import type JsonLikeObject from "../types/JsonLikeObject";
@@ -94,7 +94,7 @@ interface WorkflowDefinition {
 /**
  * A mock node implementation wrapping a user-provided handler function.
  */
-class MockNode extends NanoService<any> {
+class MockNode extends BlokService<any> {
 	private handler: (input: any, ctx: Context) => Promise<any>;
 
 	constructor(name: string, handler: (input: any, ctx: Context) => Promise<any>) {
@@ -106,14 +106,14 @@ class MockNode extends NanoService<any> {
 	async handle(
 		ctx: Context,
 		inputs: any | JsonLikeObject | Condition[],
-	): Promise<INanoServiceResponse | NanoService<any>[]> {
-		const response = new NanoServiceResponse();
+	): Promise<IBlokResponse | BlokService<any>[]> {
+		const response = new BlokResponse();
 
 		try {
 			const result = await this.handler(inputs, ctx);
 			response.setSuccess(result as JsonLikeObject);
 		} catch (error: unknown) {
-			const { GlobalError } = await import("@nanoservice-ts/shared");
+			const { GlobalError } = await import("@blok/shared");
 			const globalError = new GlobalError(error instanceof Error ? error.message : String(error));
 			globalError.setCode(500);
 			globalError.setName(this.name);
@@ -142,8 +142,8 @@ class AutoMockNode extends MockNode {
  *
  * @example
  * ```typescript
- * import { WorkflowTestRunner } from "@nanoservice-ts/runner";
- * import { defineNode } from "@nanoservice-ts/runner";
+ * import { WorkflowTestRunner } from "@blok/runner";
+ * import { defineNode } from "@blok/runner";
  * import { z } from "zod";
  *
  * const runner = new WorkflowTestRunner({ verbose: true });
@@ -171,7 +171,7 @@ class AutoMockNode extends MockNode {
  */
 export class WorkflowTestRunner {
 	private config: Required<WorkflowTestConfig>;
-	private nodes: Map<string, NanoService<any>>;
+	private nodes: Map<string, BlokService<any>>;
 	private workflow: WorkflowDefinition | null;
 	private trace: ExecutionTrace[];
 	private nodeResults: Map<string, TestResult<any>>;
@@ -192,11 +192,11 @@ export class WorkflowTestRunner {
 	 * Register a real node implementation for use in the workflow.
 	 *
 	 * @param name - The node name as referenced in the workflow steps
-	 * @param node - A NanoService instance or a FunctionNode from defineNode()
+	 * @param node - A BlokService instance or a FunctionNode from defineNode()
 	 */
-	registerNode(name: string, node: NanoService<any> | FunctionNode<any, any>): void {
+	registerNode(name: string, node: BlokService<any> | FunctionNode<any, any>): void {
 		node.name = name;
-		this.nodes.set(name, node as NanoService<any>);
+		this.nodes.set(name, node as BlokService<any>);
 
 		if (this.config.verbose) {
 			console.log(`[WorkflowTestRunner] Registered node: ${name}`);
@@ -413,7 +413,7 @@ export class WorkflowTestRunner {
 		};
 
 		try {
-			const response = (await node.handle(ctx, stepInput as JsonLikeObject)) as INanoServiceResponse;
+			const response = (await node.handle(ctx, stepInput as JsonLikeObject)) as IBlokResponse;
 
 			const endTime = performance.now();
 			traceEntry.durationMs = endTime - startTime;

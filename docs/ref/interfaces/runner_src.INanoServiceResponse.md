@@ -1,24 +1,24 @@
-[blok - v0.1.0](../README.md) / [runner/src](../modules/runner_src.md) / INanoServiceResponse
+[blok - v0.1.0](../README.md) / [runner/src](../modules/runner_src.md) / IBlokResponse
 
-# Interface: INanoServiceResponse
+# Interface: IBlokResponse
 
-[runner/src](../modules/runner_src.md).INanoServiceResponse
+[runner/src](../modules/runner_src.md).IBlokResponse
 
 ## Hierarchy
 
 - `unknown`
 
-  ↳ **`INanoServiceResponse`**
+  ↳ **`IBlokResponse`**
 
 ## Implemented by
 
-- [`NanoServiceResponse`](../classes/runner_src.NanoServiceResponse.md)
+- [`BlokResponse`](../classes/runner_src.BlokResponse.md)
 
 ## Table of contents
 
 ### Properties
 
-- [steps](runner_src.INanoServiceResponse.md#steps)
+- [steps](runner_src.IBlokResponse.md#steps)
 
 ## Properties
 
@@ -28,4 +28,4 @@
 
 #### Defined in
 
-[core/runner/src/NanoServiceResponse.ts:5](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoServiceResponse.ts#L5)
+[core/runner/src/BlokResponse.ts:5](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokResponse.ts#L5)

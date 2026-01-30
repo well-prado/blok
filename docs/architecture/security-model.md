@@ -5,7 +5,7 @@ description: "Architecture documentation for authentication, authorization, secr
 
 # Security Model
 
-Blok provides a comprehensive security architecture covering authentication, authorization, secret management, encryption, PII detection, TLS configuration, and audit logging. All security components are located in `core/runner/src/security/` and are exported from `@nanoservice-ts/runner`.
+Blok provides a comprehensive security architecture covering authentication, authorization, secret management, encryption, PII detection, TLS configuration, and audit logging. All security components are located in `core/runner/src/security/` and are exported from `@blok/runner`.
 
 ## Architecture Overview
 
@@ -58,7 +58,7 @@ import {
   JWTAuthProvider,
   APIKeyAuthProvider,
   OAuthOIDCProvider,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 const auth = new AuthMiddleware({
   providers: [
@@ -226,7 +226,7 @@ The `RBAC` class provides Role-Based Access Control with hierarchical roles, wil
 ### Defining Roles
 
 ```typescript
-import { RBAC, createDefaultRBAC } from "@nanoservice-ts/runner";
+import { RBAC, createDefaultRBAC } from "@blok/runner";
 
 // Use preconfigured roles
 const rbac = createDefaultRBAC();
@@ -336,7 +336,7 @@ The `SecretManager` provides a unified interface for retrieving secrets from mul
 Secrets are resolved by querying providers in order -- the first provider that returns a value wins:
 
 ```typescript
-import { SecretManager } from "@nanoservice-ts/runner";
+import { SecretManager } from "@blok/runner";
 
 const secrets = new SecretManager({
   providers: [
@@ -506,7 +506,7 @@ import {
   AuditLogger,
   ConsoleAuditSink,
   FileAuditSink,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 const audit = new AuditLogger({
   sinks: [
@@ -625,7 +625,7 @@ import {
   ConsoleAuditSink,
   FileAuditSink,
   SecretManager,
-} from "@nanoservice-ts/runner";
+} from "@blok/runner";
 
 // 1. Secret management
 const secrets = new SecretManager({
@@ -706,7 +706,7 @@ The `ABACEngine` provides Attribute-Based Access Control, complementing RBAC wit
 ### Policy Structure
 
 ```typescript
-import { ABACEngine, createDefaultABAC } from "@nanoservice-ts/runner";
+import { ABACEngine, createDefaultABAC } from "@blok/runner";
 
 const engine = new ABACEngine();
 
@@ -831,7 +831,7 @@ The `createDefaultABAC()` factory provides four policies:
 For production deployments, compose both systems:
 
 ```typescript
-import { createDefaultRBAC, ABACEngine } from "@nanoservice-ts/runner";
+import { createDefaultRBAC, ABACEngine } from "@blok/runner";
 
 const rbac = createDefaultRBAC();
 const abac = new ABACEngine();

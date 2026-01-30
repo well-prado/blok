@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Testing;
+namespace Blok\Blok\Testing;
 
-use Blok\Nanoservice\Node\NodeHandler;
-use Blok\Nanoservice\Node\NodeRegistry;
-use Blok\Nanoservice\Types\Context;
-use Blok\Nanoservice\Types\ExecutionRequest;
-use Blok\Nanoservice\Types\ExecutionResult;
-use Blok\Nanoservice\Types\NodeConfig;
+use Blok\Blok\Node\NodeHandler;
+use Blok\Blok\Node\NodeRegistry;
+use Blok\Blok\Types\Context;
+use Blok\Blok\Types\ExecutionRequest;
+use Blok\Blok\Types\ExecutionResult;
+use Blok\Blok\Types\NodeConfig;
 
 /**
  * TestRunner executes nodes in-process for testing.

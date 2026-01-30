@@ -2,15 +2,15 @@
  * NodeJS Runtime Adapter - Simple Integration Test
  */
 
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 import { beforeAll, describe, expect, it } from "vitest";
-import NanoService from "../../../src/NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
+import BlokService from "../../../src/Blok";
+import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
 
 // Simple test node
-class SimpleNode extends NanoService<{ input: string }> {
+class SimpleNode extends BlokService<{ input: string }> {
 	constructor() {
 		super();
 		this.name = "simple-node";
@@ -28,8 +28,8 @@ class SimpleNode extends NanoService<{ input: string }> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: { input: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { input: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		response.setSuccess({ output: `Processed: ${inputs.input}` });
 		return response;
 	}

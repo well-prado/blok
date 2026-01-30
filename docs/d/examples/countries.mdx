@@ -2,7 +2,7 @@
 title: Countries API Example
 ---
 
-This example demonstrates how to create a simple workflow that fetches data from an external API using the built-in `@nanoservice-ts/api-call` node. The workflow retrieves a list of countries and their capitals from a public API and returns the data as a JSON response.
+This example demonstrates how to create a simple workflow that fetches data from an external API using the built-in `@blok/api-call` node. The workflow retrieves a list of countries and their capitals from a public API and returns the data as a JSON response.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ Before running this example, ensure you have:
 If you haven't created a project yet, you can do so with:
 
 ```bash
-npx nanoctl@latest create project
+npx blokctl@latest create project
 ```
 
 Follow the prompts:
@@ -42,7 +42,7 @@ The Countries workflow is defined in `workflows/json/countries.json`:
   "steps": [
     {
       "name": "get-countries-api",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module"
     }
   ],
@@ -63,7 +63,7 @@ The Countries workflow is defined in `workflows/json/countries.json`:
 
 This workflow:
 1. Is triggered by an HTTP GET request to the root path (`/`)
-2. Uses the built-in `@nanoservice-ts/api-call` node to make a GET request to the countries API
+2. Uses the built-in `@blok/api-call` node to make a GET request to the countries API
 3. Returns the API response directly to the client
 
 ## Running the Example
@@ -108,7 +108,7 @@ The workflow is triggered by an HTTP GET request to the specified path. In the w
 
 ### Built-in API Call Node
 
-The workflow uses the `@nanoservice-ts/api-call` node, which is a built-in node that handles HTTP requests to external APIs. This node is configured with inputs specifying the URL, method, headers, and expected response type:
+The workflow uses the `@blok/api-call` node, which is a built-in node that handles HTTP requests to external APIs. This node is configured with inputs specifying the URL, method, headers, and expected response type:
 
 ```json
 "nodes": {
@@ -127,16 +127,16 @@ The workflow uses the `@nanoservice-ts/api-call` node, which is a built-in node 
 
 ### API Call Node Implementation
 
-The `@nanoservice-ts/api-call` node is implemented as follows:
+The `@blok/api-call` node is implemented as follows:
 
 ```typescript
 import {
-  type INanoServiceResponse,
+  type IBlokResponse,
   type JsonLikeObject,
-  NanoService,
-  NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+  BlokService,
+  BlokResponse,
+} from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 import { inputSchema } from "./inputSchema";
 import { runApiCall } from "./util";
 
@@ -148,7 +148,7 @@ export type InputType = {
   body: JsonLikeObject;
 };
 
-export default class ApiCall extends NanoService<InputType> {
+export default class ApiCall extends BlokService<InputType> {
   constructor() {
     super();
 
@@ -156,8 +156,8 @@ export default class ApiCall extends NanoService<InputType> {
     this.outputSchema = {};
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       const method = inputs.method;
@@ -250,6 +250,6 @@ To transform the API response before returning it to the client, you can add a c
 
 ## Conclusion
 
-The Countries workflow example demonstrates how to use Blok  to create a simple API proxy. By leveraging the built-in `@nanoservice-ts/api-call` node, you can easily integrate external APIs into your applications without writing complex HTTP client code.
+The Countries workflow example demonstrates how to use Blok  to create a simple API proxy. By leveraging the built-in `@blok/api-call` node, you can easily integrate external APIs into your applications without writing complex HTTP client code.
 
 This pattern can be extended to create more sophisticated workflows that combine data from multiple sources, transform data, and implement business logic.

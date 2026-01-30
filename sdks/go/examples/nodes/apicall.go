@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	nanoservice "github.com/nickincloud/nanoservice-go"
+	blok "github.com/nickincloud/blok-go"
 )
 
 // ApiCallNode makes HTTP requests to external APIs.
@@ -30,11 +30,11 @@ import (
 type ApiCallNode struct{}
 
 // Execute performs the HTTP request.
-func (n *ApiCallNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *ApiCallNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	// Get URL from config (required)
 	url, ok := config["url"].(string)
 	if !ok || url == "" {
-		return nil, nanoservice.NewConfigurationError("'url' is required in node config")
+		return nil, blok.NewConfigurationError("'url' is required in node config")
 	}
 
 	// Get method from config, default to GET
@@ -55,7 +55,7 @@ func (n *ApiCallNode) Execute(ctx *nanoservice.Context, config map[string]interf
 		if bodyData, exists := body["body"]; exists && bodyData != nil {
 			jsonData, err := json.Marshal(bodyData)
 			if err != nil {
-				return nil, nanoservice.NewExecutionError("failed to marshal request body", err)
+				return nil, blok.NewExecutionError("failed to marshal request body", err)
 			}
 			reqBody = bytes.NewBuffer(jsonData)
 		}
@@ -64,7 +64,7 @@ func (n *ApiCallNode) Execute(ctx *nanoservice.Context, config map[string]interf
 	// Create HTTP request
 	req, err := http.NewRequest(method, url, reqBody)
 	if err != nil {
-		return nil, nanoservice.NewNetworkError(fmt.Sprintf("failed to create request to %s", url), err)
+		return nil, blok.NewNetworkError(fmt.Sprintf("failed to create request to %s", url), err)
 	}
 
 	// Set headers from config
@@ -87,14 +87,14 @@ func (n *ApiCallNode) Execute(ctx *nanoservice.Context, config map[string]interf
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nanoservice.NewNetworkError(fmt.Sprintf("request to %s failed", url), err)
+		return nil, blok.NewNetworkError(fmt.Sprintf("request to %s failed", url), err)
 	}
 	defer resp.Body.Close()
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, nanoservice.NewNetworkError("failed to read response body", err)
+		return nil, blok.NewNetworkError("failed to read response body", err)
 	}
 
 	// Try to parse as JSON, fall back to string

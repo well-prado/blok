@@ -1,6 +1,6 @@
 # Node Migration Guide: Class-Based → Function-First
 
-This guide documents the migration process from class-based nodes (extending `NanoService`) to function-first nodes (using `defineNode`).
+This guide documents the migration process from class-based nodes (extending `BlokService`) to function-first nodes (using `defineNode`).
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -29,15 +29,15 @@ The function-first pattern using `defineNode` provides a modern, declarative API
 ### Code Reduction
 **Before (Class-Based)**:
 ```typescript
-export default class ApiCall extends NanoService<InputType> {
+export default class ApiCall extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = { /* JSON Schema */ };
     this.outputSchema = { /* JSON Schema */ };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response = new BlokResponse();
     try {
       // validation
       // business logic
@@ -105,13 +105,13 @@ export default defineNode({
 
 **Before**:
 ```typescript
-import { NanoService } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import { BlokService } from "@blok/runner";
+import type { Context } from "@blok/shared";
 ```
 
 **After**:
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 // Context import removed - type is inferred
 ```
@@ -177,8 +177,8 @@ output: z.object({
 
 **Before**:
 ```typescript
-async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-  const response = new NanoServiceResponse();
+async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+  const response = new BlokResponse();
   try {
     const validated = this.validateInput(inputs);
     const result = await this.doWork(ctx, validated);
@@ -207,7 +207,7 @@ async execute(ctx, input) {
 **Key Differences**:
 1. **No manual validation** - Zod handles it
 2. **No try-catch** - defineNode wrapper handles errors
-3. **No NanoServiceResponse** - return plain objects
+3. **No BlokResponse** - return plain objects
 4. **No type annotations** - inferred from schemas
 5. **Throw normal errors** - automatically mapped to GlobalError
 
@@ -222,15 +222,15 @@ async execute(ctx, input) {
 
 **Before**:
 ```typescript
-export default class ApiCall extends NanoService<InputType> {
+export default class ApiCall extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {...};
     this.outputSchema = {...};
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response = new BlokResponse();
     try {
       const body = Object.keys(inputs.body || {}).length > 0
         ? inputs.body
@@ -320,14 +320,14 @@ export type InputType = {
 
 **Before**:
 ```typescript
-export default class IfElse extends NanoService<Array<Condition>> {
+export default class IfElse extends BlokService<Array<Condition>> {
   constructor() {
     super();
     this.flow = true;
     this.contentType = "";
   }
 
-  async handle(ctx: Context, inputs: Array<Condition>): Promise<INanoServiceResponse | NanoService<Condition[]>[]> {
+  async handle(ctx: Context, inputs: Array<Condition>): Promise<IBlokResponse | BlokService<Condition[]>[]> {
     let steps: NodeBase[] = [];
     const conditions = inputs;
 
@@ -355,7 +355,7 @@ export default class IfElse extends NanoService<Array<Condition>> {
       }
     }
 
-    return steps as unknown as NanoService<Condition[]>[];
+    return steps as unknown as BlokService<Condition[]>[];
   }
 }
 ```
@@ -427,7 +427,7 @@ export default defineNode({
     }
 
     // Return steps for flow control
-    return steps as unknown as NanoService<Condition[]>[];
+    return steps as unknown as BlokService<Condition[]>[];
   },
 });
 ```
@@ -435,7 +435,7 @@ export default defineNode({
 **Key Points**:
 - Flow control nodes return `NodeBase[]` wrapped in response
 - Helper functions (like `runJs`) can be defined outside the node
-- Tests extract data from response: `(result as INanoServiceResponse).data as NodeBase[]`
+- Tests extract data from response: `(result as IBlokResponse).data as NodeBase[]`
 
 </details>
 
@@ -525,7 +525,7 @@ const result = await node.handle(ctx, inputs);
 ```typescript
 import ApiCallNode from "../index";
 
-const result = await ApiCallNode.handle(ctx, inputs) as INanoServiceResponse;
+const result = await ApiCallNode.handle(ctx, inputs) as IBlokResponse;
 ```
 
 #### 2. Update Context Mock
@@ -579,14 +579,14 @@ expect(result.data).toEqual(expectedData);
 
 **After** (Data Transformation Nodes):
 ```typescript
-const result = (await Node.handle(ctx, inputs)) as INanoServiceResponse;
+const result = (await Node.handle(ctx, inputs)) as IBlokResponse;
 expect(result.success).toBe(true);
 expect(result.data).toEqual(expectedData);
 ```
 
 **After** (Flow Control Nodes):
 ```typescript
-const result = (await Node.handle(ctx, conditions)) as INanoServiceResponse;
+const result = (await Node.handle(ctx, conditions)) as IBlokResponse;
 const steps = result.data as NodeBase[];
 expect(steps[0].name).toEqual("expected-step");
 ```
@@ -600,7 +600,7 @@ await expect(node.handle(ctx, invalid)).rejects.toThrow("Error message");
 
 **After**:
 ```typescript
-const result = (await Node.handle(ctx, invalid)) as INanoServiceResponse;
+const result = (await Node.handle(ctx, invalid)) as IBlokResponse;
 expect(result.success).toBe(false);
 expect(result.error).toBeDefined();
 expect((result.error as GlobalError).context.code).toBe(400); // or 500
@@ -643,19 +643,19 @@ cd core/runner && npm run build
 **Solution**: Add explicit type assertion
 
 ```typescript
-const result = (await Node.handle(ctx, inputs)) as INanoServiceResponse;
+const result = (await Node.handle(ctx, inputs)) as IBlokResponse;
 ```
 
 ### Issue 3: Flow Control Node Returns Wrapped Data
 
 **Symptom**: `result[0]` is undefined, but `result.data[0]` works
 
-**Cause**: Flow control nodes return NodeBase[] wrapped in NanoServiceResponse.data
+**Cause**: Flow control nodes return NodeBase[] wrapped in BlokResponse.data
 
 **Solution**: Extract data from response
 
 ```typescript
-const result = (await Node.handle(ctx, conditions)) as INanoServiceResponse;
+const result = (await Node.handle(ctx, conditions)) as IBlokResponse;
 const steps = result.data as NodeBase[];
 expect(steps[0].name).toEqual("expected");
 ```
@@ -707,20 +707,20 @@ For flow control, the runner detects the return type automatically.
 Use this checklist when migrating a node:
 
 - [ ] Add `zod: ^3.24.2` to package.json
-- [ ] Update imports (remove NanoService, add defineNode and z)
+- [ ] Update imports (remove BlokService, add defineNode and z)
 - [ ] Convert input JSON Schema to Zod schema
 - [ ] Convert output JSON Schema to Zod schema
 - [ ] Remove class declaration and constructor
 - [ ] Convert handle() method to execute() function
 - [ ] Remove manual validation logic (Zod handles it)
 - [ ] Remove try-catch error handling (wrapper handles it)
-- [ ] Remove NanoServiceResponse creation (return plain objects)
+- [ ] Remove BlokResponse creation (return plain objects)
 - [ ] Extract helper methods to standalone functions
 - [ ] Update tests to use Node.handle() instead of new Node()
 - [ ] Add proper Context mock with all required fields
 - [ ] Update error assertions (check success/error fields)
 - [ ] For flow control nodes, extract data from result.data
-- [ ] Add type assertions as needed (INanoServiceResponse)
+- [ ] Add type assertions as needed (IBlokResponse)
 - [ ] Test validation errors return code 400
 - [ ] Test runtime errors return code 500
 - [ ] Verify all existing tests pass

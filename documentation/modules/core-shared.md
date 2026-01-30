@@ -1,6 +1,6 @@
 # Module Reference: Core Shared
 
-> **Package:** `@nanoservice-ts/shared`
+> **Package:** `@blok/shared`
 > **Path:** `core/shared/`
 > **Purpose:** Shared types, base classes, and utilities used by all Blok packages
 
@@ -72,7 +72,7 @@ interface Context {
 ### NodeBase (node foundation)
 ```typescript
 abstract class NodeBase {
-  abstract handle(ctx: Context, inputs: unknown): Promise<INanoServiceResponse>;
+  abstract handle(ctx: Context, inputs: unknown): Promise<IBlokResponse>;
 }
 ```
 

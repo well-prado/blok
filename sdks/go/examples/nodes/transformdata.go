@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	nanoservice "github.com/nickincloud/nanoservice-go"
+	blok "github.com/nickincloud/blok-go"
 )
 
 // TransformDataNode transforms JSON data based on field mappings.
@@ -24,10 +24,10 @@ import (
 type TransformDataNode struct{}
 
 // Execute performs the data transformation.
-func (n *TransformDataNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *TransformDataNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	body := ctx.Request.BodyMap()
 	if body == nil {
-		return nil, nanoservice.NewValidationError("request body must be a JSON object")
+		return nil, blok.NewValidationError("request body must be a JSON object")
 	}
 
 	result := make(map[string]interface{})
@@ -126,11 +126,11 @@ func (n *TransformDataNode) OutputSchema() map[string]interface{} {
 }
 
 // Ensure TransformDataNode implements ValidatedNodeHandler
-var _ nanoservice.ValidatedNodeHandler = (*TransformDataNode)(nil)
+var _ blok.ValidatedNodeHandler = (*TransformDataNode)(nil)
 
 // compile-time interface check for other nodes
-var _ nanoservice.NodeHandler = (*HelloWorldNode)(nil)
-var _ nanoservice.NodeHandler = (*ApiCallNode)(nil)
+var _ blok.NodeHandler = (*HelloWorldNode)(nil)
+var _ blok.NodeHandler = (*ApiCallNode)(nil)
 
 // NodeName constants for registration.
 const (
@@ -141,7 +141,7 @@ const (
 )
 
 // RegisterAll registers all example nodes with the registry.
-func RegisterAll(registry *nanoservice.NodeRegistry) {
+func RegisterAll(registry *blok.NodeRegistry) {
 	registry.Register(HelloWorldNodeName, &HelloWorldNode{})
 	registry.Register(ApiCallNodeName, &ApiCallNode{})
 	registry.Register(TransformDataNodeName, &TransformDataNode{})
@@ -149,7 +149,7 @@ func RegisterAll(registry *nanoservice.NodeRegistry) {
 }
 
 // RegisterDefaults is an alias for RegisterAll for convenience.
-func RegisterDefaults(registry *nanoservice.NodeRegistry) {
+func RegisterDefaults(registry *blok.NodeRegistry) {
 	RegisterAll(registry)
 }
 

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Logging;
+namespace Blok\Blok\Logging;
 
 /**
  * LogLevel represents the severity of a log entry.

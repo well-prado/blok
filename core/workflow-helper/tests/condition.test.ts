@@ -32,7 +32,7 @@ test("Add condition", () => {
 				new AddIf('ctx.request.query.countries === "true"')
 					.addStep({
 						name: "get-countries",
-						node: "@nanoservice/api-call",
+						node: "@blok/api-call",
 						type: "module",
 						inputs: {
 							url: "https://countriesnow.space/api/v0.1/countries",
@@ -47,7 +47,7 @@ test("Add condition", () => {
 				new AddElse()
 					.addStep({
 						name: "get-facts",
-						node: "@nanoservice/api-call",
+						node: "@blok/api-call",
 						type: "module",
 						inputs: {
 							url: "https://catfact.ninja/fact",

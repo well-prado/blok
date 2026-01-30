@@ -12,7 +12,7 @@
 	"steps": [
 		{
 			"name": "validate-cart",
-			"node": "@nanoservice-ts/json-validator",
+			"node": "@blok/json-validator",
 			"type": "module"
 		},
 		{
@@ -23,13 +23,13 @@
 		},
 		{
 			"name": "check-inventory",
-			"node": "@nanoservice-ts/api-call",
+			"node": "@blok/api-call",
 			"type": "module",
 			"set_var": true
 		},
 		{
 			"name": "route-inventory-check",
-			"node": "@nanoservice-ts/if-else",
+			"node": "@blok/if-else",
 			"type": "module"
 		}
 	],
@@ -116,13 +116,13 @@
 					"steps": [
 						{
 							"name": "process-payment",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-payment-result",
-							"node": "@nanoservice-ts/if-else",
+							"node": "@blok/if-else",
 							"type": "module"
 						}
 					]
@@ -173,18 +173,18 @@
 					"steps": [
 						{
 							"name": "reserve-inventory",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
 							"name": "create-order",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "send-confirmation-email",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{

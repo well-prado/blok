@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require_relative "../lib/nanoservice"
+require_relative "../lib/blok"
 
 # ChainTestNode is used in cross-runtime integration tests.
 # It reads a chain array from the request body, appends its own entry,
 # and returns the updated chain — proving data flows between languages.
-class ChainTestNode < Nanoservice::Node::NodeHandler
+class ChainTestNode < Blok::Node::NodeHandler
   def execute(ctx, _config)
     body = ctx.request.body
 

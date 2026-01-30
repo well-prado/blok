@@ -1,4 +1,4 @@
-import type { NodeBase } from "@nanoservice-ts/shared";
+import type { NodeBase } from "@blok/shared";
 
 type Nodes = {
 	[key: string]: NodeBase;

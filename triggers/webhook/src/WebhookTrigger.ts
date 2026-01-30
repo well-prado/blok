@@ -15,16 +15,16 @@
  */
 
 import crypto from "node:crypto";
-import type { HelperResponse, WebhookTriggerOpts } from "@nanoservice-ts/helper";
+import type { HelperResponse, WebhookTriggerOpts } from "@blok/helper";
 import {
 	DefaultLogger,
 	type GlobalOptions,
-	type NanoService,
+	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@nanoservice-ts/runner";
-import type { Context, RequestContext } from "@nanoservice-ts/shared";
+} from "@blok/runner";
+import type { Context, RequestContext } from "@blok/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -190,7 +190,7 @@ export abstract class WebhookTrigger extends TriggerBase {
 	protected webhookWorkflows: WebhookWorkflowModel[] = [];
 
 	// Subclasses provide these
-	protected abstract nodes: Record<string, NanoService<unknown>>;
+	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
 	constructor() {

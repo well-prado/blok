@@ -1,4 +1,4 @@
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 import createTool from "./tool";
 import importEsModule from "./util";

@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
-import { NANOSERVICE_URL } from "../../services/constants.js";
+import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 
 import { install } from "../install/node.js";
@@ -16,7 +16,7 @@ interface PackageOption extends Package {
 }
 
 async function searchPkg(opts: OptionValues) {
-	const response = await fetch(`${NANOSERVICE_URL}/package-list?searchTerm=${opts.node}&format=${opts.format}`, {
+	const response = await fetch(`${BLOK_URL}/package-list?searchTerm=${opts.node}&format=${opts.format}`, {
 		method: "GET",
 		headers: {
 			Authorization: `Bearer ${opts.token}`,

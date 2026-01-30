@@ -1,8 +1,8 @@
-[blok - v0.1.0](../README.md) / [runner/src](../modules/runner_src.md) / NanoService
+[blok - v0.1.0](../README.md) / [runner/src](../modules/runner_src.md) / BlokService
 
-# Class: NanoService\<T\>
+# Class: BlokService\<T\>
 
-[runner/src](../modules/runner_src.md).NanoService
+[runner/src](../modules/runner_src.md).BlokService
 
 ## Type parameters
 
@@ -14,33 +14,33 @@
 
 - `unknown`
 
-  ↳ **`NanoService`**
+  ↳ **`BlokService`**
 
 ## Table of contents
 
 ### Constructors
 
-- [constructor](runner_src.NanoService.md#constructor)
+- [constructor](runner_src.BlokService.md#constructor)
 
 ### Properties
 
-- [inputSchema](runner_src.NanoService.md#inputschema)
-- [outputSchema](runner_src.NanoService.md#outputschema)
-- [v](runner_src.NanoService.md#v)
+- [inputSchema](runner_src.BlokService.md#inputschema)
+- [outputSchema](runner_src.BlokService.md#outputschema)
+- [v](runner_src.BlokService.md#v)
 
 ### Methods
 
-- [getSchemas](runner_src.NanoService.md#getschemas)
-- [handle](runner_src.NanoService.md#handle)
-- [run](runner_src.NanoService.md#run)
-- [setSchemas](runner_src.NanoService.md#setschemas)
-- [validate](runner_src.NanoService.md#validate)
+- [getSchemas](runner_src.BlokService.md#getschemas)
+- [handle](runner_src.BlokService.md#handle)
+- [run](runner_src.BlokService.md#run)
+- [setSchemas](runner_src.BlokService.md#setschemas)
+- [validate](runner_src.BlokService.md#validate)
 
 ## Constructors
 
 ### constructor
 
-• **new NanoService**\<`T`\>(): [`NanoService`](runner_src.NanoService.md)\<`T`\>
+• **new BlokService**\<`T`\>(): [`BlokService`](runner_src.BlokService.md)\<`T`\>
 
 #### Type parameters
 
@@ -50,7 +50,7 @@
 
 #### Returns
 
-[`NanoService`](runner_src.NanoService.md)\<`T`\>
+[`BlokService`](runner_src.BlokService.md)\<`T`\>
 
 #### Overrides
 
@@ -58,7 +58,7 @@ NodeBase.constructor
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:17](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L17)
+[core/runner/src/BlokService.ts:17](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L17)
 
 ## Properties
 
@@ -68,7 +68,7 @@ NodeBase.constructor
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:13](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L13)
+[core/runner/src/BlokService.ts:13](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L13)
 
 ___
 
@@ -78,7 +78,7 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:14](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L14)
+[core/runner/src/BlokService.ts:14](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L14)
 
 ___
 
@@ -88,7 +88,7 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:15](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L15)
+[core/runner/src/BlokService.ts:15](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L15)
 
 ## Methods
 
@@ -107,13 +107,13 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:29](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L29)
+[core/runner/src/BlokService.ts:29](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L29)
 
 ___
 
 ### handle
 
-▸ **handle**(`ctx`, `inputs`): `Promise`\<[`INanoServiceResponse`](../interfaces/runner_src.INanoServiceResponse.md) \| [`NanoService`](runner_src.NanoService.md)\<`T`\>[]\>
+▸ **handle**(`ctx`, `inputs`): `Promise`\<[`IBlokResponse`](../interfaces/runner_src.IBlokResponse.md) \| [`BlokService`](runner_src.BlokService.md)\<`T`\>[]\>
 
 #### Parameters
 
@@ -124,11 +124,11 @@ ___
 
 #### Returns
 
-`Promise`\<[`INanoServiceResponse`](../interfaces/runner_src.INanoServiceResponse.md) \| [`NanoService`](runner_src.NanoService.md)\<`T`\>[]\>
+`Promise`\<[`IBlokResponse`](../interfaces/runner_src.IBlokResponse.md) \| [`BlokService`](runner_src.BlokService.md)\<`T`\>[]\>
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:99](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L99)
+[core/runner/src/BlokService.ts:99](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L99)
 
 ___
 
@@ -148,7 +148,7 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:36](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L36)
+[core/runner/src/BlokService.ts:36](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L36)
 
 ___
 
@@ -169,7 +169,7 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:24](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L24)
+[core/runner/src/BlokService.ts:24](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L24)
 
 ___
 
@@ -190,4 +190,4 @@ ___
 
 #### Defined in
 
-[core/runner/src/NanoService.ts:104](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/NanoService.ts#L104)
+[core/runner/src/BlokService.ts:104](https://github.com/deskree-inc/blok/blob/fd59582/core/runner/src/BlokService.ts#L104)

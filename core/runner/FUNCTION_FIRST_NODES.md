@@ -22,16 +22,16 @@ Function-first nodes use the `defineNode()` API to create type-safe, Zod-validat
 
 ### Installation
 
-Function-first nodes are built into `@nanoservice-ts/runner` (v0.1.26+):
+Function-first nodes are built into `@blok/runner` (v0.1.26+):
 
 ```bash
-pnpm add @nanoservice-ts/runner zod
+pnpm add @blok/runner zod
 ```
 
 ### Your First Function-First Node
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -382,17 +382,17 @@ async execute(ctx, input) {
 #### Before (Class-Based) - 80+ lines
 
 ```typescript
-import NanoService from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
-import type { INanoServiceResponse } from "@nanoservice-ts/runner";
-import NanoServiceResponse from "@nanoservice-ts/runner";
+import BlokService from "@blok/runner";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
+import type { IBlokResponse } from "@blok/runner";
+import BlokResponse from "@blok/runner";
 
 interface InputType {
   userId: string;
 }
 
-export default class FetchUser extends NanoService<InputType> {
+export default class FetchUser extends BlokService<InputType> {
   constructor() {
     super();
 
@@ -420,8 +420,8 @@ export default class FetchUser extends NanoService<InputType> {
     };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       ctx.logger.log(`Fetching user: ${inputs.userId}`);
@@ -453,7 +453,7 @@ async function fetchUserFromDatabase(userId: string) {
 #### After (Function-First) - 30 lines
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -498,7 +498,7 @@ async function fetchUserFromDatabase(userId: string) {
 - [ ] Convert JSON Schema to Zod schemas
 - [ ] Move business logic from `handle()` to `execute()`
 - [ ] Remove try/catch blocks (automatic now!)
-- [ ] Remove NanoServiceResponse boilerplate
+- [ ] Remove BlokResponse boilerplate
 - [ ] Remove GlobalError construction
 - [ ] Test the node in a workflow
 
@@ -618,7 +618,7 @@ export const UpdateUser = defineNode({
 ### Example 1: API Call Node
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -867,7 +867,7 @@ Testing function-first nodes is straightforward:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 const MyNode = defineNode({

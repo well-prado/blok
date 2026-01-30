@@ -60,7 +60,7 @@ vi.mock("../../src/GRpcTrigger", () => {
 });
 
 // Mock runner — DefaultLogger must be a class (used with new)
-vi.mock("@nanoservice-ts/runner", () => ({
+vi.mock("@blok/runner", () => ({
 	DefaultLogger: class MockDefaultLogger {
 		log() {}
 		error() {}

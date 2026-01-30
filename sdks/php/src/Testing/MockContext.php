@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Testing;
+namespace Blok\Blok\Testing;
 
-use Blok\Nanoservice\Types\Context;
-use Blok\Nanoservice\Types\Request;
-use Blok\Nanoservice\Types\Response;
+use Blok\Blok\Types\Context;
+use Blok\Blok\Types\Request;
+use Blok\Blok\Types\Response;
 
 /**
  * MockContext provides a fluent builder for creating test Context instances.

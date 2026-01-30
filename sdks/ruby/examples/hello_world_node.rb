@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../lib/nanoservice"
+require_relative "../lib/blok"
 
 # HelloWorldNode greets the user with a configurable prefix.
 #
@@ -12,7 +12,7 @@ require_relative "../lib/nanoservice"
 #
 # Output:
 #   { "message" => "Hello, World!", "timestamp" => "...", "language" => "ruby" }
-class HelloWorldNode < Nanoservice::Node::NodeHandler
+class HelloWorldNode < Blok::Node::NodeHandler
   def execute(ctx, config)
     name   = ctx.request.body_str("name") || "World"
     prefix = config["prefix"] || "Hello"
@@ -32,9 +32,9 @@ end
 
 # ----- Boot the server if run directly -----
 if __FILE__ == $PROGRAM_NAME
-  registry = Nanoservice::Server::RuntimeApp.registry
+  registry = Blok::Server::RuntimeApp.registry
   registry.register("hello-world", HelloWorldNode.new)
 
   puts "Starting HelloWorldNode on port 8080..."
-  Nanoservice::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
+  Blok::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
 end

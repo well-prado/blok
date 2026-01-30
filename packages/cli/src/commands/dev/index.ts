@@ -49,17 +49,17 @@ export async function devProject(opts: OptionValues) {
 		}
 	} else {
 		// Legacy fallback: check for old-style Python3 setup
-		const legacyPythonConfig = path.join(currentPath, ".nanoctl", "runtimes", "python3", "nodemon.json");
+		const legacyPythonConfig = path.join(currentPath, ".blok", "runtimes", "python3", "nodemon.json");
 		if (fsExtra.existsSync(legacyPythonConfig)) {
 			processes.push({
 				cmd: "npx",
 				args: [
 					"nodemon@3.1.9",
 					"--config",
-					"./.nanoctl/runtimes/python3/nodemon.json",
+					"./.blok/runtimes/python3/nodemon.json",
 					"--exec",
-					"./.nanoctl/runtimes/python3/python3_runtime/bin/python3",
-					"./.nanoctl/runtimes/python3/server.py",
+					"./.blok/runtimes/python3/python3_runtime/bin/python3",
+					"./.blok/runtimes/python3/server.py",
 				],
 				name: "Python3 Runner (legacy)",
 			});

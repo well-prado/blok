@@ -20,8 +20,8 @@ COPY . .
 
 
 # Install Python dependencies
-RUN if [ -f ./.nanoctl/runtimes/python3/requirements.txt ]; then \
-    pip install --no-cache-dir -r ./.nanoctl/runtimes/python3/requirements.txt; \
+RUN if [ -f ./.blokctl/runtimes/python3/requirements.txt ]; then \
+    pip install --no-cache-dir -r ./.blokctl/runtimes/python3/requirements.txt; \
     fi
 
 # Install Node.js dependencies
@@ -36,7 +36,7 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 ENV WORKFLOWS_PATH=/app/workflows
 ENV CONSOLE_LOG_ACTIVE=true
 ENV NODE_ENV=production
-ENV APP_NAME=nanoservice-http
+ENV APP_NAME=blok-http
 
 # Expose ports (Node.js on 3000, Python on 8000)
 EXPOSE 4000/tcp

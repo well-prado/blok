@@ -1,7 +1,7 @@
 import base64
-from core.nanoservice import NanoService
+from core.blok import NanoService
 from core.types.context import Context
-from core.types.nanoservice_response import NanoServiceResponse
+from core.types.blok_response import NanoServiceResponse
 from core.types.global_error import GlobalError
 from typing import Any, Dict
 import traceback

@@ -1,9 +1,9 @@
 {
-	"name": "nanoctl",
-	"version": "0.1.14",
+	"name": "blokctl",
+	"version": "0.1.0",
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
-	"description": "cli for nanoservice-ts",
+	"description": "cli for blok",
 	"engines": {
 		"node": ">=18.0.0"
 	},
@@ -11,9 +11,12 @@
 	"types": "dist/index.d.ts",
 	"type": "module",
 	"bin": {
-		"nanoctl": "./dist/index.js"
+		"blokctl": "./dist/index.js"
 	},
-	"files": ["dist", "node_modules"],
+	"files": [
+		"dist",
+		"node_modules"
+	],
 	"scripts": {
 		"build": "rm -rf dist && npx tsc",
 		"build:dev": "tsc --watch",
@@ -22,14 +25,19 @@
 		"typecheck": "tsc --noEmit --incremental",
 		"clean": "rm -rf dist && rm -rf node_modules",
 		"install:local": "npm link",
-		"uninstall:local": "npm rm --global nanoctl",
-		"dev": "npm run uninstall:local && npm run install:local && npm run build:dev && nanoctl --help",
+		"uninstall:local": "npm rm --global blokctl",
+		"dev": "npm run uninstall:local && npm run install:local && npm run build:dev && blokctl --help",
 		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/ && if [ -d ../../apps/studio/dist ]; then cp -r ../../apps/studio/dist ./dist/studio-dist; fi",
 		"build:studio": "pnpm --filter @blok/studio build && cp -r ../../apps/studio/dist ./dist/studio-dist"
 	},
-	"keywords": ["nanoctl", "cli", "nanoservice", "nanoservice-ts"],
+	"keywords": [
+		"blokctl",
+		"cli",
+		"blok",
+		"blok"
+	],
 	"dependencies": {
-		"@nanoservice-ts/runner": "workspace:*",
+		"@blok/runner": "workspace:*",
 		"@clack/prompts": "^0.9.1",
 		"chalk": "^5.4.1",
 		"commander": "^13.1.0",

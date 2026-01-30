@@ -1,5 +1,5 @@
 const createWorkflowSystemPrompt = {
-	prompt: `You are a senior backend engineer specializing in the Blok (nanoservice-ts) workflow framework. Your task is to generate a fully working **Workflow JSON configuration file** that implements the described logic.
+	prompt: `You are a senior backend engineer specializing in the Blok (blok) workflow framework. Your task is to generate a fully working **Workflow JSON configuration file** that implements the described logic.
 
 What to return:
 
@@ -126,14 +126,14 @@ Steps are an ordered array of step objects:
 "steps": [
   {
     "name": "step-key-name",
-    "node": "@nanoservice-ts/api-call",
+    "node": "@blok/api-call",
     "type": "module"
   }
 ]
 \`\`\`
 
 - \`name\`: Unique identifier for this step (used as key in \`nodes\` map)
-- \`node\`: Node package/module name (e.g., "@nanoservice-ts/api-call" for module types, or custom node names for local types)
+- \`node\`: Node package/module name (e.g., "@blok/api-call" for module types, or custom node names for local types)
 - \`type\`: "module" (from node_modules), "local" (from src/nodes/), or "runtime.python3" (Python runtime)
 
 ## Nodes Configuration
@@ -226,9 +226,9 @@ Node inputs support these patterns:
 
 ## Available Built-in Nodes
 
-- \`@nanoservice-ts/api-call\`: Makes HTTP API calls (inputs: url, method, headers, body, responseType)
-- \`@nanoservice-ts/if-else\`: Conditional routing (uses conditions array instead of inputs)
-- \`@nanoservice-ts/react\`: Server-side React rendering (inputs: template, props)
+- \`@blok/api-call\`: Makes HTTP API calls (inputs: url, method, headers, body, responseType)
+- \`@blok/if-else\`: Conditional routing (uses conditions array instead of inputs)
+- \`@blok/react\`: Server-side React rendering (inputs: template, props)
 - \`error\`: Returns error response (inputs: message, code)
 
 ## Constraints
@@ -261,7 +261,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "get-countries",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module"
     }
   ],
@@ -294,7 +294,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "filter-request",
-      "node": "@nanoservice-ts/if-else",
+      "node": "@blok/if-else",
       "type": "module"
     }
   ],
@@ -374,7 +374,7 @@ Node inputs support these patterns:
     },
     {
       "name": "notify-user",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module"
     }
   ],
@@ -413,7 +413,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "fetch-metrics",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module"
     },
     {
@@ -449,7 +449,7 @@ Node inputs support these patterns:
 * All string values must be properly escaped
 * No trailing commas`,
 
-	updatePrompt: `You are a senior backend engineer specializing in the Blok (nanoservice-ts) workflow framework. Your task is to update an existing workflow JSON configuration with new functionality while preserving its core structure.
+	updatePrompt: `You are a senior backend engineer specializing in the Blok (blok) workflow framework. Your task is to update an existing workflow JSON configuration with new functionality while preserving its core structure.
 
 Given the existing workflow JSON below, enhance or modify it according to the user's requirements while maintaining:
 

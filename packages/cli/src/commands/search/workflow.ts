@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
-import { NANOSERVICE_URL } from "../../services/constants.js";
+import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 
 import { install } from "../install/workflow.js";
@@ -41,7 +41,7 @@ interface WorkflowOption extends Workflow {
 }
 
 async function searchWorkflow(opts: OptionValues) {
-	const response = await fetch(`${NANOSERVICE_URL}/published-workflow?workflow_name=${opts.workflow}`, {
+	const response = await fetch(`${BLOK_URL}/published-workflow?workflow_name=${opts.workflow}`, {
 		method: "GET",
 		headers: {
 			Authorization: `Bearer ${opts.token}`,

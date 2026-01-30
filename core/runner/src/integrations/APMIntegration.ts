@@ -14,7 +14,7 @@
  *
  * @example
  * ```typescript
- * import { APMIntegration } from "@nanoservice-ts/runner";
+ * import { APMIntegration } from "@blok/runner";
  *
  * // DataDog
  * const apm = new APMIntegration({

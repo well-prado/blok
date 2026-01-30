@@ -116,8 +116,8 @@ describe("WorkflowCompletionProvider", () => {
 
 			if (items && items.length > 0) {
 				const labels = items.map((i) => i.label);
-				expect(labels).toContain("@nanoservice-ts/api-call");
-				expect(labels).toContain("@nanoservice-ts/if-else");
+				expect(labels).toContain("@blok/api-call");
+				expect(labels).toContain("@blok/if-else");
 			}
 		});
 	});

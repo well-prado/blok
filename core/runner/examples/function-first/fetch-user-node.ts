@@ -7,7 +7,7 @@
  * Compare this to a class-based node - this is 60%+ less code!
  */
 
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
 

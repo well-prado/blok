@@ -194,7 +194,7 @@ function benchLookupPerformance() {
 	const nodeMap = new Map();
 	const nodeObj = {};
 	for (let i = 0; i < 200; i++) {
-		const key = `@nanoservice-ts/node-${i}`;
+		const key = `@blok/node-${i}`;
 		const value = { name: key, version: "1.0.0", runtime: "nodejs" };
 		nodeMap.set(key, value);
 		nodeObj[key] = value;
@@ -203,7 +203,7 @@ function benchLookupPerformance() {
 	measure(
 		"Map lookup (200 entries)",
 		() => {
-			nodeMap.get("@nanoservice-ts/node-100");
+			nodeMap.get("@blok/node-100");
 		},
 		10000,
 	);
@@ -211,7 +211,7 @@ function benchLookupPerformance() {
 	measure(
 		"Object lookup (200 entries)",
 		() => {
-			nodeObj["@nanoservice-ts/node-100"];
+			nodeObj["@blok/node-100"];
 		},
 		10000,
 	);

@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as p from "@clack/prompts";
 
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
-import { NANOSERVICE_URL } from "../../services/constants.js";
+import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
 
 interface WorkflowSchema {
@@ -94,7 +94,7 @@ async function loadWorkflowFiles(directory: string): Promise<{ label: string; va
 }
 
 async function publishWorkflow(token: string, workflow: Record<string, unknown>, name: string) {
-	const response = await fetch(`${NANOSERVICE_URL}/publish-workflow`, {
+	const response = await fetch(`${BLOK_URL}/publish-workflow`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -116,7 +116,7 @@ export async function publish(opts: OptionValues) {
 	const token = tokenManager.getToken();
 	const logger = p.spinner();
 	try {
-		if (!token) throw new Error("Authentication token not found. Please run 'nanoctl login' before publishing.");
+		if (!token) throw new Error("Authentication token not found. Please run 'blokctl login' before publishing.");
 		if (!opts.directory) throw new Error("Directory is required.");
 
 		logger.start("Loading workflows...");

@@ -36,9 +36,9 @@ Use the fan-out pattern when a single step needs to trigger multiple independent
     "fan-out-notifications": {
       "inputs": {
         "branches": [
-          { "stepName": "send-email", "node": "@nanoservice-ts/api-call" },
-          { "stepName": "send-sms", "node": "@nanoservice-ts/api-call" },
-          { "stepName": "send-push", "node": "@nanoservice-ts/api-call" }
+          { "stepName": "send-email", "node": "@blok/api-call" },
+          { "stepName": "send-sms", "node": "@blok/api-call" },
+          { "stepName": "send-push", "node": "@blok/api-call" }
         ],
         "waitForAll": true
       }
@@ -97,19 +97,19 @@ The saga pattern manages distributed transactions by defining compensating actio
   "steps": [
     {
       "name": "charge-payment",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module",
       "set_var": true
     },
     {
       "name": "create-order",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module",
       "set_var": true
     },
     {
       "name": "reserve-inventory",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module"
     }
   ]
@@ -124,7 +124,7 @@ If `reserve-inventory` fails, the compensating actions would be:
 
 **Recommendations:**
 - Store each step's result using `set_var: true` so compensating actions have the data they need (e.g., the payment intent ID for refunding).
-- Use the `@nanoservice-ts/if-else` node to detect failures and route to compensating steps.
+- Use the `@blok/if-else` node to detect failures and route to compensating steps.
 - Log every step and compensation for audit purposes.
 - Design compensating actions to be idempotent -- they may be executed more than once in retry scenarios.
 
@@ -137,7 +137,7 @@ Implement retries for transient failures (network timeouts, rate limits, tempora
   "steps": [
     {
       "name": "call-external-api",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module",
       "retry": {
         "maxAttempts": 3,
@@ -169,7 +169,7 @@ The circuit breaker prevents cascading failures by stopping calls to a failing s
   "steps": [
     {
       "name": "call-payment-service",
-      "node": "@nanoservice-ts/api-call",
+      "node": "@blok/api-call",
       "type": "module",
       "circuitBreaker": {
         "failureThreshold": 5,
@@ -228,7 +228,7 @@ Every node should handle errors explicitly rather than allowing unhandled except
     "details": { "field": "email", "value": "not-an-email" }
   }
   ```
-- Use the `@nanoservice-ts/if-else` node after critical steps to check for errors and route accordingly.
+- Use the `@blok/if-else` node after critical steps to check for errors and route accordingly.
 - Distinguish between retryable errors (network timeout, rate limit) and permanent errors (validation failure, not found).
 - Log errors with sufficient context (step name, inputs, error code) for debugging.
 - Never expose internal error details (stack traces, database queries) in API responses.
@@ -238,7 +238,7 @@ Every node should handle errors explicitly rather than allowing unhandled except
 Define explicit schemas for node inputs and outputs. This makes workflows self-documenting and enables validation.
 
 **Recommendations:**
-- Use `@nanoservice-ts/json-validator` at the start of workflows and before critical steps.
+- Use `@blok/json-validator` at the start of workflows and before critical steps.
 - Document the expected input shape and output shape in the node description.
 - Use TypeScript interfaces for custom nodes to enforce type safety during development.
 - Validate early, fail fast -- reject invalid inputs at the workflow boundary rather than deep in the pipeline.
@@ -311,7 +311,7 @@ Reduce the amount of data flowing between steps to improve performance and reduc
 Validate all external inputs at the workflow boundary to prevent injection attacks, data corruption, and unexpected behavior.
 
 **Recommendations:**
-- Use `@nanoservice-ts/json-validator` as the first step in every HTTP-triggered workflow.
+- Use `@blok/json-validator` as the first step in every HTTP-triggered workflow.
 - Validate:
   - Data types and formats (email, URL, date).
   - String lengths (minimum and maximum).
@@ -586,7 +586,7 @@ Error handling semantics vary across runtimes.
   }
   ```
 - Do not rely on language-specific exception types. Convert exceptions to the standard error format at the node boundary.
-- Test error propagation from non-primary runtimes to ensure the workflow's `@nanoservice-ts/if-else` routing handles them correctly.
+- Test error propagation from non-primary runtimes to ensure the workflow's `@blok/if-else` routing handles them correctly.
 
 ### Dependency Management
 

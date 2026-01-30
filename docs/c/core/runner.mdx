@@ -2,13 +2,13 @@
 title: runner
 ---
 
-`runner` is an execution engine designed to process nanoservice-based workflows efficiently. It provides a structured way to execute bloks within a defined workflow, enabling modular, reusable backend logic.
+`runner` is an execution engine designed to process blok-based workflows efficiently. It provides a structured way to execute bloks within a defined workflow, enabling modular, reusable backend logic.
 
 ---
 
 ## Relationship to the rest of the project
 <Tip> For a complete reference visit [runner](/docs/ref/runner/src/README)</Tip>
-Runner is responsibly for reading workflow files and executing provided nodes based on the selected trigger. Think about it as a conductor that orchestrates the execution of nanoservices. 
+Runner is responsibly for reading workflow files and executing provided nodes based on the selected trigger. Think about it as a conductor that orchestrates the execution of bloks. 
 
 In addition, it also tracks important parameters and metrics during the workflow execution that can be used for debugging and [monitoring purposes](/docs/d/advanced/monitoring-obserbvability).
 
@@ -18,7 +18,7 @@ In addition, it also tracks important parameters and metrics during the workflow
 
 ### **1. Clone the Repository**  
 ```bash
-git clone https://github.com/deskree-inc/blok.git
+git clone https://github.com/well-prado/blok.git
 cd blok/core/runner
 npm install
 ```
@@ -33,7 +33,7 @@ This will start the Runner in **development mode**, allowing you to test changes
 
 ### **Understanding the Runner**  
 The Runner is responsible for:  
-✅ **Executing nanoservices** in an isolated environment.  
+✅ **Executing bloks** in an isolated environment.  
 ✅ **Managing resource allocation** (CPU, memory).  
 ✅ **Handling retries, error logging, and state management.**  
 
@@ -90,5 +90,5 @@ In the PR description, include:
 ### **Final Notes**
 Contributing to the Runner helps improve the **efficiency and reliability** of `Blok`. If you have any questions, open an issue on GitHub! 🚀  
 
-🔗 [GitHub Repository](https://github.com/deskree-inc/blok.git)  
+🔗 [GitHub Repository](https://github.com/well-prado/blok.git)  
 ```

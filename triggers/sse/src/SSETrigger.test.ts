@@ -1,11 +1,11 @@
-import type { HelperResponse } from "@nanoservice-ts/helper";
-import type { NanoService } from "@nanoservice-ts/runner";
+import type { HelperResponse } from "@blok/helper";
+import type { BlokService } from "@blok/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type SSEClient, type SSEConnectionEvent, type SSEEvent, SSETrigger } from "./SSETrigger";
 
 // Mock implementations
 class TestSSETrigger extends SSETrigger {
-	protected override nodes = {} as Record<string, NanoService<unknown>>;
+	protected override nodes = {} as Record<string, BlokService<unknown>>;
 	protected override workflows = {} as Record<string, HelperResponse>;
 
 	// Expose protected methods for testing
@@ -507,7 +507,7 @@ describe("SSETrigger", () => {
 
 describe("SSETriggerOpts Schema", () => {
 	it("should validate with default values", async () => {
-		const { SSETriggerOptsSchema } = await import("@nanoservice-ts/helper");
+		const { SSETriggerOptsSchema } = await import("@blok/helper");
 
 		const opts = SSETriggerOptsSchema.parse({});
 
@@ -518,7 +518,7 @@ describe("SSETriggerOpts Schema", () => {
 	});
 
 	it("should validate custom configuration", async () => {
-		const { SSETriggerOptsSchema } = await import("@nanoservice-ts/helper");
+		const { SSETriggerOptsSchema } = await import("@blok/helper");
 
 		const opts = SSETriggerOptsSchema.parse({
 			events: ["connect", "disconnect", "subscribe.*"],

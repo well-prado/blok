@@ -86,7 +86,7 @@ export async function publish(opts: OptionValues) {
 		[key: string]: string | boolean | Record<string, string> | string[];
 	} | null = null;
 	try {
-		if (!token) throw new Error("Authentication token not found. Please run 'nanoctl login' before publishing.");
+		if (!token) throw new Error("Authentication token not found. Please run 'blokctl login' before publishing.");
 		if (!opts.directory) throw new Error("Directory is required.");
 
 		logger.start("Publishing node to the registry...");
@@ -209,7 +209,7 @@ export async function publish(opts: OptionValues) {
 		}
 
 		if (packageJson.name.startsWith("@") && !packageJson.name.startsWith(`@${registry.namespace}`)) {
-			throw new Error("If you are publishing to the nanoservices registry, the package.json shouldn't be scoped.");
+			throw new Error("If you are publishing to the bloks registry, the package.json shouldn't be scoped.");
 		}
 		if (!packageJson.name.startsWith(`@${registry.namespace}`)) {
 			packageJson.name = `@${registry.namespace}/${packageJson.name}`;
@@ -248,7 +248,7 @@ export async function publish(opts: OptionValues) {
 // Login command
 export default new Command()
 	.command("node")
-	.description("Publish a node to the nanoservices registry")
+	.description("Publish a node to the bloks registry")
 	.option("-d, --directory <value>", "Directory to publish")
 	.option("-b, --build", "Run build before publishing")
 	.argument("<node>", "Node name")

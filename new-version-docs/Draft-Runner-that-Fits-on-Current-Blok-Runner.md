@@ -46,7 +46,7 @@ We introduce an execution‑result type that represents what any runtime returns
 
 ```ts
 // core/runner/src/types/ExecutionResult.ts
-import type { Context } from "@nanoservice-ts/shared"; // matches where Context is today [7]
+import type { Context } from "@blok/shared"; // matches where Context is today [7]
 
 export type ExecutionResult = {
   success: boolean;
@@ -130,25 +130,25 @@ You can initialize this registry once at startup (e.g. in a small `runtime-regis
 
 ### 4.1. NodeJS runtime adapter (local execution)
 
-Blok already executes TypeScript/Node nodes locally using `NanoService.run(ctx)` and the `Runner` that iterates through steps. [5][32][29]
+Blok already executes TypeScript/Node nodes locally using `BlokService.run(ctx)` and the `Runner` that iterates through steps. [5][32][29]
 
 A **NodeJS adapter** can simply delegate to the existing node handler instance returned by `moduleResolver` or `localResolver`. [19][25][26]
 
 ```ts
 // core/runner/src/adapters/NodeJsRuntimeAdapter.ts
 import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "../types/ExecutionResult";
-import type { Context } from "@nanoservice-ts/shared"; // [7]
+import type { Context } from "@blok/shared"; // [7]
 import type { RunnerNode } from "./types"; // whatever file currently holds RunnerNode [10][26]
 
 export class NodeJsRuntimeAdapter implements RuntimeAdapter {
   public readonly kind: RuntimeKind = "nodejs";
 
   async execute(node: RunnerNode, ctx: Context): Promise<ExecutionResult> {
-    // Here we assume node is already an instance of NanoService (what moduleResolver/localResolver return) [19][25]
+    // Here we assume node is already an instance of BlokService (what moduleResolver/localResolver return) [19][25]
     // i.e., it has a .run(ctx) that returns ResponseContext with success/data/error. [32]
     const nanoService: any = node;
 
-    const response = await nanoService.run(ctx); // NanoService.run(ctx): Promise<ResponseContext> [32]
+    const response = await nanoService.run(ctx); // BlokService.run(ctx): Promise<ResponseContext> [32]
 
     return {
       success: response.success,
@@ -159,7 +159,7 @@ export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 }
 ```
 
-This adapter is 100% aligned with `NanoService.run(ctx)` in `core/runner/src/NanoService.ts`. [32]
+This adapter is 100% aligned with `BlokService.run(ctx)` in `core/runner/src/BlokService.ts`. [32]
 
 ### 4.2. Python3 runtime adapter using existing NodeRuntime
 
@@ -175,7 +175,7 @@ We can wrap this in a `Python3RuntimeAdapter` without changing the existing on�
 ```ts
 // core/runner/src/adapters/Python3RuntimeAdapter.ts
 import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "../types/ExecutionResult";
-import type { Context } from "@nanoservice-ts/shared"; // [7]
+import type { Context } from "@blok/shared"; // [7]
 import NodeRuntime from "./NodeRuntime"; // existing class [17]
 import type { RunnerNode } from "./types"; // same RunnerNode as elsewhere [10][26]
 
@@ -194,9 +194,9 @@ export class Python3RuntimeAdapter implements RuntimeAdapter {
 
     // NodeRuntime.handle(ctx, inputs) expects "inputs" (the node config) separately. [17]
     // We'll use the full node config as inputs so Python can reconstruct NodeBase + Context like today. [30]
-    const nanoResponse = await runtime.handle(ctx, node as any); // handle(ctx, inputs): Promise<INanoServiceResponse> [17]
+    const nanoResponse = await runtime.handle(ctx, node as any); // handle(ctx, inputs): Promise<IBlokResponse> [17]
 
-    // nanoResponse is NanoServiceResponse, which sets success/error internally [17][32]
+    // nanoResponse is BlokResponse, which sets success/error internally [17][32]
     if (nanoResponse.error) {
       return {
         success: false,
@@ -252,7 +252,7 @@ New resolver (runtime‑agnostic):
 // core/runner/src/Configuration.ts
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import type { RuntimeKind } from "./types/ExecutionResult";
-import type { Context } from "@nanoservice-ts/shared"; // [7]
+import type { Context } from "@blok/shared"; // [7]
 import type { RunnerNode } from "./types"; // existing RunnerNode [10][26]
 
 protected async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
@@ -265,11 +265,11 @@ protected async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
   const registry = RuntimeRegistry.getInstance();
   const adapter = registry.get(runtimeKind);
 
-  // Create a lightweight proxy node that implements the NanoService interface
+  // Create a lightweight proxy node that implements the BlokService interface
   // expected by the rest of the runner, but delegates execution to the adapter.
   class RuntimeProxyNode {
     name = node.name;
-    originalConfig = node; // preserve config for logging in NanoService.run if needed [32]
+    originalConfig = node; // preserve config for logging in BlokService.run if needed [32]
 
     async run(ctx: Context) {
       const result = await adapter.execute(node, ctx);

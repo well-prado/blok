@@ -5,7 +5,7 @@ edition = "2021"
 description = "Blok Runtime SDK for Rust - Execute workflow nodes in Rust"
 license = "MIT"
 repository = "https://github.com/deskree-inc/blok"
-keywords = ["blok", "workflow", "runtime", "nanoservice"]
+keywords = ["blok", "workflow", "runtime", "blok"]
 
 [[bin]]
 name = "blok-runtime"

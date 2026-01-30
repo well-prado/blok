@@ -77,8 +77,8 @@ const ctx: Context = {
 **2. Node Implementation**
 Nodes must return the response object directly:
 ```typescript
-async handle(ctx: Context, inputs: any): Promise<INanoServiceResponse> {
-  const response = new NanoServiceResponse();
+async handle(ctx: Context, inputs: any): Promise<IBlokResponse> {
+  const response = new BlokResponse();
   response.setSuccess({ output: "data" });
   return response;  // ← Return the response, not response.getResponse()
 }
@@ -90,7 +90,7 @@ The ExecutionResult contains the full response:
 const result = await adapter.execute(node, ctx);
 
 // result.success → boolean
-// result.data → Full NanoServiceResponse object
+// result.data → Full BlokResponse object
 // result.data.data → Actual output data
 // result.errors → Error object or null
 // result.metrics → { duration_ms: number }
@@ -102,14 +102,14 @@ const result = await adapter.execute(node, ctx);
 
 ```typescript
 import { describe, it, expect, beforeAll } from "vitest";
-import type { Context } from "@nanoservice-ts/shared";
-import NanoService from "../../../src/NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
+import type { Context } from "@blok/shared";
+import BlokService from "../../../src/BlokService";
+import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
 
 // 1. Define test node
-class TestNode extends NanoService<{ input: string }> {
+class TestNode extends BlokService<{ input: string }> {
   constructor() {
     super();
     this.name = "test-node";
@@ -117,8 +117,8 @@ class TestNode extends NanoService<{ input: string }> {
     this.outputSchema = { /* JSON Schema */ };
   }
 
-  async handle(ctx: Context, inputs: { input: string }): Promise<INanoServiceResponse> {
-    const response = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: { input: string }): Promise<IBlokResponse> {
+    const response = new BlokResponse();
     response.setSuccess({ output: `Processed: ${inputs.input}` });
     return response;
   }

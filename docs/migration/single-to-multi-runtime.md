@@ -264,8 +264,8 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 The Docker adapter is registered at startup with pool configuration:
 
 ```typescript
-import { RuntimeRegistry } from "@nanoservice-ts/runner";
-import { DockerRuntimeAdapter } from "@nanoservice-ts/runner/adapters/DockerRuntimeAdapter";
+import { RuntimeRegistry } from "@blok/runner";
+import { DockerRuntimeAdapter } from "@blok/runner/adapters/DockerRuntimeAdapter";
 
 const registry = RuntimeRegistry.getInstance();
 
@@ -488,8 +488,8 @@ Each runtime has its own test tooling:
 
 ```typescript
 // Node.js node test
-import { defineNode } from "@nanoservice-ts/runner";
-import { createTestContext } from "@nanoservice-ts/runner/testing";
+import { defineNode } from "@blok/runner";
+import { createTestContext } from "@blok/runner/testing";
 
 const node = defineNode({ /* ... */ });
 const ctx = createTestContext({
@@ -518,7 +518,7 @@ assert "prediction" in result["data"]
 Test the full workflow with all runtimes running:
 
 ```typescript
-import { Configuration, Runner } from "@nanoservice-ts/runner";
+import { Configuration, Runner } from "@blok/runner";
 
 describe("ML Pipeline", () => {
   it("should execute across runtimes", async () => {
@@ -546,8 +546,8 @@ describe("ML Pipeline", () => {
 For CI environments where external runtimes are unavailable:
 
 ```typescript
-import { RuntimeRegistry } from "@nanoservice-ts/runner";
-import type { RuntimeAdapter, ExecutionResult } from "@nanoservice-ts/runner/adapters/RuntimeAdapter";
+import { RuntimeRegistry } from "@blok/runner";
+import type { RuntimeAdapter, ExecutionResult } from "@blok/runner/adapters/RuntimeAdapter";
 
 class MockPythonAdapter implements RuntimeAdapter {
   readonly kind = "python3" as const;

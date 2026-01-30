@@ -5,8 +5,8 @@ RUN apk add --no-cache build-base
 
 WORKDIR /app
 
-COPY Gemfile nanoservice.gemspec ./
-COPY lib/nanoservice/version.rb lib/nanoservice/version.rb
+COPY Gemfile blok.gemspec ./
+COPY lib/blok/version.rb lib/blok/version.rb
 
 RUN bundle install --without development test --jobs 4 --retry 3
 

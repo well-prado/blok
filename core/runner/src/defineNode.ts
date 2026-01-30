@@ -1,11 +1,11 @@
 import type { ZodError, z } from "zod";
 
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError, NodeBase } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
+import { GlobalError, NodeBase } from "@blok/shared";
 import type { Schema } from "jsonschema";
-import NanoService from "./NanoService";
-import type { INanoServiceResponse } from "./NanoServiceResponse";
-import NanoServiceResponse from "./NanoServiceResponse";
+import BlokService from "./Blok";
+import type { IBlokResponse } from "./BlokResponse";
+import BlokResponse from "./BlokResponse";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 
@@ -69,16 +69,16 @@ export interface FnNodeDefinition<
 }
 
 /**
- * FunctionNode wrapper that bridges function-first nodes to existing NanoService infrastructure
+ * FunctionNode wrapper that bridges function-first nodes to existing BlokService infrastructure
  *
  * This class wraps a function-first node definition and makes it compatible with the
- * existing NanoService.run() execution model. It handles:
+ * existing BlokService.run() execution model. It handles:
  * - Zod input validation
  * - Zod output validation
  * - Error mapping (ZodError → GlobalError)
- * - Response wrapping (NanoServiceResponse)
+ * - Response wrapping (BlokResponse)
  */
-export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTypeAny> extends NanoService<
+export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTypeAny> extends BlokService<
 	z.infer<TInput>
 > {
 	private definition: FnNodeDefinition<TInput, TOutput>;
@@ -105,20 +105,20 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 	}
 
 	/**
-	 * Implementation of the abstract handle() method required by NanoService
+	 * Implementation of the abstract handle() method required by BlokService
 	 *
 	 * This method:
 	 * 1. Validates input with Zod
 	 * 2. Executes the user's execute() function
 	 * 3. Validates output with Zod
-	 * 4. Wraps result in NanoServiceResponse
+	 * 4. Wraps result in BlokResponse
 	 * 5. Maps any errors to GlobalError
 	 */
 	async handle(
 		ctx: Context,
 		inputs: z.infer<TInput> | JsonLikeObject | Condition[],
-	): Promise<INanoServiceResponse | NanoService<z.infer<TInput>>[]> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	): Promise<IBlokResponse | BlokService<z.infer<TInput>>[]> {
+		const response: BlokResponse = new BlokResponse();
 
 		try {
 			// Step 1: Validate input with Zod
@@ -129,9 +129,9 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 
 			// Step 3: If execute() returns an array of NodeBase instances (flow nodes
 			// like if-else), return them directly. The runner's processFlow() expects
-			// handle() to return NanoService[] for flow nodes, not a wrapped response.
+			// handle() to return BlokService[] for flow nodes, not a wrapped response.
 			if (Array.isArray(result) && result.length > 0 && result[0] instanceof NodeBase) {
-				return result as NanoService<z.infer<TInput>>[];
+				return result as BlokService<z.infer<TInput>>[];
 			}
 
 			// Step 4: Validate output with Zod
@@ -248,7 +248,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
  *
  * @example
  * ```typescript
- * import { defineNode } from "@nanoservice-ts/runner";
+ * import { defineNode } from "@blok/runner";
  * import { z } from "zod";
  *
  * export default defineNode({

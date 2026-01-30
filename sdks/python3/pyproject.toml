@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "blok-nanoservice-python3"
+name = "blok-blok-python3"
 version = "1.0.0"
-description = "Blok Nanoservice SDK for Python 3 — build workflow nodes as HTTP microservices"
+description = "Blok Blok SDK for Python 3 — build workflow nodes as HTTP microservices"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
@@ -13,4 +13,4 @@ license = {text = "MIT"}
 blok-serve = "bin.serve:main"
 
 [tool.setuptools.packages.find]
-include = ["nanoservice*"]
+include = ["blok*"]

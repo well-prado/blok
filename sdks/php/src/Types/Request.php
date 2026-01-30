@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Types;
+namespace Blok\Blok\Types;
 
 /**
  * Request represents the incoming HTTP request data within a workflow context.

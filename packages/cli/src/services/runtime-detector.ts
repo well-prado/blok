@@ -72,7 +72,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["java --version"],
 		toolchain: "java + mvn",
 		installDeps: "mvn package -q -DskipTests",
-		startCmd: "java -jar target/nanoservice-java-1.0.0.jar",
+		startCmd: "java -jar target/blok-java-1.0.0.jar",
 		sdkDir: "java",
 		secondaryTool: {
 			name: "Maven",

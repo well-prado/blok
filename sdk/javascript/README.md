@@ -1,7 +1,7 @@
 
 # NanoSDK – Vanilla JavaScript SDK for Atomic Computing (CDN)
 
-**NanoSDK** is the official lightweight client to execute remote nanoservice nodes on the [Atomic Computing](https://deskree.com) platform.  
+**NanoSDK** is the official lightweight client to execute remote blok nodes on the [Atomic Computing](https://deskree.com) platform.  
 This SDK is designed specifically for **browser environments** and distributed via **CDN** for easy integration without build tools or dependencies.
 
 ---
@@ -51,7 +51,7 @@ const client = new NanoSDK().createHttpClient("https://your-atomic-app.com", "yo
 ### Execute a Node.js Blok (as module)
 
 ```js
-await client.nodejs("@nanoservice-ts/api-call", {
+await client.nodejs("@blok/api-call", {
   url: "https://catfact.ninja/fact",
   method: "GET",
   responseType: "application/json"
@@ -69,8 +69,8 @@ client.nodejs(nodeName, inputs)
 
 | Parameter     | Type      | Description                                                                 |
 |---------------|-----------|-----------------------------------------------------------------------------|
-| `nodeName`    | `string`  | The name of the node to execute. This name must match a registered nanoservice. |
-| `inputs`      | `object`  | A plain object representing the inputs the nanoservice expects at runtime.     |
+| `nodeName`    | `string`  | The name of the node to execute. This name must match a registered blok. |
+| `inputs`      | `object`  | A plain object representing the inputs the blok expects at runtime.     |
 
 ---
 
@@ -131,7 +131,7 @@ Console will log:
 
 - A valid **Atomic Application URL**
 - A valid **Access Token** (generated via the Deskree platform)
-- Public nanoservice endpoints accessible via Atomic workflows
+- Public blok endpoints accessible via Atomic workflows
 
 ---
 

@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
-require_relative "lib/nanoservice/version"
+require_relative "lib/blok/version"
 
 Gem::Specification.new do |spec|
-  spec.name          = "nanoservice-ruby"
-  spec.version       = Nanoservice::VERSION
+  spec.name          = "blok-ruby"
+  spec.version       = Blok::VERSION
   spec.authors       = ["Blok Team"]
   spec.email         = ["team@blok.dev"]
 
-  spec.summary       = "Ruby SDK for the Blok nanoservice framework"
+  spec.summary       = "Ruby SDK for the Blok blok framework"
   spec.description   = "Production-ready Ruby SDK for building Blok workflow nodes. " \
                         "Provides a base node handler, HTTP runtime server, middleware pipeline, " \
                         "structured logging, schema validation, and testing utilities."

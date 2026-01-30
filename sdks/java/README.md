@@ -1,4 +1,4 @@
-# Blok Nanoservice Java SDK
+# Blok Blok Java SDK
 
 Java SDK for building workflow nodes that integrate with the Blok orchestration framework. Nodes communicate via HTTP (`POST /execute`, `GET /health`) and can be deployed as Docker containers.
 
@@ -9,7 +9,7 @@ Java SDK for building workflow nodes that integrate with the Blok orchestration 
 ```xml
 <dependency>
     <groupId>com.blok</groupId>
-    <artifactId>nanoservice-java</artifactId>
+    <artifactId>blok-java</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
@@ -25,8 +25,8 @@ mvn clean package
 ### 1. Implement a node
 
 ```java
-import com.blok.nanoservice.node.NodeHandler;
-import com.blok.nanoservice.types.Context;
+import com.blok.blok.node.NodeHandler;
+import com.blok.blok.types.Context;
 import java.util.Map;
 
 public class GreetNode implements NodeHandler {
@@ -45,9 +45,9 @@ public class GreetNode implements NodeHandler {
 ### 2. Register and serve
 
 ```java
-import com.blok.nanoservice.config.ServerConfig;
-import com.blok.nanoservice.node.NodeRegistry;
-import com.blok.nanoservice.server.RuntimeServer;
+import com.blok.blok.config.ServerConfig;
+import com.blok.blok.node.NodeRegistry;
+import com.blok.blok.server.RuntimeServer;
 
 public class Main {
     public static void main(String[] args) throws Exception {
@@ -96,9 +96,9 @@ Configuration is loaded from environment variables:
 Middleware wraps node execution to add cross-cutting behavior.
 
 ```java
-import com.blok.nanoservice.middleware.*;
-import com.blok.nanoservice.logging.Logger;
-import com.blok.nanoservice.logging.LogLevel;
+import com.blok.blok.middleware.*;
+import com.blok.blok.logging.Logger;
+import com.blok.blok.logging.LogLevel;
 
 Logger logger = new Logger(LogLevel.INFO);
 
@@ -127,7 +127,7 @@ registry.use(timing);
 Lightweight JSON Schema validation (subset of Draft 7):
 
 ```java
-import com.blok.nanoservice.validation.SchemaValidator;
+import com.blok.blok.validation.SchemaValidator;
 import java.util.*;
 
 SchemaValidator validator = new SchemaValidator();
@@ -150,8 +150,8 @@ Supported keywords: `type`, `required`, `properties`, `enum`, `minLength`, `maxL
 Use the built-in test utilities:
 
 ```java
-import com.blok.nanoservice.testing.MockContext;
-import com.blok.nanoservice.testing.TestRunner;
+import com.blok.blok.testing.MockContext;
+import com.blok.blok.testing.TestRunner;
 
 TestRunner runner = new TestRunner();
 runner.register("greet", new GreetNode());
@@ -175,7 +175,7 @@ mvn test
 Structured errors with categories:
 
 ```java
-import com.blok.nanoservice.errors.NodeException;
+import com.blok.blok.errors.NodeException;
 
 throw NodeException.validation("name is required");
 throw NodeException.configuration("missing 'url' in config");
@@ -190,10 +190,10 @@ Error categories: `VALIDATION`, `EXECUTION`, `CONFIGURATION`, `NETWORK`, `NOT_FO
 
 ```bash
 # Build
-docker build -t blok-nanoservice-java .
+docker build -t blok-blok-java .
 
 # Run
-docker run -p 8080:8080 blok-nanoservice-java
+docker run -p 8080:8080 blok-blok-java
 
 # Health check
 curl http://localhost:8080/health
@@ -202,7 +202,7 @@ curl http://localhost:8080/health
 ## Project Structure
 
 ```
-src/main/java/com/blok/nanoservice/
+src/main/java/com/blok/blok/
   types/          Context, Request, Response, NodeConfig, ExecutionRequest/Result
   node/           NodeHandler interface, NodeRegistry
   server/         RuntimeServer (JDK HttpServer)

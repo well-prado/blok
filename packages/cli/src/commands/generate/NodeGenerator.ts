@@ -178,13 +178,13 @@ export default class NodeGenerator {
 			"",
 			"Please fix ALL the errors listed above and regenerate the complete code.",
 			"Make sure to:",
-			"- Import defineNode from '@nanoservice-ts/runner'",
+			"- Import defineNode from '@blok/runner'",
 			"- Import z from 'zod'",
-			"- Import Context type from '@nanoservice-ts/shared'",
+			"- Import Context type from '@blok/shared'",
 			"- Use z.object({...}) for input and output schemas",
 			"- Make the execute function async",
 			"- Export as default: export default defineNode({...})",
-			"- Return a plain object matching the output schema (no NanoServiceResponse)",
+			"- Return a plain object matching the output schema (no BlokResponse)",
 		].join("\n");
 
 		return feedback;
@@ -198,13 +198,13 @@ export default class NodeGenerator {
 
 		// Missing imports
 		if (errorLower.includes("missing") && errorLower.includes("definenode")) {
-			return "Add: import { defineNode } from '@nanoservice-ts/runner';";
+			return "Add: import { defineNode } from '@blok/runner';";
 		}
 		if (errorLower.includes("missing") && errorLower.includes("zod")) {
 			return "Add: import { z } from 'zod';";
 		}
 		if (errorLower.includes("cannot find") && errorLower.includes("definenode")) {
-			return "Ensure defineNode is imported from '@nanoservice-ts/runner'";
+			return "Ensure defineNode is imported from '@blok/runner'";
 		}
 
 		// Schema issues
@@ -230,9 +230,9 @@ export default class NodeGenerator {
 			return "Check that the return type of execute() matches the output Zod schema exactly";
 		}
 
-		// NanoServiceResponse misuse
-		if (errorLower.includes("nanoserviceresponse") || errorLower.includes("setsuccess")) {
-			return "Do NOT use NanoServiceResponse in function-first nodes. Just return a plain object.";
+		// BlokResponse misuse
+		if (errorLower.includes("blokresponse") || errorLower.includes("setsuccess")) {
+			return "Do NOT use BlokResponse in function-first nodes. Just return a plain object.";
 		}
 
 		// Context access
@@ -242,7 +242,7 @@ export default class NodeGenerator {
 
 		// Compilation errors
 		if (errorLower.includes("cannot find module") || errorLower.includes("module not found")) {
-			return "Check import paths. Use '@nanoservice-ts/runner' for defineNode and '@nanoservice-ts/shared' for Context/GlobalError";
+			return "Check import paths. Use '@blok/runner' for defineNode and '@blok/shared' for Context/GlobalError";
 		}
 
 		// Property access errors

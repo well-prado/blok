@@ -148,17 +148,17 @@ docs/
 │
 ├── CLI Reference/
 │   ├── Overview
-│   ├── nanoctl create
-│   ├── nanoctl generate (AI)
-│   ├── nanoctl dev
-│   ├── nanoctl build
-│   ├── nanoctl deploy
-│   ├── nanoctl migrate
-│   ├── nanoctl monitor
-│   ├── nanoctl profile
-│   ├── nanoctl graph
-│   ├── nanoctl cost
-│   └── nanoctl marketplace
+│   ├── blokctl create
+│   ├── blokctl generate (AI)
+│   ├── blokctl dev
+│   ├── blokctl build
+│   ├── blokctl deploy
+│   ├── blokctl migrate
+│   ├── blokctl monitor
+│   ├── blokctl profile
+│   ├── blokctl graph
+│   ├── blokctl cost
+│   └── blokctl marketplace
 │
 ├── IDE Integration/
 │   ├── VS Code Extension
@@ -247,7 +247,7 @@ docs/
 | 1.4 | Project Structure | P0 | Full codebase analysis | - [ ] |
 | 1.5 | Configuration | P0 | Configuration.ts, .env files, docker-compose | - [ ] |
 | 1.6 | How Blok Works | P0 | core/runner/src/index.ts, TriggerBase.ts | - [ ] |
-| 1.7 | Nodes | P0 | defineNode.ts, NanoService.ts, NodeBase.ts | - [ ] | **NOTE:** All 28 TS nodes now use `defineNode()`. Document function-first as the standard, class-based as legacy. |
+| 1.7 | Nodes | P0 | defineNode.ts, BlokService.ts, NodeBase.ts | - [ ] | **NOTE:** All 28 TS nodes now use `defineNode()`. Document function-first as the standard, class-based as legacy. |
 | 1.8 | Workflows | P0 | workflow-helper/, examples/workflows/ | - [ ] |
 | 1.9 | Triggers Overview | P0 | triggers/http/, TriggerBase.ts | - [ ] |
 | 1.10 | Context & Data Flow | P0 | core/shared/src/types/Context.ts | - [ ] |
@@ -291,7 +291,7 @@ docs/
 >
 > **3 Adapter Types with different protocols:**
 > - **NodeJsRuntimeAdapter** — In-process execution, no serialization
-> - **Python3RuntimeAdapter** — gRPC (base64-encoded JSON), sends resolved inputs as `request.body` in context, passes `config.inputs` to Python NanoService `handle()`, extracts `parsedResponse.data`
+> - **Python3RuntimeAdapter** — gRPC (base64-encoded JSON), sends resolved inputs as `request.body` in context, passes `config.inputs` to Python BlokService `handle()`, extracts `parsedResponse.data`
 > - **HttpRuntimeAdapter** — HTTP POST to `/execute` (Go, Rust, Java, C#, PHP, Ruby), sends resolved inputs from `ctx.config[node.name].inputs` as request body, returns `ExecutionResult` with vars support
 >
 > **Workflow type mapping:**

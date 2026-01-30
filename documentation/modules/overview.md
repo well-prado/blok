@@ -35,7 +35,7 @@ blok/
 │   └── web/                 # api-call@1.0.0, react@1.0.0
 │
 ├── packages/                # Developer tooling
-│   ├── cli/                 # nanoctl CLI (create, generate, dev, build, deploy, etc.)
+│   ├── cli/                 # blokctl CLI (create, generate, dev, build, deploy, etc.)
 │   ├── vscode-extension/    # VS Code extension (diagnostics, hover, completion)
 │   ├── lsp-server/          # Language Server Protocol implementation
 │   ├── intellij-plugin/     # JetBrains IDE plugin
@@ -137,15 +137,15 @@ blok/
 ## Package Dependencies
 
 ```
-@nanoservice-ts/shared       ← Base types (Context, NodeBase, GlobalError)
+@blok/shared       ← Base types (Context, NodeBase, GlobalError)
        ↑
-@nanoservice-ts/runner       ← Core execution engine (depends on shared + helper)
+@blok/runner       ← Core execution engine (depends on shared + helper)
        ↑
-@nanoservice-ts/helper       ← Workflow builder DSL (depends on shared)
+@blok/helper       ← Workflow builder DSL (depends on shared)
        ↑
-@nanoservice-ts/trigger-http ← HTTP trigger (depends on runner + shared + helper)
+@blok/trigger-http ← HTTP trigger (depends on runner + shared + helper)
        ↑
-nanoctl (CLI)                ← CLI tooling (depends on runner)
+blokctl (CLI)                ← CLI tooling (depends on runner)
 ```
 
 ## Environment Variables
@@ -157,7 +157,7 @@ nanoctl (CLI)                ← CLI tooling (depends on runner)
 | `NODES_PATH` | Path to node implementations | `./src/nodes` |
 | `CONSOLE_LOG_ACTIVE` | Enable console logging | `true` |
 | `NODE_ENV` | Environment (development/production) | `development` |
-| `APP_NAME` | Application name for logging | `nanoservice-http` |
+| `APP_NAME` | Application name for logging | `blok-http` |
 | `PORT` | HTTP server port | `4000` |
 
 ### Python Runtime
@@ -200,7 +200,7 @@ nanoctl (CLI)                ← CLI tooling (depends on runner)
 | `http:dev` | Filter trigger-http dev | Start HTTP trigger dev server |
 | `runner:dev` | Filter runner build:dev | Build runner in watch mode |
 | `runner:test` | Filter runner test:dev | Run runner tests in watch mode |
-| `cli:dev` | Filter nanoctl build:dev | Build CLI in watch mode |
+| `cli:dev` | Filter blokctl build:dev | Build CLI in watch mode |
 | `lint` | `biome check --write` | Lint all files |
 | `doc:dev` | `npx mintlify dev` | Start docs dev server |
 

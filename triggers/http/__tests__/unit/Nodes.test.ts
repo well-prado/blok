@@ -6,11 +6,11 @@ describe("Nodes", () => {
 		expect(typeof nodes).toBe("object");
 	});
 
-	it("should have @nanoservice-ts/api-call key", () => {
-		expect(nodes["@nanoservice-ts/api-call"]).toBeDefined();
+	it("should have @blok/api-call key", () => {
+		expect(nodes["@blok/api-call"]).toBeDefined();
 	});
 
-	it("should have @nanoservice-ts/if-else key", () => {
-		expect(nodes["@nanoservice-ts/if-else"]).toBeDefined();
+	it("should have @blok/if-else key", () => {
+		expect(nodes["@blok/if-else"]).toBeDefined();
 	});
 });

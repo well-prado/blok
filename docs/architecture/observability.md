@@ -18,7 +18,7 @@ Blok provides a comprehensive observability stack built on OpenTelemetry, Promet
          |  +-- TriggerMetricsCollector |
          |  +-- Structured Logger       |
          |                              |
-         |  NanoService (Nodes)         |
+         |  BlokService (Nodes)         |
          |  +-- Node-level OTel meters  |
          |  +-- Execution tracing       |
          |                              |
@@ -255,7 +255,7 @@ Panels:
 
 ```bash
 # Import dashboards from the infra/grafana directory
-nanoctl monitor dashboards import --path ./infra/grafana/dashboards/
+blokctl monitor dashboards import --path ./infra/grafana/dashboards/
 ```
 
 ## Sentry Error Tracking
@@ -263,7 +263,7 @@ nanoctl monitor dashboards import --path ./infra/grafana/dashboards/
 The `SentryIntegration` provides error tracking with full workflow context:
 
 ```typescript
-import { SentryIntegration } from "@nanoservice-ts/runner";
+import { SentryIntegration } from "@blok/runner";
 
 const sentry = new SentryIntegration({
   dsn: process.env.SENTRY_DSN!,

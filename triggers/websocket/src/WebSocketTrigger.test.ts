@@ -1,5 +1,5 @@
-import type { HelperResponse } from "@nanoservice-ts/helper";
-import type { NanoService } from "@nanoservice-ts/runner";
+import type { HelperResponse } from "@blok/helper";
+import type { BlokService } from "@blok/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AuthResult,
@@ -11,7 +11,7 @@ import {
 
 // Mock implementations
 class TestWebSocketTrigger extends WebSocketTrigger {
-	protected override nodes = {} as Record<string, NanoService<unknown>>;
+	protected override nodes = {} as Record<string, BlokService<unknown>>;
 	protected override workflows = {} as Record<string, HelperResponse>;
 
 	// Expose protected methods for testing
@@ -460,7 +460,7 @@ describe("WebSocketTrigger", () => {
 
 describe("WebSocketTriggerOpts Schema", () => {
 	it("should validate with default values", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@nanoservice-ts/helper");
+		const { WebSocketTriggerOptsSchema } = await import("@blok/helper");
 
 		const opts = WebSocketTriggerOptsSchema.parse({});
 
@@ -471,7 +471,7 @@ describe("WebSocketTriggerOpts Schema", () => {
 	});
 
 	it("should validate custom configuration", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@nanoservice-ts/helper");
+		const { WebSocketTriggerOptsSchema } = await import("@blok/helper");
 
 		const opts = WebSocketTriggerOptsSchema.parse({
 			events: ["chat.*", "notification"],

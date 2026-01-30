@@ -12,13 +12,13 @@
 	"steps": [
 		{
 			"name": "fetch-source-data",
-			"node": "@nanoservice-ts/api-call",
+			"node": "@blok/api-call",
 			"type": "module",
 			"set_var": true
 		},
 		{
 			"name": "route-fetch-result",
-			"node": "@nanoservice-ts/if-else",
+			"node": "@blok/if-else",
 			"type": "module"
 		}
 	],
@@ -48,12 +48,12 @@
 						},
 						{
 							"name": "validate-transformed-data",
-							"node": "@nanoservice-ts/json-validator",
+							"node": "@blok/json-validator",
 							"type": "module"
 						},
 						{
 							"name": "route-validation",
-							"node": "@nanoservice-ts/if-else",
+							"node": "@blok/if-else",
 							"type": "module"
 						}
 					]
@@ -111,13 +111,13 @@
 					"steps": [
 						{
 							"name": "store-records",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "send-success-notification",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -132,7 +132,7 @@
 					"steps": [
 						{
 							"name": "send-failure-notification",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{

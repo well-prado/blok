@@ -1,6 +1,6 @@
 {
-	"name": "@nanoservice-ts/api-call",
-	"version": "0.1.29",
+	"name": "@blok/api-call",
+	"version": "0.1.0",
 	"description": "Node module for making API calls",
 	"engines": {
 		"node": ">=18.0.0"
@@ -26,8 +26,8 @@
 		"vitest": "^3.1.4"
 	},
 	"dependencies": {
-		"@nanoservice-ts/runner": "workspace:*",
-		"@nanoservice-ts/shared": "workspace:*",
+		"@blok/runner": "workspace:*",
+		"@blok/shared": "workspace:*",
 		"lodash": "^4.17.21",
 		"zod": "^3.24.2"
 	},

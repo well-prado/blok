@@ -149,7 +149,7 @@ pub trait NodeHandler: Send + Sync {
 ### Structure
 ```
 sdks/csharp/
-├── src/Nanoservice.Core/
+├── src/Blok.Core/
 │   ├── Program.cs              # ASP.NET entry point
 │   ├── Server/                 # HTTP + gRPC server
 │   ├── Node/
@@ -162,7 +162,7 @@ sdks/csharp/
 │   ├── Logging/                # ILogger integration
 │   ├── Validation/             # FluentValidation / DataAnnotations
 │   └── Config/                 # IConfiguration integration
-├── Nanoservice.Core.csproj     # .NET project file
+├── Blok.Core.csproj     # .NET project file
 └── Dockerfile
 ```
 

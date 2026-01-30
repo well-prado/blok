@@ -7,12 +7,12 @@ import * as utils from "../../../src/services/utils.js";
 vi.mock("fs-extra");
 vi.mock("../../../src/services/local-token-manager.js");
 vi.mock("../../../src/services/constants.js", () => ({
-	NANOSERVICE_URL: "http://mock-nanoservice-url.com",
+	BLOK_URL: "http://mock-blok-url.com",
 }));
 
 test("build - successful build", async () => {
 	vi.spyOn(fs, "existsSync").mockImplementation((path) => {
-		if (String(path).includes("Dockerfile") || String(path).includes(".nanoservice.json")) return true;
+		if (String(path).includes("Dockerfile") || String(path).includes(".blok.json")) return true;
 		return false;
 	});
 	vi.spyOn(fs, "readJSONSync").mockReturnValue({});
@@ -42,7 +42,7 @@ test("build - missing Dockerfile", async () => {
 
 test("build - authentication failure", async () => {
 	vi.spyOn(fs, "existsSync").mockImplementation((path) => {
-		if (String(path).includes("Dockerfile") || String(path).includes(".nanoservice.json")) return true;
+		if (String(path).includes("Dockerfile") || String(path).includes(".blok.json")) return true;
 		return false;
 	});
 	vi.spyOn(tokenManager, "getToken").mockReturnValue(null);

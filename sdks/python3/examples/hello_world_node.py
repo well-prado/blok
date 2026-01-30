@@ -2,8 +2,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from nanoservice.node.node_handler import NodeHandler
-from nanoservice.types.context import Context
+from blok.node.node_handler import NodeHandler
+from blok.types.context import Context
 
 
 class HelloWorldNode(NodeHandler):

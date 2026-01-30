@@ -4,7 +4,7 @@
 
 [runner/src](../modules/runner_src.md).Runner
 
-Runner class that extends RunnerSteps to execute a series of NanoService steps.
+Runner class that extends RunnerSteps to execute a series of BlokService steps.
 
 ## Hierarchy
 
@@ -39,7 +39,7 @@ Constructs a new Runner instance.
 
 | Name | Type | Default value | Description |
 | :------ | :------ | :------ | :------ |
-| `steps` | `NodeBase`[] | `[]` | An array of NanoService steps to be executed. |
+| `steps` | `NodeBase`[] | `[]` | An array of BlokService steps to be executed. |
 
 #### Returns
 
@@ -69,7 +69,7 @@ Constructs a new Runner instance.
 
 ▸ **run**(`ctx`): `Promise`\<`Context`\>
 
-Executes the series of NanoService steps with the given context.
+Executes the series of BlokService steps with the given context.
 
 #### Parameters
 
@@ -100,7 +100,7 @@ Executes a series of steps in the given context.
 | Name | Type | Default value | Description |
 | :------ | :------ | :------ | :------ |
 | `ctx` | `Context` | `undefined` | The context in which the steps are executed. |
-| `steps` | `NodeBase`[] | `undefined` | An array of NanoService steps to be executed. |
+| `steps` | `NodeBase`[] | `undefined` | An array of BlokService steps to be executed. |
 | `deep` | `boolean` | `false` | A boolean indicating whether the function is being called recursively for flow steps. |
 | `step_name` | `string` | `""` | The name of the current step being processed in a flow. |
 

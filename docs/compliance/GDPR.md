@@ -53,7 +53,7 @@ GDPR Article 5 defines seven data processing principles. Here is how Blok helps 
 **Implementation:** Document your legal basis for processing and expose it to data subjects.
 
 ```typescript
-import { AuditLogger, ConsoleAuditSink, FileAuditSink } from "@nanoservice-ts/runner";
+import { AuditLogger, ConsoleAuditSink, FileAuditSink } from "@blok/runner";
 
 // Log every data processing activity with its legal basis
 const audit = new AuditLogger({
@@ -86,7 +86,7 @@ audit.log({
 Process data only for specified, explicit, and legitimate purposes.
 
 ```typescript
-import { RBAC } from "@nanoservice-ts/runner";
+import { RBAC } from "@blok/runner";
 
 const rbac = new RBAC();
 
@@ -194,7 +194,7 @@ async function enforceRetentionPolicy(
 Protect data with appropriate security measures.
 
 ```typescript
-import { EncryptionAtRest } from "@nanoservice-ts/runner";
+import { EncryptionAtRest } from "@blok/runner";
 
 const encryption = new EncryptionAtRest({
   algorithm: "aes-256-gcm",
@@ -391,7 +391,7 @@ if (scanResult.hasPII) {
 Data subjects can request a copy of all personal data held about them.
 
 ```typescript
-import { AuditLogger, FileAuditSink } from "@nanoservice-ts/runner";
+import { AuditLogger, FileAuditSink } from "@blok/runner";
 
 // Workflow: Handle Subject Access Request (SAR)
 async function handleSubjectAccessRequest(
@@ -664,8 +664,8 @@ async function handleObjectionRequest(
 Protect all personal data stored in databases, files, or caches:
 
 ```typescript
-import { EncryptionAtRest } from "@nanoservice-ts/runner";
-import { SecretManager } from "@nanoservice-ts/runner";
+import { EncryptionAtRest } from "@blok/runner";
+import { SecretManager } from "@blok/runner";
 
 const encryption = new EncryptionAtRest({
   algorithm: "aes-256-gcm",
@@ -735,7 +735,7 @@ const server = createServer(tlsConfig, app);
 Combine authentication and RBAC for defense in depth:
 
 ```typescript
-import { AuthMiddleware, OAuthOIDCProvider, RBAC, AuditLogger } from "@nanoservice-ts/runner";
+import { AuthMiddleware, OAuthOIDCProvider, RBAC, AuditLogger } from "@blok/runner";
 
 const auth = new AuthMiddleware({
   providers: [
@@ -875,7 +875,7 @@ GDPR requires notification within 72 hours of becoming aware of a personal data 
 ### Breach Detection
 
 ```typescript
-import { AuditLogger, SentryIntegration, StructuredLogger } from "@nanoservice-ts/runner";
+import { AuditLogger, SentryIntegration, StructuredLogger } from "@blok/runner";
 
 // Configure real-time breach detection
 const logger = new StructuredLogger({
@@ -982,7 +982,7 @@ When personal data is transferred outside the EU/EEA:
 ### Implementation with SecretManager Providers
 
 ```typescript
-import { SecretManager } from "@nanoservice-ts/runner";
+import { SecretManager } from "@blok/runner";
 
 // Configure provider chain with geographic awareness
 const secrets = new SecretManager({

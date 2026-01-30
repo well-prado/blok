@@ -230,12 +230,12 @@ The adapter caches compiled `WebAssembly.Module` instances to avoid recompilatio
 To add support for a new language runtime, implement the `RuntimeAdapter` interface and register it:
 
 ```typescript
-import type { Context } from "@nanoservice-ts/shared";
-import type RunnerNode from "@nanoservice-ts/runner/RunnerNode";
+import type { Context } from "@blok/shared";
+import type RunnerNode from "@blok/runner/RunnerNode";
 import type {
   RuntimeAdapter,
   ExecutionResult,
-} from "@nanoservice-ts/runner/adapters/RuntimeAdapter";
+} from "@blok/runner/adapters/RuntimeAdapter";
 
 export class RubyRuntimeAdapter implements RuntimeAdapter {
   public readonly kind = "ruby" as const;
@@ -285,7 +285,7 @@ export class RubyRuntimeAdapter implements RuntimeAdapter {
 Register the adapter at startup:
 
 ```typescript
-import { RuntimeRegistry } from "@nanoservice-ts/runner";
+import { RuntimeRegistry } from "@blok/runner";
 import { RubyRuntimeAdapter } from "./RubyRuntimeAdapter";
 
 const registry = RuntimeRegistry.getInstance();

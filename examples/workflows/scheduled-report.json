@@ -36,7 +36,7 @@
 		},
 		{
 			"name": "route-data-check",
-			"node": "@nanoservice-ts/if-else",
+			"node": "@blok/if-else",
 			"type": "module"
 		}
 	],
@@ -99,12 +99,12 @@
 						},
 						{
 							"name": "email-report",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
 							"name": "store-report-archive",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -119,7 +119,7 @@
 					"steps": [
 						{
 							"name": "notify-no-data",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						}
 					]

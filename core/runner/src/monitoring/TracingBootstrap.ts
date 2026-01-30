@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { bootstrapTracing } from "@nanoservice-ts/runner";
+ * import { bootstrapTracing } from "@blok/runner";
  *
  * const result = await bootstrapTracing({
  *   serviceName: "blok-http",

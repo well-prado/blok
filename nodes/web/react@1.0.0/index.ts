@@ -7,8 +7,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { defineNode } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import { defineNode } from "@blok/runner";
+import type { Context } from "@blok/shared";
 import ejs from "ejs";
 import { z } from "zod";
 

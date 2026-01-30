@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Server;
+namespace Blok\Blok\Server;
 
-use Blok\Nanoservice\Node\NodeHandler;
+use Blok\Blok\Node\NodeHandler;
 
 /**
  * MiddlewarePipeline chains multiple middleware around a handler.

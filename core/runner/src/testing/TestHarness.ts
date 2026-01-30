@@ -1,6 +1,6 @@
-import type { Context, ResponseContext } from "@nanoservice-ts/shared";
-import type NanoService from "../NanoService";
-import type { INanoServiceResponse } from "../NanoServiceResponse";
+import type { Context, ResponseContext } from "@blok/shared";
+import type BlokService from "../Blok";
+import type { IBlokResponse } from "../BlokResponse";
 import type { FunctionNode } from "../defineNode";
 import type JsonLikeObject from "../types/JsonLikeObject";
 import { TestLogger } from "./TestLogger";
@@ -72,7 +72,7 @@ export interface TestMetrics {
 }
 
 /** Union type for anything that can be tested as a node */
-type TestableNode = NanoService<any> | FunctionNode<any, any>;
+type TestableNode = BlokService<any> | FunctionNode<any, any>;
 
 /**
  * NodeTestHarness - Main testing utility for Blok nodes.
@@ -83,8 +83,8 @@ type TestableNode = NanoService<any> | FunctionNode<any, any>;
  *
  * @example
  * ```typescript
- * import { NodeTestHarness } from "@nanoservice-ts/runner";
- * import { defineNode } from "@nanoservice-ts/runner";
+ * import { NodeTestHarness } from "@blok/runner";
+ * import { defineNode } from "@blok/runner";
  * import { z } from "zod";
  *
  * const AddNode = defineNode({
@@ -160,7 +160,7 @@ export class NodeTestHarness<I = any, O = any> {
 	 * Execute the node with given input and optional context overrides.
 	 *
 	 * This method directly invokes the node's handle() method, bypassing
-	 * the NanoService.run() infrastructure (metrics, schema validation via
+	 * the BlokService.run() infrastructure (metrics, schema validation via
 	 * JSON Schema, config mapping). This provides a clean, fast test
 	 * execution path focused on the node's business logic.
 	 *
@@ -175,7 +175,7 @@ export class NodeTestHarness<I = any, O = any> {
 		let result: TestResult<O>;
 
 		try {
-			const response = (await this.node.handle(ctx, input as JsonLikeObject)) as INanoServiceResponse;
+			const response = (await this.node.handle(ctx, input as JsonLikeObject)) as IBlokResponse;
 
 			const endTime = performance.now();
 			const logger = ctx.logger as TestLogger;

@@ -15,7 +15,7 @@ interface JsonContent {
 }
 
 export class Indexer {
-	private readonly INDEX_PATH = `${os.homedir()}/.nanoctl/search_indexes.json`;
+	private readonly INDEX_PATH = `${os.homedir()}/.blok/search_indexes.json`;
 	private readonly ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 	private extractKeywords(text: string): string[] {
@@ -266,8 +266,8 @@ export class Indexer {
 
 	private async buildIndex() {
 		const HOME_DIR = os.homedir();
-		const NANOCTL_DIR = path.join(HOME_DIR, ".nanoctl");
-		const GITHUB_REPO_LOCAL = path.join(NANOCTL_DIR, "nanoservice-ts");
+		const NANOCTL_DIR = path.join(HOME_DIR, ".blok");
+		const GITHUB_REPO_LOCAL = path.join(NANOCTL_DIR, "blok");
 		const homeDocsPath = path.join(GITHUB_REPO_LOCAL, "docs");
 		const userNodesPath = path.resolve(process.cwd(), "src/nodes");
 		const notesPath = path.resolve(process.cwd(), "notes");

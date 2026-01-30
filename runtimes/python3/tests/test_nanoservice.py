@@ -4,8 +4,8 @@ import unittest
 from unittest.mock import MagicMock
 from jsonschema import ValidationError # type: ignore
 from core.types.context import Context
-from core.types.nanoservice_response import NanoServiceResponse
-from core.nanoservice import NanoService
+from core.types.blok_response import NanoServiceResponse
+from core.blok import NanoService
 
 class TestNanoService(NanoService):
     async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> NanoServiceResponse:

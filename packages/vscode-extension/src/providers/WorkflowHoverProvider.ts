@@ -98,7 +98,7 @@ const FIELD_DOCS: Record<string, HoverDoc> = {
 	conditions: {
 		title: "Conditional Branches",
 		description:
-			"Array of if/else conditions for branching logic. Use with @nanoservice-ts/if-else node. Each condition has a JavaScript expression and nested steps.",
+			"Array of if/else conditions for branching logic. Use with @blok/if-else node. Each condition has a JavaScript expression and nested steps.",
 		example: `"conditions": [\n  {\n    "type": "if",\n    "condition": "ctx.request.query.type === 'admin'",\n    "steps": [{ "name": "admin-flow", "node": "...", "type": "module" }]\n  },\n  {\n    "type": "else",\n    "steps": [{ "name": "user-flow", "node": "...", "type": "module" }]\n  }\n]`,
 	},
 	set_var: {
@@ -113,7 +113,7 @@ const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
 	node: {
 		title: "Step Node Reference",
 		description:
-			"The node package or local path to execute. For modules: @nanoservice-ts/api-call. For local nodes: ./nodes/my-node.",
+			"The node package or local path to execute. For modules: @blok/api-call. For local nodes: ./nodes/my-node.",
 	},
 	type: {
 		title: "Step Type",
@@ -187,18 +187,18 @@ export class WorkflowHoverProvider implements vscode.HoverProvider {
 			}
 
 			// Common node packages
-			if (word === "@nanoservice-ts/api-call") {
+			if (word === "@blok/api-call") {
 				return new vscode.Hover(
 					new vscode.MarkdownString(
-						"**@nanoservice-ts/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
+						"**@blok/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
 					),
 					wordRange,
 				);
 			}
-			if (word === "@nanoservice-ts/if-else") {
+			if (word === "@blok/if-else") {
 				return new vscode.Hover(
 					new vscode.MarkdownString(
-						"**@nanoservice-ts/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
+						"**@blok/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
 					),
 					wordRange,
 				);

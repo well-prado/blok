@@ -16,7 +16,7 @@
  *
  * @example
  * ```typescript
- * import { CloudWatchIntegration } from "@nanoservice-ts/runner";
+ * import { CloudWatchIntegration } from "@blok/runner";
  *
  * const cw = new CloudWatchIntegration({
  *   region: "us-east-1",

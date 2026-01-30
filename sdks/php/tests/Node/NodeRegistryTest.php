@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Tests\Node;
+namespace Blok\Blok\Tests\Node;
 
-use Blok\Nanoservice\Node\NodeHandler;
-use Blok\Nanoservice\Node\NodeRegistry;
-use Blok\Nanoservice\Types\Context;
-use Blok\Nanoservice\Types\ExecutionRequest;
-use Blok\Nanoservice\Types\NodeConfig;
-use Blok\Nanoservice\Testing\MockContext;
+use Blok\Blok\Node\NodeHandler;
+use Blok\Blok\Node\NodeRegistry;
+use Blok\Blok\Types\Context;
+use Blok\Blok\Types\ExecutionRequest;
+use Blok\Blok\Types\NodeConfig;
+use Blok\Blok\Testing\MockContext;
 use PHPUnit\Framework\TestCase;
 
 final class NodeRegistryTest extends TestCase

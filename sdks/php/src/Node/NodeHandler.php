@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Node;
+namespace Blok\Blok\Node;
 
-use Blok\Nanoservice\Types\Context;
+use Blok\Blok\Types\Context;
 
 /**
  * NodeHandler is the core interface that all Blok nodes must implement.

@@ -3,7 +3,7 @@ package nodes
 import (
 	"time"
 
-	nanoservice "github.com/nickincloud/nanoservice-go"
+	blok "github.com/nickincloud/blok-go"
 )
 
 // ChainTestNode is used in cross-runtime integration tests.
@@ -12,7 +12,7 @@ import (
 type ChainTestNode struct{}
 
 // Execute processes the chain-test node.
-func (n *ChainTestNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *ChainTestNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	body := ctx.Request.BodyMap()
 
 	// Read existing chain (default to empty slice)
@@ -49,4 +49,4 @@ func (n *ChainTestNode) Execute(ctx *nanoservice.Context, config map[string]inte
 }
 
 // Ensure ChainTestNode implements NodeHandler
-var _ nanoservice.NodeHandler = (*ChainTestNode)(nil)
+var _ blok.NodeHandler = (*ChainTestNode)(nil)

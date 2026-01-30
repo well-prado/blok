@@ -25,7 +25,7 @@ create
 	.option("-n, --name <value>", "Name of the Node code snippet")
 	.option("-p, --prompt <value>", "Prompt for AI code generation")
 	.option("-t, --type <value>", "Type of code snippet (default: 'class')")
-	.option("-s, --style <value>", "Node style: 'function' (default, defineNode) or 'class' (extends NanoService)")
+	.option("-s, --style <value>", "Node style: 'function' (default, defineNode) or 'class' (extends BlokService)")
 	.option("-u, --update", "Update existing Node code snippet")
 	.option(
 		"-k, --api-key <value>",
@@ -37,7 +37,7 @@ create
 			args: options,
 			execution: async () => {
 				console.log(
-					figlet.textSync("nanoservice-ts CLI".toUpperCase(), {
+					figlet.textSync("blok CLI".toUpperCase(), {
 						font: "Digital",
 						horizontalLayout: "default",
 						verticalLayout: "default",

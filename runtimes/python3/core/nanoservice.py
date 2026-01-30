@@ -6,7 +6,7 @@ import time
 import logging
 from core.types.context import Context
 from core.types.response import ResponseContext
-from core.types.nanoservice_response import NanoServiceResponse
+from core.types.blok_response import NanoServiceResponse
 from core.node_base import NodeBase
 
 class NanoService(NodeBase):

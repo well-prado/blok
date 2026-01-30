@@ -6,10 +6,10 @@ Yes, and your instinct is correct: the current Python3-specific runner must beco
 
 ## 1. What Blok already gives us (constraints we must respect)
 
-Blok is already about nanoservices (“nodes”) that run in isolated runtimes and can be deployed in different architectures (nanoservices, micro, monolith). [20][31]
+Blok is already about bloks (“nodes”) that run in isolated runtimes and can be deployed in different architectures (bloks, micro, monolith). [20][31]
 
 - Nodes are independent, reusable execution units with their own runtime and lifecycle. [20][31]
-- The Runner is responsible for executing nanoservices in an isolated environment, managing resources, retries, error logging, and state. [23]
+- The Runner is responsible for executing bloks in an isolated environment, managing resources, retries, error logging, and state. [23]
 - Today, runtimes explicitly include Node.js, Bun, and Python 3, with more on the roadmap (C#/.NET, Java, Go, Rust, PHP). [36][30]
 - SDKs and docs already assume **multi‑runtime** support and that nodes can be written in multiple languages. [13][36][12]
 
@@ -65,7 +65,7 @@ This is the main thing we’re going to generalize.
 
 We do **not** embed languages into one huge process; we delegate to language‑specific workers (processes, containers, or wasm) behind a simple protocol.
 
-This lines up with Blok’s nanoservice/isolated runtime story. [3][20][31]
+This lines up with Blok’s blok/isolated runtime story. [3][20][31]
 
 ---
 

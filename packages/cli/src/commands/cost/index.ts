@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import * as p from "@clack/prompts";
-import type { VisualizerWorkflowDef } from "@nanoservice-ts/runner";
+import type { VisualizerWorkflowDef } from "@blok/runner";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
 import { loadWorkflow, loadWorkflows } from "../../services/workflow-loader.js";
 
 async function getCostEstimator() {
-	const { CostEstimator } = await import("@nanoservice-ts/runner");
+	const { CostEstimator } = await import("@blok/runner");
 	return CostEstimator;
 }
 

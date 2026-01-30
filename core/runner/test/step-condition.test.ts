@@ -1,4 +1,4 @@
-import { AddElse, AddIf, Workflow } from "@nanoservice-ts/helper";
+import { AddElse, AddIf, Workflow } from "@blok/helper";
 import { beforeAll, expect, test } from "vitest";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
@@ -32,7 +32,7 @@ function createLocator(): WorkflowLocator {
 					new AddIf('ctx.request.query.countries === "true"')
 						.addStep({
 							name: "get-countries",
-							node: "@nanoservice/api-call",
+							node: "@blok/api-call",
 							type: "module",
 							inputs: {
 								url: "https://countriesnow.space/api/v0.1/countries",
@@ -47,7 +47,7 @@ function createLocator(): WorkflowLocator {
 					new AddElse()
 						.addStep({
 							name: "get-facts",
-							node: "@nanoservice/api-call",
+							node: "@blok/api-call",
 							type: "module",
 							inputs: {
 								url: "https://catfact.ninja/fact",

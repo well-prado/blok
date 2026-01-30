@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Node;
+namespace Blok\Blok\Node;
 
-use Blok\Nanoservice\Server\Middleware;
-use Blok\Nanoservice\Server\MiddlewarePipeline;
-use Blok\Nanoservice\Types\ExecutionMetrics;
-use Blok\Nanoservice\Types\ExecutionRequest;
-use Blok\Nanoservice\Types\ExecutionResult;
-use Blok\Nanoservice\Types\HealthStatus;
+use Blok\Blok\Server\Middleware;
+use Blok\Blok\Server\MiddlewarePipeline;
+use Blok\Blok\Types\ExecutionMetrics;
+use Blok\Blok\Types\ExecutionRequest;
+use Blok\Blok\Types\ExecutionResult;
+use Blok\Blok\Types\HealthStatus;
 
 /**
  * NodeRegistry manages registered node handlers and dispatches execution requests.

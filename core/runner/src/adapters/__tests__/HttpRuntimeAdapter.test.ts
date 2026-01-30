@@ -1,4 +1,4 @@
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";

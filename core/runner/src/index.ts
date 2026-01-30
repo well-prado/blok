@@ -90,8 +90,8 @@ import { WorkflowTestRunner } from "./testing/WorkflowTestRunner";
 
 // types
 
-import NanoService from "./NanoService";
-import NanoServiceResponse, { INanoServiceResponse } from "./NanoServiceResponse";
+import BlokService from "./Blok";
+import BlokResponse, { IBlokResponse } from "./BlokResponse";
 import NodeMap from "./NodeMap";
 import RunnerSteps from "./RunnerSteps";
 import Average from "./types/Average";
@@ -216,9 +216,9 @@ export {
 	GlobalOptions,
 	NodeMap,
 	JsonLikeObject,
-	NanoService,
-	NanoServiceResponse,
-	INanoServiceResponse,
+	BlokService,
+	BlokResponse,
+	IBlokResponse,
 	RunnerSteps,
 	Average,
 	TriggerResponse,

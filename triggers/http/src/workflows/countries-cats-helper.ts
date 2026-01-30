@@ -1,4 +1,4 @@
-import { AddElse, AddIf, type Step, Workflow } from "@nanoservice-ts/helper";
+import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
 
 const step: Step = Workflow({
 	name: "World Countries",
@@ -13,7 +13,7 @@ const step: Step = Workflow({
 	.addCondition({
 		node: {
 			name: "filter-request",
-			node: "@nanoservice-ts/if-else",
+			node: "@blok/if-else",
 			type: "module",
 		},
 		conditions: () => {
@@ -21,7 +21,7 @@ const step: Step = Workflow({
 				new AddIf('ctx.request.query.countries === "true"')
 					.addStep({
 						name: "get-countries",
-						node: "@nanoservice-ts/api-call",
+						node: "@blok/api-call",
 						type: "module",
 						inputs: {
 							url: "https://countriesnow.space/api/v0.1/countries",
@@ -36,7 +36,7 @@ const step: Step = Workflow({
 				new AddElse()
 					.addStep({
 						name: "get-facts",
-						node: "@nanoservice-ts/api-call",
+						node: "@blok/api-call",
 						type: "module",
 						inputs: {
 							url: "https://catfact.ninja/fact",

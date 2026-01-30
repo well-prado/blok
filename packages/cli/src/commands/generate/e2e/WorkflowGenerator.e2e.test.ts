@@ -40,7 +40,7 @@ const VALID_HTTP_WORKFLOW = JSON.stringify(
 		steps: [
 			{
 				name: "fetch-user",
-				node: "@nanoservice-ts/api-call",
+				node: "@blok/api-call",
 				type: "module",
 			},
 		],
@@ -442,7 +442,7 @@ describe("WorkflowGenerator E2E", () => {
 					steps: [
 						{
 							name: "route-request",
-							node: "@nanoservice-ts/if-else",
+							node: "@blok/if-else",
 							type: "module",
 						},
 					],

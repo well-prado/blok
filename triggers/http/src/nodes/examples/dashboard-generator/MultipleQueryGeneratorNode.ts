@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { type JsonLikeObject, defineNode } from "@nanoservice-ts/runner";
+import { type JsonLikeObject, defineNode } from "@blok/runner";
 import { generateObject } from "ai";
 import { z } from "zod";
 

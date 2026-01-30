@@ -1,4 +1,4 @@
-import { GlobalLogger } from "@nanoservice-ts/shared";
+import { GlobalLogger } from "@blok/shared";
 
 /**
  * A log entry captured during test execution.

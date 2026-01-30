@@ -147,7 +147,7 @@ function updateNodeFile(filePath: string, newModule: NodeModule) {
 // Login command
 export default new Command()
 	.command("node")
-	.description("Install a node from the nanoservices registry")
+	.description("Install a node from the bloks registry")
 	.option("-d, --directory <value>", "Directory to publish")
 	.argument("<node>", "Node name")
 	.action(async (node: string, options: OptionValues) => {

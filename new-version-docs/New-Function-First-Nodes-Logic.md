@@ -17,7 +17,7 @@ I’ll define:
 
 ## 1. Target design: “Elysia‑style” functional Node
 
-Today, Nodes are classes extending `NanoService` with `handle(ctx, inputs)` and JSON Schema. [24][8][10]  
+Today, Nodes are classes extending `BlokService` with `handle(ctx, inputs)` and JSON Schema. [24][8][10]  
 We want instead:
 
 ```ts
@@ -43,7 +43,7 @@ We still need to integrate with:
 - `src/Nodes.ts` registration map: `{ [key: string]: NodeBase } = { ... }`. [27][35][25]
 - Triggers loading nodes into a `NodeMap` via this map. [32][33][18][17]
 
-So the `defineNode` output must **look like a `NodeBase`/NanoService** from the runner’s perspective. [27][18][39]
+So the `defineNode` output must **look like a `NodeBase`/BlokService** from the runner’s perspective. [27][18][39]
 
 ---
 
@@ -52,7 +52,7 @@ So the `defineNode` output must **look like a `NodeBase`/NanoService** from the 
 We define a **new, internal functional Node contract**:
 
 ```ts
-import type { Context, GlobalError } from "@nanoservice-ts/shared"; // [24][7]
+import type { Context, GlobalError } from "@blok/shared"; // [24][7]
 import type { ZodSchema } from "zod";
 
 export interface FnNodeDefinition<I, O> {
@@ -74,19 +74,19 @@ export interface FnNodeDefinition<I, O> {
 We create a helper that:
 
 - Accepts a `FnNodeDefinition`.  
-- Produces an object that **behaves like a Node class instance** from the runner’s view: it exposes a `handle(ctx, inputs)` method that returns the current `INanoServiceResponse` shape. [24][32][8]
+- Produces an object that **behaves like a Node class instance** from the runner’s view: it exposes a `handle(ctx, inputs)` method that returns the current `IBlokResponse` shape. [24][32][8]
 
 Sketch:
 
 ```ts
 // core/nodes/defineNode.ts
-import { NanoService, NanoServiceResponse, type INanoServiceResponse } from "@nanoservice-ts/runner"; // [24][8]
-import { type Context, GlobalError } from "@nanoservice-ts/shared"; // [24][7]
+import { BlokService, BlokResponse, type IBlokResponse } from "@blok/runner"; // [24][8]
+import { type Context, GlobalError } from "@blok/shared"; // [24][7]
 import type { ZodSchema } from "zod";
 import { ZodError } from "zod";
 
 export function defineNode<I, O>(def: FnNodeDefinition<I, O>) {
-  class FunctionNode extends NanoService<I> {
+  class FunctionNode extends BlokService<I> {
     constructor() {
       super();
       // convert Zod schemas into JSON Schema if you want to keep older tooling;
@@ -97,8 +97,8 @@ export function defineNode<I, O>(def: FnNodeDefinition<I, O>) {
       this.description = def.description ?? this.description;
     }
 
-    async handle(ctx: Context, rawInputs: I): Promise<INanoServiceResponse> {
-      const response = new NanoServiceResponse();
+    async handle(ctx: Context, rawInputs: I): Promise<IBlokResponse> {
+      const response = new BlokResponse();
 
       try {
         // 1) Validate input via Zod (replaces ad‑hoc JSON Schema validation)
@@ -133,10 +133,10 @@ export function defineNode<I, O>(def: FnNodeDefinition<I, O>) {
 
 This:
 
-- Extends `NanoService<I>`, just like the template class. [24][8]
-- Still returns `INanoServiceResponse` through `NanoServiceResponse`. [24][32]
+- Extends `BlokService<I>`, just like the template class. [24][8]
+- Still returns `IBlokResponse` through `BlokResponse`. [24][32]
 - Uses `GlobalError` consistently with current template. [24][8]
-- Allows us to continue treating Nodes as `NodeBase`/`NanoService` instances in `src/Nodes.ts`. [27][18][17][32]
+- Allows us to continue treating Nodes as `NodeBase`/`BlokService` instances in `src/Nodes.ts`. [27][18][17][32]
 
 So for the runner and triggers, this “function node” behaves exactly like the old class‑based node. [32][33][26]
 
@@ -149,8 +149,8 @@ In a Node’s `index.ts` (instead of hand‑writing a class): [1][24][8]
 ```ts
 // src/nodes/fetch-user/index.ts
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/core/nodes/defineNode"; // new helper you add
-import type { Context } from "@nanoservice-ts/shared"; // [24][7]
+import { defineNode } from "@blok/core/nodes/defineNode"; // new helper you add
+import type { Context } from "@blok/shared"; // [24][7]
 
 // 1) Define schemas
 const inputSchema = z.object({
@@ -180,7 +180,7 @@ export const FetchUser = defineNode({
 });
 ```
 
-This Node is just a value (`FetchUser`), not a class definition. But it is an instance of `NanoService` under the hood, so everything that expects a `NodeBase` still works. [24][8][27]
+This Node is just a value (`FetchUser`), not a class definition. But it is an instance of `BlokService` under the hood, so everything that expects a `NodeBase` still works. [24][8][27]
 
 ---
 
@@ -189,14 +189,14 @@ This Node is just a value (`FetchUser`), not a class definition. But it is an in
 Current registration pattern: [27][18][25][35]
 
 ```ts
-import ApiCall from "@nanoservice-ts/api-call";
-import IfElse from "@nanoservice-ts/if-else";
-import type { NodeBase } from "@nanoservice-ts/shared";
+import ApiCall from "@blok/api-call";
+import IfElse from "@blok/if-else";
+import type { NodeBase } from "@blok/shared";
 import Fetch from "./nodes/fetch";
 
 const nodes: { [key: string]: NodeBase } = {
-  "@nanoservice-ts/api-call": new ApiCall(),
-  "@nanoservice-ts/if-else": new IfElse(),
+  "@blok/api-call": new ApiCall(),
+  "@blok/if-else": new IfElse(),
   "fetch": new Fetch(),
 };
 
@@ -206,14 +206,14 @@ export default nodes;
 For function‑first nodes, since `defineNode` already returns an instance, you simply do:
 
 ```ts
-import ApiCall from "@nanoservice-ts/api-call";
-import IfElse from "@nanoservice-ts/if-else";
-import type { NodeBase } from "@nanoservice-ts/shared";
+import ApiCall from "@blok/api-call";
+import IfElse from "@blok/if-else";
+import type { NodeBase } from "@blok/shared";
 import { FetchUser } from "./nodes/fetch-user";
 
 const nodes: { [key: string]: NodeBase } = {
-  "@nanoservice-ts/api-call": new ApiCall(),
-  "@nanoservice-ts/if-else": new IfElse(),
+  "@blok/api-call": new ApiCall(),
+  "@blok/if-else": new IfElse(),
   "fetch-user": FetchUser,
 };
 
@@ -242,7 +242,7 @@ This still matches the type and structure expected by triggers and GRPC/HTTP loa
 
 1. **Add `defineNode` + `FnNodeDefinition` to core** (e.g. `core/nodes/defineNode.ts`) implementing the wrapper above. [24][8][7]
 2. **Add a new CLI “functional node” template**:
-   - Similar to `templates/node/index.ts` but using `zod` + `defineNode` instead of `class Node extends NanoService`. [8][24][22]
+   - Similar to `templates/node/index.ts` but using `zod` + `defineNode` instead of `class Node extends BlokService`. [8][24][22]
 3. **Add a new `createNodeSystemPrompt` variant** that:
    - Asks the model to output only:
      - imports (`zod`, `defineNode`, `Context`)

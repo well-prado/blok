@@ -1,4 +1,4 @@
-import type { LoggerContext } from "@nanoservice-ts/shared";
+import type { LoggerContext } from "@blok/shared";
 import { RunTracker } from "./RunTracker";
 
 /**

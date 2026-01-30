@@ -1,4 +1,4 @@
-package nanoservice
+package blok
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-// Server is the nanoservice HTTP server that handles execute and health requests.
+// Server is the blok HTTP server that handles execute and health requests.
 type Server struct {
 	registry   *NodeRegistry
 	config     ServerConfig
 	httpServer *http.Server
 }
 
-// NewServer creates a new nanoservice server.
+// NewServer creates a new blok server.
 func NewServer(registry *NodeRegistry, config ServerConfig) *Server {
 	return &Server{
 		registry: registry,
@@ -42,7 +42,7 @@ func (s *Server) Start() error {
 		WriteTimeout: time.Duration(s.config.WriteTimeoutSec) * time.Second,
 	}
 
-	log.Printf("Nanoservice runtime v%s starting on %s", s.config.Version, s.config.Address())
+	log.Printf("Blok runtime v%s starting on %s", s.config.Version, s.config.Address())
 	log.Printf("Registered nodes: %v", s.registry.NodeNames())
 
 	return s.httpServer.ListenAndServe()
@@ -55,7 +55,7 @@ func (s *Server) Shutdown() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.config.ShutdownTimeoutSec)*time.Second)
 	defer cancel()
-	log.Println("Shutting down nanoservice runtime...")
+	log.Println("Shutting down blok runtime...")
 	return s.httpServer.Shutdown(ctx)
 }
 

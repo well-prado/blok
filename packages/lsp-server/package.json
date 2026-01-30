@@ -31,6 +31,6 @@
 		"language-server",
 		"workflow",
 		"json",
-		"nanoservice"
+		"blok"
 	]
 }

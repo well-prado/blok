@@ -1,6 +1,6 @@
-//! # nanoservice-rs
+//! # blok-rs
 //!
-//! Rust SDK for the Blok nanoservice workflow orchestration framework.
+//! Rust SDK for the Blok blok workflow orchestration framework.
 //!
 //! Build workflow nodes in Rust that integrate with the Blok runner via HTTP or gRPC.
 //!
@@ -8,7 +8,7 @@
 //!
 //! ```rust,no_run
 //! use async_trait::async_trait;
-//! use nanoservice::{NodeHandler, NodeRegistry, Context};
+//! use blok::{NodeHandler, NodeRegistry, Context};
 //! use std::collections::HashMap;
 //!
 //! struct GreetNode;

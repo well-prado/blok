@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../lib/nanoservice"
+require_relative "../lib/blok"
 require "net/http"
 require "uri"
 require "json"
@@ -18,11 +18,11 @@ require "json"
 #
 # Output:
 #   { "status" => 200, "data" => {...}, "headers" => {...} }
-class ApiCallNode < Nanoservice::Node::NodeHandler
+class ApiCallNode < Blok::Node::NodeHandler
   def execute(ctx, config)
     url = config["url"]
     unless url
-      raise Nanoservice::Errors::NodeError.configuration("'url' is required in node config")
+      raise Blok::Errors::NodeError.configuration("'url' is required in node config")
     end
 
     method  = (config["method"] || "GET").upcase
@@ -40,7 +40,7 @@ class ApiCallNode < Nanoservice::Node::NodeHandler
     begin
       response = http.request(request)
     rescue StandardError => e
-      raise Nanoservice::Errors::NodeError.network("request to #{url} failed: #{e.message}")
+      raise Blok::Errors::NodeError.network("request to #{url} failed: #{e.message}")
     end
 
     body = begin
@@ -91,9 +91,9 @@ end
 
 # ----- Boot the server if run directly -----
 if __FILE__ == $PROGRAM_NAME
-  registry = Nanoservice::Server::RuntimeApp.registry
+  registry = Blok::Server::RuntimeApp.registry
   registry.register("api-call", ApiCallNode.new)
 
   puts "Starting ApiCallNode on port 8080..."
-  Nanoservice::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
+  Blok::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
 end

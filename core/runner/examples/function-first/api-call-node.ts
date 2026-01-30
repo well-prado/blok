@@ -1,14 +1,14 @@
 /**
  * Example: API Call Node (Function-First)
  *
- * This reimagines the existing @nanoservice-ts/api-call node using
+ * This reimagines the existing @blok/api-call node using
  * the function-first pattern. Notice how much simpler it is!
  *
  * Old class-based version: ~150 lines
  * New function-first version: ~40 lines
  */
 
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
 

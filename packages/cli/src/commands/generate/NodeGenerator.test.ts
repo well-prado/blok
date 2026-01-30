@@ -17,7 +17,7 @@ describe("NodeGenerator", () => {
 			const guidance = getGuidance("Missing defineNode import");
 			expect(guidance).not.toBeNull();
 			expect(guidance).toContain("defineNode");
-			expect(guidance).toContain("@nanoservice-ts/runner");
+			expect(guidance).toContain("@blok/runner");
 		});
 
 		it("should provide guidance for missing Zod import", () => {
@@ -62,8 +62,8 @@ describe("NodeGenerator", () => {
 			expect(guidance).toContain("output Zod schema");
 		});
 
-		it("should provide guidance for NanoServiceResponse misuse", () => {
-			const guidance = getGuidance("Do not use NanoServiceResponse in function-first nodes");
+		it("should provide guidance for BlokResponse misuse", () => {
+			const guidance = getGuidance("Do not use BlokResponse in function-first nodes");
 			expect(guidance).not.toBeNull();
 			expect(guidance).toContain("plain object");
 		});
@@ -75,7 +75,7 @@ describe("NodeGenerator", () => {
 		});
 
 		it("should provide guidance for module not found", () => {
-			const guidance = getGuidance("Cannot find module '@nanoservice-ts/core'");
+			const guidance = getGuidance("Cannot find module '@blok/core'");
 			expect(guidance).not.toBeNull();
 			expect(guidance).toContain("import paths");
 		});

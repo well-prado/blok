@@ -1,4 +1,4 @@
-# @nanoservice-ts/shared
+# @blok/shared
 
 ## 0.0.9
 

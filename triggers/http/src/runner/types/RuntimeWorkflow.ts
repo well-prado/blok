@@ -1,4 +1,4 @@
-import type { ParamsDictionary } from "@nanoservice-ts/runner";
+import type { ParamsDictionary } from "@blok/runner";
 
 type RuntimeWorkflow = {
 	workflow: ParamsDictionary;

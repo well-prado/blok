@@ -10,8 +10,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { WorkflowModel } from "@nanoservice-ts/helper";
-import type { Context } from "@nanoservice-ts/shared";
+import type { WorkflowModel } from "@blok/helper";
+import type { Context } from "@blok/shared";
 import Configuration from "../../../src/Configuration";
 import { DefaultLogger } from "../../../src/DefaultLogger";
 import Runner from "../../../src/Runner";

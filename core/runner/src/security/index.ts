@@ -26,7 +26,7 @@
  *   FileAuditSink,
  *   SecretManager,
  *   EnvironmentSecretProvider,
- * } from "@nanoservice-ts/runner";
+ * } from "@blok/runner";
  *
  * // Set up auth
  * const auth = new AuthMiddleware({

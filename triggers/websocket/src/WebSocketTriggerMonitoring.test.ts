@@ -9,8 +9,8 @@
  * - Metrics collection (connections, messages, latency)
  */
 
-import type { HelperResponse } from "@nanoservice-ts/helper";
-import type { NanoService } from "@nanoservice-ts/runner";
+import type { HelperResponse } from "@blok/helper";
+import type { BlokService } from "@blok/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type WebSocketEvent, WebSocketTrigger } from "./WebSocketTrigger";
 
@@ -18,7 +18,7 @@ import { type WebSocketEvent, WebSocketTrigger } from "./WebSocketTrigger";
  * Concrete test trigger exposing monitoring methods from TriggerBase
  */
 class MonitoredWebSocketTrigger extends WebSocketTrigger {
-	protected override nodes = {} as Record<string, NanoService<unknown>>;
+	protected override nodes = {} as Record<string, BlokService<unknown>>;
 	protected override workflows = {} as Record<string, HelperResponse>;
 
 	public getClientsMap() {

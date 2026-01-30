@@ -773,7 +773,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/api-call:get-countries-api"
+							"options": "@blok/api-call:get-countries-api"
 						},
 						"properties": [
 							{
@@ -788,7 +788,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/api-call:get-facts"
+							"options": "@blok/api-call:get-facts"
 						},
 						"properties": [
 							{
@@ -803,7 +803,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/if-else:filter-request"
+							"options": "@blok/if-else:filter-request"
 						},
 						"properties": [
 							{
@@ -956,7 +956,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/api-call:get-countries-api"
+							"options": "@blok/api-call:get-countries-api"
 						},
 						"properties": [
 							{
@@ -971,7 +971,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/api-call:get-facts"
+							"options": "@blok/api-call:get-facts"
 						},
 						"properties": [
 							{
@@ -986,7 +986,7 @@
 					{
 						"matcher": {
 							"id": "byName",
-							"options": "@nanoservice-ts/if-else:filter-request"
+							"options": "@blok/if-else:filter-request"
 						},
 						"properties": [
 							{
@@ -1080,7 +1080,7 @@
 					},
 					"direction": "backward",
 					"editorMode": "code",
-					"expr": "{service_name=\"nanoservice-http\"} | json | level=\"info\"",
+					"expr": "{service_name=\"blok-http\"} | json | level=\"info\"",
 					"queryType": "range",
 					"refId": "A"
 				}
@@ -1124,7 +1124,7 @@
 					},
 					"direction": "backward",
 					"editorMode": "code",
-					"expr": "{service_name=\"nanoservice-http\"} | json | level=\"error\"",
+					"expr": "{service_name=\"blok-http\"} | json | level=\"error\"",
 					"queryType": "range",
 					"refId": "A"
 				}

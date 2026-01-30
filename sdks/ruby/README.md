@@ -1,4 +1,4 @@
-# Nanoservice Ruby SDK
+# Blok Ruby SDK
 
 Production-ready Ruby SDK for building [Blok](https://github.com/blok-dev/sdks) workflow nodes. Each node runs inside a Docker container exposing a simple HTTP protocol:
 
@@ -15,13 +15,13 @@ Production-ready Ruby SDK for building [Blok](https://github.com/blok-dev/sdks) 
 Add to your Gemfile:
 
 ```ruby
-gem "nanoservice-ruby"
+gem "blok-ruby"
 ```
 
 Or install directly:
 
 ```sh
-gem install nanoservice-ruby
+gem install blok-ruby
 ```
 
 ## Quick Start
@@ -30,9 +30,9 @@ gem install nanoservice-ruby
 
 ```ruby
 # my_node.rb
-require "nanoservice"
+require "blok"
 
-class GreetNode < Nanoservice::Node::NodeHandler
+class GreetNode < Blok::Node::NodeHandler
   def execute(ctx, config)
     name   = ctx.request.body_str("name") || "World"
     prefix = config["prefix"] || "Hello"
@@ -49,13 +49,13 @@ end
 
 ```ruby
 # config.ru
-require "nanoservice"
+require "blok"
 require_relative "my_node"
 
-registry = Nanoservice::Server::RuntimeApp.registry
+registry = Blok::Server::RuntimeApp.registry
 registry.register("greet", GreetNode.new)
 
-run Nanoservice::Server::RuntimeApp
+run Blok::Server::RuntimeApp
 ```
 
 ```sh
@@ -99,7 +99,7 @@ Use environment variables to configure the runtime:
 | `ENABLE_CORS` | `false`   | Enable CORS headers             |
 
 ```ruby
-config = Nanoservice::Config::ServerConfig.from_env
+config = Blok::Config::ServerConfig.from_env
 ```
 
 ## Middleware
@@ -107,18 +107,18 @@ config = Nanoservice::Config::ServerConfig.from_env
 Add cross-cutting concerns to the execution pipeline:
 
 ```ruby
-logger = Nanoservice::Logging::Logger.new(:debug)
+logger = Blok::Logging::Logger.new(:debug)
 
-registry = Nanoservice::Node::NodeRegistry.new
-registry.use(Nanoservice::Middleware::LoggingMiddleware.new(logger))
-registry.use(Nanoservice::Middleware::RecoveryMiddleware.new)
+registry = Blok::Node::NodeRegistry.new
+registry.use(Blok::Middleware::LoggingMiddleware.new(logger))
+registry.use(Blok::Middleware::RecoveryMiddleware.new)
 registry.register("my-node", MyNode.new)
 ```
 
 ### Custom Middleware
 
 ```ruby
-class TimingMiddleware < Nanoservice::Middleware::Middleware
+class TimingMiddleware < Blok::Middleware::Middleware
   def wrap(handler)
     ->(ctx, config) {
       start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -136,7 +136,7 @@ end
 Validate data against JSON Schema (subset):
 
 ```ruby
-validator = Nanoservice::Validation::SchemaValidator.new
+validator = Blok::Validation::SchemaValidator.new
 
 schema = {
   "type" => "object",
@@ -156,11 +156,11 @@ errors = validator.validate({ "name" => "John" }, schema)
 Use structured errors with categories:
 
 ```ruby
-raise Nanoservice::Errors::NodeError.validation("name is required")
-raise Nanoservice::Errors::NodeError.configuration("missing API key")
-raise Nanoservice::Errors::NodeError.network("connection timed out")
-raise Nanoservice::Errors::NodeError.not_found("user not found")
-raise Nanoservice::Errors::NodeError.execution("unexpected failure")
+raise Blok::Errors::NodeError.validation("name is required")
+raise Blok::Errors::NodeError.configuration("missing API key")
+raise Blok::Errors::NodeError.network("connection timed out")
+raise Blok::Errors::NodeError.not_found("user not found")
+raise Blok::Errors::NodeError.execution("unexpected failure")
 ```
 
 ## Testing
@@ -169,11 +169,11 @@ raise Nanoservice::Errors::NodeError.execution("unexpected failure")
 
 ```ruby
 require "minitest/autorun"
-require "nanoservice"
+require "blok"
 
 class GreetNodeTest < Minitest::Test
   def test_greet_default
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_body({ "name" => "World" })
       .build
 
@@ -188,10 +188,10 @@ end
 ### TestRunner
 
 ```ruby
-runner = Nanoservice::Testing::TestRunner.new
+runner = Blok::Testing::TestRunner.new
 runner.register("greet", GreetNode.new)
 
-ctx = Nanoservice::Testing::MockContext.new.with_body({ "name" => "Test" }).build
+ctx = Blok::Testing::MockContext.new.with_body({ "name" => "Test" }).build
 result = runner.execute("greet", ctx, { "prefix" => "Hi" })
 
 assert result.success

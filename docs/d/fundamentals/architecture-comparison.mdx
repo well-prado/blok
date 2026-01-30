@@ -13,14 +13,14 @@ Blok vs Micro vs Monolith Architecture comparison.
 - **Microservices**  
   Microservices architecture splits applications into smaller, independently deployable services. Each microservice focuses on a specific function and communicates via APIs.
 
-- **Nanoservices**  
-  Nanoservices break microservices into even smaller, isolated, and lightweight functional units that execute single tasks. They can be deployed using **runners** like the **Blok** framework or more advanced platforms like Atomic Computing.
+- **Bloks**  
+  Bloks break microservices into even smaller, isolated, and lightweight functional units that execute single tasks. They can be deployed using **runners** like the **Blok** framework or more advanced platforms like Atomic Computing.
 
 ---
 
 ## **2. Advantages**
 
-| **Aspect**            | **Monolith**                              | **Microservices**                        | **Nanoservices**                                                                 |
+| **Aspect**            | **Monolith**                              | **Microservices**                        | **Bloks**                                                                 |
 |------------------------|-------------------------------------------|------------------------------------------|---------------------------------------------------------------------------------|
 | **Deployment**        | Single deployment pipeline.               | Independent deployments per service.     | Flexible deployment: monolith-like or distributed. Enterprise-ready with Atomic Computing. |
 | **Scalability**       | Limited to vertical scaling.              | Horizontal scaling for each microservice.| Granular scaling with AI-driven optimizations using Atomic Runner.              |
@@ -31,21 +31,21 @@ Blok vs Micro vs Monolith Architecture comparison.
 
 ---
 
-## **3. Deployment: Nanoservices' Unique Advantage**
+## **3. Deployment: Bloks' Unique Advantage**
 
 ### **Open Source Deployment**
-Using **Blok** (an open-source framework like Express.js), developers can deploy nanoservice projects **locally or in production** as they would a monolithic project or as microservices.
+Using **Blok** (an open-source framework like Express.js), developers can deploy blok projects **locally or in production** as they would a monolithic project or as microservices.
 
 - **Monolith-Style Deployment:**  
   - A single project contains multiple workflows and bloks within folders.  
   - Example: One HTTP trigger package in Docker can manage:  
     - 10 workflow files.  
-    - 10 installed nanoservice npm packages.  
+    - 10 installed blok npm packages.  
     - 15 local bloks within the nodes folder.
 
 - **Microservices-Style Deployment:**  
   - Developers can split bloks into smaller, independently deployed projects.  
-  - Each nanoservice project can be deployed in its own container, following microservices patterns.
+  - Each blok project can be deployed in its own container, following microservices patterns.
 
 ### **Enterprise Deployment with Atomic Computing**  
 With **Atomic Computing**, deployment is transformed into an advanced, scalable, and enterprise-ready solution:  
@@ -56,24 +56,24 @@ With **Atomic Computing**, deployment is transformed into an advanced, scalable,
 - **Consistency in Development:** The same **Blok** development experience is maintained, allowing easy migration from open-source projects to enterprise-level scaling.
 
 This dual deployment model offers unmatched flexibility:  
-- **Learn and Innovate** with open-source nanoservice-ts.  
+- **Learn and Innovate** with open-source blok.  
 - **Scale and Optimize** with Atomic Computing for enterprise needs.
 
 ---
 
 ## **4. Disadvantages**
 
-| **Aspect**            | **Monolith**                          | **Microservices**                     | **Nanoservices**                          |
+| **Aspect**            | **Monolith**                          | **Microservices**                     | **Bloks**                          |
 |------------------------|---------------------------------------|---------------------------------------|-------------------------------------------|
 | **Complexity**        | Tightly coupled, harder to scale.     | Moderate; increases with scale.       | High complexity without orchestration tools. |
 | **Management**        | Easier to manage as a single unit.    | Requires CI/CD and monitoring tools.  | Requires orchestration, like Atomic Runner, for distributed workflows. |
-| **Resource Tracking** | Limited visibility.                   | Service-based visibility.             | Requires advanced tracking for individual nanoservices. |
+| **Resource Tracking** | Limited visibility.                   | Service-based visibility.             | Requires advanced tracking for individual bloks. |
 
 ---
 
 ## **5. Ease of Use and Management**
 
-| **Aspect**                | **Monolith**                           | **Microservices**                    | **Nanoservices**                          |
+| **Aspect**                | **Monolith**                           | **Microservices**                    | **Bloks**                          |
 |----------------------------|----------------------------------------|--------------------------------------|-------------------------------------------|
 | **Setup**                 | Easy, single codebase.                 | Moderate; requires service separation.| Flexible setup with open-source or enterprise options.|
 | **Use**                   | Straightforward for small projects.    | Modular but requires API handling.   | Unified development for all deployment models.|
@@ -87,13 +87,13 @@ This dual deployment model offers unmatched flexibility:
 |-------------------|-----------------------------------------------------------------------------------|
 | **Monolith**      | Small, low-complexity projects with tight deadlines and small teams.             |
 | **Microservices** | Medium to large-scale applications requiring modularity and independent scaling. |
-| **Nanoservices**  | High-performance systems, modular workflows, and enterprise solutions requiring precise scaling and AI optimization. |
+| **Bloks**  | High-performance systems, modular workflows, and enterprise solutions requiring precise scaling and AI optimization. |
 
 ---
 
 ## **7. Conclusion**
 
-**Nanoservices** offer a modern, highly modular approach to backend development, combining the simplicity of monolithic deployment with the flexibility and scalability of microservices.  
+**Bloks** offer a modern, highly modular approach to backend development, combining the simplicity of monolithic deployment with the flexibility and scalability of microservices.  
 
 With **Blok**, developers can quickly adopt and learn bloks using familiar tools and workflows. As projects grow and enterprise needs emerge, **Atomic Computing** provides an advanced execution environment powered by AI, observability, and marketplace integrations.
 

@@ -1,11 +1,11 @@
-package nanoservice
+package blok
 
 import (
 	"os"
 	"strconv"
 )
 
-// ServerConfig holds the configuration for the nanoservice HTTP server.
+// ServerConfig holds the configuration for the blok HTTP server.
 type ServerConfig struct {
 	// Port is the HTTP port to listen on (default: 8080).
 	Port int

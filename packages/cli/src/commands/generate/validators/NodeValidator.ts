@@ -148,7 +148,7 @@ export function validateFunctionFirstStructure(context: NodeValidationContext): 
 	// Check for defineNode import
 	if (!content.includes("import") || !content.includes("defineNode")) {
 		result.valid = false;
-		result.errors.push("Missing 'defineNode' import from '@nanoservice-ts/runner'");
+		result.errors.push("Missing 'defineNode' import from '@blok/runner'");
 	}
 
 	// Check for Zod import
@@ -208,16 +208,16 @@ export function validateClassBasedStructure(context: NodeValidationContext): Val
 
 	const content = context.content;
 
-	// Check for NanoService import
-	if (!content.includes("NanoService")) {
+	// Check for BlokService import
+	if (!content.includes("BlokService")) {
 		result.valid = false;
-		result.errors.push("Missing 'NanoService' import from '@nanoservice-ts/runner'");
+		result.errors.push("Missing 'BlokService' import from '@blok/runner'");
 	}
 
 	// Check for class declaration
-	if (!content.includes("class ") || !content.includes("extends NanoService")) {
+	if (!content.includes("class ") || !content.includes("extends BlokService")) {
 		result.valid = false;
-		result.errors.push("Missing class declaration extending NanoService");
+		result.errors.push("Missing class declaration extending BlokService");
 	}
 
 	// Check for handle method

@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class MockContextTest < Minitest::Test
   def test_default_values
-    ctx = Nanoservice::Testing::MockContext.new.build
+    ctx = Blok::Testing::MockContext.new.build
 
     assert_equal "test-execution-id", ctx.id
     assert_equal "test-workflow", ctx.workflow_name
@@ -16,7 +16,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_id
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_id("custom-id")
       .build
 
@@ -24,7 +24,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_workflow
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_workflow("my-workflow", "/wf/my-workflow")
       .build
 
@@ -33,7 +33,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_workflow_default_path
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_workflow("auth")
       .build
 
@@ -42,7 +42,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_body
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_body({ "name" => "John", "age" => 30 })
       .build
 
@@ -51,7 +51,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_headers
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_headers({ "Authorization" => "Bearer token" })
       .build
 
@@ -59,7 +59,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_method
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_method("GET")
       .build
 
@@ -67,7 +67,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_var
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_var("key1", "value1")
       .with_var("key2", 42)
       .build
@@ -77,7 +77,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_with_env
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_env("API_KEY", "secret123")
       .with_env("DEBUG", "true")
       .build
@@ -87,7 +87,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_fluent_chaining
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_id("chain-test")
       .with_workflow("wf")
       .with_body({ "x" => 1 })
@@ -105,7 +105,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_context_set_and_get_var
-    ctx = Nanoservice::Testing::MockContext.new.build
+    ctx = Blok::Testing::MockContext.new.build
 
     ctx.set_var("greeting", "Hello!")
     assert_equal "Hello!", ctx.get_var("greeting")
@@ -115,7 +115,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_context_get_var_str_non_string
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_var("count", 42)
       .build
 
@@ -124,14 +124,14 @@ class MockContextTest < Minitest::Test
   end
 
   def test_context_to_hash_roundtrip
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_id("roundtrip")
       .with_body({ "key" => "val" })
       .with_var("v", "1")
       .build
 
     hash     = ctx.to_hash
-    restored = Nanoservice::Types::Context.from_hash(hash)
+    restored = Blok::Types::Context.from_hash(hash)
 
     assert_equal "roundtrip", restored.id
     assert_equal "val", restored.request.body["key"]
@@ -139,7 +139,7 @@ class MockContextTest < Minitest::Test
   end
 
   def test_request_body_str
-    ctx = Nanoservice::Testing::MockContext.new
+    ctx = Blok::Testing::MockContext.new
       .with_body({ "name" => "Alice", "count" => 5 })
       .build
 

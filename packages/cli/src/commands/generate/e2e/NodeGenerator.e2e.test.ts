@@ -40,9 +40,9 @@ const mockedValidateStructure = vi.mocked(NodeValidator.validateFunctionFirstStr
 // --- Mock LLM Responses ---
 
 const VALID_FUNCTION_FIRST_NODE = `
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 
 export default defineNode({
 	name: "fetch-user",
@@ -66,14 +66,14 @@ export default defineNode({
 `;
 
 const VALID_CLASS_BASED_NODE = `
-import NanoService, { NanoServiceResponse, GlobalError } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import BlokService, { BlokResponse, GlobalError } from "@blok/runner";
+import type { Context } from "@blok/shared";
 
 type InputType = { message: string; };
 
-export default class HelloNode extends NanoService<InputType> {
-	async handle(ctx: Context, inputs: InputType): Promise<NanoServiceResponse> {
-		const response = new NanoServiceResponse();
+export default class HelloNode extends BlokService<InputType> {
+	async handle(ctx: Context, inputs: InputType): Promise<BlokResponse> {
+		const response = new BlokResponse();
 		response.setSuccess({ greeting: inputs.message });
 		return response;
 	}
@@ -160,7 +160,7 @@ describe("NodeGenerator E2E", () => {
 			await generator.generateNode("test-node", "Create a test node", "test-api-key", false, "class");
 
 			const callArgs = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>;
-			expect(callArgs.system).toContain("NanoService");
+			expect(callArgs.system).toContain("BlokService");
 		});
 
 		it("should use temperature 0.2 for deterministic output", async () => {
@@ -280,7 +280,7 @@ describe("NodeGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 			mockedValidateStructure.mockReturnValue({
 				valid: false,
-				errors: ["Missing defineNode import from @nanoservice-ts/runner"],
+				errors: ["Missing defineNode import from @blok/runner"],
 				warnings: [],
 				suggestions: [],
 			});

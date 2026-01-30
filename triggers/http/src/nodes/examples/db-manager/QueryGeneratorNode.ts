@@ -1,7 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { defineNode } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
-import type ParamsDictionary from "@nanoservice-ts/shared/dist/types/ParamsDictionary";
+import { defineNode } from "@blok/runner";
+import type { Context } from "@blok/shared";
+import type ParamsDictionary from "@blok/shared/dist/types/ParamsDictionary";
 import { generateText } from "ai";
 import { z } from "zod";
 

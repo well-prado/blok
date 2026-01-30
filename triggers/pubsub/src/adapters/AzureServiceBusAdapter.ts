@@ -9,7 +9,7 @@
  * - AZURE_SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE: Fully qualified namespace (if using DefaultAzureCredential)
  */
 
-import type { PubSubTriggerOpts } from "@nanoservice-ts/helper";
+import type { PubSubTriggerOpts } from "@blok/helper";
 import { v4 as uuid } from "uuid";
 import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 

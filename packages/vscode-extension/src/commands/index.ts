@@ -3,7 +3,7 @@ import type { WorkflowDiagnostics } from "../providers/WorkflowDiagnostics";
 
 function getNanoctlPath(): string {
 	const config = vscode.workspace.getConfiguration("blok");
-	return config.get<string>("nanoctlPath", "nanoctl");
+	return config.get<string>("blokctlPath", "blokctl");
 }
 
 function getWorkspaceFolder(): string | undefined {
@@ -12,7 +12,7 @@ function getWorkspaceFolder(): string | undefined {
 }
 
 /**
- * Runs a nanoctl command in the integrated terminal.
+ * Runs a blokctl command in the integrated terminal.
  */
 function runInTerminal(command: string, name: string): void {
 	const terminal = vscode.window.createTerminal({ name: `Blok: ${name}` });
@@ -22,7 +22,7 @@ function runInTerminal(command: string, name: string): void {
 
 /**
  * Generate AI Node command.
- * Prompts user for description and runs `nanoctl generate ai-node`.
+ * Prompts user for description and runs `blokctl generate ai-node`.
  */
 export function registerGenerateNodeCommand(output: vscode.OutputChannel): vscode.Disposable {
 	return vscode.commands.registerCommand("blok.generateNode", async () => {
@@ -36,15 +36,15 @@ export function registerGenerateNodeCommand(output: vscode.OutputChannel): vscod
 		const style = await vscode.window.showQuickPick(
 			[
 				{ label: "function", description: "Function-first with defineNode() (recommended)" },
-				{ label: "class", description: "Class-based with NanoService" },
+				{ label: "class", description: "Class-based with BlokService" },
 			],
 			{ placeHolder: "Select node style" },
 		);
 
 		if (!style) return;
 
-		const nanoctlPath = getNanoctlPath();
-		const cmd = `${nanoctlPath} generate ai-node "${description}" --style=${style.label}`;
+		const blokctlPath = getNanoctlPath();
+		const cmd = `${blokctlPath} generate ai-node "${description}" --style=${style.label}`;
 
 		output.appendLine(`Generating AI node: ${description}`);
 		runInTerminal(cmd, "Generate Node");
@@ -53,7 +53,7 @@ export function registerGenerateNodeCommand(output: vscode.OutputChannel): vscod
 
 /**
  * Generate AI Workflow command.
- * Prompts user for description and runs `nanoctl generate ai-workflow`.
+ * Prompts user for description and runs `blokctl generate ai-workflow`.
  */
 export function registerGenerateWorkflowCommand(output: vscode.OutputChannel): vscode.Disposable {
 	return vscode.commands.registerCommand("blok.generateWorkflow", async () => {
@@ -81,8 +81,8 @@ export function registerGenerateWorkflowCommand(output: vscode.OutputChannel): v
 
 		if (!trigger) return;
 
-		const nanoctlPath = getNanoctlPath();
-		const cmd = `${nanoctlPath} generate ai-workflow "${description}" --trigger=${trigger.label}`;
+		const blokctlPath = getNanoctlPath();
+		const cmd = `${blokctlPath} generate ai-workflow "${description}" --trigger=${trigger.label}`;
 
 		output.appendLine(`Generating AI workflow: ${description}`);
 		runInTerminal(cmd, "Generate Workflow");
@@ -91,7 +91,7 @@ export function registerGenerateWorkflowCommand(output: vscode.OutputChannel): v
 
 /**
  * Generate AI Trigger command.
- * Prompts user for description and runs `nanoctl generate ai-trigger`.
+ * Prompts user for description and runs `blokctl generate ai-trigger`.
  */
 export function registerGenerateTriggerCommand(output: vscode.OutputChannel): vscode.Disposable {
 	return vscode.commands.registerCommand("blok.generateTrigger", async () => {
@@ -102,8 +102,8 @@ export function registerGenerateTriggerCommand(output: vscode.OutputChannel): vs
 
 		if (!description) return;
 
-		const nanoctlPath = getNanoctlPath();
-		const cmd = `${nanoctlPath} generate ai-trigger "${description}"`;
+		const blokctlPath = getNanoctlPath();
+		const cmd = `${blokctlPath} generate ai-trigger "${description}"`;
 
 		output.appendLine(`Generating AI trigger: ${description}`);
 		runInTerminal(cmd, "Generate Trigger");
@@ -134,7 +134,7 @@ export function registerValidateWorkflowCommand(diagnostics: WorkflowDiagnostics
 
 /**
  * Open Monitor Dashboard command.
- * Runs `nanoctl monitor` in the integrated terminal.
+ * Runs `blokctl monitor` in the integrated terminal.
  */
 export function registerOpenMonitorCommand(output: vscode.OutputChannel): vscode.Disposable {
 	return vscode.commands.registerCommand("blok.openMonitor", () => {
@@ -144,15 +144,15 @@ export function registerOpenMonitorCommand(output: vscode.OutputChannel): vscode
 			return;
 		}
 
-		const nanoctlPath = getNanoctlPath();
+		const blokctlPath = getNanoctlPath();
 		output.appendLine("Opening Blok monitor dashboard");
-		runInTerminal(`cd "${cwd}" && ${nanoctlPath} monitor`, "Monitor");
+		runInTerminal(`cd "${cwd}" && ${blokctlPath} monitor`, "Monitor");
 	});
 }
 
 /**
  * Migrate Node to Function-First command.
- * Runs `nanoctl migrate node` on the current file.
+ * Runs `blokctl migrate node` on the current file.
  */
 export function registerMigrateNodeCommand(output: vscode.OutputChannel): vscode.Disposable {
 	return vscode.commands.registerCommand("blok.migrateNode", async () => {
@@ -176,8 +176,8 @@ export function registerMigrateNodeCommand(output: vscode.OutputChannel): vscode
 
 		if (confirm !== "Yes") return;
 
-		const nanoctlPath = getNanoctlPath();
-		const cmd = `${nanoctlPath} migrate node "${filePath}"`;
+		const blokctlPath = getNanoctlPath();
+		const cmd = `${blokctlPath} migrate node "${filePath}"`;
 
 		output.appendLine(`Migrating node to function-first: ${filePath}`);
 		runInTerminal(cmd, "Migrate Node");

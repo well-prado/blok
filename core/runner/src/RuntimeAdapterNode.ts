@@ -1,5 +1,5 @@
-import type { Context, ResponseContext } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import type { Context, ResponseContext } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
 import RunnerNode from "./RunnerNode";
 import type { RuntimeAdapter } from "./adapters/RuntimeAdapter";
 import { RunTracker } from "./tracing/RunTracker";

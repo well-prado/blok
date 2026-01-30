@@ -133,7 +133,7 @@ config: {
 // node.run() returns:
 {
   success: true,
-  data: <NanoServiceResponse>,  // ← Actual response
+  data: <BlokResponse>,  // ← Actual response
   error: null
 }
 

@@ -7,11 +7,11 @@
  * - Zod input validation
  * - Zod output validation
  * - GlobalError mapping
- * - Backward compatibility with NanoService
+ * - Backward compatibility with BlokService
  */
 
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type FnNodeDefinition, FunctionNode, defineNode } from "../../src/defineNode";
@@ -666,7 +666,7 @@ describe("defineNode", () => {
 	});
 
 	describe("Backward Compatibility", () => {
-		it("should extend NanoService", () => {
+		it("should extend BlokService", () => {
 			const node = defineNode({
 				name: "compat-node",
 				description: "Compatibility test",
@@ -677,7 +677,7 @@ describe("defineNode", () => {
 				},
 			});
 
-			// FunctionNode should be a NanoService
+			// FunctionNode should be a BlokService
 			expect(node).toHaveProperty("handle");
 			expect(node).toHaveProperty("run");
 			expect(node).toHaveProperty("inputSchema");

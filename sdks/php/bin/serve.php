@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use Blok\Nanoservice\Config\ServerConfig;
-use Blok\Nanoservice\Examples\ApiCallNode;
-use Blok\Nanoservice\Examples\ChainTestNode;
-use Blok\Nanoservice\Examples\HelloWorldNode;
-use Blok\Nanoservice\Examples\TransformDataNode;
-use Blok\Nanoservice\Node\NodeRegistry;
-use Blok\Nanoservice\Server\Server;
+use Blok\Blok\Config\ServerConfig;
+use Blok\Blok\Examples\ApiCallNode;
+use Blok\Blok\Examples\ChainTestNode;
+use Blok\Blok\Examples\HelloWorldNode;
+use Blok\Blok\Examples\TransformDataNode;
+use Blok\Blok\Node\NodeRegistry;
+use Blok\Blok\Server\Server;
 
 // Load configuration from environment
 $config = ServerConfig::fromEnv();

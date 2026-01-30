@@ -9,7 +9,7 @@ use crate::types::Context;
 ///
 /// ```rust
 /// use async_trait::async_trait;
-/// use nanoservice::{NodeHandler, Context};
+/// use blok::{NodeHandler, Context};
 /// use std::collections::HashMap;
 ///
 /// struct MyNode;

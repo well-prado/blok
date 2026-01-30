@@ -1,5 +1,5 @@
 const createRuntimeSystemPrompt = {
-	prompt: `You are a senior polyglot backend engineer working on the Blok (nanoservice-ts) workflow framework. Your task is to generate a **complete Runtime SDK** for a specific programming language that enables executing workflow nodes in that language.
+	prompt: `You are a senior polyglot backend engineer working on the Blok (blok) workflow framework. Your task is to generate a **complete Runtime SDK** for a specific programming language that enables executing workflow nodes in that language.
 
 What to return:
 

@@ -1,4 +1,4 @@
-import { type Step, Workflow } from "@nanoservice-ts/helper";
+import { type Step, Workflow } from "@blok/helper";
 
 const step1Inputs = {
 	url: "https://countriesnow.space/api/v0.1/countries/capital",
@@ -21,7 +21,7 @@ const step: Step = Workflow({
 	})
 	.addStep({
 		name: "get-countries-api",
-		node: "@nanoservice-ts/api-call",
+		node: "@blok/api-call",
 		type: "module",
 		inputs: step1Inputs,
 	});

@@ -1,21 +1,21 @@
-# Module Reference: CLI (nanoctl)
+# Module Reference: CLI (blokctl)
 
-> **Package:** `nanoctl`
+> **Package:** `blokctl`
 > **Path:** `packages/cli/`
 > **Purpose:** Command-line tool for creating, developing, generating, building, and deploying Blok projects
 
 ## What It Does
 
-The `nanoctl` CLI is the primary developer interface for Blok. It handles project scaffolding, node/workflow creation, AI-powered code generation, development server, building, deploying, and operational monitoring.
+The `blokctl` CLI is the primary developer interface for Blok. It handles project scaffolding, node/workflow creation, AI-powered code generation, development server, building, deploying, and operational monitoring.
 
 ## Installation
 
 ```bash
 # Global install
-npm install -g nanoctl
+npm install -g blokctl
 
 # Or use npx (recommended)
-npx nanoctl@latest create project
+npx blokctl@latest create project
 ```
 
 ## Command Reference
@@ -23,54 +23,54 @@ npx nanoctl@latest create project
 ### Project Management
 | Command | Description |
 |---------|-------------|
-| `nanoctl create project` | Create a new Blok project |
-| `nanoctl create node` | Create a new node |
-| `nanoctl create workflow` | Create a new workflow |
-| `nanoctl install node <name>` | Install a node from the registry |
-| `nanoctl install workflow <name>` | Install a workflow from the registry |
+| `blokctl create project` | Create a new Blok project |
+| `blokctl create node` | Create a new node |
+| `blokctl create workflow` | Create a new workflow |
+| `blokctl install node <name>` | Install a node from the registry |
+| `blokctl install workflow <name>` | Install a workflow from the registry |
 
 ### Development
 | Command | Description |
 |---------|-------------|
-| `nanoctl dev` | Start development server with HMR |
-| `nanoctl build` | Build the project for production |
-| `nanoctl deploy` | Deploy to production |
+| `blokctl dev` | Start development server with HMR |
+| `blokctl build` | Build the project for production |
+| `blokctl deploy` | Deploy to production |
 
 ### AI Code Generation
 | Command | Description |
 |---------|-------------|
-| `nanoctl generate ai-node <description>` | Generate a node from natural language |
-| `nanoctl generate ai-workflow <description>` | Generate a workflow from natural language |
-| `nanoctl generate ai-trigger <description>` | Generate a trigger from natural language |
-| `nanoctl generate ai-runtime <description>` | Generate a runtime adapter from natural language |
+| `blokctl generate ai-node <description>` | Generate a node from natural language |
+| `blokctl generate ai-workflow <description>` | Generate a workflow from natural language |
+| `blokctl generate ai-trigger <description>` | Generate a trigger from natural language |
+| `blokctl generate ai-runtime <description>` | Generate a runtime adapter from natural language |
 
 ### Operations
 | Command | Description |
 |---------|-------------|
-| `nanoctl monitor` | Open the monitoring dashboard |
-| `nanoctl profile` | Profile workflow performance |
-| `nanoctl graph` | Visualize workflow dependency graph |
-| `nanoctl cost` | Estimate workflow execution costs |
+| `blokctl monitor` | Open the monitoring dashboard |
+| `blokctl profile` | Profile workflow performance |
+| `blokctl graph` | Visualize workflow dependency graph |
+| `blokctl cost` | Estimate workflow execution costs |
 
 ### Migration
 | Command | Description |
 |---------|-------------|
-| `nanoctl migrate` | Run migration tools |
-| `nanoctl migrate node` | Migrate class-based node to function-first |
+| `blokctl migrate` | Run migration tools |
+| `blokctl migrate node` | Migrate class-based node to function-first |
 
 ### Marketplace
 | Command | Description |
 |---------|-------------|
-| `nanoctl marketplace runtime` | Browse/install runtime adapters |
-| `nanoctl publish node` | Publish a node to the registry |
-| `nanoctl publish workflow` | Publish a workflow to the registry |
+| `blokctl marketplace runtime` | Browse/install runtime adapters |
+| `blokctl publish node` | Publish a node to the registry |
+| `blokctl publish workflow` | Publish a workflow to the registry |
 
 ### Search
 | Command | Description |
 |---------|-------------|
-| `nanoctl search nodes <query>` | Search for nodes |
-| `nanoctl search workflows <query>` | Search for workflows |
-| `nanoctl search docs <query>` | Search documentation |
+| `blokctl search nodes <query>` | Search for nodes |
+| `blokctl search workflows <query>` | Search for workflows |
+| `blokctl search docs <query>` | Search documentation |
 
 ## Source Structure
 

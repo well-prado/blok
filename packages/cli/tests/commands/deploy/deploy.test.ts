@@ -8,7 +8,7 @@ vi.mock("fs-extra");
 vi.mock("@clack/prompts");
 vi.mock("../../../../src/services/local-token-manager.js");
 vi.mock("../../../../src/services/constants.js", () => ({
-	NANOSERVICE_URL: "https://mock-nanoservice-url.com",
+	BLOK_URL: "https://mock-blok-url.com",
 }));
 vi.mock("node-fetch", () => ({
 	default: vi.fn(),
@@ -37,7 +37,7 @@ describe("deploy command", () => {
 
 	it("should deploy successfully", async () => {
 		vi.spyOn(fs, "existsSync").mockImplementation((path) => {
-			if (String(path).includes("Dockerfile") || String(path).includes(".nanoservice.json")) return true;
+			if (String(path).includes("Dockerfile") || String(path).includes(".blok.json")) return true;
 			return false;
 		});
 		vi.spyOn(fs, "readJSONSync").mockReturnValue({
@@ -76,10 +76,10 @@ describe("deploy command", () => {
 		await deploy(opts);
 	});
 
-	it("should throw an error if .nanoservice.json is missing", async () => {
+	it("should throw an error if .blok.json is missing", async () => {
 		vi.spyOn(fs, "existsSync").mockImplementation((path) => {
 			if (String(path).includes("Dockerfile")) return true;
-			if (String(path).includes(".nanoservice.json")) return false;
+			if (String(path).includes(".blok.json")) return false;
 			return false;
 		});
 		vi.spyOn(fs, "readJSONSync").mockReturnValue({
@@ -102,7 +102,7 @@ describe("deploy command", () => {
 	it("should throw an error if token is missing", async () => {
 		vi.spyOn(fs, "existsSync").mockImplementation((path) => {
 			if (String(path).includes("Dockerfile")) return true;
-			if (String(path).includes(".nanoservice.json")) return false;
+			if (String(path).includes(".blok.json")) return false;
 			return false;
 		});
 		vi.spyOn(p, "spinner").mockReturnValue({

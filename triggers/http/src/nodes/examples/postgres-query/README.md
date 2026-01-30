@@ -1,6 +1,6 @@
 # POSTGRES NODE
 
-This nanoservice execute queries with POSTGRES. The workflow used to execute this nanoservice is:
+This blok execute queries with POSTGRES. The workflow used to execute this blok is:
 
 1. films.json
 

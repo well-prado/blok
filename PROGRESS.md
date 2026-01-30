@@ -55,7 +55,7 @@
 - ✅ **PHASE 2A: Zod-based input/output validation** 🎉🎉🎉🎉🎉
 - ✅ **PHASE 2A: 24/24 defineNode tests passing (100%)** 🎉🎉🎉🎉🎉
 - ✅ **PHASE 2B: CLI --style flag for function-first node generation** 🎉🎉🎉🎉🎉🎉
-- ✅ **PHASE 2B: CLI migration tool (nanoctl migrate node)** 🎉🎉🎉🎉🎉🎉
+- ✅ **PHASE 2B: CLI migration tool (blokctl migrate node)** 🎉🎉🎉🎉🎉🎉
 - ✅ **PHASE 2C: AI generation validation framework (compilation + structure checks)** 🎉🎉🎉🎉🎉🎉
 - ✅ **PHASE 2D: 2 production nodes migrated to function-first (api-call, if-else)** 🎉🎉🎉🎉🎉🎉
 - ✅ **PHASE 2D: Comprehensive migration guide (real-world examples)** 🎉🎉🎉🎉🎉🎉
@@ -128,11 +128,11 @@
 - ✅ **DX-2: NodeDependencyGraph (cross-workflow node analysis, ASCII/Mermaid/DOT/JSON output, 44 tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **DX-2: PerformanceProfiler (Prometheus-based profiling, flame charts, bottleneck detection, 28 tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **DX-2: CostEstimator (per-node cost modeling, AWS/GCP/Azure/local pricing, 27 tests)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
-- ✅ **DX-2: CLI commands - nanoctl graph, nanoctl profile, nanoctl cost** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **DX-2: CLI commands - blokctl graph, blokctl profile, blokctl cost** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **DX-3: IntelliJ IDEA Plugin (LSP4IJ-based, wraps blok-lsp server)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **DX-3: Neovim Plugin (Lua, nvim-lspconfig integration, keymaps)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **DX-3: Syntax Highlighting (TextMate grammar + VS Code integration)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
-- ✅ **CLI build fixed (added @nanoservice-ts/runner workspace dep, resolved type casting)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **CLI build fixed (added @blok/runner workspace dep, resolved type casting)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **1283 tests passing across runner + CLI (1019 runner + 264 CLI)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **OBS-1: PrometheusMetricsBridge (bridges TriggerMetricsCollector to OpenTelemetry Prometheus instruments)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **OBS-2: PrometheusBootstrap (dynamic OTel SDK import, standalone /metrics for all triggers)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
@@ -168,7 +168,7 @@
 - ✅ **35 HttpRuntimeAdapter tests passing (data flow, health checks, error handling, all 6 runtime kinds)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **E2E VALIDATED: All 8 runtimes chain correctly via ctx.vars (NodeJS→Go→Rust→Java→C#→PHP→Ruby→Python3 — PASS!)** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 - ✅ **ctx.vars data flow pattern: each step stores output in ctx.vars[stepName], downstream reads via js/ expressions** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
-- ✅ **Python3RuntimeAdapter fixed: resolved inputs as request.body, config.inputs to NanoService, data extraction** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
+- ✅ **Python3RuntimeAdapter fixed: resolved inputs as request.body, config.inputs to BlokService, data extraction** 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **What's Not Ready:**
 - ✅ All roadmap items complete! Framework is deployment-ready.
@@ -312,7 +312,7 @@ async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
 - All 8 runtimes chain correctly: NodeJS → Go → Rust → Java → C# → PHP → Ruby → Python3
 - Each runtime appends its language entry to a shared chain array via `ctx.vars`
 - Data flow uses `js/ctx.vars['prevStep'].chain` expressions (not `ctx.response.data`)
-- Python3RuntimeAdapter sends resolved inputs as `request.body` and passes `config.inputs` (not full config wrapper) to Python NanoService
+- Python3RuntimeAdapter sends resolved inputs as `request.body` and passes `config.inputs` (not full config wrapper) to Python BlokService
 - Chain-verify node reads `ctx.vars` directly to produce verification report with PASS/FAIL status
 
 ---
@@ -327,7 +327,7 @@ async runtimeResolver(node: RunnerNode): Promise<RunnerNode> {
 ```typescript
 // ✅ NEW: Clean function-first pattern (IMPLEMENTED!)
 // File: core/runner/src/defineNode.ts
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -367,15 +367,15 @@ export default defineNode({
 ```typescript
 // ✅ LEGACY: Class-based pattern (still works!)
 // File: nodes/web/api-call@1.0.0/index.ts
-export default class ApiCall extends NanoService<InputType> {
+export default class ApiCall extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = { /* JSON Schema */ };
     this.outputSchema = { /* JSON Schema */ };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
     try {
       // ... 100+ lines of boilerplate
       response.setSuccess(data);
@@ -466,9 +466,9 @@ export const ApiCall = defineNode({
 
 | Node | Migration Status | Completed | Tests | Code Reduction |
 |------|-----------------|-----------|-------|----------------|
-| @nanoservice-ts/api-call | ✅ Migrated | 2026-01-27 | 5/5 ✅ | 60% less boilerplate |
-| @nanoservice-ts/if-else | ✅ Migrated | 2026-01-27 | 6/6 ✅ | 60% less boilerplate |
-| @nanoservice-ts/react | ✅ Migrated | 2026-01-27 | 1/1 ✅ | 50% less boilerplate |
+| @blok/api-call | ✅ Migrated | 2026-01-27 | 5/5 ✅ | 60% less boilerplate |
+| @blok/if-else | ✅ Migrated | 2026-01-27 | 6/6 ✅ | 60% less boilerplate |
+| @blok/react | ✅ Migrated | 2026-01-27 | 1/1 ✅ | 50% less boilerplate |
 
 **Total:** 12/12 migrated node tests passing (100% success rate) 🎉
 
@@ -477,7 +477,7 @@ export const ApiCall = defineNode({
 - ✅ Zod schema cookbook with examples (included in guide)
 - ✅ Context usage patterns documentation (included in guide)
 - ✅ Migration guide (class → function) (MIGRATION_GUIDE.md - 903 lines)
-- ✅ CLI migration tool (`nanoctl migrate node`)
+- ✅ CLI migration tool (`blokctl migrate node`)
 - 📋 Video tutorial series (future)
 
 **✅ All Blockers Resolved:**
@@ -674,13 +674,13 @@ export default class QueueTrigger extends TriggerBase {
 **What's Working Today:**
 ```bash
 # ✅ WORKING: AI node generation with function-first support + semantic feedback
-$ nanoctl generate ai-node --name "fetch-user" --prompt "Fetch user from database" --style function
+$ blokctl generate ai-node --name "fetch-user" --prompt "Fetch user from database" --style function
 
 # ✅ WORKING: AI workflow generation with validation loop
-$ nanoctl generate ai-workflow --name "user-registration" --prompt "User registration with email verification" --trigger http
+$ blokctl generate ai-workflow --name "user-registration" --prompt "User registration with email verification" --trigger http
 
 # ✅ WORKING: AI trigger generation with structural validation
-$ nanoctl generate ai-trigger --name "order-events" --type queue --prompt "Kafka consumer for order events"
+$ blokctl generate ai-trigger --name "order-events" --type queue --prompt "Kafka consumer for order events"
 
 # Implementation details:
 # - Model: OpenAI GPT-4o
@@ -724,17 +724,17 @@ $ nanoctl generate ai-trigger --name "order-events" --type queue --prompt "Kafka
 
 ```bash
 # ✅ WORKING: Node generation with function-first + class-based support
-$ nanoctl generate ai-node --name <name> --prompt <prompt> [--style function|class] [--update]
+$ blokctl generate ai-node --name <name> --prompt <prompt> [--style function|class] [--update]
 
 # ✅ WORKING: Workflow JSON generation with trigger auto-detection
-$ nanoctl generate ai-workflow --name <name> --prompt <prompt> [--trigger http|queue|pubsub|cron|webhook|websocket|sse|auto] [--update <path>]
+$ blokctl generate ai-workflow --name <name> --prompt <prompt> [--trigger http|queue|pubsub|cron|webhook|websocket|sse|auto] [--update <path>]
 
 # ✅ WORKING: Trigger TypeScript generation with type-specific guidance
-$ nanoctl generate ai-trigger --name <name> --type <type> --prompt <prompt> [--update <path>]
+$ blokctl generate ai-trigger --name <name> --type <type> --prompt <prompt> [--update <path>]
 # Supported types: queue, pubsub, cron, webhook, websocket, sse, custom
 
 # ✅ WORKING: Runtime adapter generation (7 languages)
-$ nanoctl generate ai-runtime --language <lang> --prompt <description>
+$ blokctl generate ai-runtime --language <lang> --prompt <description>
 # Supported languages: go, java, rust, python, csharp, php, ruby
 # Generates: Complete runtime SDK skeleton + HTTP server + Dockerfile
 ```
@@ -790,12 +790,12 @@ AI Generation → TypeScript Compilation → Structural Validation → Semantic 
 | Node.js (TypeScript) | Built-in | `core/runner/` | ✅ Yes | 20+ | 375+ | ✅ Yes |
 | Bun | 🔄 Partial | Experimental | ❌ No | 0 | 0 | ❌ No |
 | Python 3 | Built-in | `runtimes/python3/` | ✅ Yes | 5+ | 79 | ✅ Yes |
-| Go | `nanoservice-go` | `sdks/go/` | ✅ Yes | 3 | ✅ All pass | ✅ Yes |
-| Rust | `nanoservice-rs` | `sdks/rust/` | ✅ Yes | 3 | 40 pass (38+2 doc) | ✅ Yes |
-| Java | `nanoservice-java` | `sdks/java/` | ✅ Yes | 3 | 69 pass (verified locally) | ✅ Yes |
-| C# / .NET | `Nanoservice.Core` | `sdks/csharp/` | ✅ Yes | 3 | 57 pass (verified locally, .NET 10) | ✅ Yes |
-| PHP | `nanoservice-php` | `sdks/php/` | ✅ Yes | 3 | 63 pass | ✅ Yes |
-| Ruby | `nanoservice-ruby` | `sdks/ruby/` | ✅ Yes | 3 | 88 pass | ✅ Yes |
+| Go | `blok-go` | `sdks/go/` | ✅ Yes | 3 | ✅ All pass | ✅ Yes |
+| Rust | `blok-rs` | `sdks/rust/` | ✅ Yes | 3 | 40 pass (38+2 doc) | ✅ Yes |
+| Java | `blok-java` | `sdks/java/` | ✅ Yes | 3 | 69 pass (verified locally) | ✅ Yes |
+| C# / .NET | `Blok.Core` | `sdks/csharp/` | ✅ Yes | 3 | 57 pass (verified locally, .NET 10) | ✅ Yes |
+| PHP | `blok-php` | `sdks/php/` | ✅ Yes | 3 | 63 pass | ✅ Yes |
+| Ruby | `blok-ruby` | `sdks/ruby/` | ✅ Yes | 3 | 88 pass | ✅ Yes |
 
 **✅ Full Production SDKs (Elevated from examples to publishable packages):**
 
@@ -843,7 +843,7 @@ Location: core/runner/, core/shared/, nodes/
 Status: ✅ Production
 Features:
   - In-process execution
-  - NanoService base class
+  - BlokService base class
   - Full Context support
   - OpenTelemetry integration
   - 20+ built-in nodes
@@ -856,7 +856,7 @@ Location: runtimes/python3/
 Status: ✅ Production
 Features:
   - gRPC server (port 50051)
-  - NanoService base class
+  - BlokService base class
   - Context type mapping
   - JSONSchema validation
   - 5+ example nodes
@@ -871,12 +871,12 @@ Issues:
 
 | Language | SDK Package Name | Key Framework | Tests | Status |
 |----------|-----------------|---------------|-------|--------|
-| Go | `nanoservice-go` | stdlib net/http (zero deps) | ✅ All pass | ✅ Verified |
-| Rust | `nanoservice-rs` | axum + tonic (feature-gated gRPC) | 40 pass | ✅ Verified |
-| Java | `nanoservice-java` | com.sun.net.httpserver + Gson | 69 pass | ✅ Verified |
-| C# / .NET | `Nanoservice.Core` | ASP.NET Minimal APIs (.NET 10) | 57 pass | ✅ Verified |
-| PHP | `nanoservice-php` | React\Http async (PHP 8.2+) | 63 pass | ✅ Verified |
-| Ruby | `nanoservice-ruby` | Sinatra + Puma (Ruby 3.1+) | 88 pass | ✅ Verified |
+| Go | `blok-go` | stdlib net/http (zero deps) | ✅ All pass | ✅ Verified |
+| Rust | `blok-rs` | axum + tonic (feature-gated gRPC) | 40 pass | ✅ Verified |
+| Java | `blok-java` | com.sun.net.httpserver + Gson | 69 pass | ✅ Verified |
+| C# / .NET | `Blok.Core` | ASP.NET Minimal APIs (.NET 10) | 57 pass | ✅ Verified |
+| PHP | `blok-php` | React\Http async (PHP 8.2+) | 63 pass | ✅ Verified |
+| Ruby | `blok-ruby` | Sinatra + Puma (Ruby 3.1+) | 88 pass | ✅ Verified |
 
 **Protocol Definitions:**
 
@@ -901,21 +901,21 @@ Issues:
 
 | Package | Version | Status | Test Coverage | Issues | Owner |
 |---------|---------|--------|---------------|--------|-------|
-| @nanoservice-ts/runner | 0.1.26 | ✅ Stable | 40% | Python lock-in | - |
-| @nanoservice-ts/shared | 0.0.9 | ✅ Stable | 60% | None | - |
-| @nanoservice-ts/helper | 0.1.5 | ✅ Stable | 50% | Limited types | - |
-| nanoctl (CLI) | 0.1.14 | 🔄 Active Dev | 55% | AI generation polish | - |
+| @blok/runner | 0.1.26 | ✅ Stable | 40% | Python lock-in | - |
+| @blok/shared | 0.0.9 | ✅ Stable | 60% | None | - |
+| @blok/helper | 0.1.5 | ✅ Stable | 50% | Limited types | - |
+| blokctl (CLI) | 0.1.14 | 🔄 Active Dev | 55% | AI generation polish | - |
 
 ### Trigger Packages
 
 | Package | Version | Status | Test Coverage | Issues | Owner |
 |---------|---------|--------|---------------|--------|-------|
-| @nanoservice-ts/trigger-http | 0.0.34 | ✅ Production | 45% | None | - |
-| @nanoservice-ts/trigger-grpc | 0.0.14 | ✅ Production | 40% | None | - |
-| @nanoservice-ts/trigger-queue | 0.0.1 | ✅ Complete | 100% (9 tests) | None | - |
-| @nanoservice-ts/trigger-pubsub | 0.0.1 | ✅ Complete | 100% (8 tests) | None | - |
-| @nanoservice-ts/trigger-cron | 0.0.1 | ✅ Complete | 100% (6 tests) | None | - |
-| @nanoservice-ts/trigger-webhook | 0.0.1 | ✅ Complete | 100% (18 tests) | None | - |
+| @blok/trigger-http | 0.0.34 | ✅ Production | 45% | None | - |
+| @blok/trigger-grpc | 0.0.14 | ✅ Production | 40% | None | - |
+| @blok/trigger-queue | 0.0.1 | ✅ Complete | 100% (9 tests) | None | - |
+| @blok/trigger-pubsub | 0.0.1 | ✅ Complete | 100% (8 tests) | None | - |
+| @blok/trigger-cron | 0.0.1 | ✅ Complete | 100% (6 tests) | None | - |
+| @blok/trigger-webhook | 0.0.1 | ✅ Complete | 100% (18 tests) | None | - |
 | trigger-websocket | 0.0.1 | ✅ Complete | 30 | Phase 3E Complete | ws (peer) |
 | trigger-sse | 0.0.1 | ✅ Complete | 32 | Phase 3F Complete | none |
 
@@ -923,9 +923,9 @@ Issues:
 
 | Package | Version | Status | Test Coverage | Pattern | Migration Status |
 |---------|---------|--------|---------------|---------|-----------------|
-| @nanoservice-ts/api-call | 0.1.29 | ✅ Production | 55% | Class | ❌ Not migrated |
-| @nanoservice-ts/if-else | 0.0.30 | ✅ Production | 60% | Class | ❌ Not migrated |
-| @nanoservice-ts/react | 0.0.17 | ✅ Production | 30% | Class | ❌ Not migrated |
+| @blok/api-call | 0.1.29 | ✅ Production | 55% | Class | ❌ Not migrated |
+| @blok/if-else | 0.0.30 | ✅ Production | 60% | Class | ❌ Not migrated |
+| @blok/react | 0.0.17 | ✅ Production | 30% | Class | ❌ Not migrated |
 
 ### Runtime Packages
 
@@ -973,7 +973,7 @@ HTTP Request → HttpTrigger
 protected nodeTypes(): NodeResolverTypes {
   return {
     module: {
-      // Loads from node_modules (@nanoservice-ts/*)
+      // Loads from node_modules (@blok/*)
       resolver: async (node, opts) => this.moduleResolver(node, opts)
     },
     local: {
@@ -1034,15 +1034,15 @@ protected tracer = trace.getTracer(
 **2. Modern Node Development ❌**
 ```typescript
 // PROBLEM: Verbose class boilerplate
-export default class MyNode extends NanoService<InputType> {
+export default class MyNode extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = { /* duplicate JSON Schema */ };
     this.outputSchema = { /* duplicate JSON Schema */ };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
     try {
       // ... business logic ...
       response.setSuccess(data);
@@ -1160,9 +1160,9 @@ export default class MyNode extends NanoService<InputType> {
   - [ ] Document prompt engineering
 
 - [ ] **Node Migration**
-  - [ ] Migrate @nanoservice-ts/api-call
-  - [ ] Migrate @nanoservice-ts/if-else
-  - [ ] Migrate @nanoservice-ts/react
+  - [ ] Migrate @blok/api-call
+  - [ ] Migrate @blok/if-else
+  - [ ] Migrate @blok/react
   - [ ] Migrate HTTP example nodes
   - [ ] Test all migrated nodes
   - [ ] Create migration toolkit
@@ -1394,7 +1394,7 @@ export default class MyNode extends NanoService<InputType> {
 **Python3RuntimeAdapter Fixes (3 changes):**
 - Fixed `createContext()` to use resolved inputs as `request.body` when available (instead of original HTTP body)
 - Changed to return `parsedResponse.data` instead of full parsedResponse (consistency with HttpRuntimeAdapter)
-- Changed config to send `config.inputs` instead of full config wrapper to Python NanoService (matches what `handle(ctx, inputs)` expects)
+- Changed config to send `config.inputs` instead of full config wrapper to Python BlokService (matches what `handle(ctx, inputs)` expects)
 
 **Files Modified:**
 - `core/runner/src/adapters/Python3RuntimeAdapter.ts` — 3 data flow fixes
@@ -1737,7 +1737,7 @@ export default class MyNode extends NanoService<InputType> {
 **Phase 5: runtimes/python3 (30 → 79 tests, +49 new):**
 - ✅ `test_global_error.py` - 15 tests (init, setCode, setJson, setStack, hasJson, __str__, to_dict)
 - ✅ `test_response.py` - 6 tests (default init, to_dict with various error types)
-- ✅ `test_nanoservice_response.py` - 6 tests (setError, setSuccess, to_dict)
+- ✅ `test_blok_response.py` - 6 tests (setError, setSuccess, to_dict)
 - ✅ `test_context.py` - 3 tests (defaults, field setting, config type)
 - ✅ `test_message_manager.py` - 18 tests (decode/encode for all format combinations)
 - ✅ `test_runner.py` - 7 tests (init, context creation, node resolver, run)
@@ -1871,7 +1871,7 @@ export default class MyNode extends NanoService<InputType> {
     - Workflow fields (name, version, steps, nodes, trigger)
     - Node config fields (inputs, conditions, set_var)
     - Step fields (node, type, runtime)
-    - Common node packages (@nanoservice-ts/api-call, @nanoservice-ts/if-else)
+    - Common node packages (@blok/api-call, @blok/if-else)
   - **Auto-Completion**: Context-aware completions
     - Trigger types, HTTP methods, step types
     - Runtime kinds (11 options)
@@ -1906,7 +1906,7 @@ export default class MyNode extends NanoService<InputType> {
     - Node config with conditions/inputs
     - Integrated with VS Code's built-in JSON validation
   - **Configuration Options**: Extension settings
-    - `blok.nanoctlPath` - CLI binary path
+    - `blok.blokctlPath` - CLI binary path
     - `blok.workflowGlob` - Workflow file pattern
     - `blok.validateOnSave` - Auto-validation toggle
     - `blok.aiProvider` - AI provider selection
@@ -1957,7 +1957,7 @@ export default class MyNode extends NanoService<InputType> {
     - 10 trigger types with descriptions and examples
     - Workflow fields (name, version, steps, nodes, trigger, inputs, conditions, set_var)
     - Step fields (node, type, runtime)
-    - Common node packages (@nanoservice-ts/api-call, @nanoservice-ts/if-else)
+    - Common node packages (@blok/api-call, @blok/if-else)
     - HTTP method values, runtime type values
   - **Auto-Completion**: Context-aware completions
     - Trigger types, HTTP methods, step types
@@ -2203,7 +2203,7 @@ export default class MyNode extends NanoService<InputType> {
 
 ### 2026-01-28 - Worker Trigger Package COMPLETED! 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
-**Worker Trigger (`@nanoservice-ts/trigger-worker`) - COMPLETE:**
+**Worker Trigger (`@blok/trigger-worker`) - COMPLETE:**
 - ✅ Created `WorkerTrigger.ts` - Abstract base class extending TriggerBase with adapter pattern
   - `listen()` - Starts worker processing for all worker-configured workflows
   - `stop()` - Graceful shutdown with adapter disconnect
@@ -2295,7 +2295,7 @@ export default class MyNode extends NanoService<InputType> {
   - Language-specific validation (Go: package/go.mod, Java: class/pom.xml, Rust: fn/Cargo.toml, Python: def/requirements.txt)
   - Semantic error guidance for feedback loop
   - Analytics integration with prompt versioning
-- ✅ Wired up CLI command: `nanoctl generate ai-runtime --language <lang> --prompt <desc>`
+- ✅ Wired up CLI command: `blokctl generate ai-runtime --language <lang> --prompt <desc>`
   - 7 supported languages: go, java, rust, python, csharp, php, ruby
   - Writes multi-file output to `runtimes/<language>/` directory
   - Shows validation results, warnings, and generated file list
@@ -2336,7 +2336,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Created `TriggerMetricsCollector.ts` - P50/P95/P99 latency percentiles, error categorization, throughput tracking
 - ✅ Created `monitoring/index.ts` barrel export
 - ✅ Integrated all monitoring into `TriggerBase` (health check, rate limiter, circuit breaker, metrics collector)
-- ✅ Exported all monitoring classes and types from `@nanoservice-ts/runner`
+- ✅ Exported all monitoring classes and types from `@blok/runner`
 - ✅ 62 unit tests (13 HealthCheck + 14 RateLimiter + 23 CircuitBreaker + 12 TriggerMetricsCollector)
 - ✅ Created Docker Compose for integration testing (`infra/testing/docker-compose.yml`)
   - PostgreSQL, Redis, Kafka (KRaft mode), RabbitMQ, NATS (JetStream), Python runtime
@@ -2416,8 +2416,8 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ 17 unit tests for NodeGenerator semantic analysis (100% passing)
 
 **CLI Commands Added:**
-- ✅ `nanoctl generate ai-workflow` - workflow JSON generation (--name, --prompt, --trigger, --update, --api-key)
-- ✅ `nanoctl generate ai-trigger` - trigger TypeScript generation (--name, --type, --prompt, --update, --api-key)
+- ✅ `blokctl generate ai-workflow` - workflow JSON generation (--name, --prompt, --trigger, --update, --api-key)
+- ✅ `blokctl generate ai-trigger` - trigger TypeScript generation (--name, --type, --prompt, --update, --api-key)
 
 **Key Technical Wins:**
 - 🚀 **Validation Pipeline**: Generation → Compilation → Structure → Semantic Analysis
@@ -2438,7 +2438,7 @@ export default class MyNode extends NanoService<InputType> {
 ### 2026-01-28 (Phase 3A-3D) - Universal Triggers COMPLETED! 🎉🎉🎉🎉🎉🎉🎉🎉🎉🎉
 
 **Phase 3A: Queue Triggers - COMPLETE:**
-- ✅ Created `@nanoservice-ts/trigger-queue` package
+- ✅ Created `@blok/trigger-queue` package
 - ✅ Implemented `QueueTrigger` base class extending TriggerBase
 - ✅ Built `KafkaAdapter` with consumer groups and offset management
 - ✅ Built `RabbitMQAdapter` with AMQP channel management
@@ -2450,7 +2450,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Proper error handling with GlobalError mapping
 
 **Phase 3B: Pub/Sub Triggers - COMPLETE:**
-- ✅ Created `@nanoservice-ts/trigger-pubsub` package
+- ✅ Created `@blok/trigger-pubsub` package
 - ✅ Implemented `PubSubTrigger` base class
 - ✅ Built `GCPPubSubAdapter` with Google Cloud Pub/Sub integration
 - ✅ Built `AWSSNSAdapter` with SNS subscription via SQS queue
@@ -2461,7 +2461,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Dead letter queue support
 
 **Phase 3C: Cron/Scheduled Triggers - COMPLETE:**
-- ✅ Created `@nanoservice-ts/trigger-cron` package
+- ✅ Created `@blok/trigger-cron` package
 - ✅ Implemented `CronTrigger` base class with job management
 - ✅ Full cron expression support (minute, hour, day, month, weekday)
 - ✅ Timezone support using IANA timezone names (e.g., "America/New_York")
@@ -2472,7 +2472,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ 6 unit tests passing (100% success rate)
 
 **Phase 3D: Webhook Triggers - COMPLETE:**
-- ✅ Created `@nanoservice-ts/trigger-webhook` package
+- ✅ Created `@blok/trigger-webhook` package
 - ✅ Implemented `WebhookTrigger` base class
 - ✅ Built-in source handlers for GitHub, Stripe, Shopify, Custom
 - ✅ GitHub webhook signature verification (HMAC-SHA256, x-hub-signature-256)
@@ -2503,8 +2503,8 @@ export default class MyNode extends NanoService<InputType> {
 ### 2026-01-27 (Late Night - Phase 2B) - CLI Integration COMPLETED! 🎉🎉🎉🎉🎉🎉🎉🎉
 
 **Phase 2B: CLI Template Updates - COMPLETE:**
-- ✅ Added --style flag to `nanoctl create node` command (lines 109, 123 in index.ts)
-- ✅ Created migration tool: `nanoctl migrate node --path <path>` (160 lines)
+- ✅ Added --style flag to `blokctl create node` command (lines 109, 123 in index.ts)
+- ✅ Created migration tool: `blokctl migrate node --path <path>` (160 lines)
 - ✅ Verified function-first templates already working in CLI
 - ✅ Build validation passed with zero TypeScript errors
 - ✅ Function-first marked as "recommended" in interactive prompts
@@ -2514,7 +2514,7 @@ export default class MyNode extends NanoService<InputType> {
 
 **Key Technical Wins:**
 - 🚀 **CLI Flags**: Users can now specify `--style function` for fast node creation
-- 🚀 **Migration Tooling**: `nanoctl migrate node` guides developers through conversion
+- 🚀 **Migration Tooling**: `blokctl migrate node` guides developers through conversion
 - 🚀 **Zero Breaking Changes**: Both function-first and class-based patterns fully supported
 - 🚀 **Educational Approach**: Migration tool teaches pattern instead of automated transformation
 - 🚀 **Build Quality**: Clean compilation, proper TypeScript types, commander.js integration
@@ -2538,9 +2538,9 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Fixed linting errors (converted classes to functions, added node: imports)
 
 **Phase 2D: Node Migrations - COMPLETE:**
-- ✅ Migrated [@nanoservice-ts/api-call](nodes/web/api-call@1.0.0/index.ts:1) to function-first (77 lines, 60% code reduction)
+- ✅ Migrated [@blok/api-call](nodes/web/api-call@1.0.0/index.ts:1) to function-first (77 lines, 60% code reduction)
 - ✅ Updated api-call tests to function-first pattern (5/5 tests passing)
-- ✅ Migrated [@nanoservice-ts/if-else](nodes/control-flow/if-else@1.0.0/index.ts:1) to function-first (102 lines)
+- ✅ Migrated [@blok/if-else](nodes/control-flow/if-else@1.0.0/index.ts:1) to function-first (102 lines)
 - ✅ Updated if-else tests to function-first pattern (6/6 tests passing)
 - ✅ Created [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md:1) - comprehensive guide with real examples (900+ lines)
 - ✅ Fixed ZodError detection across module boundaries (duck-typing instead of instanceof)
@@ -2569,7 +2569,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Created comprehensive validator tests (16 tests, 100% passing)
 - ✅ CompilationValidator tests document TypeScript validation capabilities and limitations
 - ✅ NodeValidator tests verify structural validation (10/10 tests passing)
-- ✅ Migrated @nanoservice-ts/react node to function-first pattern
+- ✅ Migrated @blok/react node to function-first pattern
 - ✅ Converted JSON Schema to Zod for React node (inputSchema → z.object)
 - ✅ Updated React node tests for function-first pattern (1/1 test passing)
 - ✅ All 3 production nodes now using defineNode API (api-call, if-else, react)
@@ -2596,13 +2596,13 @@ export default class MyNode extends NanoService<InputType> {
 
 **Phase 2A: Core defineNode API Complete:**
 - ✅ Created defineNode() API with full Zod integration (278 lines)
-- ✅ Implemented FunctionNode wrapper extending NanoService (backward compatible)
+- ✅ Implemented FunctionNode wrapper extending BlokService (backward compatible)
 - ✅ Built automatic input/output validation with Zod schemas
 - ✅ Added ZodError → GlobalError mapping (400 for validation, 500 for runtime)
 - ✅ Created 2 complete example nodes (fetch-user, api-call)
 - ✅ Wrote 24 comprehensive unit tests (100% passing, < 290ms execution)
 - ✅ Created 850+ lines of API documentation
-- ✅ Exported from @nanoservice-ts/runner package
+- ✅ Exported from @blok/runner package
 - ✅ Added Zod dependency to core/runner package
 - ✅ Build validation passed with zero TypeScript errors
 - ✅ Created PHASE_2A_COMPLETE.md session summary (614 lines)
@@ -2711,7 +2711,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Built 7-file Go runtime example (SDK, server, node, Dockerfile, docs)
 - ✅ Created Java Runtime SDK with Maven setup
 - ✅ Built 7-file Java runtime example (SDK, server, node, Dockerfile, docs)
-- ✅ Exported DockerRuntimeAdapter from `@nanoservice-ts/runner`
+- ✅ Exported DockerRuntimeAdapter from `@blok/runner`
 - ✅ Updated documentation with Docker adapter examples
 - ✅ Build validation passed with zero TypeScript errors
 
@@ -2733,7 +2733,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Updated `Configuration.ts` to use RuntimeRegistry instead of hardcoded logic
 - ✅ Added `runtime` field to `RunnerNode` type
 - ✅ Auto-registration of adapters in Configuration constructor
-- ✅ Exported all runtime types from `@nanoservice-ts/runner`
+- ✅ Exported all runtime types from `@blok/runner`
 - ✅ Created comprehensive example documentation
 - ✅ Build validation passed with zero TypeScript errors
 
@@ -2753,7 +2753,7 @@ export default class MyNode extends NanoService<InputType> {
 - ✅ Draft runner architecture designed
 
 ### 2026-01 (Earlier)
-- ✅ Project rebranded from "nanoservice-ts" to "Blok"
+- ✅ Project rebranded from "blok" to "Blok"
 - ✅ Documentation site updated to blok.build
 - ✅ Package versions aligned
 - ✅ GitHub links updated
@@ -2858,17 +2858,17 @@ Multi-Region/Edge Deployment          [█████████████�
 ### Test Coverage by Package
 
 ```
-@nanoservice-ts/runner                [████████████████████] 99%  (1051 tests) 🎉🎉🎉🎉
-@nanoservice-ts/shared                [██████████████████░░] 92%  (90 tests) 🎉🎉 NEW!
-@nanoservice-ts/helper                [██████████████████░░] 93%  (50 tests) 🎉🎉 NEW!
-@nanoservice-ts/trigger-http          [██████████████████░░] 90%  (36 tests) 🎉🎉 NEW!
-@nanoservice-ts/trigger-grpc          [██████████████████░░] 90%  (77 tests) 🎉🎉 NEW!
-@nanoservice-ts/trigger-websocket     [████████████████████] 100% (50 tests) 🎉
-@nanoservice-ts/trigger-sse           [████████████████████] 100% (49 tests) 🎉
-@nanoservice-ts/trigger-worker        [████████████████████] 100% (32 tests) 🎉
-@nanoservice-ts/api-call              [███████████░░░░░░░░░] 55%
-@nanoservice-ts/if-else               [████████████░░░░░░░░] 60%
-nanoctl (CLI)                         [██████████████████░░] 90%  (264 tests) 🎉
+@blok/runner                [████████████████████] 99%  (1051 tests) 🎉🎉🎉🎉
+@blok/shared                [██████████████████░░] 92%  (90 tests) 🎉🎉 NEW!
+@blok/helper                [██████████████████░░] 93%  (50 tests) 🎉🎉 NEW!
+@blok/trigger-http          [██████████████████░░] 90%  (36 tests) 🎉🎉 NEW!
+@blok/trigger-grpc          [██████████████████░░] 90%  (77 tests) 🎉🎉 NEW!
+@blok/trigger-websocket     [████████████████████] 100% (50 tests) 🎉
+@blok/trigger-sse           [████████████████████] 100% (49 tests) 🎉
+@blok/trigger-worker        [████████████████████] 100% (32 tests) 🎉
+@blok/api-call              [███████████░░░░░░░░░] 55%
+@blok/if-else               [████████████░░░░░░░░] 60%
+blokctl (CLI)                         [██████████████████░░] 90%  (264 tests) 🎉
 blok-vscode (Extension)               [████████████████████] 100% (62 tests) 🎉
 blok-lsp-server                       [████████████████████] 100% (89 tests) 🎉
 runtimes/python3                      [██████████████████░░] 91%  (79 tests) 🎉🎉 NEW!
@@ -3235,7 +3235,7 @@ runtimes/python3                      [█████████████�
 ### Key Source Files
 - `core/runner/src/Configuration.ts` - Runtime resolution logic
 - `core/runner/src/TriggerBase.ts` - Trigger base class
-- `core/runner/src/NanoService.ts` - Node base class
+- `core/runner/src/BlokService.ts` - Node base class
 - `core/workflow-helper/src/types/TriggerOpts.ts` - Trigger schema (updated for Phase 3)
 - `packages/cli/src/commands/generate/prompts/create-node.system.ts` - Current AI prompt
 - `triggers/http/src/runner/HttpTrigger.ts` - HTTP trigger implementation

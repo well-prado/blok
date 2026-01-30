@@ -111,7 +111,7 @@ function getDocumentSettings(resource: string): BlokLspSettings {
 // Document validation
 function isWorkflowFile(uri: string): boolean {
 	// Match workflow files by path pattern
-	return /workflows?[/\\].*\.json$/i.test(uri) || /\.workflow\.json$/i.test(uri) || /nanoservice\.json$/i.test(uri);
+	return /workflows?[/\\].*\.json$/i.test(uri) || /\.workflow\.json$/i.test(uri) || /blok\.json$/i.test(uri);
 }
 
 function validateDocument(document: TextDocument): void {

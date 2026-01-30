@@ -1,6 +1,6 @@
 {
-	"name": "@nanoservice-ts/trigger-queue",
-	"version": "0.0.1",
+	"name": "@blok/trigger-queue",
+	"version": "0.1.0",
 	"description": "Queue-based trigger for Blok workflows - supports Kafka, RabbitMQ, SQS, and Redis",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -13,9 +13,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@nanoservice-ts/helper": "workspace:*",
-		"@nanoservice-ts/runner": "workspace:*",
-		"@nanoservice-ts/shared": "workspace:*",
+		"@blok/helper": "workspace:*",
+		"@blok/runner": "workspace:*",
+		"@blok/shared": "workspace:*",
 		"@opentelemetry/api": "^1.8.0",
 		"uuid": "^10.0.0"
 	},

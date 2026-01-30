@@ -43,7 +43,7 @@ Executes a series of steps in the given context.
 | Name | Type | Default value | Description |
 | :------ | :------ | :------ | :------ |
 | `ctx` | `Context` | `undefined` | The context in which the steps are executed. |
-| `steps` | `NodeBase`[] | `undefined` | An array of NanoService steps to be executed. |
+| `steps` | `NodeBase`[] | `undefined` | An array of BlokService steps to be executed. |
 | `deep` | `boolean` | `false` | A boolean indicating whether the function is being called recursively for flow steps. |
 | `step_name` | `string` | `""` | The name of the current step being processed in a flow. |
 

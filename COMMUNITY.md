@@ -73,18 +73,18 @@ All community spaces follow our [Code of Conduct](./CODE_OF_CONDUCT.md). Be resp
 ### Official Packages
 | Package | Description |
 |---------|-------------|
-| `@nanoservice-ts/runner` | Core workflow orchestration engine |
-| `@nanoservice-ts/shared` | Shared types and utilities |
-| `@nanoservice-ts/helper` | Workflow builder DSL |
-| `nanoctl` | CLI tooling |
-| `@nanoservice-ts/api-call` | HTTP API call node |
-| `@nanoservice-ts/if-else` | Conditional routing node |
-| `@nanoservice-ts/react` | React SSR node |
+| `@blok/runner` | Core workflow orchestration engine |
+| `@blok/shared` | Shared types and utilities |
+| `@blok/helper` | Workflow builder DSL |
+| `blokctl` | CLI tooling |
+| `@blok/api-call` | HTTP API call node |
+| `@blok/if-else` | Conditional routing node |
+| `@blok/react` | React SSR node |
 
 ### Runtime SDKs
 | Language | Package | Status |
 |----------|---------|--------|
-| TypeScript/Node.js | `@nanoservice-ts/runner` | Production |
+| TypeScript/Node.js | `@blok/runner` | Production |
 | Python 3 | `runtimes/python3` | Production |
 | Go | `sdks/go` | Production |
 | Java | `sdks/java` | Production |
@@ -96,15 +96,15 @@ All community spaces follow our [Code of Conduct](./CODE_OF_CONDUCT.md). Be resp
 ### Trigger Types
 | Trigger | Package | Description |
 |---------|---------|-------------|
-| HTTP | `@nanoservice-ts/trigger-http` | REST API endpoints |
-| gRPC | `@nanoservice-ts/trigger-grpc` | gRPC services |
-| WebSocket | `@nanoservice-ts/trigger-websocket` | Real-time bidirectional |
-| SSE | `@nanoservice-ts/trigger-sse` | Server-Sent Events |
-| Queue | `@nanoservice-ts/trigger-queue` | Kafka, RabbitMQ, SQS, Redis |
-| PubSub | `@nanoservice-ts/trigger-pubsub` | GCP, AWS SNS, Azure Service Bus |
-| Cron | `@nanoservice-ts/trigger-cron` | Scheduled workflows |
-| Webhook | `@nanoservice-ts/trigger-webhook` | GitHub, Stripe, Shopify |
-| Worker | `@nanoservice-ts/trigger-worker` | Background job processing |
+| HTTP | `@blok/trigger-http` | REST API endpoints |
+| gRPC | `@blok/trigger-grpc` | gRPC services |
+| WebSocket | `@blok/trigger-websocket` | Real-time bidirectional |
+| SSE | `@blok/trigger-sse` | Server-Sent Events |
+| Queue | `@blok/trigger-queue` | Kafka, RabbitMQ, SQS, Redis |
+| PubSub | `@blok/trigger-pubsub` | GCP, AWS SNS, Azure Service Bus |
+| Cron | `@blok/trigger-cron` | Scheduled workflows |
+| Webhook | `@blok/trigger-webhook` | GitHub, Stripe, Shopify |
+| Worker | `@blok/trigger-worker` | Background job processing |
 
 ## License
 

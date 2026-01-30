@@ -1,5 +1,5 @@
 const createNodeSystemPrompt = {
-	prompt: `You are a senior backend engineer specializing in nanoservices using the \`@nanoservice-ts\` framework. Your task is to generate a fully working Node class file that performs the described logic.
+	prompt: `You are a senior backend engineer specializing in bloks using the \`@blok\` framework. Your task is to generate a fully working Node class file that performs the described logic.
 
 What to return:
 
@@ -10,7 +10,7 @@ What to return:
   2. A meaningful class name (e.g., \`MySQLSelect\`, \`SendSlackMessage\`) based on the described functionality.
   3. A clear and structured \`InputType\` definition.
   4. A matching \`this.inputSchema\` using the JSON Schema standard.
-  5. A complete implementation of the \`handle()\` method using \`NanoServiceResponse\`.
+  5. A complete implementation of the \`handle()\` method using \`BlokResponse\`.
 
 Constraints:
 
@@ -31,19 +31,19 @@ Format:
 * Return the entire code, from imports to the end of the class, as it would appear in a \`.ts\` file.
 
 Node class template:
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { type IBlokResponse, BlokService, BlokResponse } from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 
 type InputType = {
 	message?: string;
 };
 
 /**
- * Represents a Node service that extends the NanoService class.
+ * Represents a Node service that extends the BlokService class.
  * This class is responsible for handling requests and providing responses
  * with automated validation using JSON Schema.
  */
-export default class Node extends NanoService<InputType> {
+export default class Node extends BlokService<InputType> {
 	/**
 	 * Initializes a new instance of the Node class.
 	 * Sets up the input and output JSON Schema for automated validation.
@@ -61,14 +61,14 @@ export default class Node extends NanoService<InputType> {
 	 *
 	 * @param ctx - The context of the request.
 	 * @param inputs - The input data for the request.
-	 * @returns A promise that resolves to an INanoServiceResponse object.
+	 * @returns A promise that resolves to an IBlokResponse object.
 	 *
 	 * The method tries to execute the main logic and sets a success message in the response.
 	 * If an error occurs, it catches the error, creates a GlobalError object, sets the error details,
 	 * and sets the error in the response.
 	 */
-	async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-		const response: NanoServiceResponse = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+		const response: BlokResponse = new BlokResponse();
 
 		try {
 			// Your code here
@@ -86,7 +86,7 @@ export default class Node extends NanoService<InputType> {
 		return response;
 	}
 }`,
-	updatePrompt: `You are a senior backend engineer specializing in nanoservices using the \`@nanoservice-ts\` framework. Your task is to update an existing Node class file with new functionality while preserving its core structure.
+	updatePrompt: `You are a senior backend engineer specializing in bloks using the \`@blok\` framework. Your task is to update an existing Node class file with new functionality while preserving its core structure.
 
 Given the existing code below, enhance or modify it according to the user's requirements while maintaining the following:
 

@@ -1,13 +1,13 @@
 {
 	"name": "ts-template",
-	"version": "1.0.0",
+	"version": "0.1.0",
 	"description": "",
 	"engines": {
 		"node": ">=18.0.0"
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"repository": "https://github.com/deskree-inc/nanoservice-ts-shared-lib.git",
+	"repository": "https://github.com/well-prado/blok.git",
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"scripts": {

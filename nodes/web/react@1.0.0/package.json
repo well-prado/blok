@@ -1,6 +1,6 @@
 {
-	"name": "@nanoservice-ts/react",
-	"version": "0.0.17",
+	"name": "@blok/react",
+	"version": "0.1.0",
 	"description": "",
 	"engines": {
 		"node": ">=18.0.0"
@@ -30,9 +30,9 @@
 		"nodemon": "^3.1.9"
 	},
 	"dependencies": {
-		"@nanoservice-ts/shared": "workspace:*",
-		"@nanoservice-ts/runner": "workspace:*",
-		"@nanoservice-ts/helper": "workspace:*",
+		"@blok/shared": "workspace:*",
+		"@blok/runner": "workspace:*",
+		"@blok/helper": "workspace:*",
 		"ejs": "^3.1.10",
 		"zod": "^3.24.2"
 	},

@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { PIIDetector, PIIType } from "@nanoservice-ts/runner";
+ * import { PIIDetector, PIIType } from "@blok/runner";
  *
  * const detector = new PIIDetector({
  *   types: [PIIType.EMAIL, PIIType.PHONE, PIIType.SSN, PIIType.CREDIT_CARD],

@@ -12,7 +12,7 @@
 4. [Phase 1: Backend — Run Tracking & Event System](#phase-1-backend--run-tracking--event-system)
 5. [Phase 2: Trace API — HTTP & SSE Endpoints](#phase-2-trace-api--http--sse-endpoints)
 6. [Phase 3: Frontend — Blok Studio App](#phase-3-frontend--blok-studio-app)
-7. [Phase 4: CLI Integration — `nanoctl trace`](#phase-4-cli-integration--nanoctl-trace)
+7. [Phase 4: CLI Integration — `blokctl trace`](#phase-4-cli-integration--blokctl-trace)
 8. [Phase 5: Advanced Features — Trigger.dev-Level Polish](#phase-5-advanced-features--triggerddev-level-polish)
 9. [Phase 6: Persistence & Scale](#phase-6-persistence--scale)
 10. [Technical Specifications](#technical-specifications)
@@ -908,26 +908,26 @@ apps/studio/
 
 ---
 
-## Phase 4: CLI Integration — `nanoctl trace`
+## Phase 4: CLI Integration — `blokctl trace`
 
 ### Objective
 
-Add a `nanoctl trace` (or `nanoctl studio`) command that launches Blok Studio with zero configuration.
+Add a `blokctl trace` (or `blokctl studio`) command that launches Blok Studio with zero configuration.
 
 ### 4.1 Command Design
 
 ```bash
 # Launch Studio UI in browser
-nanoctl trace
+blokctl trace
 
 # With custom options
-nanoctl trace --port 5555 --url http://localhost:4000
+blokctl trace --port 5555 --url http://localhost:4000
 
 # Open directly to a specific workflow
-nanoctl trace --workflow countries
+blokctl trace --workflow countries
 
 # Open directly to a specific run
-nanoctl trace --run run_abc123
+blokctl trace --run run_abc123
 ```
 
 ### 4.2 Implementation
@@ -1299,7 +1299,7 @@ class PostgresRunStore implements RunStore { ... }
 
 ### Phase 4: CLI Integration (1 week)
 
-**Milestone:** `nanoctl trace` launches Studio.
+**Milestone:** `blokctl trace` launches Studio.
 
 **Deliverables:**
 - CLI command with options
@@ -1391,7 +1391,7 @@ Sources:
 | DAG/graph view | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ React Flow |
 | Input/output inspection | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Multi-language support | ❌ TS only | ✅ 4 langs | ❌ TS only | ❌ | ❌ Python | ✅ 8 langs | ✅ 8 langs |
-| CLI launch | ❌ Cloud | ❌ Server | ❌ Cloud | ❌ Docker | ❌ Server | ❌ Server | ✅ `nanoctl trace` |
+| CLI launch | ❌ Cloud | ❌ Server | ❌ Cloud | ❌ Docker | ❌ Server | ❌ Server | ✅ `blokctl trace` |
 | Self-hosted | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | OpenTelemetry native | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
@@ -1414,7 +1414,7 @@ Sources:
 
 ### D. Key Design Principles
 
-1. **Zero Config** — Works out of the box with `nanoctl trace`
+1. **Zero Config** — Works out of the box with `blokctl trace`
 2. **Non-Intrusive** — Tracking adds < 1ms overhead; no workflow changes needed
 3. **Real-Time First** — SSE streaming, live animations, instant feedback
 4. **Multi-Language Aware** — Treats NodeJS, Go, Python, Rust, Java, C#, PHP, Ruby equally

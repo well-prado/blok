@@ -149,7 +149,7 @@ docker build -t blok-java-runtime:latest .
 ### Configure the runtime adapter
 
 ```typescript
-import { RuntimeRegistry, DockerRuntimeAdapter } from "@nanoservice-ts/runner";
+import { RuntimeRegistry, DockerRuntimeAdapter } from "@blok/runner";
 
 const registry = RuntimeRegistry.getInstance();
 registry.register(

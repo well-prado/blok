@@ -11,7 +11,7 @@ describe("NodeValidator", () => {
 	describe("validateFunctionFirstStructure", () => {
 		it("should pass for valid function-first node", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -44,9 +44,9 @@ export default defineNode({
 
 		it("should fail for class-based node (old pattern)", () => {
 			const classBasedCode = `
-import { NanoService } from "@nanoservice-ts/runner";
+import { BlokService } from "@blok/runner";
 
-export default class TestNode extends NanoService {
+export default class TestNode extends BlokService {
   async handle(ctx: any, input: any) {
     return { success: true };
   }
@@ -68,7 +68,7 @@ export default class TestNode extends NanoService {
 
 		it("should fail for node missing execute function", () => {
 			const incompleteCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -95,7 +95,7 @@ export default defineNode({
 
 		it("should fail for node missing name property", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -125,7 +125,7 @@ export default defineNode({
 
 		it("should fail for node missing description property", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -155,7 +155,7 @@ export default defineNode({
 
 		it("should fail for node missing input schema", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -185,7 +185,7 @@ export default defineNode({
 
 		it("should fail for node missing output schema", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -215,7 +215,7 @@ export default defineNode({
 
 		it("should pass for node with complex input/output schemas", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -267,7 +267,7 @@ export default defineNode({
 	describe("validateExports", () => {
 		it("should pass for valid default export", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -294,7 +294,7 @@ export default defineNode({
 
 		it("should fail for missing default export", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 const myNode = defineNode({

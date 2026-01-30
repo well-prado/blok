@@ -13,11 +13,11 @@ scrape_configs:
 
   - job_name: "blok-http"
     static_configs:
-      - targets: ["nanoservice-http:4000"]
+      - targets: ["blok-http:4000"]
 
   - job_name: "blok-grpc"
     static_configs:
-      - targets: ["nanoservice-grpc:9091"]
+      - targets: ["blok-grpc:9091"]
 
   # Other triggers expose metrics on BLOK_METRICS_PORT (default 9464)
   - job_name: "blok-triggers"

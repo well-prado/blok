@@ -1,4 +1,4 @@
-package nanoservice
+package blok
 
 import (
 	"errors"

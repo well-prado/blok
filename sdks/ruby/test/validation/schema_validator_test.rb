@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class SchemaValidatorTest < Minitest::Test
   def setup
-    @v = Nanoservice::Validation::SchemaValidator.new
+    @v = Blok::Validation::SchemaValidator.new
   end
 
   # ---- Type validation ----

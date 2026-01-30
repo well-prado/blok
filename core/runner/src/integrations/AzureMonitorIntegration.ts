@@ -17,7 +17,7 @@
  *
  * @example
  * ```typescript
- * import { AzureMonitorIntegration } from "@nanoservice-ts/runner";
+ * import { AzureMonitorIntegration } from "@blok/runner";
  *
  * const azure = new AzureMonitorIntegration({
  *   connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING!,

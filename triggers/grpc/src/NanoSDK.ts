@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { JsonLikeObject } from "@nanoservice-ts/runner";
+import type { JsonLikeObject } from "@blok/runner";
 import GrpcClient, { type RpcOptions, type WorkflowRequest, HttpVersionEnum, TransportEnum } from "./GrpcClient";
 import MessageDecode from "./MessageDecode";
 
@@ -75,7 +75,7 @@ export class NanoSDKClient {
 
 		const base64Workflow = Buffer.from(JSON.stringify({ request: {}, workflow: workflow })).toString("base64");
 		const request: WorkflowRequest = {
-			$typeName: "nanoservice.workflow.v1.WorkflowRequest",
+			$typeName: "blok.workflow.v1.WorkflowRequest",
 			Name: nodeName,
 			Message: base64Workflow,
 			Encoding: "BASE64",
@@ -113,7 +113,7 @@ export class NanoSDKClient {
 
 		const base64Workflow = Buffer.from(JSON.stringify({ request: {}, workflow: workflow })).toString("base64");
 		const request: WorkflowRequest = {
-			$typeName: "nanoservice.workflow.v1.WorkflowRequest",
+			$typeName: "blok.workflow.v1.WorkflowRequest",
 			Name: nodeName,
 			Message: base64Workflow,
 			Encoding: "BASE64",

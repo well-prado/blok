@@ -3,7 +3,7 @@
  * Provides mock objects and helper functions for unit and integration tests
  */
 
-import type { Context, LoggerContext } from "@nanoservice-ts/shared";
+import type { Context, LoggerContext } from "@blok/shared";
 import DefaultLogger from "../../src/DefaultLogger";
 import type { RunnerNode } from "../../src/RunnerNode";
 import type { ExecutionResult, RuntimeKind } from "../../src/adapters/RuntimeAdapter";
@@ -162,9 +162,9 @@ export function generateRandomWorkflowName(): string {
 }
 
 /**
- * Creates a mock NanoServiceResponse for testing
+ * Creates a mock BlokResponse for testing
  */
-export function createMockNanoServiceResponse(success = true) {
+export function createMockBlokResponse(success = true) {
 	return {
 		success,
 		data: success ? { result: "test" } : null,

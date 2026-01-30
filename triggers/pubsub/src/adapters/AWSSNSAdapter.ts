@@ -14,7 +14,7 @@
  * - SQS_MAX_MESSAGES: Max messages per receive (default: 10)
  */
 
-import type { PubSubTriggerOpts } from "@nanoservice-ts/helper";
+import type { PubSubTriggerOpts } from "@blok/helper";
 import { v4 as uuid } from "uuid";
 import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 

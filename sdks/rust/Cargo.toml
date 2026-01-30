@@ -1,20 +1,20 @@
 [package]
-name = "nanoservice-rs"
+name = "blok-rs"
 version = "1.0.0"
 edition = "2021"
 description = "Blok Runtime SDK for Rust — Build workflow nodes in Rust for the Blok orchestration framework"
 license = "MIT"
-repository = "https://github.com/nickincloud/nanoservice-rs"
-keywords = ["blok", "workflow", "runtime", "nanoservice", "orchestration"]
+repository = "https://github.com/nickincloud/blok-rs"
+keywords = ["blok", "workflow", "runtime", "blok", "orchestration"]
 categories = ["web-programming", "network-programming"]
 readme = "README.md"
 
 [[bin]]
-name = "nanoservice"
+name = "blok"
 path = "src/main.rs"
 
 [lib]
-name = "nanoservice"
+name = "blok"
 path = "src/lib.rs"
 
 [features]

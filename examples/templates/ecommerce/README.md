@@ -129,9 +129,9 @@ FROM_EMAIL, INTERNAL_API_KEY
 
 1. Copy the desired workflow JSON files into your project's `workflows/json/` directory.
 2. Set the required environment variables for each workflow in your `.env` file.
-3. Install the required nanoservice modules:
+3. Install the required blok modules:
    ```bash
-   npx blok install @nanoservice-ts/api-call @nanoservice-ts/if-else @nanoservice-ts/json-validator
+   npx blok install @blok/api-call @blok/if-else @blok/json-validator
    ```
 4. Start the Blok runtime:
    ```bash

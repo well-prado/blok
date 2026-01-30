@@ -5,7 +5,7 @@
  * used across all test suites.
  */
 
-import type { Context, LoggerContext } from "@nanoservice-ts/shared";
+import type { Context, LoggerContext } from "@blok/shared";
 
 /**
  * Create a mock Context for testing trigger execution.

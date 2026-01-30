@@ -36,19 +36,19 @@ function M._setup_keymaps()
 
 	if keymaps.graph then
 		vim.keymap.set("n", keymaps.graph, function()
-			vim.cmd("terminal nanoctl graph --format ascii")
+			vim.cmd("terminal blokctl graph --format ascii")
 		end, { desc = "Blok: Show dependency graph" })
 	end
 
 	if keymaps.profile then
 		vim.keymap.set("n", keymaps.profile, function()
-			vim.cmd("terminal nanoctl profile --format table")
+			vim.cmd("terminal blokctl profile --format table")
 		end, { desc = "Blok: Show performance profile" })
 	end
 
 	if keymaps.cost then
 		vim.keymap.set("n", keymaps.cost, function()
-			vim.cmd("terminal nanoctl cost --format table")
+			vim.cmd("terminal blokctl cost --format table")
 		end, { desc = "Blok: Show cost estimate" })
 	end
 end

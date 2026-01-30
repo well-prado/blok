@@ -21,7 +21,7 @@ RUN cargo build --release
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
-COPY --from=builder /app/target/release/nanoservice .
+COPY --from=builder /app/target/release/blok .
 
 EXPOSE 8080
 
@@ -32,4 +32,4 @@ ENV RUST_LOG=info
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["./nanoservice"]
+ENTRYPOINT ["./blok"]

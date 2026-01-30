@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import ejs from "ejs";
 import { z } from "zod";
 

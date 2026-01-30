@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class ExecutionResultTest < Minitest::Test
   def test_success_factory
-    result = Nanoservice::Types::ExecutionResult.success({ "msg" => "hello" })
+    result = Blok::Types::ExecutionResult.success({ "msg" => "hello" })
 
     assert result.success
     assert_equal({ "msg" => "hello" }, result.data)
@@ -14,8 +14,8 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_success_with_metrics_factory
-    metrics = Nanoservice::Types::ExecutionMetrics.new(duration_ms: 12.5)
-    result  = Nanoservice::Types::ExecutionResult.success_with_metrics({ "ok" => true }, metrics)
+    metrics = Blok::Types::ExecutionMetrics.new(duration_ms: 12.5)
+    result  = Blok::Types::ExecutionResult.success_with_metrics({ "ok" => true }, metrics)
 
     assert result.success
     assert_equal({ "ok" => true }, result.data)
@@ -23,7 +23,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_error_factory
-    result = Nanoservice::Types::ExecutionResult.error("something broke")
+    result = Blok::Types::ExecutionResult.error("something broke")
 
     refute result.success
     assert_nil result.data
@@ -31,7 +31,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_error_with_details_factory
-    result = Nanoservice::Types::ExecutionResult.error_with_details(
+    result = Blok::Types::ExecutionResult.error_with_details(
       "validation failed",
       { "field" => "name" }
     )
@@ -42,15 +42,15 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_with_logs
-    result = Nanoservice::Types::ExecutionResult.success({ "x" => 1 })
+    result = Blok::Types::ExecutionResult.success({ "x" => 1 })
     result.with_logs(["line1", "line2"])
 
     assert_equal ["line1", "line2"], result.logs
   end
 
   def test_with_metrics
-    result  = Nanoservice::Types::ExecutionResult.success({})
-    metrics = Nanoservice::Types::ExecutionMetrics.new(duration_ms: 5.0, cpu_ms: 3.0)
+    result  = Blok::Types::ExecutionResult.success({})
+    metrics = Blok::Types::ExecutionMetrics.new(duration_ms: 5.0, cpu_ms: 3.0)
     result.with_metrics(metrics)
 
     assert_equal 5.0, result.metrics.duration_ms
@@ -58,7 +58,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_to_hash_success
-    result = Nanoservice::Types::ExecutionResult.success({ "key" => "val" })
+    result = Blok::Types::ExecutionResult.success({ "key" => "val" })
     hash   = result.to_hash
 
     assert_equal true, hash["success"]
@@ -69,8 +69,8 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_to_hash_with_all_fields
-    metrics = Nanoservice::Types::ExecutionMetrics.new(duration_ms: 10.0)
-    result  = Nanoservice::Types::ExecutionResult.success({ "a" => 1 })
+    metrics = Blok::Types::ExecutionMetrics.new(duration_ms: 10.0)
+    result  = Blok::Types::ExecutionResult.success({ "a" => 1 })
     result.with_logs(["log1"])
     result.with_metrics(metrics)
 
@@ -82,7 +82,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_to_hash_error
-    result = Nanoservice::Types::ExecutionResult.error("fail")
+    result = Blok::Types::ExecutionResult.error("fail")
     hash   = result.to_hash
 
     assert_equal false, hash["success"]
@@ -91,14 +91,14 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_from_hash_roundtrip
-    original = Nanoservice::Types::ExecutionResult.success_with_metrics(
+    original = Blok::Types::ExecutionResult.success_with_metrics(
       { "msg" => "hi" },
-      Nanoservice::Types::ExecutionMetrics.new(duration_ms: 7.5)
+      Blok::Types::ExecutionMetrics.new(duration_ms: 7.5)
     )
     original.with_logs(["entry"])
 
     json     = JSON.generate(original.to_hash)
-    restored = Nanoservice::Types::ExecutionResult.from_hash(JSON.parse(json))
+    restored = Blok::Types::ExecutionResult.from_hash(JSON.parse(json))
 
     assert restored.success
     assert_equal "hi", restored.data["msg"]
@@ -106,7 +106,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_metrics_to_hash_omits_nil
-    metrics = Nanoservice::Types::ExecutionMetrics.new(duration_ms: 5.0)
+    metrics = Blok::Types::ExecutionMetrics.new(duration_ms: 5.0)
     hash    = metrics.to_hash
 
     assert_equal({ "duration_ms" => 5.0 }, hash)
@@ -115,7 +115,7 @@ class ExecutionResultTest < Minitest::Test
   end
 
   def test_metrics_to_hash_all_fields
-    metrics = Nanoservice::Types::ExecutionMetrics.new(
+    metrics = Blok::Types::ExecutionMetrics.new(
       duration_ms: 10.0,
       cpu_ms: 8.0,
       memory_bytes: 1024

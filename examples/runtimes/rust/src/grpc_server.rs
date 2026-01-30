@@ -8,7 +8,7 @@ use crate::types::ExecutionRequest;
 
 /// Generated proto types from tonic-build
 pub mod proto {
-    tonic::include_proto!("nanoservice.workflow.v1");
+    tonic::include_proto!("blok.workflow.v1");
 }
 
 use proto::node_service_server::{NodeService, NodeServiceServer};

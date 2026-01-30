@@ -1,4 +1,4 @@
-import type { Context, GlobalLogger } from "@nanoservice-ts/shared";
+import type { Context, GlobalLogger } from "@blok/shared";
 import DefaultLogger from "./DefaultLogger";
 import type Config from "./types/Config";
 import type { WorkflowLocator } from "./types/GlobalOptions";

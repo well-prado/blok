@@ -1,9 +1,9 @@
 {
-	"name": "blok/nanoservice-php",
-	"description": "PHP SDK for building Blok nanoservice nodes",
+	"name": "blok/blok-php",
+	"description": "PHP SDK for building Blok blok nodes",
 	"type": "library",
 	"license": "MIT",
-	"keywords": ["blok", "nanoservice", "workflow", "microservice", "node"],
+	"keywords": ["blok", "blok", "workflow", "microservice", "node"],
 	"require": {
 		"php": ">=8.2",
 		"react/http": "^1.9",
@@ -14,13 +14,13 @@
 	},
 	"autoload": {
 		"psr-4": {
-			"Blok\\Nanoservice\\": "src/",
-			"Blok\\Nanoservice\\Examples\\": "examples/"
+			"Blok\\Blok\\": "src/",
+			"Blok\\Blok\\Examples\\": "examples/"
 		}
 	},
 	"autoload-dev": {
 		"psr-4": {
-			"Blok\\Nanoservice\\Tests\\": "tests/"
+			"Blok\\Blok\\Tests\\": "tests/"
 		}
 	},
 	"scripts": {

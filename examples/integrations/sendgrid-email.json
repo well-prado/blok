@@ -12,12 +12,12 @@
 	"steps": [
 		{
 			"name": "validate-email-request",
-			"node": "@nanoservice-ts/json-validator",
+			"node": "@blok/json-validator",
 			"type": "module"
 		},
 		{
 			"name": "route-email-mode",
-			"node": "@nanoservice-ts/if-else",
+			"node": "@blok/if-else",
 			"type": "module"
 		}
 	],
@@ -121,13 +121,13 @@
 					"steps": [
 						{
 							"name": "send-template-email",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-template-result",
-							"node": "@nanoservice-ts/if-else",
+							"node": "@blok/if-else",
 							"type": "module"
 						}
 					]
@@ -137,13 +137,13 @@
 					"steps": [
 						{
 							"name": "send-custom-email",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-custom-result",
-							"node": "@nanoservice-ts/if-else",
+							"node": "@blok/if-else",
 							"type": "module"
 						}
 					]
@@ -244,7 +244,7 @@
 					"steps": [
 						{
 							"name": "log-template-success",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -259,7 +259,7 @@
 					"steps": [
 						{
 							"name": "log-template-failure",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -279,7 +279,7 @@
 					"steps": [
 						{
 							"name": "log-custom-success",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{
@@ -294,7 +294,7 @@
 					"steps": [
 						{
 							"name": "log-custom-failure",
-							"node": "@nanoservice-ts/api-call",
+							"node": "@blok/api-call",
 							"type": "module"
 						},
 						{

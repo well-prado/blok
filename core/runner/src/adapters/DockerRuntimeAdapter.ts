@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./RuntimeAdapter";
 

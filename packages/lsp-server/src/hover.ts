@@ -71,22 +71,22 @@ export function getHover(text: string, line: number, character: number): Hover |
 		}
 
 		// Common node packages
-		if (word === "@nanoservice-ts/api-call") {
+		if (word === "@blok/api-call") {
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
 					value:
-						"**@nanoservice-ts/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
+						"**@blok/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
 				},
 				range,
 			};
 		}
-		if (word === "@nanoservice-ts/if-else") {
+		if (word === "@blok/if-else") {
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
 					value:
-						"**@nanoservice-ts/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
+						"**@blok/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
 				},
 				range,
 			};

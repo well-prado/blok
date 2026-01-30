@@ -1,5 +1,5 @@
 /**
- * @nanoservice-ts/trigger-worker
+ * @blok/trigger-worker
  *
  * Worker-based trigger for Blok workflows.
  * Supports background job processing with:
@@ -16,7 +16,7 @@
  *
  * @example BullMQ
  * ```typescript
- * import { WorkerTrigger, BullMQAdapter } from "@nanoservice-ts/trigger-worker";
+ * import { WorkerTrigger, BullMQAdapter } from "@blok/trigger-worker";
  *
  * class MyWorkerTrigger extends WorkerTrigger {
  *   protected adapter = new BullMQAdapter({
@@ -41,7 +41,7 @@
  *
  * @example InMemory (development)
  * ```typescript
- * import { WorkerTrigger, InMemoryAdapter } from "@nanoservice-ts/trigger-worker";
+ * import { WorkerTrigger, InMemoryAdapter } from "@blok/trigger-worker";
  *
  * class DevWorkerTrigger extends WorkerTrigger {
  *   protected adapter = new InMemoryAdapter();
@@ -64,4 +64,4 @@ export { BullMQAdapter, type BullMQConfig } from "./adapters/BullMQAdapter";
 export { InMemoryAdapter } from "./adapters/InMemoryAdapter";
 
 // Re-export types from helper for convenience
-export type { WorkerTriggerOpts } from "@nanoservice-ts/helper";
+export type { WorkerTriggerOpts } from "@blok/helper";

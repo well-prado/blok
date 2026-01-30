@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Validation;
+namespace Blok\Blok\Validation;
 
 /**
  * SchemaValidator validates data against a JSON Schema (Draft 7 subset).

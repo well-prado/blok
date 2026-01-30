@@ -33,7 +33,7 @@ import {
 
 const exec = util.promisify(child_process.exec);
 
-const HOME_DIR = `${os.homedir()}/.nanoctl`;
+const HOME_DIR = `${os.homedir()}/.blok`;
 
 /** Convert kebab-case to PascalCase (e.g. "my-node" -> "MyNode") */
 function toPascalCase(name: string): string {
@@ -93,13 +93,13 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		};
 
 		p.intro(color.inverse(" Creating a new Node "));
-		const nanoctlNode = await p.group(
+		const blokctlNode = await p.group(
 			{
 				nodeName: () => resolveNodeName(),
 				selectedManager: () => resolveSelectedManager(),
 				nodeRuntime: () =>
 					p.select({
-						message: "Select the nanoservice runtime",
+						message: "Select the blok runtime",
 						options: [
 							{ label: "TypeScript/Node.js", value: "typescript", hint: "recommended" },
 							{ label: "Python 3", value: "python3", hint: "Production - gRPC" },
@@ -120,9 +120,9 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			},
 		);
 
-		nodeName = nanoctlNode.nodeName;
-		node_runtime = nanoctlNode.nodeRuntime;
-		selectedManager = nanoctlNode.selectedManager;
+		nodeName = blokctlNode.nodeName;
+		node_runtime = blokctlNode.nodeRuntime;
+		selectedManager = blokctlNode.selectedManager;
 
 		if (node_runtime === "python3") {
 			// Show a warning message
@@ -136,11 +136,11 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		// (All runtimes now supported)
 
 		if (node_runtime === "typescript") {
-			const nanoctlNodeExtension = await p.group(
+			const blokctlNodeExtension = await p.group(
 				{
 					nodeType: () =>
 						p.select({
-							message: "Select the nanoservice type",
+							message: "Select the blok type",
 							options: [
 								{ label: "Module", value: "module", hint: "recommended" },
 								{ label: "Class", value: "class" },
@@ -151,7 +151,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 							message: "Select the node style",
 							options: [
 								{ label: "Function-First (defineNode)", value: "function", hint: "recommended" },
-								{ label: "Class-Based (extends NanoService)", value: "class" },
+								{ label: "Class-Based (extends BlokService)", value: "class" },
 							],
 						}),
 					template: () =>
@@ -171,9 +171,9 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				},
 			);
 
-			nodeType = nanoctlNodeExtension.nodeType;
-			nodeStyle = nanoctlNodeExtension.nodeStyle;
-			template = nanoctlNodeExtension.template;
+			nodeType = blokctlNodeExtension.nodeType;
+			nodeStyle = blokctlNodeExtension.nodeStyle;
+			template = blokctlNodeExtension.template;
 		}
 	}
 
@@ -185,7 +185,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		const mainDirExists = fsExtra.existsSync(GITHUB_REPO_LOCAL);
 		if (!mainDirExists)
 			throw new Error(
-				"The blok repository was not found. Please run 'npx nanoctl@latest create project' to clone the repository.",
+				"The blok repository was not found. Please run 'npx blokctl@latest create project' to clone the repository.",
 			);
 
 		if (node_runtime === "typescript") {
@@ -653,7 +653,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			console.log(
 				"Oops! It seems like you haven't created a project yet... or have you? 🤔\n" +
 					"If you already did, you can navigate to it using: cd project-name\n" +
-					"Otherwise, you can create a new project with: npx nanoctl@latest create project",
+					"Otherwise, you can create a new project with: npx blokctl@latest create project",
 			);
 		}
 		if (message === "ops2") {
@@ -666,7 +666,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			console.log(
 				"Oops! It seems like you haven't created a project with python3 support yet... or have you? 🤔\n" +
 					"If you already did, you can navigate to it using: cd project-name\n" +
-					"Otherwise, you can create a new project with: npx nanoctl@latest create project",
+					"Otherwise, you can create a new project with: npx blokctl@latest create project",
 			);
 		}
 		if (message !== "ops1" && message !== "ops2") {

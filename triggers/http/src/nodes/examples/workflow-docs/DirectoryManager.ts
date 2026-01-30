@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Types;
+namespace Blok\Blok\Types;
 
 /**
  * HealthStatus represents the health status of the runtime.

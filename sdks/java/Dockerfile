@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf 
 
 WORKDIR /app
 
-COPY --from=builder /app/target/nanoservice-java-1.0.0.jar ./nanoservice.jar
+COPY --from=builder /app/target/blok-java-1.0.0.jar ./blok.jar
 
 EXPOSE 8080
 
@@ -30,4 +30,4 @@ ENV VERSION=1.0.0
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["java", "-jar", "nanoservice.jar"]
+ENTRYPOINT ["java", "-jar", "blok.jar"]

@@ -1,5 +1,5 @@
-import { type Context, GlobalError, type NodeBase, type Step } from "@nanoservice-ts/shared";
-import type NanoServiceResponse from "./NanoServiceResponse";
+import { type Context, GlobalError, type NodeBase, type Step } from "@blok/shared";
+import type BlokResponse from "./BlokResponse";
 import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";
 
@@ -8,7 +8,7 @@ export default abstract class RunnerSteps {
 	 * Executes a series of steps in the given context.
 	 *
 	 * @param ctx - The context in which the steps are executed.
-	 * @param steps - An array of NanoService steps to be executed.
+	 * @param steps - An array of BlokService steps to be executed.
 	 * @param deep - A boolean indicating whether the function is being called recursively for flow steps.
 	 * @param step_name - The name of the current step being processed in a flow.
 	 * @returns A promise that resolves to the updated context after all steps have been executed.
@@ -61,7 +61,7 @@ export default abstract class RunnerSteps {
 
 					try {
 						const model = await step.process(ctx, step as unknown as Step);
-						ctx.response = model.data as NanoServiceResponse;
+						ctx.response = model.data as BlokResponse;
 
 						// --- Trace: complete or fail node ---
 						if (tracker && nodeRunId) {

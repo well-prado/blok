@@ -1,6 +1,6 @@
-// import { NodeBase } from "@nanoservice-ts/shared";
+// import { NodeBase } from "@blok/shared";
 // import { z } from "zod";
-import type { NodeBase } from "@nanoservice-ts/shared";
+import type { NodeBase } from "@blok/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";

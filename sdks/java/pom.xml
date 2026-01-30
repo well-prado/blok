@@ -5,13 +5,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.blok</groupId>
-    <artifactId>nanoservice-java</artifactId>
+    <artifactId>blok-java</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>Blok Nanoservice Java SDK</name>
-    <description>Java SDK for building Blok nanoservice workflow nodes</description>
-    <url>https://github.com/nickincloud/nanoservice-java</url>
+    <name>Blok Blok Java SDK</name>
+    <description>Java SDK for building Blok blok workflow nodes</description>
+    <url>https://github.com/nickincloud/blok-java</url>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
@@ -19,7 +19,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <gson.version>2.10.1</gson.version>
         <junit.version>5.10.1</junit.version>
-        <main.class>com.blok.nanoservice.Main</main.class>
+        <main.class>com.blok.blok.Main</main.class>
     </properties>
 
     <dependencies>

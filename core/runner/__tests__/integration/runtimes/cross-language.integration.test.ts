@@ -1,4 +1,4 @@
-import type { Context } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
 /**
  * Cross-Language Integration Tests (Phase 5G)
  *

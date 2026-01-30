@@ -2,48 +2,48 @@
 
 require "json"
 
-require_relative "nanoservice/version"
+require_relative "blok/version"
 
 # Types
-require_relative "nanoservice/types/context"
-require_relative "nanoservice/types/request"
-require_relative "nanoservice/types/response"
-require_relative "nanoservice/types/node_config"
-require_relative "nanoservice/types/execution_request"
-require_relative "nanoservice/types/execution_result"
-require_relative "nanoservice/types/execution_metrics"
-require_relative "nanoservice/types/health_status"
+require_relative "blok/types/context"
+require_relative "blok/types/request"
+require_relative "blok/types/response"
+require_relative "blok/types/node_config"
+require_relative "blok/types/execution_request"
+require_relative "blok/types/execution_result"
+require_relative "blok/types/execution_metrics"
+require_relative "blok/types/health_status"
 
 # Errors
-require_relative "nanoservice/errors/error_category"
-require_relative "nanoservice/errors/node_error"
+require_relative "blok/errors/error_category"
+require_relative "blok/errors/node_error"
 
 # Logging
-require_relative "nanoservice/logging/log_level"
-require_relative "nanoservice/logging/log_entry"
-require_relative "nanoservice/logging/logger"
+require_relative "blok/logging/log_level"
+require_relative "blok/logging/log_entry"
+require_relative "blok/logging/logger"
 
 # Node
-require_relative "nanoservice/node/node_handler"
-require_relative "nanoservice/node/node_registry"
+require_relative "blok/node/node_handler"
+require_relative "blok/node/node_registry"
 
 # Middleware
-require_relative "nanoservice/middleware/middleware"
-require_relative "nanoservice/middleware/logging_middleware"
-require_relative "nanoservice/middleware/recovery_middleware"
+require_relative "blok/middleware/middleware"
+require_relative "blok/middleware/logging_middleware"
+require_relative "blok/middleware/recovery_middleware"
 
 # Validation
-require_relative "nanoservice/validation/schema_validator"
+require_relative "blok/validation/schema_validator"
 
 # Config
-require_relative "nanoservice/config/server_config"
+require_relative "blok/config/server_config"
 
 # Server
-require_relative "nanoservice/server/runtime_app"
+require_relative "blok/server/runtime_app"
 
 # Testing
-require_relative "nanoservice/testing/mock_context"
-require_relative "nanoservice/testing/test_runner"
+require_relative "blok/testing/mock_context"
+require_relative "blok/testing/test_runner"
 
-module Nanoservice
+module Blok
 end

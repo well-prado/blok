@@ -91,7 +91,7 @@ class RuntimeRegistry {
 
 **A. NodeJS Runtime Adapter**
 - Executes TypeScript/JavaScript nodes in-process
-- Uses existing `NanoService.run(ctx)` integration
+- Uses existing `BlokService.run(ctx)` integration
 - Zero breaking changes to current Node.js nodes
 
 **B. Python3 Runtime Adapter**
@@ -158,7 +158,7 @@ class RuntimeRegistry {
 - [x] Export `HttpRuntimeAdapter` and `HttpRuntimeAdapterOptions` from runner index
 - [x] E2E validation: all 8 runtimes chain correctly via `ctx.vars` (NodeJS → Go → Rust → Java → C# → PHP → Ruby → Python3 — PASS)
 - [x] `ctx.vars` data flow pattern validated: each step reads from previous step's vars, not `ctx.response.data`
-- [x] Python3RuntimeAdapter improved: sends resolved inputs as `request.body`, extracts `parsedResponse.data`, passes `config.inputs` to Python NanoService
+- [x] Python3RuntimeAdapter improved: sends resolved inputs as `request.body`, extracts `parsedResponse.data`, passes `config.inputs` to Python BlokService
 - [x] Chain-init and chain-verify nodes store/read from `ctx.vars` directly
 
 ### Success Metrics
@@ -181,9 +181,9 @@ class RuntimeRegistry {
 Replace class-based node development with modern, Elysia-style function + Zod schema pattern.
 
 ### Current State
-- ❌ Nodes require class inheritance (`extends NanoService<T>`)
+- ❌ Nodes require class inheritance (`extends BlokService<T>`)
 - ❌ Duplicate schema definitions (JSON Schema + TypeScript types)
-- ❌ Verbose boilerplate (`constructor`, `handle`, `NanoServiceResponse`)
+- ❌ Verbose boilerplate (`constructor`, `handle`, `BlokResponse`)
 - ❌ AI models struggle to generate correct class patterns
 - ✅ Zod v4 already in dependencies
 - ✅ Context type well-defined
@@ -195,7 +195,7 @@ Replace class-based node development with modern, Elysia-style function + Zod sc
 
 ```typescript
 import { z } from "zod";
-import { Context } from "@nanoservice-ts/shared";
+import { Context } from "@blok/shared";
 
 const MyNode = defineNode({
   name: "fetch-user",
@@ -228,9 +228,9 @@ const MyNode = defineNode({
 
 #### 2.2 Backward Compatibility Layer
 ```typescript
-// defineNode wraps function into NanoService-compatible instance
-class FunctionNode extends NanoService<I> {
-  async handle(ctx: Context, rawInputs: I): Promise<INanoServiceResponse> {
+// defineNode wraps function into BlokService-compatible instance
+class FunctionNode extends BlokService<I> {
+  async handle(ctx: Context, rawInputs: I): Promise<IBlokResponse> {
     // 1. Validate input with Zod
     const parsed = def.input.parse(rawInputs);
 
@@ -259,7 +259,7 @@ class FunctionNode extends NanoService<I> {
 
 **Phase 2B: CLI Template Updates (Week 2-3)** ✅
 - [x] Create new functional node template
-- [ ] Add `--style=function|class` flag to `nanoctl create node`
+- [ ] Add `--style=function|class` flag to `blokctl create node`
 - [ ] Update `NodeFileWriter` to support both templates
 - [x] Default to function-first for new projects
 - [ ] Add migration script for class → function conversion
@@ -272,8 +272,8 @@ class FunctionNode extends NanoService<I> {
 - [ ] Add feedback loop for prompt refinement
 
 **Phase 2D: Node Migration (Week 4-6)** ✅
-- [x] Convert `@nanoservice-ts/api-call` to function-first
-- [x] Convert `@nanoservice-ts/if-else` to function-first
+- [x] Convert `@blok/api-call` to function-first
+- [x] Convert `@blok/if-else` to function-first
 - [x] Convert HTTP example nodes to function-first (all 25 nodes migrated)
 - [ ] Create migration guide for node authors
 - [ ] Add deprecation warnings to class-based pattern
@@ -293,7 +293,7 @@ class FunctionNode extends NanoService<I> {
 - [ ] Collect feedback and iterate
 
 **Phase 2G: Full Node Migration to Function-First** ✅
-All 28 TypeScript nodes migrated from class-based (`extends NanoService<T>`) to function-first (`defineNode()`) pattern:
+All 28 TypeScript nodes migrated from class-based (`extends BlokService<T>`) to function-first (`defineNode()`) pattern:
 
 | Batch | Nodes | Status |
 |-------|-------|--------|
@@ -606,20 +606,20 @@ ai/
 
 ```bash
 # Node generation (function-first)
-nanoctl generate ai-node "Fetch user from PostgreSQL by ID"
-nanoctl generate ai-node "Send email via SendGrid with template"
+blokctl generate ai-node "Fetch user from PostgreSQL by ID"
+blokctl generate ai-node "Send email via SendGrid with template"
 
 # Workflow generation (TypeScript structure)
-nanoctl generate ai-workflow "User registration with email verification"
-nanoctl generate ai-workflow "E-commerce checkout flow with payment"
+blokctl generate ai-workflow "User registration with email verification"
+blokctl generate ai-workflow "E-commerce checkout flow with payment"
 
 # Trigger generation (any type)
-nanoctl generate ai-trigger "Kafka consumer for user-events topic"
-nanoctl generate ai-trigger "Cron job to sync data every hour"
+blokctl generate ai-trigger "Kafka consumer for user-events topic"
+blokctl generate ai-trigger "Cron job to sync data every hour"
 
 # Runtime adapter generation
-nanoctl generate ai-runtime "Go HTTP runtime adapter"
-nanoctl generate ai-runtime "Rust gRPC runtime adapter"
+blokctl generate ai-runtime "Go HTTP runtime adapter"
+blokctl generate ai-runtime "Rust gRPC runtime adapter"
 ```
 
 #### 4.3 System Prompts
@@ -635,7 +635,7 @@ Based on documents in `new-version-docs/`:
 **B. Workflow TypeScript Structure Prompt**
 - Generates `WorkflowConfig` objects
 - Uses correct trigger configuration
-- Implements conditional routing with `@nanoservice-ts/if-else`
+- Implements conditional routing with `@blok/if-else`
 - Uses proper `ctx` references in conditions
 - Follows HTTP/gRPC workflow patterns
 
@@ -762,12 +762,12 @@ Each language gets a standardized SDK:
 
 ```
 runtimes/
-├── nodejs/           (existing @nanoservice-ts/*)
+├── nodejs/           (existing @blok/*)
 ├── bun/              (existing, minimal changes)
 ├── python3/          (existing runtimes/python3)
 ├── go/
 │   ├── core/
-│   │   ├── nanoservice.go
+│   │   ├── blok.go
 │   │   ├── context.go
 │   │   ├── node.go
 │   │   └── response.go
@@ -779,7 +779,7 @@ runtimes/
 │   └── go.mod
 ├── java/
 │   ├── core/
-│   │   ├── Nanoservice.java
+│   │   ├── Blok.java
 │   │   ├── Context.java
 │   │   ├── Node.java
 │   │   └── Response.java
@@ -792,7 +792,7 @@ runtimes/
 ├── rust/
 │   ├── src/
 │   │   ├── lib.rs
-│   │   ├── nanoservice.rs
+│   │   ├── blok.rs
 │   │   ├── context.rs
 │   │   ├── node.rs
 │   │   └── response.rs
@@ -834,7 +834,7 @@ message NodeResponse {
 ### Implementation Tasks
 
 **Phase 5A: Go Runtime (Week 1-4)**
-- [ ] Create Go core SDK (`nanoservice-go`)
+- [ ] Create Go core SDK (`blok-go`)
 - [ ] Implement Context mapping
 - [ ] Implement Node base
 - [ ] Create gRPC server
@@ -845,7 +845,7 @@ message NodeResponse {
 - [ ] Publish to Go pkg registry
 
 **Phase 5B: Java Runtime (Week 5-8)**
-- [ ] Create Java core SDK (`nanoservice-java`)
+- [ ] Create Java core SDK (`blok-java`)
 - [ ] Implement Context mapping (POJOs)
 - [ ] Implement Node base class
 - [ ] Create gRPC server (grpc-java)
@@ -856,7 +856,7 @@ message NodeResponse {
 - [ ] Publish to Maven Central
 
 **Phase 5C: Rust Runtime (Week 9-12)**
-- [ ] Create Rust core SDK (`nanoservice-rs`)
+- [ ] Create Rust core SDK (`blok-rs`)
 - [ ] Implement Context mapping (serde)
 - [ ] Implement Node trait
 - [ ] Create gRPC server (tonic)
@@ -868,7 +868,7 @@ message NodeResponse {
 - [ ] Publish to crates.io
 
 **Phase 5D: C# / .NET Runtime (Week 13-16)**
-- [ ] Create .NET core SDK (`Nanoservice.Core`)
+- [ ] Create .NET core SDK (`Blok.Core`)
 - [ ] Implement Context mapping
 - [ ] Implement Node base class
 - [ ] Create gRPC server (Grpc.Net)
@@ -879,7 +879,7 @@ message NodeResponse {
 - [ ] Publish to NuGet
 
 **Phase 5E: PHP Runtime (Week 17-19)**
-- [ ] Create PHP core SDK (`nanoservice-php`)
+- [ ] Create PHP core SDK (`blok-php`)
 - [ ] Implement Context mapping (arrays/objects)
 - [ ] Implement Node base class
 - [ ] Create HTTP server (PSR-7/PSR-15)
@@ -889,7 +889,7 @@ message NodeResponse {
 - [ ] Publish to Packagist
 
 **Phase 5F: Ruby Runtime (Week 20-22)**
-- [ ] Create Ruby core SDK (`nanoservice-ruby`)
+- [ ] Create Ruby core SDK (`blok-ruby`)
 - [ ] Implement Context mapping (hashes)
 - [ ] Implement Node base class
 - [ ] Create HTTP server (Rack/Sinatra)
@@ -1579,7 +1579,7 @@ Blok Studio is a production-ready React SPA (`apps/studio/`) that connects to th
               │
               ▼ (wraps into)
 ┌────────────────────────────────────────┐
-│    FunctionNode extends NanoService    │
+│    FunctionNode extends BlokService    │
 │  • handle(ctx, inputs)                 │
 │  • Input validation (Zod)              │
 │  • Output validation (Zod)             │

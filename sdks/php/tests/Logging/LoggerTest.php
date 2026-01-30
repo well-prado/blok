@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Tests\Logging;
+namespace Blok\Blok\Tests\Logging;
 
-use Blok\Nanoservice\Logging\LogEntry;
-use Blok\Nanoservice\Logging\Logger;
-use Blok\Nanoservice\Logging\LogLevel;
+use Blok\Blok\Logging\LogEntry;
+use Blok\Blok\Logging\Logger;
+use Blok\Blok\Logging\LogLevel;
 use PHPUnit\Framework\TestCase;
 
 final class LoggerTest extends TestCase

@@ -1,5 +1,5 @@
 /**
- * @nanoservice-ts/trigger-pubsub
+ * @blok/trigger-pubsub
  *
  * Pub/Sub-based trigger for Blok workflows.
  * Supports multiple pub/sub providers:
@@ -9,7 +9,7 @@
  *
  * @example GCP Pub/Sub
  * ```typescript
- * import { PubSubTrigger, GCPPubSubAdapter } from "@nanoservice-ts/trigger-pubsub";
+ * import { PubSubTrigger, GCPPubSubAdapter } from "@blok/trigger-pubsub";
  *
  * class MyPubSubTrigger extends PubSubTrigger {
  *   protected adapter = new GCPPubSubAdapter({
@@ -26,7 +26,7 @@
  *
  * @example AWS SNS/SQS
  * ```typescript
- * import { PubSubTrigger, AWSSNSAdapter } from "@nanoservice-ts/trigger-pubsub";
+ * import { PubSubTrigger, AWSSNSAdapter } from "@blok/trigger-pubsub";
  *
  * class MyPubSubTrigger extends PubSubTrigger {
  *   protected adapter = new AWSSNSAdapter({
@@ -38,7 +38,7 @@
  *
  * @example Azure Service Bus
  * ```typescript
- * import { PubSubTrigger, AzureServiceBusAdapter } from "@nanoservice-ts/trigger-pubsub";
+ * import { PubSubTrigger, AzureServiceBusAdapter } from "@blok/trigger-pubsub";
  *
  * class MyPubSubTrigger extends PubSubTrigger {
  *   protected adapter = new AzureServiceBusAdapter({
@@ -65,4 +65,4 @@ export { AzureServiceBusAdapter, type AzureServiceBusConfig } from "./adapters/A
 export type {
 	PubSubProvider,
 	PubSubTriggerOpts,
-} from "@nanoservice-ts/helper";
+} from "@blok/helper";

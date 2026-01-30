@@ -1,6 +1,6 @@
-# nanoservice-rs
+# blok-rs
 
-Rust SDK for the Blok nanoservice workflow orchestration framework.
+Rust SDK for the Blok blok workflow orchestration framework.
 
 Build high-performance workflow nodes in Rust with async/await support.
 
@@ -8,14 +8,14 @@ Build high-performance workflow nodes in Rust with async/await support.
 
 ```toml
 [dependencies]
-nanoservice-rs = "1.0"
+blok-rs = "1.0"
 ```
 
 ## Quick Start
 
 ```rust
 use async_trait::async_trait;
-use nanoservice::{NodeHandler, NodeRegistry, Context};
+use blok::{NodeHandler, NodeRegistry, Context};
 use std::collections::HashMap;
 
 struct GreetNode;
@@ -36,7 +36,7 @@ impl NodeHandler for GreetNode {
 async fn main() {
     let mut registry = NodeRegistry::new("1.0.0");
     registry.register("greet", GreetNode);
-    nanoservice::server::serve(registry, 8080).await.unwrap();
+    blok::server::serve(registry, 8080).await.unwrap();
 }
 ```
 

@@ -11,7 +11,7 @@ describe("CompilationValidator", () => {
 	describe("validateCode", () => {
 		it("should pass for valid function-first node", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -75,7 +75,7 @@ export default defineNode({
 		it("should pass for code with type errors (type checking limitations)", () => {
 			// Note: Deep type checking requires full project context with type definitions
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -107,7 +107,7 @@ export default defineNode({
 
 		it("should document syntax validation limitations", () => {
 			const invalidCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -142,7 +142,7 @@ export default defineNode({
 
 		it("should pass for code with proper async/await usage", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -174,7 +174,7 @@ export default defineNode({
 	describe("validateFile", () => {
 		it("should validate code using file path for context", () => {
 			const validCode = `
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({

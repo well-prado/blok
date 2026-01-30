@@ -4,7 +4,7 @@ I’ll focus on:
 1) backend/runtime changes for run tracking,  
 2) HTTP/stream APIs,  
 3) a TanStack Start app design,  
-4) CLI integration (`nanoctl trace`‑style),  
+4) CLI integration (`blokctl trace`‑style),  
 5) phased rollout.
 
 All code‑related statements are cited.
@@ -28,11 +28,11 @@ The **DB Manager** and **Dashboard Charts Generator** workflows show how you str
 
 - `db-manager.json` and `dashboard-gen.json` show:
   - A top‑level HTTP trigger with `"method": "*"` and paths using `/:function?/:id?`. [13][29]
-  - A first step `filter-request` using `@nanoservice-ts/if-else` to choose branches. [13][26][29]
+  - A first step `filter-request` using `@blok/if-else` to choose branches. [13][26][29]
   - For GET root requests, a `database-ui` or `dashboard-ui` node that serves HTML UI. [10][12][13][16][20][21][23][26][29][32][33]
   - Other branches handle JSON APIs (`get-tables`, `get-relationships`, `execute-prompt`, etc.). [13][20][21][29][35][37][38]
 
-Your UI nodes (e.g. `DatabaseUI`, `DashboardGeneratorUI`, `WorkflowUI`, `WeatherUI`, `FeedbackUI`) are implemented as `NanoService` subclasses that: [2][5][16][20][23][24][32][33][36]
+Your UI nodes (e.g. `DatabaseUI`, `DashboardGeneratorUI`, `WorkflowUI`, `WeatherUI`, `FeedbackUI`) are implemented as `BlokService` subclasses that: [2][5][16][20][23][24][32][33][36]
 
 - Set `this.contentType = "text/html"` for HTML responses. [2][5][16][20][23][24][36]
 - Use EJS + static HTML templates + optionally embedded React scripts. [2][5][16][20][23][24][36][38][39]
@@ -50,10 +50,10 @@ We’ll *not* reuse node‑based UIs for the new trace app (per your request), b
 
 The CLI entrypoint `main` in `packages/cli/src/index.ts` sets up a `commander`‑based CLI, config & analytics, and registers subcommands like `create project`, `create node`, etc. [6][18][19][27][37][40]
 
-- `createProject` is wired as `nanoctl create project` and `nanoctl create project .`, with analytics and interactive prompts for trigger, runtimes, and package manager. [6][18][19][27][37]
-- You already have interactive flows (e.g. `nanoctl chat`) that open REPL‑like UX for developer tools. [7][25][31]
+- `createProject` is wired as `blokctl create project` and `blokctl create project .`, with analytics and interactive prompts for trigger, runtimes, and package manager. [6][18][19][27][37]
+- You already have interactive flows (e.g. `blokctl chat`) that open REPL‑like UX for developer tools. [7][25][31]
 
-This is the natural place to wire a `nanoctl trace` or `nanoctl studio` command that:
+This is the natural place to wire a `blokctl trace` or `blokctl studio` command that:
 
 - Starts a **trace backend** (if needed) and a **TanStack Start dev server**, and
 - Opens a browser window to the UI (Prisma‑Studio style).
@@ -223,7 +223,7 @@ Layout:
     - Node name (e.g. `database-ui`, `postgres-query`). [10][13][20][21][23][26][29][32][33]
     - Node type (module/class, remote/local, etc. from runtime metadata). [34]
     - Triggered or not; status: pending/running/completed/failed. [11][29]
-  - Use color coding and icons (DB, AI, UI, etc.) informed by your nanoservices list. [20][23][32][33]
+  - Use color coding and icons (DB, AI, UI, etc.) informed by your bloks list. [20][23][32][33]
 
 - **Right: timeline + detail inspector**
   - Vertical, time‑sorted list of events from `GET /__blok-trace/runs/:runId/events` (or from `NodeRun`s when offline). [11]
@@ -265,7 +265,7 @@ TanStack Start is well‑suited for this: you can have loader actions for initia
 
 ---
 
-## 4. Phase 3 – CLI integration: `nanoctl trace` / “Blok Studio”
+## 4. Phase 3 – CLI integration: `blokctl trace` / “Blok Studio”
 
 Now wire this into the CLI that you already have configured in `packages/cli/src/index.ts`. [6][18][19][27][37][40]
 
@@ -313,7 +313,7 @@ Implement `startTraceStudio` in a new CLI module:
    - “Trace UI running at http://localhost:5555”
    - “Connected to Blok backend at http://localhost:4000”
 
-Your success pattern here is very similar to how `nanoctl generate ai-node` or `nanoctl chat` orchestrate interactive flows. [7][25][31][35]
+Your success pattern here is very similar to how `blokctl generate ai-node` or `blokctl chat` orchestrate interactive flows. [7][25][31][35]
 
 ---
 
@@ -326,12 +326,12 @@ To reach “as good as Trigger.dev” quality, layer in:
    - Expose tags in `WorkflowRun`. [9][11][18][40]
 
 2. **Deep metrics integration**
-   - From `/infra/metrics` and `npx nanoctl@latest monitor`, you already have Prometheus metrics. [3][9][26]
+   - From `/infra/metrics` and `npx blokctl@latest monitor`, you already have Prometheus metrics. [3][9][26]
    - For each workflow/node:
      - Show charts: latency histogram, throughput line chart, error ratio. [3][9][26]
 
 3. **Search and Quick Open**
-   - Integrate with `searchWorkflow` (CLI hits `${NANOSERVICE_URL}/published-workflow?workflow_name=...`). [39]
+   - Integrate with `searchWorkflow` (CLI hits `${BLOK_URL}/published-workflow?workflow_name=...`). [39]
    - Add a search box in UI to jump to a workflow by name/id. [39]
 
 4. **AI‑assisted debugging (optional)**
@@ -353,7 +353,7 @@ To reach “as good as Trigger.dev” quality, layer in:
    - Wire loaders/actions to trace APIs; implement SSE for real‑time. [11]
 
 3. **CLI integration**
-   - Add `nanoctl trace` command in `packages/cli/src/index.ts`, referencing `startTraceStudio`. [6][18][19]
+   - Add `blokctl trace` command in `packages/cli/src/index.ts`, referencing `startTraceStudio`. [6][18][19]
    - Implement `startTraceStudio` to boot TanStack Start and open browser. [6][18][19]
 
 4. **Polish**

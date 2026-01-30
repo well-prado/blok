@@ -453,7 +453,7 @@ describe("WorkflowValidator", () => {
 				description: "test",
 				version: "1.0.0",
 				trigger: { http: { method: "*", path: "/:action?" } },
-				steps: [{ name: "router", node: "@nanoservice-ts/if-else", type: "module" }],
+				steps: [{ name: "router", node: "@blok/if-else", type: "module" }],
 				nodes: {
 					router: {
 						conditions: [
@@ -622,7 +622,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					http: { method: "GET", path: "/", accept: "application/json" },
 				},
-				steps: [{ name: "get-countries-api", node: "@nanoservice-ts/api-call", type: "module" }],
+				steps: [{ name: "get-countries-api", node: "@blok/api-call", type: "module" }],
 				nodes: {
 					"get-countries-api": {
 						inputs: {
@@ -648,7 +648,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					http: { method: "*", path: "/:function?/:id?", accept: "application/json" },
 				},
-				steps: [{ name: "filter-request", node: "@nanoservice-ts/if-else", type: "module" }],
+				steps: [{ name: "filter-request", node: "@blok/if-else", type: "module" }],
 				nodes: {
 					"filter-request": {
 						conditions: [
@@ -716,7 +716,7 @@ describe("WorkflowValidator", () => {
 				trigger: {
 					cron: { schedule: "0 8 * * *", timezone: "America/New_York", overlap: false },
 				},
-				steps: [{ name: "fetch-metrics", node: "@nanoservice-ts/api-call", type: "module" }],
+				steps: [{ name: "fetch-metrics", node: "@blok/api-call", type: "module" }],
 				nodes: {
 					"fetch-metrics": {
 						inputs: { url: "${ctx.env.METRICS_API_URL}", method: "GET" },

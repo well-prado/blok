@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Tests\Types;
+namespace Blok\Blok\Tests\Types;
 
-use Blok\Nanoservice\Types\ExecutionMetrics;
-use Blok\Nanoservice\Types\ExecutionResult;
+use Blok\Blok\Types\ExecutionMetrics;
+use Blok\Blok\Types\ExecutionResult;
 use PHPUnit\Framework\TestCase;
 
 final class ExecutionResultTest extends TestCase

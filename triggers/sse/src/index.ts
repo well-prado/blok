@@ -1,5 +1,5 @@
 /**
- * @nanoservice-ts/trigger-sse
+ * @blok/trigger-sse
  *
  * Server-Sent Events (SSE) trigger for Blok workflows.
  * Handle real-time server-to-client push notifications.
@@ -13,7 +13,7 @@
  *
  * @example
  * ```typescript
- * import { SSETrigger } from "@nanoservice-ts/trigger-sse";
+ * import { SSETrigger } from "@blok/trigger-sse";
  * import express from "express";
  *
  * class MySSETrigger extends SSETrigger {
@@ -110,4 +110,4 @@ export {
 } from "./SSETrigger";
 
 // Re-export types from helper for convenience
-export type { SSETriggerOpts } from "@nanoservice-ts/helper";
+export type { SSETriggerOpts } from "@blok/helper";

@@ -34,7 +34,7 @@ Before running this example, ensure you have:
 If you haven't created a project yet, you can do so with:
 
 ```bash
-npx nanoctl@latest create project
+npx blokctl@latest create project
 ```
 
 Follow the prompts:
@@ -130,7 +130,7 @@ The DB Manager workflow is defined in `workflows/json/db-manager.json`:
   "steps": [
     {
       "name": "filter-request",
-      "node": "@nanoservice-ts/if-else",
+      "node": "@blok/if-else",
       "type": "module"
     }
   ],
@@ -252,7 +252,7 @@ The DB Manager workflow is defined in `workflows/json/db-manager.json`:
 
 ## UI Rendering with If-Else Node
 
-One of the most powerful features of Blok  is the ability to serve different content based on request conditions. The DB Manager example demonstrates this by using the `@nanoservice-ts/if-else` node to render the UI and handle API requests within a single workflow.
+One of the most powerful features of Blok  is the ability to serve different content based on request conditions. The DB Manager example demonstrates this by using the `@blok/if-else` node to render the UI and handle API requests within a single workflow.
 
 ### How UI Rendering Works in Blok 
 
@@ -306,24 +306,24 @@ Here's a simplified example of how the `database-ui` node might be implemented:
 
 ```typescript
 import {
-  type INanoServiceResponse,
-  NanoService,
-  NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+  type IBlokResponse,
+  BlokService,
+  BlokResponse,
+} from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 import fs from 'fs';
 import path from 'path';
 
 type InputType = {};
 
-export default class DatabaseUI extends NanoService<InputType> {
+export default class DatabaseUI extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {};
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       // Read the HTML file
@@ -406,12 +406,12 @@ Here's a simplified version of the `postgres-query` node:
 
 ```typescript
 import {
-  type INanoServiceResponse,
+  type IBlokResponse,
   type JsonLikeObject,
-  NanoService,
-  NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+  BlokService,
+  BlokResponse,
+} from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 import pg from "pg";
 
 type PostgresQueryInputs = {
@@ -422,7 +422,7 @@ type PostgresQueryInputs = {
   set_var?: boolean;
 };
 
-export default class PostgresQuery extends NanoService<PostgresQueryInputs> {
+export default class PostgresQuery extends BlokService<PostgresQueryInputs> {
   constructor() {
     super();
     this.inputSchema = {
@@ -440,8 +440,8 @@ export default class PostgresQuery extends NanoService<PostgresQueryInputs> {
     this.outputSchema = {};
   }
 
-  async handle(ctx: Context, inputs: PostgresQueryInputs): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: PostgresQueryInputs): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       const { Client } = pg;
@@ -491,12 +491,12 @@ This node uses OpenAI to generate an SQL query based on a natural language promp
 ```typescript
 import { createOpenAI } from "@ai-sdk/openai";
 import {
-  type INanoServiceResponse,
-  NanoService,
-  NanoServiceResponse,
+  type IBlokResponse,
+  BlokService,
+  BlokResponse,
   type ParamsDictionary,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+} from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 import { generateText } from "ai";
 
 type InputType = {
@@ -511,7 +511,7 @@ type Column = {
   primary_key: string;
 };
 
-export default class QueryGeneratorNode extends NanoService<InputType> {
+export default class QueryGeneratorNode extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {
@@ -536,8 +536,8 @@ export default class QueryGeneratorNode extends NanoService<InputType> {
     };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
     const { table_name: tableName, columns, prompt } = inputs;
 
     try {
@@ -593,18 +593,18 @@ This node maps data from one format to another:
 
 ```typescript
 import {
-  type INanoServiceResponse,
+  type IBlokResponse,
   type JsonLikeObject,
-  NanoService,
-  NanoServiceResponse,
-} from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+  BlokService,
+  BlokResponse,
+} from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 
 type InputType = {
   model: object;
 };
 
-export default class MapperNode extends NanoService<InputType> {
+export default class MapperNode extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {
@@ -617,8 +617,8 @@ export default class MapperNode extends NanoService<InputType> {
     };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       response.setSuccess(inputs.model as JsonLikeObject);

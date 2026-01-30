@@ -1,11 +1,11 @@
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use nanoservice::config::ServerConfig;
-use nanoservice::logging::{LogLevel, Logger};
-use nanoservice::middleware::LoggingMiddleware;
-use nanoservice::nodes;
-use nanoservice::registry::NodeRegistry;
+use blok::config::ServerConfig;
+use blok::logging::{LogLevel, Logger};
+use blok::middleware::LoggingMiddleware;
+use blok::nodes;
+use blok::registry::NodeRegistry;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     registry.use_middleware(LoggingMiddleware::new(logger));
 
     info!(
-        "Nanoservice Rust Runtime v{} — {} node(s) registered",
+        "Blok Rust Runtime v{} — {} node(s) registered",
         config.version,
         registry.len()
     );
@@ -47,20 +47,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         nodes::register_all(&mut http_registry);
 
         tokio::select! {
-            result = nanoservice::server::serve(http_registry, config.port) => {
+            result = blok::server::serve(http_registry, config.port) => {
                 result?;
             }
-            result = nanoservice::grpc_server::serve_grpc(grpc_shared, config.grpc_port) => {
+            result = blok::grpc_server::serve_grpc(grpc_shared, config.grpc_port) => {
                 result?;
             }
         }
     } else {
-        nanoservice::server::serve(registry, config.port).await?;
+        blok::server::serve(registry, config.port).await?;
     }
 
     #[cfg(not(feature = "grpc"))]
     {
-        nanoservice::server::serve(registry, config.port).await?;
+        blok::server::serve(registry, config.port).await?;
     }
 
     Ok(())

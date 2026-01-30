@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { INanoServiceResponse } from "@nanoservice-ts/runner";
+import type { IBlokResponse } from "@blok/runner";
 import { beforeAll, expect, test } from "vitest";
 import ReactNode from "../index";
 import ctx from "./helper";
@@ -23,7 +23,7 @@ test("Render index.html page", async () => {
 	const context = ctx();
 	const inputs = { react_app: "./dist/app/index.merged.min.js" };
 
-	const response = (await ReactNode.handle(context, inputs)) as INanoServiceResponse;
+	const response = (await ReactNode.handle(context, inputs)) as IBlokResponse;
 	const mockup_file = path.resolve(rootDir, "index.mockup.html");
 	const message: string = fs.readFileSync(mockup_file, "utf8");
 

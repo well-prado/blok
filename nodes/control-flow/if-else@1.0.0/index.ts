@@ -5,10 +5,10 @@
  * Migrated from class-based to function-first pattern using defineNode.
  */
 
-import type { ConditionOpts } from "@nanoservice-ts/helper";
-import { type Condition, type NanoService, defineNode } from "@nanoservice-ts/runner";
-import type { Context, NodeBase } from "@nanoservice-ts/shared";
-import type ParamsDictionary from "@nanoservice-ts/shared/dist/types/ParamsDictionary";
+import type { ConditionOpts } from "@blok/helper";
+import { type Condition, type BlokService, defineNode } from "@blok/runner";
+import type { Context, NodeBase } from "@blok/shared";
+import type ParamsDictionary from "@blok/shared/dist/types/ParamsDictionary";
 import { z } from "zod";
 
 /**
@@ -88,7 +88,7 @@ export default defineNode({
 
 		// Return steps as NodeBase[] (flow control)
 		// The runner will recognize this as a flow node and execute the steps
-		return steps as unknown as NanoService<Condition[]>[];
+		return steps as unknown as BlokService<Condition[]>[];
 	},
 });
 

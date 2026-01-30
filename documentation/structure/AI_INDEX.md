@@ -3,27 +3,27 @@
 > **Purpose:** This file is structured for optimal AI/LLM retrieval. It provides a flat, keyword-rich index of every concept, API, and feature in Blok with direct pointers to source files.
 
 ## Framework Identity
-- **Name:** Blok (formerly nanoservice-ts)
+- **Name:** Blok (formerly blok)
 - **Type:** Workflow orchestration framework
 - **Language:** TypeScript (Node.js)
 - **License:** Apache 2.0
 - **Repository:** https://github.com/deskree-inc/blok
 - **Documentation:** https://blok.build/
-- **CLI:** nanoctl (npm package)
-- **Package Scope:** @nanoservice-ts/*
+- **CLI:** blokctl (npm package)
+- **Package Scope:** @blok/*
 
 ## Quick Answers
 
 ### How to create a new Blok project?
 ```bash
-npx nanoctl@latest create project
+npx blokctl@latest create project
 ```
 
 ### How to create a node?
 ```typescript
 // File: src/nodes/my-node/index.ts
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 
 export default defineNode({
   name: "my-node",
@@ -73,16 +73,16 @@ docker compose -f infra/docker-compose.production.yml up -d
 ### Core APIs
 | Concept | File | Package |
 |---------|------|---------|
-| defineNode | `core/runner/src/defineNode.ts` | @nanoservice-ts/runner |
-| NanoService (class-based node) | `core/runner/src/NanoService.ts` | @nanoservice-ts/runner |
-| Context type | `core/shared/src/types/Context.ts` | @nanoservice-ts/shared |
-| GlobalError | `core/shared/src/GlobalError.ts` | @nanoservice-ts/shared |
-| Runner | `core/runner/src/Runner.ts` | @nanoservice-ts/runner |
-| TriggerBase | `core/runner/src/TriggerBase.ts` | @nanoservice-ts/runner |
-| Workflow builder | `core/workflow-helper/src/index.ts` | @nanoservice-ts/helper |
-| Configuration | `core/runner/src/Configuration.ts` | @nanoservice-ts/runner |
-| NodeBase | `core/shared/src/NodeBase.ts` | @nanoservice-ts/shared |
-| Mapper | `core/shared/src/utils/Mapper.ts` | @nanoservice-ts/shared |
+| defineNode | `core/runner/src/defineNode.ts` | @blok/runner |
+| BlokService (class-based node) | `core/runner/src/BlokService.ts` | @blok/runner |
+| Context type | `core/shared/src/types/Context.ts` | @blok/shared |
+| GlobalError | `core/shared/src/GlobalError.ts` | @blok/shared |
+| Runner | `core/runner/src/Runner.ts` | @blok/runner |
+| TriggerBase | `core/runner/src/TriggerBase.ts` | @blok/runner |
+| Workflow builder | `core/workflow-helper/src/index.ts` | @blok/helper |
+| Configuration | `core/runner/src/Configuration.ts` | @blok/runner |
+| NodeBase | `core/shared/src/NodeBase.ts` | @blok/shared |
+| Mapper | `core/shared/src/utils/Mapper.ts` | @blok/shared |
 
 ### Runtime Adapters
 | Adapter | File | Protocol |
@@ -142,7 +142,7 @@ docker compose -f infra/docker-compose.production.yml up -d
 | Go | `sdks/go/` | `cmd/server/main.go` |
 | Java | `sdks/java/` | `src/main/java/com/blok/` |
 | Rust | `sdks/rust/` | `src/main.rs` |
-| C# | `sdks/csharp/` | `src/Nanoservice.Core/Program.cs` |
+| C# | `sdks/csharp/` | `src/Blok.Core/Program.cs` |
 | PHP | `sdks/php/` | `src/Server.php` |
 | Ruby | `sdks/ruby/` | `lib/blok/server.rb` |
 | Python | `runtimes/python3/` | `server.py` |
@@ -192,7 +192,7 @@ docker compose -f infra/docker-compose.production.yml up -d
 
 ## Keywords for Search
 
-blok, nanoservice, workflow, orchestration, node, trigger, context, runner,
+blok, blok, workflow, orchestration, node, trigger, context, runner,
 defineNode, function-first, zod, schema, validation, typescript, javascript,
 http, grpc, queue, kafka, rabbitmq, sqs, redis, pubsub, gcp, aws, azure,
 cron, webhook, websocket, sse, worker, bullmq, nats,
@@ -201,6 +201,6 @@ security, auth, jwt, oauth, rbac, abac, secret, vault, encryption, tls, audit, p
 monitoring, logging, tracing, opentelemetry, prometheus, grafana, sentry, cloudwatch,
 circuit-breaker, rate-limiter, health-check, metrics, apm, datadog, newrelic,
 testing, unit-test, integration-test, vitest, test-harness,
-cli, nanoctl, generate, ai, code-generation, scaffold,
+cli, blokctl, generate, ai, code-generation, scaffold,
 deployment, docker, kubernetes, helm, terraform, cloudformation, arm,
 hmr, hot-reload, caching, cost-estimation, graphql, openapi, visualization

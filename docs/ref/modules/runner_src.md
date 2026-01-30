@@ -10,8 +10,8 @@
 - [ConfigurationResolver](../classes/runner_src.ConfigurationResolver.md)
 - [DefaultLogger](../classes/runner_src.DefaultLogger.md)
 - [LocalStorage](../classes/runner_src.LocalStorage.md)
-- [NanoService](../classes/runner_src.NanoService.md)
-- [NanoServiceResponse](../classes/runner_src.NanoServiceResponse.md)
+- [BlokService](../classes/runner_src.BlokService.md)
+- [BlokResponse](../classes/runner_src.BlokResponse.md)
 - [NodeMap](../classes/runner_src.NodeMap.md)
 - [ResolverBase](../classes/runner_src.ResolverBase.md)
 - [Runner](../classes/runner_src.Runner.md)
@@ -20,7 +20,7 @@
 
 ### Interfaces
 
-- [INanoServiceResponse](../interfaces/runner_src.INanoServiceResponse.md)
+- [IBlokResponse](../interfaces/runner_src.IBlokResponse.md)
 - [JsonLikeObject](../interfaces/runner_src.JsonLikeObject.md)
 - [ParamsDictionary](../interfaces/runner_src.ParamsDictionary.md)
 

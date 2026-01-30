@@ -22,9 +22,9 @@ if not configs.blok_lsp then
 			-- cmd = { "npx", "blok-lsp", "--stdio" },
 			filetypes = { "json" },
 			root_dir = lspconfig.util.root_pattern(
-				"nanoservice.json",
-				"nanoctl.config.ts",
-				"nanoctl.config.js",
+				"blok.json",
+				"blokctl.config.ts",
+				"blokctl.config.js",
 				"package.json"
 			),
 			settings = {

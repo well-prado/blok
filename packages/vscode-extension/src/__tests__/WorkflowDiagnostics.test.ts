@@ -94,7 +94,7 @@ describe("WorkflowDiagnostics", () => {
 					name: "test-workflow",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "step1", node: "@nanoservice-ts/api-call", type: "module" }],
+					steps: [{ name: "step1", node: "@blok/api-call", type: "module" }],
 					nodes: { step1: { inputs: { url: "https://example.com" } } },
 				}),
 			);
@@ -594,7 +594,7 @@ describe("WorkflowDiagnostics", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { manual: {} },
-					steps: [{ name: "filter", node: "@nanoservice-ts/if-else", type: "module" }],
+					steps: [{ name: "filter", node: "@blok/if-else", type: "module" }],
 					nodes: {
 						filter: {
 							conditions: [
@@ -631,7 +631,7 @@ describe("WorkflowDiagnostics", () => {
 						accept: "application/json",
 					},
 				},
-				steps: [{ name: "validate-input", node: "@nanoservice-ts/if-else", type: "module" }],
+				steps: [{ name: "validate-input", node: "@blok/if-else", type: "module" }],
 				nodes: {
 					"validate-input": {
 						conditions: [

@@ -106,7 +106,7 @@ describe("WorkflowHoverProvider (LSP)", () => {
 
 	describe("step field hover", () => {
 		it("should show hover for node field in step", () => {
-			const text = '{\n  "steps": [\n    {\n      "node": "@nanoservice-ts/api-call"\n    }\n  ]\n}';
+			const text = '{\n  "steps": [\n    {\n      "node": "@blok/api-call"\n    }\n  ]\n}';
 			const hover = getHover(text, 3, 8);
 			expect(hover).not.toBeNull();
 			const value = (hover!.contents as { value: string }).value;
@@ -148,8 +148,8 @@ describe("WorkflowHoverProvider (LSP)", () => {
 			expect(value).toContain("Runtime Type: go");
 		});
 
-		it("should show hover for @nanoservice-ts/api-call value", () => {
-			const text = '{\n  "steps": [\n    {\n      "node": "@nanoservice-ts/api-call"\n    }\n  ]\n}';
+		it("should show hover for @blok/api-call value", () => {
+			const text = '{\n  "steps": [\n    {\n      "node": "@blok/api-call"\n    }\n  ]\n}';
 			const hover = getHover(text, 3, 18);
 			expect(hover).not.toBeNull();
 			const value = (hover!.contents as { value: string }).value;
@@ -157,8 +157,8 @@ describe("WorkflowHoverProvider (LSP)", () => {
 			expect(value).toContain("HTTP API calls");
 		});
 
-		it("should show hover for @nanoservice-ts/if-else value", () => {
-			const text = '{\n  "steps": [\n    {\n      "node": "@nanoservice-ts/if-else"\n    }\n  ]\n}';
+		it("should show hover for @blok/if-else value", () => {
+			const text = '{\n  "steps": [\n    {\n      "node": "@blok/if-else"\n    }\n  ]\n}';
 			const hover = getHover(text, 3, 18);
 			expect(hover).not.toBeNull();
 			const value = (hover!.contents as { value: string }).value;

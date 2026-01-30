@@ -1,4 +1,4 @@
-# 🚀 Creating a Workflow in nanoservice-ts
+# 🚀 Creating a Workflow in blok
 
 A **workflow** in `Blok` is a structured JSON file that defines:
 
@@ -13,7 +13,7 @@ A **workflow** in `Blok` is a structured JSON file that defines:
 To create a new workflow, run the following command:
 
 ```sh
-npx nanoctl@latest create workflow
+npx blokctl@latest create workflow
 ```
 
 ### 🛠 CLI Inputs
@@ -52,7 +52,7 @@ Below is an example of a workflow named **"fetch-cat-facts"** that makes an HTTP
     "steps": [
         {
             "name": "fetch_api_data",
-            "node": "@nanoservice-ts/api-call",
+            "node": "@blok/api-call",
             "type": "module"
         }
     ],
@@ -102,14 +102,14 @@ The `steps` define the sequence of nodes executed in the workflow:
 "steps": [
     {
         "name": "fetch_api_data",
-        "node": "@nanoservice-ts/api-call",
+        "node": "@blok/api-call",
         "type": "module"
     }
 ]
 ```
 
 - **`name`**: Unique name for the step.
-- **`node`**: The node to execute (e.g., `@nanoservice-ts/api-call`).
+- **`node`**: The node to execute (e.g., `@blok/api-call`).
 - **`type`**: Specifies the type of node. The available options are:
     - **`module`**: Used for nodes installed as dependencies (e.g., from npm) or nodes created using the `Class` type.
     - **`local`**: Used for nodes created locally, typically intended for publishing to npm.
@@ -141,7 +141,7 @@ The `nodes` section configures each node used in the workflow:
 
 ## 📌 Step 5: Run & Test the Workflow
 
-1. **Start the nanoservice project**:
+1. **Start the blok project**:
 
      ```sh
      npm run dev

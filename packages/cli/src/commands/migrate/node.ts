@@ -43,10 +43,10 @@ export async function migrateNode(opts: OptionValues) {
 		}
 
 		// Check if it's a class-based node
-		if (!fileContent.includes("extends NanoService")) {
+		if (!fileContent.includes("extends BlokService")) {
 			s.stop("Not a class-based node");
-			console.log(color.red("\n❌ This doesn't appear to be a class-based NanoService node."));
-			console.log(color.dim("Migration is only supported for nodes extending NanoService.\n"));
+			console.log(color.red("\n❌ This doesn't appear to be a class-based BlokService node."));
+			console.log(color.dim("Migration is only supported for nodes extending BlokService.\n"));
 			process.exit(1);
 		}
 
@@ -63,7 +63,7 @@ export async function migrateNode(opts: OptionValues) {
 		console.log(color.dim("   • Replace class with defineNode()"));
 		console.log(color.dim("   • Convert JSON Schema to Zod schemas"));
 		console.log(color.dim("   • Move handle() logic to execute()"));
-		console.log(color.dim("   • Remove NanoServiceResponse boilerplate"));
+		console.log(color.dim("   • Remove BlokResponse boilerplate"));
 		console.log(color.dim("   • Return plain objects instead of response.setSuccess()"));
 		console.log("\n4. " + color.cyan("Example transformation:"));
 
@@ -71,9 +71,9 @@ export async function migrateNode(opts: OptionValues) {
 		console.log(color.dim("\n   Before (class-based):"));
 		console.log(
 			color.dim(`
-   export default class MyNode extends NanoService<InputType> {
+   export default class MyNode extends BlokService<InputType> {
      async handle(ctx: Context, inputs: InputType) {
-       const response = new NanoServiceResponse();
+       const response = new BlokResponse();
        try {
          const result = await doSomething(inputs.value);
          response.setSuccess({ result });

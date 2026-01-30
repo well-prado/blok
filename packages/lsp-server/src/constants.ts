@@ -52,9 +52,9 @@ export const PUBSUB_PROVIDERS = ["gcp", "aws", "azure", "redis", "nats"] as cons
 export const WEBHOOK_SOURCES = ["github", "stripe", "shopify", "custom"] as const;
 
 export const NODE_PACKAGES = [
-	{ name: "@nanoservice-ts/api-call", description: "HTTP API call node - makes requests to external services" },
-	{ name: "@nanoservice-ts/if-else", description: "Conditional branching node - evaluates conditions for routing" },
-	{ name: "@nanoservice-ts/react", description: "React SSR node - server-side rendering" },
+	{ name: "@blok/api-call", description: "HTTP API call node - makes requests to external services" },
+	{ name: "@blok/if-else", description: "Conditional branching node - evaluates conditions for routing" },
+	{ name: "@blok/react", description: "React SSR node - server-side rendering" },
 ] as const;
 
 export interface WorkflowJson {
@@ -164,7 +164,7 @@ export const FIELD_DOCS: Record<string, HoverDoc> = {
 	conditions: {
 		title: "Conditional Branches",
 		description:
-			"Array of if/else conditions for branching logic. Use with @nanoservice-ts/if-else node. Each condition has a JavaScript expression and nested steps.",
+			"Array of if/else conditions for branching logic. Use with @blok/if-else node. Each condition has a JavaScript expression and nested steps.",
 		example: `"conditions": [\n  {\n    "type": "if",\n    "condition": "ctx.request.query.type === 'admin'",\n    "steps": [...]\n  },\n  {\n    "type": "else",\n    "steps": [...]\n  }\n]`,
 	},
 	set_var: {
@@ -179,7 +179,7 @@ export const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
 	node: {
 		title: "Step Node Reference",
 		description:
-			"The node package or local path to execute. For modules: @nanoservice-ts/api-call. For local nodes: ./nodes/my-node.",
+			"The node package or local path to execute. For modules: @blok/api-call. For local nodes: ./nodes/my-node.",
 	},
 	type: {
 		title: "Step Type",

@@ -2,7 +2,7 @@
 	"Define Node (Function-First)": {
 		"prefix": ["blok-node", "defineNode"],
 		"body": [
-			"import { defineNode } from \"@nanoservice-ts/runner\";",
+			"import { defineNode } from \"@blok/runner\";",
 			"import { z } from \"zod\";",
 			"",
 			"export default defineNode({",
@@ -28,7 +28,7 @@
 	"Define Node with API Call": {
 		"prefix": ["blok-node-api", "defineNode-api"],
 		"body": [
-			"import { defineNode } from \"@nanoservice-ts/runner\";",
+			"import { defineNode } from \"@blok/runner\";",
 			"import { z } from \"zod\";",
 			"",
 			"export default defineNode({",
@@ -61,7 +61,7 @@
 	"Define Node with Database": {
 		"prefix": ["blok-node-db", "defineNode-db"],
 		"body": [
-			"import { defineNode } from \"@nanoservice-ts/runner\";",
+			"import { defineNode } from \"@blok/runner\";",
 			"import { z } from \"zod\";",
 			"",
 			"export default defineNode({",
@@ -90,16 +90,16 @@
 		"description": "Create a Blok node that performs database operations"
 	},
 	"Class-Based Node (Legacy)": {
-		"prefix": ["blok-node-class", "nanoservice"],
+		"prefix": ["blok-node-class", "blok"],
 		"body": [
-			"import { NanoService, NanoServiceResponse, type INanoServiceResponse } from \"@nanoservice-ts/runner\";",
-			"import type { Context, GlobalError } from \"@nanoservice-ts/shared\";",
+			"import { BlokService, BlokResponse, type IBlokResponse } from \"@blok/runner\";",
+			"import type { Context, GlobalError } from \"@blok/shared\";",
 			"",
 			"interface ${1:MyNode}Input {",
 			"\t${2:field}: ${3:string};",
 			"}",
 			"",
-			"export default class ${1:MyNode} extends NanoService<${1:MyNode}Input> {",
+			"export default class ${1:MyNode} extends BlokService<${1:MyNode}Input> {",
 			"\tconstructor() {",
 			"\t\tsuper();",
 			"\t\tthis.inputSchema = {",
@@ -111,8 +111,8 @@
 			"\t\t};",
 			"\t}",
 			"",
-			"\tasync handle(ctx: Context, inputs: ${1:MyNode}Input): Promise<INanoServiceResponse> {",
-			"\t\tconst response = new NanoServiceResponse();",
+			"\tasync handle(ctx: Context, inputs: ${1:MyNode}Input): Promise<IBlokResponse> {",
+			"\t\tconst response = new BlokResponse();",
 			"\t\ttry {",
 			"\t\t\t${4:// Implement node logic}",
 			"\t\t\tresponse.setSuccess({ ${2:field}: inputs.${2:field} });",
@@ -131,7 +131,7 @@
 		"prefix": ["blok-test", "blok-node-test"],
 		"body": [
 			"import { describe, it, expect } from \"vitest\";",
-			"import { NodeTestHarness, TestLogger } from \"@nanoservice-ts/runner\";",
+			"import { NodeTestHarness, TestLogger } from \"@blok/runner\";",
 			"import ${1:MyNode} from \"./${2:my-node}\";",
 			"",
 			"describe(\"${1:MyNode}\", () => {",
@@ -161,7 +161,7 @@
 		"prefix": ["blok-workflow-test"],
 		"body": [
 			"import { describe, it, expect } from \"vitest\";",
-			"import { WorkflowTestRunner } from \"@nanoservice-ts/runner\";",
+			"import { WorkflowTestRunner } from \"@blok/runner\";",
 			"",
 			"describe(\"${1:My Workflow}\", () => {",
 			"\tconst runner = new WorkflowTestRunner();",

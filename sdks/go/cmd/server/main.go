@@ -1,4 +1,4 @@
-// Package main provides the entry point for the nanoservice Go runtime server.
+// Package main provides the entry point for the blok Go runtime server.
 //
 // Usage:
 //
@@ -16,26 +16,26 @@ package main
 import (
 	"log"
 
-	nanoservice "github.com/nickincloud/nanoservice-go"
-	"github.com/nickincloud/nanoservice-go/examples/nodes"
+	blok "github.com/nickincloud/blok-go"
+	"github.com/nickincloud/blok-go/examples/nodes"
 )
 
 func main() {
 	// Create registry and register nodes
-	registry := nanoservice.NewNodeRegistry()
+	registry := blok.NewNodeRegistry()
 
 	// Register all example nodes
 	nodes.RegisterAll(registry)
 
 	// Add middleware
-	logger := nanoservice.NewLogger(nanoservice.LogLevelInfo)
+	logger := blok.NewLogger(blok.LogLevelInfo)
 	registry.Use(
-		nanoservice.RecoveryMiddleware(),
-		nanoservice.LoggingMiddleware(logger),
+		blok.RecoveryMiddleware(),
+		blok.LoggingMiddleware(logger),
 	)
 
 	// Start serving (reads config from env, handles graceful shutdown)
-	if err := nanoservice.ListenAndServe(registry); err != nil {
+	if err := blok.ListenAndServe(registry); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }

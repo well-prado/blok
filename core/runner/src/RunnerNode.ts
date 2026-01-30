@@ -1,4 +1,4 @@
-import { type Context, NodeBase, type ResponseContext, type Step } from "@nanoservice-ts/shared";
+import { type Context, NodeBase, type ResponseContext, type Step } from "@blok/shared";
 import type { RuntimeKind } from "./adapters/RuntimeAdapter";
 
 export default abstract class RunnerNode extends NodeBase implements Step {

@@ -5,15 +5,15 @@
 
 ## What It Does
 
-`defineNode` is the recommended way to create Blok nodes. Instead of extending `NanoService<T>` with class syntax, you define a node with a plain object: name, description, Zod input/output schemas, and an execute function.
+`defineNode` is the recommended way to create Blok nodes. Instead of extending `BlokService<T>` with class syntax, you define a node with a plain object: name, description, Zod input/output schemas, and an execute function.
 
-Under the hood, `defineNode` wraps your function into a `FunctionNode` class that implements the full `NanoService` interface, maintaining 100% backward compatibility with the runner.
+Under the hood, `defineNode` wraps your function into a `FunctionNode` class that implements the full `BlokService` interface, maintaining 100% backward compatibility with the runner.
 
 ## API Signature
 
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 
 const MyNode = defineNode({
   // Required: unique node name
@@ -58,7 +58,7 @@ export default MyNode;
 defineNode({ name, input, output, execute })
        │
        ▼
-Creates FunctionNode extends NanoService<I>
+Creates FunctionNode extends BlokService<I>
        │
        ▼
 FunctionNode.handle(ctx, rawInputs):
@@ -67,7 +67,7 @@ FunctionNode.handle(ctx, rawInputs):
   3. Call execute(ctx, parsedInput)
   4. Parse result through output Zod schema
   5. If validation fails → GlobalError with details
-  6. Return NanoServiceResponse.success(parsedOutput)
+  6. Return BlokResponse.success(parsedOutput)
 ```
 
 ## Source Files
@@ -85,7 +85,7 @@ FunctionNode.handle(ctx, rawInputs):
 ### Minimal Node
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 
 export default defineNode({
   name: "greet",
@@ -156,17 +156,17 @@ export default defineNode({
 ### Class-Based (Legacy)
 ```typescript
 // ~40 lines
-import { NanoService, NanoServiceResponse, GlobalError } from "@nanoservice-ts/runner";
-import { Context } from "@nanoservice-ts/shared";
-import { INanoServiceResponse } from "@nanoservice-ts/runner";
+import { BlokService, BlokResponse, GlobalError } from "@blok/runner";
+import { Context } from "@blok/shared";
+import { IBlokResponse } from "@blok/runner";
 
 interface GreetInput { name: string; }
 
-export default class Greet extends NanoService<GreetInput> {
+export default class Greet extends BlokService<GreetInput> {
   constructor() { super(); }
 
-  async handle(ctx: Context, inputs: GreetInput): Promise<INanoServiceResponse> {
-    const response = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: GreetInput): Promise<IBlokResponse> {
+    const response = new BlokResponse();
     try {
       if (!inputs.name) throw new GlobalError(400, "name required");
       response.setSuccess({ message: `Hello, ${inputs.name}!` });
@@ -187,5 +187,5 @@ export default class Greet extends NanoService<GreetInput> {
 3. **Context usage patterns** within execute functions
 4. **Error handling** (thrown errors → GlobalError mapping)
 5. **Migration guide** from class-based to function-first
-6. **CLI template** (`nanoctl create node --style=function`)
+6. **CLI template** (`blokctl create node --style=function`)
 7. **Testing nodes** created with `defineNode`

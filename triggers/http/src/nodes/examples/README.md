@@ -27,7 +27,7 @@ The repository contains the following workflows:
 
 ---
 
-## 🛠 Nanoservices
+## 🛠 Bloks
 
 These bloks are used within the workflows to handle specific tasks:
 

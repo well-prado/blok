@@ -1,11 +1,11 @@
-# Nanoservice.Core - C# SDK for Blok
+# Blok.Core - C# SDK for Blok
 
-C# SDK for building workflow nodes in the Blok nanoservice framework. Each node runs as a Docker container exposing `POST /execute` and `GET /health` endpoints.
+C# SDK for building workflow nodes in the Blok blok framework. Each node runs as a Docker container exposing `POST /execute` and `GET /health` endpoints.
 
 ## Install
 
 ```bash
-dotnet add package Nanoservice.Core
+dotnet add package Blok.Core
 ```
 
 ## Quick Start
@@ -14,8 +14,8 @@ Create a custom node by implementing `INodeHandler`:
 
 ```csharp
 using System.Text.Json;
-using Nanoservice.Core.Node;
-using Nanoservice.Core.Types;
+using Blok.Core.Node;
+using Blok.Core.Types;
 
 public class GreetNode : INodeHandler
 {
@@ -31,9 +31,9 @@ public class GreetNode : INodeHandler
 Register and start the server:
 
 ```csharp
-using Nanoservice.Core.Config;
-using Nanoservice.Core.Node;
-using Nanoservice.Core.Server;
+using Blok.Core.Config;
+using Blok.Core.Node;
+using Blok.Core.Server;
 
 var registry = new NodeRegistry();
 registry.Register("greet", new GreetNode());
@@ -70,7 +70,7 @@ await RuntimeServer.Run(registry, config);
 Add cross-cutting behavior with middleware:
 
 ```csharp
-using Nanoservice.Core.Middleware;
+using Blok.Core.Middleware;
 
 var chain = new MiddlewareChain()
     .Use(new RecoveryMiddleware())
@@ -88,7 +88,7 @@ Built-in middleware:
 Validate JSON data against schemas:
 
 ```csharp
-using Nanoservice.Core.Validation;
+using Blok.Core.Validation;
 
 var validator = new SchemaValidator();
 var schema = JsonDocument.Parse(@"{
@@ -108,7 +108,7 @@ var errors = validator.Validate(data, schema);
 Use `MockContextBuilder` and `TestNodeRunner` for unit tests:
 
 ```csharp
-using Nanoservice.Core.Testing;
+using Blok.Core.Testing;
 
 var ctx = new MockContextBuilder()
     .WithBody(new { name = "Blok" })
@@ -124,8 +124,8 @@ var result = await runner.ExecuteAsync("my-node", ctx);
 ## Docker
 
 ```bash
-docker build -t my-nanoservice .
-docker run -p 8080:8080 my-nanoservice
+docker build -t my-blok .
+docker run -p 8080:8080 my-blok
 ```
 
 ## Endpoints

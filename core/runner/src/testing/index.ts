@@ -10,7 +10,7 @@
  *   NodeTestHarness,
  *   WorkflowTestRunner,
  *   TestLogger,
- * } from "@nanoservice-ts/runner/testing";
+ * } from "@blok/runner/testing";
  * ```
  */
 

@@ -1,4 +1,4 @@
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import pg from "pg";
 import { z } from "zod";
 

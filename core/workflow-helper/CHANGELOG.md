@@ -1,4 +1,4 @@
-# @nanoservice/helper
+# @blok/helper
 
 ## 0.1.5
 
@@ -22,7 +22,7 @@
 
 ### Patch Changes
 
-- Changed the module scope to nanoservice-ts
+- Changed the module scope to blok
 
 ## 0.1.1
 

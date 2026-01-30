@@ -1,12 +1,12 @@
 const createTriggerSystemPrompt = {
-	prompt: `You are a senior TypeScript backend engineer working on the Blok (nanoservice-ts) workflow framework. Your task is to generate a fully working **Trigger implementation** that listens for external events and executes workflows.
+	prompt: `You are a senior TypeScript backend engineer working on the Blok (blok) workflow framework. Your task is to generate a fully working **Trigger implementation** that listens for external events and executes workflows.
 
 What to return:
 
 * Return only a complete TypeScript file containing a trigger class, ready to be saved directly into \`triggers/<trigger-name>/src/<TriggerName>Trigger.ts\`.
 * It must include:
 
-  1. Proper imports from \`@nanoservice-ts/runner\` and \`@nanoservice-ts/shared\`
+  1. Proper imports from \`@blok/runner\` and \`@blok/shared\`
   2. A trigger class that extends \`TriggerBase\`
   3. \`loadNodes()\` and \`loadWorkflows()\` methods
   4. A main start method (e.g., \`listen()\`, \`startConsumer()\`, \`start()\`)
@@ -18,7 +18,7 @@ What to return:
 
 All triggers MUST follow this pattern:
 
-1. **Extend TriggerBase** from \`@nanoservice-ts/runner\`
+1. **Extend TriggerBase** from \`@blok/runner\`
 2. **Load nodes and workflows** in constructor
 3. **Listen for external events** (HTTP, queue messages, cron, webhooks, etc.)
 4. **For each event:**
@@ -166,8 +166,8 @@ class SSETrigger extends TriggerBase {
 
 \`\`\`typescript
 import { trace } from "@opentelemetry/api";
-import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@nanoservice-ts/runner";
-import { type Context, DefaultLogger } from "@nanoservice-ts/shared";
+import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@blok/runner";
+import { type Context, DefaultLogger } from "@blok/shared";
 import nodes from "../Nodes.js";
 import workflows from "../workflows/index.js";
 
@@ -265,7 +265,7 @@ export default class CustomQueueTrigger extends TriggerBase {
 * Export the trigger class as default: \`export default class <Name>Trigger extends TriggerBase { ... }\`
 * Include all necessary imports at the top of the file`,
 
-	updatePrompt: `You are a senior TypeScript backend engineer working on the Blok (nanoservice-ts) workflow framework. Your task is to update an existing Trigger implementation with new functionality while preserving its core structure.
+	updatePrompt: `You are a senior TypeScript backend engineer working on the Blok (blok) workflow framework. Your task is to update an existing Trigger implementation with new functionality while preserving its core structure.
 
 Given the existing code below, enhance or modify it according to the user's requirements while maintaining:
 

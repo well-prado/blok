@@ -154,9 +154,9 @@ optimizations:
     sourcemaps: false
     maxBundleSize: 1MB
     excludeModules:
-      - "@nanoservice-ts/trigger-queue" # Not available at edge
-      - "@nanoservice-ts/trigger-pubsub"
-      - "@nanoservice-ts/trigger-worker"
+      - "@blok/trigger-queue" # Not available at edge
+      - "@blok/trigger-pubsub"
+      - "@blok/trigger-worker"
 
 # ─── Edge Monitoring ──────────────────────────────────────
 monitoring:

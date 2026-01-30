@@ -13,7 +13,7 @@
 | [Phase 1: Backend — Run Tracking & Event System](#phase-1-backend--run-tracking--event-system) | Done | 12 | 12 | ██████████ 100% |
 | [Phase 2: Trace API — HTTP & SSE Endpoints](#phase-2-trace-api--http--sse-endpoints) | Done | 13 | 13 | ██████████ 100% |
 | [Phase 3: Frontend — Blok Studio App](#phase-3-frontend--blok-studio-app) | Done | 42 | 42 | ██████████ 100% |
-| [Phase 4: CLI Integration — `nanoctl trace`](#phase-4-cli-integration--nanoctl-trace) | Done | 8 | 8 | ██████████ 100% |
+| [Phase 4: CLI Integration — `blokctl trace`](#phase-4-cli-integration--blokctl-trace) | Done | 8 | 8 | ██████████ 100% |
 | [Phase 5: Advanced Features](#phase-5-advanced-features) | Done | 11 | 11 | ██████████ 100% |
 | [Phase 6: Persistence & Scale](#phase-6-persistence--scale) | Done | 8 | 8 | ██████████ 100% |
 | **Total** | **Done** | **94** | **94** | **██████████ 100%** |
@@ -210,10 +210,10 @@
 
 ---
 
-## Phase 4: CLI Integration — `nanoctl trace`
+## Phase 4: CLI Integration — `blokctl trace`
 
 **Status:** Done
-**Target:** `nanoctl trace` launches Blok Studio with zero config
+**Target:** `blokctl trace` launches Blok Studio with zero config
 **Depends on:** Phase 3 (Frontend app)
 
 ### Command Implementation
@@ -233,7 +233,7 @@
 ### CLI Options
 
 ```
-nanoctl trace|studio [options]
+blokctl trace|studio [options]
   -p, --port <port>     Studio UI port (default: 5555)
   -u, --url <url>       Blok backend URL (default: http://localhost:4000)
   --workflow <name>     Open specific workflow
@@ -243,7 +243,7 @@ nanoctl trace|studio [options]
 
 ### Phase 4 Success Criteria
 
-- [x] `nanoctl trace` opens Studio in browser (uses `open` package)
+- [x] `blokctl trace` opens Studio in browser (uses `open` package)
 - [x] Helpful warning when backend not running (starts anyway for convenience)
 - [x] Works on macOS, Linux, Windows (Node.js `http` + `open` package)
 - [x] Pre-built mode serves app without dev dependencies (`serve-handler` + bundled SPA)
@@ -439,7 +439,7 @@ nanoctl trace|studio [options]
 | 2026-01-29 | — | Initial progress tracker created | Blok Core Team |
 | 2026-01-29 | 1, 2 | Phase 1 & 2 complete: RunTracker, TraceRouter, instrumentation, tests, HttpTrigger integration | Blok Core Team |
 | 2026-01-29 | 3 | Phase 3 complete: Blok Studio frontend app (Vite + React + TanStack Router/Query/Table + React Flow + Tailwind v4) | Blok Core Team |
-| 2026-01-29 | 4 | Phase 4 complete: `nanoctl trace` CLI command with health check, reverse proxy, SPA serving, browser auto-open | Blok Core Team |
+| 2026-01-29 | 4 | Phase 4 complete: `blokctl trace` CLI command with health check, reverse proxy, SPA serving, browser auto-open | Blok Core Team |
 | 2026-01-30 | 5 | Phase 5 P1 complete: Run replay, request builder, Cmd+K global search, desktop notifications | Blok Core Team |
 | 2026-01-30 | 5 | Phase 5 P2 complete: Diff view, run tags/metadata, metrics dashboard with Recharts charts | Blok Core Team |
 | 2026-01-30 | 6 | Phase 6 SQLite complete: RunStore interface, InMemoryRunStore, SqliteRunStore, schema migrations, data retention, createStore factory, 123 tests passing | Blok Core Team |

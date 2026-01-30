@@ -34,7 +34,7 @@ import { Command } from "commander";
 const version = await getPackageVersion();
 const exec = util.promisify(child_process.exec);
 
-export const CLI_NAME = "nanoctl";
+export const CLI_NAME = "blokctl";
 
 const validateVersion = async (
 	currentVersion: string,
@@ -66,8 +66,8 @@ const validateVersion = async (
 
 async function main() {
 	try {
-		const HOME_DIR = `${os.homedir()}/.nanoctl`;
-		const cliConfigPath = `${HOME_DIR}/nanoctl.json`;
+		const HOME_DIR = `${os.homedir()}/.blok`;
+		const cliConfigPath = `${HOME_DIR}/blokctl.json`;
 
 		fsExtra.ensureDirSync(HOME_DIR);
 
@@ -80,7 +80,7 @@ async function main() {
 
 		await validateVersion(version);
 
-		const create = new Command("create").description("Create a new nanoservice component");
+		const create = new Command("create").description("Create a new blok component");
 
 		const project = new Command("project")
 			.description("Create a new Project")

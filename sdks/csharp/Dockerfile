@@ -3,16 +3,16 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy solution and project files first for layer caching
-COPY Nanoservice.Core.sln ./
-COPY src/Nanoservice.Core/Nanoservice.Core.csproj src/Nanoservice.Core/
-COPY tests/Nanoservice.Core.Tests/Nanoservice.Core.Tests.csproj tests/Nanoservice.Core.Tests/
+COPY Blok.Core.sln ./
+COPY src/Blok.Core/Blok.Core.csproj src/Blok.Core/
+COPY tests/Blok.Core.Tests/Blok.Core.Tests.csproj tests/Blok.Core.Tests/
 RUN dotnet restore
 
 # Copy all source code
 COPY . .
 
 # Build and publish
-RUN dotnet publish src/Nanoservice.Core/Nanoservice.Core.csproj \
+RUN dotnet publish src/Blok.Core/Blok.Core.csproj \
     -c Release \
     -o /app/publish \
     --no-restore
@@ -36,4 +36,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["dotnet", "Nanoservice.Core.dll"]
+ENTRYPOINT ["dotnet", "Blok.Core.dll"]

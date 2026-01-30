@@ -87,12 +87,12 @@ With **Blok**, backend development becomes modular, predictable, and future-proo
 To start developing your project, simply run:
 
 ```bash
-  npx nanoctl@latest create project
+  npx blokctl@latest create project
 ```
 
 And follow the instructions of the CLI
 
-_For more information and examples, visit [Getting Started](https://blok.build/docs/d/getting-started/nanoctl)_
+_For more information and examples, visit [Getting Started](https://blok.build/docs/d/getting-started/blokctl)_
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -149,7 +149,7 @@ To contribute to the Blok documentation, follow these steps:
 2. Clone the project to your local machine
 
 ```
-   git clone https://github.com/deskree-inc/blok.git
+   git clone https://github.com/well-prado/blok.git
 ```
 3. Navigate to the project directory
 ```
@@ -157,7 +157,7 @@ cd Blok
 ```
 4. Add the upstream remote
 ```
-git remote add upstream https://github.com/deskree-inc/blok.git
+git remote add upstream https://github.com/well-prado/blok.git
 ```
 5. Run the application in development mode
 
@@ -196,9 +196,9 @@ Distributed under the Apache License 2.0. See `LICENSE.txt` for more information
 
 Discord: [Blok](https://discord.gg/uFs9bYwfM9)
 
-X: [@nanoservice_ts](https://x.com/blok_build)
+X: [@blok_ts](https://x.com/blok_build)
 
-Reddit: [r/nanoservice](https://www.reddit.com/r/nanoservice/)
+Reddit: [r/blok](https://www.reddit.com/r/blok/)
 
 Project Link: [https://github.com/deskree-inc/blok](https://github.com/deskree-inc/blok)
 

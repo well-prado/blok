@@ -1,5 +1,5 @@
-import { defineNode } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import { defineNode } from "@blok/runner";
+import type { Context } from "@blok/shared";
 import { z } from "zod";
 
 type ChainEntry = { language: string; order: number; timestamp?: string };

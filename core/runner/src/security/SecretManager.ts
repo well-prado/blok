@@ -20,7 +20,7 @@
  *   SecretManager,
  *   EnvironmentSecretProvider,
  *   InMemorySecretProvider,
- * } from "@nanoservice-ts/runner";
+ * } from "@blok/runner";
  *
  * // Simple setup with environment variables
  * const secrets = new SecretManager({

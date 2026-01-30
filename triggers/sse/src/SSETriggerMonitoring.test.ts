@@ -9,8 +9,8 @@
  * - Metrics collection (connections, events, channels)
  */
 
-import type { HelperResponse } from "@nanoservice-ts/helper";
-import type { NanoService } from "@nanoservice-ts/runner";
+import type { HelperResponse } from "@blok/helper";
+import type { BlokService } from "@blok/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SSETrigger } from "./SSETrigger";
 
@@ -18,7 +18,7 @@ import { SSETrigger } from "./SSETrigger";
  * Concrete test trigger exposing monitoring methods from TriggerBase
  */
 class MonitoredSSETrigger extends SSETrigger {
-	protected override nodes = {} as Record<string, NanoService<unknown>>;
+	protected override nodes = {} as Record<string, BlokService<unknown>>;
 	protected override workflows = {} as Record<string, HelperResponse>;
 
 	public getClientsMap() {

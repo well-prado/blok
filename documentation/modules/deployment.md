@@ -18,7 +18,7 @@ The main production Dockerfile that builds a Blok HTTP trigger application:
   - `WORKFLOWS_PATH=/app/workflows`
   - `CONSOLE_LOG_ACTIVE=true`
   - `NODE_ENV=production`
-  - `APP_NAME=nanoservice-http`
+  - `APP_NAME=blok-http`
 
 ### `dockerfiles/Dockerfile`
 Generic Blok container (without Python runtime).

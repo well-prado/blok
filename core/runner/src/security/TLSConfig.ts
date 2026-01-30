@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { TLSConfig } from "@nanoservice-ts/runner";
+ * import { TLSConfig } from "@blok/runner";
  *
  * // Production TLS setup
  * const tls = new TLSConfig({

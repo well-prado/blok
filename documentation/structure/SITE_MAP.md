@@ -27,7 +27,7 @@
 | # | Page | URL Path | Source Files | Module Ref | Deps |
 |---|------|----------|-------------|-----------|------|
 | 6 | How Blok Works | `/concepts/how-it-works` | Runner.ts, TriggerBase.ts, index.ts | core-runner.md | 1-5 |
-| 7 | Nodes | `/concepts/nodes` | defineNode.ts, NanoService.ts, NodeBase.ts | nodes.md, define-node.md | 6 |
+| 7 | Nodes | `/concepts/nodes` | defineNode.ts, BlokService.ts, NodeBase.ts | nodes.md, define-node.md | 6 |
 | 8 | Workflows | `/concepts/workflows` | workflow-helper/, examples/workflows/ | workflow-helper.md | 6 |
 | 9 | Triggers | `/concepts/triggers` | TriggerBase.ts, triggers/*/ | triggers.md | 6 |
 | 10 | Context & Data | `/concepts/context` | Context.ts, Mapper.ts, VarsContext.ts | core-shared.md | 6 |
@@ -40,7 +40,7 @@
 | 12 | Input/Output Schemas | `/nodes/schemas` | defineNode.ts, Zod usage | define-node.md | 11 |
 | 13 | Using Context | `/nodes/context` | Context.ts, examples/ | core-shared.md | 10, 11 |
 | 14 | Error Handling | `/nodes/errors` | GlobalError.ts, defineNode error mapping | core-shared.md | 11 |
-| 15 | Class-Based Nodes | `/nodes/class-based` | NanoService.ts, NodeBase.ts | core-runner.md | 7 |
+| 15 | Class-Based Nodes | `/nodes/class-based` | BlokService.ts, NodeBase.ts | core-runner.md | 7 |
 | 16 | Testing Nodes | `/nodes/testing` | TestHarness.ts, TestLogger.ts | testing.md | 11 |
 
 ## Building Workflows

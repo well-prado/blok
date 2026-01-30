@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Examples;
+namespace Blok\Blok\Examples;
 
-use Blok\Nanoservice\Node\NodeHandler;
-use Blok\Nanoservice\Types\Context;
+use Blok\Blok\Node\NodeHandler;
+use Blok\Blok\Types\Context;
 
 /**
  * ChainTestNode is used in cross-runtime integration tests.

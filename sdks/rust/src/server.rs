@@ -30,7 +30,7 @@ pub async fn serve(registry: NodeRegistry, port: u16) -> Result<(), Box<dyn std:
     let app = create_router(registry);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
-    info!("Nanoservice runtime listening on port {}", port);
+    info!("Blok runtime listening on port {}", port);
 
     axum::serve(listener, app).await?;
     Ok(())

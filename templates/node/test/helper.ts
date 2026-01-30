@@ -1,5 +1,5 @@
-import type { ParamsDictionary } from "@nanoservice-ts/runner";
-import type { Context } from "@nanoservice-ts/shared";
+import type { ParamsDictionary } from "@blok/runner";
+import type { Context } from "@blok/shared";
 
 export default function ctx(): Context {
 	const ctx: Context = {

@@ -1,11 +1,11 @@
 ---
 title: "Migration: Class-Based to Function-First Nodes"
-description: "Step-by-step guide for migrating from class-based NanoService nodes to function-first defineNode API"
+description: "Step-by-step guide for migrating from class-based BlokService nodes to function-first defineNode API"
 ---
 
 # Migration: Class-Based to Function-First Nodes
 
-This guide walks you through migrating existing class-based `NanoService` nodes to the new function-first `defineNode` API. The migration is fully backward-compatible -- both styles work side by side.
+This guide walks you through migrating existing class-based `BlokService` nodes to the new function-first `defineNode` API. The migration is fully backward-compatible -- both styles work side by side.
 
 ## Why Migrate?
 
@@ -26,13 +26,13 @@ This guide walks you through migrating existing class-based `NanoService` nodes 
 
 ```typescript
 // nodes/fetch-user/index.ts
-import NanoService from "@nanoservice-ts/runner/NanoService";
-import NanoServiceResponse from "@nanoservice-ts/runner/NanoServiceResponse";
-import type { INanoServiceResponse } from "@nanoservice-ts/runner/NanoServiceResponse";
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
-import type JsonLikeObject from "@nanoservice-ts/runner/types/JsonLikeObject";
-import type Condition from "@nanoservice-ts/runner/types/Condition";
+import BlokService from "@blok/runner/BlokService";
+import BlokResponse from "@blok/runner/BlokResponse";
+import type { IBlokResponse } from "@blok/runner/BlokResponse";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
+import type JsonLikeObject from "@blok/runner/types/JsonLikeObject";
+import type Condition from "@blok/runner/types/Condition";
 
 interface FetchUserInput {
   userId: string;
@@ -44,7 +44,7 @@ interface User {
   email: string;
 }
 
-export default class FetchUser extends NanoService<FetchUserInput> {
+export default class FetchUser extends BlokService<FetchUserInput> {
   constructor() {
     super();
     this.inputSchema = {
@@ -72,8 +72,8 @@ export default class FetchUser extends NanoService<FetchUserInput> {
   async handle(
     ctx: Context,
     inputs: FetchUserInput | JsonLikeObject | Condition[],
-  ): Promise<INanoServiceResponse> {
-    const response = new NanoServiceResponse();
+  ): Promise<IBlokResponse> {
+    const response = new BlokResponse();
 
     try {
       const { userId } = inputs as FetchUserInput;
@@ -103,7 +103,7 @@ export default class FetchUser extends NanoService<FetchUserInput> {
 
 ```typescript
 // nodes/fetch-user/index.ts
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -151,14 +151,14 @@ npm install zod
 Find the class-based node file. It will look like this:
 
 ```typescript
-export default class MyNode extends NanoService<SomeType> {
+export default class MyNode extends BlokService<SomeType> {
   constructor() {
     super();
     this.inputSchema = { ... };
     this.outputSchema = { ... };
   }
 
-  async handle(ctx, inputs): Promise<INanoServiceResponse> {
+  async handle(ctx, inputs): Promise<IBlokResponse> {
     // ...
   }
 }
@@ -191,7 +191,7 @@ The `handle()` method typically follows this pattern:
 
 ```typescript
 async handle(ctx, inputs) {
-  const response = new NanoServiceResponse();
+  const response = new BlokResponse();
   try {
     const typedInputs = inputs as MyInputType;    // <-- manual cast
     // ... core logic ...
@@ -217,7 +217,7 @@ async execute(ctx, input) {
 ### Step 5: Write the defineNode Call
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -243,17 +243,17 @@ export default defineNode({
 
 Replace:
 ```typescript
-import NanoService from "@nanoservice-ts/runner/NanoService";
-import NanoServiceResponse from "@nanoservice-ts/runner/NanoServiceResponse";
-import type { INanoServiceResponse } from "@nanoservice-ts/runner/NanoServiceResponse";
-import { GlobalError } from "@nanoservice-ts/shared";
-import type JsonLikeObject from "@nanoservice-ts/runner/types/JsonLikeObject";
-import type Condition from "@nanoservice-ts/runner/types/Condition";
+import BlokService from "@blok/runner/BlokService";
+import BlokResponse from "@blok/runner/BlokResponse";
+import type { IBlokResponse } from "@blok/runner/BlokResponse";
+import { GlobalError } from "@blok/shared";
+import type JsonLikeObject from "@blok/runner/types/JsonLikeObject";
+import type Condition from "@blok/runner/types/Condition";
 ```
 
 With:
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 ```
 
@@ -263,20 +263,20 @@ The node's external interface is unchanged. Existing workflow JSON files do not 
 
 ## Using the CLI Migration Command
 
-The `nanoctl` CLI provides an automated migration command:
+The `blokctl` CLI provides an automated migration command:
 
 ```bash
 # Migrate a single node
-nanoctl migrate node ./nodes/fetch-user/index.ts
+blokctl migrate node ./nodes/fetch-user/index.ts
 
 # Migrate all nodes in a directory
-nanoctl migrate node ./nodes/ --recursive
+blokctl migrate node ./nodes/ --recursive
 
 # Preview changes without writing (dry run)
-nanoctl migrate node ./nodes/fetch-user/index.ts --dry-run
+blokctl migrate node ./nodes/fetch-user/index.ts --dry-run
 
 # Generate migration report
-nanoctl migrate node ./nodes/ --report
+blokctl migrate node ./nodes/ --report
 ```
 
 The CLI command performs:
@@ -294,10 +294,10 @@ The CLI command performs:
 **Before:**
 ```typescript
 async handle(ctx, inputs) {
-  const response = new NanoServiceResponse();
+  const response = new BlokResponse();
   const result = await doWork(inputs);
 
-  // set_var is a NanoService property
+  // set_var is a BlokService property
   if (this.set_var) {
     const vars = { [this.name]: result.data };
     this.setVar(ctx, vars);
@@ -327,7 +327,7 @@ export default defineNode({
 **Before:**
 ```typescript
 async handle(ctx, inputs) {
-  const response = new NanoServiceResponse();
+  const response = new BlokResponse();
   const conditions = inputs as Condition[];
   // ... evaluate conditions
   response.setSuccess(result);
@@ -365,7 +365,7 @@ export default defineNode({
 **Before:**
 ```typescript
 async handle(ctx, inputs) {
-  const response = new NanoServiceResponse();
+  const response = new BlokResponse();
   this.contentType = "text/csv";
   response.setSuccess({ data: csvString });
   return response;
@@ -419,7 +419,7 @@ export default defineNode({
 
 ### Gotcha: Multiple Return Types
 
-Class-based `handle()` could return `INanoServiceResponse | NanoService<T>[]`. The `defineNode` API always expects a single return value matching the output schema. If you need to return multiple node instances (for fan-out), keep using the class-based approach for now.
+Class-based `handle()` could return `IBlokResponse | BlokService<T>[]`. The `defineNode` API always expects a single return value matching the output schema. If you need to return multiple node instances (for fan-out), keep using the class-based approach for now.
 
 ## Backward Compatibility Guarantees
 
@@ -428,9 +428,9 @@ Class-based `handle()` could return `INanoServiceResponse | NanoService<T>[]`. T
 - **Metrics**: Both styles emit the same OpenTelemetry metrics.
 - **Side-by-side**: You can mix class-based and function-first nodes in the same workflow.
 - **Runtime adapters**: `defineNode` works with all runtime adapters (NodeJS, Bun, etc.).
-- **NanoService inheritance**: `FunctionNode` extends `NanoService`, so it is fully compatible with all existing runner infrastructure.
+- **BlokService inheritance**: `FunctionNode` extends `BlokService`, so it is fully compatible with all existing runner infrastructure.
 
-The class-based `NanoService` API is not deprecated. Both approaches are supported.
+The class-based `BlokService` API is not deprecated. Both approaches are supported.
 
 ## See Also
 

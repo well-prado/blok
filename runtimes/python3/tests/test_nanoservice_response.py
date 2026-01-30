@@ -1,5 +1,5 @@
 import unittest
-from core.types.nanoservice_response import NanoServiceResponse
+from core.types.blok_response import NanoServiceResponse
 from core.types.global_error import GlobalError
 
 

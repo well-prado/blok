@@ -1,4 +1,4 @@
-package nanoservice
+package blok
 
 // NodeHandler is the interface that all Blok nodes must implement.
 //
@@ -26,7 +26,7 @@ type NodeHandler interface {
 //
 // Example:
 //
-//	registry.Register("greet", nanoservice.NodeHandlerFunc(func(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+//	registry.Register("greet", blok.NodeHandlerFunc(func(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 //	    return map[string]string{"message": "Hello!"}, nil
 //	}))
 type NodeHandlerFunc func(ctx *Context, config map[string]interface{}) (interface{}, error)

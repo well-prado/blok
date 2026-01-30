@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * import { SentryIntegration } from "@nanoservice-ts/runner";
+ * import { SentryIntegration } from "@blok/runner";
  *
  * const sentry = new SentryIntegration({
  *   dsn: process.env.SENTRY_DSN!,

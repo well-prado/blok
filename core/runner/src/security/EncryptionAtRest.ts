@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { EncryptionAtRest } from "@nanoservice-ts/runner";
+ * import { EncryptionAtRest } from "@blok/runner";
  *
  * const encryption = new EncryptionAtRest({
  *   algorithm: "aes-256-gcm",

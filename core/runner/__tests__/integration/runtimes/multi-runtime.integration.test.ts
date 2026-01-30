@@ -15,11 +15,11 @@
  * Optional: Python3 HTTP SDK container on port 9007
  */
 
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import NanoService from "../../../src/NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
+import BlokService from "../../../src/Blok";
+import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import RunnerNode from "../../../src/RunnerNode";
 import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
@@ -40,14 +40,14 @@ let python3Available = false;
 /**
  * Fetch user node - simulates fetching user data
  */
-class FetchUserNode extends NanoService<{ userId: string }> {
+class FetchUserNode extends BlokService<{ userId: string }> {
 	constructor() {
 		super();
 		this.name = "fetch-user";
 	}
 
-	async handle(ctx: Context, inputs: { userId: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { userId: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		const user = {
 			id: inputs.userId,
 			name: `User ${inputs.userId}`,
@@ -68,14 +68,14 @@ class FetchUserNode extends NanoService<{ userId: string }> {
 /**
  * Transform node - transforms data for next step
  */
-class DataTransformNode extends NanoService<{ data: unknown; format: string }> {
+class DataTransformNode extends BlokService<{ data: unknown; format: string }> {
 	constructor() {
 		super();
 		this.name = "data-transform";
 	}
 
-	async handle(ctx: Context, inputs: { data: unknown; format: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { data: unknown; format: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		let transformed: unknown;
 		switch (inputs.format) {
@@ -104,14 +104,14 @@ class DataTransformNode extends NanoService<{ data: unknown; format: string }> {
 /**
  * Aggregator node - aggregates results from previous steps
  */
-class AggregatorNode extends NanoService<Record<string, never>> {
+class AggregatorNode extends BlokService<Record<string, never>> {
 	constructor() {
 		super();
 		this.name = "aggregator";
 	}
 
-	async handle(ctx: Context): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		// Read all vars from previous steps
 		const aggregated: Record<string, unknown> = {};
@@ -132,14 +132,14 @@ class AggregatorNode extends NanoService<Record<string, never>> {
 /**
  * Error node - conditionally fails for testing error propagation
  */
-class ConditionalErrorNode extends NanoService<{ failAfterStep: number }> {
+class ConditionalErrorNode extends BlokService<{ failAfterStep: number }> {
 	constructor() {
 		super();
 		this.name = "conditional-error";
 	}
 
-	async handle(ctx: Context, inputs: { failAfterStep: number }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { failAfterStep: number }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		const currentStep = ((ctx.vars?.["step-counter"] as number) || 0) + 1;
 
 		if (ctx.vars) {
@@ -409,7 +409,7 @@ describe("Multi-Runtime Workflow Integration Tests", () => {
 	describe("RuntimeAdapterNode Bridge", () => {
 		it("should bridge NodeJS adapter through RuntimeAdapterNode", async () => {
 			const fetchNode = new FetchUserNode();
-			// NanoService sets 'name', not 'node'. Ensure both are set for bridge.
+			// BlokService sets 'name', not 'node'. Ensure both are set for bridge.
 			(fetchNode as any).node = "fetch-user";
 
 			// The bridge wraps the adapter call

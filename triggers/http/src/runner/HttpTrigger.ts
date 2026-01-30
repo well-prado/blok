@@ -1,12 +1,12 @@
 import type { Server } from "node:http";
-import { type Step, Workflow } from "@nanoservice-ts/helper";
-import type { TriggerOpts } from "@nanoservice-ts/helper/dist/types/TriggerOpts";
-import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@nanoservice-ts/runner";
-import { TriggerBase } from "@nanoservice-ts/runner";
-import { NodeMap } from "@nanoservice-ts/runner";
-import { DefaultLogger } from "@nanoservice-ts/runner";
-import { registerTraceRoutes } from "@nanoservice-ts/runner";
-import { type Context, GlobalError, type RequestContext } from "@nanoservice-ts/shared";
+import { type Step, Workflow } from "@blok/helper";
+import type { TriggerOpts } from "@blok/helper/dist/types/TriggerOpts";
+import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blok/runner";
+import { TriggerBase } from "@blok/runner";
+import { NodeMap } from "@blok/runner";
+import { DefaultLogger } from "@blok/runner";
+import { registerTraceRoutes } from "@blok/runner";
+import { type Context, GlobalError, type RequestContext } from "@blok/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -129,7 +129,7 @@ export default class HttpTrigger extends TriggerBase {
 
 				let remoteNodeExecution = false;
 				let runtimeWorkflow: RuntimeWorkflow | undefined;
-				if (req.headers["x-nanoservice-execute-node"] === "true" && req.method.toLowerCase() === "post") {
+				if (req.headers["x-blok-execute-node"] === "true" && req.method.toLowerCase() === "post") {
 					remoteNodeExecution = true;
 					const coder = new MessageDecode();
 					const messageContext: Context = coder.requestDecode(req.body); // Collecting the context from the body

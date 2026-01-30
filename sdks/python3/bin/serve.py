@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the Blok nanoservice Python3 runtime server.
+"""Entry point for the Blok blok Python3 runtime server.
 
 Usage:
     python bin/serve.py
@@ -19,11 +19,11 @@ import os
 # Add the SDK root to the path so imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nanoservice.node.node_registry import NodeRegistry
-from nanoservice.server.runtime_server import RuntimeServer
-from nanoservice.config.server_config import ServerConfig
-from nanoservice.middleware.logging_middleware import logging_middleware
-from nanoservice.middleware.recovery_middleware import recovery_middleware
+from blok.node.node_registry import NodeRegistry
+from blok.server.runtime_server import RuntimeServer
+from blok.config.server_config import ServerConfig
+from blok.middleware.logging_middleware import logging_middleware
+from blok.middleware.recovery_middleware import recovery_middleware
 from examples import register_all
 
 

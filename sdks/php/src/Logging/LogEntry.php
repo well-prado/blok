@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Logging;
+namespace Blok\Blok\Logging;
 
 /**
  * LogEntry represents a single log entry.

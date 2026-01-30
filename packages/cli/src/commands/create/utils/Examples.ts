@@ -1,14 +1,14 @@
 const node_file = `
-import ApiCall from "@nanoservice-ts/api-call";
-import IfElse from "@nanoservice-ts/if-else";
-import type { NodeBase } from "@nanoservice-ts/shared";
+import ApiCall from "@blok/api-call";
+import IfElse from "@blok/if-else";
+import type { NodeBase } from "@blok/shared";
 import ExampleNodes from "./nodes/examples";
 
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@nanoservice-ts/api-call": new ApiCall(),
-	"@nanoservice-ts/if-else": new IfElse(),
+	"@blok/api-call": new ApiCall(),
+	"@blok/if-else": new IfElse(),
 	...ExampleNodes,
 };
 
@@ -29,21 +29,21 @@ const package_dev_dependencies = {
 };
 
 const python3_file = `
-from core.nanoservice import NanoService
+from core.blok import BlokService
 from core.types.context import Context
-from core.types.nanoservice_response import NanoServiceResponse
+from core.types.blok_response import BlokResponse
 from core.types.global_error import GlobalError
 from typing import Any, Dict
 import traceback
 
-class Node(NanoService):
+class Node(BlokService):
     def __init__(self):
-        NanoService.__init__(self)
+        BlokService.__init__(self)
         self.input_schema = {}
         self.output_schema = {}
 
-    async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> NanoServiceResponse:
-        response = NanoServiceResponse()
+    async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> BlokResponse:
+        response = BlokResponse()
 
         try:
             response.setSuccess({ "message": "Hello World from Python3!" })
@@ -114,7 +114,7 @@ stdout_logfile=/var/log/nodejs.out.log
 
 const supervisord_python = `
 [program:python_app]
-command=python3 /app/.nanoctl/runtimes/python3/server.py
+command=python3 /app/.blok/runtimes/python3/server.py
 directory=/app
 autostart=true
 autorestart=true
@@ -631,7 +631,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\
 CMD ["bundle", "exec", "puma", "-b", "tcp://0.0.0.0:8080"]
 `;
 
-const function_first_node_file = `import { defineNode } from "@nanoservice-ts/runner";
+const function_first_node_file = `import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 /**

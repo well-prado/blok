@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { HotReloadManager } from "@nanoservice-ts/runner";
+ * import { HotReloadManager } from "@blok/runner";
  *
  * const hmr = new HotReloadManager({
  *   nodePaths: ["./src/nodes"],

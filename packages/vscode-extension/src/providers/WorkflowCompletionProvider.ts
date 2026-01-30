@@ -9,7 +9,7 @@ import * as vscode from "vscode";
  * - Step types (local, module, runtime.*)
  * - Runtime kinds (nodejs, python3, go, java, rust, etc.)
  * - Queue/pubsub providers
- * - Common node packages (@nanoservice-ts/api-call, @nanoservice-ts/if-else)
+ * - Common node packages (@blok/api-call, @blok/if-else)
  * - Context variable patterns (ctx.request.*, ctx.response.*, ctx.vars.*)
  */
 export class WorkflowCompletionProvider implements vscode.CompletionItemProvider {
@@ -145,7 +145,7 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 
 	private createStepTypeCompletions(): vscode.CompletionItem[] {
 		const types = [
-			{ label: "module", docs: "Node from npm package (e.g., @nanoservice-ts/api-call)", priority: "1" },
+			{ label: "module", docs: "Node from npm package (e.g., @blok/api-call)", priority: "1" },
 			{ label: "local", docs: "Node defined locally in the project (e.g., ./nodes/my-node)", priority: "2" },
 			{ label: "runtime.nodejs", docs: "Execute using Node.js runtime adapter", priority: "3" },
 			{ label: "runtime.python3", docs: "Execute using Python 3 runtime adapter (via gRPC)", priority: "4" },
@@ -189,9 +189,9 @@ export class WorkflowCompletionProvider implements vscode.CompletionItemProvider
 
 	private createNodeCompletions(): vscode.CompletionItem[] {
 		const nodes = [
-			{ label: "@nanoservice-ts/api-call", docs: "HTTP API call node - makes requests to external services" },
-			{ label: "@nanoservice-ts/if-else", docs: "Conditional branching node - evaluates conditions for routing" },
-			{ label: "@nanoservice-ts/react", docs: "React SSR node - server-side rendering" },
+			{ label: "@blok/api-call", docs: "HTTP API call node - makes requests to external services" },
+			{ label: "@blok/if-else", docs: "Conditional branching node - evaluates conditions for routing" },
+			{ label: "@blok/react", docs: "React SSR node - server-side rendering" },
 		];
 
 		return nodes.map((n) => {

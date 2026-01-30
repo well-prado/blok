@@ -3,7 +3,7 @@
 require_relative "../test_helper"
 
 # Simple test node that returns configured data.
-class TestNode < Nanoservice::Node::NodeHandler
+class TestNode < Blok::Node::NodeHandler
   def initialize(data = { "ok" => true })
     super()
     @data = data
@@ -15,15 +15,15 @@ class TestNode < Nanoservice::Node::NodeHandler
 end
 
 # Node that raises an error.
-class ErrorNode < Nanoservice::Node::NodeHandler
+class ErrorNode < Blok::Node::NodeHandler
   def execute(_ctx, _config)
-    raise Nanoservice::Errors::NodeError.validation("bad input")
+    raise Blok::Errors::NodeError.validation("bad input")
   end
 end
 
 class NodeRegistryTest < Minitest::Test
   def setup
-    @registry = Nanoservice::Node::NodeRegistry.new("1.0.0")
+    @registry = Blok::Node::NodeRegistry.new("1.0.0")
   end
 
   def test_register_and_get
@@ -44,9 +44,9 @@ class NodeRegistryTest < Minitest::Test
   def test_execute_success
     @registry.register("test", TestNode.new({ "msg" => "hello" }))
 
-    ctx     = Nanoservice::Testing::MockContext.new.build
-    request = Nanoservice::Types::ExecutionRequest.new(
-      node:    Nanoservice::Types::NodeConfig.new(name: "test"),
+    ctx     = Blok::Testing::MockContext.new.build
+    request = Blok::Types::ExecutionRequest.new(
+      node:    Blok::Types::NodeConfig.new(name: "test"),
       context: ctx
     )
     result = @registry.execute(request)
@@ -58,9 +58,9 @@ class NodeRegistryTest < Minitest::Test
   end
 
   def test_execute_not_found
-    ctx     = Nanoservice::Testing::MockContext.new.build
-    request = Nanoservice::Types::ExecutionRequest.new(
-      node:    Nanoservice::Types::NodeConfig.new(name: "missing"),
+    ctx     = Blok::Testing::MockContext.new.build
+    request = Blok::Types::ExecutionRequest.new(
+      node:    Blok::Types::NodeConfig.new(name: "missing"),
       context: ctx
     )
     result = @registry.execute(request)
@@ -72,9 +72,9 @@ class NodeRegistryTest < Minitest::Test
   def test_execute_error_handling
     @registry.register("error", ErrorNode.new)
 
-    ctx     = Nanoservice::Testing::MockContext.new.build
-    request = Nanoservice::Types::ExecutionRequest.new(
-      node:    Nanoservice::Types::NodeConfig.new(name: "error"),
+    ctx     = Blok::Testing::MockContext.new.build
+    request = Blok::Types::ExecutionRequest.new(
+      node:    Blok::Types::NodeConfig.new(name: "error"),
       context: ctx
     )
     result = @registry.execute(request)
@@ -99,7 +99,7 @@ class NodeRegistryTest < Minitest::Test
 
   def test_middleware_applied
     log_entries = []
-    middleware = Class.new(Nanoservice::Middleware::Middleware) do
+    middleware = Class.new(Blok::Middleware::Middleware) do
       define_method(:initialize) do |entries|
         super()
         @entries = entries
@@ -119,9 +119,9 @@ class NodeRegistryTest < Minitest::Test
     @registry.use(middleware.new(log_entries))
     @registry.register("test", TestNode.new)
 
-    ctx     = Nanoservice::Testing::MockContext.new.build
-    request = Nanoservice::Types::ExecutionRequest.new(
-      node:    Nanoservice::Types::NodeConfig.new(name: "test"),
+    ctx     = Blok::Testing::MockContext.new.build
+    request = Blok::Types::ExecutionRequest.new(
+      node:    Blok::Types::NodeConfig.new(name: "test"),
       context: ctx
     )
     result = @registry.execute(request)

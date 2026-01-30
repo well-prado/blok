@@ -1,8 +1,8 @@
-import type { Context, NodeBase } from "@nanoservice-ts/shared";
+import type { Context, NodeBase } from "@blok/shared";
 import RunnerSteps from "./RunnerSteps";
 
 /**
- * Runner class that extends RunnerSteps to execute a series of NanoService steps.
+ * Runner class that extends RunnerSteps to execute a series of BlokService steps.
  */
 export default class Runner extends RunnerSteps {
 	private steps: NodeBase[];
@@ -10,7 +10,7 @@ export default class Runner extends RunnerSteps {
 	/**
 	 * Constructs a new Runner instance.
 	 *
-	 * @param steps - An array of NanoService steps to be executed.
+	 * @param steps - An array of BlokService steps to be executed.
 	 */
 	constructor(steps: NodeBase[] = []) {
 		super();
@@ -25,7 +25,7 @@ export default class Runner extends RunnerSteps {
 	}
 
 	/**
-	 * Executes the series of NanoService steps with the given context.
+	 * Executes the series of BlokService steps with the given context.
 	 *
 	 * @param ctx - The context to be passed through the steps.
 	 * @returns A promise that resolves to the final context after all steps have been executed.

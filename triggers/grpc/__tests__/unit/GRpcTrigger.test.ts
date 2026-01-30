@@ -39,7 +39,7 @@ vi.mock("../../src/Nodes", () => ({ default: {} }));
 vi.mock("../../src/Workflows", () => ({ default: {} }));
 
 // Mock runner — TriggerBase and other classes must be constructable
-vi.mock("@nanoservice-ts/runner", () => {
+vi.mock("@blok/runner", () => {
 	class MockNodeMap {
 		nodes: Record<string, any> = {};
 		addNode(key: string, val: any) {
@@ -88,7 +88,7 @@ vi.mock("@nanoservice-ts/runner", () => {
 });
 
 // Mock helper
-vi.mock("@nanoservice-ts/helper", () => ({
+vi.mock("@blok/helper", () => ({
 	Workflow: vi.fn().mockReturnValue({
 		addTrigger: vi.fn().mockReturnValue({
 			addStep: vi.fn().mockReturnValue({ name: "Remote Node", steps: [] }),
@@ -97,7 +97,7 @@ vi.mock("@nanoservice-ts/helper", () => ({
 }));
 
 // Mock shared — GlobalError must be a class
-vi.mock("@nanoservice-ts/shared", () => ({
+vi.mock("@blok/shared", () => ({
 	GlobalError: class GlobalError extends Error {
 		context: any;
 		constructor(message: string) {

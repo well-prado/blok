@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "../lib/nanoservice"
+require_relative "../lib/blok"
 
 # TransformDataNode transforms JSON data based on field mappings.
 #
@@ -12,11 +12,11 @@ require_relative "../lib/nanoservice"
 #
 # Input: Request body (must be a JSON object)
 # Output: Transformed JSON object
-class TransformDataNode < Nanoservice::Node::NodeHandler
+class TransformDataNode < Blok::Node::NodeHandler
   def execute(ctx, config)
     body = ctx.request.body
     unless body.is_a?(Hash)
-      raise Nanoservice::Errors::NodeError.validation("request body must be a JSON object")
+      raise Blok::Errors::NodeError.validation("request body must be a JSON object")
     end
 
     result = {}
@@ -74,9 +74,9 @@ end
 
 # ----- Boot the server if run directly -----
 if __FILE__ == $PROGRAM_NAME
-  registry = Nanoservice::Server::RuntimeApp.registry
+  registry = Blok::Server::RuntimeApp.registry
   registry.register("transform-data", TransformDataNode.new)
 
   puts "Starting TransformDataNode on port 8080..."
-  Nanoservice::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
+  Blok::Server::RuntimeApp.run!(port: 8080, bind: "0.0.0.0")
 end

@@ -5,8 +5,8 @@
  * All existing behavior is preserved.
  */
 
-import type { Condition, INanoServiceResponse, JsonLikeObject, ParamsDictionary } from "@nanoservice-ts/runner";
-import type { Context, NodeBase, ResponseContext } from "@nanoservice-ts/shared";
+import type { Condition, IBlokResponse, JsonLikeObject, ParamsDictionary } from "@blok/runner";
+import type { Context, NodeBase, ResponseContext } from "@blok/shared";
 import { describe, expect, it, vi } from "vitest";
 import IfElseNode from "../index";
 
@@ -74,7 +74,7 @@ describe("IfElse Node - Function-First", () => {
 		];
 
 		(mockContext.request as JsonLikeObject).method = "GET";
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		const steps = result.data as NodeBase[];
 		expect(steps[0].name).toEqual("step1");
 	});
@@ -98,7 +98,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		const steps = result.data as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});
@@ -112,7 +112,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		expect(result.success).toBe(false);
 		expect(result.error).toBeDefined();
 	});
@@ -131,7 +131,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		expect(result.success).toBe(false);
 		expect(result.error).toBeDefined();
 	});
@@ -161,7 +161,7 @@ describe("IfElse Node - Function-First", () => {
 		];
 
 		(mockContext.request as JsonLikeObject).method = "GET";
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		const steps = result.data as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});
@@ -185,7 +185,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as INanoServiceResponse;
+		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
 		const steps = result.data as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});

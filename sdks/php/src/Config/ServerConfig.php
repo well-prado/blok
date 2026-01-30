@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Config;
+namespace Blok\Blok\Config;
 
-use Blok\Nanoservice\Logging\LogLevel;
+use Blok\Blok\Logging\LogLevel;
 
 /**
  * ServerConfig holds server configuration loaded from environment variables.

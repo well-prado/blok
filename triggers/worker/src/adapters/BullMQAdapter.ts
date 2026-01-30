@@ -22,7 +22,7 @@
 
 import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 
-import type { WorkerTriggerOpts } from "@nanoservice-ts/helper";
+import type { WorkerTriggerOpts } from "@blok/helper";
 
 /**
  * BullMQ adapter configuration

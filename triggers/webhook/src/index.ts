@@ -1,5 +1,5 @@
 /**
- * @nanoservice-ts/trigger-webhook
+ * @blok/trigger-webhook
  *
  * Webhook trigger for Blok workflows.
  * Handle webhook events from external services.
@@ -18,7 +18,7 @@
  *
  * @example
  * ```typescript
- * import { WebhookTrigger } from "@nanoservice-ts/trigger-webhook";
+ * import { WebhookTrigger } from "@blok/trigger-webhook";
  *
  * class MyWebhookTrigger extends WebhookTrigger {
  *   protected nodes = myNodes;
@@ -53,7 +53,7 @@
  *
  * Custom Source Handler:
  * ```typescript
- * import { WebhookTrigger } from "@nanoservice-ts/trigger-webhook";
+ * import { WebhookTrigger } from "@blok/trigger-webhook";
  *
  * WebhookTrigger.registerSourceHandler("my-service", {
  *   getEventType: (headers, body) => body.event_type,
@@ -77,4 +77,4 @@ export {
 } from "./WebhookTrigger";
 
 // Re-export types from helper for convenience
-export type { WebhookTriggerOpts } from "@nanoservice-ts/helper";
+export type { WebhookTriggerOpts } from "@blok/helper";

@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Server;
+namespace Blok\Blok\Server;
 
-use Blok\Nanoservice\Config\ServerConfig;
-use Blok\Nanoservice\Node\NodeRegistry;
-use Blok\Nanoservice\Types\ExecutionRequest;
+use Blok\Blok\Config\ServerConfig;
+use Blok\Blok\Node\NodeRegistry;
+use Blok\Blok\Types\ExecutionRequest;
 use Psr\Http\Message\ServerRequestInterface;
 use React\Http\HttpServer;
 use React\Http\Message\Response as HttpResponse;
@@ -41,7 +41,7 @@ final class Server
         $server->listen($socket);
 
         echo sprintf(
-            "Blok nanoservice runtime v%s listening on %s\n",
+            "Blok blok runtime v%s listening on %s\n",
             $this->config->version,
             $address,
         );

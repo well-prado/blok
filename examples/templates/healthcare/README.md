@@ -155,9 +155,9 @@ DATA_RETENTION_DAYS, INTERNAL_API_KEY
 
 1. Copy the desired workflow JSON files into your project's `workflows/json/` directory.
 2. Set the required environment variables in your `.env` file. Pay special attention to encryption keys and API credentials.
-3. Install the required nanoservice modules:
+3. Install the required blok modules:
    ```bash
-   npx blok install @nanoservice-ts/api-call @nanoservice-ts/if-else @nanoservice-ts/json-validator
+   npx blok install @blok/api-call @blok/if-else @blok/json-validator
    ```
 4. Start the Blok runtime:
    ```bash

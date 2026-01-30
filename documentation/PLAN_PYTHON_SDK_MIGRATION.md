@@ -42,7 +42,7 @@ Create the following structure mirroring the other SDKs:
 sdks/python3/
 ├── bin/
 │   └── serve.py                   # Entry point — starts HTTP server
-├── nanoservice/
+├── blok/
 │   ├── __init__.py
 │   ├── server/
 │   │   ├── __init__.py
@@ -97,7 +97,7 @@ GET /health
 **Key reference files to match the contract:**
 
 - `core/runner/src/adapters/HttpRuntimeAdapter.ts` — The adapter that will communicate with Python (lines 60-130 define the request/response format)
-- Any existing SDK server as a pattern to follow (e.g., `sdks/go/server.go` or `sdks/ruby/lib/nanoservice/server/runtime_app.rb`)
+- Any existing SDK server as a pattern to follow (e.g., `sdks/go/server.go` or `sdks/ruby/lib/blok/server/runtime_app.rb`)
 
 ### Step 2: Migrate Existing Python Nodes
 
@@ -105,8 +105,8 @@ Move the existing node implementations from `runtimes/python3/nodes/` to `sdks/p
 
 **Current (gRPC-era):**
 ```python
-class ChainTest(NanoService):
-    async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> NanoServiceResponse:
+class ChainTest(BlokService):
+    async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> BlokResponse:
         # Node logic...
         response.setSuccess(data)
         return response
@@ -130,7 +130,7 @@ class ChainTestNode(NodeHandler):
         )
 ```
 
-The key difference: the new `NodeHandler` receives `ExecutionRequest` (the full HTTP JSON body) and returns `ExecutionResult` (the full HTTP JSON response). No more `NanoService.process()` → `blueprintMapper` → `handle()` chain — that mapping happens in the **runner** before the HTTP call.
+The key difference: the new `NodeHandler` receives `ExecutionRequest` (the full HTTP JSON body) and returns `ExecutionResult` (the full HTTP JSON response). No more `BlokService.process()` → `blueprintMapper` → `handle()` chain — that mapping happens in the **runner** before the HTTP call.
 
 ### Step 3: Update Runner Configuration
 
@@ -270,7 +270,7 @@ ENTRYPOINT ["python", "bin/serve.py"]
 
 9. **`runtimes/python3/server.py`** — Current gRPC server entry point. Must be replaced with HTTP.
 10. **`runtimes/python3/runner.py`** — Current node executor. The HTTP SDK eliminates this — the runner does this work now.
-11. **`runtimes/python3/core/nanoservice.py`** — Current base class for Python nodes (NanoService). The new SDK will have a simpler `NodeHandler` base class.
+11. **`runtimes/python3/core/blok.py`** — Current base class for Python nodes (BlokService). The new SDK will have a simpler `NodeHandler` base class.
 12. **`runtimes/python3/core/node_base.py`** — Current NodeBase with `process()` and `blueprintMapper()`. The new SDK doesn't need this — the runner's Mapper handles it before the HTTP call.
 13. **`runtimes/python3/core/types/context.py`** — Current Context type. Must match the JSON Context format from `HttpRuntimeAdapter`.
 14. **`runtimes/python3/core/types/response.py`** — Current ResponseContext type. Replaced by `ExecutionResult`.
@@ -303,9 +303,9 @@ ENTRYPOINT ["python", "bin/serve.py"]
 
 ### Understand other SDK implementations (secondary references):
 
-29. **`sdks/ruby/lib/nanoservice/server/runtime_app.rb`** — Ruby HTTP server (Sinatra). Good reference because Python's Flask is similar to Sinatra.
+29. **`sdks/ruby/lib/blok/server/runtime_app.rb`** — Ruby HTTP server (Sinatra). Good reference because Python's Flask is similar to Sinatra.
 30. **`sdks/php/src/Server/Server.php`** — PHP HTTP server (ReactPHP). Shows async event-loop server pattern.
-31. **`sdks/java/src/main/java/com/blok/nanoservice/server/RuntimeServer.java`** — Java HTTP server. Shows middleware pattern.
+31. **`sdks/java/src/main/java/com/blok/blok/server/RuntimeServer.java`** — Java HTTP server. Shows middleware pattern.
 
 ---
 
@@ -328,10 +328,10 @@ ENTRYPOINT ["python", "bin/serve.py"]
 | Server framework | grpc.aio (asyncio) | aiohttp or Flask |
 | Default port | 50051 | 9007 (8080 internal) |
 | Runner adapter | `Python3RuntimeAdapter` (custom) | `HttpRuntimeAdapter` (shared) |
-| Node base class | `NanoService` (with blueprintMapper) | `NodeHandler` (simple execute) |
+| Node base class | `BlokService` (with blueprintMapper) | `NodeHandler` (simple execute) |
 | Container | Optional / manual | Required (Docker, like all other SDKs) |
 | Dependencies (runner-side) | `@grpc/grpc-js`, proto files | None (uses fetch) |
-| Node interface | `handle(ctx, inputs)` → `NanoServiceResponse` | `execute(request)` → `ExecutionResult` |
+| Node interface | `handle(ctx, inputs)` → `BlokResponse` | `execute(request)` → `ExecutionResult` |
 
 ---
 

@@ -8,18 +8,23 @@
 	"engines": {
 		"vscode": "^1.85.0"
 	},
-	"categories": ["Programming Languages", "Snippets", "Linters", "Other"],
+	"categories": [
+		"Programming Languages",
+		"Snippets",
+		"Linters",
+		"Other"
+	],
 	"keywords": [
 		"blok",
-		"nanoservice",
+		"blok",
 		"workflow",
 		"orchestration",
 		"typescript"
 	],
 	"activationEvents": [
 		"workspaceContains:**/workflows/**/*.json",
-		"workspaceContains:**/nanoservice.json",
-		"workspaceContains:**/nanoctl.config.*"
+		"workspaceContains:**/blok.json",
+		"workspaceContains:**/blokctl.config.*"
 	],
 	"main": "./dist/extension.js",
 	"icon": "images/blok-icon.png",
@@ -102,8 +107,13 @@
 		"languages": [
 			{
 				"id": "blok-workflow",
-				"aliases": ["Blok Workflow"],
-				"filenamePatterns": ["**/workflows/**/*.json", "*.workflow.json"],
+				"aliases": [
+					"Blok Workflow"
+				],
+				"filenamePatterns": [
+					"**/workflows/**/*.json",
+					"*.workflow.json"
+				],
 				"configuration": "../syntax/language-configuration.json"
 			}
 		],
@@ -116,7 +126,9 @@
 			{
 				"scopeName": "source.blok-workflow",
 				"path": "../syntax/syntaxes/blok-workflow.tmLanguage.json",
-				"injectTo": ["source.json"]
+				"injectTo": [
+					"source.json"
+				]
 			}
 		],
 		"snippets": [
@@ -138,10 +150,10 @@
 		"configuration": {
 			"title": "Blok",
 			"properties": {
-				"blok.nanoctlPath": {
+				"blok.blokctlPath": {
 					"type": "string",
-					"default": "nanoctl",
-					"description": "Path to the nanoctl CLI binary"
+					"default": "blokctl",
+					"description": "Path to the blokctl CLI binary"
 				},
 				"blok.workflowGlob": {
 					"type": "string",
@@ -155,7 +167,10 @@
 				},
 				"blok.aiProvider": {
 					"type": "string",
-					"enum": ["openai", "anthropic"],
+					"enum": [
+						"openai",
+						"anthropic"
+					],
 					"default": "openai",
 					"description": "AI provider for code generation"
 				}

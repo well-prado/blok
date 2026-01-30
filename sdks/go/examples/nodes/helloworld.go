@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"time"
 
-	nanoservice "github.com/nickincloud/nanoservice-go"
+	blok "github.com/nickincloud/blok-go"
 )
 
 // HelloWorldNode is a simple example node that greets the user.
 type HelloWorldNode struct{}
 
 // Execute processes the hello-world node.
-func (n *HelloWorldNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *HelloWorldNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	// Get name from request body, default to "World"
 	name := "World"
 	if body := ctx.Request.BodyMap(); body != nil {

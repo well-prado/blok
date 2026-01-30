@@ -94,26 +94,26 @@ Important details from Python side:
 
 ## 2. How nodes use `Context` in TypeScript
 
-The canonical code example for node usage of `Context` is the conceptual node in `docs/d/introduction/context.mdx`. Even though it’s in docs, it’s real TS code and matches how `NanoService`‑based nodes behave. [5]
+The canonical code example for node usage of `Context` is the conceptual node in `docs/d/introduction/context.mdx`. Even though it’s in docs, it’s real TS code and matches how `BlokService`‑based nodes behave. [5]
 
 ```ts
 // conceptual example of a Node using Context
-import { type INanoServiceResponse, NanoService, NanoServiceResponse } from "@nanoservice-ts/runner";
-import { type Context, GlobalError } from "@nanoservice-ts/shared";
+import { type IBlokResponse, BlokService, BlokResponse } from "@blok/runner";
+import { type Context, GlobalError } from "@blok/shared";
 
 type InputType = {
   message?: string;
 };
 
-export default class Node extends NanoService<InputType> {
+export default class Node extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {};
     this.outputSchema = {};
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
 
     try {
       // 1. Get data from the request via context
@@ -181,7 +181,7 @@ The most complete workflow example is `triggers/http/workflows/json/workflow-doc
   "steps": [
     {
       "name": "filter-request",
-      "node": "@nanoservice-ts/if-else",
+      "node": "@blok/if-else",
       "type": "module"
     }
   ],
@@ -256,9 +256,9 @@ This mirrors the JSON structure of `workflow-docs.json`. [30][25]
 
 ---
 
-## 4. Conditional workflows via `@nanoservice-ts/if-else` (with `ctx`)
+## 4. Conditional workflows via `@blok/if-else` (with `ctx`)
 
-The `filter-request` node in `workflow-docs.json` is a **router** built with a single `@nanoservice-ts/if-else` node. [30][25]
+The `filter-request` node in `workflow-docs.json` is a **router** built with a single `@blok/if-else` node. [30][25]
 
 ### 4.1. Conditions structure
 
@@ -535,7 +535,7 @@ export const workflowDocsConfig: WorkflowConfig = {
   steps: [
     {
       name: "filter-request",
-      node: "@nanoservice-ts/if-else",
+      node: "@blok/if-else",
       type: "module",
     },
   ],
@@ -641,9 +641,9 @@ This is **exactly** the JSON from `workflow-docs.json` but as a typed TS object,
    - For HTTP workflows, use `{ http: { method, path, accept } }`. [30]  
    - Make sure `path` parameters like `/:function?` are consistent with how you reference `ctx.request.params.function` in conditions. [30][25][32]  
 3. **Steps**:
-   - `steps` is an ordered array of entry steps; most HTTP flows start with a single router node like `@nanoservice-ts/if-else`. [30][25]  
+   - `steps` is an ordered array of entry steps; most HTTP flows start with a single router node like `@blok/if-else`. [30][25]  
 4. **Conditional routing**:
-   - Use `@nanoservice-ts/if-else` with `conditions: IfElseCondition[]`. [30][25]  
+   - Use `@blok/if-else` with `conditions: IfElseCondition[]`. [30][25]  
    - Conditions must be valid JS expressions referencing real `ctx` fields (e.g. `ctx.request.method`, `ctx.request.params`, `ctx.request.query`, `ctx.vars`). [25][5][10][32]  
    - Provide a final `"else"` branch with a fallback (e.g. `method-not-allowed`). [25]  
 5. **Node configs**:
@@ -655,7 +655,7 @@ This is **exactly** the JSON from `workflow-docs.json` but as a typed TS object,
 
 If you want, next I can:
 
-- Draft a **system prompt just for TS workflow generation** (like we did for `defineNode`) that tells Claude: “Given a description, emit a `WorkflowConfig` TypeScript module like `workflow-docs.ts` using correct `ctx` usage and `@nanoservice-ts/if-else` patterns,” grounded in this exact example. [30][25][32]
+- Draft a **system prompt just for TS workflow generation** (like we did for `defineNode`) that tells Claude: “Given a description, emit a `WorkflowConfig` TypeScript module like `workflow-docs.ts` using correct `ctx` usage and `@blok/if-else` patterns,” grounded in this exact example. [30][25][32]
 
 ---
 *Exported from Tetrix AI Space*

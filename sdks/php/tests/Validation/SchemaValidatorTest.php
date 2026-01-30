@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Tests\Validation;
+namespace Blok\Blok\Tests\Validation;
 
-use Blok\Nanoservice\Validation\SchemaValidator;
+use Blok\Blok\Validation\SchemaValidator;
 use PHPUnit\Framework\TestCase;
 
 final class SchemaValidatorTest extends TestCase

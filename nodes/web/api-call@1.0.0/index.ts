@@ -8,8 +8,8 @@
  * Migrated: ~40 lines, 60% less code, fully type-safe
  */
 
-import { defineNode } from "@nanoservice-ts/runner";
-import type { JsonLikeObject } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
+import type { JsonLikeObject } from "@blok/runner";
 import { z } from "zod";
 import { runApiCall } from "./util";
 

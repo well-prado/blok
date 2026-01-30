@@ -118,7 +118,7 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	if (!healthy) {
 		s.stop(color.yellow("Backend not reachable"));
 		p.log.warn(
-			`Blok backend not found at ${color.cyan(backendUrl)}\n` + `  Start it first: ${color.cyan("nanoctl dev")}`,
+			`Blok backend not found at ${color.cyan(backendUrl)}\n` + `  Start it first: ${color.cyan("blokctl dev")}`,
 		);
 		p.log.info("Starting Studio anyway — it will connect when the backend is up.");
 	} else {

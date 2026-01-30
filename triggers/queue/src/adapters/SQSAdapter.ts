@@ -13,7 +13,7 @@
  * - SQS_VISIBILITY_TIMEOUT: Visibility timeout in seconds (default: 30)
  */
 
-import type { QueueTriggerOpts } from "@nanoservice-ts/helper";
+import type { QueueTriggerOpts } from "@blok/helper";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 

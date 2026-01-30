@@ -41,7 +41,7 @@ Demonstrates:
 - Type-safe inputs and outputs
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -86,7 +86,7 @@ Demonstrates:
 Function-first nodes work seamlessly with existing workflows:
 
 ```typescript
-import { WorkflowConfig } from "@nanoservice-ts/helper";
+import { WorkflowConfig } from "@blok/helper";
 import FetchUser from "./nodes/fetch-user-node";
 import ApiCall from "./nodes/api-call-node";
 
@@ -144,7 +144,7 @@ async execute(ctx, input) {
 
 **Before** (Class-Based):
 ```typescript
-export default class MyNode extends NanoService<InputType> {
+export default class MyNode extends BlokService<InputType> {
   constructor() {
     super();
     this.inputSchema = {
@@ -162,8 +162,8 @@ export default class MyNode extends NanoService<InputType> {
     };
   }
 
-  async handle(ctx: Context, inputs: InputType): Promise<INanoServiceResponse> {
-    const response: NanoServiceResponse = new NanoServiceResponse();
+  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
+    const response: BlokResponse = new BlokResponse();
     try {
       const user = await fetchUser(inputs.userId);
       response.setSuccess({ user });
@@ -321,7 +321,7 @@ const UpdateUserInput = UserSchema.partial();
 Testing function-first nodes is simple:
 
 ```typescript
-import { defineNode } from "@nanoservice-ts/runner";
+import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
 const MyNode = defineNode({

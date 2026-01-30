@@ -1,13 +1,13 @@
-# nanoservice-go
+# blok-go
 
-Go SDK for the Blok nanoservice workflow orchestration framework.
+Go SDK for the Blok blok workflow orchestration framework.
 
 Build workflow nodes in Go that integrate with the Blok runner via HTTP.
 
 ## Installation
 
 ```bash
-go get github.com/nickincloud/nanoservice-go
+go get github.com/nickincloud/blok-go
 ```
 
 ## Quick Start
@@ -17,12 +17,12 @@ package main
 
 import (
     "log"
-    nanoservice "github.com/nickincloud/nanoservice-go"
+    blok "github.com/nickincloud/blok-go"
 )
 
 type GreetNode struct{}
 
-func (n *GreetNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *GreetNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
     name := "World"
     if body := ctx.Request.BodyMap(); body != nil {
         if v, ok := body["name"].(string); ok {
@@ -33,10 +33,10 @@ func (n *GreetNode) Execute(ctx *nanoservice.Context, config map[string]interfac
 }
 
 func main() {
-    registry := nanoservice.NewNodeRegistry()
+    registry := blok.NewNodeRegistry()
     registry.Register("greet", &GreetNode{})
 
-    if err := nanoservice.ListenAndServe(registry); err != nil {
+    if err := blok.ListenAndServe(registry); err != nil {
         log.Fatal(err)
     }
 }
@@ -55,8 +55,8 @@ type NodeHandler interface {
 Or use a function directly:
 
 ```go
-registry.Register("echo", nanoservice.NodeHandlerFunc(
-    func(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+registry.Register("echo", blok.NodeHandlerFunc(
+    func(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
         return ctx.Request.Body, nil
     },
 ))
@@ -82,13 +82,13 @@ Environment variables:
 Add cross-cutting behavior to all node executions:
 
 ```go
-registry := nanoservice.NewNodeRegistry()
+registry := blok.NewNodeRegistry()
 
-logger := nanoservice.NewLogger(nanoservice.LogLevelInfo)
+logger := blok.NewLogger(blok.LogLevelInfo)
 registry.Use(
-    nanoservice.RecoveryMiddleware(),
-    nanoservice.LoggingMiddleware(logger),
-    nanoservice.TimeoutMiddleware(5 * time.Second),
+    blok.RecoveryMiddleware(),
+    blok.LoggingMiddleware(logger),
+    blok.TimeoutMiddleware(5 * time.Second),
 )
 ```
 
@@ -101,9 +101,9 @@ Built-in middleware:
 Custom middleware:
 
 ```go
-func MyMiddleware() nanoservice.Middleware {
-    return func(next nanoservice.NodeHandler) nanoservice.NodeHandler {
-        return nanoservice.NodeHandlerFunc(func(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func MyMiddleware() blok.Middleware {
+    return func(next blok.NodeHandler) blok.NodeHandler {
+        return blok.NodeHandlerFunc(func(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
             // Before execution
             result, err := next.Execute(ctx, config)
             // After execution
@@ -120,7 +120,7 @@ Implement `ValidatedNodeHandler` to add schema validation:
 ```go
 type MyNode struct{}
 
-func (n *MyNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *MyNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
     // Input is already validated at this point
     return map[string]string{"status": "ok"}, nil
 }
@@ -145,16 +145,16 @@ func (n *MyNode) OutputSchema() map[string]interface{} {
 
 ```go
 func TestMyNode(t *testing.T) {
-    runner := nanoservice.NewTestNodeRunner()
+    runner := blok.NewTestNodeRunner()
     runner.Register("my-node", &MyNode{})
 
-    ctx := nanoservice.NewMockContext().
+    ctx := blok.NewMockContext().
         WithBody(map[string]interface{}{"name": "Test"}).
         Build()
 
     result := runner.Execute("my-node", ctx, nil)
 
-    data, err := nanoservice.AssertSuccess(result)
+    data, err := blok.AssertSuccess(result)
     if err != nil {
         t.Fatal(err)
     }
@@ -168,19 +168,19 @@ func TestMyNode(t *testing.T) {
 Use structured errors for clear error categorization:
 
 ```go
-func (n *MyNode) Execute(ctx *nanoservice.Context, config map[string]interface{}) (interface{}, error) {
+func (n *MyNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
     url, ok := config["url"].(string)
     if !ok {
-        return nil, nanoservice.NewConfigurationError("'url' is required in config")
+        return nil, blok.NewConfigurationError("'url' is required in config")
     }
 
     resp, err := http.Get(url)
     if err != nil {
-        return nil, nanoservice.NewNetworkError("API request failed", err)
+        return nil, blok.NewNetworkError("API request failed", err)
     }
 
     if resp.StatusCode == 404 {
-        return nil, nanoservice.NewNotFoundError("resource not found")
+        return nil, blok.NewNotFoundError("resource not found")
     }
 
     return data, nil
@@ -195,12 +195,12 @@ Error categories: `VALIDATION`, `EXECUTION`, `CONFIGURATION`, `NETWORK`, `NOT_FO
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN CGO_ENABLED=0 go build -o /nanoservice ./cmd/server
+RUN CGO_ENABLED=0 go build -o /blok ./cmd/server
 
 FROM alpine:3.19
-COPY --from=builder /nanoservice /app/nanoservice
+COPY --from=builder /blok /app/blok
 EXPOSE 8080
-ENTRYPOINT ["/app/nanoservice"]
+ENTRYPOINT ["/app/blok"]
 ```
 
 ## HTTP Endpoints

@@ -1,4 +1,4 @@
-import type { JsonLikeObject } from "@nanoservice-ts/runner";
+import type { JsonLikeObject } from "@blok/runner";
 
 export default class InMemory {
 	protected static _instance: InMemory;

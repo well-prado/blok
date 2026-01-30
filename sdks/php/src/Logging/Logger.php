@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Blok\Nanoservice\Logging;
+namespace Blok\Blok\Logging;
 
 /**
  * Logger captures log entries for inclusion in ExecutionResult.logs.

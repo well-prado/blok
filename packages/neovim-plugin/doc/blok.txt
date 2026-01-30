@@ -65,9 +65,9 @@ Call `require("blok").setup(opts)` with any of these options:
 
 The plugin provides keymaps that invoke the Blok CLI:
 
-- `nanoctl graph --format ascii`  - Dependency graph visualization
-- `nanoctl profile --format table` - Performance profiling
-- `nanoctl cost --format table`   - Cost estimation
+- `blokctl graph --format ascii`  - Dependency graph visualization
+- `blokctl profile --format table` - Performance profiling
+- `blokctl cost --format table`   - Cost estimation
 
 ==============================================================================
 5. KEYMAPS                                                   *blok-keymaps*

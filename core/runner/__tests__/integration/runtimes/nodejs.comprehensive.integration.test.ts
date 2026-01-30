@@ -10,11 +10,11 @@
  * 6. ✅ Performance (< 1ms overhead)
  */
 
-import type { Context } from "@nanoservice-ts/shared";
-import { GlobalError } from "@nanoservice-ts/shared";
+import type { Context } from "@blok/shared";
+import { GlobalError } from "@blok/shared";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import NanoService from "../../../src/NanoService";
-import NanoServiceResponse, { type INanoServiceResponse } from "../../../src/NanoServiceResponse";
+import BlokService from "../../../src/Blok";
+import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";
 import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter";
 
@@ -25,7 +25,7 @@ import { NodeJsRuntimeAdapter } from "../../../src/adapters/NodeJsRuntimeAdapter
 /**
  * Simple echo node - returns input as output
  */
-class EchoNode extends NanoService<{ message: string }> {
+class EchoNode extends BlokService<{ message: string }> {
 	constructor() {
 		super();
 		this.name = "echo-node";
@@ -44,8 +44,8 @@ class EchoNode extends NanoService<{ message: string }> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: { message: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { message: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		response.setSuccess({ echo: inputs.message });
 		return response;
 	}
@@ -54,7 +54,7 @@ class EchoNode extends NanoService<{ message: string }> {
 /**
  * Context vars node - reads from and writes to ctx.vars
  */
-class ContextVarsNode extends NanoService<{ input: string }> {
+class ContextVarsNode extends BlokService<{ input: string }> {
 	constructor() {
 		super();
 		this.name = "context-vars-node";
@@ -73,8 +73,8 @@ class ContextVarsNode extends NanoService<{ input: string }> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: { input: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { input: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		// Read from ctx.vars
 		const previousValue = ctx.vars?.["shared-value"] || "none";
@@ -96,7 +96,7 @@ class ContextVarsNode extends NanoService<{ input: string }> {
 /**
  * Environment node - reads from ctx.env
  */
-class EnvNode extends NanoService<Record<string, never>> {
+class EnvNode extends BlokService<Record<string, never>> {
 	constructor() {
 		super();
 		this.name = "env-node";
@@ -113,8 +113,8 @@ class EnvNode extends NanoService<Record<string, never>> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: Record<string, never>): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: Record<string, never>): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		response.setSuccess({
 			envValue: ctx.env?.TEST_INTEGRATION_VAR || "not-found",
@@ -127,7 +127,7 @@ class EnvNode extends NanoService<Record<string, never>> {
 /**
  * Error node - throws an error conditionally
  */
-class ErrorNode extends NanoService<{ shouldError: boolean }> {
+class ErrorNode extends BlokService<{ shouldError: boolean }> {
 	constructor() {
 		super();
 		this.name = "error-node";
@@ -145,8 +145,8 @@ class ErrorNode extends NanoService<{ shouldError: boolean }> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: { shouldError: boolean }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { shouldError: boolean }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		if (inputs.shouldError) {
 			const error = new GlobalError("Test error occurred");
@@ -165,7 +165,7 @@ class ErrorNode extends NanoService<{ shouldError: boolean }> {
 /**
  * Transform node - transforms input string to uppercase
  */
-class TransformNode extends NanoService<{ text: string }> {
+class TransformNode extends BlokService<{ text: string }> {
 	constructor() {
 		super();
 		this.name = "transform-node";
@@ -183,8 +183,8 @@ class TransformNode extends NanoService<{ text: string }> {
 		};
 	}
 
-	async handle(ctx: Context, inputs: { text: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { text: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 		response.setSuccess({
 			transformed: inputs.text.toUpperCase(),
 		});
@@ -195,7 +195,7 @@ class TransformNode extends NanoService<{ text: string }> {
 /**
  * Math node - performs arithmetic operations
  */
-class MathNode extends NanoService<{ a: number; b: number; operation: string }> {
+class MathNode extends BlokService<{ a: number; b: number; operation: string }> {
 	constructor() {
 		super();
 		this.name = "math-node";
@@ -215,8 +215,8 @@ class MathNode extends NanoService<{ a: number; b: number; operation: string }> 
 		};
 	}
 
-	async handle(ctx: Context, inputs: { a: number; b: number; operation: string }): Promise<INanoServiceResponse> {
-		const response = new NanoServiceResponse();
+	async handle(ctx: Context, inputs: { a: number; b: number; operation: string }): Promise<IBlokResponse> {
+		const response = new BlokResponse();
 
 		let result: number;
 		switch (inputs.operation) {
@@ -464,13 +464,13 @@ describe("NodeJS Runtime Adapter - Comprehensive Tests", () => {
 		});
 
 		it("should capture unexpected errors", async () => {
-			class ThrowingNode extends NanoService<Record<string, never>> {
+			class ThrowingNode extends BlokService<Record<string, never>> {
 				constructor() {
 					super();
 					this.name = "throwing-node";
 				}
 
-				async handle(): Promise<INanoServiceResponse> {
+				async handle(): Promise<IBlokResponse> {
 					throw new Error("Unexpected runtime error");
 				}
 			}

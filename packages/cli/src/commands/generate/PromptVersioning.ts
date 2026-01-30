@@ -39,7 +39,7 @@ export const PROMPT_VERSIONS: PromptRegistry = {
 	"create-node": {
 		id: "create-node",
 		version: "1.0.0",
-		changelog: "Class-based NanoService pattern with GlobalError handling",
+		changelog: "Class-based BlokService pattern with GlobalError handling",
 		createdAt: "2026-01-27T00:00:00Z",
 		contentHash: "",
 	},

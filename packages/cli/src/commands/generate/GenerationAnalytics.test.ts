@@ -423,7 +423,7 @@ describe("GenerationAnalytics", () => {
 				success: false,
 				attempts: 3,
 				durationMs: 5000,
-				errors: ['TS2304: Cannot find name "defineNode"', "TS2307: Cannot find module '@nanoservice-ts/runner'"],
+				errors: ['TS2304: Cannot find name "defineNode"', "TS2307: Cannot find module '@blok/runner'"],
 				promptVersion: "v1",
 			});
 			analytics.recordEvent({

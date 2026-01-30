@@ -1,62 +1,62 @@
-# @nanoservice-ts/react
+# @blok/react
 
 ## 0.0.17
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.26
+  - @blok/runner@0.1.26
 
 ## 0.0.16
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.25
+  - @blok/runner@0.1.25
 
 ## 0.0.15
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.24
+  - @blok/runner@0.1.24
 
 ## 0.0.14
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.23
+  - @blok/runner@0.1.23
 
 ## 0.0.13
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.22
+  - @blok/runner@0.1.22
 
 ## 0.0.12
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.21
+  - @blok/runner@0.1.21
 
 ## 0.0.11
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/helper@0.1.5
-  - @nanoservice-ts/runner@0.1.20
+  - @blok/helper@0.1.5
+  - @blok/runner@0.1.20
 
 ## 0.0.10
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.19
-  - @nanoservice-ts/shared@0.0.9
+  - @blok/runner@0.1.19
+  - @blok/shared@0.0.9
 
 ## 0.0.9
 
@@ -64,15 +64,15 @@
 
 - Added examples and create project' command to include examples and 'create node' command with options for type ('module' or 'class') and template ('class' or 'ui')
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.18
-  - @nanoservice-ts/shared@0.0.8
+  - @blok/runner@0.1.18
+  - @blok/shared@0.0.8
 
 ## 0.0.8
 
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.17
+  - @blok/runner@0.1.17
 
 ## 0.0.7
 
@@ -80,17 +80,17 @@
 
 - Added support for YAML, XML and TOML in the workflow file. Upgraded package version recommended by Dependabot.
 - Updated dependencies
-  - @nanoservice-ts/helper@0.1.4
-  - @nanoservice-ts/runner@0.1.16
-  - @nanoservice-ts/shared@0.0.7
+  - @blok/helper@0.1.4
+  - @blok/runner@0.1.16
+  - @blok/shared@0.0.7
 
 ## 0.0.6
 
 ### Patch Changes
 
-- Improved the NanoService base class to accept a InputType. This force developer to always create a type to define the Node handle input. Added unit test for pending projects like if-else and api-call.
+- Improved the BlokService base class to accept a InputType. This force developer to always create a type to define the Node handle input. Added unit test for pending projects like if-else and api-call.
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.15
+  - @blok/runner@0.1.15
 
 ## 0.0.5
 
@@ -103,8 +103,8 @@
 ### Patch Changes
 
 - Updated dependencies
-  - @nanoservice-ts/shared@0.0.6
-  - @nanoservice-ts/runner@0.1.14
+  - @blok/shared@0.0.6
+  - @blok/runner@0.1.14
 
 ## 0.0.3
 
@@ -124,5 +124,5 @@
 
 - Implemented a react node and the chatbot demo page
 - Updated dependencies
-  - @nanoservice-ts/runner@0.1.13
-  - @nanoservice-ts/shared@0.0.5
+  - @blok/runner@0.1.13
+  - @blok/shared@0.0.5

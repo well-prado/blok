@@ -1,4 +1,4 @@
-import { NANOSERVICE_URL } from "./constants.js";
+import { BLOK_URL } from "./constants.js";
 
 export default class RegistryManager {
 	private registry: string;
@@ -16,7 +16,7 @@ export default class RegistryManager {
 	}
 
 	async getRegistryToken(accessToken: string) {
-		const response = await fetch(`${NANOSERVICE_URL}/repository-token`, {
+		const response = await fetch(`${BLOK_URL}/repository-token`, {
 			method: "GET",
 			headers: {
 				Authorization: `Bearer ${accessToken}`,

@@ -28,7 +28,7 @@ export interface ProjectRuntimeConfig {
  * Setup a single runtime SDK in the project directory.
  *
  * This follows the existing Python3 pattern from project.ts:
- * 1. Copy SDK source to .nanoctl/runtimes/{language}/
+ * 1. Copy SDK source to .blok/runtimes/{language}/
  * 2. Create runtimes/{language}/nodes/ for user nodes
  * 3. Symlink shared code between SDK and project
  * 4. Install dependencies
@@ -40,7 +40,7 @@ export async function setupRuntime(
 	spinner: SpinnerHandler,
 ): Promise<RuntimeConfig> {
 	const sdkSourcePath = path.join(githubRepoLocal, "sdks", runtime.sdkDir);
-	const nanoctlRuntimeDir = path.join(projectDir, ".nanoctl", "runtimes", runtime.kind);
+	const blokctlRuntimeDir = path.join(projectDir, ".blok", "runtimes", runtime.kind);
 	const projectRuntimeDir = path.join(projectDir, "runtimes", runtime.kind);
 
 	// Verify SDK source exists in cloned repo
@@ -52,9 +52,9 @@ export async function setupRuntime(
 
 	spinner.message(`Setting up ${runtime.label} runtime...`);
 
-	// 1. Copy SDK source to .nanoctl/runtimes/{language}/
-	fsExtra.ensureDirSync(path.dirname(nanoctlRuntimeDir));
-	fsExtra.copySync(sdkSourcePath, nanoctlRuntimeDir);
+	// 1. Copy SDK source to .blok/runtimes/{language}/
+	fsExtra.ensureDirSync(path.dirname(blokctlRuntimeDir));
+	fsExtra.copySync(sdkSourcePath, blokctlRuntimeDir);
 
 	// 2. Create project-level runtimes directory for user nodes
 	fsExtra.ensureDirSync(projectRuntimeDir);
@@ -64,25 +64,25 @@ export async function setupRuntime(
 	// 3. Language-specific setup
 	switch (runtime.kind) {
 		case "python3":
-			await setupPython3(nanoctlRuntimeDir, projectRuntimeDir, spinner);
+			await setupPython3(blokctlRuntimeDir, projectRuntimeDir, spinner);
 			break;
 		case "go":
-			await setupGo(nanoctlRuntimeDir, spinner);
+			await setupGo(blokctlRuntimeDir, spinner);
 			break;
 		case "rust":
-			await setupRust(nanoctlRuntimeDir, spinner);
+			await setupRust(blokctlRuntimeDir, spinner);
 			break;
 		case "java":
-			await setupJava(nanoctlRuntimeDir, spinner);
+			await setupJava(blokctlRuntimeDir, spinner);
 			break;
 		case "csharp":
-			await setupCSharp(nanoctlRuntimeDir, spinner);
+			await setupCSharp(blokctlRuntimeDir, spinner);
 			break;
 		case "php":
-			await setupPhp(nanoctlRuntimeDir, spinner);
+			await setupPhp(blokctlRuntimeDir, spinner);
 			break;
 		case "ruby":
-			await setupRuby(nanoctlRuntimeDir, spinner);
+			await setupRuby(blokctlRuntimeDir, spinner);
 			break;
 	}
 
@@ -91,7 +91,7 @@ export async function setupRuntime(
 	return {
 		port: runtime.defaultPort,
 		startCmd: runtime.startCmd,
-		cwd: path.relative(projectDir, nanoctlRuntimeDir),
+		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,
 		label: runtime.label,
 	};
@@ -207,7 +207,7 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<void>
 }
 
 /**
- * Write the .nanoctl/config.json file with runtime configuration.
+ * Write the .blok/config.json file with runtime configuration.
  */
 export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeConfig[]): void {
 	const config: ProjectRuntimeConfig = {
@@ -218,17 +218,17 @@ export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeCo
 		config.runtimes[rc.kind] = rc;
 	}
 
-	const configPath = path.join(projectDir, ".nanoctl", "config.json");
+	const configPath = path.join(projectDir, ".blok", "config.json");
 	fsExtra.ensureDirSync(path.dirname(configPath));
 	fsExtra.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
 /**
- * Read the .nanoctl/config.json file.
+ * Read the .blok/config.json file.
  * Returns null if file doesn't exist.
  */
 export function readProjectConfig(projectDir: string): ProjectRuntimeConfig | null {
-	const configPath = path.join(projectDir, ".nanoctl", "config.json");
+	const configPath = path.join(projectDir, ".blok", "config.json");
 	if (!fsExtra.existsSync(configPath)) {
 		return null;
 	}
@@ -241,7 +241,7 @@ export function readProjectConfig(projectDir: string): ProjectRuntimeConfig | nu
 export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string {
 	if (runtimeConfigs.length === 0) return "";
 
-	const lines = ["\n# Runtimes (auto-configured by nanoctl)"];
+	const lines = ["\n# Runtimes (auto-configured by blokctl)"];
 
 	for (const rc of runtimeConfigs) {
 		const envKey = rc.kind === "csharp" ? "CSHARP" : rc.kind.toUpperCase();
