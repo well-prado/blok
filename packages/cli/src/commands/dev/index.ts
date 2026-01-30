@@ -175,15 +175,18 @@ export async function devProject(opts: OptionValues) {
 	// 3. Start NodeJS runner last so its logs appear after all runtimes
 	spawnProcess("npx", ["nodemon@3.1.9"], "NodeJS Runner", currentPath);
 
-	// Graceful shutdown: SIGTERM all process groups, then SIGKILL after 3s.
-	// pnpm kills child processes prematurely on SIGINT (pnpm/pnpm#7374),
-	// so we also register a synchronous 'exit' handler as a safety net —
-	// process.kill() is synchronous and works inside 'exit' handlers.
+	// Keep the event loop alive — detached children don't prevent Node
+	// from exiting, so without this the process would exit immediately
+	// after devProject() returns, triggering the 'exit' handler which
+	// would SIGKILL everything.
+	const keepAlive = setInterval(() => {}, 60_000);
+
 	let stopping = false;
 	function shutdown() {
 		if (stopping) return;
 		stopping = true;
 		console.log("\nStopping processes...");
+		clearInterval(keepAlive);
 
 		killAllGroups("SIGTERM");
 
@@ -197,9 +200,8 @@ export async function devProject(opts: OptionValues) {
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
 
-	// Safety net: if the process is killed before the graceful handler
-	// completes (e.g. pnpm killing us), SIGKILL all process groups
-	// synchronously on our way out.
+	// Safety net: SIGKILL all process groups synchronously on exit.
+	// process.kill() is synchronous and works inside 'exit' handlers.
 	process.on("exit", () => {
 		killAllGroups("SIGKILL");
 	});
