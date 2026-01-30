@@ -69,7 +69,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Java",
 		installHint: "Install JDK 17+: https://adoptium.net/",
 		defaultPort: 9003,
-		commands: ["java --version"],
+		commands: ["java --version", "/opt/homebrew/opt/openjdk/bin/java --version", "/usr/libexec/java_home -v 17+ 2>/dev/null && java --version"],
 		toolchain: "java + mvn",
 		installDeps: "mvn package -q -DskipTests",
 		startCmd: "java -jar target/blok-java-1.0.0.jar",
@@ -196,11 +196,14 @@ export async function detectRuntimes(): Promise<RuntimeInfo[]> {
 			version: undefined,
 		};
 
-		// Check primary command
-		const output = await tryExec(def.commands[0]);
-		if (output) {
-			info.available = true;
-			info.version = parseVersion(output, def.kind);
+		// Check primary command (try all alternatives until one succeeds)
+		for (const cmd of def.commands) {
+			const output = await tryExec(cmd);
+			if (output) {
+				info.available = true;
+				info.version = parseVersion(output, def.kind);
+				break;
+			}
 		}
 
 		// Check secondary toolchain if defined
