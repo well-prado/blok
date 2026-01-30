@@ -17,10 +17,25 @@ import { useEffect, useRef } from "react";
  */
 export function useGlobalStream(enabled = true) {
 	const queryClient = useQueryClient();
-	const { setStatus, incrementStreams, decrementStreams } = useConnectionStore();
+
+	// Use individual selectors — Zustand action functions are stable references
+	// that never change between renders. NEVER destructure from useStore() without
+	// a selector: that subscribes to ALL state changes and creates new object refs
+	// on every render, which causes useEffect infinite loops.
+	const setStatus = useConnectionStore((s) => s.setStatus);
+	const incrementStreams = useConnectionStore((s) => s.incrementStreams);
+	const decrementStreams = useConnectionStore((s) => s.decrementStreams);
 	const addNotification = useNotificationStore((s) => s.addNotification);
-	const notificationsEnabled = useNotificationStore((s) => s.enabled);
 	const pushEvent = useLiveFeedStore((s) => s.pushEvent);
+
+	// Read notificationsEnabled via ref so toggling it doesn't tear down the SSE connection
+	const notificationsEnabledRef = useRef(useNotificationStore.getState().enabled);
+	useEffect(() => {
+		return useNotificationStore.subscribe((s) => {
+			notificationsEnabledRef.current = s.enabled;
+		});
+	}, []);
+
 	const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
@@ -48,7 +63,7 @@ export function useGlobalStream(enabled = true) {
 				pushEvent(event);
 
 				// Emit notifications for run completions/failures
-				if (notificationsEnabled) {
+				if (notificationsEnabledRef.current) {
 					if (event.type === "RUN_COMPLETED") {
 						const payload = event.payload as Record<string, unknown> | undefined;
 						const durationMs = payload?.durationMs as number | undefined;
@@ -79,12 +94,13 @@ export function useGlobalStream(enabled = true) {
 		return () => {
 			disconnect();
 			decrementStreams();
+			setStatus("disconnected");
 			if (invalidateTimer.current) {
 				clearTimeout(invalidateTimer.current);
 				invalidateTimer.current = null;
 			}
 		};
-	}, [enabled, queryClient, setStatus, incrementStreams, decrementStreams, addNotification, notificationsEnabled, pushEvent]);
+	}, [enabled, queryClient, setStatus, incrementStreams, decrementStreams, addNotification, pushEvent]);
 }
 
 function formatMs(ms: number): string {

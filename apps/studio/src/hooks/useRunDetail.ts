@@ -19,7 +19,10 @@ export function useRunDetail(runId: string) {
  */
 export function useTraceStream(runId: string) {
 	const queryClient = useQueryClient();
-	const { incrementStreams, decrementStreams, setStatus } = useConnectionStore();
+	// Use individual selectors for stable references (see useGlobalStream.ts for explanation)
+	const incrementStreams = useConnectionStore((s) => s.incrementStreams);
+	const decrementStreams = useConnectionStore((s) => s.decrementStreams);
+	const setStatus = useConnectionStore((s) => s.setStatus);
 
 	const handleEvent = useCallback(
 		(event: RunEvent) => {
