@@ -53,23 +53,40 @@ function killAllGroups(signal: NodeJS.Signals) {
 }
 
 /**
- * Poll a health endpoint until it responds or timeout is reached.
+ * Poll a health endpoint until it responds, the process exits, or timeout.
+ * If the owning process exits (e.g. Ruby crashes), resolve immediately
+ * instead of waiting the full timeout.
  */
-function waitForHealth(port: number, timeoutMs: number): Promise<boolean> {
+function waitForHealth(port: number, timeoutMs: number, proc?: ChildProcess): Promise<boolean> {
 	return new Promise((resolve) => {
+		// Process already exited — fail immediately
+		if (proc && proc.exitCode !== null) {
+			resolve(false);
+			return;
+		}
+
 		const start = Date.now();
+		let done = false;
+
+		function finish(result: boolean) {
+			if (done) return;
+			done = true;
+			clearInterval(interval);
+			resolve(result);
+		}
+
+		// Abort early if the runtime process dies
+		proc?.on("exit", () => finish(false));
+
 		const interval = setInterval(() => {
+			if (done) return;
 			if (Date.now() - start > timeoutMs) {
-				clearInterval(interval);
-				resolve(false);
+				finish(false);
 				return;
 			}
 			const req = http.get(`http://localhost:${port}/health`, (res) => {
 				res.resume();
-				if (res.statusCode === 200) {
-					clearInterval(interval);
-					resolve(true);
-				}
+				if (res.statusCode === 200) finish(true);
 			});
 			req.on("error", () => {
 				// Not ready yet, keep polling
@@ -141,11 +158,11 @@ export async function devProject(opts: OptionValues) {
 	}
 
 	// 1. Start all runtime processes
-	const healthPorts: number[] = [];
+	const healthChecks: Array<{ port: number; proc: ChildProcess }> = [];
 	for (const def of runtimeDefs) {
-		spawnProcess(def.cmd, def.args, def.name, currentPath, def.cwd, def.env);
+		const child = spawnProcess(def.cmd, def.args, def.name, currentPath, def.cwd, def.env);
 		if (def.port) {
-			healthPorts.push(def.port);
+			healthChecks.push({ port: def.port, proc: child });
 		}
 	}
 
@@ -158,15 +175,15 @@ export async function devProject(opts: OptionValues) {
 	}
 
 	// 2. Wait for all runtimes to be healthy before starting NodeJS runner
-	if (healthPorts.length > 0) {
+	if (healthChecks.length > 0) {
 		console.log("\nWaiting for runtimes to be ready...");
 		const maxWait = 120_000; // 2 minutes (Rust can take a while to compile)
-		const results = await Promise.all(healthPorts.map((port) => waitForHealth(port, maxWait)));
+		const results = await Promise.all(healthChecks.map((hc) => waitForHealth(hc.port, maxWait, hc.proc)));
 		const allReady = results.every(Boolean);
 		if (allReady) {
 			console.log("All runtimes ready.\n");
 		} else {
-			const failedPorts = healthPorts.filter((_, i) => !results[i]);
+			const failedPorts = healthChecks.filter((_, i) => !results[i]).map((hc) => hc.port);
 			console.log(`Warning: Some runtimes did not become healthy: ports ${failedPorts.join(", ")}`);
 			console.log("Starting NodeJS runner anyway.\n");
 		}
