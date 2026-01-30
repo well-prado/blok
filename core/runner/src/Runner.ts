@@ -18,6 +18,13 @@ export default class Runner extends RunnerSteps {
 	}
 
 	/**
+	 * Returns the number of steps in this runner.
+	 */
+	getStepCount(): number {
+		return this.steps.length;
+	}
+
+	/**
 	 * Executes the series of NanoService steps with the given context.
 	 *
 	 * @param ctx - The context to be passed through the steps.

@@ -67,6 +67,12 @@ import { WorkflowVisualizer } from "./visualization/WorkflowVisualizer";
 // Performance Profiling
 import { PerformanceProfiler } from "./monitoring/PerformanceProfiler";
 
+// Tracing (Blok Studio)
+import { RunTracker } from "./tracing/RunTracker";
+import { registerTraceRoutes } from "./tracing/TraceRouter";
+import { TracingLogger } from "./tracing/TracingLogger";
+import { sanitize as traceSanitize } from "./tracing/sanitize";
+
 // Cost Estimation
 import { CostEstimator } from "./cost/CostEstimator";
 import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
@@ -174,6 +180,11 @@ export {
 	NodeDependencyGraph,
 	// Performance Profiling
 	PerformanceProfiler,
+	// Tracing (Blok Studio)
+	RunTracker,
+	registerTraceRoutes,
+	TracingLogger,
+	traceSanitize,
 	// Cost Estimation
 	CostEstimator,
 	PRICING,
@@ -441,3 +452,19 @@ export type {
 	ExecutionTrace,
 	WorkflowExecuteOptions,
 } from "./testing/WorkflowTestRunner";
+
+// Tracing types (Blok Studio)
+export type {
+	WorkflowRun,
+	WorkflowRunStatus,
+	NodeRun,
+	NodeRunStatus,
+	RunEvent,
+	RunEventType,
+	TraceLogEntry,
+	WorkflowSummary as TraceWorkflowSummary,
+	WorkflowDetail as TraceWorkflowDetail,
+	PaginatedResult,
+	StartRunOptions,
+	StartNodeOptions,
+} from "./tracing/types";

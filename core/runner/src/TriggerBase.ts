@@ -14,6 +14,8 @@ import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
+import { RunTracker } from "./tracing/RunTracker";
+import { TracingLogger } from "./tracing/TracingLogger";
 import type TriggerResponse from "./types/TriggerResponse";
 
 export default abstract class TriggerBase extends Trigger {
@@ -191,6 +193,27 @@ export default abstract class TriggerBase extends Trigger {
 		this.inFlightRequests++;
 		const runStart = performance.now();
 		let runSuccess = true;
+
+		// --- Trace: start run ---
+		const tracker = RunTracker.getInstance();
+		let traceRunId: string | undefined;
+		if (tracker.active) {
+			const runner = this.getRunner();
+			const stepCount = runner.getStepCount?.() ?? this.configuration.steps?.length ?? 0;
+			const run = tracker.startRun({
+				workflowName: this.configuration.name || ctx.workflow_name || "unknown",
+				workflowPath: ctx.workflow_path || "",
+				triggerType: this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown",
+				triggerSummary: this.buildTraceTriggerSummary(ctx),
+				nodeCount: stepCount,
+			});
+			traceRunId = run.id;
+			(ctx as Record<string, unknown>)._traceRunId = run.id;
+
+			// Wrap logger to forward log entries to RunTracker
+			ctx.logger = new TracingLogger(ctx.logger, run.id, tracker);
+		}
+
 		try {
 			const start = performance.now();
 			const defaultMeter = metrics.getMeter("default");
@@ -320,12 +343,23 @@ export default abstract class TriggerBase extends Trigger {
 
 			globalMetrics.clear();
 
+			// --- Trace: complete run ---
+			if (traceRunId) {
+				tracker.completeRun(traceRunId, context.response?.data);
+			}
+
 			return {
 				ctx: context,
 				metrics: average,
 			};
 		} catch (err) {
 			runSuccess = false;
+
+			// --- Trace: fail run ---
+			if (traceRunId) {
+				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
+			}
+
 			throw err;
 		} finally {
 			const durationMs = performance.now() - runStart;
@@ -336,6 +370,17 @@ export default abstract class TriggerBase extends Trigger {
 			});
 			this.inFlightRequests--;
 		}
+	}
+
+	/**
+	 * Build a human-readable trigger summary for trace display.
+	 */
+	protected buildTraceTriggerSummary(ctx: Context): string {
+		const req = ctx.request as Record<string, unknown>;
+		if (req?.method && req?.path) {
+			return `${(req.method as string).toUpperCase()} ${req.path}`;
+		}
+		return this.constructor.name.replace("Trigger", "").toLowerCase();
 	}
 
 	createContext(logger?: LoggerContext, blueprintPath?: string, id?: string): Context {

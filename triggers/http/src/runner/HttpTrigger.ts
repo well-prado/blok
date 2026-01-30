@@ -5,6 +5,7 @@ import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from 
 import { TriggerBase } from "@nanoservice-ts/runner";
 import { NodeMap } from "@nanoservice-ts/runner";
 import { DefaultLogger } from "@nanoservice-ts/runner";
+import { registerTraceRoutes } from "@nanoservice-ts/runner";
 import { type Context, GlobalError, type RequestContext } from "@nanoservice-ts/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import bodyParser from "body-parser";
@@ -104,6 +105,13 @@ export default class HttpTrigger extends TriggerBase {
 			 * to extend this project.
 			 */
 			this.app.use("/", apps);
+
+			// --- Blok Studio: Trace API ---
+			if (process.env.BLOK_TRACE_ENABLED !== "false") {
+				const traceRouter = express.Router();
+				registerTraceRoutes(traceRouter);
+				this.app.use("/__blok", traceRouter);
+			}
 
 			this.app.use(["/:workflow", "/"], async (req: Request, res: Response): Promise<void> => {
 				const id: string = (req.query?.requestId as string) || (uuid() as string);

@@ -2,6 +2,7 @@ import type { Context, ResponseContext } from "@nanoservice-ts/shared";
 import { GlobalError } from "@nanoservice-ts/shared";
 import RunnerNode from "./RunnerNode";
 import type { RuntimeAdapter } from "./adapters/RuntimeAdapter";
+import { RunTracker } from "./tracing/RunTracker";
 
 /**
  * RuntimeAdapterNode is a wrapper that bridges the existing RunnerNode interface
@@ -33,6 +34,21 @@ export class RuntimeAdapterNode extends RunnerNode {
 	 */
 	async run(ctx: Context): Promise<ResponseContext> {
 		const result = await this.adapter.execute(this.targetNode, ctx);
+
+		// --- Trace: capture runtime metrics ---
+		const traceNodeId = (ctx as Record<string, unknown>)._traceNodeId as string | undefined;
+		if (traceNodeId && result.metrics) {
+			const tracker = RunTracker.getInstance();
+			const nodeRun = tracker.getNodeRun(traceNodeId);
+			if (nodeRun) {
+				nodeRun.metrics = {
+					duration_ms: result.metrics.duration_ms,
+					cpu_ms: result.metrics.cpu_ms,
+					memory_bytes: result.metrics.memory_bytes,
+				};
+				nodeRun.runtimeKind = this.adapter.kind;
+			}
+		}
 
 		// Ensure ctx.vars exists
 		if (!ctx.vars) {
