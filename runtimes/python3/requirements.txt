@@ -37,7 +37,7 @@ pycares==4.5.0
 pycparser==2.22
 pymilvus==2.5.7
 python-dateutil==2.9.0.post0
-python-dotenv==1.1.0
+python-dotenv==1.2.1
 pytz==2025.2
 PyYAML==6.0.2
 referencing==0.36.2
