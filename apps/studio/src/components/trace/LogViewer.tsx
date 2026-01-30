@@ -34,7 +34,7 @@ export function LogViewer({ logs, nodeNames }: LogViewerProps) {
 	return (
 		<div className="flex flex-col h-full">
 			{/* Filters */}
-			<div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 flex-shrink-0">
+			<div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
 				<select
 					value={levelFilter}
 					onChange={(e) => setLevelFilter(e.target.value)}
@@ -87,16 +87,16 @@ export function LogViewer({ logs, nodeNames }: LogViewerProps) {
 							key={log.id}
 							className="flex items-start gap-2 px-3 py-1 hover:bg-zinc-800/30 border-b border-zinc-800/30"
 						>
-							<span className="text-[10px] text-zinc-600 flex-shrink-0 pt-0.5 w-20">
+							<span className="text-[10px] text-zinc-600 shrink-0 pt-0.5 w-20">
 								{formatTimestamp(log.timestamp).split(", ")[1]}
 							</span>
 							<span
-								className={cn("text-[10px] uppercase font-bold flex-shrink-0 w-10 pt-0.5", LOG_LEVEL_COLORS[log.level])}
+								className={cn("text-[10px] uppercase font-bold shrink-0 w-10 pt-0.5", LOG_LEVEL_COLORS[log.level])}
 							>
 								{log.level}
 							</span>
 							{log.nodeName && (
-								<span className="text-[10px] text-zinc-600 flex-shrink-0 truncate w-20 pt-0.5">{log.nodeName}</span>
+								<span className="text-[10px] text-zinc-600 shrink-0 truncate w-20 pt-0.5">{log.nodeName}</span>
 							)}
 							<span className="text-zinc-300 break-all flex-1">{log.message}</span>
 						</div>

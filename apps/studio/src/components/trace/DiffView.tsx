@@ -304,11 +304,11 @@ function NodesTab({
 						>
 							<div className="flex items-center gap-2">
 								{statusMatch ? (
-									<CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+									<CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
 								) : nodeA && nodeB ? (
-									<MinusCircle className="w-3 h-3 text-amber-500 flex-shrink-0" />
+									<MinusCircle className="w-3 h-3 text-amber-500 shrink-0" />
 								) : (
-									<XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+									<XCircle className="w-3 h-3 text-red-500 shrink-0" />
 								)}
 								<span className="truncate">{name}</span>
 							</div>

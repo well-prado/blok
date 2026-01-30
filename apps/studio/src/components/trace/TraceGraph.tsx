@@ -112,7 +112,7 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 				<Background color="#27272a" gap={16} size={1} />
 				<Controls
 					showInteractive={false}
-					className="!bg-zinc-900 !border-zinc-700 !rounded-md [&>button]:!bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!text-zinc-400 [&>button:hover]:!bg-zinc-700"
+					className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
 				/>
 				<MiniMap
 					nodeStrokeColor="#3f3f46"
@@ -124,7 +124,7 @@ export function TraceGraph({ nodes, selectedNodeId, onSelectNode }: TraceGraphPr
 						return "#52525b";
 					}}
 					maskColor="rgba(0,0,0,0.6)"
-					className="!bg-zinc-900 !border-zinc-700 !rounded-md"
+					className="bg-zinc-900! border-zinc-700! rounded-md!"
 				/>
 			</ReactFlow>
 		</div>
@@ -136,7 +136,7 @@ function TraceNodeComponent({ data }: NodeProps) {
 
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className="!bg-zinc-600 !w-2 !h-2 !border-0" />
+			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-2! h-2! border-0!" />
 			<div
 				className={cn(
 					"rounded-md border px-3 py-2 min-w-[160px] transition-all",
@@ -148,7 +148,7 @@ function TraceNodeComponent({ data }: NodeProps) {
 				<div className="flex items-center gap-2">
 					<span
 						className={cn(
-							"w-2 h-2 rounded-full flex-shrink-0",
+							"w-2 h-2 rounded-full shrink-0",
 							STATUS_DOT_COLORS[node.status],
 							node.status === "running" && "animate-pulse-dot",
 						)}
@@ -162,7 +162,7 @@ function TraceNodeComponent({ data }: NodeProps) {
 					</span>
 				</div>
 			</div>
-			<Handle type="source" position={Position.Bottom} className="!bg-zinc-600 !w-2 !h-2 !border-0" />
+			<Handle type="source" position={Position.Bottom} className="bg-zinc-600! w-2! h-2! border-0!" />
 		</>
 	);
 }

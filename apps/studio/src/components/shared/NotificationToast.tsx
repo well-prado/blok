@@ -49,9 +49,9 @@ function ToastItem({ toast, onDismiss }: { toast: Notification; onDismiss: (id: 
 	const navigate = useNavigate();
 
 	const icons = {
-		success: <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />,
-		error: <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />,
-		info: <Info className="w-4 h-4 text-blue-400 flex-shrink-0" />,
+		success: <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />,
+		error: <XCircle className="w-4 h-4 text-red-400 shrink-0" />,
+		info: <Info className="w-4 h-4 text-blue-400 shrink-0" />,
 	};
 
 	return (
@@ -176,9 +176,9 @@ export function NotificationBell() {
 										)}
 									>
 										<div className="flex items-center gap-1.5">
-											{!n.read && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />}
+											{!n.read && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />}
 											<span className="text-xs text-zinc-300 truncate">{n.title}</span>
-											<span className="text-[10px] text-zinc-600 ml-auto flex-shrink-0">
+											<span className="text-[10px] text-zinc-600 ml-auto shrink-0">
 												{formatRelativeTime(n.timestamp)}
 											</span>
 										</div>

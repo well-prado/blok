@@ -20,7 +20,7 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 			{/* Header */}
 			<div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
 				<div className="flex items-center gap-2 min-w-0">
-					<Box className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+					<Box className="w-4 h-4 text-zinc-500 shrink-0" />
 					<h3 className="text-sm font-medium text-zinc-100 truncate">{node.nodeName}</h3>
 				</div>
 				<button
@@ -101,7 +101,7 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 								<div key={log.id} className="flex items-start gap-2 text-xs font-mono">
 									<span
 										className={cn(
-											"uppercase text-[10px] font-bold w-10 flex-shrink-0 pt-0.5",
+											"uppercase text-[10px] font-bold w-10 shrink-0 pt-0.5",
 											log.level === "error" && "text-red-400",
 											log.level === "warn" && "text-amber-400",
 											log.level === "info" && "text-blue-400",

@@ -123,7 +123,7 @@ export function CommandPalette() {
 				>
 					{/* Search input */}
 					<div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
-						<Search className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+						<Search className="w-4 h-4 text-zinc-500 shrink-0" />
 						<input
 							ref={inputRef}
 							value={query}
@@ -225,14 +225,14 @@ function WorkflowResult({
 				selected ? "bg-zinc-800" : "hover:bg-zinc-800/50",
 			)}
 		>
-			<Workflow className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+			<Workflow className="w-4 h-4 text-zinc-500 shrink-0" />
 			<div className="flex-1 min-w-0">
 				<div className="text-sm text-zinc-200">{workflow.name}</div>
 				<div className="text-[11px] text-zinc-500">
 					{workflow.triggerTypes.join(", ")} · {workflow.totalRuns} runs · avg {formatDuration(workflow.avgDurationMs)}
 				</div>
 			</div>
-			{selected && <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />}
+			{selected && <ArrowRight className="w-3 h-3 text-zinc-500 shrink-0" />}
 		</button>
 	);
 }
@@ -255,19 +255,19 @@ function RunResult({
 				selected ? "bg-zinc-800" : "hover:bg-zinc-800/50",
 			)}
 		>
-			<Activity className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+			<Activity className="w-4 h-4 text-zinc-500 shrink-0" />
 			<div className="flex-1 min-w-0">
 				<div className="flex items-center gap-2">
 					<span className="text-sm text-zinc-200">{run.workflowName}</span>
 					<span className="text-[11px] text-zinc-500 font-mono">{run.id.slice(0, 12)}</span>
-					<span className={cn("w-2 h-2 rounded-full flex-shrink-0", STATUS_DOT_COLORS[run.status])} />
+					<span className={cn("w-2 h-2 rounded-full shrink-0", STATUS_DOT_COLORS[run.status])} />
 				</div>
 				<div className="text-[11px] text-zinc-500">
 					{run.triggerSummary} · {formatDuration(run.durationMs)} · {formatRelativeTime(run.startedAt)}
 					{run.error && <span className="text-red-400"> · {run.error.message.slice(0, 60)}</span>}
 				</div>
 			</div>
-			{selected && <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />}
+			{selected && <ArrowRight className="w-3 h-3 text-zinc-500 shrink-0" />}
 		</button>
 	);
 }

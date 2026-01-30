@@ -31,7 +31,7 @@ router.get("/", (_, res) => {
 		</style>
 	</head>
 	<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
-		<main class="flex-grow flex items-center justify-center px-4">
+		<main class="grow flex items-center justify-center px-4">
 			<div class="max-w-3xl bg-white shadow-xl rounded-2xl p-10 border border-gray-200">
 				<h1 class="text-3xl font-semibold mb-6 text-center text-blue-700">🚀 Welcome to <span class="text-black">nanoservice-ts</span></h1>
 				<p class="text-lg mb-4">You're ready to start building fast and modular applications. Here's how to get started:</p>

@@ -36,7 +36,7 @@ export function TraceTimeline({ run, nodes, selectedNodeId, onSelectNode }: Trac
 			>
 				<span
 					className={cn(
-						"w-2 h-2 rounded-full flex-shrink-0",
+						"w-2 h-2 rounded-full shrink-0",
 						STATUS_DOT_COLORS[run.status],
 						run.status === "running" && "animate-pulse-dot",
 					)}
@@ -77,7 +77,7 @@ export function TraceTimeline({ run, nodes, selectedNodeId, onSelectNode }: Trac
 						{/* Status dot */}
 						<span
 							className={cn(
-								"w-2 h-2 rounded-full flex-shrink-0",
+								"w-2 h-2 rounded-full shrink-0",
 								STATUS_DOT_COLORS[node.status],
 								node.status === "running" && "animate-pulse-dot",
 							)}
@@ -85,7 +85,7 @@ export function TraceTimeline({ run, nodes, selectedNodeId, onSelectNode }: Trac
 						/>
 
 						{/* Node name */}
-						<span className="text-xs text-zinc-300 flex-shrink-0 truncate max-w-[120px]">{node.nodeName}</span>
+						<span className="text-xs text-zinc-300 shrink-0 truncate max-w-[120px]">{node.nodeName}</span>
 
 						{/* Timeline bar */}
 						<div className="flex-1 h-3 relative mx-1">
@@ -105,7 +105,7 @@ export function TraceTimeline({ run, nodes, selectedNodeId, onSelectNode }: Trac
 						</div>
 
 						{/* Duration */}
-						<span className="text-[11px] font-mono text-zinc-500 flex-shrink-0 w-14 text-right">
+						<span className="text-[11px] font-mono text-zinc-500 shrink-0 w-14 text-right">
 							{node.status === "running" ? (
 								<span className="text-blue-400">...</span>
 							) : node.status === "pending" || node.status === "skipped" ? (
@@ -116,7 +116,7 @@ export function TraceTimeline({ run, nodes, selectedNodeId, onSelectNode }: Trac
 						</span>
 
 						{/* Status icon */}
-						<span className="text-xs flex-shrink-0 w-4 text-center">
+						<span className="text-xs shrink-0 w-4 text-center">
 							{node.status === "completed" && <span className="text-green-400">{"\u2713"}</span>}
 							{node.status === "failed" && <span className="text-red-400">{"\u2717"}</span>}
 							{node.status === "running" && <span className="text-blue-400">{"\u21BB"}</span>}

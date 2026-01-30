@@ -30,7 +30,7 @@ export function LiveFeed() {
 				>
 					<span
 						className={cn(
-							"w-1.5 h-1.5 rounded-full flex-shrink-0",
+							"w-1.5 h-1.5 rounded-full shrink-0",
 							event.type.includes("FAIL") || event.type.includes("ERROR")
 								? "bg-red-400"
 								: event.type.includes("COMPLETE")
@@ -44,10 +44,10 @@ export function LiveFeed() {
 					<div className="flex-1 min-w-0">
 						<span className="text-[11px] text-zinc-300 truncate block">{event.nodeName || event.workflowName}</span>
 					</div>
-					<span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0", EVENT_COLORS[event.type])}>
+					<span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0", EVENT_COLORS[event.type])}>
 						{EVENT_LABELS[event.type]}
 					</span>
-					<span className="text-[10px] text-zinc-600 flex-shrink-0">{formatRelativeTime(event.timestamp)}</span>
+					<span className="text-[10px] text-zinc-600 shrink-0">{formatRelativeTime(event.timestamp)}</span>
 				</Link>
 			))}
 			<div ref={bottomRef} />

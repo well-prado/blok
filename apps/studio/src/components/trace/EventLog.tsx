@@ -32,15 +32,15 @@ export function EventLog({ runId }: EventLogProps) {
 		<div className="space-y-0.5 font-mono text-xs">
 			{events.map((event) => (
 				<div key={event.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-800/30 rounded">
-					<span className="text-[10px] text-zinc-600 flex-shrink-0 w-20">
+					<span className="text-[10px] text-zinc-600 shrink-0 w-20">
 						{formatTimestamp(event.timestamp).split(", ")[1]}
 					</span>
-					<span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0", EVENT_COLORS[event.type])}>
+					<span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0", EVENT_COLORS[event.type])}>
 						{EVENT_LABELS[event.type]}
 					</span>
-					{event.nodeName && <span className="text-zinc-400 flex-shrink-0">{event.nodeName}</span>}
+					{event.nodeName && <span className="text-zinc-400 shrink-0">{event.nodeName}</span>}
 					<span className="text-zinc-600 truncate flex-1">{event.workflowName}</span>
-					<span className="text-[10px] text-zinc-700 flex-shrink-0">{event.id.slice(0, 8)}</span>
+					<span className="text-[10px] text-zinc-700 shrink-0">{event.id.slice(0, 8)}</span>
 				</div>
 			))}
 		</div>
