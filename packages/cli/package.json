@@ -34,7 +34,7 @@
 		"chalk": "^5.4.1",
 		"commander": "^13.1.0",
 		"figlet": "^1.8.0",
-		"fs-extra": "^11.2.0",
+		"fs-extra": "^11.3.3",
 		"ink": "^5.2.1",
 		"picocolors": "^1.1.1",
 		"posthog-node": "^4.6.0",
