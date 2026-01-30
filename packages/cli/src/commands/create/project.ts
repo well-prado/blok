@@ -1,4 +1,4 @@
-import child_process, { spawn } from "node:child_process";
+import child_process from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import util from "node:util";
@@ -9,13 +9,20 @@ import fsExtra from "fs-extra";
 import color from "picocolors";
 import simpleGit, { type SimpleGit, type SimpleGitOptions } from "simple-git";
 import { manager as pm } from "../../services/package-manager.js";
+import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
+import {
+	type RuntimeConfig,
+	generateRuntimeEnvVars,
+	generateSupervisordConfig,
+	setupRuntime,
+	writeProjectConfig,
+} from "../../services/runtime-setup.js";
 import {
 	examples_url,
 	node_file,
 	package_dependencies,
 	package_dev_dependencies,
 	supervisord_nodejs,
-	supervisord_python,
 } from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);
@@ -33,12 +40,6 @@ const options: Partial<SimpleGitOptions> = {
 	trimmed: false,
 };
 
-type SpinnerHandler = {
-	start: (msg?: string) => void;
-	stop: (msg?: string, code?: number) => void;
-	message: (msg?: string) => void;
-};
-
 const git: SimpleGit = simpleGit(options);
 
 export async function createProject(opts: OptionValues, version: string, currentPath = false) {
@@ -48,8 +49,11 @@ export async function createProject(opts: OptionValues, version: string, current
 	let projectName: string = opts.name ? opts.name : "";
 	let trigger = "http";
 	let examples = false;
-	let runtimes = ["node"];
+	let selectedRuntimeKinds: string[] = ["node"];
 	let selectedManager = "npm";
+
+	// Detect available runtimes on the machine
+	let detectedRuntimes: RuntimeInfo[] = [];
 
 	if (!isDefault) {
 		console.log(
@@ -63,6 +67,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		);
 		console.log("");
 		p.intro(color.inverse(" Create a New Project "));
+
+		// Detect installed language toolchains
+		const detectSpinner = p.spinner();
+		detectSpinner.start("Detecting installed language runtimes...");
+		detectedRuntimes = await detectRuntimes();
+		detectSpinner.stop("Runtime detection complete.");
 
 		// Get the project name and trigger
 
@@ -91,6 +101,22 @@ export async function createProject(opts: OptionValues, version: string, current
 			})) as string;
 		};
 
+		// Build runtime options with detection hints
+		const runtimeOptions = [
+			{ label: "NodeJS", value: "node", hint: "always included" },
+			...detectedRuntimes.map((rt) => {
+				let hint: string;
+				if (rt.available) {
+					hint = `${rt.toolchain} ${rt.version || ""} detected`.trim();
+				} else if (rt.secondaryTool && !rt.secondaryTool.available) {
+					hint = `${rt.secondaryTool.name} not found - will be skipped`;
+				} else {
+					hint = `${rt.toolchain} not found - will be skipped`;
+				}
+				return { label: rt.label, value: rt.kind, hint };
+			}),
+		];
+
 		const nanoctlProject = await p.group(
 			{
 				projectName: () => resolveProjectName(),
@@ -105,11 +131,9 @@ export async function createProject(opts: OptionValues, version: string, current
 				runtimes: () =>
 					p.multiselect({
 						message: "Select the runtimes to install",
-						options: [
-							{ label: "NodeJS", value: "node", hint: "recommended" },
-							{ label: "Python3", value: "python3" },
-						],
+						options: runtimeOptions,
 						initialValues: ["node"],
+						required: true,
 					}),
 				selectedManager: () => resolveSelectedManager(),
 			},
@@ -123,23 +147,37 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		projectName = nanoctlProject.projectName;
 		trigger = nanoctlProject.trigger;
-		runtimes = nanoctlProject.runtimes;
+		selectedRuntimeKinds = nanoctlProject.runtimes;
 		selectedManager = nanoctlProject.selectedManager;
 
-		// Python3 Alpha Warning
-		if (runtimes.includes("python3")) {
-			// Show a warning message
+		// Warn about unavailable runtimes
+		const unavailableSelected = selectedRuntimeKinds.filter((kind) => {
+			if (kind === "node") return false;
+			const rt = detectedRuntimes.find((r) => r.kind === kind);
+			return rt && !rt.available;
+		});
+
+		if (unavailableSelected.length > 0) {
 			console.log("");
-			console.log(color.yellow("⚠️  Python3 Runtime (Alpha Version) ⚠️."));
-			console.log(color.yellow("-----------------------------------------------------"));
+			for (const kind of unavailableSelected) {
+				const rt = detectedRuntimes.find((r) => r.kind === kind);
+				if (rt) {
+					console.log(color.yellow(`  ${rt.label}: ${rt.toolchain} not found. Skipping setup.`));
+					if (rt.secondaryTool && !rt.secondaryTool.available) {
+						console.log(color.yellow(`    ${rt.secondaryTool.installHint}`));
+					} else {
+						console.log(color.yellow(`    ${rt.installHint}`));
+					}
+				}
+			}
+			console.log("");
 
-			console.log(color.yellow("- Requires **Python 3** to be installed."));
-			console.log(color.yellow("- Currently supported only on **MacOS**."));
-			console.log(color.yellow("- Experimental feature: Some functionality may be unstable or missing."));
-			console.log(color.yellow("- Recommended for testing purposes only."));
-			console.log(color.yellow("- For production, use **NodeJS (recommended)**."));
-
-			console.log(color.yellow("-----------------------------------------------------"));
+			// Filter out unavailable runtimes
+			selectedRuntimeKinds = selectedRuntimeKinds.filter((kind) => {
+				if (kind === "node") return true;
+				const rt = detectedRuntimes.find((r) => r.kind === kind);
+				return rt?.available ?? false;
+			});
 		}
 
 		const nanoctlExamplesProject = await p.group(
@@ -257,54 +295,44 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Get the package manager
 		manager = await pm.getManager(selectedManager as string);
 
-		// Runtimes
+		// Setup non-NodeJS runtimes
+		const nonNodeRuntimes = selectedRuntimeKinds.filter((kind) => kind !== "node");
+		const runtimeConfigs: RuntimeConfig[] = [];
 
-		if (runtimes.includes("python3")) {
-			// Setup the environment
-			const nanoctlDir = `${dirPath}/.nanoctl`;
-			fsExtra.ensureDirSync(nanoctlDir);
-			const runtimesDir = `${nanoctlDir}/runtimes`;
-			fsExtra.ensureDirSync(runtimesDir);
-			const pythonDir = `${runtimesDir}/python3`;
-			fsExtra.ensureDirSync(pythonDir);
-			fsExtra.copySync(`${GITHUB_REPO_LOCAL}/runtimes/python3`, pythonDir);
-
-			// Setup the project
-			const runtimesProjectDir = `${dirPath}/runtimes`;
-			fsExtra.ensureDirSync(runtimesProjectDir);
-			const pythonProjectDir = `${runtimesProjectDir}/python3`;
-			fsExtra.ensureDirSync(pythonProjectDir);
-			fsExtra.symlinkSync(`${pythonDir}/nodes`, `${pythonProjectDir}/nodes`, "junction");
-			fsExtra.symlinkSync(`${pythonDir}/core`, `${pythonProjectDir}/core`, "junction");
-			fsExtra.symlinkSync(`${pythonDir}/requirement.txt`, `${pythonProjectDir}/requirement.txt`, "file");
-
-			// Create a virtual environment
-			s.message("Creating Python3 virtual environment...");
-			await createPythonVenv(pythonDir, s);
-			s.message("Python3 virtual environment created successfully!");
-
-			// Install Python3 Packages
-			await exec(manager.INSTALL, { cwd: pythonDir });
-
-			s.message("Installing python3 packages...");
-			const cmd_install_pythonpk_response = await exec(
-				`bash -c "source ${pythonDir}/python3_runtime/bin/activate && pip3 install -r ${pythonDir}/requirements.txt"`,
-				{ cwd: pythonDir },
-			);
-			s.message("Python3 packages installed successfully!");
-			console.log("\n", cmd_install_pythonpk_response.stdout);
-
-			fsExtra.symlinkSync(`${pythonDir}/python3_runtime`, `${pythonProjectDir}/python3_runtime`, "junction");
-
+		if (nonNodeRuntimes.length > 0) {
+			// Add nanoctl dev script and devDependency for multi-runtime dev server
 			packageJsonContent.scripts = {
 				...packageJsonContent.scripts,
 				dev: "nanoctl dev",
 			};
-
 			packageJsonContent.devDependencies = {
 				...packageJsonContent.devDependencies,
 				nanoctl: `^${version}`,
 			};
+
+			for (const kind of nonNodeRuntimes) {
+				const rt = detectedRuntimes.find((r) => r.kind === kind);
+				if (!rt) continue;
+
+				try {
+					const config = await setupRuntime(rt, GITHUB_REPO_LOCAL, dirPath, s);
+					runtimeConfigs.push(config);
+				} catch (error) {
+					console.log(color.yellow(`\n  Warning: Failed to setup ${rt.label} runtime: ${(error as Error).message}`));
+					console.log(color.yellow("  You can set it up manually later.\n"));
+				}
+			}
+
+			// Write .nanoctl/config.json
+			if (runtimeConfigs.length > 0) {
+				writeProjectConfig(dirPath, runtimeConfigs);
+			}
+
+			// Append runtime env vars to .env.local
+			if (runtimeConfigs.length > 0) {
+				const envVars = generateRuntimeEnvVars(runtimeConfigs);
+				fsExtra.appendFileSync(envLocal, envVars);
+			}
 		}
 
 		// Examples
@@ -325,7 +353,9 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Create supervisord.conf
 		const supervisordConfPath = `${dirPath}/supervisord.conf`;
 		let supervisordConfContent = supervisord_nodejs;
-		if (runtimes.includes("python3")) supervisordConfContent += supervisord_python;
+		if (runtimeConfigs.length > 0) {
+			supervisordConfContent += generateSupervisordConfig(runtimeConfigs);
+		}
 		fsExtra.writeFileSync(supervisordConfPath, supervisordConfContent);
 
 		// Install Packages
@@ -340,11 +370,25 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Create a new project
 		if (!isDefault) s.stop(`Project "${projectName}" created successfully.`);
-		console.log(`\nTrigger: ${trigger.toUpperCase()}\n`);
+		console.log(`\nTrigger: ${trigger.toUpperCase()}`);
+
+		// Show runtime summary
+		const installedRuntimes = ["NodeJS", ...runtimeConfigs.map((rc) => rc.label)];
+		console.log(`Runtimes: ${installedRuntimes.join(", ")}\n`);
+
 		if (!currentPath) console.log(`Change to the project directory: cd ${projectName}`);
 		console.log(`Run the command "npm run dev" to start the development server.`);
 		console.log("You can test the project in your browser at http://localhost:4000/health-check");
-		console.log("For more documentation, visit https://blok.build/");
+
+		// Show runtime health check URLs
+		if (runtimeConfigs.length > 0) {
+			console.log("\nRuntime health checks:");
+			for (const rc of runtimeConfigs) {
+				console.log(`  ${rc.label}: http://localhost:${rc.port}/health`);
+			}
+		}
+
+		console.log("\nFor more documentation, visit https://blok.build/");
 
 		if (examples) {
 			console.log(examples_url);
@@ -353,27 +397,4 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (!isDefault) s.stop((error as Error).message);
 		if (isDefault) console.log((error as Error).message);
 	}
-}
-
-function createPythonVenv(pythonProjectDir: string, s: SpinnerHandler): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const process = spawn("python3", ["-m", "venv", "python3_runtime"], {
-			cwd: pythonProjectDir,
-			stdio: "inherit",
-			shell: true,
-		});
-
-		process.on("close", (code) => {
-			if (code === 0) {
-				s.message("Python3 virtual environment created successfully!");
-				resolve();
-			} else {
-				reject(new Error(`❌ Failed to create virtual environment. Exit code: ${code}`));
-			}
-		});
-
-		process.on("error", (err) => {
-			reject(new Error(`⚠️ Error creating virtual environment: ${err.message}`));
-		});
-	});
 }
