@@ -138,6 +138,24 @@ export default class HttpTrigger extends TriggerBase {
 								case "runtime.python3":
 									set_node_type = NodeTypes.PYTHON3;
 									break;
+								case "runtime.go":
+									set_node_type = NodeTypes.GO;
+									break;
+								case "runtime.rust":
+									set_node_type = NodeTypes.RUST;
+									break;
+								case "runtime.java":
+									set_node_type = NodeTypes.JAVA;
+									break;
+								case "runtime.csharp":
+									set_node_type = NodeTypes.CSHARP;
+									break;
+								case "runtime.php":
+									set_node_type = NodeTypes.PHP;
+									break;
+								case "runtime.ruby":
+									set_node_type = NodeTypes.RUBY;
+									break;
 								case "local":
 									set_node_type = NodeTypes.LOCAL;
 									break;
@@ -181,7 +199,7 @@ export default class HttpTrigger extends TriggerBase {
 						ctx.logger.log(`Version: ${this.configuration.version}, Method: ${req.method}`);
 
 						const { method, path } = this.configuration.trigger.http;
-						if (method && method !== "*" && req.method.toLowerCase() !== method.toLowerCase())
+						if (method && method !== "*" && method !== "ANY" && req.method.toLowerCase() !== method.toLowerCase())
 							throw new Error("Invalid HTTP method");
 						if (!validateRoute(path, req.path)) throw new Error("Invalid HTTP path");
 
