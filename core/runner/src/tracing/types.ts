@@ -140,3 +140,88 @@ export interface StartNodeOptions {
 	depth: number;
 	stepIndex: number;
 }
+
+// === Custom Dashboards ===
+
+export type WidgetType =
+	| "stat-card"
+	| "timeline"
+	| "error-rate"
+	| "duration-distribution"
+	| "workflow-breakdown"
+	| "node-performance"
+	| "recent-runs"
+	| "heatmap";
+
+export interface DashboardWidget {
+	id: string;
+	type: WidgetType;
+	title: string;
+	config: {
+		workflow?: string;
+		timeRange?: "1h" | "6h" | "24h" | "7d" | "30d";
+		metric?: string;
+		limit?: number;
+		[key: string]: unknown;
+	};
+	position: {
+		x: number;
+		y: number;
+		w: number;
+		h: number;
+	};
+}
+
+export interface Dashboard {
+	id: string;
+	name: string;
+	description?: string;
+	isDefault: boolean;
+	createdAt: number;
+	updatedAt: number;
+	widgets: DashboardWidget[];
+}
+
+// === Store Query Types ===
+
+export interface RunQuery {
+	workflow?: string;
+	status?: WorkflowRunStatus;
+	tags?: string[];
+	limit?: number;
+	offset?: number;
+	sort?: "asc" | "desc";
+}
+
+export interface MetricsResult {
+	totalRuns: number;
+	completedRuns: number;
+	failedRuns: number;
+	avgDurationMs: number;
+	p50DurationMs: number;
+	p95DurationMs: number;
+	p99DurationMs: number;
+	executionTimeline: Array<{
+		bucket: string;
+		total: number;
+		completed: number;
+		failed: number;
+	}>;
+	durationDistribution: Array<{
+		range: string;
+		count: number;
+	}>;
+	workflowBreakdown: Array<{
+		name: string;
+		totalRuns: number;
+		errorRate: number;
+		avgDurationMs: number;
+	}>;
+	nodePerformance: Array<{
+		nodeName: string;
+		avgDurationMs: number;
+		maxDurationMs: number;
+		errorRate: number;
+		executionCount: number;
+	}>;
+}

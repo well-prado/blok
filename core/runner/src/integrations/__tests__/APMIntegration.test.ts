@@ -91,7 +91,7 @@ describe("APMIntegration", () => {
 
 		it("should fail for New Relic without license key", async () => {
 			const origKey = process.env.NEW_RELIC_LICENSE_KEY;
-			process.env.NEW_RELIC_LICENSE_KEY = undefined;
+			Reflect.deleteProperty(process.env, "NEW_RELIC_LICENSE_KEY");
 
 			const apm = new APMIntegration({
 				vendor: "newrelic",

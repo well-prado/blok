@@ -8,6 +8,8 @@ import { RunFilters } from "@/components/runs/RunFilters";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { formatDuration, formatPercent } from "@/lib/formatters";
 import { JsonViewer } from "@/components/shared/JsonViewer";
+import { ExportMenu } from "@/components/shared/ExportMenu";
+import { exportRunsJson, exportRunsCsv } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/workflows/$name")({
@@ -90,7 +92,16 @@ function WorkflowDetailPage() {
       {/* Tab content */}
       {activeTab === "runs" && (
         <div className="space-y-3">
-          <RunFilters status={statusFilter} onStatusChange={setStatusFilter} />
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <RunFilters status={statusFilter} onStatusChange={setStatusFilter} />
+            </div>
+            <ExportMenu
+              onExportJson={() => exportRunsJson({ workflow: name, status: statusFilter || undefined })}
+              onExportCsv={() => exportRunsCsv({ workflow: name, status: statusFilter || undefined })}
+              label="Export All"
+            />
+          </div>
           {runsLoading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
@@ -102,6 +113,7 @@ function WorkflowDetailPage() {
               page={page}
               limit={limit}
               onPageChange={setPage}
+              enableCompare
             />
           ) : (
             <EmptyState

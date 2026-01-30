@@ -24,7 +24,8 @@
 		"install:local": "npm link",
 		"uninstall:local": "npm rm --global nanoctl",
 		"dev": "npm run uninstall:local && npm run install:local && npm run build:dev && nanoctl --help",
-		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/"
+		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/ && if [ -d ../../apps/studio/dist ]; then cp -r ../../apps/studio/dist ./dist/studio-dist; fi",
+		"build:studio": "pnpm --filter @blok/studio build && cp -r ../../apps/studio/dist ./dist/studio-dist"
 	},
 	"keywords": ["nanoctl", "cli", "nanoservice", "nanoservice-ts"],
 	"dependencies": {

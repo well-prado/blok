@@ -1,6 +1,11 @@
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import { v4 as uuid } from "uuid";
+import type { RunStore } from "./RunStore";
+import { InMemoryRunStore } from "./InMemoryRunStore";
+import { createStore } from "./createStore";
 import type {
+	Dashboard,
+	MetricsResult,
 	NodeRun,
 	RunEvent,
 	RunEventType,
@@ -12,36 +17,56 @@ import type {
 	WorkflowSummary,
 } from "./types";
 
+/** Webhook registration for run event notifications. */
+export interface Webhook {
+	id: string;
+	url: string;
+	events: string[];
+	secret?: string;
+	createdAt: number;
+	active: boolean;
+	lastTriggeredAt?: number;
+	lastStatus?: number;
+	failCount: number;
+}
+
 export class RunTracker extends EventEmitter {
-	private runs: Map<string, WorkflowRun> = new Map();
-	private nodeRuns: Map<string, NodeRun[]> = new Map(); // runId → NodeRun[]
-	private nodeRunIndex: Map<string, NodeRun> = new Map(); // nodeRunId → NodeRun
-	private events: Map<string, RunEvent[]> = new Map(); // runId → RunEvent[]
-	private logs: Map<string, TraceLogEntry[]> = new Map(); // runId → LogEntry[]
+	private store: RunStore;
 	private maxRuns: number;
 	private enabled: boolean;
+	private webhooks: Map<string, Webhook> = new Map();
 
 	private static instance: RunTracker | null = null;
 
-	constructor(maxRuns?: number) {
+	constructor(maxRuns?: number, store?: RunStore) {
 		super();
 		this.setMaxListeners(100);
 		this.maxRuns = maxRuns ?? Number.parseInt(process.env.BLOK_TRACE_MAX_RUNS || "1000", 10);
 		this.enabled = process.env.BLOK_TRACE_ENABLED !== "false";
+		this.store = store ?? new InMemoryRunStore();
 	}
 
 	static getInstance(): RunTracker {
 		if (!RunTracker.instance) {
-			RunTracker.instance = new RunTracker();
+			const store = createStore();
+			RunTracker.instance = new RunTracker(undefined, store);
 		}
 		return RunTracker.instance;
 	}
 
 	static resetInstance(): void {
+		if (RunTracker.instance) {
+			RunTracker.instance.store.close();
+		}
 		RunTracker.instance = null;
 	}
 
-	/** Fast path: skip all work when tracing is disabled or no listeners */
+	/** The underlying store for direct access if needed. */
+	getStore(): RunStore {
+		return this.store;
+	}
+
+	/** Fast path: skip all work when tracing is disabled */
 	get active(): boolean {
 		return this.enabled;
 	}
@@ -63,10 +88,7 @@ export class RunTracker extends EventEmitter {
 			metadata: opts.metadata,
 		};
 
-		this.runs.set(run.id, run);
-		this.nodeRuns.set(run.id, []);
-		this.events.set(run.id, []);
-		this.logs.set(run.id, []);
+		this.store.saveRun(run);
 
 		this.emitEvent(run.id, run.workflowName, "RUN_STARTED", undefined, undefined, {
 			workflowName: run.workflowName,
@@ -75,39 +97,49 @@ export class RunTracker extends EventEmitter {
 			nodeCount: run.nodeCount,
 		});
 
-		this.evictOldRuns();
+		this.store.evictOldRuns(this.maxRuns);
 		return run;
 	}
 
 	completeRun(runId: string, data?: unknown): void {
-		const run = this.runs.get(runId);
+		const run = this.store.getRun(runId);
 		if (!run) return;
 
-		run.status = "completed";
-		run.finishedAt = Date.now();
-		run.durationMs = run.finishedAt - run.startedAt;
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "completed",
+			finishedAt,
+			durationMs,
+		});
 
 		this.emitEvent(runId, run.workflowName, "RUN_COMPLETED", undefined, undefined, {
-			durationMs: run.durationMs,
+			durationMs,
 			completedNodes: run.completedNodes,
 			data,
 		});
 	}
 
 	failRun(runId: string, error: Error): void {
-		const run = this.runs.get(runId);
+		const run = this.store.getRun(runId);
 		if (!run) return;
 
-		run.status = "failed";
-		run.finishedAt = Date.now();
-		run.durationMs = run.finishedAt - run.startedAt;
-		run.error = {
-			message: error.message,
-			stack: error.stack,
-		};
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "failed",
+			finishedAt,
+			durationMs,
+			error: {
+				message: error.message,
+				stack: error.stack,
+			},
+		});
 
 		this.emitEvent(runId, run.workflowName, "RUN_FAILED", undefined, undefined, {
-			durationMs: run.durationMs,
+			durationMs,
 			error: { message: error.message, stack: error.stack },
 		});
 	}
@@ -129,11 +161,9 @@ export class RunTracker extends EventEmitter {
 			stepIndex: opts.stepIndex,
 		};
 
-		const nodes = this.nodeRuns.get(runId);
-		if (nodes) nodes.push(nodeRun);
-		this.nodeRunIndex.set(nodeRun.id, nodeRun);
+		this.store.saveNodeRun(nodeRun);
 
-		const run = this.runs.get(runId);
+		const run = this.store.getRun(runId);
 		this.emitEvent(runId, run?.workflowName || "", "NODE_STARTED", opts.nodeName, nodeRun.id, {
 			nodeType: opts.nodeType,
 			runtimeKind: opts.runtimeKind,
@@ -145,45 +175,59 @@ export class RunTracker extends EventEmitter {
 	}
 
 	completeNode(nodeRunId: string, outputs?: unknown, nodeMetrics?: NodeRun["metrics"]): void {
-		const nodeRun = this.nodeRunIndex.get(nodeRunId);
+		const nodeRun = this.store.getNodeRun(nodeRunId);
 		if (!nodeRun) return;
 
-		nodeRun.status = "completed";
-		nodeRun.finishedAt = Date.now();
-		nodeRun.durationMs = nodeRun.finishedAt - nodeRun.startedAt;
-		nodeRun.outputs = outputs;
-		nodeRun.metrics = nodeMetrics;
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - nodeRun.startedAt;
 
-		const run = this.runs.get(nodeRun.runId);
-		if (run) run.completedNodes++;
+		this.store.updateNodeRun(nodeRunId, {
+			status: "completed",
+			finishedAt,
+			durationMs,
+			outputs,
+			metrics: nodeMetrics,
+		});
+
+		const run = this.store.getRun(nodeRun.runId);
+		if (run) {
+			this.store.updateRun(nodeRun.runId, {
+				completedNodes: run.completedNodes + 1,
+			});
+		}
 
 		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_COMPLETED", nodeRun.nodeName, nodeRunId, {
-			durationMs: nodeRun.durationMs,
+			durationMs,
 			metrics: nodeMetrics,
 		});
 	}
 
 	failNode(nodeRunId: string, error: Error): void {
-		const nodeRun = this.nodeRunIndex.get(nodeRunId);
+		const nodeRun = this.store.getNodeRun(nodeRunId);
 		if (!nodeRun) return;
 
-		nodeRun.status = "failed";
-		nodeRun.finishedAt = Date.now();
-		nodeRun.durationMs = nodeRun.finishedAt - nodeRun.startedAt;
-		nodeRun.error = {
-			message: error.message,
-			stack: error.stack,
-		};
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - nodeRun.startedAt;
 
-		const run = this.runs.get(nodeRun.runId);
+		this.store.updateNodeRun(nodeRunId, {
+			status: "failed",
+			finishedAt,
+			durationMs,
+			error: {
+				message: error.message,
+				stack: error.stack,
+			},
+		});
+
+		const run = this.store.getRun(nodeRun.runId);
 		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_FAILED", nodeRun.nodeName, nodeRunId, {
-			durationMs: nodeRun.durationMs,
+			durationMs,
 			error: { message: error.message, stack: error.stack },
 		});
 	}
 
 	skipNode(runId: string, nodeName: string, stepIndex: number, reason?: string): void {
-		const run = this.runs.get(runId);
+		const run = this.store.getRun(runId);
 		this.emitEvent(runId, run?.workflowName || "", "NODE_SKIPPED", nodeName, undefined, {
 			reason,
 			stepIndex,
@@ -199,10 +243,9 @@ export class RunTracker extends EventEmitter {
 			timestamp: Date.now(),
 		};
 
-		const logs = this.logs.get(entry.runId);
-		if (logs) logs.push(log);
+		this.store.saveLog(log);
 
-		const run = this.runs.get(entry.runId);
+		const run = this.store.getRun(entry.runId);
 		this.emitEvent(entry.runId, run?.workflowName || "", "LOG_ENTRY", entry.nodeName, entry.nodeId, {
 			level: entry.level,
 			message: entry.message,
@@ -213,154 +256,136 @@ export class RunTracker extends EventEmitter {
 	// === Vars Updated ===
 
 	trackVarsUpdate(runId: string, nodeName: string, nodeId: string | undefined, vars: Record<string, unknown>): void {
-		const run = this.runs.get(runId);
+		const run = this.store.getRun(runId);
 		this.emitEvent(runId, run?.workflowName || "", "VARS_UPDATED", nodeName, nodeId, { vars });
 	}
 
-	// === Queries ===
+	// === Queries (delegated to store) ===
 
 	getRun(runId: string): WorkflowRun | undefined {
-		return this.runs.get(runId);
+		return this.store.getRun(runId);
 	}
 
 	getRuns(opts?: {
 		workflow?: string;
 		status?: WorkflowRunStatus;
+		tags?: string[];
 		limit?: number;
 		offset?: number;
 		sort?: "asc" | "desc";
 	}): { runs: WorkflowRun[]; total: number } {
-		let runs = Array.from(this.runs.values());
-
-		if (opts?.workflow) {
-			runs = runs.filter((r) => r.workflowName === opts.workflow);
-		}
-		if (opts?.status) {
-			runs = runs.filter((r) => r.status === opts.status);
-		}
-
-		// Sort by startedAt (default desc = most recent first)
-		const sortDir = opts?.sort === "asc" ? 1 : -1;
-		runs.sort((a, b) => sortDir * (b.startedAt - a.startedAt));
-
-		const total = runs.length;
-		const offset = opts?.offset ?? 0;
-		const limit = opts?.limit ?? 50;
-		runs = runs.slice(offset, offset + limit);
-
-		return { runs, total };
+		return this.store.getRuns(opts);
 	}
 
 	getNodeRuns(runId: string): NodeRun[] {
-		return this.nodeRuns.get(runId) || [];
+		return this.store.getNodeRuns(runId);
 	}
 
 	getNodeRun(nodeRunId: string): NodeRun | undefined {
-		return this.nodeRunIndex.get(nodeRunId);
+		return this.store.getNodeRun(nodeRunId);
 	}
 
 	getEvents(runId: string, since?: number): RunEvent[] {
-		const events = this.events.get(runId) || [];
-		if (since) {
-			return events.filter((e) => e.timestamp > since);
-		}
-		return events;
+		return this.store.getEvents(runId, since);
 	}
 
 	getLogs(runId: string, nodeId?: string): TraceLogEntry[] {
-		const logs = this.logs.get(runId) || [];
-		if (nodeId) {
-			return logs.filter((l) => l.nodeId === nodeId);
-		}
-		return logs;
+		return this.store.getLogs(runId, nodeId);
 	}
 
-	// === Metadata ===
+	// === Metadata (delegated to store) ===
 
 	getWorkflowSummaries(): WorkflowSummary[] {
-		const summaries = new Map<string, {
-			name: string;
-			path: string;
-			triggerTypes: Set<string>;
-			totalRuns: number;
-			recentRuns: number;
-			lastRunAt?: number;
-			lastRunStatus?: WorkflowRunStatus;
-			errorCount: number;
-			totalDuration: number;
-			durations: number[];
-		}>();
+		return this.store.getWorkflowSummaries();
+	}
 
-		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+	// === Tags ===
 
-		for (const run of this.runs.values()) {
-			let summary = summaries.get(run.workflowName);
-			if (!summary) {
-				summary = {
-					name: run.workflowName,
-					path: run.workflowPath,
-					triggerTypes: new Set(),
-					totalRuns: 0,
-					recentRuns: 0,
-					errorCount: 0,
-					totalDuration: 0,
-					durations: [],
-				};
-				summaries.set(run.workflowName, summary);
-			}
+	addTag(runId: string, tag: string): boolean {
+		const run = this.store.getRun(runId);
+		if (!run) return false;
+		const tags = run.tags || [];
+		if (tags.includes(tag)) return false;
+		tags.push(tag);
+		this.store.updateRun(runId, { tags });
+		return true;
+	}
 
-			summary.triggerTypes.add(run.triggerType);
-			summary.totalRuns++;
+	removeTag(runId: string, tag: string): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || !run.tags) return false;
+		const idx = run.tags.indexOf(tag);
+		if (idx === -1) return false;
+		const tags = [...run.tags];
+		tags.splice(idx, 1);
+		this.store.updateRun(runId, { tags });
+		return true;
+	}
 
-			if (run.startedAt >= oneDayAgo) summary.recentRuns++;
-			if (!summary.lastRunAt || run.startedAt > summary.lastRunAt) {
-				summary.lastRunAt = run.startedAt;
-				summary.lastRunStatus = run.status;
-			}
-			if (run.status === "failed") summary.errorCount++;
-			if (run.durationMs !== undefined) {
-				summary.totalDuration += run.durationMs;
-				summary.durations.push(run.durationMs);
-			}
-		}
+	getAllTags(): string[] {
+		return this.store.getAllTags();
+	}
 
-		return Array.from(summaries.values()).map((s) => {
-			const sortedDurations = s.durations.sort((a, b) => a - b);
-			const p95Index = Math.floor(sortedDurations.length * 0.95);
+	// === Metrics Aggregation (delegated to store) ===
 
-			return {
-				name: s.name,
-				path: s.path,
-				triggerTypes: Array.from(s.triggerTypes),
-				totalRuns: s.totalRuns,
-				recentRuns: s.recentRuns,
-				lastRunAt: s.lastRunAt,
-				lastRunStatus: s.lastRunStatus,
-				errorRate: s.totalRuns > 0 ? s.errorCount / s.totalRuns : 0,
-				avgDurationMs: s.durations.length > 0 ? s.totalDuration / s.durations.length : 0,
-				p95DurationMs: sortedDurations.length > 0 ? sortedDurations[p95Index] || sortedDurations[sortedDurations.length - 1] : 0,
-			};
-		});
+	getMetrics(workflow?: string): MetricsResult {
+		return this.store.getMetrics(workflow);
 	}
 
 	// === Utility ===
 
 	getActiveRunCount(): number {
-		let count = 0;
-		for (const run of this.runs.values()) {
-			if (run.status === "running") count++;
-		}
-		return count;
+		return this.store.getActiveRunCount();
 	}
 
 	clearAll(): number {
-		const count = this.runs.size;
-		this.runs.clear();
-		this.nodeRuns.clear();
-		this.nodeRunIndex.clear();
-		this.events.clear();
-		this.logs.clear();
-		return count;
+		return this.store.clearAll();
+	}
+
+	// === Dashboards (delegated to store) ===
+
+	saveDashboard(dashboard: Dashboard): void {
+		this.store.saveDashboard(dashboard);
+	}
+
+	getDashboard(dashboardId: string): Dashboard | undefined {
+		return this.store.getDashboard(dashboardId);
+	}
+
+	listDashboards(): Dashboard[] {
+		return this.store.listDashboards();
+	}
+
+	deleteDashboard(dashboardId: string): boolean {
+		return this.store.deleteDashboard(dashboardId);
+	}
+
+	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void {
+		this.store.updateDashboard(dashboardId, updates);
+	}
+
+	// === Webhooks ===
+
+	registerWebhook(opts: { url: string; events: string[]; secret?: string }): Webhook {
+		const webhook: Webhook = {
+			id: `wh_${uuid().replace(/-/g, "").slice(0, 12)}`,
+			url: opts.url,
+			events: opts.events,
+			secret: opts.secret,
+			createdAt: Date.now(),
+			active: true,
+			failCount: 0,
+		};
+		this.webhooks.set(webhook.id, webhook);
+		return webhook;
+	}
+
+	removeWebhook(id: string): boolean {
+		return this.webhooks.delete(id);
+	}
+
+	getWebhooks(): Webhook[] {
+		return Array.from(this.webhooks.values());
 	}
 
 	// === Internal ===
@@ -384,36 +409,80 @@ export class RunTracker extends EventEmitter {
 			payload,
 		};
 
-		const events = this.events.get(runId);
-		if (events) events.push(event);
+		this.store.saveEvent(event);
 
 		this.emit("event", event);
 		this.emit(type, event);
+
+		// Fire webhooks for relevant events
+		this.fireWebhooks(event);
 	}
 
-	private evictOldRuns(): void {
-		if (this.runs.size <= this.maxRuns) return;
+	private fireWebhooks(event: RunEvent): void {
+		const eventMap: Record<string, string> = {
+			RUN_STARTED: "run.started",
+			RUN_COMPLETED: "run.completed",
+			RUN_FAILED: "run.failed",
+		};
+		const webhookEvent = eventMap[event.type];
+		if (!webhookEvent) return;
 
-		// Find oldest runs
-		const sorted = Array.from(this.runs.entries()).sort((a, b) => a[1].startedAt - b[1].startedAt);
+		for (const webhook of this.webhooks.values()) {
+			if (!webhook.active) continue;
+			if (!webhook.events.includes(webhookEvent)) continue;
 
-		const toRemove = sorted.slice(0, this.runs.size - this.maxRuns);
-		for (const [runId] of toRemove) {
-			// Don't evict running runs
-			const run = this.runs.get(runId);
-			if (run?.status === "running") continue;
+			const body = JSON.stringify({
+				event: webhookEvent,
+				timestamp: event.timestamp,
+				run: this.store.getRun(event.runId),
+				webhookId: webhook.id,
+			});
 
-			this.runs.delete(runId);
-			// Clean up node run index entries
-			const nodes = this.nodeRuns.get(runId);
-			if (nodes) {
-				for (const node of nodes) {
-					this.nodeRunIndex.delete(node.id);
-				}
+			const headers: Record<string, string> = { "Content-Type": "application/json" };
+			if (webhook.secret) {
+				const crypto = require("node:crypto") as typeof import("node:crypto");
+				headers["X-Blok-Signature"] = crypto
+					.createHmac("sha256", webhook.secret)
+					.update(body)
+					.digest("hex");
 			}
-			this.nodeRuns.delete(runId);
-			this.events.delete(runId);
-			this.logs.delete(runId);
+
+			// Fire-and-forget HTTP POST
+			const http = require("node:http") as typeof import("node:http");
+			const https = require("node:https") as typeof import("node:https");
+			const parsed = new URL(webhook.url);
+			const client = parsed.protocol === "https:" ? https : http;
+
+			const req = client.request(
+				{
+					hostname: parsed.hostname,
+					port: parsed.port,
+					path: parsed.pathname + parsed.search,
+					method: "POST",
+					headers,
+					timeout: 5000,
+				},
+				(res) => {
+					webhook.lastTriggeredAt = Date.now();
+					webhook.lastStatus = res.statusCode;
+					if (res.statusCode && res.statusCode >= 400) {
+						webhook.failCount++;
+						if (webhook.failCount >= 10) webhook.active = false;
+					} else {
+						webhook.failCount = 0;
+					}
+					res.resume(); // consume body
+				},
+			);
+
+			req.on("error", () => {
+				webhook.lastTriggeredAt = Date.now();
+				webhook.failCount++;
+				if (webhook.failCount >= 10) webhook.active = false;
+			});
+
+			req.write(body);
+			req.end();
 		}
 	}
 }

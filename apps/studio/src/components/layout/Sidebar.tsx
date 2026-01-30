@@ -1,5 +1,5 @@
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { LayoutDashboard, Workflow, Activity, Settings } from "lucide-react";
+import { LayoutDashboard, Workflow, Activity, BarChart3, Webhook, Settings, Search, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { STATUS_DOT_COLORS } from "@/lib/constants";
@@ -9,8 +9,11 @@ export function Sidebar() {
   const { data: workflows } = useWorkflows();
 
   const navItems = [
-    { to: "/", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/", label: "Overview", icon: LayoutDashboard },
+    { to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
     { to: "/runs", label: "All Runs", icon: Activity },
+    { to: "/metrics", label: "Metrics", icon: BarChart3 },
+    { to: "/webhooks", label: "Webhooks", icon: Webhook },
   ] as const;
 
   return (
@@ -77,7 +80,7 @@ export function Sidebar() {
                     {wf.lastRunStatus && (
                       <span
                         className={cn(
-                          "w-2 h-2 rounded-full flex-shrink-0",
+                          "w-2 h-2 rounded-full shrink-0",
                           STATUS_DOT_COLORS[wf.lastRunStatus],
                           wf.lastRunStatus === "running" && "animate-pulse-dot",
                         )}
@@ -92,7 +95,18 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom */}
-      <div className="border-t border-zinc-800 p-2">
+      <div className="border-t border-zinc-800 p-2 space-y-0.5">
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+          className="w-full flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"
+        >
+          <Search className="w-4 h-4" />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="text-[10px] px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-600">
+            {"\u2318"}K
+          </kbd>
+        </button>
         <Link
           to="/"
           className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors"

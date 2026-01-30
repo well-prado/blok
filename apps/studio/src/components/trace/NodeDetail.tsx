@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { formatDuration, formatBytes } from "@/lib/formatters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { JsonViewer } from "@/components/shared/JsonViewer";
+import { ExplainError } from "@/components/trace/ExplainError";
 import type { NodeRun, TraceLogEntry } from "@/types";
 
 interface NodeDetailProps {
@@ -72,7 +73,10 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
         {/* Error */}
         {node.error && (
           <div className="rounded-md border border-red-900/50 bg-red-950/30 p-3">
-            <div className="text-xs font-medium text-red-400 mb-1">Error</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-red-400">Error</span>
+              <ExplainError runId={node.runId} nodeId={node.id} compact />
+            </div>
             <p className="text-xs text-red-300 font-mono break-all">{node.error.message}</p>
             {node.error.code && (
               <p className="text-[11px] text-red-400/70 mt-1">Code: {node.error.code}</p>

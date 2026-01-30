@@ -16,8 +16,12 @@ export default defineConfig({
       output: {
         manualChunks: {
           "react-vendor": ["react", "react-dom"],
-          "tanstack": ["@tanstack/react-router", "@tanstack/react-query", "@tanstack/react-table"],
+          "tanstack-router": ["@tanstack/react-router"],
+          "tanstack-query": ["@tanstack/react-query"],
+          "tanstack-table": ["@tanstack/react-table"],
           "graph": ["@xyflow/react", "dagre"],
+          "charts": ["recharts"],
+          "icons": ["lucide-react"],
         },
       },
     },

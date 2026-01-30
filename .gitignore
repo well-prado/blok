@@ -204,3 +204,9 @@ sdks/ruby/vendor/
 sdks/ruby/.bundle/
 sdks/ruby/Gemfile.lock
 sdks/ruby/pkg/
+
+# pnpm project — ignore npm lockfiles
+package-lock.json
+
+# Blok Studio local trace database
+.blok/

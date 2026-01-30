@@ -127,3 +127,125 @@ export interface ConfigResponse {
   workflows: string[];
   triggers: string[];
 }
+
+export interface DiffResponse {
+  runA: RunDetail;
+  runB: RunDetail;
+}
+
+export interface MetricsResponse {
+  totalRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  avgDurationMs: number;
+  p50DurationMs: number;
+  p95DurationMs: number;
+  p99DurationMs: number;
+  executionTimeline: Array<{
+    bucket: string;
+    total: number;
+    completed: number;
+    failed: number;
+  }>;
+  durationDistribution: Array<{
+    range: string;
+    count: number;
+  }>;
+  workflowBreakdown: Array<{
+    name: string;
+    totalRuns: number;
+    errorRate: number;
+    avgDurationMs: number;
+  }>;
+  nodePerformance: Array<{
+    nodeName: string;
+    avgDurationMs: number;
+    maxDurationMs: number;
+    errorRate: number;
+    executionCount: number;
+  }>;
+}
+
+export interface TagsResponse {
+  tags: string[];
+}
+
+export interface AddTagResponse {
+  added: string[];
+  tags: string[];
+}
+
+export interface RemoveTagResponse {
+  removed: boolean;
+  tags: string[];
+}
+
+// === Webhooks ===
+
+export interface Webhook {
+  id: string;
+  url: string;
+  events: string[];
+  secret?: string;
+  createdAt: number;
+  active: boolean;
+  lastTriggeredAt?: number;
+  lastStatus?: number;
+  failCount: number;
+}
+
+export interface WebhooksResponse {
+  webhooks: Webhook[];
+}
+
+// === AI Explanation ===
+
+export interface ExplainResponse {
+  explanation: string;
+  model: string;
+}
+
+// === Custom Dashboards ===
+
+export type WidgetType =
+  | "stat-card"
+  | "timeline"
+  | "error-rate"
+  | "duration-distribution"
+  | "workflow-breakdown"
+  | "node-performance"
+  | "recent-runs"
+  | "heatmap";
+
+export interface DashboardWidget {
+  id: string;
+  type: WidgetType;
+  title: string;
+  config: {
+    workflow?: string;
+    timeRange?: "1h" | "6h" | "24h" | "7d" | "30d";
+    metric?: string;
+    limit?: number;
+    [key: string]: unknown;
+  };
+  position: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+}
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description?: string;
+  isDefault: boolean;
+  createdAt: number;
+  updatedAt: number;
+  widgets: DashboardWidget[];
+}
+
+export interface DashboardsResponse {
+  dashboards: Dashboard[];
+}

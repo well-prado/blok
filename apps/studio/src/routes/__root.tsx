@@ -2,6 +2,8 @@ import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { StatusBar } from "@/components/layout/StatusBar";
+import { CommandPalette } from "@/components/shared/CommandPalette";
+import { NotificationToast } from "@/components/shared/NotificationToast";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -21,6 +23,8 @@ function RootLayout() {
         </main>
       </div>
       <StatusBar />
+      <CommandPalette />
+      <NotificationToast />
     </div>
   );
 }

@@ -7,7 +7,9 @@
 	},
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"files": ["dist"],
+	"files": [
+		"dist"
+	],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
@@ -22,9 +24,12 @@
 		"typecheck": "tsc --noEmit --incremental"
 	},
 	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.13",
 		"@types/lodash": "^4.14.196",
 		"@types/node": "^22.13.4",
+		"@types/pg": "^8.16.0",
 		"@vitest/coverage-v8": "^4.0.18",
+		"better-sqlite3": "^12.6.2",
 		"copyfiles": "^2.4.1",
 		"nodemon": "^3.1.9",
 		"rimraf": "^6.0.1",
@@ -45,15 +50,20 @@
 		"zod": "^3.24.2"
 	},
 	"peerDependencies": {
-		"@opentelemetry/sdk-metrics": "^1.30.0",
 		"@opentelemetry/exporter-prometheus": "^0.57.0",
-		"@opentelemetry/resources": "^1.30.0",
-		"@opentelemetry/semantic-conventions": "^1.30.0",
-		"@opentelemetry/sdk-trace-node": "^1.30.0",
+		"@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0",
 		"@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
-		"@opentelemetry/exporter-trace-otlp-grpc": "^0.57.0"
+		"@opentelemetry/resources": "^1.30.0",
+		"@opentelemetry/sdk-metrics": "^1.30.0",
+		"@opentelemetry/sdk-trace-node": "^1.30.0",
+		"@opentelemetry/semantic-conventions": "^1.30.0",
+		"better-sqlite3": "^11.0.0",
+		"pg": "^8.13.0"
 	},
 	"peerDependenciesMeta": {
+		"better-sqlite3": {
+			"optional": true
+		},
 		"@opentelemetry/sdk-metrics": {
 			"optional": true
 		},
@@ -73,6 +83,9 @@
 			"optional": true
 		},
 		"@opentelemetry/exporter-trace-otlp-grpc": {
+			"optional": true
+		},
+		"pg": {
 			"optional": true
 		}
 	},

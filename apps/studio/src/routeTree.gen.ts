@@ -9,11 +9,30 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as WebhooksRouteImport } from "./routes/webhooks"
+import { Route as MetricsRouteImport } from "./routes/metrics"
+import { Route as DashboardsRouteImport } from "./routes/dashboards"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
 import { Route as WorkflowsNameRouteImport } from "./routes/workflows/$name"
+import { Route as RunsDiffRouteImport } from "./routes/runs/diff"
 import { Route as RunsRunIdRouteImport } from "./routes/runs/$runId"
 
+const WebhooksRoute = WebhooksRouteImport.update({
+  id: "/webhooks",
+  path: "/webhooks",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRoute = MetricsRouteImport.update({
+  id: "/metrics",
+  path: "/metrics",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardsRoute = DashboardsRouteImport.update({
+  id: "/dashboards",
+  path: "/dashboards",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
@@ -29,6 +48,11 @@ const WorkflowsNameRoute = WorkflowsNameRouteImport.update({
   path: "/workflows/$name",
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsDiffRoute = RunsDiffRouteImport.update({
+  id: "/runs/diff",
+  path: "/runs/diff",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RunsRunIdRoute = RunsRunIdRouteImport.update({
   id: "/runs/$runId",
   path: "/runs/$runId",
@@ -37,40 +61,102 @@ const RunsRunIdRoute = RunsRunIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/dashboards": typeof DashboardsRoute
+  "/metrics": typeof MetricsRoute
+  "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
+  "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
   "/runs/": typeof RunsIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/dashboards": typeof DashboardsRoute
+  "/metrics": typeof MetricsRoute
+  "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
+  "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
   "/runs": typeof RunsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/dashboards": typeof DashboardsRoute
+  "/metrics": typeof MetricsRoute
+  "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
+  "/runs/diff": typeof RunsDiffRoute
   "/workflows/$name": typeof WorkflowsNameRoute
   "/runs/": typeof RunsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: "/" | "/runs/$runId" | "/workflows/$name" | "/runs/"
+  fullPaths:
+    | "/"
+    | "/dashboards"
+    | "/metrics"
+    | "/webhooks"
+    | "/runs/$runId"
+    | "/runs/diff"
+    | "/workflows/$name"
+    | "/runs/"
   fileRoutesByTo: FileRoutesByTo
-  to: "/" | "/runs/$runId" | "/workflows/$name" | "/runs"
-  id: "__root__" | "/" | "/runs/$runId" | "/workflows/$name" | "/runs/"
+  to:
+    | "/"
+    | "/dashboards"
+    | "/metrics"
+    | "/webhooks"
+    | "/runs/$runId"
+    | "/runs/diff"
+    | "/workflows/$name"
+    | "/runs"
+  id:
+    | "__root__"
+    | "/"
+    | "/dashboards"
+    | "/metrics"
+    | "/webhooks"
+    | "/runs/$runId"
+    | "/runs/diff"
+    | "/workflows/$name"
+    | "/runs/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DashboardsRoute: typeof DashboardsRoute
+  MetricsRoute: typeof MetricsRoute
+  WebhooksRoute: typeof WebhooksRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
+  RunsDiffRoute: typeof RunsDiffRoute
   WorkflowsNameRoute: typeof WorkflowsNameRoute
   RunsIndexRoute: typeof RunsIndexRoute
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/webhooks": {
+      id: "/webhooks"
+      path: "/webhooks"
+      fullPath: "/webhooks"
+      preLoaderRoute: typeof WebhooksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/metrics": {
+      id: "/metrics"
+      path: "/metrics"
+      fullPath: "/metrics"
+      preLoaderRoute: typeof MetricsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/dashboards": {
+      id: "/dashboards"
+      path: "/dashboards"
+      fullPath: "/dashboards"
+      preLoaderRoute: typeof DashboardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/": {
       id: "/"
       path: "/"
@@ -92,6 +178,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof WorkflowsNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/runs/diff": {
+      id: "/runs/diff"
+      path: "/runs/diff"
+      fullPath: "/runs/diff"
+      preLoaderRoute: typeof RunsDiffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/runs/$runId": {
       id: "/runs/$runId"
       path: "/runs/$runId"
@@ -104,7 +197,11 @@ declare module "@tanstack/react-router" {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DashboardsRoute: DashboardsRoute,
+  MetricsRoute: MetricsRoute,
+  WebhooksRoute: WebhooksRoute,
   RunsRunIdRoute: RunsRunIdRoute,
+  RunsDiffRoute: RunsDiffRoute,
   WorkflowsNameRoute: WorkflowsNameRoute,
   RunsIndexRoute: RunsIndexRoute,
 }

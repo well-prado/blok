@@ -1,6 +1,7 @@
 import { Wifi, WifiOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connection";
+import { NotificationBell } from "@/components/shared/NotificationToast";
 
 export function StatusBar() {
   const { status, activeStreams } = useConnectionStore();
@@ -25,7 +26,10 @@ export function StatusBar() {
           {activeStreams} active stream{activeStreams > 1 ? "s" : ""}
         </span>
       )}
-      <div className="ml-auto text-zinc-600">Blok Studio v0.1.0</div>
+      <div className="ml-auto flex items-center gap-3">
+        <NotificationBell />
+        <span className="text-zinc-600">Blok Studio v0.1.0</span>
+      </div>
     </div>
   );
 }
