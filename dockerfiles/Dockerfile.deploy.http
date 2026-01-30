@@ -1,5 +1,5 @@
 # Base image with both Python and Node.js
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 # Install Node.js (LTS version)
 RUN apt-get update && apt-get install -y --no-install-recommends \
