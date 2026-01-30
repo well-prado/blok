@@ -24,7 +24,7 @@ import { getHover } from "./hover";
  * - Hover: Rich documentation on hover for workflow fields and values
  *
  * Communication: stdio (default) or TCP
- * File types: JSON files matching **/ workflows; /**\/*.json or blok.workflow.json
+ * File types: JSON files matching `**​/workflows/**​/*.json` or `blok.workflow.json`
  */
 
 // Create connection and document manager
