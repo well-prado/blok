@@ -682,8 +682,8 @@ importers:
         specifier: ^2.0.1
         version: 2.0.2(@bufbuild/protobuf@2.2.5)
       '@connectrpc/connect-fastify':
-        specifier: ^2.0.1
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)
+        specifier: ^2.1.1
+        version: 2.1.1(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)
       '@connectrpc/connect-node':
         specifier: ^2.0.1
         version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
@@ -1925,6 +1925,10 @@ packages:
     resolution: {integrity: sha512-VtPOkrdPHZsKc/clNqyi9WUA8TINkZ4cGk63UUE3u4pmB2k+ZMQRDuIOagv8UVd6j7k0T3+RRIb7beKTebNbcw==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/runtime@7.28.6':
+    resolution: {integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/template@7.27.0':
     resolution: {integrity: sha512-2ncevenBqXI6qRMukPlXwHKHchC7RyMuu4xv5JBXRfOGVcTy1mXCD12qrp7Jsoxll1EV3+9sE4GugBVRjT2jFA==}
     engines: {node: '>=6.9.0'}
@@ -2136,13 +2140,13 @@ packages:
   '@clack/prompts@0.9.1':
     resolution: {integrity: sha512-JIpyaboYZeWYlyP0H+OoPPxd6nqueG/CmN6ixBiNFsIDHREevjIf0n0Ohh5gr5C8pEDknzgvz+pIJ8dMhzWIeg==}
 
-  '@connectrpc/connect-fastify@2.0.2':
-    resolution: {integrity: sha512-rOobWfWc09+Ws4x+tfZFd12UBezMInq+V5chqbgGuGgajZXyEPRfu8ePo0IiKltWptOq7oPAyaEbadpgcZsnBg==}
-    engines: {node: '>=18.14.1'}
+  '@connectrpc/connect-fastify@2.1.1':
+    resolution: {integrity: sha512-UMkdus491H+iUTQE/wnZjaiX6oQ3+GH7gfE5kq2AtXZEZ4IV02bOmTYZS+jfu63+MMeyAkacgfruCYfvwqYzxA==}
+    engines: {node: '>=20'}
     peerDependencies:
-      '@bufbuild/protobuf': ^2.2.0
-      '@connectrpc/connect': 2.0.2
-      '@connectrpc/connect-node': 2.0.2
+      '@bufbuild/protobuf': ^2.7.0
+      '@connectrpc/connect': 2.1.1
+      '@connectrpc/connect-node': 2.1.1
       fastify: ^4.22.1 || ^5.1.0
 
   '@connectrpc/connect-node@2.0.2':
@@ -9146,6 +9150,8 @@ snapshots:
     dependencies:
       regenerator-runtime: 0.14.1
 
+  '@babel/runtime@7.28.6': {}
+
   '@babel/template@7.27.0':
     dependencies:
       '@babel/code-frame': 7.26.2
@@ -9441,7 +9447,7 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@connectrpc/connect-fastify@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)':
+  '@connectrpc/connect-fastify@2.1.1(@bufbuild/protobuf@2.2.5)(@connectrpc/connect-node@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)))(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))(fastify@5.3.3)':
     dependencies:
       '@bufbuild/protobuf': 2.2.5
       '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
@@ -10781,7 +10787,7 @@ snapshots:
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.28.6
-      '@babel/runtime': 7.27.0
+      '@babel/runtime': 7.28.6
       '@types/aria-query': 5.0.4
       aria-query: 5.3.0
       dom-accessibility-api: 0.5.16
