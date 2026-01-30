@@ -51,12 +51,12 @@ thiserror = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client for example nodes
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 [dev-dependencies]
 axum-test = "14"
 tokio-test = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 [build-dependencies]
 tonic-build = { version = "0.12", optional = true }
