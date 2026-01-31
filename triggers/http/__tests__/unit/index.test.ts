@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Prevent auto-run
 process.env.DISABLE_TRIGGER_RUN = "true";
@@ -18,7 +18,9 @@ vi.mock("@opentelemetry/api", () => ({
 	metrics: {
 		getMeter: () => ({
 			createCounter: () => ({ add: vi.fn() }),
+			createHistogram: () => ({ record: vi.fn() }),
 			createGauge: () => ({ record: vi.fn() }),
+			createObservableGauge: () => ({ addCallback: vi.fn() }),
 		}),
 	},
 	SpanStatusCode: { OK: 0, ERROR: 1 },
@@ -31,9 +33,26 @@ vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
 vi.mock("../../src/Nodes", () => ({ default: {} }));
 vi.mock("../../src/Workflows", () => ({ default: {} }));
 vi.mock("../../src/AppRoutes", () => {
-	const { Router } = require("express");
-	return { default: Router() };
+	const { Hono } = require("hono");
+	return { default: new Hono() };
 });
+
+// Mock @hono/node-server serve() to avoid actually binding a port
+const mockServer = { close: vi.fn(), on: vi.fn() };
+vi.mock("@hono/node-server", () => ({
+	serve: vi.fn((_opts: any, cb: any) => {
+		if (cb) cb();
+		return mockServer;
+	}),
+}));
+
+vi.mock("@hono/node-server/serve-static", () => ({
+	serveStatic: () => vi.fn(),
+}));
+
+vi.mock("@hono/node-server/utils/response", () => ({
+	RESPONSE_ALREADY_SENT: new Response(null),
+}));
 
 import App from "../../src/index";
 
@@ -46,27 +65,23 @@ describe("App", () => {
 	});
 
 	describe("getHttpApp()", () => {
-		it("should return Express app from trigger", () => {
+		it("should return Hono app from trigger", () => {
 			const app = new App();
 			const httpApp = app.getHttpApp();
 			expect(httpApp).toBeDefined();
 			expect(typeof httpApp.use).toBe("function");
+			expect(typeof httpApp.fetch).toBe("function");
 		});
 	});
 
 	describe("run()", () => {
-		it("should call listen on the trigger", async () => {
+		it("should call serve and initialize the server", async () => {
 			const app = new App();
-			const httpApp = app.getHttpApp();
-
-			// Mock listen to resolve immediately
-			vi.spyOn(httpApp, "listen").mockImplementation(((port: number, cb: () => void) => {
-				cb();
-				return { close: vi.fn() };
-			}) as any);
+			const { serve } = await import("@hono/node-server");
 
 			// run() doesn't return anything meaningful, just verify no throw
 			await app.run();
+			expect(serve).toHaveBeenCalled();
 		});
 	});
 });

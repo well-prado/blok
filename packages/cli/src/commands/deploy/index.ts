@@ -135,15 +135,12 @@ export async function deploy(opts: OptionValues) {
 		fs.writeJSONSync(blokFile, json, { spaces: 2 });
 
 		logger.message("Deployment completed");
-		logger.stop(
-			`Blok deployed successfully! ${color.gray(`Version: ${deploymentStatus?.latestReadyRevisionName}`)}`,
-			0,
-		);
+		logger.stop(`Blok deployed successfully! ${color.gray(`Version: ${deploymentStatus?.latestReadyRevisionName}`)}`);
 		p.log.success(`Service live at: ${color.greenBright(deploymentData?.data?.url)}`);
 		p.log.success(`Monitoring live at: ${color.greenBright(deploymentData?.data?.prometheusUrl)}`);
 		return true;
 	} catch (error) {
-		logger.stop(`Error: ${error}`, 1);
+		logger.error(`Error: ${error}`);
 		return false;
 	}
 }

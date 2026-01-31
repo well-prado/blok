@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import * as p from "@clack/prompts";
 import type { VisualizerWorkflowDef } from "@blok/runner";
+import * as p from "@clack/prompts";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
 import { loadWorkflow, loadWorkflows } from "../../services/workflow-loader.js";
 
@@ -33,7 +33,7 @@ program
 				if (workflowName) {
 					const wf = await loadWorkflow(directory, workflowName);
 					if (!wf) {
-						logger.stop(`Workflow "${workflowName}" not found.`, 1);
+						logger.error(`Workflow "${workflowName}" not found.`);
 						return;
 					}
 					workflows = [wf];
@@ -42,7 +42,7 @@ program
 				}
 
 				if (workflows.length === 0) {
-					logger.stop("No workflow files found.", 1);
+					logger.error("No workflow files found.");
 					p.log.warn("Make sure your project has workflow JSON files in the workflows/ directory.");
 					return;
 				}

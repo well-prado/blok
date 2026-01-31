@@ -1,31 +1,17 @@
-import express from "express";
-import { describe, expect, it, vi } from "vitest";
-import router from "../../src/AppRoutes";
+import { describe, expect, it } from "vitest";
+import app from "../../src/AppRoutes";
 
 describe("AppRoutes", () => {
-	it("should export an Express Router", () => {
-		expect(router).toBeDefined();
+	it("should export a Hono app", () => {
+		expect(app).toBeDefined();
+		expect(typeof app.fetch).toBe("function");
 	});
 
-	it("should handle GET / route", () => {
-		const mockRes = {
-			status: vi.fn().mockReturnThis(),
-			send: vi.fn(),
-		};
-
-		// Find the GET / handler from the router stack
-		const layer = (router as any).stack?.find((l: any) => l.route?.path === "/" && l.route?.methods?.get);
-
-		if (layer) {
-			layer.route.stack[0].handle({}, mockRes);
-			expect(mockRes.status).toHaveBeenCalledWith(200);
-			expect(mockRes.send).toHaveBeenCalled();
-			// Verify it sends HTML
-			const html = mockRes.send.mock.calls[0][0];
-			expect(html).toContain("<!DOCTYPE html>");
-		} else {
-			// Router has GET / route registered
-			expect(true).toBe(true);
-		}
+	it("should handle GET / route and return HTML", async () => {
+		const res = await app.request("/");
+		expect(res.status).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("<!DOCTYPE html>");
+		expect(html).toContain("Welcome to blok");
 	});
 });

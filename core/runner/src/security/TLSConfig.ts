@@ -40,7 +40,13 @@
  * ```
  */
 
-import { X509Certificate, createPrivateKey, generateKeyPairSync } from "node:crypto";
+import {
+	X509Certificate,
+	createPrivateKey,
+	createSign,
+	randomBytes as cryptoRandomBytes,
+	generateKeyPairSync,
+} from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import type { ConnectionOptions, TlsOptions } from "node:tls";
 
@@ -493,8 +499,6 @@ export class TLSConfig {
 		// a DER-encoded self-signed cert.  In practice, libraries like
 		// `selfsigned` or `node-forge` are often used.  This implementation
 		// provides a functional placeholder that works with Node.js built-ins.
-
-		const { createSign, randomBytes: cryptoRandomBytes } = require("node:crypto");
 
 		// Serial number (20 bytes, positive)
 		const serial = cryptoRandomBytes(20);

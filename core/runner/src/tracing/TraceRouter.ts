@@ -1,3 +1,4 @@
+import http from "node:http";
 import { RunTracker } from "./RunTracker";
 import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
 
@@ -494,7 +495,6 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		t.on("RUN_STARTED", onRunStarted);
 
 		// Make the HTTP request to re-trigger the workflow
-		const http = require("node:http") as typeof import("node:http");
 		const parsedUrl = new URL(finalUrl);
 
 		const reqOpts: import("node:http").RequestOptions = {

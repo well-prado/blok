@@ -1,4 +1,7 @@
+import { createRequire } from "node:module";
 import { InMemoryRunStore } from "./InMemoryRunStore";
+
+const esmRequire = createRequire(import.meta.url);
 import type { RunStore } from "./RunStore";
 import type {
 	Dashboard,
@@ -51,7 +54,7 @@ export class PostgresRunStore implements RunStore {
 		let Pool: typeof import("pg").Pool;
 		try {
 			const mod = "pg";
-			Pool = require(mod).Pool;
+			Pool = esmRequire(mod).Pool;
 		} catch {
 			throw new Error(
 				"PostgresRunStore requires 'pg'. Install it:\n" + "  npm install pg\n" + "  # or\n" + "  pnpm add pg",
@@ -570,7 +573,7 @@ export class PostgresRunStore implements RunStore {
 	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void {
 		this.memory.updateDashboard(dashboardId, updates);
 
-		const setClauses: string[] = [`updated_at = $1`];
+		const setClauses: string[] = ["updated_at = $1"];
 		const values: unknown[] = [Date.now()];
 		let paramIdx = 2;
 

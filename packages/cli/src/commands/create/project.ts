@@ -319,7 +319,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const [pkg, ver] of Object.entries(deps)) {
 				if (typeof ver === "string" && ver.startsWith("workspace:")) {
 					if (localRepoPath && workspacePackageMap[pkg]) {
-						deps[pkg] = `link:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
+						deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
 					} else {
 						deps[pkg] = "^0.1.0";
 					}
@@ -340,7 +340,7 @@ export async function createProject(opts: OptionValues, version: string, current
 				...packageJsonContent.scripts,
 				dev: "blokctl dev",
 			};
-			const blokctlRef = localRepoPath ? `link:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
+			const blokctlRef = localRepoPath ? `file:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
 			packageJsonContent.devDependencies = {
 				...packageJsonContent.devDependencies,
 				blokctl: blokctlRef,

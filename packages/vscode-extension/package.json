@@ -8,19 +8,8 @@
 	"engines": {
 		"vscode": "^1.85.0"
 	},
-	"categories": [
-		"Programming Languages",
-		"Snippets",
-		"Linters",
-		"Other"
-	],
-	"keywords": [
-		"blok",
-		"blok",
-		"workflow",
-		"orchestration",
-		"typescript"
-	],
+	"categories": ["Programming Languages", "Snippets", "Linters", "Other"],
+	"keywords": ["blok", "blok", "workflow", "orchestration", "typescript"],
 	"activationEvents": [
 		"workspaceContains:**/workflows/**/*.json",
 		"workspaceContains:**/blok.json",
@@ -107,13 +96,8 @@
 		"languages": [
 			{
 				"id": "blok-workflow",
-				"aliases": [
-					"Blok Workflow"
-				],
-				"filenamePatterns": [
-					"**/workflows/**/*.json",
-					"*.workflow.json"
-				],
+				"aliases": ["Blok Workflow"],
+				"filenamePatterns": ["**/workflows/**/*.json", "*.workflow.json"],
 				"configuration": "../syntax/language-configuration.json"
 			}
 		],
@@ -126,9 +110,7 @@
 			{
 				"scopeName": "source.blok-workflow",
 				"path": "../syntax/syntaxes/blok-workflow.tmLanguage.json",
-				"injectTo": [
-					"source.json"
-				]
+				"injectTo": ["source.json"]
 			}
 		],
 		"snippets": [
@@ -167,10 +149,7 @@
 				},
 				"blok.aiProvider": {
 					"type": "string",
-					"enum": [
-						"openai",
-						"anthropic"
-					],
+					"enum": ["openai", "anthropic"],
 					"default": "openai",
 					"description": "AI provider for code generation"
 				}
@@ -187,9 +166,9 @@
 	},
 	"devDependencies": {
 		"@types/vscode": "^1.85.0",
-		"@types/node": "^20.0.0",
-		"esbuild": "^0.20.0",
-		"vitest": "^3.0.0",
-		"typescript": "^5.5.0"
+		"@types/node": "^20.10.0",
+		"esbuild": "^0.27.2",
+		"vitest": "^4.0.18",
+		"typescript": "^5.8.3"
 	}
 }

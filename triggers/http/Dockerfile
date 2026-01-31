@@ -27,7 +27,7 @@ ENV NODE_ENV=production
 RUN bun run build
 
 # copy production dependencies and source code into final image
-FROM node:23.11.1-slim AS release
+FROM oven/bun:1-slim AS release
 WORKDIR /usr/src/app
 
 COPY --from=install /temp/prod/node_modules node_modules
@@ -42,8 +42,8 @@ ENV NODE_ENV=production
 ENV APP_NAME=blok-http
 
 # run the app
-USER node
+USER bun
 EXPOSE 4000/tcp
 EXPOSE 9091/tcp
 
-ENTRYPOINT [ "node", "-r", "./dist/runner/metrics/opentelemetry_metrics.js", "dist/index.js" ]
+ENTRYPOINT [ "bun", "--preload", "./dist/runner/metrics/opentelemetry_metrics.js", "run", "dist/index.js" ]

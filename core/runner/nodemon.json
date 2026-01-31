@@ -1,6 +1,0 @@
-{
-	"watch": ["src"],
-	"ext": ".ts,.js",
-	"ignore": [],
-	"exec": "pnpm --filter @blok/helper run build"
-}

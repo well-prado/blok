@@ -7,22 +7,29 @@ import { NodeMap } from "@blok/runner";
 import { DefaultLogger } from "@blok/runner";
 import { registerTraceRoutes } from "@blok/runner";
 import { type Context, GlobalError, type RequestContext } from "@blok/shared";
+import type { HttpBindings } from "@hono/node-server";
+import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
-import bodyParser from "body-parser";
-import cors from "cors";
-import express, { type Express, type Request, type Response } from "express";
+import { Hono, type Context as HonoContext } from "hono";
+import { cors } from "hono/cors";
 import { v4 as uuid } from "uuid";
 import apps from "../AppRoutes";
 import nodes from "../Nodes";
 import workflows from "../Workflows";
+import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
 import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
+import type WorkflowRequest from "./types/WorkflowRequest";
+
+type AppBindings = { Bindings: HttpBindings };
 
 export default class HttpTrigger extends TriggerBase {
-	private app: Express = express();
+	private app: Hono<AppBindings> = new Hono<AppBindings>();
 	private port: string | number = process.env.PORT || 4000;
 	private initializer = 0;
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
@@ -76,27 +83,31 @@ export default class HttpTrigger extends TriggerBase {
 		console.log(`[HMR] Node reloaded: ${event.relativePath}`);
 	}
 
-	getApp(): Express {
+	getApp(): Hono<AppBindings> {
 		return this.app;
 	}
 
 	listen(): Promise<number> {
 		return new Promise((done) => {
-			this.app.use(express.static("public"));
-			this.app.use(bodyParser.text({ limit: "150mb" }));
-			this.app.use(bodyParser.urlencoded({ extended: true }));
-			this.app.use(bodyParser.json({ limit: "150mb" }));
+			// Static files
+			this.app.use("/public/*", serveStatic({ root: "./" }));
+
+			// CORS
 			this.app.use(cors());
 
-			this.app.use("/health-check", (req: Request, res: Response) => {
-				res.status(200).send("Online and ready for action 💪");
+			// Health check
+			this.app.all("/health-check", (c) => {
+				return c.text("Online and ready for action", 200);
 			});
 
-			this.app.get("/metrics", (req: Request, res: Response) => {
+			// Prometheus metrics — uses raw Node.js req/res since the
+			// OpenTelemetry Prometheus exporter expects (IncomingMessage, ServerResponse)
+			this.app.get("/metrics", (c) => {
 				try {
-					metricsHandler(req, res);
+					metricsHandler(c.env.incoming, c.env.outgoing);
+					return RESPONSE_ALREADY_SENT;
 				} catch (error) {
-					res.status(500).send("Error serving metrics");
+					return c.text("Error serving metrics", 500);
 				}
 			});
 
@@ -105,34 +116,58 @@ export default class HttpTrigger extends TriggerBase {
 			// so that /__blok/* requests are handled by the trace router, not treated
 			// as workflow lookups.
 			if (process.env.BLOK_TRACE_ENABLED !== "false") {
-				const traceRouter = express.Router();
-				registerTraceRoutes(traceRouter);
-				this.app.use("/__blok", traceRouter);
+				const { traceAdapter, traceApp } = createTraceRouterAdapter();
+				registerTraceRoutes(traceAdapter);
+				this.app.route("/__blok", traceApp);
 			}
 
 			/*
-			 * You can add your own middleware or routes with custom ExpressJS logic
+			 * You can add your own middleware or routes with custom Hono logic
 			 * to extend this project.
 			 */
-			this.app.use("/", apps);
+			this.app.route("/", apps);
 
-			this.app.use(["/:workflow", "/"], async (req: Request, res: Response): Promise<void> => {
-				const id: string = (req.query?.requestId as string) || (uuid() as string);
-				req.query.requestId = undefined;
-				let workflowNameInPath: string = req.params.workflow as string;
+			// Catch-all workflow handler
+			const workflowHandler = async (c: HonoContext<AppBindings>) => {
+				const id: string = c.req.query("requestId") || (uuid() as string);
+				let workflowNameInPath: string = c.req.param("workflow") as string;
 
 				// Skip internal paths — these are handled by dedicated routers above
 				if (workflowNameInPath === "__blok") {
-					res.status(404).json({ error: "Not found" });
-					return;
+					return c.json({ error: "Not found" }, 404);
 				}
+
+				// Compute the sub-path (equivalent to Express req.path in use() middleware context)
+				const fullPath = c.req.path;
+				const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
 
 				let remoteNodeExecution = false;
 				let runtimeWorkflow: RuntimeWorkflow | undefined;
-				if (req.headers["x-blok-execute-node"] === "true" && req.method.toLowerCase() === "post") {
+
+				// Parse request body for non-GET methods
+				let body: unknown = {};
+				if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+					try {
+						const contentType = c.req.header("content-type") || "";
+						if (contentType.includes("application/json")) {
+							body = await c.req.json();
+						} else if (
+							contentType.includes("application/x-www-form-urlencoded") ||
+							contentType.includes("multipart/form-data")
+						) {
+							body = await c.req.parseBody();
+						} else {
+							body = await c.req.text();
+						}
+					} catch {
+						body = {};
+					}
+				}
+
+				if (c.req.header("x-blok-execute-node") === "true" && c.req.method.toLowerCase() === "post") {
 					remoteNodeExecution = true;
 					const coder = new MessageDecode();
-					const messageContext: Context = coder.requestDecode(req.body); // Collecting the context from the body
+					const messageContext: Context = coder.requestDecode(body as WorkflowRequest);
 					runtimeWorkflow = messageContext as unknown as RuntimeWorkflow;
 				}
 
@@ -144,7 +179,7 @@ export default class HttpTrigger extends TriggerBase {
 					description: "Workflow requests",
 				});
 
-				await this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
+				return this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
 					try {
 						const start = performance.now();
 						if (remoteNodeExecution && runtimeWorkflow !== undefined) {
@@ -185,7 +220,7 @@ export default class HttpTrigger extends TriggerBase {
 							const trigger_config =
 								((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
 
-							let remoteNodeName = workflowNameInPath + req.path;
+							let remoteNodeName = workflowNameInPath + subPath;
 							if (remoteNodeName.substring(remoteNodeName.length - 1) === "/") {
 								remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
 							}
@@ -210,17 +245,44 @@ export default class HttpTrigger extends TriggerBase {
 						}
 
 						await this.configuration.init(workflowNameInPath, this.nodeMap);
-						let ctx: Context = this.createContext(undefined, workflowNameInPath || (req.params.workflow as string), id);
-						req.params = handleDynamicRoute(this.configuration.trigger.http.path, req);
+						let ctx: Context = this.createContext(
+							undefined,
+							workflowNameInPath || (c.req.param("workflow") as string),
+							id,
+						);
 
-						ctx.logger.log(`Version: ${this.configuration.version}, Method: ${req.method}`);
+						const resolvedParams = handleDynamicRoute(
+							this.configuration.trigger.http.path,
+							subPath,
+							(c.req.param() as Record<string, string>) || {},
+						);
+
+						ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
 
 						const { method, path } = this.configuration.trigger.http;
-						if (method && method !== "*" && method !== "ANY" && req.method.toLowerCase() !== method.toLowerCase())
+						if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
 							throw new Error("Invalid HTTP method");
-						if (!validateRoute(path, req.path)) throw new Error("Invalid HTTP path");
+						if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
 
-						ctx.request = req as unknown as RequestContext;
+						// Build RequestContext from Hono request
+						const url = new URL(c.req.url);
+						const queryObj: Record<string, string> = {};
+						for (const [key, value] of url.searchParams.entries()) {
+							if (key !== "requestId") {
+								queryObj[key] = value;
+							}
+						}
+
+						ctx.request = {
+							body,
+							headers: Object.fromEntries([...c.req.raw.headers.entries()]),
+							params: resolvedParams,
+							query: queryObj,
+							method: c.req.method,
+							path: subPath,
+							url: c.req.url,
+						} as unknown as RequestContext;
+
 						const response: TriggerResponse = await this.run(ctx);
 						ctx = response.ctx;
 						const average = response.metrics;
@@ -246,8 +308,12 @@ export default class HttpTrigger extends TriggerBase {
 						span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
 						span.setStatus({ code: SpanStatusCode.OK });
 
-						res.setHeader("Content-Type", ctx.response.contentType);
-						res.status(200).send(ctx.response.data);
+						const data = ctx.response.data;
+						c.header("Content-Type", ctx.response.contentType);
+						if (typeof data === "string") {
+							return c.body(data, 200);
+						}
+						return c.json(data as object, 200);
 					} catch (e: unknown) {
 						span.setAttribute("success", false);
 						span.setAttribute("workflow_request_id", `${id}`);
@@ -274,52 +340,54 @@ export default class HttpTrigger extends TriggerBase {
 									code: SpanStatusCode.ERROR,
 									message: (error_context.context.json as Error).toString(),
 								});
-								res.status(500).json({
-									origin: error_context.context.name,
-									error: (error_context.context.json as Error).toString(),
-								});
-
 								this.logger.error(`${(error_context.context.json as Error).toString()}`);
-							} else {
-								if (error_context.context.code === undefined) error_context.setCode(500);
-								const code = error_context.context.code as number;
-
-								if (error_context.hasJson()) {
-									workflow_runner_errors.add(1, {
-										env: process.env.NODE_ENV,
-										workflow_version: `${this.configuration?.version || "unknown"}`,
-										workflow_name: `${this.configuration?.name || "unknown"}`,
-										workflow_path: `${workflowNameInPath}`,
-									});
-									span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
-									this.logger.error(`${JSON.stringify(error_context.context.json)}`);
-									res.status(code).json(error_context.context.json);
-								} else {
-									workflow_runner_errors.add(1, {
-										env: process.env.NODE_ENV,
-										workflow_version: `${this.configuration?.version || "unknown"}`,
-										workflow_name: `${this.configuration?.name || "unknown"}`,
-										workflow_path: `${workflowNameInPath}`,
-									});
-									span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
-									this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
-									res.status(code).json({ error: error_context.message });
-								}
+								return c.json(
+									{
+										origin: error_context.context.name,
+										error: (error_context.context.json as Error).toString(),
+									},
+									500,
+								);
 							}
-						} else {
+
+							if (error_context.context.code === undefined) error_context.setCode(500);
+							const code = error_context.context.code as number;
+
+							if (error_context.hasJson()) {
+								workflow_runner_errors.add(1, {
+									env: process.env.NODE_ENV,
+									workflow_version: `${this.configuration?.version || "unknown"}`,
+									workflow_name: `${this.configuration?.name || "unknown"}`,
+									workflow_path: `${workflowNameInPath}`,
+								});
+								span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
+								this.logger.error(`${JSON.stringify(error_context.context.json)}`);
+								return c.json(error_context.context.json as object, code as 500);
+							}
+
 							workflow_runner_errors.add(1, {
 								env: process.env.NODE_ENV,
 								workflow_version: `${this.configuration?.version || "unknown"}`,
 								workflow_name: `${this.configuration?.name || "unknown"}`,
 								workflow_path: `${workflowNameInPath}`,
 							});
-							span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
-							this.logger.error(
-								`${workflowNameInPath}: ${(e as Error).message}`,
-								`${(e as Error).stack?.replace(/\n/g, " ")}`,
-							);
-							res.status(500).json({ error: (e as Error).message });
+							span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
+							this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
+							return c.json({ error: error_context.message }, code as 500);
 						}
+
+						workflow_runner_errors.add(1, {
+							env: process.env.NODE_ENV,
+							workflow_version: `${this.configuration?.version || "unknown"}`,
+							workflow_name: `${this.configuration?.name || "unknown"}`,
+							workflow_path: `${workflowNameInPath}`,
+						});
+						span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
+						this.logger.error(
+							`${workflowNameInPath}: ${(e as Error).message}`,
+							`${(e as Error).stack?.replace(/\n/g, " ")}`,
+						);
+						return c.json({ error: (e as Error).message }, 500);
 					} finally {
 						if (remoteNodeExecution) {
 							delete this.nodeMap.workflows[id];
@@ -327,18 +395,21 @@ export default class HttpTrigger extends TriggerBase {
 						span.end();
 					}
 				});
-			});
+			};
 
-			this.server = this.app.listen(this.port, async () => {
+			this.app.all("/:workflow{.+}/*", workflowHandler);
+			this.app.all("/:workflow{.+}", workflowHandler);
+
+			this.server = serve({ fetch: this.app.fetch, port: Number(this.port) }, () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
 
 				// Enable HMR in development mode
 				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
-					await this.enableHotReload();
+					this.enableHotReload();
 				}
 
 				done(this.endCounter(this.initializer));
-			});
+			}) as Server;
 		});
 	}
 }

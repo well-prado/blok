@@ -96,7 +96,7 @@ program
 				}
 
 				if (!hasData) {
-					logger.stop("No profiling data available.", 1);
+					logger.error("No profiling data available.");
 					p.log.warn("Make sure Prometheus is running and workflows have been executed.");
 					p.log.info(`Tried connecting to: ${host}`);
 					return;

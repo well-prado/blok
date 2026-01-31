@@ -4,7 +4,8 @@
 	},
 	"compilerOptions": {
 		"target": "ES2022",
-		"module": "CommonJS",
+		"module": "es2022",
+		"moduleResolution": "bundler",
 		"rootDir": "./src",
 		"baseUrl": ".",
 		"paths": {

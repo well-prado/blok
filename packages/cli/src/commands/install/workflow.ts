@@ -50,7 +50,7 @@ export async function install(opts: OptionValues) {
 
 		logger.stop("Workflow installed successfully.");
 	} catch (error) {
-		logger.stop((error as Error).message, 1);
+		logger.error((error as Error).message);
 	}
 }
 

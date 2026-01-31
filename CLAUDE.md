@@ -5,13 +5,13 @@ Read `AGENTS.md` for full architecture, APIs, and patterns. This file contains C
 ## Quick Commands
 
 ```bash
-pnpm install                       # Install dependencies
-pnpm build                         # Build all packages
-pnpm test                          # Run all tests
-pnpm lint                          # Lint with Biome
-pnpm http:dev                      # Start HTTP trigger dev server
-pnpm runner:test                   # Test runner in watch mode
-pnpm core:build:dev                # Watch-build all core packages
+bun install                        # Install dependencies
+bun run build                      # Build all packages
+bun run test                       # Run all tests
+bun run lint                       # Lint with Biome
+bun run http:dev                   # Start HTTP trigger dev server
+bun run runner:test                # Test runner in watch mode
+bun run core:build:dev             # Watch-build all core packages
 blokctl dev                        # Full dev server (spawns runtimes + runner)
 blokctl create node <name>         # Scaffold a new node
 blokctl create workflow <name>     # Scaffold a new workflow

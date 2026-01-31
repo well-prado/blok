@@ -188,7 +188,7 @@ export async function publish(opts: OptionValues) {
 
 		logger.stop("Workflow published successfully");
 	} catch (error) {
-		logger.stop((error as Error).message, 1);
+		logger.error((error as Error).message);
 	}
 }
 

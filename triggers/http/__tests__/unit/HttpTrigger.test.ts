@@ -16,7 +16,9 @@ vi.mock("@opentelemetry/api", () => ({
 	metrics: {
 		getMeter: () => ({
 			createCounter: () => ({ add: vi.fn() }),
+			createHistogram: () => ({ record: vi.fn() }),
 			createGauge: () => ({ record: vi.fn() }),
+			createObservableGauge: () => ({ addCallback: vi.fn() }),
 		}),
 	},
 	SpanStatusCode: { OK: 0, ERROR: 1 },
@@ -35,9 +37,26 @@ vi.mock("../../src/Workflows", () => ({
 }));
 
 vi.mock("../../src/AppRoutes", () => {
-	const { Router } = require("express");
-	return { default: Router() };
+	const { Hono } = require("hono");
+	return { default: new Hono() };
 });
+
+// Mock @hono/node-server serve() to avoid actually binding a port
+const mockServer = { close: vi.fn(), on: vi.fn() };
+vi.mock("@hono/node-server", () => ({
+	serve: vi.fn((_opts: any, cb: any) => {
+		if (cb) cb();
+		return mockServer;
+	}),
+}));
+
+vi.mock("@hono/node-server/serve-static", () => ({
+	serveStatic: () => vi.fn(),
+}));
+
+vi.mock("@hono/node-server/utils/response", () => ({
+	RESPONSE_ALREADY_SENT: new Response(null),
+}));
 
 import HttpTrigger from "../../src/runner/HttpTrigger";
 
@@ -63,27 +82,22 @@ describe("HttpTrigger", () => {
 	});
 
 	describe("getApp()", () => {
-		it("should return Express instance", () => {
+		it("should return Hono instance", () => {
 			const app = trigger.getApp();
 			expect(app).toBeDefined();
 			expect(typeof app.use).toBe("function");
-			expect(typeof app.listen).toBe("function");
+			expect(typeof app.fetch).toBe("function");
+			expect(typeof app.get).toBe("function");
+			expect(typeof app.post).toBe("function");
 		});
 	});
 
 	describe("listen()", () => {
 		it("should set up middleware and start listening", async () => {
-			const app = trigger.getApp();
-			const originalListen = app.listen.bind(app);
-
-			// Mock listen to call callback immediately
-			vi.spyOn(app, "listen").mockImplementation(((port: number, callback: () => void) => {
-				callback();
-				return { close: vi.fn() };
-			}) as any);
-
+			const { serve } = await import("@hono/node-server");
 			const result = await trigger.listen();
 			expect(typeof result).toBe("number");
+			expect(serve).toHaveBeenCalled();
 		});
 
 		it("should use PORT env var when set", () => {

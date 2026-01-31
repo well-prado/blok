@@ -69,7 +69,7 @@ export async function search(opts: OptionValues) {
 			},
 		});
 	} catch (error) {
-		logger.stop((error as Error).message, 1);
+		logger.error((error as Error).message);
 	}
 }
 

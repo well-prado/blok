@@ -6,7 +6,7 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		coverage: {
-			provider: "v8",
+			provider: "istanbul",
 			reporter: ["text", "json", "html", "lcov"],
 			exclude: ["node_modules/", "dist/", "**/*.d.ts", "**/*.config.ts", "__tests__/", "src/types/", "src/index.ts"],
 			thresholds: {

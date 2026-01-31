@@ -1,11 +1,13 @@
-# Base image with both Python and Node.js
+# Base image with both Python and Bun
 FROM python:3.11-slim-bookworm
 
-# Install Node.js (LTS version)
+# Install Bun
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs \
+    unzip \
+    && curl -fsSL https://bun.sh/install | bash \
+    && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
+    && ln -s /root/.bun/bin/bunx /usr/local/bin/bunx \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Supervisor
@@ -24,10 +26,10 @@ RUN if [ -f ./.blokctl/runtimes/python3/requirements.txt ]; then \
     pip install --no-cache-dir -r ./.blokctl/runtimes/python3/requirements.txt; \
     fi
 
-# Install Node.js dependencies
-RUN npm install
-# Build the Node.js application
-RUN npm run build
+# Install dependencies
+RUN bun install
+# Build the application
+RUN bun run build
 
 # Configure Supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf

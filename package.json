@@ -5,44 +5,56 @@
 	"keywords": [],
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
+	"workspaces": [
+		"core/*",
+		"nodes/**/**",
+		"triggers/*",
+		"templates/**/**",
+		"packages/*",
+		"apps/*"
+	],
+	"trustedDependencies": [
+		"@biomejs/biome",
+		"@bufbuild/buf",
+		"better-sqlite3",
+		"esbuild",
+		"nx",
+		"protobufjs"
+	],
 	"scripts": {
-		"ci:publish": "pnpm build && pnpm publish -r --access public",
-		"doc:dev": "cd docs && npx mintlify dev",
-		"doc:generate": "npx typedoc --skipErrorChecking && node ./docs/generateRefLinks.js",
+		"ci:publish": "bun run build && bunx changeset publish",
+		"doc:dev": "cd docs && bunx mintlify dev",
+		"doc:generate": "bunx typedoc --skipErrorChecking && bun run ./docs/generateRefLinks.js",
 		"prepare": "husky",
 		"lint": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
 		"test": "nx run-many -t test",
-		"cli:dev": "pnpm --filter blokctl --parallel -r run build:dev",
-		"cli:test:dev": "pnpm --filter blokctl --parallel -r run test:dev",
-		"cli:test": "pnpm --filter blokctl --parallel -r run test",
-		"build:cli": "pnpm --filter blokctl --parallel -r run build",
-		"runner:test": "pnpm --filter @blok/runner --parallel -r run test:dev",
-		"runner:dev": "pnpm --filter @blok/runner --parallel -r run build:dev",
-		"helper:test": "pnpm --filter @blok/helper --parallel -r run test:dev",
-		"helper:dev": "pnpm --filter @blok/helper --parallel -r run build:dev",
-		"http:dev": "pnpm --filter @blok/trigger-http --parallel -r run dev",
-		"nodes:build": "pnpm --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name --parallel -r run build:dev",
-		"core:build:dev": "pnpm --filter @blok/runner --filter @blok/shared --filter @blok/helper --parallel run build:dev",
-		"build": "pnpm --filter blokctl --filter @blok/runner --filter @blok/shared --filter @blok/helper run build && pnpm --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name --parallel -r run build"
+		"cli:dev": "bun run --filter blokctl build:dev",
+		"cli:test:dev": "bun run --filter blokctl test:dev",
+		"cli:test": "bun run --filter blokctl test",
+		"build:cli": "bun run --filter blokctl build",
+		"runner:test": "bun run --filter @blok/runner test:dev",
+		"runner:dev": "bun run --filter @blok/runner build:dev",
+		"helper:test": "bun run --filter @blok/helper test:dev",
+		"helper:dev": "bun run --filter @blok/helper build:dev",
+		"http:dev": "bun run --filter @blok/trigger-http dev",
+		"nodes:build": "bun run --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name build:dev",
+		"core:build:dev": "bun run --filter @blok/runner --filter @blok/shared --filter @blok/helper build:dev",
+		"build": "bun run --filter @blok/shared --filter @blok/helper build && bun run --filter @blok/runner build && bun run --filter blokctl --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name build"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "1.9.4",
-		"@changesets/cli": "^2.27.12",
+		"@changesets/cli": "^2.29.8",
 		"husky": "^9.1.7",
-		"lint-staged": "^15.4.3",
-		"nx": "20.4.0",
-		"typedoc": "^0.27.6",
-		"typedoc-plugin-markdown": "^4.4.1"
+		"lint-staged": "^16.2.7",
+		"nx": "20.8.4",
+		"typedoc": "^0.28.16",
+		"typedoc-plugin-markdown": "^4.9.0"
 	},
 	"lint-staged": {
 		"*": [
 			"biome check --unsafe --write --no-errors-on-unmatched --files-ignore-unknown=true",
-			"pnpm run test"
+			"bun run test"
 		]
 	},
-	"engines": {
-		"pnpm": ">=10.2.0"
-	},
-	"packageManager": "pnpm@10.14.0",
 	"private": true
 }

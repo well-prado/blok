@@ -5,27 +5,26 @@
 	"engines": {
 		"node": ">=18.0.0"
 	},
+	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"files": [
-		"dist"
-	],
+	"files": ["dist"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
-		"build": "rm -rf dist && npx tsc",
+		"build": "rm -rf dist && bun run tsc",
 		"build:dev": "tsc --watch",
 		"test:dev": "vitest",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit --incremental"
 	},
 	"devDependencies": {
-		"@types/node": "^22.13.4",
-		"typescript": "^5.7.2",
-		"vitest": "^3.1.4"
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"zod": "^3.24.1"
+		"zod": "^3.24.2"
 	},
 	"private": false
 }
