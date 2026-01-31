@@ -83,7 +83,7 @@ export async function setupRuntime(
 			await setupPhp(blokctlRuntimeDir, spinner);
 			break;
 		case "ruby":
-			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner);
+			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner, runtime.defaultPort);
 			break;
 	}
 
@@ -200,7 +200,7 @@ async function setupPhp(sdkDir: string, spinner: SpinnerHandler): Promise<void> 
  * Ruby: install Bundler dependencies.
  * Returns an override startCmd if the system `bundle` is too old (e.g., macOS ships Ruby 2.6).
  */
-async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<string | undefined> {
+async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number): Promise<string> {
 	// Resolve the correct bundle binary (macOS ships Ruby 2.6 + Bundler 1.x)
 	const bundleCandidates = ["bundle", "/opt/homebrew/opt/ruby/bin/bundle"];
 	let resolvedBundle = "bundle";
@@ -224,10 +224,9 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<strin
 	await exec(`"${resolvedBundle}" install`, { cwd: sdkDir, timeout: 120000 });
 	spinner.message("Ruby dependencies installed.");
 
-	if (resolvedBundle !== "bundle") {
-		return `${resolvedBundle} exec rackup --host 0.0.0.0 --port 8080 config.ru`;
-	}
-	return undefined;
+	// Always return the startCmd with explicit -p flag because rackup
+	// does not reliably read the PORT env var across versions.
+	return `${resolvedBundle} exec rackup --host 0.0.0.0 -p ${port} config.ru`;
 }
 
 /**

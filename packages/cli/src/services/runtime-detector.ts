@@ -119,7 +119,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["ruby --version", "/opt/homebrew/opt/ruby/bin/ruby --version"],
 		toolchain: "ruby + bundler",
 		installDeps: "bundle install",
-		startCmd: "bundle exec rackup --host 0.0.0.0 --port 8080 config.ru",
+		startCmd: "bundle exec rackup --host 0.0.0.0 config.ru",
 		sdkDir: "ruby",
 		secondaryTool: {
 			name: "Bundler",
