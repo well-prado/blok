@@ -1,4 +1,4 @@
-#! /usr/bin/env node
+#! /usr/bin/env bun
 import child_process from "node:child_process";
 import os from "node:os";
 import util from "node:util";
@@ -10,6 +10,7 @@ import { createProject } from "./commands/create/project.js";
 import { createWorkflow } from "./commands/create/workflow.js";
 import { devProject } from "./commands/dev/index.js";
 import { type OptionValues, program } from "./services/commander.js";
+import { setNonInteractive } from "./services/non-interactive.js";
 import { PosthogAnalytics } from "./services/posthog.js";
 import { getPackageVersion } from "./services/utils.js";
 
@@ -84,6 +85,14 @@ async function main() {
 
 		program.version(`${version}`, "-v, --version").description(`Blok CLI ${version}`);
 
+		program.option("--non-interactive", "Disable interactive prompts (fail if required flags are missing)");
+		program.hook("preAction", (thisCommand) => {
+			const opts = thisCommand.opts();
+			if (opts.nonInteractive) {
+				setNonInteractive(true);
+			}
+		});
+
 		await validateVersion(version);
 
 		const create = new Command("create").description("Create a new blok component");
@@ -92,6 +101,10 @@ async function main() {
 			.description("Create a new Project")
 			.option("-n, --name <value>", "Create a default Project")
 			.option("-l, --local <path>", "Use a local repo path instead of cloning from remote")
+			.option("-t, --trigger <value>", "Trigger type to install (default: http)")
+			.option("-r, --runtimes <value>", "Comma-separated runtime list (default: node)")
+			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
+			.option("--examples", "Install example workflows and nodes")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "create project",
@@ -119,6 +132,10 @@ async function main() {
 			.description("Create a new Node")
 			.option("-n, --name <value>", "Create a default Node")
 			.option("-s, --style <value>", "Node style: 'function' (recommended) or 'class'")
+			.option("-r, --runtime <value>", "Runtime: typescript, python3, go, java, rust, csharp, php, ruby")
+			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
+			.option("--node-type <value>", "Node type: module, class (TypeScript only)")
+			.option("--template <value>", "Template: standard, ui (TypeScript only)")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "create node",

@@ -57,6 +57,8 @@ describe("deploy command", () => {
 			start: vi.fn(),
 			message: vi.fn(),
 			stop: vi.fn(),
+			error: vi.fn(),
+			cancel: vi.fn(),
 		});
 		vi.spyOn(tokenManager, "getToken").mockReturnValue("mock-token");
 		fetch.mockResolvedValueOnce({
@@ -94,6 +96,8 @@ describe("deploy command", () => {
 			start: vi.fn(),
 			message: vi.fn(),
 			stop: vi.fn(),
+			error: vi.fn(),
+			cancel: vi.fn(),
 		});
 
 		await expect(deploy(opts)).resolves.toBeFalsy();
@@ -109,6 +113,8 @@ describe("deploy command", () => {
 			start: vi.fn(),
 			message: vi.fn(),
 			stop: vi.fn(),
+			error: vi.fn(),
+			cancel: vi.fn(),
 		});
 		vi.spyOn(fs, "readJSONSync").mockReturnValue({
 			name: "test-service",

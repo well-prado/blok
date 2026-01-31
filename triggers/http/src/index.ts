@@ -35,7 +35,7 @@ export default class App {
 		});
 	}
 
-	// Expose the Express app for hosting with serverless functions like AWS Lambda, GC Functions, etc.
+	// Expose the Hono app for hosting with serverless functions like AWS Lambda, GC Functions, etc.
 	getHttpApp() {
 		return this.httpTrigger.getApp();
 	}

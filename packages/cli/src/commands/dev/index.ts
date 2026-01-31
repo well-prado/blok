@@ -37,16 +37,23 @@ function spawnProcess(
 }
 
 /**
- * Kill all process groups. Uses POSIX kill(-pgid) to terminate entire
- * process trees (child + all its descendants).
+ * Kill all process groups. Uses the system `kill` command with negative PID
+ * to terminate entire process trees (child + all its descendants).
+ * This approach is compatible with both Node.js and Bun runtimes.
  */
 function killAllGroups(signal: NodeJS.Signals) {
+	const sig = signal === "SIGKILL" ? "9" : "15";
 	for (const child of runningProcesses) {
 		if (child.pid && child.exitCode === null) {
 			try {
-				process.kill(-child.pid, signal);
+				spawn("kill", [`-${sig}`, "--", `-${child.pid}`], { stdio: "ignore" });
 			} catch {
-				// Process group may have already exited
+				// Fallback: kill individual process
+				try {
+					child.kill(signal);
+				} catch {
+					// Process may have already exited
+				}
 			}
 		}
 	}
@@ -189,8 +196,8 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// 3. Start NodeJS runner last so its logs appear after all runtimes
-	spawnProcess("npx", ["nodemon@3.1.9"], "NodeJS Runner", currentPath);
+	// 3. Start Blok runner last so its logs appear after all runtimes
+	spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath);
 
 	// Keep the event loop alive — detached children don't prevent Node
 	// from exiting, so without this the process would exit immediately

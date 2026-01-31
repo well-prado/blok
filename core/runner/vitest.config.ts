@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -6,7 +6,7 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		coverage: {
-			provider: "v8",
+			provider: "istanbul",
 			reporter: ["text", "json", "html", "lcov"],
 			exclude: ["node_modules/", "dist/", "test/", "**/*.d.ts", "**/*.config.ts", "**/proto/**", "**/__tests__/**"],
 			thresholds: {

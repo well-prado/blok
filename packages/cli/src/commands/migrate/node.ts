@@ -3,6 +3,7 @@ import * as p from "@clack/prompts";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import color from "picocolors";
+import { isNonInteractive } from "../../services/non-interactive.js";
 
 /**
  * Migration guide for converting class-based nodes to function-first
@@ -54,18 +55,18 @@ export async function migrateNode(opts: OptionValues) {
 
 		// Show migration guide
 		console.log(color.green("\n✅ This is a class-based node that can be migrated!"));
-		console.log("\n" + color.bold("Migration Steps:") + "\n");
-		console.log("1. " + color.cyan("Backup your current file:"));
+		console.log(`\n${color.bold("Migration Steps:")}\n`);
+		console.log(`1. ${color.cyan("Backup your current file:")}`);
 		console.log(color.dim(`   cp ${nodePath} ${nodePath}.backup`));
-		console.log("\n2. " + color.cyan("Follow the migration guide:"));
+		console.log(`\n2. ${color.cyan("Follow the migration guide:")}`);
 		console.log(color.dim("   https://github.com/yourrepo/blok/blob/main/MIGRATION_GUIDE.md"));
-		console.log("\n3. " + color.cyan("Key changes needed:"));
+		console.log(`\n3. ${color.cyan("Key changes needed:")}`);
 		console.log(color.dim("   • Replace class with defineNode()"));
 		console.log(color.dim("   • Convert JSON Schema to Zod schemas"));
 		console.log(color.dim("   • Move handle() logic to execute()"));
 		console.log(color.dim("   • Remove BlokResponse boilerplate"));
 		console.log(color.dim("   • Return plain objects instead of response.setSuccess()"));
-		console.log("\n4. " + color.cyan("Example transformation:"));
+		console.log(`\n4. ${color.cyan("Example transformation:")}`);
 
 		// Show example
 		console.log(color.dim("\n   Before (class-based):"));
@@ -100,21 +101,30 @@ export async function migrateNode(opts: OptionValues) {
    });`),
 		);
 
-		console.log("\n5. " + color.cyan("Test your migrated node:"));
+		console.log(`\n5. ${color.cyan("Test your migrated node:")}`);
 		console.log(color.dim("   • Run existing tests to verify behavior"));
 		console.log(color.dim("   • Check that input/output validation works"));
 		console.log(color.dim("   • Verify error handling is correct"));
 
-		console.log("\n6. " + color.cyan("Resources:"));
+		console.log(`\n6. ${color.cyan("Resources:")}`);
 		console.log(color.dim("   • Full Migration Guide: MIGRATION_GUIDE.md"));
 		console.log(color.dim("   • defineNode API Docs: core/runner/FUNCTION_FIRST_NODES.md"));
 		console.log(color.dim("   • Example Nodes: core/runner/examples/function-first/"));
 
 		// Ask if user wants to create a backup
-		const shouldBackup = await p.confirm({
-			message: "Would you like to create a backup of this file now?",
-			initialValue: true,
-		});
+		let shouldBackup: boolean | symbol;
+		if (opts.backup !== undefined) {
+			// --backup or --no-backup flag provided
+			shouldBackup = opts.backup;
+		} else if (isNonInteractive()) {
+			// Default to creating backup in non-interactive mode (safe default)
+			shouldBackup = true;
+		} else {
+			shouldBackup = await p.confirm({
+				message: "Would you like to create a backup of this file now?",
+				initialValue: true,
+			});
+		}
 
 		if (shouldBackup) {
 			const backupPath = `${absolutePath}.backup`;

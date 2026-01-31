@@ -8,6 +8,7 @@ import figlet from "figlet";
 import fsExtra from "fs-extra";
 import color from "picocolors";
 import simpleGit, { type SimpleGit, type SimpleGitOptions } from "simple-git";
+import { isNonInteractive, parseCommaSeparated, resolveOrThrow } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
 import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
 import {
@@ -47,17 +48,21 @@ const git: SimpleGit = simpleGit(options);
 export async function createProject(opts: OptionValues, version: string, currentPath = false, localRepoPath?: string) {
 	const availableManagers = await pm.getAvailableManagers();
 	let manager = await pm.getManager();
+	const nonInteractive = isNonInteractive();
 	const isDefault = opts.name !== undefined;
+	const skipPrompts = isDefault || nonInteractive;
+
+	// Initialize from flags or defaults
 	let projectName: string = opts.name ? opts.name : "";
-	let trigger = "http";
-	let examples = false;
-	let selectedRuntimeKinds: string[] = ["node"];
-	let selectedManager = "npm";
+	let trigger: string = opts.trigger || "http";
+	let examples: boolean = opts.examples ?? false;
+	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
+	let selectedManager: string = opts.packageManager || "npm";
 
 	// Detect available runtimes on the machine
 	let detectedRuntimes: RuntimeInfo[] = [];
 
-	if (!isDefault) {
+	if (!skipPrompts) {
 		console.log(
 			figlet.textSync("blok CLI".toUpperCase(), {
 				font: "Digital",
@@ -91,6 +96,9 @@ export async function createProject(opts: OptionValues, version: string, current
 		};
 
 		const resolveSelectedManager = async (): Promise<string> => {
+			if (opts.packageManager) {
+				return opts.packageManager;
+			}
 			if (availableManagers.length === 1) {
 				return availableManagers[0];
 			}
@@ -123,20 +131,24 @@ export async function createProject(opts: OptionValues, version: string, current
 			{
 				projectName: () => resolveProjectName(),
 				trigger: () =>
-					p.select({
-						message: "Select the trigger to install",
-						options: [
-							{ label: "HTTP", value: "http", hint: "recommended" },
-							//{ label: "GRPC", value: "grpc" }
-						],
-					}),
+					opts.trigger
+						? Promise.resolve(opts.trigger)
+						: p.select({
+								message: "Select the trigger to install",
+								options: [
+									{ label: "HTTP", value: "http", hint: "recommended" },
+									//{ label: "GRPC", value: "grpc" }
+								],
+							}),
 				runtimes: () =>
-					p.multiselect({
-						message: "Select the runtimes to install",
-						options: runtimeOptions,
-						initialValues: ["node"],
-						required: true,
-					}),
+					opts.runtimes
+						? Promise.resolve(parseCommaSeparated(opts.runtimes))
+						: p.multiselect({
+								message: "Select the runtimes to install",
+								options: runtimeOptions,
+								initialValues: ["node"],
+								required: true,
+							}),
 				selectedManager: () => resolveSelectedManager(),
 			},
 			{
@@ -185,13 +197,15 @@ export async function createProject(opts: OptionValues, version: string, current
 		const blokctlExamplesProject = await p.group(
 			{
 				examples: () =>
-					p.select({
-						message: "Install the examples?",
-						options: [
-							{ label: "NO", value: false, hint: "recommended" },
-							{ label: "YES", value: true },
-						],
-					}),
+					opts.examples !== undefined
+						? Promise.resolve(opts.examples)
+						: p.select({
+								message: "Install the examples?",
+								options: [
+									{ label: "NO", value: false, hint: "recommended" },
+									{ label: "YES", value: true },
+								],
+							}),
 			},
 			{
 				onCancel: () => {
@@ -202,16 +216,24 @@ export async function createProject(opts: OptionValues, version: string, current
 		);
 
 		examples = blokctlExamplesProject.examples;
+	} else if (nonInteractive) {
+		// Validate required fields in non-interactive mode
+		projectName = resolveOrThrow("name", opts.name);
+
+		// Detect runtimes if non-node runtimes requested
+		if (selectedRuntimeKinds.some((k) => k !== "node")) {
+			detectedRuntimes = await detectRuntimes();
+		}
 	}
 
 	const s = p.spinner();
-	if (!isDefault) s.start("Creating the project...");
+	if (!skipPrompts) s.start("Creating the project...");
 
 	try {
 		// Prepare the project
 		const dirPath = !currentPath ? path.join(process.cwd(), projectName) : process.cwd();
 
-		if (!isDefault) s.message("Gathering project files");
+		if (!skipPrompts) s.message("Gathering project files");
 
 		// Determine the repo source: local path or cloned remote
 		const repoSource = localRepoPath ? path.resolve(localRepoPath) : GITHUB_REPO_LOCAL;
@@ -233,7 +255,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		if (!isDefault) s.message("Copying project files...");
+		if (!skipPrompts) s.message("Copying project files...");
 
 		/// Copy the project files
 		if (!currentPath) {
@@ -245,7 +267,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		fsExtra.copySync(`${repoSource}/triggers/${trigger}`, dirPath);
 
-		if (!isDefault) {
+		if (!skipPrompts) {
 			s.message("Installing example workflows and nodes");
 		}
 		const nodesDir = `${dirPath}/src/nodes`;
@@ -319,12 +341,22 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const [pkg, ver] of Object.entries(deps)) {
 				if (typeof ver === "string" && ver.startsWith("workspace:")) {
 					if (localRepoPath && workspacePackageMap[pkg]) {
-						deps[pkg] = `link:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
+						deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
 					} else {
 						deps[pkg] = "^0.1.0";
 					}
 				}
 			}
+		}
+
+		// When using local repo, add overrides so the package manager resolves
+		// transitive workspace:* deps (e.g. @blok/runner -> @blok/shared) via file: links
+		if (localRepoPath) {
+			const overrides: Record<string, string> = {};
+			for (const [pkg, relativePath] of Object.entries(workspacePackageMap)) {
+				overrides[pkg] = `file:${path.resolve(repoSource, relativePath)}`;
+			}
+			packageJsonContent.overrides = overrides;
 		}
 
 		// Get the package manager
@@ -340,7 +372,7 @@ export async function createProject(opts: OptionValues, version: string, current
 				...packageJsonContent.scripts,
 				dev: "blokctl dev",
 			};
-			const blokctlRef = localRepoPath ? `link:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
+			const blokctlRef = localRepoPath ? `file:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
 			packageJsonContent.devDependencies = {
 				...packageJsonContent.devDependencies,
 				blokctl: blokctlRef,
@@ -409,7 +441,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 
 		// Create a new project
-		if (!isDefault) s.stop(`Project "${projectName}" created successfully.`);
+		if (!skipPrompts) s.stop(`Project "${projectName}" created successfully.`);
 		console.log(`\nTrigger: ${trigger.toUpperCase()}`);
 
 		// Show runtime summary
@@ -434,7 +466,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log(examples_url);
 		}
 	} catch (error) {
-		if (!isDefault) s.stop((error as Error).message);
-		if (isDefault) console.log((error as Error).message);
+		if (!skipPrompts) s.stop((error as Error).message);
+		if (skipPrompts) console.log((error as Error).message);
 	}
 }

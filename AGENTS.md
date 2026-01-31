@@ -1,6 +1,6 @@
 # Blok Framework
 
-Blok is a TypeScript-first workflow orchestration framework. It executes declarative workflows (JSON or TypeScript DSL) composed of steps (nodes) that run across 8 language runtimes: NodeJS, Python3, Go, Rust, Java, C#, PHP, and Ruby. Built as a pnpm monorepo with NX.
+Blok is a TypeScript-first workflow orchestration framework. It executes declarative workflows (JSON or TypeScript DSL) composed of steps (nodes) that run across 8 language runtimes: NodeJS, Python3, Go, Rust, Java, C#, PHP, and Ruby. Built as a Bun monorepo with Hono for HTTP serving.
 
 ## Monorepo Structure
 
@@ -25,7 +25,7 @@ blok/
 │   ├── ruby/                # Ruby SDK      (port 9006)
 │   └── python3/             # Python3 SDK   (port 9007)
 ├── triggers/
-│   ├── http/                # @blok/trigger-http — Express-based HTTP trigger
+│   ├── http/                # @blok/trigger-http — Hono-based HTTP trigger
 │   ├── grpc/                # gRPC trigger
 │   ├── webhook/             # Webhook trigger
 │   ├── websocket/           # WebSocket trigger
@@ -47,32 +47,32 @@ blok/
 
 ```bash
 # Monorepo-wide
-pnpm install                       # Install all workspace dependencies
-pnpm build                         # Build all core packages + nodes
-pnpm test                          # Run all tests (nx run-many -t test)
-pnpm lint                          # Lint with Biome
+bun install                        # Install all workspace dependencies
+bun run build                      # Build all core packages + nodes
+bun run test                       # Run all tests
+bun run lint                       # Lint with Biome
 
 # Core packages
-pnpm runner:dev                    # Build @blok/runner in watch mode
-pnpm runner:test                   # Test @blok/runner in watch mode
-pnpm helper:dev                    # Build @blok/helper in watch mode
-pnpm helper:test                   # Test @blok/helper in watch mode
-pnpm core:build:dev                # Build all core packages in watch mode
+bun run runner:dev                 # Build @blok/runner in watch mode
+bun run runner:test                # Test @blok/runner in watch mode
+bun run helper:dev                 # Build @blok/helper in watch mode
+bun run helper:test                # Test @blok/helper in watch mode
+bun run core:build:dev             # Build all core packages in watch mode
 
 # HTTP trigger
-pnpm http:dev                      # Start HTTP trigger dev server
+bun run http:dev                   # Start HTTP trigger dev server
 
 # CLI
-pnpm build:cli                     # Build blokctl
-pnpm cli:dev                       # Build + watch blokctl
-pnpm cli:test                      # Test blokctl
+bun run build:cli                  # Build blokctl
+bun run cli:dev                    # Build + watch blokctl
+bun run cli:test                   # Test blokctl
 
 # Nodes
-pnpm nodes:build                   # Build all pre-built nodes
+bun run nodes:build                # Build all pre-built nodes
 
 # Individual packages (vitest)
-cd core/runner && pnpm test:dev    # Watch mode tests
-cd core/runner && pnpm test        # Single run tests
+cd core/runner && bun run test:dev # Watch mode tests
+cd core/runner && bun run test     # Single run tests
 ```
 
 ### CLI Commands (blokctl)
@@ -627,7 +627,7 @@ Created by `blokctl create project`. Defines runtime processes:
 }
 ```
 
-`blokctl dev` reads this file, spawns each runtime process, polls `/health` until ready, then starts the NodeJS runner.
+`blokctl dev` reads this file, spawns each runtime process, polls `/health` until ready, then starts the Bun runner.
 
 ---
 
@@ -661,9 +661,9 @@ import { z } from "zod";
 - **Types/Interfaces**: PascalCase (`StepOpts`, `RuntimeKind`)
 - **Zod schemas**: PascalCase + `Schema` suffix (`StepOptsSchema`, `RuntimeKindSchema`)
 - **Node files**: Always `export default defineNode(...)`
-- **Package manager**: pnpm 10+ with workspaces
-- **Build**: NX for task orchestration, TypeScript compiler for builds
-- **Node engine**: >=18.0.0
+- **Runtime / Package manager**: Bun with workspaces
+- **Build**: TypeScript compiler for builds (declaration generation)
+- **HTTP framework**: Hono (triggers/http)
 
 ---
 

@@ -1,9 +1,14 @@
+import { createRequire } from "node:module";
 import type { RunStore } from "./RunStore";
+
+const esmRequire = createRequire(import.meta.url);
 import type {
 	Dashboard,
 	MetricsResult,
 	NodeRun,
+	NodeRunStatus,
 	RunEvent,
+	RunEventType,
 	RunQuery,
 	TraceLogEntry,
 	WorkflowRun,
@@ -12,37 +17,144 @@ import type {
 } from "./types";
 
 /**
- * SQLite-backed RunStore using better-sqlite3.
+ * Minimal interface covering the shared API surface of
+ * better-sqlite3 and bun:sqlite Database instances.
+ */
+interface SqliteDatabase {
+	prepare(sql: string): SqliteStatement;
+	exec(sql: string): unknown;
+	transaction<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R;
+	close(): void;
+}
+
+interface SqliteStatement {
+	run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+	get(...params: unknown[]): Record<string, unknown> | undefined;
+	all(...params: unknown[]): Record<string, unknown>[];
+}
+
+// Row types for SQLite query results
+interface RunRow {
+	id: string;
+	workflow_name: string;
+	workflow_path: string;
+	trigger_type: string;
+	trigger_summary: string;
+	status: string;
+	started_at: number;
+	finished_at: number | null;
+	duration_ms: number | null;
+	error_json: string | null;
+	tags_json: string | null;
+	metadata_json: string | null;
+	node_count: number;
+	completed_nodes: number;
+	// Aggregate fields used in some queries
+	trigger_types?: string;
+	total_runs?: number;
+	recent_runs?: number;
+	last_run_at?: number;
+	error_count?: number;
+	avg_duration?: number;
+}
+
+interface NodeRunRow {
+	id: string;
+	run_id: string;
+	node_name: string;
+	node_type: string;
+	runtime_kind: string | null;
+	status: string;
+	started_at: number;
+	finished_at: number | null;
+	duration_ms: number | null;
+	inputs_json: string | null;
+	outputs_json: string | null;
+	error_json: string | null;
+	parent_node_id: string | null;
+	depth: number;
+	step_index: number;
+	metrics_json: string | null;
+}
+
+interface EventRow {
+	id: string;
+	type: string;
+	run_id: string;
+	workflow_name: string;
+	timestamp: number;
+	node_name: string | null;
+	node_id: string | null;
+	payload_json: string | null;
+}
+
+interface LogRow {
+	id: string;
+	run_id: string;
+	node_id: string | null;
+	node_name: string | null;
+	level: string;
+	message: string;
+	timestamp: number;
+	data_json: string | null;
+}
+
+interface DashboardRow {
+	id: string;
+	name: string;
+	description: string | null;
+	is_default: number;
+	created_at: number;
+	updated_at: number;
+	widgets_json: string;
+}
+
+const isBun = "Bun" in globalThis;
+
+/**
+ * SQLite-backed RunStore supporting both bun:sqlite and better-sqlite3.
+ *
+ * When running under Bun, uses the built-in bun:sqlite module for
+ * optimal performance. Falls back to better-sqlite3 under Node.js.
  *
  * Provides persistent trace storage that survives process restarts.
- * All operations are synchronous (better-sqlite3 is synchronous).
+ * All operations are synchronous.
  *
  * Schema is auto-migrated on construction via a versioned migration system.
  */
 export class SqliteRunStore implements RunStore {
-	private db: import("better-sqlite3").Database;
+	private db: SqliteDatabase;
 
 	// Prepared statements (lazy-initialized)
-	private stmts: Record<string, import("better-sqlite3").Statement> = {};
+	private stmts: Record<string, SqliteStatement> = {};
 
 	constructor(dbPath = ".blok/trace.db") {
-		let Database: typeof import("better-sqlite3");
-		try {
-			const mod = "better-sqlite3";
-			Database = require(mod);
-		} catch {
-			throw new Error(
-				"SqliteRunStore requires 'better-sqlite3'. Install it:\n" +
-					"  npm install better-sqlite3\n" +
-					"  # or\n" +
-					"  pnpm add better-sqlite3",
-			);
+		if (isBun) {
+			// Use Bun's built-in SQLite (3-6x faster than better-sqlite3)
+			const bunMod = "bun:sqlite";
+			const { Database } = esmRequire(bunMod);
+			this.db = new Database(dbPath);
+		} else {
+			// Fallback to better-sqlite3 for Node.js
+			let Database: new (path: string) => SqliteDatabase;
+			try {
+				const mod = "better-sqlite3";
+				Database = esmRequire(mod);
+			} catch {
+				throw new Error(
+					"SqliteRunStore requires 'better-sqlite3'. Install it:\n" +
+						"  npm install better-sqlite3\n" +
+						"  # or\n" +
+						"  bun add better-sqlite3",
+				);
+			}
+			this.db = new Database(dbPath);
 		}
 
-		this.db = new Database(dbPath);
-		this.db.pragma("journal_mode = WAL");
-		this.db.pragma("synchronous = NORMAL");
-		this.db.pragma("foreign_keys = ON");
+		// Use exec for pragmas — works in both bun:sqlite and better-sqlite3
+		this.db.exec("PRAGMA journal_mode = WAL");
+		this.db.exec("PRAGMA synchronous = NORMAL");
+		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
 	}
 
@@ -60,7 +172,7 @@ export class SqliteRunStore implements RunStore {
 			this.db
 				.prepare("SELECT version FROM _trace_migrations")
 				.all()
-				.map((r: any) => r.version),
+				.map((r) => (r as { version: number }).version),
 		);
 
 		const migrations: Array<{ version: number; sql: string }> = [
@@ -170,7 +282,7 @@ export class SqliteRunStore implements RunStore {
 
 	// === Prepared Statement Helpers ===
 
-	private stmt(key: string, sql: string): import("better-sqlite3").Statement {
+	private stmt(key: string, sql: string): SqliteStatement {
 		if (!this.stmts[key]) {
 			this.stmts[key] = this.db.prepare(sql);
 		}
@@ -353,7 +465,7 @@ export class SqliteRunStore implements RunStore {
 	// === Reads ===
 
 	getRun(runId: string): WorkflowRun | undefined {
-		const row = this.stmt("getRun", "SELECT * FROM workflow_runs WHERE id = ?").get(runId) as any;
+		const row = this.stmt("getRun", "SELECT * FROM workflow_runs WHERE id = ?").get(runId) as RunRow | undefined;
 		return row ? this.rowToRun(row) : undefined;
 	}
 
@@ -423,8 +535,8 @@ export class SqliteRunStore implements RunStore {
 					LIMIT ? OFFSET ?
 				`;
 				const allTagParams = [...tagParams, ...tags, tags.length];
-				const total = (this.db.prepare(countSql).get(...allTagParams) as any)?.total ?? 0;
-				const rows = this.db.prepare(querySql).all(...allTagParams, limit, offset) as any[];
+				const total = (this.db.prepare(countSql).get(...allTagParams) as { total: number } | undefined)?.total ?? 0;
+				const rows = this.db.prepare(querySql).all(...allTagParams, limit, offset) as unknown as RunRow[];
 				return { runs: rows.map((r) => this.rowToRun(r)), total };
 			}
 
@@ -440,20 +552,22 @@ export class SqliteRunStore implements RunStore {
 			querySql = `SELECT * FROM workflow_runs ${where} ORDER BY started_at ${sortDir} LIMIT ? OFFSET ?`;
 		}
 
-		const total = (this.db.prepare(countSql).get(...params) as any)?.total ?? 0;
-		const rows = this.db.prepare(querySql).all(...params, limit, offset) as any[];
+		const total = (this.db.prepare(countSql).get(...params) as { total: number } | undefined)?.total ?? 0;
+		const rows = this.db.prepare(querySql).all(...params, limit, offset) as unknown as RunRow[];
 		return { runs: rows.map((r) => this.rowToRun(r)), total };
 	}
 
 	getNodeRuns(runId: string): NodeRun[] {
 		const rows = this.stmt("getNodeRuns", "SELECT * FROM node_runs WHERE run_id = ? ORDER BY step_index").all(
 			runId,
-		) as any[];
+		) as unknown as NodeRunRow[];
 		return rows.map((r) => this.rowToNodeRun(r));
 	}
 
 	getNodeRun(nodeRunId: string): NodeRun | undefined {
-		const row = this.stmt("getNodeRun", "SELECT * FROM node_runs WHERE id = ?").get(nodeRunId) as any;
+		const row = this.stmt("getNodeRun", "SELECT * FROM node_runs WHERE id = ?").get(nodeRunId) as
+			| NodeRunRow
+			| undefined;
 		return row ? this.rowToNodeRun(row) : undefined;
 	}
 
@@ -463,11 +577,13 @@ export class SqliteRunStore implements RunStore {
 				this.stmt(
 					"getEventsSince",
 					"SELECT * FROM run_events WHERE run_id = ? AND timestamp > ? ORDER BY timestamp",
-				).all(runId, since) as any[]
+				).all(runId, since) as unknown as EventRow[]
 			).map((r) => this.rowToEvent(r));
 		}
 		return (
-			this.stmt("getEvents", "SELECT * FROM run_events WHERE run_id = ? ORDER BY timestamp").all(runId) as any[]
+			this.stmt("getEvents", "SELECT * FROM run_events WHERE run_id = ? ORDER BY timestamp").all(
+				runId,
+			) as unknown as EventRow[]
 		).map((r) => this.rowToEvent(r));
 	}
 
@@ -477,11 +593,13 @@ export class SqliteRunStore implements RunStore {
 				this.stmt("getLogsNode", "SELECT * FROM log_entries WHERE run_id = ? AND node_id = ? ORDER BY timestamp").all(
 					runId,
 					nodeId,
-				) as any[]
+				) as unknown as LogRow[]
 			).map((r) => this.rowToLog(r));
 		}
 		return (
-			this.stmt("getLogs", "SELECT * FROM log_entries WHERE run_id = ? ORDER BY timestamp").all(runId) as any[]
+			this.stmt("getLogs", "SELECT * FROM log_entries WHERE run_id = ? ORDER BY timestamp").all(
+				runId,
+			) as unknown as LogRow[]
 		).map((r) => this.rowToLog(r));
 	}
 
@@ -502,20 +620,20 @@ export class SqliteRunStore implements RunStore {
 			FROM workflow_runs
 			GROUP BY workflow_name
 		`)
-			.all(Date.now() - 24 * 60 * 60 * 1000) as any[];
+			.all(Date.now() - 24 * 60 * 60 * 1000) as unknown as RunRow[];
 
 		return rows.map((r) => {
 			// Get last run status
 			const lastRun = this.db
 				.prepare("SELECT status FROM workflow_runs WHERE workflow_name = ? ORDER BY started_at DESC LIMIT 1")
-				.get(r.workflow_name) as any;
+				.get(r.workflow_name) as { status: string } | undefined;
 
 			// Get p95 duration
 			const durations = this.db
 				.prepare(
 					"SELECT duration_ms FROM workflow_runs WHERE workflow_name = ? AND duration_ms IS NOT NULL ORDER BY duration_ms",
 				)
-				.all(r.workflow_name) as any[];
+				.all(r.workflow_name) as unknown as { duration_ms: number }[];
 
 			const p95Index = Math.floor(durations.length * 0.95);
 			const p95 = durations.length > 0 ? (durations[Math.min(p95Index, durations.length - 1)]?.duration_ms ?? 0) : 0;
@@ -524,11 +642,11 @@ export class SqliteRunStore implements RunStore {
 				name: r.workflow_name,
 				path: r.workflow_path,
 				triggerTypes: r.trigger_types ? r.trigger_types.split(",") : [],
-				totalRuns: r.total_runs,
-				recentRuns: r.recent_runs,
+				totalRuns: r.total_runs ?? 0,
+				recentRuns: r.recent_runs ?? 0,
 				lastRunAt: r.last_run_at ?? undefined,
 				lastRunStatus: lastRun?.status as WorkflowRunStatus | undefined,
-				errorRate: r.total_runs > 0 ? r.error_count / r.total_runs : 0,
+				errorRate: (r.total_runs ?? 0) > 0 ? (r.error_count ?? 0) / (r.total_runs ?? 1) : 0,
 				avgDurationMs: r.avg_duration ?? 0,
 				p95DurationMs: p95,
 			};
@@ -542,12 +660,14 @@ export class SqliteRunStore implements RunStore {
 			FROM workflow_runs, json_each(workflow_runs.tags_json)
 			ORDER BY value
 		`)
-			.all() as any[];
+			.all() as unknown as { tag: string }[];
 		return rows.map((r) => r.tag);
 	}
 
 	getActiveRunCount(): number {
-		const row = this.db.prepare("SELECT COUNT(*) as count FROM workflow_runs WHERE status = 'running'").get() as any;
+		const row = this.db.prepare("SELECT COUNT(*) as count FROM workflow_runs WHERE status = 'running'").get() as
+			| { count: number }
+			| undefined;
 		return row?.count ?? 0;
 	}
 
@@ -565,16 +685,18 @@ export class SqliteRunStore implements RunStore {
 				AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms END) as avg_duration
 			FROM workflow_runs ${where}
 		`)
-			.get(...params) as any;
+			.get(...params) as
+			| { total_runs: number; completed_runs: number; failed_runs: number; avg_duration: number }
+			| undefined;
 
 		// Percentiles
 		const durations = this.db
 			.prepare(
 				`SELECT duration_ms FROM workflow_runs ${where} ${where ? "AND" : "WHERE"} duration_ms IS NOT NULL ORDER BY duration_ms`,
 			)
-			.all(...params) as any[];
+			.all(...params) as unknown as { duration_ms: number }[];
 
-		const durationValues = durations.map((d: any) => d.duration_ms);
+		const durationValues = durations.map((d) => d.duration_ms);
 
 		const percentile = (arr: number[], p: number) => {
 			if (arr.length === 0) return 0;
@@ -601,7 +723,7 @@ export class SqliteRunStore implements RunStore {
 				FROM workflow_runs
 				${where} ${where ? "AND" : "WHERE"} started_at >= ? AND started_at < ?
 			`)
-				.get(...params, bucketStart, bucketEnd) as any;
+				.get(...params, bucketStart, bucketEnd) as { total: number; completed: number; failed: number } | undefined;
 
 			executionTimeline.push({
 				bucket: new Date(bucketStart).toISOString(),
@@ -637,9 +759,9 @@ export class SqliteRunStore implements RunStore {
 			FROM workflow_runs ${where}
 			GROUP BY workflow_name
 		`)
-			.all(...params) as any[];
+			.all(...params) as unknown as { name: string; total_runs: number; failed: number; avg_duration: number }[];
 
-		const workflowBreakdown = wfRows.map((r: any) => ({
+		const workflowBreakdown = wfRows.map((r) => ({
 			name: r.name,
 			totalRuns: r.total_runs,
 			errorRate: r.total_runs > 0 ? r.failed / r.total_runs : 0,
@@ -660,9 +782,15 @@ export class SqliteRunStore implements RunStore {
 			${runIdWhere}
 			GROUP BY nr.node_name
 		`)
-			.all(...params) as any[];
+			.all(...params) as unknown as {
+			node_name: string;
+			total: number;
+			failed: number;
+			avg_duration: number;
+			max_duration: number;
+		}[];
 
-		const nodePerformance = nodeRows.map((r: any) => ({
+		const nodePerformance = nodeRows.map((r) => ({
 			nodeName: r.node_name,
 			avgDurationMs: r.avg_duration ?? 0,
 			maxDurationMs: r.max_duration ?? 0,
@@ -707,12 +835,16 @@ export class SqliteRunStore implements RunStore {
 	}
 
 	getDashboard(dashboardId: string): Dashboard | undefined {
-		const row = this.stmt("getDashboard", "SELECT * FROM dashboards WHERE id = ?").get(dashboardId) as any;
+		const row = this.stmt("getDashboard", "SELECT * FROM dashboards WHERE id = ?").get(dashboardId) as
+			| DashboardRow
+			| undefined;
 		return row ? this.rowToDashboard(row) : undefined;
 	}
 
 	listDashboards(): Dashboard[] {
-		const rows = this.db.prepare("SELECT * FROM dashboards ORDER BY updated_at DESC").all() as any[];
+		const rows = this.db
+			.prepare("SELECT * FROM dashboards ORDER BY updated_at DESC")
+			.all() as unknown as DashboardRow[];
 		return rows.map((r) => this.rowToDashboard(r));
 	}
 
@@ -749,7 +881,8 @@ export class SqliteRunStore implements RunStore {
 	// === Cleanup ===
 
 	clearAll(): number {
-		const count = (this.db.prepare("SELECT COUNT(*) as c FROM workflow_runs").get() as any)?.c ?? 0;
+		const count =
+			(this.db.prepare("SELECT COUNT(*) as c FROM workflow_runs").get() as { c: number } | undefined)?.c ?? 0;
 		this.db.exec("DELETE FROM log_entries");
 		this.db.exec("DELETE FROM run_events");
 		this.db.exec("DELETE FROM node_runs");
@@ -767,7 +900,8 @@ export class SqliteRunStore implements RunStore {
 	}
 
 	evictOldRuns(maxRuns: number): void {
-		const count = (this.db.prepare("SELECT COUNT(*) as c FROM workflow_runs").get() as any)?.c ?? 0;
+		const count =
+			(this.db.prepare("SELECT COUNT(*) as c FROM workflow_runs").get() as { c: number } | undefined)?.c ?? 0;
 		if (count <= maxRuns) return;
 
 		const toRemove = count - maxRuns;
@@ -790,14 +924,14 @@ export class SqliteRunStore implements RunStore {
 
 	// === Row → Object Mappers ===
 
-	private rowToRun(row: any): WorkflowRun {
+	private rowToRun(row: RunRow): WorkflowRun {
 		return {
 			id: row.id,
 			workflowName: row.workflow_name,
 			workflowPath: row.workflow_path,
 			triggerType: row.trigger_type,
 			triggerSummary: row.trigger_summary,
-			status: row.status,
+			status: row.status as WorkflowRunStatus,
 			startedAt: row.started_at,
 			finishedAt: row.finished_at ?? undefined,
 			durationMs: row.duration_ms ?? undefined,
@@ -809,14 +943,14 @@ export class SqliteRunStore implements RunStore {
 		};
 	}
 
-	private rowToNodeRun(row: any): NodeRun {
+	private rowToNodeRun(row: NodeRunRow): NodeRun {
 		return {
 			id: row.id,
 			runId: row.run_id,
 			nodeName: row.node_name,
 			nodeType: row.node_type,
 			runtimeKind: row.runtime_kind ?? undefined,
-			status: row.status,
+			status: row.status as NodeRunStatus,
 			startedAt: row.started_at,
 			finishedAt: row.finished_at ?? undefined,
 			durationMs: row.duration_ms ?? undefined,
@@ -830,10 +964,10 @@ export class SqliteRunStore implements RunStore {
 		};
 	}
 
-	private rowToEvent(row: any): RunEvent {
+	private rowToEvent(row: EventRow): RunEvent {
 		return {
 			id: row.id,
-			type: row.type,
+			type: row.type as RunEventType,
 			runId: row.run_id,
 			workflowName: row.workflow_name,
 			timestamp: row.timestamp,
@@ -843,20 +977,20 @@ export class SqliteRunStore implements RunStore {
 		};
 	}
 
-	private rowToLog(row: any): TraceLogEntry {
+	private rowToLog(row: LogRow): TraceLogEntry {
 		return {
 			id: row.id,
 			runId: row.run_id,
 			nodeId: row.node_id ?? undefined,
 			nodeName: row.node_name ?? undefined,
-			level: row.level,
+			level: row.level as TraceLogEntry["level"],
 			message: row.message,
 			timestamp: row.timestamp,
 			data: row.data_json ? JSON.parse(row.data_json) : undefined,
 		};
 	}
 
-	private rowToDashboard(row: any): Dashboard {
+	private rowToDashboard(row: DashboardRow): Dashboard {
 		return {
 			id: row.id,
 			name: row.name,

@@ -1,10 +1,5 @@
-import type { Request } from "express";
 import { describe, expect, it } from "vitest";
 import { handleDynamicRoute, validateRoute } from "../../src/runner/Util";
-
-function createMockRequest(path: string, params: Record<string, string> = {}): Request {
-	return { path, params } as unknown as Request;
-}
 
 describe("validateRoute()", () => {
 	it("should return true for exact match", () => {
@@ -50,27 +45,23 @@ describe("validateRoute()", () => {
 
 describe("handleDynamicRoute()", () => {
 	it("should extract single param from route", () => {
-		const req = createMockRequest("/api/users/42");
-		const params = handleDynamicRoute("/api/users/:id", req);
+		const params = handleDynamicRoute("/api/users/:id", "/api/users/42", {});
 		expect(params.id).toBe("42");
 	});
 
 	it("should extract multiple params from route", () => {
-		const req = createMockRequest("/api/v1/users");
-		const params = handleDynamicRoute("/api/:version/:resource", req);
+		const params = handleDynamicRoute("/api/:version/:resource", "/api/v1/users", {});
 		expect(params.version).toBe("v1");
 		expect(params.resource).toBe("users");
 	});
 
-	it("should return req.params for routes with no dynamic params", () => {
-		const req = createMockRequest("/api/static", { existing: "val" });
-		const params = handleDynamicRoute("/api/static", req);
+	it("should preserve existing params for routes with no dynamic params", () => {
+		const params = handleDynamicRoute("/api/static", "/api/static", { existing: "val" });
 		expect(params.existing).toBe("val");
 	});
 
 	it("should handle fallback splitting when regex does not match", () => {
-		const req = createMockRequest("/a/b/c");
-		const params = handleDynamicRoute("/:x/:y/:z", req);
+		const params = handleDynamicRoute("/:x/:y/:z", "/a/b/c", {});
 		expect(params.x).toBeDefined();
 		expect(params.y).toBeDefined();
 		expect(params.z).toBeDefined();

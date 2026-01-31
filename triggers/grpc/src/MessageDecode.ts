@@ -1,7 +1,7 @@
 import type { JsonLikeObject } from "@blok/runner";
 import type { Context } from "@blok/shared";
+import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { MessageEncoding, MessageType, type WorkflowRequest, type WorkflowResponse } from "./gen/workflow_pb";
-const { XMLParser, XMLBuilder } = require("fast-xml-parser");
 
 export default class MessageDecode {
 	requestDecode(request: WorkflowRequest): Context {

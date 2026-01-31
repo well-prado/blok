@@ -8,6 +8,8 @@ const migrate = new Command("migrate").description("Migrate nodes and workflows 
 const node = new Command("node")
 	.description("Migrate a class-based node to function-first pattern")
 	.option("-p, --path <value>", "Path to the node file to migrate")
+	.option("--backup", "Create backup before migration (default in non-interactive mode)")
+	.option("--no-backup", "Skip backup creation")
 	.action(async (options: OptionValues) => {
 		await migrateNode(options);
 	});

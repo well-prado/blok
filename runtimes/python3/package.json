@@ -7,15 +7,10 @@
 		"test": "tests"
 	},
 	"scripts": {
-		"dev": "nodemon"
+		"dev": "python3 server.py"
 	},
-	"keywords": [
-		"blok",
-		"node"
-	],
+	"keywords": ["blok", "node"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
-	"devDependencies": {
-		"nodemon": "^3.1.9"
-	}
+	"devDependencies": {}
 }

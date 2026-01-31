@@ -5,6 +5,7 @@ import * as p from "@clack/prompts";
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
+import { isNonInteractive } from "../../services/non-interactive.js";
 
 interface WorkflowSchema {
 	id: string;
@@ -135,6 +136,11 @@ export async function publish(opts: OptionValues) {
 				// Search for similar files
 				const similarFiles = findSimilarFiles(workflowsDir, opts.workflow);
 				if (similarFiles.length > 0) {
+					if (isNonInteractive()) {
+						throw new Error(
+							`Workflow "${opts.workflow}" not found. Similar workflows: ${similarFiles.map((f) => f.replace(".json", "")).join(", ")}. Provide an exact workflow name in non-interactive mode.`,
+						);
+					}
 					logger.stop("Similar workflows found");
 					const selection = await p.select({
 						message: "Select a workflow to publish",
@@ -161,6 +167,11 @@ export async function publish(opts: OptionValues) {
 				workflowId = opts.workflow;
 			}
 		} else {
+			if (isNonInteractive()) {
+				throw new Error(
+					"Missing required argument <workflow> (non-interactive mode). Provide the workflow name as an argument.",
+				);
+			}
 			// List all workflows
 			logger.stop("Select a workflow to publish");
 			const workflowOptions = await loadWorkflowFiles(opts.directory);
@@ -188,7 +199,7 @@ export async function publish(opts: OptionValues) {
 
 		logger.stop("Workflow published successfully");
 	} catch (error) {
-		logger.stop((error as Error).message, 1);
+		logger.error((error as Error).message);
 	}
 }
 

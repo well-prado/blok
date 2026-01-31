@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { isNonInteractive } from "../../services/non-interactive.js";
 
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
@@ -40,8 +41,12 @@ export async function login(opts: OptionValues) {
 
 	try {
 		if (!token && !BLOKS_TOKEN && !opts.token) {
-			// const tokenType = await resolveTokenType();
-			// if (tokenType === "token")
+			if (isNonInteractive()) {
+				throw new Error(
+					"Missing required flag --token or BLOKS_TOKEN env var (non-interactive mode). " +
+						"Run without --non-interactive to use interactive prompts, or provide --token.",
+				);
+			}
 			token = await resolveToken();
 		} else if (opts.token) {
 			token = opts.token;

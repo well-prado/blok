@@ -4,7 +4,7 @@
 	},
 	"compilerOptions": {
 		"target": "ES2022",
-		"module": "CommonJS",
+		"module": "es2022",
 		"lib": ["ES2022"],
 		"declaration": true,
 		"strict": true,
@@ -25,7 +25,7 @@
 		"resolveJsonModule": true,
 		"outDir": "./dist",
 		"rootDir": "./src",
-		"moduleResolution": "node"
+		"moduleResolution": "bundler"
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "**/*.test.ts"]

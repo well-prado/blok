@@ -1,22 +1,22 @@
 /**
- * Express router instance used to define application routes.
+ * Hono sub-app used to define application routes.
  *
  * @remarks
- * This router is currently empty. You can create routes by using methods like `router.get`, `router.post`, etc.
+ * This app is currently minimal. You can create routes by using methods like `app.get`, `app.post`, etc.
  * Example:
  * ```typescript
- * router.get('/example', (req, res) => {
- *   res.send('Example route');
+ * app.get('/example', (c) => {
+ *   return c.text('Example route');
  * });
  * ```
  *
  * @module AppRoutes
  */
 
-import express from "express";
-const router: express.Router = express.Router();
+import { Hono } from "hono";
+const app = new Hono();
 
-router.get("/", (_, res) => {
+app.get("/", (c) => {
 	const html = `
 	<!DOCTYPE html>
 	<html lang="en">
@@ -58,7 +58,7 @@ router.get("/", (_, res) => {
 	</html>
 	`;
 
-	res.status(200).send(html);
+	return c.html(html, 200);
 });
 
-export default router;
+export default app;

@@ -1,5 +1,10 @@
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { InMemoryRunStore } from "./InMemoryRunStore";
 import type { RunStore } from "./RunStore";
+
+const esmRequire = createRequire(import.meta.url);
 
 export type StoreType = "memory" | "sqlite" | "postgres";
 
@@ -57,8 +62,8 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 			const ssl =
 				opts?.postgresSsl ?? (process.env.BLOK_TRACE_PG_SSL === "true" ? { rejectUnauthorized: false } : false);
 
-			// Dynamic import to avoid hard dependency
-			const { PostgresRunStore } = require("./PostgresRunStore") as typeof import("./PostgresRunStore");
+			// Dynamic require to avoid hard dependency on pg
+			const { PostgresRunStore } = esmRequire("./PostgresRunStore") as typeof import("./PostgresRunStore");
 			store = new PostgresRunStore({
 				connectionString,
 				max: poolSize,
@@ -80,15 +85,13 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 		}
 		case "sqlite": {
 			// Ensure directory exists for SQLite file
-			const path = require("node:path") as typeof import("node:path");
-			const fs = require("node:fs") as typeof import("node:fs");
 			const dir = path.dirname(sqlitePath);
 			if (dir && dir !== "." && !fs.existsSync(dir)) {
 				fs.mkdirSync(dir, { recursive: true });
 			}
 
-			// Dynamic import to avoid hard dependency
-			const { SqliteRunStore } = require("./SqliteRunStore") as typeof import("./SqliteRunStore");
+			// Dynamic require to avoid hard dependency on better-sqlite3
+			const { SqliteRunStore } = esmRequire("./SqliteRunStore") as typeof import("./SqliteRunStore");
 			store = new SqliteRunStore(sqlitePath);
 			break;
 		}

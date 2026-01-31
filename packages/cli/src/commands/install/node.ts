@@ -6,6 +6,7 @@ import * as p from "@clack/prompts";
 
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";
+import { isNonInteractive } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
 import { registryManager } from "../../services/registry-manager.js";
 
@@ -44,15 +45,21 @@ export async function install(opts: OptionValues) {
 		const runtime = await discoveryNodeRuntime();
 
 		if (runtime === "npm" && availableManagers.length > 1) {
-			logger.message("Multiple package managers detected. Please select one.");
-			const selectedManager = await p.select({
-				message: "Select the package manager",
-				options: availableManagers.map((manager) => ({
-					label: manager,
-					value: manager,
-				})),
-			});
-			manager = await pm.getManager(selectedManager as string);
+			if (opts.packageManager) {
+				manager = await pm.getManager(opts.packageManager);
+			} else if (isNonInteractive()) {
+				// In non-interactive mode, use the auto-detected manager
+			} else {
+				logger.message("Multiple package managers detected. Please select one.");
+				const selectedManager = await p.select({
+					message: "Select the package manager",
+					options: availableManagers.map((manager) => ({
+						label: manager,
+						value: manager,
+					})),
+				});
+				manager = await pm.getManager(selectedManager as string);
+			}
 		}
 
 		// Get the registry token
@@ -87,7 +94,7 @@ export async function install(opts: OptionValues) {
 		logger.stop("Node installed successfully.");
 	} catch (error) {
 		if (fs.existsSync(npmrcFile)) fs.unlinkSync(npmrcFile);
-		logger.stop((error as Error).message, 1);
+		logger.error((error as Error).message);
 	} finally {
 		if (fs.existsSync(npmrcFile)) fs.unlinkSync(npmrcFile);
 	}
@@ -149,6 +156,7 @@ export default new Command()
 	.command("node")
 	.description("Install a node from the bloks registry")
 	.option("-d, --directory <value>", "Directory to publish")
+	.option("-m, --package-manager <value>", "Package manager to use (npm, yarn, pnpm, bun)")
 	.argument("<node>", "Node name")
 	.action(async (node: string, options: OptionValues) => {
 		await trackCommandExecution({

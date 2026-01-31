@@ -1,6 +1,5 @@
 import type { ParamsDictionary } from "@blok/runner";
 import type { NodeBase, Step } from "@blok/shared";
-import type { Request } from "express";
 
 export function validateRoute(dynamicRoute: string, actualRoute: string) {
 	if (!dynamicRoute || !actualRoute) return false;
@@ -16,31 +15,36 @@ export function validateRoute(dynamicRoute: string, actualRoute: string) {
 	return dynamicRouteRegExp.test(actualRoute);
 }
 
-export function handleDynamicRoute(dynamicRoute: string, req: Request): ParamsDictionary {
+export function handleDynamicRoute(
+	dynamicRoute: string,
+	requestPath: string,
+	existingParams: Record<string, string>,
+): ParamsDictionary {
+	const params: ParamsDictionary = { ...existingParams };
+
 	// Extract the parameter names from the dynamic route pattern
 	const paramNames = dynamicRoute.match(/:(\w+)/g)?.map((name: string) => name.substring(1));
 	if (paramNames) {
 		// Create a new RegExp to match the dynamic route pattern
 		const dynamicRouteRegExp = new RegExp(`^${dynamicRoute.replace(/:\w+/g, "([^\\/]+)")}$`);
 		// Test the actual route against the dynamic route pattern
-		const match = req.path.match(dynamicRouteRegExp);
+		const match = requestPath.match(dynamicRouteRegExp);
 		if (match) {
 			// Extract the parameter values from the actual route
-			const params = match.slice(1);
-			// Add the parameter names and values to the request object
+			const matchedParams = match.slice(1);
 			paramNames.forEach((name: string | number, index: number) => {
-				req.params[name] = params[index];
+				params[name] = matchedParams[index];
 			});
 		} else {
-			const params = req.path.split("/");
+			const pathParts = requestPath.split("/");
 			const dynamicRouteSplitted = dynamicRoute.split("/");
 			dynamicRouteSplitted.forEach((name: string, i: number) => {
-				if (name.startsWith(":")) req.params[name.replace(":", "").replace("?", "")] = params[i];
+				if (name.startsWith(":")) params[name.replace(":", "").replace("?", "")] = pathParts[i];
 			});
 		}
 	}
 
-	return req.params;
+	return params;
 }
 
 export async function nodeResolver(node: Step): Promise<NodeBase> {

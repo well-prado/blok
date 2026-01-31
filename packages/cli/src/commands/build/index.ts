@@ -205,12 +205,12 @@ export async function build(opts: OptionValues) {
 		fs.writeJSONSync(blokFile, json, { spaces: 2 });
 
 		if (status?.status?.condition?.status !== "True") throw new Error(status?.status?.condition?.message);
-		logger.stop("Build completed successfully", 0);
+		logger.stop("Build completed successfully");
 		return true;
 	} catch (error) {
 		if (opts.tarball && fs.existsSync(opts.tarball)) fs.removeSync(opts.tarball);
-		if (opts.id) logger.stop(`Build Failed. ${error} - Build ID: ${opts.id}`, 1);
-		else logger.stop(`Build Failed. ${error}`, 1);
+		if (opts.id) logger.error(`Build Failed. ${error} - Build ID: ${opts.id}`);
+		else logger.error(`Build Failed. ${error}`);
 		console.error(error);
 		return false;
 	}
