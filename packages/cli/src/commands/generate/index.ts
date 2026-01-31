@@ -7,6 +7,7 @@ import figlet from "figlet";
 import open from "open";
 import color from "picocolors";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
+import { isNonInteractive } from "../../services/non-interactive.js";
 import { getPreferredEditor } from "../../services/utils.js";
 import NodeFileWriter from "./NodeFileWriter.js";
 import NodeGenerator, { type NodeInformation } from "./NodeGenerator.js";
@@ -27,6 +28,8 @@ create
 	.option("-t, --type <value>", "Type of code snippet (default: 'class')")
 	.option("-s, --style <value>", "Node style: 'function' (default, defineNode) or 'class' (extends BlokService)")
 	.option("-u, --update", "Update existing Node code snippet")
+	.option("-c, --code <value>", "Code string to use with --update (skip multiline readline)")
+	.option("--code-file <value>", "File path to read code from for --update")
 	.option(
 		"-k, --api-key <value>",
 		"OpenAI API key (optional, uses environment variable OPENAI_API_KEY if not provided)",
@@ -88,47 +91,67 @@ create
 					const nodeName = options.name.toLowerCase().replace(/\s+/g, "-");
 					p.intro(color.inverse(`🛠️  Update Existing Node: ${nodeName}`));
 
-					const rl = readline.createInterface({
-						input: process.stdin,
-						output: process.stdout,
-						terminal: true,
-					});
+					let multilineInput = "";
 
-					const lines: string[] = [];
-					console.log("\n   Enter your code below:");
-					console.log("   - Type 'quit' on a new line to finish");
-					console.log("   - Press Ctrl+C to cancel");
-					console.log("   ----------------------------------------\n");
+					if (options.code) {
+						// Use code directly from --code flag
+						multilineInput = options.code;
+					} else if (options.codeFile) {
+						// Read code from file specified by --code-file flag
+						if (!fs.existsSync(options.codeFile)) {
+							console.error(`File not found: ${options.codeFile}`);
+							process.exit(1);
+						}
+						multilineInput = fs.readFileSync(options.codeFile, "utf-8");
+					} else if (isNonInteractive()) {
+						console.error(
+							"Missing required flag --code or --code-file (non-interactive mode). " +
+								"Provide code via --code or --code-file when using --update in non-interactive mode.",
+						);
+						process.exit(1);
+					} else {
+						const rl = readline.createInterface({
+							input: process.stdin,
+							output: process.stdout,
+							terminal: true,
+						});
 
-					const multilineInput = await new Promise<string>((resolve) => {
-						rl.on("line", (input: string) => {
-							if (input.trim().toLocaleLowerCase() === "quit") {
+						const lines: string[] = [];
+						console.log("\n   Enter your code below:");
+						console.log("   - Type 'quit' on a new line to finish");
+						console.log("   - Press Ctrl+C to cancel");
+						console.log("   ----------------------------------------\n");
+
+						multilineInput = await new Promise<string>((resolve) => {
+							rl.on("line", (input: string) => {
+								if (input.trim().toLocaleLowerCase() === "quit") {
+									rl.close();
+									resolve(lines.join("\n"));
+								} else {
+									lines.push(input);
+									rl.prompt();
+								}
+							});
+
+							// Handle Ctrl+C to cancel
+							rl.on("SIGINT", () => {
+								console.log("\nInput cancelled");
 								rl.close();
-								resolve(lines.join("\n"));
-							} else {
-								lines.push(input);
-								rl.prompt();
-							}
-						});
-
-						// Handle Ctrl+C to cancel
-						rl.on("SIGINT", () => {
-							console.log("\nInput cancelled");
-							rl.close();
-							resolve("");
-						});
-
-						// Handle Ctrl+D (EOF)
-						rl.on("close", () => {
-							if (lines.length > 0) {
-								resolve(lines.join("\n"));
-							} else {
 								resolve("");
-							}
-						});
+							});
 
-						rl.prompt();
-					});
+							// Handle Ctrl+D (EOF)
+							rl.on("close", () => {
+								if (lines.length > 0) {
+									resolve(lines.join("\n"));
+								} else {
+									resolve("");
+								}
+							});
+
+							rl.prompt();
+						});
+					}
 
 					s.start(`Updating ${nodeStyle === "function" ? "function-first" : "class-based"} Node code...`);
 					// Generate the Node code snippet using AI

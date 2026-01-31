@@ -6,6 +6,7 @@ import * as p from "@clack/prompts";
 
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { tokenManager } from "../../services/local-token-manager.js";
+import { isNonInteractive } from "../../services/non-interactive.js";
 import { VersionUpdateType, manager as pm } from "../../services/package-manager.js";
 import { registryManager } from "../../services/registry-manager.js";
 
@@ -106,6 +107,11 @@ export async function publish(opts: OptionValues) {
 					// Search for similar directories
 					const similarDirs = findSimilarDirectories(nodesDir, opts.node);
 					if (similarDirs.length > 0) {
+						if (isNonInteractive()) {
+							throw new Error(
+								`Node "${opts.node}" not found. Similar nodes: ${similarDirs.join(", ")}. Provide an exact node name in non-interactive mode.`,
+							);
+						}
 						logger.message("Similar nodes found");
 						const selection = await p.select({
 							message: "Select a node to publish",
@@ -129,6 +135,11 @@ export async function publish(opts: OptionValues) {
 					opts.directory = nodePath;
 				}
 			} else {
+				if (isNonInteractive()) {
+					throw new Error(
+						"Missing required argument <node> (non-interactive mode). Provide the node name as an argument.",
+					);
+				}
 				// List all nodes
 				logger.message("Select a node to publish");
 				const nodeOptions = await loadNodeDirectories(opts.directory);
@@ -151,19 +162,27 @@ export async function publish(opts: OptionValues) {
 			}
 		}
 
-		const runtimesToPublish = await p.select({
-			message: "Select node runtime",
-			options: packagePublisherRuntimes,
-			initialValue: "npm",
-		});
+		const runtimesToPublish = opts.runtime
+			? opts.runtime
+			: isNonInteractive()
+				? "npm"
+				: await p.select({
+						message: "Select node runtime",
+						options: packagePublisherRuntimes,
+						initialValue: "npm",
+					});
 
 		const manager = await pm.getManager(runtimesToPublish as string);
 
-		const versionType = await p.select({
-			message: "Select the version bump type",
-			options: packagePublishVerion.map((v) => ({ label: v, value: v })),
-			initialValue: "patch",
-		});
+		const versionType = opts.bump
+			? opts.bump
+			: isNonInteractive()
+				? "patch"
+				: await p.select({
+						message: "Select the version bump type",
+						options: packagePublishVerion.map((v) => ({ label: v, value: v })),
+						initialValue: "patch",
+					});
 
 		if (opts.build) {
 			logger.start("Running build before publishing...");
@@ -251,6 +270,8 @@ export default new Command()
 	.description("Publish a node to the bloks registry")
 	.option("-d, --directory <value>", "Directory to publish")
 	.option("-b, --build", "Run build before publishing")
+	.option("-r, --runtime <value>", "Publishing runtime (default: npm)")
+	.option("--bump <value>", "Version bump: patch, minor, major (default: patch)")
 	.argument("<node>", "Node name")
 	.action(async (node: string, options: OptionValues) => {
 		await trackCommandExecution({

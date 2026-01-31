@@ -5,16 +5,19 @@ import type { OptionValues } from "commander";
 import figlet from "figlet";
 import fsExtra from "fs-extra";
 import color from "picocolors";
+import { isNonInteractive, resolveOrThrow } from "../../services/non-interactive.js";
 import { workflow_template } from "./utils/Examples.js";
 
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 
 export async function createWorkflow(opts: OptionValues, currentPath = false) {
+	const nonInteractive = isNonInteractive();
 	const isDefault = opts.name !== undefined;
+	const skipPrompts = isDefault || nonInteractive;
 	let workflowName: string = opts.name ? opts.name : "";
 
-	if (!isDefault) {
+	if (!skipPrompts) {
 		console.log(
 			figlet.textSync("blok CLI".toUpperCase(), {
 				font: "Digital",
@@ -52,10 +55,12 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 		);
 
 		workflowName = blokctlNode.workflowName;
+	} else if (nonInteractive) {
+		workflowName = resolveOrThrow("name", opts.name);
 	}
 
 	const s = p.spinner();
-	if (!isDefault) s.start("Creating the workflow...");
+	if (!skipPrompts) s.start("Creating the workflow...");
 
 	try {
 		// Prepare the project
@@ -74,7 +79,7 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 
 			// Prepare the workflow
 			const currentWorkflowsDir = `${dirPath}/workflows/json`;
-			if (!isDefault) {
+			if (!skipPrompts) {
 				fsExtra.ensureDirSync(currentWorkflowsDir);
 			} else {
 				const workflowDirExists = fsExtra.existsSync(currentWorkflowsDir);
@@ -86,7 +91,7 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 			dirPath = path.join(dirPath, `${workflowName.replaceAll(" ", "-").toLowerCase()}.json`);
 		}
 
-		if (!isDefault) s.message("Creating workflow...");
+		if (!skipPrompts) s.message("Creating workflow...");
 
 		/// Copy the node files
 		if (!currentPath) {
@@ -98,12 +103,12 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 		workflow_json.name = workflowName;
 		fsExtra.writeFileSync(dirPath, JSON.stringify(workflow_json, null, 2));
 
-		if (!isDefault) s.stop(`Node "${workflowName}" created successfully.`);
+		if (!skipPrompts) s.stop(`Node "${workflowName}" created successfully.`);
 		if (!currentPath) console.log("\nNavigate to the workflow directory by running: cd workflows/json");
 
 		console.log("For more documentation, visit https://blok.build/docs/d/core-concepts/workflows");
 	} catch (error) {
-		if (!isDefault) s.stop("An error occurred");
+		if (!skipPrompts) s.stop("An error occurred");
 
 		const message = (error as Error).message;
 		if (message === "ops1") {

@@ -7,6 +7,7 @@ import type { OptionValues } from "commander";
 import figlet from "figlet";
 import fsExtra from "fs-extra";
 import color from "picocolors";
+import { isNonInteractive, resolveOrThrow } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
 import {
 	csharp_csproj_file,
@@ -47,15 +48,19 @@ const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 export async function createNode(opts: OptionValues, currentPath = false) {
 	const availableManagers = await pm.getAvailableManagers();
 	let manager = await pm.getManager();
+	const nonInteractive = isNonInteractive();
 	const isDefault = opts.name !== undefined;
-	let nodeName: string = opts.name ? opts.name : "";
-	let nodeType = "";
-	let template = "";
-	let nodeStyle = opts.style || ""; // "function" or "class"
-	let node_runtime = "";
-	let selectedManager = "npm";
+	const skipPrompts = isDefault || nonInteractive;
 
-	if (!isDefault) {
+	// Initialize from flags or defaults
+	let nodeName: string = opts.name ? opts.name : "";
+	let nodeType: string = opts.nodeType || "";
+	let template: string = opts.template || "";
+	let nodeStyle: string = opts.style || ""; // "function" or "class"
+	let node_runtime: string = opts.runtime || "";
+	let selectedManager: string = opts.packageManager || "npm";
+
+	if (!skipPrompts) {
 		console.log(
 			figlet.textSync("Blok CLI".toUpperCase(), {
 				font: "Digital",
@@ -80,6 +85,9 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 		};
 
 		const resolveSelectedManager = async (): Promise<string> => {
+			if (opts.packageManager) {
+				return opts.packageManager;
+			}
 			if (availableManagers.length === 1) {
 				return availableManagers[0];
 			}
@@ -98,19 +106,21 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				nodeName: () => resolveNodeName(),
 				selectedManager: () => resolveSelectedManager(),
 				nodeRuntime: () =>
-					p.select({
-						message: "Select the blok runtime",
-						options: [
-							{ label: "TypeScript/Node.js", value: "typescript", hint: "recommended" },
-							{ label: "Python 3", value: "python3", hint: "Production - gRPC" },
-							{ label: "Go", value: "go", hint: "Production - Docker" },
-							{ label: "Java", value: "java", hint: "Production - Docker" },
-							{ label: "Rust", value: "rust", hint: "Production - Docker" },
-							{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
-							{ label: "PHP", value: "php", hint: "Production - Docker" },
-							{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
-						],
-					}),
+					opts.runtime
+						? Promise.resolve(opts.runtime)
+						: p.select({
+								message: "Select the blok runtime",
+								options: [
+									{ label: "TypeScript/Node.js", value: "typescript", hint: "recommended" },
+									{ label: "Python 3", value: "python3", hint: "Production - gRPC" },
+									{ label: "Go", value: "go", hint: "Production - Docker" },
+									{ label: "Java", value: "java", hint: "Production - Docker" },
+									{ label: "Rust", value: "rust", hint: "Production - Docker" },
+									{ label: "C# / .NET", value: "csharp", hint: "Production - Docker" },
+									{ label: "PHP", value: "php", hint: "Production - Docker" },
+									{ label: "Ruby", value: "ruby", hint: "Production - Docker" },
+								],
+							}),
 			},
 			{
 				onCancel: () => {
@@ -139,29 +149,35 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			const blokctlNodeExtension = await p.group(
 				{
 					nodeType: () =>
-						p.select({
-							message: "Select the blok type",
-							options: [
-								{ label: "Module", value: "module", hint: "recommended" },
-								{ label: "Class", value: "class" },
-							],
-						}),
+						opts.nodeType
+							? Promise.resolve(opts.nodeType)
+							: p.select({
+									message: "Select the blok type",
+									options: [
+										{ label: "Module", value: "module", hint: "recommended" },
+										{ label: "Class", value: "class" },
+									],
+								}),
 					nodeStyle: () =>
-						p.select({
-							message: "Select the node style",
-							options: [
-								{ label: "Function-First (defineNode)", value: "function", hint: "recommended" },
-								{ label: "Class-Based (extends BlokService)", value: "class" },
-							],
-						}),
+						opts.style
+							? Promise.resolve(opts.style)
+							: p.select({
+									message: "Select the node style",
+									options: [
+										{ label: "Function-First (defineNode)", value: "function", hint: "recommended" },
+										{ label: "Class-Based (extends BlokService)", value: "class" },
+									],
+								}),
 					template: () =>
-						p.select({
-							message: "Select the template",
-							options: [
-								{ label: "Standard", value: "class", hint: "recommended" },
-								{ label: "UI - EJS + ReactJS + TailwindCSS", value: "ui" },
-							],
-						}),
+						opts.template
+							? Promise.resolve(opts.template === "standard" ? "class" : opts.template)
+							: p.select({
+									message: "Select the template",
+									options: [
+										{ label: "Standard", value: "class", hint: "recommended" },
+										{ label: "UI - EJS + ReactJS + TailwindCSS", value: "ui" },
+									],
+								}),
 				},
 				{
 					onCancel: () => {
@@ -175,10 +191,21 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			nodeStyle = blokctlNodeExtension.nodeStyle;
 			template = blokctlNodeExtension.template;
 		}
+	} else if (nonInteractive) {
+		// Validate required fields in non-interactive mode
+		nodeName = resolveOrThrow("name", opts.name);
+		node_runtime = opts.runtime || "typescript";
+		nodeStyle = opts.style || "function";
+
+		// Apply TypeScript defaults
+		if (node_runtime === "typescript") {
+			nodeType = opts.nodeType || "module";
+			template = opts.template === "standard" ? "class" : opts.template || "class";
+		}
 	}
 
 	const s = p.spinner();
-	if (!isDefault) s.start(`Creating the ${node_runtime} node...`);
+	if (!skipPrompts) s.start(`Creating the ${node_runtime} node...`);
 
 	try {
 		// Prepare the project
@@ -198,7 +225,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 				// Prepare the node
 				const currentNodesDir = `${currentDir}/nodes`;
-				if (!isDefault) {
+				if (!skipPrompts) {
 					fsExtra.ensureDirSync(currentNodesDir);
 				} else {
 					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
@@ -208,7 +235,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Copying project files...");
+			if (!skipPrompts) s.message("Copying project files...");
 
 			/// Copy the node files
 			if (!currentPath) {
@@ -294,7 +321,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 				// Prepare the node
 				const currentNodesDir = `${currentDir}/nodes`;
-				if (!isDefault) {
+				if (!skipPrompts) {
 					fsExtra.ensureDirSync(currentNodesDir);
 				} else {
 					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
@@ -304,7 +331,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Copying project files...");
+			if (!skipPrompts) s.message("Copying project files...");
 
 			// Copy the node files
 			if (!currentPath) {
@@ -330,7 +357,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 				// Prepare the node
 				const currentNodesDir = `${currentDir}/nodes`;
-				if (!isDefault) {
+				if (!skipPrompts) {
 					fsExtra.ensureDirSync(currentNodesDir);
 				} else {
 					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
@@ -342,7 +369,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating Go node files...");
+			if (!skipPrompts) s.message("Creating Go node files...");
 
 			// Copy the node files
 			if (!currentPath) {
@@ -380,7 +407,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 				// Prepare the node
 				const currentNodesDir = `${currentDir}/nodes`;
-				if (!isDefault) {
+				if (!skipPrompts) {
 					fsExtra.ensureDirSync(currentNodesDir);
 				} else {
 					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
@@ -392,7 +419,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating Java node files...");
+			if (!skipPrompts) s.message("Creating Java node files...");
 
 			// Copy the node files
 			if (!currentPath) {
@@ -433,7 +460,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 				// Prepare the node
 				const currentNodesDir = `${currentDir}/nodes`;
-				if (!isDefault) {
+				if (!skipPrompts) {
 					fsExtra.ensureDirSync(currentNodesDir);
 				} else {
 					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
@@ -445,7 +472,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating Rust node files...");
+			if (!skipPrompts) s.message("Creating Rust node files...");
 
 			// Copy the node files
 			if (!currentPath) {
@@ -488,7 +515,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating C# node files...");
+			if (!skipPrompts) s.message("Creating C# node files...");
 
 			if (!currentPath) {
 				if (fsExtra.existsSync(dirPath)) throw new Error("ops2");
@@ -523,7 +550,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating PHP node files...");
+			if (!skipPrompts) s.message("Creating PHP node files...");
 
 			if (!currentPath) {
 				if (fsExtra.existsSync(dirPath)) throw new Error("ops2");
@@ -560,7 +587,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
-			if (!isDefault) s.message("Creating Ruby node files...");
+			if (!skipPrompts) s.message("Creating Ruby node files...");
 
 			if (!currentPath) {
 				if (fsExtra.existsSync(dirPath)) throw new Error("ops2");
@@ -585,7 +612,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
-		if (!isDefault) s.stop(`Node "${nodeName}" created successfully.`);
+		if (!skipPrompts) s.stop(`Node "${nodeName}" created successfully.`);
 
 		// Show navigation instructions based on runtime
 		if (!currentPath && node_runtime === "typescript") {
@@ -646,7 +673,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 		console.log("\nFor more documentation, visit https://blok.build/docs/d/core-concepts/nodes");
 	} catch (error) {
-		if (!isDefault) s.stop("An error occurred");
+		if (!skipPrompts) s.stop("An error occurred");
 
 		const message = (error as Error).message;
 		if (message === "ops1") {
