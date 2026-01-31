@@ -18,6 +18,8 @@ import {
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
 import {
+	agents_md,
+	claude_md,
 	examples_url,
 	node_file,
 	package_dependencies,
@@ -391,6 +393,10 @@ export async function createProject(opts: OptionValues, version: string, current
 			supervisordConfContent += generateSupervisordConfig(runtimeConfigs);
 		}
 		fsExtra.writeFileSync(supervisordConfPath, supervisordConfContent);
+
+		// Create AI context files (AGENTS.md and CLAUDE.md)
+		fsExtra.writeFileSync(`${dirPath}/AGENTS.md`, agents_md.trimStart());
+		fsExtra.writeFileSync(`${dirPath}/CLAUDE.md`, claude_md.trimStart());
 
 		// Install Packages
 		s.message("Installing packages...");

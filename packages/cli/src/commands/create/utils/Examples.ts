@@ -636,6 +636,337 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\
 CMD ["bundle", "exec", "puma", "-b", "tcp://0.0.0.0:8080"]
 `;
 
+const agents_md = `# Blok Project
+
+Blok is a TypeScript-first workflow orchestration framework. It executes declarative workflows (JSON or TypeScript DSL) composed of steps (nodes) that run across 8 language runtimes: NodeJS, Python3, Go, Rust, Java, C#, PHP, and Ruby.
+
+## Project Structure
+
+\`\`\`
+├── src/
+│   └── nodes/             # TypeScript node implementations
+├── runtimes/              # Non-NodeJS runtime nodes (Go, Python3, etc.)
+│   └── {lang}/nodes/      # Language-specific node implementations
+├── workflows/
+│   ├── json/              # Workflow definitions (JSON)
+│   ├── yaml/              # Workflow definitions (YAML)
+│   └── toml/              # Workflow definitions (TOML)
+├── .blok/
+│   ├── config.json        # Runtime configuration (ports, start commands)
+│   └── runtimes/          # Auto-generated runtime scaffolds
+├── .env.local             # Environment variables (ports, paths)
+└── supervisord.conf       # Process management config
+\`\`\`
+
+## Commands
+
+\`\`\`bash
+npm run dev                # Start dev server (or blokctl dev for multi-runtime)
+npm run build              # Build project
+npm test                   # Run tests
+blokctl create node <name> # Scaffold a new node
+blokctl create workflow <n># Scaffold a new workflow
+blokctl trace              # Open Blok Studio (trace visualization)
+blokctl studio             # Alias for blokctl trace
+\`\`\`
+
+## Context — Critical Data Flow
+
+The Context type is the central execution state passed through every step.
+
+\`\`\`typescript
+type Context = {
+  id: string;                      // Unique request ID
+  request: RequestContext;          // Incoming request (body, headers, params, query)
+  response: ResponseContext;       // Current step output — OVERWRITTEN every step
+  vars?: VarsContext;              // Persistent variables — PERSISTS across workflow
+  config: ConfigContext;           // Node config (inputs resolved by Mapper)
+  env?: EnvContext;                // process.env access
+  logger: LoggerContext;
+  error: ErrorContext;
+};
+\`\`\`
+
+### The Two Critical Rules
+
+**Rule 1: \\\`ctx.response.data\\\` is OVERWRITTEN after every step.**
+Each step's output replaces the previous \\\`ctx.response.data\\\`. If you need a step's output later, store it in \\\`ctx.vars\\\`.
+
+**Rule 2: \\\`ctx.vars\\\` PERSISTS across the entire workflow.**
+Use \\\`set_var: true\\\` on a step to auto-store its output in \\\`ctx.vars[stepName]\\\`. Downstream steps access it via \\\`ctx.vars['step-name']\\\`.
+
+### Data Flow Example
+
+\`\`\`
+Step 1: "fetch-user"  (set_var: true)
+  → ctx.response.data = { id: "123", name: "Alice" }
+  → ctx.vars["fetch-user"] = { id: "123", name: "Alice" }
+
+Step 2: "transform"
+  → ctx.response.data = { result: "done" }     ← Step 1 output GONE from response
+  → ctx.vars["fetch-user"] still available
+
+Step 3: "output"
+  → Can read ctx.vars["fetch-user"].name        ← still "Alice"
+\`\`\`
+
+### Blueprint Mapper — Expression Resolution
+
+Node inputs support dynamic expressions resolved BEFORE node execution:
+
+\`\`\`json
+{
+  "inputs": {
+    "userId": "js/ctx.request.body.userId",
+    "chain": "js/ctx.vars['previous-step'].chain",
+    "previous": "js/ctx.response.data.result"
+  }
+}
+\`\`\`
+
+Available in js/ expressions: \\\`ctx\\\`, \\\`data\\\` (ctx.response.data), \\\`func\\\` (ctx.func), \\\`vars\\\` (ctx.vars)
+
+---
+
+## Creating Nodes with defineNode
+
+Use \\\`defineNode()\\\` for all new nodes. Never use the legacy class-based pattern.
+
+\`\`\`typescript
+import { defineNode } from "@blok/runner";
+import { z } from "zod";
+
+export default defineNode({
+  name: "fetch-user",
+  description: "Fetches user by ID",
+
+  input: z.object({
+    userId: z.string().uuid(),
+  }),
+
+  output: z.object({
+    user: z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string().email(),
+    }),
+  }),
+
+  async execute(ctx, input) {
+    const user = await fetchUser(input.userId);
+    return { user };
+  },
+});
+\`\`\`
+
+### Key Behaviors
+
+- Zod input/output validation runs automatically
+- ZodError is mapped to GlobalError with HTTP 400
+- \\\`flow: true\\\` nodes return NodeBase[] for conditional execution
+- \\\`contentType\\\` sets response Content-Type (e.g., "text/html")
+- Always \\\`export default defineNode(...)\\\`
+
+---
+
+## Workflow Structure (JSON)
+
+\`\`\`json
+{
+  "name": "My Workflow",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "POST", "path": "/api/process", "accept": "application/json" }
+  },
+  "steps": [
+    { "name": "fetch",   "node": "@blok/api-call", "type": "module" },
+    { "name": "process", "node": "my-node",        "type": "module", "set_var": true },
+    { "name": "go-step", "node": "chain-test",     "type": "runtime.go" }
+  ],
+  "nodes": {
+    "fetch":   { "inputs": { "url": "https://api.example.com", "method": "GET" } },
+    "process": { "inputs": { "data": "js/ctx.response.data" } },
+    "go-step": { "inputs": { "processed": "js/ctx.vars['process']" } }
+  }
+}
+\`\`\`
+
+### Step Types
+
+| Type | Description |
+|------|-------------|
+| \\\`module\\\` | TypeScript node from registered modules |
+| \\\`local\\\` | TypeScript node from filesystem (NODES_PATH) |
+| \\\`runtime.python3\\\` | Python3 SDK container (port 9007) |
+| \\\`runtime.go\\\` | Go SDK container (port 9001) |
+| \\\`runtime.rust\\\` | Rust SDK container (port 9002) |
+| \\\`runtime.java\\\` | Java SDK container (port 9003) |
+| \\\`runtime.csharp\\\` | C# SDK container (port 9004) |
+| \\\`runtime.php\\\` | PHP SDK container (port 9005) |
+| \\\`runtime.ruby\\\` | Ruby SDK container (port 9006) |
+
+### Conditional Workflow (if-else)
+
+\`\`\`json
+{
+  "nodes": {
+    "filter": {
+      "conditions": [
+        {
+          "type": "if",
+          "condition": "ctx.request.query.active === \\\\"true\\\\"",
+          "steps": [{ "name": "active-path", "node": "handle-active", "type": "module" }]
+        },
+        {
+          "type": "else",
+          "steps": [{ "name": "default-path", "node": "handle-default", "type": "module" }]
+        }
+      ]
+    }
+  }
+}
+\`\`\`
+
+---
+
+## Trigger Types
+
+| Trigger | Example Config |
+|---------|---------------|
+| \\\`http\\\` | \\\`{ "method": "GET", "path": "/", "accept": "application/json" }\\\` |
+| \\\`grpc\\\` | \\\`{ "service": "UserService", "method": "GetUser" }\\\` |
+| \\\`cron\\\` | \\\`{ "schedule": "0 * * * *", "timezone": "UTC" }\\\` |
+| \\\`queue\\\` | \\\`{ "provider": "kafka", "topic": "events" }\\\` |
+| \\\`pubsub\\\` | \\\`{ "provider": "gcp", "topic": "updates" }\\\` |
+| \\\`webhook\\\` | \\\`{ "source": "github", "events": ["push"] }\\\` |
+| \\\`websocket\\\` | \\\`{ "events": ["message"], "path": "/ws" }\\\` |
+| \\\`sse\\\` | \\\`{ "events": ["update"], "path": "/stream" }\\\` |
+| \\\`worker\\\` | \\\`{ "queue": "jobs", "concurrency": 5 }\\\` |
+
+---
+
+## Runtime Adapter System
+
+All non-NodeJS SDKs communicate via HTTP:
+- **POST /execute** — Execute node with context
+- **GET /health** — Health check
+
+Environment variables: \\\`RUNTIME_{LANG}_HOST\\\` / \\\`RUNTIME_{LANG}_PORT\\\`
+
+Runtime nodes auto-save \\\`result.data\\\` to \\\`ctx.vars[stepName]\\\`.
+
+---
+
+## Blok Studio
+
+Real-time workflow trace visualization UI.
+
+- Launch: \\\`blokctl trace\\\` or \\\`blokctl studio\\\`
+- API: \\\`/__blok/runs\\\`, \\\`/__blok/runs/:id\\\`, \\\`/__blok/runs/:id/stream\\\` (SSE)
+- Disable: \\\`BLOK_TRACE_ENABLED=false\\\`
+
+---
+
+## Do NOT
+
+- Do NOT rely on \\\`ctx.response.data\\\` for data from non-previous steps — it gets overwritten
+- Do NOT create class-based nodes — use \\\`defineNode()\\\` instead
+- Do NOT use \\\`any\\\` type — use \\\`unknown\\\` and narrow with Zod
+- Do NOT hardcode runtime ports — use environment variables
+- Do NOT skip Zod input/output schemas
+- Do NOT edit files in \\\`.blok/runtimes/\\\` — they are auto-generated
+
+## Do
+
+- Use \\\`ctx.vars\\\` with \\\`set_var: true\\\` to pass data between non-adjacent steps
+- Use \\\`js/ctx.vars['step-name'].field\\\` in workflow inputs for data flow
+- Use Zod schemas for all input/output validation
+- Use \\\`defineNode()\\\` for all new nodes
+- Handle errors via GlobalError with appropriate HTTP status codes
+- Keep nodes focused — one responsibility per node
+`;
+
+const claude_md = `# Blok Project — Claude Code Guide
+
+Read \\\`AGENTS.md\\\` for full architecture and API details. This file contains Claude-specific guidance.
+
+## Quick Commands
+
+\\\`\\\`\\\`bash
+npm run dev                        # Start dev server
+blokctl dev                        # Multi-runtime dev server
+blokctl create node <name>         # Scaffold new node
+blokctl create workflow <name>     # Scaffold new workflow
+blokctl trace                      # Open Blok Studio
+npm test                           # Run tests
+\\\`\\\`\\\`
+
+## Context Rules (Memorize These)
+
+1. **\\\`ctx.response.data\\\` is OVERWRITTEN every step.** Previous output GONE unless stored in vars.
+2. **\\\`ctx.vars\\\` PERSISTS across the workflow.** Use \\\`set_var: true\\\` or \\\`js/ctx.vars['step']\\\`.
+3. **Blueprint Mapper resolves \\\`js/\\\` expressions BEFORE node execution.**
+
+When users have data flow issues, check these three things first.
+
+## Debugging Workflows
+
+1. **Verify structure**: Every \\\`steps[].name\\\` must match a key in \\\`nodes\\\`
+2. **Trace data flow**: Which steps have \\\`set_var: true\\\`? Do \\\`js/\\\` expressions reference correct step names?
+3. **Check runtimes**: SDK containers running? \\\`GET http://localhost:{port}/health\\\`
+4. **Check Studio traces**: \\\`/__blok/runs/:id\\\` shows step-by-step inputs/outputs/errors
+
+### Common Errors
+
+| Error | Fix |
+|-------|-----|
+| \\\`Node type X not found\\\` | Wrong \\\`type\\\` in step — use module, local, or runtime.* |
+| \\\`Validation failed\\\` | Zod schema mismatch — check input schema vs actual data |
+| \\\`Runtime execution error\\\` | SDK container not running — check health endpoint |
+| \\\`ctx.vars['X'] undefined\\\` | Source step missing \\\`set_var: true\\\` or name mismatch |
+
+## Generating Code
+
+Always use \\\`defineNode()\\\`. Never class-based BlokService.
+
+\\\`\\\`\\\`typescript
+import { defineNode } from "@blok/runner";
+import { z } from "zod";
+
+export default defineNode({
+  name: "node-name",
+  description: "What this node does",
+  input: z.object({ /* Zod schema */ }),
+  output: z.object({ /* Zod schema */ }),
+  async execute(ctx, input) {
+    return { /* must match output schema */ };
+  },
+});
+\\\`\\\`\\\`
+
+### Checklist:
+- Zod input schema covers all inputs
+- Zod output schema matches execute() return
+- Node name matches workflow references
+- No \\\`any\\\` types — use \\\`z.unknown()\\\` if dynamic
+- \\\`export default defineNode(...)\\\`
+
+## Blok Studio Help
+
+- Launch: \\\`blokctl trace\\\` or navigate to \\\`/__blok\\\`
+- "No output" → Node not returning data or Zod output validation failed
+- "Step error" → Expand error — check if 400 (validation) or 500 (runtime)
+- "Vars not passing" → Source step needs \\\`set_var: true\\\`, target needs \\\`js/ctx.vars['name']\\\`
+
+## Do NOT
+
+- Do NOT suggest class-based BlokService for new nodes
+- Do NOT generate code with \\\`any\\\` types
+- Do NOT assume \\\`ctx.response.data\\\` persists across steps
+- Do NOT skip Zod schemas when creating nodes
+- Do NOT edit files in \\\`.blok/runtimes/\\\`
+`;
+
 const function_first_node_file = `import { defineNode } from "@blok/runner";
 import { z } from "zod";
 
@@ -706,4 +1037,6 @@ export {
 	ruby_gemfile,
 	ruby_dockerfile,
 	function_first_node_file,
+	agents_md,
+	claude_md,
 };
