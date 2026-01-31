@@ -93,7 +93,75 @@ export default defineNode({
 - Error cases throw Error (auto-wrapped to GlobalError with 500)
 - No `any` types — use `z.unknown()` if truly dynamic
 
-## Generating Workflow JSON
+## Generating TypeScript Workflows (Preferred)
+
+Always prefer TypeScript workflows over JSON. They live in `triggers/http/src/workflows/` and are organized in domain-specific subfolders.
+
+### Simple Workflow
+
+```typescript
+import { type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({
+  name: "Workflow Name",
+  version: "1.0.0",
+  description: "What this workflow does",
+})
+  .addTrigger("http", {
+    method: "POST",          // Use "ANY" for all methods (not "*")
+    path: "/api/endpoint",
+    accept: "application/json",
+  })
+  .addStep({
+    name: "step-name",
+    node: "node-package",
+    type: "module",
+    inputs: { key: "value or js/expression" },
+  });
+
+export default step;
+```
+
+### Conditional Workflow (if-else)
+
+```typescript
+import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({ name: "My Router", version: "1.0.0" })
+  .addTrigger("http", { method: "ANY", path: "/", accept: "application/json" })
+  .addCondition({
+    node: { name: "router", node: "@blok/if-else", type: "module" },
+    conditions: () => [
+      new AddIf('ctx.request.query.type === "a"')
+        .addStep({ name: "branch-a", node: "@blok/api-call", type: "module", inputs: { url: "..." } })
+        .build(),
+      new AddElse()
+        .addStep({ name: "branch-b", node: "@blok/api-call", type: "module", inputs: { url: "..." } })
+        .build(),
+    ],
+  });
+
+export default step;
+```
+
+### After creating a workflow, you MUST:
+1. Register it in `triggers/http/src/Workflows.ts` (import + add to the `workflows` object)
+2. Register any new nodes in `triggers/http/src/Nodes.ts` if not already there
+3. Organize files in subfolders by domain (e.g. `workflows/users/`, `workflows/orders/`)
+
+### Checklist for generated TypeScript workflows:
+- Import `{ type Step, Workflow }` from `@blok/helper` (add `AddIf, AddElse` for conditionals)
+- Default export is typed as `Step`
+- Use `"ANY"` for wildcard HTTP method (not `"*"`)
+- `js/` expressions in inputs work identically to JSON workflows
+- Steps that provide data to non-adjacent downstream steps have `set_var: true`
+- Condition strings are valid JavaScript with access to `ctx`
+- Version follows semver (x.x.x)
+- Workflow name is 3+ characters, node references are 5+ characters
+
+## Generating Workflow JSON (Alternative)
+
+JSON workflows are an alternative to TypeScript workflows. They live in `triggers/http/workflows/json/`.
 
 ```json
 {
@@ -113,7 +181,7 @@ export default defineNode({
 }
 ```
 
-### Checklist for generated workflows:
+### Checklist for generated JSON workflows:
 - Every step name appears as a key in `nodes`
 - `js/` expressions reference correct `ctx.vars` keys (check step order)
 - Steps that provide data to non-adjacent downstream steps have `set_var: true`

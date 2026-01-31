@@ -274,7 +274,263 @@ export default defineNode({
 
 ## Workflow Structure
 
-Workflows can be defined as JSON or via the TypeScript DSL.
+Workflows can be defined as **TypeScript (preferred)** or JSON. TypeScript workflows use a fluent builder API from `@blok/helper` and live in `triggers/http/src/workflows/`. JSON workflows live in `triggers/http/workflows/json/`. Both produce the same internal structure and have identical capabilities.
+
+### TypeScript Workflows (Preferred)
+
+TypeScript workflows are the recommended approach. They provide type safety, IDE autocompletion, and can be organized in folders.
+
+#### File Structure
+
+```
+triggers/http/src/
+├── workflows/                    # TypeScript workflow definitions
+│   ├── users/                    # Organize by domain in subfolders
+│   │   ├── create-user.ts
+│   │   └── get-user.ts
+│   ├── orders/
+│   │   ├── process-order.ts
+│   │   └── cancel-order.ts
+│   └── health-check.ts          # Or flat files for simple workflows
+├── Workflows.ts                  # Registry: maps workflow IDs to workflow objects
+└── Nodes.ts                      # Registry: maps node IDs to node instances
+```
+
+#### Simple Workflow
+
+```typescript
+import { type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({
+  name: "Get Users",
+  version: "1.0.0",
+  description: "Fetches users from external API",
+})
+  .addTrigger("http", {
+    method: "GET",
+    path: "/users",
+    accept: "application/json",
+  })
+  .addStep({
+    name: "fetch-users",
+    node: "@blok/api-call",
+    type: "module",
+    inputs: {
+      url: "https://api.example.com/users",
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      responseType: "application/json",
+    },
+  });
+
+export default step;
+```
+
+#### Multi-Step Workflow
+
+```typescript
+import { type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({
+  name: "Process Order",
+  version: "1.0.0",
+})
+  .addTrigger("http", {
+    method: "POST",
+    path: "/orders",
+    accept: "application/json",
+  })
+  .addStep({
+    name: "validate-order",
+    node: "order-validator",
+    type: "module",
+    inputs: {
+      order: "js/ctx.request.body",
+    },
+  })
+  .addStep({
+    name: "save-order",
+    node: "order-store",
+    type: "module",
+    inputs: {
+      data: "js/ctx.response.data",
+    },
+  });
+
+export default step;
+```
+
+#### Conditional Workflow (if-else)
+
+```typescript
+import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({
+  name: "Route by Query",
+  version: "1.0.0",
+})
+  .addTrigger("http", {
+    method: "ANY",       // ← Use "ANY" in TS (equivalent to "*" in JSON)
+    path: "/",
+    accept: "application/json",
+  })
+  .addCondition({
+    node: {
+      name: "router",
+      node: "@blok/if-else",
+      type: "module",
+    },
+    conditions: () => {
+      return [
+        new AddIf('ctx.request.query.type === "countries"')
+          .addStep({
+            name: "get-countries",
+            node: "@blok/api-call",
+            type: "module",
+            inputs: {
+              url: "https://countriesnow.space/api/v0.1/countries",
+              method: "GET",
+              headers: { "Content-Type": "application/json" },
+              responseType: "application/json",
+            },
+          })
+          .build(),
+        new AddIf('ctx.request.query.type === "facts"')
+          .addStep({
+            name: "get-facts",
+            node: "@blok/api-call",
+            type: "module",
+            inputs: {
+              url: "https://catfact.ninja/fact",
+              method: "GET",
+              headers: { "Content-Type": "application/json" },
+              responseType: "application/json",
+            },
+          })
+          .build(),
+        new AddElse()
+          .addStep({
+            name: "default-response",
+            node: "default-handler",
+            type: "module",
+          })
+          .build(),
+      ];
+    },
+  });
+
+export default step;
+```
+
+#### Cross-Runtime Workflow
+
+```typescript
+import { type Step, Workflow } from "@blok/helper";
+
+const step: Step = Workflow({
+  name: "Cross Runtime Chain",
+  version: "1.0.0",
+})
+  .addTrigger("http", {
+    method: "GET",
+    path: "/chain",
+    accept: "application/json",
+  })
+  .addStep({
+    name: "init",
+    node: "chain-init",
+    type: "module",
+    inputs: {},
+  })
+  .addStep({
+    name: "go-step",
+    node: "chain-test",
+    type: "runtime.go",
+    inputs: {
+      chain: "js/ctx.response.data.chain",
+    },
+  })
+  .addStep({
+    name: "python-step",
+    node: "chain-test",
+    type: "runtime.python3",
+    inputs: {
+      chain: "js/ctx.response.data.chain",
+    },
+  });
+
+export default step;
+```
+
+#### Registering Workflows in Workflows.ts
+
+Every TS workflow must be imported and registered in `triggers/http/src/Workflows.ts`:
+
+```typescript
+import type Workflows from "./runner/types/Workflows";
+import createUser from "./workflows/users/create-user";
+import getUser from "./workflows/users/get-user";
+import processOrder from "./workflows/orders/process-order";
+import healthCheck from "./workflows/health-check";
+
+const workflows: Workflows = {
+  "create-user": createUser,
+  "get-user": getUser,
+  "process-order": processOrder,
+  "health-check": healthCheck,
+};
+
+export default workflows;
+```
+
+The key (e.g. `"create-user"`) becomes the workflow's route identifier.
+
+#### Registering Nodes in Nodes.ts
+
+All nodes referenced by workflows must be registered in `triggers/http/src/Nodes.ts`:
+
+```typescript
+import ApiCall from "@blok/api-call";
+import IfElse from "@blok/if-else";
+import type { NodeBase } from "@blok/shared";
+import OrderValidator from "./nodes/order-validator/index";
+import OrderStore from "./nodes/order-store/index";
+
+const nodes: {
+  [key: string]: NodeBase;
+} = {
+  "@blok/api-call": ApiCall,
+  "@blok/if-else": IfElse,
+  "order-validator": OrderValidator,
+  "order-store": OrderStore,
+};
+
+export default nodes;
+```
+
+#### Builder API Chain
+
+```
+Workflow({ name, version, description? })
+  → returns Trigger
+    .addTrigger(type, config)
+      → returns StepNode
+        .addStep({ name, node, type, inputs?, runtime? })
+          → returns StepNode (chainable)
+        .addCondition({ node, conditions: () => [...] })
+          → returns StepNode (chainable)
+```
+
+#### Key Differences: TS vs JSON
+
+| Feature | TypeScript | JSON |
+|---------|-----------|------|
+| HTTP method wildcard | `"ANY"` | `"*"` |
+| Inputs location | Inline on `.addStep()` | Separate in `nodes` object |
+| Conditions | `AddIf` / `AddElse` builders | `conditions` array |
+| File location | `triggers/http/src/workflows/` | `triggers/http/workflows/json/` |
+| Registration | Import in `Workflows.ts` | Auto-loaded by runner |
+| Type safety | Full TypeScript + Zod validation | None |
 
 ### JSON Workflow
 
@@ -348,7 +604,7 @@ Workflows can be defined as JSON or via the TypeScript DSL.
 | `runtime.php` | PHP SDK container | HTTP to port 9005 |
 | `runtime.ruby` | Ruby SDK container | HTTP to port 9006 |
 
-### Conditional Workflow (if-else)
+### Conditional Workflow (if-else) — JSON
 
 ```json
 {
@@ -384,18 +640,6 @@ Workflows can be defined as JSON or via the TypeScript DSL.
 ```
 
 Conditions are evaluated in order. First match wins. `condition` strings are JavaScript expressions with access to `ctx`.
-
-### TypeScript DSL
-
-```typescript
-import { Workflow, Step } from "@blok/helper";
-
-const workflow = Workflow({ name: "example", version: "1.0.0" })
-  .addTrigger("http", { method: "POST", path: "/api/process" })
-  .addStep({ name: "fetch", node: "@blok/api-call", type: "module" })
-  .addStep({ name: "process", node: "my-node", type: "module" })
-  .build();
-```
 
 ---
 
