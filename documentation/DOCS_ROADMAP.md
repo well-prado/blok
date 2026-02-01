@@ -280,7 +280,7 @@ docs/
 | 2.4 | Cron Triggers | P1 | triggers/cron/ | - [ ] |
 | 2.5 | Webhook Triggers | P1 | triggers/webhook/ | - [ ] |
 | 2.6 | WebSocket Trigger | P1 | triggers/websocket/ | - [ ] |
-| 2.7 | SSE Trigger | P1 | triggers/sse/ | - [ ] |
+| 2.7 | SSE Trigger | P1 | triggers/sse/ (SSETrigger abstract base + SSEServer concrete trigger + runner infrastructure) | - [ ] |
 | 2.8 | Worker Trigger | P1 | triggers/worker/ + 2 adapters | - [ ] |
 | 2.9 | Building Custom Triggers | P1 | TriggerBase.ts | - [ ] |
 
@@ -572,10 +572,61 @@ actual code here
 | `apps/studio/src/__tests__/` | 70 frontend tests (formatters, API, stores, components) |
 | `core/runner/src/tracing/` | Backend trace collection and API endpoints |
 
+### SSE Trigger Sources
+| File | What to Document |
+|------|-----------------|
+| `triggers/sse/src/SSETrigger.ts` | Abstract base class (860 lines): connection management, channels, broadcasting, heartbeat, event history/replay, workflow triggering on connect/disconnect/subscribe/unsubscribe |
+| `triggers/sse/src/runner/SSEServer.ts` | Concrete trigger: Hono HTTP server, SSE stream endpoints, REST management APIs, Blok Studio integration, Prometheus metrics |
+| `triggers/sse/src/index.ts` | App entry point: GlobalOptions, App class instantiation, HMR support (mirrors HTTP trigger pattern) |
+| `triggers/sse/src/lib.ts` | Library exports: SSETrigger class + types for package consumers (`@blok/trigger-sse`) |
+| `triggers/sse/src/AppRoutes.ts` | Custom Hono routes: welcome page with SSE usage instructions |
+| `triggers/sse/src/Nodes.ts` | Node registry: `@blok/api-call`, `@blok/if-else`, `welcome-message` |
+| `triggers/sse/src/Workflows.ts` | Workflow registry: imports on-connect, on-subscribe workflows |
+| `triggers/sse/src/workflows/notifications/on-connect.ts` | Example workflow: triggered on SSE connect, sends welcome message |
+| `triggers/sse/src/workflows/notifications/on-subscribe.ts` | Example workflow: triggered on channel subscribe |
+| `triggers/sse/src/nodes/welcome-message/index.ts` | Example node: `defineNode()` pattern, sends SSE event via `ctx.vars._sse_send` |
+| `triggers/sse/src/runner/HonoTraceRouterAdapter.ts` | Blok Studio bridge: adapts TraceRouter interface to Hono routes (`/__blok/*`) |
+| `triggers/sse/src/runner/metrics/opentelemetry_metrics.ts` | Prometheus metrics handler for `/metrics` endpoint |
+| `triggers/sse/src/runner/metrics/opentelemetry_traces.ts` | OpenTelemetry trace setup for distributed tracing |
+| `triggers/sse/src/runner/types/Workflows.ts` | Type definition: `Record<string, HelperResponse>` |
+| `triggers/sse/src/runner/types/NodeTypes.ts` | Enum of node types (module, runtime.*) |
+| `triggers/sse/Dockerfile` | Production container: bun runtime, port 4001, preloads metrics |
+| `triggers/sse/Dockerfile.dev` | Development container: node 23-alpine, port 4001, watch mode |
+| `triggers/sse/.env.example` | Environment template: PORT=4001, APP_NAME=blok-sse, BLOK_TRACE_ENABLED |
+| `triggers/sse/vitest.config.ts` | Test configuration: 90% coverage thresholds, Istanbul provider |
+| `packages/cli/src/commands/create/project.ts` | CLI integration: SSE option in trigger selection, trigger-aware port assignment |
+
+> **KEY LEARNINGS for Phase 2.7 (SSE Trigger Documentation):**
+>
+> **SSE Trigger Architecture (two-layer design):**
+> - `SSETrigger` (abstract) handles all SSE protocol logic: connection lifecycle, channels, broadcasting, heartbeat, event history with replay (Last-Event-ID), metadata
+> - `SSEServer` (concrete) adds the HTTP layer: Hono server, REST endpoints, Blok Studio, metrics — developers extend this pattern for custom SSE servers
+> - Library vs App separation: `lib.ts` exports the abstract class for package consumers; `index.ts` is the runnable App entry point
+>
+> **SSE Context Data (critical for workflow docs):**
+> - `ctx.vars._sse` — `{ clientId, eventType, channel, clientChannels, clientMetadata, timestamp }` — available in all SSE-triggered workflows
+> - `ctx.vars._sse_send` — function `(event: string, data: unknown) => void` to send SSE event to the triggering client
+> - `ctx.vars._sse_broadcast` — function `(channel: string, event: string, data: unknown) => void` to broadcast to a channel
+> - Workflows use `.addTrigger("sse", { events: ["connect"] })` — but `TriggerOpts` only types HTTP fields, so `as any` cast needed until Phase 3.1
+>
+> **REST Management Endpoints (port 4001):**
+> - `GET /events/:channel` — opens SSE stream, subscribes to channel, triggers on-connect + on-subscribe workflows
+> - `POST /events/:channel/publish` — publish `{ event, data }` to all clients on a channel
+> - `POST /events/broadcast` — broadcast `{ event, data, channel? }` to all or specific channel
+> - `GET /clients` — returns `{ activeConnections, totalConnections, uptime, channels }`
+> - `GET /channels` — lists active channels with subscriber counts
+>
+> **Differences from HTTP Trigger:**
+> - Port 4001 (HTTP uses 4000)
+> - Long-lived connections (vs request-response)
+> - Channel-based pub/sub (vs route-based)
+> - Workflow triggers on connection events, not HTTP methods
+> - SSE-specific context vars (`_sse`, `_sse_send`, `_sse_broadcast`)
+
 ---
 
-**Document Version:** 1.2.0
+**Document Version:** 1.3.0
 **Created:** 2026-01-29
-**Last Updated:** 2026-01-30
+**Last Updated:** 2026-02-01
 **Owner:** Blok Core Team
-**Status:** Planning (enriched with runtime + context data flow learnings from E2E validation, Blok Studio source mapping added)
+**Status:** Planning (enriched with runtime + context data flow learnings from E2E validation, Blok Studio source mapping added, SSE trigger source mapping and architecture learnings added)

@@ -6,17 +6,26 @@
 		"target": "ES2022",
 		"module": "es2022",
 		"moduleResolution": "bundler",
+		"rootDir": "./src",
+		"baseUrl": ".",
+		"paths": {
+			"@nodes/*": ["./src/nodes/*"],
+			"@src/*": ["src/*"]
+		},
+		"allowJs": true,
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,
 		"outDir": "./dist",
-		"rootDir": "./src",
-		"strict": true,
 		"esModuleInterop": true,
-		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
+		"strict": true,
+		"noUnusedLocals": true,
+		"noImplicitReturns": true,
+		"skipLibCheck": true,
 		"resolveJsonModule": true
 	},
-	"include": ["src/**/*"],
-	"exclude": ["node_modules", "dist", "**/*.test.ts"]
+	"compileOnSave": true,
+	"include": ["./src", "./src/nodes/**/*.json", "./src/nodes/**/*.md"],
+	"exclude": ["src/nodes/**/test/*.ts", "**/*.test.ts", "node_modules", "dist"]
 }

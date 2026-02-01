@@ -331,8 +331,9 @@ Key changes:
 Expand from HTTP + gRPC to support queues, pub/sub, workers, cron, webhooks, and custom triggers.
 
 ### Current State
-- ✅ HTTP trigger (Express.js)
+- ✅ HTTP trigger (Hono + @hono/node-server)
 - ✅ gRPC trigger (Connect RPC)
+- ✅ SSE trigger (Server-Sent Events) — complete project template with Hono server, real-time streaming, channel management, Blok Studio integration, CLI support
 - ❌ Queue triggers (Kafka, RabbitMQ, SQS, etc.)
 - ❌ Pub/sub triggers (Redis, NATS, etc.)
 - ❌ Worker triggers (Temporal, Inngest-like)
@@ -527,13 +528,55 @@ class QueueTrigger extends TriggerBase {
 
 **Phase 3F: Real-time Triggers (Week 12-13)**
 - [ ] Implement WebSocket trigger
-- [ ] Implement SSE (Server-Sent Events) trigger
-- [ ] Add connection management
+- [x] Implement SSE (Server-Sent Events) trigger
+- [x] Add connection management (SSE)
 - [ ] Add authentication/authorization
-- [ ] Add room/channel support
+- [x] Add room/channel support (SSE)
 - [ ] Create real-time dashboard
-- [ ] Write integration tests
+- [x] Write integration tests (SSE — 49 tests passing)
 - [ ] Document real-time trigger usage
+
+> **Phase 3F — SSE Trigger Template (Completed)**
+>
+> The SSE trigger is now a complete, runnable project template — on par with the HTTP trigger — so that `blokctl create project --trigger sse` produces a working project.
+>
+> **Architecture:**
+> - `SSETrigger` (abstract base, 860 lines) — connection management, channels, broadcasting, heartbeat, event history/replay, workflow triggering on connect/disconnect/subscribe/unsubscribe
+> - `SSEServer` (concrete trigger) — extends `SSETrigger`, adds Hono HTTP server with SSE stream endpoints, REST management APIs, Blok Studio integration, Prometheus metrics
+> - App entry point (`src/index.ts`) mirrors the HTTP trigger pattern with `GlobalOptions`, `App` class, and HMR support
+>
+> **Endpoints (port 4001):**
+> - `GET /events/:channel` — SSE stream (opens connection, subscribes to channel)
+> - `POST /events/:channel/publish` — publish event to a channel
+> - `POST /events/broadcast` — broadcast to all connected clients
+> - `GET /clients` — connection stats (active connections, total, uptime)
+> - `GET /channels` — list active channels with client counts
+> - `GET /health-check` — health check
+> - `GET /metrics` — Prometheus metrics
+> - `/__blok/*` — Blok Studio trace routes
+>
+> **Example workflows & nodes:**
+> - `on-connect` workflow — triggered when a client connects, sends welcome message
+> - `on-subscribe` workflow — triggered when a client subscribes to a channel
+> - `welcome-message` node — `defineNode()` pattern, sends SSE event via `ctx.vars._sse_send`
+>
+> **SSE context data (available in workflows):**
+> - `ctx.vars._sse` — `{ clientId, eventType, channel, clientChannels, clientMetadata, timestamp }`
+> - `ctx.vars._sse_send` — function to send SSE event to the triggering client
+> - `ctx.vars._sse_broadcast` — function to broadcast SSE event to a channel
+>
+> **CLI integration:**
+> - `blokctl create project --trigger sse` added to project creation wizard
+> - Trigger-aware port assignment (HTTP: 4000, SSE: 4001)
+> - Full non-interactive mode support
+>
+> **Infrastructure:**
+> - Docker support (`Dockerfile` + `Dockerfile.dev`)
+> - `.env.example` with SSE-specific configuration
+> - `vitest.config.ts` with 90% coverage thresholds
+> - 49 tests passing across connection management, channels, broadcasting, heartbeat, and event history
+>
+> **Known limitation:** `TriggerOpts` in `@blok/helper` only defines HTTP fields — SSE trigger options require `as any` cast. Fix planned in Phase 3.1 (discriminated union types per trigger kind).
 
 **Phase 3G: AI-Powered Trigger Generation (Week 14)**
 - [ ] Implement trigger generation prompt (from docs)
@@ -1390,6 +1433,7 @@ Blok Studio is a production-ready React SPA (`apps/studio/`) that connects to th
 
 ### 2026 Q3 (Jul - Sep): Universal Triggers
 **Milestone: Production-Ready Trigger Ecosystem**
+- ✅ SSE trigger (Server-Sent Events) — **completed early** (full project template, CLI integration, 49 tests)
 - ✅ Queue triggers (Kafka, RabbitMQ, SQS, Redis)
 - ✅ Pub/sub triggers (Redis, NATS, Google)
 - ✅ Worker triggers with scheduling
@@ -1397,6 +1441,7 @@ Blok Studio is a production-ready React SPA (`apps/studio/`) that connects to th
 - ✅ Webhook triggers (GitHub, Stripe, Shopify)
 
 **Deliverables:**
+- SSE trigger template (complete — `blokctl create project --trigger sse`)
 - Queue trigger implementations
 - Pub/sub trigger implementations
 - Worker trigger with dashboard

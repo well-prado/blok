@@ -1,113 +1,46 @@
-/**
- * @blok/trigger-sse
- *
- * Server-Sent Events (SSE) trigger for Blok workflows.
- * Handle real-time server-to-client push notifications.
- *
- * Features:
- * - Channel/topic subscriptions
- * - Automatic reconnection support (via retry)
- * - Event type filtering
- * - Connection health monitoring
- * - Message history replay (via Last-Event-ID)
- *
- * @example
- * ```typescript
- * import { SSETrigger } from "@blok/trigger-sse";
- * import express from "express";
- *
- * class MySSETrigger extends SSETrigger {
- *   protected nodes = myNodes;
- *   protected workflows = myWorkflows;
- * }
- *
- * const trigger = new MySSETrigger();
- * await trigger.listen();
- *
- * const app = express();
- *
- * // SSE endpoint
- * app.get("/events/:channel", async (req, res) => {
- *   // Set SSE headers
- *   res.setHeader("Content-Type", "text/event-stream");
- *   res.setHeader("Cache-Control", "no-cache");
- *   res.setHeader("Connection", "keep-alive");
- *
- *   const client = await trigger.handleConnection(
- *     (data) => { res.write(data); return true; },
- *     () => res.end(),
- *     req.headers as Record<string, string>,
- *     { userId: req.user?.id }
- *   );
- *
- *   if (!client) return;
- *
- *   // Subscribe to channel
- *   await trigger.subscribe(client.id, req.params.channel);
- *
- *   // Handle disconnect
- *   req.on("close", () => {
- *     trigger.handleDisconnect(client.id);
- *   });
- * });
- *
- * // Send events
- * app.post("/events/:channel", async (req, res) => {
- *   const sent = trigger.broadcastToChannel(req.params.channel, {
- *     id: uuid(),
- *     event: req.body.event,
- *     data: req.body.data,
- *   });
- *   res.json({ sent });
- * });
- * ```
- *
- * Workflow Definition:
- * ```typescript
- * Workflow({ name: "sse-handler", version: "1.0.0" })
- *   .addTrigger("sse", {
- *     events: ["connect", "disconnect", "subscribe"],
- *     channels: ["notifications", "updates"],
- *   })
- *   .addStep({ ... });
- * ```
- *
- * Client-side Usage:
- * ```javascript
- * const eventSource = new EventSource("/events/notifications");
- *
- * eventSource.onmessage = (event) => {
- *   console.log("Message:", event.data);
- * };
- *
- * eventSource.addEventListener("notification", (event) => {
- *   console.log("Notification:", JSON.parse(event.data));
- * });
- *
- * eventSource.onerror = (error) => {
- *   console.error("SSE error:", error);
- * };
- * ```
- *
- * Event Format:
- * ```
- * id: event-123
- * event: notification
- * data: {"message": "Hello, World!"}
- *
- * ```
- */
+import { DefaultLogger } from "@blok/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import SSEServer from "./runner/SSEServer";
 
-// Core exports
-export {
-	SSETrigger,
-	type SSEEvent,
-	type SSEState,
-	type SSEClient,
-	type SSEChannel,
-	type SSEEventType,
-	type SSEConnectionEvent,
-} from "./SSETrigger";
+export default class App {
+	private sseServer: SSEServer = <SSEServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-sse-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
 
-// Re-export types from helper for convenience
-export type { SSETriggerOpts } from "@blok/helper";
+	constructor() {
+		this.initializer = performance.now();
+		this.sseServer = new SSEServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.sseServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(`Server initialized in ${this.initializer.toFixed(2)}ms`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+
+	// Expose the Hono app for hosting with serverless functions
+	getApp() {
+		return this.sseServer.getApp();
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}

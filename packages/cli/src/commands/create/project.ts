@@ -137,6 +137,7 @@ export async function createProject(opts: OptionValues, version: string, current
 								message: "Select the trigger to install",
 								options: [
 									{ label: "HTTP", value: "http", hint: "recommended" },
+									{ label: "SSE", value: "sse", hint: "real-time server push" },
 									//{ label: "GRPC", value: "grpc" }
 								],
 							}),
@@ -450,7 +451,8 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		if (!currentPath) console.log(`Change to the project directory: cd ${projectName}`);
 		console.log(`Run the command "npm run dev" to start the development server.`);
-		console.log("You can test the project in your browser at http://localhost:4000/health-check");
+		const triggerPort = trigger === "sse" ? 4001 : 4000;
+		console.log(`You can test the project in your browser at http://localhost:${triggerPort}/health-check`);
 
 		// Show runtime health check URLs
 		if (runtimeConfigs.length > 0) {
