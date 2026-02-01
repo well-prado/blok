@@ -139,3 +139,9 @@ dist
 # Other
 .vscode
 .DS_store
+
+# Blok runtime build artifacts
+.blok/runtimes/**/bin/
+.blok/runtimes/**/obj/
+.blok/runtimes/**/__pycache__/
+.blok/runtimes/**/target/

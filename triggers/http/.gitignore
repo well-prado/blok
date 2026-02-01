@@ -141,3 +141,9 @@ dist
 .DS_store
 
 images/examples/*
+
+# Blok runtime build artifacts
+.blok/runtimes/**/bin/
+.blok/runtimes/**/obj/
+.blok/runtimes/**/__pycache__/
+.blok/runtimes/**/target/
