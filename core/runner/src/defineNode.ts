@@ -60,6 +60,13 @@ export interface FnNodeDefinition<
 	flow?: boolean;
 
 	/**
+	 * Minimum runtime versions required by this node.
+	 * Keys are runtime kind identifiers, values are semver constraints.
+	 * @example { python3: ">=3.11.0", go: ">=1.21.0" }
+	 */
+	runtimeRequirements?: Partial<Record<string, string>>;
+
+	/**
 	 * Node execution logic
 	 * @param ctx - Workflow context
 	 * @param input - Type-safe input (validated against input schema)
@@ -83,6 +90,9 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 > {
 	private definition: FnNodeDefinition<TInput, TOutput>;
 
+	/** Minimum runtime versions required by this node (if any) */
+	public runtimeRequirements?: Partial<Record<string, string>>;
+
 	constructor(definition: FnNodeDefinition<TInput, TOutput>) {
 		super();
 		this.definition = definition;
@@ -96,6 +106,11 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		// Set flow flag for control flow nodes (e.g. if-else) that return sub-steps
 		if (definition.flow) {
 			this.flow = true;
+		}
+
+		// Store runtime requirements for validation at workflow load time
+		if (definition.runtimeRequirements) {
+			this.runtimeRequirements = definition.runtimeRequirements;
 		}
 
 		// Convert Zod schemas to JSON Schema for backward compatibility

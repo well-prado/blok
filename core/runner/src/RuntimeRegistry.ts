@@ -16,9 +16,11 @@ import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 export class RuntimeRegistry {
 	private static instance: RuntimeRegistry;
 	private adapters: Map<RuntimeKind, RuntimeAdapter>;
+	private versions: Map<RuntimeKind, string>;
 
 	private constructor() {
 		this.adapters = new Map<RuntimeKind, RuntimeAdapter>();
+		this.versions = new Map<RuntimeKind, string>();
 	}
 
 	/**
@@ -81,10 +83,40 @@ export class RuntimeRegistry {
 	}
 
 	/**
-	 * Clear all registered adapters (useful for testing)
+	 * Set the detected version for a runtime kind.
+	 *
+	 * @param kind - The runtime kind
+	 * @param version - The detected version string (e.g. "3.12.0")
+	 */
+	public setVersion(kind: RuntimeKind, version: string): void {
+		this.versions.set(kind, version);
+	}
+
+	/**
+	 * Get the detected version for a runtime kind.
+	 *
+	 * @param kind - The runtime kind
+	 * @returns The version string, or undefined if not known
+	 */
+	public getVersion(kind: RuntimeKind): string | undefined {
+		return this.versions.get(kind);
+	}
+
+	/**
+	 * Get all known runtime versions.
+	 *
+	 * @returns Map of runtime kind to version string
+	 */
+	public getVersions(): Map<RuntimeKind, string> {
+		return new Map(this.versions);
+	}
+
+	/**
+	 * Clear all registered adapters and versions (useful for testing)
 	 */
 	public clear(): void {
 		this.adapters.clear();
+		this.versions.clear();
 	}
 
 	/**

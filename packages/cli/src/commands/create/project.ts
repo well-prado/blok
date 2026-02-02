@@ -18,6 +18,7 @@ import {
 	setupRuntime,
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
+import { computeDefaultConstraint } from "../../services/semver-utils.js";
 import {
 	agents_md,
 	claude_md,
@@ -111,13 +112,16 @@ export async function createProject(opts: OptionValues, version: string, current
 			})) as string;
 		};
 
-		// Build runtime options with detection hints
+		// Build runtime options with detection hints and version pin info
 		const runtimeOptions = [
 			{ label: "NodeJS", value: "node", hint: "always included" },
 			...detectedRuntimes.map((rt) => {
 				let hint: string;
-				if (rt.available) {
-					hint = `${rt.toolchain} ${rt.version || ""} detected`.trim();
+				if (rt.available && rt.version) {
+					const constraint = computeDefaultConstraint(rt.version);
+					hint = `${rt.toolchain} ${rt.version} detected (will pin ${constraint})`;
+				} else if (rt.available) {
+					hint = `${rt.toolchain} detected`;
 				} else if (rt.secondaryTool && !rt.secondaryTool.available) {
 					hint = `${rt.secondaryTool.name} not found - will be skipped`;
 				} else {

@@ -5,6 +5,7 @@ import util from "node:util";
 import * as p from "@clack/prompts";
 import fsExtra from "fs-extra";
 import color from "picocolors";
+import { checkProject } from "./commands/check/index.js";
 import { createNode } from "./commands/create/node.js";
 import { createProject } from "./commands/create/project.js";
 import { createWorkflow } from "./commands/create/workflow.js";
@@ -192,11 +193,27 @@ async function main() {
 
 		program.addCommand(create);
 
+		// Runtime version check
+
+		program
+			.command("check")
+			.description("Validate runtime version requirements")
+			.action(async (options: OptionValues) => {
+				await analytics.trackCommandExecution({
+					command: "check",
+					args: options,
+					execution: async () => {
+						await checkProject(options);
+					},
+				});
+			});
+
 		// Dev server
 
 		program
 			.command("dev")
 			.description("Start the development server")
+			.option("--skip-version-check", "Skip runtime version validation")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "dev",

@@ -3,6 +3,13 @@ import path from "node:path";
 import util from "node:util";
 import fsExtra from "fs-extra";
 import type { RuntimeInfo } from "./runtime-detector.js";
+import { detectRuntimeVersion } from "./runtime-detector.js";
+import {
+	computeDefaultConstraint,
+	formatVersionMismatch,
+	formatVersionSuccess,
+	satisfiesConstraint,
+} from "./semver-utils.js";
 
 const exec = util.promisify(child_process.exec);
 
@@ -18,6 +25,10 @@ export interface RuntimeConfig {
 	cwd: string;
 	kind: string;
 	label: string;
+	/** Exact runtime version detected at setup time (e.g. "3.12.0") */
+	version?: string;
+	/** Semver constraint for this runtime (e.g. ">=3.12.0") */
+	requiredVersion?: string;
 }
 
 export interface ProjectRuntimeConfig {
@@ -95,6 +106,8 @@ export async function setupRuntime(
 		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,
 		label: runtime.label,
+		version: runtime.version,
+		requiredVersion: runtime.version ? computeDefaultConstraint(runtime.version) : undefined,
 	};
 }
 
@@ -295,4 +308,55 @@ stdout_logfile=/var/log/${rc.kind}.out.log
 	}
 
 	return config;
+}
+
+/**
+ * Result of validating a single runtime's version against its constraint.
+ */
+export interface RuntimeValidationResult {
+	kind: string;
+	label: string;
+	required: string;
+	found: string | undefined;
+	satisfied: boolean;
+	message: string;
+}
+
+/**
+ * Validate all project runtimes against their version constraints.
+ *
+ * Reads `.blok/config.json`, re-detects current runtime versions,
+ * and checks each against its `requiredVersion` constraint.
+ *
+ * Runtimes without a `requiredVersion` are skipped (backward compatible).
+ */
+export async function validateProjectRuntimes(projectDir: string): Promise<RuntimeValidationResult[]> {
+	const config = readProjectConfig(projectDir);
+	if (!config?.runtimes) return [];
+
+	const results: RuntimeValidationResult[] = [];
+
+	for (const [kind, rc] of Object.entries(config.runtimes)) {
+		// Skip runtimes without version constraints (backward compatibility)
+		if (!rc.requiredVersion) continue;
+
+		const currentVersion = await detectRuntimeVersion(kind);
+
+		const satisfied = currentVersion ? satisfiesConstraint(currentVersion, rc.requiredVersion) : false;
+
+		const message = satisfied
+			? formatVersionSuccess(rc.label, currentVersion as string, rc.requiredVersion)
+			: formatVersionMismatch(rc.label, currentVersion, rc.requiredVersion);
+
+		results.push({
+			kind,
+			label: rc.label,
+			required: rc.requiredVersion,
+			found: currentVersion,
+			satisfied,
+			message,
+		});
+	}
+
+	return results;
 }

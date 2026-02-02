@@ -1,5 +1,6 @@
 import type { Context } from "@blok/shared";
 import type RunnerNode from "../RunnerNode";
+import { RuntimeRegistry } from "../RuntimeRegistry";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./RuntimeAdapter";
 
 /**
@@ -151,6 +152,10 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 
 	/**
 	 * Check if the SDK container is healthy via GET /health
+	 *
+	 * If the health response includes a `version` field, it is stored
+	 * in the RuntimeRegistry so that node-level runtime requirements
+	 * can be validated at workflow load time.
 	 */
 	async checkHealth(): Promise<boolean> {
 		try {
@@ -160,8 +165,15 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 			});
 
 			if (response.ok) {
-				const data = (await response.json()) as { status?: string };
-				return data.status === "healthy" || data.status === "ok";
+				const data = (await response.json()) as { status?: string; version?: string };
+				const healthy = data.status === "healthy" || data.status === "ok";
+
+				// Store reported runtime version for constraint validation
+				if (healthy && data.version) {
+					RuntimeRegistry.getInstance().setVersion(this.kind, data.version);
+				}
+
+				return healthy;
 			}
 
 			return false;

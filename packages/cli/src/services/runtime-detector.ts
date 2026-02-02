@@ -232,6 +232,26 @@ export async function detectRuntimes(): Promise<RuntimeInfo[]> {
 }
 
 /**
+ * Detect the version of a single runtime kind.
+ * Faster than full detectRuntimes() when you only need one.
+ *
+ * @returns The detected version string, or undefined if not installed.
+ */
+export async function detectRuntimeVersion(kind: string): Promise<string | undefined> {
+	const def = RUNTIME_DEFINITIONS.find((r) => r.kind === kind);
+	if (!def) return undefined;
+
+	for (const cmd of def.commands) {
+		const output = await tryExec(cmd);
+		if (output) {
+			return parseVersion(output, def.kind);
+		}
+	}
+
+	return undefined;
+}
+
+/**
  * Get runtime info for a specific kind.
  */
 export function getRuntimeDefinition(kind: string): Omit<RuntimeInfo, "available" | "version"> | undefined {
