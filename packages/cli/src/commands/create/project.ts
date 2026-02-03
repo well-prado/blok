@@ -1175,7 +1175,7 @@ function getProviderDependencies(
 	const deps: Record<string, string> = {};
 
 	const pubsubProviderDeps: Record<string, Record<string, string>> = {
-		gcp: { "@google-cloud/pubsub": "^4.0.0" },
+		gcp: { "@google-cloud/pubsub": "^5.0.0" },
 		aws: { "@aws-sdk/client-sns": "^3.980.0", "@aws-sdk/client-sqs": "^3.980.0" },
 		azure: { "@azure/service-bus": "^7.9.5" },
 	};
