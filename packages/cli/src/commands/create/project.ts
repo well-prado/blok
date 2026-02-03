@@ -36,7 +36,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.0.1-beta.5";
+const GITHUB_REPO_RELEASE_TAG = "v0.2.0";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -411,6 +411,9 @@ export async function createProject(opts: OptionValues, version: string, current
 			const triggerDestDir = `${dirPath}/src/triggers/${triggerKind}`;
 			fixRunnerImportPaths(triggerDestDir, triggerKind);
 		}
+
+		// Replace @blok/ with @blokjs/ in all TypeScript files (for old templates)
+		replaceBlokImportsInDirectory(`${dirPath}/src`);
 
 		// Generate shared Nodes.ts by merging from all triggers
 		const sharedNodesContent = generateSharedNodesFile(selectedTriggers, repoSource);
@@ -992,6 +995,33 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 // Implement trigger-specific initialization here
 console.log("${triggerKind} trigger not yet implemented");
 `;
+}
+
+/**
+ * Recursively replace @blok/ with @blokjs/ in all TypeScript files.
+ * This handles old templates that still use the @blok/ package scope.
+ */
+function replaceBlokImportsInDirectory(dirPath: string): void {
+	const files = fsExtra.readdirSync(dirPath, { withFileTypes: true });
+
+	for (const file of files) {
+		const fullPath = path.join(dirPath, file.name);
+
+		if (file.isDirectory()) {
+			// Skip node_modules and .blok directories
+			if (file.name !== "node_modules" && file.name !== ".blok") {
+				replaceBlokImportsInDirectory(fullPath);
+			}
+		} else if (file.name.endsWith(".ts") || file.name.endsWith(".tsx")) {
+			let content = fsExtra.readFileSync(fullPath, "utf8");
+
+			// Replace @blok/ with @blokjs/ in imports
+			if (content.includes("@blok/")) {
+				content = content.replace(/@blok\//g, "@blokjs/");
+				fsExtra.writeFileSync(fullPath, content);
+			}
+		}
+	}
 }
 
 /**
