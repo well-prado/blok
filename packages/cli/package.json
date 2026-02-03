@@ -1,6 +1,6 @@
 {
 	"name": "blokctl",
-	"version": "0.2.9",
+	"version": "0.2.11",
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"description": "cli for blok",
@@ -13,10 +13,7 @@
 	"bin": {
 		"blokctl": "./dist/index.js"
 	},
-	"files": [
-		"dist",
-		"node_modules"
-	],
+	"files": ["dist", "node_modules"],
 	"scripts": {
 		"build": "rm -rf dist && bun run tsc",
 		"build:dev": "tsc --watch",
@@ -30,12 +27,7 @@
 		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/ && if [ -d ../../apps/studio/dist ]; then cp -r ../../apps/studio/dist ./dist/studio-dist; fi",
 		"build:studio": "bun run --filter @blokjs/studio build && cp -r ../../apps/studio/dist ./dist/studio-dist"
 	},
-	"keywords": [
-		"blokctl",
-		"cli",
-		"blok",
-		"blok"
-	],
+	"keywords": ["blokctl", "cli", "blok", "blok"],
 	"dependencies": {
 		"@blokjs/runner": "^0.2.0",
 		"@clack/prompts": "^1.0.0",

@@ -36,7 +36,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.2.2";
+const GITHUB_REPO_RELEASE_TAG = "v0.2.9";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -460,6 +460,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		fsExtra.copySync(`${repoSource}/infra/metrics`, `${dirPath}/infra/metrics`);
 		fsExtra.removeSync(`${dirPath}/public/metric`);
 
+		// Copy development infra (docker-compose with Redis) if queue trigger is selected
+		if (selectedTriggers.includes("queue")) {
+			fsExtra.ensureDirSync(`${dirPath}/infra/development`);
+			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/development`);
+		}
+
 		// Examples
 
 		if (!examples) {
@@ -702,6 +708,16 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const rc of runtimeConfigs) {
 				console.log(`  ${rc.label}: http://localhost:${rc.port}/health`);
 			}
+		}
+
+		// Show infrastructure setup instructions for queue/pubsub triggers
+		if (selectedTriggers.includes("queue") && queueProvider === "redis") {
+			console.log(color.cyan("\n📦 Redis Setup (for Queue trigger):"));
+			console.log("  Start Redis with Docker:");
+			console.log(color.dim("    cd infra/development"));
+			console.log(color.dim("    docker network create shared-network"));
+			console.log(color.dim("    docker compose up -d redis redis-commander"));
+			console.log("  Redis Commander UI: http://localhost:8081");
 		}
 
 		console.log("\nFor more documentation, visit https://blok.build/");
