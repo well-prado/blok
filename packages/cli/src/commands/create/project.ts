@@ -495,31 +495,42 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Replace workspace:* references that only work inside the monorepo
 		const workspacePackageMap: Record<string, string> = {
-			"@blok/api-call": "nodes/web/api-call@1.0.0",
-			"@blok/helper": "core/workflow-helper",
-			"@blok/if-else": "nodes/control-flow/if-else@1.0.0",
-			"@blok/runner": "core/runner",
-			"@blok/shared": "core/shared",
-			"@blok/trigger-pubsub": "triggers/pubsub",
-			"@blok/trigger-queue": "triggers/queue",
+			"@blokjs/api-call": "nodes/web/api-call@1.0.0",
+			"@blokjs/helper": "core/workflow-helper",
+			"@blokjs/if-else": "nodes/control-flow/if-else@1.0.0",
+			"@blokjs/runner": "core/runner",
+			"@blokjs/shared": "core/shared",
+			"@blokjs/trigger-pubsub": "triggers/pubsub",
+			"@blokjs/trigger-queue": "triggers/queue",
 		};
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
 			if (!deps) continue;
+
+			// Replace @blok/ with @blokjs/ (for old templates)
+			for (const pkg of Object.keys(deps)) {
+				if (pkg.startsWith("@blok/")) {
+					const newPkg = pkg.replace("@blok/", "@blokjs/");
+					deps[newPkg] = "^0.2.0";
+					delete deps[pkg];
+				}
+			}
+
+			// Replace workspace:* references
 			for (const [pkg, ver] of Object.entries(deps)) {
 				if (typeof ver === "string" && ver.startsWith("workspace:")) {
 					if (localRepoPath && workspacePackageMap[pkg]) {
 						deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
 					} else {
-						deps[pkg] = "^0.1.0";
+						deps[pkg] = "^0.2.0";
 					}
 				}
 			}
 		}
 
 		// When using local repo, add overrides/resolutions so the package manager resolves
-		// transitive workspace:* deps (e.g. @blok/runner -> @blok/shared) via file: links
+		// transitive workspace:* deps (e.g. @blokjs/runner -> @blokjs/shared) via file: links
 		if (localRepoPath) {
 			const fileLinks: Record<string, string> = {};
 			for (const [pkg, relativePath] of Object.entries(workspacePackageMap)) {
@@ -564,12 +575,14 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Add trigger packages to dependencies (pubsub and queue need their trigger packages)
 		const triggerPackageDeps: Record<string, string> = {};
 		if (selectedTriggers.includes("pubsub")) {
-			const pubsubRef = localRepoPath ? `file:${path.resolve(repoSource, "triggers/pubsub")}` : "@blok/trigger-pubsub";
-			triggerPackageDeps["@blok/trigger-pubsub"] = localRepoPath ? pubsubRef : "workspace:*";
+			triggerPackageDeps["@blokjs/trigger-pubsub"] = localRepoPath
+				? `file:${path.resolve(repoSource, "triggers/pubsub")}`
+				: "^0.2.0";
 		}
 		if (selectedTriggers.includes("queue")) {
-			const queueRef = localRepoPath ? `file:${path.resolve(repoSource, "triggers/queue")}` : "@blok/trigger-queue";
-			triggerPackageDeps["@blok/trigger-queue"] = localRepoPath ? queueRef : "workspace:*";
+			triggerPackageDeps["@blokjs/trigger-queue"] = localRepoPath
+				? `file:${path.resolve(repoSource, "triggers/queue")}`
+				: "^0.2.0";
 		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
 			packageJsonContent.dependencies = {
@@ -712,11 +725,11 @@ function generateSharedNodesFile(triggers: string[], _repoSource: string): strin
 	const nodeExports: Map<string, string> = new Map();
 
 	// Always include core nodes
-	nodeImports.add('import ApiCall from "@blok/api-call";');
-	nodeImports.add('import IfElse from "@blok/if-else";');
-	nodeImports.add('import type { BlokService } from "@blok/runner";');
-	nodeExports.set("@blok/api-call", "ApiCall");
-	nodeExports.set("@blok/if-else", "IfElse");
+	nodeImports.add('import ApiCall from "@blokjs/api-call";');
+	nodeImports.add('import IfElse from "@blokjs/if-else";');
+	nodeImports.add('import type { BlokService } from "@blokjs/runner";');
+	nodeExports.set("@blokjs/api-call", "ApiCall");
+	nodeExports.set("@blokjs/if-else", "IfElse");
 
 	// Add trigger-specific nodes
 	for (const trigger of triggers) {
@@ -770,7 +783,7 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 	const importSection = imports.length > 0 ? `${imports.join("\n")}\n` : "";
 	const entriesSection = workflowEntries.length > 0 ? workflowEntries.join("\n") : "\t// Add your workflows here";
 
-	return `import type { HelperResponse } from "@blok/helper";
+	return `import type { HelperResponse } from "@blokjs/helper";
 
 ${importSection}
 const workflows: Record<string, HelperResponse> = {
@@ -787,7 +800,7 @@ export default workflows;
  */
 function generateTriggerEntryFile(triggerKind: string): string {
 	if (triggerKind === "http") {
-		return `import { DefaultLogger } from "@blok/runner";
+		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import HttpTrigger from "./runner/HttpTrigger";
 
@@ -836,7 +849,7 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "sse") {
-		return `import { DefaultLogger } from "@blok/runner";
+		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import SSEServer from "./runner/SSEServer";
 
@@ -885,7 +898,7 @@ export default class App {
 	}
 
 	if (triggerKind === "pubsub") {
-		return `import { DefaultLogger } from "@blok/runner";
+		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import PubSubServer from "./runner/PubSubServer";
 
@@ -930,7 +943,7 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "queue") {
-		return `import { DefaultLogger } from "@blok/runner";
+		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import QueueServer from "./runner/QueueServer";
 
@@ -1051,7 +1064,7 @@ function updatePubSubProvider(triggerDestDir: string, provider: string): void {
 	// Replace import
 	content = content.replace(
 		/import \{ PubSubTrigger, \w+ \} from "@blok\/trigger-pubsub";/,
-		`import { PubSubTrigger, ${config.importName} } from "@blok/trigger-pubsub";`,
+		`import { PubSubTrigger, ${config.importName} } from "@blokjs/trigger-pubsub";`,
 	);
 
 	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
@@ -1108,7 +1121,7 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	// Replace import
 	content = content.replace(
 		/import \{ QueueTrigger, \w+ \} from "@blok\/trigger-queue";/,
-		`import { QueueTrigger, ${config.importName} } from "@blok/trigger-queue";`,
+		`import { QueueTrigger, ${config.importName} } from "@blokjs/trigger-queue";`,
 	);
 
 	// Replace adapter instantiation (match only actual class property, not JSDoc examples)

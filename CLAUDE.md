@@ -63,7 +63,7 @@ When a user has data flow issues, check these three things first.
 Always use `defineNode()`. Never create class-based BlokService nodes.
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -100,7 +100,7 @@ Always prefer TypeScript workflows over JSON. They live in `triggers/http/src/wo
 ### Simple Workflow
 
 ```typescript
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
   name: "Workflow Name",
@@ -125,18 +125,18 @@ export default step;
 ### Conditional Workflow (if-else)
 
 ```typescript
-import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
+import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({ name: "My Router", version: "1.0.0" })
   .addTrigger("http", { method: "ANY", path: "/", accept: "application/json" })
   .addCondition({
-    node: { name: "router", node: "@blok/if-else", type: "module" },
+    node: { name: "router", node: "@blokjs/if-else", type: "module" },
     conditions: () => [
       new AddIf('ctx.request.query.type === "a"')
-        .addStep({ name: "branch-a", node: "@blok/api-call", type: "module", inputs: { url: "..." } })
+        .addStep({ name: "branch-a", node: "@blokjs/api-call", type: "module", inputs: { url: "..." } })
         .build(),
       new AddElse()
-        .addStep({ name: "branch-b", node: "@blok/api-call", type: "module", inputs: { url: "..." } })
+        .addStep({ name: "branch-b", node: "@blokjs/api-call", type: "module", inputs: { url: "..." } })
         .build(),
     ],
   });
@@ -150,7 +150,7 @@ export default step;
 3. Organize files in subfolders by domain (e.g. `workflows/users/`, `workflows/orders/`)
 
 ### Checklist for generated TypeScript workflows:
-- Import `{ type Step, Workflow }` from `@blok/helper` (add `AddIf, AddElse` for conditionals)
+- Import `{ type Step, Workflow }` from `@blokjs/helper` (add `AddIf, AddElse` for conditionals)
 - Default export is typed as `Step`
 - Use `"ANY"` for wildcard HTTP method (not `"*"`)
 - `js/` expressions in inputs work identically to JSON workflows

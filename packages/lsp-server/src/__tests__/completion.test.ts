@@ -74,15 +74,15 @@ describe("WorkflowCompletionProvider (LSP)", () => {
 			const content = '{\n  "steps": [\n    {\n      "node": "';
 			const items = getCompletions(content, getOffset(content));
 			const labels = items.map((i) => i.label);
-			expect(labels).toContain("@blok/api-call");
-			expect(labels).toContain("@blok/if-else");
-			expect(labels).toContain("@blok/react");
+			expect(labels).toContain("@blokjs/api-call");
+			expect(labels).toContain("@blokjs/if-else");
+			expect(labels).toContain("@blokjs/react");
 		});
 
 		it("should use Module kind for node packages", () => {
 			const content = '{\n  "steps": [\n    {\n      "node": "';
 			const items = getCompletions(content, getOffset(content));
-			const apiCall = items.find((i) => i.label === "@blok/api-call");
+			const apiCall = items.find((i) => i.label === "@blokjs/api-call");
 			expect(apiCall?.kind).toBe(CompletionItemKind.Module);
 		});
 	});

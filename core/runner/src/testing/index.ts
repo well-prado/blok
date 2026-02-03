@@ -10,7 +10,7 @@
  *   NodeTestHarness,
  *   WorkflowTestRunner,
  *   TestLogger,
- * } from "@blok/runner/testing";
+ * } from "@blokjs/runner/testing";
  * ```
  */
 

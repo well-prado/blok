@@ -12,7 +12,7 @@
 	"steps": [
 		{
 			"name": "validate-upload-request",
-			"node": "@blok/json-validator",
+			"node": "@blokjs/json-validator",
 			"type": "module"
 		},
 		{
@@ -29,7 +29,7 @@
 		},
 		{
 			"name": "create-file-record",
-			"node": "@blok/api-call",
+			"node": "@blokjs/api-call",
 			"type": "module",
 			"set_var": true
 		},

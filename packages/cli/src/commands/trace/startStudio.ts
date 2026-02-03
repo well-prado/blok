@@ -106,7 +106,7 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	// Resolve Studio static assets
 	const staticPath = resolveStaticPath();
 	if (!staticPath) {
-		p.log.error(`Studio assets not found.\n` + `  Build them first: ${color.cyan("pnpm --filter @blok/studio build")}`);
+		p.log.error(`Studio assets not found.\n` + `  Build them first: ${color.cyan("pnpm --filter @blokjs/studio build")}`);
 		process.exit(1);
 	}
 

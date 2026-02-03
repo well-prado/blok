@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import BlokService from "../Blok";
 import BlokResponse, { type IBlokResponse } from "../BlokResponse";
 import type { FunctionNode } from "../defineNode";
@@ -113,7 +113,7 @@ class MockNode extends BlokService<any> {
 			const result = await this.handler(inputs, ctx);
 			response.setSuccess(result as JsonLikeObject);
 		} catch (error: unknown) {
-			const { GlobalError } = await import("@blok/shared");
+			const { GlobalError } = await import("@blokjs/shared");
 			const globalError = new GlobalError(error instanceof Error ? error.message : String(error));
 			globalError.setCode(500);
 			globalError.setName(this.name);
@@ -142,8 +142,8 @@ class AutoMockNode extends MockNode {
  *
  * @example
  * ```typescript
- * import { WorkflowTestRunner } from "@blok/runner";
- * import { defineNode } from "@blok/runner";
+ * import { WorkflowTestRunner } from "@blokjs/runner";
+ * import { defineNode } from "@blokjs/runner";
  * import { z } from "zod";
  *
  * const runner = new WorkflowTestRunner({ verbose: true });

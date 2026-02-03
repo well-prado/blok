@@ -1,6 +1,6 @@
 {
-	"name": "@blok/shared",
-	"version": "0.1.0",
+	"name": "@blokjs/shared",
+	"version": "0.2.1",
 	"description": "Shared class, interfaces and types",
 	"type": "module",
 	"main": "dist/index.js",
@@ -11,7 +11,10 @@
 		"test": "vitest run",
 		"test:dev": "vitest"
 	},
-	"keywords": ["api", "blueprint"],
+	"keywords": [
+		"api",
+		"blueprint"
+	],
 	"author": "Deskree Inc",
 	"license": "MIT",
 	"devDependencies": {
@@ -24,5 +27,8 @@
 		"dayjs": "^1.11.19",
 		"lodash": "^4.17.21"
 	},
-	"private": false
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }

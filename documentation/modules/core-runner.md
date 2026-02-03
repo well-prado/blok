@@ -1,6 +1,6 @@
 # Module Reference: Core Runner
 
-> **Package:** `@blok/runner`
+> **Package:** `@blokjs/runner`
 > **Path:** `core/runner/`
 > **Purpose:** The workflow execution engine — the heart of Blok
 
@@ -171,8 +171,8 @@ defineNode<I, O>({
 
 ## Dependencies
 
-- `@blok/shared` (types, base classes)
-- `@blok/helper` (workflow builder)
+- `@blokjs/shared` (types, base classes)
+- `@blokjs/helper` (workflow builder)
 - `@connectrpc/connect` (gRPC)
 - `@grpc/grpc-js` (native gRPC)
 - `zod` (schema validation)

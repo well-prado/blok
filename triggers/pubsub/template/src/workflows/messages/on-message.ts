@@ -1,4 +1,4 @@
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 /**
  * Example Pub/Sub workflow - triggered when a message is received
@@ -28,7 +28,7 @@ const step: Step = Workflow({
 	})
 	.addStep({
 		name: "log-message",
-		node: "@blok/api-call",
+		node: "@blokjs/api-call",
 		type: "module",
 		inputs: {
 			url: "https://httpbin.org/post",

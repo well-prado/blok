@@ -1,4 +1,4 @@
-import { GCPPubSubAdapter, PubSubTrigger } from "@blok/trigger-pubsub";
+import { GCPPubSubAdapter, PubSubTrigger } from "@blokjs/trigger-pubsub";
 import nodes from "../Nodes";
 import workflows from "../Workflows";
 
@@ -15,7 +15,7 @@ import workflows from "../Workflows";
  *
  * @example AWS SNS/SQS
  * ```typescript
- * import { AWSSNSAdapter } from "@blok/trigger-pubsub";
+ * import { AWSSNSAdapter } from "@blokjs/trigger-pubsub";
  * protected adapter = new AWSSNSAdapter({
  *   region: process.env.AWS_REGION || "us-east-1",
  * });
@@ -23,7 +23,7 @@ import workflows from "../Workflows";
  *
  * @example Azure Service Bus
  * ```typescript
- * import { AzureServiceBusAdapter } from "@blok/trigger-pubsub";
+ * import { AzureServiceBusAdapter } from "@blokjs/trigger-pubsub";
  * protected adapter = new AzureServiceBusAdapter({
  *   connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION_STRING || "",
  * });

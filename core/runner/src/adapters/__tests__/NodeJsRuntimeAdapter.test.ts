@@ -3,7 +3,7 @@
  * Tests in-process TypeScript/JavaScript node execution
  */
 
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertExecutionTimeWithinRange,

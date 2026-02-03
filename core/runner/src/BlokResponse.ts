@@ -1,4 +1,4 @@
-import type { GlobalError, NodeBase, ResponseContext } from "@blok/shared";
+import type { GlobalError, NodeBase, ResponseContext } from "@blokjs/shared";
 import type JsonLikeObject from "./types/JsonLikeObject";
 
 export interface IBlokResponse extends ResponseContext {

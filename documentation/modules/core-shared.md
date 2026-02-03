@@ -1,6 +1,6 @@
 # Module Reference: Core Shared
 
-> **Package:** `@blok/shared`
+> **Package:** `@blokjs/shared`
 > **Path:** `core/shared/`
 > **Purpose:** Shared types, base classes, and utilities used by all Blok packages
 

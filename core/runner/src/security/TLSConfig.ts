@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { TLSConfig } from "@blok/runner";
+ * import { TLSConfig } from "@blokjs/runner";
  *
  * // Production TLS setup
  * const tls = new TLSConfig({

@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { EncryptionAtRest } from "@blok/runner";
+ * import { EncryptionAtRest } from "@blokjs/runner";
  *
  * const encryption = new EncryptionAtRest({
  *   algorithm: "aes-256-gcm",

@@ -13,7 +13,7 @@ Under the hood, `defineNode` wraps your function into a `FunctionNode` class tha
 
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 const MyNode = defineNode({
   // Required: unique node name
@@ -85,7 +85,7 @@ FunctionNode.handle(ctx, rawInputs):
 ### Minimal Node
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
   name: "greet",
@@ -156,9 +156,9 @@ export default defineNode({
 ### Class-Based (Legacy)
 ```typescript
 // ~40 lines
-import { BlokService, BlokResponse, GlobalError } from "@blok/runner";
-import { Context } from "@blok/shared";
-import { IBlokResponse } from "@blok/runner";
+import { BlokService, BlokResponse, GlobalError } from "@blokjs/runner";
+import { Context } from "@blokjs/shared";
+import { IBlokResponse } from "@blokjs/runner";
 
 interface GreetInput { name: string; }
 

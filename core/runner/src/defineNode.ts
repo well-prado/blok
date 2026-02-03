@@ -1,7 +1,7 @@
 import type { ZodError, z } from "zod";
 
-import type { Context } from "@blok/shared";
-import { GlobalError, NodeBase } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError, NodeBase } from "@blokjs/shared";
 import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
 import type { IBlokResponse } from "./BlokResponse";
@@ -248,7 +248,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
  *
  * @example
  * ```typescript
- * import { defineNode } from "@blok/runner";
+ * import { defineNode } from "@blokjs/runner";
  * import { z } from "zod";
  *
  * export default defineNode({

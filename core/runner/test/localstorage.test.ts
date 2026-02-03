@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type HelperResponse, Workflow } from "@blok/helper";
+import { type HelperResponse, Workflow } from "@blokjs/helper";
 import { beforeAll, expect, test } from "vitest";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
@@ -36,7 +36,7 @@ function createLocator(): WorkflowLocator {
 		})
 		.addStep({
 			name: "get-countries-api",
-			node: "@blok/api-call",
+			node: "@blokjs/api-call",
 			type: "module",
 			inputs: step1Inputs,
 		}) as HelperResponse;

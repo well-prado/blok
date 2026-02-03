@@ -1,6 +1,6 @@
-// import { NodeBase } from "@blok/shared";
+// import { NodeBase } from "@blokjs/shared";
 // import { z } from "zod";
-import type { NodeBase } from "@blok/shared";
+import type { NodeBase } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";

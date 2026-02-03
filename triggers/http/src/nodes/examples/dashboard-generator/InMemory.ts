@@ -1,4 +1,4 @@
-import type { JsonLikeObject } from "@blok/runner";
+import type { JsonLikeObject } from "@blokjs/runner";
 
 export default class InMemory {
 	protected static _instance: InMemory;

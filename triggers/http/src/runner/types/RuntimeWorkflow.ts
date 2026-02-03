@@ -1,4 +1,4 @@
-import type { ParamsDictionary } from "@blok/runner";
+import type { ParamsDictionary } from "@blokjs/runner";
 
 type RuntimeWorkflow = {
 	workflow: ParamsDictionary;

@@ -1,4 +1,4 @@
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
 	name: "On SSE Subscribe",

@@ -1,5 +1,5 @@
 /**
- * Adapter that bridges the TraceRouter interface from @blok/runner to Hono.
+ * Adapter that bridges the TraceRouter interface from @blokjs/runner to Hono.
  *
  * The core/runner package defines a TraceRouter interface that matches Express's
  * Router API surface (use, get, post, put, delete). This adapter implements that

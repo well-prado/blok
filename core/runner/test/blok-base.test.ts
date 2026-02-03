@@ -1,4 +1,4 @@
-import type { Context, LoggerContext } from "@blok/shared";
+import type { Context, LoggerContext } from "@blokjs/shared";
 import { beforeAll, expect, test } from "vitest";
 import DefaultLogger from "../src/DefaultLogger";
 import BlokService from "../src/Blok";

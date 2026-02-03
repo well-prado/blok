@@ -1,4 +1,4 @@
-import type { HelperResponse } from "@blok/helper";
+import type { HelperResponse } from "@blokjs/helper";
 import type NodeMap from "../NodeMap";
 
 type GlobalOptions = {

@@ -4,7 +4,7 @@ import type { ConditionOpts } from "../components/AddIf";
 
 /**
  * RuntimeKind represents all supported runtime environments
- * Synced with @blok/runner RuntimeKind type
+ * Synced with @blokjs/runner RuntimeKind type
  */
 export const RuntimeKindSchema = z.enum([
 	"nodejs",

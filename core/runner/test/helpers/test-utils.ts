@@ -3,7 +3,7 @@
  * Provides mock objects and helper functions for unit and integration tests
  */
 
-import type { Context, LoggerContext } from "@blok/shared";
+import type { Context, LoggerContext } from "@blokjs/shared";
 import DefaultLogger from "../../src/DefaultLogger";
 import type { RunnerNode } from "../../src/RunnerNode";
 import type { ExecutionResult, RuntimeKind } from "../../src/adapters/RuntimeAdapter";

@@ -1,4 +1,4 @@
-import type { LoggerContext } from "@blok/shared";
+import type { LoggerContext } from "@blokjs/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RunTracker } from "../../tracing/RunTracker";
 import { TracingLogger } from "../../tracing/TracingLogger";

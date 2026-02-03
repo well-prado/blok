@@ -1,4 +1,4 @@
-import type { Context, NodeBase } from "@blok/shared";
+import type { Context, NodeBase } from "@blokjs/shared";
 import RunnerSteps from "./RunnerSteps";
 
 /**

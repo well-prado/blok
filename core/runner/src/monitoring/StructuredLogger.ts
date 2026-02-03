@@ -14,7 +14,7 @@
  *
  * @example
  * ```typescript
- * import { StructuredLogger } from "@blok/runner";
+ * import { StructuredLogger } from "@blokjs/runner";
  *
  * const logger = new StructuredLogger({
  *   service: "blok-http",

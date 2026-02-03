@@ -1,5 +1,5 @@
 {
-	"name": "@blok/sdk-contract-tests",
+	"name": "@blokjs/sdk-contract-tests",
 	"version": "0.1.0",
 	"private": true,
 	"description": "Contract tests for Blok multi-language runtime SDKs",

@@ -1,6 +1,6 @@
 {
 	"name": "node-name",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "",
 	"type": "module",
 	"main": "dist/index.js",
@@ -19,9 +19,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blok/shared": "workspace:*",
-		"@blok/runner": "workspace:*",
-		"@blok/helper": "workspace:*",
+		"@blokjs/shared": "^0.2.0",
+		"@blokjs/runner": "^0.2.0",
+		"@blokjs/helper": "^0.2.0",
 		"zod": "^3.24.2"
 	},
 	"private": true

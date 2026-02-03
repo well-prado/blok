@@ -1,6 +1,6 @@
-import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blok/shared";
-import type ParamsDictionary from "@blok/shared/dist/types/ParamsDictionary";
-import type VarsContext from "@blok/shared/dist/types/VarsContext";
+import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
+import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
+import type VarsContext from "@blokjs/shared/dist/types/VarsContext";
 import { metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";

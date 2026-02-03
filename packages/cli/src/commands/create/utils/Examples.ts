@@ -1,6 +1,6 @@
-const node_file = `import ApiCall from "@blok/api-call";
-import IfElse from "@blok/if-else";
-import type { NodeBase } from "@blok/shared";
+const node_file = `import ApiCall from "@blokjs/api-call";
+import IfElse from "@blokjs/if-else";
+import type { NodeBase } from "@blokjs/shared";
 import ChainInit from "./nodes/chain-init/index";
 import ChainVerify from "./nodes/chain-verify/index";
 import ExampleNodes from "./nodes/examples/index";
@@ -9,8 +9,8 @@ import RuntimeBridge from "./nodes/runtime-bridge/index";
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@blok/api-call": ApiCall,
-	"@blok/if-else": IfElse,
+	"@blokjs/api-call": ApiCall,
+	"@blokjs/if-else": IfElse,
 	"chain-init": ChainInit,
 	"chain-verify": ChainVerify,
 	"runtime-bridge": RuntimeBridge,
@@ -733,7 +733,7 @@ Available in js/ expressions: \\\`ctx\\\`, \\\`data\\\` (ctx.response.data), \\\
 Use \\\`defineNode()\\\` for all new nodes. Never use the legacy class-based pattern.
 
 \`\`\`typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -779,7 +779,7 @@ export default defineNode({
     "http": { "method": "POST", "path": "/api/process", "accept": "application/json" }
   },
   "steps": [
-    { "name": "fetch",   "node": "@blok/api-call", "type": "module" },
+    { "name": "fetch",   "node": "@blokjs/api-call", "type": "module" },
     { "name": "process", "node": "my-node",        "type": "module", "set_var": true },
     { "name": "go-step", "node": "chain-test",     "type": "runtime.go" }
   ],
@@ -930,7 +930,7 @@ When users have data flow issues, check these three things first.
 Always use \\\`defineNode()\\\`. Never class-based BlokService.
 
 \\\`\\\`\\\`typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -967,7 +967,7 @@ export default defineNode({
 - Do NOT edit files in \\\`.blok/runtimes/\\\`
 `;
 
-const function_first_node_file = `import { defineNode } from "@blok/runner";
+const function_first_node_file = `import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 /**

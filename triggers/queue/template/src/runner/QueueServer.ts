@@ -1,4 +1,4 @@
-import { KafkaAdapter, QueueTrigger } from "@blok/trigger-queue";
+import { KafkaAdapter, QueueTrigger } from "@blokjs/trigger-queue";
 import nodes from "../Nodes";
 import workflows from "../Workflows";
 
@@ -15,7 +15,7 @@ import workflows from "../Workflows";
  *
  * @example RabbitMQ
  * ```typescript
- * import { RabbitMQAdapter } from "@blok/trigger-queue";
+ * import { RabbitMQAdapter } from "@blokjs/trigger-queue";
  * protected adapter = new RabbitMQAdapter({
  *   url: process.env.RABBITMQ_URL || "amqp://localhost",
  * });
@@ -23,7 +23,7 @@ import workflows from "../Workflows";
  *
  * @example AWS SQS
  * ```typescript
- * import { SQSAdapter } from "@blok/trigger-queue";
+ * import { SQSAdapter } from "@blokjs/trigger-queue";
  * protected adapter = new SQSAdapter({
  *   region: process.env.AWS_REGION || "us-east-1",
  * });
@@ -31,7 +31,7 @@ import workflows from "../Workflows";
  *
  * @example Redis/BullMQ
  * ```typescript
- * import { RedisAdapter } from "@blok/trigger-queue";
+ * import { RedisAdapter } from "@blokjs/trigger-queue";
  * protected adapter = new RedisAdapter({
  *   host: process.env.REDIS_HOST || "localhost",
  *   port: Number(process.env.REDIS_PORT) || 6379,

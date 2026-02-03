@@ -1,4 +1,4 @@
-import { type Context, GlobalError, type NodeBase, type Step } from "@blok/shared";
+import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
 import type BlokResponse from "./BlokResponse";
 import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";

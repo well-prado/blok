@@ -78,7 +78,7 @@ import {
   JWTAuthProvider,
   APIKeyAuthProvider,
   OAuthOIDCProvider,
-} from "@blok/runner";
+} from "@blokjs/runner";
 
 const auth = new AuthMiddleware({
   providers: [
@@ -120,7 +120,7 @@ app.use(auth.expressMiddleware());
 **Health check configuration:**
 
 ```typescript
-import { HealthCheck } from "@blok/runner";
+import { HealthCheck } from "@blokjs/runner";
 
 const health = new HealthCheck();
 
@@ -176,7 +176,7 @@ Blok supports three authentication mechanisms out of the box, all implemented th
 **JWT Authentication (JWTAuthProvider)**
 
 ```typescript
-import { JWTAuthProvider } from "@blok/runner";
+import { JWTAuthProvider } from "@blokjs/runner";
 
 const jwtAuth = new JWTAuthProvider({
   secret: process.env.JWT_SECRET!,   // HS256 shared secret
@@ -190,7 +190,7 @@ const jwtAuth = new JWTAuthProvider({
 **API Key Authentication (APIKeyAuthProvider)**
 
 ```typescript
-import { APIKeyAuthProvider } from "@blok/runner";
+import { APIKeyAuthProvider } from "@blokjs/runner";
 
 const apiKeyAuth = new APIKeyAuthProvider({
   keys: new Map([
@@ -211,7 +211,7 @@ const apiKeyAuth = new APIKeyAuthProvider({
 **OAuth 2.0 / OIDC (OAuthOIDCProvider)**
 
 ```typescript
-import { OAuthOIDCProvider } from "@blok/runner";
+import { OAuthOIDCProvider } from "@blokjs/runner";
 
 const oidcAuth = new OAuthOIDCProvider({
   issuerUrl: "https://auth.example.com",
@@ -232,7 +232,7 @@ const oidcAuth = new OAuthOIDCProvider({
 Blok's `RBAC` class implements hierarchical role-based access control with resource-level granularity:
 
 ```typescript
-import { RBAC, createDefaultRBAC } from "@blok/runner";
+import { RBAC, createDefaultRBAC } from "@blokjs/runner";
 
 // Use the built-in default roles (admin, developer, operator, viewer, service)
 const rbac = createDefaultRBAC();
@@ -314,7 +314,7 @@ import {
   AuditLogger,
   ConsoleAuditSink,
   FileAuditSink,
-} from "@blok/runner";
+} from "@blokjs/runner";
 
 const audit = new AuditLogger({
   sinks: [
@@ -401,7 +401,7 @@ audit.logSecurityEvent({
 The `SecretManager` provides a unified interface with provider chaining:
 
 ```typescript
-import { SecretManager } from "@blok/runner";
+import { SecretManager } from "@blokjs/runner";
 
 const secrets = new SecretManager({
   providers: [
@@ -465,7 +465,7 @@ const connectionString = await secrets.resolveTemplate(
 Protect sensitive data with AES-256-GCM encryption:
 
 ```typescript
-import { EncryptionAtRest } from "@blok/runner";
+import { EncryptionAtRest } from "@blokjs/runner";
 
 const encryption = new EncryptionAtRest({
   algorithm: "aes-256-gcm",
@@ -511,7 +511,7 @@ import {
   PrometheusMetricsBridge,
   TriggerMetricsCollector,
   bootstrapPrometheus,
-} from "@blok/runner";
+} from "@blokjs/runner";
 
 // Bootstrap Prometheus with OpenTelemetry
 const prom = await bootstrapPrometheus({
@@ -530,7 +530,7 @@ const prom = await bootstrapPrometheus({
 ### Sentry Error Tracking
 
 ```typescript
-import { SentryIntegration } from "@blok/runner";
+import { SentryIntegration } from "@blokjs/runner";
 
 const sentry = new SentryIntegration({
   dsn: process.env.SENTRY_DSN!,
@@ -556,7 +556,7 @@ sentry.captureWorkflowError(error, {
 ### CloudWatch Integration
 
 ```typescript
-import { CloudWatchIntegration } from "@blok/runner";
+import { CloudWatchIntegration } from "@blokjs/runner";
 
 const cloudwatch = new CloudWatchIntegration({
   region: "us-east-1",
@@ -568,7 +568,7 @@ const cloudwatch = new CloudWatchIntegration({
 ### Azure Monitor Integration
 
 ```typescript
-import { AzureMonitorIntegration } from "@blok/runner";
+import { AzureMonitorIntegration } from "@blokjs/runner";
 
 const azure = new AzureMonitorIntegration({
   connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING!,
@@ -578,7 +578,7 @@ const azure = new AzureMonitorIntegration({
 ### Structured Logging
 
 ```typescript
-import { StructuredLogger } from "@blok/runner";
+import { StructuredLogger } from "@blokjs/runner";
 
 const logger = new StructuredLogger({
   service: "blok-api",

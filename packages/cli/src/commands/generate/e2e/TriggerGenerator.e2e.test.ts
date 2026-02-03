@@ -33,8 +33,8 @@ const mockedValidateCode = vi.mocked(CompilationValidator.validateCode);
 // --- Mock LLM Responses ---
 
 const VALID_QUEUE_TRIGGER = `
-import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@blok/runner";
-import { type Context, DefaultLogger } from "@blok/shared";
+import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@blokjs/runner";
+import { type Context, DefaultLogger } from "@blokjs/shared";
 
 export default class KafkaQueueTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
@@ -61,7 +61,7 @@ export default class KafkaQueueTrigger extends TriggerBase {
 `;
 
 const VALID_CRON_TRIGGER = `
-import { TriggerBase, type GlobalOptions, NodeMap } from "@blok/runner";
+import { TriggerBase, type GlobalOptions, NodeMap } from "@blokjs/runner";
 
 export default class DailyCronTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
@@ -83,7 +83,7 @@ export default class DailyCronTrigger extends TriggerBase {
 `;
 
 const VALID_WEBHOOK_TRIGGER = `
-import { TriggerBase, type GlobalOptions, NodeMap } from "@blok/runner";
+import { TriggerBase, type GlobalOptions, NodeMap } from "@blokjs/runner";
 
 export default class GitHubWebhookTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
@@ -121,7 +121,7 @@ export default class BrokenTrigger {
 `;
 
 const INVALID_TRIGGER_NO_METHODS = `
-import { TriggerBase } from "@blok/runner";
+import { TriggerBase } from "@blokjs/runner";
 
 export default class MinimalTrigger extends TriggerBase {
 	constructor() {
@@ -136,7 +136,7 @@ export default class MinimalTrigger extends TriggerBase {
 `;
 
 const INVALID_TRIGGER_NO_CONTEXT = `
-import { TriggerBase } from "@blok/runner";
+import { TriggerBase } from "@blokjs/runner";
 
 export default class NoContextTrigger extends TriggerBase {
 	constructor() {

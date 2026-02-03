@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";

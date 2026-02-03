@@ -126,14 +126,14 @@ Steps are an ordered array of step objects:
 "steps": [
   {
     "name": "step-key-name",
-    "node": "@blok/api-call",
+    "node": "@blokjs/api-call",
     "type": "module"
   }
 ]
 \`\`\`
 
 - \`name\`: Unique identifier for this step (used as key in \`nodes\` map)
-- \`node\`: Node package/module name (e.g., "@blok/api-call" for module types, or custom node names for local types)
+- \`node\`: Node package/module name (e.g., "@blokjs/api-call" for module types, or custom node names for local types)
 - \`type\`: "module" (from node_modules), "local" (from src/nodes/), or "runtime.python3" (Python runtime)
 
 ## Nodes Configuration
@@ -226,9 +226,9 @@ Node inputs support these patterns:
 
 ## Available Built-in Nodes
 
-- \`@blok/api-call\`: Makes HTTP API calls (inputs: url, method, headers, body, responseType)
-- \`@blok/if-else\`: Conditional routing (uses conditions array instead of inputs)
-- \`@blok/react\`: Server-side React rendering (inputs: template, props)
+- \`@blokjs/api-call\`: Makes HTTP API calls (inputs: url, method, headers, body, responseType)
+- \`@blokjs/if-else\`: Conditional routing (uses conditions array instead of inputs)
+- \`@blokjs/react\`: Server-side React rendering (inputs: template, props)
 - \`error\`: Returns error response (inputs: message, code)
 
 ## Constraints
@@ -261,7 +261,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "get-countries",
-      "node": "@blok/api-call",
+      "node": "@blokjs/api-call",
       "type": "module"
     }
   ],
@@ -294,7 +294,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "filter-request",
-      "node": "@blok/if-else",
+      "node": "@blokjs/if-else",
       "type": "module"
     }
   ],
@@ -374,7 +374,7 @@ Node inputs support these patterns:
     },
     {
       "name": "notify-user",
-      "node": "@blok/api-call",
+      "node": "@blokjs/api-call",
       "type": "module"
     }
   ],
@@ -413,7 +413,7 @@ Node inputs support these patterns:
   "steps": [
     {
       "name": "fetch-metrics",
-      "node": "@blok/api-call",
+      "node": "@blokjs/api-call",
       "type": "module"
     },
     {

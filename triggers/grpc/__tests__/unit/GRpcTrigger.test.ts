@@ -39,7 +39,7 @@ vi.mock("../../src/Nodes", () => ({ default: {} }));
 vi.mock("../../src/Workflows", () => ({ default: {} }));
 
 // Mock runner — TriggerBase and other classes must be constructable
-vi.mock("@blok/runner", () => {
+vi.mock("@blokjs/runner", () => {
 	class MockNodeMap {
 		nodes: Record<string, any> = {};
 		addNode(key: string, val: any) {
@@ -88,7 +88,7 @@ vi.mock("@blok/runner", () => {
 });
 
 // Mock helper
-vi.mock("@blok/helper", () => ({
+vi.mock("@blokjs/helper", () => ({
 	Workflow: vi.fn().mockReturnValue({
 		addTrigger: vi.fn().mockReturnValue({
 			addStep: vi.fn().mockReturnValue({ name: "Remote Node", steps: [] }),
@@ -97,7 +97,7 @@ vi.mock("@blok/helper", () => ({
 }));
 
 // Mock shared — GlobalError must be a class
-vi.mock("@blok/shared", () => ({
+vi.mock("@blokjs/shared", () => ({
 	GlobalError: class GlobalError extends Error {
 		context: any;
 		constructor(message: string) {

@@ -1,4 +1,4 @@
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step1Inputs = {
 	url: "https://countriesnow.space/api/v0.1/countries/capital",
@@ -21,7 +21,7 @@ const step: Step = Workflow({
 	})
 	.addStep({
 		name: "get-countries-api",
-		node: "@blok/api-call",
+		node: "@blokjs/api-call",
 		type: "module",
 		inputs: step1Inputs,
 	});

@@ -6,7 +6,7 @@ What to return:
 * Return only a complete TypeScript file containing a trigger class, ready to be saved directly into \`triggers/<trigger-name>/src/<TriggerName>Trigger.ts\`.
 * It must include:
 
-  1. Proper imports from \`@blok/runner\` and \`@blok/shared\`
+  1. Proper imports from \`@blokjs/runner\` and \`@blokjs/shared\`
   2. A trigger class that extends \`TriggerBase\`
   3. \`loadNodes()\` and \`loadWorkflows()\` methods
   4. A main start method (e.g., \`listen()\`, \`startConsumer()\`, \`start()\`)
@@ -18,7 +18,7 @@ What to return:
 
 All triggers MUST follow this pattern:
 
-1. **Extend TriggerBase** from \`@blok/runner\`
+1. **Extend TriggerBase** from \`@blokjs/runner\`
 2. **Load nodes and workflows** in constructor
 3. **Listen for external events** (HTTP, queue messages, cron, webhooks, etc.)
 4. **For each event:**
@@ -166,8 +166,8 @@ class SSETrigger extends TriggerBase {
 
 \`\`\`typescript
 import { trace } from "@opentelemetry/api";
-import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@blok/runner";
-import { type Context, DefaultLogger } from "@blok/shared";
+import { TriggerBase, type GlobalOptions, NodeMap, Runner } from "@blokjs/runner";
+import { type Context, DefaultLogger } from "@blokjs/shared";
 import nodes from "../Nodes.js";
 import workflows from "../workflows/index.js";
 

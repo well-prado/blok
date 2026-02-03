@@ -12,7 +12,7 @@ This node uses the modern **function-first** pattern with `defineNode` API and Z
 ## Usage
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({

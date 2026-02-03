@@ -12,17 +12,17 @@
 	"steps": [
 		{
 			"name": "validate-input",
-			"node": "@blok/json-validator",
+			"node": "@blokjs/json-validator",
 			"type": "module"
 		},
 		{
 			"name": "check-existing-user",
-			"node": "@blok/api-call",
+			"node": "@blokjs/api-call",
 			"type": "module"
 		},
 		{
 			"name": "route-user-check",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],
@@ -88,12 +88,12 @@
 						},
 						{
 							"name": "create-user",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
 							"name": "send-welcome-email",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{

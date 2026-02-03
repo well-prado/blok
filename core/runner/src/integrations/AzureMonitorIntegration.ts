@@ -17,7 +17,7 @@
  *
  * @example
  * ```typescript
- * import { AzureMonitorIntegration } from "@blok/runner";
+ * import { AzureMonitorIntegration } from "@blokjs/runner";
  *
  * const azure = new AzureMonitorIntegration({
  *   connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING!,

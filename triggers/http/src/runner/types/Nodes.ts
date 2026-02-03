@@ -1,4 +1,4 @@
-import type { NodeBase } from "@blok/shared";
+import type { NodeBase } from "@blokjs/shared";
 
 type Nodes = {
 	[key: string]: NodeBase;

@@ -10,8 +10,8 @@
  * 6. ✅ Performance (< 1ms overhead)
  */
 
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import BlokService from "../../../src/Blok";
 import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";

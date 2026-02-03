@@ -10,7 +10,7 @@
  * Uses the 'cron' package for cron parsing and scheduling.
  */
 
-import type { CronTriggerOpts, HelperResponse } from "@blok/helper";
+import type { CronTriggerOpts, HelperResponse } from "@blokjs/helper";
 import {
 	DefaultLogger,
 	type GlobalOptions,
@@ -18,8 +18,8 @@ import {
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, MetricsType, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, MetricsType, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { CronJob } from "cron";
 import { v4 as uuid } from "uuid";

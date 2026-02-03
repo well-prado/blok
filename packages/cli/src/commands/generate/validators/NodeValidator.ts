@@ -148,7 +148,7 @@ export function validateFunctionFirstStructure(context: NodeValidationContext): 
 	// Check for defineNode import
 	if (!content.includes("import") || !content.includes("defineNode")) {
 		result.valid = false;
-		result.errors.push("Missing 'defineNode' import from '@blok/runner'");
+		result.errors.push("Missing 'defineNode' import from '@blokjs/runner'");
 	}
 
 	// Check for Zod import
@@ -211,7 +211,7 @@ export function validateClassBasedStructure(context: NodeValidationContext): Val
 	// Check for BlokService import
 	if (!content.includes("BlokService")) {
 		result.valid = false;
-		result.errors.push("Missing 'BlokService' import from '@blok/runner'");
+		result.errors.push("Missing 'BlokService' import from '@blokjs/runner'");
 	}
 
 	// Check for class declaration

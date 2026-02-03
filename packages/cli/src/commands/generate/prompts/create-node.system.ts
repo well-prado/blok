@@ -31,8 +31,8 @@ Format:
 * Return the entire code, from imports to the end of the class, as it would appear in a \`.ts\` file.
 
 Node class template:
-import { type IBlokResponse, BlokService, BlokResponse } from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+import { type IBlokResponse, BlokService, BlokResponse } from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 
 type InputType = {
 	message?: string;

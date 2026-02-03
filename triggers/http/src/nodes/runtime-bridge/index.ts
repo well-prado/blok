@@ -1,5 +1,5 @@
-import { type JsonLikeObject, defineNode } from "@blok/runner";
-import type { Context } from "@blok/shared";
+import { type JsonLikeObject, defineNode } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
 
 /**

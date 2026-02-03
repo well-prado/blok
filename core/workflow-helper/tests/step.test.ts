@@ -21,7 +21,7 @@ beforeAll(() => {
 test("Initialize the workflow with inputs", (t) => {
 	const step = trigger.addStep({
 		name: "get-countries-api",
-		node: "@blok/api-call",
+		node: "@blokjs/api-call",
 		type: "module",
 		inputs: {
 			url: "https://countriesnow.space/api/v0.1/countries/capital",
@@ -41,7 +41,7 @@ test("Initialize the workflow with inputs", (t) => {
 test("Initialize the workflow without inputs", (t) => {
 	const step = trigger.addStep({
 		name: "get-countries-api",
-		node: "@blok/api-call",
+		node: "@blokjs/api-call",
 		type: "module",
 	});
 
@@ -54,7 +54,7 @@ test("Initialize the workflow without inputs", (t) => {
 	expect(() =>
 		trigger.addStep({
 			name: "",
-			node: "@blok/api-call",
+			node: "@blokjs/api-call",
 			type: "module",
 		}),
 	).toThrow();

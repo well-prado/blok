@@ -1,4 +1,4 @@
-# @blok/runner — Internals
+# @blokjs/runner — Internals
 
 ## Key Files
 

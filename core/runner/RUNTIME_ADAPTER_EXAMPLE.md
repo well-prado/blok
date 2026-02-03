@@ -31,7 +31,7 @@ The Runtime Adapter system makes Blok truly language-agnostic by providing a plu
 ### 1. RuntimeAdapter Interface
 
 ```typescript
-import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "@blok/runner";
+import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "@blokjs/runner";
 
 interface RuntimeAdapter {
   readonly kind: RuntimeKind;
@@ -42,7 +42,7 @@ interface RuntimeAdapter {
 ### 2. RuntimeRegistry
 
 ```typescript
-import { RuntimeRegistry } from "@blok/runner";
+import { RuntimeRegistry } from "@blokjs/runner";
 
 const registry = RuntimeRegistry.getInstance();
 ```
@@ -54,7 +54,7 @@ const registry = RuntimeRegistry.getInstance();
 Executes TypeScript/JavaScript nodes **in-process** with zero overhead:
 
 ```typescript
-import { NodeJsRuntimeAdapter, RuntimeRegistry } from "@blok/runner";
+import { NodeJsRuntimeAdapter, RuntimeRegistry } from "@blokjs/runner";
 
 const registry = RuntimeRegistry.getInstance();
 registry.register(new NodeJsRuntimeAdapter());
@@ -68,7 +68,7 @@ registry.register(new NodeJsRuntimeAdapter());
 Executes Python nodes via **gRPC**:
 
 ```typescript
-import { Python3RuntimeAdapter, RuntimeRegistry } from "@blok/runner";
+import { Python3RuntimeAdapter, RuntimeRegistry } from "@blokjs/runner";
 
 const registry = RuntimeRegistry.getInstance();
 registry.register(new Python3RuntimeAdapter("localhost", 50051));
@@ -119,9 +119,9 @@ registry.register(new Python3RuntimeAdapter("localhost", 50051));
 ### Example: Go Runtime Adapter (Docker-based)
 
 ```typescript
-import type { Context } from "@blok/shared";
-import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "@blok/runner";
-import type RunnerNode from "@blok/runner/dist/RunnerNode";
+import type { Context } from "@blokjs/shared";
+import type { RuntimeAdapter, RuntimeKind, ExecutionResult } from "@blokjs/runner";
+import type RunnerNode from "@blokjs/runner/dist/RunnerNode";
 import { exec } from "child_process";
 import { promisify } from "util";
 
@@ -185,7 +185,7 @@ export class GoRuntimeAdapter implements RuntimeAdapter {
 ### Register Custom Adapter
 
 ```typescript
-import { RuntimeRegistry } from "@blok/runner";
+import { RuntimeRegistry } from "@blokjs/runner";
 import { GoRuntimeAdapter } from "./adapters/GoRuntimeAdapter";
 
 const registry = RuntimeRegistry.getInstance();
@@ -253,7 +253,7 @@ All adapters return metrics:
 Executes nodes in **Docker containers** with HTTP-based communication:
 
 ```typescript
-import { DockerRuntimeAdapter, RuntimeRegistry } from "@blok/runner";
+import { DockerRuntimeAdapter, RuntimeRegistry } from "@blokjs/runner";
 
 const registry = RuntimeRegistry.getInstance();
 

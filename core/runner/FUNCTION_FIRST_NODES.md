@@ -22,16 +22,16 @@ Function-first nodes use the `defineNode()` API to create type-safe, Zod-validat
 
 ### Installation
 
-Function-first nodes are built into `@blok/runner` (v0.1.26+):
+Function-first nodes are built into `@blokjs/runner` (v0.1.26+):
 
 ```bash
-pnpm add @blok/runner zod
+pnpm add @blokjs/runner zod
 ```
 
 ### Your First Function-First Node
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -382,11 +382,11 @@ async execute(ctx, input) {
 #### Before (Class-Based) - 80+ lines
 
 ```typescript
-import BlokService from "@blok/runner";
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
-import type { IBlokResponse } from "@blok/runner";
-import BlokResponse from "@blok/runner";
+import BlokService from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
+import type { IBlokResponse } from "@blokjs/runner";
+import BlokResponse from "@blokjs/runner";
 
 interface InputType {
   userId: string;
@@ -453,7 +453,7 @@ async function fetchUserFromDatabase(userId: string) {
 #### After (Function-First) - 30 lines
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -618,7 +618,7 @@ export const UpdateUser = defineNode({
 ### Example 1: API Call Node
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -867,7 +867,7 @@ Testing function-first nodes is straightforward:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 const MyNode = defineNode({

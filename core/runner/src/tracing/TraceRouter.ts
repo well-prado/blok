@@ -43,7 +43,7 @@ interface TraceRouter {
  * Usage (in HttpTrigger.ts):
  * ```ts
  * import { Router } from "express";
- * import { registerTraceRoutes } from "@blok/runner";
+ * import { registerTraceRoutes } from "@blokjs/runner";
  * const traceRouter = Router();
  * registerTraceRoutes(traceRouter);
  * app.use("/__blok", traceRouter);

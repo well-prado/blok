@@ -178,9 +178,9 @@ export default class NodeGenerator {
 			"",
 			"Please fix ALL the errors listed above and regenerate the complete code.",
 			"Make sure to:",
-			"- Import defineNode from '@blok/runner'",
+			"- Import defineNode from '@blokjs/runner'",
 			"- Import z from 'zod'",
-			"- Import Context type from '@blok/shared'",
+			"- Import Context type from '@blokjs/shared'",
 			"- Use z.object({...}) for input and output schemas",
 			"- Make the execute function async",
 			"- Export as default: export default defineNode({...})",
@@ -198,13 +198,13 @@ export default class NodeGenerator {
 
 		// Missing imports
 		if (errorLower.includes("missing") && errorLower.includes("definenode")) {
-			return "Add: import { defineNode } from '@blok/runner';";
+			return "Add: import { defineNode } from '@blokjs/runner';";
 		}
 		if (errorLower.includes("missing") && errorLower.includes("zod")) {
 			return "Add: import { z } from 'zod';";
 		}
 		if (errorLower.includes("cannot find") && errorLower.includes("definenode")) {
-			return "Ensure defineNode is imported from '@blok/runner'";
+			return "Ensure defineNode is imported from '@blokjs/runner'";
 		}
 
 		// Schema issues
@@ -242,7 +242,7 @@ export default class NodeGenerator {
 
 		// Compilation errors
 		if (errorLower.includes("cannot find module") || errorLower.includes("module not found")) {
-			return "Check import paths. Use '@blok/runner' for defineNode and '@blok/shared' for Context/GlobalError";
+			return "Check import paths. Use '@blokjs/runner' for defineNode and '@blokjs/shared' for Context/GlobalError";
 		}
 
 		// Property access errors

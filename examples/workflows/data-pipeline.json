@@ -12,13 +12,13 @@
 	"steps": [
 		{
 			"name": "fetch-source-data",
-			"node": "@blok/api-call",
+			"node": "@blokjs/api-call",
 			"type": "module",
 			"set_var": true
 		},
 		{
 			"name": "route-fetch-result",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],
@@ -48,12 +48,12 @@
 						},
 						{
 							"name": "validate-transformed-data",
-							"node": "@blok/json-validator",
+							"node": "@blokjs/json-validator",
 							"type": "module"
 						},
 						{
 							"name": "route-validation",
-							"node": "@blok/if-else",
+							"node": "@blokjs/if-else",
 							"type": "module"
 						}
 					]
@@ -111,13 +111,13 @@
 					"steps": [
 						{
 							"name": "store-records",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "send-success-notification",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
@@ -132,7 +132,7 @@
 					"steps": [
 						{
 							"name": "send-failure-notification",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{

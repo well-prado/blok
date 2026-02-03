@@ -1,5 +1,5 @@
-import type { JsonLikeObject } from "@blok/runner";
-import type { Context } from "@blok/shared";
+import type { JsonLikeObject } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { MessageEncoding, MessageType, type WorkflowRequest, type WorkflowResponse } from "./gen/workflow_pb";
 

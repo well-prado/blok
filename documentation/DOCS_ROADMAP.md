@@ -394,7 +394,7 @@ docs/
 | 7.9 | Command Palette & Keyboard Shortcuts | P2 | components/shared/CommandPalette.tsx | - [ ] |
 | 7.10 | Extending the Studio | P2 | lib/api.ts, lib/sse.ts, types.ts | - [ ] |
 
-> **NOTE:** The Studio is a complete React 19 SPA with 70 frontend tests. It connects to the runner's trace API (`/__blok/*`) via Vite proxy and provides real-time observability via SSE. Run with `pnpm --filter @blok/studio run dev` on `localhost:5555`.
+> **NOTE:** The Studio is a complete React 19 SPA with 70 frontend tests. It connects to the runner's trace API (`/__blok/*`) via Vite proxy and provides real-time observability via SSE. Run with `pnpm --filter @blokjs/studio run dev` on `localhost:5555`.
 
 ### Phase 8: Advanced Topics & Examples
 **Goal:** Deep-dive content and real-world recipes.
@@ -578,9 +578,9 @@ actual code here
 | `triggers/sse/src/SSETrigger.ts` | Abstract base class (860 lines): connection management, channels, broadcasting, heartbeat, event history/replay, workflow triggering on connect/disconnect/subscribe/unsubscribe |
 | `triggers/sse/src/runner/SSEServer.ts` | Concrete trigger: Hono HTTP server, SSE stream endpoints, REST management APIs, Blok Studio integration, Prometheus metrics |
 | `triggers/sse/src/index.ts` | App entry point: GlobalOptions, App class instantiation, HMR support (mirrors HTTP trigger pattern) |
-| `triggers/sse/src/lib.ts` | Library exports: SSETrigger class + types for package consumers (`@blok/trigger-sse`) |
+| `triggers/sse/src/lib.ts` | Library exports: SSETrigger class + types for package consumers (`@blokjs/trigger-sse`) |
 | `triggers/sse/src/AppRoutes.ts` | Custom Hono routes: welcome page with SSE usage instructions |
-| `triggers/sse/src/Nodes.ts` | Node registry: `@blok/api-call`, `@blok/if-else`, `welcome-message` |
+| `triggers/sse/src/Nodes.ts` | Node registry: `@blokjs/api-call`, `@blokjs/if-else`, `welcome-message` |
 | `triggers/sse/src/Workflows.ts` | Workflow registry: imports on-connect, on-subscribe workflows |
 | `triggers/sse/src/workflows/notifications/on-connect.ts` | Example workflow: triggered on SSE connect, sends welcome message |
 | `triggers/sse/src/workflows/notifications/on-subscribe.ts` | Example workflow: triggered on channel subscribe |

@@ -20,7 +20,7 @@
  *    - Ack/nack based on response
  */
 
-import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@blok/helper";
+import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@blokjs/helper";
 import {
 	DefaultLogger,
 	type GlobalOptions,
@@ -28,8 +28,8 @@ import {
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 

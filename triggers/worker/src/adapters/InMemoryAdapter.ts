@@ -17,7 +17,7 @@
  * ```
  */
 
-import type { WorkerTriggerOpts } from "@blok/helper";
+import type { WorkerTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
 import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 

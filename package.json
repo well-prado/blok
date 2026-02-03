@@ -32,14 +32,14 @@
 		"cli:test:dev": "bun run --filter blokctl test:dev",
 		"cli:test": "bun run --filter blokctl test",
 		"build:cli": "bun run --filter blokctl build",
-		"runner:test": "bun run --filter @blok/runner test:dev",
-		"runner:dev": "bun run --filter @blok/runner build:dev",
-		"helper:test": "bun run --filter @blok/helper test:dev",
-		"helper:dev": "bun run --filter @blok/helper build:dev",
-		"http:dev": "bun run --filter @blok/trigger-http dev",
-		"nodes:build": "bun run --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name build:dev",
-		"core:build:dev": "bun run --filter @blok/runner --filter @blok/shared --filter @blok/helper build:dev",
-		"build": "bun run --filter @blok/shared --filter @blok/helper build && bun run --filter @blok/runner build && bun run --filter blokctl --filter @blok/api-call --filter @blok/if-else --filter @blok/react --filter node-name --filter node-ui-name build"
+		"runner:test": "bun run --filter @blokjs/runner test:dev",
+		"runner:dev": "bun run --filter @blokjs/runner build:dev",
+		"helper:test": "bun run --filter @blokjs/helper test:dev",
+		"helper:dev": "bun run --filter @blokjs/helper build:dev",
+		"http:dev": "bun run --filter @blokjs/trigger-http dev",
+		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter node-name --filter node-ui-name build:dev",
+		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
+		"build": "bun run --filter @blokjs/shared --filter @blokjs/helper build && bun run --filter @blokjs/runner build && bun run --filter blokctl --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter node-name --filter node-ui-name build"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "1.9.4",

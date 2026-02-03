@@ -7,7 +7,7 @@
  * Compare this to a class-based node - this is 60%+ less code!
  */
 
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
 

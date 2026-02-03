@@ -6,8 +6,8 @@ import {
 	type ParamsDictionary,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import fastify from "fastify";
 import { v4 as uuid } from "uuid";
@@ -16,8 +16,8 @@ import nodes from "./Nodes";
 import workflows from "./Workflows";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 
-import { type Step, Workflow } from "@blok/helper";
-import type { TriggerOpts } from "@blok/helper/dist/types/TriggerOpts";
+import { type Step, Workflow } from "@blokjs/helper";
+import type { TriggerOpts } from "@blokjs/helper/dist/types/TriggerOpts";
 import {
 	MessageEncoding,
 	MessageType,

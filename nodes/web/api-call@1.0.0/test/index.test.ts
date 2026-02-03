@@ -5,9 +5,9 @@
  * All existing behavior is preserved.
  */
 
-import type { IBlokResponse } from "@blok/runner";
-import type { Context } from "@blok/shared";
-import type { GlobalError } from "@blok/shared";
+import type { IBlokResponse } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
+import type { GlobalError } from "@blokjs/shared";
 import { describe, expect, it, vi } from "vitest";
 import ApiCallNode from "../index";
 import { runApiCall } from "../util";

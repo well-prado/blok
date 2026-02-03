@@ -17,7 +17,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../src/RunnerNode";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";

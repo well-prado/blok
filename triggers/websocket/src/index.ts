@@ -1,5 +1,5 @@
 /**
- * @blok/trigger-websocket
+ * @blokjs/trigger-websocket
  *
  * WebSocket trigger for Blok workflows.
  * Handle real-time bidirectional communication.
@@ -14,7 +14,7 @@
  *
  * @example
  * ```typescript
- * import { WebSocketTrigger } from "@blok/trigger-websocket";
+ * import { WebSocketTrigger } from "@blokjs/trigger-websocket";
  * import { WebSocketServer } from "ws";
  *
  * class MyWebSocketTrigger extends WebSocketTrigger {
@@ -124,4 +124,4 @@ export {
 } from "./WebSocketTrigger";
 
 // Re-export types from helper for convenience
-export type { WebSocketTriggerOpts } from "@blok/helper";
+export type { WebSocketTriggerOpts } from "@blokjs/helper";

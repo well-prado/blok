@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 /**
  * Cross-Language Integration Tests (Phase 5G)
  *

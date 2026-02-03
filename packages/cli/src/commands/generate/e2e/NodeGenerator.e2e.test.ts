@@ -40,9 +40,9 @@ const mockedValidateStructure = vi.mocked(NodeValidator.validateFunctionFirstStr
 // --- Mock LLM Responses ---
 
 const VALID_FUNCTION_FIRST_NODE = `
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
 	name: "fetch-user",
@@ -66,8 +66,8 @@ export default defineNode({
 `;
 
 const VALID_CLASS_BASED_NODE = `
-import BlokService, { BlokResponse, GlobalError } from "@blok/runner";
-import type { Context } from "@blok/shared";
+import BlokService, { BlokResponse, GlobalError } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
 
 type InputType = { message: string; };
 
@@ -280,7 +280,7 @@ describe("NodeGenerator E2E", () => {
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 			mockedValidateStructure.mockReturnValue({
 				valid: false,
-				errors: ["Missing defineNode import from @blok/runner"],
+				errors: ["Missing defineNode import from @blokjs/runner"],
 				warnings: [],
 				suggestions: [],
 			});

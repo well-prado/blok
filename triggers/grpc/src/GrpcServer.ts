@@ -1,6 +1,6 @@
 import type { ConnectRouter } from "@connectrpc/connect";
 import { fastifyConnectPlugin } from "@connectrpc/connect-fastify";
-import { DefaultLogger } from "@blok/runner";
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import GRpcTrigger from "./GRpcTrigger";
 

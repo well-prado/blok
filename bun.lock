@@ -14,7 +14,7 @@
       },
     },
     "apps/studio": {
-      "name": "@blok/studio",
+      "name": "@blokjs/studio",
       "version": "0.1.0",
       "dependencies": {
         "@tanstack/react-query": "^5.62.0",
@@ -50,11 +50,11 @@
       },
     },
     "core/runner": {
-      "name": "@blok/runner",
-      "version": "0.1.0",
+      "name": "@blokjs/runner",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "fast-xml-parser": "^5.3.4",
         "jsonschema": "^1.5.0",
@@ -100,8 +100,8 @@
       ],
     },
     "core/shared": {
-      "name": "@blok/shared",
-      "version": "0.1.0",
+      "name": "@blokjs/shared",
+      "version": "0.2.1",
       "dependencies": {
         "dayjs": "^1.11.19",
         "lodash": "^4.17.21",
@@ -114,8 +114,8 @@
       },
     },
     "core/workflow-helper": {
-      "name": "@blok/helper",
-      "version": "0.1.0",
+      "name": "@blokjs/helper",
+      "version": "0.2.1",
       "dependencies": {
         "zod": "^3.24.2",
       },
@@ -126,12 +126,12 @@
       },
     },
     "nodes/control-flow/if-else@1.0.0": {
-      "name": "@blok/if-else",
-      "version": "0.1.0",
+      "name": "@blokjs/if-else",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "lodash": "^4.17.21",
         "zod": "^3.24.2",
       },
@@ -144,11 +144,11 @@
       },
     },
     "nodes/web/api-call@1.0.0": {
-      "name": "@blok/api-call",
-      "version": "0.1.0",
+      "name": "@blokjs/api-call",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "lodash": "^4.17.21",
         "zod": "^3.24.2",
       },
@@ -161,12 +161,12 @@
       },
     },
     "nodes/web/react@1.0.0": {
-      "name": "@blok/react",
-      "version": "0.1.0",
+      "name": "@blokjs/react",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "ejs": "^3.1.10",
         "zod": "^3.24.2",
       },
@@ -184,13 +184,13 @@
     },
     "packages/cli": {
       "name": "blokctl",
-      "version": "0.1.0",
+      "version": "0.2.2",
       "bin": {
         "blokctl": "./dist/index.js",
       },
       "dependencies": {
         "@ai-sdk/openai": "^1.3.22",
-        "@blok/runner": "workspace:*",
+        "@blokjs/runner": "^0.2.0",
         "@clack/prompts": "^1.0.0",
         "ai": "^4.3.16",
         "chalk": "^5.6.2",
@@ -222,8 +222,8 @@
       },
     },
     "packages/lsp-server": {
-      "name": "@blok/lsp-server",
-      "version": "0.1.0",
+      "name": "@blokjs/lsp-server",
+      "version": "0.2.1",
       "bin": {
         "blok-lsp": "./dist/server.js",
       },
@@ -238,8 +238,8 @@
       },
     },
     "packages/syntax": {
-      "name": "@blok/syntax",
-      "version": "0.1.0",
+      "name": "@blokjs/syntax",
+      "version": "0.2.1",
     },
     "packages/vscode-extension": {
       "name": "blok-vscode",
@@ -254,11 +254,11 @@
     },
     "templates/node": {
       "name": "node-name",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "zod": "^3.24.2",
       },
       "devDependencies": {
@@ -269,11 +269,11 @@
     },
     "templates/node-function": {
       "name": "node-function-name",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "zod": "^3.24.2",
       },
       "devDependencies": {
@@ -284,11 +284,11 @@
     },
     "templates/node-ui": {
       "name": "node-ui-name",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "ejs": "^3.1.10",
         "zod": "^3.24.2",
       },
@@ -317,12 +317,12 @@
       },
     },
     "triggers/cron": {
-      "name": "@blok/trigger-cron",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-cron",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "cron": "^4.4.0",
         "uuid": "^11.1.0",
@@ -336,14 +336,14 @@
       },
     },
     "triggers/grpc": {
-      "name": "@blok/trigger-grpc",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-grpc",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/api-call": "workspace:*",
-        "@blok/helper": "workspace:*",
-        "@blok/if-else": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/api-call": "^0.2.0",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/if-else": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@bufbuild/protobuf": "^2.11.0",
         "@connectrpc/connect": "^2.1.1",
         "@connectrpc/connect-fastify": "^2.1.1",
@@ -373,15 +373,15 @@
       },
     },
     "triggers/http": {
-      "name": "@blok/trigger-http",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-http",
+      "version": "0.1.1",
       "dependencies": {
         "@ai-sdk/openai": "^1.3.22",
-        "@blok/api-call": "workspace:*",
-        "@blok/helper": "workspace:*",
-        "@blok/if-else": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/api-call": "^0.2.0",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/if-else": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@hono/node-server": "^1.19.9",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-prometheus": "^0.57.2",
@@ -409,12 +409,12 @@
       },
     },
     "triggers/pubsub": {
-      "name": "@blok/trigger-pubsub",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-pubsub",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
       },
@@ -438,12 +438,12 @@
       ],
     },
     "triggers/queue": {
-      "name": "@blok/trigger-queue",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-queue",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
       },
@@ -470,14 +470,14 @@
       ],
     },
     "triggers/sse": {
-      "name": "@blok/trigger-sse",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-sse",
+      "version": "0.1.1",
       "dependencies": {
-        "@blok/api-call": "workspace:*",
-        "@blok/helper": "workspace:*",
-        "@blok/if-else": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/api-call": "^0.2.0",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/if-else": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@hono/node-server": "^1.19.9",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-prometheus": "^0.57.2",
@@ -500,12 +500,12 @@
       },
     },
     "triggers/webhook": {
-      "name": "@blok/trigger-webhook",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-webhook",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
       },
@@ -517,12 +517,12 @@
       },
     },
     "triggers/websocket": {
-      "name": "@blok/trigger-websocket",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-websocket",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
       },
@@ -542,12 +542,12 @@
       ],
     },
     "triggers/worker": {
-      "name": "@blok/trigger-worker",
-      "version": "0.1.0",
+      "name": "@blokjs/trigger-worker",
+      "version": "0.2.1",
       "dependencies": {
-        "@blok/helper": "workspace:*",
-        "@blok/runner": "workspace:*",
-        "@blok/shared": "workspace:*",
+        "@blokjs/helper": "^0.2.0",
+        "@blokjs/runner": "^0.2.0",
+        "@blokjs/shared": "^0.2.0",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
       },
@@ -815,41 +815,41 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@1.9.4", "", { "os": "win32", "cpu": "x64" }, "sha512-8Y5wMhVIPaWe6jw2H+KlEm4wP/f7EW3810ZLmDlrEEy5KvBsb9ECEfu/kMWD484ijfQ8+nIi0giMgu9g1UAuuA=="],
 
-    "@blok/api-call": ["@blok/api-call@workspace:nodes/web/api-call@1.0.0"],
+    "@blokjs/api-call": ["@blokjs/api-call@workspace:nodes/web/api-call@1.0.0"],
 
-    "@blok/helper": ["@blok/helper@workspace:core/workflow-helper"],
+    "@blokjs/helper": ["@blokjs/helper@workspace:core/workflow-helper"],
 
-    "@blok/if-else": ["@blok/if-else@workspace:nodes/control-flow/if-else@1.0.0"],
+    "@blokjs/if-else": ["@blokjs/if-else@workspace:nodes/control-flow/if-else@1.0.0"],
 
-    "@blok/lsp-server": ["@blok/lsp-server@workspace:packages/lsp-server"],
+    "@blokjs/lsp-server": ["@blokjs/lsp-server@workspace:packages/lsp-server"],
 
-    "@blok/react": ["@blok/react@workspace:nodes/web/react@1.0.0"],
+    "@blokjs/react": ["@blokjs/react@workspace:nodes/web/react@1.0.0"],
 
-    "@blok/runner": ["@blok/runner@workspace:core/runner"],
+    "@blokjs/runner": ["@blokjs/runner@workspace:core/runner"],
 
-    "@blok/shared": ["@blok/shared@workspace:core/shared"],
+    "@blokjs/shared": ["@blokjs/shared@workspace:core/shared"],
 
-    "@blok/studio": ["@blok/studio@workspace:apps/studio"],
+    "@blokjs/studio": ["@blokjs/studio@workspace:apps/studio"],
 
-    "@blok/syntax": ["@blok/syntax@workspace:packages/syntax"],
+    "@blokjs/syntax": ["@blokjs/syntax@workspace:packages/syntax"],
 
-    "@blok/trigger-cron": ["@blok/trigger-cron@workspace:triggers/cron"],
+    "@blokjs/trigger-cron": ["@blokjs/trigger-cron@workspace:triggers/cron"],
 
-    "@blok/trigger-grpc": ["@blok/trigger-grpc@workspace:triggers/grpc"],
+    "@blokjs/trigger-grpc": ["@blokjs/trigger-grpc@workspace:triggers/grpc"],
 
-    "@blok/trigger-http": ["@blok/trigger-http@workspace:triggers/http"],
+    "@blokjs/trigger-http": ["@blokjs/trigger-http@workspace:triggers/http"],
 
-    "@blok/trigger-pubsub": ["@blok/trigger-pubsub@workspace:triggers/pubsub"],
+    "@blokjs/trigger-pubsub": ["@blokjs/trigger-pubsub@workspace:triggers/pubsub"],
 
-    "@blok/trigger-queue": ["@blok/trigger-queue@workspace:triggers/queue"],
+    "@blokjs/trigger-queue": ["@blokjs/trigger-queue@workspace:triggers/queue"],
 
-    "@blok/trigger-sse": ["@blok/trigger-sse@workspace:triggers/sse"],
+    "@blokjs/trigger-sse": ["@blokjs/trigger-sse@workspace:triggers/sse"],
 
-    "@blok/trigger-webhook": ["@blok/trigger-webhook@workspace:triggers/webhook"],
+    "@blokjs/trigger-webhook": ["@blokjs/trigger-webhook@workspace:triggers/webhook"],
 
-    "@blok/trigger-websocket": ["@blok/trigger-websocket@workspace:triggers/websocket"],
+    "@blokjs/trigger-websocket": ["@blokjs/trigger-websocket@workspace:triggers/websocket"],
 
-    "@blok/trigger-worker": ["@blok/trigger-worker@workspace:triggers/worker"],
+    "@blokjs/trigger-worker": ["@blokjs/trigger-worker@workspace:triggers/worker"],
 
     "@bufbuild/buf": ["@bufbuild/buf@1.64.0", "", { "optionalDependencies": { "@bufbuild/buf-darwin-arm64": "1.64.0", "@bufbuild/buf-darwin-x64": "1.64.0", "@bufbuild/buf-linux-aarch64": "1.64.0", "@bufbuild/buf-linux-armv7": "1.64.0", "@bufbuild/buf-linux-x64": "1.64.0", "@bufbuild/buf-win32-arm64": "1.64.0", "@bufbuild/buf-win32-x64": "1.64.0" }, "bin": { "buf": "bin/buf", "protoc-gen-buf-lint": "bin/protoc-gen-buf-lint", "protoc-gen-buf-breaking": "bin/protoc-gen-buf-breaking" } }, "sha512-MC9Zj+pUQsKLEQrsBPmV3CuECYUSD2n82WUcLMu6f49LwSMtKg887B5vPADsf2yMM+6N1LjYHHLb3fN4R1ZGyg=="],
 

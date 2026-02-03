@@ -3,14 +3,14 @@ const registerNodeSystemPrompt = {
  
  You will receive:
  - The current full content of the TypeScript file.
- - The import path of the new node (e.g., "@blok/my-new-node" or "./nodes/remove-properties").
+ - The import path of the new node (e.g., "@blokjs/my-new-node" or "./nodes/remove-properties").
  - The class name of the new node (e.g., "RemovePropertiesFromArray").
  - The string **registry key** to register it under (e.g., "remove-properties").
  
  Your task:
  
  1. Add an \`import\` statement for the new node in the correct location, maintaining **alphabetical order** among existing regular imports.
- 2. The line \`import type { NodeBase } from "@blok/shared";\` must remain in place and not be reordered.
+ 2. The line \`import type { NodeBase } from "@blokjs/shared";\` must remain in place and not be reordered.
  3. Add a new entry to the \`nodes\` object using the provided registry key only. Example:
     "remove-properties": new RemovePropertiesFromArray(),
  4. **Do not modify any existing imports or registry entries.** Their keys must remain exactly as they appear.

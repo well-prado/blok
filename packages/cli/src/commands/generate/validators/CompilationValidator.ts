@@ -80,7 +80,7 @@ export function validateCode(code: string, fileName = "temp.ts"): CompilationRes
 			const errorCode = diagnostic.code;
 			const skipCodes = [
 				2307, // Cannot find module (expected when checking isolated code)
-				2304, // Cannot find name (might be from @blok/runner)
+				2304, // Cannot find name (might be from @blokjs/runner)
 			];
 
 			if (skipCodes.includes(errorCode)) {

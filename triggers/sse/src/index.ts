@@ -1,4 +1,4 @@
-import { DefaultLogger } from "@blok/runner";
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import SSEServer from "./runner/SSEServer";
 

@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({

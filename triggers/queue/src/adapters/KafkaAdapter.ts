@@ -14,7 +14,7 @@
  * - KAFKA_SASL_PASSWORD: SASL password
  */
 
-import type { QueueTriggerOpts } from "@blok/helper";
+import type { QueueTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 

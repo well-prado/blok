@@ -24,7 +24,7 @@
 					"steps": [
 						{
 							"name": "get-countries",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						}
 					],
@@ -35,7 +35,7 @@
 					"steps": [
 						{
 							"name": "get-facts",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						}
 					]

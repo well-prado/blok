@@ -1,4 +1,4 @@
-import type { Trigger } from "@blok/shared";
+import type { Trigger } from "@blokjs/shared";
 
 type Triggers = {
 	[key: string]: Trigger;

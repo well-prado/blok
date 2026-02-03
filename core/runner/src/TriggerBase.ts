@@ -1,4 +1,4 @@
-import { type Context, type LoggerContext, Metrics, Trigger } from "@blok/shared";
+import { type Context, type LoggerContext, Metrics, Trigger } from "@blokjs/shared";
 import { metrics } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";

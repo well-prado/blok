@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { IBlokResponse } from "@blok/runner";
+import type { IBlokResponse } from "@blokjs/runner";
 import { beforeAll, expect, test } from "vitest";
 import ReactNode from "../index";
 import ctx from "./helper";

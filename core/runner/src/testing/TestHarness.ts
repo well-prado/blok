@@ -1,4 +1,4 @@
-import type { Context, ResponseContext } from "@blok/shared";
+import type { Context, ResponseContext } from "@blokjs/shared";
 import type BlokService from "../Blok";
 import type { IBlokResponse } from "../BlokResponse";
 import type { FunctionNode } from "../defineNode";
@@ -83,8 +83,8 @@ type TestableNode = BlokService<any> | FunctionNode<any, any>;
  *
  * @example
  * ```typescript
- * import { NodeTestHarness } from "@blok/runner";
- * import { defineNode } from "@blok/runner";
+ * import { NodeTestHarness } from "@blokjs/runner";
+ * import { defineNode } from "@blokjs/runner";
  * import { z } from "zod";
  *
  * const AddNode = defineNode({

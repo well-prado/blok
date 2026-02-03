@@ -1,4 +1,4 @@
-import { DefaultLogger } from "@blok/runner";
+import { DefaultLogger } from "@blokjs/runner";
 import { metrics } from "@opentelemetry/api";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { Resource } from "@opentelemetry/resources";

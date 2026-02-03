@@ -1,4 +1,4 @@
-import { GlobalLogger } from "@blok/shared";
+import { GlobalLogger } from "@blokjs/shared";
 
 /**
  * A log entry captured during test execution.

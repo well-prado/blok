@@ -73,18 +73,18 @@ All community spaces follow our [Code of Conduct](./CODE_OF_CONDUCT.md). Be resp
 ### Official Packages
 | Package | Description |
 |---------|-------------|
-| `@blok/runner` | Core workflow orchestration engine |
-| `@blok/shared` | Shared types and utilities |
-| `@blok/helper` | Workflow builder DSL |
+| `@blokjs/runner` | Core workflow orchestration engine |
+| `@blokjs/shared` | Shared types and utilities |
+| `@blokjs/helper` | Workflow builder DSL |
 | `blokctl` | CLI tooling |
-| `@blok/api-call` | HTTP API call node |
-| `@blok/if-else` | Conditional routing node |
-| `@blok/react` | React SSR node |
+| `@blokjs/api-call` | HTTP API call node |
+| `@blokjs/if-else` | Conditional routing node |
+| `@blokjs/react` | React SSR node |
 
 ### Runtime SDKs
 | Language | Package | Status |
 |----------|---------|--------|
-| TypeScript/Node.js | `@blok/runner` | Production |
+| TypeScript/Node.js | `@blokjs/runner` | Production |
 | Python 3 | `runtimes/python3` | Production |
 | Go | `sdks/go` | Production |
 | Java | `sdks/java` | Production |
@@ -96,15 +96,15 @@ All community spaces follow our [Code of Conduct](./CODE_OF_CONDUCT.md). Be resp
 ### Trigger Types
 | Trigger | Package | Description |
 |---------|---------|-------------|
-| HTTP | `@blok/trigger-http` | REST API endpoints |
-| gRPC | `@blok/trigger-grpc` | gRPC services |
-| WebSocket | `@blok/trigger-websocket` | Real-time bidirectional |
-| SSE | `@blok/trigger-sse` | Server-Sent Events |
-| Queue | `@blok/trigger-queue` | Kafka, RabbitMQ, SQS, Redis |
-| PubSub | `@blok/trigger-pubsub` | GCP, AWS SNS, Azure Service Bus |
-| Cron | `@blok/trigger-cron` | Scheduled workflows |
-| Webhook | `@blok/trigger-webhook` | GitHub, Stripe, Shopify |
-| Worker | `@blok/trigger-worker` | Background job processing |
+| HTTP | `@blokjs/trigger-http` | REST API endpoints |
+| gRPC | `@blokjs/trigger-grpc` | gRPC services |
+| WebSocket | `@blokjs/trigger-websocket` | Real-time bidirectional |
+| SSE | `@blokjs/trigger-sse` | Server-Sent Events |
+| Queue | `@blokjs/trigger-queue` | Kafka, RabbitMQ, SQS, Redis |
+| PubSub | `@blokjs/trigger-pubsub` | GCP, AWS SNS, Azure Service Bus |
+| Cron | `@blokjs/trigger-cron` | Scheduled workflows |
+| Webhook | `@blokjs/trigger-webhook` | GitHub, Stripe, Shopify |
+| Worker | `@blokjs/trigger-worker` | Background job processing |
 
 ## License
 

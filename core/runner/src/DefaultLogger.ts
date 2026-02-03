@@ -1,4 +1,4 @@
-import { GlobalLogger } from "@blok/shared";
+import { GlobalLogger } from "@blokjs/shared";
 
 /**
  * DefaultLogger class extends GlobalLogger to provide logging functionality

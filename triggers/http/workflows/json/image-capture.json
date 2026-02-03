@@ -12,7 +12,7 @@
 	"steps": [
 		{
 			"name": "filter-request",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],

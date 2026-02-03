@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
-import type { HMREvent } from "@blok/runner";
-import { registerTraceRoutes } from "@blok/runner";
+import type { HMREvent } from "@blokjs/runner";
+import { registerTraceRoutes } from "@blokjs/runner";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";

@@ -1,4 +1,4 @@
-import type { Context, MetricsType } from "@blok/shared";
+import type { Context, MetricsType } from "@blokjs/shared";
 
 type TriggerResponse = {
 	ctx: Context;

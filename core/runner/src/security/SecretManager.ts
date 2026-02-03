@@ -20,7 +20,7 @@
  *   SecretManager,
  *   EnvironmentSecretProvider,
  *   InMemorySecretProvider,
- * } from "@blok/runner";
+ * } from "@blokjs/runner";
  *
  * // Simple setup with environment variables
  * const secrets = new SecretManager({

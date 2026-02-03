@@ -195,7 +195,7 @@ Replace class-based node development with modern, Elysia-style function + Zod sc
 
 ```typescript
 import { z } from "zod";
-import { Context } from "@blok/shared";
+import { Context } from "@blokjs/shared";
 
 const MyNode = defineNode({
   name: "fetch-user",
@@ -272,8 +272,8 @@ class FunctionNode extends BlokService<I> {
 - [ ] Add feedback loop for prompt refinement
 
 **Phase 2D: Node Migration (Week 4-6)** ✅
-- [x] Convert `@blok/api-call` to function-first
-- [x] Convert `@blok/if-else` to function-first
+- [x] Convert `@blokjs/api-call` to function-first
+- [x] Convert `@blokjs/if-else` to function-first
 - [x] Convert HTTP example nodes to function-first (all 25 nodes migrated)
 - [ ] Create migration guide for node authors
 - [ ] Add deprecation warnings to class-based pattern
@@ -576,7 +576,7 @@ class QueueTrigger extends TriggerBase {
 > - `vitest.config.ts` with 90% coverage thresholds
 > - 49 tests passing across connection management, channels, broadcasting, heartbeat, and event history
 >
-> **Known limitation:** `TriggerOpts` in `@blok/helper` only defines HTTP fields — SSE trigger options require `as any` cast. Fix planned in Phase 3.1 (discriminated union types per trigger kind).
+> **Known limitation:** `TriggerOpts` in `@blokjs/helper` only defines HTTP fields — SSE trigger options require `as any` cast. Fix planned in Phase 3.1 (discriminated union types per trigger kind).
 
 **Phase 3G: AI-Powered Trigger Generation (Week 14)**
 - [ ] Implement trigger generation prompt (from docs)
@@ -678,7 +678,7 @@ Based on documents in `new-version-docs/`:
 **B. Workflow TypeScript Structure Prompt**
 - Generates `WorkflowConfig` objects
 - Uses correct trigger configuration
-- Implements conditional routing with `@blok/if-else`
+- Implements conditional routing with `@blokjs/if-else`
 - Uses proper `ctx` references in conditions
 - Follows HTTP/gRPC workflow patterns
 
@@ -805,7 +805,7 @@ Each language gets a standardized SDK:
 
 ```
 runtimes/
-├── nodejs/           (existing @blok/*)
+├── nodejs/           (existing @blokjs/*)
 ├── bun/              (existing, minimal changes)
 ├── python3/          (existing runtimes/python3)
 ├── go/

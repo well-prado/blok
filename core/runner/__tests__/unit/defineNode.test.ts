@@ -10,8 +10,8 @@
  * - Backward compatibility with BlokService
  */
 
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type FnNodeDefinition, FunctionNode, defineNode } from "../../src/defineNode";

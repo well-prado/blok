@@ -197,8 +197,8 @@ describe("WorkflowHoverProvider", () => {
 	});
 
 	describe("node package hovers", () => {
-		it("should show hover for @blok/api-call value", () => {
-			const content = '    "node": "@blok/api-call"';
+		it("should show hover for @blokjs/api-call value", () => {
+			const content = '    "node": "@blokjs/api-call"';
 			const doc = createMockDocument(content);
 			// Position on the value part
 			const pos = new vscode.Position(0, 20);

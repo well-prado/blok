@@ -5,7 +5,7 @@
  * used across all test suites.
  */
 
-import type { Context, LoggerContext } from "@blok/shared";
+import type { Context, LoggerContext } from "@blokjs/shared";
 
 /**
  * Create a mock Context for testing trigger execution.

@@ -1,4 +1,4 @@
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import pg from "pg";
 import { z } from "zod";
 

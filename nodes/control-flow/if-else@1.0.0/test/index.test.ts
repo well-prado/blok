@@ -5,8 +5,8 @@
  * All existing behavior is preserved.
  */
 
-import type { Condition, IBlokResponse, JsonLikeObject, ParamsDictionary } from "@blok/runner";
-import type { Context, NodeBase, ResponseContext } from "@blok/shared";
+import type { Condition, IBlokResponse, JsonLikeObject, ParamsDictionary } from "@blokjs/runner";
+import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
 import { describe, expect, it, vi } from "vitest";
 import IfElseNode from "../index";
 

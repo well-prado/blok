@@ -16,7 +16,7 @@
  *
  * @example
  * ```typescript
- * import { CloudWatchIntegration } from "@blok/runner";
+ * import { CloudWatchIntegration } from "@blokjs/runner";
  *
  * const cw = new CloudWatchIntegration({
  *   region: "us-east-1",

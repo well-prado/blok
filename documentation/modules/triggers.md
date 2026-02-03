@@ -14,8 +14,8 @@ All triggers extend `TriggerBase`, which provides shared infrastructure for load
 
 | Trigger | Package | Port | Event Source |
 |---------|---------|------|-------------|
-| **HTTP** | `@blok/trigger-http` | 4000 | HTTP requests (GET, POST, PUT, DELETE, etc.) |
-| **gRPC** | `@blok/trigger-grpc` | 50051 | gRPC/Connect RPC calls |
+| **HTTP** | `@blokjs/trigger-http` | 4000 | HTTP requests (GET, POST, PUT, DELETE, etc.) |
+| **gRPC** | `@blokjs/trigger-grpc` | 50051 | gRPC/Connect RPC calls |
 | **Cron** | `triggers/cron` | - | Scheduled tasks (cron expressions) |
 | **Queue** | `triggers/queue` | - | Kafka, RabbitMQ, SQS, Redis message queues |
 | **Pub/Sub** | `triggers/pubsub` | - | GCP Pub/Sub, AWS SNS, Azure Service Bus |

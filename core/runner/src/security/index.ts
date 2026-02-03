@@ -26,7 +26,7 @@
  *   FileAuditSink,
  *   SecretManager,
  *   EnvironmentSecretProvider,
- * } from "@blok/runner";
+ * } from "@blokjs/runner";
  *
  * // Set up auth
  * const auth = new AuthMiddleware({

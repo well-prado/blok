@@ -7,11 +7,11 @@ Blok is a TypeScript-first workflow orchestration framework. It executes declara
 ```
 blok/
 ├── core/
-│   ├── runner/              # @blok/runner  — Workflow execution engine
-│   ├── shared/              # @blok/shared  — Common types, NodeBase, Context, GlobalError
-│   └── workflow-helper/     # @blok/helper  — TypeScript DSL for defining workflows
+│   ├── runner/              # @blokjs/runner  — Workflow execution engine
+│   ├── shared/              # @blokjs/shared  — Common types, NodeBase, Context, GlobalError
+│   └── workflow-helper/     # @blokjs/helper  — TypeScript DSL for defining workflows
 ├── apps/
-│   └── studio/              # @blok/studio  — React trace visualization UI (Vite + TanStack)
+│   └── studio/              # @blokjs/studio  — React trace visualization UI (Vite + TanStack)
 ├── packages/
 │   ├── cli/                 # blokctl       — CLI tool for project scaffolding & dev
 │   ├── lsp-server/          # Language Server Protocol for IDE support
@@ -25,7 +25,7 @@ blok/
 │   ├── ruby/                # Ruby SDK      (port 9006)
 │   └── python3/             # Python3 SDK   (port 9007)
 ├── triggers/
-│   ├── http/                # @blok/trigger-http — Hono-based HTTP trigger
+│   ├── http/                # @blokjs/trigger-http — Hono-based HTTP trigger
 │   ├── grpc/                # gRPC trigger
 │   ├── webhook/             # Webhook trigger
 │   ├── websocket/           # WebSocket trigger
@@ -36,10 +36,10 @@ blok/
 │   └── worker/              # Background worker trigger
 ├── nodes/
 │   ├── web/
-│   │   ├── api-call@1.0.0/  # @blok/api-call — HTTP request node
-│   │   └── react@1.0.0/     # @blok/react   — React SSR node
+│   │   ├── api-call@1.0.0/  # @blokjs/api-call — HTTP request node
+│   │   └── react@1.0.0/     # @blokjs/react   — React SSR node
 │   └── control-flow/
-│       └── if-else@1.0.0/   # @blok/if-else — Conditional branching
+│       └── if-else@1.0.0/   # @blokjs/if-else — Conditional branching
 └── runtimes/                # Runtime process definitions
 ```
 
@@ -53,10 +53,10 @@ bun run test                       # Run all tests
 bun run lint                       # Lint with Biome
 
 # Core packages
-bun run runner:dev                 # Build @blok/runner in watch mode
-bun run runner:test                # Test @blok/runner in watch mode
-bun run helper:dev                 # Build @blok/helper in watch mode
-bun run helper:test                # Test @blok/helper in watch mode
+bun run runner:dev                 # Build @blokjs/runner in watch mode
+bun run runner:test                # Test @blokjs/runner in watch mode
+bun run helper:dev                 # Build @blokjs/helper in watch mode
+bun run helper:test                # Test @blokjs/helper in watch mode
 bun run core:build:dev             # Build all core packages in watch mode
 
 # HTTP trigger
@@ -181,7 +181,7 @@ Use `defineNode()` for all new nodes. It replaces the legacy class-based BlokSer
 ### Simple Node
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -212,7 +212,7 @@ export default defineNode({
 ### Flow Control Node (Conditional)
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -274,7 +274,7 @@ export default defineNode({
 
 ## Workflow Structure
 
-Workflows can be defined as **TypeScript (preferred)** or JSON. TypeScript workflows use a fluent builder API from `@blok/helper` and live in `triggers/http/src/workflows/`. JSON workflows live in `triggers/http/workflows/json/`. Both produce the same internal structure and have identical capabilities.
+Workflows can be defined as **TypeScript (preferred)** or JSON. TypeScript workflows use a fluent builder API from `@blokjs/helper` and live in `triggers/http/src/workflows/`. JSON workflows live in `triggers/http/workflows/json/`. Both produce the same internal structure and have identical capabilities.
 
 ### TypeScript Workflows (Preferred)
 
@@ -299,7 +299,7 @@ triggers/http/src/
 #### Simple Workflow
 
 ```typescript
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
   name: "Get Users",
@@ -313,7 +313,7 @@ const step: Step = Workflow({
   })
   .addStep({
     name: "fetch-users",
-    node: "@blok/api-call",
+    node: "@blokjs/api-call",
     type: "module",
     inputs: {
       url: "https://api.example.com/users",
@@ -329,7 +329,7 @@ export default step;
 #### Multi-Step Workflow
 
 ```typescript
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
   name: "Process Order",
@@ -363,7 +363,7 @@ export default step;
 #### Conditional Workflow (if-else)
 
 ```typescript
-import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
+import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
   name: "Route by Query",
@@ -377,7 +377,7 @@ const step: Step = Workflow({
   .addCondition({
     node: {
       name: "router",
-      node: "@blok/if-else",
+      node: "@blokjs/if-else",
       type: "module",
     },
     conditions: () => {
@@ -385,7 +385,7 @@ const step: Step = Workflow({
         new AddIf('ctx.request.query.type === "countries"')
           .addStep({
             name: "get-countries",
-            node: "@blok/api-call",
+            node: "@blokjs/api-call",
             type: "module",
             inputs: {
               url: "https://countriesnow.space/api/v0.1/countries",
@@ -398,7 +398,7 @@ const step: Step = Workflow({
         new AddIf('ctx.request.query.type === "facts"')
           .addStep({
             name: "get-facts",
-            node: "@blok/api-call",
+            node: "@blokjs/api-call",
             type: "module",
             inputs: {
               url: "https://catfact.ninja/fact",
@@ -425,7 +425,7 @@ export default step;
 #### Cross-Runtime Workflow
 
 ```typescript
-import { type Step, Workflow } from "@blok/helper";
+import { type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
   name: "Cross Runtime Chain",
@@ -490,17 +490,17 @@ The key (e.g. `"create-user"`) becomes the workflow's route identifier.
 All nodes referenced by workflows must be registered in `triggers/http/src/Nodes.ts`:
 
 ```typescript
-import ApiCall from "@blok/api-call";
-import IfElse from "@blok/if-else";
-import type { NodeBase } from "@blok/shared";
+import ApiCall from "@blokjs/api-call";
+import IfElse from "@blokjs/if-else";
+import type { NodeBase } from "@blokjs/shared";
 import OrderValidator from "./nodes/order-validator/index";
 import OrderStore from "./nodes/order-store/index";
 
 const nodes: {
   [key: string]: NodeBase;
 } = {
-  "@blok/api-call": ApiCall,
-  "@blok/if-else": IfElse,
+  "@blokjs/api-call": ApiCall,
+  "@blokjs/if-else": IfElse,
   "order-validator": OrderValidator,
   "order-store": OrderStore,
 };
@@ -547,7 +547,7 @@ Workflow({ name, version, description? })
     }
   },
   "steps": [
-    { "name": "fetch",    "node": "@blok/api-call",  "type": "module" },
+    { "name": "fetch",    "node": "@blokjs/api-call",  "type": "module" },
     { "name": "process",  "node": "my-node",         "type": "module", "set_var": true },
     { "name": "go-step",  "node": "chain-test",      "type": "runtime.go" },
     { "name": "output",   "node": "format-result",   "type": "local" }
@@ -609,7 +609,7 @@ Workflow({ name, version, description? })
 ```json
 {
   "steps": [
-    { "name": "filter-request", "node": "@blok/if-else", "type": "module" }
+    { "name": "filter-request", "node": "@blokjs/if-else", "type": "module" }
   ],
   "nodes": {
     "filter-request": {
@@ -618,13 +618,13 @@ Workflow({ name, version, description? })
           "type": "if",
           "condition": "ctx.request.query.countries === \"true\"",
           "steps": [
-            { "name": "get-countries", "node": "@blok/api-call", "type": "module" }
+            { "name": "get-countries", "node": "@blokjs/api-call", "type": "module" }
           ]
         },
         {
           "type": "else",
           "steps": [
-            { "name": "get-facts", "node": "@blok/api-call", "type": "module" }
+            { "name": "get-facts", "node": "@blokjs/api-call", "type": "module" }
           ]
         }
       ]
@@ -804,7 +804,7 @@ interface NodeTrace {
 
 ### GlobalError
 
-All framework errors use `GlobalError` from `@blok/shared`:
+All framework errors use `GlobalError` from `@blokjs/shared`:
 
 ```typescript
 const error = new GlobalError("Something went wrong");
@@ -879,17 +879,17 @@ Created by `blokctl create project`. Defines runtime processes:
 
 ```typescript
 // Core runner
-import { defineNode } from "@blok/runner";
-import type { FnNodeDefinition } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
+import type { FnNodeDefinition } from "@blokjs/runner";
 
 // Shared types
-import type { Context, RequestContext, ResponseContext, VarsContext } from "@blok/shared";
-import { GlobalError, NodeBase } from "@blok/shared";
+import type { Context, RequestContext, ResponseContext, VarsContext } from "@blokjs/shared";
+import { GlobalError, NodeBase } from "@blokjs/shared";
 
 // Workflow helper DSL
-import { Workflow, Step, Trigger, AddIf, AddElse } from "@blok/helper";
-import type { StepOpts, WorkflowOpts, NodeType, RuntimeKind } from "@blok/helper";
-import type { HttpTriggerOpts, CronTriggerOpts, QueueTriggerOpts } from "@blok/helper";
+import { Workflow, Step, Trigger, AddIf, AddElse } from "@blokjs/helper";
+import type { StepOpts, WorkflowOpts, NodeType, RuntimeKind } from "@blokjs/helper";
+import type { HttpTriggerOpts, CronTriggerOpts, QueueTriggerOpts } from "@blokjs/helper";
 
 // Zod (always from "zod" directly)
 import { z } from "zod";

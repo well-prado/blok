@@ -1,4 +1,4 @@
-import { AddElse, AddIf, type Step, Workflow } from "@blok/helper";
+import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
 
 const step: Step = Workflow({
 	name: "Empty",
@@ -13,7 +13,7 @@ const step: Step = Workflow({
 	.addCondition({
 		node: {
 			name: "filter-request",
-			node: "@blok/if-else",
+			node: "@blokjs/if-else",
 			type: "module",
 		},
 		conditions: () => {

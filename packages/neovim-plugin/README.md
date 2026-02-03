@@ -12,7 +12,7 @@ Language support for Blok workflow JSON files in Neovim.
 ## Requirements
 
 - Neovim 0.9+
-- `blok-lsp` binary on your PATH: `npm install -g @blok/lsp-server`
+- `blok-lsp` binary on your PATH: `npm install -g @blokjs/lsp-server`
 - Optional: [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) (recommended)
 
 ## Installation

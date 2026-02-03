@@ -1,6 +1,6 @@
 {
-	"name": "@blok/runner",
-	"version": "0.1.0",
+	"name": "@blokjs/runner",
+	"version": "0.2.1",
 	"description": "",
 	"engines": {
 		"node": ">=18.0.0"
@@ -8,7 +8,9 @@
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"files": ["dist"],
+	"files": [
+		"dist"
+	],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
@@ -35,8 +37,8 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blok/helper": "workspace:*",
-		"@blok/shared": "workspace:*",
+		"@blokjs/helper": "^0.2.0",
+		"@blokjs/shared": "^0.2.0",
 		"@opentelemetry/api": "^1.9.0",
 		"fast-xml-parser": "^5.3.4",
 		"jsonschema": "^1.5.0",
@@ -86,5 +88,8 @@
 			"optional": true
 		}
 	},
-	"private": false
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }
