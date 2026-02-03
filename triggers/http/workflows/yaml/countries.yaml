@@ -9,7 +9,7 @@ trigger:
     accept: application/json
 steps:
 - name: get-countries-api
-  node: "@blok/api-call"
+  node: "@blokjs/api-call"
   type: module
 nodes:
   get-countries-api:
