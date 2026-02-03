@@ -10,7 +10,8 @@ export const HttpTriggerOptsSchema = z.object({
 
 // Legacy alias for backward compatibility
 export const TriggerOptsSchema = HttpTriggerOptsSchema;
-export type TriggerOpts = z.infer<typeof TriggerOptsSchema>;
+// Use z.input for parameter types (allows optional fields with defaults)
+export type TriggerOpts = z.input<typeof TriggerOptsSchema>;
 
 // Queue Trigger Options (Kafka, RabbitMQ, SQS, Redis)
 export const QueueProviderSchema = z.enum(["kafka", "rabbitmq", "sqs", "redis", "beanstalk"]);
@@ -28,7 +29,7 @@ export const QueueTriggerOptsSchema = z.object({
 	batchSize: z.number().default(1).describe("Number of messages to process in batch"),
 	concurrency: z.number().default(1).describe("Number of concurrent consumers"),
 });
-export type QueueTriggerOpts = z.infer<typeof QueueTriggerOptsSchema>;
+export type QueueTriggerOpts = z.input<typeof QueueTriggerOptsSchema>;
 
 // Pub/Sub Trigger Options (GCP Pub/Sub, AWS SNS, Azure Service Bus)
 export const PubSubProviderSchema = z.enum(["gcp", "aws", "azure"]);
@@ -46,7 +47,7 @@ export const PubSubTriggerOptsSchema = z.object({
 	deadLetterTopic: z.string().optional().describe("Dead letter topic for failed messages"),
 	filter: z.string().optional().describe("Message filter expression"),
 });
-export type PubSubTriggerOpts = z.infer<typeof PubSubTriggerOptsSchema>;
+export type PubSubTriggerOpts = z.input<typeof PubSubTriggerOptsSchema>;
 
 // Worker Trigger Options (background jobs)
 export const WorkerTriggerOptsSchema = z.object({
@@ -57,7 +58,7 @@ export const WorkerTriggerOptsSchema = z.object({
 	priority: z.number().default(0).describe("Job priority (higher = more priority)"),
 	delay: z.number().optional().describe("Delay before processing in milliseconds"),
 });
-export type WorkerTriggerOpts = z.infer<typeof WorkerTriggerOptsSchema>;
+export type WorkerTriggerOpts = z.input<typeof WorkerTriggerOptsSchema>;
 
 // Cron Trigger Options (scheduled workflows)
 export const CronTriggerOptsSchema = z.object({
@@ -65,7 +66,7 @@ export const CronTriggerOptsSchema = z.object({
 	timezone: z.string().default("UTC").describe("Timezone for schedule evaluation"),
 	overlap: z.boolean().default(false).describe("Allow overlapping executions"),
 });
-export type CronTriggerOpts = z.infer<typeof CronTriggerOptsSchema>;
+export type CronTriggerOpts = z.input<typeof CronTriggerOptsSchema>;
 
 // Webhook Trigger Options (external service events)
 export const WebhookTriggerOptsSchema = z.object({
@@ -74,7 +75,7 @@ export const WebhookTriggerOptsSchema = z.object({
 	secret: z.string().optional().describe("Webhook secret for verification"),
 	path: z.string().optional().describe("Custom webhook path"),
 });
-export type WebhookTriggerOpts = z.infer<typeof WebhookTriggerOptsSchema>;
+export type WebhookTriggerOpts = z.input<typeof WebhookTriggerOptsSchema>;
 
 // WebSocket Trigger Options (real-time bidirectional)
 export const WebSocketTriggerOptsSchema = z.object({
@@ -85,7 +86,7 @@ export const WebSocketTriggerOptsSchema = z.object({
 	heartbeatInterval: z.number().default(30000).describe("Heartbeat interval in milliseconds"),
 	messageRateLimit: z.number().default(100).describe("Max messages per second per client"),
 });
-export type WebSocketTriggerOpts = z.infer<typeof WebSocketTriggerOptsSchema>;
+export type WebSocketTriggerOpts = z.input<typeof WebSocketTriggerOptsSchema>;
 
 // SSE Trigger Options (Server-Sent Events)
 export const SSETriggerOptsSchema = z.object({
@@ -96,7 +97,7 @@ export const SSETriggerOptsSchema = z.object({
 	heartbeatInterval: z.number().default(30000).describe("Heartbeat interval in milliseconds"),
 	retryInterval: z.number().default(3000).describe("Client retry interval in milliseconds"),
 });
-export type SSETriggerOpts = z.infer<typeof SSETriggerOptsSchema>;
+export type SSETriggerOpts = z.input<typeof SSETriggerOptsSchema>;
 
 // All trigger types
 export const TriggersSchema = z.enum([
@@ -112,3 +113,29 @@ export const TriggersSchema = z.enum([
 	"websocket",
 ]);
 export type TriggersEnum = z.infer<typeof TriggersSchema>;
+
+// Type map for trigger configs - maps trigger name to its options type
+export type TriggerConfigMap = {
+	http: TriggerOpts;
+	grpc: Record<string, unknown>;
+	manual: Record<string, unknown>;
+	cron: CronTriggerOpts;
+	queue: QueueTriggerOpts;
+	pubsub: PubSubTriggerOpts;
+	worker: WorkerTriggerOpts;
+	webhook: WebhookTriggerOpts;
+	sse: SSETriggerOpts;
+	websocket: WebSocketTriggerOpts;
+};
+
+// All trigger options union type
+export type AnyTriggerOpts =
+	| TriggerOpts
+	| QueueTriggerOpts
+	| PubSubTriggerOpts
+	| WorkerTriggerOpts
+	| CronTriggerOpts
+	| WebhookTriggerOpts
+	| WebSocketTriggerOpts
+	| SSETriggerOpts
+	| Record<string, unknown>;

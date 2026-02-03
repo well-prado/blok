@@ -66,6 +66,8 @@ export async function createProject(opts: OptionValues, version: string, current
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
 	let selectedManager: string = opts.packageManager || "npm";
+	let pubsubProvider: string = opts.pubsubProvider || "gcp";
+	let queueProvider: string = opts.queueProvider || "kafka";
 
 	// Detect available runtimes on the machine
 	let detectedRuntimes: RuntimeInfo[] = [];
@@ -146,11 +148,40 @@ export async function createProject(opts: OptionValues, version: string, current
 								options: [
 									{ label: "HTTP", value: "http", hint: "REST APIs (port 4000)" },
 									{ label: "SSE", value: "sse", hint: "Real-time push (port 4001)" },
+									{ label: "Queue", value: "queue", hint: "Kafka/RabbitMQ/SQS/Redis (port 4005)" },
+									{ label: "Pub/Sub", value: "pubsub", hint: "GCP/AWS/Azure messaging (port 4006)" },
 									//{ label: "GRPC", value: "grpc", hint: "RPC (port 4003)" }
 								],
 								initialValues: ["http"],
 								required: true,
 							}),
+				pubsubProvider: ({ results }) =>
+					opts.pubsubProvider
+						? Promise.resolve(opts.pubsubProvider)
+						: results.triggers?.includes("pubsub")
+							? p.select({
+									message: "Select Pub/Sub provider",
+									options: [
+										{ label: "Google Cloud Pub/Sub", value: "gcp" },
+										{ label: "AWS SNS/SQS", value: "aws" },
+										{ label: "Azure Service Bus", value: "azure" },
+									],
+								})
+							: Promise.resolve(null),
+				queueProvider: ({ results }) =>
+					opts.queueProvider
+						? Promise.resolve(opts.queueProvider)
+						: results.triggers?.includes("queue")
+							? p.select({
+									message: "Select Queue provider",
+									options: [
+										{ label: "Apache Kafka", value: "kafka" },
+										{ label: "RabbitMQ", value: "rabbitmq" },
+										{ label: "AWS SQS", value: "sqs" },
+										{ label: "Redis/BullMQ", value: "redis" },
+									],
+								})
+							: Promise.resolve(null),
 				runtimes: () =>
 					opts.runtimes
 						? Promise.resolve(parseCommaSeparated(opts.runtimes))
@@ -172,6 +203,8 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		projectName = blokctlProject.projectName;
 		selectedTriggers = blokctlProject.triggers;
+		pubsubProvider = (blokctlProject.pubsubProvider as string) || "gcp";
+		queueProvider = (blokctlProject.queueProvider as string) || "kafka";
 		selectedRuntimeKinds = blokctlProject.runtimes;
 		selectedManager = blokctlProject.selectedManager;
 
@@ -288,7 +321,11 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Use the first trigger as the "primary" for base files (package.json, tsconfig, etc.)
 		const primaryTrigger = selectedTriggers[0];
-		const primaryTriggerDir = `${repoSource}/triggers/${primaryTrigger}`;
+		// Pubsub and Queue triggers use template subdirectory
+		const primaryTriggerDir =
+			primaryTrigger === "pubsub" || primaryTrigger === "queue"
+				? `${repoSource}/triggers/${primaryTrigger}/template`
+				: `${repoSource}/triggers/${primaryTrigger}`;
 
 		// Copy base config files from primary trigger
 		const baseFiles = ["package.json", "tsconfig.json", ".env.example", ".gitignore", "vitest.config.ts"];
@@ -309,34 +346,63 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Copy each trigger's files to src/triggers/{kind}/
 		for (const triggerKind of selectedTriggers) {
-			const triggerSrcDir = `${repoSource}/triggers/${triggerKind}/src`;
 			const triggerDestDir = `${dirPath}/src/triggers/${triggerKind}`;
-
 			fsExtra.ensureDirSync(triggerDestDir);
 
-			// Copy runner folder (contains the trigger server implementation)
-			if (fsExtra.existsSync(`${triggerSrcDir}/runner`)) {
-				fsExtra.copySync(`${triggerSrcDir}/runner`, `${triggerDestDir}/runner`);
-			}
+			// Pubsub and Queue use template directories
+			if (triggerKind === "pubsub" || triggerKind === "queue") {
+				const templateDir = `${repoSource}/triggers/${triggerKind}/template/src`;
+				if (fsExtra.existsSync(templateDir)) {
+					// Copy the entire template src directory
+					fsExtra.copySync(templateDir, triggerDestDir);
 
-			// Copy AppRoutes.ts
-			if (fsExtra.existsSync(`${triggerSrcDir}/AppRoutes.ts`)) {
-				fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
-			}
+					// Copy workflows to shared workflows directory
+					if (fsExtra.existsSync(`${templateDir}/workflows`)) {
+						fsExtra.copySync(`${templateDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
+						// Remove from trigger dir (it's now in shared)
+						fsExtra.removeSync(`${triggerDestDir}/workflows`);
+					}
 
-			// Copy trigger-specific workflow files
-			if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
-				fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
-			}
+					// Remove trigger-specific Nodes.ts and Workflows.ts (we use shared ones)
+					// The runner imports from ../../../Nodes and ../../../Workflows
+					fsExtra.removeSync(`${triggerDestDir}/Nodes.ts`);
+					fsExtra.removeSync(`${triggerDestDir}/Workflows.ts`);
 
-			// For SSE, also copy the base SSETrigger.ts
-			if (triggerKind === "sse" && fsExtra.existsSync(`${triggerSrcDir}/SSETrigger.ts`)) {
-				fsExtra.copySync(`${triggerSrcDir}/SSETrigger.ts`, `${triggerDestDir}/SSETrigger.ts`);
-			}
+					// Update provider-specific adapter
+					if (triggerKind === "pubsub") {
+						updatePubSubProvider(triggerDestDir, pubsubProvider);
+					} else if (triggerKind === "queue") {
+						updateQueueProvider(triggerDestDir, queueProvider);
+					}
+				}
+			} else {
+				// HTTP and SSE use the regular src directory
+				const triggerSrcDir = `${repoSource}/triggers/${triggerKind}/src`;
 
-			// Copy lib.ts if exists (for SSE package exports)
-			if (fsExtra.existsSync(`${triggerSrcDir}/lib.ts`)) {
-				fsExtra.copySync(`${triggerSrcDir}/lib.ts`, `${triggerDestDir}/lib.ts`);
+				// Copy runner folder (contains the trigger server implementation)
+				if (fsExtra.existsSync(`${triggerSrcDir}/runner`)) {
+					fsExtra.copySync(`${triggerSrcDir}/runner`, `${triggerDestDir}/runner`);
+				}
+
+				// Copy AppRoutes.ts
+				if (fsExtra.existsSync(`${triggerSrcDir}/AppRoutes.ts`)) {
+					fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
+				}
+
+				// Copy trigger-specific workflow files
+				if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
+					fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
+				}
+
+				// For SSE, also copy the base SSETrigger.ts
+				if (triggerKind === "sse" && fsExtra.existsSync(`${triggerSrcDir}/SSETrigger.ts`)) {
+					fsExtra.copySync(`${triggerSrcDir}/SSETrigger.ts`, `${triggerDestDir}/SSETrigger.ts`);
+				}
+
+				// Copy lib.ts if exists (for SSE package exports)
+				if (fsExtra.existsSync(`${triggerSrcDir}/lib.ts`)) {
+					fsExtra.copySync(`${triggerSrcDir}/lib.ts`, `${triggerDestDir}/lib.ts`);
+				}
 			}
 		}
 
@@ -434,6 +500,8 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blok/if-else": "nodes/control-flow/if-else@1.0.0",
 			"@blok/runner": "core/runner",
 			"@blok/shared": "core/shared",
+			"@blok/trigger-pubsub": "triggers/pubsub",
+			"@blok/trigger-queue": "triggers/queue",
 		};
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
@@ -484,6 +552,32 @@ export async function createProject(opts: OptionValues, version: string, current
 			blokctl: blokctlRef,
 		};
 
+		// Add provider-specific dependencies for pubsub and queue triggers
+		const providerDeps = getProviderDependencies(selectedTriggers, pubsubProvider, queueProvider);
+		if (Object.keys(providerDeps).length > 0) {
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				...providerDeps,
+			};
+		}
+
+		// Add trigger packages to dependencies (pubsub and queue need their trigger packages)
+		const triggerPackageDeps: Record<string, string> = {};
+		if (selectedTriggers.includes("pubsub")) {
+			const pubsubRef = localRepoPath ? `file:${path.resolve(repoSource, "triggers/pubsub")}` : "@blok/trigger-pubsub";
+			triggerPackageDeps["@blok/trigger-pubsub"] = localRepoPath ? pubsubRef : "workspace:*";
+		}
+		if (selectedTriggers.includes("queue")) {
+			const queueRef = localRepoPath ? `file:${path.resolve(repoSource, "triggers/queue")}` : "@blok/trigger-queue";
+			triggerPackageDeps["@blok/trigger-queue"] = localRepoPath ? queueRef : "workspace:*";
+		}
+		if (Object.keys(triggerPackageDeps).length > 0) {
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				...triggerPackageDeps,
+			};
+		}
+
 		// Setup non-NodeJS runtimes
 		const nonNodeRuntimes = selectedRuntimeKinds.filter((kind) => kind !== "node");
 		const runtimeConfigs: RuntimeConfig[] = [];
@@ -516,6 +610,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (triggerConfigs.length > 0) {
 			const triggerEnvVars = generateTriggerEnvVars(triggerConfigs);
 			fsExtra.appendFileSync(envLocal, triggerEnvVars);
+		}
+
+		// Append provider-specific env vars to .env.local
+		const providerEnvVars = getProviderEnvVars(selectedTriggers, pubsubProvider, queueProvider);
+		if (providerEnvVars) {
+			fsExtra.appendFileSync(envLocal, providerEnvVars);
 		}
 
 		// Examples
@@ -658,6 +758,12 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 			imports.push('import OnSubscribe from "./workflows/sse/notifications/on-subscribe";');
 			workflowEntries.push('\t"on-connect": OnConnect,');
 			workflowEntries.push('\t"on-subscribe": OnSubscribe,');
+		} else if (trigger === "pubsub") {
+			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
+			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
+		} else if (trigger === "queue") {
+			imports.push('import OnQueueMessage from "./workflows/queue/messages/on-message";');
+			workflowEntries.push('\t"on-queue-message": OnQueueMessage,');
 		}
 	}
 
@@ -778,6 +884,96 @@ export default class App {
 `;
 	}
 
+	if (triggerKind === "pubsub") {
+		return `import { DefaultLogger } from "@blok/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import PubSubServer from "./runner/PubSubServer";
+
+export default class App {
+	private pubsubServer: PubSubServer = <PubSubServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-pubsub-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.pubsubServer = new PubSubServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.pubsubServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`Pub/Sub trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}
+`;
+	}
+
+	if (triggerKind === "queue") {
+		return `import { DefaultLogger } from "@blok/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import QueueServer from "./runner/QueueServer";
+
+export default class App {
+	private queueServer: QueueServer = <QueueServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-queue-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.queueServer = new QueueServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.queueServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`Queue trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}
+`;
+	}
+
 	// Generic fallback for other triggers
 	return `// Entry point for ${triggerKind} trigger
 // Implement trigger-specific initialization here
@@ -799,6 +995,10 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 		filesToFix.push(`${triggerDestDir}/runner/HttpTrigger.ts`);
 	} else if (triggerKind === "sse") {
 		filesToFix.push(`${triggerDestDir}/runner/SSEServer.ts`);
+	} else if (triggerKind === "pubsub") {
+		filesToFix.push(`${triggerDestDir}/runner/PubSubServer.ts`);
+	} else if (triggerKind === "queue") {
+		filesToFix.push(`${triggerDestDir}/runner/QueueServer.ts`);
 	}
 
 	for (const filePath of filesToFix) {
@@ -813,4 +1013,196 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 
 		fsExtra.writeFileSync(filePath, content);
 	}
+}
+
+/**
+ * Update Pub/Sub trigger to use the selected provider adapter.
+ */
+function updatePubSubProvider(triggerDestDir: string, provider: string): void {
+	const serverPath = `${triggerDestDir}/runner/PubSubServer.ts`;
+	if (!fsExtra.existsSync(serverPath)) return;
+
+	let content = fsExtra.readFileSync(serverPath, "utf8");
+
+	const adapterConfigs: Record<string, { importName: string; init: string }> = {
+		gcp: {
+			importName: "GCPPubSubAdapter",
+			init: `new GCPPubSubAdapter({
+		projectId: process.env.GCP_PROJECT_ID || "my-project",
+	})`,
+		},
+		aws: {
+			importName: "AWSSNSAdapter",
+			init: `new AWSSNSAdapter({
+		region: process.env.AWS_REGION || "us-east-1",
+	})`,
+		},
+		azure: {
+			importName: "AzureServiceBusAdapter",
+			init: `new AzureServiceBusAdapter({
+		connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION_STRING || "",
+	})`,
+		},
+	};
+
+	const config = adapterConfigs[provider];
+	if (!config) return;
+
+	// Replace import
+	content = content.replace(
+		/import \{ PubSubTrigger, \w+ \} from "@blok\/trigger-pubsub";/,
+		`import { PubSubTrigger, ${config.importName} } from "@blok/trigger-pubsub";`,
+	);
+
+	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
+	// Look for the pattern inside the class body (starts with tab for indentation)
+	content = content.replace(
+		/(export default class \w+ extends PubSubTrigger \{[\s\S]*?)\n\tprotected adapter = new \w+\(\{[\s\S]*?\}\);/,
+		`$1\n\tprotected adapter = ${config.init};`,
+	);
+
+	fsExtra.writeFileSync(serverPath, content);
+}
+
+/**
+ * Update Queue trigger to use the selected provider adapter.
+ */
+function updateQueueProvider(triggerDestDir: string, provider: string): void {
+	const serverPath = `${triggerDestDir}/runner/QueueServer.ts`;
+	if (!fsExtra.existsSync(serverPath)) return;
+
+	let content = fsExtra.readFileSync(serverPath, "utf8");
+
+	const adapterConfigs: Record<string, { importName: string; init: string }> = {
+		kafka: {
+			importName: "KafkaAdapter",
+			init: `new KafkaAdapter({
+		brokers: (process.env.KAFKA_BROKERS || "localhost:9092").split(","),
+		clientId: process.env.KAFKA_CLIENT_ID || "blok-queue-trigger",
+	})`,
+		},
+		rabbitmq: {
+			importName: "RabbitMQAdapter",
+			init: `new RabbitMQAdapter({
+		url: process.env.RABBITMQ_URL || "amqp://localhost",
+	})`,
+		},
+		sqs: {
+			importName: "SQSAdapter",
+			init: `new SQSAdapter({
+		region: process.env.AWS_REGION || "us-east-1",
+	})`,
+		},
+		redis: {
+			importName: "RedisAdapter",
+			init: `new RedisAdapter({
+		host: process.env.REDIS_HOST || "localhost",
+		port: Number(process.env.REDIS_PORT) || 6379,
+	})`,
+		},
+	};
+
+	const config = adapterConfigs[provider];
+	if (!config) return;
+
+	// Replace import
+	content = content.replace(
+		/import \{ QueueTrigger, \w+ \} from "@blok\/trigger-queue";/,
+		`import { QueueTrigger, ${config.importName} } from "@blok/trigger-queue";`,
+	);
+
+	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
+	// Look for the pattern inside the class body (starts with tab for indentation)
+	content = content.replace(
+		/(export default class \w+ extends QueueTrigger \{[\s\S]*?)\n\tprotected adapter = new \w+\(\{[\s\S]*?\}\);/,
+		`$1\n\tprotected adapter = ${config.init};`,
+	);
+
+	fsExtra.writeFileSync(serverPath, content);
+}
+
+/**
+ * Get provider-specific dependencies for pubsub and queue triggers.
+ */
+function getProviderDependencies(
+	triggers: string[],
+	pubsubProvider: string,
+	queueProvider: string,
+): Record<string, string> {
+	const deps: Record<string, string> = {};
+
+	const pubsubProviderDeps: Record<string, Record<string, string>> = {
+		gcp: { "@google-cloud/pubsub": "^4.0.0" },
+		aws: { "@aws-sdk/client-sns": "^3.980.0", "@aws-sdk/client-sqs": "^3.980.0" },
+		azure: { "@azure/service-bus": "^7.9.5" },
+	};
+
+	const queueProviderDeps: Record<string, Record<string, string>> = {
+		kafka: { kafkajs: "^2.2.4" },
+		rabbitmq: { amqplib: "^0.10.9" },
+		sqs: { "@aws-sdk/client-sqs": "^3.980.0" },
+		redis: { ioredis: "^5.9.2", bullmq: "^5.67.2" },
+	};
+
+	if (triggers.includes("pubsub") && pubsubProviderDeps[pubsubProvider]) {
+		Object.assign(deps, pubsubProviderDeps[pubsubProvider]);
+	}
+
+	if (triggers.includes("queue") && queueProviderDeps[queueProvider]) {
+		Object.assign(deps, queueProviderDeps[queueProvider]);
+	}
+
+	return deps;
+}
+
+/**
+ * Get provider-specific environment variables for pubsub and queue triggers.
+ */
+function getProviderEnvVars(triggers: string[], pubsubProvider: string, queueProvider: string): string {
+	const lines: string[] = [];
+
+	const pubsubEnvVars: Record<string, string> = {
+		gcp: `
+# Google Cloud Pub/Sub
+GCP_PROJECT_ID=my-project
+GOOGLE_APPLICATION_CREDENTIALS=./credentials.json`,
+		aws: `
+# AWS SNS/SQS
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=`,
+		azure: `
+# Azure Service Bus
+AZURE_SERVICE_BUS_CONNECTION_STRING=`,
+	};
+
+	const queueEnvVars: Record<string, string> = {
+		kafka: `
+# Apache Kafka
+KAFKA_BROKERS=localhost:9092
+KAFKA_CLIENT_ID=blok-queue-trigger
+KAFKA_GROUP_ID=blok-consumer-group`,
+		rabbitmq: `
+# RabbitMQ
+RABBITMQ_URL=amqp://localhost`,
+		sqs: `
+# AWS SQS
+AWS_REGION=us-east-1
+SQS_QUEUE_URL=`,
+		redis: `
+# Redis/BullMQ
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=`,
+	};
+
+	if (triggers.includes("pubsub") && pubsubEnvVars[pubsubProvider]) {
+		lines.push(pubsubEnvVars[pubsubProvider]);
+	}
+
+	if (triggers.includes("queue") && queueEnvVars[queueProvider]) {
+		lines.push(queueEnvVars[queueProvider]);
+	}
+
+	return lines.join("\n");
 }

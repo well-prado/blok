@@ -102,9 +102,11 @@ async function main() {
 			.option("-n, --name <value>", "Create a default Project")
 			.option("-l, --local <path>", "Use a local repo path instead of cloning from remote")
 			.option("-t, --trigger <value>", "Single trigger type (backwards compat, default: http)")
-			.option("-T, --triggers <value>", "Comma-separated trigger list: http,sse (default: http)")
+			.option("-T, --triggers <value>", "Comma-separated trigger list: http,sse,pubsub,queue (default: http)")
 			.option("-r, --runtimes <value>", "Comma-separated runtime list (default: node)")
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
+			.option("--pubsub-provider <value>", "Pub/Sub provider: gcp, aws, azure (default: gcp)")
+			.option("--queue-provider <value>", "Queue provider: kafka, rabbitmq, sqs, redis (default: kafka)")
 			.option("--examples", "Install example workflows and nodes")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
