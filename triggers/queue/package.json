@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-queue",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Queue-based trigger for Blok workflows - supports Kafka, RabbitMQ, SQS, and Redis",
 	"type": "module",
 	"main": "dist/index.js",
@@ -28,11 +28,11 @@
 		"vitest": "^4.0.18"
 	},
 	"peerDependencies": {
-		"kafkajs": "^2.2.4",
-		"amqplib": "^0.10.9",
-		"@aws-sdk/client-sqs": "^3.980.0",
-		"ioredis": "^5.9.2",
-		"bullmq": "^5.67.2"
+		"kafkajs": "",
+		"amqplib": "",
+		"@aws-sdk/client-sqs": "",
+		"ioredis": "",
+		"bullmq": ""
 	},
 	"peerDependenciesMeta": {
 		"kafkajs": {
