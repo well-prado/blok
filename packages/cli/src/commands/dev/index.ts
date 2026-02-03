@@ -173,6 +173,14 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
+	// Show trigger endpoints
+	if (config?.triggers && Object.keys(config.triggers).length > 0) {
+		console.log("\nTrigger endpoints:");
+		for (const [, trigger] of Object.entries(config.triggers)) {
+			console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
+		}
+	}
+
 	// Show runtime health endpoints
 	if (config?.runtimes && Object.keys(config.runtimes).length > 0) {
 		console.log("\nRuntime health endpoints:");
@@ -196,8 +204,25 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// 3. Start Blok runner last so its logs appear after all runtimes
-	spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath);
+	// 3. Start triggers from config, or fallback to single runner
+	if (config?.triggers && Object.keys(config.triggers).length > 0) {
+		console.log("Starting triggers...");
+		for (const [, trigger] of Object.entries(config.triggers)) {
+			const cmdParts = trigger.startCmd.split(" ");
+			const cmd = cmdParts[0];
+			const args = cmdParts.slice(1);
+			// Add --watch for development
+			if (cmd === "bun" && !args.includes("--watch")) {
+				args.unshift("--watch");
+			}
+			spawnProcess(cmd, args, `${trigger.label} (port ${trigger.port})`, currentPath, undefined, {
+				PORT: String(trigger.port),
+			});
+		}
+	} else {
+		// Legacy fallback: single trigger at src/index.ts
+		spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath);
+	}
 
 	// Keep the event loop alive — detached children don't prevent Node
 	// from exiting, so without this the process would exit immediately

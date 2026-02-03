@@ -20,9 +20,21 @@ export interface RuntimeConfig {
 	label: string;
 }
 
-export interface ProjectRuntimeConfig {
-	runtimes: Record<string, RuntimeConfig>;
+export interface TriggerConfig {
+	kind: string;
+	label: string;
+	port: number;
+	entryPoint: string;
+	startCmd: string;
 }
+
+export interface ProjectConfig {
+	triggers?: Record<string, TriggerConfig>;
+	runtimes?: Record<string, RuntimeConfig>;
+}
+
+// Backwards compatibility alias
+export type ProjectRuntimeConfig = ProjectConfig;
 
 /**
  * Setup a single runtime SDK in the project directory.
@@ -230,15 +242,27 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number):
 }
 
 /**
- * Write the .blok/config.json file with runtime configuration.
+ * Write the .blok/config.json file with runtime and trigger configuration.
  */
-export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeConfig[]): void {
-	const config: ProjectRuntimeConfig = {
-		runtimes: {},
-	};
+export function writeProjectConfig(
+	projectDir: string,
+	runtimeConfigs: RuntimeConfig[],
+	triggerConfigs?: TriggerConfig[],
+): void {
+	const config: ProjectConfig = {};
 
-	for (const rc of runtimeConfigs) {
-		config.runtimes[rc.kind] = rc;
+	if (runtimeConfigs.length > 0) {
+		config.runtimes = {};
+		for (const rc of runtimeConfigs) {
+			config.runtimes[rc.kind] = rc;
+		}
+	}
+
+	if (triggerConfigs && triggerConfigs.length > 0) {
+		config.triggers = {};
+		for (const tc of triggerConfigs) {
+			config.triggers[tc.kind] = tc;
+		}
 	}
 
 	const configPath = path.join(projectDir, ".blok", "config.json");
@@ -250,7 +274,7 @@ export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeCo
  * Read the .blok/config.json file.
  * Returns null if file doesn't exist.
  */
-export function readProjectConfig(projectDir: string): ProjectRuntimeConfig | null {
+export function readProjectConfig(projectDir: string): ProjectConfig | null {
 	const configPath = path.join(projectDir, ".blok", "config.json");
 	if (!fsExtra.existsSync(configPath)) {
 		return null;
@@ -291,6 +315,101 @@ autostart=true
 autorestart=true
 stderr_logfile=/var/log/${rc.kind}.err.log
 stdout_logfile=/var/log/${rc.kind}.out.log
+`;
+	}
+
+	return config;
+}
+
+// ============================================================================
+// Trigger Configuration Helpers
+// ============================================================================
+
+/** Default port mapping for each trigger type */
+const TRIGGER_PORTS: Record<string, number> = {
+	http: 4000,
+	sse: 4001,
+	websocket: 4002,
+	grpc: 4003,
+	cron: 4004,
+	queue: 4005,
+	pubsub: 4006,
+	webhook: 4007,
+	worker: 4008,
+};
+
+/** Human-readable labels for each trigger type */
+const TRIGGER_LABELS: Record<string, string> = {
+	http: "HTTP Trigger",
+	sse: "SSE Trigger",
+	websocket: "WebSocket Trigger",
+	grpc: "gRPC Trigger",
+	cron: "Cron Trigger",
+	queue: "Queue Trigger",
+	pubsub: "PubSub Trigger",
+	webhook: "Webhook Trigger",
+	worker: "Worker Trigger",
+};
+
+/**
+ * Get the default port for a trigger type.
+ */
+export function getTriggerPort(triggerKind: string): number {
+	return TRIGGER_PORTS[triggerKind] ?? 4000;
+}
+
+/**
+ * Get the human-readable label for a trigger type.
+ */
+export function getTriggerLabel(triggerKind: string): string {
+	return TRIGGER_LABELS[triggerKind] ?? `${triggerKind.toUpperCase()} Trigger`;
+}
+
+/**
+ * Create a TriggerConfig object for a given trigger type.
+ */
+export function createTriggerConfig(triggerKind: string): TriggerConfig {
+	const port = getTriggerPort(triggerKind);
+	return {
+		kind: triggerKind,
+		label: getTriggerLabel(triggerKind),
+		port,
+		entryPoint: `src/triggers/${triggerKind}/index.ts`,
+		startCmd: `bun run src/triggers/${triggerKind}/index.ts`,
+	};
+}
+
+/**
+ * Generate environment variable entries for selected triggers.
+ */
+export function generateTriggerEnvVars(triggerConfigs: TriggerConfig[]): string {
+	if (triggerConfigs.length === 0) return "";
+
+	const lines = ["\n# Triggers (auto-configured by blokctl)"];
+
+	for (const tc of triggerConfigs) {
+		lines.push(`TRIGGER_${tc.kind.toUpperCase()}_PORT=${tc.port}`);
+	}
+
+	return lines.join("\n");
+}
+
+/**
+ * Generate supervisord config entries for selected triggers.
+ */
+export function generateTriggerSupervisordConfig(triggerConfigs: TriggerConfig[]): string {
+	let config = "";
+
+	for (const tc of triggerConfigs) {
+		config += `
+[program:${tc.kind}_trigger]
+command=${tc.startCmd}
+directory=/app
+environment=PORT="${tc.port}",HOST="0.0.0.0"
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/${tc.kind}_trigger.err.log
+stdout_logfile=/var/log/${tc.kind}_trigger.out.log
 `;
 	}
 

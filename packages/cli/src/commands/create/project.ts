@@ -13,8 +13,12 @@ import { manager as pm } from "../../services/package-manager.js";
 import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
 import {
 	type RuntimeConfig,
+	type TriggerConfig,
+	createTriggerConfig,
 	generateRuntimeEnvVars,
 	generateSupervisordConfig,
+	generateTriggerEnvVars,
+	generateTriggerSupervisordConfig,
 	setupRuntime,
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
@@ -25,7 +29,6 @@ import {
 	node_file,
 	package_dependencies,
 	package_dev_dependencies,
-	supervisord_nodejs,
 } from "./utils/Examples.js";
 
 const exec = util.promisify(child_process.exec);
@@ -54,7 +57,12 @@ export async function createProject(opts: OptionValues, version: string, current
 
 	// Initialize from flags or defaults
 	let projectName: string = opts.name ? opts.name : "";
-	let trigger: string = opts.trigger || "http";
+	// Support both --trigger (single, backwards compat) and --triggers (multi)
+	let selectedTriggers: string[] = opts.triggers
+		? parseCommaSeparated(opts.triggers)
+		: opts.trigger
+			? [opts.trigger]
+			: ["http"];
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
 	let selectedManager: string = opts.packageManager || "npm";
@@ -130,16 +138,18 @@ export async function createProject(opts: OptionValues, version: string, current
 		const blokctlProject = await p.group(
 			{
 				projectName: () => resolveProjectName(),
-				trigger: () =>
-					opts.trigger
-						? Promise.resolve(opts.trigger)
-						: p.select({
-								message: "Select the trigger to install",
+				triggers: () =>
+					opts.triggers || opts.trigger
+						? Promise.resolve(opts.triggers ? parseCommaSeparated(opts.triggers) : [opts.trigger])
+						: p.multiselect({
+								message: "Select triggers to install",
 								options: [
-									{ label: "HTTP", value: "http", hint: "recommended" },
-									{ label: "SSE", value: "sse", hint: "real-time server push" },
-									//{ label: "GRPC", value: "grpc" }
+									{ label: "HTTP", value: "http", hint: "REST APIs (port 4000)" },
+									{ label: "SSE", value: "sse", hint: "Real-time push (port 4001)" },
+									//{ label: "GRPC", value: "grpc", hint: "RPC (port 4003)" }
 								],
+								initialValues: ["http"],
+								required: true,
 							}),
 				runtimes: () =>
 					opts.runtimes
@@ -161,7 +171,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		);
 
 		projectName = blokctlProject.projectName;
-		trigger = blokctlProject.trigger;
+		selectedTriggers = blokctlProject.triggers;
 		selectedRuntimeKinds = blokctlProject.runtimes;
 		selectedManager = blokctlProject.selectedManager;
 
@@ -266,7 +276,97 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		fsExtra.copySync(`${repoSource}/triggers/${trigger}`, dirPath);
+		// Create base project structure
+		fsExtra.ensureDirSync(dirPath);
+		fsExtra.ensureDirSync(`${dirPath}/src`);
+		fsExtra.ensureDirSync(`${dirPath}/src/triggers`);
+		fsExtra.ensureDirSync(`${dirPath}/src/nodes`);
+		fsExtra.ensureDirSync(`${dirPath}/src/workflows`);
+
+		// Build trigger configs for all selected triggers
+		const triggerConfigs: TriggerConfig[] = selectedTriggers.map((kind) => createTriggerConfig(kind));
+
+		// Use the first trigger as the "primary" for base files (package.json, tsconfig, etc.)
+		const primaryTrigger = selectedTriggers[0];
+		const primaryTriggerDir = `${repoSource}/triggers/${primaryTrigger}`;
+
+		// Copy base config files from primary trigger
+		const baseFiles = ["package.json", "tsconfig.json", ".env.example", ".gitignore", "vitest.config.ts"];
+		for (const file of baseFiles) {
+			const src = `${primaryTriggerDir}/${file}`;
+			if (fsExtra.existsSync(src)) {
+				fsExtra.copySync(src, `${dirPath}/${file}`);
+			}
+		}
+
+		// Copy Dockerfiles from primary trigger
+		if (fsExtra.existsSync(`${primaryTriggerDir}/Dockerfile`)) {
+			fsExtra.copySync(`${primaryTriggerDir}/Dockerfile`, `${dirPath}/Dockerfile`);
+		}
+		if (fsExtra.existsSync(`${primaryTriggerDir}/Dockerfile.dev`)) {
+			fsExtra.copySync(`${primaryTriggerDir}/Dockerfile.dev`, `${dirPath}/Dockerfile.dev`);
+		}
+
+		// Copy each trigger's files to src/triggers/{kind}/
+		for (const triggerKind of selectedTriggers) {
+			const triggerSrcDir = `${repoSource}/triggers/${triggerKind}/src`;
+			const triggerDestDir = `${dirPath}/src/triggers/${triggerKind}`;
+
+			fsExtra.ensureDirSync(triggerDestDir);
+
+			// Copy runner folder (contains the trigger server implementation)
+			if (fsExtra.existsSync(`${triggerSrcDir}/runner`)) {
+				fsExtra.copySync(`${triggerSrcDir}/runner`, `${triggerDestDir}/runner`);
+			}
+
+			// Copy AppRoutes.ts
+			if (fsExtra.existsSync(`${triggerSrcDir}/AppRoutes.ts`)) {
+				fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
+			}
+
+			// Copy trigger-specific workflow files
+			if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
+				fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
+			}
+
+			// For SSE, also copy the base SSETrigger.ts
+			if (triggerKind === "sse" && fsExtra.existsSync(`${triggerSrcDir}/SSETrigger.ts`)) {
+				fsExtra.copySync(`${triggerSrcDir}/SSETrigger.ts`, `${triggerDestDir}/SSETrigger.ts`);
+			}
+
+			// Copy lib.ts if exists (for SSE package exports)
+			if (fsExtra.existsSync(`${triggerSrcDir}/lib.ts`)) {
+				fsExtra.copySync(`${triggerSrcDir}/lib.ts`, `${triggerDestDir}/lib.ts`);
+			}
+		}
+
+		// Fix import paths in copied runner files (they import from ../Nodes, need ../../Nodes)
+		for (const triggerKind of selectedTriggers) {
+			const triggerDestDir = `${dirPath}/src/triggers/${triggerKind}`;
+			fixRunnerImportPaths(triggerDestDir, triggerKind);
+		}
+
+		// Generate shared Nodes.ts by merging from all triggers
+		const sharedNodesContent = generateSharedNodesFile(selectedTriggers, repoSource);
+		fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, sharedNodesContent);
+
+		// Generate shared Workflows.ts
+		const sharedWorkflowsContent = generateSharedWorkflowsFile(selectedTriggers);
+		fsExtra.writeFileSync(`${dirPath}/src/Workflows.ts`, sharedWorkflowsContent);
+
+		// Generate trigger entry points that import shared nodes/workflows
+		for (const triggerKind of selectedTriggers) {
+			const entryContent = generateTriggerEntryFile(triggerKind);
+			fsExtra.writeFileSync(`${dirPath}/src/triggers/${triggerKind}/index.ts`, entryContent);
+		}
+
+		// Copy trigger-specific nodes to shared src/nodes/
+		for (const triggerKind of selectedTriggers) {
+			const triggerNodesDir = `${repoSource}/triggers/${triggerKind}/src/nodes`;
+			if (fsExtra.existsSync(triggerNodesDir)) {
+				fsExtra.copySync(triggerNodesDir, `${dirPath}/src/nodes`);
+			}
+		}
 
 		if (!skipPrompts) {
 			s.message("Installing example workflows and nodes");
@@ -365,22 +465,30 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Get the package manager
 		manager = await pm.getManager(selectedManager as string);
 
+		// Add trigger-specific scripts to package.json
+		const triggerScripts: Record<string, string> = {
+			dev: "blokctl dev",
+		};
+		for (const tc of triggerConfigs) {
+			triggerScripts[`start:${tc.kind}`] = tc.startCmd;
+		}
+		packageJsonContent.scripts = {
+			...packageJsonContent.scripts,
+			...triggerScripts,
+		};
+
+		// Add blokctl as devDependency for multi-trigger dev server
+		const blokctlRef = localRepoPath ? `file:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
+		packageJsonContent.devDependencies = {
+			...packageJsonContent.devDependencies,
+			blokctl: blokctlRef,
+		};
+
 		// Setup non-NodeJS runtimes
 		const nonNodeRuntimes = selectedRuntimeKinds.filter((kind) => kind !== "node");
 		const runtimeConfigs: RuntimeConfig[] = [];
 
 		if (nonNodeRuntimes.length > 0) {
-			// Add blokctl dev script and devDependency for multi-runtime dev server
-			packageJsonContent.scripts = {
-				...packageJsonContent.scripts,
-				dev: "blokctl dev",
-			};
-			const blokctlRef = localRepoPath ? `file:${path.resolve(repoSource, "packages/cli")}` : `^${version}`;
-			packageJsonContent.devDependencies = {
-				...packageJsonContent.devDependencies,
-				blokctl: blokctlRef,
-			};
-
 			for (const kind of nonNodeRuntimes) {
 				const rt = detectedRuntimes.find((r) => r.kind === kind);
 				if (!rt) continue;
@@ -394,16 +502,20 @@ export async function createProject(opts: OptionValues, version: string, current
 				}
 			}
 
-			// Write .blok/config.json
-			if (runtimeConfigs.length > 0) {
-				writeProjectConfig(dirPath, runtimeConfigs);
-			}
-
 			// Append runtime env vars to .env.local
 			if (runtimeConfigs.length > 0) {
 				const envVars = generateRuntimeEnvVars(runtimeConfigs);
 				fsExtra.appendFileSync(envLocal, envVars);
 			}
+		}
+
+		// Write .blok/config.json with both triggers and runtimes
+		writeProjectConfig(dirPath, runtimeConfigs, triggerConfigs);
+
+		// Append trigger env vars to .env.local
+		if (triggerConfigs.length > 0) {
+			const triggerEnvVars = generateTriggerEnvVars(triggerConfigs);
+			fsExtra.appendFileSync(envLocal, triggerEnvVars);
 		}
 
 		// Examples
@@ -421,9 +533,14 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		fsExtra.writeFileSync(packageJson, JSON.stringify(packageJsonContent, null, 2));
 
-		// Create supervisord.conf
+		// Create supervisord.conf with triggers and runtimes
 		const supervisordConfPath = `${dirPath}/supervisord.conf`;
-		let supervisordConfContent = supervisord_nodejs;
+		let supervisordConfContent = "[supervisord]\nnodaemon=true\n";
+		// Add trigger programs
+		if (triggerConfigs.length > 0) {
+			supervisordConfContent += generateTriggerSupervisordConfig(triggerConfigs);
+		}
+		// Add runtime programs
 		if (runtimeConfigs.length > 0) {
 			supervisordConfContent += generateSupervisordConfig(runtimeConfigs);
 		}
@@ -445,7 +562,10 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Create a new project
 		if (!skipPrompts) s.stop(`Project "${projectName}" created successfully.`);
-		console.log(`\nTrigger: ${trigger.toUpperCase()}`);
+
+		// Show trigger summary
+		const triggerNames = triggerConfigs.map((tc) => tc.label).join(", ");
+		console.log(`\nTriggers: ${triggerNames}`);
 
 		// Show runtime summary
 		const installedRuntimes = ["NodeJS", ...runtimeConfigs.map((rc) => rc.label)];
@@ -453,8 +573,12 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		if (!currentPath) console.log(`Change to the project directory: cd ${projectName}`);
 		console.log(`Run the command "npm run dev" to start the development server.`);
-		const triggerPort = trigger === "sse" ? 4001 : 4000;
-		console.log(`You can test the project in your browser at http://localhost:${triggerPort}/health-check`);
+
+		// Show trigger health check URLs
+		console.log("\nTrigger endpoints:");
+		for (const tc of triggerConfigs) {
+			console.log(`  ${tc.label}: http://localhost:${tc.port}/health-check`);
+		}
 
 		// Show runtime health check URLs
 		if (runtimeConfigs.length > 0) {
@@ -472,5 +596,221 @@ export async function createProject(opts: OptionValues, version: string, current
 	} catch (error) {
 		if (!skipPrompts) s.stop((error as Error).message);
 		if (skipPrompts) console.log((error as Error).message);
+	}
+}
+
+// ============================================================================
+// Helper Functions for Multi-Trigger Project Generation
+// ============================================================================
+
+/**
+ * Generate shared Nodes.ts that combines nodes from all selected triggers.
+ */
+function generateSharedNodesFile(triggers: string[], _repoSource: string): string {
+	// Collect unique node imports from all triggers
+	const nodeImports: Set<string> = new Set();
+	const nodeExports: Map<string, string> = new Map();
+
+	// Always include core nodes
+	nodeImports.add('import ApiCall from "@blok/api-call";');
+	nodeImports.add('import IfElse from "@blok/if-else";');
+	nodeImports.add('import type { BlokService } from "@blok/runner";');
+	nodeExports.set("@blok/api-call", "ApiCall");
+	nodeExports.set("@blok/if-else", "IfElse");
+
+	// Add trigger-specific nodes
+	for (const trigger of triggers) {
+		if (trigger === "sse") {
+			nodeImports.add('import WelcomeMessage from "./nodes/welcome-message/index";');
+			nodeExports.set("welcome-message", "WelcomeMessage");
+		}
+		// Add more trigger-specific nodes here as triggers are added
+	}
+
+	const importLines = Array.from(nodeImports).join("\n");
+	const exportEntries = Array.from(nodeExports.entries())
+		.map(([key, value]) => `\t"${key}": ${value},`)
+		.join("\n");
+
+	return `${importLines}
+
+const nodes: Record<string, BlokService<unknown>> = {
+${exportEntries}
+};
+
+export default nodes;
+`;
+}
+
+/**
+ * Generate shared Workflows.ts that imports workflows from all trigger directories.
+ */
+function generateSharedWorkflowsFile(triggers: string[]): string {
+	const imports: string[] = [];
+	const workflowEntries: string[] = [];
+
+	for (const trigger of triggers) {
+		if (trigger === "http") {
+			// HTTP trigger typically has example workflows
+			imports.push("// Import HTTP workflows here");
+		} else if (trigger === "sse") {
+			imports.push('import OnConnect from "./workflows/sse/notifications/on-connect";');
+			imports.push('import OnSubscribe from "./workflows/sse/notifications/on-subscribe";');
+			workflowEntries.push('\t"on-connect": OnConnect,');
+			workflowEntries.push('\t"on-subscribe": OnSubscribe,');
+		}
+	}
+
+	const importSection = imports.length > 0 ? `${imports.join("\n")}\n` : "";
+	const entriesSection = workflowEntries.length > 0 ? workflowEntries.join("\n") : "\t// Add your workflows here";
+
+	return `import type { HelperResponse } from "@blok/helper";
+
+${importSection}
+const workflows: Record<string, HelperResponse> = {
+${entriesSection}
+};
+
+export default workflows;
+`;
+}
+
+/**
+ * Generate trigger entry point that imports shared nodes/workflows.
+ * Matches the pattern of the original trigger index.ts files.
+ */
+function generateTriggerEntryFile(triggerKind: string): string {
+	if (triggerKind === "http") {
+		return `import { DefaultLogger } from "@blok/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import HttpTrigger from "./runner/HttpTrigger";
+
+export default class App {
+	private httpTrigger: HttpTrigger = <HttpTrigger>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-http-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.httpTrigger = new HttpTrigger();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.httpTrigger.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`Server initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+
+	getHttpApp() {
+		return this.httpTrigger.getApp();
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}
+`;
+	}
+
+	if (triggerKind === "sse") {
+		return `import { DefaultLogger } from "@blok/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import SSEServer from "./runner/SSEServer";
+
+export default class App {
+	private sseServer: SSEServer = <SSEServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-sse-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.sseServer = new SSEServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.sseServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`Server initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+
+	getApp() {
+		return this.sseServer.getApp();
+	}
+}
+
+ {
+	new App().run();
+}
+`;
+	}
+
+	// Generic fallback for other triggers
+	return `// Entry point for ${triggerKind} trigger
+// Implement trigger-specific initialization here
+console.log("${triggerKind} trigger not yet implemented");
+`;
+}
+
+/**
+ * Fix import paths in runner files after copying to src/triggers/{kind}/.
+ * The original files import from "../Nodes" but in the new structure
+ * we need "../../../Nodes" (going up from src/triggers/http/runner/ to src/).
+ * Path: runner/ -> http/ -> triggers/ -> src/
+ */
+function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void {
+	// Files that need path fixes
+	const filesToFix: string[] = [];
+
+	if (triggerKind === "http") {
+		filesToFix.push(`${triggerDestDir}/runner/HttpTrigger.ts`);
+	} else if (triggerKind === "sse") {
+		filesToFix.push(`${triggerDestDir}/runner/SSEServer.ts`);
+	}
+
+	for (const filePath of filesToFix) {
+		if (!fsExtra.existsSync(filePath)) continue;
+
+		let content = fsExtra.readFileSync(filePath, "utf8");
+
+		// Replace imports from "../Nodes" and "../Workflows" with "../../../Nodes" and "../../../Workflows"
+		// Path: src/triggers/http/runner/ -> ../../../ = src/
+		content = content.replace(/from ["']\.\.\/Nodes["']/g, 'from "../../../Nodes"');
+		content = content.replace(/from ["']\.\.\/Workflows["']/g, 'from "../../../Workflows"');
+
+		fsExtra.writeFileSync(filePath, content);
 	}
 }
