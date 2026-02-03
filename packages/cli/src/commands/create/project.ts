@@ -350,14 +350,16 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		// When using local repo, add overrides so the package manager resolves
+		// When using local repo, add overrides/resolutions so the package manager resolves
 		// transitive workspace:* deps (e.g. @blok/runner -> @blok/shared) via file: links
 		if (localRepoPath) {
-			const overrides: Record<string, string> = {};
+			const fileLinks: Record<string, string> = {};
 			for (const [pkg, relativePath] of Object.entries(workspacePackageMap)) {
-				overrides[pkg] = `file:${path.resolve(repoSource, relativePath)}`;
+				fileLinks[pkg] = `file:${path.resolve(repoSource, relativePath)}`;
 			}
-			packageJsonContent.overrides = overrides;
+			// npm/pnpm use "overrides", yarn/bun use "resolutions"
+			packageJsonContent.overrides = fileLinks;
+			packageJsonContent.resolutions = fileLinks;
 		}
 
 		// Get the package manager
