@@ -130,7 +130,7 @@ The DB Manager workflow is defined in `workflows/json/db-manager.json`:
   "steps": [
     {
       "name": "filter-request",
-      "node": "@blok/if-else",
+      "node": "@blokjs/if-else",
       "type": "module"
     }
   ],
@@ -252,7 +252,7 @@ The DB Manager workflow is defined in `workflows/json/db-manager.json`:
 
 ## UI Rendering with If-Else Node
 
-One of the most powerful features of Blok  is the ability to serve different content based on request conditions. The DB Manager example demonstrates this by using the `@blok/if-else` node to render the UI and handle API requests within a single workflow.
+One of the most powerful features of Blok  is the ability to serve different content based on request conditions. The DB Manager example demonstrates this by using the `@blokjs/if-else` node to render the UI and handle API requests within a single workflow.
 
 ### How UI Rendering Works in Blok 
 
@@ -309,8 +309,8 @@ import {
   type IBlokResponse,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import fs from 'fs';
 import path from 'path';
 
@@ -410,8 +410,8 @@ import {
   type JsonLikeObject,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import pg from "pg";
 
 type PostgresQueryInputs = {
@@ -495,8 +495,8 @@ import {
   BlokService,
   BlokResponse,
   type ParamsDictionary,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import { generateText } from "ai";
 
 type InputType = {
@@ -597,8 +597,8 @@ import {
   type JsonLikeObject,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 
 type InputType = {
   model: object;

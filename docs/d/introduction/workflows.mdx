@@ -85,7 +85,7 @@ JSON is the default format for defining workflows in Blok . A typical workflow J
   "steps": [
     {
       "name": "get-countries-api",
-      "node": "@blok/api-call",
+      "node": "@blokjs/api-call",
       "type": "module"
     }
   ],
@@ -107,7 +107,7 @@ JSON is the default format for defining workflows in Blok . A typical workflow J
 In this example:
 1. The workflow is named "World Countries".
 2. It's triggered by a GET request to the root path ("/").
-3. It has one step that uses the built-in `@blok/api-call` node to fetch country data from an external API.
+3. It has one step that uses the built-in `@blokjs/api-call` node to fetch country data from an external API.
 
 ### TOML and YAML Formats
 
@@ -124,15 +124,15 @@ Blok comes with several built-in nodes that provide common functionality. These 
 
 ```typescript
 // src/Nodes.ts
-import ApiCall from "@blok/api-call";
-import IfElse from "@blok/if-else";
-import type { NodeBase } from "@blok/shared";
+import ApiCall from "@blokjs/api-call";
+import IfElse from "@blokjs/if-else";
+import type { NodeBase } from "@blokjs/shared";
 
 const nodes: {
   [key: string]: NodeBase;
 } = {
-  "@blok/api-call": new ApiCall(),
-  "@blok/if-else": new IfElse(),
+  "@blokjs/api-call": new ApiCall(),
+  "@blokjs/if-else": new IfElse(),
 };
 
 export default nodes;
@@ -140,10 +140,10 @@ export default nodes;
 
 The key built-in nodes include:
 
-1. **`@blok/api-call`**: Makes HTTP requests to external APIs and services.
-2. **`@blok/if-else`**: Provides conditional branching in workflows based on specified conditions.
+1. **`@blokjs/api-call`**: Makes HTTP requests to external APIs and services.
+2. **`@blokjs/if-else`**: Provides conditional branching in workflows based on specified conditions.
 
-You can use these built-in nodes directly in your workflow definitions by referencing their names (e.g., `"@blok/api-call"`) in the `node` property of a step.
+You can use these built-in nodes directly in your workflow definitions by referencing their names (e.g., `"@blokjs/api-call"`) in the `node` property of a step.
 
 ## Workflow Execution
 
