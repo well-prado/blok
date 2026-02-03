@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-pubsub",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Pub/Sub-based trigger for Blok workflows - supports GCP Pub/Sub, AWS SNS/SQS, and Azure Service Bus",
 	"type": "module",
 	"main": "dist/index.js",

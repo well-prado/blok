@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-queue",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Queue-based trigger for Blok workflows - supports Kafka, RabbitMQ, SQS, and Redis",
 	"type": "module",
 	"main": "dist/index.js",

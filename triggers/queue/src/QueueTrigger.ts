@@ -117,12 +117,6 @@ export abstract class QueueTrigger extends TriggerBase {
 	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
-	constructor() {
-		super();
-		this.loadNodes();
-		this.loadWorkflows();
-	}
-
 	/**
 	 * Load nodes into the node map
 	 */
@@ -146,6 +140,11 @@ export abstract class QueueTrigger extends TriggerBase {
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
+
+		// Initialize nodes and workflows (called here because subclass properties
+		// aren't available in parent constructor)
+		this.loadNodes();
+		this.loadWorkflows();
 
 		try {
 			// Connect to queue system

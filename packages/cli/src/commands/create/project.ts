@@ -1091,10 +1091,10 @@ function updatePubSubProvider(triggerDestDir: string, provider: string): void {
 	const config = adapterConfigs[provider];
 	if (!config) return;
 
-	// Replace import
+	// Replace import (handles both orders: {Adapter, PubSubTrigger} or {PubSubTrigger, Adapter})
 	content = content.replace(
-		/import \{ PubSubTrigger, \w+ \} from "@blok\/trigger-pubsub";/,
-		`import { PubSubTrigger, ${config.importName} } from "@blokjs/trigger-pubsub";`,
+		/import \{ (\w+), (\w+) \} from ["']@blokjs\/trigger-pubsub["'];/,
+		`import { ${config.importName}, PubSubTrigger } from "@blokjs/trigger-pubsub";`,
 	);
 
 	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
@@ -1148,10 +1148,10 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	const config = adapterConfigs[provider];
 	if (!config) return;
 
-	// Replace import
+	// Replace import (handles both orders: {Adapter, QueueTrigger} or {QueueTrigger, Adapter})
 	content = content.replace(
-		/import \{ QueueTrigger, \w+ \} from "@blok\/trigger-queue";/,
-		`import { QueueTrigger, ${config.importName} } from "@blokjs/trigger-queue";`,
+		/import \{ (\w+), (\w+) \} from ["']@blokjs\/trigger-queue["'];/,
+		`import { ${config.importName}, QueueTrigger } from "@blokjs/trigger-queue";`,
 	);
 
 	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
