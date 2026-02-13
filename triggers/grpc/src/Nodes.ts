@@ -1,10 +1,8 @@
 import ApiCall from "@blokjs/api-call";
 import IfElse from "@blokjs/if-else";
-import type { NodeBase } from "@blokjs/shared";
+import type { BlokService } from "@blokjs/runner";
 
-const nodes: {
-	[key: string]: NodeBase;
-} = {
+const nodes: Record<string, BlokService<unknown>> = {
 	"@blokjs/api-call": ApiCall,
 	"@blokjs/if-else": IfElse,
 };

@@ -1,7 +1,5 @@
-import type { NodeBase } from "@blokjs/shared";
+import type { BlokService } from "@blokjs/runner";
 
-type Nodes = {
-	[key: string]: NodeBase;
-};
+type Nodes = Record<string, BlokService<unknown>>;
 
 export default Nodes;
