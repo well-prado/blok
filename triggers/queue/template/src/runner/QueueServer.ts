@@ -44,6 +44,6 @@ export default class QueueServer extends QueueTrigger {
 		clientId: process.env.KAFKA_CLIENT_ID || "blok-queue-trigger",
 	});
 
-	protected nodes = nodes;
-	protected workflows = workflows;
+	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected workflows: Record<string, import("@blokjs/helper").HelperResponse> = workflows;
 }

@@ -21,8 +21,8 @@ export default class SSEServer extends SSETrigger {
 	private port: string | number = process.env.PORT || 4001;
 	private server: Server | null = null;
 
-	protected nodes = nodes;
-	protected workflows = workflows;
+	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected workflows: Record<string, import("@blokjs/helper").HelperResponse> = workflows;
 
 	/**
 	 * Gracefully stop the SSE server.

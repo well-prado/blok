@@ -34,6 +34,6 @@ export default class PubSubServer extends PubSubTrigger {
 		projectId: process.env.GCP_PROJECT_ID || "my-project",
 	});
 
-	protected nodes = nodes;
-	protected workflows = workflows;
+	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected workflows: Record<string, import("@blokjs/helper").HelperResponse> = workflows;
 }
