@@ -44,12 +44,15 @@ export default abstract class RunnerSteps {
 				if (!step.flow) {
 					// --- Trace: start node ---
 					let nodeRunId: string | undefined;
+					const stepAny = step as unknown as Record<string, unknown>;
+					const stepType = (stepAny.type as string) || "unknown";
+					const stepPrefix = `[step ${i + 1}/${steps.length}] ${step.name} (${stepType})`;
+
 					if (tracker && traceRunId) {
-						const stepAny = step as unknown as Record<string, unknown>;
 						const configAny = ctx.config as unknown as Record<string, Record<string, unknown>>;
 						const nodeRun = tracker.startNode(traceRunId, {
 							nodeName: step.name,
-							nodeType: (stepAny.type as string) || "unknown",
+							nodeType: stepType,
 							runtimeKind: stepAny.runtime as string | undefined,
 							inputs: sanitize(configAny?.[step.name]?.inputs ?? stepAny.config),
 							depth: depthLevel,
@@ -59,9 +62,14 @@ export default abstract class RunnerSteps {
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;
 					}
 
+					ctx.logger.log(`${stepPrefix} → started`);
+					const stepStart = performance.now();
+
 					try {
 						const model = await step.process(ctx, step as unknown as Step);
 						ctx.response = model.data as BlokResponse;
+
+						const stepDuration = (performance.now() - stepStart).toFixed(1);
 
 						// --- Trace: complete or fail node ---
 						if (tracker && nodeRunId) {
@@ -76,7 +84,12 @@ export default abstract class RunnerSteps {
 							}
 						}
 
-						if (ctx.response.error) throw ctx.response.error;
+						if (ctx.response.error) {
+							ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms)`);
+							throw ctx.response.error;
+						}
+
+						ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms)`);
 					} catch (nodeErr) {
 						// --- Trace: fail node on exception ---
 						if (tracker && nodeRunId) {
@@ -85,7 +98,12 @@ export default abstract class RunnerSteps {
 								tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
 							}
 						}
-						throw nodeErr;
+
+						// Enrich error with step context so developers know which step failed
+						const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+						const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
+						(enrichedError as Error & { cause?: unknown }).cause = nodeErr;
+						throw enrichedError;
 					}
 				} else {
 					stepName = step.name;

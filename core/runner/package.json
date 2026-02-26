@@ -8,9 +8,7 @@
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
-	"files": [
-		"dist"
-	],
+	"files": ["dist"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {

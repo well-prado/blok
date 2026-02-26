@@ -12,9 +12,9 @@
 
 import type { CronTriggerOpts, HelperResponse } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,

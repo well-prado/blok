@@ -59,7 +59,7 @@ async function checkBackendHealth(backendUrl: string): Promise<boolean> {
  * Handles REST + SSE streams transparently via pipe.
  */
 function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, backendUrl: string) {
-	const targetUrl = new URL(req.url!, backendUrl);
+	const targetUrl = new URL(req.url ?? "/", backendUrl);
 	const client = targetUrl.protocol === "https:" ? https : http;
 
 	const proxyReq = client.request(
@@ -106,7 +106,7 @@ export async function startStudio(options: StudioOptions): Promise<void> {
 	// Resolve Studio static assets
 	const staticPath = resolveStaticPath();
 	if (!staticPath) {
-		p.log.error(`Studio assets not found.\n` + `  Build them first: ${color.cyan("pnpm --filter @blokjs/studio build")}`);
+		p.log.error(`Studio assets not found.\n  Build them first: ${color.cyan("pnpm --filter @blokjs/studio build")}`);
 		process.exit(1);
 	}
 

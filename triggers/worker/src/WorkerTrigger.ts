@@ -21,9 +21,9 @@
 
 import type { HelperResponse, WorkerTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
@@ -373,7 +373,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 
 				// Store worker metadata in context
 				if (!ctx.vars) ctx.vars = {};
-				ctx.vars["_worker_job"] = {
+				ctx.vars._worker_job = {
 					id: job.id,
 					queue: job.queue,
 					attempts: String(job.attempts),
@@ -492,7 +492,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 	protected calculateBackoff(attempt: number, baseDelay?: number): number {
 		const base = baseDelay ?? 1000;
 		const maxDelay = 30000; // 30 seconds max
-		const exponential = Math.min(base * Math.pow(2, attempt), maxDelay);
+		const exponential = Math.min(base * 2 ** attempt, maxDelay);
 		const jitter = Math.random() * exponential * 0.1; // 10% jitter
 		return Math.floor(exponential + jitter);
 	}

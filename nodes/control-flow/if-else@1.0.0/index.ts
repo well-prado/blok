@@ -6,7 +6,7 @@
  */
 
 import type { ConditionOpts } from "@blokjs/helper";
-import { type Condition, type BlokService, defineNode } from "@blokjs/runner";
+import { type BlokService, type Condition, defineNode } from "@blokjs/runner";
 import type { Context, NodeBase } from "@blokjs/shared";
 import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
 import { z } from "zod";

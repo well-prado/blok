@@ -18,9 +18,9 @@
 
 import type { HelperResponse, WebSocketTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
@@ -496,7 +496,8 @@ export abstract class WebSocketTrigger extends TriggerBase {
 			});
 		}
 
-		const room = this.rooms.get(roomName)!;
+		const room = this.rooms.get(roomName);
+		if (!room) return;
 		room.clients.add(clientId);
 		client.rooms.add(roomName);
 

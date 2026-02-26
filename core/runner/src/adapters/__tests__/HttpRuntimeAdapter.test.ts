@@ -274,7 +274,7 @@ describe("HttpRuntimeAdapter", () => {
 			});
 		});
 
-		it("should include node config in ExecutionRequest", async () => {
+		it("should include unwrapped node config in ExecutionRequest", async () => {
 			const ctx = createMockContext();
 			(ctx as any).config = {
 				go: {
@@ -288,9 +288,10 @@ describe("HttpRuntimeAdapter", () => {
 			const fetchCall = vi.mocked(fetch).mock.calls[0];
 			const body = JSON.parse(fetchCall[1]?.body as string);
 
+			// Config should be unwrapped: inputs are sent directly, not wrapped in {inputs: {...}}
 			expect(body.node.config).toEqual({
-				inputs: { chain: [], origin: "test" },
-				timeout: 5000,
+				chain: [],
+				origin: "test",
 			});
 		});
 

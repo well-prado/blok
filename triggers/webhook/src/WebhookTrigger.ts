@@ -17,9 +17,9 @@
 import crypto from "node:crypto";
 import type { HelperResponse, WebhookTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,

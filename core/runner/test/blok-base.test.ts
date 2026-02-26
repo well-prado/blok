@@ -1,8 +1,8 @@
 import type { Context, LoggerContext } from "@blokjs/shared";
 import { beforeAll, expect, test } from "vitest";
-import DefaultLogger from "../src/DefaultLogger";
 import BlokService from "../src/Blok";
 import BlokResponse, { type IBlokResponse } from "../src/BlokResponse";
+import DefaultLogger from "../src/DefaultLogger";
 import type JsonLikeObject from "../src/types/JsonLikeObject";
 
 let context = <Context>{};

@@ -308,8 +308,16 @@ export default class HttpTrigger extends TriggerBase {
 						span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
 						span.setStatus({ code: SpanStatusCode.OK });
 
-						const data = ctx.response.data;
-						c.header("Content-Type", ctx.response.contentType);
+						// Support both module nodes (wrapped BlokResponse with .data/.contentType)
+						// and runtime adapter nodes (raw data without wrapper)
+						const hasWrapper =
+							ctx.response &&
+							typeof ctx.response === "object" &&
+							"data" in ctx.response &&
+							"contentType" in ctx.response;
+						const data = hasWrapper ? ctx.response.data : ctx.response;
+						const contentType = hasWrapper ? ctx.response.contentType : "application/json";
+						c.header("Content-Type", contentType);
 						if (typeof data === "string") {
 							return c.body(data, 200);
 						}

@@ -26,12 +26,14 @@ export interface WorkflowTestResult {
 	/** Whether the entire workflow executed successfully */
 	success: boolean;
 	/** Final output of the workflow */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility handles arbitrary data
 	output: any;
 	/** Ordered trace of node executions */
 	trace: ExecutionTrace[];
 	/** Total execution duration in milliseconds */
 	durationMs: number;
 	/** Per-node results keyed by node name */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility handles arbitrary data
 	nodeResults: Map<string, TestResult<any>>;
 }
 
@@ -44,8 +46,10 @@ export interface ExecutionTrace {
 	/** The index of this step in the workflow */
 	stepIndex: number;
 	/** Input data provided to the node */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility handles arbitrary data
 	input: any;
 	/** Output data returned by the node */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility handles arbitrary data
 	output: any;
 	/** Execution duration in milliseconds */
 	durationMs: number;
@@ -77,7 +81,9 @@ export interface WorkflowExecuteOptions {
 interface WorkflowStep {
 	name: string;
 	node: string;
+	// biome-ignore lint/suspicious/noExplicitAny: workflow inputs are arbitrary
 	inputs?: Record<string, any>;
+	// biome-ignore lint/suspicious/noExplicitAny: condition shapes are dynamic
 	conditions?: any[];
 	set_var?: boolean;
 }
@@ -88,25 +94,27 @@ interface WorkflowStep {
 interface WorkflowDefinition {
 	name?: string;
 	steps: WorkflowStep[];
+	// biome-ignore lint/suspicious/noExplicitAny: trigger config is dynamic
 	trigger?: any;
 }
 
 /**
  * A mock node implementation wrapping a user-provided handler function.
  */
+// biome-ignore lint/suspicious/noExplicitAny: mock node needs generic any for test flexibility
 class MockNode extends BlokService<any> {
+	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
 	private handler: (input: any, ctx: Context) => Promise<any>;
 
+	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
 	constructor(name: string, handler: (input: any, ctx: Context) => Promise<any>) {
 		super();
 		this.name = name;
 		this.handler = handler;
 	}
 
-	async handle(
-		ctx: Context,
-		inputs: any | JsonLikeObject | Condition[],
-	): Promise<IBlokResponse | BlokService<any>[]> {
+	// biome-ignore lint/suspicious/noExplicitAny: matches BlokService.handle signature
+	async handle(ctx: Context, inputs: any | JsonLikeObject | Condition[]): Promise<IBlokResponse | BlokService<any>[]> {
 		const response = new BlokResponse();
 
 		try {
@@ -171,9 +179,11 @@ class AutoMockNode extends MockNode {
  */
 export class WorkflowTestRunner {
 	private config: Required<WorkflowTestConfig>;
+	// biome-ignore lint/suspicious/noExplicitAny: node registry holds heterogeneous node types
 	private nodes: Map<string, BlokService<any>>;
 	private workflow: WorkflowDefinition | null;
 	private trace: ExecutionTrace[];
+	// biome-ignore lint/suspicious/noExplicitAny: test results hold arbitrary data
 	private nodeResults: Map<string, TestResult<any>>;
 
 	constructor(config?: WorkflowTestConfig) {
@@ -194,8 +204,10 @@ export class WorkflowTestRunner {
 	 * @param name - The node name as referenced in the workflow steps
 	 * @param node - A BlokService instance or a FunctionNode from defineNode()
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: accepts heterogeneous node types for test flexibility
 	registerNode(name: string, node: BlokService<any> | FunctionNode<any, any>): void {
 		node.name = name;
+		// biome-ignore lint/suspicious/noExplicitAny: cast required for heterogeneous node storage
 		this.nodes.set(name, node as BlokService<any>);
 
 		if (this.config.verbose) {
@@ -212,6 +224,7 @@ export class WorkflowTestRunner {
 	 * @param name - The node name as referenced in the workflow steps
 	 * @param handler - Async function that receives (input, ctx) and returns output
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: mock handler accepts arbitrary inputs/outputs
 	mockNode(name: string, handler: (input: any, ctx: Context) => Promise<any>): void {
 		const mockNodeInstance = new MockNode(name, handler);
 		this.nodes.set(name, mockNodeInstance);
@@ -262,6 +275,7 @@ export class WorkflowTestRunner {
 	 * @returns WorkflowTestResult with output, trace, and per-node results
 	 * @throws Error if no workflow is loaded or if a required node is not registered
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility accepts arbitrary input data
 	async execute(input: any, options?: WorkflowExecuteOptions): Promise<WorkflowTestResult> {
 		if (!this.workflow) {
 			throw new Error("No workflow loaded. Call loadWorkflow() first.");
@@ -301,6 +315,7 @@ export class WorkflowTestRunner {
 		};
 
 		let workflowSuccess = true;
+		// biome-ignore lint/suspicious/noExplicitAny: error can be any type
 		let workflowError: any = null;
 
 		// Create a timeout promise
@@ -448,6 +463,7 @@ export class WorkflowTestRunner {
 			// If step sets a var, store output in vars
 			if (step.set_var) {
 				if (!ctx.vars) ctx.vars = {};
+				// biome-ignore lint/suspicious/noExplicitAny: vars hold arbitrary workflow data
 				(ctx.vars as Record<string, any>)[step.name] = response.data;
 			}
 

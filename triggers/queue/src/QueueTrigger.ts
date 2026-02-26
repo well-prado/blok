@@ -22,9 +22,9 @@
 
 import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
@@ -267,7 +267,7 @@ export abstract class QueueTrigger extends TriggerBase {
 
 				// Store raw message in context for advanced use cases
 				if (!ctx.vars) ctx.vars = {};
-				ctx.vars["_queue_message"] = {
+				ctx.vars._queue_message = {
 					topic: message.topic,
 					partition: String(message.partition ?? ""),
 					offset: message.offset ?? "",

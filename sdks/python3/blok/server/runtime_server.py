@@ -80,6 +80,18 @@ class _RequestHandler(BaseHTTPRequestHandler):
         """Override to use Python logging instead of stderr."""
         logger.debug("%s %s", self.address_string(), format % args)
 
+    def handle_one_request(self) -> None:
+        """Override to suppress ConnectionResetError noise.
+
+        The Blok runner closes HTTP connections after reading the response,
+        which causes Python's http.server to log ConnectionResetError tracebacks.
+        These are expected and not actual errors.
+        """
+        try:
+            super().handle_one_request()
+        except ConnectionResetError:
+            self.close_connection = True
+
 
 class RuntimeServer:
     """Blok HTTP server that handles execute and health requests.

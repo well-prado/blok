@@ -58,8 +58,23 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 			});
 
 			if (!response.ok) {
+				// Read the error response body — SDK containers return structured error details
+				// that would otherwise be lost (e.g. validation messages, stack traces)
+				let errorDetail = "";
+				try {
+					const errorBody = (await response.json()) as Record<string, unknown>;
+					const errors = errorBody?.errors as Record<string, unknown> | undefined;
+					errorDetail = (errors?.message as string) || JSON.stringify(errors) || "";
+				} catch {
+					try {
+						errorDetail = await response.text();
+					} catch {
+						/* body not readable */
+					}
+				}
+
 				throw new Error(
-					`HTTP runtime '${this.kind}' at ${this.baseUrl} returned HTTP ${response.status}: ${response.statusText}`,
+					`HTTP runtime '${this.kind}' at ${this.baseUrl} returned HTTP ${response.status}: ${response.statusText}${errorDetail ? ` — ${errorDetail}` : ""}`,
 				);
 			}
 
@@ -117,11 +132,16 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 		// Use resolved inputs if available, otherwise fall back to previous step data
 		const requestBody = resolvedInputs || (ctx.response?.data ?? {});
 
+		// Unwrap the {inputs: {...}} wrapper that comes from @blokjs/helper StepNode.
+		// SDK nodes expect config to contain the inputs directly (e.g. config.operation),
+		// not wrapped as config.inputs.operation.
+		const unwrappedConfig = resolvedInputs || (nodeConfig as Record<string, unknown>)?.inputs || nodeConfig || {};
+
 		return {
 			node: {
 				name: node.node,
 				type: node.type,
-				config: nodeConfig || {},
+				config: unwrappedConfig,
 			},
 			context: {
 				id: ctx.id,

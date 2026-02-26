@@ -20,9 +20,9 @@
 
 import type { HelperResponse, PubSubProvider, PubSubTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
@@ -263,7 +263,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 
 				// Store message metadata in context
 				if (!ctx.vars) ctx.vars = {};
-				ctx.vars["_pubsub_message"] = {
+				ctx.vars._pubsub_message = {
 					topic: message.topic,
 					subscription: message.subscription || "",
 					publishTime: message.publishTime?.toISOString() ?? "",
