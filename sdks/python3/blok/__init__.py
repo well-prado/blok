@@ -33,3 +33,11 @@ __all__ = [
     "Logger",
     "LogLevel",
 ]
+
+# Worker (optional — requires nats-py)
+try:
+    from blok.worker import Worker, WorkerConfig, JobMessage, listen_and_serve_worker
+
+    __all__ += ["Worker", "WorkerConfig", "JobMessage", "listen_and_serve_worker"]
+except ImportError:
+    pass

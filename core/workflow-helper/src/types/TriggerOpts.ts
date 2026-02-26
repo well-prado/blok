@@ -13,8 +13,8 @@ export const TriggerOptsSchema = HttpTriggerOptsSchema;
 // Use z.input for parameter types (allows optional fields with defaults)
 export type TriggerOpts = z.input<typeof TriggerOptsSchema>;
 
-// Queue Trigger Options (Kafka, RabbitMQ, SQS, Redis)
-export const QueueProviderSchema = z.enum(["kafka", "rabbitmq", "sqs", "redis", "beanstalk"]);
+// Queue Trigger Options (Kafka, RabbitMQ, SQS, Redis, NATS)
+export const QueueProviderSchema = z.enum(["kafka", "rabbitmq", "sqs", "redis", "beanstalk", "nats"]);
 export type QueueProvider = z.infer<typeof QueueProviderSchema>;
 
 export const QueueTriggerOptsSchema = z.object({

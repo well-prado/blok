@@ -62,6 +62,7 @@ export {
 // Adapters
 export { BullMQAdapter, type BullMQConfig } from "./adapters/BullMQAdapter";
 export { InMemoryAdapter } from "./adapters/InMemoryAdapter";
+export { NATSWorkerAdapter, type NATSWorkerConfig } from "./adapters/NATSAdapter";
 
 // Re-export types from helper for convenience
 export type { WorkerTriggerOpts } from "@blokjs/helper";

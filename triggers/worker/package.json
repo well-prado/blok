@@ -28,13 +28,17 @@
 	},
 	"peerDependencies": {
 		"bullmq": "^5.67.2",
-		"ioredis": "^5.9.2"
+		"ioredis": "^5.9.2",
+		"nats": ""
 	},
 	"peerDependenciesMeta": {
 		"bullmq": {
 			"optional": true
 		},
 		"ioredis": {
+			"optional": true
+		},
+		"nats": {
 			"optional": true
 		}
 	},

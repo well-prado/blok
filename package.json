@@ -54,6 +54,7 @@
 		"ioredis": "^5.9.2",
 		"kafkajs": "^2.2.4",
 		"lint-staged": "^16.2.7",
+		"nats": "^2.29.3",
 		"nx": "20.8.4",
 		"typedoc": "^0.28.16",
 		"typedoc-plugin-markdown": "^4.9.0"

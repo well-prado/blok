@@ -9,8 +9,12 @@ description = "Blok Blok SDK for Python 3 — build workflow nodes as HTTP micro
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
+[project.optional-dependencies]
+worker = ["nats-py>=2.9.0"]
+
 [project.scripts]
 blok-serve = "bin.serve:main"
+blok-worker = "bin.worker:main"
 
 [tool.setuptools.packages.find]
 include = ["blok*"]

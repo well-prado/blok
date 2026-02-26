@@ -40,6 +40,8 @@ pub mod registry;
 #[cfg(feature = "http")]
 pub mod server;
 pub mod testing;
+#[cfg(feature = "worker")]
+pub mod worker;
 pub mod types;
 pub mod validation;
 

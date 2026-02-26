@@ -76,6 +76,7 @@ export { KafkaAdapter, type KafkaConfig } from "./adapters/KafkaAdapter";
 export { RabbitMQAdapter, type RabbitMQConfig } from "./adapters/RabbitMQAdapter";
 export { SQSAdapter, type SQSConfig } from "./adapters/SQSAdapter";
 export { RedisAdapter, type RedisConfig } from "./adapters/RedisAdapter";
+export { NATSAdapter, type NATSConfig } from "./adapters/NATSAdapter";
 
 // Re-export types from helper for convenience
 export type {

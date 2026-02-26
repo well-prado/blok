@@ -1,2 +1,5 @@
 # Blok Blok Python3 SDK
-# No external dependencies required - uses Python standard library only
+# No external dependencies required for HTTP server mode - uses Python standard library only
+#
+# For worker mode (NATS JetStream background jobs), install:
+#   pip install nats-py>=2.9.0

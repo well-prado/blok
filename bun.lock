@@ -16,6 +16,7 @@
         "ioredis": "^5.9.2",
         "kafkajs": "^2.2.4",
         "lint-staged": "^16.2.7",
+        "nats": "^2.29.3",
         "nx": "20.8.4",
         "typedoc": "^0.28.16",
         "typedoc-plugin-markdown": "^4.9.0",
@@ -192,7 +193,7 @@
     },
     "packages/cli": {
       "name": "blokctl",
-      "version": "0.2.7",
+      "version": "0.2.11",
       "bin": {
         "blokctl": "./dist/index.js",
       },
@@ -418,7 +419,7 @@
     },
     "triggers/pubsub": {
       "name": "@blokjs/trigger-pubsub",
-      "version": "0.2.1",
+      "version": "0.2.3",
       "dependencies": {
         "@blokjs/helper": "^0.2.0",
         "@blokjs/runner": "^0.2.0",
@@ -436,7 +437,7 @@
         "@aws-sdk/client-sns": "^3.980.0",
         "@aws-sdk/client-sqs": "^3.980.0",
         "@azure/service-bus": "^7.9.5",
-        "@google-cloud/pubsub": "^4.0.0",
+        "@google-cloud/pubsub": "^5.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sns",
@@ -447,7 +448,7 @@
     },
     "triggers/queue": {
       "name": "@blokjs/trigger-queue",
-      "version": "0.2.1",
+      "version": "0.2.3",
       "dependencies": {
         "@blokjs/helper": "^0.2.0",
         "@blokjs/runner": "^0.2.0",
@@ -468,6 +469,7 @@
         "bullmq": "",
         "ioredis": "",
         "kafkajs": "",
+        "nats": "",
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
@@ -475,6 +477,7 @@
         "bullmq",
         "ioredis",
         "kafkajs",
+        "nats",
       ],
     },
     "triggers/sse": {
@@ -568,10 +571,12 @@
       "peerDependencies": {
         "bullmq": "^5.67.2",
         "ioredis": "^5.9.2",
+        "nats": "",
       },
       "optionalPeers": [
         "bullmq",
         "ioredis",
+        "nats",
       ],
     },
   },
@@ -2434,6 +2439,10 @@
 
     "napi-build-utils": ["napi-build-utils@2.0.0", "", {}, "sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA=="],
 
+    "nats": ["nats@2.29.3", "", { "dependencies": { "nkeys.js": "1.1.0" } }, "sha512-tOQCRCwC74DgBTk4pWZ9V45sk4d7peoE2njVprMRCBXrhJ5q5cYM7i6W+Uvw2qUrcfOSnuisrX7bEx3b3Wx4QA=="],
+
+    "nkeys.js": ["nkeys.js@1.1.0", "", { "dependencies": { "tweetnacl": "1.0.3" } }, "sha512-tB/a0shZL5UZWSwsoeyqfTszONTt4k2YS0tuQioMOD180+MbombYVgzDUYHlx+gejYK6rgf08n/2Df99WY0Sxg=="],
+
     "node-abi": ["node-abi@3.87.0", "", { "dependencies": { "semver": "^7.3.5" } }, "sha512-+CGM1L1CgmtheLcBuleyYOn7NWPVu0s0EJH2C4puxgEZb9h8QpR9G2dBfZJOAUhi7VQxuBPMd0hiISWcTyiYyQ=="],
 
     "node-abort-controller": ["node-abort-controller@3.1.1", "", {}, "sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ=="],
@@ -2883,6 +2892,8 @@
     "tsx": ["tsx@4.21.0", "", { "dependencies": { "esbuild": "~0.27.0", "get-tsconfig": "^4.7.5" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "bin": { "tsx": "dist/cli.mjs" } }, "sha512-5C1sg4USs1lfG0GFb2RLXsdpXqBSEhAaA/0kPL01wxzpMqLILNxIxIOKiILz+cdg/pLnOUxFYOR5yhHU666wbw=="],
 
     "tunnel-agent": ["tunnel-agent@0.6.0", "", { "dependencies": { "safe-buffer": "^5.0.1" } }, "sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w=="],
+
+    "tweetnacl": ["tweetnacl@1.0.3", "", {}, "sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw=="],
 
     "type-fest": ["type-fest@4.41.0", "", {}, "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA=="],
 

@@ -179,6 +179,7 @@ export async function createProject(opts: OptionValues, version: string, current
 										{ label: "RabbitMQ", value: "rabbitmq" },
 										{ label: "AWS SQS", value: "sqs" },
 										{ label: "Redis/BullMQ", value: "redis" },
+										{ label: "NATS JetStream", value: "nats" },
 									],
 								})
 							: Promise.resolve(null),
@@ -460,7 +461,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		fsExtra.copySync(`${repoSource}/infra/metrics`, `${dirPath}/infra/metrics`);
 		fsExtra.removeSync(`${dirPath}/public/metric`);
 
-		// Copy development infra (docker-compose with Redis) if queue trigger is selected
+		// Copy development infra (docker-compose with Redis/NATS) if queue trigger is selected
 		if (selectedTriggers.includes("queue")) {
 			fsExtra.ensureDirSync(`${dirPath}/infra/development`);
 			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/development`);
@@ -718,6 +719,15 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log(color.dim("    docker network create shared-network"));
 			console.log(color.dim("    docker compose up -d redis redis-commander"));
 			console.log("  Redis Commander UI: http://localhost:8081");
+		}
+
+		if (selectedTriggers.includes("queue") && queueProvider === "nats") {
+			console.log(color.cyan("\n📦 NATS JetStream Setup (for Queue trigger):"));
+			console.log("  Start NATS with Docker:");
+			console.log(color.dim("    cd infra/development"));
+			console.log(color.dim("    docker network create shared-network"));
+			console.log(color.dim("    docker compose up -d nats"));
+			console.log("  NATS Monitoring: http://localhost:8222");
 		}
 
 		console.log("\nFor more documentation, visit https://blok.build/");
@@ -1159,6 +1169,12 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 		port: Number(process.env.REDIS_PORT) || 6379,
 	})`,
 		},
+		nats: {
+			importName: "NATSAdapter",
+			init: `new NATSAdapter({
+		servers: (process.env.NATS_SERVERS || "localhost:4222").split(","),
+	})`,
+		},
 	};
 
 	const config = adapterConfigs[provider];
@@ -1178,6 +1194,14 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	);
 
 	fsExtra.writeFileSync(serverPath, content);
+
+	// Update the example workflow's provider field to match the selected provider
+	const workflowPath = `${triggerDestDir}/workflows/messages/on-message.ts`;
+	if (fsExtra.existsSync(workflowPath)) {
+		let workflowContent = fsExtra.readFileSync(workflowPath, "utf8");
+		workflowContent = workflowContent.replace(/provider: "kafka"/, `provider: "${provider}"`);
+		fsExtra.writeFileSync(workflowPath, workflowContent);
+	}
 }
 
 /**
@@ -1201,6 +1225,7 @@ function getProviderDependencies(
 		rabbitmq: { amqplib: "^0.10.9" },
 		sqs: { "@aws-sdk/client-sqs": "^3.980.0" },
 		redis: { ioredis: "^5.9.2", bullmq: "^5.67.2" },
+		nats: { nats: "^2.28.0" },
 	};
 
 	if (triggers.includes("pubsub") && pubsubProviderDeps[pubsubProvider]) {
@@ -1253,6 +1278,10 @@ SQS_QUEUE_URL=`,
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=`,
+		nats: `
+# NATS JetStream
+NATS_SERVERS=localhost:4222
+NATS_STREAM_NAME=blok-queue`,
 	};
 
 	if (triggers.includes("pubsub") && pubsubEnvVars[pubsubProvider]) {

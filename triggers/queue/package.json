@@ -32,7 +32,8 @@
 		"amqplib": "",
 		"@aws-sdk/client-sqs": "",
 		"ioredis": "",
-		"bullmq": ""
+		"bullmq": "",
+		"nats": ""
 	},
 	"peerDependenciesMeta": {
 		"kafkajs": {
@@ -48,6 +49,9 @@
 			"optional": true
 		},
 		"bullmq": {
+			"optional": true
+		},
+		"nats": {
 			"optional": true
 		}
 	},
