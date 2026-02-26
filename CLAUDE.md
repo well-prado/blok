@@ -188,6 +188,109 @@ JSON workflows are an alternative to TypeScript workflows. They live in `trigger
 - Condition expressions in if-else are valid JavaScript
 - Version follows semver (x.x.x)
 
+## Generating Worker Workflows
+
+Worker workflows use the `worker` trigger to process background jobs from a queue. They follow the same pattern as HTTP workflows but with different trigger config.
+
+```typescript
+import { type Step, Workflow } from "@blokjs/helper";
+
+const step: Step = Workflow({
+  name: "Process Background Job",
+  version: "1.0.0",
+})
+  .addTrigger("worker", {
+    queue: "background-jobs",
+    // concurrency: 5,     // Optional: max concurrent jobs
+    // retries: 3,         // Optional: max retry attempts
+    // timeout: 30000,     // Optional: job timeout in ms
+  })
+  .addStep({
+    name: "process",
+    node: "my-processor",
+    type: "module",
+    inputs: {
+      payload: "js/ctx.request.body",         // Job data
+      jobId: "js/ctx.request.params.jobId",   // Job ID
+    },
+  });
+
+export default step;
+```
+
+### Worker context mapping:
+- `ctx.request.body` → Job payload
+- `ctx.request.params.queue` → Queue name
+- `ctx.request.params.jobId` → Job ID
+- `ctx.request.params.attempt` → Current attempt (0-based)
+- `ctx.vars._worker_job` → Full job metadata
+
+### Worker trigger adapters:
+- **NATS JetStream** (`NATSWorkerAdapter`) — recommended for production
+- **BullMQ** (`BullMQAdapter`) — Redis-based, supports priority/delayed jobs
+- **InMemory** (`InMemoryAdapter`) — development/testing only
+
+## Testing Nodes and Workflows
+
+The `@blokjs/runner` package exports testing utilities. Use them with Vitest.
+
+### Unit testing a node with NodeTestHarness:
+
+```typescript
+import { NodeTestHarness } from "@blokjs/runner";
+import myNode from "../src/nodes/my-node";
+
+const harness = new NodeTestHarness(myNode);
+
+test("processes input correctly", async () => {
+  const result = await harness.execute({ userId: "abc-123" });
+  harness.assertSuccess(result);
+  harness.assertOutput(result, { user: { id: "abc-123" } });
+});
+```
+
+### Integration testing a workflow with WorkflowTestRunner:
+
+```typescript
+import { WorkflowTestRunner } from "@blokjs/runner";
+
+const runner = new WorkflowTestRunner({ verbose: true, mockAllNodes: true });
+
+runner.registerNode("validate", ValidateNode);
+runner.mockNode("external-api", async (input) => ({ result: "mocked" }));
+
+runner.loadWorkflow(myWorkflowDefinition);
+const result = await runner.execute({ input: "data" });
+expect(result.success).toBe(true);
+expect(result.trace).toHaveLength(2); // Check execution trace
+```
+
+## Debugging Workers & NATS
+
+### Step 1: Verify NATS connectivity
+- Is NATS running? Check `nats-server` or Docker container
+- Default URL: `localhost:4222`
+- Health: `nats --server localhost:4222 server ping`
+
+### Step 2: Check worker environment
+- `NATS_SERVERS` set correctly?
+- `WORKER_QUEUES` lists the queues the worker should consume?
+- Standalone workers (Go/Rust/Python) connect directly to NATS, not through the TS runner
+
+### Step 3: Verify job dispatch
+- Jobs must be published to the correct NATS subject (queue name)
+- Use `dispatch()` method or NATS CLI: `nats pub queue-name '{"data":"payload"}'`
+
+### Common Worker Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Failed to connect to NATS` | NATS server not running | Start NATS: `docker compose up nats` |
+| `nats module not found` | Missing peer dependency | Install: `bun add nats` or `pip install nats-py` |
+| `Job timed out` | Processing exceeded timeout | Increase `timeout` in trigger config or optimize node |
+| `Max retries exceeded` | Job failing repeatedly | Check node error, job moves to DLQ after max retries |
+| `Stream not found` | JetStream stream not created | Worker auto-creates streams on first subscribe |
+
 ## Helping Users with Blok Studio
 
 - **Launch**: `blokctl trace` or navigate to `/__blok` on the running trigger

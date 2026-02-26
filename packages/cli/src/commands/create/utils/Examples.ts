@@ -841,7 +841,73 @@ export default defineNode({
 | \\\`webhook\\\` | \\\`{ "source": "github", "events": ["push"] }\\\` |
 | \\\`websocket\\\` | \\\`{ "events": ["message"], "path": "/ws" }\\\` |
 | \\\`sse\\\` | \\\`{ "events": ["update"], "path": "/stream" }\\\` |
-| \\\`worker\\\` | \\\`{ "queue": "jobs", "concurrency": 5 }\\\` |
+| \\\`worker\\\` | \\\`{ "queue": "jobs", "concurrency": 5, "retries": 3 }\\\` |
+
+### Worker Trigger
+
+The worker trigger processes background jobs from a queue with retry logic and concurrency control.
+
+\\\`\\\`\\\`typescript
+Workflow({ name: "Process Job", version: "1.0.0" })
+  .addTrigger("worker", { queue: "background-jobs" })
+  .addStep({
+    name: "process",
+    node: "my-processor",
+    type: "module",
+    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" },
+  });
+\\\`\\\`\\\`
+
+Job context: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue\\\` = queue name, \\\`ctx.request.params.jobId\\\` = job ID, \\\`ctx.request.params.attempt\\\` = attempt count, \\\`ctx.vars._worker_job\\\` = full metadata.
+
+Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev only).
+
+### NATS JetStream
+
+Recommended queue/worker backend. Environment variables:
+\\\`\\\`\\\`
+NATS_SERVERS=localhost:4222
+NATS_STREAM_NAME=blok-queue     # or blok-worker for worker trigger
+NATS_TOKEN=                      # optional auth
+\\\`\\\`\\\`
+
+Queue providers: \\\`kafka\\\`, \\\`rabbitmq\\\`, \\\`sqs\\\`, \\\`redis\\\`, \\\`beanstalk\\\`, \\\`nats\\\`
+
+### Standalone Workers (Go, Rust, Python)
+
+Go, Rust, and Python SDKs include standalone NATS workers that connect directly to NATS without the TypeScript runner:
+
+\\\`\\\`\\\`
+WORKER_CONCURRENCY=1             # Max concurrent jobs
+WORKER_MAX_RETRIES=3             # Max delivery attempts
+WORKER_QUEUES=queue1,queue2      # Queues to consume
+\\\`\\\`\\\`
+
+---
+
+## Testing Utilities
+
+\\\`@blokjs/runner\\\` provides testing utilities for nodes and workflows.
+
+### NodeTestHarness — Unit test a single node:
+\\\`\\\`\\\`typescript
+import { NodeTestHarness } from "@blokjs/runner";
+const harness = new NodeTestHarness(myNode);
+const result = await harness.execute({ input: "data" });
+harness.assertSuccess(result);
+harness.assertOutput(result, { expected: "output" });
+\\\`\\\`\\\`
+
+### WorkflowTestRunner — Integration test a workflow:
+\\\`\\\`\\\`typescript
+import { WorkflowTestRunner } from "@blokjs/runner";
+const runner = new WorkflowTestRunner({ verbose: true });
+runner.registerNode("validate", ValidateNode);
+runner.mockNode("external-api", async (input) => ({ result: "mocked" }));
+runner.loadWorkflow(workflowDefinition);
+const result = await runner.execute({ input: "data" });
+// result.success, result.output, result.trace, result.nodeResults
+\\\`\\\`\\\`
 
 ---
 
@@ -951,12 +1017,48 @@ export default defineNode({
 - No \\\`any\\\` types — use \\\`z.unknown()\\\` if dynamic
 - \\\`export default defineNode(...)\\\`
 
+## Worker Workflows
+
+Worker trigger processes background jobs from a queue:
+
+\\\`\\\`\\\`typescript
+Workflow({ name: "Process Job", version: "1.0.0" })
+  .addTrigger("worker", { queue: "background-jobs" })
+  .addStep({ name: "process", node: "my-processor", type: "module",
+    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" } });
+\\\`\\\`\\\`
+
+Job data: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue/jobId/attempt\\\` = metadata.
+Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev).
+
+## Testing
+
+\\\`\\\`\\\`typescript
+import { NodeTestHarness, WorkflowTestRunner } from "@blokjs/runner";
+
+// Unit test a node
+const harness = new NodeTestHarness(myNode);
+const result = await harness.execute({ input: "data" });
+harness.assertSuccess(result);
+
+// Integration test a workflow
+const runner = new WorkflowTestRunner({ mockAllNodes: true });
+runner.loadWorkflow(definition);
+const wfResult = await runner.execute({ input: "data" });
+\\\`\\\`\\\`
+
 ## Blok Studio Help
 
 - Launch: \\\`blokctl trace\\\` or navigate to \\\`/__blok\\\`
 - "No output" → Node not returning data or Zod output validation failed
 - "Step error" → Expand error — check if 400 (validation) or 500 (runtime)
 - "Vars not passing" → Source step needs \\\`set_var: true\\\`, target needs \\\`js/ctx.vars['name']\\\`
+
+## Debugging Workers
+
+- NATS not reachable → Check \\\`NATS_SERVERS\\\` env var, ensure NATS is running
+- Job timeout → Increase \\\`timeout\\\` in trigger config or optimize node
+- Max retries exceeded → Check node errors, job moves to DLQ
 
 ## Do NOT
 

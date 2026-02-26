@@ -657,8 +657,203 @@ Conditions are evaluated in order. First match wins. `condition` strings are Jav
 | `sse` | events, channels, path | `{ "events": ["update"], "path": "/stream" }` |
 | `worker` | queue, concurrency, retries | `{ "queue": "jobs", "concurrency": 5 }` |
 
-Queue providers: `kafka`, `rabbitmq`, `sqs`, `redis`, `beanstalk`
+Queue providers: `kafka`, `rabbitmq`, `sqs`, `redis`, `beanstalk`, `nats`
 Pub/Sub providers: `gcp`, `aws`, `azure`
+
+### Worker Trigger
+
+The `worker` trigger processes background jobs from a queue. It supports multiple adapters and provides retry logic, concurrency control, and job lifecycle management.
+
+#### Worker Trigger Config
+
+```typescript
+interface WorkerTriggerOpts {
+  queue: string;           // Queue name to subscribe to
+  concurrency?: number;    // Max concurrent jobs (default: 1)
+  retries?: number;        // Maximum retry attempts (default: 3)
+  timeout?: number;        // Job processing timeout in ms
+  delay?: number;          // Base delay for exponential backoff in ms
+}
+```
+
+#### Worker Workflow Example (TypeScript)
+
+```typescript
+import { type Step, Workflow } from "@blokjs/helper";
+
+const step: Step = Workflow({
+  name: "Process Background Job",
+  version: "1.0.0",
+})
+  .addTrigger("worker", {
+    queue: "background-jobs",
+  })
+  .addStep({
+    name: "process-job",
+    node: "@blokjs/api-call",
+    type: "module",
+    inputs: {
+      url: "https://example.com/process",
+      method: "POST",
+      body: "js/ctx.request.body",
+    },
+  });
+
+export default step;
+```
+
+#### Job Context Mapping
+
+When a worker processes a job, the context is populated as follows:
+
+```
+ctx.request.body              → Job payload (data)
+ctx.request.headers           → Job headers/metadata
+ctx.request.params.queue      → Queue name
+ctx.request.params.jobId      → Job ID
+ctx.request.params.attempt    → Current attempt (0-based string)
+ctx.vars._worker_job          → { id, queue, attempts, maxRetries, priority, createdAt, delay, timeout }
+```
+
+#### Worker Adapters
+
+| Adapter | Backend | Install | Use Case |
+|---------|---------|---------|----------|
+| `NATSWorkerAdapter` | NATS JetStream | `nats` | Production — durable, distributed |
+| `BullMQAdapter` | Redis via BullMQ | `bullmq ioredis` | Production — priority queues, delayed jobs |
+| `InMemoryAdapter` | In-process | None | Development/testing only |
+
+#### Worker Retry Logic
+
+Exponential backoff with jitter: `min(baseDelay × 2^attempt, 30000ms) + 10% jitter`
+
+After max retries, jobs are moved to a Dead Letter Queue (DLQ).
+
+### NATS JetStream
+
+NATS JetStream is the recommended adapter for both queue and worker triggers. It provides:
+
+- **Pull-based consumers** — reliable message delivery
+- **Durable consumers** — fault tolerance across restarts
+- **Server-side retry** — `max_deliver` configures redelivery count
+- **Work queue semantics** — each message processed by exactly one consumer
+
+#### NATS Environment Variables
+
+```
+NATS_SERVERS=localhost:4222         # Comma-separated server URLs
+NATS_TOKEN=                         # Authentication token (optional)
+NATS_USER=                          # Username (optional)
+NATS_PASS=                          # Password (optional)
+NATS_STREAM_NAME=blok-queue         # Queue trigger stream (default: blok-queue)
+                                    # Worker trigger stream (default: blok-worker)
+```
+
+---
+
+## Standalone Workers (Go, Rust, Python)
+
+Go, Rust, and Python SDKs include standalone NATS JetStream workers that run independently of the TypeScript runner. These connect directly to NATS, consume jobs, and execute registered node handlers in their native runtimes.
+
+### Architecture
+
+```
+NATS JetStream
+  └── Worker (Go/Rust/Python process)
+       ├── handle(queue, handler)      # Custom handler per queue
+       ├── handle_node(queue, name)    # Auto-route to node registry
+       ├── start()                     # Connect + consume + block
+       ├── stop()                      # Graceful shutdown
+       └── dispatch(queue, data)       # Publish new job
+```
+
+### Worker Environment Variables (All Languages)
+
+```
+NATS_SERVERS=localhost:4222         # NATS server URLs
+NATS_STREAM_NAME=blok-worker       # JetStream stream name
+NATS_TOKEN=                         # Auth token
+NATS_USER= / NATS_PASS=           # User/pass auth
+WORKER_CONCURRENCY=1                # Max concurrent jobs
+WORKER_MAX_RETRIES=3                # Max delivery attempts
+WORKER_ACK_WAIT_SECS=30            # Ack timeout (Python: seconds, Go: duration string)
+WORKER_QUEUES=queue1,queue2         # Comma-separated queue names
+PORT=8080                           # Health server port (Rust/Python)
+```
+
+### Go Worker
+
+```go
+import blok "blok-runtime"
+
+func main() {
+    registry := blok.NewNodeRegistry("1.0.0")
+    registry.Register("process-order", processOrderNode)
+
+    config := blok.LoadWorkerConfigFromEnv()
+    worker := blok.NewWorker(registry, config)
+
+    // Route queue to registered node
+    worker.HandleNode("orders", "process-order")
+
+    // Or use a custom handler
+    worker.Handle("notifications", func(ctx context.Context, job *blok.JobMessage) error {
+        var payload map[string]interface{}
+        job.DataAs(&payload)
+        return nil
+    })
+
+    worker.Start(context.Background()) // Blocks until signal
+}
+```
+
+### Rust Worker
+
+```rust
+use blok_runtime::{Worker, WorkerConfig, NodeRegistry, JobMessage};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut registry = NodeRegistry::new("1.0.0");
+    registry.register("process-order", process_order_node);
+
+    let config = WorkerConfig::from_env();
+    let mut worker = Worker::new(registry, config);
+
+    worker.handle_node("orders", "process-order");
+    worker.handle("notifications", |job: JobMessage| async move {
+        println!("Got job: {}", job.id);
+        Ok(())
+    });
+
+    worker.start().await
+}
+```
+
+### Python Worker
+
+```python
+from blok import NodeRegistry, Worker, WorkerConfig, listen_and_serve_worker
+
+registry = NodeRegistry("1.0.0")
+registry.register("process-order", process_order_node)
+
+# Quick start (reads config from env, starts health server)
+listen_and_serve_worker(registry)
+
+# Or manual setup
+config = WorkerConfig.from_env()
+worker = Worker(registry, config)
+worker.handle_node("orders", "process-order")
+
+async def custom_handler(job):
+    print(f"Got job: {job.id}, data: {job.data_map()}")
+
+worker.handle("notifications", custom_handler)
+asyncio.run(worker.start())
+```
+
+**Install**: `pip install nats-py` (or `pip install blok-blok-python3[worker]`)
 
 ---
 
@@ -800,6 +995,107 @@ interface NodeTrace {
 
 ---
 
+## Testing Utilities
+
+The `@blokjs/runner` package provides testing utilities for both individual nodes and complete workflows.
+
+### NodeTestHarness — Unit Testing Nodes
+
+```typescript
+import { NodeTestHarness } from "@blokjs/runner";
+import myNode from "./my-node";
+
+const harness = new NodeTestHarness(myNode);
+
+// Execute with test input
+const result = await harness.execute(
+  { userId: "abc-123" },
+  { vars: { "auth": { role: "admin" } } }  // Context overrides
+);
+
+// Assertions
+harness.assertSuccess(result);
+harness.assertOutput(result, { user: { id: "abc-123" } });
+harness.assertContextVar(result, "my-node", { user: { id: "abc-123" } });
+
+// Metrics
+const metrics = harness.getMetrics();
+// { totalExecutions, successCount, failureCount, avgDurationMs, lastDurationMs }
+```
+
+### TestResult
+
+```typescript
+interface TestResult<O> {
+  success: boolean;
+  data: O | null;        // Node output
+  error: any;            // Error if failed
+  context: Context;      // Full context after execution
+  durationMs: number;    // Execution time
+  logs: string[];        // Captured log messages
+}
+```
+
+### TestContextOverrides
+
+```typescript
+interface TestContextOverrides {
+  id?: string;
+  request?: { body?, headers?, query?, params? };
+  response?: Partial<ResponseContext>;
+  vars?: Record<string, any>;
+  env?: Record<string, any>;
+  error?: { message, code? };
+  logger?: TestLogger;
+  workflow_name?: string;
+  workflow_path?: string;
+  config?: Record<string, any>;
+}
+```
+
+### WorkflowTestRunner — Integration Testing Workflows
+
+```typescript
+import { WorkflowTestRunner } from "@blokjs/runner";
+
+const runner = new WorkflowTestRunner({ verbose: true, timeout: 10000 });
+
+// Register real or mock nodes
+runner.registerNode("validate", ValidateNode);
+runner.mockNode("fetch-user", async (input, ctx) => {
+  return { user: { id: input.userId, name: "Test User" } };
+});
+
+// Load and execute workflow
+runner.loadWorkflow({
+  name: "test-workflow",
+  steps: [
+    { name: "step1", node: "validate", inputs: { userId: "abc" } },
+    { name: "step2", node: "fetch-user", inputs: { userId: "js/ctx.response.data.userId" } },
+  ],
+});
+
+const result = await runner.execute({ userId: "abc" });
+// result.success, result.output, result.trace, result.durationMs, result.nodeResults
+```
+
+#### WorkflowTestRunner Config
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `timeout` | 30000 | Workflow execution timeout (ms) |
+| `verbose` | false | Print execution details to console |
+| `mockAllNodes` | false | Auto-mock any unregistered node |
+
+#### ExecutionTrace
+
+Each step in the trace contains:
+```typescript
+{ nodeName, stepIndex, input, output, durationMs, success, error?, timestamp }
+```
+
+---
+
 ## Error Handling
 
 ### GlobalError
@@ -882,6 +1178,10 @@ Created by `blokctl create project`. Defines runtime processes:
 import { defineNode } from "@blokjs/runner";
 import type { FnNodeDefinition } from "@blokjs/runner";
 
+// Testing utilities
+import { NodeTestHarness, WorkflowTestRunner } from "@blokjs/runner";
+import type { TestResult, TestContextOverrides } from "@blokjs/runner";
+
 // Shared types
 import type { Context, RequestContext, ResponseContext, VarsContext } from "@blokjs/shared";
 import { GlobalError, NodeBase } from "@blokjs/shared";
@@ -889,7 +1189,7 @@ import { GlobalError, NodeBase } from "@blokjs/shared";
 // Workflow helper DSL
 import { Workflow, Step, Trigger, AddIf, AddElse } from "@blokjs/helper";
 import type { StepOpts, WorkflowOpts, NodeType, RuntimeKind } from "@blokjs/helper";
-import type { HttpTriggerOpts, CronTriggerOpts, QueueTriggerOpts } from "@blokjs/helper";
+import type { HttpTriggerOpts, CronTriggerOpts, QueueTriggerOpts, WorkerTriggerOpts } from "@blokjs/helper";
 
 // Zod (always from "zod" directly)
 import { z } from "zod";
