@@ -5,9 +5,22 @@ import (
 	"strconv"
 )
 
-// ServerConfig holds the configuration for the blok HTTP server.
+// Transport identifies which server(s) to start.
+type Transport string
+
+const (
+	// TransportHTTP runs the HTTP server only (default; existing behavior).
+	TransportHTTP Transport = "http"
+	// TransportGRPC runs the gRPC server only.
+	TransportGRPC Transport = "grpc"
+	// TransportBoth runs HTTP and gRPC in the same process during migration.
+	TransportBoth Transport = "both"
+)
+
+// ServerConfig holds the configuration for the blok runtime server(s).
 type ServerConfig struct {
-	// Port is the HTTP port to listen on (default: 8080).
+	// Port is the HTTP port to listen on (default: 9001 — matches the
+	// runner's DEFAULT_PORTS.go).
 	Port int
 
 	// Host is the bind address (default: "0.0.0.0").
@@ -15,6 +28,14 @@ type ServerConfig struct {
 
 	// Version is the runtime version reported in health checks.
 	Version string
+
+	// GRPCPort is the gRPC port to listen on (default: 10001 — matches the
+	// runner's DEFAULT_GRPC_PORTS.go = HTTP+1000).
+	GRPCPort int
+
+	// Transport selects which server(s) to start. Default: TransportHTTP.
+	// Override via the BLOK_TRANSPORT env var.
+	Transport Transport
 
 	// ReadTimeoutSec is the HTTP read timeout in seconds (default: 30).
 	ReadTimeoutSec int
@@ -35,9 +56,11 @@ type ServerConfig struct {
 // DefaultConfig returns a ServerConfig with sensible defaults.
 func DefaultConfig() ServerConfig {
 	return ServerConfig{
-		Port:               8080,
+		Port:               9001,
 		Host:               "0.0.0.0",
 		Version:            "1.0.0",
+		GRPCPort:           10001,
+		Transport:          TransportHTTP,
 		ReadTimeoutSec:     30,
 		WriteTimeoutSec:    30,
 		ShutdownTimeoutSec: 10,
@@ -50,9 +73,11 @@ func DefaultConfig() ServerConfig {
 // falling back to defaults for unset variables.
 //
 // Environment variables:
-//   - PORT: HTTP port (default: 8080)
+//   - PORT: HTTP port (default: 9001 — matches DEFAULT_PORTS.go on the runner)
 //   - HOST: Bind address (default: 0.0.0.0)
 //   - VERSION: Runtime version (default: 1.0.0)
+//   - GRPC_PORT: gRPC port (default: 10001 — matches DEFAULT_GRPC_PORTS.go)
+//   - BLOK_TRANSPORT: "http" | "grpc" | "both" (default: "http")
 //   - READ_TIMEOUT: Read timeout in seconds (default: 30)
 //   - WRITE_TIMEOUT: Write timeout in seconds (default: 30)
 //   - SHUTDOWN_TIMEOUT: Shutdown timeout in seconds (default: 10)
@@ -73,6 +98,19 @@ func LoadConfigFromEnv() ServerConfig {
 
 	if v := os.Getenv("VERSION"); v != "" {
 		cfg.Version = v
+	}
+
+	if v := os.Getenv("GRPC_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil && port > 0 {
+			cfg.GRPCPort = port
+		}
+	}
+
+	if v := os.Getenv("BLOK_TRANSPORT"); v != "" {
+		switch Transport(v) {
+		case TransportHTTP, TransportGRPC, TransportBoth:
+			cfg.Transport = Transport(v)
+		}
 	}
 
 	if v := os.Getenv("READ_TIMEOUT"); v != "" {

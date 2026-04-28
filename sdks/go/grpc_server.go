@@ -1,0 +1,422 @@
+// gRPC server implementing the canonical Blok NodeRuntime v1 service.
+//
+// Wire contract: proto/blok/runtime/v1/runtime.proto. Generated stubs live
+// in github.com/nickincloud/blok-go/genpb/blok/runtime/v1.
+//
+// Architecture
+// ------------
+//   - BlokNodeRuntime is the gRPC service implementation. It owns a pointer
+//     to the shared NodeRegistry so a single registry can serve both HTTP
+//     and gRPC.
+//   - ServeGrpc builds the gRPC server, binds the port, and blocks until
+//     shutdown (or the listener is closed).
+//   - Codec helpers (decodeExecuteRequest / encodeExecuteResponse / etc.)
+//     sit at the boundary between proto and the SDK's internal
+//     ExecutionRequest / ExecutionResult types so NodeRegistry.Execute runs
+//     unchanged regardless of which transport delivered the request.
+//
+// The proto sends inputs, previous_output, vars, and the request body as
+// raw JSON-encoded bytes. The SDK JSON-decodes them lazily.
+
+package blok
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"strings"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	pb "github.com/nickincloud/blok-go/genpb/blok/runtime/v1"
+)
+
+// =============================================================================
+// Service implementation
+// =============================================================================
+
+// BlokNodeRuntime is the gRPC implementation of the v1 NodeRuntime service.
+//
+// Single Responsibility: translate proto messages into the SDK's internal
+// ExecutionRequest / ExecutionResult and dispatch to NodeRegistry. All
+// node-level error handling lives in NodeRegistry.Execute.
+type BlokNodeRuntime struct {
+	pb.UnimplementedNodeRuntimeServer
+	registry   *NodeRegistry
+	sdkVersion string
+}
+
+// NewBlokNodeRuntime returns a BlokNodeRuntime bound to the given registry.
+func NewBlokNodeRuntime(registry *NodeRegistry, sdkVersion string) *BlokNodeRuntime {
+	if sdkVersion == "" {
+		sdkVersion = "1.0.0"
+	}
+	return &BlokNodeRuntime{registry: registry, sdkVersion: sdkVersion}
+}
+
+// Execute decodes the proto envelope, dispatches to the registry, and
+// encodes the result back to a proto response.
+func (s *BlokNodeRuntime) Execute(ctx context.Context, req *pb.ExecuteRequest) (*pb.ExecuteResponse, error) {
+	execReq, err := decodeExecuteRequest(req)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	result := s.registry.Execute(execReq)
+	return encodeExecuteResponse(result, execReq.Node.Name, s.sdkVersion), nil
+}
+
+// ExecuteStream returns UNIMPLEMENTED for now (Phase 5 capability).
+func (s *BlokNodeRuntime) ExecuteStream(req *pb.ExecuteRequest, stream pb.NodeRuntime_ExecuteStreamServer) error {
+	return status.Error(codes.Unimplemented, "ExecuteStream is not implemented yet — opt out via stream_logs=false")
+}
+
+// Health reports SERVING with the SDK version and registered node names.
+// Wire-compatible with grpc.health.v1.Health/Check.
+func (s *BlokNodeRuntime) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
+	return &pb.HealthResponse{
+		Status:          pb.HealthResponse_SERVING,
+		SdkVersion:      s.sdkVersion,
+		RegisteredNodes: s.registry.NodeNames(),
+	}, nil
+}
+
+// ListNodes returns the registered node names as descriptors.
+func (s *BlokNodeRuntime) ListNodes(ctx context.Context, req *pb.ListNodesRequest) (*pb.ListNodesResponse, error) {
+	names := s.registry.NodeNames()
+	descriptors := make([]*pb.NodeDescriptor, 0, len(names))
+	for _, name := range names {
+		descriptors = append(descriptors, &pb.NodeDescriptor{
+			Name:             name,
+			Description:      "",
+			InputSchemaJson:  nil,
+			OutputSchemaJson: nil,
+			Tags:             nil,
+		})
+	}
+	return &pb.ListNodesResponse{
+		Nodes:        descriptors,
+		SdkName:      "blok-go",
+		SdkVersion:   s.sdkVersion,
+		ProtoVersion: "1.0.0",
+	}, nil
+}
+
+// =============================================================================
+// Server lifecycle
+// =============================================================================
+
+// GrpcServerOptions controls how ServeGrpc binds and configures the gRPC
+// server. Zero values are replaced by sensible defaults.
+type GrpcServerOptions struct {
+	// MaxMessageBytes limits the maximum send/receive size. Defaults to
+	// 16 MiB (matches the runner-side default + the PHP-buffer ceiling
+	// from BLOK_FRAMEWORK_FIXES.md #5).
+	MaxMessageBytes int
+	// SdkVersion is reported in Health and ListNodes responses.
+	SdkVersion string
+}
+
+// ServeGrpc binds the gRPC server on host:port and blocks until the server
+// stops (or returns a startup error). The returned grpc.Server lets callers
+// stop the server gracefully when blocking is delegated to the caller.
+//
+// For non-blocking startup (so a process can listen on HTTP and gRPC at the
+// same time), see StartGrpc which returns the started server immediately.
+func ServeGrpc(registry *NodeRegistry, host string, port int, opts GrpcServerOptions) error {
+	server, lis, err := buildGrpcServer(registry, host, port, opts)
+	if err != nil {
+		return err
+	}
+	log.Printf("Blok gRPC server (NodeRuntime v1) listening on %s with %d nodes registered",
+		lis.Addr().String(), len(registry.NodeNames()))
+	return server.Serve(lis)
+}
+
+// StartGrpc binds and starts the gRPC server in a background goroutine.
+// Returns the server immediately so the caller can stop it via Stop or
+// GracefulStop. Errors during Serve are logged.
+//
+// Use this for dual-listen mode where the same process serves HTTP and gRPC.
+func StartGrpc(registry *NodeRegistry, host string, port int, opts GrpcServerOptions) (*grpc.Server, net.Addr, error) {
+	server, lis, err := buildGrpcServer(registry, host, port, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	go func() {
+		log.Printf("Blok gRPC server (NodeRuntime v1) listening on %s with %d nodes registered",
+			lis.Addr().String(), len(registry.NodeNames()))
+		if serveErr := server.Serve(lis); serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped) {
+			log.Printf("gRPC server error: %v", serveErr)
+		}
+	}()
+	return server, lis.Addr(), nil
+}
+
+func buildGrpcServer(registry *NodeRegistry, host string, port int, opts GrpcServerOptions) (*grpc.Server, net.Listener, error) {
+	maxMsg := opts.MaxMessageBytes
+	if maxMsg <= 0 {
+		maxMsg = 16 * 1024 * 1024
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	lis, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	server := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxMsg),
+		grpc.MaxSendMsgSize(maxMsg),
+	)
+	pb.RegisterNodeRuntimeServer(server, NewBlokNodeRuntime(registry, opts.SdkVersion))
+	return server, lis, nil
+}
+
+// =============================================================================
+// Codec — proto ↔ internal types
+// =============================================================================
+
+// decodeError signals an unrecoverable problem in incoming proto messages.
+type decodeError struct{ msg string }
+
+func (e *decodeError) Error() string { return e.msg }
+
+// decodeExecuteRequest decodes a proto ExecuteRequest into the SDK's
+// ExecutionRequest. The opaque JSON-shaped fields (inputs, previous_output,
+// vars, request body) arrive as raw bytes and are JSON-decoded here.
+func decodeExecuteRequest(req *pb.ExecuteRequest) (*ExecutionRequest, error) {
+	if req == nil || req.Node == nil || req.Node.Name == "" {
+		return nil, &decodeError{msg: "ExecuteRequest.node is required"}
+	}
+
+	inputs, err := decodeJSONObject(req.Inputs, "inputs")
+	if err != nil {
+		return nil, err
+	}
+
+	previousOutput, err := decodeJSONValue(req.GetState().GetPreviousOutput(), "previous_output")
+	if err != nil {
+		return nil, err
+	}
+
+	vars, err := decodeJSONObject(req.GetState().GetVars(), "vars")
+	if err != nil {
+		return nil, err
+	}
+
+	trigger := req.GetTrigger()
+	body := decodeRequestBody(trigger.GetBody(), trigger.GetHeaders())
+
+	exec := &ExecutionRequest{
+		Node: NodeConfig{
+			Name:   req.Node.Name,
+			Type:   req.Node.Type,
+			Config: inputs,
+		},
+		Context: Context{
+			ID:           req.GetWorkflow().GetRunId(),
+			WorkflowName: req.GetWorkflow().GetName(),
+			WorkflowPath: req.GetWorkflow().GetPath(),
+			Request: Request{
+				Body:    body,
+				Headers: trigger.GetHeaders(),
+				Params:  trigger.GetParams(),
+				Query:   trigger.GetQuery(),
+				Method:  trigger.GetMethod(),
+				URL:     trigger.GetUrl(),
+				Cookies: trigger.GetCookies(),
+				BaseURL: trigger.GetBaseUrl(),
+			},
+			Response: Response{
+				Data:        previousOutput,
+				ContentType: "application/json",
+				Success:     true,
+				Error:       nil,
+			},
+			Vars: vars,
+			Env:  req.GetState().GetEnv(),
+		},
+	}
+	return exec, nil
+}
+
+// encodeExecuteResponse encodes the SDK's ExecutionResult into a proto
+// ExecuteResponse.
+func encodeExecuteResponse(result *ExecutionResult, nodeName string, sdkVersion string) *pb.ExecuteResponse {
+	var metrics *pb.Metrics
+	if result.Metrics != nil {
+		var dur, cpu float64
+		var mem int64
+		if result.Metrics.DurationMs != nil {
+			dur = *result.Metrics.DurationMs
+		}
+		if result.Metrics.CpuMs != nil {
+			cpu = *result.Metrics.CpuMs
+		}
+		if result.Metrics.MemoryBytes != nil {
+			mem = int64(*result.Metrics.MemoryBytes)
+		}
+		metrics = &pb.Metrics{
+			DurationMs:  dur,
+			CpuMs:       cpu,
+			MemoryBytes: mem,
+		}
+	}
+
+	var dataBytes []byte
+	if result.Success && result.Data != nil {
+		dataBytes = encodeJSONBytes(result.Data)
+	}
+
+	var varsDeltaBytes []byte
+	if len(result.Vars) > 0 {
+		varsDeltaBytes = encodeJSONBytes(result.Vars)
+	}
+
+	var nodeError *pb.NodeError
+	if !result.Success {
+		nodeError = internalErrorToProto(result.Errors, nodeName, sdkVersion)
+	}
+
+	return &pb.ExecuteResponse{
+		Success:     result.Success,
+		Data:        dataBytes,
+		ContentType: "application/json",
+		Error:       nodeError,
+		VarsDelta:   varsDeltaBytes,
+		Logs:        nil,
+		Metrics:     metrics,
+	}
+}
+
+// internalErrorToProto builds a structured NodeError from the SDK's loose
+// error shape. Until SDK code is migrated to produce structured errors
+// natively, we synthesize one with category=INTERNAL and the original
+// payload preserved in details_json.
+func internalErrorToProto(errVal interface{}, nodeName, sdkVersion string) *pb.NodeError {
+	message := "node error"
+	var detailsBytes []byte
+
+	switch v := errVal.(type) {
+	case nil:
+		// keep defaults
+	case string:
+		message = v
+		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": v})
+	case map[string]string:
+		if m, ok := v["message"]; ok && m != "" {
+			message = m
+		}
+		detailsBytes = encodeJSONBytes(v)
+	case map[string]interface{}:
+		if m, ok := v["message"].(string); ok && m != "" {
+			message = m
+		}
+		detailsBytes = encodeJSONBytes(v)
+	case error:
+		message = v.Error()
+		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": message})
+	default:
+		message = fmt.Sprintf("%v", v)
+		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": message})
+	}
+
+	return &pb.NodeError{
+		Code:                "GO_NODE_ERROR",
+		Category:            pb.ErrorCategory_INTERNAL,
+		Severity:            pb.ErrorSeverity_ERROR,
+		Node:                nodeName,
+		Sdk:                 "blok-go",
+		SdkVersion:          sdkVersion,
+		RuntimeKind:         "runtime.go",
+		At:                  nil,
+		Message:             message,
+		Description:         "",
+		Remediation:         "",
+		DocUrl:              "",
+		Causes:              nil,
+		Stack:               "",
+		ContextSnapshotJson: nil,
+		HttpStatus:          500,
+		Retryable:           false,
+		RetryAfterMs:        0,
+		DetailsJson:         detailsBytes,
+	}
+}
+
+// decodeJSONObject decodes a JSON-bytes field as a map. Empty bytes → empty map.
+// Non-object payloads are wrapped under a "_value" key.
+func decodeJSONObject(blob []byte, field string) (map[string]interface{}, error) {
+	if len(blob) == 0 {
+		return map[string]interface{}{}, nil
+	}
+	var raw interface{}
+	if err := json.Unmarshal(blob, &raw); err != nil {
+		return nil, &decodeError{msg: fmt.Sprintf("invalid `%s` JSON: %v", field, err)}
+	}
+	if m, ok := raw.(map[string]interface{}); ok {
+		return m, nil
+	}
+	return map[string]interface{}{"_value": raw}, nil
+}
+
+// decodeJSONValue decodes a JSON-bytes field as an arbitrary value. Empty bytes → nil.
+func decodeJSONValue(blob []byte, field string) (interface{}, error) {
+	if len(blob) == 0 {
+		return nil, nil
+	}
+	var raw interface{}
+	if err := json.Unmarshal(blob, &raw); err != nil {
+		return nil, &decodeError{msg: fmt.Sprintf("invalid `%s` JSON: %v", field, err)}
+	}
+	return raw, nil
+}
+
+// decodeRequestBody decodes the trigger body. JSON content-types parse as
+// JSON; everything else arrives as a raw string for the node to interpret.
+func decodeRequestBody(blob []byte, headers map[string]string) interface{} {
+	if len(blob) == 0 {
+		return nil
+	}
+	contentType := pickHeader(headers, "content-type")
+	if strings.Contains(strings.ToLower(contentType), "application/json") {
+		var v interface{}
+		if err := json.Unmarshal(blob, &v); err == nil {
+			return v
+		}
+		// fall through to raw-string handling
+	}
+	return string(blob)
+}
+
+func pickHeader(headers map[string]string, name string) string {
+	if headers == nil {
+		return ""
+	}
+	if v, ok := headers[name]; ok {
+		return v
+	}
+	// Try case-insensitive lookup.
+	for k, v := range headers {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
+}
+
+// encodeJSONBytes encodes a Go value as UTF-8 JSON bytes. Errors fall back
+// to nil (the proto receiver treats empty as null).
+func encodeJSONBytes(value interface{}) []byte {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return bytes
+}
