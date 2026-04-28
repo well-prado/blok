@@ -8,7 +8,10 @@ import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
-import type { RuntimeKind } from "./adapters/RuntimeAdapter";
+import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
+import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
+import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig, type Transport } from "./adapters/grpc/types";
+import { resolveTransportForKind } from "./adapters/transport";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
 import type Flow from "./types/Flow";
@@ -38,40 +41,111 @@ export default class Configuration implements Config {
 	}
 
 	/**
-	 * Initialize the RuntimeRegistry with built-in adapters
+	 * Initialize the RuntimeRegistry with built-in adapters.
+	 *
+	 * Registers `NodeJsRuntimeAdapter` for in-process JS nodes, then for each
+	 * SDK language picks `HttpRuntimeAdapter` or `GrpcRuntimeAdapter` based on
+	 * {@link resolveTransportForKind} (env-driven). This is the single point
+	 * of transport selection — no other file branches on transport.
 	 */
 	private initializeRuntimeRegistry(): void {
 		const registry = RuntimeRegistry.getInstance();
 
-		// Register NodeJS runtime adapter if not already registered
 		if (!registry.has("nodejs")) {
 			registry.register(new NodeJsRuntimeAdapter());
 		}
 
-		// Register HTTP-based runtime adapters for all SDK languages
-		// Python3 now uses HttpRuntimeAdapter (same as Go/Rust/Java/C#/PHP/Ruby)
-		const httpRuntimes: Array<{
+		const sdkLanguages: Array<{
 			kind: RuntimeKind;
 			hostEnv: string;
-			portEnv: string;
-			defaultPort: number;
+			httpPortEnv: string;
+			grpcPortEnv: string;
+			defaultHttpPort: number;
 		}> = [
-			{ kind: "go", hostEnv: "RUNTIME_GO_HOST", portEnv: "RUNTIME_GO_PORT", defaultPort: 9001 },
-			{ kind: "rust", hostEnv: "RUNTIME_RUST_HOST", portEnv: "RUNTIME_RUST_PORT", defaultPort: 9002 },
-			{ kind: "java", hostEnv: "RUNTIME_JAVA_HOST", portEnv: "RUNTIME_JAVA_PORT", defaultPort: 9003 },
-			{ kind: "csharp", hostEnv: "RUNTIME_CSHARP_HOST", portEnv: "RUNTIME_CSHARP_PORT", defaultPort: 9004 },
-			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", portEnv: "RUNTIME_PHP_PORT", defaultPort: 9005 },
-			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", portEnv: "RUNTIME_RUBY_PORT", defaultPort: 9006 },
-			{ kind: "python3", hostEnv: "RUNTIME_PYTHON3_HOST", portEnv: "RUNTIME_PYTHON3_PORT", defaultPort: 9007 },
+			{
+				kind: "go",
+				hostEnv: "RUNTIME_GO_HOST",
+				httpPortEnv: "RUNTIME_GO_PORT",
+				grpcPortEnv: "RUNTIME_GO_GRPC_PORT",
+				defaultHttpPort: 9001,
+			},
+			{
+				kind: "rust",
+				hostEnv: "RUNTIME_RUST_HOST",
+				httpPortEnv: "RUNTIME_RUST_PORT",
+				grpcPortEnv: "RUNTIME_RUST_GRPC_PORT",
+				defaultHttpPort: 9002,
+			},
+			{
+				kind: "java",
+				hostEnv: "RUNTIME_JAVA_HOST",
+				httpPortEnv: "RUNTIME_JAVA_PORT",
+				grpcPortEnv: "RUNTIME_JAVA_GRPC_PORT",
+				defaultHttpPort: 9003,
+			},
+			{
+				kind: "csharp",
+				hostEnv: "RUNTIME_CSHARP_HOST",
+				httpPortEnv: "RUNTIME_CSHARP_PORT",
+				grpcPortEnv: "RUNTIME_CSHARP_GRPC_PORT",
+				defaultHttpPort: 9004,
+			},
+			{
+				kind: "php",
+				hostEnv: "RUNTIME_PHP_HOST",
+				httpPortEnv: "RUNTIME_PHP_PORT",
+				grpcPortEnv: "RUNTIME_PHP_GRPC_PORT",
+				defaultHttpPort: 9005,
+			},
+			{
+				kind: "ruby",
+				hostEnv: "RUNTIME_RUBY_HOST",
+				httpPortEnv: "RUNTIME_RUBY_PORT",
+				grpcPortEnv: "RUNTIME_RUBY_GRPC_PORT",
+				defaultHttpPort: 9006,
+			},
+			{
+				kind: "python3",
+				hostEnv: "RUNTIME_PYTHON3_HOST",
+				httpPortEnv: "RUNTIME_PYTHON3_PORT",
+				grpcPortEnv: "RUNTIME_PYTHON3_GRPC_PORT",
+				defaultHttpPort: 9007,
+			},
 		];
 
-		for (const rt of httpRuntimes) {
-			if (!registry.has(rt.kind)) {
-				const host = process.env[rt.hostEnv] || "localhost";
-				const port = process.env[rt.portEnv] ? Number.parseInt(process.env[rt.portEnv] as string) : rt.defaultPort;
-				registry.register(new HttpRuntimeAdapter(rt.kind, host, port));
-			}
+		for (const lang of sdkLanguages) {
+			if (registry.has(lang.kind)) continue;
+			const transport: Transport = resolveTransportForKind(lang.kind);
+			const host = process.env[lang.hostEnv] || "localhost";
+			const adapter: RuntimeAdapter =
+				transport === "grpc"
+					? this.buildGrpcAdapter(lang.kind, host, lang.grpcPortEnv)
+					: this.buildHttpAdapter(lang.kind, host, lang.httpPortEnv, lang.defaultHttpPort);
+			registry.register(adapter);
 		}
+	}
+
+	private buildHttpAdapter(kind: RuntimeKind, host: string, portEnv: string, defaultPort: number): HttpRuntimeAdapter {
+		const port = process.env[portEnv] ? Number.parseInt(process.env[portEnv] as string, 10) : defaultPort;
+		return new HttpRuntimeAdapter(kind, host, port);
+	}
+
+	private buildGrpcAdapter(kind: RuntimeKind, host: string, portEnv: string): GrpcRuntimeAdapter {
+		const defaultPort = DEFAULT_GRPC_PORTS[kind];
+		const port = process.env[portEnv] ? Number.parseInt(process.env[portEnv] as string, 10) : defaultPort;
+		const config: GrpcAdapterConfig = {
+			kind,
+			host,
+			port,
+			defaultDeadlineMs: GRPC_DEFAULTS.DEFAULT_DEADLINE_MS,
+			maxMessageBytes: GRPC_DEFAULTS.MAX_MESSAGE_BYTES,
+			keepalive: {
+				timeMs: GRPC_DEFAULTS.KEEPALIVE_TIME_MS,
+				timeoutMs: GRPC_DEFAULTS.KEEPALIVE_TIMEOUT_MS,
+				permitWithoutCalls: GRPC_DEFAULTS.KEEPALIVE_PERMIT_WITHOUT_CALLS,
+			},
+		};
+		return new GrpcRuntimeAdapter(config);
 	}
 
 	public async init(workflowNameInPath: string, opts?: GlobalOptions) {

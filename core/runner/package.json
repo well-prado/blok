@@ -12,8 +12,10 @@
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
-		"build": "rm -rf dist && bun run tsc",
+		"build": "rm -rf dist && bun run tsc && bun run sync:proto",
 		"build:dev": "bun run build && tsc --watch",
+		"sync:proto": "mkdir -p dist/adapters/grpc/proto/blok/runtime/v1 && cp src/adapters/grpc/proto/blok/runtime/v1/runtime.proto dist/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
+		"sync:proto:fromroot": "mkdir -p src/adapters/grpc/proto/blok/runtime/v1 && cp ../../proto/blok/runtime/v1/runtime.proto src/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
 		"test:dev": "vitest",
 		"test": "vitest run",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
@@ -37,6 +39,8 @@
 	"dependencies": {
 		"@blokjs/helper": "^0.2.0",
 		"@blokjs/shared": "^0.2.0",
+		"@grpc/grpc-js": "^1.12.0",
+		"@grpc/proto-loader": "^0.7.13",
 		"@opentelemetry/api": "^1.9.0",
 		"fast-xml-parser": "^5.3.4",
 		"jsonschema": "^1.5.0",

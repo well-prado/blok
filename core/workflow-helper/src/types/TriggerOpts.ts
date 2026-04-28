@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-// HTTP Trigger Options
+// =============================================================================
+// HTTP Trigger
+// =============================================================================
+
+/** Validation schema for the HTTP trigger configuration. */
 export const HttpTriggerOptsSchema = z.object({
 	method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "ANY"]),
 	path: z.string().optional(),
@@ -8,12 +12,29 @@ export const HttpTriggerOptsSchema = z.object({
 	headers: z.record(z.string(), z.any()).optional(),
 });
 
-// Legacy alias for backward compatibility
-export const TriggerOptsSchema = HttpTriggerOptsSchema;
-// Use z.input for parameter types (allows optional fields with defaults)
-export type TriggerOpts = z.input<typeof TriggerOptsSchema>;
+/** Configuration for an HTTP trigger. Use with `addTrigger("http", ...)`. */
+export type HttpTriggerOpts = z.input<typeof HttpTriggerOptsSchema>;
 
-// Queue Trigger Options (Kafka, RabbitMQ, SQS, Redis, NATS)
+/**
+ * Legacy alias for {@link HttpTriggerOptsSchema}. Prefer the explicit name.
+ *
+ * @deprecated Use {@link HttpTriggerOptsSchema} directly. Will be removed in
+ * the next minor version.
+ */
+export const TriggerOptsSchema = HttpTriggerOptsSchema;
+
+/**
+ * Legacy alias for {@link HttpTriggerOpts}. Prefer the explicit name.
+ *
+ * @deprecated Use {@link HttpTriggerOpts} directly. Will be removed in the
+ * next minor version.
+ */
+export type TriggerOpts = HttpTriggerOpts;
+
+// =============================================================================
+// Queue Trigger (Kafka, RabbitMQ, SQS, Redis, NATS, Beanstalk)
+// =============================================================================
+
 export const QueueProviderSchema = z.enum(["kafka", "rabbitmq", "sqs", "redis", "beanstalk", "nats"]);
 export type QueueProvider = z.infer<typeof QueueProviderSchema>;
 
@@ -31,7 +52,10 @@ export const QueueTriggerOptsSchema = z.object({
 });
 export type QueueTriggerOpts = z.input<typeof QueueTriggerOptsSchema>;
 
-// Pub/Sub Trigger Options (GCP Pub/Sub, AWS SNS, Azure Service Bus)
+// =============================================================================
+// Pub/Sub Trigger (GCP Pub/Sub, AWS SNS/SQS, Azure Service Bus)
+// =============================================================================
+
 export const PubSubProviderSchema = z.enum(["gcp", "aws", "azure"]);
 export type PubSubProvider = z.infer<typeof PubSubProviderSchema>;
 
@@ -49,7 +73,10 @@ export const PubSubTriggerOptsSchema = z.object({
 });
 export type PubSubTriggerOpts = z.input<typeof PubSubTriggerOptsSchema>;
 
-// Worker Trigger Options (background jobs)
+// =============================================================================
+// Worker Trigger (background jobs)
+// =============================================================================
+
 export const WorkerTriggerOptsSchema = z.object({
 	queue: z.string().describe("Worker queue name"),
 	concurrency: z.number().default(1).describe("Number of concurrent workers"),
@@ -60,7 +87,10 @@ export const WorkerTriggerOptsSchema = z.object({
 });
 export type WorkerTriggerOpts = z.input<typeof WorkerTriggerOptsSchema>;
 
-// Cron Trigger Options (scheduled workflows)
+// =============================================================================
+// Cron Trigger (scheduled workflows)
+// =============================================================================
+
 export const CronTriggerOptsSchema = z.object({
 	schedule: z.string().describe("Cron expression (e.g., '0 * * * *' for hourly)"),
 	timezone: z.string().default("UTC").describe("Timezone for schedule evaluation"),
@@ -68,7 +98,10 @@ export const CronTriggerOptsSchema = z.object({
 });
 export type CronTriggerOpts = z.input<typeof CronTriggerOptsSchema>;
 
-// Webhook Trigger Options (external service events)
+// =============================================================================
+// Webhook Trigger (external service events)
+// =============================================================================
+
 export const WebhookTriggerOptsSchema = z.object({
 	source: z.string().describe("Source service (github, stripe, shopify, etc.)"),
 	events: z.array(z.string()).describe("Event types to listen for"),
@@ -77,7 +110,10 @@ export const WebhookTriggerOptsSchema = z.object({
 });
 export type WebhookTriggerOpts = z.input<typeof WebhookTriggerOptsSchema>;
 
-// WebSocket Trigger Options (real-time bidirectional)
+// =============================================================================
+// WebSocket Trigger (real-time bidirectional)
+// =============================================================================
+
 export const WebSocketTriggerOptsSchema = z.object({
 	events: z.array(z.string()).default(["*"]).describe("Event names to listen for (supports wildcards)"),
 	rooms: z.array(z.string()).optional().describe("Room/channel filters"),
@@ -88,7 +124,10 @@ export const WebSocketTriggerOptsSchema = z.object({
 });
 export type WebSocketTriggerOpts = z.input<typeof WebSocketTriggerOptsSchema>;
 
-// SSE Trigger Options (Server-Sent Events)
+// =============================================================================
+// SSE Trigger (Server-Sent Events)
+// =============================================================================
+
 export const SSETriggerOptsSchema = z.object({
 	events: z.array(z.string()).default(["*"]).describe("Event names to emit"),
 	channels: z.array(z.string()).optional().describe("Channel filters"),
@@ -99,7 +138,11 @@ export const SSETriggerOptsSchema = z.object({
 });
 export type SSETriggerOpts = z.input<typeof SSETriggerOptsSchema>;
 
-// All trigger types
+// =============================================================================
+// Trigger registry (the dispatch table)
+// =============================================================================
+
+/** All trigger names supported by Blok. */
 export const TriggersSchema = z.enum([
 	"http",
 	"grpc",
@@ -114,9 +157,14 @@ export const TriggersSchema = z.enum([
 ]);
 export type TriggersEnum = z.infer<typeof TriggersSchema>;
 
-// Type map for trigger configs - maps trigger name to its options type
+/**
+ * Map of trigger name → its config type.
+ *
+ * Used by {@link Trigger.addTrigger} overloads to constrain the `config`
+ * argument's shape for each trigger kind.
+ */
 export type TriggerConfigMap = {
-	http: TriggerOpts;
+	http: HttpTriggerOpts;
 	grpc: Record<string, unknown>;
 	manual: Record<string, unknown>;
 	cron: CronTriggerOpts;
@@ -128,9 +176,29 @@ export type TriggerConfigMap = {
 	websocket: WebSocketTriggerOpts;
 };
 
-// All trigger options union type
+/**
+ * Map of trigger name → validation schema. `null` means the trigger does not
+ * have a required configuration shape (currently `grpc` and `manual`).
+ *
+ * Single source of truth for runtime trigger-config validation. Used by
+ * {@link validateTriggerConfig}.
+ */
+export const TRIGGER_SCHEMAS = {
+	http: HttpTriggerOptsSchema,
+	queue: QueueTriggerOptsSchema,
+	pubsub: PubSubTriggerOptsSchema,
+	worker: WorkerTriggerOptsSchema,
+	cron: CronTriggerOptsSchema,
+	webhook: WebhookTriggerOptsSchema,
+	sse: SSETriggerOptsSchema,
+	websocket: WebSocketTriggerOptsSchema,
+	grpc: null,
+	manual: null,
+} as const satisfies Record<TriggersEnum, z.ZodTypeAny | null>;
+
+/** Union of every valid trigger configuration (typed). */
 export type AnyTriggerOpts =
-	| TriggerOpts
+	| HttpTriggerOpts
 	| QueueTriggerOpts
 	| PubSubTriggerOpts
 	| WorkerTriggerOpts
@@ -139,3 +207,35 @@ export type AnyTriggerOpts =
 	| WebSocketTriggerOpts
 	| SSETriggerOpts
 	| Record<string, unknown>;
+
+/**
+ * Validate a trigger configuration against the schema for the given trigger
+ * kind. When the trigger has a schema, returns the parsed config (with
+ * defaults applied). When the trigger has no schema (`grpc`, `manual`),
+ * returns the input config (or an empty object when `undefined`).
+ *
+ * Throws when the trigger requires a schema and the config is missing or
+ * invalid. The thrown error is either a `ZodError` (for shape violations) or
+ * a regular `Error` (when config is missing entirely).
+ *
+ * @example
+ *   const cfg = validateTriggerConfig("cron", { schedule: "0 * * * *" });
+ *   // cfg.timezone === "UTC" (default applied)
+ *
+ * @example
+ *   validateTriggerConfig("cron", undefined);
+ *   // throws: 'Trigger "cron" requires a configuration object.'
+ */
+export function validateTriggerConfig(name: TriggersEnum, config: unknown): unknown {
+	const schema = TRIGGER_SCHEMAS[name];
+	if (schema === null) {
+		// Triggers with no schema accept anything (including undefined).
+		return config ?? {};
+	}
+	if (config === undefined) {
+		throw new Error(
+			`Trigger "${name}" requires a configuration object. See ${name.charAt(0).toUpperCase()}${name.slice(1)}TriggerOpts.`,
+		);
+	}
+	return schema.parse(config);
+}

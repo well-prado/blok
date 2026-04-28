@@ -1,3 +1,11 @@
+import BlokError, {
+	type BlokErrorOpts,
+	DEFAULT_HTTP_STATUS,
+	DEFAULT_RETRYABLE,
+	ErrorCategory,
+	ErrorSeverity,
+	type NodeErrorPayload,
+} from "./BlokError";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
 import { Metrics, type MetricsType } from "./Metrics";
@@ -28,6 +36,13 @@ export {
 	Step,
 	GlobalLogger,
 	GlobalError,
+	BlokError,
+	type BlokErrorOpts,
+	type NodeErrorPayload,
+	ErrorCategory,
+	ErrorSeverity,
+	DEFAULT_HTTP_STATUS,
+	DEFAULT_RETRYABLE,
 	Metrics,
 	MemoryUsage,
 	type MetricsType,

@@ -4,8 +4,10 @@ import {
 	CronTriggerOptsSchema,
 	HttpTriggerOptsSchema,
 	QueueTriggerOptsSchema,
+	TRIGGER_SCHEMAS,
 	TriggersSchema,
 	WebhookTriggerOptsSchema,
+	validateTriggerConfig,
 } from "../src/types/TriggerOpts";
 import { WorkflowOptsSchema } from "../src/types/WorkflowOpts";
 
@@ -52,6 +54,26 @@ describe("StepOptsSchema", () => {
 	it("should allow optional runtime", () => {
 		const result = StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "runtime.go", runtime: "go" });
 		expect(result.runtime).toBe("go");
+	});
+
+	it("should allow optional set_var, active, stop", () => {
+		const result = StepOptsSchema.parse({
+			name: "step",
+			node: "my-node-name",
+			type: "module",
+			set_var: true,
+			active: false,
+			stop: true,
+		});
+		expect(result.set_var).toBe(true);
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+	});
+
+	it("should reject non-boolean set_var", () => {
+		expect(() =>
+			StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "module", set_var: "yes" }),
+		).toThrow();
 	});
 });
 
@@ -157,5 +179,56 @@ describe("StepConditionSchema", () => {
 			node: { name: "cond-node", node: "control-flow/if-else@1.0.0", type: "local" },
 		});
 		expect(result.node.name).toBe("cond-node");
+	});
+});
+
+describe("TRIGGER_SCHEMAS", () => {
+	it("has an entry for every trigger name", () => {
+		for (const name of TriggersSchema.options) {
+			expect(TRIGGER_SCHEMAS).toHaveProperty(name);
+		}
+	});
+
+	it("returns null for schemaless triggers", () => {
+		expect(TRIGGER_SCHEMAS.grpc).toBeNull();
+		expect(TRIGGER_SCHEMAS.manual).toBeNull();
+	});
+
+	it("returns a schema for typed triggers", () => {
+		expect(TRIGGER_SCHEMAS.http).not.toBeNull();
+		expect(TRIGGER_SCHEMAS.cron).not.toBeNull();
+		expect(TRIGGER_SCHEMAS.queue).not.toBeNull();
+	});
+});
+
+describe("validateTriggerConfig", () => {
+	it("returns an empty object for grpc/manual when given undefined", () => {
+		expect(validateTriggerConfig("grpc", undefined)).toEqual({});
+		expect(validateTriggerConfig("manual", undefined)).toEqual({});
+	});
+
+	it("returns the provided config for grpc/manual when given an object", () => {
+		const cfg = { service: "UserService" };
+		expect(validateTriggerConfig("grpc", cfg)).toEqual(cfg);
+	});
+
+	it("throws when a typed trigger is missing its config", () => {
+		expect(() => validateTriggerConfig("cron", undefined)).toThrow(/requires a configuration object/);
+		expect(() => validateTriggerConfig("queue", undefined)).toThrow(/requires a configuration object/);
+		expect(() => validateTriggerConfig("worker", undefined)).toThrow(/requires a configuration object/);
+	});
+
+	it("applies defaults from the schema", () => {
+		const result = validateTriggerConfig("cron", { schedule: "0 * * * *" }) as {
+			timezone: string;
+			overlap: boolean;
+		};
+		expect(result.timezone).toBe("UTC");
+		expect(result.overlap).toBe(false);
+	});
+
+	it("rejects invalid configs", () => {
+		expect(() => validateTriggerConfig("cron", { schedule: 123 })).toThrow();
+		expect(() => validateTriggerConfig("queue", { provider: "unknown", topic: "x" })).toThrow();
 	});
 });

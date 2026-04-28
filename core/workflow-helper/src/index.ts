@@ -6,9 +6,12 @@ import Trigger from "./components/Trigger";
 import Workflow from "./components/Workflow";
 import { NodeType, NodeTypeSchema, RuntimeKind, RuntimeKindSchema, StepInputs, StepOpts } from "./types/StepOpts";
 import {
+	AnyTriggerOpts,
 	// Cron
 	CronTriggerOpts,
 	CronTriggerOptsSchema,
+	// HTTP (preferred name)
+	HttpTriggerOpts,
 	HttpTriggerOptsSchema,
 	// Pub/Sub
 	PubSubProvider,
@@ -23,7 +26,10 @@ import {
 	// SSE
 	SSETriggerOpts,
 	SSETriggerOptsSchema,
-	// HTTP (legacy)
+	// Trigger registry
+	TRIGGER_SCHEMAS,
+	TriggerConfigMap,
+	// HTTP (legacy aliases — deprecated)
 	TriggerOpts,
 	TriggerOptsSchema,
 	TriggersEnum,
@@ -38,6 +44,7 @@ import {
 	// Worker
 	WorkerTriggerOpts,
 	WorkerTriggerOptsSchema,
+	validateTriggerConfig,
 } from "./types/TriggerOpts";
 
 export {
@@ -54,10 +61,12 @@ export {
 	StepOpts,
 	Trigger,
 	Workflow,
-	// Trigger types
+	// Trigger types — preferred names
+	HttpTriggerOpts,
+	HttpTriggerOptsSchema,
+	// Trigger types — legacy aliases (deprecated)
 	TriggerOpts,
 	TriggerOptsSchema,
-	HttpTriggerOptsSchema,
 	QueueProvider,
 	QueueProviderSchema,
 	QueueTriggerOpts,
@@ -78,4 +87,9 @@ export {
 	SSETriggerOptsSchema,
 	TriggersSchema,
 	TriggersEnum,
+	// Trigger registry — runtime dispatch
+	TriggerConfigMap,
+	TRIGGER_SCHEMAS,
+	AnyTriggerOpts,
+	validateTriggerConfig,
 };

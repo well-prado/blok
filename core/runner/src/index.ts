@@ -15,6 +15,24 @@ import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
+import { DEFAULT_HEALTH_SERVICE_CONFIG, buildChannelOptions } from "./adapters/grpc/GrpcChannelOptions";
+import { GrpcClientPool, buildCredentials } from "./adapters/grpc/GrpcClientPool";
+import {
+	NodeRuntimeService,
+	bufferToJson,
+	decodeExecuteResponse,
+	encodeExecuteRequest,
+	jsonToBuffer,
+} from "./adapters/grpc/GrpcCodec";
+import {
+	GRPC_STATUS_MAP,
+	categoryToGrpcStatus,
+	toBlokError as grpcToBlokError,
+	isServiceError,
+} from "./adapters/grpc/GrpcErrors";
+import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
+import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS } from "./adapters/grpc/types";
+import { resolveTransportForKind } from "./adapters/transport";
 
 // Function-first node API
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
@@ -127,6 +145,24 @@ export {
 	HttpRuntimeAdapter,
 	BunRuntimeAdapter,
 	WasmRuntimeAdapter,
+	// gRPC runtime adapter
+	GrpcRuntimeAdapter,
+	GrpcClientPool,
+	buildCredentials,
+	buildChannelOptions,
+	NodeRuntimeService,
+	encodeExecuteRequest,
+	decodeExecuteResponse,
+	jsonToBuffer,
+	bufferToJson,
+	GRPC_STATUS_MAP,
+	GRPC_DEFAULTS,
+	DEFAULT_GRPC_PORTS,
+	DEFAULT_HEALTH_SERVICE_CONFIG,
+	categoryToGrpcStatus,
+	isServiceError,
+	grpcToBlokError,
+	resolveTransportForKind,
 	// Function-first API
 	defineNode,
 	FunctionNode,
@@ -227,6 +263,32 @@ export {
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type { HttpRuntimeAdapterOptions } from "./adapters/HttpRuntimeAdapter";
+
+// gRPC adapter types
+export type {
+	GrpcAdapterConfig,
+	KeepaliveConfig,
+	TlsConfig,
+	Transport,
+} from "./adapters/grpc/types";
+export type {
+	DecodedExecuteResponse,
+	DecodedLogLine,
+	DecodedMetrics,
+	DecodedNodeError,
+	ExecuteRequestProto,
+	ExecuteResponseProto,
+	LogLineProto,
+	MetricsProto,
+	NodeErrorProto,
+	NodeRefProto,
+	RuntimeStateProto,
+	StepInfoProto,
+	TriggerInfoProto,
+	WorkflowInfoProto,
+	ExecuteOptionsProto,
+} from "./adapters/grpc/GrpcCodec";
+export type { GrpcErrorContext } from "./adapters/grpc/GrpcErrors";
 export type {
 	HealthStatus,
 	HealthCheckResult,
