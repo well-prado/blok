@@ -23,6 +23,19 @@ export interface GrpcAdapterConfig {
 	readonly tls?: TlsConfig;
 	/** Optional gRPC service config JSON for retries on the Health RPC. */
 	readonly serviceConfigJson?: string;
+	/**
+	 * Background health-check polling interval in ms. Set to `0` to disable
+	 * (useful in tests so timers don't leak). Defaults to
+	 * {@link GRPC_DEFAULTS.HEALTH_INTERVAL_MS}.
+	 */
+	readonly healthCheckIntervalMs?: number;
+	/**
+	 * Number of consecutive Health/Check failures that opens the circuit
+	 * (subsequent `execute()` / `executeStream()` calls fail fast with a
+	 * `BlokError(category=DEPENDENCY)` instead of dialing). Defaults to
+	 * {@link GRPC_DEFAULTS.HEALTH_FAILURE_THRESHOLD}.
+	 */
+	readonly healthCheckFailureThreshold?: number;
 }
 
 /**
@@ -78,6 +91,8 @@ export const GRPC_DEFAULTS = {
 	KEEPALIVE_PERMIT_WITHOUT_CALLS: true,
 	/** Health probe interval. */
 	HEALTH_INTERVAL_MS: 30_000,
+	/** Consecutive Health failures that trip the circuit breaker. */
+	HEALTH_FAILURE_THRESHOLD: 3,
 } as const;
 
 /**

@@ -1,5 +1,5 @@
 import type { RuntimeKind } from "./RuntimeAdapter";
-import type { Transport } from "./grpc/types";
+import type { TlsConfig, Transport } from "./grpc/types";
 
 /**
  * Resolve the transport to use for a given runtime kind from the environment.
@@ -49,8 +49,113 @@ export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEn
  * else (including unset, empty, `0`, `false`) returns false.
  */
 export function isStreamLogsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	const raw = env.BLOK_STREAM_LOGS;
-	if (!raw) return false;
-	const normalized = raw.trim().toLowerCase();
+	return isTruthyFlag(env.BLOK_STREAM_LOGS);
+}
+
+/**
+ * Resolve the gRPC background health-check interval from the environment.
+ *
+ * `BLOK_GRPC_HEALTH_INTERVAL_MS` is the global override:
+ *   - any positive integer → use that interval
+ *   - `0` → disable the loop entirely (useful in tests)
+ *   - unset / non-numeric → return undefined; adapter uses
+ *     {@link GRPC_DEFAULTS.HEALTH_INTERVAL_MS}.
+ */
+export function resolveHealthCheckIntervalMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = env.BLOK_GRPC_HEALTH_INTERVAL_MS;
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed < 0) return undefined;
+	return parsed;
+}
+
+/**
+ * Resolve the consecutive-failure threshold for the gRPC circuit breaker.
+ *
+ * `BLOK_GRPC_HEALTH_FAILURE_THRESHOLD` overrides the default
+ * ({@link GRPC_DEFAULTS.HEALTH_FAILURE_THRESHOLD}). Values < 1 are ignored
+ * (the checker requires ≥ 1 failure to trip).
+ */
+export function resolveHealthCheckFailureThreshold(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = env.BLOK_GRPC_HEALTH_FAILURE_THRESHOLD;
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed < 1) return undefined;
+	return parsed;
+}
+
+/**
+ * Build a {@link TlsConfig} for a given runtime kind from environment
+ * variables. Returns `undefined` when nothing is configured (channel stays
+ * plaintext — appropriate for loopback dev).
+ *
+ * Per-kind env vars (taking precedence):
+ *   - `RUNTIME_<KIND>_TLS_CA`              CA cert path (PEM)
+ *   - `RUNTIME_<KIND>_TLS_CLIENT_CERT`     client cert path (PEM, mTLS)
+ *   - `RUNTIME_<KIND>_TLS_CLIENT_KEY`      client key path (PEM, mTLS)
+ *   - `RUNTIME_<KIND>_TLS_SERVER_NAME`     SNI override
+ *   - `RUNTIME_<KIND>_TLS_INSECURE_SKIP_VERIFY=true`  dev-only
+ *
+ * Global fallbacks (apply when the per-kind var is unset):
+ *   - `BLOK_GRPC_TLS_CA`, `BLOK_GRPC_TLS_CLIENT_CERT`, `BLOK_GRPC_TLS_CLIENT_KEY`,
+ *     `BLOK_GRPC_TLS_SERVER_NAME`, `BLOK_GRPC_TLS_INSECURE_SKIP_VERIFY`.
+ *
+ * If none of the relevant env vars are set, returns `undefined`.
+ */
+export function loadTlsConfigForKind(kind: RuntimeKind, env: NodeJS.ProcessEnv = process.env): TlsConfig | undefined {
+	const upperKind = kind.toUpperCase();
+	const pick = (suffix: string): string | undefined =>
+		env[`RUNTIME_${upperKind}_TLS_${suffix}`] ?? env[`BLOK_GRPC_TLS_${suffix}`];
+
+	const caCertPath = pick("CA");
+	const clientCertPath = pick("CLIENT_CERT");
+	const clientKeyPath = pick("CLIENT_KEY");
+	const serverNameOverride = pick("SERVER_NAME");
+	const insecureSkipVerifyRaw = pick("INSECURE_SKIP_VERIFY");
+	const insecureSkipVerify = isTruthyFlag(insecureSkipVerifyRaw);
+
+	const anySet =
+		caCertPath !== undefined ||
+		clientCertPath !== undefined ||
+		clientKeyPath !== undefined ||
+		serverNameOverride !== undefined ||
+		insecureSkipVerify;
+
+	if (!anySet) return undefined;
+
+	return {
+		caCertPath,
+		clientCertPath,
+		clientKeyPath,
+		serverNameOverride,
+		insecureSkipVerify,
+	};
+}
+
+/**
+ * Whether `BLOK_GRPC_REQUIRE_TLS=true` enforces TLS on non-loopback hosts.
+ * When true, building a gRPC adapter with no TLS config against a non-loopback
+ * host throws at startup. Loopback (localhost, 127.0.0.0/8, ::1) is exempted.
+ */
+export function isStrictTlsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	return isTruthyFlag(env.BLOK_GRPC_REQUIRE_TLS);
+}
+
+/**
+ * Returns true when the host is a loopback address that doesn't require
+ * TLS even under strict mode. Match is intentionally generous — covers
+ * `localhost`, the 127.x range, IPv6 loopback, and the wildcard 0.0.0.0
+ * (which dev SDKs commonly bind to).
+ */
+export function isLoopbackHost(host: string): boolean {
+	const normalized = host.trim().toLowerCase();
+	if (normalized === "localhost" || normalized === "::1" || normalized === "0.0.0.0") return true;
+	if (normalized.startsWith("127.")) return true;
+	return false;
+}
+
+function isTruthyFlag(value: string | undefined): boolean {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }

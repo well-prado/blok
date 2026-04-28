@@ -8,6 +8,11 @@
 export { GrpcRuntimeAdapter } from "./GrpcRuntimeAdapter";
 export { GrpcClientPool, buildCredentials } from "./GrpcClientPool";
 export {
+	GrpcHealthChecker,
+	type HealthCheckerOptions,
+	type HealthProbe,
+} from "./GrpcHealthChecker";
+export {
 	GRPC_STATUS_MAP,
 	type GrpcErrorContext,
 	categoryToGrpcStatus,

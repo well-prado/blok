@@ -15,7 +15,8 @@ import {
 	encodeExecuteRequest,
 } from "./GrpcCodec";
 import { type GrpcErrorContext, toBlokError } from "./GrpcErrors";
-import type { GrpcAdapterConfig } from "./types";
+import { GrpcHealthChecker } from "./GrpcHealthChecker";
+import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "./types";
 
 /**
  * Runtime adapter that executes a node by calling
@@ -47,16 +48,69 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	private readonly config: GrpcAdapterConfig;
 	private readonly pool: GrpcClientPool;
 	private readonly ownsPool: boolean;
+	private readonly healthChecker: GrpcHealthChecker | null;
 
 	constructor(config: GrpcAdapterConfig, pool?: GrpcClientPool) {
 		this.kind = config.kind;
 		this.config = config;
 		this.pool = pool ?? new GrpcClientPool();
 		this.ownsPool = pool === undefined;
+		this.healthChecker = this.buildHealthChecker();
+	}
+
+	/**
+	 * Lazily start the background health-check loop. Operators can disable
+	 * the loop with `healthCheckIntervalMs: 0`. Tests typically construct
+	 * adapters without starting the loop and use {@link checkHealth}
+	 * directly.
+	 */
+	startHealthCheck(): void {
+		this.healthChecker?.start();
+	}
+
+	private buildHealthChecker(): GrpcHealthChecker | null {
+		const intervalMs = this.config.healthCheckIntervalMs ?? GRPC_DEFAULTS.HEALTH_INTERVAL_MS;
+		if (intervalMs <= 0) return null;
+		const threshold = this.config.healthCheckFailureThreshold ?? GRPC_DEFAULTS.HEALTH_FAILURE_THRESHOLD;
+		return new GrpcHealthChecker(() => this.checkHealth(), {
+			intervalMs,
+			failureThreshold: threshold,
+		});
+	}
+
+	/** Build a typed `BlokError(category=DEPENDENCY)` for short-circuited calls. */
+	private circuitOpenError(node: RunnerNode): BlokError {
+		return BlokError.dependency({
+			code: "GRPC_RUNTIME_UNAVAILABLE",
+			message: `Runtime ${this.kind} unavailable — circuit breaker is open after consecutive Health failures`,
+			description: `The background health probe could not reach ${this.config.host}:${this.config.port} for the configured failure threshold. Calls fail fast until a probe succeeds.`,
+			remediation:
+				"Check the SDK process is running and reachable, then wait for the next health probe to recover the circuit.",
+			retryable: true,
+			retryAfterMs: this.config.healthCheckIntervalMs ?? GRPC_DEFAULTS.HEALTH_INTERVAL_MS,
+			contextSnapshot: {
+				kind: this.kind,
+				host: this.config.host,
+				port: this.config.port,
+				node: node.name,
+			},
+		});
 	}
 
 	async execute(node: RunnerNode, ctx: Context): Promise<ExecutionResult> {
 		const startTime = performance.now();
+
+		// Fail fast when the circuit breaker has tripped — avoids stacking up
+		// blocked calls on top of a known-unhealthy SDK.
+		if (this.healthChecker && !this.healthChecker.isAvailable()) {
+			return {
+				success: false,
+				data: null,
+				errors: this.circuitOpenError(node),
+				metrics: { duration_ms: performance.now() - startTime, request_bytes: 0 } as ExecutionResult["metrics"],
+			};
+		}
+
 		const stepInfo = readStepInfo(ctx);
 		const deadlineMs = readPerCallDeadline(ctx) ?? this.config.defaultDeadlineMs;
 
@@ -116,6 +170,29 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		result: Promise<ExecutionResult>;
 	} {
 		const startTime = performance.now();
+
+		// Mirror the unary fast-fail path so streaming callers see the same
+		// circuit-breaker behavior. Returns an empty iterable + a pre-resolved
+		// failure result so consumers' `for await` and `await result` patterns
+		// both terminate immediately.
+		if (this.healthChecker && !this.healthChecker.isAvailable()) {
+			const blokError = this.circuitOpenError(node);
+			const empty: AsyncIterable<DecodedExecuteEvent> = {
+				[Symbol.asyncIterator]: async function* () {
+					/* nothing to yield */
+				},
+			};
+			return {
+				events: empty,
+				result: Promise.resolve({
+					success: false,
+					data: null,
+					errors: blokError,
+					metrics: { duration_ms: performance.now() - startTime, request_bytes: 0 } as ExecutionResult["metrics"],
+				}),
+			};
+		}
+
 		const stepInfo = readStepInfo(ctx);
 		const deadlineMs = readPerCallDeadline(ctx) ?? this.config.defaultDeadlineMs;
 
@@ -201,8 +278,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		}
 	}
 
-	/** Close the underlying client pool. Only effective when the pool is owned. */
+	/**
+	 * Close the underlying client pool and stop the health-check loop.
+	 * Pool close is only effective when the pool is owned by this adapter.
+	 */
 	close(): void {
+		this.healthChecker?.stop();
 		if (this.ownsPool) this.pool.close();
 	}
 

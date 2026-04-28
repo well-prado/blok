@@ -11,7 +11,15 @@ import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig, type Transport } from "./adapters/grpc/types";
-import { isStreamLogsEnabled, resolveTransportForKind } from "./adapters/transport";
+import {
+	isLoopbackHost,
+	isStreamLogsEnabled,
+	isStrictTlsEnabled,
+	loadTlsConfigForKind,
+	resolveHealthCheckFailureThreshold,
+	resolveHealthCheckIntervalMs,
+	resolveTransportForKind,
+} from "./adapters/transport";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
 import type Flow from "./types/Flow";
@@ -133,6 +141,16 @@ export default class Configuration implements Config {
 	private buildGrpcAdapter(kind: RuntimeKind, host: string, portEnv: string): GrpcRuntimeAdapter {
 		const defaultPort = DEFAULT_GRPC_PORTS[kind];
 		const port = process.env[portEnv] ? Number.parseInt(process.env[portEnv] as string, 10) : defaultPort;
+		const tls = loadTlsConfigForKind(kind);
+
+		// Strict mode rejects insecure channels against non-loopback hosts so
+		// production deployments can't accidentally ship plaintext mTLS-bypass.
+		if (!tls && isStrictTlsEnabled() && !isLoopbackHost(host)) {
+			throw new Error(
+				`BLOK_GRPC_REQUIRE_TLS=true: refusing to build a plaintext gRPC adapter for runtime.${kind} targeting ${host}:${port}. Set RUNTIME_${kind.toUpperCase()}_TLS_CA (and CLIENT_CERT/CLIENT_KEY for mTLS) or fall back to a loopback host.`,
+			);
+		}
+
 		const config: GrpcAdapterConfig = {
 			kind,
 			host,
@@ -144,8 +162,17 @@ export default class Configuration implements Config {
 				timeoutMs: GRPC_DEFAULTS.KEEPALIVE_TIMEOUT_MS,
 				permitWithoutCalls: GRPC_DEFAULTS.KEEPALIVE_PERMIT_WITHOUT_CALLS,
 			},
+			tls,
+			healthCheckIntervalMs: resolveHealthCheckIntervalMs(),
+			healthCheckFailureThreshold: resolveHealthCheckFailureThreshold(),
 		};
-		return new GrpcRuntimeAdapter(config);
+		const adapter = new GrpcRuntimeAdapter(config);
+		// Start the background health probe loop now so the circuit breaker
+		// is warm before the first workflow run. Adapters created in tests
+		// either disable the interval (BLOK_GRPC_HEALTH_INTERVAL_MS=0) or
+		// avoid Configuration entirely.
+		adapter.startHealthCheck();
+		return adapter;
 	}
 
 	public async init(workflowNameInPath: string, opts?: GlobalOptions) {

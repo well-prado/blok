@@ -188,6 +188,9 @@ function makeAdapterConfig(port: number, overrides: Partial<GrpcAdapterConfig> =
 			timeoutMs: GRPC_DEFAULTS.KEEPALIVE_TIMEOUT_MS,
 			permitWithoutCalls: GRPC_DEFAULTS.KEEPALIVE_PERMIT_WITHOUT_CALLS,
 		},
+		// Disable the background health probe loop in unit tests by default —
+		// individual tests opt in by passing a positive interval.
+		healthCheckIntervalMs: 0,
 		...overrides,
 	};
 }
@@ -536,6 +539,107 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 				expect(result.errors).toBeInstanceOf(BlokError);
 				const err = result.errors as BlokError;
 				expect([ErrorCategory.DEPENDENCY, ErrorCategory.TIMEOUT]).toContain(err.category);
+			} finally {
+				isolated.close();
+			}
+		});
+	});
+
+	describe("circuit breaker (health-check integration)", () => {
+		// Tests that opt the adapter INTO the background health loop. Each
+		// test owns its adapter instance + cleans up on teardown.
+
+		it("execute() short-circuits with GRPC_RUNTIME_UNAVAILABLE once the breaker is open", async () => {
+			// Start an isolated adapter pointed at a port we can take down.
+			const isolated = new GrpcRuntimeAdapter(
+				makeAdapterConfig(mock.port, {
+					healthCheckIntervalMs: 1, // arbitrarily fast for the test
+					healthCheckFailureThreshold: 2,
+				}),
+			);
+			try {
+				// Force health to fail twice via the mock so the breaker opens.
+				healthOverride = () => "NOT_SERVING";
+				// Drive the loop deterministically — accessing the private field
+				// would require a friend; instead we just call checkHealth()
+				// twice to advance the tick logic in the public surface.
+				// To keep the test independent of the timer, reach into the
+				// private health checker via `as any` (acceptable for tests).
+				const checker = (isolated as unknown as { healthChecker: { tick: () => Promise<void> } }).healthChecker;
+				expect(checker).toBeTruthy();
+				await checker.tick();
+				await checker.tick();
+
+				const result = await isolated.execute(makeNode(), makeCtx());
+				expect(result.success).toBe(false);
+				expect(result.errors).toBeInstanceOf(BlokError);
+				const err = result.errors as BlokError;
+				expect(err.errorCode).toBe("GRPC_RUNTIME_UNAVAILABLE");
+				expect(err.category).toBe(ErrorCategory.DEPENDENCY);
+				expect(err.retryable).toBe(true);
+			} finally {
+				isolated.close();
+			}
+		});
+
+		it("executeStream() short-circuits with the same error and yields no events", async () => {
+			const isolated = new GrpcRuntimeAdapter(
+				makeAdapterConfig(mock.port, {
+					healthCheckIntervalMs: 1,
+					healthCheckFailureThreshold: 1,
+				}),
+			);
+			try {
+				healthOverride = () => "NOT_SERVING";
+				const checker = (isolated as unknown as { healthChecker: { tick: () => Promise<void> } }).healthChecker;
+				await checker.tick();
+
+				const { events, result } = isolated.executeStream(makeNode(), makeCtx());
+				const collected: DecodedExecuteEvent[] = [];
+				for await (const ev of events) collected.push(ev);
+				const final = await result;
+
+				expect(collected).toHaveLength(0);
+				expect(final.success).toBe(false);
+				expect((final.errors as BlokError).errorCode).toBe("GRPC_RUNTIME_UNAVAILABLE");
+			} finally {
+				isolated.close();
+			}
+		});
+
+		it("recovers automatically after the next successful health probe", async () => {
+			const isolated = new GrpcRuntimeAdapter(
+				makeAdapterConfig(mock.port, {
+					healthCheckIntervalMs: 1,
+					healthCheckFailureThreshold: 1,
+				}),
+			);
+			try {
+				const checker = (isolated as unknown as { healthChecker: { tick: () => Promise<void> } }).healthChecker;
+
+				// Open the breaker.
+				healthOverride = () => "NOT_SERVING";
+				await checker.tick();
+				const failed = await isolated.execute(makeNode(), makeCtx());
+				expect(failed.success).toBe(false);
+				expect((failed.errors as BlokError).errorCode).toBe("GRPC_RUNTIME_UNAVAILABLE");
+
+				// Recover.
+				healthOverride = null;
+				await checker.tick();
+
+				const ok = await isolated.execute(makeNode(), makeCtx());
+				expect(ok.success).toBe(true);
+			} finally {
+				isolated.close();
+			}
+		});
+
+		it("disables the loop entirely when healthCheckIntervalMs is 0", () => {
+			const isolated = new GrpcRuntimeAdapter(makeAdapterConfig(mock.port, { healthCheckIntervalMs: 0 }));
+			try {
+				const checker = (isolated as unknown as { healthChecker: unknown }).healthChecker;
+				expect(checker).toBeNull();
 			} finally {
 				isolated.close();
 			}
