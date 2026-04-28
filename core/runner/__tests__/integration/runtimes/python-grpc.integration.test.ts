@@ -226,4 +226,24 @@ describe.skipIf(!PYTHON_AVAILABLE)("TS runner ↔ Python SDK over gRPC (E2E)", (
 			isolatedAdapter.close();
 		}
 	});
+
+	it("ExecuteStream emits NodeStarted -> final and resolves to the same payload as Execute", async () => {
+		const node = makeNode("step-greet", "hello-world");
+		const ctx = makeCtx("step-greet", { prefix: "Hi" }, { name: "Blok" });
+
+		const { events, result } = adapter.executeStream(node, ctx);
+		const eventTypes: string[] = [];
+		for await (const ev of events) eventTypes.push(ev.type);
+		const final = await result;
+
+		// Order: NodeStarted first, final last. Logs may or may not appear
+		// depending on whether the example node logs to "blok.node".
+		expect(eventTypes[0]).toBe("started");
+		expect(eventTypes[eventTypes.length - 1]).toBe("final");
+
+		expect(final.success).toBe(true);
+		const data = final.data as { message: string; language: string };
+		expect(data.message).toBe("Hi, Blok!");
+		expect(data.language).toBe("python3");
+	});
 });

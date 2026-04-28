@@ -285,6 +285,61 @@ export function encodeExecuteRequest(
 }
 
 // =============================================================================
+// ExecuteStream — server-streaming wire types + decoded events
+// =============================================================================
+
+/**
+ * Proto envelope for a streamed event. proto-loader with `oneofs: true`
+ * exposes the active oneof case via the `event` property AND mirrors the
+ * matching field at the top level. We discriminate on `event`.
+ */
+export interface ExecuteEventProto {
+	event: "started" | "log" | "progress" | "partial" | "final" | undefined;
+	started?: { at: { seconds: string; nanos: number } | null };
+	log?: LogLineProto;
+	progress?: { percent: number; phase: string };
+	partial?: { snapshotJson: Buffer };
+	final?: ExecuteResponseProto;
+}
+
+/**
+ * Adapter-facing discriminated union — keeps callers free of proto-loader
+ * shape concerns and lets TypeScript narrow on the `type` field.
+ */
+export type DecodedExecuteEvent =
+	| { readonly type: "started"; readonly at: number }
+	| { readonly type: "log"; readonly log: DecodedLogLine }
+	| { readonly type: "progress"; readonly percent: number; readonly phase: string }
+	| { readonly type: "partial"; readonly snapshot: unknown }
+	| { readonly type: "final"; readonly response: DecodedExecuteResponse };
+
+/**
+ * Decode a single streamed `ExecuteEvent` proto into the discriminated union
+ * the adapter exposes. Returns `null` when the proto envelope is empty (no
+ * oneof field set) — the caller skips such frames.
+ */
+export function decodeExecuteEvent(event: ExecuteEventProto): DecodedExecuteEvent | null {
+	switch (event.event) {
+		case "started":
+			return { type: "started", at: timestampToMs(event.started?.at ?? null) };
+		case "log":
+			return event.log ? { type: "log", log: decodeLogLine(event.log) } : null;
+		case "progress":
+			return {
+				type: "progress",
+				percent: event.progress?.percent ?? 0,
+				phase: event.progress?.phase ?? "",
+			};
+		case "partial":
+			return { type: "partial", snapshot: bufferToJson(event.partial?.snapshotJson) };
+		case "final":
+			return event.final ? { type: "final", response: decodeExecuteResponse(event.final) } : null;
+		default:
+			return null;
+	}
+}
+
+// =============================================================================
 // Decoder — proto ExecuteResponse → DecodedExecuteResponse
 // =============================================================================
 

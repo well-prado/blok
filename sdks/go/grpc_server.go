@@ -28,10 +28,12 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/nickincloud/blok-go/genpb/blok/runtime/v1"
 )
@@ -71,9 +73,41 @@ func (s *BlokNodeRuntime) Execute(ctx context.Context, req *pb.ExecuteRequest) (
 	return encodeExecuteResponse(result, execReq.Node.Name, s.sdkVersion), nil
 }
 
-// ExecuteStream returns UNIMPLEMENTED for now (Phase 5 capability).
+// ExecuteStream is the server-streaming variant of Execute.
+//
+// Emits, in order:
+//  1. one NodeStarted event marking call acceptance
+//  2. one terminal ExecuteResponse carrying the same payload as the unary
+//     Execute would return
+//
+// Log capture (LogLine events) is intentionally out of scope for the Phase 5
+// Go pilot — the existing NodeHandler.Execute signature has no per-call
+// logger sink, so adding it requires a Context refactor that lands in a
+// follow-up. Real-time log streaming arrives once the SDK exposes a
+// per-call streaming logger.
 func (s *BlokNodeRuntime) ExecuteStream(req *pb.ExecuteRequest, stream pb.NodeRuntime_ExecuteStreamServer) error {
-	return status.Error(codes.Unimplemented, "ExecuteStream is not implemented yet — opt out via stream_logs=false")
+	execReq, err := decodeExecuteRequest(req)
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	// NodeStarted goes out immediately so the runner can record start time
+	// before the (potentially long) execute call.
+	if sendErr := stream.Send(&pb.ExecuteEvent{
+		Event: &pb.ExecuteEvent_Started{
+			Started: &pb.NodeStarted{At: timestamppb.New(time.Now())},
+		},
+	}); sendErr != nil {
+		return sendErr
+	}
+
+	result := s.registry.Execute(execReq)
+
+	return stream.Send(&pb.ExecuteEvent{
+		Event: &pb.ExecuteEvent_Final{
+			Final: encodeExecuteResponse(result, execReq.Node.Name, s.sdkVersion),
+		},
+	})
 }
 
 // Health reports SERVING with the SDK version and registered node names.

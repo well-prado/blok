@@ -10,15 +10,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 
 	pb "github.com/nickincloud/blok-go/genpb/blok/runtime/v1"
 )
@@ -349,26 +348,40 @@ func TestListNodesReturnsRegisteredDescriptors(t *testing.T) {
 	}
 }
 
-func TestExecuteStreamIsUnimplemented(t *testing.T) {
+func TestExecuteStreamEmitsStartedThenFinal(t *testing.T) {
 	_, addr, stop := startTestServer(t)
 	defer stop()
 	client, closeClient := dialTestClient(t, addr)
 	defer closeClient()
 
-	stream, err := client.ExecuteStream(context.Background(), makeRequest("echo", nil, nil))
+	stream, err := client.ExecuteStream(context.Background(), makeRequest("echo", map[string]any{"hi": 1}, nil))
 	if err != nil {
-		// Some gRPC versions surface UNIMPLEMENTED at call site.
-		if status.Code(err) != codes.Unimplemented {
-			t.Errorf("expected UNIMPLEMENTED, got %v", err)
+		t.Fatalf("ExecuteStream call failed: %v", err)
+	}
+
+	var events []*pb.ExecuteEvent
+	for {
+		ev, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
 		}
-		return
+		if recvErr != nil {
+			t.Fatalf("Recv failed: %v", recvErr)
+		}
+		events = append(events, ev)
 	}
-	// Otherwise it surfaces on the first Recv.
-	_, recvErr := stream.Recv()
-	if recvErr == nil {
-		t.Fatal("expected UNIMPLEMENTED on first Recv")
+
+	if len(events) < 2 {
+		t.Fatalf("expected at least 2 events (started, final), got %d", len(events))
 	}
-	if status.Code(recvErr) != codes.Unimplemented {
-		t.Errorf("expected UNIMPLEMENTED, got %v", recvErr)
+	if _, ok := events[0].GetEvent().(*pb.ExecuteEvent_Started); !ok {
+		t.Errorf("expected first event = NodeStarted, got %T", events[0].GetEvent())
+	}
+	last, ok := events[len(events)-1].GetEvent().(*pb.ExecuteEvent_Final)
+	if !ok {
+		t.Fatalf("expected last event = ExecuteResponse, got %T", events[len(events)-1].GetEvent())
+	}
+	if !last.Final.Success {
+		t.Errorf("expected final.success=true, got false")
 	}
 }

@@ -11,6 +11,8 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
 import {
+	type DecodedExecuteEvent,
+	type ExecuteEventProto,
 	type ExecuteRequestProto,
 	type ExecuteResponseProto,
 	NodeRuntimeService,
@@ -67,6 +69,13 @@ function makeCtx(overrides: Partial<Context> = {}): Context {
 interface MockServerBehavior {
 	executeImpl?: (request: ExecuteRequestProto) => ExecuteResponseProto | Error;
 	healthImpl?: () => "SERVING" | "NOT_SERVING" | "UNKNOWN" | Error;
+	/**
+	 * Server-streaming `ExecuteStream` impl. Each yielded `ExecuteEventProto`
+	 * is written to the call. If a value of type `Error` is yielded the
+	 * server destroys the call with that error; if `null` is yielded the
+	 * call ends silently. Defaults to ending immediately (no events).
+	 */
+	executeStreamImpl?: (request: ExecuteRequestProto) => Iterable<ExecuteEventProto | Error | null>;
 }
 
 /** Spin up a real gRPC server on a random port for integration testing. */
@@ -123,7 +132,28 @@ async function startMockServer(behavior: MockServerBehavior): Promise<{
 		ListNodes: (_call: unknown, callback: (err: ServiceError | null, response?: unknown) => void) => {
 			callback(null, { nodes: [], sdkName: "blok-test", sdkVersion: "1.0.0", protoVersion: "1.0.0" });
 		},
-		ExecuteStream: (call: { end: () => void }) => {
+		ExecuteStream: (call: {
+			request: ExecuteRequestProto;
+			write: (event: ExecuteEventProto) => void;
+			end: () => void;
+			emit: (event: "error", err: ServiceError) => void;
+		}) => {
+			const events = behavior.executeStreamImpl?.(call.request);
+			if (!events) {
+				call.end();
+				return;
+			}
+			for (const ev of events) {
+				if (ev === null) {
+					call.end();
+					return;
+				}
+				if (ev instanceof Error) {
+					call.emit("error", ev as ServiceError);
+					return;
+				}
+				call.write(ev);
+			}
 			call.end();
 		},
 	});
@@ -168,6 +198,7 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 	let lastRequest: ExecuteRequestProto | null = null;
 	let executeOverride: ((req: ExecuteRequestProto) => ExecuteResponseProto | Error) | null = null;
 	let healthOverride: (() => "SERVING" | "NOT_SERVING" | "UNKNOWN" | Error) | null = null;
+	let executeStreamOverride: ((req: ExecuteRequestProto) => Iterable<ExecuteEventProto | Error | null>) | null = null;
 
 	beforeAll(async () => {
 		mock = await startMockServer({
@@ -191,6 +222,10 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 				};
 			},
 			healthImpl: () => healthOverride?.() ?? "SERVING",
+			executeStreamImpl: (req) => {
+				lastRequest = req;
+				return executeStreamOverride?.(req) ?? [];
+			},
 		});
 		adapter = new GrpcRuntimeAdapter(makeAdapterConfig(mock.port));
 	});
@@ -199,6 +234,7 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 		lastRequest = null;
 		executeOverride = null;
 		healthOverride = null;
+		executeStreamOverride = null;
 	});
 
 	afterAll(async () => {
@@ -356,6 +392,117 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 			});
 			const result = await adapter.execute(makeNode(), makeCtx());
 			expect(result.logs).toEqual(["[info] started", "[warn] slow query"]);
+		});
+	});
+
+	describe("executeStream()", () => {
+		const finalSuccessFrame = (data: unknown): ExecuteEventProto => ({
+			event: "final",
+			final: {
+				success: true,
+				data: jsonToBuffer(data),
+				contentType: "application/json",
+				error: null,
+				varsDelta: Buffer.alloc(0),
+				logs: [],
+				metrics: null,
+			},
+		});
+
+		it("emits decoded events in order and resolves the typed result", async () => {
+			executeStreamOverride = () => [
+				{ event: "started", started: { at: { seconds: "1700000000", nanos: 0 } } },
+				{
+					event: "log",
+					log: { timestamp: null, level: "info", message: "hi", attributes: { src: "test" } },
+				},
+				{ event: "progress", progress: { percent: 0.5, phase: "halfway" } },
+				finalSuccessFrame({ ok: true }),
+			];
+
+			const { events, result } = adapter.executeStream(makeNode(), makeCtx());
+			const collected: DecodedExecuteEvent[] = [];
+			for await (const ev of events) collected.push(ev);
+			const final = await result;
+
+			expect(collected.map((e) => e.type)).toEqual(["started", "log", "progress", "final"]);
+			const log = collected[1];
+			expect(log.type).toBe("log");
+			if (log.type === "log") {
+				expect(log.log.message).toBe("hi");
+				expect(log.log.attributes).toEqual({ src: "test" });
+			}
+			const progress = collected[2];
+			expect(progress.type).toBe("progress");
+			if (progress.type === "progress") {
+				expect(progress.percent).toBe(0.5);
+				expect(progress.phase).toBe("halfway");
+			}
+
+			expect(final.success).toBe(true);
+			expect(final.data).toEqual({ ok: true });
+			expect(final.errors).toBeNull();
+		});
+
+		it("opts the SDK into log streaming via ExecuteOptions.streamLogs=true", async () => {
+			executeStreamOverride = () => [finalSuccessFrame({ ack: 1 })];
+			const { events, result } = adapter.executeStream(makeNode(), makeCtx());
+			for await (const _ of events) {
+				/* drain */
+			}
+			await result;
+			expect(lastRequest?.options.streamLogs).toBe(true);
+		});
+
+		it("yields nothing and resolves to a BlokError when the stream ends without a final frame", async () => {
+			executeStreamOverride = () => [{ event: "started", started: { at: { seconds: "1700000000", nanos: 0 } } }];
+
+			const { events, result } = adapter.executeStream(makeNode(), makeCtx());
+			const collected: DecodedExecuteEvent[] = [];
+			for await (const ev of events) collected.push(ev);
+			const final = await result;
+
+			expect(collected.map((e) => e.type)).toEqual(["started"]);
+			expect(final.success).toBe(false);
+			expect(final.errors).toBeInstanceOf(BlokError);
+			expect((final.errors as BlokError).message).toMatch(/final frame/i);
+		});
+
+		it("maps server-side stream errors to a BlokError on the result promise", async () => {
+			executeStreamOverride = () => [
+				Object.assign(new Error("boom"), {
+					code: GrpcStatus.INTERNAL,
+					details: "internal failure",
+					metadata: new Metadata(),
+				}),
+			];
+
+			const { events, result } = adapter.executeStream(makeNode(), makeCtx());
+			const collected: DecodedExecuteEvent[] = [];
+			for await (const ev of events) collected.push(ev);
+			const final = await result;
+
+			expect(final.success).toBe(false);
+			expect(final.errors).toBeInstanceOf(BlokError);
+			expect((final.errors as BlokError).errorCode).toBe("GRPC_INTERNAL");
+		});
+
+		it("decodes a partial-result frame", async () => {
+			executeStreamOverride = () => [
+				{ event: "partial", partial: { snapshotJson: jsonToBuffer({ progress: "checkpoint-1" }) } },
+				finalSuccessFrame({ done: true }),
+			];
+
+			const { events, result } = adapter.executeStream(makeNode(), makeCtx());
+			const collected: DecodedExecuteEvent[] = [];
+			for await (const ev of events) collected.push(ev);
+			await result;
+
+			const partial = collected[0];
+			expect(partial.type).toBe("partial");
+			if (partial.type === "partial") {
+				expect(partial.snapshot).toEqual({ progress: "checkpoint-1" });
+			}
 		});
 	});
 

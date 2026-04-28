@@ -1,13 +1,16 @@
 import { BlokError, type Context, ErrorCategory, ErrorSeverity } from "@blokjs/shared";
-import type { Client, ServiceError } from "@grpc/grpc-js";
-import { Metadata } from "@grpc/grpc-js";
+import type { ClientReadableStream, ServiceError } from "@grpc/grpc-js";
+import { type Client, Metadata } from "@grpc/grpc-js";
 import type RunnerNode from "../../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../RuntimeAdapter";
 import { GrpcClientPool } from "./GrpcClientPool";
 import {
+	type DecodedExecuteEvent,
 	type DecodedExecuteResponse,
+	type ExecuteEventProto,
 	type ExecuteRequestProto,
 	type ExecuteResponseProto,
+	decodeExecuteEvent,
 	decodeExecuteResponse,
 	encodeExecuteRequest,
 } from "./GrpcCodec";
@@ -78,6 +81,109 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 				} as ExecutionResult["metrics"],
 			};
 		}
+	}
+
+	/**
+	 * Open a server-streaming `ExecuteStream` call and return both an
+	 * AsyncIterable of decoded events AND a promise that resolves to the
+	 * final {@link ExecutionResult} once the stream completes.
+	 *
+	 * Phase 5 capability: SDKs may emit `NodeStarted`, `LogLine`, `Progress`,
+	 * and `PartialResult` events while a node executes; the stream always
+	 * terminates with a single `final` event carrying the same
+	 * {@link ExecuteResponseProto} that unary `Execute` would return.
+	 *
+	 * SDKs that don't implement streaming respond with gRPC `UNIMPLEMENTED`;
+	 * the returned promise rejects with a {@link BlokError} of category
+	 * `INTERNAL` (mapped from `UNIMPLEMENTED`) and the iterable yields nothing.
+	 *
+	 * Callers should consume the iterable in parallel with awaiting the
+	 * promise — events are pushed live, while the promise gives the typed
+	 * result for the rest of the runner pipeline.
+	 *
+	 * @example
+	 *   const { events, result } = adapter.executeStream(node, ctx);
+	 *   for await (const ev of events) {
+	 *     if (ev.type === "log") tracker.appendLog(ev.log);
+	 *   }
+	 *   const final = await result;
+	 */
+	executeStream(
+		node: RunnerNode,
+		ctx: Context,
+	): {
+		events: AsyncIterable<DecodedExecuteEvent>;
+		result: Promise<ExecutionResult>;
+	} {
+		const startTime = performance.now();
+		const stepInfo = readStepInfo(ctx);
+		const deadlineMs = readPerCallDeadline(ctx) ?? this.config.defaultDeadlineMs;
+
+		const request = encodeExecuteRequest(node, ctx, stepInfo.index, stepInfo.total, stepInfo.depth, deadlineMs);
+		// Opt the SDK into emitting log frames (proto ExecuteOptions.stream_logs).
+		request.options = { ...request.options, streamLogs: true };
+		const requestBytes = approximateRequestBytes(request);
+
+		const client = this.pool.get(this.config);
+		const call = this.openExecuteStream(client, request, deadlineMs);
+
+		let finalDecoded: DecodedExecuteResponse | null = null;
+		const errorContext = this.errorContext(node);
+		const failureResult = (err: unknown): ExecutionResult => {
+			const blokError = err instanceof BlokError ? err : toBlokError(err, errorContext);
+			return {
+				success: false,
+				data: null,
+				errors: blokError,
+				metrics: {
+					duration_ms: performance.now() - startTime,
+					request_bytes: requestBytes,
+				} as ExecutionResult["metrics"],
+			};
+		};
+
+		const events = decodedEventsFromCall(call, (decoded) => {
+			if (decoded.type === "final") finalDecoded = decoded.response;
+		});
+
+		const result = new Promise<ExecutionResult>((resolve) => {
+			let settled = false;
+			const settle = (value: ExecutionResult): void => {
+				if (settled) return;
+				settled = true;
+				resolve(value);
+			};
+
+			call.on("error", (err) => settle(failureResult(err)));
+			call.on("end", () => {
+				if (finalDecoded) {
+					settle(this.toExecutionResult(finalDecoded, requestBytes, performance.now() - startTime));
+				} else {
+					settle(failureResult(new Error("ExecuteStream ended without a final frame")));
+				}
+			});
+		});
+
+		return { events, result };
+	}
+
+	private openExecuteStream(
+		client: Client,
+		request: ExecuteRequestProto,
+		deadlineMs: number,
+	): ClientReadableStream<ExecuteEventProto> {
+		const metadata = new Metadata();
+		const deadline = new Date(Date.now() + deadlineMs);
+		const callable = (
+			client as unknown as {
+				ExecuteStream: (
+					request: ExecuteRequestProto,
+					metadata: Metadata,
+					options: { deadline: Date },
+				) => ClientReadableStream<ExecuteEventProto>;
+			}
+		).ExecuteStream;
+		return callable.call(client, request, metadata, { deadline });
 	}
 
 	/**
@@ -272,6 +378,33 @@ function readStepInfo(ctx: Context): { index: number; total: number; depth: numb
 function readPerCallDeadline(ctx: Context): number | undefined {
 	const value = (ctx as Record<string, unknown>)._stepDeadlineMs;
 	return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/**
+ * Wrap a `ClientReadableStream` of {@link ExecuteEventProto} as an
+ * AsyncIterable of decoded events. Empty oneof frames are silently skipped.
+ *
+ * Each decoded event is also handed to `tap` so the caller (the adapter) can
+ * snapshot terminal frames without needing to consume the iterable itself.
+ *
+ * Errors and stream end are NOT signalled through the iterable — callers
+ * await the companion `result` promise for the typed terminal value.
+ */
+async function* decodedEventsFromCall(
+	call: ClientReadableStream<ExecuteEventProto>,
+	tap: (decoded: DecodedExecuteEvent) => void,
+): AsyncIterable<DecodedExecuteEvent> {
+	try {
+		for await (const raw of call) {
+			const decoded = decodeExecuteEvent(raw as ExecuteEventProto);
+			if (decoded === null) continue;
+			tap(decoded);
+			yield decoded;
+		}
+	} catch {
+		// The companion `result` promise carries the typed error; this catch
+		// just terminates the iterable without bubbling up the raw gRPC error.
+	}
 }
 
 /**

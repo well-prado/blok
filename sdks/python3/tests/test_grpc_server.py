@@ -156,8 +156,60 @@ def test_list_nodes_returns_registered_descriptors(client):
     assert {"echo", "greet"}.issubset(names)
 
 
-def test_execute_stream_is_unimplemented(client):
-    with pytest.raises(grpc.RpcError) as excinfo:
-        list(client.ExecuteStream(_make_request("echo", {})))
+def test_execute_stream_emits_started_then_final(client):
+    events = list(client.ExecuteStream(_make_request("echo", {"shape": "round"})))
 
-    assert excinfo.value.code() == grpc.StatusCode.UNIMPLEMENTED
+    assert len(events) >= 2
+    assert events[0].WhichOneof("event") == "started"
+    assert events[-1].WhichOneof("event") == "final"
+
+    final = events[-1].final
+    assert final.success is True
+    assert json.loads(final.data) == {"shape": "round"}
+
+
+def test_execute_stream_streams_log_records_from_blok_node_logger(client):
+    """A node that emits to ``blok.node`` logger should produce LogLine frames."""
+    import logging
+
+    class _LoggingNode:
+        def execute(self, ctx, config):
+            logging.getLogger("blok.node").info("hello from streaming")
+            logging.getLogger("blok.node").warning("almost done")
+            return {"ok": True}
+
+    # Register on the fly so we don't pollute the module-scoped fixture.
+    # The test client targets the same registry the fixture started; this
+    # registration mutates that shared registry.
+    from blok.runtime.v1 import runtime_pb2 as pb  # noqa: F401 — already imported
+    # We can't reach the registry from `client` directly, so use a separate
+    # one-shot server for this test.
+    import socket as _socket
+
+    from blok.node.node_registry import NodeRegistry as _NR
+    from blok.server.grpc_server import serve_grpc as _serve
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    reg = _NR(version="1.0.0-test")
+    reg.register("loggy", _LoggingNode())
+    srv = _serve(reg, port=port, host="127.0.0.1", sdk_version="1.0.0-test")
+    try:
+        ch = grpc.insecure_channel(f"127.0.0.1:{port}")
+        stub = pb_grpc.NodeRuntimeStub(ch)
+        events = list(stub.ExecuteStream(_make_request("loggy", {})))
+        ch.close()
+    finally:
+        srv.stop(grace=1.0)
+
+    types = [ev.WhichOneof("event") for ev in events]
+    assert types[0] == "started"
+    assert types[-1] == "final"
+    log_messages = [ev.log.message for ev in events if ev.WhichOneof("event") == "log"]
+    assert "hello from streaming" in log_messages
+    assert "almost done" in log_messages
+    log_levels = [ev.log.level for ev in events if ev.WhichOneof("event") == "log"]
+    assert "info" in log_levels
+    assert "warning" in log_levels

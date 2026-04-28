@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
+import time
 from concurrent import futures
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import grpc
+from google.protobuf import timestamp_pb2
 
 from blok.node.node_registry import NodeRegistry
 from blok.types.context import Context, Request, Response
@@ -40,6 +43,12 @@ from blok.runtime.v1 import runtime_pb2 as pb
 from blok.runtime.v1 import runtime_pb2_grpc as pb_grpc
 
 logger = logging.getLogger("blok.grpc")
+
+# Logger that node handlers should emit to in order to have their messages
+# streamed back to the runner via ``ExecuteStream``. This is a deliberate
+# convention: only events on this named logger are captured, so the handler
+# doesn't have to filter out unrelated noise from third-party libraries.
+NODE_LOGGER_NAME = "blok.node"
 
 # =============================================================================
 # Servicer
@@ -78,12 +87,68 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
 
     # -- ExecuteStream ----------------------------------------------------
 
-    def ExecuteStream(self, request: pb.ExecuteRequest, context: grpc.ServicerContext):
-        # Phase 5 capability. Return UNIMPLEMENTED for now so callers fall back
-        # to the unary `Execute`.
-        context.abort(
-            grpc.StatusCode.UNIMPLEMENTED,
-            "ExecuteStream is not implemented yet — opt out via stream_logs=false",
+    def ExecuteStream(
+        self,
+        request: pb.ExecuteRequest,
+        context: grpc.ServicerContext,
+    ) -> Iterator[pb.ExecuteEvent]:
+        """Server-streaming variant of :meth:`Execute`.
+
+        Emits, in order:
+          1. one :class:`pb.NodeStarted` event marking call acceptance
+          2. zero or more :class:`pb.LogLine` events captured from the
+             :data:`NODE_LOGGER_NAME` logger while the node executes
+          3. one terminal :class:`pb.ExecuteResponse` carrying the same payload
+             as a unary :meth:`Execute` would return
+
+        Logs are captured via a thread-local handler so concurrent calls in
+        the gRPC ThreadPoolExecutor don't cross-contaminate.
+        """
+        try:
+            execution_request = _decode_execute_request(request)
+        except _DecodeError as exc:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(exc))
+            return  # pragma: no cover — abort raises
+
+        # NodeStarted goes out immediately so the runner can record start time
+        # before the (potentially long) execute call.
+        yield pb.ExecuteEvent(started=pb.NodeStarted(at=_now_timestamp()))
+
+        log_queue: "queue.SimpleQueue[logging.LogRecord]" = queue.SimpleQueue()
+        handler = _QueueLogHandler(log_queue)
+        handler.setLevel(logging.DEBUG)
+        node_logger = logging.getLogger(NODE_LOGGER_NAME)
+        node_logger.addHandler(handler)
+        previous_propagate = node_logger.propagate
+        previous_level = node_logger.level
+        node_logger.propagate = False
+        # Lower the logger threshold to DEBUG so INFO/DEBUG messages from
+        # the node aren't filtered out before the handler sees them. Restored
+        # in the `finally` block so we don't leave the logger globally chatty.
+        node_logger.setLevel(logging.DEBUG)
+
+        try:
+            result = self._registry.execute(execution_request)
+        finally:
+            node_logger.removeHandler(handler)
+            node_logger.propagate = previous_propagate
+            node_logger.setLevel(previous_level)
+
+        # Drain captured logs before the final frame so the runner sees them
+        # in causal order with respect to the response.
+        while True:
+            try:
+                record = log_queue.get_nowait()
+            except queue.Empty:
+                break
+            yield pb.ExecuteEvent(log=_log_record_to_proto(record))
+
+        yield pb.ExecuteEvent(
+            final=_encode_execute_response(
+                result,
+                node_name=execution_request.node.name,
+                sdk_version=self._sdk_version,
+            )
         )
 
     # -- Health -----------------------------------------------------------
@@ -365,3 +430,52 @@ def _encode_json_bytes(value: Any) -> bytes:
         return json.dumps(value).encode("utf-8")
     except (TypeError, ValueError):
         return b""
+
+
+# =============================================================================
+# Streaming helpers — used by ExecuteStream
+# =============================================================================
+
+
+class _QueueLogHandler(logging.Handler):
+    """Logging handler that pushes records onto a :class:`queue.SimpleQueue`.
+
+    Used by :meth:`BlokNodeRuntimeServicer.ExecuteStream` to capture log
+    records emitted on the ``blok.node`` logger during a single ``execute``
+    call. The queue is drained after execute completes; for fully real-time
+    streaming the handler would need to coordinate with the generator (Phase 5
+    follow-up).
+    """
+
+    def __init__(self, sink: "queue.SimpleQueue[logging.LogRecord]") -> None:
+        super().__init__()
+        self._sink = sink
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._sink.put(record)
+
+
+def _now_timestamp() -> timestamp_pb2.Timestamp:
+    """Build a proto Timestamp from the current wall clock."""
+    ts = timestamp_pb2.Timestamp()
+    ts.GetCurrentTime()
+    return ts
+
+
+def _log_record_to_proto(record: logging.LogRecord) -> pb.LogLine:
+    """Convert a Python ``logging.LogRecord`` into a proto ``LogLine``."""
+    ts = timestamp_pb2.Timestamp()
+    ts.FromMilliseconds(int(record.created * 1000))
+
+    attributes: Dict[str, str] = {}
+    if record.name and record.name != NODE_LOGGER_NAME:
+        attributes["logger"] = record.name
+    if record.funcName:
+        attributes["func"] = record.funcName
+
+    return pb.LogLine(
+        timestamp=ts,
+        level=record.levelname.lower(),
+        message=record.getMessage(),
+        attributes=attributes,
+    )
