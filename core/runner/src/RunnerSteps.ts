@@ -48,6 +48,18 @@ export default abstract class RunnerSteps {
 					const stepType = (stepAny.type as string) || "unknown";
 					const stepPrefix = `[step ${i + 1}/${steps.length}] ${step.name} (${stepType})`;
 
+					// --- Step metadata for runtime adapters ---
+					// Populate `ctx._stepInfo` so adapters (e.g. GrpcRuntimeAdapter)
+					// can report the step's position in the workflow without each
+					// adapter having to plumb its own counter. Set unconditionally —
+					// independent of whether tracing is enabled.
+					(ctx as Record<string, unknown>)._stepInfo = {
+						name: step.name,
+						index: i,
+						total: steps.length,
+						depth: depthLevel,
+					};
+
 					if (tracker && traceRunId) {
 						const configAny = ctx.config as unknown as Record<string, Record<string, unknown>>;
 						const nodeRun = tracker.startNode(traceRunId, {
