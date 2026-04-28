@@ -11,7 +11,7 @@ import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig, type Transport } from "./adapters/grpc/types";
-import { resolveTransportForKind } from "./adapters/transport";
+import { isStreamLogsEnabled, resolveTransportForKind } from "./adapters/transport";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
 import type Flow from "./types/Flow";
@@ -354,8 +354,11 @@ export default class Configuration implements Config {
 		targetNode.stop = node.stop !== undefined ? node.stop : false;
 		targetNode.set_var = node.set_var !== undefined ? node.set_var : false;
 
-		// Wrap in RuntimeAdapterNode to integrate with existing Runner
-		return new RuntimeAdapterNode(adapter, targetNode) as RunnerNode;
+		// Wrap in RuntimeAdapterNode to integrate with existing Runner.
+		// Opt the runtime path into ExecuteStream when BLOK_STREAM_LOGS=true so
+		// node-emitted LogLine events flow into the Studio SSE stream.
+		const streamLogs = isStreamLogsEnabled();
+		return new RuntimeAdapterNode(adapter, targetNode, { streamLogs }) as RunnerNode;
 	}
 
 	protected async moduleResolver(node: RunnerNode, opts: GlobalOptions): Promise<RunnerNode> {

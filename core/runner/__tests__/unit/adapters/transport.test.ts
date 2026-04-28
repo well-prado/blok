@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTransportForKind } from "../../../src/adapters/transport";
+import { isStreamLogsEnabled, resolveTransportForKind } from "../../../src/adapters/transport";
 
 describe("resolveTransportForKind", () => {
 	it("returns http when no env vars are set", () => {
@@ -46,5 +46,31 @@ describe("resolveTransportForKind", () => {
 			const env = { [`RUNTIME_${kind.toUpperCase()}_TRANSPORT`]: "grpc" };
 			expect(resolveTransportForKind(kind, env)).toBe("grpc");
 		}
+	});
+});
+
+describe("isStreamLogsEnabled", () => {
+	it("returns false when BLOK_STREAM_LOGS is unset", () => {
+		expect(isStreamLogsEnabled({})).toBe(false);
+	});
+
+	it("returns true for truthy values (case-insensitive)", () => {
+		for (const value of ["1", "true", "TRUE", "yes", "Yes", "on", "ON"]) {
+			expect(isStreamLogsEnabled({ BLOK_STREAM_LOGS: value })).toBe(true);
+		}
+	});
+
+	it("returns false for falsy values", () => {
+		for (const value of ["0", "false", "no", "off", "", "  "]) {
+			expect(isStreamLogsEnabled({ BLOK_STREAM_LOGS: value })).toBe(false);
+		}
+	});
+
+	it("trims whitespace before evaluating the value", () => {
+		expect(isStreamLogsEnabled({ BLOK_STREAM_LOGS: "  true  " })).toBe(true);
+	});
+
+	it("returns false for arbitrary non-truthy strings", () => {
+		expect(isStreamLogsEnabled({ BLOK_STREAM_LOGS: "maybe" })).toBe(false);
 	});
 });

@@ -20,8 +20,10 @@ import path from "node:path";
 import { BlokError, type Context } from "@blokjs/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import RunnerNode from "../../../src/RunnerNode";
+import { RuntimeAdapterNode } from "../../../src/RuntimeAdapterNode";
 import { GrpcRuntimeAdapter } from "../../../src/adapters/grpc/GrpcRuntimeAdapter";
 import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "../../../src/adapters/grpc/types";
+import { RunTracker } from "../../../src/tracing/RunTracker";
 
 const PYTHON_SDK_ROOT = path.resolve(__dirname, "../../../../../sdks/python3");
 const PYTHON_SERVE_SCRIPT = path.join(PYTHON_SDK_ROOT, "bin/serve.py");
@@ -227,23 +229,77 @@ describe.skipIf(!PYTHON_AVAILABLE)("TS runner ↔ Python SDK over gRPC (E2E)", (
 		}
 	});
 
-	it("ExecuteStream emits NodeStarted -> final and resolves to the same payload as Execute", async () => {
+	it("ExecuteStream emits NodeStarted -> log -> final and resolves to the same payload as Execute", async () => {
 		const node = makeNode("step-greet", "hello-world");
 		const ctx = makeCtx("step-greet", { prefix: "Hi" }, { name: "Blok" });
 
 		const { events, result } = adapter.executeStream(node, ctx);
 		const eventTypes: string[] = [];
-		for await (const ev of events) eventTypes.push(ev.type);
+		const logMessages: string[] = [];
+		for await (const ev of events) {
+			eventTypes.push(ev.type);
+			if (ev.type === "log") logMessages.push(ev.log.message);
+		}
 		const final = await result;
 
-		// Order: NodeStarted first, final last. Logs may or may not appear
-		// depending on whether the example node logs to "blok.node".
+		// Order: NodeStarted first, final last, log frames in between.
 		expect(eventTypes[0]).toBe("started");
 		expect(eventTypes[eventTypes.length - 1]).toBe("final");
+		// hello-world emits one INFO log via the `blok.node` logger.
+		expect(logMessages).toContain("greeting Blok with prefix 'Hi'");
 
 		expect(final.success).toBe(true);
 		const data = final.data as { message: string; language: string };
 		expect(data.message).toBe("Hi, Blok!");
 		expect(data.language).toBe("python3");
+	});
+
+	it("RuntimeAdapterNode in streaming mode forwards LogLine events to RunTracker.addLog (E2E SSE path)", async () => {
+		// This test proves the full Phase 5 wire: Python emits a log on the
+		// `blok.node` logger -> rendered as a LogLine ExecuteEvent on the
+		// gRPC stream -> RuntimeAdapterNode (streamLogs=true) drains it ->
+		// RunTracker.addLog records it -> the existing SSE endpoint surfaces
+		// it without any UI changes (per master plan §10).
+		const tracker = RunTracker.getInstance();
+
+		// Seed a workflow run + node run so addLog has somewhere to attach.
+		// startRun generates its own ID — capture it for getLogs() later.
+		const run = tracker.startRun({
+			workflowName: "stream-e2e",
+			workflowPath: "/stream-e2e",
+			triggerType: "http",
+		});
+		const traceRunId = run.id;
+		const startedNode = tracker.startNode(traceRunId, {
+			nodeName: "step-greet",
+			nodeType: "runtime.python3",
+			runtimeKind: "python3",
+			depth: 0,
+			stepIndex: 0,
+		});
+		const traceNodeId = startedNode.id;
+
+		const target = makeNode("step-greet", "hello-world");
+		const streamingNode = new RuntimeAdapterNode(adapter as unknown as GrpcRuntimeAdapter, target, {
+			streamLogs: true,
+		});
+
+		const ctx = makeCtx("step-greet", { prefix: "Hi" }, { name: "Studio" });
+		(ctx as Record<string, unknown>)._traceRunId = traceRunId;
+		(ctx as Record<string, unknown>)._traceNodeId = traceNodeId;
+
+		const response = await streamingNode.run(ctx);
+
+		expect(response.success).toBe(true);
+		const data = response.data as { message: string };
+		expect(data.message).toBe("Hi, Studio!");
+
+		// The Python hello-world emits one INFO log; it should be persisted
+		// by the tracker and visible via getLogs.
+		const logs = tracker.getLogs(traceRunId);
+		const greetingLogs = logs.filter((l) => l.message.includes("greeting Studio"));
+		expect(greetingLogs.length).toBeGreaterThanOrEqual(1);
+		expect(greetingLogs[0].level).toBe("info");
+		expect(greetingLogs[0].nodeName).toBe("step-greet");
 	});
 });
