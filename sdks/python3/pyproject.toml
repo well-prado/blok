@@ -5,12 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "blok-blok-python3"
 version = "1.0.0"
-description = "Blok Blok SDK for Python 3 — build workflow nodes as HTTP microservices"
+description = "Blok Blok SDK for Python 3 — build workflow nodes as HTTP microservices or gRPC servers"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
 [project.optional-dependencies]
+# NATS JetStream worker support.
 worker = ["nats-py>=2.9.0"]
+
+# gRPC transport support. The runtime server can speak either HTTP (stdlib) or
+# gRPC; pick at startup via `BLOK_TRANSPORT=http|grpc|both` (default `http`).
+# `Health` is defined inline in `runtime.proto` so we do NOT depend on
+# `grpcio-health-checking` (the standard `grpc.health.v1` package).
+grpc = [
+    "grpcio>=1.60",
+    "protobuf>=4.25",
+]
+
+# Test dependencies. Installed via `pip install -e .[test]`.
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
 
 [project.scripts]
 blok-serve = "bin.serve:main"
@@ -18,3 +34,8 @@ blok-worker = "bin.worker:main"
 
 [tool.setuptools.packages.find]
 include = ["blok*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

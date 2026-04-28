@@ -8,9 +8,14 @@ class ServerConfig:
     All values can be overridden via environment variables.
 
     Environment variables:
-        PORT: HTTP port (default: 8080)
+        PORT: HTTP port (default: 9007)
         HOST: Bind address (default: 0.0.0.0)
         VERSION: Runtime version (default: 1.0.0)
+        GRPC_PORT: gRPC port (default: 10007 — matches runner's
+                   DEFAULT_GRPC_PORTS.python3 = HTTP+1000)
+        BLOK_TRANSPORT: Transport selector. One of "http", "grpc", "both"
+                        (default: "http"). When "grpc" or "both" the SDK
+                        starts a gRPC server on GRPC_PORT.
         READ_TIMEOUT: Read timeout in seconds (default: 30)
         WRITE_TIMEOUT: Write timeout in seconds (default: 30)
         SHUTDOWN_TIMEOUT: Shutdown timeout in seconds (default: 10)
@@ -20,9 +25,11 @@ class ServerConfig:
 
     def __init__(
         self,
-        port: int = 8080,
+        port: int = 9007,
         host: str = "0.0.0.0",
         version: str = "1.0.0",
+        grpc_port: int = 10007,
+        transport: str = "http",
         read_timeout_sec: int = 30,
         write_timeout_sec: int = 30,
         shutdown_timeout_sec: int = 10,
@@ -32,6 +39,8 @@ class ServerConfig:
         self.port = port
         self.host = host
         self.version = version
+        self.grpc_port = grpc_port
+        self.transport = transport
         self.read_timeout_sec = read_timeout_sec
         self.write_timeout_sec = write_timeout_sec
         self.shutdown_timeout_sec = shutdown_timeout_sec
@@ -60,6 +69,18 @@ class ServerConfig:
 
         if v := os.environ.get("VERSION"):
             cfg.version = v
+
+        if v := os.environ.get("GRPC_PORT"):
+            try:
+                gport = int(v)
+                if gport > 0:
+                    cfg.grpc_port = gport
+            except ValueError:
+                pass
+
+        if v := os.environ.get("BLOK_TRANSPORT"):
+            if v in ("http", "grpc", "both"):
+                cfg.transport = v
 
         if v := os.environ.get("READ_TIMEOUT"):
             try:
