@@ -1,0 +1,29 @@
+version: "3"
+
+# RoadRunner configuration for the Blok PHP SDK gRPC server.
+#
+# Run with: `rr serve -c .rr.yaml` (set GRPC_PORT to override the listen port).
+# The PHP worker is `bin/serve.php` invoked with BLOK_TRANSPORT=grpc so it
+# enters the spiral/roadrunner-grpc Server::serve() loop. RoadRunner handles
+# HTTP/2 + gRPC framing in Go and dispatches each call to a PHP worker.
+
+server:
+  command: "php bin/serve.php"
+  env:
+    BLOK_TRANSPORT: grpc
+
+grpc:
+  listen: "tcp://${HOST:-0.0.0.0}:${GRPC_PORT:-10005}"
+  proto:
+    - "proto/blok/runtime/v1/runtime.proto"
+  max_send_msg_size: 16
+  max_recv_msg_size: 16
+  pool:
+    num_workers: 1
+    max_jobs: 0
+    allocate_timeout: 60s
+    destroy_timeout: 60s
+
+logs:
+  mode: development
+  level: warn
