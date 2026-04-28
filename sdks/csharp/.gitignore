@@ -1,0 +1,8 @@
+# Build artifacts — produced by `dotnet build` / `dotnet publish`.
+# Reproducible from source; not committed.
+bin/
+obj/
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/

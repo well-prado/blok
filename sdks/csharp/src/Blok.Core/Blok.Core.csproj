@@ -11,13 +11,30 @@
     <PackageId>Blok.Core</PackageId>
     <Version>1.0.0</Version>
     <Authors>Blok</Authors>
-    <Description>C# SDK for the Blok blok framework. Build workflow nodes as Docker containers with a simple handler interface.</Description>
-    <PackageTags>blok;blok;workflow;microservice;docker</PackageTags>
+    <Description>C# SDK for the Blok blok framework. Build workflow nodes as Docker containers with HTTP and/or gRPC transports.</Description>
+    <PackageTags>blok;blok;workflow;microservice;docker;grpc</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/deskree/blok</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
+
+  <!-- gRPC server stack. Generates server stubs from `runtime.proto` at build
+       time via `Grpc.Tools` (no external protoc required). -->
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.66.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.Tools" Version="2.67.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\..\proto\blok\runtime\v1\runtime.proto"
+              GrpcServices="Server"
+              ProtoRoot="..\..\proto" />
+  </ItemGroup>
 
 </Project>
