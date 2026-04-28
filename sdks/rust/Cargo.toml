@@ -5,7 +5,7 @@ edition = "2021"
 description = "Blok Runtime SDK for Rust — Build workflow nodes in Rust for the Blok orchestration framework"
 license = "MIT"
 repository = "https://github.com/nickincloud/blok-rs"
-keywords = ["blok", "workflow", "runtime", "blok", "orchestration"]
+keywords = ["blok", "workflow", "runtime", "orchestration", "grpc"]
 categories = ["web-programming", "network-programming"]
 readme = "README.md"
 
@@ -20,7 +20,10 @@ path = "src/lib.rs"
 [features]
 default = ["http"]
 http = ["axum", "tower", "tower-http"]
-grpc = ["tonic", "prost", "base64"]
+# `tonic-build` is a build-time dep needed to compile `proto/blok/runtime/v1/runtime.proto`
+# at compile time. Listed here so `--features grpc` activates the runtime
+# stack (tonic/prost/base64) AND the build script in one step.
+grpc = ["tonic", "prost", "prost-types", "base64", "tokio-stream", "dep:tonic-build", "dep:protoc-bin-vendored"]
 worker = ["async-nats", "tokio-stream"]
 full = ["http", "grpc", "worker"]
 
@@ -36,6 +39,9 @@ tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
 # gRPC server (feature-gated)
 tonic = { version = "0.12", optional = true }
 prost = { version = "0.13", optional = true }
+# Provides `prost_types::Timestamp` and other well-known types referenced by
+# `runtime.proto` (`google.protobuf.Timestamp`).
+prost-types = { version = "0.13", optional = true }
 base64 = { version = "0.22", optional = true }
 
 # Serialization
@@ -65,6 +71,9 @@ reqwest = { version = "0.12", features = ["json"] }
 
 [build-dependencies]
 tonic-build = { version = "0.12", optional = true }
+# Bundle a `protoc` binary so the Rust SDK builds without requiring users to
+# install Google Protocol Buffers separately. Activated with the `grpc` feature.
+protoc-bin-vendored = { version = "3", optional = true }
 
 [package.metadata.docs.rs]
 all-features = true
