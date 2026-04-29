@@ -2,6 +2,43 @@
 
 export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
+/**
+ * Structured failure detail attached to a {@link WorkflowRun} or
+ * {@link NodeRun}. When the failure source threw a typed `BlokError`
+ * (master plan §17), every field below may be populated. When the
+ * source threw an unstructured `Error`, only `message` and `stack`
+ * are set. Studio's `NodeDetail` panel renders the structured fields
+ * when present and falls back gracefully otherwise.
+ */
+export interface RunErrorDetail {
+	message: string;
+	stack?: string;
+	/** Stable machine identifier — see `docs/error-codes.md`. */
+	code?: string;
+	/** One of the 12 `BlokErrorCategory` values (e.g. `"DEPENDENCY"`). */
+	category?: string;
+	/** One of `"INFO" | "WARN" | "ERROR" | "FATAL"`. */
+	severity?: string;
+	/** HTTP-status mapping for the failure. */
+	httpStatus?: number;
+	/** Whether the runner-level retry policy may retry this. */
+	retryable?: boolean;
+	/** Suggested backoff before retrying, in milliseconds. */
+	retryAfterMs?: number;
+	/** Multi-paragraph context (what was tried, why it failed). */
+	description?: string;
+	/** Suggested next step for the developer. */
+	remediation?: string;
+	/** Link to documentation explaining the code. */
+	docUrl?: string;
+	/** Category-specific structured details (Zod issues, SQL state). */
+	details?: unknown;
+	/** Bounded slice of inputs/state at error time (§17.6). */
+	contextSnapshot?: unknown;
+	/** Flattened cause chain (outermost first). */
+	causes?: ReadonlyArray<Record<string, unknown>>;
+}
+
 export interface WorkflowRun {
 	id: string;
 	workflowName: string;
@@ -12,11 +49,7 @@ export interface WorkflowRun {
 	startedAt: number;
 	finishedAt?: number;
 	durationMs?: number;
-	error?: {
-		message: string;
-		code?: string;
-		stack?: string;
-	};
+	error?: RunErrorDetail;
 	tags?: string[];
 	metadata?: Record<string, unknown>;
 	nodeCount: number;
@@ -39,11 +72,7 @@ export interface NodeRun {
 	durationMs?: number;
 	inputs?: unknown;
 	outputs?: unknown;
-	error?: {
-		message: string;
-		code?: string;
-		stack?: string;
-	};
+	error?: RunErrorDetail;
 	parentNodeId?: string;
 	depth: number;
 	stepIndex: number;

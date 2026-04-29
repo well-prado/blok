@@ -25,6 +25,31 @@ export interface WorkflowRun {
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
+/**
+ * Structured failure detail per master plan §17. Mirrors the runner-side
+ * `RunErrorDetail` shape from `core/runner/src/tracing/types.ts`. All
+ * structured fields are optional — for unstructured throws only
+ * `message` and `stack` are populated.
+ */
+export interface NodeRunErrorDetail {
+	message: string;
+	stack?: string;
+	code?: string;
+	/** One of the 12 `BlokErrorCategory` values, e.g. `"DEPENDENCY"`. */
+	category?: string;
+	/** `"INFO" | "WARN" | "ERROR" | "FATAL"`. */
+	severity?: string;
+	httpStatus?: number;
+	retryable?: boolean;
+	retryAfterMs?: number;
+	description?: string;
+	remediation?: string;
+	docUrl?: string;
+	details?: unknown;
+	contextSnapshot?: unknown;
+	causes?: ReadonlyArray<Record<string, unknown>>;
+}
+
 export interface NodeRun {
 	id: string;
 	runId: string;
@@ -37,11 +62,14 @@ export interface NodeRun {
 	durationMs?: number;
 	inputs?: unknown;
 	outputs?: unknown;
-	error?: {
-		message: string;
-		code?: string;
-		stack?: string;
-	};
+	/**
+	 * Failure detail. When the node threw a typed `BlokError` (master plan
+	 * §17), the structured fields (category, retryable, remediation,
+	 * causes, …) are populated and rendered by `NodeDetail` with the
+	 * full §17.10 affordances. Unstructured throws set only `message`
+	 * and `stack`.
+	 */
+	error?: NodeRunErrorDetail;
 	parentNodeId?: string;
 	depth: number;
 	stepIndex: number;

@@ -1,5 +1,6 @@
 import { JsonViewer } from "@/components/shared/JsonViewer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { BlokErrorDetail } from "@/components/trace/BlokErrorDetail";
 import { ExplainError } from "@/components/trace/ExplainError";
 import { formatBytes, formatDuration } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -62,20 +63,17 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 					)}
 				</div>
 
-				{/* Error */}
+				{/* Error — typed BlokError gets rich rendering (category pill,
+				    severity, retryable hint, remediation, doc_url, causes,
+				    context snapshot, stack). Untyped errors fall through to
+				    the message + stack render inside `BlokErrorDetail`. */}
 				{node.error && (
-					<div className="rounded-md border border-red-900/50 bg-red-950/30 p-3">
-						<div className="flex items-center justify-between mb-1">
+					<div className="space-y-2">
+						<div className="flex items-center justify-between">
 							<span className="text-xs font-medium text-red-400">Error</span>
 							<ExplainError runId={node.runId} nodeId={node.id} compact />
 						</div>
-						<p className="text-xs text-red-300 font-mono break-all">{node.error.message}</p>
-						{node.error.code && <p className="text-[11px] text-red-400/70 mt-1">Code: {node.error.code}</p>}
-						{node.error.stack && (
-							<pre className="mt-2 text-[10px] text-red-400/60 overflow-x-auto whitespace-pre-wrap break-all max-h-40">
-								{node.error.stack}
-							</pre>
-						)}
+						<BlokErrorDetail error={node.error} />
 					</div>
 				)}
 

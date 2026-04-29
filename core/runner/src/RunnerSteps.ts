@@ -93,11 +93,14 @@ export default abstract class RunnerSteps {
 						// --- Trace: complete or fail node ---
 						if (tracker && nodeRunId) {
 							if (ctx.response.error) {
-								const errMsg =
-									typeof ctx.response.error === "string"
-										? ctx.response.error
-										: (ctx.response.error as Error).message || "Node error";
-								tracker.failNode(nodeRunId, new Error(errMsg));
+								// Pass the error VERBATIM so RunTracker's
+								// `toRunErrorDetail` can preserve BlokError
+								// fields (category, retryable, remediation,
+								// causes, …) when the SDK supplied a typed
+								// failure. Strings and bare Errors fall
+								// through to the legacy `{message, stack}`
+								// shape.
+								tracker.failNode(nodeRunId, ctx.response.error);
 							} else {
 								tracker.completeNode(nodeRunId, sanitize(ctx.response.data));
 							}

@@ -380,19 +380,47 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const limit = Number.parseInt(req.query.limit || "50", 10);
 		const offset = Number.parseInt(req.query.offset || "0", 10);
 		const sort = (req.query.sort as "asc" | "desc") || "desc";
+		// Master plan §17.10: optional category filter. The filter is
+		// applied AFTER `getRuns()` returns so it works against any
+		// store backend (in-memory, sqlite, postgres) without a schema
+		// change. The trade-off is that pagination math now reflects
+		// the post-filter count, not the underlying store count — this
+		// is the right behavior for a UI filter (the user sees "12
+		// dependency failures" not "12 of 1247 runs that happen to be
+		// dependency failures").
+		const categoryFilter =
+			typeof req.query.category === "string" && req.query.category.length > 0
+				? req.query.category.toUpperCase()
+				: undefined;
 
 		const result = t.getRuns({
 			workflow,
 			status: status as "running" | "completed" | "failed" | undefined,
 			tags,
-			limit,
-			offset,
+			// When filtering by category we have to over-fetch (the
+			// store doesn't know about the category column), then
+			// post-filter and re-paginate. 1000 is a soft cap that
+			// covers Studio's in-page filter UX without unbounded
+			// memory pressure.
+			limit: categoryFilter ? Math.max(limit, 1000) : limit,
+			offset: categoryFilter ? 0 : offset,
 			sort,
 		});
 
+		let runs = result.runs;
+		let total = result.total;
+		if (categoryFilter) {
+			runs = runs.filter((r) => {
+				const category = r.error?.category;
+				return typeof category === "string" && category.toUpperCase() === categoryFilter;
+			});
+			total = runs.length;
+			runs = runs.slice(offset, offset + limit);
+		}
+
 		res.json({
-			runs: result.runs,
-			total: result.total,
+			runs,
+			total,
 			page: Math.floor(offset / limit) + 1,
 		});
 	});

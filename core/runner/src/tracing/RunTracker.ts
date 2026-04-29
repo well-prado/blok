@@ -10,6 +10,7 @@ import type {
 	Dashboard,
 	MetricsResult,
 	NodeRun,
+	RunErrorDetail,
 	RunEvent,
 	RunEventType,
 	StartNodeOptions,
@@ -19,6 +20,52 @@ import type {
 	WorkflowRunStatus,
 	WorkflowSummary,
 } from "./types";
+
+/**
+ * Build a {@link RunErrorDetail} from any thrown error. When the source is
+ * a typed `BlokError` (master plan §17), all 17+ structured fields are
+ * preserved; otherwise the legacy `{message, stack}` shape falls through.
+ *
+ * Detection is duck-typed against the `category` field (BlokError carries
+ * a `category` enum value like `"DEPENDENCY"`; vanilla `Error` never
+ * does). This avoids a hard import dependency from the tracing layer
+ * onto `@blokjs/shared`.
+ */
+function toRunErrorDetail(error: unknown): RunErrorDetail {
+	if (error === null || error === undefined) {
+		return { message: "unknown error" };
+	}
+	if (typeof error !== "object") {
+		return { message: String(error) };
+	}
+	const e = error as Record<string, unknown>;
+	const detail: RunErrorDetail = {
+		message: typeof e.message === "string" ? e.message : "unknown error",
+	};
+	if (typeof e.stack === "string") detail.stack = e.stack;
+	// Structured BlokError fields. We accept either runner-side
+	// (`errorCode` getter on BlokError) or raw NodeErrorPayload (`code`)
+	// shapes — failNode is called with the BlokError instance, but the
+	// payload variant covers RunStore re-hydration paths.
+	const code = e.errorCode ?? e.code;
+	if (typeof code === "string" && code.length > 0) detail.code = code;
+	if (typeof e.category === "string") detail.category = e.category;
+	if (typeof e.severity === "string") detail.severity = e.severity;
+	if (typeof e.httpStatus === "number") detail.httpStatus = e.httpStatus;
+	if (typeof e.retryable === "boolean") detail.retryable = e.retryable;
+	if (typeof e.retryAfterMs === "number") detail.retryAfterMs = e.retryAfterMs;
+	if (typeof e.description === "string" && e.description.length > 0) detail.description = e.description;
+	if (typeof e.remediation === "string" && e.remediation.length > 0) detail.remediation = e.remediation;
+	if (typeof e.docUrl === "string" && e.docUrl.length > 0) detail.docUrl = e.docUrl;
+	if (e.details !== undefined && e.details !== null) detail.details = e.details;
+	if (e.contextSnapshot !== undefined && e.contextSnapshot !== null) detail.contextSnapshot = e.contextSnapshot;
+	if (Array.isArray(e.causes) && e.causes.length > 0) {
+		detail.causes = (e.causes as unknown[]).filter(
+			(c): c is Record<string, unknown> => typeof c === "object" && c !== null,
+		);
+	}
+	return detail;
+}
 
 /** Webhook registration for run event notifications. */
 export interface Webhook {
@@ -124,7 +171,7 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
-	failRun(runId: string, error: Error): void {
+	failRun(runId: string, error: Error | unknown): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
 
@@ -135,15 +182,12 @@ export class RunTracker extends EventEmitter {
 			status: "failed",
 			finishedAt,
 			durationMs,
-			error: {
-				message: error.message,
-				stack: error.stack,
-			},
+			error: toRunErrorDetail(error),
 		});
 
 		this.emitEvent(runId, run.workflowName, "RUN_FAILED", undefined, undefined, {
 			durationMs,
-			error: { message: error.message, stack: error.stack },
+			error: toRunErrorDetail(error),
 		});
 	}
 
@@ -205,27 +249,25 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
-	failNode(nodeRunId: string, error: Error): void {
+	failNode(nodeRunId: string, error: Error | unknown): void {
 		const nodeRun = this.store.getNodeRun(nodeRunId);
 		if (!nodeRun) return;
 
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - nodeRun.startedAt;
+		const errorDetail = toRunErrorDetail(error);
 
 		this.store.updateNodeRun(nodeRunId, {
 			status: "failed",
 			finishedAt,
 			durationMs,
-			error: {
-				message: error.message,
-				stack: error.stack,
-			},
+			error: errorDetail,
 		});
 
 		const run = this.store.getRun(nodeRun.runId);
 		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_FAILED", nodeRun.nodeName, nodeRunId, {
 			durationMs,
-			error: { message: error.message, stack: error.stack },
+			error: errorDetail,
 		});
 	}
 
