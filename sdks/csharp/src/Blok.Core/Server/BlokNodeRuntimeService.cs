@@ -1,10 +1,17 @@
 using System.Text.Json;
+using Blok.Core.Errors;
 using Blok.Core.Node;
 using Blok.Core.Types;
 using Blok.Runtime.V1;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+
+// `Blok.Core.Errors.ErrorCategory` (the legacy 5-value enum) and
+// `Blok.Runtime.V1.ErrorCategory` (the proto's 12-value enum) collide. Alias
+// the proto enums so the switch expressions in this file are unambiguous.
+using ProtoErrorCategory = Blok.Runtime.V1.ErrorCategory;
+using ProtoErrorSeverity = Blok.Runtime.V1.ErrorSeverity;
 
 namespace Blok.Core.Server;
 
@@ -224,52 +231,176 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
         return response;
     }
 
+    /// <summary>
+    /// Build a proto <see cref="NodeError"/> from whatever
+    /// <see cref="ExecutionResult"/> carried.
+    ///
+    /// <para>Two paths, both producing the same proto shape:</para>
+    /// <list type="bullet">
+    ///   <item><b>Structured (preferred)</b> — <c>errVal</c> is a typed
+    ///     <see cref="BlokError"/>. All 19 fields serialize losslessly via
+    ///     <c>BlokErrorToProto</c>. Auto-fills
+    ///     <c>node</c>/<c>sdk</c>/<c>sdk_version</c>/<c>runtime_kind</c> if
+    ///     the BlokError didn't set them itself.</item>
+    ///   <item><b>Loose</b> — <c>errVal</c> is anything else. Wrapped via
+    ///     <see cref="BlokError.FromUnknown"/> and serialized through the
+    ///     same path.</item>
+    /// </list>
+    /// </summary>
     private static NodeError InternalErrorToProto(object? errVal, string nodeName, string sdkVersion)
     {
-        var message = "node error";
-        ByteString detailsJson = ByteString.Empty;
-
-        switch (errVal)
+        var origin = BlokErrorOrigin.Defaults(nodeName, sdkVersion);
+        if (errVal is BlokError be)
         {
-            case null:
-                break;
-            case string s:
-                message = s;
-                detailsJson = EncodeJsonBytes(new Dictionary<string, object?> { ["message"] = s });
-                break;
-            case Dictionary<string, object?> dict:
-                if (dict.TryGetValue("message", out var msg) && msg is string msgStr && !string.IsNullOrEmpty(msgStr))
-                {
-                    message = msgStr;
-                }
-                detailsJson = EncodeJsonBytes(dict);
-                break;
-            default:
-                message = errVal.ToString() ?? "node error";
-                detailsJson = EncodeJsonBytes(new Dictionary<string, object?> { ["message"] = message });
-                break;
+            be.ApplyOriginIfMissing(origin);
+            return BlokErrorToProto(be);
+        }
+        return BlokErrorToProto(BlokError.FromUnknown(errVal, origin));
+    }
+
+    /// <summary>
+    /// Serialize a fully-populated <see cref="BlokError"/> into the proto
+    /// wire format. The cause chain is serialized as a list of proto
+    /// NodeError messages; each element's own <c>causes</c> list is left
+    /// empty (the chain is already flat at the BlokError layer).
+    /// </summary>
+    private static NodeError BlokErrorToProto(BlokError err)
+    {
+        var nodeError = new NodeError
+        {
+            Code = err.Code,
+            Category = CategoryToProto(err.Category),
+            Severity = SeverityToProto(err.Severity),
+            Node = err.Node,
+            Sdk = err.Sdk,
+            SdkVersion = err.SdkVersion,
+            RuntimeKind = err.RuntimeKind,
+            Message = err.Message ?? string.Empty,
+            Description = err.Description,
+            Remediation = err.Remediation,
+            DocUrl = err.DocUrl,
+            Stack = err.Stack,
+            HttpStatus = err.HttpStatus,
+            Retryable = err.Retryable,
+            RetryAfterMs = err.RetryAfterMs,
+            At = Timestamp.FromDateTime(DateTime.SpecifyKind(err.At, DateTimeKind.Utc)),
+        };
+
+        if (err.Details is not null)
+        {
+            nodeError.DetailsJson = EncodeJsonBytes(err.Details);
+        }
+        if (err.ContextSnapshot is not null)
+        {
+            nodeError.ContextSnapshotJson = EncodeJsonBytes(err.ContextSnapshot);
         }
 
-        return new NodeError
+        foreach (var cause in err.Causes)
         {
-            Code = "CSHARP_NODE_ERROR",
-            Category = ErrorCategory.Internal,
-            Severity = ErrorSeverity.Error,
-            Node = nodeName,
-            Sdk = "blok-csharp",
-            SdkVersion = sdkVersion,
-            RuntimeKind = "runtime.csharp",
-            Message = message,
-            Description = string.Empty,
-            Remediation = string.Empty,
-            DocUrl = string.Empty,
-            Stack = string.Empty,
-            HttpStatus = 500,
-            Retryable = false,
-            RetryAfterMs = 0,
-            DetailsJson = detailsJson,
+            nodeError.Causes.Add(CauseMapToProto(cause));
+        }
+
+        return nodeError;
+    }
+
+    /// <summary>
+    /// Convert one cause-chain link (already a snake_case map) into a proto
+    /// <see cref="NodeError"/>. Each link's own <c>causes</c> list is left
+    /// empty; the chain is already flat at the BlokError layer.
+    /// </summary>
+    private static NodeError CauseMapToProto(IDictionary<string, object?> cause)
+    {
+        var category = BlokErrorCategoryExtensions.Parse(StringField(cause, "category"));
+        var severity = BlokErrorSeverityExtensions.Parse(StringField(cause, "severity"));
+        var nodeError = new NodeError
+        {
+            Code = StringField(cause, "code"),
+            Category = CategoryToProto(category),
+            Severity = SeverityToProto(severity),
+            Node = StringField(cause, "node"),
+            Sdk = StringField(cause, "sdk"),
+            SdkVersion = StringField(cause, "sdk_version"),
+            RuntimeKind = StringField(cause, "runtime_kind"),
+            Message = StringField(cause, "message"),
+            Description = StringField(cause, "description"),
+            Remediation = StringField(cause, "remediation"),
+            DocUrl = StringField(cause, "doc_url"),
+            Stack = StringField(cause, "stack"),
+            HttpStatus = IntField(cause, "http_status", 500),
+            Retryable = BoolField(cause, "retryable", false),
+            RetryAfterMs = LongField(cause, "retry_after_ms", 0),
+        };
+
+        if (cause.TryGetValue("at", out var atRaw) && atRaw is string atStr
+            && DateTime.TryParse(atStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsedAt))
+        {
+            nodeError.At = Timestamp.FromDateTime(DateTime.SpecifyKind(parsedAt, DateTimeKind.Utc));
+        }
+
+        if (cause.TryGetValue("details", out var details) && details is not null)
+        {
+            nodeError.DetailsJson = EncodeJsonBytes(details);
+        }
+        if (cause.TryGetValue("context_snapshot", out var snapshot) && snapshot is not null)
+        {
+            nodeError.ContextSnapshotJson = EncodeJsonBytes(snapshot);
+        }
+        return nodeError;
+    }
+
+    private static ProtoErrorCategory CategoryToProto(BlokErrorCategory c) => c switch
+    {
+        BlokErrorCategory.Validation => ProtoErrorCategory.Validation,
+        BlokErrorCategory.Configuration => ProtoErrorCategory.Configuration,
+        BlokErrorCategory.Dependency => ProtoErrorCategory.Dependency,
+        BlokErrorCategory.Timeout => ProtoErrorCategory.Timeout,
+        BlokErrorCategory.Permission => ProtoErrorCategory.Permission,
+        BlokErrorCategory.RateLimit => ProtoErrorCategory.RateLimit,
+        BlokErrorCategory.NotFound => ProtoErrorCategory.NotFound,
+        BlokErrorCategory.Conflict => ProtoErrorCategory.Conflict,
+        BlokErrorCategory.Cancelled => ProtoErrorCategory.Cancelled,
+        BlokErrorCategory.Protocol => ProtoErrorCategory.Protocol,
+        BlokErrorCategory.Data => ProtoErrorCategory.Data,
+        _ => ProtoErrorCategory.Internal,
+    };
+
+    private static ProtoErrorSeverity SeverityToProto(BlokErrorSeverity s) => s switch
+    {
+        BlokErrorSeverity.Info => ProtoErrorSeverity.Info,
+        BlokErrorSeverity.Warn => ProtoErrorSeverity.Warn,
+        BlokErrorSeverity.Fatal => ProtoErrorSeverity.Fatal,
+        _ => ProtoErrorSeverity.Error,
+    };
+
+    private static string StringField(IDictionary<string, object?> m, string key)
+        => m.TryGetValue(key, out var v) && v is string s ? s : string.Empty;
+
+    private static int IntField(IDictionary<string, object?> m, string key, int fallback)
+    {
+        if (!m.TryGetValue(key, out var v) || v is null) return fallback;
+        return v switch
+        {
+            int i => i,
+            long l => (int)l,
+            double d => (int)d,
+            _ => fallback,
         };
     }
+
+    private static long LongField(IDictionary<string, object?> m, string key, long fallback)
+    {
+        if (!m.TryGetValue(key, out var v) || v is null) return fallback;
+        return v switch
+        {
+            int i => i,
+            long l => l,
+            double d => (long)d,
+            _ => fallback,
+        };
+    }
+
+    private static bool BoolField(IDictionary<string, object?> m, string key, bool fallback)
+        => m.TryGetValue(key, out var v) && v is bool b ? b : fallback;
 
     /// <summary>Decode JSON-encoded bytes into a typed config dictionary.</summary>
     private static Dictionary<string, JsonElement> DecodeJsonObject(ByteString bytes, string field)
