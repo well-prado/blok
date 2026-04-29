@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Blok\Blok\Server;
 
+use Blok\Blok\Errors\BlokError;
+use Blok\Blok\Errors\BlokErrorCategory as InternalCategory;
+use Blok\Blok\Errors\BlokErrorSeverity as InternalSeverity;
+use Blok\Blok\Errors\Origin;
 use Blok\Blok\Node\NodeRegistry;
 use Blok\Blok\Types\Context as BlokContext;
 use Blok\Blok\Types\ExecutionRequest as BlokExecutionRequest;
@@ -177,36 +181,180 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
         return $response;
     }
 
+    /**
+     * Build a proto {@see NodeError} from whatever {@see ExecutionResult}
+     * carried.
+     *
+     * Two paths, both producing the same proto shape:
+     * - **Structured (preferred)** — `$err` is a typed {@see BlokError}.
+     *   All 19 fields serialize losslessly via {@see self::blokErrorToProto()}.
+     *   Auto-fills `node`/`sdk`/`sdk_version`/`runtime_kind` if the BlokError
+     *   didn't set them itself.
+     * - **Loose** — `$err` is anything else (array, string, null, Throwable).
+     *   Wrapped via {@see BlokError::fromUnknown()} (always produces
+     *   `category=INTERNAL` with the original payload preserved in
+     *   `details_json`) and then serialized via the structured path.
+     */
     public function internalErrorToProto(mixed $err, string $nodeName): NodeError
     {
-        $message = 'node error';
-        $detailsJson = '';
+        $origin = Origin::defaults($nodeName, $this->sdkVersion);
+        if ($err instanceof BlokError) {
+            $err->applyOriginIfMissing($origin);
+            return $this->blokErrorToProto($err);
+        }
+        return $this->blokErrorToProto(BlokError::fromUnknown($err, $origin));
+    }
 
-        if (is_string($err) && $err !== '') {
-            $message = $err;
-            $detailsJson = self::encodeJsonBytes(['message' => $err]);
-        } elseif (is_array($err)) {
-            if (isset($err['message']) && is_string($err['message']) && $err['message'] !== '') {
-                $message = $err['message'];
-            }
-            $detailsJson = self::encodeJsonBytes($err);
-        } elseif ($err !== null) {
-            $message = (string) $err;
-            $detailsJson = self::encodeJsonBytes(['message' => $message]);
+    /**
+     * Serialize a fully-populated {@see BlokError} into the proto wire
+     * format. The cause chain is serialized as a list of proto NodeError
+     * messages; each element's own `causes` list is left empty (the chain
+     * is already flat at the BlokError layer).
+     */
+    private function blokErrorToProto(BlokError $err): NodeError
+    {
+        $node = (new NodeError())
+            ->setCode($err->errorCode)
+            ->setCategory(self::categoryToProto($err->category))
+            ->setSeverity(self::severityToProto($err->severity))
+            ->setNode($err->node)
+            ->setSdk($err->sdk)
+            ->setSdkVersion($err->sdkVersion)
+            ->setRuntimeKind($err->runtimeKind)
+            ->setMessage($err->getMessage())
+            ->setDescription($err->description)
+            ->setRemediation($err->remediation)
+            ->setDocUrl($err->docUrl)
+            ->setStack($err->stack)
+            ->setHttpStatus($err->httpStatus)
+            ->setRetryable($err->retryable)
+            ->setRetryAfterMs($err->retryAfterMs);
+
+        $node->setAt(self::timeToProto($err->at));
+        if ($err->details !== null) {
+            $node->setDetailsJson(self::encodeJsonBytes($err->details));
+        }
+        if ($err->contextSnapshot !== null) {
+            $node->setContextSnapshotJson(self::encodeJsonBytes($err->contextSnapshot));
         }
 
-        return (new NodeError())
-            ->setCode('PHP_NODE_ERROR')
-            ->setCategory(ErrorCategory::INTERNAL)
-            ->setSeverity(ErrorSeverity::ERROR)
-            ->setNode($nodeName)
-            ->setSdk(self::SDK_NAME)
-            ->setSdkVersion($this->sdkVersion)
-            ->setRuntimeKind(self::RUNTIME_KIND)
-            ->setMessage($message)
-            ->setHttpStatus(500)
-            ->setRetryable(false)
-            ->setDetailsJson($detailsJson);
+        $causes = [];
+        foreach ($err->causes as $causePayload) {
+            $causes[] = self::causeArrayToProto($causePayload);
+        }
+        $node->setCauses($causes);
+        return $node;
+    }
+
+    /**
+     * Convert one cause-chain link (already a snake_case array) into a proto
+     * {@see NodeError}. Each link's own `causes` list is left empty.
+     *
+     * @param array<string, mixed> $cause
+     */
+    private static function causeArrayToProto(array $cause): NodeError
+    {
+        $category = InternalCategory::parse(self::strField($cause, 'category'));
+        $severity = InternalSeverity::parse(self::strField($cause, 'severity'));
+        $node = (new NodeError())
+            ->setCode(self::strField($cause, 'code'))
+            ->setCategory(self::categoryToProto($category))
+            ->setSeverity(self::severityToProto($severity))
+            ->setNode(self::strField($cause, 'node'))
+            ->setSdk(self::strField($cause, 'sdk'))
+            ->setSdkVersion(self::strField($cause, 'sdk_version'))
+            ->setRuntimeKind(self::strField($cause, 'runtime_kind'))
+            ->setMessage(self::strField($cause, 'message'))
+            ->setDescription(self::strField($cause, 'description'))
+            ->setRemediation(self::strField($cause, 'remediation'))
+            ->setDocUrl(self::strField($cause, 'doc_url'))
+            ->setStack(self::strField($cause, 'stack'))
+            ->setHttpStatus(self::intField($cause, 'http_status', 500))
+            ->setRetryable(self::boolField($cause, 'retryable', false))
+            ->setRetryAfterMs(self::intField($cause, 'retry_after_ms', 0));
+
+        $atRaw = $cause['at'] ?? null;
+        if (is_string($atRaw) && $atRaw !== '') {
+            try {
+                $node->setAt(self::timeToProto(new \DateTimeImmutable($atRaw)));
+            } catch (\Exception) {
+                // best effort
+            }
+        }
+
+        if (isset($cause['details']) && $cause['details'] !== null) {
+            $node->setDetailsJson(self::encodeJsonBytes($cause['details']));
+        }
+        if (isset($cause['context_snapshot']) && $cause['context_snapshot'] !== null) {
+            $node->setContextSnapshotJson(self::encodeJsonBytes($cause['context_snapshot']));
+        }
+        return $node;
+    }
+
+    private static function categoryToProto(InternalCategory $c): int
+    {
+        return match ($c) {
+            InternalCategory::Validation => ErrorCategory::VALIDATION,
+            InternalCategory::Configuration => ErrorCategory::CONFIGURATION,
+            InternalCategory::Dependency => ErrorCategory::DEPENDENCY,
+            InternalCategory::Timeout => ErrorCategory::TIMEOUT,
+            InternalCategory::Permission => ErrorCategory::PERMISSION,
+            InternalCategory::RateLimit => ErrorCategory::RATE_LIMIT,
+            InternalCategory::NotFound => ErrorCategory::NOT_FOUND,
+            InternalCategory::Conflict => ErrorCategory::CONFLICT,
+            InternalCategory::Cancelled => ErrorCategory::CANCELLED,
+            InternalCategory::Protocol => ErrorCategory::PROTOCOL,
+            InternalCategory::Data => ErrorCategory::DATA,
+            InternalCategory::Internal => ErrorCategory::INTERNAL,
+        };
+    }
+
+    private static function severityToProto(InternalSeverity $s): int
+    {
+        return match ($s) {
+            InternalSeverity::Info => ErrorSeverity::INFO,
+            InternalSeverity::Warn => ErrorSeverity::WARN,
+            InternalSeverity::Fatal => ErrorSeverity::FATAL,
+            default => ErrorSeverity::ERROR,
+        };
+    }
+
+    private static function timeToProto(\DateTimeImmutable $time): \Google\Protobuf\Timestamp
+    {
+        $ts = new \Google\Protobuf\Timestamp();
+        $ts->setSeconds($time->getTimestamp());
+        $ts->setNanos((int) ((int) $time->format('u') * 1000));
+        return $ts;
+    }
+
+    /**
+     * @param array<string, mixed> $m
+     */
+    private static function strField(array $m, string $key): string
+    {
+        $v = $m[$key] ?? null;
+        return is_string($v) ? $v : '';
+    }
+
+    /**
+     * @param array<string, mixed> $m
+     */
+    private static function intField(array $m, string $key, int $fallback): int
+    {
+        $v = $m[$key] ?? null;
+        if (is_int($v)) return $v;
+        if (is_float($v)) return (int) $v;
+        if (is_string($v) && is_numeric($v)) return (int) $v;
+        return $fallback;
+    }
+
+    /**
+     * @param array<string, mixed> $m
+     */
+    private static function boolField(array $m, string $key, bool $fallback): bool
+    {
+        $v = $m[$key] ?? null;
+        return is_bool($v) ? $v : $fallback;
     }
 
     /**

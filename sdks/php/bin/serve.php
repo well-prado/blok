@@ -7,6 +7,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use Blok\Blok\Config\ServerConfig;
 use Blok\Blok\Config\Transport;
 use Blok\Blok\Examples\ApiCallNode;
+use Blok\Blok\Examples\BlokErrorDemoNode;
 use Blok\Blok\Examples\ChainTestNode;
 use Blok\Blok\Examples\HelloWorldNode;
 use Blok\Blok\Examples\TransformDataNode;
@@ -23,6 +24,7 @@ $registry->register('hello-world', new HelloWorldNode());
 $registry->register('api-call', new ApiCallNode());
 $registry->register('transform-data', new TransformDataNode());
 $registry->register('chain-test', new ChainTestNode());
+$registry->register('blok-error-demo', new BlokErrorDemoNode());
 
 fwrite(
     STDERR,

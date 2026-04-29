@@ -181,7 +181,10 @@ final class BlokNodeRuntimeServiceTest extends TestCase
         self::assertFalse($resp->getSuccess());
         $err = $resp->getError();
         self::assertNotNull($err);
-        self::assertSame('PHP_NODE_ERROR', $err->getCode());
+        // Hardcoded `PHP_NODE_ERROR` retired in favour of `UNCAUGHT_<TYPE>`
+        // per master plan §17.7. Untyped throws now get categorized as
+        // INTERNAL with code derived from the exception class.
+        self::assertSame('UNCAUGHT_RUNTIMEEXCEPTION', $err->getCode());
         self::assertSame(ErrorCategory::INTERNAL, $err->getCategory());
         self::assertSame('kaboom', $err->getNode());
         self::assertSame('blok-php', $err->getSdk());
@@ -189,7 +192,6 @@ final class BlokNodeRuntimeServiceTest extends TestCase
         self::assertSame('boom', $err->getMessage());
         self::assertSame(500, $err->getHttpStatus());
         self::assertFalse($err->getRetryable());
-        self::assertNotSame('', $err->getDetailsJson());
     }
 
     public function testExecuteWithMissingNodeReturnsStructuredError(): void

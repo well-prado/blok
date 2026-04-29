@@ -115,7 +115,13 @@ final class NodeRegistryTest extends TestCase
         $result = $registry->execute($req);
 
         $this->assertFalse($result->success);
-        $this->assertStringContainsString('boom', $result->errors['message']);
+        // Per master plan §17 wiring, the registry now preserves the typed
+        // Throwable on `errors` so the gRPC servicer can derive
+        // `UNCAUGHT_<TYPE>` from the exception class. The legacy
+        // `['message' => ...]` shape is retired in favour of the structured
+        // path.
+        $this->assertInstanceOf(\RuntimeException::class, $result->errors);
+        $this->assertSame('boom', $result->errors->getMessage());
     }
 
     public function testHealth(): void

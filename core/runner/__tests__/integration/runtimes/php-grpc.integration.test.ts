@@ -228,6 +228,72 @@ describe.skipIf(!TOOLCHAIN_AVAILABLE)("TS runner ↔ PHP SDK over gRPC (E2E via 
 		expect(err.message).toMatch(/not found/i);
 	});
 
+	it("PHP BlokError::dependency() flows through gRPC with all structured fields preserved", async () => {
+		// Master plan §17 end-to-end check: a PHP handler that throws
+		// `BlokError::dependency()->...->build()` with a remediation, retry
+		// hints, cause chain, and details should arrive at the runner as a
+		// typed BlokError with every field round-tripped losslessly.
+		const node = makeNode("step-dep", "blok-error-demo");
+		const ctx = makeCtx("step-dep", { mode: "dependency" }, {});
+
+		const result = await adapter.execute(node, ctx);
+
+		expect(result.success).toBe(false);
+		expect(result.errors).toBeInstanceOf(BlokError);
+		const err = result.errors as BlokError;
+
+		expect(err.errorCode).toBe("POSTGRES_CONNECT_TIMEOUT");
+		expect(err.category).toBe("DEPENDENCY");
+		expect(err.severity).toBe("ERROR");
+		expect(err.message).toBe("Could not connect to Postgres within 5s");
+		expect(err.description).toContain("host=db.internal");
+		expect(err.remediation).toContain("DATABASE_URL");
+		expect(err.docUrl).toBe("https://docs.example.com/errors/POSTGRES_CONNECT_TIMEOUT");
+		expect(err.httpStatus).toBe(502);
+		expect(err.retryable).toBe(true);
+		expect(err.retryAfterMs).toBe(5_000);
+
+		// Origin auto-enriched by the servicer.
+		expect(err.sdk).toBe("blok-php");
+		expect(err.runtimeKind).toBe("runtime.php");
+
+		// Structured details + cause chain round-trip.
+		expect(err.details).toEqual({ host: "db.internal", port: 5432, timeout_ms: 5000 });
+		expect(err.causes.length).toBeGreaterThan(0);
+		expect(err.causes[0].message).toContain("Connection refused");
+	});
+
+	it("PHP BlokError::rateLimit() propagates retry hints", async () => {
+		const node = makeNode("step-rl", "blok-error-demo");
+		const ctx = makeCtx("step-rl", { mode: "rate-limit" }, {});
+
+		const result = await adapter.execute(node, ctx);
+		const err = result.errors as BlokError;
+
+		expect(err.errorCode).toBe("UPSTREAM_RATE_LIMITED");
+		expect(err.category).toBe("RATE_LIMIT");
+		expect(err.httpStatus).toBe(429);
+		expect(err.retryable).toBe(true);
+		expect(err.retryAfterMs).toBe(60_000);
+		expect(err.details).toEqual({ limit: 5000, remaining: 0 });
+	});
+
+	it("PHP BlokError::validation() maps to 400 with non-retryable + structured issues", async () => {
+		const node = makeNode("step-val", "blok-error-demo");
+		const ctx = makeCtx("step-val", { mode: "validation" }, {});
+
+		const result = await adapter.execute(node, ctx);
+		const err = result.errors as BlokError;
+
+		expect(err.errorCode).toBe("VALIDATION_FAILED");
+		expect(err.category).toBe("VALIDATION");
+		expect(err.httpStatus).toBe(400);
+		expect(err.retryable).toBe(false);
+		const details = err.details as { issues: { path: string[]; message: string }[] };
+		expect(details.issues).toHaveLength(2);
+		expect(details.issues[0].path).toEqual(["email"]);
+	});
+
 	it("Health probe returns true while the PHP server is running", async () => {
 		const healthy = await adapter.checkHealth();
 		expect(healthy).toBe(true);
