@@ -17,6 +17,8 @@ require_relative "blok/types/health_status"
 # Errors
 require_relative "blok/errors/error_category"
 require_relative "blok/errors/node_error"
+require_relative "blok/errors/blok_error"
+require_relative "blok/errors/build_context_snapshot"
 
 # Logging
 require_relative "blok/logging/log_level"

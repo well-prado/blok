@@ -187,38 +187,120 @@ module Blok
         builder
       end
 
+      # Build a proto +NodeError+ from whatever +ExecutionResult+ carried.
+      #
+      # Two paths, both producing the same proto shape:
+      # * **Structured (preferred)** — +err_val+ is a typed
+      #   +Blok::Errors::BlokError+. All 19 fields serialize losslessly
+      #   via {#blok_error_to_proto}. Auto-fills +node+/+sdk+/+sdk_version+/
+      #   +runtime_kind+ if the BlokError didn't set them itself.
+      # * **Loose** — +err_val+ is anything else (Hash, String, nil,
+      #   Exception). Wrapped via +BlokError.from_unknown+ and serialized
+      #   through the same path.
       def internal_error_to_proto(err_val, node_name)
-        message = "node error"
-        details_json = ""
-
-        case err_val
-        when nil
-          # keep defaults
-        when String
-          message = err_val
-          details_json = JSON.generate({ "message" => err_val })
-        when Hash
-          msg = err_val["message"] || err_val[:message]
-          message = msg if msg.is_a?(String) && !msg.empty?
-          details_json = JSON.generate(err_val)
-        else
-          message = err_val.to_s
-          details_json = JSON.generate({ "message" => message })
-        end
-
-        ::Blok::Runtime::V1::NodeError.new(
-          code: "RUBY_NODE_ERROR",
-          category: :INTERNAL,
-          severity: :ERROR,
-          node: node_name,
-          sdk: "blok-ruby",
-          sdk_version: @sdk_version,
-          runtime_kind: "runtime.ruby",
-          message: message,
-          http_status: 500,
-          retryable: false,
-          details_json: details_json
+        origin = ::Blok::Errors::BlokError::Origin.defaults(
+          node: node_name, sdk_version: @sdk_version
         )
+        if err_val.is_a?(::Blok::Errors::BlokError)
+          err_val.apply_origin_if_missing(origin)
+          blok_error_to_proto(err_val)
+        else
+          blok_error_to_proto(::Blok::Errors::BlokError.from_unknown(err_val, origin: origin))
+        end
+      end
+
+      # Serialize a fully-populated +BlokError+ into the proto wire format.
+      # The cause chain is serialized as a list of proto +NodeError+
+      # messages; each element's own +causes+ list is left empty (the chain
+      # is already flat at the BlokError layer).
+      def blok_error_to_proto(err)
+        ::Blok::Runtime::V1::NodeError.new(
+          code: err.code,
+          category: category_to_proto(err.category),
+          severity: severity_to_proto(err.severity),
+          node: err.node,
+          sdk: err.sdk,
+          sdk_version: err.sdk_version,
+          runtime_kind: err.runtime_kind,
+          at: time_to_proto(err.at),
+          message: err.message.to_s,
+          description: err.description,
+          remediation: err.remediation,
+          doc_url: err.doc_url,
+          stack: err.stack,
+          http_status: err.http_status,
+          retryable: err.retryable,
+          retry_after_ms: err.retry_after_ms,
+          details_json: err.details.nil? ? "" : JSON.generate(err.details),
+          context_snapshot_json: err.context_snapshot.nil? ? "" : JSON.generate(err.context_snapshot),
+          causes: err.causes.map { |c| cause_hash_to_proto(c) }
+        )
+      end
+
+      # Convert one cause-chain link (already a snake_case Hash) into a
+      # proto +NodeError+. Each link's own +causes+ list is left empty.
+      def cause_hash_to_proto(cause)
+        ::Blok::Runtime::V1::NodeError.new(
+          code: (cause["code"] || "").to_s,
+          category: category_to_proto(cause["category"] || "INTERNAL"),
+          severity: severity_to_proto(cause["severity"] || "ERROR"),
+          node: (cause["node"] || "").to_s,
+          sdk: (cause["sdk"] || "").to_s,
+          sdk_version: (cause["sdk_version"] || "").to_s,
+          runtime_kind: (cause["runtime_kind"] || "").to_s,
+          at: parse_at_proto(cause["at"]),
+          message: (cause["message"] || "").to_s,
+          description: (cause["description"] || "").to_s,
+          remediation: (cause["remediation"] || "").to_s,
+          doc_url: (cause["doc_url"] || "").to_s,
+          stack: (cause["stack"] || "").to_s,
+          http_status: (cause["http_status"] || 500).to_i,
+          retryable: cause["retryable"] == true,
+          retry_after_ms: (cause["retry_after_ms"] || 0).to_i,
+          details_json: cause["details"].nil? ? "" : JSON.generate(cause["details"]),
+          context_snapshot_json: cause["context_snapshot"].nil? ? "" : JSON.generate(cause["context_snapshot"])
+        )
+      end
+
+      # Map the Ruby string category to the proto enum symbol. Unknown
+      # values default to +:INTERNAL+ — same fallback as Python.
+      def category_to_proto(c)
+        case c
+        when "VALIDATION"    then :VALIDATION
+        when "CONFIGURATION" then :CONFIGURATION
+        when "DEPENDENCY"    then :DEPENDENCY
+        when "TIMEOUT"       then :TIMEOUT
+        when "PERMISSION"    then :PERMISSION
+        when "RATE_LIMIT"    then :RATE_LIMIT
+        when "NOT_FOUND"     then :NOT_FOUND
+        when "CONFLICT"      then :CONFLICT
+        when "CANCELLED"     then :CANCELLED
+        when "PROTOCOL"      then :PROTOCOL
+        when "DATA"          then :DATA
+        else :INTERNAL
+        end
+      end
+
+      def severity_to_proto(s)
+        case s
+        when "INFO"  then :INFO
+        when "WARN"  then :WARN
+        when "FATAL" then :FATAL
+        else :ERROR
+        end
+      end
+
+      def time_to_proto(time)
+        return nil if time.nil?
+        Google::Protobuf::Timestamp.new(seconds: time.to_i, nanos: time.nsec)
+      end
+
+      def parse_at_proto(value)
+        return nil if value.nil? || value.to_s.empty?
+        time = Time.iso8601(value.to_s)
+        Google::Protobuf::Timestamp.new(seconds: time.to_i, nanos: time.nsec)
+      rescue ArgumentError
+        nil
       end
 
       def decode_json_object(bytes, field)
