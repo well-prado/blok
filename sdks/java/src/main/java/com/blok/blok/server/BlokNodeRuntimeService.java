@@ -22,9 +22,11 @@ import com.blok.runtime.v1.Metrics;
 import com.blok.runtime.v1.NodeDescriptor;
 import com.blok.runtime.v1.NodeError;
 import com.blok.runtime.v1.NodeRuntimeGrpc;
+import com.blok.runtime.v1.NodeStarted;
 import com.blok.runtime.v1.RuntimeState;
 import com.blok.runtime.v1.TriggerInfo;
 import com.blok.runtime.v1.WorkflowInfo;
+import com.google.protobuf.Timestamp;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -89,12 +91,43 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
         responseObserver.onCompleted();
     }
 
+    /**
+     * Server-streaming variant of {@link #execute}. Emits, in order:
+     * (1) one {@code NodeStarted} event marking call acceptance,
+     * (2) one terminal {@code ExecuteResponse} matching the unary payload.
+     *
+     * <p>Log capture (LogLine events) is intentionally out of scope for the
+     * Phase 5 Java pilot — {@code NodeHandler.execute} has no per-call
+     * logger sink, and threading one through would change the SDK API.
+     * Real-time log streaming arrives in a follow-up.
+     */
     @Override
     public void executeStream(ExecuteRequest request, StreamObserver<ExecuteEvent> responseObserver) {
-        // Phase 5 capability — opt out by setting `stream_logs=false`.
-        responseObserver.onError(Status.UNIMPLEMENTED
-                .withDescription("ExecuteStream is not implemented yet — opt out via stream_logs=false")
-                .asRuntimeException());
+        ExecutionRequest executionRequest;
+        try {
+            executionRequest = decodeExecuteRequest(request);
+        } catch (DecodeException e) {
+            responseObserver.onError(Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException());
+            return;
+        }
+
+        responseObserver.onNext(ExecuteEvent.newBuilder()
+                .setStarted(NodeStarted.newBuilder().setAt(currentTimestamp()).build())
+                .build());
+
+        ExecutionResult result = registry.execute(executionRequest);
+        ExecuteResponse finalResponse = encodeExecuteResponse(result, executionRequest.getNode().getName());
+
+        responseObserver.onNext(ExecuteEvent.newBuilder().setFinal(finalResponse).build());
+        responseObserver.onCompleted();
+    }
+
+    private static Timestamp currentTimestamp() {
+        long millis = System.currentTimeMillis();
+        return Timestamp.newBuilder()
+                .setSeconds(millis / 1000)
+                .setNanos((int) ((millis % 1000) * 1_000_000))
+                .build();
     }
 
     @Override

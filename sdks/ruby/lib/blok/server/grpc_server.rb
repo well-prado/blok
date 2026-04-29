@@ -2,6 +2,7 @@
 
 require "grpc"
 require "json"
+require "google/protobuf/well_known_types"
 
 require_relative "../runtime/v1/runtime_services_pb"
 
@@ -41,9 +42,29 @@ module Blok
         raise GRPC::InvalidArgument, e.message
       end
 
-      # Streaming variant — Phase 5. Returns UNIMPLEMENTED.
-      def execute_stream(_request, _call)
-        raise GRPC::Unimplemented, "ExecuteStream is not implemented yet — opt out via stream_logs=false"
+      # Server-streaming variant of +execute+. Emits, in order:
+      #   1. one +NodeStarted+ event marking call acceptance
+      #   2. one terminal +ExecuteResponse+ matching the unary payload
+      #
+      # Log capture (LogLine events) is intentionally out of scope for the
+      # Phase 5 Ruby pilot — +Blok::NodeHandler#execute+ has no per-call
+      # logger sink, and threading one through would change the SDK API.
+      # Real-time log streaming arrives in a follow-up.
+      def execute_stream(request, _call)
+        execution_request = decode_execute_request(request)
+        node_name = execution_request.node.name
+
+        Enumerator.new do |yielder|
+          yielder << ::Blok::Runtime::V1::ExecuteEvent.new(
+            started: ::Blok::Runtime::V1::NodeStarted.new(at: now_timestamp)
+          )
+
+          result = @registry.execute(execution_request)
+          final_response = encode_execute_response(result, node_name)
+          yielder << ::Blok::Runtime::V1::ExecuteEvent.new(final: final_response)
+        end
+      rescue DecodeError => e
+        raise GRPC::InvalidArgument, e.message
       end
 
       # Health check (wire-compatible with grpc.health.v1.Health/Check).
@@ -69,6 +90,13 @@ module Blok
       end
 
       private
+
+      # Build a +Google::Protobuf::Timestamp+ for "now". Used by streaming
+      # frames to mark call acceptance.
+      def now_timestamp
+        time = Time.now
+        Google::Protobuf::Timestamp.new(seconds: time.to_i, nanos: time.nsec)
+      end
 
       # ===== Codec — proto <-> internal types =====
 

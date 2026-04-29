@@ -79,16 +79,43 @@ impl NodeRuntime for BlokNodeRuntime {
         Ok(Response::new(proto_response))
     }
 
-    /// Streaming variant — Phase 5. Returns UNIMPLEMENTED for now.
+    /// Server-streaming variant of `Execute`.
+    ///
+    /// Emits, in order:
+    ///   1. one `NodeStarted` event marking call acceptance
+    ///   2. one terminal `ExecuteResponse` carrying the same payload as the
+    ///      unary `Execute` would return
+    ///
+    /// Log capture (`LogLine` events) is intentionally out of scope for the
+    /// Phase 5 Rust pilot — `NodeHandler::execute` has no per-call logger
+    /// sink, so threading one through would change the SDK API. Real-time
+    /// log streaming for Rust arrives in a follow-up.
     type ExecuteStreamStream = tokio_stream::Iter<std::vec::IntoIter<Result<ProtoExecuteEvent, Status>>>;
 
     async fn execute_stream(
         &self,
-        _request: Request<ProtoExecuteRequest>,
+        request: Request<ProtoExecuteRequest>,
     ) -> Result<Response<Self::ExecuteStreamStream>, Status> {
-        Err(Status::unimplemented(
-            "ExecuteStream is not implemented yet — opt out via stream_logs=false",
-        ))
+        let req = request.into_inner();
+        let mut exec_req = decode_execute_request(req)?;
+        let node_name = exec_req.node.name.clone();
+
+        let started_event = ProtoExecuteEvent {
+            event: Some(proto::execute_event::Event::Started(proto::NodeStarted {
+                at: Some(now_timestamp()),
+            })),
+        };
+
+        let registry = self.registry.lock().await;
+        let result = registry.execute(&mut exec_req).await;
+        let final_response = encode_execute_response(result, &node_name, &self.sdk_version);
+
+        let final_event = ProtoExecuteEvent {
+            event: Some(proto::execute_event::Event::Final(final_response)),
+        };
+
+        let events = vec![Ok(started_event), Ok(final_event)];
+        Ok(Response::new(tokio_stream::iter(events.into_iter())))
     }
 
     /// Health check (wire-compatible with `grpc.health.v1.Health/Check`).
@@ -156,6 +183,19 @@ pub async fn serve_grpc(
 // =============================================================================
 // Codec — proto ↔ internal types
 // =============================================================================
+
+/// Build a `prost_types::Timestamp` from the current wall clock. Returns
+/// epoch-zero on systems where the clock is set before 1970 (impossible in
+/// practice; defensive programming).
+fn now_timestamp() -> prost_types::Timestamp {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    prost_types::Timestamp {
+        seconds: now.as_secs() as i64,
+        nanos: now.subsec_nanos() as i32,
+    }
+}
 
 /// Decode a proto `ExecuteRequest` into the SDK's internal `ExecutionRequest`.
 ///

@@ -9,7 +9,7 @@
 //!   structured `NodeError` on the response body.
 //! - `Health` — returns SERVING with the SDK version + registered nodes.
 //! - `ListNodes` — returns the registered node names.
-//! - `ExecuteStream` — returns UNIMPLEMENTED (Phase 5 capability).
+//! - `ExecuteStream` — Phase 5 minimum (NodeStarted + final).
 
 #![cfg(feature = "grpc")]
 
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use blok::grpc_server::proto;
 use blok::grpc_server::proto::node_runtime_client::NodeRuntimeClient;
 use blok::grpc_server::proto::{
     health_response::Status as HealthStatus, ExecuteOptions, ExecuteRequest as ProtoExecuteRequest,
@@ -31,7 +32,6 @@ use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Code;
 
 /// Trivial node that echoes its config back as data.
 struct EchoNode;
@@ -209,14 +209,36 @@ async fn list_nodes_returns_registered_descriptors() {
 }
 
 #[tokio::test]
-async fn execute_stream_is_unimplemented_for_phase_0() {
+async fn execute_stream_emits_started_then_final() {
+    use proto::execute_event::Event;
+
     let (port, handle) = start_server().await;
     let mut client = make_client(port).await;
 
-    let result = client.execute_stream(empty_request("echo", json!({}))).await;
+    let response = client
+        .execute_stream(empty_request("echo", json!({"shape": "round"})))
+        .await
+        .expect("ExecuteStream should return a streaming response");
 
-    let err = result.expect_err("ExecuteStream should return UNIMPLEMENTED");
-    assert_eq!(err.code(), Code::Unimplemented);
+    let mut stream = response.into_inner();
+    let mut events: Vec<Event> = Vec::new();
+    while let Some(item) = stream.message().await.expect("stream item should be Ok") {
+        if let Some(event) = item.event {
+            events.push(event);
+        }
+    }
+
+    assert!(events.len() >= 2, "expected ≥ 2 events, got {}", events.len());
+    assert!(matches!(events.first(), Some(Event::Started(_))), "first event should be NodeStarted");
+
+    let final_event = events.last().expect("must have a final event");
+    let Event::Final(final_response) = final_event else {
+        panic!("last event should be Final, got {:?}", final_event);
+    };
+    assert!(final_response.success, "final.success should be true");
+    let data: serde_json::Value =
+        serde_json::from_slice(&final_response.data).expect("final.data is JSON");
+    assert_eq!(data, json!({"shape": "round"}));
 
     handle.abort();
 }

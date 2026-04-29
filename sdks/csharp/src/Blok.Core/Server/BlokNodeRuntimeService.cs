@@ -3,6 +3,7 @@ using Blok.Core.Node;
 using Blok.Core.Types;
 using Blok.Runtime.V1;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 
 namespace Blok.Core.Server;
@@ -60,10 +61,37 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
     }
 
     /// <inheritdoc />
-    public override Task ExecuteStream(ExecuteRequest request, IServerStreamWriter<ExecuteEvent> responseStream, ServerCallContext context)
+    /// <remarks>
+    /// Server-streaming variant of <see cref="Execute" />. Emits, in order:
+    /// (1) one <c>NodeStarted</c> event marking call acceptance, (2) one
+    /// terminal <c>ExecuteResponse</c> matching the unary payload.
+    ///
+    /// Log capture (LogLine events) is intentionally out of scope for the
+    /// Phase 5 C# pilot — <see cref="INodeHandler" /> has no per-call
+    /// logger sink, and threading one through would change the SDK API.
+    /// Real-time log streaming arrives in a follow-up.
+    /// </remarks>
+    public override async Task ExecuteStream(ExecuteRequest request, IServerStreamWriter<ExecuteEvent> responseStream, ServerCallContext context)
     {
-        // Phase 5 capability — opt out by setting `stream_logs=false`.
-        throw new RpcException(new Status(StatusCode.Unimplemented, "ExecuteStream is not implemented yet — opt out via stream_logs=false"));
+        ExecutionRequest executionRequest;
+        try
+        {
+            executionRequest = DecodeExecuteRequest(request);
+        }
+        catch (DecodeException ex)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+
+        await responseStream.WriteAsync(new ExecuteEvent
+        {
+            Started = new NodeStarted { At = Timestamp.FromDateTime(DateTime.UtcNow) },
+        });
+
+        var result = await _registry.ExecuteAsync(executionRequest);
+        var finalResponse = EncodeExecuteResponse(result, executionRequest.Node.Name, _sdkVersion);
+
+        await responseStream.WriteAsync(new ExecuteEvent { Final = finalResponse });
     }
 
     /// <inheritdoc />
