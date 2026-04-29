@@ -1,5 +1,8 @@
 package com.blok.blok.server;
 
+import com.blok.blok.errors.BlokError;
+import com.blok.blok.errors.BlokErrorCategory;
+import com.blok.blok.errors.BlokErrorSeverity;
 import com.blok.blok.node.NodeRegistry;
 import com.blok.blok.types.Context;
 import com.blok.blok.types.ExecutionRequest;
@@ -247,43 +250,170 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
         return builder.build();
     }
 
+    /**
+     * Build a proto {@link NodeError} from whatever {@link ExecutionResult}
+     * carried.
+     *
+     * <p>Two paths, both producing the same proto shape:
+     * <ul>
+     *   <li><b>Structured (preferred)</b> — {@code errVal} is a typed
+     *       {@link BlokError}. All 19 fields serialize losslessly via
+     *       {@link #blokErrorToProto}. Auto-fills
+     *       {@code node}/{@code sdk}/{@code sdk_version}/{@code runtime_kind}
+     *       if the BlokError didn't set them itself.</li>
+     *   <li><b>Loose</b> — {@code errVal} is anything else (Map, String,
+     *       null, Throwable). Wrapped via {@link BlokError#fromUnknown}
+     *       (always produces {@code category=INTERNAL} with the original
+     *       payload preserved in {@code details_json}) and then serialized
+     *       via the structured path.</li>
+     * </ul>
+     */
     private NodeError internalErrorToProto(Object errVal, String nodeName) {
-        String message = "node error";
-        ByteString detailsJson = ByteString.EMPTY;
+        BlokError.Origin origin = BlokError.Origin.defaults(nodeName, sdkVersion);
+        if (errVal instanceof BlokError be) {
+            be.applyOriginIfMissing(origin);
+            return blokErrorToProto(be);
+        }
+        return blokErrorToProto(BlokError.fromUnknown(errVal, origin));
+    }
 
-        if (errVal == null) {
-            // keep defaults
-        } else if (errVal instanceof String s) {
-            message = s;
-            Map<String, Object> wrap = new HashMap<>();
-            wrap.put("message", s);
-            detailsJson = ByteString.copyFromUtf8(GSON.toJson(wrap));
-        } else if (errVal instanceof Map<?, ?> map) {
-            Object msg = map.get("message");
-            if (msg instanceof String ms && !ms.isEmpty()) {
-                message = ms;
-            }
-            detailsJson = ByteString.copyFromUtf8(GSON.toJson(map));
-        } else {
-            message = errVal.toString();
-            Map<String, Object> wrap = new HashMap<>();
-            wrap.put("message", message);
-            detailsJson = ByteString.copyFromUtf8(GSON.toJson(wrap));
+    /**
+     * Serialize a fully-populated {@link BlokError} into the proto wire
+     * format. The cause chain is serialized as a list of proto NodeError
+     * messages; each element's own {@code causes} list is left empty (the
+     * chain is already flat at the BlokError layer).
+     */
+    private NodeError blokErrorToProto(BlokError err) {
+        NodeError.Builder b = NodeError.newBuilder()
+                .setCode(err.getCode() != null ? err.getCode() : "")
+                .setCategory(categoryToProto(err.getCategory()))
+                .setSeverity(severityToProto(err.getSeverity()))
+                .setNode(err.getNode())
+                .setSdk(err.getSdk())
+                .setSdkVersion(err.getSdkVersion())
+                .setRuntimeKind(err.getRuntimeKind())
+                .setMessage(err.getMessage() != null ? err.getMessage() : "")
+                .setDescription(err.getDescription())
+                .setRemediation(err.getRemediation())
+                .setDocUrl(err.getDocUrl())
+                .setStack(err.getStack())
+                .setHttpStatus(err.getHttpStatus())
+                .setRetryable(err.isRetryable())
+                .setRetryAfterMs(err.getRetryAfterMs());
+
+        long epochSec = err.getAt().getEpochSecond();
+        int nanos = err.getAt().getNano();
+        b.setAt(Timestamp.newBuilder().setSeconds(epochSec).setNanos(nanos).build());
+
+        if (err.getDetails() != null) {
+            b.setDetailsJson(ByteString.copyFromUtf8(GSON.toJson(err.getDetails())));
+        }
+        if (err.getContextSnapshot() != null) {
+            b.setContextSnapshotJson(ByteString.copyFromUtf8(GSON.toJson(err.getContextSnapshot())));
         }
 
-        return NodeError.newBuilder()
-                .setCode("JAVA_NODE_ERROR")
-                .setCategory(ErrorCategory.INTERNAL)
-                .setSeverity(ErrorSeverity.ERROR)
-                .setNode(nodeName)
-                .setSdk("blok-java")
-                .setSdkVersion(sdkVersion)
-                .setRuntimeKind("runtime.java")
-                .setMessage(message)
-                .setHttpStatus(500)
-                .setRetryable(false)
-                .setDetailsJson(detailsJson)
-                .build();
+        for (Map<String, Object> cause : err.getCauses()) {
+            b.addCauses(causeMapToProto(cause));
+        }
+        return b.build();
+    }
+
+    /**
+     * Convert one cause-chain link (already a snake_case map) into a proto
+     * NodeError. Each link's own {@code causes} list is left empty; the chain
+     * is already flat at the BlokError layer.
+     */
+    private NodeError causeMapToProto(Map<String, Object> cause) {
+        BlokErrorCategory category = BlokErrorCategory.parse(stringField(cause, "category"));
+        BlokErrorSeverity severity = BlokErrorSeverity.parse(stringField(cause, "severity"));
+        NodeError.Builder b = NodeError.newBuilder()
+                .setCode(stringField(cause, "code"))
+                .setCategory(categoryToProto(category))
+                .setSeverity(severityToProto(severity))
+                .setNode(stringField(cause, "node"))
+                .setSdk(stringField(cause, "sdk"))
+                .setSdkVersion(stringField(cause, "sdk_version"))
+                .setRuntimeKind(stringField(cause, "runtime_kind"))
+                .setMessage(stringField(cause, "message"))
+                .setDescription(stringField(cause, "description"))
+                .setRemediation(stringField(cause, "remediation"))
+                .setDocUrl(stringField(cause, "doc_url"))
+                .setStack(stringField(cause, "stack"))
+                .setHttpStatus(intField(cause, "http_status", 500))
+                .setRetryable(boolField(cause, "retryable", false))
+                .setRetryAfterMs(longField(cause, "retry_after_ms", 0L));
+
+        Object atRaw = cause.get("at");
+        if (atRaw instanceof String at) {
+            try {
+                java.time.Instant instant = java.time.Instant.parse(at);
+                b.setAt(Timestamp.newBuilder()
+                        .setSeconds(instant.getEpochSecond())
+                        .setNanos(instant.getNano())
+                        .build());
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+
+        Object det = cause.get("details");
+        if (det != null) {
+            b.setDetailsJson(ByteString.copyFromUtf8(GSON.toJson(det)));
+        }
+        Object snap = cause.get("context_snapshot");
+        if (snap != null) {
+            b.setContextSnapshotJson(ByteString.copyFromUtf8(GSON.toJson(snap)));
+        }
+        return b.build();
+    }
+
+    private static ErrorCategory categoryToProto(BlokErrorCategory c) {
+        return switch (c) {
+            case VALIDATION -> ErrorCategory.VALIDATION;
+            case CONFIGURATION -> ErrorCategory.CONFIGURATION;
+            case DEPENDENCY -> ErrorCategory.DEPENDENCY;
+            case TIMEOUT -> ErrorCategory.TIMEOUT;
+            case PERMISSION -> ErrorCategory.PERMISSION;
+            case RATE_LIMIT -> ErrorCategory.RATE_LIMIT;
+            case NOT_FOUND -> ErrorCategory.NOT_FOUND;
+            case CONFLICT -> ErrorCategory.CONFLICT;
+            case CANCELLED -> ErrorCategory.CANCELLED;
+            case PROTOCOL -> ErrorCategory.PROTOCOL;
+            case DATA -> ErrorCategory.DATA;
+            case INTERNAL -> ErrorCategory.INTERNAL;
+        };
+    }
+
+    private static ErrorSeverity severityToProto(BlokErrorSeverity s) {
+        return switch (s) {
+            case INFO -> ErrorSeverity.INFO;
+            case WARN -> ErrorSeverity.WARN;
+            case FATAL -> ErrorSeverity.FATAL;
+            case ERROR -> ErrorSeverity.ERROR;
+        };
+    }
+
+    private static String stringField(Map<String, Object> m, String key) {
+        Object v = m.get(key);
+        return v instanceof String s ? s : "";
+    }
+
+    private static int intField(Map<String, Object> m, String key, int fallback) {
+        Object v = m.get(key);
+        if (v instanceof Number n) return n.intValue();
+        return fallback;
+    }
+
+    private static long longField(Map<String, Object> m, String key, long fallback) {
+        Object v = m.get(key);
+        if (v instanceof Number n) return n.longValue();
+        return fallback;
+    }
+
+    private static boolean boolField(Map<String, Object> m, String key, boolean fallback) {
+        Object v = m.get(key);
+        if (v instanceof Boolean b) return b;
+        return fallback;
     }
 
     /** Decode JSON-encoded bytes into a typed map. Empty bytes → empty map. */

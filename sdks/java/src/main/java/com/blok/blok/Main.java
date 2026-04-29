@@ -6,6 +6,7 @@ import com.blok.blok.middleware.LoggingMiddleware;
 import com.blok.blok.middleware.RecoveryMiddleware;
 import com.blok.blok.node.NodeRegistry;
 import com.blok.blok.nodes.ApiCallNode;
+import com.blok.blok.nodes.BlokErrorDemoNode;
 import com.blok.blok.nodes.ChainTestNode;
 import com.blok.blok.nodes.HelloWorldNode;
 import com.blok.blok.nodes.TransformDataNode;
@@ -30,6 +31,7 @@ public class Main {
         registry.register("api-call", new ApiCallNode());
         registry.register("transform-data", new TransformDataNode());
         registry.register("chain-test", new ChainTestNode());
+        registry.register("blok-error-demo", new BlokErrorDemoNode());
 
         Logger logger = new Logger(config.getLogLevel());
         registry.use(new RecoveryMiddleware());
