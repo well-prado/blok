@@ -385,17 +385,53 @@ export default abstract class TriggerBase extends Trigger {
 
 	createContext(logger?: LoggerContext, blueprintPath?: string, id?: string): Context {
 		const requestId: string = id || uuid();
+		const request = { body: {} };
+		const response = { data: "", contentType: "", success: true, error: null };
+		// Single state object — shared by ctx.state (canonical) and ctx.vars
+		// (legacy alias). All step outputs land here unless `ephemeral: true`.
+		const state: Record<string, unknown> = {};
+
 		const ctx: Context = {
 			id: requestId,
 			workflow_name: this.configuration.name,
 			workflow_path: blueprintPath || "",
 			config: this.configuration.nodes,
-			request: { body: {} },
-			response: { data: "", contentType: "", success: true, error: null },
+			request,
+			response,
 			error: { message: [] },
 			logger: logger || new DefaultLogger(this.configuration.name, blueprintPath, requestId),
 			eventLogger: null,
+			state,
+			// vars is a legacy alias of state — same reference, mutations
+			// to either propagate. Authors writing `ctx.vars[k] = v` keep
+			// working; the runner reads via state.
+			vars: state,
 			_PRIVATE_: null,
+		};
+
+		// V2 read-only aliases — same object reference, no copy.
+		// Reads via ctx.req / ctx.prev work; writes go to the canonical
+		// field (request / response).
+		Object.defineProperty(ctx, "req", {
+			get() {
+				return ctx.request;
+			},
+			enumerable: true,
+		});
+		Object.defineProperty(ctx, "prev", {
+			get() {
+				return ctx.response;
+			},
+			enumerable: true,
+		});
+
+		// Explicit side-channel publication. Writes to state under `name`
+		// and emits a Studio trace event. Most nodes don't need this —
+		// returning the value lets the runner persist it via PersistenceHelper.
+		ctx.publish = (name: string, value: unknown): void => {
+			(ctx.state as Record<string, unknown>)[name] = value;
+			const evt = ctx.eventLogger as { emit?: (event: string, payload: unknown) => void } | null;
+			evt?.emit?.("publish", { name, value, runId: requestId });
 		};
 
 		Object.defineProperty(ctx, "id", {

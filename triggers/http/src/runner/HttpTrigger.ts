@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+import * as path from "node:path";
 import { type Step, Workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper/dist/types/TriggerOpts";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
@@ -21,7 +22,9 @@ import workflows from "../Workflows";
 import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
+import { type RouteEntry, buildRouteTable } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
+import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 import type WorkflowRequest from "./types/WorkflowRequest";
@@ -87,7 +90,95 @@ export default class HttpTrigger extends TriggerBase {
 		return this.app;
 	}
 
-	listen(): Promise<number> {
+	/**
+	 * Scan the workflow directories on disk + the manually-registered TS
+	 * workflows in `Workflows.ts` and return the route table. Called once
+	 * at boot from `listen()` so workflow URLs are decided before serving.
+	 *
+	 * Off by default. Opt-in via `BLOK_FILE_BASED_ROUTING=true` (or the
+	 * shorter `BLOK_ROUTES=v2`). When off, returns an empty table and
+	 * routing falls back to the legacy catch-all `/<key>/<path>` scheme.
+	 */
+	private async buildFileBasedRoutes(): Promise<RouteEntry[]> {
+		const enabled = process.env.BLOK_FILE_BASED_ROUTING === "true" || process.env.BLOK_ROUTES === "v2";
+		if (!enabled) return [];
+
+		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
+
+		// JSON workflows live under WORKFLOWS_PATH/json/<nested>.json.
+		// stripLeadingSegments=1 elides the `json/` segment from URLs.
+		const scannedJson = await scanWorkflows(
+			[
+				{
+					dir: path.join(workflowsRoot, "json"),
+					kind: "json",
+					stripLeadingSegments: 0,
+				},
+			],
+			{
+				onLoadError: (file, err) => {
+					this.logger.error(`[blok] workflow load error in ${file}: ${err.message}`);
+				},
+			},
+		);
+
+		const manual = Object.keys(workflows ?? {}).map((key) => ({
+			key,
+			workflow: (workflows as Record<string, unknown>)[key],
+		}));
+
+		const table = buildRouteTable(scannedJson, manual, {
+			onWarning: (msg) => this.logger.log(`[blok] route warning: ${msg}`),
+		});
+
+		if (table.length > 0) {
+			this.logger.log(`[blok] file-based routing — ${table.length} route(s) registered:`);
+			for (const r of table) {
+				this.logger.log(`[blok]   ${r.method.padEnd(7)} ${r.path}  ←  ${r.workflowKey}`);
+			}
+		}
+		return table;
+	}
+
+	/**
+	 * Pre-stash scanned JSON workflows into `nodeMap.workflows` so the
+	 * existing catch-all handler's `LocalStorage` fallback finds them
+	 * without an extra disk read. The workflow's URL is determined by
+	 * the catch-all's standard `:workflow{.+}` capture — multi-segment
+	 * paths work because the regex is greedy.
+	 *
+	 * @param routes - the route table from `buildFileBasedRoutes()`
+	 */
+	private prestashScannedWorkflows(routes: readonly RouteEntry[]): void {
+		for (const route of routes) {
+			if (route.kind !== "json") continue;
+			// Convert the URL path into a catch-all-compatible key.
+			// Strip the leading `/` and turn `:param` segments back into
+			// fixed strings is NOT possible — but the catch-all only ever
+			// looks up the LITERAL workflow name from the URL. So we use
+			// the file-derived path (without leading slash) as the key.
+			const key = route.path.replace(/^\//, "");
+			if (!key) continue; // skip the root index — keep using catch-all for those
+			// Wrap the raw JSON workflow with a `.toJson()` shim so it
+			// satisfies the LocalStorage workflowLocator fallback contract.
+			const raw = route.workflow;
+			this.nodeMap.workflows[key] = {
+				toJson: () => JSON.stringify(raw),
+			} as unknown as Step;
+		}
+	}
+
+	async listen(): Promise<number> {
+		// File-based routing — scan workflow folders + pre-stash entries
+		// before any middleware so the catch-all's in-memory fallback finds
+		// them. Off by default; opt-in via BLOK_FILE_BASED_ROUTING=true.
+		try {
+			const routes = await this.buildFileBasedRoutes();
+			this.prestashScannedWorkflows(routes);
+		} catch (err) {
+			this.logger.error(`[blok] file-based routing setup failed: ${(err as Error).message}`);
+		}
+
 		return new Promise((done) => {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));

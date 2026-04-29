@@ -17,7 +17,38 @@ export default abstract class NodeBase {
 	public active = true;
 	public stop = false;
 	public originalConfig: ParamsDictionary = {};
+
+	/**
+	 * @deprecated v2 default-stores every step's output. `set_var: true` is
+	 * a no-op (default behaviour); `set_var: false` is normalized to
+	 * `ephemeral: true` at workflow load time. Reading this field is still
+	 * supported for legacy code paths but new code should rely on `ephemeral`.
+	 */
 	public set_var = false;
+
+	// =========================================================================
+	// V2 persistence knobs — populated by Configuration.getSteps from the
+	// step definition. Read by PersistenceHelper.applyStepOutput.
+	// =========================================================================
+
+	/**
+	 * Alternative state key for this step's output. When set, the runner
+	 * stores result.data at `ctx.state[as]` instead of `ctx.state[name]`.
+	 */
+	public as?: string;
+
+	/**
+	 * When true, the runner shallow-merges the keys of result.data into
+	 * `ctx.state` instead of nesting under the step name. Mutually exclusive
+	 * with `as`.
+	 */
+	public spread = false;
+
+	/**
+	 * When true, the runner skips persisting this step's output to state.
+	 * Only `ctx.prev` carries the result to the immediately next step.
+	 */
+	public ephemeral = false;
 
 	public async process(ctx: Context, step?: Step): Promise<ResponseContext> {
 		let response: ResponseContext = {
@@ -76,11 +107,21 @@ export default abstract class NodeBase {
 		return Function("ctx", "data", "func", "vars", `"use strict";return (${str});`)(ctx, data, func, vars);
 	}
 
+	/**
+	 * @deprecated In v2, return your output and let the runner persist it
+	 * to `ctx.state[id]` automatically. Use `ctx.publish(name, value)` for
+	 * explicit side-channel publication when you really need it. This
+	 * method continues to work for legacy code.
+	 */
 	public setVar(ctx: Context, vars: VarsContext) {
 		if (ctx.vars === undefined) ctx.vars = {};
 		ctx.vars = { ...ctx.vars, ...vars };
 	}
 
+	/**
+	 * @deprecated Read from `ctx.state[name]` directly, or reference it from
+	 * a workflow step's `inputs` as `$.state[name]` / `js/ctx.state.name`.
+	 */
 	public getVar(ctx: Context, name: string) {
 		return ctx.vars?.[name];
 	}

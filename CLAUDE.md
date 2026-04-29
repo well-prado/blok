@@ -18,25 +18,45 @@ blokctl create workflow <name>     # Scaffold a new workflow
 blokctl trace                      # Open Blok Studio
 ```
 
-## Context Rules (Memorize These)
+## Context Rules (Memorize These) — Workflow v2
 
-1. **`ctx.response.data` is OVERWRITTEN every step.** Previous step output is GONE unless stored in vars.
-2. **`ctx.vars` PERSISTS across the entire workflow.** Use `set_var: true` on steps or `js/ctx.vars['step-name']` in inputs.
-3. **Blueprint Mapper resolves `js/` expressions BEFORE node execution.** The node receives already-resolved values.
+1. **Every step's output is auto-persisted to `ctx.state[id]`.** No `set_var` flag needed — it's the default. Other steps reference it via `$.state.<id>` in their inputs.
+2. **`ctx.prev` is the immediately previous step's output.** Overwritten on every step. Use for adjacent reads only; for cross-step access use `ctx.state[<id>]`.
+3. **Blueprint Mapper resolves `$.<path>` and `js/...` expressions BEFORE node execution.** Authors write `$.state.users` (typed in TS, plain string in JSON); the runner resolves it.
+4. **Opt out of persistence with `ephemeral: true`** on the step. Side-effect-only steps (logging, audit) typically do this.
+5. **Multi-output nodes:** add `spread: true` to flatten `result.data` keys into `ctx.state` instead of nesting under the step's id. Useful in data-pipeline workflows.
+6. **Rename outputs:** `as: "<name>"` stores the result at `ctx.state[<name>]` instead of `ctx.state[<id>]`. Mutually exclusive with `spread`.
 
-When a user has data flow issues, check these three things first.
+When a user has data flow issues, check these rules first.
+
+### v1 → v2 mapping (legacy compatibility)
+
+Old (v1) workflows keep working — the runner normalizes them at load time:
+
+| v1 | v2 | notes |
+|---|---|---|
+| `steps[].name` + `nodes[name]{inputs}` | `steps[].id` + `steps[].inputs` (inline) | one source of truth for step identity |
+| `steps[].node` | `steps[].use` | clearer intent |
+| `set_var: true` | (default) | every step auto-stores |
+| `set_var: false` | `ephemeral: true` | normalized 1:1 |
+| `js/ctx.vars['x']` | `$.state.x` (or `js/ctx.state.x`) | `ctx.vars` aliases `ctx.state` for back-compat |
+| `js/ctx.response.data` | `$.prev.data` (or `js/ctx.prev.data`) | `ctx.response` aliases `ctx.prev` |
+| `js/ctx.request.body` | `$.req.body` | `ctx.req` aliases `ctx.request` |
+| `addCondition + new AddIf().build()` | `branch({when, then, else})` | one primitive |
+| `method: "*"` | `method: "ANY"` | normalizer warns + auto-converts |
 
 ## Debugging Workflows
 
-### Step 1: Verify workflow JSON structure
-- Every `steps[].name` must have a matching key in `nodes`
-- `steps[].node` must point to a valid node package or path
-- `steps[].type` must be `module`, `local`, or `runtime.*`
+### Step 1: Verify workflow structure
+- v2: every step has an `id` and a `use` (node reference). `inputs` lives on the step itself.
+- v1 (legacy): `steps[].name` must match a key in `nodes{}`. The runner normalizes this on load — but the v2 shape is preferred for new workflows.
+- `type` is optional in v2: inferred from `use` when absent (defaults to `"module"`).
 
-### Step 2: Trace data flow through ctx.vars
-- Which steps have `set_var: true`? Their output goes to `ctx.vars[stepName]`
-- Do `js/` expressions in node inputs reference the correct step names?
-- Remember: `ctx.response.data` only has the LAST step's output
+### Step 2: Trace data flow through ctx.state
+- Every step's output lands in `ctx.state[id]` automatically. Reference it from a later step's inputs as `$.state.<id>` (TS) or `"$.state.<id>"` (JSON, plain string).
+- Adjacent steps can read `ctx.prev.data` (the previous step's full envelope).
+- If a step has `spread: true`, its `result.data` keys are merged INTO `ctx.state` directly — `state.foo`, `state.bar` instead of `state.<id>.foo`.
+- If a step has `ephemeral: true`, it's NOT in `ctx.state` — only `ctx.prev` carries it to the immediately next step.
 
 ### Step 3: Check runtime connectivity
 - Is the SDK container running? Check `GET http://localhost:{port}/health`
@@ -55,8 +75,11 @@ When a user has data flow issues, check these three things first.
 | `Node type X not found` | Missing runtime resolver | Add `runtime.X` to `nodeTypes()` in Configuration.ts |
 | `Validation failed: field (...)` | Zod schema mismatch | Check input schema vs actual data passed to node |
 | `Runtime execution error` | SDK container not running | Start runtime, verify health endpoint |
-| `ctx.vars['X'] is undefined` | Step X missing `set_var: true` | Add `set_var: true` to step or check step name spelling |
+| `ctx.state['X'] is undefined` | Step X has `ephemeral: true`, OR the id doesn't match what's referenced in `$.state.<id>` | Remove `ephemeral`, or fix the id reference |
 | `Node X not found` | Module not registered | Check GlobalOptions.nodes registration |
+| `as and spread are mutually exclusive` | Step has both fields set | Pick one — `as: "name"` to rename, `spread: true` to flatten |
+| `branch step is missing 'when'` | Branch with no condition string | Set `when: "..."` (or pass a `$` proxy expression) |
+| `Two workflows claim GET /path` | Route collision in file-based routing | Set explicit `trigger.http.path` on one to disambiguate |
 
 ## Generating Node Code
 
@@ -93,99 +116,183 @@ export default defineNode({
 - Error cases throw Error (auto-wrapped to GlobalError with 500)
 - No `any` types — use `z.unknown()` if truly dynamic
 
-## Generating TypeScript Workflows (Preferred)
+## Generating TypeScript Workflows (v2 — Preferred)
 
 Always prefer TypeScript workflows over JSON. They live in `triggers/http/src/workflows/` and are organized in domain-specific subfolders.
 
 ### Simple Workflow
 
 ```typescript
-import { type Step, Workflow } from "@blokjs/helper";
+import { workflow, $ } from "@blokjs/helper";
 
-const step: Step = Workflow({
+export default workflow({
   name: "Workflow Name",
   version: "1.0.0",
   description: "What this workflow does",
-})
-  .addTrigger("http", {
-    method: "POST",          // Use "ANY" for all methods (not "*")
-    path: "/api/endpoint",
-    accept: "application/json",
-  })
-  .addStep({
-    name: "step-name",
-    node: "node-package",
-    type: "module",
-    inputs: { key: "value or js/expression" },
-  });
-
-export default step;
+  trigger: {
+    http: {
+      method: "POST",          // Use "ANY" for all methods (not "*")
+      path: "/api/endpoint",   // Optional — when omitted, URL is derived from the file path
+    },
+  },
+  steps: [
+    {
+      id: "echo",
+      use: "@blokjs/respond",
+      inputs: { body: $.req.body },
+    },
+  ],
+});
 ```
 
-### Conditional Workflow (if-else)
+### Multi-step Workflow (using $.state to chain outputs)
 
 ```typescript
-import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
+import { workflow, $ } from "@blokjs/helper";
 
-const step: Step = Workflow({ name: "My Router", version: "1.0.0" })
-  .addTrigger("http", { method: "ANY", path: "/", accept: "application/json" })
-  .addCondition({
-    node: { name: "router", node: "@blokjs/if-else", type: "module" },
-    conditions: () => [
-      new AddIf('ctx.request.query.type === "a"')
-        .addStep({ name: "branch-a", node: "@blokjs/api-call", type: "module", inputs: { url: "..." } })
-        .build(),
-      new AddElse()
-        .addStep({ name: "branch-b", node: "@blokjs/api-call", type: "module", inputs: { url: "..." } })
-        .build(),
-    ],
-  });
-
-export default step;
+export default workflow({
+  name: "Fetch and Respond",
+  version: "1.0.0",
+  trigger: { http: { method: "GET" } },
+  steps: [
+    {
+      id: "fetch",
+      use: "@blokjs/api-call",
+      inputs: { url: "https://countriesnow.space/api/v0.1/countries" },
+    },
+    {
+      id: "respond",
+      use: "@blokjs/respond",
+      inputs: { body: $.state.fetch },   // $.state.<id> compiles to "js/ctx.state.fetch"
+    },
+  ],
+});
 ```
 
-### After creating a workflow, you MUST:
-1. Register it in `triggers/http/src/Workflows.ts` (import + add to the `workflows` object)
-2. Register any new nodes in `triggers/http/src/Nodes.ts` if not already there
-3. Organize files in subfolders by domain (e.g. `workflows/users/`, `workflows/orders/`)
+### Conditional Workflow (branch primitive)
+
+```typescript
+import { workflow, branch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Method Router",
+  version: "1.0.0",
+  trigger: { http: { method: "ANY" } },
+  steps: [
+    branch({
+      id: "route",
+      when: '$.req.method === "POST"',
+      then: [
+        { id: "create", use: "@blokjs/api-call", inputs: { url: "..." } },
+      ],
+      else: [
+        { id: "read",   use: "@blokjs/api-call", inputs: { url: "..." } },
+      ],
+    }),
+  ],
+});
+```
+
+### Data-pipeline pattern (spread)
+
+When a node returns multiple named outputs and you want each at the top level of state:
+
+```typescript
+{
+  id: "load",
+  use: "fetch-user-and-profile",
+  spread: true,  // result.data = { user, profile }  →  state.user + state.profile
+}
+```
+
+### Persistence knobs (per-step declarative)
+
+| Knob | Effect |
+|---|---|
+| (none) | Default: store at `state[id]` |
+| `as: "name"` | Store at `state[name]` instead of `state[id]` |
+| `spread: true` | Shallow-merge `result.data` keys into `state` (mutually exclusive with `as`) |
+| `ephemeral: true` | Skip storage; only `ctx.prev` carries the result to the next step |
 
 ### Checklist for generated TypeScript workflows:
-- Import `{ type Step, Workflow }` from `@blokjs/helper` (add `AddIf, AddElse` for conditionals)
-- Default export is typed as `Step`
+- Import `{ workflow, $, branch }` from `@blokjs/helper` (use `branch` for if/else)
+- Default export is the result of `workflow({...})` — not a chained builder
 - Use `"ANY"` for wildcard HTTP method (not `"*"`)
-- `js/` expressions in inputs work identically to JSON workflows
-- Steps that provide data to non-adjacent downstream steps have `set_var: true`
-- Condition strings are valid JavaScript with access to `ctx`
+- Reference earlier outputs with `$.state.<id>` (typed proxy) or hand-written `"js/ctx.state.<id>"` strings
+- `id` is required on every step; `use` replaces the legacy `node` field
+- `as` and `spread` are mutually exclusive — pick one
+- `path` is optional on the trigger — when omitted, URL is derived from the file path under `workflows/`
 - Version follows semver (x.x.x)
-- Workflow name is 3+ characters, node references are 5+ characters
+- Workflow name is 3+ characters
 
-## Generating Workflow JSON (Alternative)
+### Legacy DSL (`Workflow`, `addTrigger`, `addStep`, `addCondition`, `AddIf`, `AddElse`)
+Still supported and normalized at workflow load time. New workflows should use the v2 DSL above.
 
-JSON workflows are an alternative to TypeScript workflows. They live in `triggers/http/workflows/json/`.
+## Generating Workflow JSON (v2 — Mirrors TS exactly)
+
+JSON workflows live in `triggers/http/workflows/json/` (recursively — subfolders are scanned). The JSON shape mirrors the TS DSL one-for-one so an LLM that learns one knows the other.
 
 ```json
 {
   "name": "Workflow Name",
   "version": "1.0.0",
+  "description": "What this workflow does",
   "trigger": {
-    "http": { "method": "POST", "path": "/api/endpoint", "accept": "application/json" }
+    "http": { "method": "POST", "accept": "application/json" }
   },
   "steps": [
-    { "name": "step-name", "node": "node-package", "type": "module" }
-  ],
-  "nodes": {
-    "step-name": {
-      "inputs": { "key": "value or js/expression" }
+    {
+      "id": "fetch",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://example.com/api" }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/respond",
+      "inputs": { "body": "$.state.fetch" }
     }
+  ]
+}
+```
+
+### Branch (if/else) in JSON
+
+```json
+{
+  "id": "route",
+  "branch": {
+    "when": "$.req.method === 'POST'",
+    "then": [{ "id": "create", "use": "@blokjs/api-call", "inputs": { "url": "..." } }],
+    "else": [{ "id": "read",   "use": "@blokjs/api-call", "inputs": { "url": "..." } }]
   }
 }
 ```
 
+### File-based URL routing (recursive scan)
+
+When `BLOK_FILE_BASED_ROUTING=true` is set, JSON workflows under `workflows/json/` are scanned recursively. The URL is derived from the file path:
+
+| File path | URL |
+|---|---|
+| `workflows/json/health.json` | `/health` |
+| `workflows/json/users/list.json` | `/users/list` |
+| `workflows/json/users/index.json` | `/users` |
+| `workflows/json/users/[id].json` | `/users/:id` |
+| `workflows/json/users/[id]/orders.json` | `/users/:id/orders` |
+
+Files/folders starting with `_` or `.` are skipped (utility files, drafts).
+
+If `trigger.http.path` is set explicitly, it overrides the file-derived URL.
+
 ### Checklist for generated JSON workflows:
-- Every step name appears as a key in `nodes`
-- `js/` expressions reference correct `ctx.vars` keys (check step order)
-- Steps that provide data to non-adjacent downstream steps have `set_var: true`
-- Condition expressions in if-else are valid JavaScript
+- `id` is required on every step (replaces v1 `name`)
+- `use` is required on every step (replaces v1 `node`)
+- `inputs` lives DIRECTLY on the step — no separate `nodes{}` map
+- Reference earlier outputs as `"$.state.<id>"` strings (the runner converts `$.` to `js/ctx.` at load time; `js/ctx.state.<id>` also works)
+- Use `"ANY"` for wildcard HTTP method (not `"*"`)
+- For if/else: a single step with `id` + `branch: { when, then, else }`
+- Subfolders work: organize by domain (`users/`, `orders/`, etc.)
+- `path` on the trigger is optional — omit it to use file-based routing
 - Version follows semver (x.x.x)
 
 ## Generating Worker Workflows
@@ -309,7 +416,10 @@ Common user questions:
 
 - Do NOT suggest class-based BlokService for new nodes — always use `defineNode()`
 - Do NOT generate code with `any` types
-- Do NOT assume `ctx.response.data` persists across steps
+- Do NOT assume `ctx.prev` (or `ctx.response.data`) persists across more than one step — use `ctx.state[<id>]` for cross-step access
+- Do NOT write to `ctx.state` inside a node's `execute()` — return your output and let the runner persist it. If a node truly needs to publish a side-channel value, use `ctx.publish(name, value)`
+- Do NOT use `set_var: true` in new workflows — the runner default-stores every step's output. Use `ephemeral: true` to opt out
+- Do NOT use `"*"` for the HTTP wildcard method — use `"ANY"` (the runner accepts both for back-compat but warns)
 - Do NOT skip Zod schemas when creating nodes
 - Do NOT use ESLint/Prettier — this project uses Biome
 - Do NOT edit files in `.blok/runtimes/` — they are auto-generated

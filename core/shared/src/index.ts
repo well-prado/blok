@@ -19,7 +19,9 @@ import LoggerContext from "./types/LoggerContext";
 import NodeConfigContext from "./types/NodeConfigContext";
 import RequestContext from "./types/RequestContext";
 import ResponseContext from "./types/ResponseContext";
+import StateContext from "./types/StateContext";
 import Step from "./types/Step";
+import VarsContext from "./types/VarsContext";
 import MemoryUsage from "./utils/MemoryUsage";
 
 export {
@@ -33,6 +35,8 @@ export {
 	Trigger,
 	NodeConfigContext,
 	FunctionContext,
+	StateContext,
+	VarsContext,
 	Step,
 	GlobalLogger,
 	GlobalError,

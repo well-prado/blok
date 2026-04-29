@@ -5,6 +5,7 @@ import type { ExecutionResult, RuntimeAdapter } from "./adapters/RuntimeAdapter"
 import type { DecodedExecuteEvent } from "./adapters/grpc/GrpcCodec";
 import { RunTracker } from "./tracing/RunTracker";
 import type { TraceLogEntry } from "./tracing/types";
+import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 /**
  * RuntimeAdapterNode is a wrapper that bridges the existing RunnerNode interface
@@ -40,6 +41,10 @@ export class RuntimeAdapterNode extends RunnerNode {
 		this.active = targetNode.active;
 		this.stop = targetNode.stop;
 		this.set_var = targetNode.set_var;
+		// V2 persistence knobs — flow through to PersistenceHelper.
+		this.as = targetNode.as;
+		this.spread = targetNode.spread;
+		this.ephemeral = targetNode.ephemeral;
 	}
 
 	/**
@@ -60,42 +65,39 @@ export class RuntimeAdapterNode extends RunnerNode {
 			? await this.runStreaming(ctx, tracker, traceRunId, traceNodeId)
 			: await this.adapter.execute(this.targetNode, ctx);
 
-		// --- Trace: capture runtime metrics ---
-		// Includes the gRPC wire bytes (request_bytes / response_bytes) when
-		// the adapter populated them — closes BLOK_FRAMEWORK_FIXES.md #7.6
-		// for the gRPC transport. HTTP adapter has them undefined, so the
-		// fields stay absent on HTTP-only deployments.
-		if (tracker && traceNodeId && result.metrics) {
-			const nodeRun = tracker.getNodeRun(traceNodeId);
-			if (nodeRun) {
-				nodeRun.metrics = {
-					duration_ms: result.metrics.duration_ms,
-					cpu_ms: result.metrics.cpu_ms,
-					memory_bytes: result.metrics.memory_bytes,
-					request_bytes: result.metrics.request_bytes,
-					response_bytes: result.metrics.response_bytes,
-				};
-				nodeRun.runtimeKind = this.adapter.kind;
-			}
+		// --- Trace: stash runtime metrics on ctx so RunnerSteps can pass
+		// them to `tracker.completeNode(...)` as the third argument. The
+		// previous in-place mutation via `tracker.getNodeRun()` was a
+		// dead-end: SqliteRunStore.getNodeRun reconstructs from a row, so
+		// the mutation landed on a detached object; even on InMemoryRunStore
+		// the next `completeNode(nodeRunId, outputs)` call wrote
+		// `metrics: undefined` over it. Stashing on ctx and threading
+		// through `completeNode` is the single path that survives all
+		// store implementations and the NODE_COMPLETED event payload.
+		if (result.metrics) {
+			(ctx as Record<string, unknown>)._stepMetrics = result.metrics;
 		}
 
-		// Ensure ctx.vars exists
-		if (!ctx.vars) {
-			(ctx as Record<string, unknown>).vars = {};
+		// Defensive: ensure state exists. TriggerBase initializes it, but
+		// some legacy code paths construct ctx by hand. ctx.vars and
+		// ctx.state alias the same object; we read/write through `state`.
+		if (!ctx.state || typeof ctx.state !== "object") {
+			(ctx as { state: Record<string, unknown> }).state = {};
 		}
-		const vars = ctx.vars as Record<string, unknown>;
+		const state = ctx.state as Record<string, unknown>;
 
-		// Merge SDK-returned vars into ctx.vars (if the SDK server includes them)
+		// Merge SDK-returned `vars_delta` into state. This is the SDK's
+		// explicit publication path (proto field `vars_delta` on
+		// ExecuteResponse) — it stacks with the auto-store rule below.
 		if (result.vars && typeof result.vars === "object") {
-			Object.assign(vars, result.vars);
+			Object.assign(state, result.vars);
 		}
 
-		// Auto-save the step's result data into ctx.vars[stepName]
-		// This ensures each runtime step's output is accessible downstream,
-		// even if the SDK server doesn't explicitly return vars
-		if (result.data != null) {
-			vars[this.name] = result.data;
-		}
+		// V2 persistence — runner-owned, declarative.
+		// `ephemeral` skips, `spread` merges, `as` renames, default stores
+		// at state[name]. SDK nodes have always auto-stored (today's
+		// behaviour); this just routes through the unified helper.
+		applyStepOutput(ctx, this, result);
 
 		// Convert errors to GlobalError if present
 		let error: GlobalError | null = null;

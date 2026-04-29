@@ -75,32 +75,30 @@ Examples:
 For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
 `;
 
+// v2 workflow template — LLM- and human-friendly. Every step's output
+// auto-persists to ctx.state[id]. Reference earlier outputs via
+// $.state.<id> in inputs (compiles to "js/ctx.state.<id>" at runtime).
+// Opt out of persistence with "ephemeral": true.
 const workflow_template = `
 {
-	"name": "",
-	"description": "",
+	"name": "My Workflow",
+	"description": "What this workflow does",
 	"version": "1.0.0",
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
 			"accept": "application/json"
 		}
 	},
 	"steps": [
 		{
-			"name": "node-name",
-			"node": "node-module-name",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"name": {
+			"id": "echo",
+			"use": "@blokjs/respond",
 			"inputs": {
-
+				"body": "$.req.body"
 			}
 		}
-	}
+	]
 }
 `;
 

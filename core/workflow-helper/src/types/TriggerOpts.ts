@@ -4,12 +4,72 @@ import { z } from "zod";
 // HTTP Trigger
 // =============================================================================
 
+/**
+ * Canonical HTTP method names.
+ *
+ * `"ANY"` is the wildcard. Legacy `"*"` (used by old JSON workflows) is
+ * accepted via {@link HttpMethodSchema} preprocessing and normalized to
+ * `"ANY"` with a one-time deprecation warning.
+ */
+export const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "ANY"] as const;
+
+let _wildcardWarned = false;
+function warnWildcardOnce(): void {
+	if (_wildcardWarned) return;
+	_wildcardWarned = true;
+	console.warn(
+		'[blok] trigger.http.method "*" is deprecated; use "ANY" instead. ' +
+			"Run `blokctl migrate workflows` to update your workflows.",
+	);
+}
+
+/**
+ * HTTP method schema — accepts the canonical names plus the legacy `"*"`
+ * (which is preprocessed to `"ANY"` with a one-time warning).
+ */
+export const HttpMethodSchema = z.preprocess((val) => {
+	if (val === "*") {
+		warnWildcardOnce();
+		return "ANY";
+	}
+	return val;
+}, z.enum(HTTP_METHODS));
+
+export type HttpMethod = z.infer<typeof HttpMethodSchema>;
+
 /** Validation schema for the HTTP trigger configuration. */
 export const HttpTriggerOptsSchema = z.object({
-	method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "ANY"]),
-	path: z.string().optional(),
-	accept: z.string().default("application/json"),
-	headers: z.record(z.string(), z.any()).optional(),
+	method: HttpMethodSchema.describe(
+		"HTTP method this workflow responds to. " +
+			"Use 'ANY' to match all methods. The legacy '*' is accepted for back-compat but warns.",
+	),
+	path: z
+		.string()
+		.optional()
+		.describe(
+			"OPTIONAL. When set, this is the FULL URL path (e.g. '/api/users/:id'). " +
+				"When omitted, the URL is derived from the workflow file's location " +
+				"under the workflows root. Examples: " +
+				"workflows/users/list.ts → /users/list; " +
+				"workflows/users/[id].ts → /users/:id; " +
+				"workflows/users/index.ts → /users.",
+		),
+	accept: z
+		.string()
+		.default("application/json")
+		.describe("Default response Content-Type when the workflow doesn't set one explicitly."),
+	headers: z
+		.record(z.string(), z.any())
+		.optional()
+		.describe("Required headers for incoming requests (validated at trigger entry)."),
+	legacyKeyPrefix: z
+		.boolean()
+		.optional()
+		.describe(
+			"Opt-in back-compat for the v1 URL scheme `/<workflow-key>/<path>`. " +
+				"When true, the workflow is also reachable at the legacy filename-prefixed URL. " +
+				"Off (undefined / false) by default. Will be removed after one minor version.",
+		),
 });
 
 /** Configuration for an HTTP trigger. Use with `addTrigger("http", ...)`. */

@@ -175,15 +175,35 @@ export default class Configuration implements Config {
 		return adapter;
 	}
 
-	public async init(workflowNameInPath: string, opts?: GlobalOptions) {
+	/**
+	 * Initialize the configuration for a workflow run.
+	 *
+	 * @param workflowNameInPath - workflow identifier; used by the resolver
+	 *   to locate the workflow on disk and as the trace label.
+	 * @param opts - global options (workflows map, nodes map, etc.).
+	 * @param preloaded - optional pre-parsed workflow object. When provided,
+	 *   the resolver is skipped and this object is used directly. Used by
+	 *   the file-based router so workflows scanned at boot don't re-load
+	 *   from disk on every request. The object still flows through the
+	 *   normalizer for v1→v2 conversion.
+	 */
+	public async init(workflowNameInPath: string, opts?: GlobalOptions, preloaded?: unknown) {
 		if (this.globalOptions === undefined && opts !== undefined) {
 			this.globalOptions = opts;
 		}
 
 		if (workflowNameInPath === undefined) throw new Error("Workflow name must be provided");
-		const resolver = new ConfigurationResolver(opts as GlobalOptions);
 
-		this.workflow = await resolver.get("local", workflowNameInPath as string);
+		if (preloaded !== undefined) {
+			// Boot-time scan path — workflow object already loaded, just
+			// normalize it through the same v1→v2 pipeline as disk-loaded
+			// workflows.
+			const { normalizeWorkflow } = await import("./workflow/WorkflowNormalizer");
+			this.workflow = normalizeWorkflow(preloaded, workflowNameInPath) as unknown as typeof this.workflow;
+		} else {
+			const resolver = new ConfigurationResolver(opts as GlobalOptions);
+			this.workflow = await resolver.get("local", workflowNameInPath as string);
+		}
 
 		if (!this.workflow) throw new Error(`No workflow found with path '${workflowNameInPath}'`);
 
@@ -218,6 +238,13 @@ export default class Configuration implements Config {
 			node.active = step.active !== undefined ? step.active : true;
 			node.stop = step.stop !== undefined ? step.stop : false;
 			node.set_var = step.set_var !== undefined ? step.set_var : false;
+			// V2 persistence knobs — read by PersistenceHelper.applyStepOutput.
+			// `as` renames the state key; `spread` flattens result.data into
+			// state; `ephemeral: true` skips persistence entirely. Default
+			// behaviour (none set) is to store at state[name].
+			node.as = (step as RunnerNode & { as?: string }).as;
+			node.spread = (step as RunnerNode & { spread?: boolean }).spread === true;
+			node.ephemeral = (step as RunnerNode & { ephemeral?: boolean }).ephemeral === true;
 			nodes.push(node);
 		}
 
