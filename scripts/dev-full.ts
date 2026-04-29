@@ -337,6 +337,29 @@ const TRIGGER_LABEL = "trigger";
 const TRIGGER_COLOR = "\x1b[97m"; // bright white
 
 // =============================================================================
+// Studio dev server — Vite SPA on port 5555 with /__blok proxy to the runner
+// =============================================================================
+//
+// Studio is a separate React SPA at `apps/studio` whose Vite config
+// (apps/studio/vite.config.ts) sets `server.port = 5555` and proxies
+// `/__blok` to `http://localhost:4000`. So once the trigger is up,
+// `bun run --filter @blokjs/studio dev` brings up the Vite server
+// and the browser's `/__blok/runs` calls land on the trigger via
+// the proxy.
+//
+// Detection: bun workspaces hoist `vite` to the root
+// `node_modules/.bin/vite`. We spawn Studio via `bun run --filter
+// @blokjs/studio dev`, which delegates to vite from wherever bun
+// resolves it. If `apps/studio` isn't installed (e.g. fresh clone
+// without `bun install`) the spawn will fail and we surface a
+// hint; the trigger + SDKs still run, just no pretty UI.
+
+const STUDIO_PORT = 5555;
+const STUDIO_LABEL = "studio";
+const STUDIO_COLOR = "\x1b[96m"; // bright cyan
+const STUDIO_PACKAGE_JSON = path.join(REPO_ROOT, "apps/studio/package.json");
+
+// =============================================================================
 // Multiplexed log piping
 // =============================================================================
 
@@ -535,6 +558,34 @@ async function main() {
 		process.exit(1);
 	}
 
+	// Spawn Studio (Vite SPA) if its workspace is present. Studio's
+	// `/__blok` proxy points at the trigger (port 4000), so it has
+	// to start AFTER the trigger is healthy or the first call from
+	// the browser will 502 until the trigger comes up.
+	let studioReady = false;
+	if (existsSync(STUDIO_PACKAGE_JSON)) {
+		console.log("\nStarting Studio (Vite dev server)…");
+		const studio = spawn("bun", ["run", "--filter", "@blokjs/studio", "dev"], {
+			cwd: REPO_ROOT,
+			env: { ...process.env },
+		});
+		pipe(studio, STUDIO_LABEL, STUDIO_COLOR);
+		cleanupHandlers.push(() => {
+			if (studio.pid && studio.exitCode === null) studio.kill("SIGTERM");
+		});
+		studio.on("exit", (code) => {
+			if (code !== null && code !== 0) {
+				console.error(`${STUDIO_COLOR}[${STUDIO_LABEL}]${COLOR_RESET} exited with code ${code}`);
+			}
+		});
+		studioReady = await waitForPort(STUDIO_PORT, 30_000);
+		if (!studioReady) {
+			console.warn("Warning: Studio Vite server did not bind within 30s. The trigger + SDKs are still healthy.");
+		}
+	} else {
+		console.log(`\n${STUDIO_COLOR}[${STUDIO_LABEL}]${COLOR_RESET} skipped — apps/studio package.json not found.`);
+	}
+
 	// Ready banner with concrete curl commands.
 	const banner = [
 		"",
@@ -548,9 +599,11 @@ async function main() {
 		`    http://localhost:${TRIGGER_PORT}/cross-runtime-chain \\`,
 		`    -d '{}' | jq .`,
 		"",
-		"Studio (run-detail UI):",
+		studioReady
+			? "Studio (UI for runs / metrics / workflow graph):"
+			: "Studio API (raw JSON — Studio UI not available):",
 		"",
-		`  http://localhost:${TRIGGER_PORT}/__blok/runs`,
+		studioReady ? `  http://localhost:${STUDIO_PORT}` : `  http://localhost:${TRIGGER_PORT}/__blok/runs`,
 		"",
 		`Trigger root: http://localhost:${TRIGGER_PORT}/`,
 		"",
