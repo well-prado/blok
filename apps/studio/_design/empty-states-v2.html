@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blok Studio · Direction A · Empty States Hi-Fi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,wght@1,400;1,500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --blok-green-500: #2bcd71;
+        --blok-green-600: #22a85b;
+        --blok-green-100: rgba(43, 205, 113, 0.12);
+        --bg-canvas: #0b0b0d;
+        --bg-raised: #111113;
+        --bg-overlay: #18181b;
+        --bg-hover: #1f1f23;
+        --ink-1: #f4f4f5;
+        --ink-2: #a1a1aa;
+        --ink-3: #52525b;
+        --hairline: rgba(244, 244, 245, 0.06);
+        --hairline-2: rgba(244, 244, 245, 0.1);
+        --status-running: #3b82f6;
+        --status-failed: #ef4444;
+        --selected-bg: rgba(43, 205, 113, 0.08);
+        --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
+        --font-display: "Newsreader", Georgia, serif;
+        --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: var(--bg-canvas); color: var(--ink-1); font-family: var(--font-ui); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+
+      .junior-banner { background: var(--bg-overlay); border-bottom: 1px solid var(--hairline-2); padding: 14px 24px; font-size: 12px; color: var(--ink-2); }
+      .junior-pill { display: inline-block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; background: var(--blok-green-100); color: var(--blok-green-500); padding: 2px 8px; border-radius: 999px; margin-right: 12px; border: 1px solid rgba(43, 205, 113, 0.2); }
+
+      .canvas-head { padding: 28px 32px 18px; max-width: 1600px; margin: 0 auto; border-bottom: 1px solid var(--hairline-2); }
+      .canvas-head h1 { margin: 0; font-family: var(--font-display); font-style: italic; font-weight: 500; font-size: 26px; color: var(--ink-1); letter-spacing: -0.01em; }
+      .canvas-head .sub { color: var(--ink-2); margin-top: 6px; max-width: 720px; font-size: 13.5px; }
+      .canvas-head .principle { margin-top: 18px; padding: 12px 16px; background: var(--bg-overlay); border-left: 3px solid var(--blok-green-500); border-radius: 0 6px 6px 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+      .canvas-head .principle b { color: var(--ink-1); }
+
+      .grid { max-width: 1600px; margin: 24px auto 64px; padding: 0 32px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+
+      .frame { background: var(--bg-raised); border: 1px solid var(--hairline-2); border-radius: 12px; overflow: hidden; }
+      .frame-tag { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); border-bottom: 1px solid var(--hairline); }
+      .frame-tag .num { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--bg-canvas); border: 1px solid var(--hairline-2); color: var(--ink-2); font-weight: 500; }
+      .frame-tag .file { color: var(--ink-1); }
+      .frame-tag .desc { color: var(--ink-3); margin-left: auto; }
+
+      .frame-body { background: var(--bg-canvas); padding: 0; min-height: 460px; display: flex; flex-direction: column; }
+
+      /* Mini app chrome inside each frame */
+      .mini-top { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 38px; border-bottom: 1px solid var(--hairline); background: var(--bg-canvas); }
+      .mini-top svg { height: 14px; }
+      .mini-top .wm { font-weight: 600; font-size: 12px; letter-spacing: 0.03em; }
+      .mini-top .env { display: flex; align-items: center; gap: 5px; background: var(--bg-raised); border: 1px solid var(--hairline-2); padding: 2px 8px 2px 6px; border-radius: 5px; font-size: 11px; }
+      .mini-top .env .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--blok-green-500); box-shadow: 0 0 0 2px rgba(43, 205, 113, 0.18); }
+      .mini-top .env .label { color: var(--ink-1); font-weight: 500; font-size: 11px; }
+      .mini-top .env .caret { color: var(--ink-3); font-size: 9px; }
+      .mini-top .spacer { flex: 1; }
+      .mini-top .ticker { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+      .mini-top .ticker .pulse { color: var(--blok-green-500); display: inline-flex; align-items: center; gap: 4px; }
+      .mini-top .pulse-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--blok-green-500); animation: brand-pulse 2s infinite; }
+      @keyframes brand-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(43,205,113,0.5); } 50% { box-shadow: 0 0 0 3px rgba(43,205,113,0); } }
+
+      .mini-shell { display: grid; grid-template-columns: 130px 1fr; flex: 1; min-height: 0; }
+      .mini-rail { background: var(--bg-canvas); border-right: 1px solid var(--hairline); padding: 8px 6px; }
+      .mini-rail .nav-section { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); padding: 8px 8px 4px; }
+      .mini-rail .nav-link { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11.5px; color: var(--ink-2); border-radius: 4px; cursor: pointer; position: relative; }
+      .mini-rail .nav-link.active { background: var(--selected-bg); color: var(--ink-1); }
+      .mini-rail .nav-link.active::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px; background: var(--blok-green-500); }
+      .mini-rail .nav-link svg { width: 11px; height: 11px; opacity: 0.7; }
+      .mini-rail .nav-link.active svg { opacity: 1; }
+
+      .mini-body { padding: 18px 22px 18px; display: flex; flex-direction: column; min-width: 0; }
+
+      /* Empty-state pattern */
+      .empty { flex: 1; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 16px; padding: 12px 0; }
+      .empty .glyph { width: 32px; height: 32px; opacity: 0.5; color: var(--ink-3); }
+      .empty h2 { margin: 0; font-size: 17px; font-weight: 600; color: var(--ink-1); font-family: var(--font-display); font-style: italic; letter-spacing: -0.01em; }
+      .empty .lede { font-size: 13px; color: var(--ink-2); line-height: 1.55; max-width: 420px; }
+      .empty .lede b { color: var(--ink-1); font-weight: 500; }
+      .empty .lede code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-raised); border: 1px solid var(--hairline); padding: 1px 5px; border-radius: 3px; color: var(--ink-1); }
+
+      .snippet { background: var(--bg-raised); border: 1px solid var(--hairline-2); border-radius: 6px; overflow: hidden; max-width: 460px; }
+      .snippet-head { padding: 6px 12px; background: var(--bg-overlay); border-bottom: 1px solid var(--hairline); display: flex; align-items: center; gap: 8px; }
+      .snippet-head .lang { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; }
+      .snippet-head .copy { margin-left: auto; font-size: 10.5px; padding: 1px 8px; border: 1px solid var(--hairline-2); border-radius: 4px; color: var(--ink-2); cursor: pointer; font-family: var(--font-mono); background: transparent; }
+      .snippet-head .copy:hover { background: var(--bg-hover); color: var(--ink-1); }
+      .snippet pre { margin: 0; padding: 12px 14px; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-1); line-height: 1.55; overflow-x: auto; }
+      .snippet pre .prompt { color: var(--ink-3); }
+      .snippet pre .key { color: var(--blok-green-500); }
+      .snippet pre .str { color: #f4c280; }
+      .snippet pre .cmt { color: var(--ink-3); }
+
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+      .btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 6px 12px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
+      .btn.primary { background: var(--blok-green-500); color: #00231b; font-weight: 600; }
+      .btn.primary:hover { background: var(--blok-green-600); }
+      .btn.secondary { background: var(--bg-raised); color: var(--ink-1); border-color: var(--hairline-2); }
+      .btn.secondary:hover { background: var(--bg-hover); }
+      .btn.ghost { background: transparent; color: var(--ink-2); }
+      .btn.ghost:hover { background: var(--bg-hover); color: var(--ink-1); }
+      .docs-link { display: inline-flex; align-items: center; gap: 5px; color: var(--blok-green-500); text-decoration: none; font-size: 12px; font-family: var(--font-mono); }
+      .docs-link:hover { text-decoration: underline; }
+
+      /* Filter-active variant */
+      .filter-summary { background: var(--bg-overlay); border: 1px solid var(--hairline-2); border-radius: 8px; padding: 10px 14px; max-width: 520px; }
+      .filter-summary .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11.5px; }
+      .filter-summary .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-canvas); border: 1px solid var(--hairline-2); border-radius: 4px; padding: 1px 7px; color: var(--ink-2); }
+      .filter-summary .chip .k { color: var(--ink-3); }
+      .filter-summary .chip .v { color: var(--ink-1); }
+
+      /* Skeleton (loading) variant */
+      .skel-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--hairline); }
+      .skel-row:last-child { border-bottom: 0; }
+      .skel { background: linear-gradient(90deg, var(--bg-raised) 0%, var(--bg-overlay) 50%, var(--bg-raised) 100%); background-size: 200% 100%; animation: skel-flow 1.6s ease-in-out infinite; border-radius: 3px; height: 11px; }
+      @keyframes skel-flow { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      .skel.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+      .skel.idx { width: 14px; height: 9px; }
+      .skel.name { width: 30%; }
+      .skel.dur { width: 60px; margin-left: auto; }
+      .skel-banner { padding: 10px 0 14px; max-width: 460px; }
+      .skel-title { width: 60%; height: 18px; margin-bottom: 8px; background: linear-gradient(90deg, var(--bg-raised) 0%, var(--bg-overlay) 50%, var(--bg-raised) 100%); background-size: 200% 100%; animation: skel-flow 1.6s ease-in-out infinite; border-radius: 4px; }
+      .skel-meta { width: 40%; height: 11px; background: linear-gradient(90deg, var(--bg-raised) 0%, var(--bg-overlay) 50%, var(--bg-raised) 100%); background-size: 200% 100%; animation: skel-flow 1.6s ease-in-out infinite; border-radius: 3px; }
+      .skel-stage { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+      .skel-stage .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--blok-green-500); animation: brand-pulse 2s infinite; }
+    </style>
+  </head>
+  <body>
+    <div class="junior-banner">
+      <span class="junior-pill">Junior · Phase 6 · Empty states</span>
+      <span><b>Each empty state teaches.</b> Real CLI command, real SDK snippet,
+      real next-action button. No mascot, no "Oops! Nothing here yet". The
+      operator should be able to <i>act</i> within five seconds of landing.
+      Per skill rules: no decorative SVG illustrations — a single Lucide
+      glyph at half-opacity is enough. Whitespace is the design, not the
+      failure.</span>
+    </div>
+
+    <header class="canvas-head">
+      <h1>Empty states · four pages, one pattern</h1>
+      <p class="sub">
+        Each cell below is one of Studio's primary pages in a state where
+        the data set is empty. The pattern: <b>one-glyph anchor · headline ·
+        single-paragraph lede · concrete next action · escape hatch</b>. No
+        page resolves to "this list is empty" without a clear path forward.
+      </p>
+      <div class="principle">
+        <b>Hierarchy:</b> glyph (visual anchor, half-opacity) → headline
+        (Newsreader italic, what state we're in) → lede (sans, plain
+        English, names the thing missing) → action (primary green CTA,
+        does the highest-leverage thing) → escape (secondary, undoes the
+        active filter / reverses navigation). No friendly cartoons, no
+        "click here to learn more" pop-ups, no checklists.
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- ── 01 · Dashboard, fresh install (zero runs ever) ───────────── -->
+      <article class="frame">
+        <div class="frame-tag">
+          <span class="num">01</span>
+          <span class="file">routes/index.tsx</span>
+          <span class="desc">fresh install · zero runs in this env</span>
+        </div>
+        <div class="frame-body">
+          <div class="mini-top">
+            <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+              <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+            </svg>
+            <span class="wm">blok</span>
+            <div class="env"><span class="dot"></span><span class="label">production</span><span class="caret">▾</span></div>
+            <div class="spacer"></div>
+            <span class="ticker">no runs yet</span>
+          </div>
+          <div class="mini-shell">
+            <aside class="mini-rail">
+              <div class="nav-section">Operate</div>
+              <div class="nav-link active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zm0 10h16v6H4z"/></svg>
+                Overview
+              </div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/></svg>Runs</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/></svg>Logs</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Queues</div>
+            </aside>
+            <main class="mini-body">
+              <div class="empty">
+                <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M4 18h16M4 12h12M4 6h8"/>
+                </svg>
+                <h2>No runs yet · production</h2>
+                <p class="lede">
+                  Trigger the first run to see it stream in real time here.
+                  Once a workflow runs in <code>production</code>, this page
+                  shows live success rate, p50/p95 latency, and the last 50
+                  events as they happen.
+                </p>
+                <div class="snippet">
+                  <div class="snippet-head">
+                    <span class="lang">curl · http</span>
+                    <button class="copy">copy</button>
+                  </div>
+                  <pre><span class="prompt">$</span> curl -X POST <span class="str">http://localhost:4000/cross-runtime-chain</span> \
+  -H <span class="str">'content-type: application/json'</span> \
+  -d <span class="str">'{}'</span></pre>
+                </div>
+                <div class="snippet">
+                  <div class="snippet-head">
+                    <span class="lang">typescript · sdk</span>
+                    <button class="copy">copy</button>
+                  </div>
+                  <pre><span class="cmt">// triggers/http/src/workflows/cross-runtime-chain.ts</span>
+<span class="key">await</span> blok.run(<span class="str">"cross-runtime-chain"</span>, {
+  input: { },
+});</pre>
+                </div>
+                <div class="actions">
+                  <button class="btn primary">Run sample workflow</button>
+                  <a class="docs-link" href="#">↗ docs.blok.io/quickstart</a>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <!-- ── 02 · Runs page, filter returns zero ─────────────────────── -->
+      <article class="frame">
+        <div class="frame-tag">
+          <span class="num">02</span>
+          <span class="file">routes/runs.tsx</span>
+          <span class="desc">filter active · 0 of 8,412 runs match</span>
+        </div>
+        <div class="frame-body">
+          <div class="mini-top">
+            <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+              <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+            </svg>
+            <span class="wm">blok</span>
+            <div class="env"><span class="dot"></span><span class="label">production</span><span class="caret">▾</span></div>
+            <div class="spacer"></div>
+            <span class="ticker"><span class="pulse"><span class="pulse-dot"></span>Live · 3 active</span></span>
+          </div>
+          <div class="mini-shell">
+            <aside class="mini-rail">
+              <div class="nav-section">Operate</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zm0 10h16v6H4z"/></svg>Overview</div>
+              <div class="nav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/></svg>Runs</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/></svg>Logs</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Queues</div>
+            </aside>
+            <main class="mini-body">
+              <div class="filter-summary" style="margin-bottom: 16px">
+                <div class="row">
+                  <span class="chip"><span class="k">status:</span><span class="v">failed</span></span>
+                  <span class="chip"><span class="k">workflow:</span><span class="v">user-onboard</span></span>
+                  <span class="chip"><span class="k">since:</span><span class="v">last 24h</span></span>
+                  <span style="color: var(--ink-3)">·</span>
+                  <span style="color: var(--ink-3)">3 filters active</span>
+                </div>
+              </div>
+              <div class="empty" style="padding-top: 0">
+                <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M3 6h18l-2 13H5L3 6z"/><path d="M9 4h6v2H9z"/>
+                </svg>
+                <h2>No runs match these filters</h2>
+                <p class="lede">
+                  Across the last 24 hours, <b>0 of 8,412</b>
+                  <code>user-onboard</code> runs failed in production.
+                  Either the workflow has been quiet, or the filter is
+                  too tight.
+                </p>
+                <div class="actions">
+                  <button class="btn primary">Clear filters</button>
+                  <button class="btn secondary">Widen window to 7 days</button>
+                  <button class="btn ghost">Save this view</button>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <!-- ── 03 · Logs page, search returns zero (live tailing) ──────── -->
+      <article class="frame">
+        <div class="frame-tag">
+          <span class="num">03</span>
+          <span class="file">routes/logs.tsx</span>
+          <span class="desc">search active · tail on · 0 matches</span>
+        </div>
+        <div class="frame-body">
+          <div class="mini-top">
+            <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+              <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+            </svg>
+            <span class="wm">blok</span>
+            <div class="env"><span class="dot"></span><span class="label">production</span><span class="caret">▾</span></div>
+            <div class="spacer"></div>
+            <span class="ticker"><span class="pulse"><span class="pulse-dot"></span>tailing</span></span>
+          </div>
+          <div class="mini-shell">
+            <aside class="mini-rail">
+              <div class="nav-section">Operate</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zm0 10h16v6H4z"/></svg>Overview</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/></svg>Runs</div>
+              <div class="nav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/></svg>Logs</div>
+              <div class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Queues</div>
+            </aside>
+            <main class="mini-body">
+              <div class="filter-summary" style="margin-bottom: 16px">
+                <div class="row">
+                  <span class="chip"><span class="k">level:</span><span class="v">error</span></span>
+                  <span class="chip"><span class="k">~</span><span class="v">"DEPENDENCY"</span></span>
+                  <span style="color: var(--ink-3)">·</span>
+                  <span style="color: var(--blok-green-500); display: inline-flex; align-items: center; gap: 5px;"><span class="pulse-dot"></span>tail mode</span>
+                </div>
+              </div>
+              <div class="empty" style="padding-top: 0">
+                <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.5-4.5"/>
+                </svg>
+                <h2>No matches in the live stream</h2>
+                <p class="lede">
+                  No <code>error</code>-level events containing
+                  <code>"DEPENDENCY"</code> have arrived since the tail
+                  started. <b>Tailing live</b> at 21.4 ev/s. New matches
+                  flash brand-green when they land.
+                </p>
+                <div class="actions">
+                  <button class="btn primary">Clear search</button>
+                  <button class="btn secondary">Pause tail</button>
+                  <button class="btn ghost">Search history (last 7 d)</button>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </article>
+
+      <!-- ── 04 · Run-detail loading skeleton ────────────────────────── -->
+      <article class="frame">
+        <div class="frame-tag">
+          <span class="num">04</span>
+          <span class="file">routes/runs.$runId.tsx</span>
+          <span class="desc">fetching · live SSE attaching</span>
+        </div>
+        <div class="frame-body">
+          <div class="mini-top">
+            <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+              <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+            </svg>
+            <span class="wm">blok</span>
+            <div class="env"><span class="dot"></span><span class="label">production</span><span class="caret">▾</span></div>
+            <div class="spacer"></div>
+            <span class="ticker"><span class="pulse"><span class="pulse-dot"></span>connecting</span></span>
+          </div>
+          <div class="mini-shell">
+            <aside class="mini-rail">
+              <!-- Rail with skeleton step rows — preserves spatial frame so
+                   when data arrives, nothing jumps. -->
+              <div class="nav-section">Steps</div>
+              <div class="skel-row" style="padding-left: 8px"><span class="skel idx"></span><span class="skel dot"></span><span class="skel name"></span><span class="skel dur"></span></div>
+              <div class="skel-row" style="padding-left: 8px"><span class="skel idx"></span><span class="skel dot"></span><span class="skel name" style="width: 50%"></span><span class="skel dur"></span></div>
+              <div class="skel-row" style="padding-left: 8px"><span class="skel idx"></span><span class="skel dot"></span><span class="skel name" style="width: 40%"></span><span class="skel dur"></span></div>
+              <div class="skel-row" style="padding-left: 8px"><span class="skel idx"></span><span class="skel dot"></span><span class="skel name" style="width: 35%"></span><span class="skel dur"></span></div>
+              <div class="skel-row" style="padding-left: 8px"><span class="skel idx"></span><span class="skel dot"></span><span class="skel name" style="width: 50%"></span><span class="skel dur"></span></div>
+            </aside>
+            <main class="mini-body">
+              <div class="skel-banner">
+                <div class="skel-title"></div>
+                <div class="skel-meta"></div>
+              </div>
+              <div class="skel-stage">
+                <span class="dot"></span>
+                <span>Connecting to <code style="font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--hairline); padding: 1px 5px; border-radius: 3px; color: var(--ink-1);">/__blok/runs/run_4d8a17b5/stream</code> · attaching SSE</span>
+              </div>
+              <p style="margin-top: 18px; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; max-width: 420px;">
+                The run-detail layout reserves the same 3-pane structure
+                while data arrives — no layout shift when nodes land.
+                Step rail fills top-down as <code style="font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2);">NODE_STARTED</code> events arrive.
+              </p>
+
+              <div class="actions" style="margin-top: 28px;">
+                <button class="btn secondary">Open in run list</button>
+                <button class="btn ghost">Cancel · ⌘.</button>
+              </div>
+            </main>
+          </div>
+        </div>
+      </article>
+    </main>
+
+    <footer style="max-width: 1600px; margin: 0 auto 64px; padding: 32px; border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink-3); line-height: 1.7;">
+      <h3 style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); font-weight: 600; margin: 0 0 8px;">The pattern, summarized</h3>
+      <ol style="margin: 0; padding-left: 22px;">
+        <li><b style="color: var(--ink-1);">Glyph</b> — single Lucide line-icon, 32 px, 50% opacity. Anchors the eye and signals "this is intentional space," not "the page broke."</li>
+        <li><b style="color: var(--ink-1);">Headline</b> — Newsreader italic (the only place we keep the Direction-C concession). Names the state in 3–6 words: "No runs yet · production", "No runs match these filters", "No matches in the live stream", "Connecting…"</li>
+        <li><b style="color: var(--ink-1);">Lede</b> — sans-serif, 13 px, max 420 px wide. Explains <em>why</em> the list is empty and what would put data into it. Names variables in <code style="font-family: var(--font-mono); font-size: 11px; background: var(--bg-raised); padding: 0 4px; border-radius: 3px; color: var(--ink-1);">code</code>.</li>
+        <li><b style="color: var(--ink-1);">Snippet (cells 01)</b> — only when teaching <em>how to start</em>. Real curl, real SDK call, copy button. No fake hello-world; uses an actual workflow name from this codebase.</li>
+        <li><b style="color: var(--ink-1);">Action row</b> — primary green CTA does the highest-leverage thing for the empty state (run sample / clear filters / clear search). Secondary widens the funnel. Ghost saves the view or escapes.</li>
+      </ol>
+
+      <h3 style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); font-weight: 600; margin: 28px 0 8px;">What I deliberately didn't do</h3>
+      <ul style="margin: 0; padding-left: 22px;">
+        <li>No mascot · no friendly cartoon character · no SVG-illustrated empty boxes</li>
+        <li>No "Pro tip:" / "Did you know?" callouts in empty space</li>
+        <li>No checklists ("1. Create a workflow 2. Trigger it 3. Watch the magic")</li>
+        <li>No giant "Get started" button as the only thing on the page</li>
+        <li>No fake skeleton data that stays visible — the loading skeleton (cell 04) preserves <em>structure</em>, not phantom content</li>
+      </ul>
+    </footer>
+  </body>
+</html>
