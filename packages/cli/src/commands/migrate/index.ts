@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { program } from "../../services/commander.js";
 import type { OptionValues } from "..//../services/commander.js";
 import { migrateNode } from "./node.js";
+import { migrateWorkflows } from "./workflows.js";
 
 const migrate = new Command("migrate").description("Migrate nodes and workflows to newer patterns");
 
@@ -14,6 +15,24 @@ const node = new Command("node")
 		await migrateNode(options);
 	});
 
+const workflows = new Command("workflows")
+	.description("Migrate v1 JSON workflows to the v2 shape (id+use+inputs, branch primitive, ANY method)")
+	.option(
+		"-d, --dir <value>",
+		"Path to the JSON workflows directory (defaults to ./workflows/json or ./triggers/http/workflows/json)",
+	)
+	.option(
+		"--strip-legacy-path",
+		"Don't preserve the legacy /<workflow-key> URL — let the migrated workflow use its file-derived URL instead",
+	)
+	.option("--dry-run", "Print what would change without writing files")
+	.option("--backup", "Create .bak files next to each migrated workflow (default true)")
+	.option("--no-backup", "Skip backup creation")
+	.action(async (options: OptionValues) => {
+		await migrateWorkflows(options);
+	});
+
 migrate.addCommand(node);
+migrate.addCommand(workflows);
 
 program.addCommand(migrate);
