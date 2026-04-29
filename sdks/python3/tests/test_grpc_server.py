@@ -216,3 +216,83 @@ def test_execute_stream_streams_log_records_from_blok_node_logger(client):
     log_levels = [ev.log.level for ev in events if ev.WhichOneof("event") == "log"]
     assert "info" in log_levels
     assert "warning" in log_levels
+
+
+def test_execute_stream_real_time_emits_log_before_final():
+    """Logs emitted DURING a long-running handler arrive in the stream
+    before the final frame — proving the worker-thread + queue model
+    emits real-time, not just a buffered drain at the end (Phase 5
+    polish per master plan §17 follow-up).
+    """
+    import logging
+    import socket as _socket
+    import time as _time
+
+    from blok.node.node_registry import NodeRegistry as _NR
+    from blok.runtime.v1 import runtime_pb2 as pb  # noqa: F401
+    from blok.server.grpc_server import serve_grpc as _serve
+
+    log_emit_at: list[float] = []
+    log_arrival_at: list[float] = []
+    handler_done_at: list[float] = []
+
+    class _SlowLoggingNode:
+        def execute(self, ctx, config):
+            # Log first, sleep second. The real-time path must emit
+            # the log frame BEFORE the sleep finishes.
+            log_emit_at.append(_time.monotonic())
+            logging.getLogger("blok.node").info("emitted-before-sleep")
+            _time.sleep(0.5)
+            handler_done_at.append(_time.monotonic())
+            return {"ok": True}
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    reg = _NR(version="1.0.0-test")
+    reg.register("slow-loggy", _SlowLoggingNode())
+    srv = _serve(reg, port=port, host="127.0.0.1", sdk_version="1.0.0-test")
+    try:
+        ch = grpc.insecure_channel(f"127.0.0.1:{port}")
+        stub = pb_grpc.NodeRuntimeStub(ch)
+        # Iterate manually so we can timestamp each event's arrival.
+        stream = stub.ExecuteStream(_make_request("slow-loggy", {}))
+        events = []
+        for ev in stream:
+            events.append(ev)
+            kind = ev.WhichOneof("event")
+            if kind == "log":
+                log_arrival_at.append(_time.monotonic())
+        ch.close()
+    finally:
+        srv.stop(grace=1.0)
+
+    types = [ev.WhichOneof("event") for ev in events]
+    assert types[0] == "started"
+    assert "log" in types
+    assert types[-1] == "final"
+
+    # The critical assertion: the log arrived BEFORE the handler
+    # finished. With the legacy buffered model the log_arrival_at
+    # entries would be later than handler_done_at[0] (drained after
+    # the handler returns); with the real-time model they must be
+    # earlier — within ~tens of milliseconds of the emit, well
+    # before the 500 ms sleep completes.
+    assert log_emit_at, "node never emitted"
+    assert log_arrival_at, "no log frame arrived in stream"
+    assert handler_done_at, "handler never returned"
+    arrival_lag = log_arrival_at[0] - log_emit_at[0]
+    handler_runtime = handler_done_at[0] - log_emit_at[0]
+    # Arrival should be much closer to emit than to handler completion.
+    # With the 50 ms poll tick the worst-case lag is ~50 ms; we allow
+    # 150 ms to absorb gRPC framing latency in CI.
+    assert arrival_lag < 0.15, (
+        f"log frame arrived {arrival_lag*1000:.1f}ms after emit (should be <150ms)"
+    )
+    # And it must arrive *before* the handler finishes — the whole
+    # point of real-time streaming.
+    assert log_arrival_at[0] < handler_done_at[0], (
+        f"log arrived after handler completed (lag {arrival_lag*1000:.1f}ms; "
+        f"handler ran {handler_runtime*1000:.1f}ms)"
+    )

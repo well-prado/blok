@@ -279,6 +279,64 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
+	/**
+	 * Record a streaming `Progress` frame for an in-flight node. Overwrites
+	 * any previous progress (only the latest milestone is preserved on
+	 * the {@link NodeRun} record). Emits a `NODE_PROGRESS` event so SSE
+	 * subscribers (Studio) get the live update too.
+	 *
+	 * Master plan §17 Phase 5 follow-up — wires the proto `Progress`
+	 * frame from `ExecuteStream` into the trace store + Studio.
+	 *
+	 * @param percent 0–100; values outside the range are clamped.
+	 * @param phase optional free-form phase label (may be empty).
+	 */
+	recordProgress(nodeRunId: string, percent: number, phase: string): void {
+		const nodeRun = this.store.getNodeRun(nodeRunId);
+		if (!nodeRun) return;
+
+		const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+		const updatedAt = Date.now();
+
+		this.store.updateNodeRun(nodeRunId, {
+			progress: {
+				percent: clamped,
+				phase: phase ?? "",
+				updatedAt,
+			},
+		});
+
+		const run = this.store.getRun(nodeRun.runId);
+		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_PROGRESS", nodeRun.nodeName, nodeRunId, {
+			percent: clamped,
+			phase: phase ?? "",
+			updatedAt,
+		});
+	}
+
+	/**
+	 * Record a streaming `PartialResult` snapshot for an in-flight node.
+	 * Overwrites any previous snapshot. Emits a `NODE_PARTIAL_RESULT`
+	 * event for SSE subscribers.
+	 *
+	 * Master plan §17 Phase 5 follow-up.
+	 */
+	recordPartialResult(nodeRunId: string, snapshot: unknown): void {
+		const nodeRun = this.store.getNodeRun(nodeRunId);
+		if (!nodeRun) return;
+
+		const updatedAt = Date.now();
+		this.store.updateNodeRun(nodeRunId, {
+			partialResult: { snapshot, updatedAt },
+		});
+
+		const run = this.store.getRun(nodeRun.runId);
+		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_PARTIAL_RESULT", nodeRun.nodeName, nodeRunId, {
+			snapshot,
+			updatedAt,
+		});
+	}
+
 	// === Logging ===
 
 	addLog(entry: Omit<TraceLogEntry, "id" | "timestamp">): void {

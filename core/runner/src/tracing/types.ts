@@ -73,6 +73,32 @@ export interface NodeRun {
 	inputs?: unknown;
 	outputs?: unknown;
 	error?: RunErrorDetail;
+	/**
+	 * Latest streaming progress hint emitted via the proto `Progress`
+	 * event during `ExecuteStream` (master plan §17 Phase 5
+	 * follow-up). Studio renders it as a live progress bar; the
+	 * value is overwritten on each new frame so only the most recent
+	 * milestone is preserved. Absent for unary calls and for SDKs
+	 * that don't emit progress frames.
+	 */
+	progress?: {
+		/** 0–100, clamped. */
+		percent: number;
+		/** Free-form phase label (`"validating"`, `"writing"`, …). May be empty. */
+		phase: string;
+		/** Wall-clock receipt timestamp (ms since epoch). */
+		updatedAt: number;
+	};
+	/**
+	 * Latest streaming `PartialResult` snapshot during `ExecuteStream`.
+	 * Useful for UIs that want to show interim state of a long-running
+	 * computation (row count, partial output). Always overwritten by
+	 * newer frames — only the latest snapshot is preserved.
+	 */
+	partialResult?: {
+		snapshot: unknown;
+		updatedAt: number;
+	};
 	parentNodeId?: string;
 	depth: number;
 	stepIndex: number;
@@ -98,7 +124,11 @@ export type RunEventType =
 	| "NODE_FAILED"
 	| "NODE_SKIPPED"
 	| "VARS_UPDATED"
-	| "LOG_ENTRY";
+	| "LOG_ENTRY"
+	/** §17 Phase 5: streaming `Progress` frame from the SDK. */
+	| "NODE_PROGRESS"
+	/** §17 Phase 5: streaming `PartialResult` frame from the SDK. */
+	| "NODE_PARTIAL_RESULT";
 
 export interface RunEvent {
 	id: string;

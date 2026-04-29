@@ -162,12 +162,19 @@ export class RuntimeAdapterNode extends RunnerNode {
 					message: event.log.message,
 					data: Object.keys(event.log.attributes).length > 0 ? event.log.attributes : undefined,
 				} satisfies Omit<TraceLogEntry, "id" | "timestamp">);
+			} else if (event.type === "progress" && tracker && traceNodeId) {
+				// Live progress hint — overwrites any previous;
+				// emits NODE_PROGRESS for Studio SSE.
+				tracker.recordProgress(traceNodeId, event.percent, event.phase);
+			} else if (event.type === "partial" && tracker && traceNodeId) {
+				// Interim snapshot — overwrites any previous;
+				// emits NODE_PARTIAL_RESULT for Studio SSE.
+				tracker.recordPartialResult(traceNodeId, event.snapshot);
 			}
-			// `started`/`progress`/`partial` frames are intentionally ignored at
-			// this layer for now — the node lifecycle (NodeStarted / metrics /
-			// completion) is already tracked by RunnerSteps via `startNode` /
-			// `completeNode`. Wiring richer progress UI into Studio is a
-			// follow-up that doesn't change the wire contract.
+			// `started` is intentionally ignored at this layer — the
+			// node lifecycle (NodeStarted / metrics / completion) is
+			// already tracked by RunnerSteps via `startNode` /
+			// `completeNode`.
 		}
 
 		return result;

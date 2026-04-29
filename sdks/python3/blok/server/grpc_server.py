@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import threading
 import time
 from concurrent import futures
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -104,12 +105,43 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
         Emits, in order:
           1. one :class:`pb.NodeStarted` event marking call acceptance
           2. zero or more :class:`pb.LogLine` events captured from the
-             :data:`NODE_LOGGER_NAME` logger while the node executes
+             :data:`NODE_LOGGER_NAME` logger **as they happen** while the
+             node executes (real-time, not buffered — Phase 5 follow-up)
           3. one terminal :class:`pb.ExecuteResponse` carrying the same payload
              as a unary :meth:`Execute` would return
 
-        Logs are captured via a thread-local handler so concurrent calls in
-        the gRPC ThreadPoolExecutor don't cross-contaminate.
+        # Real-time streaming model
+
+        The handler runs on a worker thread (via
+        :class:`threading.Thread`) so the generator's main loop can
+        block on the log queue with a short timeout. Every time a log
+        record is enqueued the loop wakes, yields a ``LogLine`` proto,
+        and goes back to polling. When the worker thread completes the
+        loop drains any remaining records (preserving causal order
+        with respect to the final response) and yields the
+        ``ExecuteResponse``.
+
+        # Why a thread (not asyncio)
+
+        The :class:`NodeRegistry` interface is sync (
+        ``execute(request) -> result``) and node handlers may call
+        blocking I/O (``requests.post``, DB drivers, etc.) without
+        wrapping each call in ``run_in_executor``. A thread keeps the
+        contract simple and matches the gRPC server's existing
+        thread-pool model — the gRPC ThreadPoolExecutor already
+        dispatches concurrent calls onto threads, and our worker
+        thread is just one more worker for the duration of one call.
+
+        # Log capture isolation
+
+        Logs are captured via a per-call handler attached to the
+        :data:`NODE_LOGGER_NAME` logger. Concurrent ``ExecuteStream``
+        calls running on the gRPC pool each install their own
+        handler; ``logging`` itself serializes ``emit()`` so
+        ``queue.SimpleQueue`` is the right primitive (no extra lock
+        needed). The handler is removed in ``finally`` so a crashed
+        worker thread doesn't leave dangling handlers on the
+        process-wide root logger.
         """
         try:
             execution_request = _decode_execute_request(request)
@@ -134,21 +166,61 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
         # in the `finally` block so we don't leave the logger globally chatty.
         node_logger.setLevel(logging.DEBUG)
 
+        # Run the handler on a worker thread so we can stream logs as
+        # they happen. ``result_box`` carries the success result (one
+        # entry on success, none on exception); ``error_box`` carries a
+        # surfaced exception so we can re-raise on the main thread for
+        # gRPC to translate into a status. The worker is daemon=True
+        # so a stuck handler can't block process shutdown.
+        result_box: list = []
+        error_box: list = []
+
+        def run_handler() -> None:
+            try:
+                result_box.append(self._registry.execute(execution_request))
+            except BaseException as exc:  # noqa: BLE001 — surface to main thread
+                error_box.append(exc)
+
+        worker = threading.Thread(target=run_handler, daemon=True, name="blok-execute-stream-worker")
+
         try:
-            result = self._registry.execute(execution_request)
+            worker.start()
+            # Real-time streaming loop: wake every 50 ms to either yield
+            # a buffered log frame or to check whether the worker has
+            # finished. A 50 ms tick is short enough that human
+            # observers see logs land "instantly" in Studio's SSE
+            # stream while keeping wakeup overhead negligible (~20
+            # checks/second).
+            while worker.is_alive():
+                try:
+                    record = log_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                yield pb.ExecuteEvent(log=_log_record_to_proto(record))
+
+            # Worker is done. Drain any logs the worker emitted between
+            # our last `get(timeout=0.05)` and its final return so they
+            # arrive before the final frame.
+            while True:
+                try:
+                    record = log_queue.get_nowait()
+                except queue.Empty:
+                    break
+                yield pb.ExecuteEvent(log=_log_record_to_proto(record))
         finally:
             node_logger.removeHandler(handler)
             node_logger.propagate = previous_propagate
             node_logger.setLevel(previous_level)
 
-        # Drain captured logs before the final frame so the runner sees them
-        # in causal order with respect to the response.
-        while True:
-            try:
-                record = log_queue.get_nowait()
-            except queue.Empty:
-                break
-            yield pb.ExecuteEvent(log=_log_record_to_proto(record))
+        # Surface any exception the worker thread caught.
+        if error_box:
+            raise error_box[0]
+
+        # ``result_box`` always has exactly one element when the
+        # worker completed without exception (registry.execute()
+        # never raises — it converts handler errors into a failed
+        # ExecutionResult).
+        result = result_box[0]
 
         yield pb.ExecuteEvent(
             final=_encode_execute_response(

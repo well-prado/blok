@@ -70,6 +70,28 @@ export interface NodeRun {
 	 * and `stack`.
 	 */
 	error?: NodeRunErrorDetail;
+	/**
+	 * Latest streaming `Progress` frame from the SDK (master plan §17
+	 * Phase 5 follow-up). Studio renders it as a live progress bar
+	 * that drives forward as new frames arrive. Absent for unary
+	 * calls and SDKs that don't emit progress.
+	 */
+	progress?: {
+		/** 0–100, clamped. */
+		percent: number;
+		/** Free-form phase label (e.g. `"validating"`). May be empty. */
+		phase: string;
+		/** Wall-clock receipt timestamp (ms since epoch). */
+		updatedAt: number;
+	};
+	/**
+	 * Latest streaming `PartialResult` snapshot — useful for showing
+	 * interim state of a long-running computation.
+	 */
+	partialResult?: {
+		snapshot: unknown;
+		updatedAt: number;
+	};
 	parentNodeId?: string;
 	depth: number;
 	stepIndex: number;
@@ -89,7 +111,11 @@ export type RunEventType =
 	| "NODE_FAILED"
 	| "NODE_SKIPPED"
 	| "VARS_UPDATED"
-	| "LOG_ENTRY";
+	| "LOG_ENTRY"
+	/** §17 Phase 5: streaming `Progress` frame from the SDK. */
+	| "NODE_PROGRESS"
+	/** §17 Phase 5: streaming `PartialResult` frame from the SDK. */
+	| "NODE_PARTIAL_RESULT";
 
 export interface RunEvent {
 	id: string;

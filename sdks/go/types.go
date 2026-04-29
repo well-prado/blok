@@ -19,6 +19,59 @@ type Context struct {
 	Response     Response               `json:"response"`
 	Vars         map[string]interface{} `json:"vars"`
 	Env          map[string]string      `json:"env"`
+
+	// streamLog, when set, sinks log events into the per-call gRPC
+	// ExecuteStream channel. Set by `BlokNodeRuntime.ExecuteStream`
+	// for the duration of one streaming call; unset (nil) on the
+	// unary Execute path. Handlers should NOT call this directly —
+	// they call the public `Context.StreamLog` shim, which is
+	// always safe to call (no-op when streaming is off).
+	//
+	// Type signature is the public StreamLogEntry struct so handlers can
+	// import the type cleanly without reaching into the gRPC
+	// internals.
+	//
+	// Phase 5 follow-up per master plan §17.
+	streamLog func(StreamLogEntry)
+}
+
+// StreamLogEntry is a single log event emitted by a node handler. Carries the
+// level, message, and optional structured attributes. Handed to
+// `Context.StreamLog`; if streaming is enabled the runner receives a
+// `LogLine` proto for each entry in real time.
+type StreamLogEntry struct {
+	Level   string            // "debug" | "info" | "warn" | "error" (lowercase, free-form)
+	Message string            // human-readable message
+	Attrs   map[string]string // optional structured attributes
+}
+
+// StreamLog emits a real-time log event to the runner's ExecuteStream
+// channel. No-op on the unary Execute path (when the call is unary,
+// `streamLog` is nil and StreamLog returns immediately). Safe to call
+// from any goroutine — the underlying channel is unbuffered-but-
+// non-blocking via a `select { default }` drop policy in the
+// servicer's send loop, so a flood of logs from a busy handler can't
+// stall the request thread.
+//
+// Recommended call style:
+//
+//	ctx.StreamLog(blok.StreamLogEntry{
+//	    Level:   "info",
+//	    Message: fmt.Sprintf("Processing batch %d", i),
+//	    Attrs:   map[string]string{"batch_size": fmt.Sprint(len(batch))},
+//	})
+func (c *Context) StreamLog(entry StreamLogEntry) {
+	if c.streamLog != nil {
+		c.streamLog(entry)
+	}
+}
+
+// setStreamLog wires the per-call sink into the context. Internal
+// helper used by `BlokNodeRuntime.ExecuteStream`. Cleared when the
+// streaming call finishes so a leaked context can't accidentally
+// publish to a closed channel.
+func (c *Context) setStreamLog(sink func(StreamLogEntry)) {
+	c.streamLog = sink
 }
 
 // SetVar stores a variable in the context for downstream nodes.

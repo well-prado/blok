@@ -385,3 +385,90 @@ func TestExecuteStreamEmitsStartedThenFinal(t *testing.T) {
 		t.Errorf("expected final.success=true, got false")
 	}
 }
+
+// loggingNode emits log lines via ctx.StreamLog before sleeping. Used to
+// verify the ExecuteStream real-time path: logs must arrive in the
+// stream BEFORE the handler returns, not buffered until completion.
+type loggingNode struct{}
+
+func (n *loggingNode) Execute(ctx *Context, _ map[string]any) (any, error) {
+	ctx.StreamLog(StreamLogEntry{
+		Level:   "info",
+		Message: "emitted-before-sleep",
+		Attrs:   map[string]string{"phase": "early"},
+	})
+	time.Sleep(300 * time.Millisecond)
+	ctx.StreamLog(StreamLogEntry{Level: "warning", Message: "almost-done"})
+	return map[string]any{"ok": true}, nil
+}
+
+func TestExecuteStreamRealTimeEmitsLogBeforeFinal(t *testing.T) {
+	// Bring up a server with a node that emits a log THEN sleeps —
+	// the real-time path must surface the log frame before the
+	// 300 ms sleep completes (Phase 5 polish per master plan §17
+	// follow-up).
+	registry := NewNodeRegistry()
+	registry.Register("loggy", &loggingNode{})
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := lis.Addr().String()
+
+	server := grpc.NewServer()
+	pb.RegisterNodeRuntimeServer(server, NewBlokNodeRuntime(registry, "1.0.0-test"))
+	go func() { _ = server.Serve(lis) }()
+	defer server.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	client, closeClient := dialTestClient(t, addr)
+	defer closeClient()
+
+	startedAt := time.Now()
+	stream, err := client.ExecuteStream(context.Background(), makeRequest("loggy", nil, nil))
+	if err != nil {
+		t.Fatalf("ExecuteStream: %v", err)
+	}
+
+	var firstLogAt time.Time
+	var finalAt time.Time
+	for {
+		ev, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			t.Fatalf("Recv: %v", recvErr)
+		}
+		switch ev.GetEvent().(type) {
+		case *pb.ExecuteEvent_Log:
+			if firstLogAt.IsZero() {
+				firstLogAt = time.Now()
+			}
+		case *pb.ExecuteEvent_Final:
+			finalAt = time.Now()
+		}
+	}
+
+	if firstLogAt.IsZero() {
+		t.Fatalf("no log frame received")
+	}
+	if finalAt.IsZero() {
+		t.Fatalf("no final frame received")
+	}
+
+	// Critical assertion: first log arrived BEFORE the final
+	// frame, AND much earlier than the handler's 300 ms sleep
+	// would have completed if we'd been buffering.
+	logLag := firstLogAt.Sub(startedAt)
+	totalLag := finalAt.Sub(startedAt)
+	if firstLogAt.After(finalAt) {
+		t.Fatalf("first log arrived after final frame (log %v, final %v)", logLag, totalLag)
+	}
+	// 200 ms ceiling absorbs gRPC framing latency; the buffered model
+	// would yield logLag ≥ 300 ms (handler sleep duration).
+	if logLag > 200*time.Millisecond {
+		t.Fatalf("first log arrived %v after start (expected <200ms; buffered model would be ≥300ms)", logLag)
+	}
+}

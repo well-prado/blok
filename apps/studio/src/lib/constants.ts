@@ -45,6 +45,8 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	NODE_SKIPPED: "Node Skipped",
 	VARS_UPDATED: "Vars Updated",
 	LOG_ENTRY: "Log Entry",
+	NODE_PROGRESS: "Node Progress",
+	NODE_PARTIAL_RESULT: "Node Partial Result",
 };
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
@@ -57,6 +59,8 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	NODE_SKIPPED: "text-zinc-400 bg-zinc-400/10",
 	VARS_UPDATED: "text-yellow-400 bg-yellow-400/10",
 	LOG_ENTRY: "text-zinc-300 bg-zinc-300/10",
+	NODE_PROGRESS: "text-cyan-400 bg-cyan-400/10",
+	NODE_PARTIAL_RESULT: "text-cyan-300 bg-cyan-300/10",
 };
 
 export const LOG_LEVEL_COLORS = {

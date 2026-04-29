@@ -77,14 +77,28 @@ func (s *BlokNodeRuntime) Execute(ctx context.Context, req *pb.ExecuteRequest) (
 //
 // Emits, in order:
 //  1. one NodeStarted event marking call acceptance
-//  2. one terminal ExecuteResponse carrying the same payload as the unary
+//  2. zero or more LogLine events emitted by the handler via
+//     `ctx.StreamLog(...)` while it runs (real-time, not buffered)
+//  3. one terminal ExecuteResponse carrying the same payload as the unary
 //     Execute would return
 //
-// Log capture (LogLine events) is intentionally out of scope for the Phase 5
-// Go pilot — the existing NodeHandler.Execute signature has no per-call
-// logger sink, so adding it requires a Context refactor that lands in a
-// follow-up. Real-time log streaming arrives once the SDK exposes a
-// per-call streaming logger.
+// # Real-time streaming model
+//
+// The handler runs on its own goroutine so the request goroutine can
+// `select` on the log channel and the result channel concurrently. Every
+// time the handler calls `ctx.StreamLog`, an entry lands on the log
+// channel; the request goroutine wakes, sends a LogLine proto, and goes
+// back to selecting. When the handler returns, the result lands on the
+// result channel; we drain any remaining log entries (preserving causal
+// order with respect to the final response) and send the
+// ExecuteResponse.
+//
+// # Drop policy under load
+//
+// The log channel is buffered (default 64). If a handler emits faster
+// than the gRPC stream can drain (very rare in practice), additional
+// `StreamLog` calls drop the entry rather than block — observability
+// over correctness; a chatty handler does not stall execution.
 func (s *BlokNodeRuntime) ExecuteStream(req *pb.ExecuteRequest, stream pb.NodeRuntime_ExecuteStreamServer) error {
 	execReq, err := decodeExecuteRequest(req)
 	if err != nil {
@@ -101,13 +115,82 @@ func (s *BlokNodeRuntime) ExecuteStream(req *pb.ExecuteRequest, stream pb.NodeRu
 		return sendErr
 	}
 
-	result := s.registry.Execute(execReq)
+	// Channel-backed logger sink. Buffered to absorb bursts without
+	// blocking the handler; non-blocking drop on overflow.
+	const logBufSize = 64
+	logCh := make(chan StreamLogEntry, logBufSize)
+	execReq.Context.setStreamLog(func(entry StreamLogEntry) {
+		select {
+		case logCh <- entry:
+		default:
+			// Buffer full — drop the entry.
+		}
+	})
+
+	// Run the handler on a worker goroutine so we can multiplex log
+	// frames and the final result on the request goroutine.
+	resultCh := make(chan *ExecutionResult, 1)
+	go func() {
+		resultCh <- s.registry.Execute(execReq)
+	}()
+
+	// Streaming loop: forward each log frame as it arrives; break
+	// when the handler returns.
+	var result *ExecutionResult
+	streaming := true
+	for streaming {
+		select {
+		case entry := <-logCh:
+			if sendErr := stream.Send(&pb.ExecuteEvent{
+				Event: &pb.ExecuteEvent_Log{Log: streamLogEntryToProto(entry)},
+			}); sendErr != nil {
+				return sendErr
+			}
+		case result = <-resultCh:
+			streaming = false
+		}
+	}
+
+	// Detach the sink so a delayed handler goroutine can't accidentally
+	// publish to the closing channel.
+	execReq.Context.setStreamLog(nil)
+
+	// Drain any logs the handler emitted between our last `select`
+	// wakeup and its final return so they arrive before the final
+	// frame.
+draining:
+	for {
+		select {
+		case entry := <-logCh:
+			if sendErr := stream.Send(&pb.ExecuteEvent{
+				Event: &pb.ExecuteEvent_Log{Log: streamLogEntryToProto(entry)},
+			}); sendErr != nil {
+				return sendErr
+			}
+		default:
+			break draining
+		}
+	}
 
 	return stream.Send(&pb.ExecuteEvent{
 		Event: &pb.ExecuteEvent_Final{
 			Final: encodeExecuteResponse(result, execReq.Node.Name, s.sdkVersion),
 		},
 	})
+}
+
+// streamLogEntryToProto encodes a handler-emitted StreamLogEntry into the
+// proto LogLine wire shape. The proto `timestamp` field captures
+// wall-clock at encode time (the entry's emit moment is captured here
+// in the request goroutine, microseconds after the handler returned
+// from StreamLog).
+func streamLogEntryToProto(entry StreamLogEntry) *pb.LogLine {
+	return &pb.LogLine{
+		Timestamp:  timestamppb.New(time.Now()),
+		Level:      entry.Level,
+		Message:    entry.Message,
+		Attributes: entry.Attrs,
+	}
 }
 
 // Health reports SERVING with the SDK version and registered node names.
