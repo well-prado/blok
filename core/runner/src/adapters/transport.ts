@@ -6,17 +6,33 @@ import type { TlsConfig, Transport } from "./grpc/types";
  *
  * Precedence (most specific wins):
  *   1. `RUNTIME_<KIND>_TRANSPORT` — per-kind override
- *      e.g. `RUNTIME_PYTHON3_TRANSPORT=grpc`
- *   2. `RUNTIME_TRANSPORT` — global default
- *      e.g. `RUNTIME_TRANSPORT=grpc`
- *   3. The hard-coded fallback (`http` for now; flips to `grpc` in Phase 6).
+ *      e.g. `RUNTIME_PYTHON3_TRANSPORT=http` to opt one SDK out of gRPC.
+ *   2. `RUNTIME_TRANSPORT` — global override
+ *      e.g. `RUNTIME_TRANSPORT=http` to roll back the whole runner.
+ *   3. The hard-coded default — **`grpc`** as of Phase 6 (master plan §11).
+ *      Flipped from `http` to `grpc` after the cross-language parity matrix
+ *      (`bun run test:parity`, 33 tests across 6 SDKs × 5 workflows) and
+ *      the per-SDK §17 BlokError E2E suites stayed green for the full
+ *      Phase 5 observation window.
  *
  * Pure function — reads `process.env` once per call so tests can override.
  *
+ * # Why the default flip is safe
+ *
+ * - HTTP transport remains available behind `RUNTIME_TRANSPORT=http` for at
+ *   least two minor versions (master plan §11 commitment).
+ * - PHP without RoadRunner (Path B from §16) sets
+ *   `RUNTIME_PHP_TRANSPORT=http` per host. The forever-supported escape
+ *   hatch is unaffected.
+ * - SDKs that fail to bind their gRPC listener fall through the
+ *   {@link GrpcHealthChecker} circuit-breaker and surface a typed
+ *   `BlokError(category=DEPENDENCY)` per §9 — no silent failure.
+ *
  * @param kind The runtime kind (e.g. "python3").
- * @param env Optional env source (defaults to `process.env`). Tests can pass
- *            a stub map.
- * @returns Either `"http"` or `"grpc"`. Invalid values fall back to `"http"`.
+ * @param env Optional env source (defaults to `process.env`). Tests can
+ *            pass a stub map.
+ * @returns Either `"http"` or `"grpc"`. Invalid values fall back to the
+ *          Phase 6 default (`grpc`).
  */
 export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEnv = process.env): Transport {
 	const perKindKey = `RUNTIME_${kind.toUpperCase()}_TRANSPORT`;
@@ -30,8 +46,9 @@ export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEn
 		return global;
 	}
 
-	// Phase 0 default: HTTP. Flips to gRPC in Phase 6 once parity is proven.
-	return "http";
+	// Phase 6 default: gRPC. The flip from HTTP landed once the parity
+	// matrix had been green for the observation window.
+	return "grpc";
 }
 
 /**

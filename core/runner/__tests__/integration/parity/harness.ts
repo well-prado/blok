@@ -236,14 +236,76 @@ const rubyProfile: SdkProfile = {
 	},
 };
 
+// =============================================================================
+// PHP profile — RoadRunner-backed, opt-in
+// =============================================================================
+//
+// PHP is wired up as an OPTIONAL profile (not in the default
+// `SDK_PROFILES` array). It joins the cross-runtime-chain demo
+// because the workflow lists `runtime.php`, but stays out of the
+// regular parity matrix (`matrix.integration.test.ts`) — RoadRunner
+// has its own daemon lifecycle (a `rr` process hosting PHP workers
+// under a goridge pipe) which is heavier to spin up than the other
+// SDKs, and the per-SDK PHP test (`php-grpc.integration.test.ts`)
+// already proves §17 parity in isolation.
+
+const PHP_SDK_ROOT = path.join(REPO_ROOT, "sdks/php");
+const PHP_RR_CONFIG = path.join(PHP_SDK_ROOT, ".rr.yaml");
+const PHP_VENDOR_AUTOLOAD = path.join(PHP_SDK_ROOT, "vendor/autoload.php");
+
+function detectRrBin(): string | null {
+	for (const candidate of ["/opt/homebrew/bin/rr", "rr"]) {
+		try {
+			execSync(`${candidate} --version`, { stdio: "ignore" });
+			return candidate;
+		} catch {
+			// keep trying
+		}
+	}
+	return null;
+}
+
+function detectPhpBin(): string | null {
+	for (const candidate of ["/opt/homebrew/bin/php", "php"]) {
+		try {
+			execSync(`${candidate} --version`, { stdio: "ignore" });
+			return candidate;
+		} catch {
+			// keep trying
+		}
+	}
+	return null;
+}
+
 /**
- * PHP is intentionally NOT in the matrix. RoadRunner has its own daemon
- * lifecycle and the per-SDK PHP integration test
- * (`php-grpc.integration.test.ts`) already proves §17 parity. Adding it
- * here would double the matrix walltime without expanding coverage.
- *
- * If/when PHP support lands without RoadRunner (Path B from §11), revisit.
+ * PHP via RoadRunner. Spawns
+ * `rr serve -c .rr.yaml --override grpc.listen=tcp://127.0.0.1:<grpcPort>`.
+ * The `httpPort` parameter is unused — RoadRunner's HTTP port is
+ * configured statically in `.rr.yaml` and isn't relevant for the
+ * gRPC-only demo flow.
  */
+export const phpProfile: SdkProfile = {
+	id: "php",
+	kind: "php",
+	detect: () => {
+		const rr = detectRrBin();
+		const php = detectPhpBin();
+		return rr !== null && php !== null && existsSync(PHP_RR_CONFIG) && existsSync(PHP_VENDOR_AUTOLOAD);
+	},
+	spawn: (_httpPort, grpcPort) => {
+		const rr = detectRrBin();
+		if (rr === null) throw new Error("rr not detected; should not be called when detect() returned false");
+		return spawn(rr, ["serve", "-c", ".rr.yaml", "--override", `grpc.listen=tcp://127.0.0.1:${grpcPort}`], {
+			cwd: PHP_SDK_ROOT,
+			env: {
+				...process.env,
+				GRPC_PORT: String(grpcPort),
+				HOST: "127.0.0.1",
+			},
+			stdio: ["ignore", "ignore", "inherit"],
+		});
+	},
+};
 
 /**
  * The full ordered list of SDK profiles the matrix iterates over.

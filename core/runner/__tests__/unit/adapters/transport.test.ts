@@ -10,8 +10,11 @@ import {
 } from "../../../src/adapters/transport";
 
 describe("resolveTransportForKind", () => {
-	it("returns http when no env vars are set", () => {
-		expect(resolveTransportForKind("python3", {})).toBe("http");
+	it("returns the Phase 6 default (grpc) when no env vars are set", () => {
+		// Master plan §11/§14 Phase 6 flip: the hard-coded default went
+		// from `http` to `grpc` once the parity matrix had been green
+		// for the observation window. HTTP remains opt-in via env.
+		expect(resolveTransportForKind("python3", {})).toBe("grpc");
 	});
 
 	it("returns the global default when set", () => {
@@ -35,9 +38,9 @@ describe("resolveTransportForKind", () => {
 		).toBe("http");
 	});
 
-	it("falls back to http when env values are invalid", () => {
-		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "weird" })).toBe("http");
-		expect(resolveTransportForKind("python3", { RUNTIME_PYTHON3_TRANSPORT: "weird" })).toBe("http");
+	it("falls back to the Phase 6 default (grpc) when env values are invalid", () => {
+		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "weird" })).toBe("grpc");
+		expect(resolveTransportForKind("python3", { RUNTIME_PYTHON3_TRANSPORT: "weird" })).toBe("grpc");
 	});
 
 	it("uppercases the kind correctly for the env var key", () => {
