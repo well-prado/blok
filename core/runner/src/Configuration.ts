@@ -382,9 +382,13 @@ export default class Configuration implements Config {
 		targetNode.set_var = node.set_var !== undefined ? node.set_var : false;
 
 		// Wrap in RuntimeAdapterNode to integrate with existing Runner.
-		// Opt the runtime path into ExecuteStream when BLOK_STREAM_LOGS=true so
-		// node-emitted LogLine events flow into the Studio SSE stream.
-		const streamLogs = isStreamLogsEnabled();
+		// Per-step `stream_logs: true|false` overrides the global
+		// `BLOK_STREAM_LOGS` env flag (master plan §17 Phase 5 follow-up).
+		// This lets workflow authors silence one chatty step without
+		// disabling streaming workflow-wide, or opt a single step in
+		// without flipping the whole runtime.
+		const stepStreamLogs = (node as { stream_logs?: boolean }).stream_logs;
+		const streamLogs = stepStreamLogs !== undefined ? stepStreamLogs : isStreamLogsEnabled();
 		return new RuntimeAdapterNode(adapter, targetNode, { streamLogs }) as RunnerNode;
 	}
 

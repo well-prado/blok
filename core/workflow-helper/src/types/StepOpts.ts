@@ -89,6 +89,23 @@ export const StepOptsSchema = z.object({
 	 * Default: false.
 	 */
 	stop: z.boolean().optional(),
+	/**
+	 * Per-step opt-in for live log streaming (master plan §17 Phase 5
+	 * follow-up). When `true`, this runtime step routes through
+	 * `ExecuteStream` instead of unary `Execute`, so `LogLine` events
+	 * the SDK emits during the call surface live in Studio's SSE
+	 * stream.
+	 *
+	 * Default: inherits from the global `BLOK_STREAM_LOGS` env flag.
+	 * Per-step `true` overrides a `false` env. Per-step `false`
+	 * overrides a `true` env (useful when one chatty step would
+	 * dominate the stream and you want to silence just that step).
+	 *
+	 * Has no effect on module nodes (no streaming path) or on
+	 * adapters that don't support `executeStream` (e.g. PHP — falls
+	 * back to unary).
+	 */
+	stream_logs: z.boolean().optional(),
 });
 
 export type StepOpts = z.infer<typeof StepOptsSchema>;
