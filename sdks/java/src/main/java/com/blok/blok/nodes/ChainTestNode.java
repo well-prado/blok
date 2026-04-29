@@ -24,16 +24,24 @@ public class ChainTestNode implements NodeHandler {
             body = (Map<String, Object>) ctx.getRequest().getBody();
         }
 
-        // Read existing chain (default to empty list)
+        // Read existing chain — gRPC inputs first (carried on
+        // `node.config`), HTTP body fallback (legacy wire shape where
+        // the runner mapped resolvedInputs → request.body). Dual-read
+        // keeps the cross-runtime-chain demo working over both
+        // transports during the §11 deprecation window.
         List<Object> chain = new ArrayList<>();
-        if (body != null && body.get("chain") instanceof List) {
+        if (config != null && config.get("chain") instanceof List) {
+            chain = new ArrayList<>((List<Object>) config.get("chain"));
+        } else if (body != null && body.get("chain") instanceof List) {
             chain = new ArrayList<>((List<Object>) body.get("chain"));
         }
 
-        // Read origin
+        // Read origin — same dual-read.
         String origin = "unknown";
-        if (body != null && body.get("origin") instanceof String) {
-            origin = (String) body.get("origin");
+        if (config != null && config.get("origin") instanceof String s && !s.isEmpty()) {
+            origin = s;
+        } else if (body != null && body.get("origin") instanceof String s && !s.isEmpty()) {
+            origin = s;
         }
 
         // Append this language's entry

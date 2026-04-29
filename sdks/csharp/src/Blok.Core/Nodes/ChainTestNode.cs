@@ -15,23 +15,42 @@ public class ChainTestNode : INodeHandler
     {
         await Task.CompletedTask;
 
-        // Read existing chain from request body
+        // Read existing chain — gRPC inputs first (carried on
+        // `node.config`), HTTP body fallback (legacy wire shape where
+        // the runner mapped resolvedInputs → request.body). Dual-read
+        // keeps the cross-runtime-chain demo working over both
+        // transports during the §11 deprecation window.
         var chain = new List<object>();
-        if (ctx.Request?.Body.ValueKind == JsonValueKind.Object &&
-            ctx.Request.Body.TryGetProperty("chain", out var chainProp) &&
-            chainProp.ValueKind == JsonValueKind.Array)
+        JsonElement chainSrc = default;
+        if (config.TryGetValue("chain", out var configChain) && configChain.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in chainProp.EnumerateArray())
+            chainSrc = configChain;
+        }
+        else if (ctx.Request?.Body.ValueKind == JsonValueKind.Object &&
+                 ctx.Request.Body.TryGetProperty("chain", out var bodyChain) &&
+                 bodyChain.ValueKind == JsonValueKind.Array)
+        {
+            chainSrc = bodyChain;
+        }
+        if (chainSrc.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in chainSrc.EnumerateArray())
             {
                 chain.Add(item);
             }
         }
 
-        // Read origin
+        // Read origin — same dual-read.
         var origin = "unknown";
-        if (ctx.Request?.Body.ValueKind == JsonValueKind.Object &&
-            ctx.Request.Body.TryGetProperty("origin", out var originProp) &&
-            originProp.ValueKind == JsonValueKind.String)
+        if (config.TryGetValue("origin", out var configOrigin) &&
+            configOrigin.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrEmpty(configOrigin.GetString()))
+        {
+            origin = configOrigin.GetString() ?? "unknown";
+        }
+        else if (ctx.Request?.Body.ValueKind == JsonValueKind.Object &&
+                 ctx.Request.Body.TryGetProperty("origin", out var originProp) &&
+                 originProp.ValueKind == JsonValueKind.String)
         {
             origin = originProp.GetString() ?? "unknown";
         }

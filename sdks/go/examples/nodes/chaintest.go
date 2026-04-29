@@ -12,20 +12,31 @@ import (
 type ChainTestNode struct{}
 
 // Execute processes the chain-test node.
+//
+// Reads `chain` and `origin` from the resolved step inputs first
+// (the gRPC wire shape carries them on `node.config`), falling back
+// to `ctx.Request.BodyMap()` for the legacy HTTP path where the
+// runner mapped `resolvedInputs → request.body`. This dual-read
+// keeps the cross-runtime-chain demo working over both transports
+// during the §11 deprecation window.
 func (n *ChainTestNode) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	body := ctx.Request.BodyMap()
 
-	// Read existing chain (default to empty slice)
+	// Read existing chain — gRPC inputs first, HTTP body fallback.
 	var chain []interface{}
-	if body != nil {
+	if c, ok := config["chain"].([]interface{}); ok {
+		chain = c
+	} else if body != nil {
 		if c, ok := body["chain"].([]interface{}); ok {
 			chain = c
 		}
 	}
 
-	// Read origin
+	// Read origin — gRPC inputs first, HTTP body fallback.
 	origin := "unknown"
-	if body != nil {
+	if o, ok := config["origin"].(string); ok && o != "" {
+		origin = o
+	} else if body != nil {
 		if o, ok := body["origin"].(string); ok && o != "" {
 			origin = o
 		}
