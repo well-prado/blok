@@ -138,6 +138,7 @@ const (
 	ApiCallNodeName       = "api-call"
 	TransformDataNodeName = "transform-data"
 	ChainTestNodeName     = "chain-test"
+	BlokErrorDemoNodeName = "blok-error-demo"
 )
 
 // RegisterAll registers all example nodes with the registry.
@@ -146,6 +147,7 @@ func RegisterAll(registry *blok.NodeRegistry) {
 	registry.Register(ApiCallNodeName, &ApiCallNode{})
 	registry.Register(TransformDataNodeName, &TransformDataNode{})
 	registry.Register(ChainTestNodeName, &ChainTestNode{})
+	registry.Register(BlokErrorDemoNodeName, &BlokErrorDemoNode{})
 }
 
 // RegisterDefaults is an alias for RegisterAll for convenience.

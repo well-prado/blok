@@ -329,60 +329,170 @@ func encodeExecuteResponse(result *ExecutionResult, nodeName string, sdkVersion 
 	}
 }
 
-// internalErrorToProto builds a structured NodeError from the SDK's loose
-// error shape. Until SDK code is migrated to produce structured errors
-// natively, we synthesize one with category=INTERNAL and the original
-// payload preserved in details_json.
+// internalErrorToProto builds a structured NodeError from whatever
+// ExecutionResult.Errors carries.
+//
+// Two paths:
+//   - Structured (preferred): errVal is a *BlokError. All 19 fields serialize
+//     losslessly via blokErrorToProto. Auto-fills node/sdk/sdk_version/
+//     runtime_kind if the BlokError didn't set them itself.
+//   - Loose: errVal is anything else (dict, string, nil, error). Wrapped via
+//     FromUnknown (always produces category=INTERNAL with the original
+//     payload preserved in details_json) and then serialized via the
+//     structured path.
+//
+// Both paths produce the same proto shape, so the runner's gRPC codec
+// consumes them identically.
 func internalErrorToProto(errVal interface{}, nodeName, sdkVersion string) *pb.NodeError {
-	message := "node error"
-	var detailsBytes []byte
-
-	switch v := errVal.(type) {
-	case nil:
-		// keep defaults
-	case string:
-		message = v
-		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": v})
-	case map[string]string:
-		if m, ok := v["message"]; ok && m != "" {
-			message = m
-		}
-		detailsBytes = encodeJSONBytes(v)
-	case map[string]interface{}:
-		if m, ok := v["message"].(string); ok && m != "" {
-			message = m
-		}
-		detailsBytes = encodeJSONBytes(v)
-	case error:
-		message = v.Error()
-		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": message})
-	default:
-		message = fmt.Sprintf("%v", v)
-		detailsBytes = encodeJSONBytes(map[string]interface{}{"message": message})
+	if blokErr, ok := errVal.(*BlokError); ok {
+		blokErr.EnrichOrigin(DefaultOrigin(nodeName, sdkVersion))
+		return blokErrorToProto(blokErr)
 	}
+	return blokErrorToProto(FromUnknown(errVal, DefaultOrigin(nodeName, sdkVersion)))
+}
 
+// blokErrorToProto serializes a fully-populated *BlokError into the proto
+// wire format. The cause chain is serialized as a list of pb.NodeError
+// messages; each element's own causes list is left empty (the chain is
+// already flat at the BlokError layer, so nesting at the wire layer would
+// double-count).
+func blokErrorToProto(e *BlokError) *pb.NodeError {
+	at := timestamppb.New(e.At)
+	causes := make([]*pb.NodeError, 0, len(e.Causes))
+	for _, c := range e.Causes {
+		causes = append(causes, causeMapToProto(c))
+	}
 	return &pb.NodeError{
-		Code:                "GO_NODE_ERROR",
-		Category:            pb.ErrorCategory_INTERNAL,
-		Severity:            pb.ErrorSeverity_ERROR,
-		Node:                nodeName,
-		Sdk:                 "blok-go",
-		SdkVersion:          sdkVersion,
-		RuntimeKind:         "runtime.go",
-		At:                  nil,
-		Message:             message,
-		Description:         "",
-		Remediation:         "",
-		DocUrl:              "",
-		Causes:              nil,
-		Stack:               "",
-		ContextSnapshotJson: nil,
-		HttpStatus:          500,
-		Retryable:           false,
-		RetryAfterMs:        0,
-		DetailsJson:         detailsBytes,
+		Code:                e.Code,
+		Category:            categoryToProto(e.Category),
+		Severity:            severityToProto(e.Severity),
+		Node:                e.Node,
+		Sdk:                 e.SDK,
+		SdkVersion:          e.SDKVersion,
+		RuntimeKind:         e.RuntimeKind,
+		At:                  at,
+		Message:             e.Message,
+		Description:         e.Description,
+		Remediation:         e.Remediation,
+		DocUrl:              e.DocURL,
+		Causes:              causes,
+		Stack:               e.Stack,
+		ContextSnapshotJson: encodeNullableJSONBytes(e.ContextSnapshot),
+		HttpStatus:          int32(e.HTTPStatus),
+		Retryable:           e.Retryable,
+		RetryAfterMs:        e.RetryAfterMs,
+		DetailsJson:         encodeNullableJSONBytes(e.Details),
 	}
 }
+
+func causeMapToProto(cause map[string]interface{}) *pb.NodeError {
+	atTs := timestamppb.Now()
+	if atStr, ok := cause["at"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339Nano, atStr); err == nil {
+			atTs = timestamppb.New(parsed)
+		}
+	}
+	httpStatus := 500
+	if hs, ok := cause["http_status"].(int); ok {
+		httpStatus = hs
+	} else if hs, ok := cause["http_status"].(float64); ok {
+		httpStatus = int(hs)
+	}
+	retryAfterMs := int64(0)
+	switch v := cause["retry_after_ms"].(type) {
+	case int:
+		retryAfterMs = int64(v)
+	case int64:
+		retryAfterMs = v
+	case float64:
+		retryAfterMs = int64(v)
+	}
+	retryable := false
+	if r, ok := cause["retryable"].(bool); ok {
+		retryable = r
+	}
+	return &pb.NodeError{
+		Code:                stringField(cause, "code"),
+		Category:            categoryToProto(ErrorCategory(stringField(cause, "category"))),
+		Severity:            severityToProto(ErrorSeverity(stringField(cause, "severity"))),
+		Node:                stringField(cause, "node"),
+		Sdk:                 stringField(cause, "sdk"),
+		SdkVersion:          stringField(cause, "sdk_version"),
+		RuntimeKind:         stringField(cause, "runtime_kind"),
+		At:                  atTs,
+		Message:             stringField(cause, "message"),
+		Description:         stringField(cause, "description"),
+		Remediation:         stringField(cause, "remediation"),
+		DocUrl:              stringField(cause, "doc_url"),
+		Causes:              []*pb.NodeError{},
+		Stack:               stringField(cause, "stack"),
+		ContextSnapshotJson: encodeNullableJSONBytes(cause["context_snapshot"]),
+		HttpStatus:          int32(httpStatus),
+		Retryable:           retryable,
+		RetryAfterMs:        retryAfterMs,
+		DetailsJson:         encodeNullableJSONBytes(cause["details"]),
+	}
+}
+
+func stringField(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func encodeNullableJSONBytes(v interface{}) []byte {
+	if v == nil {
+		return nil
+	}
+	return encodeJSONBytes(v)
+}
+
+// categoryToProto maps a (possibly legacy/unknown) ErrorCategory string to
+// the proto integer enum. Unknown values default to INTERNAL — same
+// fallback as Python.
+func categoryToProto(c ErrorCategory) pb.ErrorCategory {
+	switch c {
+	case CategoryValidation:
+		return pb.ErrorCategory_VALIDATION
+	case CategoryConfiguration:
+		return pb.ErrorCategory_CONFIGURATION
+	case CategoryDependency:
+		return pb.ErrorCategory_DEPENDENCY
+	case CategoryTimeout:
+		return pb.ErrorCategory_TIMEOUT
+	case CategoryPermission:
+		return pb.ErrorCategory_PERMISSION
+	case CategoryRateLimit:
+		return pb.ErrorCategory_RATE_LIMIT
+	case CategoryNotFound:
+		return pb.ErrorCategory_NOT_FOUND
+	case CategoryConflict:
+		return pb.ErrorCategory_CONFLICT
+	case CategoryCancelled:
+		return pb.ErrorCategory_CANCELLED
+	case CategoryProtocol:
+		return pb.ErrorCategory_PROTOCOL
+	case CategoryData:
+		return pb.ErrorCategory_DATA
+	default:
+		return pb.ErrorCategory_INTERNAL
+	}
+}
+
+func severityToProto(s ErrorSeverity) pb.ErrorSeverity {
+	switch s {
+	case SeverityInfo:
+		return pb.ErrorSeverity_INFO
+	case SeverityWarn:
+		return pb.ErrorSeverity_WARN
+	case SeverityFatal:
+		return pb.ErrorSeverity_FATAL
+	default:
+		return pb.ErrorSeverity_ERROR
+	}
+}
+
 
 // decodeJSONObject decodes a JSON-bytes field as a map. Empty bytes → empty map.
 // Non-object payloads are wrapped under a "_value" key.
