@@ -141,40 +141,84 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	/**
-	 * Pre-stash scanned JSON workflows into `nodeMap.workflows` so the
-	 * existing catch-all handler's `LocalStorage` fallback finds them
-	 * without an extra disk read. The workflow's URL is determined by
-	 * the catch-all's standard `:workflow{.+}` capture — multi-segment
-	 * paths work because the regex is greedy.
+	 * Register every entry in the route table as an explicit Hono route.
+	 * Each handler delegates to `runWorkflowExecution` with the route's
+	 * pre-loaded workflow object passed directly to `Configuration.init`
+	 * (no disk re-read at request time, no LocalStorage fallback dance).
 	 *
-	 * @param routes - the route table from `buildFileBasedRoutes()`
+	 * Registered BEFORE the catch-all so explicit routes win. Method
+	 * "ANY" maps to `app.all(...)`; otherwise `app[method](...)`. Falls
+	 * back to `app.all(...)` for HEAD/OPTIONS where Hono lacks a
+	 * dedicated method.
 	 */
-	private prestashScannedWorkflows(routes: readonly RouteEntry[]): void {
+	private registerExplicitRoutes(routes: readonly RouteEntry[]): void {
 		for (const route of routes) {
-			if (route.kind !== "json") continue;
-			// Convert the URL path into a catch-all-compatible key.
-			// Strip the leading `/` and turn `:param` segments back into
-			// fixed strings is NOT possible — but the catch-all only ever
-			// looks up the LITERAL workflow name from the URL. So we use
-			// the file-derived path (without leading slash) as the key.
-			const key = route.path.replace(/^\//, "");
-			if (!key) continue; // skip the root index — keep using catch-all for those
-			// Wrap the raw JSON workflow with a `.toJson()` shim so it
-			// satisfies the LocalStorage workflowLocator fallback contract.
-			const raw = route.workflow;
-			this.nodeMap.workflows[key] = {
-				toJson: () => JSON.stringify(raw),
-			} as unknown as Step;
+			const handler = async (c: HonoContext<AppBindings>): Promise<Response> => {
+				const requestId = c.req.query("requestId") || (uuid() as string);
+				const body = await this.parseBody(c);
+				return this.runWorkflowExecution(c, {
+					workflowName: route.workflowKey,
+					subPath: "/",
+					body,
+					requestId,
+					explicitRoute: true,
+					preloadedWorkflow: route.workflow,
+				});
+			};
+
+			const method = route.method.toUpperCase();
+			switch (method) {
+				case "GET":
+					this.app.get(route.path, handler);
+					break;
+				case "POST":
+					this.app.post(route.path, handler);
+					break;
+				case "PUT":
+					this.app.put(route.path, handler);
+					break;
+				case "DELETE":
+					this.app.delete(route.path, handler);
+					break;
+				case "PATCH":
+					this.app.patch(route.path, handler);
+					break;
+				default:
+					// ANY (or HEAD/OPTIONS/unknown) — register on all methods.
+					this.app.all(route.path, handler);
+					break;
+			}
+		}
+	}
+
+	/**
+	 * Parse the request body using the same content-type rules the
+	 * catch-all handler uses. Extracted so both paths (catch-all and
+	 * explicit routes) parse bodies identically.
+	 */
+	private async parseBody(c: HonoContext<AppBindings>): Promise<unknown> {
+		if (c.req.method === "GET" || c.req.method === "HEAD") return {};
+		try {
+			const contentType = c.req.header("content-type") || "";
+			if (contentType.includes("application/json")) return await c.req.json();
+			if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
+				return await c.req.parseBody();
+			}
+			return await c.req.text();
+		} catch {
+			return {};
 		}
 	}
 
 	async listen(): Promise<number> {
-		// File-based routing — scan workflow folders + pre-stash entries
-		// before any middleware so the catch-all's in-memory fallback finds
-		// them. Off by default; opt-in via BLOK_FILE_BASED_ROUTING=true.
+		// File-based routing — scan workflow folders, build the route table,
+		// and register each entry as an explicit Hono route BEFORE the
+		// catch-all. Off by default; opt-in via BLOK_FILE_BASED_ROUTING=true.
+		// When off, all requests fall through to the catch-all (legacy
+		// /<workflow-key> URL scheme).
+		let fileBasedRoutes: RouteEntry[] = [];
 		try {
-			const routes = await this.buildFileBasedRoutes();
-			this.prestashScannedWorkflows(routes);
+			fileBasedRoutes = await this.buildFileBasedRoutes();
 		} catch (err) {
 			this.logger.error(`[blok] file-based routing setup failed: ${(err as Error).message}`);
 		}
@@ -218,10 +262,18 @@ export default class HttpTrigger extends TriggerBase {
 			 */
 			this.app.route("/", apps);
 
-			// Catch-all workflow handler
+			// File-based routing — register every scanned workflow at its
+			// resolved URL (explicit `trigger.http.path` wins; otherwise the
+			// file-derived path is used). Registered BEFORE the catch-all so
+			// matching requests are routed directly without filename-prefix
+			// dispatch. Empty when BLOK_FILE_BASED_ROUTING is off.
+			if (fileBasedRoutes.length > 0) this.registerExplicitRoutes(fileBasedRoutes);
+
+			// Catch-all workflow handler — legacy /<workflow-key>/<path> dispatch.
+			// Falls through here only when no explicit file-based route matched.
 			const workflowHandler = async (c: HonoContext<AppBindings>) => {
-				const id: string = c.req.query("requestId") || (uuid() as string);
-				let workflowNameInPath: string = c.req.param("workflow") as string;
+				const requestId = c.req.query("requestId") || (uuid() as string);
+				const workflowNameInPath = c.req.param("workflow") as string;
 
 				// Skip internal paths — these are handled by dedicated routers above
 				if (workflowNameInPath === "__blok") {
@@ -232,29 +284,12 @@ export default class HttpTrigger extends TriggerBase {
 				const fullPath = c.req.path;
 				const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
 
+				const body = await this.parseBody(c);
+
+				// Remote node execution dispatch (header-based) — only meaningful for
+				// the catch-all path, never for explicit routes.
 				let remoteNodeExecution = false;
 				let runtimeWorkflow: RuntimeWorkflow | undefined;
-
-				// Parse request body for non-GET methods
-				let body: unknown = {};
-				if (c.req.method !== "GET" && c.req.method !== "HEAD") {
-					try {
-						const contentType = c.req.header("content-type") || "";
-						if (contentType.includes("application/json")) {
-							body = await c.req.json();
-						} else if (
-							contentType.includes("application/x-www-form-urlencoded") ||
-							contentType.includes("multipart/form-data")
-						) {
-							body = await c.req.parseBody();
-						} else {
-							body = await c.req.text();
-						}
-					} catch {
-						body = {};
-					}
-				}
-
 				if (c.req.header("x-blok-execute-node") === "true" && c.req.method.toLowerCase() === "post") {
 					remoteNodeExecution = true;
 					const coder = new MessageDecode();
@@ -262,237 +297,13 @@ export default class HttpTrigger extends TriggerBase {
 					runtimeWorkflow = messageContext as unknown as RuntimeWorkflow;
 				}
 
-				const defaultMeter = metrics.getMeter("default");
-				const workflow_runner_errors = defaultMeter.createCounter("workflow_errors", {
-					description: "Workflow runner errors",
-				});
-				const workflow_execution = defaultMeter.createCounter("workflow", {
-					description: "Workflow requests",
-				});
-
-				return this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
-					try {
-						const start = performance.now();
-						if (remoteNodeExecution && runtimeWorkflow !== undefined) {
-							const workflowModel = runtimeWorkflow.workflow;
-							const node_type = (workflowModel.steps[0] as unknown as ParamsDictionary).type;
-							let set_node_type: NodeTypes = NodeTypes.MODULE;
-							switch (node_type) {
-								case "runtime.python3":
-									set_node_type = NodeTypes.PYTHON3;
-									break;
-								case "runtime.go":
-									set_node_type = NodeTypes.GO;
-									break;
-								case "runtime.rust":
-									set_node_type = NodeTypes.RUST;
-									break;
-								case "runtime.java":
-									set_node_type = NodeTypes.JAVA;
-									break;
-								case "runtime.csharp":
-									set_node_type = NodeTypes.CSHARP;
-									break;
-								case "runtime.php":
-									set_node_type = NodeTypes.PHP;
-									break;
-								case "runtime.ruby":
-									set_node_type = NodeTypes.RUBY;
-									break;
-								case "local":
-									set_node_type = NodeTypes.LOCAL;
-									break;
-								default:
-									set_node_type = NodeTypes.MODULE;
-									break;
-							}
-
-							const trigger = Object.keys(workflowModel.trigger)[0];
-							const trigger_config =
-								((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
-
-							let remoteNodeName = workflowNameInPath + subPath;
-							if (remoteNodeName.substring(remoteNodeName.length - 1) === "/") {
-								remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
-							}
-
-							const step: Step = Workflow({
-								name: `Remote Node: ${remoteNodeName}`,
-								version: "1.0.0",
-								description: "Remote Node",
-							})
-								.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
-								.addStep({
-									name: "node",
-									node: remoteNodeName,
-									type: set_node_type,
-									inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary)
-										.inputs,
-								});
-
-							this.nodeMap.workflows[id] = step;
-							workflowNameInPath = id;
-							remoteNodeExecution = true;
-						}
-
-						await this.configuration.init(workflowNameInPath, this.nodeMap);
-						let ctx: Context = this.createContext(
-							undefined,
-							workflowNameInPath || (c.req.param("workflow") as string),
-							id,
-						);
-
-						const resolvedParams = handleDynamicRoute(
-							this.configuration.trigger.http.path,
-							subPath,
-							(c.req.param() as Record<string, string>) || {},
-						);
-
-						ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
-
-						const { method, path } = this.configuration.trigger.http;
-						if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
-							throw new Error("Invalid HTTP method");
-						if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
-
-						// Build RequestContext from Hono request
-						const url = new URL(c.req.url);
-						const queryObj: Record<string, string> = {};
-						for (const [key, value] of url.searchParams.entries()) {
-							if (key !== "requestId") {
-								queryObj[key] = value;
-							}
-						}
-
-						ctx.request = {
-							body,
-							headers: Object.fromEntries([...c.req.raw.headers.entries()]),
-							params: resolvedParams,
-							query: queryObj,
-							method: c.req.method,
-							path: subPath,
-							url: c.req.url,
-						} as unknown as RequestContext;
-
-						const response: TriggerResponse = await this.run(ctx);
-						ctx = response.ctx;
-						const average = response.metrics;
-
-						const end = performance.now();
-						ctx.logger.log(`Completed in ${(end - start).toFixed(2)}ms`);
-
-						if (ctx.response.contentType === undefined || ctx.response.contentType === "")
-							ctx.response.contentType = "application/json";
-
-						span.setAttribute("success", true);
-						span.setAttribute("Content-Type", ctx.response.contentType);
-						span.setAttribute("workflow_request_id", `${ctx.id}`);
-						span.setAttribute("workflow_elapsed_time", `${end - start}`);
-						span.setAttribute("workflow_version", `${this.configuration.version}`);
-						span.setAttribute("workflow_name", `${this.configuration.name}`);
-						span.setAttribute("workflow_memory_avg_mb", `${average.memory.total}`);
-						span.setAttribute("workflow_memory_min_mb", `${average.memory.min}`);
-						span.setAttribute("workflow_memory_max_mb", `${average.memory.max}`);
-						span.setAttribute("workflow_cpu_percentage", `${average.cpu.average}`);
-						span.setAttribute("workflow_cpu_total", `${average.cpu.total}`);
-						span.setAttribute("workflow_cpu_usage", `${average.cpu.usage}`);
-						span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
-						span.setStatus({ code: SpanStatusCode.OK });
-
-						// Support both module nodes (wrapped BlokResponse with .data/.contentType)
-						// and runtime adapter nodes (raw data without wrapper)
-						const hasWrapper =
-							ctx.response &&
-							typeof ctx.response === "object" &&
-							"data" in ctx.response &&
-							"contentType" in ctx.response;
-						const data = hasWrapper ? ctx.response.data : ctx.response;
-						const contentType = hasWrapper ? ctx.response.contentType : "application/json";
-						c.header("Content-Type", contentType);
-						if (typeof data === "string") {
-							return c.body(data, 200);
-						}
-						return c.json(data as object, 200);
-					} catch (e: unknown) {
-						span.setAttribute("success", false);
-						span.setAttribute("workflow_request_id", `${id}`);
-						span.recordException(e as Error);
-
-						workflow_execution.add(0, {
-							env: process.env.NODE_ENV,
-							workflow_version: `${this.configuration?.version || "unknown"}`,
-							workflow_name: `${this.configuration?.name || "unknown"}`,
-							workflow_path: `${workflowNameInPath}`,
-						});
-
-						if (e instanceof GlobalError) {
-							const error_context = e as GlobalError;
-
-							if (error_context.context.message === "{}" && error_context.context.json instanceof DOMException) {
-								workflow_runner_errors.add(1, {
-									env: process.env.NODE_ENV,
-									workflow_version: `${this.configuration?.version || "unknown"}`,
-									workflow_name: `${this.configuration?.name || "unknown"}`,
-									workflow_path: `${workflowNameInPath}`,
-								});
-								span.setStatus({
-									code: SpanStatusCode.ERROR,
-									message: (error_context.context.json as Error).toString(),
-								});
-								this.logger.error(`${(error_context.context.json as Error).toString()}`);
-								return c.json(
-									{
-										origin: error_context.context.name,
-										error: (error_context.context.json as Error).toString(),
-									},
-									500,
-								);
-							}
-
-							if (error_context.context.code === undefined) error_context.setCode(500);
-							const code = error_context.context.code as number;
-
-							if (error_context.hasJson()) {
-								workflow_runner_errors.add(1, {
-									env: process.env.NODE_ENV,
-									workflow_version: `${this.configuration?.version || "unknown"}`,
-									workflow_name: `${this.configuration?.name || "unknown"}`,
-									workflow_path: `${workflowNameInPath}`,
-								});
-								span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
-								this.logger.error(`${JSON.stringify(error_context.context.json)}`);
-								return c.json(error_context.context.json as object, code as 500);
-							}
-
-							workflow_runner_errors.add(1, {
-								env: process.env.NODE_ENV,
-								workflow_version: `${this.configuration?.version || "unknown"}`,
-								workflow_name: `${this.configuration?.name || "unknown"}`,
-								workflow_path: `${workflowNameInPath}`,
-							});
-							span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
-							this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
-							return c.json({ error: error_context.message }, code as 500);
-						}
-
-						workflow_runner_errors.add(1, {
-							env: process.env.NODE_ENV,
-							workflow_version: `${this.configuration?.version || "unknown"}`,
-							workflow_name: `${this.configuration?.name || "unknown"}`,
-							workflow_path: `${workflowNameInPath}`,
-						});
-						span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
-						this.logger.error(
-							`${workflowNameInPath}: ${(e as Error).message}`,
-							`${(e as Error).stack?.replace(/\n/g, " ")}`,
-						);
-						return c.json({ error: (e as Error).message }, 500);
-					} finally {
-						if (remoteNodeExecution) {
-							delete this.nodeMap.workflows[id];
-						}
-						span.end();
-					}
+				return this.runWorkflowExecution(c, {
+					workflowName: workflowNameInPath,
+					subPath,
+					body,
+					requestId,
+					remoteNodeExecution,
+					runtimeWorkflow,
 				});
 			};
 
@@ -509,6 +320,297 @@ export default class HttpTrigger extends TriggerBase {
 
 				done(this.endCounter(this.initializer));
 			}) as Server;
+		});
+	}
+
+	/**
+	 * Execute a workflow request — the shared work both the legacy catch-all
+	 * and the explicit file-based routes funnel into.
+	 *
+	 * @param c - Hono context
+	 * @param opts.workflowName - workflow identifier (catch-all: extracted from URL; explicit: closure-bound)
+	 * @param opts.subPath - sub-path after the workflow key (catch-all only; "/" for explicit routes)
+	 * @param opts.body - parsed request body
+	 * @param opts.requestId - per-request UUID for tracing
+	 * @param opts.explicitRoute - true when called from `registerExplicitRoutes`. Skips
+	 *   the runtime method+path validation since Hono already routed by both.
+	 * @param opts.preloadedWorkflow - the workflow object pre-parsed at boot (file-based
+	 *   routing path). When provided, `Configuration.init` uses it directly instead of
+	 *   re-reading from disk.
+	 * @param opts.remoteNodeExecution - legacy catch-all path: header-based dispatch.
+	 * @param opts.runtimeWorkflow - legacy catch-all path: workflow synthesised at request
+	 *   time from the remote-node-execution header payload.
+	 */
+	private async runWorkflowExecution(
+		c: HonoContext<AppBindings>,
+		opts: {
+			workflowName: string;
+			subPath: string;
+			body: unknown;
+			requestId: string;
+			explicitRoute?: boolean;
+			preloadedWorkflow?: unknown;
+			remoteNodeExecution?: boolean;
+			runtimeWorkflow?: RuntimeWorkflow;
+		},
+	): Promise<Response> {
+		const id = opts.requestId;
+		let workflowNameInPath = opts.workflowName;
+		const subPath = opts.subPath;
+		const body = opts.body;
+		const explicitRoute = opts.explicitRoute === true;
+		let remoteNodeExecution = opts.remoteNodeExecution === true;
+		const runtimeWorkflow = opts.runtimeWorkflow;
+		const preloadedWorkflow = opts.preloadedWorkflow;
+
+		const defaultMeter = metrics.getMeter("default");
+		const workflow_runner_errors = defaultMeter.createCounter("workflow_errors", {
+			description: "Workflow runner errors",
+		});
+		const workflow_execution = defaultMeter.createCounter("workflow", {
+			description: "Workflow requests",
+		});
+
+		return this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
+			try {
+				const start = performance.now();
+				if (remoteNodeExecution && runtimeWorkflow !== undefined) {
+					const workflowModel = runtimeWorkflow.workflow;
+					const node_type = (workflowModel.steps[0] as unknown as ParamsDictionary).type;
+					let set_node_type: NodeTypes = NodeTypes.MODULE;
+					switch (node_type) {
+						case "runtime.python3":
+							set_node_type = NodeTypes.PYTHON3;
+							break;
+						case "runtime.go":
+							set_node_type = NodeTypes.GO;
+							break;
+						case "runtime.rust":
+							set_node_type = NodeTypes.RUST;
+							break;
+						case "runtime.java":
+							set_node_type = NodeTypes.JAVA;
+							break;
+						case "runtime.csharp":
+							set_node_type = NodeTypes.CSHARP;
+							break;
+						case "runtime.php":
+							set_node_type = NodeTypes.PHP;
+							break;
+						case "runtime.ruby":
+							set_node_type = NodeTypes.RUBY;
+							break;
+						case "local":
+							set_node_type = NodeTypes.LOCAL;
+							break;
+						default:
+							set_node_type = NodeTypes.MODULE;
+							break;
+					}
+
+					const trigger = Object.keys(workflowModel.trigger)[0];
+					const trigger_config =
+						((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
+
+					let remoteNodeName = workflowNameInPath + subPath;
+					if (remoteNodeName.substring(remoteNodeName.length - 1) === "/") {
+						remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
+					}
+
+					const step: Step = Workflow({
+						name: `Remote Node: ${remoteNodeName}`,
+						version: "1.0.0",
+						description: "Remote Node",
+					})
+						.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
+						.addStep({
+							name: "node",
+							node: remoteNodeName,
+							type: set_node_type,
+							inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary).inputs,
+						});
+
+					this.nodeMap.workflows[id] = step;
+					workflowNameInPath = id;
+					remoteNodeExecution = true;
+				}
+
+				// File-based routing path: pass the pre-loaded workflow object
+				// directly to Configuration.init so it bypasses the disk lookup.
+				// Falls back to the standard nodeMap-resolver path otherwise.
+				if (preloadedWorkflow !== undefined) {
+					await this.configuration.init(workflowNameInPath, this.nodeMap, preloadedWorkflow);
+				} else {
+					await this.configuration.init(workflowNameInPath, this.nodeMap);
+				}
+				let ctx: Context = this.createContext(undefined, workflowNameInPath || (c.req.param("workflow") as string), id);
+
+				// For explicit (file-based) routes, Hono already validated the
+				// method + matched path params. `c.req.param()` returns the
+				// captured params directly. For the catch-all, parse via
+				// handleDynamicRoute against the trigger's path pattern.
+				let resolvedParams: Record<string, string>;
+				if (explicitRoute) {
+					const all = (c.req.param() as Record<string, string>) || {};
+					const filtered: Record<string, string> = {};
+					for (const k of Object.keys(all)) {
+						if (k !== "workflow") filtered[k] = all[k];
+					}
+					resolvedParams = filtered;
+				} else {
+					resolvedParams = handleDynamicRoute(
+						this.configuration.trigger.http.path,
+						subPath,
+						(c.req.param() as Record<string, string>) || {},
+					);
+				}
+
+				ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
+
+				// Method/path validation only for the catch-all path. Hono
+				// already enforced both for explicit routes.
+				if (!explicitRoute) {
+					const { method, path } = this.configuration.trigger.http;
+					if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
+						throw new Error("Invalid HTTP method");
+					if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
+				}
+
+				// Build RequestContext from Hono request
+				const url = new URL(c.req.url);
+				const queryObj: Record<string, string> = {};
+				for (const [key, value] of url.searchParams.entries()) {
+					if (key !== "requestId") {
+						queryObj[key] = value;
+					}
+				}
+
+				ctx.request = {
+					body,
+					headers: Object.fromEntries([...c.req.raw.headers.entries()]),
+					params: resolvedParams,
+					query: queryObj,
+					method: c.req.method,
+					path: explicitRoute ? c.req.path : subPath,
+					url: c.req.url,
+				} as unknown as RequestContext;
+
+				const response: TriggerResponse = await this.run(ctx);
+				ctx = response.ctx;
+				const average = response.metrics;
+
+				const end = performance.now();
+				ctx.logger.log(`Completed in ${(end - start).toFixed(2)}ms`);
+
+				if (ctx.response.contentType === undefined || ctx.response.contentType === "")
+					ctx.response.contentType = "application/json";
+
+				span.setAttribute("success", true);
+				span.setAttribute("Content-Type", ctx.response.contentType);
+				span.setAttribute("workflow_request_id", `${ctx.id}`);
+				span.setAttribute("workflow_elapsed_time", `${end - start}`);
+				span.setAttribute("workflow_version", `${this.configuration.version}`);
+				span.setAttribute("workflow_name", `${this.configuration.name}`);
+				span.setAttribute("workflow_memory_avg_mb", `${average.memory.total}`);
+				span.setAttribute("workflow_memory_min_mb", `${average.memory.min}`);
+				span.setAttribute("workflow_memory_max_mb", `${average.memory.max}`);
+				span.setAttribute("workflow_cpu_percentage", `${average.cpu.average}`);
+				span.setAttribute("workflow_cpu_total", `${average.cpu.total}`);
+				span.setAttribute("workflow_cpu_usage", `${average.cpu.usage}`);
+				span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
+				span.setStatus({ code: SpanStatusCode.OK });
+
+				// Support both module nodes (wrapped BlokResponse with .data/.contentType)
+				// and runtime adapter nodes (raw data without wrapper)
+				const hasWrapper =
+					ctx.response && typeof ctx.response === "object" && "data" in ctx.response && "contentType" in ctx.response;
+				const data = hasWrapper ? ctx.response.data : ctx.response;
+				const contentType = hasWrapper ? ctx.response.contentType : "application/json";
+				c.header("Content-Type", contentType);
+				if (typeof data === "string") {
+					return c.body(data, 200);
+				}
+				return c.json(data as object, 200);
+			} catch (e: unknown) {
+				span.setAttribute("success", false);
+				span.setAttribute("workflow_request_id", `${id}`);
+				span.recordException(e as Error);
+
+				workflow_execution.add(0, {
+					env: process.env.NODE_ENV,
+					workflow_version: `${this.configuration?.version || "unknown"}`,
+					workflow_name: `${this.configuration?.name || "unknown"}`,
+					workflow_path: `${workflowNameInPath}`,
+				});
+
+				if (e instanceof GlobalError) {
+					const error_context = e as GlobalError;
+
+					if (error_context.context.message === "{}" && error_context.context.json instanceof DOMException) {
+						workflow_runner_errors.add(1, {
+							env: process.env.NODE_ENV,
+							workflow_version: `${this.configuration?.version || "unknown"}`,
+							workflow_name: `${this.configuration?.name || "unknown"}`,
+							workflow_path: `${workflowNameInPath}`,
+						});
+						span.setStatus({
+							code: SpanStatusCode.ERROR,
+							message: (error_context.context.json as Error).toString(),
+						});
+						this.logger.error(`${(error_context.context.json as Error).toString()}`);
+						return c.json(
+							{
+								origin: error_context.context.name,
+								error: (error_context.context.json as Error).toString(),
+							},
+							500,
+						);
+					}
+
+					if (error_context.context.code === undefined) error_context.setCode(500);
+					const code = error_context.context.code as number;
+
+					if (error_context.hasJson()) {
+						workflow_runner_errors.add(1, {
+							env: process.env.NODE_ENV,
+							workflow_version: `${this.configuration?.version || "unknown"}`,
+							workflow_name: `${this.configuration?.name || "unknown"}`,
+							workflow_path: `${workflowNameInPath}`,
+						});
+						span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
+						this.logger.error(`${JSON.stringify(error_context.context.json)}`);
+						return c.json(error_context.context.json as object, code as 500);
+					}
+
+					workflow_runner_errors.add(1, {
+						env: process.env.NODE_ENV,
+						workflow_version: `${this.configuration?.version || "unknown"}`,
+						workflow_name: `${this.configuration?.name || "unknown"}`,
+						workflow_path: `${workflowNameInPath}`,
+					});
+					span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
+					this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
+					return c.json({ error: error_context.message }, code as 500);
+				}
+
+				workflow_runner_errors.add(1, {
+					env: process.env.NODE_ENV,
+					workflow_version: `${this.configuration?.version || "unknown"}`,
+					workflow_name: `${this.configuration?.name || "unknown"}`,
+					workflow_path: `${workflowNameInPath}`,
+				});
+				span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
+				this.logger.error(
+					`${workflowNameInPath}: ${(e as Error).message}`,
+					`${(e as Error).stack?.replace(/\n/g, " ")}`,
+				);
+				return c.json({ error: (e as Error).message }, 500);
+			} finally {
+				if (remoteNodeExecution) {
+					delete this.nodeMap.workflows[id];
+				}
+				span.end();
+			}
 		});
 	}
 }
