@@ -400,6 +400,18 @@ export default class Configuration implements Config {
 		}
 
 		const clone = Object.assign(Object.create(Object.getPrototypeOf(nodeHandler)), nodeHandler);
+		// Copy step-level metadata from the workflow JSON onto the clone.
+		// Without this, `step.type` is undefined for module nodes and
+		// downstream consumers (RunnerSteps step prefix, RunTracker
+		// `startNode`'s `nodeType` field) fall back to "unknown" — which
+		// surfaces in dev as `[step 1/9] init (unknown) → started`. The
+		// runtimeResolver already does this; we mirror it here.
+		(clone as RunnerNode).name = node.name;
+		(clone as RunnerNode).node = node.node;
+		(clone as RunnerNode).type = node.type;
+		if (node.active !== undefined) (clone as RunnerNode).active = node.active;
+		if (node.stop !== undefined) (clone as RunnerNode).stop = node.stop;
+		if (node.set_var !== undefined) (clone as RunnerNode).set_var = node.set_var;
 		return clone as RunnerNode;
 	}
 

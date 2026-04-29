@@ -244,6 +244,22 @@ const ALL_PROFILES: RuntimeProfile[] = [
 					BLOK_TRANSPORT: "grpc",
 					HOST: "127.0.0.1",
 					LOG_LEVEL: "INFO",
+					// Silence ASP.NET's per-request trace lines
+					// ("Executing endpoint…", "Request finished…").
+					// ASP.NET env-var convention: `__` replaces the
+					// `:` config delimiter, but dots inside category
+					// names are preserved literally — so the env key is
+					// `Logging__LogLevel__Microsoft.AspNetCore`, NOT
+					// `Logging__LogLevel__Microsoft_AspNetCore`.
+					// Without these overrides every gRPC call prints
+					// 4 INFO lines that drown the trigger logs in dev.
+					// We keep `Default = Warning` so the C# SDK's own
+					// startup banner (logged at Information by user
+					// code) still surfaces.
+					Logging__LogLevel__Default: "Warning",
+					"Logging__LogLevel__Microsoft.AspNetCore": "Warning",
+					"Logging__LogLevel__Microsoft.AspNetCore.Hosting": "Warning",
+					"Logging__LogLevel__Microsoft.AspNetCore.Routing": "Warning",
 				},
 			}),
 	},
@@ -386,34 +402,40 @@ function pipe(child: ChildProcess, label: string, color: string): void {
 // Health probe
 // =============================================================================
 
-/** TCP-connect health probe — works for both gRPC and HTTP listeners. */
-function waitForPort(port: number, timeoutMs = 30_000): Promise<boolean> {
+/**
+ * TCP-connect health probe — works for both gRPC and HTTP listeners.
+ *
+ * Tries IPv4 (`127.0.0.1`), then IPv6 loopback (`::1`) on each tick.
+ * Vite's "Local: http://localhost:5555/" log line resolves to whichever
+ * `localhost` your OS prefers — on macOS that can be IPv6 only, which
+ * fails an IPv4-only probe and surfaces as a spurious "did not bind
+ * within 30s" warning even though the server is happily listening.
+ * Probing both address families closes that gap.
+ */
+function tryConnect(host: string, port: number, timeoutMs: number): Promise<boolean> {
 	return new Promise((resolve) => {
-		const start = Date.now();
-		const tick = () => {
-			if (Date.now() - start > timeoutMs) {
-				resolve(false);
-				return;
-			}
-			const sock = new Socket();
-			sock.setTimeout(1000);
-			sock
-				.once("connect", () => {
-					sock.destroy();
-					resolve(true);
-				})
-				.once("timeout", () => {
-					sock.destroy();
-					setTimeout(tick, 200);
-				})
-				.once("error", () => {
-					sock.destroy();
-					setTimeout(tick, 200);
-				})
-				.connect(port, "127.0.0.1");
+		const sock = new Socket();
+		const done = (ok: boolean) => {
+			sock.destroy();
+			resolve(ok);
 		};
-		tick();
+		sock.setTimeout(timeoutMs);
+		sock
+			.once("connect", () => done(true))
+			.once("timeout", () => done(false))
+			.once("error", () => done(false));
+		sock.connect(port, host);
 	});
+}
+
+async function waitForPort(port: number, timeoutMs = 30_000): Promise<boolean> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (await tryConnect("127.0.0.1", port, 500)) return true;
+		if (await tryConnect("::1", port, 500)) return true;
+		await new Promise((r) => setTimeout(r, 200));
+	}
+	return false;
 }
 
 // =============================================================================

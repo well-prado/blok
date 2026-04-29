@@ -3,6 +3,7 @@ package com.blok.blok.server;
 import com.blok.blok.node.NodeRegistry;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
@@ -42,14 +43,35 @@ public final class BlokGrpcServer {
         this.sdkVersion = sdkVersion == null || sdkVersion.isBlank() ? "1.0.0" : sdkVersion;
     }
 
-    /** Bind the gRPC server and start serving. Non-blocking. */
+    /** Bind the gRPC server and start serving. Non-blocking.
+     *
+     * <p>Uses {@link NettyServerBuilder} (not the generic
+     * {@link ServerBuilder}) so we can lower {@code permitKeepAliveTime}
+     * to match the runner-side keepalive cadence. Java gRPC's default
+     * {@code permitKeepAliveTime} is 5 minutes, which causes Java
+     * servers to send {@code GOAWAY ENHANCE_YOUR_CALM} when the runner
+     * pings every 10s (the master plan §9 keepalive). The runner then
+     * surfaces a scary-looking
+     * {@code TypeError: null is not an object (evaluating 'self.emit')}
+     * inside Node's http2 GOAWAY handler. Setting the permit window to
+     * 5s + permit-without-calls=true keeps the connection happy and
+     * silences that whole class of log noise.
+     */
     public void start() throws IOException {
         if (server != null && !server.isShutdown()) {
             throw new IllegalStateException("gRPC server already started");
         }
-        server = ServerBuilder.forPort(port)
+        server = NettyServerBuilder.forPort(port)
                 .addService(new BlokNodeRuntimeService(registry, sdkVersion))
                 .maxInboundMessageSize(MAX_MESSAGE_BYTES)
+                // Accept the runner's master plan §9 keepalive cadence
+                // (10s ping interval, 5s timeout). Without this, the
+                // Java server's default 5-minute permitKeepAliveTime
+                // rejects every ping after the first as "excess pings"
+                // and sends GOAWAY, which trips a separate Node http2
+                // bug on the client. See doc comment above.
+                .permitKeepAliveTime(5, TimeUnit.SECONDS)
+                .permitKeepAliveWithoutCalls(true)
                 .build()
                 .start();
         System.out.println(
