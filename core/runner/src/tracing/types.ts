@@ -54,6 +54,16 @@ export interface WorkflowRun {
 	metadata?: Record<string, unknown>;
 	nodeCount: number;
 	completedNodes: number;
+	/**
+	 * Environment scope · Phase 2 of the Studio redesign · trigger.dev v4
+	 * parity. Defaults to `"production"` for legacy runs (before this
+	 * field was introduced) and for runtimes that don't set `BLOK_ENV`.
+	 * Studio filters all list views by `useEnvScope.current` so operators
+	 * see only the env they're inspecting; the EnvChip in the sidebar
+	 * controls this. Persisted as a regular column on each store; old
+	 * SQLite databases still work because the column is optional.
+	 */
+	environment?: string;
 }
 
 // === Node Lifecycle ===

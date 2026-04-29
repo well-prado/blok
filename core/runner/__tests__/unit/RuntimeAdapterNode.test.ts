@@ -236,17 +236,16 @@ describe("RuntimeAdapterNode", () => {
 			expect((tracker.addLog as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
 		});
 
-		it("captures request_bytes/response_bytes from result.metrics into nodeRun.metrics", async () => {
-			const stubNodeRun = {
-				id: traceNodeId,
-				runId: traceRunId,
-				nodeName: "step-x",
-				nodeType: "runtime.python3",
-				status: "running",
-				startedAt: Date.now(),
-			} as unknown as ReturnType<RunTracker["getNodeRun"]> & { metrics?: Record<string, unknown> };
-			(tracker.getNodeRun as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stubNodeRun);
-
+		it("stashes adapter metrics on ctx._stepMetrics so RunnerSteps can thread them into completeNode", async () => {
+			// Contract: `RuntimeAdapterNode` does not mutate the persisted
+			// `nodeRun` directly (the previous version did, which was the
+			// dead-end fixed by stashing on ctx — see RuntimeAdapterNode.ts
+			// comment block). Instead it parks `result.metrics` on
+			// `ctx._stepMetrics`; `RunnerSteps` reads it after the step
+			// returns and passes it as the third argument to
+			// `tracker.completeNode(...)`. That single path survives every
+			// store backend (in-memory, sqlite, postgres) and reaches the
+			// NODE_COMPLETED event payload Studio's inspector consumes.
 			const adapter = makeStreamingAdapter([], {
 				success: true,
 				data: { ok: true },
@@ -262,10 +261,11 @@ describe("RuntimeAdapterNode", () => {
 				vars: {},
 			});
 			const node = new RuntimeAdapterNode(adapter, makeTarget(), { streamLogs: true });
+			const ctx = makeCtx(traceRunId, traceNodeId);
 
-			await node.run(makeCtx(traceRunId, traceNodeId));
+			await node.run(ctx);
 
-			expect(stubNodeRun.metrics).toEqual({
+			expect((ctx as Record<string, unknown>)._stepMetrics).toEqual({
 				duration_ms: 12,
 				cpu_ms: 4,
 				memory_bytes: 1024,

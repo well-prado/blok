@@ -3,13 +3,14 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { TagEditor } from "@/components/shared/TagEditor";
+import { ActiveStepPanel } from "@/components/trace/ActiveStepPanel";
 import { EventLog } from "@/components/trace/EventLog";
 import { ExplainError } from "@/components/trace/ExplainError";
+import { Inspector } from "@/components/trace/Inspector";
 import { LogViewer } from "@/components/trace/LogViewer";
-import { NodeDetail } from "@/components/trace/NodeDetail";
 import { RequestBuilder } from "@/components/trace/RequestBuilder";
+import { StepRail } from "@/components/trace/StepRail";
 import { TraceGraph } from "@/components/trace/TraceGraph";
-import { TraceTimeline } from "@/components/trace/TraceTimeline";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { exportRunCsv, exportRunJson, replayRun } from "@/lib/api";
 import { formatTimestamp } from "@/lib/formatters";
@@ -18,69 +19,109 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Activity, ArrowLeft, Loader2, RotateCcw, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+/**
+ * Run-detail · 3-pane operator layout (Direction A · Phase 1).
+ *
+ * StepRail (240px) | center pane (fluid) | Inspector (320px).
+ *
+ * The center pane swaps modes via 1-5 (active-step / graph / logs /
+ * events / replay) without rebuilding the rail or inspector — the
+ * spatial frame stays stable, which is the whole point of moving away
+ * from the previous tabs+drawer layout.
+ *
+ * Default mode = "step" (active-step view). Step selection: defaults
+ * to the failed node if any, otherwise the running one, otherwise the
+ * first node — so the inspector always has something to render.
+ */
 export const Route = createFileRoute("/runs/$runId")({
 	component: RunTracePage,
 });
+
+type Mode = "step" | "graph" | "logs" | "events" | "request";
 
 function RunTracePage() {
 	const { runId } = Route.useParams();
 	const navigate = useNavigate();
 	const { data, isLoading, error } = useRunDetail(runId);
-	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-	const [activeTab, setActiveTab] = useState<"timeline" | "graph" | "logs" | "events" | "request">("timeline");
+	const [activeStepId, setActiveStepId] = useState<string | null>(null);
+	const [mode, setMode] = useState<Mode>("step");
 	const [replaying, setReplaying] = useState(false);
 	const [replayError, setReplayError] = useState<string | null>(null);
 
-	// Subscribe to SSE for live updates
+	// SSE
 	useTraceStream(runId);
 
-	// Keyboard navigation
+	// Default-select a step so the rail + inspector are never empty when
+	// the run has any nodes. Priority: failed > running > first.
+	useEffect(() => {
+		if (activeStepId || !data || data.nodes.length === 0) return;
+		const failed = data.nodes.find((n) => n.status === "failed");
+		const running = data.nodes.find((n) => n.status === "running");
+		const first = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex)[0];
+		const target = failed ?? running ?? first;
+		if (target) setActiveStepId(target.id);
+	}, [data, activeStepId]);
+
+	// Keyboard nav
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if (
 				e.target instanceof HTMLInputElement ||
 				e.target instanceof HTMLSelectElement ||
 				e.target instanceof HTMLTextAreaElement
-			)
+			) {
 				return;
-			// Don't intercept when command palette might be open (Cmd+K)
+			}
 			if (e.metaKey || e.ctrlKey) return;
+
+			// j/k → next/prev step
+			if ((e.key === "j" || e.key === "k") && data) {
+				e.preventDefault();
+				const sorted = data.nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex);
+				if (sorted.length === 0) return;
+				const idx = sorted.findIndex((n) => n.id === activeStepId);
+				const nextIdx = e.key === "j" ? Math.min(idx + 1, sorted.length - 1) : Math.max(idx - 1, 0);
+				const target = sorted[nextIdx];
+				if (target) setActiveStepId(target.id);
+				return;
+			}
+
+			// 1-5 → mode switch
 			switch (e.key) {
 				case "1":
-					setActiveTab("timeline");
+					setMode("step");
 					break;
 				case "2":
-					setActiveTab("graph");
+					setMode("graph");
 					break;
 				case "3":
-					setActiveTab("logs");
+					setMode("logs");
 					break;
 				case "4":
-					setActiveTab("events");
+					setMode("events");
 					break;
 				case "5":
-					setActiveTab("request");
+					setMode("request");
 					break;
 				case "Escape":
-					setSelectedNodeId(null);
+					setMode("step");
 					break;
 			}
 		};
 		window.addEventListener("keydown", handler);
 		return () => window.removeEventListener("keydown", handler);
-	}, []);
+	}, [data, activeStepId]);
 
-	const selectedNode = useMemo(() => {
-		if (!data || !selectedNodeId) return null;
-		return data.nodes.find((n) => n.id === selectedNodeId) || null;
-	}, [data, selectedNodeId]);
+	const activeNode = useMemo(() => {
+		if (!data || !activeStepId) return null;
+		return data.nodes.find((n) => n.id === activeStepId) || null;
+	}, [data, activeStepId]);
 
 	const nodeNames = useMemo(() => {
 		if (!data) return [];
 		return [...new Set(data.nodes.map((n) => n.nodeName))];
 	}, [data]);
 
-	// Parse trigger summary for request builder defaults
 	const triggerParts = useMemo(() => {
 		if (!data) return { method: "GET", path: "/" };
 		const parts = data.run.triggerSummary.split(" ");
@@ -91,7 +132,6 @@ function RunTracePage() {
 		if (!data || replaying) return;
 		setReplaying(true);
 		setReplayError(null);
-
 		try {
 			const result = await replayRun(runId);
 			navigate({ to: "/runs/$runId", params: { runId: result.newRunId } });
@@ -126,23 +166,23 @@ function RunTracePage() {
 	const isHttpTrigger = run.triggerType === "http";
 	const isFinished = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
 
-	const tabs = [
-		{ key: "timeline" as const, label: "Timeline", shortcut: "1" },
-		{ key: "graph" as const, label: "Graph", shortcut: "2" },
-		{ key: "logs" as const, label: "Logs", shortcut: "3" },
-		{ key: "events" as const, label: "Events", shortcut: "4" },
-		...(isHttpTrigger ? [{ key: "request" as const, label: "Request", shortcut: "5" }] : []),
+	const modes: { key: Mode; label: string; show: boolean }[] = [
+		{ key: "step", label: "Active step", show: true },
+		{ key: "graph", label: "Graph", show: true },
+		{ key: "logs", label: "Logs", show: true },
+		{ key: "events", label: "Events", show: true },
+		{ key: "request", label: "Replay", show: isHttpTrigger },
 	];
 
 	return (
 		<div className="h-full flex flex-col">
 			{/* Header */}
-			<div className="shrink-0 border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+			<header className="shrink-0 border-b border-zinc-800 bg-canvas/60 px-4 py-3">
 				<div className="flex items-center gap-3 mb-1">
 					<Link
 						to="/workflows/$name"
 						params={{ name: run.workflowName }}
-						className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+						className="p-1 rounded hover:bg-hover text-zinc-500 hover:text-zinc-300 transition-colors"
 					>
 						<ArrowLeft className="w-4 h-4" />
 					</Link>
@@ -155,9 +195,7 @@ function RunTracePage() {
 						running={run.status === "running"}
 					/>
 
-					{/* Spacer to push action buttons to the right */}
 					<div className="ml-auto flex items-center gap-2">
-						{/* Replay button — only for finished HTTP runs */}
 						{isFinished && isHttpTrigger && (
 							<button
 								type="button"
@@ -166,8 +204,8 @@ function RunTracePage() {
 								className={cn(
 									"flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
 									replaying
-										? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-										: "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100",
+										? "bg-raised text-zinc-500 cursor-not-allowed"
+										: "bg-raised text-zinc-300 hover:bg-hover hover:text-zinc-100",
 								)}
 								title="Replay this run with the same request"
 							>
@@ -175,17 +213,15 @@ function RunTracePage() {
 								Replay
 							</button>
 						)}
-
-						{/* Request Builder button — for HTTP triggers */}
 						{isHttpTrigger && (
 							<button
 								type="button"
-								onClick={() => setActiveTab("request")}
+								onClick={() => setMode("request")}
 								className={cn(
 									"flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-									activeTab === "request"
-										? "bg-blue-600/20 text-blue-400"
-										: "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100",
+									mode === "request"
+										? "bg-blok-green-500/15 text-blok-green-500"
+										: "bg-raised text-zinc-300 hover:bg-hover hover:text-zinc-100",
 								)}
 								title="Open request builder"
 							>
@@ -193,16 +229,10 @@ function RunTracePage() {
 								Request
 							</button>
 						)}
-
-						{/* Explain Error — only for failed runs */}
 						{run.status === "failed" && run.error && <ExplainError runId={runId} />}
-
-						{/* Export menu */}
 						<ExportMenu onExportJson={() => exportRunJson(runId)} onExportCsv={() => exportRunCsv(runId)} />
 					</div>
 				</div>
-
-				{/* AI explanation panel — rendered below header actions when active */}
 
 				<div className="flex items-center gap-4 text-xs text-zinc-500 ml-9">
 					<span>
@@ -219,80 +249,77 @@ function RunTracePage() {
 					</span>
 					{replayError && <span className="text-red-400">{replayError}</span>}
 				</div>
-				{/* Tags */}
 				<div className="ml-9 mt-1">
 					<TagEditor runId={run.id} tags={run.tags || []} />
 				</div>
-			</div>
+			</header>
 
-			{/* Tabs */}
-			<div className="shrink-0 flex gap-0 border-b border-zinc-800 px-4">
-				{tabs.map((tab) => (
-					<button
-						type="button"
-						key={tab.key}
-						onClick={() => setActiveTab(tab.key)}
-						className={cn(
-							"px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
-							activeTab === tab.key
-								? "border-blue-500 text-zinc-100"
-								: "border-transparent text-zinc-500 hover:text-zinc-300",
+			{/* 3-pane shell */}
+			<div className="flex-1 grid grid-cols-[240px_minmax(0,1fr)_320px] overflow-hidden">
+				{/* Left: step rail */}
+				<StepRail nodes={nodes} activeStepId={activeStepId} onSelect={setActiveStepId} />
+
+				{/* Center: mode-switched content */}
+				<main className="flex flex-col overflow-hidden bg-canvas">
+					{/* Mode tab strip — sticky so it never scrolls away */}
+					<nav className="flex gap-0 border-b border-zinc-800 px-4 sticky top-0 bg-canvas z-10">
+						{modes
+							.filter((m) => m.show)
+							.map((m, i) => (
+								<button
+									type="button"
+									key={m.key}
+									onClick={() => setMode(m.key)}
+									className={cn(
+										"px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5",
+										mode === m.key
+											? "border-blok-green-500 text-zinc-100"
+											: "border-transparent text-zinc-500 hover:text-zinc-300",
+									)}
+								>
+									{m.label}
+									<kbd className="font-mono text-[9.5px] px-1 py-px rounded bg-raised border border-zinc-800 text-zinc-500">
+										{i + 1}
+									</kbd>
+								</button>
+							))}
+					</nav>
+
+					{/* Mode content */}
+					<div className="flex-1 overflow-y-auto">
+						{mode === "step" &&
+							(activeNode ? (
+								<ActiveStepPanel node={activeNode} logs={logs} totalSteps={nodes.length} />
+							) : (
+								<div className="p-8 text-sm text-zinc-500">No step selected.</div>
+							))}
+						{mode === "graph" && (
+							<div className="p-4 h-full">
+								<TraceGraph run={run} nodes={nodes} selectedNodeId={activeStepId} onSelectNode={setActiveStepId} />
+							</div>
 						)}
-					>
-						{tab.label}
-						<span className="ml-1.5 text-[10px] text-zinc-600">{tab.shortcut}</span>
-					</button>
-				))}
-			</div>
-
-			{/* Content area */}
-			<div className="flex-1 overflow-hidden flex">
-				{/* Main panel */}
-				<div
-					className={cn(
-						"overflow-y-auto transition-all",
-						selectedNode && activeTab !== "request" ? "flex-1" : "w-full",
-					)}
-				>
-					{activeTab === "timeline" && (
-						<div className="p-4">
-							<TraceTimeline run={run} nodes={nodes} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
-						</div>
-					)}
-
-					{activeTab === "graph" && (
-						<div className="p-4">
-							<TraceGraph run={run} nodes={nodes} selectedNodeId={selectedNodeId} onSelectNode={setSelectedNodeId} />
-						</div>
-					)}
-
-					{activeTab === "logs" && (
-						<div className="h-full">
-							<LogViewer logs={logs} nodeNames={nodeNames} />
-						</div>
-					)}
-
-					{activeTab === "events" && (
-						<div className="p-4">
-							<EventLog runId={runId} />
-						</div>
-					)}
-
-					{activeTab === "request" && (
-						<RequestBuilder
-							defaultMethod={triggerParts.method}
-							defaultPath={triggerParts.path}
-							onClose={() => setActiveTab("timeline")}
-						/>
-					)}
-				</div>
-
-				{/* Detail panel */}
-				{selectedNode && activeTab !== "request" && (
-					<div className="w-80 border-l border-zinc-800 bg-zinc-950/50 overflow-hidden shrink-0">
-						<NodeDetail node={selectedNode} logs={logs} onClose={() => setSelectedNodeId(null)} />
+						{mode === "logs" && (
+							<div className="h-full">
+								<LogViewer logs={logs} nodeNames={nodeNames} />
+							</div>
+						)}
+						{mode === "events" && (
+							<div className="p-4">
+								<EventLog runId={runId} />
+							</div>
+						)}
+						{mode === "request" && (
+							<RequestBuilder
+								defaultMethod={triggerParts.method}
+								defaultPath={triggerParts.path}
+								onClose={() => setMode("step")}
+							/>
+						)}
 					</div>
-				)}
+				</main>
+
+				{/* Right: inspector — wire metrics + live tail */}
+				<Inspector node={activeNode} logs={logs} />
 			</div>
 		</div>
 	);

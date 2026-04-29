@@ -221,25 +221,38 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
                 .setSuccess(result.isSuccess())
                 .setContentType("application/json");
 
+        ByteString dataBytes = ByteString.EMPTY;
         if (result.isSuccess() && result.getData() != null) {
-            builder.setData(ByteString.copyFromUtf8(GSON.toJson(result.getData())));
+            dataBytes = ByteString.copyFromUtf8(GSON.toJson(result.getData()));
+            builder.setData(dataBytes);
         }
 
+        ByteString varsDeltaBytes = ByteString.EMPTY;
         if (result.getVars() != null && !result.getVars().isEmpty()) {
-            builder.setVarsDelta(ByteString.copyFromUtf8(GSON.toJson(result.getVars())));
+            varsDeltaBytes = ByteString.copyFromUtf8(GSON.toJson(result.getVars()));
+            builder.setVarsDelta(varsDeltaBytes);
         }
 
-        if (result.getMetrics() != null) {
+        // Phase 0 follow-up: response_bytes — approximate via JSON-payload
+        // length (data + vars_delta). Studio's run-detail Inspector reads
+        // this so operators can see "wire 1.1 KB → 84 B" rather than
+        // "→ 0 B".
+        long responseBytes = (long) dataBytes.size() + (long) varsDeltaBytes.size();
+
+        if (result.getMetrics() != null || responseBytes > 0) {
             Metrics.Builder metrics = Metrics.newBuilder();
-            if (result.getMetrics().getDurationMs() != null) {
-                metrics.setDurationMs(result.getMetrics().getDurationMs());
+            if (result.getMetrics() != null) {
+                if (result.getMetrics().getDurationMs() != null) {
+                    metrics.setDurationMs(result.getMetrics().getDurationMs());
+                }
+                if (result.getMetrics().getCpuMs() != null) {
+                    metrics.setCpuMs(result.getMetrics().getCpuMs());
+                }
+                if (result.getMetrics().getMemoryBytes() != null) {
+                    metrics.setMemoryBytes(result.getMetrics().getMemoryBytes());
+                }
             }
-            if (result.getMetrics().getCpuMs() != null) {
-                metrics.setCpuMs(result.getMetrics().getCpuMs());
-            }
-            if (result.getMetrics().getMemoryBytes() != null) {
-                metrics.setMemoryBytes(result.getMetrics().getMemoryBytes());
-            }
+            metrics.setResponseBytes(responseBytes);
             builder.setMetrics(metrics.build());
         }
 

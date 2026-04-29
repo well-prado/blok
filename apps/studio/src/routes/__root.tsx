@@ -20,10 +20,10 @@ function RootLayout() {
 	useGlobalStream();
 
 	return (
-		<div className="h-screen flex flex-col bg-zinc-950">
+		<div className="h-screen flex flex-col bg-canvas">
 			<div className="flex flex-1 overflow-hidden">
 				<Sidebar />
-				<main className="flex-1 overflow-y-auto bg-zinc-925">
+				<main className="flex-1 overflow-y-auto bg-raised">
 					<ErrorBoundary>
 						<Outlet />
 					</ErrorBoundary>

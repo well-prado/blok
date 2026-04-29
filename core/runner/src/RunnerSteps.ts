@@ -102,7 +102,16 @@ export default abstract class RunnerSteps {
 								// shape.
 								tracker.failNode(nodeRunId, ctx.response.error);
 							} else {
-								tracker.completeNode(nodeRunId, sanitize(ctx.response.data));
+								// `_stepMetrics` is stashed on ctx by RuntimeAdapterNode
+								// when an adapter returns metrics (gRPC wire bytes,
+								// duration, cpu, memory). Threading it through
+								// `completeNode` is what gets the metrics into the
+								// run store + NODE_COMPLETED event payload — Studio's
+								// inspector reads them from there.
+								const ctxAny = ctx as Record<string, unknown>;
+								const stepMetrics = ctxAny._stepMetrics as Parameters<typeof tracker.completeNode>[2];
+								ctxAny._stepMetrics = undefined;
+								tracker.completeNode(nodeRunId, sanitize(ctx.response.data), stepMetrics);
 							}
 						}
 

@@ -126,6 +126,49 @@ export function useTraceStream(runId: string) {
 						}
 						break;
 					}
+
+					case "NODE_PROGRESS": {
+						// Phase 5 streaming frame: drives the live progress bar
+						// + phase label in NodeDetail.tsx. Always overwrites any
+						// previous progress on this node — only the latest frame
+						// is preserved.
+						const progressPayload = event.payload as Record<string, unknown> | undefined;
+						if (!progressPayload) break;
+						updated.nodes = updated.nodes.map((n) =>
+							n.id === event.nodeId || n.nodeName === event.nodeName
+								? {
+										...n,
+										progress: {
+											percent: Math.max(0, Math.min(100, Number(progressPayload.percent ?? 0))),
+											phase: (progressPayload.phase as string) || "",
+											updatedAt: event.timestamp,
+										},
+									}
+								: n,
+						);
+						break;
+					}
+
+					case "NODE_PARTIAL_RESULT": {
+						// Phase 5 streaming frame: interim snapshot of an
+						// in-flight node's output. Studio renders this as a
+						// JSON viewer that the operator can expand to peek at
+						// what the node has computed so far.
+						const partialPayload = event.payload as Record<string, unknown> | undefined;
+						if (!partialPayload) break;
+						updated.nodes = updated.nodes.map((n) =>
+							n.id === event.nodeId || n.nodeName === event.nodeName
+								? {
+										...n,
+										partialResult: {
+											snapshot: partialPayload.snapshot,
+											updatedAt: event.timestamp,
+										},
+									}
+								: n,
+						);
+						break;
+					}
 				}
 
 				return updated;

@@ -401,6 +401,16 @@ func encodeExecuteResponse(result *ExecutionResult, nodeName string, sdkVersion 
 		nodeError = internalErrorToProto(result.Errors, nodeName, sdkVersion)
 	}
 
+	// Populate `response_bytes` so Studio's run-detail Inspector can
+	// display the gRPC wire size next to the request bytes the runner
+	// already measures. Approximate via the JSON-encoded payload size
+	// (data + vars_delta) — matches the runner's request_bytes
+	// approximation, so the two numbers are comparable.
+	if metrics == nil {
+		metrics = &pb.Metrics{}
+	}
+	metrics.ResponseBytes = int64(len(dataBytes) + len(varsDeltaBytes))
+
 	return &pb.ExecuteResponse{
 		Success:     result.Success,
 		Data:        dataBytes,

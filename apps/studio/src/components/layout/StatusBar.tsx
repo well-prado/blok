@@ -6,8 +6,10 @@ import { Loader2, Wifi, WifiOff } from "lucide-react";
 export function StatusBar() {
 	const { status, activeStreams } = useConnectionStore();
 
+	// "connected" gets the brand-green treatment so the healthy state
+	// matches the env chip's brand-glow elsewhere — one visual idea.
 	const statusConfig = {
-		connected: { icon: Wifi, label: "Connected", className: "text-green-400" },
+		connected: { icon: Wifi, label: "Connected", className: "text-blok-green-500" },
 		connecting: { icon: Loader2, label: "Connecting...", className: "text-yellow-400 animate-spin" },
 		disconnected: { icon: WifiOff, label: "Disconnected", className: "text-zinc-500" },
 		error: { icon: WifiOff, label: "Connection error", className: "text-red-400" },
@@ -16,7 +18,7 @@ export function StatusBar() {
 	const { icon: Icon, label, className } = statusConfig[status];
 
 	return (
-		<div className="h-6 border-t border-zinc-800 bg-zinc-950 flex items-center px-3 text-[11px]">
+		<div className="h-6 border-t border-zinc-800 bg-canvas flex items-center px-3 text-[11px]">
 			<div className="flex items-center gap-1.5">
 				<Icon className={cn("w-3 h-3", className)} />
 				<span className="text-zinc-500">{label}</span>

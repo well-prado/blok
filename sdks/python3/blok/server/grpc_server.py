@@ -372,16 +372,6 @@ def _encode_execute_response(
     sdk_version: str,
 ) -> pb.ExecuteResponse:
     """Encode the SDK's ``ExecutionResult`` into a proto ``ExecuteResponse``."""
-    metrics = None
-    if result.metrics is not None:
-        metrics = pb.Metrics(
-            duration_ms=result.metrics.duration_ms or 0.0,
-            cpu_ms=result.metrics.cpu_ms or 0.0,
-            memory_bytes=int(result.metrics.memory_bytes or 0),
-            request_bytes=0,
-            response_bytes=0,
-        )
-
     data_bytes = b""
     if result.success and result.data is not None:
         data_bytes = _encode_json_bytes(result.data)
@@ -389,6 +379,23 @@ def _encode_execute_response(
     vars_delta_bytes = b""
     if result.vars:
         vars_delta_bytes = _encode_json_bytes(result.vars)
+
+    # Phase 0 follow-up: populate `response_bytes` so Studio's run-detail
+    # Inspector shows the gRPC wire size next to the runner-measured
+    # request_bytes. We approximate via `len(data) + len(vars_delta)` —
+    # matches the runner's request_bytes approximation, so the two
+    # numbers in the Inspector are comparable.
+    response_bytes = len(data_bytes) + len(vars_delta_bytes)
+
+    metrics = None
+    if result.metrics is not None or response_bytes > 0:
+        metrics = pb.Metrics(
+            duration_ms=(result.metrics.duration_ms if result.metrics else 0) or 0.0,
+            cpu_ms=(result.metrics.cpu_ms if result.metrics else 0) or 0.0,
+            memory_bytes=int((result.metrics.memory_bytes if result.metrics else 0) or 0),
+            request_bytes=0,
+            response_bytes=response_bytes,
+        )
 
     error_proto: Optional[pb.NodeError] = None
     if not result.success:

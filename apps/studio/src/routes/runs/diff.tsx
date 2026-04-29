@@ -56,7 +56,7 @@ function DiffPage() {
 	return (
 		<div className="h-full flex flex-col">
 			{/* Header */}
-			<div className="shrink-0 border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+			<div className="shrink-0 border-b border-zinc-800 bg-canvas/60 px-4 py-3">
 				<div className="flex items-center gap-3">
 					<Link
 						to="/runs"

@@ -530,3 +530,10 @@ export type {
 	StartRunOptions,
 	StartNodeOptions,
 } from "./tracing/types";
+
+// Tracing store factory + concrete stores — exposed so the CLI's
+// standalone `blokctl studio` mode can spin up its own SQLite-backed
+// tracker without proxying to a live trigger. See
+// `packages/cli/src/commands/trace/startStudio.ts` for the call site.
+export { createStore, InMemoryRunStore, SqliteRunStore } from "./tracing";
+export type { CreateStoreOptions, StoreType } from "./tracing";

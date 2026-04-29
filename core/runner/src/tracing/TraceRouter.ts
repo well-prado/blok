@@ -371,6 +371,238 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		res.json({ removed: true });
 	});
 
+	// === Queues (Phase 5) ===
+	//
+	// Direction A · Phase 5. Honest "what's configured to receive
+	// work" page — Blok's HTTP triggers are stateless (no queue depth)
+	// so this view is workflow-by-trigger-type with throughput +
+	// last-run timing, not a JetStream-style depth dashboard.
+	// JetStream-backed worker queues will surface real depth here when
+	// the NATS integration grows the capability — for now we mark
+	// `depth: null` everywhere so the UI knows to show "—" instead of
+	// "0".
+	//
+	// Query params:
+	//   ?env=<name>  filter by environment scope (Phase 2.1)
+	router.get("/queues", (req: TraceRequest, res: TraceResponse) => {
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+
+		// Reuse the workflow-summary aggregation; queues are workflows
+		// reframed by their trigger type. Pull recent runs to compute
+		// per-trigger-type throughput counts.
+		const workflows = t.getWorkflowSummaries();
+		const recent = t.getRuns({ limit: 500, sort: "desc" }).runs;
+
+		// env post-filter on the recent-run window
+		const recentInScope = envFilter ? recent.filter((r) => (r.environment ?? "production") === envFilter) : recent;
+
+		// Group workflows by their first trigger type (HTTP triggers
+		// dominate today; future triggers will surface in this list).
+		const queues = workflows.map((w) => {
+			const wfRecent = recentInScope.filter((r) => r.workflowName === w.name);
+			const triggerType = w.triggerTypes[0] ?? "unknown";
+			const lastRun = wfRecent[0];
+			return {
+				id: w.name,
+				name: w.name,
+				triggerType,
+				triggerTypes: w.triggerTypes,
+				// Stateless HTTP triggers have no queue depth; depth
+				// will populate when NATS JetStream integration lands.
+				depth: null as number | null,
+				runs24h: wfRecent.length,
+				totalRuns: w.totalRuns,
+				lastRunAt: lastRun?.startedAt ?? w.lastRunAt,
+				lastRunStatus: lastRun?.status ?? w.lastRunStatus,
+				avgDurationMs: w.avgDurationMs,
+				errorRate: w.errorRate,
+			};
+		});
+
+		res.json({ queues, total: queues.length, env: envFilter ?? null });
+	});
+
+	// === Deployments (Phase 5) ===
+	//
+	// Read-only "what versions are running where" view. Blok workflows
+	// declare a `version` string in their definition; we group runs by
+	// `workflowName + version` and report counts + success rate per
+	// pair. Studio lists these as "what's deployed", and clicking a
+	// row drills into the workflow's runs filtered to that version.
+	//
+	// Source: scan recent run metadata. Workflow versions live in the
+	// trigger's workflow registry but the runner doesn't keep that
+	// catalog at this layer — recent runs are the source of truth for
+	// "what version produced what trace".
+	router.get("/deployments", (req: TraceRequest, res: TraceResponse) => {
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+		const limit = Math.min(Number.parseInt(req.query.limit || "500", 10), 2000);
+
+		const runs = t.getRuns({ limit, sort: "desc" }).runs;
+		const inScope = envFilter ? runs.filter((r) => (r.environment ?? "production") === envFilter) : runs;
+
+		// Group by `workflowName::version`. Version is read from the
+		// run's metadata if present, else "unknown" so the row still
+		// surfaces.
+		const buckets = new Map<
+			string,
+			{
+				workflowName: string;
+				version: string;
+				environment: string;
+				runs: number;
+				succeeded: number;
+				failed: number;
+				lastRunAt: number;
+				firstRunAt: number;
+				avgDurationMs: number;
+				_durationSum: number;
+			}
+		>();
+
+		for (const run of inScope) {
+			const version = (run.metadata?.version as string | undefined) ?? "unknown";
+			const env = run.environment ?? "production";
+			const key = `${run.workflowName}::${version}::${env}`;
+			let b = buckets.get(key);
+			if (!b) {
+				b = {
+					workflowName: run.workflowName,
+					version,
+					environment: env,
+					runs: 0,
+					succeeded: 0,
+					failed: 0,
+					lastRunAt: 0,
+					firstRunAt: run.startedAt,
+					avgDurationMs: 0,
+					_durationSum: 0,
+				};
+				buckets.set(key, b);
+			}
+			b.runs += 1;
+			if (run.status === "completed") b.succeeded += 1;
+			if (run.status === "failed") b.failed += 1;
+			if (run.startedAt > b.lastRunAt) b.lastRunAt = run.startedAt;
+			if (run.startedAt < b.firstRunAt) b.firstRunAt = run.startedAt;
+			if (run.durationMs) b._durationSum += run.durationMs;
+		}
+
+		const deployments = [...buckets.values()].map((b) => {
+			const { _durationSum, ...rest } = b;
+			return {
+				...rest,
+				avgDurationMs: b.runs > 0 ? Math.round(_durationSum / b.runs) : 0,
+				successRate: b.runs > 0 ? b.succeeded / b.runs : 0,
+			};
+		});
+		deployments.sort((a, b) => b.lastRunAt - a.lastRunAt);
+
+		res.json({ deployments, total: deployments.length, env: envFilter ?? null });
+	});
+
+	// === Logs (cross-run aggregator) ===
+	//
+	// Direction A · Phase 3 · the page that doesn't exist in current
+	// Studio. Aggregates `TraceLogEntry`s across recent runs into a
+	// flat feed so operators can grep across workflows during an
+	// incident without having to know which run-id to open.
+	//
+	// Pagination is deliberately simple — `limit` + `since` (epoch ms)
+	// with `desc` sort. We over-fetch from the store (limit*4 runs ×
+	// up-to-N logs each) and apply filters in memory because the
+	// underlying log store doesn't have an indexed multi-key query.
+	// At ≤1000 rows this stays well under 50ms even on the in-memory
+	// backend; SQLite can be similarly fast since each `getLogs(runId)`
+	// is a single indexed query. When the cap is reached, the response
+	// signals truncation via `truncated: true` so the client can prompt
+	// for narrower filters.
+	//
+	// Query params (all optional):
+	//   ?workflow=<name>                exact match
+	//   ?level=info,warn,error,debug    comma-separated
+	//   ?q=<text>                       case-insensitive substring of message
+	//   ?since=<epoch ms>               only logs newer than this
+	//   ?limit=<int>                    max rows returned, default 200, cap 1000
+	router.get("/logs", (req: TraceRequest, res: TraceResponse) => {
+		const workflowFilter =
+			typeof req.query.workflow === "string" && req.query.workflow.length > 0 ? req.query.workflow : undefined;
+		const levelFilter = (() => {
+			if (typeof req.query.level !== "string" || req.query.level.length === 0) return undefined;
+			return new Set(req.query.level.split(",").map((s: string) => s.trim().toLowerCase()));
+		})();
+		const qRaw = typeof req.query.q === "string" ? req.query.q.trim() : "";
+		const q = qRaw.length > 0 ? qRaw.toLowerCase() : undefined;
+		const since = req.query.since ? Number.parseInt(req.query.since, 10) : undefined;
+		const limit = Math.min(Number.parseInt(req.query.limit || "200", 10), 1000);
+		// Phase 2.1 · environment scoping. Default `production` matches
+		// SqliteRunStore.rowToRun's NULL → "production" mapping so legacy
+		// runs still surface under the default scope.
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+
+		// Pull recent runs so we can flatten their logs. We over-pull
+		// (limit*4 runs cap'd at 200) so a noisy run with 50+ logs
+		// doesn't crowd out logs from quieter neighbors.
+		const runs = t.getRuns({ limit: Math.min(limit * 4, 200), sort: "desc" }).runs;
+		const matches: Array<{
+			id: string;
+			runId: string;
+			workflowName: string;
+			workflowPath: string;
+			nodeId: string | undefined;
+			nodeName: string | undefined;
+			level: string;
+			message: string;
+			timestamp: number;
+			data: unknown;
+		}> = [];
+		let truncated = false;
+
+		outer: for (const run of runs) {
+			if (workflowFilter && run.workflowName !== workflowFilter) continue;
+			if (envFilter && (run.environment ?? "production") !== envFilter) continue;
+			const logs = t.getLogs(run.id);
+			for (const log of logs) {
+				if (since !== undefined && log.timestamp <= since) continue;
+				if (levelFilter && !levelFilter.has(log.level)) continue;
+				if (q && !log.message.toLowerCase().includes(q)) continue;
+				matches.push({
+					id: log.id,
+					runId: run.id,
+					workflowName: run.workflowName,
+					workflowPath: run.workflowPath,
+					nodeId: log.nodeId,
+					nodeName: log.nodeName,
+					level: log.level,
+					message: log.message,
+					timestamp: log.timestamp,
+					data: log.data,
+				});
+				if (matches.length >= limit) {
+					truncated = true;
+					break outer;
+				}
+			}
+		}
+
+		matches.sort((a, b) => b.timestamp - a.timestamp);
+		res.json({
+			logs: matches,
+			total: matches.length,
+			truncated,
+			query: { workflow: workflowFilter, level: req.query.level, q: qRaw, since, limit },
+		});
+	});
+
 	// === Run Endpoints ===
 
 	router.get("/runs", (req: TraceRequest, res: TraceResponse) => {
@@ -380,6 +612,16 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const limit = Number.parseInt(req.query.limit || "50", 10);
 		const offset = Number.parseInt(req.query.offset || "0", 10);
 		const sort = (req.query.sort as "asc" | "desc") || "desc";
+		// Phase 2.1 · environment scoping. Same post-filter pattern as
+		// `categoryFilter` below: applied after `getRuns()` returns so it
+		// works against any store (SQLite has the column; InMemory just
+		// stores the object). Empty string + "all" both bypass the
+		// filter (Studio's EnvChip can dispatch a "show all envs"
+		// view in a follow-up).
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
 		// Master plan §17.10: optional category filter. The filter is
 		// applied AFTER `getRuns()` returns so it works against any
 		// store backend (in-memory, sqlite, postgres) without a schema
@@ -393,17 +635,16 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 				? req.query.category.toUpperCase()
 				: undefined;
 
+		// Combined filter mode — when EITHER category OR env post-filters
+		// are active we have to over-fetch + re-paginate after applying
+		// them.
+		const needsPostFilter = Boolean(categoryFilter || envFilter);
 		const result = t.getRuns({
 			workflow,
 			status: status as "running" | "completed" | "failed" | undefined,
 			tags,
-			// When filtering by category we have to over-fetch (the
-			// store doesn't know about the category column), then
-			// post-filter and re-paginate. 1000 is a soft cap that
-			// covers Studio's in-page filter UX without unbounded
-			// memory pressure.
-			limit: categoryFilter ? Math.max(limit, 1000) : limit,
-			offset: categoryFilter ? 0 : offset,
+			limit: needsPostFilter ? Math.max(limit, 1000) : limit,
+			offset: needsPostFilter ? 0 : offset,
 			sort,
 		});
 
@@ -415,6 +656,14 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 				return typeof category === "string" && category.toUpperCase() === categoryFilter;
 			});
 			total = runs.length;
+		}
+		if (envFilter) {
+			// Default `production` for legacy rows where env is NULL —
+			// matches the SqliteRunStore.rowToRun default.
+			runs = runs.filter((r) => (r.environment ?? "production") === envFilter);
+			total = runs.length;
+		}
+		if (needsPostFilter) {
 			runs = runs.slice(offset, offset + limit);
 		}
 

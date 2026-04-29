@@ -99,6 +99,10 @@ export interface NodeRun {
 		duration_ms?: number;
 		cpu_ms?: number;
 		memory_bytes?: number;
+		/** gRPC adapter only: bytes sent on the wire to the SDK. */
+		request_bytes?: number;
+		/** gRPC adapter only: bytes received in the SDK's response. */
+		response_bytes?: number;
 	};
 }
 

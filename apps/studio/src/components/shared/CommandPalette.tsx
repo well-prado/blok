@@ -118,7 +118,7 @@ export function CommandPalette() {
 			<div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] pointer-events-none">
 				<dialog
 					open
-					className="relative w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden pointer-events-auto"
+					className="relative w-full max-w-lg bg-overlay border border-zinc-800 rounded-xl shadow-2xl overflow-hidden pointer-events-auto"
 					aria-label="Search"
 				>
 					{/* Search input */}

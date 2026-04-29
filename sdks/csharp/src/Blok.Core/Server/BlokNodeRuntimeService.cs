@@ -203,23 +203,33 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
             ContentType = "application/json",
         };
 
+        long responseBytes = 0;
+
         if (result.Success && result.Data is not null)
         {
             response.Data = ByteString.CopyFromUtf8(JsonSerializer.Serialize(result.Data, SerializerOptions));
+            responseBytes += response.Data.Length;
         }
 
         if (result.Vars is { Count: > 0 })
         {
             response.VarsDelta = ByteString.CopyFromUtf8(JsonSerializer.Serialize(result.Vars, SerializerOptions));
+            responseBytes += response.VarsDelta.Length;
         }
 
-        if (result.Metrics is not null)
+        // Phase 0 follow-up: populate response_bytes so Studio's run-detail
+        // Inspector shows the gRPC wire size next to the runner-measured
+        // request_bytes. Approximated via JSON-payload length (data +
+        // vars_delta) — same approximation as the runner's request_bytes,
+        // so the two sides of "1.1 KB → 84 B" are comparable.
+        if (result.Metrics is not null || responseBytes > 0)
         {
             response.Metrics = new Metrics
             {
-                DurationMs = result.Metrics.DurationMs ?? 0.0,
-                CpuMs = result.Metrics.CpuMs ?? 0.0,
-                MemoryBytes = result.Metrics.MemoryBytes ?? 0L,
+                DurationMs = result.Metrics?.DurationMs ?? 0.0,
+                CpuMs = result.Metrics?.CpuMs ?? 0.0,
+                MemoryBytes = result.Metrics?.MemoryBytes ?? 0L,
+                ResponseBytes = responseBytes,
             };
         }
 

@@ -264,14 +264,6 @@ fn encode_execute_response(
     node_name: &str,
     sdk_version: &str,
 ) -> ProtoExecuteResponse {
-    let metrics = result.metrics.as_ref().map(|m| ProtoMetrics {
-        duration_ms: m.duration_ms.unwrap_or(0.0),
-        cpu_ms: m.cpu_ms.unwrap_or(0.0),
-        memory_bytes: m.memory_bytes.unwrap_or(0) as i64,
-        request_bytes: 0,
-        response_bytes: 0,
-    });
-
     let data_bytes = if result.success {
         encode_json_bytes(&result.data)
     } else {
@@ -281,6 +273,27 @@ fn encode_execute_response(
     let vars_delta_bytes = match &result.vars {
         Some(vars) if !vars.is_empty() => encode_json_bytes(&serde_json::json!(vars)),
         _ => Vec::new(),
+    };
+
+    // Phase 0 follow-up: populate `response_bytes` so Studio's
+    // run-detail Inspector shows the gRPC wire size next to the
+    // runner-measured request_bytes. Approximated via JSON-payload
+    // length (data + vars_delta) — matches the runner's own
+    // request_bytes approximation, so the two numbers shown side-by-
+    // side in the Inspector are comparable.
+    let response_bytes = (data_bytes.len() + vars_delta_bytes.len()) as i64;
+
+    let metrics = if result.metrics.is_some() || response_bytes > 0 {
+        let m = result.metrics.as_ref();
+        Some(ProtoMetrics {
+            duration_ms: m.and_then(|m| m.duration_ms).unwrap_or(0.0),
+            cpu_ms: m.and_then(|m| m.cpu_ms).unwrap_or(0.0),
+            memory_bytes: m.and_then(|m| m.memory_bytes).unwrap_or(0) as i64,
+            request_bytes: 0,
+            response_bytes,
+        })
+    } else {
+        None
     };
 
     let error = if result.success {

@@ -204,6 +204,21 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
+	// Phase: ship-with-CLI persistence. Default to SQLite at
+	// `.blok/trace.db` so users get Prisma-Studio-style "open the
+	// project, see all your runs" durability without configuration.
+	// Users who explicitly set BLOK_TRACE_STORE=memory or set their
+	// own SQLITE_PATH win — we only fill in the defaults if absent.
+	// The directory is auto-created by `createStore` when the file is
+	// first opened.
+	const traceEnv: Record<string, string> = {};
+	if (!process.env.BLOK_TRACE_STORE) {
+		traceEnv.BLOK_TRACE_STORE = "sqlite";
+	}
+	if (!process.env.BLOK_TRACE_SQLITE_PATH) {
+		traceEnv.BLOK_TRACE_SQLITE_PATH = path.join(".blok", "trace.db");
+	}
+
 	// 3. Start triggers from config, or fallback to single runner
 	if (config?.triggers && Object.keys(config.triggers).length > 0) {
 		console.log("Starting triggers...");
@@ -217,11 +232,12 @@ export async function devProject(opts: OptionValues) {
 			}
 			spawnProcess(cmd, args, `${trigger.label} (port ${trigger.port})`, currentPath, undefined, {
 				PORT: String(trigger.port),
+				...traceEnv,
 			});
 		}
 	} else {
 		// Legacy fallback: single trigger at src/index.ts
-		spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath);
+		spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath, undefined, traceEnv);
 	}
 
 	// Keep the event loop alive — detached children don't prevent Node

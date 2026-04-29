@@ -164,19 +164,32 @@ module Blok
           content_type: "application/json"
         )
 
+        response_bytes = 0
+
         if result.success && !result.data.nil?
-          builder.data = JSON.generate(result.data)
+          data_bytes = JSON.generate(result.data)
+          builder.data = data_bytes
+          response_bytes += data_bytes.bytesize
         end
 
         if result.vars && !result.vars.empty?
-          builder.vars_delta = JSON.generate(result.vars)
+          vars_bytes = JSON.generate(result.vars)
+          builder.vars_delta = vars_bytes
+          response_bytes += vars_bytes.bytesize
         end
 
-        if result.metrics
+        # Phase 0 follow-up: populate response_bytes so Studio's
+        # run-detail Inspector shows the gRPC wire size next to the
+        # runner-measured request_bytes. Approximated via JSON-payload
+        # length (data + vars_delta) — same approximation as the runner's
+        # request_bytes, so the two sides of "1.1 KB → 84 B" compare
+        # apples to apples.
+        if result.metrics || response_bytes.positive?
           builder.metrics = ::Blok::Runtime::V1::Metrics.new(
-            duration_ms: (result.metrics.duration_ms || 0.0).to_f,
-            cpu_ms: (result.metrics.cpu_ms || 0.0).to_f,
-            memory_bytes: (result.metrics.memory_bytes || 0).to_i
+            duration_ms: (result.metrics&.duration_ms || 0.0).to_f,
+            cpu_ms: (result.metrics&.cpu_ms || 0.0).to_f,
+            memory_bytes: (result.metrics&.memory_bytes || 0).to_i,
+            response_bytes: response_bytes
           )
         end
 

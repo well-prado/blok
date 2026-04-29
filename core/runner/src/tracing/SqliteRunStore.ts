@@ -49,6 +49,12 @@ interface RunRow {
 	metadata_json: string | null;
 	node_count: number;
 	completed_nodes: number;
+	/**
+	 * Environment scope (Phase 2.1). NULL on rows from before the column
+	 * was added — `rowToRun` defaults those to `"production"` so the
+	 * legacy data still shows up under the default env scope.
+	 */
+	environment: string | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -266,6 +272,18 @@ export class SqliteRunStore implements RunStore {
 					);
 				`,
 			},
+			{
+				// Phase 2.1 · environment scoping. Add `environment` to
+				// workflow_runs so list views can filter by env. Existing
+				// rows get NULL (which `rowToRun` reads as `production` —
+				// see RunRow comment) so legacy data still appears under
+				// the default scope without a backfill.
+				version: 3,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN environment TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_environment ON workflow_runs(environment);
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -298,8 +316,8 @@ export class SqliteRunStore implements RunStore {
 			INSERT OR REPLACE INTO workflow_runs
 			(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 			 status, started_at, finished_at, duration_ms, error_json,
-			 tags_json, metadata_json, node_count, completed_nodes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 tags_json, metadata_json, node_count, completed_nodes, environment)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -316,6 +334,7 @@ export class SqliteRunStore implements RunStore {
 			run.metadata ? JSON.stringify(run.metadata) : null,
 			run.nodeCount,
 			run.completedNodes,
+			run.environment ?? null,
 		);
 	}
 
@@ -940,6 +959,10 @@ export class SqliteRunStore implements RunStore {
 			metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
 			nodeCount: row.node_count,
 			completedNodes: row.completed_nodes,
+			// Pre-Phase-2.1 rows have NULL `environment` — present them as
+			// "production" so the EnvChip default-scope still surfaces
+			// historical data without a backfill.
+			environment: row.environment ?? "production",
 		};
 	}
 

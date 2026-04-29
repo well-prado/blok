@@ -547,9 +547,18 @@ async function main() {
 	// actually launched. The trigger reads RUNTIME_<KEY>_GRPC_PORT
 	// (defaults to the table in DEFAULT_GRPC_PORTS, but we set them
 	// explicitly here for visibility).
+	//
+	// Persistence — default to SQLite at `.blok/trace.db` so the in-repo
+	// dev orchestrator behaves the same as a real `blokctl dev` project:
+	// runs survive restarts, Studio's "Clear all data" button has
+	// something to clear, and the standalone `blokctl studio` mode can
+	// be invoked against the same file. Users who export a different
+	// BLOK_TRACE_STORE / BLOK_TRACE_SQLITE_PATH win.
 	const triggerEnv: Record<string, string> = {
 		...process.env,
 		PORT: String(TRIGGER_PORT),
+		BLOK_TRACE_STORE: process.env.BLOK_TRACE_STORE || "sqlite",
+		BLOK_TRACE_SQLITE_PATH: process.env.BLOK_TRACE_SQLITE_PATH || ".blok/trace.db",
 	};
 	for (const p of runnable) {
 		triggerEnv[`RUNTIME_${p.envKey}_HOST`] = "127.0.0.1";

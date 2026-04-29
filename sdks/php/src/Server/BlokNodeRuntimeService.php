@@ -158,20 +158,34 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
             ->setSuccess($result->success)
             ->setContentType('application/json');
 
+        $responseBytes = 0;
+
         if ($result->success && $result->data !== null) {
-            $response->setData(self::encodeJsonBytes($result->data));
+            $dataBytes = self::encodeJsonBytes($result->data);
+            $response->setData($dataBytes);
+            $responseBytes += strlen($dataBytes);
         }
 
         if (is_array($result->vars) && $result->vars !== []) {
-            $response->setVarsDelta(self::encodeJsonBytes($result->vars));
+            $varsBytes = self::encodeJsonBytes($result->vars);
+            $response->setVarsDelta($varsBytes);
+            $responseBytes += strlen($varsBytes);
         }
 
-        if ($result->metrics !== null) {
-            $response->setMetrics(
-                (new Metrics())
+        // Phase 0 follow-up: populate response_bytes so Studio's
+        // run-detail Inspector shows the gRPC wire size next to the
+        // runner-measured request_bytes. Approximated via JSON-payload
+        // length (data + vars_delta) — matches the runner's
+        // request_bytes approximation, so the two sides of "1.1 KB → 84 B"
+        // are comparable.
+        if ($result->metrics !== null || $responseBytes > 0) {
+            $metrics = (new Metrics())->setResponseBytes($responseBytes);
+            if ($result->metrics !== null) {
+                $metrics
                     ->setDurationMs((float) $result->metrics->durationMs)
-                    ->setMemoryBytes((int) $result->metrics->memoryBytes),
-            );
+                    ->setMemoryBytes((int) $result->metrics->memoryBytes);
+            }
+            $response->setMetrics($metrics);
         }
 
         if (! $result->success) {

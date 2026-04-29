@@ -124,6 +124,12 @@ export class RunTracker extends EventEmitter {
 	// === Workflow Lifecycle ===
 
 	startRun(opts: StartRunOptions): WorkflowRun {
+		// Phase 2.1 · environment scoping. Read `BLOK_ENV` (default
+		// `production`) so every run carries the env it was triggered
+		// against. Studio's EnvChip (`useEnvScope.current`) filters
+		// list views by this field. Old runs without the field still
+		// match `production` via the post-filter default.
+		const environment = (process.env.BLOK_ENV || "production").trim() || "production";
 		const run: WorkflowRun = {
 			id: `run_${uuid().replace(/-/g, "").slice(0, 12)}`,
 			workflowName: opts.workflowName,
@@ -136,6 +142,7 @@ export class RunTracker extends EventEmitter {
 			completedNodes: 0,
 			tags: opts.tags,
 			metadata: opts.metadata,
+			environment,
 		};
 
 		this.store.saveRun(run);
