@@ -21,6 +21,7 @@
 		"test:integration": "vitest run --config vitest.integration.config.ts",
 		"test:integration:dev": "vitest --config vitest.integration.config.ts",
 		"test:integration:coverage": "vitest run --config vitest.integration.config.ts --coverage",
+		"test:parity": "vitest run --config vitest.integration.config.ts __tests__/integration/parity",
 		"test:all": "vitest run && vitest run --config vitest.integration.config.ts",
 		"typecheck": "tsc --noEmit --incremental"
 	},
