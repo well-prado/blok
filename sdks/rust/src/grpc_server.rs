@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
+use crate::blok_error::{BlokError, BlokErrorCategory, BlokErrorSeverity, Origin};
 use crate::registry::NodeRegistry;
 use crate::types::{Context, ExecutionRequest, ExecutionResult, NodeConfig, Request as SdkRequest, Response as SdkResponse};
 
@@ -259,7 +260,7 @@ fn decode_execute_request(req: ProtoExecuteRequest) -> Result<ExecutionRequest, 
 
 /// Encode the SDK's internal `ExecutionResult` into a proto `ExecuteResponse`.
 fn encode_execute_response(
-    result: ExecutionResult,
+    mut result: ExecutionResult,
     node_name: &str,
     sdk_version: &str,
 ) -> ProtoExecuteResponse {
@@ -286,7 +287,8 @@ fn encode_execute_response(
         None
     } else {
         Some(internal_error_to_proto(
-            &result.errors.unwrap_or_else(|| serde_json::json!({"message": "unknown error"})),
+            result.blok_error.take(),
+            result.errors.as_ref(),
             node_name,
             sdk_version,
         ))
@@ -303,43 +305,175 @@ fn encode_execute_response(
     }
 }
 
-/// Build a proto `NodeError` from the SDK's loose JSON error shape.
+/// Build a proto `NodeError` from whatever `ExecutionResult` carried.
 ///
-/// The SDK's current `ExecutionResult.errors` is `serde_json::Value` (loose).
-/// Until SDK code is migrated to produce structured `NodeError`s natively,
-/// we synthesize one with category=INTERNAL and the original message.
+/// Two paths, both producing the same proto shape:
+///
+/// * **Structured (preferred)** — `blok_err` is `Some(BlokError)` produced by a
+///   handler returning a typed [`crate::BlokError`]. All 19 fields serialize
+///   losslessly via [`blok_error_to_proto`]. Auto-fills
+///   `node`/`sdk`/`sdk_version`/`runtime_kind` if the BlokError didn't set
+///   them itself.
+/// * **Loose** — `blok_err` is `None` and `loose_err` carries the legacy
+///   `{"message": ...}` JSON. Wrapped via [`BlokError::from_message`] (always
+///   produces `category=INTERNAL` with the original payload preserved in
+///   `details_json`) and then serialized via the structured path.
 fn internal_error_to_proto(
-    err: &serde_json::Value,
+    blok_err: Option<BlokError>,
+    loose_err: Option<&serde_json::Value>,
     node_name: &str,
     sdk_version: &str,
 ) -> ProtoNodeError {
-    let message = err
+    let origin = Origin::defaults(node_name, sdk_version);
+    if let Some(mut err) = blok_err {
+        err.apply_origin_if_missing(&origin);
+        return blok_error_to_proto(&err);
+    }
+
+    let fallback = loose_err.cloned().unwrap_or_else(|| serde_json::json!({"message": "node error"}));
+    let message = fallback
         .get("message")
         .and_then(|v| v.as_str())
-        .unwrap_or_else(|| "node error")
+        .unwrap_or("node error")
         .to_string();
-    let details_json = encode_json_bytes(err);
 
+    // Preserve the original JSON payload as details_json so consumers don't
+    // lose any fields the legacy path attached.
+    let mut wrapped = BlokError::from_message(message, &origin);
+    wrapped.details = Some(fallback);
+    blok_error_to_proto(&wrapped)
+}
+
+/// Serialize a fully-populated `BlokError` into the proto wire format. The
+/// cause chain is serialized as a list of proto `NodeError` messages; each
+/// element's own `causes` list is left empty (the chain is already flat at
+/// the BlokError layer, so nesting at the wire layer would double-count).
+fn blok_error_to_proto(err: &BlokError) -> ProtoNodeError {
+    let causes: Vec<ProtoNodeError> = err.causes.iter().map(cause_value_to_proto).collect();
     ProtoNodeError {
-        code: "RUST_NODE_ERROR".to_string(),
-        category: ProtoErrorCategory::Internal as i32,
-        severity: ProtoErrorSeverity::Error as i32,
-        node: node_name.to_string(),
-        sdk: "blok-rust".to_string(),
-        sdk_version: sdk_version.to_string(),
-        runtime_kind: "runtime.rust".to_string(),
-        at: None,
-        message,
-        description: String::new(),
-        remediation: String::new(),
-        doc_url: String::new(),
+        code: err.code.clone(),
+        category: category_to_proto(err.category) as i32,
+        severity: severity_to_proto(err.severity) as i32,
+        node: err.node.clone(),
+        sdk: err.sdk.clone(),
+        sdk_version: err.sdk_version.clone(),
+        runtime_kind: err.runtime_kind.clone(),
+        at: Some(prost_timestamp_from_chrono(&err.at)),
+        message: err.message.clone(),
+        description: err.description.clone(),
+        remediation: err.remediation.clone(),
+        doc_url: err.doc_url.clone(),
+        causes,
+        stack: err.stack.clone(),
+        context_snapshot_json: encode_optional_json_bytes(err.context_snapshot.as_ref()),
+        http_status: err.http_status,
+        retryable: err.retryable,
+        retry_after_ms: err.retry_after_ms,
+        details_json: encode_optional_json_bytes(err.details.as_ref()),
+    }
+}
+
+/// Convert one cause-chain link (already a JSON value of the snake_case wire
+/// shape) into a proto `NodeError`. Mirrors Go's `causeMapToProto`.
+fn cause_value_to_proto(cause: &serde_json::Value) -> ProtoNodeError {
+    let s = |key: &str| -> String {
+        cause
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    };
+    let i32_field = |key: &str, default: i32| -> i32 {
+        cause
+            .get(key)
+            .and_then(|v| v.as_i64())
+            .map(|n| n as i32)
+            .unwrap_or(default)
+    };
+    let i64_field = |key: &str, default: i64| -> i64 {
+        cause.get(key).and_then(|v| v.as_i64()).unwrap_or(default)
+    };
+    let bool_field = |key: &str, default: bool| -> bool {
+        cause
+            .get(key)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(default)
+    };
+    let category = BlokErrorCategory::parse(&s("category"));
+    let severity = BlokErrorSeverity::parse(&s("severity"));
+    let at = match cause.get("at").and_then(|v| v.as_str()) {
+        Some(text) => parse_timestamp(text).unwrap_or_else(now_timestamp),
+        None => now_timestamp(),
+    };
+    ProtoNodeError {
+        code: s("code"),
+        category: category_to_proto(category) as i32,
+        severity: severity_to_proto(severity) as i32,
+        node: s("node"),
+        sdk: s("sdk"),
+        sdk_version: s("sdk_version"),
+        runtime_kind: s("runtime_kind"),
+        at: Some(at),
+        message: s("message"),
+        description: s("description"),
+        remediation: s("remediation"),
+        doc_url: s("doc_url"),
         causes: Vec::new(),
-        stack: String::new(),
-        context_snapshot_json: Vec::new(),
-        http_status: 500,
-        retryable: false,
-        retry_after_ms: 0,
-        details_json,
+        stack: s("stack"),
+        context_snapshot_json: encode_optional_json_bytes(cause.get("context_snapshot")),
+        http_status: i32_field("http_status", 500),
+        retryable: bool_field("retryable", false),
+        retry_after_ms: i64_field("retry_after_ms", 0),
+        details_json: encode_optional_json_bytes(cause.get("details")),
+    }
+}
+
+fn category_to_proto(c: BlokErrorCategory) -> ProtoErrorCategory {
+    match c {
+        BlokErrorCategory::Validation => ProtoErrorCategory::Validation,
+        BlokErrorCategory::Configuration => ProtoErrorCategory::Configuration,
+        BlokErrorCategory::Dependency => ProtoErrorCategory::Dependency,
+        BlokErrorCategory::Timeout => ProtoErrorCategory::Timeout,
+        BlokErrorCategory::Permission => ProtoErrorCategory::Permission,
+        BlokErrorCategory::RateLimit => ProtoErrorCategory::RateLimit,
+        BlokErrorCategory::NotFound => ProtoErrorCategory::NotFound,
+        BlokErrorCategory::Conflict => ProtoErrorCategory::Conflict,
+        BlokErrorCategory::Cancelled => ProtoErrorCategory::Cancelled,
+        BlokErrorCategory::Internal => ProtoErrorCategory::Internal,
+        BlokErrorCategory::Protocol => ProtoErrorCategory::Protocol,
+        BlokErrorCategory::Data => ProtoErrorCategory::Data,
+    }
+}
+
+fn severity_to_proto(s: BlokErrorSeverity) -> ProtoErrorSeverity {
+    match s {
+        BlokErrorSeverity::Info => ProtoErrorSeverity::Info,
+        BlokErrorSeverity::Warn => ProtoErrorSeverity::Warn,
+        BlokErrorSeverity::Error => ProtoErrorSeverity::Error,
+        BlokErrorSeverity::Fatal => ProtoErrorSeverity::Fatal,
+    }
+}
+
+fn prost_timestamp_from_chrono(at: &chrono::DateTime<chrono::Utc>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: at.timestamp(),
+        nanos: at.timestamp_subsec_nanos() as i32,
+    }
+}
+
+fn parse_timestamp(text: &str) -> Option<prost_types::Timestamp> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|dt| prost_types::Timestamp {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+        })
+}
+
+fn encode_optional_json_bytes(value: Option<&serde_json::Value>) -> Vec<u8> {
+    match value {
+        Some(v) if !v.is_null() => encode_json_bytes(v),
+        _ => Vec::new(),
     }
 }
 
