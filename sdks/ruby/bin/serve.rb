@@ -72,10 +72,16 @@ when Blok::Config::ServerConfig::Transport::HTTP
   start_http(registry, config)
 when Blok::Config::ServerConfig::Transport::GRPC
   grpc_server = start_grpc(registry, config, blocking: false)
-  trap("INT")  { grpc_server.stop; exit 0 }
-  trap("TERM") { grpc_server.stop; exit 0 }
-  # Block the main thread until signal.
-  sleep
+  # Hand the stop signal off the trap context to the main thread.
+  # `GrpcServer#stop` calls `RpcServer#stop` which acquires a Mutex,
+  # and `Mutex#synchronize` raises `ThreadError: can't be called from
+  # trap context` under Ruby 3.x. `Queue#<<` is signal-safe in MRI.
+  stop_queue = Queue.new
+  trap("INT")  { stop_queue << "INT" }
+  trap("TERM") { stop_queue << "TERM" }
+  stop_queue.pop
+  grpc_server.stop
+  exit 0
 when Blok::Config::ServerConfig::Transport::BOTH
   grpc_server = start_grpc(registry, config, blocking: false)
   at_exit { grpc_server.stop }

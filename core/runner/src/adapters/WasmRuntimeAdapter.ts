@@ -31,6 +31,7 @@ interface CachedModule {
  */
 export class WasmRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "wasm" as const;
+	public readonly transport = "module" as const;
 
 	private moduleCache = new Map<string, CachedModule>();
 	private maxCacheSize: number;

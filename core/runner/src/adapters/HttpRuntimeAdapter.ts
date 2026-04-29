@@ -32,6 +32,7 @@ export interface HttpRuntimeAdapterOptions {
  */
 export class HttpRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind: RuntimeKind;
+	public readonly transport = "http" as const;
 	private baseUrl: string;
 	private timeoutMs: number;
 

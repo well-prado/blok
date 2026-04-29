@@ -128,3 +128,57 @@ describe("RunnerSteps populates ctx._stepInfo", () => {
 		expect(active.captured).toEqual({ name: "active", index: 1, total: 2, depth: 0 });
 	});
 });
+
+describe("RunnerSteps step-prefix log includes transport tag for runtime nodes", () => {
+	class TransportNode extends CaptureStepInfoNode {
+		public readonly transport: string;
+		constructor(name: string, transport: string) {
+			super();
+			this.name = name;
+			this.node = name;
+			this.type = `runtime.${name}`;
+			this.active = true;
+			this.transport = transport;
+		}
+	}
+
+	it("includes the adapter transport in the step prefix when present", async () => {
+		const messages: string[] = [];
+		const ctx = makeCtx({
+			logger: {
+				log: (msg: string) => messages.push(msg),
+				error: () => {},
+			} as unknown as Context["logger"],
+		});
+		const node = new TransportNode("python3", "grpc");
+		const runner = new Runner([node]);
+
+		await runner.run(ctx);
+
+		const startedLine = messages.find((m) => m.includes("→ started"));
+		expect(startedLine).toBeDefined();
+		expect(startedLine).toContain("(runtime.python3, grpc)");
+	});
+
+	it("omits the transport tag when the step doesn't expose one (module/local nodes)", async () => {
+		const messages: string[] = [];
+		const ctx = makeCtx({
+			logger: {
+				log: (msg: string) => messages.push(msg),
+				error: () => {},
+			} as unknown as Context["logger"],
+		});
+		// Plain CaptureStepInfoNode has no `transport` field — represents a
+		// module/local TS node going through NodeJsRuntimeAdapter without
+		// the wrapper.
+		const node = makeNode("module-step");
+		const runner = new Runner([node]);
+
+		await runner.run(ctx);
+
+		const startedLine = messages.find((m) => m.includes("→ started"));
+		expect(startedLine).toBeDefined();
+		expect(startedLine).toContain("(module)");
+		expect(startedLine).not.toMatch(/,\s*(grpc|http|module)\)/);
+	});
+});

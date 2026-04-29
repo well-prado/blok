@@ -18,11 +18,20 @@ export class RuntimeAdapterNode extends RunnerNode {
 	private targetNode: RunnerNode;
 	private streamLogs: boolean;
 
+	/**
+	 * Wire transport this node uses (`http` | `grpc` | `module`). Surfaced
+	 * in the step-prefix log by `RunnerSteps` so operators can tell at a
+	 * glance which path a runtime node took during the migration. Read-only;
+	 * mirrors the underlying adapter's `transport` field.
+	 */
+	public readonly transport: RuntimeAdapter["transport"];
+
 	constructor(adapter: RuntimeAdapter, targetNode: RunnerNode, opts: { streamLogs?: boolean } = {}) {
 		super();
 		this.adapter = adapter;
 		this.targetNode = targetNode;
 		this.streamLogs = opts.streamLogs === true;
+		this.transport = adapter.transport;
 		// Copy properties from target node
 		this.node = targetNode.node;
 		this.name = targetNode.name;
@@ -52,6 +61,10 @@ export class RuntimeAdapterNode extends RunnerNode {
 			: await this.adapter.execute(this.targetNode, ctx);
 
 		// --- Trace: capture runtime metrics ---
+		// Includes the gRPC wire bytes (request_bytes / response_bytes) when
+		// the adapter populated them — closes BLOK_FRAMEWORK_FIXES.md #7.6
+		// for the gRPC transport. HTTP adapter has them undefined, so the
+		// fields stay absent on HTTP-only deployments.
 		if (tracker && traceNodeId && result.metrics) {
 			const nodeRun = tracker.getNodeRun(traceNodeId);
 			if (nodeRun) {
@@ -59,6 +72,8 @@ export class RuntimeAdapterNode extends RunnerNode {
 					duration_ms: result.metrics.duration_ms,
 					cpu_ms: result.metrics.cpu_ms,
 					memory_bytes: result.metrics.memory_bytes,
+					request_bytes: result.metrics.request_bytes,
+					response_bytes: result.metrics.response_bytes,
 				};
 				nodeRun.runtimeKind = this.adapter.kind;
 			}

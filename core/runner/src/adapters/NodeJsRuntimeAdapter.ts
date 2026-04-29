@@ -13,6 +13,7 @@ import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
  */
 export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "nodejs";
+	public readonly transport = "module" as const;
 
 	/**
 	 * Execute a Node.js node in-process

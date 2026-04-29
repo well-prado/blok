@@ -51,6 +51,10 @@ export interface NodeRun {
 		duration_ms?: number;
 		cpu_ms?: number;
 		memory_bytes?: number;
+		/** Approximate or exact bytes sent on the wire to the SDK. */
+		request_bytes?: number;
+		/** Bytes received from the SDK in the response. */
+		response_bytes?: number;
 	};
 }
 

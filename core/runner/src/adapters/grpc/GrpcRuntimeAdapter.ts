@@ -1,6 +1,7 @@
 import { BlokError, type Context, ErrorCategory, ErrorSeverity } from "@blokjs/shared";
 import type { ClientReadableStream, ServiceError } from "@grpc/grpc-js";
 import { type Client, Metadata } from "@grpc/grpc-js";
+import { SpanStatusCode, type Tracer, trace } from "@opentelemetry/api";
 import type RunnerNode from "../../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../RuntimeAdapter";
 import { GrpcClientPool } from "./GrpcClientPool";
@@ -45,10 +46,12 @@ import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "./types";
  */
 export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	readonly kind: RuntimeKind;
+	readonly transport = "grpc" as const;
 	private readonly config: GrpcAdapterConfig;
 	private readonly pool: GrpcClientPool;
 	private readonly ownsPool: boolean;
 	private readonly healthChecker: GrpcHealthChecker | null;
+	private readonly tracer: Tracer;
 
 	constructor(config: GrpcAdapterConfig, pool?: GrpcClientPool) {
 		this.kind = config.kind;
@@ -56,6 +59,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		this.pool = pool ?? new GrpcClientPool();
 		this.ownsPool = pool === undefined;
 		this.healthChecker = this.buildHealthChecker();
+		// `@opentelemetry/api` returns a no-op tracer when no OTEL SDK is
+		// registered in the host process, so this is zero-cost when OTEL
+		// isn't in use. When the host has OTEL set up, RPC spans nest
+		// under whatever span is active when `execute()` is called
+		// (typically the workflow span from `TriggerBase`).
+		this.tracer = trace.getTracer("@blokjs/runner.grpc", "1.0.0");
 	}
 
 	/**
@@ -119,12 +128,34 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 
 		const client = this.pool.get(this.config);
 
+		// Span attributes follow the OTEL gRPC semantic conventions so traces
+		// from this adapter compose with general-purpose tooling out of the
+		// box. The span is a child of whatever is active in `context.active()`
+		// when `execute()` is called.
+		const span = this.tracer.startSpan(`grpc.${this.kind}.Execute`, {
+			attributes: {
+				"rpc.system": "grpc",
+				"rpc.service": "blok.runtime.v1.NodeRuntime",
+				"rpc.method": "Execute",
+				"net.peer.name": this.config.host,
+				"net.peer.port": this.config.port,
+				"blok.runtime.kind": this.kind,
+				"blok.node.name": node.name,
+				"blok.request.bytes": requestBytes,
+			},
+		});
+
 		try {
 			const response = await this.unaryExecute(client, request, deadlineMs);
 			const decoded = decodeExecuteResponse(response);
-			return this.toExecutionResult(decoded, requestBytes, performance.now() - startTime);
+			const result = this.toExecutionResult(decoded, requestBytes, performance.now() - startTime);
+			span.setAttribute("blok.response.bytes", result.metrics?.response_bytes ?? 0);
+			span.setStatus({ code: result.success ? SpanStatusCode.OK : SpanStatusCode.ERROR });
+			return result;
 		} catch (err) {
 			const blokError = toBlokError(err, this.errorContext(node));
+			span.recordException(blokError);
+			span.setStatus({ code: SpanStatusCode.ERROR, message: blokError.message });
 			return {
 				success: false,
 				data: null,
@@ -134,6 +165,8 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 					request_bytes: requestBytes,
 				} as ExecutionResult["metrics"],
 			};
+		} finally {
+			span.end();
 		}
 	}
 
@@ -204,6 +237,23 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		const client = this.pool.get(this.config);
 		const call = this.openExecuteStream(client, request, deadlineMs);
 
+		// Streaming span lives for the lifetime of the call; ended in the
+		// same `settle()` path that resolves the result promise so timing
+		// captures the full server-streaming arc rather than just the first
+		// frame.
+		const span = this.tracer.startSpan(`grpc.${this.kind}.ExecuteStream`, {
+			attributes: {
+				"rpc.system": "grpc",
+				"rpc.service": "blok.runtime.v1.NodeRuntime",
+				"rpc.method": "ExecuteStream",
+				"net.peer.name": this.config.host,
+				"net.peer.port": this.config.port,
+				"blok.runtime.kind": this.kind,
+				"blok.node.name": node.name,
+				"blok.request.bytes": requestBytes,
+			},
+		});
+
 		let finalDecoded: DecodedExecuteResponse | null = null;
 		const errorContext = this.errorContext(node);
 		const failureResult = (err: unknown): ExecutionResult => {
@@ -228,6 +278,17 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			const settle = (value: ExecutionResult): void => {
 				if (settled) return;
 				settled = true;
+				if (value.success) {
+					span.setAttribute("blok.response.bytes", value.metrics?.response_bytes ?? 0);
+					span.setStatus({ code: SpanStatusCode.OK });
+				} else {
+					if (value.errors instanceof BlokError) span.recordException(value.errors);
+					span.setStatus({
+						code: SpanStatusCode.ERROR,
+						message: value.errors instanceof Error ? value.errors.message : "stream failure",
+					});
+				}
+				span.end();
 				resolve(value);
 			};
 

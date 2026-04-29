@@ -68,6 +68,7 @@ interface FakeStreamingAdapter extends RuntimeAdapter {
 function makeStreamingAdapter(events: DecodedExecuteEvent[], result: ExecutionResult): FakeStreamingAdapter {
 	return {
 		kind: "python3",
+		transport: "grpc",
 		execute: vi.fn().mockResolvedValue(result),
 		checkHealth: vi.fn().mockResolvedValue(true),
 		executeStream: vi.fn(() => {
@@ -84,12 +85,23 @@ function makeStreamingAdapter(events: DecodedExecuteEvent[], result: ExecutionRe
 function makeUnaryOnlyAdapter(result: ExecutionResult): RuntimeAdapter {
 	return {
 		kind: "python3",
+		transport: "http",
 		execute: vi.fn().mockResolvedValue(result),
 		checkHealth: vi.fn().mockResolvedValue(true),
 	};
 }
 
 describe("RuntimeAdapterNode", () => {
+	describe("transport metadata", () => {
+		it("mirrors the underlying adapter's transport tag", () => {
+			const grpcNode = new RuntimeAdapterNode(makeStreamingAdapter([], successResult), makeTarget());
+			expect(grpcNode.transport).toBe("grpc");
+
+			const httpNode = new RuntimeAdapterNode(makeUnaryOnlyAdapter(successResult), makeTarget());
+			expect(httpNode.transport).toBe("http");
+		});
+	});
+
 	describe("default unary path", () => {
 		it("calls adapter.execute when streamLogs is not enabled", async () => {
 			const adapter = makeStreamingAdapter([], successResult);
@@ -222,6 +234,44 @@ describe("RuntimeAdapterNode", () => {
 			await node.run(makeCtx(traceRunId, traceNodeId));
 
 			expect((tracker.addLog as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+		});
+
+		it("captures request_bytes/response_bytes from result.metrics into nodeRun.metrics", async () => {
+			const stubNodeRun = {
+				id: traceNodeId,
+				runId: traceRunId,
+				nodeName: "step-x",
+				nodeType: "runtime.python3",
+				status: "running",
+				startedAt: Date.now(),
+			} as unknown as ReturnType<RunTracker["getNodeRun"]> & { metrics?: Record<string, unknown> };
+			(tracker.getNodeRun as unknown as ReturnType<typeof vi.fn>).mockReturnValue(stubNodeRun);
+
+			const adapter = makeStreamingAdapter([], {
+				success: true,
+				data: { ok: true },
+				errors: null,
+				logs: [],
+				metrics: {
+					duration_ms: 12,
+					cpu_ms: 4,
+					memory_bytes: 1024,
+					request_bytes: 256,
+					response_bytes: 512,
+				},
+				vars: {},
+			});
+			const node = new RuntimeAdapterNode(adapter, makeTarget(), { streamLogs: true });
+
+			await node.run(makeCtx(traceRunId, traceNodeId));
+
+			expect(stubNodeRun.metrics).toEqual({
+				duration_ms: 12,
+				cpu_ms: 4,
+				memory_bytes: 1024,
+				request_bytes: 256,
+				response_bytes: 512,
+			});
 		});
 	});
 });

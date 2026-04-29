@@ -46,7 +46,14 @@ export default abstract class RunnerSteps {
 					let nodeRunId: string | undefined;
 					const stepAny = step as unknown as Record<string, unknown>;
 					const stepType = (stepAny.type as string) || "unknown";
-					const stepPrefix = `[step ${i + 1}/${steps.length}] ${step.name} (${stepType})`;
+					// Runtime nodes (RuntimeAdapterNode) expose `transport` so
+					// operators can tell at a glance whether the step ran via
+					// HTTP, gRPC, or in-process module nodes. Module/local
+					// nodes don't carry the field — prefix stays one-tag.
+					const transport = stepAny.transport as string | undefined;
+					const stepPrefix = transport
+						? `[step ${i + 1}/${steps.length}] ${step.name} (${stepType}, ${transport})`
+						: `[step ${i + 1}/${steps.length}] ${step.name} (${stepType})`;
 
 					// --- Step metadata for runtime adapters ---
 					// Populate `ctx._stepInfo` so adapters (e.g. GrpcRuntimeAdapter)
