@@ -130,7 +130,10 @@ def test_execute_returns_structured_error_for_missing_node(client):
 
     assert response.success is False
     err = response.error
-    assert err.code == "PYTHON_NODE_ERROR"
+    # Per master plan §17.7, the missing-node error path goes through
+    # BlokError.from_unknown which produces INTERNAL/UNCAUGHT_ERROR by
+    # default. The message still carries "not found" detail.
+    assert err.code == "UNCAUGHT_ERROR"
     assert err.category == pb.ErrorCategory.INTERNAL
     assert err.runtime_kind == "runtime.python3"
     assert err.sdk == "blok-python3"

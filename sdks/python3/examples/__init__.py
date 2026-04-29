@@ -2,11 +2,13 @@ from examples.hello_world_node import HelloWorldNode
 from examples.chain_test_node import ChainTestNode
 from examples.api_call_node import ApiCallNode
 from examples.transform_data_node import TransformDataNode
+from examples.blok_error_demo_node import BlokErrorDemoNode
 
 HELLO_WORLD_NODE_NAME = "hello-world"
 API_CALL_NODE_NAME = "api_call"
 TRANSFORM_DATA_NODE_NAME = "transform-data"
 CHAIN_TEST_NODE_NAME = "chain-test"
+BLOK_ERROR_DEMO_NODE_NAME = "blok-error-demo"
 
 
 def register_all(registry):
@@ -15,3 +17,4 @@ def register_all(registry):
     registry.register(API_CALL_NODE_NAME, ApiCallNode())
     registry.register(TRANSFORM_DATA_NODE_NAME, TransformDataNode())
     registry.register(CHAIN_TEST_NODE_NAME, ChainTestNode())
+    registry.register(BLOK_ERROR_DEMO_NODE_NAME, BlokErrorDemoNode())

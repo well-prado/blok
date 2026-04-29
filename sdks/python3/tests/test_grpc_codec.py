@@ -204,7 +204,10 @@ class TestEncodeExecuteResponse:
         )
         assert proto.success is False
         err = proto.error
-        assert err.code == "PYTHON_NODE_ERROR"
+        # Per master plan §17.7, unstructured errors auto-categorize as
+        # INTERNAL with code=UNCAUGHT_ERROR (the original payload is
+        # preserved in details_json).
+        assert err.code == "UNCAUGHT_ERROR"
         assert err.category == pb.ErrorCategory.INTERNAL
         assert err.severity == pb.ErrorSeverity.ERROR
         assert err.node == "store-tutorial"

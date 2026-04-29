@@ -34,6 +34,13 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 import grpc
 from google.protobuf import timestamp_pb2
 
+from blok.errors.blok_error import (
+    BlokError,
+    DEFAULT_RUNTIME_KIND,
+    DEFAULT_SDK_NAME,
+    ErrorCategory,
+    ErrorSeverity,
+)
 from blok.node.node_registry import NodeRegistry
 from blok.types.context import Context, Request, Response
 from blok.types.execution_request import ExecutionRequest, NodeConfig
@@ -336,47 +343,172 @@ def _internal_error_to_proto(
     node_name: str,
     sdk_version: str,
 ) -> pb.NodeError:
-    """Build a proto ``NodeError`` from the SDK's loose JSON error shape.
+    """Build a proto ``NodeError`` from whatever ``ExecutionResult.errors`` carries.
 
-    The SDK's current ``ExecutionResult.errors`` is an arbitrary value (often a
-    ``{"message": "..."}`` dict). Until SDK code is migrated to produce
-    structured errors natively, we synthesize one with category=INTERNAL and
-    the original payload preserved in ``details_json``.
+    Two paths:
+
+    * **Structured (preferred)** — ``err`` is a :class:`BlokError`. All 19
+      fields serialize losslessly via :func:`_blok_error_to_proto`. Auto-fills
+      ``node``/``sdk``/``sdk_version``/``runtime_kind`` if the BlokError didn't
+      set them itself.
+    * **Loose** — ``err`` is a dict / string / None / Exception. Wrapped via
+      :meth:`BlokError.from_unknown` (always produces ``category=INTERNAL``
+      with the original payload preserved in ``details_json``) and then
+      serialized via the structured path.
+
+    Both paths produce the same proto shape, so the runner's gRPC codec
+    consumes them identically.
     """
-    if isinstance(err, dict):
-        message = str(err.get("message") or "node error")
-        details_json = _encode_json_bytes(err)
-    elif isinstance(err, str):
-        message = err
-        details_json = _encode_json_bytes({"message": err})
-    elif err is None:
-        message = "node error"
-        details_json = b""
-    else:
-        message = str(err)
-        details_json = _encode_json_bytes({"message": message})
+    if isinstance(err, BlokError):
+        return _blok_error_to_proto(
+            _enrich(err, node_name=node_name, sdk_version=sdk_version),
+        )
+
+    wrapped = BlokError.from_unknown(
+        err,
+        node=node_name,
+        sdk=DEFAULT_SDK_NAME,
+        sdk_version=sdk_version,
+        runtime_kind=DEFAULT_RUNTIME_KIND,
+    )
+    return _blok_error_to_proto(wrapped)
+
+
+def _enrich(err: BlokError, *, node_name: str, sdk_version: str) -> BlokError:
+    """Fill in any missing auto-enrichment fields on a handler-thrown BlokError."""
+    if not err.node:
+        err.node = node_name
+    if not err.sdk:
+        err.sdk = DEFAULT_SDK_NAME
+    if not err.sdk_version:
+        err.sdk_version = sdk_version
+    if not err.runtime_kind:
+        err.runtime_kind = DEFAULT_RUNTIME_KIND
+    return err
+
+
+def _blok_error_to_proto(err: BlokError) -> pb.NodeError:
+    """Serialize a fully-populated :class:`BlokError` into the proto wire format.
+
+    The cause chain is serialized as a list of ``pb.NodeError`` messages; each
+    element is the chain link's payload with its own ``causes`` list emptied
+    (the cause chain has already been flattened by ``BlokError`` at construction
+    time, so nesting at the wire layer would double-count).
+    """
+    at_ts = timestamp_pb2.Timestamp()
+    at_ts.FromDatetime(err.at)
 
     return pb.NodeError(
-        code="PYTHON_NODE_ERROR",
-        category=pb.ErrorCategory.INTERNAL,
-        severity=pb.ErrorSeverity.ERROR,
-        node=node_name,
-        sdk="blok-python3",
-        sdk_version=sdk_version,
-        runtime_kind="runtime.python3",
-        at=None,
-        message=message,
-        description="",
-        remediation="",
-        doc_url="",
-        causes=[],
-        stack="",
-        context_snapshot_json=b"",
-        http_status=500,
-        retryable=False,
-        retry_after_ms=0,
-        details_json=details_json,
+        code=err.code,
+        category=_PROTO_CATEGORY[err.category],
+        severity=_PROTO_SEVERITY[err.severity],
+        node=err.node,
+        sdk=err.sdk,
+        sdk_version=err.sdk_version,
+        runtime_kind=err.runtime_kind,
+        at=at_ts,
+        message=err.message,
+        description=err.description,
+        remediation=err.remediation,
+        doc_url=err.doc_url,
+        causes=[_cause_dict_to_proto(c) for c in err.causes],
+        stack=err.stack,
+        context_snapshot_json=_encode_json_bytes(err.context_snapshot) if err.context_snapshot is not None else b"",
+        http_status=err.http_status,
+        retryable=err.retryable,
+        retry_after_ms=err.retry_after_ms,
+        details_json=_encode_json_bytes(err.details) if err.details is not None else b"",
     )
+
+
+def _cause_dict_to_proto(cause: Dict[str, Any]) -> pb.NodeError:
+    """Convert a flattened cause-chain dict (from ``BlokError.causes``) into proto.
+
+    Each element is one link from a `BlokError` cause chain — already a flat
+    list, so we don't recurse into the link's own causes.
+    """
+    at_str = cause.get("at")
+    at_ts = timestamp_pb2.Timestamp()
+    if isinstance(at_str, str):
+        try:
+            at_ts.FromJsonString(at_str)
+        except Exception:  # pragma: no cover — defensive
+            at_ts.GetCurrentTime()
+    else:
+        at_ts.GetCurrentTime()
+
+    category = _parse_category_name(cause.get("category"))
+    severity = _parse_severity_name(cause.get("severity"))
+    return pb.NodeError(
+        code=str(cause.get("code", "")),
+        category=_PROTO_CATEGORY[category],
+        severity=_PROTO_SEVERITY[severity],
+        node=str(cause.get("node", "")),
+        sdk=str(cause.get("sdk", "")),
+        sdk_version=str(cause.get("sdk_version", "")),
+        runtime_kind=str(cause.get("runtime_kind", "")),
+        at=at_ts,
+        message=str(cause.get("message", "")),
+        description=str(cause.get("description", "")),
+        remediation=str(cause.get("remediation", "")),
+        doc_url=str(cause.get("doc_url", "")),
+        causes=[],
+        stack=str(cause.get("stack", "")),
+        context_snapshot_json=_encode_json_bytes(cause.get("context_snapshot"))
+        if cause.get("context_snapshot") is not None
+        else b"",
+        http_status=int(cause.get("http_status", 500)),
+        retryable=bool(cause.get("retryable", False)),
+        retry_after_ms=int(cause.get("retry_after_ms", 0)),
+        details_json=_encode_json_bytes(cause.get("details")) if cause.get("details") is not None else b"",
+    )
+
+
+def _parse_category_name(value: Any) -> ErrorCategory:
+    if isinstance(value, ErrorCategory):
+        return value
+    if isinstance(value, str):
+        try:
+            return ErrorCategory(value)
+        except ValueError:
+            pass
+    return ErrorCategory.INTERNAL
+
+
+def _parse_severity_name(value: Any) -> ErrorSeverity:
+    if isinstance(value, ErrorSeverity):
+        return value
+    if isinstance(value, str):
+        try:
+            return ErrorSeverity(value)
+        except ValueError:
+            pass
+    return ErrorSeverity.ERROR
+
+
+# Map the SDK-side ErrorCategory enum (string values) to the proto-generated
+# integer enum. Single source of truth; failures fall back to INTERNAL.
+_PROTO_CATEGORY: Dict[ErrorCategory, int] = {
+    ErrorCategory.VALIDATION: pb.ErrorCategory.VALIDATION,
+    ErrorCategory.CONFIGURATION: pb.ErrorCategory.CONFIGURATION,
+    ErrorCategory.DEPENDENCY: pb.ErrorCategory.DEPENDENCY,
+    ErrorCategory.TIMEOUT: pb.ErrorCategory.TIMEOUT,
+    ErrorCategory.PERMISSION: pb.ErrorCategory.PERMISSION,
+    ErrorCategory.RATE_LIMIT: pb.ErrorCategory.RATE_LIMIT,
+    ErrorCategory.NOT_FOUND: pb.ErrorCategory.NOT_FOUND,
+    ErrorCategory.CONFLICT: pb.ErrorCategory.CONFLICT,
+    ErrorCategory.CANCELLED: pb.ErrorCategory.CANCELLED,
+    ErrorCategory.INTERNAL: pb.ErrorCategory.INTERNAL,
+    ErrorCategory.PROTOCOL: pb.ErrorCategory.PROTOCOL,
+    ErrorCategory.DATA: pb.ErrorCategory.DATA,
+}
+
+_PROTO_SEVERITY: Dict[ErrorSeverity, int] = {
+    ErrorSeverity.INFO: pb.ErrorSeverity.INFO,
+    ErrorSeverity.WARN: pb.ErrorSeverity.WARN,
+    ErrorSeverity.ERROR: pb.ErrorSeverity.ERROR,
+    ErrorSeverity.FATAL: pb.ErrorSeverity.FATAL,
+}
 
 
 def _decode_json_object(blob: bytes, field: str) -> Dict[str, Any]:
