@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	_resetHttpDeprecationCache,
 	isLoopbackHost,
 	isStreamLogsEnabled,
 	isStrictTlsEnabled,
@@ -57,6 +58,52 @@ describe("resolveTransportForKind", () => {
 			const env = { [`RUNTIME_${kind.toUpperCase()}_TRANSPORT`]: "grpc" };
 			expect(resolveTransportForKind(kind, env)).toBe("grpc");
 		}
+	});
+});
+
+describe("resolveTransportForKind — HTTP deprecation warning", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		_resetHttpDeprecationCache();
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+	});
+
+	it("warns once when RUNTIME_TRANSPORT=http resolves", () => {
+		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" })).toBe("http");
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+		expect(warnSpy.mock.calls[0][0]).toContain("RUNTIME_TRANSPORT=http is deprecated");
+		expect(warnSpy.mock.calls[0][0]).toContain("v0.4.0");
+	});
+
+	it("warns once when RUNTIME_<KIND>_TRANSPORT=http resolves", () => {
+		expect(resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "http" })).toBe("http");
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+		expect(warnSpy.mock.calls[0][0]).toContain("RUNTIME_GO_TRANSPORT=http");
+	});
+
+	it("dedupes warnings per env var key across multiple resolves", () => {
+		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" });
+		resolveTransportForKind("go", { RUNTIME_TRANSPORT: "http" });
+		resolveTransportForKind("rust", { RUNTIME_TRANSPORT: "http" });
+		expect(warnSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("warns separately for the global override and a per-kind override", () => {
+		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" });
+		resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "http" });
+		expect(warnSpy).toHaveBeenCalledTimes(2);
+	});
+
+	it("does NOT warn when transport resolves to grpc (default or explicit)", () => {
+		resolveTransportForKind("python3", {});
+		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "grpc" });
+		resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "grpc" });
+		expect(warnSpy).not.toHaveBeenCalled();
 	});
 });
 

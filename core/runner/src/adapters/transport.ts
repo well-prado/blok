@@ -38,17 +38,46 @@ export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEn
 	const perKindKey = `RUNTIME_${kind.toUpperCase()}_TRANSPORT`;
 	const perKind = env[perKindKey];
 	if (perKind === "grpc" || perKind === "http") {
+		if (perKind === "http") warnDeprecatedHttpTransport(perKindKey);
 		return perKind;
 	}
 
 	const global = env.RUNTIME_TRANSPORT;
 	if (global === "grpc" || global === "http") {
+		if (global === "http") warnDeprecatedHttpTransport("RUNTIME_TRANSPORT");
 		return global;
 	}
 
 	// Phase 6 default: gRPC. The flip from HTTP landed once the parity
 	// matrix had been green for the observation window.
 	return "grpc";
+}
+
+/**
+ * Set of env-var names that have already triggered the deprecation warning
+ * in this process. Prevents log spam when many runtime kinds resolve through
+ * the same global override on each request.
+ *
+ * Exported as a reset hook for tests — production code never touches it.
+ */
+const _httpDeprecationWarned = new Set<string>();
+
+function warnDeprecatedHttpTransport(envKey: string): void {
+	if (_httpDeprecationWarned.has(envKey)) return;
+	_httpDeprecationWarned.add(envKey);
+	console.warn(
+		`[blok] ${envKey}=http is deprecated and will be removed in v0.4.0. Migrate to gRPC by dropping the env var (gRPC is the default since Phase 6) and ensuring your SDK process boots with BLOK_TRANSPORT=grpc.`,
+	);
+}
+
+/**
+ * Test-only — reset the per-process HTTP-transport deprecation cache so a
+ * test that flips `RUNTIME_TRANSPORT=http` can re-assert the warning fires.
+ *
+ * @internal
+ */
+export function _resetHttpDeprecationCache(): void {
+	_httpDeprecationWarned.clear();
 }
 
 /**
