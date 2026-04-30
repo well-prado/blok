@@ -13,11 +13,37 @@ type SpinnerHandler = {
 };
 
 export interface RuntimeConfig {
+	/**
+	 * HTTP listener port. Kept for back-compat — the SDK still binds it for
+	 * users who flip `--with-http-fallback` or `RUNTIME_TRANSPORT=http`. The
+	 * CLI's gRPC-only spawn does not health-probe this port.
+	 */
 	port: number;
+	/**
+	 * gRPC listener port. The CLI spawns the SDK with `BLOK_TRANSPORT=grpc`
+	 * and `GRPC_PORT=<grpcPort>`, then waits on a TCP-connect probe to this
+	 * port before starting triggers.
+	 *
+	 * Optional in the type for back-compat reading of pre-Phase-7
+	 * `.blok/config.json`. New writes always populate it.
+	 */
+	grpcPort?: number;
 	startCmd: string;
+	/**
+	 * Optional gRPC-only boot command — used when the SDK's gRPC server is
+	 * a different binary entirely (PHP uses RoadRunner). When unset, the
+	 * CLI uses `startCmd` with `BLOK_TRANSPORT=grpc` env override.
+	 */
+	grpcStartCmd?: string;
 	cwd: string;
 	kind: string;
 	label: string;
+	/**
+	 * Transport the CLI uses when spawning this runtime. Defaults to
+	 * `"grpc"` for new projects (Phase 7); `"http"` is honored on existing
+	 * projects but emits a deprecation warning at boot.
+	 */
+	transport?: "grpc" | "http";
 }
 
 export interface TriggerConfig {
@@ -103,10 +129,13 @@ export async function setupRuntime(
 
 	return {
 		port: runtime.defaultPort,
+		grpcPort: runtime.defaultGrpcPort,
 		startCmd: startCmdOverride || runtime.startCmd,
+		grpcStartCmd: runtime.grpcStartCmd,
 		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,
 		label: runtime.label,
+		transport: "grpc",
 	};
 }
 
@@ -284,6 +313,10 @@ export function readProjectConfig(projectDir: string): ProjectConfig | null {
 
 /**
  * Generate environment variable entries for selected runtimes.
+ *
+ * Emits BOTH `RUNTIME_<K>_PORT` (HTTP, kept for back-compat) and
+ * `RUNTIME_<K>_GRPC_PORT` (gRPC, what the runner actually probes when
+ * `BLOK_TRANSPORT=grpc`). The trigger-http reads both at boot.
  */
 export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string {
 	if (runtimeConfigs.length === 0) return "";
@@ -294,23 +327,36 @@ export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string 
 		const envKey = rc.kind === "csharp" ? "CSHARP" : rc.kind.toUpperCase();
 		lines.push(`RUNTIME_${envKey}_HOST=localhost`);
 		lines.push(`RUNTIME_${envKey}_PORT=${rc.port}`);
+		if (rc.grpcPort !== undefined) {
+			lines.push(`RUNTIME_${envKey}_GRPC_PORT=${rc.grpcPort}`);
+		}
 	}
+
+	// Default transport — picked up by core/runner/src/adapters/transport.ts
+	// via `RUNTIME_TRANSPORT`. Leaving this unset would still default to
+	// grpc (Phase 6), but writing it explicitly makes the intent visible
+	// in the generated `.env` so users grepping `BLOK_TRANSPORT` find it.
+	lines.push("BLOK_TRANSPORT=grpc");
 
 	return lines.join("\n");
 }
 
 /**
- * Generate supervisord config entries for selected runtimes.
+ * Generate supervisord config entries for selected runtimes. Each program
+ * boots with `BLOK_TRANSPORT=grpc` and a `GRPC_PORT` matching the
+ * runtime's gRPC listener so the trigger and CLI can reach it.
  */
 export function generateSupervisordConfig(runtimeConfigs: RuntimeConfig[]): string {
 	let config = "";
 
 	for (const rc of runtimeConfigs) {
+		const cmd = rc.grpcStartCmd ?? rc.startCmd;
+		const grpcPortLine = rc.grpcPort !== undefined ? `,GRPC_PORT="${rc.grpcPort}"` : "";
 		config += `
 [program:${rc.kind}_runtime]
-command=${rc.startCmd}
+command=${cmd}
 directory=/app/${rc.cwd}
-environment=PORT="${rc.port}",HOST="0.0.0.0"
+environment=PORT="${rc.port}"${grpcPortLine},HOST="0.0.0.0",BLOK_TRANSPORT="grpc"
 autostart=true
 autorestart=true
 stderr_logfile=/var/log/${rc.kind}.err.log

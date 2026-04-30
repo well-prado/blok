@@ -9,7 +9,20 @@ export interface RuntimeInfo {
 	available: boolean;
 	version?: string;
 	installHint: string;
+	/**
+	 * Default HTTP port. Kept for back-compat with `.blok/config.json` files
+	 * scaffolded before the gRPC-only flip; the CLI no longer health-probes
+	 * this port. The trigger and SDK still listen on it for users who opt
+	 * into HTTP via `--with-http-fallback` or `RUNTIME_TRANSPORT=http`.
+	 */
 	defaultPort: number;
+	/**
+	 * Default gRPC port. Equal to `defaultPort + 1000` by convention
+	 * (mirrors `scripts/dev-full.ts` mapping). The CLI's gRPC-only spawn
+	 * sets `GRPC_PORT` and `BLOK_TRANSPORT=grpc` from this and probes here
+	 * for readiness.
+	 */
+	defaultGrpcPort: number;
 	/** Command(s) to check availability */
 	commands: string[];
 	/** Human-readable name of the required toolchain */
@@ -18,6 +31,13 @@ export interface RuntimeInfo {
 	installDeps: string;
 	/** Command to start the runtime server */
 	startCmd: string;
+	/**
+	 * Optional override for the gRPC-only boot command. If set, the CLI
+	 * runs this instead of `startCmd` with `BLOK_TRANSPORT=grpc` env. Used
+	 * for SDKs whose gRPC server is a different binary entirely (e.g. PHP
+	 * uses RoadRunner).
+	 */
+	grpcStartCmd?: string;
 	/** SDK source directory name inside sdks/ */
 	sdkDir: string;
 	/** Additional toolchain checks (e.g., maven for Java, composer for PHP) */
@@ -30,12 +50,33 @@ export interface RuntimeInfo {
 	};
 }
 
+/**
+ * Locate the RoadRunner binary. Returns the resolved path or null if
+ * neither the brew-default nor `$PATH` location holds an executable.
+ *
+ * Mirrors the helper in `scripts/dev-full.ts:147-157` so PHP detection
+ * stays in lock-step between `bun dev` (in-repo orchestrator) and
+ * `blokctl dev` (user-facing CLI).
+ */
+export function detectRr(): string | null {
+	for (const bin of ["/opt/homebrew/bin/rr", "rr"]) {
+		try {
+			child_process.execSync(`${bin} --version`, { stdio: "ignore" });
+			return bin;
+		} catch {
+			// keep trying
+		}
+	}
+	return null;
+}
+
 const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 	{
 		kind: "python3",
 		label: "Python 3",
 		installHint: "Install Python: https://python.org/downloads/",
 		defaultPort: 9007,
+		defaultGrpcPort: 10007,
 		commands: ["python3 --version"],
 		toolchain: "python3",
 		installDeps: "pip3 install -r requirements.txt",
@@ -47,6 +88,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Go",
 		installHint: "Install Go: https://go.dev/dl/",
 		defaultPort: 9001,
+		defaultGrpcPort: 10001,
 		commands: ["go version"],
 		toolchain: "go",
 		installDeps: "go mod download",
@@ -58,6 +100,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Rust",
 		installHint: "Install Rust: https://rustup.rs/",
 		defaultPort: 9002,
+		defaultGrpcPort: 10002,
 		commands: ["rustc --version"],
 		toolchain: "rustc + cargo",
 		installDeps: "cargo build --release",
@@ -69,6 +112,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Java",
 		installHint: "Install JDK 17+: https://adoptium.net/",
 		defaultPort: 9003,
+		defaultGrpcPort: 10003,
 		commands: [
 			"java --version",
 			"/opt/homebrew/opt/openjdk/bin/java --version",
@@ -89,6 +133,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "C# / .NET",
 		installHint: "Install .NET SDK: https://dotnet.microsoft.com/download",
 		defaultPort: 9004,
+		defaultGrpcPort: 10004,
 		commands: ["dotnet --version"],
 		toolchain: "dotnet",
 		installDeps: "dotnet restore",
@@ -98,12 +143,18 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 	{
 		kind: "php",
 		label: "PHP",
-		installHint: "Install PHP 8.2+: https://php.net/downloads",
+		installHint: "Install PHP 8.2+ + RoadRunner: https://php.net/downloads (rr: brew install roadrunner)",
 		defaultPort: 9005,
+		defaultGrpcPort: 10005,
 		commands: ["php --version"],
-		toolchain: "php + composer",
+		toolchain: "php + composer + rr",
 		installDeps: "composer install",
 		startCmd: "php bin/serve.php",
+		// PHP's gRPC server is RoadRunner, NOT the same binary as the HTTP
+		// boot. The CLI invokes this command verbatim; the rr binary path
+		// is resolved at spawn-time via `detectRr()` and swapped in if the
+		// literal `rr` token isn't on $PATH.
+		grpcStartCmd: "rr serve -c .rr.yaml --override grpc.listen=tcp://127.0.0.1:10005",
 		sdkDir: "php",
 		secondaryTool: {
 			name: "Composer",
@@ -116,6 +167,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		label: "Ruby",
 		installHint: "Install Ruby 3.2+: https://ruby-lang.org/en/downloads/",
 		defaultPort: 9006,
+		defaultGrpcPort: 10006,
 		commands: ["ruby --version", "/opt/homebrew/opt/ruby/bin/ruby --version"],
 		toolchain: "ruby + bundler",
 		installDeps: "bundle install",
