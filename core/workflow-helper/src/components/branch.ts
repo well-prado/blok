@@ -72,7 +72,6 @@ export function branch(opts: BranchOpts): V2BranchStep {
 		id: opts.id,
 		branch: {
 			when,
-			// biome-ignore lint/suspicious/noThenProperty: `then` is part of the user-facing branch DSL — `branch({ when, then, else })` mirrors the JSON shape exactly. Renaming would break the canonical authoring API.
 			then: thenSteps,
 			...(elseSteps ? { else: elseSteps } : {}),
 		},

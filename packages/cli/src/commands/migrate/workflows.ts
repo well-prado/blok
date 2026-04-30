@@ -230,7 +230,6 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 					id,
 					branch: {
 						when: typeof ifCond.condition === "string" ? ifCond.condition : "true",
-						// biome-ignore lint/suspicious/noThenProperty: `then` is part of the user-facing v2 branch DSL — `branch({ when, then, else })` mirrors the JSON shape exactly.
 						then: convertSteps(Array.isArray(ifCond.steps) ? (ifCond.steps as unknown[]) : [], {}),
 					},
 				};

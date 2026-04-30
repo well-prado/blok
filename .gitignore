@@ -211,3 +211,6 @@ pnpm-lock.yaml
 
 # Blok Studio local trace database
 .blok/
+
+# Migration backups (e.g. blokctl migrate workflows writes <name>.json.bak)
+*.bak

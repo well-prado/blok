@@ -251,7 +251,6 @@ export const V2BranchStepSchema: z.ZodType<{
 						"JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. " +
 							"$ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true').",
 					),
-				// biome-ignore lint/suspicious/noThenProperty: `then` is part of the user-facing branch DSL — `branch({ when, then, else })` mirrors the JSON shape exactly.
 				then: z.array(z.unknown()).describe("Steps to execute when `when` is truthy."),
 				else: z.array(z.unknown()).optional().describe("Steps to execute when `when` is falsy. Optional."),
 			})

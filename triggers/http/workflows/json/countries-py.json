@@ -1,23 +1,19 @@
 {
 	"name": "World Countries",
-	"description": "Workflow description",
 	"version": "1.0.0",
+	"description": "Workflow description",
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
+			"path": "/countries-py",
 			"accept": "application/json"
 		}
 	},
 	"steps": [
 		{
-			"name": "get-countries-api",
-			"node": "api_call",
-			"type": "runtime.python3"
-		}
-	],
-	"nodes": {
-		"get-countries-api": {
+			"id": "get-countries-api",
+			"use": "api_call",
+			"type": "runtime.python3",
 			"inputs": {
 				"url": "https://countriesnow.space/api/v0.1/countries/capital",
 				"method": "GET",
@@ -27,5 +23,5 @@
 				"responseType": "application/json"
 			}
 		}
-	}
+	]
 }

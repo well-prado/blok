@@ -1,14 +1,13 @@
 {
 	"name": "Empty",
-	"description": "Load test empty workflow",
 	"version": "1.0.0",
+	"description": "Load test empty workflow",
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
+			"path": "/empty",
 			"accept": "application/json"
 		}
 	},
-	"steps": [],
-	"nodes": {}
+	"steps": []
 }

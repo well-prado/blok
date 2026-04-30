@@ -1,55 +1,51 @@
-import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
+import { branch, workflow } from "@blokjs/helper";
 
-const step: Step = Workflow({
+export default workflow({
 	name: "World Countries",
 	version: "1.0.0",
 	description: "Workflow description",
-})
-	.addTrigger("http", {
-		method: "GET",
-		path: "/",
-		accept: "application/json",
-	})
-	.addCondition({
-		node: {
-			name: "filter-request",
-			node: "@blokjs/if-else",
-			type: "module",
+	trigger: {
+		http: {
+			method: "GET",
+			// Preserve the legacy /<workflow-key>/ URL after the v2 migration.
+			path: "/countries-cats-helper",
+			accept: "application/json",
 		},
-		conditions: () => {
-			return [
-				new AddIf('ctx.request.query.countries === "true"')
-					.addStep({
-						name: "get-countries",
-						node: "@blokjs/api-call",
-						type: "module",
-						inputs: {
-							url: "https://countriesnow.space/api/v0.1/countries",
-							method: "GET",
-							headers: {
-								"Content-Type": "application/json",
-							},
-							responseType: "application/json",
+	},
+	steps: [
+		branch({
+			id: "filter-request",
+			when: 'ctx.request.query.countries === "true"',
+			then: [
+				{
+					id: "get-countries",
+					use: "@blokjs/api-call",
+					type: "module",
+					inputs: {
+						url: "https://countriesnow.space/api/v0.1/countries",
+						method: "GET",
+						headers: {
+							"Content-Type": "application/json",
 						},
-					})
-					.build(),
-				new AddElse()
-					.addStep({
-						name: "get-facts",
-						node: "@blokjs/api-call",
-						type: "module",
-						inputs: {
-							url: "https://catfact.ninja/fact",
-							method: "GET",
-							headers: {
-								"Content-Type": "application/json",
-							},
-							responseType: "application/json",
+						responseType: "application/json",
+					},
+				},
+			],
+			else: [
+				{
+					id: "get-facts",
+					use: "@blokjs/api-call",
+					type: "module",
+					inputs: {
+						url: "https://catfact.ninja/fact",
+						method: "GET",
+						headers: {
+							"Content-Type": "application/json",
 						},
-					})
-					.build(),
-			];
-		},
-	});
-
-export default step;
+						responseType: "application/json",
+					},
+				},
+			],
+		}),
+	],
+});

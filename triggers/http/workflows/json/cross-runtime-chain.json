@@ -1,109 +1,89 @@
 {
 	"name": "Cross-Runtime Chain Test",
-	"description": "Tests all 8 language runtimes by chaining nodes via ctx.vars. Each SDK node appends its language to the chain array. A final verify node confirms all runtimes executed correctly.",
 	"version": "1.2.0",
+	"description": "Tests all 8 language runtimes by chaining nodes via ctx.vars. Each SDK node appends its language to the chain array. A final verify node confirms all runtimes executed correctly.",
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/cross-runtime-chain",
 			"accept": "application/json"
 		}
 	},
 	"steps": [
 		{
-			"name": "init",
-			"node": "chain-init",
-			"type": "module"
-		},
-		{
-			"name": "go",
-			"node": "chain-test",
-			"type": "runtime.go"
-		},
-		{
-			"name": "rust",
-			"node": "chain-test",
-			"type": "runtime.rust"
-		},
-		{
-			"name": "java",
-			"node": "chain-test",
-			"type": "runtime.java"
-		},
-		{
-			"name": "csharp",
-			"node": "chain-test",
-			"type": "runtime.csharp"
-		},
-		{
-			"name": "php",
-			"node": "chain-test",
-			"type": "runtime.php"
-		},
-		{
-			"name": "ruby",
-			"node": "chain-test",
-			"type": "runtime.ruby"
-		},
-		{
-			"name": "python",
-			"node": "chain-test",
-			"type": "runtime.python3"
-		},
-		{
-			"name": "verify",
-			"node": "chain-verify",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"init": {
+			"id": "init",
+			"use": "chain-init",
+			"type": "module",
 			"inputs": {}
 		},
-		"go": {
+		{
+			"id": "go",
+			"use": "chain-test",
+			"type": "runtime.go",
 			"inputs": {
 				"chain": "js/ctx.vars['init'].chain",
 				"origin": "js/ctx.vars['init'].origin"
 			}
 		},
-		"rust": {
+		{
+			"id": "rust",
+			"use": "chain-test",
+			"type": "runtime.rust",
 			"inputs": {
 				"chain": "js/ctx.vars['go'].chain",
 				"origin": "js/ctx.vars['go'].origin"
 			}
 		},
-		"java": {
+		{
+			"id": "java",
+			"use": "chain-test",
+			"type": "runtime.java",
 			"inputs": {
 				"chain": "js/ctx.vars['rust'].chain",
 				"origin": "js/ctx.vars['rust'].origin"
 			}
 		},
-		"csharp": {
+		{
+			"id": "csharp",
+			"use": "chain-test",
+			"type": "runtime.csharp",
 			"inputs": {
 				"chain": "js/ctx.vars['java'].chain",
 				"origin": "js/ctx.vars['java'].origin"
 			}
 		},
-		"php": {
+		{
+			"id": "php",
+			"use": "chain-test",
+			"type": "runtime.php",
 			"inputs": {
 				"chain": "js/ctx.vars['csharp'].chain",
 				"origin": "js/ctx.vars['csharp'].origin"
 			}
 		},
-		"ruby": {
+		{
+			"id": "ruby",
+			"use": "chain-test",
+			"type": "runtime.ruby",
 			"inputs": {
 				"chain": "js/ctx.vars['php'].chain",
 				"origin": "js/ctx.vars['php'].origin"
 			}
 		},
-		"python": {
+		{
+			"id": "python",
+			"use": "chain-test",
+			"type": "runtime.python3",
 			"inputs": {
 				"chain": "js/ctx.vars['ruby'].chain",
 				"origin": "js/ctx.vars['ruby'].origin"
 			}
 		},
-		"verify": {
+		{
+			"id": "verify",
+			"use": "chain-verify",
+			"type": "module",
 			"inputs": {}
 		}
-	}
+	]
 }
