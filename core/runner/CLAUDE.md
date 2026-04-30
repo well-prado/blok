@@ -11,8 +11,10 @@
 | `src/RuntimeRegistry.ts` | Singleton managing all RuntimeAdapter instances |
 | `src/RuntimeAdapterNode.ts` | Bridge: wraps RuntimeAdapter into RunnerNode interface |
 | `src/TriggerBase.ts` | Base class for triggers — creates Context, runs workflow, handles tracing |
-| `src/adapters/HttpRuntimeAdapter.ts` | HTTP adapter for all non-NodeJS SDKs |
+| `src/adapters/grpc/GrpcRuntimeAdapter.ts` | gRPC adapter for all non-NodeJS SDKs (default since Phase 6) |
+| `src/adapters/HttpRuntimeAdapter.ts` | HTTP adapter — **deprecated**, removed in v0.4.0. Resolves only via `RUNTIME_TRANSPORT=http` opt-in (see `transport.ts:resolveTransportForKind`); emits a once-per-process stderr warning. |
 | `src/adapters/NodeJsRuntimeAdapter.ts` | In-process adapter for NodeJS/TypeScript nodes |
+| `src/adapters/transport.ts` | Resolves which transport a runtime kind uses. Default `grpc`; `RUNTIME_TRANSPORT=http` and per-kind `RUNTIME_<K>_TRANSPORT=http` are honored with a deprecation warning. |
 | `src/tracing/RunTracker.ts` | Trace recording (SQLite/Postgres/In-Memory) |
 | `src/tracing/registerTraceRoutes.ts` | `/__blok/*` REST API for Blok Studio |
 
@@ -39,7 +41,7 @@ runSteps(ctx, steps)
 nodeTypes() returns:
   "module"           → moduleResolver() — loads from GlobalOptions.nodes
   "local"            → localResolver()  — dynamic import from NODES_PATH
-  "runtime.python3"  → runtimeResolver() — RuntimeRegistry → HttpRuntimeAdapter
+  "runtime.python3"  → runtimeResolver() — RuntimeRegistry → GrpcRuntimeAdapter (HTTP via opt-in)
   "runtime.go"       → runtimeResolver()
   "runtime.rust"     → runtimeResolver()
   "runtime.java"     → runtimeResolver()
@@ -47,6 +49,30 @@ nodeTypes() returns:
   "runtime.php"      → runtimeResolver()
   "runtime.ruby"     → runtimeResolver()
 ```
+
+Transport selection lives in `src/adapters/transport.ts`. The default is `grpc`
+since Phase 6 (master plan §11/§14). `RUNTIME_TRANSPORT=http` and per-kind
+`RUNTIME_<KIND>_TRANSPORT=http` overrides remain functional **until v0.4.0**;
+they emit a once-per-process stderr warning on resolve.
+
+## Persistence model (v2)
+
+Step output flows through `src/workflow/PersistenceHelper.ts:applyStepOutput`.
+Rules in order:
+
+1. `step.ephemeral === true` → no-op. Available only via `ctx.prev`.
+2. Legacy `step.set_var === false` → also no-op (back-compat).
+3. `step.spread === true` AND data is a plain object → shallow-merge into `ctx.state`.
+4. Default → `ctx.state[step.as ?? step.name] = result.data`.
+
+`set_var` is **passed through verbatim** by `Configuration.getSteps`,
+`Configuration.getFlow`, and `Configuration.runtimeResolver` — they never
+default it to `false`. NodeBase initializes `set_var` to `undefined` so the
+default-store rule can fire. Defaulting to `false` here would silently
+disable persistence for every step that didn't explicitly set the field
+(which is every v2 step) — that exact regression broke
+cross-runtime-chain in Phase 6 and is now covered by
+`__tests__/unit/RuntimeAdapterNode.test.ts`.
 
 ## Tests
 
