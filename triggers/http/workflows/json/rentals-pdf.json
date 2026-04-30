@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/rentals-pdf",
+			"path": "/",
 			"accept": "application/json"
 		}
 	},

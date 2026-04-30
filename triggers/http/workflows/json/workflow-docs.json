@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "ANY",
-			"path": "/workflow-docs/:function?",
+			"path": "/:function?",
 			"accept": "application/json"
 		}
 	},

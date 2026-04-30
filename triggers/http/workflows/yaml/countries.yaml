@@ -5,7 +5,7 @@ version: 1.0.0
 trigger:
   http:
     method: GET
-    path: "/countries"
+    path: "/"
     accept: application/json
 steps:
 - id: get-countries-api

@@ -7,8 +7,7 @@ export default workflow({
 	trigger: {
 		http: {
 			method: "GET",
-			// Preserve the legacy /<workflow-key>/ URL after the v2 migration.
-			path: "/empty",
+			path: "/",
 			accept: "application/json",
 		},
 	},

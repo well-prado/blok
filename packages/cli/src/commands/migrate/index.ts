@@ -21,10 +21,6 @@ const workflows = new Command("workflows")
 		"-d, --dir <value>",
 		"Path to the JSON workflows directory (defaults to ./workflows/json or ./triggers/http/workflows/json)",
 	)
-	.option(
-		"--strip-legacy-path",
-		"Don't preserve the legacy /<workflow-key> URL — let the migrated workflow use its file-derived URL instead",
-	)
 	.option("--dry-run", "Print what would change without writing files")
 	.option("--backup", "Create .bak files next to each migrated workflow (default true)")
 	.option("--no-backup", "Skip backup creation")

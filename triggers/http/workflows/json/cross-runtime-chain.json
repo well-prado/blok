@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/cross-runtime-chain",
+			"path": "/",
 			"accept": "application/json"
 		}
 	},

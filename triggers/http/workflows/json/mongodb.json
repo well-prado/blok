@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "ANY",
-			"path": "/mongodb/:collection/:id?",
+			"path": "/:collection/:id?",
 			"accept": "application/json"
 		}
 	},

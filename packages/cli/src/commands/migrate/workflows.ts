@@ -14,16 +14,19 @@ import color from "picocolors";
  * - `set_var: true` → dropped (now default)
  * - `set_var: false` → `ephemeral: true`
  * - `method: "*"` → `method: "ANY"`
- * - Preserves the LEGACY URL by injecting `trigger.http.path = "/<filename-key>"`
- *   so consumers don't break when the catch-all is replaced by file-based
- *   routing. Pass `--strip-legacy-path` to opt out and rely on the
- *   file-derived URL instead.
+ * - Legacy `js/ctx.vars[...]` / `js/ctx.response.data` references in
+ *   step inputs are rewritten to canonical `js/ctx.state[...]` /
+ *   `js/ctx.prev.data` spellings.
+ *
+ * **`trigger.http.path` is preserved verbatim.** The legacy URL
+ * `/<workflow-key>/<sub-path>` keeps working because the catch-all
+ * extracts the workflow key from the URL; file-based routing derives
+ * `/<filename>` from the file location automatically. Injecting an
+ * absolute path here would break the catch-all without helping
+ * file-based routing.
  *
  * Each migrated file gets a `<name>.json.bak` backup unless `--no-backup`
  * is set. Use `--dry-run` to preview without writing.
- *
- * Skips files whose first key is already `id` (already v2) and prints a
- * one-line summary at the end.
  *
  * **Note:** TS workflow migration is NOT covered by this command — TS
  * files use a chained builder API that requires AST rewriting. Migrate
@@ -33,7 +36,6 @@ export async function migrateWorkflows(opts: OptionValues): Promise<void> {
 	const cwd = process.cwd();
 	const explicitDir = (opts.dir as string | undefined) ?? null;
 	const dryRun = opts.dryRun === true;
-	const stripLegacyPath = opts.stripLegacyPath === true;
 	const writeBackup = opts.backup !== false; // default true unless --no-backup
 
 	console.log(color.cyan("\n🔄 Workflow v1 → v2 migrator"));
@@ -60,7 +62,7 @@ export async function migrateWorkflows(opts: OptionValues): Promise<void> {
 
 	const results: MigrationResult[] = [];
 	for (const file of files) {
-		const result = await migrateOne(file, root, { dryRun, stripLegacyPath, writeBackup });
+		const result = await migrateOne(file, { dryRun, writeBackup });
 		results.push(result);
 		printResult(result);
 	}
@@ -75,18 +77,17 @@ export async function migrateWorkflows(opts: OptionValues): Promise<void> {
 
 interface MigrationOpts {
 	readonly dryRun: boolean;
-	readonly stripLegacyPath: boolean;
 	readonly writeBackup: boolean;
 }
 
 type MigrationResult =
-	| { kind: "migrated"; file: string; injectedPath: string | null }
+	| { kind: "migrated"; file: string }
 	| { kind: "already-v2"; file: string }
 	| { kind: "not-http"; file: string; trigger: string }
 	| { kind: "skipped"; file: string; reason: string }
 	| { kind: "error"; file: string; error: string };
 
-async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): Promise<MigrationResult> {
+async function migrateOne(file: string, opts: MigrationOpts): Promise<MigrationResult> {
 	let raw: string;
 	let parsed: unknown;
 	try {
@@ -101,22 +102,13 @@ async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): P
 	}
 
 	const wf = parsed as Record<string, unknown>;
-
 	const triggerKind = detectTriggerKind(wf);
-
-	// File-derived key — used to preserve the legacy URL.
-	const relPath = path.relative(rootDir, file);
-	const legacyKey = relPath.replace(/\.json$/i, "").replace(/\\/g, "/");
-	const legacyUrl = `/${legacyKey}`;
 
 	// Build the v2 shape. Runs unconditionally — even on already-v2
 	// workflows — so legacy `js/ctx.vars[...]` / `js/ctx.response.data`
 	// references inside step inputs get rewritten to the canonical v2
 	// `js/ctx.state[...]` / `js/ctx.prev.data` spellings.
-	const v2 = convertToV2(wf, {
-		legacyUrl: opts.stripLegacyPath ? null : legacyUrl,
-		isHttp: triggerKind === "http",
-	});
+	const v2 = convertToV2(wf);
 
 	const serialized = `${JSON.stringify(v2, null, "\t")}\n`;
 
@@ -127,11 +119,7 @@ async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): P
 	}
 
 	if (opts.dryRun) {
-		return {
-			kind: "migrated",
-			file,
-			injectedPath: opts.stripLegacyPath || triggerKind !== "http" ? null : legacyUrl,
-		};
+		return { kind: "migrated", file };
 	}
 
 	if (opts.writeBackup) {
@@ -151,24 +139,18 @@ async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): P
 	return {
 		kind: triggerKind === "http" ? "migrated" : "not-http",
 		file,
-		injectedPath: opts.stripLegacyPath || triggerKind !== "http" ? null : legacyUrl,
 		trigger: triggerKind,
 	} as MigrationResult;
 }
 
-interface ConvertOpts {
-	readonly legacyUrl: string | null;
-	readonly isHttp: boolean;
-}
-
-function convertToV2(wf: Record<string, unknown>, opts: ConvertOpts): Record<string, unknown> {
+function convertToV2(wf: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 
 	if (typeof wf.name === "string") out.name = wf.name;
 	if (typeof wf.version === "string") out.version = wf.version;
 	if (typeof wf.description === "string") out.description = wf.description;
 
-	out.trigger = convertTrigger(wf.trigger, opts);
+	out.trigger = convertTrigger(wf.trigger);
 	out.steps = convertSteps(
 		Array.isArray(wf.steps) ? (wf.steps as unknown[]) : [],
 		isPlainObject(wf.nodes) ? (wf.nodes as Record<string, unknown>) : {},
@@ -177,27 +159,19 @@ function convertToV2(wf: Record<string, unknown>, opts: ConvertOpts): Record<str
 	return out;
 }
 
-function convertTrigger(rawTrigger: unknown, opts: ConvertOpts): Record<string, unknown> {
+function convertTrigger(rawTrigger: unknown): Record<string, unknown> {
 	if (!isPlainObject(rawTrigger)) return {};
 	const out: Record<string, unknown> = {};
 	for (const [kind, cfg] of Object.entries(rawTrigger as Record<string, unknown>)) {
 		if (kind === "http" && isPlainObject(cfg)) {
 			const httpCfg: Record<string, unknown> = { ...(cfg as Record<string, unknown>) };
-			// Convert `*` → `ANY`
+			// Convert `*` → `ANY`. Leave `path` exactly as the author wrote it
+			// — the catch-all interprets `path` as a sub-path (after the
+			// workflow key), and file-based routing derives the prefix from
+			// the file location. Injecting an absolute path here would break
+			// the catch-all without helping file-based routing (which already
+			// derives `/<filename>` correctly when `path` is `/`).
 			if (httpCfg.method === "*") httpCfg.method = "ANY";
-			// Inject explicit path to preserve legacy URL (unless --strip-legacy-path).
-			// Skip injection when the existing path already starts with the legacy
-			// URL — happens on already-migrated workflows being re-run for legacy
-			// js/ rewrites; without this guard we'd produce /<key>/<key>.
-			if (opts.legacyUrl !== null && opts.isHttp) {
-				const existingPath = typeof httpCfg.path === "string" ? httpCfg.path : null;
-				const alreadyPrefixed =
-					existingPath !== null && (existingPath === opts.legacyUrl || existingPath.startsWith(`${opts.legacyUrl}/`));
-				if (!alreadyPrefixed) {
-					const subPath = existingPath && existingPath !== "/" ? existingPath : "";
-					httpCfg.path = `${opts.legacyUrl}${subPath}`;
-				}
-			}
 			out[kind] = httpCfg;
 		} else {
 			out[kind] = cfg;
@@ -406,9 +380,7 @@ function printResult(result: MigrationResult): void {
 	const file = path.relative(process.cwd(), result.file);
 	switch (result.kind) {
 		case "migrated":
-			console.log(
-				`  ${color.green("✓")} ${color.cyan(file)}${result.injectedPath ? color.dim(`  → preserved URL ${result.injectedPath}`) : ""}`,
-			);
+			console.log(`  ${color.green("✓")} ${color.cyan(file)}`);
 			break;
 		case "already-v2":
 			console.log(`  ${color.dim("⊙")} ${color.dim(file)} ${color.dim("(already v2)")}`);

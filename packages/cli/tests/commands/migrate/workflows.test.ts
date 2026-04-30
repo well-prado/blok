@@ -45,7 +45,7 @@ describe("migrateWorkflows — v1 step shape conversion", () => {
 			nodes: { fetch: { inputs: { url: "https://example.com" } } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const out = await readWorkflow("simple.json");
 		const steps = out.steps as Array<Record<string, unknown>>;
@@ -65,7 +65,7 @@ describe("migrateWorkflows — v1 step shape conversion", () => {
 			nodes: { fetch: { inputs: { url: "https://example.com", method: "GET" } } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const out = await readWorkflow("simple.json");
 		const step = (out.steps as Array<Record<string, unknown>>)[0];
@@ -82,7 +82,7 @@ describe("migrateWorkflows — v1 step shape conversion", () => {
 			nodes: { fetch: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const step = (await readWorkflow("simple.json")).steps as Array<Record<string, unknown>>;
 		expect(step[0].set_var).toBeUndefined();
@@ -97,7 +97,7 @@ describe("migrateWorkflows — v1 step shape conversion", () => {
 			nodes: { log: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const step = (await readWorkflow("simple.json")).steps as Array<Record<string, unknown>>;
 		expect(step[0].ephemeral).toBe(true);
@@ -116,7 +116,7 @@ describe("migrateWorkflows — v1 step shape conversion", () => {
 			nodes: { skipped: { inputs: {} }, halts: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const steps = (await readWorkflow("simple.json")).steps as Array<Record<string, unknown>>;
 		expect(steps[0].active).toBe(false);
@@ -148,7 +148,7 @@ describe("migrateWorkflows — branch (if-else) conversion", () => {
 			},
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const out = await readWorkflow("router.json");
 		const steps = out.steps as Array<Record<string, unknown>>;
@@ -188,7 +188,7 @@ describe("migrateWorkflows — branch (if-else) conversion", () => {
 			},
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const branch = ((await readWorkflow("router.json")).steps as Array<Record<string, unknown>>)[0].branch as Record<
 			string,
@@ -208,13 +208,19 @@ describe("migrateWorkflows — trigger handling", () => {
 			nodes: { step: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const trigger = (await readWorkflow("wildcard.json")).trigger as Record<string, Record<string, unknown>>;
 		expect(trigger.http.method).toBe("ANY");
 	});
 
-	it("preserves the legacy URL by injecting trigger.http.path = /<filename-key>", async () => {
+	it("leaves trigger.http.path verbatim (preserved as written)", async () => {
+		// `path` carries v1 sub-path semantics for the catch-all and v2
+		// absolute-path semantics for file-based routing. The migrator
+		// can't preserve both, so it preserves nothing — the legacy
+		// /<workflow-key>/<sub-path> URL still works via the catch-all
+		// (workflow key derived from URL), and file-based routing
+		// derives /<filename> from the file location automatically.
 		await writeWorkflow("countries.json", {
 			name: "Countries",
 			version: "1.0.0",
@@ -226,37 +232,22 @@ describe("migrateWorkflows — trigger handling", () => {
 		await migrateWorkflows({ backup: false });
 
 		const trigger = (await readWorkflow("countries.json")).trigger as Record<string, Record<string, unknown>>;
-		expect(trigger.http.path).toBe("/countries");
+		expect(trigger.http.path).toBe("/");
 	});
 
-	it("appends a non-/ existing path to the legacy URL", async () => {
-		await writeWorkflow("countries.json", {
-			name: "Countries",
+	it("preserves a non-`/` sub-path verbatim", async () => {
+		await writeWorkflow("dashboard.json", {
+			name: "Dashboard",
 			version: "1.0.0",
-			trigger: { http: { method: "GET", path: "/:id" } },
+			trigger: { http: { method: "GET", path: "/:function?/:id?" } },
 			steps: [{ name: "fetch", node: "@blokjs/api-call", type: "module" }],
 			nodes: { fetch: { inputs: {} } },
 		});
 
 		await migrateWorkflows({ backup: false });
 
-		const trigger = (await readWorkflow("countries.json")).trigger as Record<string, Record<string, unknown>>;
-		expect(trigger.http.path).toBe("/countries/:id");
-	});
-
-	it("does not preserve URL when --strip-legacy-path is set", async () => {
-		await writeWorkflow("countries.json", {
-			name: "Countries",
-			version: "1.0.0",
-			trigger: { http: { method: "GET", path: "/" } },
-			steps: [{ name: "fetch", node: "@blokjs/api-call", type: "module" }],
-			nodes: { fetch: { inputs: {} } },
-		});
-
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
-
-		const trigger = (await readWorkflow("countries.json")).trigger as Record<string, Record<string, unknown>>;
-		expect(trigger.http.path).toBe("/");
+		const trigger = (await readWorkflow("dashboard.json")).trigger as Record<string, Record<string, unknown>>;
+		expect(trigger.http.path).toBe("/:function?/:id?");
 	});
 });
 
@@ -287,7 +278,7 @@ describe("migrateWorkflows — flags", () => {
 			nodes: { fetch: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true });
+		await migrateWorkflows({});
 
 		const bakExists = await fsp
 			.stat(path.join(tmpDir, "workflows", "json", "simple.json.bak"))
@@ -305,7 +296,7 @@ describe("migrateWorkflows — flags", () => {
 			nodes: { fetch: { inputs: {} } },
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const bakExists = await fsp
 			.stat(path.join(tmpDir, "workflows", "json", "simple.json.bak"))
@@ -495,7 +486,7 @@ describe("migrateWorkflows — recursive scan", () => {
 			}),
 		);
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const out = JSON.parse(await fsp.readFile(path.join(usersDir, "list.json"), "utf8"));
 		expect(out.steps[0].id).toBe("fetch");
@@ -509,7 +500,7 @@ describe("migrateWorkflows — recursive scan", () => {
 			steps: [{ name: "x", node: "@blokjs/api-call", type: "module" }],
 		});
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 
 		const helper = JSON.parse(await fsp.readFile(path.join(tmpDir, "workflows", "json", "_helper.json"), "utf8"));
 		// Untouched — still has v1 shape.
@@ -524,14 +515,14 @@ describe("migrateWorkflows — error handling", () => {
 		await fsp.mkdir(dir, { recursive: true });
 		await fsp.writeFile(path.join(dir, "broken.json"), "{ not valid json");
 
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 		// process.exit(1) called — verify
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 
 	it("exits 1 when no workflows directory found", async () => {
 		// No workflows/json dir created
-		await migrateWorkflows({ stripLegacyPath: true, backup: false });
+		await migrateWorkflows({ backup: false });
 		expect(exitSpy).toHaveBeenCalledWith(1);
 	});
 });

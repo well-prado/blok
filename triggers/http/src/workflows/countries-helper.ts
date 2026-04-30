@@ -7,10 +7,7 @@ export default workflow({
 	trigger: {
 		http: {
 			method: "GET",
-			// Preserve the legacy /<workflow-key>/ URL after the v2 migration so
-			// existing consumers keep working. Drop this `path` to adopt the
-			// file-based default URL when ready.
-			path: "/countries-helper",
+			path: "/",
 			accept: "application/json",
 		},
 	},

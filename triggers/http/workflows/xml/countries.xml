@@ -4,7 +4,7 @@
 <trigger>
     <http>
         <method>GET</method>
-        <path>/countries</path>
+        <path>/</path>
         <accept>application/json</accept>
     </http>
 </trigger>

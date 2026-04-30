@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "ANY",
-			"path": "/feedback/:function?/:id?",
+			"path": "/:function?/:id?",
 			"accept": "application/json"
 		}
 	},
