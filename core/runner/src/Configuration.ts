@@ -237,7 +237,12 @@ export default class Configuration implements Config {
 			node.name = step.name;
 			node.active = step.active !== undefined ? step.active : true;
 			node.stop = step.stop !== undefined ? step.stop : false;
-			node.set_var = step.set_var !== undefined ? step.set_var : false;
+			// Pass `set_var` through verbatim — DO NOT default to `false`. The
+			// `false` value short-circuits PersistenceHelper.applyStepOutput
+			// and silently disables v2's default-store rule. Legacy v1
+			// workflows that explicitly set `set_var: false` are normalized
+			// to `ephemeral: true` upstream by WorkflowNormalizer.
+			if (step.set_var !== undefined) node.set_var = step.set_var;
 			// V2 persistence knobs — read by PersistenceHelper.applyStepOutput.
 			// `as` renames the state key; `spread` flattens result.data into
 			// state; `ephemeral: true` skips persistence entirely. Default
@@ -326,7 +331,12 @@ export default class Configuration implements Config {
 			node.name = step.name;
 			node.active = step.active !== undefined ? step.active : true;
 			node.stop = step.stop !== undefined ? step.stop : false;
-			node.set_var = step.set_var !== undefined ? step.set_var : false;
+			// Pass `set_var` through verbatim — DO NOT default to `false`. The
+			// `false` value short-circuits PersistenceHelper.applyStepOutput
+			// and silently disables v2's default-store rule. Legacy v1
+			// workflows that explicitly set `set_var: false` are normalized
+			// to `ephemeral: true` upstream by WorkflowNormalizer.
+			if (step.set_var !== undefined) node.set_var = step.set_var;
 
 			// const validator = z.instanceof(NodeBase);
 			// validator.parse(node);
@@ -406,7 +416,19 @@ export default class Configuration implements Config {
 		targetNode.runtime = runtimeKind as RuntimeKind;
 		targetNode.active = node.active !== undefined ? node.active : true;
 		targetNode.stop = node.stop !== undefined ? node.stop : false;
-		targetNode.set_var = node.set_var !== undefined ? node.set_var : false;
+		// Pass `set_var` through verbatim — DO NOT default to `false`. The v2
+		// default-store rule in PersistenceHelper persists `result.data` at
+		// `state[name]` unless `set_var === false` is explicit. Defaulting to
+		// `false` here silently disabled persistence for every SDK step,
+		// breaking `js/ctx.state['<id>']` reads in v2 workflows
+		// (cross-runtime-chain regressed: `state['go']` was undefined even
+		// though the GO step ran fine).
+		if (node.set_var !== undefined) targetNode.set_var = node.set_var;
+		// V2 persistence knobs — flow through to PersistenceHelper.
+		const v2 = node as RunnerNode & { as?: string; spread?: boolean; ephemeral?: boolean };
+		if (v2.as !== undefined) targetNode.as = v2.as;
+		targetNode.spread = v2.spread === true;
+		targetNode.ephemeral = v2.ephemeral === true;
 
 		// Wrap in RuntimeAdapterNode to integrate with existing Runner.
 		// Per-step `stream_logs: true|false` overrides the global

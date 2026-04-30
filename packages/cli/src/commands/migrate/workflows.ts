@@ -254,8 +254,15 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 		const v2Step: Record<string, unknown> = { id, use: nodeRef };
 		if (typeof step.type === "string") v2Step.type = step.type;
 		if (inputs) v2Step.inputs = rewriteLegacyExpressions(inputs);
-		// set_var: true is a no-op going forward; drop.
-		// set_var: false → ephemeral: true.
+		// `set_var` is a v1-only field. In v2 the runner default-stores every
+		// step's output; an explicit `set_var: false` means "skip persistence",
+		// which v2 spells as `ephemeral: true`. We translate here:
+		//   - set_var: false → ephemeral: true   (preserves v1 semantics)
+		//   - set_var: true  → drop              (matches v2 default)
+		// We NEVER copy `set_var` onto v2Step. A stray `set_var: false` in a
+		// migrated workflow would short-circuit `PersistenceHelper.applyStepOutput`
+		// at runtime and silently disable persistence for the step — see the
+		// regression that broke cross-runtime-chain on Phase 6.
 		if (step.set_var === false) v2Step.ephemeral = true;
 		// Preserve other v2 knobs if author already set them.
 		if (typeof step.as === "string") v2Step.as = step.as;
@@ -264,6 +271,10 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 		if (step.active === false) v2Step.active = false;
 		if (step.stop === true) v2Step.stop = true;
 		if (typeof step.stream_logs === "boolean") v2Step.stream_logs = step.stream_logs;
+		// `v2Step` is built field-by-field above; `set_var` is intentionally
+		// not on the allow-list. If you add a future field that does
+		// `Object.assign(v2Step, step)` or similar, add `set_var` to the strip
+		// list here — it must not survive into a v2 workflow.
 		out.push(v2Step);
 	}
 	return out;

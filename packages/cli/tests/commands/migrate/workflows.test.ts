@@ -327,6 +327,73 @@ describe("migrateWorkflows — already-v2 detection", () => {
 	});
 });
 
+describe("migrateWorkflows — set_var scrub on already-v2 input", () => {
+	// These guard a real regression: a stray `set_var: false` on a v2-shaped
+	// step short-circuits PersistenceHelper.applyStepOutput at runtime,
+	// silently disabling persistence for that step (broke cross-runtime-chain
+	// on Phase 6). The migrator's job is to never let that field survive.
+
+	it("strips set_var: false from a v2 step and converts to ephemeral: true", async () => {
+		await writeWorkflow("v2-set-var-false.json", {
+			name: "V2 With Set Var False",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/" } },
+			steps: [{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://x.com" }, set_var: false }],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("v2-set-var-false.json");
+		const step = (out.steps as Array<Record<string, unknown>>)[0];
+		expect(step.set_var).toBeUndefined();
+		expect(step.ephemeral).toBe(true);
+		expect(step.id).toBe("fetch");
+		expect(step.use).toBe("@blokjs/api-call");
+	});
+
+	it("strips set_var: true from a v2 step (no-op in v2 — default-store handles it)", async () => {
+		await writeWorkflow("v2-set-var-true.json", {
+			name: "V2 With Set Var True",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/" } },
+			steps: [{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://x.com" }, set_var: true }],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("v2-set-var-true.json");
+		const step = (out.steps as Array<Record<string, unknown>>)[0];
+		expect(step.set_var).toBeUndefined();
+		expect(step.ephemeral).toBeUndefined();
+		expect(step.id).toBe("fetch");
+		expect(step.use).toBe("@blokjs/api-call");
+	});
+
+	it("ephemeral: true wins when both ephemeral: true and set_var: true coexist", async () => {
+		await writeWorkflow("v2-both.json", {
+			name: "V2 Both",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/" } },
+			steps: [
+				{
+					id: "log",
+					use: "@blokjs/api-call",
+					inputs: {},
+					ephemeral: true,
+					set_var: true,
+				},
+			],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("v2-both.json");
+		const step = (out.steps as Array<Record<string, unknown>>)[0];
+		expect(step.set_var).toBeUndefined();
+		expect(step.ephemeral).toBe(true);
+	});
+});
+
 describe("migrateWorkflows — legacy js/ expression rewrite", () => {
 	it("rewrites js/ctx.vars[...] → js/ctx.state[...] inside inputs", async () => {
 		await writeWorkflow("chain.json", {

@@ -236,6 +236,48 @@ describe("RuntimeAdapterNode", () => {
 			expect((tracker.addLog as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
 		});
 
+		it("populates ctx.state[name] with result.data when set_var is not explicitly set (v2 default-store)", async () => {
+			// Regression for the cross-runtime-chain bug on Phase 6:
+			// `Configuration.runtimeResolver` used to default `targetNode.set_var = false`
+			// when the source step omitted the field. NodeBase also initialized
+			// `set_var = false` by default. Both meant `PersistenceHelper.applyStepOutput`
+			// short-circuited at runtime and silently disabled persistence for every
+			// SDK step — `state['go']` was undefined even though the GO step ran fine.
+			// With the v2 fix, set_var defaults to undefined → default-store fires.
+			const adapter = makeStreamingAdapter([], {
+				success: true,
+				data: { chain: [{ language: "go", order: 2 }], origin: "blok-test" },
+				errors: null,
+				logs: [],
+				metrics: { duration_ms: 1, cpu_ms: 0, memory_bytes: 0, request_bytes: 0, response_bytes: 0 },
+				vars: {},
+			});
+			const target = makeTarget("go");
+			const node = new RuntimeAdapterNode(adapter, target);
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
+			expect(state.go).toEqual({
+				chain: [{ language: "go", order: 2 }],
+				origin: "blok-test",
+			});
+		});
+
+		it("skips ctx.state[name] when set_var is explicitly false (legacy v1 ephemeral semantic)", async () => {
+			const adapter = makeStreamingAdapter([], successResult);
+			const target = makeTarget("legacy-step");
+			target.set_var = false;
+			const node = new RuntimeAdapterNode(adapter, target);
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
+			expect(state["legacy-step"]).toBeUndefined();
+		});
+
 		it("stashes adapter metrics on ctx._stepMetrics so RunnerSteps can thread them into completeNode", async () => {
 			// Contract: `RuntimeAdapterNode` does not mutate the persisted
 			// `nodeRun` directly (the previous version did, which was the
