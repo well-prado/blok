@@ -66,7 +66,7 @@ export async function migrateWorkflows(opts: OptionValues): Promise<void> {
 	}
 
 	console.log("");
-	printSummary(results, dryRun);
+	printSummary(results, dryRun, writeBackup);
 }
 
 // =============================================================================
@@ -102,13 +102,6 @@ async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): P
 
 	const wf = parsed as Record<string, unknown>;
 
-	// Detect if already v2 — first step has `id` and no top-level `nodes{}`.
-	const steps = Array.isArray(wf.steps) ? (wf.steps as unknown[]) : [];
-	const firstStep = steps.find(isPlainObject) as Record<string, unknown> | undefined;
-	if (firstStep && "id" in firstStep && !("nodes" in wf)) {
-		return { kind: "already-v2", file };
-	}
-
 	const triggerKind = detectTriggerKind(wf);
 
 	// File-derived key — used to preserve the legacy URL.
@@ -116,13 +109,22 @@ async function migrateOne(file: string, rootDir: string, opts: MigrationOpts): P
 	const legacyKey = relPath.replace(/\.json$/i, "").replace(/\\/g, "/");
 	const legacyUrl = `/${legacyKey}`;
 
-	// Build the v2 shape.
+	// Build the v2 shape. Runs unconditionally — even on already-v2
+	// workflows — so legacy `js/ctx.vars[...]` / `js/ctx.response.data`
+	// references inside step inputs get rewritten to the canonical v2
+	// `js/ctx.state[...]` / `js/ctx.prev.data` spellings.
 	const v2 = convertToV2(wf, {
 		legacyUrl: opts.stripLegacyPath ? null : legacyUrl,
 		isHttp: triggerKind === "http",
 	});
 
 	const serialized = `${JSON.stringify(v2, null, "\t")}\n`;
+
+	// If the canonical output equals the input verbatim, the file is
+	// already in idiomatic v2 shape — no write needed, no backup needed.
+	if (serialized.trimEnd() === raw.trimEnd()) {
+		return { kind: "already-v2", file };
+	}
 
 	if (opts.dryRun) {
 		return {
@@ -184,10 +186,17 @@ function convertTrigger(rawTrigger: unknown, opts: ConvertOpts): Record<string, 
 			// Convert `*` → `ANY`
 			if (httpCfg.method === "*") httpCfg.method = "ANY";
 			// Inject explicit path to preserve legacy URL (unless --strip-legacy-path).
+			// Skip injection when the existing path already starts with the legacy
+			// URL — happens on already-migrated workflows being re-run for legacy
+			// js/ rewrites; without this guard we'd produce /<key>/<key>.
 			if (opts.legacyUrl !== null && opts.isHttp) {
 				const existingPath = typeof httpCfg.path === "string" ? httpCfg.path : null;
-				const subPath = existingPath && existingPath !== "/" ? existingPath : "";
-				httpCfg.path = `${opts.legacyUrl}${subPath}`;
+				const alreadyPrefixed =
+					existingPath !== null && (existingPath === opts.legacyUrl || existingPath.startsWith(`${opts.legacyUrl}/`));
+				if (!alreadyPrefixed) {
+					const subPath = existingPath && existingPath !== "/" ? existingPath : "";
+					httpCfg.path = `${opts.legacyUrl}${subPath}`;
+				}
 			}
 			out[kind] = httpCfg;
 		} else {
@@ -204,6 +213,28 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 		const step = rawStep as Record<string, unknown>;
 		const id = pickString(step.name) ?? pickString(step.id);
 		if (!id) continue;
+
+		// Already-v2 branch step (`{id, branch: {when, then, else}}`) —
+		// detected BEFORE the nodeRef check because branch steps don't
+		// carry `use`. Walk nested inputs for legacy js/ rewrites.
+		if (isPlainObject(step.branch)) {
+			const rawBranch = step.branch as Record<string, unknown>;
+			const branchStep: Record<string, unknown> = {
+				id,
+				branch: {
+					when: rewriteLegacyExpressions(typeof rawBranch.when === "string" ? rawBranch.when : "true"),
+					then: convertSteps(Array.isArray(rawBranch.then) ? (rawBranch.then as unknown[]) : [], {}),
+				},
+			};
+			if (Array.isArray(rawBranch.else)) {
+				(branchStep.branch as Record<string, unknown>).else = convertSteps(rawBranch.else as unknown[], {});
+			}
+			if (step.active === false) branchStep.active = false;
+			if (step.stop === true) branchStep.stop = true;
+			out.push(branchStep);
+			continue;
+		}
+
 		const nodeRef = pickString(step.node) ?? pickString(step.use);
 		if (!nodeRef) continue;
 
@@ -214,8 +245,7 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 			return null;
 		})();
 
-		// Branch detection — if the v1 node config has `conditions` array,
-		// convert to v2 branch shape.
+		// V1 if/else: synthesised from `nodes[name].conditions[]` array.
 		if (v1NodeConfig && Array.isArray(v1NodeConfig.conditions)) {
 			const conds = v1NodeConfig.conditions as unknown[];
 			const ifCond = conds.find((c) => isPlainObject(c) && (c as Record<string, unknown>).type === "if") as
@@ -229,7 +259,7 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 				const branchStep: Record<string, unknown> = {
 					id,
 					branch: {
-						when: typeof ifCond.condition === "string" ? ifCond.condition : "true",
+						when: rewriteLegacyExpressions(typeof ifCond.condition === "string" ? ifCond.condition : "true"),
 						then: convertSteps(Array.isArray(ifCond.steps) ? (ifCond.steps as unknown[]) : [], {}),
 					},
 				};
@@ -249,7 +279,7 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 		// Regular step.
 		const v2Step: Record<string, unknown> = { id, use: nodeRef };
 		if (typeof step.type === "string") v2Step.type = step.type;
-		if (inputs) v2Step.inputs = inputs;
+		if (inputs) v2Step.inputs = rewriteLegacyExpressions(inputs);
 		// set_var: true is a no-op going forward; drop.
 		// set_var: false → ephemeral: true.
 		if (step.set_var === false) v2Step.ephemeral = true;
@@ -263,6 +293,48 @@ function convertSteps(steps: readonly unknown[], nodes: Record<string, unknown>)
 		out.push(v2Step);
 	}
 	return out;
+}
+
+/**
+ * Recursively rewrite legacy `js/ctx.vars[...]` / `js/ctx.response.data`
+ * (and their `${...}` template-string equivalents) to the v2 canonical
+ * `js/ctx.state[...]` / `js/ctx.prev.data` spellings.
+ *
+ * `vars` and `response` are runtime aliases of `state` and `prev`
+ * respectively, so legacy spellings still work — but the canonical v2
+ * spelling is what authors should see post-migration.
+ *
+ * Walks plain objects + arrays recursively; leaves primitives and
+ * non-plain values untouched.
+ *
+ * @internal exported for unit testing
+ */
+export function rewriteLegacyExpressions<T>(value: T): T {
+	if (typeof value === "string") {
+		return rewriteOneString(value) as T;
+	}
+	if (Array.isArray(value)) {
+		return value.map((v) => rewriteLegacyExpressions(v)) as T;
+	}
+	if (isPlainObject(value)) {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value)) {
+			out[k] = rewriteLegacyExpressions(v);
+		}
+		return out as T;
+	}
+	return value;
+}
+
+function rewriteOneString(input: string): string {
+	let s = input;
+	// js/ prefix variants
+	s = s.replace(/js\/ctx\.vars\b/g, "js/ctx.state");
+	s = s.replace(/js\/ctx\.response\.data\b/g, "js/ctx.prev.data");
+	// ${...} template variants
+	s = s.replace(/\$\{ctx\.vars\b/g, "${ctx.state");
+	s = s.replace(/\$\{ctx\.response\.data\b/g, "${ctx.prev.data");
+	return s;
 }
 
 function detectTriggerKind(wf: Record<string, unknown>): string {
@@ -355,7 +427,7 @@ function printResult(result: MigrationResult): void {
 	}
 }
 
-function printSummary(results: readonly MigrationResult[], dryRun: boolean): void {
+function printSummary(results: readonly MigrationResult[], dryRun: boolean, writeBackup: boolean): void {
 	const counts = {
 		migrated: 0,
 		alreadyV2: 0,
@@ -377,7 +449,7 @@ function printSummary(results: readonly MigrationResult[], dryRun: boolean): voi
 
 	if (dryRun) {
 		console.log(color.dim("\nDry run — no files written. Re-run without --dry-run to apply."));
-	} else if (counts.migrated + counts.notHttp > 0) {
+	} else if (writeBackup && counts.migrated + counts.notHttp > 0) {
 		console.log(
 			color.dim("\nBackups written next to each file as <name>.json.bak. Run with --no-backup to skip backups."),
 		);

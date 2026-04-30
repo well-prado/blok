@@ -316,20 +316,167 @@ describe("migrateWorkflows — flags", () => {
 });
 
 describe("migrateWorkflows — already-v2 detection", () => {
-	it("leaves v2 files untouched", async () => {
+	it("leaves v2 files untouched when no legacy refs exist", async () => {
 		const v2Workflow = {
 			name: "Already V2",
 			version: "1.0.0",
 			trigger: { http: { method: "GET", path: "/already-v2" } },
-			steps: [{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "..." } }],
+			steps: [{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://x.com" } }],
 		};
-		await writeWorkflow("already-v2.json", v2Workflow);
-		const before = await fsp.readFile(path.join(tmpDir, "workflows", "json", "already-v2.json"), "utf8");
+		// Write with a trailing newline so it matches the migrator's canonical output verbatim.
+		const dir = path.join(tmpDir, "workflows", "json");
+		await fsp.mkdir(dir, { recursive: true });
+		await fsp.writeFile(path.join(dir, "already-v2.json"), `${JSON.stringify(v2Workflow, null, "\t")}\n`);
+		const before = await fsp.readFile(path.join(dir, "already-v2.json"), "utf8");
 
 		await migrateWorkflows({ backup: false });
 
-		const after = await fsp.readFile(path.join(tmpDir, "workflows", "json", "already-v2.json"), "utf8");
+		const after = await fsp.readFile(path.join(dir, "already-v2.json"), "utf8");
 		expect(after).toBe(before);
+	});
+});
+
+describe("migrateWorkflows — legacy js/ expression rewrite", () => {
+	it("rewrites js/ctx.vars[...] → js/ctx.state[...] inside inputs", async () => {
+		await writeWorkflow("chain.json", {
+			name: "Chain",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/chain" } },
+			steps: [
+				{ id: "init", use: "init-node", inputs: {} },
+				{
+					id: "next",
+					use: "next-node",
+					inputs: {
+						chain: "js/ctx.vars['init'].chain",
+						origin: "js/ctx.vars['init'].origin",
+					},
+				},
+			],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("chain.json");
+		const next = (out.steps as Array<Record<string, unknown>>)[1];
+		const inputs = next.inputs as Record<string, string>;
+		expect(inputs.chain).toBe("js/ctx.state['init'].chain");
+		expect(inputs.origin).toBe("js/ctx.state['init'].origin");
+	});
+
+	it("rewrites js/ctx.response.data → js/ctx.prev.data", async () => {
+		await writeWorkflow("respdata.json", {
+			name: "RespData",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/respdata" } },
+			steps: [{ id: "step", use: "node", inputs: { body: "js/ctx.response.data.user" } }],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("respdata.json");
+		const inputs = (out.steps as Array<Record<string, unknown>>)[0].inputs as Record<string, string>;
+		expect(inputs.body).toBe("js/ctx.prev.data.user");
+	});
+
+	it("rewrites ${ctx.vars[...]} template strings", async () => {
+		await writeWorkflow("template.json", {
+			name: "Template",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/template" } },
+			steps: [{ id: "step", use: "node", inputs: { greeting: "Hello ${ctx.vars['name']}!" } }],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("template.json");
+		const inputs = (out.steps as Array<Record<string, unknown>>)[0].inputs as Record<string, string>;
+		expect(inputs.greeting).toBe("Hello ${ctx.state['name']}!");
+	});
+
+	it("rewrites refs nested inside arrays and sub-objects", async () => {
+		await writeWorkflow("nested.json", {
+			name: "Nested",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/nested" } },
+			steps: [
+				{
+					id: "step",
+					use: "node",
+					inputs: {
+						messages: ["static", "js/ctx.vars['data']", { deep: { ref: "js/ctx.vars['x'].y" } }],
+					},
+				},
+			],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("nested.json");
+		const inputs = (out.steps as Array<Record<string, unknown>>)[0].inputs as { messages: unknown[] };
+		expect(inputs.messages[1]).toBe("js/ctx.state['data']");
+		expect((inputs.messages[2] as { deep: { ref: string } }).deep.ref).toBe("js/ctx.state['x'].y");
+	});
+
+	it("rewrites refs inside a v2 branch step's nested inputs and when", async () => {
+		await writeWorkflow("branch.json", {
+			name: "Branch",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/branch" } },
+			steps: [
+				{
+					id: "router",
+					branch: {
+						when: "ctx.vars['choice'] === 'a'",
+						then: [{ id: "a", use: "n", inputs: { val: "js/ctx.vars['init'].x" } }],
+						else: [{ id: "b", use: "n", inputs: { val: "js/ctx.response.data" } }],
+					},
+				},
+			],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("branch.json");
+		const router = (out.steps as Array<Record<string, unknown>>)[0];
+		const branch = router.branch as Record<string, unknown>;
+		// Bare `ctx.vars[...]` (no js/ or ${ prefix) is NOT rewritten by
+		// design — the runtime resolves either form via the alias and
+		// rewriting unprefixed JS identifiers risks collateral damage.
+		expect(branch.when).toBe("ctx.vars['choice'] === 'a'");
+
+		const thenSteps = branch.then as Array<Record<string, unknown>>;
+		expect((thenSteps[0].inputs as { val: string }).val).toBe("js/ctx.state['init'].x");
+
+		const elseSteps = branch.else as Array<Record<string, unknown>>;
+		expect((elseSteps[0].inputs as { val: string }).val).toBe("js/ctx.prev.data");
+	});
+
+	it("does not touch non-legacy js/ expressions", async () => {
+		await writeWorkflow("safe.json", {
+			name: "Safe",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/safe" } },
+			steps: [
+				{
+					id: "step",
+					use: "node",
+					inputs: {
+						varsKey: "js/ctx.varsKey",
+						unrelated: "js/ctx.req.body",
+						already: "js/ctx.state.foo",
+					},
+				},
+			],
+		});
+
+		await migrateWorkflows({ backup: false });
+
+		const out = await readWorkflow("safe.json");
+		const inputs = (out.steps as Array<Record<string, unknown>>)[0].inputs as Record<string, string>;
+		expect(inputs.varsKey).toBe("js/ctx.varsKey");
+		expect(inputs.unrelated).toBe("js/ctx.req.body");
+		expect(inputs.already).toBe("js/ctx.state.foo");
 	});
 });
 

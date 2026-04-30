@@ -28,7 +28,7 @@
 			"use": "array-map",
 			"type": "module",
 			"inputs": {
-				"array": "js/ctx.response.data.data",
+				"array": "js/ctx.prev.data.data",
 				"map": "{ product: data.product, quantity: parseInt(data.quantity), total: parseInt(data.total), price: parseInt(data.price), rental_month: data.rental_month }"
 			}
 		},
@@ -38,7 +38,7 @@
 			"type": "runtime.python3",
 			"inputs": {
 				"title": "Top 20 Films by Revenue",
-				"sales_data": "js/ctx.response.data"
+				"sales_data": "js/ctx.prev.data"
 			}
 		},
 		{
@@ -46,7 +46,7 @@
 			"use": "base64-pdf",
 			"type": "module",
 			"inputs": {
-				"base64": "${ctx.response.data.pdf_base64}"
+				"base64": "${ctx.prev.data.pdf_base64}"
 			}
 		}
 	]

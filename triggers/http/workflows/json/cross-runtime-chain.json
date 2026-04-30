@@ -21,8 +21,8 @@
 			"use": "chain-test",
 			"type": "runtime.go",
 			"inputs": {
-				"chain": "js/ctx.vars['init'].chain",
-				"origin": "js/ctx.vars['init'].origin"
+				"chain": "js/ctx.state['init'].chain",
+				"origin": "js/ctx.state['init'].origin"
 			}
 		},
 		{
@@ -30,8 +30,8 @@
 			"use": "chain-test",
 			"type": "runtime.rust",
 			"inputs": {
-				"chain": "js/ctx.vars['go'].chain",
-				"origin": "js/ctx.vars['go'].origin"
+				"chain": "js/ctx.state['go'].chain",
+				"origin": "js/ctx.state['go'].origin"
 			}
 		},
 		{
@@ -39,8 +39,8 @@
 			"use": "chain-test",
 			"type": "runtime.java",
 			"inputs": {
-				"chain": "js/ctx.vars['rust'].chain",
-				"origin": "js/ctx.vars['rust'].origin"
+				"chain": "js/ctx.state['rust'].chain",
+				"origin": "js/ctx.state['rust'].origin"
 			}
 		},
 		{
@@ -48,8 +48,8 @@
 			"use": "chain-test",
 			"type": "runtime.csharp",
 			"inputs": {
-				"chain": "js/ctx.vars['java'].chain",
-				"origin": "js/ctx.vars['java'].origin"
+				"chain": "js/ctx.state['java'].chain",
+				"origin": "js/ctx.state['java'].origin"
 			}
 		},
 		{
@@ -57,8 +57,8 @@
 			"use": "chain-test",
 			"type": "runtime.php",
 			"inputs": {
-				"chain": "js/ctx.vars['csharp'].chain",
-				"origin": "js/ctx.vars['csharp'].origin"
+				"chain": "js/ctx.state['csharp'].chain",
+				"origin": "js/ctx.state['csharp'].origin"
 			}
 		},
 		{
@@ -66,8 +66,8 @@
 			"use": "chain-test",
 			"type": "runtime.ruby",
 			"inputs": {
-				"chain": "js/ctx.vars['php'].chain",
-				"origin": "js/ctx.vars['php'].origin"
+				"chain": "js/ctx.state['php'].chain",
+				"origin": "js/ctx.state['php'].origin"
 			}
 		},
 		{
@@ -75,8 +75,8 @@
 			"use": "chain-test",
 			"type": "runtime.python3",
 			"inputs": {
-				"chain": "js/ctx.vars['ruby'].chain",
-				"origin": "js/ctx.vars['ruby'].origin"
+				"chain": "js/ctx.state['ruby'].chain",
+				"origin": "js/ctx.state['ruby'].origin"
 			}
 		},
 		{
