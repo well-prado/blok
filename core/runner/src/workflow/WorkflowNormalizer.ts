@@ -379,14 +379,10 @@ function normalizeSubworkflowStep(
 			`[blok] WorkflowNormalizer: sub-workflow step "${id}" is missing \`subworkflow\` (workflow name to invoke).`,
 		);
 	}
-	// `wait: false` is rejected at schema level for v0.3.x. Defensive
-	// runtime check here so JSON workflows that bypass Zod also fail
-	// loudly rather than silently fire-and-forget.
-	if (step.wait === false) {
-		throw new Error(
-			`[blok] WorkflowNormalizer: sub-workflow step "${id}" sets \`wait: false\` — fire-and-forget is not yet supported in v0.3.x. Omit \`wait\` or set \`wait: true\`.`,
-		);
-	}
+	// `wait: false` (fire-and-forget) is now supported. The async dispatch
+	// branch lives in SubworkflowNode.run; the field is threaded through
+	// onto InternalStep below for the resolver to copy onto the
+	// SubworkflowNode instance.
 
 	// Persistence + retry + idempotency knobs — pass through verbatim
 	// (mirrors normalizeRegularStep). `as` and `spread` mutual exclusion
@@ -410,9 +406,8 @@ function normalizeSubworkflowStep(
 		spread,
 		ephemeral,
 		subworkflow,
-		// Default `wait: true` when omitted. The schema rejects `false`
-		// already, but we still want the field present on the InternalStep
-		// for downstream readers.
+		// Default `wait: true` when omitted. `wait: false` triggers the
+		// async dispatch branch in SubworkflowNode.run.
 		wait: step.wait === undefined ? true : Boolean(step.wait),
 	};
 

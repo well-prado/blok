@@ -525,6 +525,8 @@ export default class Configuration implements Config {
 		subworkflowNode.active = node.active !== undefined ? node.active : true;
 		subworkflowNode.stop = node.stop !== undefined ? node.stop : false;
 		subworkflowNode.subworkflow = v2.subworkflow;
+		// `wait: false` triggers the fire-and-forget branch in SubworkflowNode.run.
+		// Default to `true` (synchronous) when unset.
 		subworkflowNode.wait = v2.wait !== false;
 		// `globalOptions` is the runner's node registry — child Configuration.init
 		// needs it for `module:` step resolution.

@@ -251,8 +251,19 @@ describe("V2SubworkflowStepSchema", () => {
 		expect(result.wait).toBe(true);
 	});
 
-	it("rejects wait: false with a clear deferred-feature message", () => {
-		expect(() => V2SubworkflowStepSchema.parse({ ...baseStep, wait: false })).toThrow(/wait: false.*not yet supported/);
+	it("accepts wait: false (fire-and-forget — Tier 2 #4 follow-up)", () => {
+		const result = V2SubworkflowStepSchema.parse({ ...baseStep, wait: false });
+		expect(result.wait).toBe(false);
+	});
+
+	it("accepts wait: false combined with idempotencyKey (at-most-once dispatch)", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			wait: false,
+			idempotencyKey: "request-123",
+		}) as { wait: boolean; idempotencyKey: string };
+		expect(result.wait).toBe(false);
+		expect(result.idempotencyKey).toBe("request-123");
 	});
 
 	it("rejects as + spread combo (mutually exclusive)", () => {

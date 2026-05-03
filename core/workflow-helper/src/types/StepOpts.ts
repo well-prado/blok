@@ -412,8 +412,14 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.describe(
 					"If true (default), parent step blocks until child completes and " +
 						"the child's ctx.response becomes the parent step's output. " +
-						"`wait: false` (fire-and-forget) is planned but not yet supported " +
-						"in v0.3.x.",
+						"If false, dispatch is fire-and-forget — the parent step returns " +
+						"immediately with `{runId, workflowName, scheduledAt}` and the " +
+						"child runs asynchronously via setImmediate. The child still " +
+						"appears in Studio's Sub-runs strip and the parentRunId/parentNodeRunId " +
+						"lineage is preserved. Combine with `idempotencyKey` for " +
+						"at-most-once dispatch (Trigger.dev / Stripe semantics: the runId " +
+						"is cached against the key regardless of child outcome; new key " +
+						"needed to retry on failure).",
 				),
 			as: z
 				.string()
@@ -435,10 +441,14 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.min(1)
 				.optional()
 				.describe(
-					"When set, the entire sub-workflow's result is cached against the " +
-						"triple (parentWorkflow, step.id, key). Cache HIT means the child " +
-						"workflow is NEVER invoked — including any side effects. Use with " +
-						"care for sub-workflows that send emails, charge cards, etc.",
+					"When set, the sub-workflow's parent step output is cached against " +
+						"the triple (parentWorkflow, step.id, key). Cache semantics depend " +
+						"on `wait`: with `wait: true` (default), cache HIT means the child " +
+						"workflow is NEVER invoked — including any side effects (use with " +
+						"care for sub-workflows that send emails, charge cards, etc.). With " +
+						"`wait: false`, cache HIT returns the SAME `{runId, workflowName, " +
+						"scheduledAt}` for the lifetime of the cache entry — at-most-once " +
+						"dispatch deduplication. To retry on child failure, use a new key.",
 				),
 			idempotencyKeyTTL: z
 				.number()
@@ -450,12 +460,6 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				"Retry the WHOLE sub-workflow on failure. Each retry creates a fresh " +
 					"child run record under the same parent.",
 			),
-		})
-		.refine((step) => step.wait !== false, {
-			message:
-				"`wait: false` (fire-and-forget) is planned but not yet supported in v0.3.x. " +
-				"Omit `wait` or set `wait: true`.",
-			path: ["wait"],
 		})
 		.refine((step) => !(step.as && step.spread), {
 			message: "`as` and `spread` are mutually exclusive — pick one.",

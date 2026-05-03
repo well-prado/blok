@@ -288,15 +288,15 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 		expect(step.retry.maxAttempts).toBe(3);
 	});
 
-	it("rejects wait: false at workflow load time (deferred to follow-up)", () => {
-		expect(() =>
-			workflow({
-				name: "Bad",
-				version: "1.0.0",
-				trigger: { http: { method: "POST" } },
-				steps: [{ id: "bg", subworkflow: "child", wait: false }],
-			}),
-		).toThrow(/wait: false.*not yet supported/);
+	it("accepts wait: false at workflow load time (fire-and-forget)", () => {
+		const wf = workflow({
+			name: "WithFireAndForget",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "bg", subworkflow: "child", wait: false }],
+		});
+		const step = wf._config.steps[0] as { wait: boolean };
+		expect(step.wait).toBe(false);
 	});
 
 	it("rejects empty subworkflow name", () => {

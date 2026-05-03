@@ -322,14 +322,29 @@ describe("WorkflowNormalizer — sub-workflow step", () => {
 		expect(() => normalizeWorkflow(v2)).toThrow();
 	});
 
-	it("rejects wait: false at runtime (defensive — schema also rejects)", () => {
+	it("accepts wait: false on a sub-workflow step (fire-and-forget)", () => {
 		const v2 = {
-			name: "Bad",
+			name: "WithFireAndForget",
 			version: "1.0.0",
 			trigger: { http: { method: "POST" } },
 			steps: [{ id: "bg", subworkflow: "child", wait: false }],
 		};
-		expect(() => normalizeWorkflow(v2)).toThrow(/wait: false.*not yet supported/);
+		const normalized = normalizeWorkflow(v2) as unknown as { steps: Array<{ wait: boolean }> };
+		expect(normalized.steps[0].wait).toBe(false);
+	});
+
+	it("accepts wait: false combined with idempotencyKey (at-most-once dispatch)", () => {
+		const v2 = {
+			name: "WithCachedDispatch",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "bg", subworkflow: "child", wait: false, idempotencyKey: "req-123" }],
+		};
+		const normalized = normalizeWorkflow(v2) as unknown as {
+			steps: Array<{ wait: boolean; idempotencyKey?: string }>;
+		};
+		expect(normalized.steps[0].wait).toBe(false);
+		expect(normalized.steps[0].idempotencyKey).toBe("req-123");
 	});
 
 	it("rejects as + spread combo on a sub-workflow step", () => {

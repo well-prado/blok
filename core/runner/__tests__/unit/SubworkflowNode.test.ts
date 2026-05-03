@@ -1,5 +1,5 @@
 import type { Context, ResponseContext } from "@blokjs/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
@@ -408,6 +408,225 @@ describe("SubworkflowNode — dispatch", () => {
 		const state = (parentCtx as unknown as { state: Record<string, unknown> }).state;
 		const callOutput = state["call-e2e"] as { echoed: { from: { hello: string } } };
 		expect(callOutput.echoed).toEqual({ from: { hello: "world" } });
+	});
+});
+
+// =============================================================================
+// Tier 2 #4 follow-up — wait: false (fire-and-forget)
+// =============================================================================
+
+describe("SubworkflowNode — fire-and-forget (wait: false)", () => {
+	beforeEach(() => {
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+	});
+
+	function flush(): Promise<void> {
+		// setImmediate macrotask + a few microtask ticks for the chained
+		// then/catch handlers + tracker.completeRun.
+		return new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+	}
+
+	it("returns immediately with {runId, workflowName, scheduledAt} — does NOT await child", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-async",
+			source: "/child-async.ts",
+			workflow: makeChildWorkflowDef("child-async"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "fire-it",
+			subworkflowName: "child-async",
+			wait: false,
+		});
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { "fire-it": { inputs: { from: "p" } } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+
+		expect(result.success).toBe(true);
+		expect(result.error).toBeNull();
+		const data = result.data as { runId: string; workflowName: string; scheduledAt: number };
+		expect(data.workflowName).toBe("child-async");
+		expect(typeof data.runId).toBe("string");
+		expect(data.runId.length).toBeGreaterThan(0);
+		expect(typeof data.scheduledAt).toBe("number");
+		expect(data.scheduledAt).toBeLessThanOrEqual(Date.now());
+
+		// Child still in `running` BEFORE setImmediate fires.
+		const tracker = RunTracker.getInstance();
+		const childRunBefore = tracker.getStore().getRun(data.runId);
+		expect(childRunBefore?.status).toBe("running");
+
+		// Wait for the async dispatch to complete.
+		await flush();
+
+		const childRunAfter = tracker.getStore().getRun(data.runId);
+		expect(childRunAfter?.status).toBe("completed");
+	});
+
+	it("dispatch metadata lands on parent state[<id>] via applyStepOutput", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-bg",
+			source: "/child-bg.ts",
+			workflow: makeChildWorkflowDef("child-bg"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "send-receipt",
+			subworkflowName: "child-bg",
+			wait: false,
+		});
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { "send-receipt": { inputs: {} } } as unknown as Context["config"];
+		(parentCtx as unknown as { state: Record<string, unknown> }).state = {};
+
+		await node.run(parentCtx);
+		await flush();
+
+		const state = (parentCtx as unknown as { state: Record<string, unknown> }).state;
+		const stored = state["send-receipt"] as { runId: string; workflowName: string };
+		expect(stored.workflowName).toBe("child-bg");
+		expect(typeof stored.runId).toBe("string");
+	});
+
+	it("attaches parentRunId + parentNodeRunId on the async child run", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-bg",
+			source: "/child-bg.ts",
+			workflow: makeChildWorkflowDef("child-bg"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "fire",
+			subworkflowName: "child-bg",
+			wait: false,
+		});
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { fire: { inputs: {} } } as unknown as Context["config"];
+		(parentCtx as Record<string, unknown>)._traceNodeId = "parent_node_xyz";
+
+		const result = await node.run(parentCtx);
+		await flush();
+
+		const data = result.data as { runId: string };
+		const tracker = RunTracker.getInstance();
+		const childRun = tracker.getStore().getRun(data.runId);
+		expect(childRun?.parentRunId).toBe((parentCtx as Record<string, unknown>)._traceRunId);
+		expect(childRun?.parentNodeRunId).toBe("parent_node_xyz");
+	});
+
+	it("child failure marks child run as failed but does NOT throw to the parent", async () => {
+		// Failing child handler: throws inside execute.
+		class FailingNode extends EchoBodyNode {
+			constructor() {
+				super("fail-node");
+			}
+			override async run(): Promise<ResponseContext> {
+				throw new Error("boom");
+			}
+		}
+		WorkflowRegistry.getInstance().register({
+			name: "child-fail",
+			source: "/child-fail.ts",
+			workflow: {
+				name: "child-fail",
+				version: "1.0.0",
+				trigger: { manual: {} },
+				steps: [{ id: "go", use: "fail-node", type: "module", inputs: {} }],
+			},
+		});
+
+		const node = new SubworkflowNode();
+		node.name = "fire";
+		node.node = "@blokjs/subworkflow";
+		node.type = "subworkflow";
+		node.subworkflow = "child-fail";
+		node.wait = false;
+		node.globalOptions = {
+			nodes: {
+				getNode: (name: string) => (name === "fail-node" ? new FailingNode() : null),
+			},
+		} as unknown as SubworkflowNode["globalOptions"];
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { fire: { inputs: {} } } as unknown as Context["config"];
+
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+		// Parent step does NOT throw despite child failing.
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+		expect(result.error).toBeNull();
+
+		await flush();
+
+		const data = result.data as { runId: string };
+		const tracker = RunTracker.getInstance();
+		const childRun = tracker.getStore().getRun(data.runId);
+		expect(childRun?.status).toBe("failed");
+		expect(errSpy).toHaveBeenCalled();
+		errSpy.mockRestore();
+	});
+
+	it("multiple parallel fire-and-forget invocations create distinct child runs", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-multi",
+			source: "/child-multi.ts",
+			workflow: makeChildWorkflowDef("child-multi"),
+		});
+
+		const parentCtx = makeParentCtx();
+		const tracker = RunTracker.getInstance();
+		const parentRunId = (parentCtx as Record<string, unknown>)._traceRunId as string;
+
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			const node = makeSubworkflowNode({
+				stepName: `fire-${i}`,
+				subworkflowName: "child-multi",
+				wait: false,
+			});
+			parentCtx.config = { [`fire-${i}`]: { inputs: {} } } as unknown as Context["config"];
+			const result = await node.run(parentCtx);
+			ids.push((result.data as { runId: string }).runId);
+		}
+		await flush();
+
+		// All three child runs exist and are linked to the same parent.
+		const children = tracker.getRunsByParent(parentRunId);
+		expect(children.length).toBe(3);
+		const childIds = children.map((c) => c.id).sort();
+		expect(childIds).toEqual(ids.sort());
+	});
+
+	it("respects the persistence rules — ephemeral skips state", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-eph",
+			source: "/child-eph.ts",
+			workflow: makeChildWorkflowDef("child-eph"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "fire",
+			subworkflowName: "child-eph",
+			wait: false,
+		});
+		node.ephemeral = true; // skip state persistence
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { fire: { inputs: {} } } as unknown as Context["config"];
+		(parentCtx as unknown as { state: Record<string, unknown> }).state = {};
+
+		await node.run(parentCtx);
+		await flush();
+
+		const state = (parentCtx as unknown as { state: Record<string, unknown> }).state;
+		expect(state.fire).toBeUndefined();
 	});
 });
 

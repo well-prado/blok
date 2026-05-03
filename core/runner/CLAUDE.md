@@ -160,8 +160,8 @@ Any v2 workflow can invoke another named workflow as a step:
   id: "send-receipt",
   subworkflow: "send-receipt-email",
   inputs: { user: $.state.user, order: $.state.order },
-  // wait: true is the default; `wait: false` is rejected with a
-  // deferred-feature error in v0.3.x (planned for a follow-up).
+  // wait: true (default) — synchronous, parent blocks on child
+  // wait: false — fire-and-forget; parent returns {runId, workflowName, scheduledAt}
 }
 ```
 
@@ -185,14 +185,43 @@ the child and a "Sub-runs (N)" strip on the parent's run header.
 Endpoint: `GET /__blok/runs/:runId/subruns` returns the child runs
 sorted oldest-first.
 
+**Wait modes**:
+
+- `wait: true` (default) — synchronous. Parent step `await`s
+  `childRunner.run()` to completion. Child's `ctx.response` becomes
+  the parent step's `model.data` and lands on `state[<id>]` via
+  `applyStepOutput`. Errors propagate to the parent step (and its
+  `retry` loop, if configured).
+- `wait: false` — fire-and-forget. Parent step returns IMMEDIATELY
+  with `{runId, workflowName, scheduledAt}`. Child runs
+  asynchronously via `setImmediate(() => childRunner.run(...).then(completeRun).catch(failRun))`.
+  Errors are caught + routed to `tracker.failRun(childRunId, err)` +
+  `console.error`, NOT propagated to the parent (which has already
+  returned). `parentRunId`/`parentNodeRunId` lineage is preserved
+  for both modes — the child appears in Studio's Sub-runs strip
+  with status transitioning `running → completed | failed`
+  independently of the parent.
+
 **Composition with Tier 1**:
-- Parent step's `idempotencyKey` caches the **whole** sub-workflow
-  result. Cache HIT means the child workflow is NEVER invoked —
-  including any side effects. This is the headline pattern AND the
-  primary footgun. Document prominently for sub-workflows that have
-  unconditional side effects (sends emails, charges cards, etc.).
-- Parent step's `retry` retries the whole sub-workflow on failure;
-  each retry creates a fresh child run record under the same parent.
+- Parent step's `idempotencyKey` caches the parent step output:
+  - With `wait: true`: cache holds the **whole child result**. Cache
+    HIT means the child workflow is NEVER invoked — including any
+    side effects. This is the headline pattern AND the primary
+    footgun. Document prominently for sub-workflows that have
+    unconditional side effects (sends emails, charges cards, etc.).
+  - With `wait: false`: cache holds the **dispatch metadata**
+    (`{runId, workflowName, scheduledAt}`). Cache HIT returns the
+    SAME runId regardless of child outcome — Trigger.dev / Stripe
+    at-most-once dispatch dedup semantics. To retry on child
+    failure, use a new idempotency key. The cached `runId` points
+    at the original (possibly long-completed or long-failed) child
+    run; caller polls `/__blok/runs/<runId>` for the current state.
+- Parent step's `retry` retries the dispatch step (registry lookup,
+  recursion guard) on failure. With `wait: true`, the retry covers
+  the full child execution (failed children re-trigger fresh).
+  With `wait: false`, the retry only covers the dispatch itself
+  (the async child's failure does NOT trigger parent retry; the
+  parent step has already returned successfully with the runId).
 - Replay creates fresh sub-run lineage automatically.
 
 **Recursion guard**: hard-coded cap at 10 levels of nesting,
@@ -205,13 +234,17 @@ when exceeded — bounds blast radius of accidental cycles
 Additive; pre-existing rows get NULL.
 
 **Not yet shipped**:
-- `wait: false` (fire-and-forget) — schema accepts and rejects with
-  a clear deferred-feature error.
 - Cross-process sub-workflow dispatch (HTTP self-call) — current
-  implementation is in-process only. Horizontal-scale users with
-  isolation needs may want this in a follow-up.
+  implementation is in-process only. `wait: false` async dispatch
+  is `setImmediate`-based, NOT cross-process. Horizontal-scale
+  users with isolation needs may want this in a follow-up.
 - Polymorphic workflow names (`subworkflow: $.req.body.kind`) —
   workflow names are static today.
+- Studio `↳ async` indicator distinguishing sync vs async sub-
+  workflow steps in StepRail. Currently both show `↳ sub`; the
+  Sub-runs strip on the parent surfaces the actual status.
+- Cancellation API for fire-and-forget children
+  (`POST /__blok/runs/:childId/cancel`).
 
 ## Concurrency keys (Tier 2 #6)
 

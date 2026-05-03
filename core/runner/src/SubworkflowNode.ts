@@ -62,7 +62,21 @@ export class SubworkflowNode extends RunnerNode {
 	 * it being defined.
 	 */
 	public declare subworkflow: string;
-	/** Default true — `wait: false` is rejected at workflow load time in v0.3.x. */
+	/**
+	 * Wait mode for the sub-workflow dispatch:
+	 *
+	 * - `true` (default) — synchronous: parent step blocks on the child
+	 *   and the child's `ctx.response` becomes the parent step's output.
+	 * - `false` — fire-and-forget: parent step returns IMMEDIATELY with
+	 *   `{runId, workflowName, scheduledAt}`. The child runs
+	 *   asynchronously via `setImmediate` and shows up in Studio's
+	 *   Sub-runs strip with status transitioning `running → completed |
+	 *   failed` independently of the parent.
+	 *
+	 * Combine `wait: false` with `idempotencyKey` for at-most-once
+	 * dispatch deduplication (the `runId` is cached against the key
+	 * regardless of child outcome — Trigger.dev / Stripe semantics).
+	 */
 	public declare wait: boolean;
 	/**
 	 * Runner-wide options (carries the `nodes` registry that the child
@@ -142,7 +156,12 @@ export class SubworkflowNode extends RunnerNode {
 			(childCtx as Record<string, unknown>)._traceRunId = childRun.id;
 		}
 
-		// === 6. Run the child ===
+		// === 6. Dispatch — sync or fire-and-forget based on `this.wait` ===
+		if (this.wait === false) {
+			return this.dispatchAsync(ctx, childRunner, childCtx, childRunId, entry.name);
+		}
+
+		// === 6a. Synchronous dispatch (wait: true / default) ===
 		try {
 			await childRunner.run(childCtx);
 			if (childRunId) tracker.completeRun(childRunId, childCtx.response);
@@ -166,6 +185,64 @@ export class SubworkflowNode extends RunnerNode {
 			success: result.success,
 			data: childCtx.response,
 			error: childCtx.response?.error ?? null,
+		};
+	}
+
+	/**
+	 * Fire-and-forget dispatch (Tier 2 #4 follow-up — `wait: false`).
+	 *
+	 * Schedules the child runner via `setImmediate` so the parent step
+	 * can return immediately. Child errors are caught and routed to
+	 * `tracker.failRun(childRunId, err)` — visible in Studio, NOT
+	 * propagated to the parent step (which has already returned). Also
+	 * logged via `console.error` for ops visibility.
+	 *
+	 * Parent step's output is the dispatch metadata `{runId,
+	 * workflowName, scheduledAt}` — NOT the child's response (which
+	 * doesn't exist yet). Caller polls `GET /__blok/runs/<runId>` for
+	 * the actual outcome.
+	 */
+	private dispatchAsync(
+		parentCtx: Context,
+		childRunner: { run: (ctx: Context) => Promise<unknown> },
+		childCtx: Context,
+		childRunId: string | undefined,
+		childWorkflowName: string,
+	): ResponseContext {
+		const scheduledAt = Date.now();
+		const tracker = RunTracker.getInstance();
+
+		setImmediate(() => {
+			void (async () => {
+				try {
+					await childRunner.run(childCtx);
+					if (childRunId) tracker.completeRun(childRunId, childCtx.response);
+				} catch (err) {
+					if (childRunId) {
+						tracker.failRun(childRunId, err instanceof Error ? err : new Error(String(err)));
+					}
+					console.error(
+						`[blok][subworkflow] async child '${childWorkflowName}' (run ${childRunId ?? "?"}) failed:`,
+						err instanceof Error ? err.stack || err.message : err,
+					);
+				}
+			})();
+		});
+
+		// Parent step's output: dispatch metadata (the runId is the
+		// canonical handle for at-most-once dispatch deduplication when
+		// combined with `idempotencyKey`).
+		const dispatchData: Record<string, unknown> = {
+			runId: childRunId ?? null,
+			workflowName: childWorkflowName,
+			scheduledAt,
+		};
+		const result = { success: true, data: dispatchData };
+		applyStepOutput(parentCtx, this, result);
+		return {
+			success: true,
+			data: dispatchData,
+			error: null,
 		};
 	}
 }
