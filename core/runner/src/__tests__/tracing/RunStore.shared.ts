@@ -446,5 +446,108 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(store.getRun("run_1")).toBeDefined();
 			});
 		});
+
+		// === Concurrency gating (Tier 2 #6) ===
+
+		describe("concurrency gating", () => {
+			const FAR_FUTURE = Date.now() + 60 * 60 * 1000;
+
+			it("grants slots up to the limit", () => {
+				const a = store.acquireConcurrencySlot("wf", "tenant-x", 2, "run_1", FAR_FUTURE);
+				expect(a.acquired).toBe(true);
+				expect(a.currentInFlight).toBe(1);
+
+				const b = store.acquireConcurrencySlot("wf", "tenant-x", 2, "run_2", FAR_FUTURE);
+				expect(b.acquired).toBe(true);
+				expect(b.currentInFlight).toBe(2);
+			});
+
+			it("denies the next acquire once the limit is hit", () => {
+				store.acquireConcurrencySlot("wf", "tenant-x", 2, "run_1", FAR_FUTURE);
+				store.acquireConcurrencySlot("wf", "tenant-x", 2, "run_2", FAR_FUTURE);
+				const denied = store.acquireConcurrencySlot("wf", "tenant-x", 2, "run_3", FAR_FUTURE);
+				expect(denied.acquired).toBe(false);
+				expect(denied.currentInFlight).toBe(2);
+			});
+
+			it("releases slots so the next acquire succeeds", () => {
+				store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_1", FAR_FUTURE);
+				store.releaseConcurrencySlot("wf", "tenant-x", "run_1");
+				const next = store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_2", FAR_FUTURE);
+				expect(next.acquired).toBe(true);
+				expect(next.currentInFlight).toBe(1);
+			});
+
+			it("releasing an unknown runId is a no-op", () => {
+				store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_1", FAR_FUTURE);
+				expect(() => store.releaseConcurrencySlot("wf", "tenant-x", "run_unknown")).not.toThrow();
+				const denied = store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_2", FAR_FUTURE);
+				expect(denied.acquired).toBe(false);
+			});
+
+			it("re-acquiring with the same runId refreshes the lease without growing the count", () => {
+				store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_1", FAR_FUTURE);
+				const reacquire = store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_1", FAR_FUTURE + 1000);
+				expect(reacquire.acquired).toBe(true);
+				expect(reacquire.currentInFlight).toBe(1);
+			});
+
+			it("isolates buckets across workflows", () => {
+				store.acquireConcurrencySlot("wf-A", "k", 1, "run_a", FAR_FUTURE);
+				const b = store.acquireConcurrencySlot("wf-B", "k", 1, "run_b", FAR_FUTURE);
+				expect(b.acquired).toBe(true);
+			});
+
+			it("isolates buckets across keys", () => {
+				store.acquireConcurrencySlot("wf", "key-A", 1, "run_a", FAR_FUTURE);
+				const b = store.acquireConcurrencySlot("wf", "key-B", 1, "run_b", FAR_FUTURE);
+				expect(b.acquired).toBe(true);
+			});
+
+			it("lazy-purges expired leases on the next acquire to the same bucket", () => {
+				const past = Date.now() - 1000;
+				store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_dead", past);
+
+				// New acquire on the same bucket sees the expired lease and reclaims its slot.
+				const fresh = store.acquireConcurrencySlot("wf", "tenant-x", 1, "run_alive", FAR_FUTURE);
+				expect(fresh.acquired).toBe(true);
+				expect(fresh.currentInFlight).toBe(1);
+			});
+
+			it("purgeExpiredConcurrencySlots removes only expired entries", () => {
+				// Use distinct buckets so the per-bucket lazy-purge inside
+				// `acquireConcurrencySlot` doesn't preempt our global purge.
+				const past = Date.now() - 1000;
+				store.acquireConcurrencySlot("wf", "bucket-dead", 5, "run_dead", past);
+				store.acquireConcurrencySlot("wf", "bucket-alive", 5, "run_alive", FAR_FUTURE);
+
+				const removed = store.purgeExpiredConcurrencySlots(Date.now());
+				expect(removed).toBe(1);
+
+				// The alive bucket is untouched: a new acquire there sees the
+				// existing slot and currentInFlight grows to 2.
+				const next = store.acquireConcurrencySlot("wf", "bucket-alive", 5, "run_new", FAR_FUTURE);
+				expect(next.acquired).toBe(true);
+				expect(next.currentInFlight).toBe(2);
+			});
+
+			it("clearAll removes all concurrency locks", () => {
+				store.acquireConcurrencySlot("wf", "k", 1, "run_1", FAR_FUTURE);
+				store.clearAll();
+				const fresh = store.acquireConcurrencySlot("wf", "k", 1, "run_2", FAR_FUTURE);
+				expect(fresh.acquired).toBe(true);
+				expect(fresh.currentInFlight).toBe(1);
+			});
+
+			it("respects concurrencyLimit changes between acquires (snapshot semantics)", () => {
+				// Simulate a config change mid-run: first acquire with limit 5,
+				// then attempt with limit 1. The second sees 1 in-flight (>=
+				// limit 1) and is denied.
+				store.acquireConcurrencySlot("wf", "k", 5, "run_1", FAR_FUTURE);
+				const denied = store.acquireConcurrencySlot("wf", "k", 1, "run_2", FAR_FUTURE);
+				expect(denied.acquired).toBe(false);
+				expect(denied.currentInFlight).toBe(1);
+			});
+		});
 	});
 }

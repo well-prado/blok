@@ -209,6 +209,58 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
+	/**
+	 * Tier 2 #6 — mark a run as throttled because the concurrency gate
+	 * denied it before any step executed. Distinct from `failRun` because
+	 * no step ran; nothing produced an error. Studio surfaces a Throttled
+	 * badge and SSE subscribers see a granular `RUN_THROTTLED` event.
+	 */
+	markRunThrottled(
+		runId: string,
+		info: { concurrencyKey: string; concurrencyLimit: number; currentInFlight: number },
+	): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "throttled",
+			finishedAt,
+			durationMs,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_THROTTLED", undefined, undefined, {
+			durationMs,
+			concurrencyKey: info.concurrencyKey,
+			concurrencyLimit: info.concurrencyLimit,
+			currentInFlight: info.currentInFlight,
+		});
+	}
+
+	// === Concurrency gate pass-throughs (Tier 2 #6) ===
+
+	/**
+	 * Acquire a concurrency slot for `(workflowName, concurrencyKey)`. Pass
+	 * through to the underlying RunStore. Returns the acquire outcome —
+	 * caller decides whether to proceed or call `markRunThrottled`.
+	 */
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ReturnType<typeof this.store.acquireConcurrencySlot> {
+		return this.store.acquireConcurrencySlot(workflowName, concurrencyKey, concurrencyLimit, runId, leaseExpiresAt);
+	}
+
+	/** Release a slot acquired via `acquireConcurrencySlot`. Idempotent. */
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		this.store.releaseConcurrencySlot(workflowName, concurrencyKey, runId);
+	}
+
 	// === Node Lifecycle ===
 
 	startNode(runId: string, opts: StartNodeOptions): NodeRun {

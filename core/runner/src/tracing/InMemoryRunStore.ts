@@ -1,6 +1,7 @@
 import type { RunStore } from "./RunStore";
 import type {
 	CachedStepResult,
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -25,11 +26,16 @@ export class InMemoryRunStore implements RunStore {
 	private logs: Map<string, TraceLogEntry[]> = new Map(); // runId → LogEntry[]
 	private dashboards: Map<string, Dashboard> = new Map();
 	private idempotencyCache: Map<string, CachedStepResult> = new Map();
+	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
 
 	private idemKey(workflowName: string, stepId: string, key: string): string {
 		// US (\x1f) is non-printable and never appears in identifiers, so it
 		// cannot collide with characters in workflow / step / key strings.
 		return `${workflowName}\x1f${stepId}\x1f${key}`;
+	}
+
+	private concurrencyBucketKey(workflowName: string, concurrencyKey: string): string {
+		return `${workflowName}\x1f${concurrencyKey}`;
 	}
 
 	// === Writes ===
@@ -372,6 +378,7 @@ export class InMemoryRunStore implements RunStore {
 		this.logs.clear();
 		this.dashboards.clear();
 		this.idempotencyCache.clear();
+		this.concurrencyLocks.clear();
 		return count;
 	}
 
@@ -423,6 +430,66 @@ export class InMemoryRunStore implements RunStore {
 				this.idempotencyCache.delete(k);
 				removed++;
 			}
+		}
+		return removed;
+	}
+
+	// === Concurrency gating (Tier 2 #6) ===
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ConcurrencySlotResult {
+		const bucketKey = this.concurrencyBucketKey(workflowName, concurrencyKey);
+		let bucket = this.concurrencyLocks.get(bucketKey);
+		if (!bucket) {
+			bucket = new Map();
+			this.concurrencyLocks.set(bucketKey, bucket);
+		}
+
+		// Lazy-purge expired leases for THIS bucket so we don't deny based
+		// on a slot held by a process that crashed mid-run.
+		const now = Date.now();
+		for (const [otherRunId, expiresAt] of bucket) {
+			if (expiresAt <= now) bucket.delete(otherRunId);
+		}
+
+		// Idempotent re-acquire — if the same runId already holds a slot,
+		// refresh its lease and report success without growing the count.
+		if (bucket.has(runId)) {
+			bucket.set(runId, leaseExpiresAt);
+			return { acquired: true, currentInFlight: bucket.size };
+		}
+
+		if (bucket.size >= concurrencyLimit) {
+			return { acquired: false, currentInFlight: bucket.size };
+		}
+
+		bucket.set(runId, leaseExpiresAt);
+		return { acquired: true, currentInFlight: bucket.size };
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		const bucketKey = this.concurrencyBucketKey(workflowName, concurrencyKey);
+		const bucket = this.concurrencyLocks.get(bucketKey);
+		if (!bucket) return;
+		bucket.delete(runId);
+		if (bucket.size === 0) this.concurrencyLocks.delete(bucketKey);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		let removed = 0;
+		for (const [bucketKey, bucket] of this.concurrencyLocks.entries()) {
+			for (const [runId, expiresAt] of bucket) {
+				if (expiresAt <= now) {
+					bucket.delete(runId);
+					removed++;
+				}
+			}
+			if (bucket.size === 0) this.concurrencyLocks.delete(bucketKey);
 		}
 		return removed;
 	}

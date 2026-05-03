@@ -29,6 +29,10 @@ import {
 } from "./types/StepOpts";
 import {
 	AnyTriggerOpts,
+	// Concurrency keys (Tier 2 #6)
+	ConcurrencyOpts,
+	ConcurrencyOptsFields,
+	ConcurrencyOptsSchema,
 	// Cron
 	CronTriggerOpts,
 	CronTriggerOptsSchema,
@@ -70,6 +74,7 @@ import {
 	// Worker
 	WorkerTriggerOpts,
 	WorkerTriggerOptsSchema,
+	concurrencyRefinement,
 	validateTriggerConfig,
 } from "./types/TriggerOpts";
 import { WorkflowV2, WorkflowV2Schema } from "./types/WorkflowOpts";
@@ -122,6 +127,11 @@ export {
 	HTTP_METHODS,
 	HttpMethod,
 	HttpMethodSchema,
+	// Concurrency keys (Tier 2 #6)
+	ConcurrencyOpts,
+	ConcurrencyOptsFields,
+	ConcurrencyOptsSchema,
+	concurrencyRefinement,
 	// Trigger types — preferred names
 	HttpTriggerOpts,
 	HttpTriggerOptsSchema,

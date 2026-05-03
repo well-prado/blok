@@ -9,12 +9,14 @@ import {
 	V2SubworkflowStepSchema,
 } from "../src/types/StepOpts";
 import {
+	ConcurrencyOptsSchema,
 	CronTriggerOptsSchema,
 	HttpTriggerOptsSchema,
 	QueueTriggerOptsSchema,
 	TRIGGER_SCHEMAS,
 	TriggersSchema,
 	WebhookTriggerOptsSchema,
+	WorkerTriggerOptsSchema,
 	validateTriggerConfig,
 } from "../src/types/TriggerOpts";
 import { WorkflowOptsSchema } from "../src/types/WorkflowOpts";
@@ -355,6 +357,156 @@ describe("HttpTriggerOptsSchema", () => {
 
 	it("should require valid method", () => {
 		expect(() => HttpTriggerOptsSchema.parse({ method: "INVALID" })).toThrow();
+	});
+
+	it("accepts concurrencyKey + concurrencyLimit (Tier 2 #6)", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "tenant-abc",
+				concurrencyLimit: 5,
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts concurrencyKey alone (limit defaults at runtime to 1)", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-abc",
+		}) as { concurrencyKey: string; concurrencyLimit?: number };
+		expect(result.concurrencyKey).toBe("tenant-abc");
+		expect(result.concurrencyLimit).toBeUndefined();
+	});
+
+	it("accepts a $-proxy compiled string for concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "js/ctx.request.body.userId",
+				concurrencyLimit: 3,
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects empty-string concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "",
+			}),
+		).toThrow();
+	});
+
+	it("rejects concurrencyLimit < 1", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLimit: 0,
+			}),
+		).toThrow();
+	});
+
+	it("rejects non-integer concurrencyLimit", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLimit: 2.5,
+			}),
+		).toThrow();
+	});
+
+	it("rejects concurrencyLimit set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyLimit: 5,
+			}),
+		).toThrow(/concurrencyLimit.+requires.+concurrencyKey/i);
+	});
+
+	it("rejects concurrencyLeaseMs set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyLeaseMs: 60_000,
+			}),
+		).toThrow(/concurrencyLeaseMs.+requires.+concurrencyKey/i);
+	});
+
+	it("rejects concurrencyLeaseMs below 1s", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLeaseMs: 500,
+			}),
+		).toThrow();
+	});
+
+	it("accepts concurrencyLeaseMs >= 1s", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLeaseMs: 1_000,
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("WorkerTriggerOptsSchema concurrency keys", () => {
+	it("accepts concurrencyKey + concurrencyLimit alongside legacy concurrency", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "renders",
+			concurrency: 10,
+			concurrencyKey: "$.req.body.tenantId",
+			concurrencyLimit: 2,
+		}) as {
+			queue: string;
+			concurrency: number;
+			concurrencyKey?: string;
+			concurrencyLimit?: number;
+		};
+		expect(result.concurrency).toBe(10);
+		expect(result.concurrencyKey).toBe("$.req.body.tenantId");
+		expect(result.concurrencyLimit).toBe(2);
+	});
+
+	it("rejects concurrencyLimit without concurrencyKey on worker triggers too", () => {
+		expect(() =>
+			WorkerTriggerOptsSchema.parse({
+				queue: "renders",
+				concurrencyLimit: 2,
+			}),
+		).toThrow(/concurrencyLimit.+requires.+concurrencyKey/i);
+	});
+
+	it("default consumer concurrency stays 1 when only concurrencyKey provided", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "renders",
+			concurrencyKey: "x",
+		}) as { concurrency: number };
+		expect(result.concurrency).toBe(1);
+	});
+});
+
+describe("ConcurrencyOptsSchema (standalone)", () => {
+	it("accepts an empty object (all fields optional)", () => {
+		expect(() => ConcurrencyOptsSchema.parse({})).not.toThrow();
+	});
+
+	it("accepts a key alone", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyKey: "k" })).not.toThrow();
+	});
+
+	it("rejects limit without key", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyLimit: 5 })).toThrow();
+	});
+
+	it("rejects leaseMs without key", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyLeaseMs: 60_000 })).toThrow();
 	});
 });
 

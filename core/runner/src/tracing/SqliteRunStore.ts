@@ -4,6 +4,7 @@ import type { RunStore } from "./RunStore";
 const esmRequire = createRequire(import.meta.url);
 import type {
 	CachedStepResult,
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -379,6 +380,28 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
 					ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
 					CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
+				`,
+			},
+			{
+				// Tier 2 #6 · concurrency keys. Adds a per-(workflow, key)
+				// in-flight slot table. Composite PK on (workflow_name,
+				// concurrency_key, run_id) lets a single run hold at most
+				// one slot per bucket while still permitting the
+				// `concurrencyLimit` runs to coexist within a bucket.
+				// `expires_at` is the lease upper bound — covers
+				// crash-safety when a process dies before releasing.
+				version: 7,
+				sql: `
+					CREATE TABLE IF NOT EXISTS concurrency_locks (
+						workflow_name TEXT NOT NULL,
+						concurrency_key TEXT NOT NULL,
+						run_id TEXT NOT NULL,
+						acquired_at INTEGER NOT NULL,
+						expires_at INTEGER NOT NULL,
+						PRIMARY KEY (workflow_name, concurrency_key, run_id)
+					);
+					CREATE INDEX IF NOT EXISTS idx_locks_expires ON concurrency_locks(expires_at);
+					CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key);
 				`,
 			},
 		];
@@ -1039,6 +1062,7 @@ export class SqliteRunStore implements RunStore {
 		this.db.exec("DELETE FROM workflow_runs");
 		this.db.exec("DELETE FROM dashboards");
 		this.db.exec("DELETE FROM idempotency_cache");
+		this.db.exec("DELETE FROM concurrency_locks");
 		return count;
 	}
 
@@ -1094,6 +1118,90 @@ export class SqliteRunStore implements RunStore {
 			"purgeExpiredIdempotency",
 			"DELETE FROM idempotency_cache WHERE expires_at IS NOT NULL AND expires_at <= ?",
 		).run(now);
+		return result.changes;
+	}
+
+	// === Concurrency gating (Tier 2 #6) ===
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ConcurrencySlotResult {
+		// Wrap the read-modify-write in a transaction so two concurrent
+		// `acquireConcurrencySlot` calls can't both see N < limit and
+		// both grant a slot. better-sqlite3 / bun:sqlite serialize within
+		// a single connection; the transaction is the safety net for any
+		// future multi-connection setup.
+		const txn = this.db.transaction((): ConcurrencySlotResult => {
+			const now = Date.now();
+
+			// Lazy-purge expired leases for THIS bucket so we don't deny
+			// based on a slot held by a process that crashed mid-run.
+			this.stmt(
+				"deleteExpiredLocksForBucket",
+				"DELETE FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND expires_at <= ?",
+			).run(workflowName, concurrencyKey, now);
+
+			// Idempotent re-acquire — if the same runId already holds a
+			// slot, refresh its lease (UPSERT on PK) and report success
+			// without growing the count.
+			const existing = this.stmt(
+				"getLockForRun",
+				"SELECT 1 FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+			).get(workflowName, concurrencyKey, runId) as { 1: number } | undefined;
+
+			if (existing) {
+				this.stmt(
+					"refreshLockLease",
+					"UPDATE concurrency_locks SET expires_at = ? WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+				).run(leaseExpiresAt, workflowName, concurrencyKey, runId);
+				const count =
+					(
+						this.stmt(
+							"countLocksForBucket",
+							"SELECT COUNT(*) as c FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ?",
+						).get(workflowName, concurrencyKey) as { c: number } | undefined
+					)?.c ?? 0;
+				return { acquired: true, currentInFlight: count };
+			}
+
+			const currentCount =
+				(
+					this.stmt(
+						"countLocksForBucket",
+						"SELECT COUNT(*) as c FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ?",
+					).get(workflowName, concurrencyKey) as { c: number } | undefined
+				)?.c ?? 0;
+
+			if (currentCount >= concurrencyLimit) {
+				return { acquired: false, currentInFlight: currentCount };
+			}
+
+			this.stmt(
+				"insertLock",
+				`INSERT INTO concurrency_locks
+				(workflow_name, concurrency_key, run_id, acquired_at, expires_at)
+				VALUES (?, ?, ?, ?, ?)`,
+			).run(workflowName, concurrencyKey, runId, now, leaseExpiresAt);
+
+			return { acquired: true, currentInFlight: currentCount + 1 };
+		});
+
+		return txn();
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		this.stmt(
+			"releaseLock",
+			"DELETE FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+		).run(workflowName, concurrencyKey, runId);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		const result = this.stmt("purgeExpiredLocks", "DELETE FROM concurrency_locks WHERE expires_at <= ?").run(now);
 		return result.changes;
 	}
 

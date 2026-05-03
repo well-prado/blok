@@ -7,6 +7,7 @@ export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = 
 	failed: "text-red-400 bg-red-400/10",
 	cancelled: "text-purple-400 bg-purple-400/10",
 	skipped: "text-zinc-500 bg-zinc-500/10",
+	throttled: "text-amber-300 bg-amber-300/10",
 };
 
 export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
@@ -16,6 +17,7 @@ export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string
 	failed: "bg-red-400",
 	cancelled: "bg-purple-400",
 	skipped: "bg-zinc-500",
+	throttled: "bg-amber-300",
 };
 
 export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
@@ -25,6 +27,7 @@ export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = 
 	failed: "Failed",
 	cancelled: "Cancelled",
 	skipped: "Skipped",
+	throttled: "Throttled",
 };
 
 export const TIMELINE_BAR_COLORS: Record<NodeRunStatus, string> = {
@@ -49,6 +52,7 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	NODE_PARTIAL_RESULT: "Node Partial Result",
 	NODE_CACHED: "Node Cached",
 	NODE_ATTEMPT_FAILED: "Attempt Failed",
+	RUN_THROTTLED: "Run Throttled",
 };
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
@@ -65,6 +69,7 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	NODE_PARTIAL_RESULT: "text-cyan-300 bg-cyan-300/10",
 	NODE_CACHED: "text-emerald-400 bg-emerald-400/10",
 	NODE_ATTEMPT_FAILED: "text-amber-400 bg-amber-400/10",
+	RUN_THROTTLED: "text-amber-300 bg-amber-300/10",
 };
 
 export const LOG_LEVEL_COLORS = {

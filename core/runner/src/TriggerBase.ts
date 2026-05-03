@@ -4,8 +4,11 @@ import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";
 import DefaultLogger from "./DefaultLogger";
 import Runner from "./Runner";
+import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
+import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import type { HMREvent } from "./hmr/FileWatcher";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
+import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { CircuitBreaker } from "./monitoring/CircuitBreaker";
 import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
 import { HealthCheck } from "./monitoring/HealthCheck";
@@ -193,6 +196,10 @@ export default abstract class TriggerBase extends Trigger {
 		this.inFlightRequests++;
 		const runStart = performance.now();
 		let runSuccess = true;
+		// Tier 2 #6 — concurrency lock claim, populated when the gate grants
+		// a slot. Released in the `finally` block. Null when the workflow has
+		// no concurrency gate or the gate failed open (key resolution).
+		let acquiredLock: { workflowName: string; concurrencyKey: string; runId: string } | null = null;
 
 		// --- Trace: start run ---
 		const tracker = RunTracker.getInstance();
@@ -228,6 +235,48 @@ export default abstract class TriggerBase extends Trigger {
 		}
 
 		try {
+			// --- Concurrency gate (Tier 2 #6) ---
+			// Runs after `tracker.startRun` so denied attempts appear in
+			// Studio with status "throttled". Skipped when:
+			//  - tracker is inactive (lock store IS the run store)
+			//  - the trigger config has no `concurrencyKey`
+			//  - the resolved key is null/undefined (fail-open, matches
+			//    idempotency-cache semantics)
+			//  - `BLOK_CONCURRENCY_DISABLED=1` (kill-switch).
+			if (traceRunId && process.env.BLOK_CONCURRENCY_DISABLED !== "1") {
+				const concCfg = readConcurrencyConfig(this.configuration.trigger as Record<string, unknown> | undefined);
+				if (concCfg) {
+					const resolvedKey = resolveIdempotencyKey(concCfg.keyExpression, ctx);
+					if (resolvedKey !== null) {
+						const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
+						const now = Date.now();
+						const result = tracker.acquireConcurrencySlot(
+							workflowName,
+							resolvedKey,
+							concCfg.limit,
+							traceRunId,
+							now + concCfg.leaseMs,
+						);
+						if (!result.acquired) {
+							tracker.markRunThrottled(traceRunId, {
+								concurrencyKey: resolvedKey,
+								concurrencyLimit: concCfg.limit,
+								currentInFlight: result.currentInFlight,
+							});
+							throw new ConcurrencyLimitError({
+								workflowName,
+								concurrencyKey: resolvedKey,
+								concurrencyLimit: concCfg.limit,
+								currentInFlight: result.currentInFlight,
+								retryAfterMs: 1000,
+								runId: traceRunId,
+							});
+						}
+						acquiredLock = { workflowName, concurrencyKey: resolvedKey, runId: traceRunId };
+					}
+				}
+			}
+
 			const start = performance.now();
 			const defaultMeter = metrics.getMeter("default");
 			const workflow_execution = defaultMeter.createCounter("workflow", {
@@ -369,12 +418,23 @@ export default abstract class TriggerBase extends Trigger {
 			runSuccess = false;
 
 			// --- Trace: fail run ---
-			if (traceRunId) {
+			// Tier 2 #6: ConcurrencyLimitError already flipped the run's
+			// status to "throttled" via markRunThrottled — don't override
+			// it with "failed" here. The transport layer (HTTP/Worker)
+			// catches the error and translates it into 429 / NACK.
+			if (traceRunId && !(err instanceof ConcurrencyLimitError)) {
 				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
 			}
 
 			throw err;
 		} finally {
+			// Release the concurrency slot if the gate granted one. Idempotent
+			// at the store layer — a double-release (gate granted but then
+			// crash + lazy-purge) is a no-op.
+			if (acquiredLock) {
+				tracker.releaseConcurrencySlot(acquiredLock.workflowName, acquiredLock.concurrencyKey, acquiredLock.runId);
+			}
+
 			const durationMs = performance.now() - runStart;
 			this.metricsBridge.recordExecution(durationMs, runSuccess, {
 				workflow_name: this.configuration.name || "",

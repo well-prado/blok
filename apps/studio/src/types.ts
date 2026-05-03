@@ -1,6 +1,13 @@
 /** Mirror of backend tracing types for the Studio frontend. */
 
-export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type WorkflowRunStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	/** Tier 2 #6: rejected at run-entry by the concurrency gate. No step ran. */
+	| "throttled";
 
 export interface WorkflowRun {
 	id: string;
@@ -166,7 +173,12 @@ export type RunEventType =
 	 * Tier 1: retry attempt failed; another attempt will follow.
 	 * Final failure (after exhausting maxAttempts) emits NODE_FAILED.
 	 */
-	| "NODE_ATTEMPT_FAILED";
+	| "NODE_ATTEMPT_FAILED"
+	/**
+	 * Tier 2 #6 concurrency gate denied the run. Payload carries
+	 * `{ concurrencyKey, concurrencyLimit, currentInFlight, durationMs }`.
+	 */
+	| "RUN_THROTTLED";
 
 export interface RunEvent {
 	id: string;

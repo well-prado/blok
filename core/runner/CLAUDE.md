@@ -213,6 +213,89 @@ Additive; pre-existing rows get NULL.
 - Polymorphic workflow names (`subworkflow: $.req.body.kind`) —
   workflow names are static today.
 
+## Concurrency keys (Tier 2 #6)
+
+Trigger authors opt in by adding `concurrencyKey` (with an optional
+`concurrencyLimit`) to a trigger config block:
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/render",
+    concurrencyKey: $.req.body.userId,  // literal or $-proxy
+    concurrencyLimit: 5,                 // default 1 (Trigger.dev parity)
+  },
+}
+```
+
+The gate runs in `TriggerBase.run()` between `tracker.startRun()` and
+`runner.run()`. At run-entry, the trigger resolves the key against ctx,
+attempts `runStore.acquireConcurrencySlot(workflow, key, limit, runId,
+leaseExpiresAt)`, and either:
+
+- **Granted**: stashes the lock on a closure variable; releases it in
+  the `finally` block (idempotent at the store layer).
+- **Denied**: calls `tracker.markRunThrottled(...)` (sets run status
+  `"throttled"`, emits `RUN_THROTTLED` event), throws
+  `ConcurrencyLimitError` with structured info `{workflowName,
+  concurrencyKey, concurrencyLimit, currentInFlight, retryAfterMs,
+  runId}`. Trigger transports translate this:
+  - HTTP → `429 Too Many Requests` with `Retry-After` header (seconds,
+    rounded up) and structured JSON body.
+  - Worker → NACK with redelivery; existing job-queue back-off handles
+    spacing. Doesn't count against the workflow's retry budget.
+
+**Lease semantics**: locks have a hard expires-at timestamp (default
+1h). Happy path releases in `finally`. Crash safety: lazy-purged on
+the next acquire to the same `(workflow, key)` bucket. Tunable per
+trigger via `concurrencyLeaseMs`; process-wide via
+`BLOK_CONCURRENCY_LEASE_MS`. Kill-switch: `BLOK_CONCURRENCY_DISABLED=1`
+short-circuits the gate.
+
+**Cache namespace + isolation**: locks are keyed `(workflowName,
+resolvedKey)`. Different workflows + different keys never contend.
+
+**Composition with Tier 1 / Tier 2 #4**:
+- **Idempotency cache hits** still hold a slot for the duration of the
+  cache fetch + persistence apply (~ms). Trade-off accepted; well
+  under typical workflow runtime.
+- **Sub-workflow steps** do NOT go through `TriggerBase.run()` — they
+  invoke directly via `SubworkflowNode`. Children do NOT contend for
+  the parent's concurrency slot. Step-level concurrency keys (a
+  follow-up feature) would address inner-loop fairness.
+- **Replay** picks up the lineage `replayOf` and goes through the gate
+  on the new run. If the workflow is still over-limit, the replay
+  throttles too (correct by design — the limit is dynamic state).
+
+**Failure modes**:
+- Key resolution fails (e.g. `js/ctx.bad.path` throws or returns
+  null/undefined) → fail-open (skip the gate, run the workflow).
+  Matches `idempotencyKey` semantics. Use `BLOK_MAPPER_MODE=strict`
+  to fail-fast in production.
+- Tracker inactive (`BLOK_TRACE_ENABLED=false`) → gate disabled.
+  Same store backs both. Documented trade-off.
+
+**Sqlite**: migration v7 adds the `concurrency_locks` table with PK
+on `(workflow_name, concurrency_key, run_id)` plus indexes on
+`expires_at` and `(workflow_name, concurrency_key)`. Additive; pre-Tier-2-#6
+DBs upgrade transparently.
+
+**Backends**:
+- SQLite (default for production).
+- InMemory (dev / tests).
+- Postgres delegates to in-memory — durable PG schema for cross-process
+  gating is a deferred follow-up. Same trade-off as Tier 1's
+  idempotency cache.
+
+**Not yet shipped**:
+- `onLimit: "queue"` (defer the run instead of rejecting) — needs
+  Tier 2 #5's deferred-run plumbing. Lands as additive when #5 ships.
+- Cross-process backend (NATS KV / Redis). Single-process semantics
+  ship first.
+- Step-level concurrency keys (different invariant set, separate
+  plan).
+
 ## Input resolution (Mapper)
 
 `@blokjs/shared`'s `Mapper` resolves `${path}` interpolations and

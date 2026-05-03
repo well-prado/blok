@@ -1,6 +1,18 @@
 // === Run Lifecycle ===
 
-export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+/**
+ * Lifecycle status of a workflow run.
+ *
+ * - `pending`: created but not yet started.
+ * - `running`: currently executing.
+ * - `completed`: finished successfully.
+ * - `failed`: a step threw or the run aborted with an error.
+ * - `cancelled`: stopped externally before completion.
+ * - `throttled` (Tier 2 #6): rejected at run-entry because the
+ *   concurrency limit for the resolved `concurrencyKey` was reached.
+ *   Distinct from `failed` — no step ran; nothing produced an error.
+ */
+export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "throttled";
 
 /**
  * Structured failure detail attached to a {@link WorkflowRun} or
@@ -193,6 +205,24 @@ export interface CachedStepResult {
 	sourceNodeRunId: string;
 }
 
+/**
+ * Outcome of an `acquireConcurrencySlot` attempt (Tier 2 #6).
+ *
+ * The store's gate decides whether the run is allowed to proceed by
+ * comparing the current in-flight count for the (workflow, key) pair
+ * against the requested limit.
+ */
+export interface ConcurrencySlotResult {
+	/** True when the slot was granted; false when the run should be throttled. */
+	acquired: boolean;
+	/**
+	 * Number of in-flight runs (including the just-acquired one when
+	 * `acquired === true`) sharing the same (workflowName, concurrencyKey).
+	 * Useful for observability — Studio surfaces this on `RUN_THROTTLED`.
+	 */
+	currentInFlight: number;
+}
+
 // === Events ===
 
 export type RunEventType =
@@ -221,7 +251,14 @@ export type RunEventType =
 	 * Payload carries `{ attempt, error }`. Final attempt failure (after
 	 * exhausting `retry.maxAttempts`) emits `NODE_FAILED` instead.
 	 */
-	| "NODE_ATTEMPT_FAILED";
+	| "NODE_ATTEMPT_FAILED"
+	/**
+	 * Tier 2 #6 concurrency gate denied a run before any step executed.
+	 * Payload carries `{ concurrencyKey, concurrencyLimit, currentInFlight }`.
+	 * The run's status flips to `"throttled"` (distinct from `"failed"` —
+	 * no step ran). Studio surfaces a Throttled badge.
+	 */
+	| "RUN_THROTTLED";
 
 export interface RunEvent {
 	id: string;

@@ -1,6 +1,90 @@
 import { z } from "zod";
 
 // =============================================================================
+// Concurrency keys (Tier 2 #6) — shared across HTTP & Worker triggers
+// =============================================================================
+
+/**
+ * Reusable Zod field bag for per-key concurrency gating.
+ *
+ * Spread into a trigger's `z.object({...})` and pair with the
+ * {@link concurrencyRefinement} cross-field check to add concurrency-key
+ * support to a trigger schema.
+ *
+ * Authors set `concurrencyKey` (literal or `$`-proxy expression) plus an
+ * optional `concurrencyLimit` (defaults to 1, matching Trigger.dev's
+ * "named mutex per key" pattern). When omitted, the trigger has no
+ * concurrency gate (zero-overhead default).
+ */
+export const ConcurrencyOptsFields = {
+	concurrencyKey: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"OPTIONAL. Per-key concurrency gating. Literal string or `$.<path>` proxy expression " +
+				"evaluated against the live ctx at run-entry time. When set, runs sharing the resolved " +
+				"key contend for at most `concurrencyLimit` concurrent slots. When unset, no gating applies.",
+		),
+	concurrencyLimit: z
+		.number()
+		.int()
+		.min(1)
+		.max(10000)
+		.optional()
+		.describe(
+			"OPTIONAL. Maximum concurrent runs for the resolved `concurrencyKey`. " +
+				"Defaults to 1 (matches Trigger.dev's named-mutex semantics). " +
+				"Ignored when `concurrencyKey` is unset. Bump for throughput-oriented use cases.",
+		),
+	concurrencyLeaseMs: z
+		.number()
+		.int()
+		.min(1000)
+		.optional()
+		.describe(
+			"OPTIONAL. Lease duration for the concurrency slot in milliseconds. " +
+				"Defaults to 3600000 (1h). Tunable per-trigger; process-wide override via " +
+				"`BLOK_CONCURRENCY_LEASE_MS`. Crash-safety upper bound on slot leaks.",
+		),
+} as const;
+
+/**
+ * Cross-field refinement: `concurrencyLimit` set without `concurrencyKey`
+ * is meaningless and rejected at validation time. Same for `concurrencyLeaseMs`.
+ */
+export const concurrencyRefinement = (
+	val: { concurrencyKey?: string; concurrencyLimit?: number; concurrencyLeaseMs?: number },
+	ctx: z.RefinementCtx,
+): void => {
+	if (val.concurrencyLimit !== undefined && val.concurrencyKey === undefined) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["concurrencyLimit"],
+			message: "`concurrencyLimit` requires `concurrencyKey` to be set.",
+		});
+	}
+	if (val.concurrencyLeaseMs !== undefined && val.concurrencyKey === undefined) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["concurrencyLeaseMs"],
+			message: "`concurrencyLeaseMs` requires `concurrencyKey` to be set.",
+		});
+	}
+};
+
+/**
+ * Standalone schema exposing just the concurrency fields. Useful for tests
+ * and tools that want to validate concurrency config in isolation. Real
+ * triggers spread {@link ConcurrencyOptsFields} into their own `z.object`
+ * and apply {@link concurrencyRefinement}.
+ */
+export const ConcurrencyOptsSchema = z.object(ConcurrencyOptsFields).superRefine(concurrencyRefinement);
+
+/** Inferred shape of the concurrency-options field bag. */
+export type ConcurrencyOpts = z.input<typeof ConcurrencyOptsSchema>;
+
+// =============================================================================
 // HTTP Trigger
 // =============================================================================
 
@@ -38,39 +122,42 @@ export const HttpMethodSchema = z.preprocess((val) => {
 export type HttpMethod = z.infer<typeof HttpMethodSchema>;
 
 /** Validation schema for the HTTP trigger configuration. */
-export const HttpTriggerOptsSchema = z.object({
-	method: HttpMethodSchema.describe(
-		"HTTP method this workflow responds to. " +
-			"Use 'ANY' to match all methods. The legacy '*' is accepted for back-compat but warns.",
-	),
-	path: z
-		.string()
-		.optional()
-		.describe(
-			"OPTIONAL. When set, this is the FULL URL path (e.g. '/api/users/:id'). " +
-				"When omitted, the URL is derived from the workflow file's location " +
-				"under the workflows root. Examples: " +
-				"workflows/users/list.ts → /users/list; " +
-				"workflows/users/[id].ts → /users/:id; " +
-				"workflows/users/index.ts → /users.",
+export const HttpTriggerOptsSchema = z
+	.object({
+		method: HttpMethodSchema.describe(
+			"HTTP method this workflow responds to. " +
+				"Use 'ANY' to match all methods. The legacy '*' is accepted for back-compat but warns.",
 		),
-	accept: z
-		.string()
-		.default("application/json")
-		.describe("Default response Content-Type when the workflow doesn't set one explicitly."),
-	headers: z
-		.record(z.string(), z.any())
-		.optional()
-		.describe("Required headers for incoming requests (validated at trigger entry)."),
-	legacyKeyPrefix: z
-		.boolean()
-		.optional()
-		.describe(
-			"Opt-in back-compat for the v1 URL scheme `/<workflow-key>/<path>`. " +
-				"When true, the workflow is also reachable at the legacy filename-prefixed URL. " +
-				"Off (undefined / false) by default. Will be removed after one minor version.",
-		),
-});
+		path: z
+			.string()
+			.optional()
+			.describe(
+				"OPTIONAL. When set, this is the FULL URL path (e.g. '/api/users/:id'). " +
+					"When omitted, the URL is derived from the workflow file's location " +
+					"under the workflows root. Examples: " +
+					"workflows/users/list.ts → /users/list; " +
+					"workflows/users/[id].ts → /users/:id; " +
+					"workflows/users/index.ts → /users.",
+			),
+		accept: z
+			.string()
+			.default("application/json")
+			.describe("Default response Content-Type when the workflow doesn't set one explicitly."),
+		headers: z
+			.record(z.string(), z.any())
+			.optional()
+			.describe("Required headers for incoming requests (validated at trigger entry)."),
+		legacyKeyPrefix: z
+			.boolean()
+			.optional()
+			.describe(
+				"Opt-in back-compat for the v1 URL scheme `/<workflow-key>/<path>`. " +
+					"When true, the workflow is also reachable at the legacy filename-prefixed URL. " +
+					"Off (undefined / false) by default. Will be removed after one minor version.",
+			),
+		...ConcurrencyOptsFields,
+	})
+	.superRefine(concurrencyRefinement);
 
 /** Configuration for an HTTP trigger. Use with `addTrigger("http", ...)`. */
 export type HttpTriggerOpts = z.input<typeof HttpTriggerOptsSchema>;
@@ -137,14 +224,23 @@ export type PubSubTriggerOpts = z.input<typeof PubSubTriggerOptsSchema>;
 // Worker Trigger (background jobs)
 // =============================================================================
 
-export const WorkerTriggerOptsSchema = z.object({
-	queue: z.string().describe("Worker queue name"),
-	concurrency: z.number().default(1).describe("Number of concurrent workers"),
-	timeout: z.number().optional().describe("Job timeout in milliseconds"),
-	retries: z.number().default(3).describe("Number of retry attempts"),
-	priority: z.number().default(0).describe("Job priority (higher = more priority)"),
-	delay: z.number().optional().describe("Delay before processing in milliseconds"),
-});
+export const WorkerTriggerOptsSchema = z
+	.object({
+		queue: z.string().describe("Worker queue name"),
+		concurrency: z
+			.number()
+			.default(1)
+			.describe(
+				"Number of concurrent consumers (parallelism cap). Orthogonal to `concurrencyKey` — " +
+					"`concurrency` is the consumer count; `concurrencyKey` is per-key fairness within those consumers.",
+			),
+		timeout: z.number().optional().describe("Job timeout in milliseconds"),
+		retries: z.number().default(3).describe("Number of retry attempts"),
+		priority: z.number().default(0).describe("Job priority (higher = more priority)"),
+		delay: z.number().optional().describe("Delay before processing in milliseconds"),
+		...ConcurrencyOptsFields,
+	})
+	.superRefine(concurrencyRefinement);
 export type WorkerTriggerOpts = z.input<typeof WorkerTriggerOptsSchema>;
 
 // =============================================================================

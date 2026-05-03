@@ -22,6 +22,7 @@
 import type { HelperResponse, WorkerTriggerOpts } from "@blokjs/helper";
 import {
 	type BlokService,
+	ConcurrencyLimitError,
 	DefaultLogger,
 	type GlobalOptions,
 	NodeMap,
@@ -420,6 +421,36 @@ export abstract class WorkerTrigger extends TriggerBase {
 				await job.complete();
 			} catch (error) {
 				const errorMessage = (error as Error).message;
+
+				// Tier 2 #6 — concurrency gate denial. Distinct from a normal
+				// failure: NACK with redelivery so the broker re-queues the
+				// job with its existing back-off semantics. Doesn't count
+				// against the workflow's retry budget (different invariant).
+				// We always pass `willRetry: true` regardless of `job.attempts`
+				// because throttling is a transient resource state, not a
+				// permanent failure.
+				if (error instanceof ConcurrencyLimitError) {
+					span.setAttribute("success", false);
+					span.setAttribute("will_retry", true);
+					span.setAttribute("throttled", true);
+					span.setStatus({ code: SpanStatusCode.OK, message: "concurrency_limit_reached" });
+
+					this.logger.log(
+						`[concurrency] job ${jobId} key='${error.info.concurrencyKey}' ` +
+							`limit=${error.info.concurrencyLimit} inFlight=${error.info.currentInFlight} → NACK + redelivery`,
+					);
+
+					workerRetries.add(1, {
+						env: process.env.NODE_ENV,
+						queue: config.queue,
+						workflow_name: this.configuration?.name || "unknown",
+						reason: "throttled",
+					});
+
+					await job.fail(error as Error, true);
+					return;
+				}
+
 				const shouldRetry = job.attempts < job.maxRetries;
 
 				// Set span error

@@ -1,5 +1,6 @@
 import type {
 	CachedStepResult,
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -83,6 +84,42 @@ export interface RunStore {
 	 * concurrent reads.
 	 */
 	purgeExpiredIdempotencyCache(now: number): number;
+
+	// === Concurrency gating (Tier 2 #6) ===
+	/**
+	 * Try to acquire a slot for `(workflowName, concurrencyKey)`. Lazily
+	 * purges expired leases for the same key first, then grants the slot
+	 * iff `currentInFlight < concurrencyLimit`.
+	 *
+	 * Returns:
+	 *   `{ acquired: true,  currentInFlight: <new count> }` on success
+	 *   `{ acquired: false, currentInFlight: <observed count> }` on denial
+	 *
+	 * The lease has a hard upper bound (`leaseExpiresAt` in ms since epoch).
+	 * Callers MUST release the slot in a `finally` block; the lease is the
+	 * crash-safety net for processes that die before release.
+	 */
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ConcurrencySlotResult;
+
+	/**
+	 * Release a slot previously acquired by `runId`. Idempotent — releasing
+	 * an unknown `runId` is a no-op (covers double-release races between
+	 * the happy-path `finally` block and the lazy-purge fallback).
+	 */
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void;
+
+	/**
+	 * Delete every lease whose `expiresAt <= now`. Returns the number of
+	 * rows removed. Cheap to call periodically (e.g. from a janitor task);
+	 * the gate also lazy-purges per-key on every acquire call.
+	 */
+	purgeExpiredConcurrencySlots(now: number): number;
 
 	// === Lifecycle ===
 	close(): void;

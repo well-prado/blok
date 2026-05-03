@@ -94,6 +94,18 @@ import { sanitize as traceSanitize } from "./tracing/sanitize";
 // Workflow registry (Tier 2 sub-workflow primitive)
 import { type RegisteredWorkflow, WorkflowRegistry } from "./workflow/WorkflowRegistry";
 
+// Concurrency gate (Tier 2 #6)
+import {
+	ConcurrencyLimitError,
+	type ConcurrencyLimitInfo,
+	isConcurrencyLimitError,
+} from "./concurrency/ConcurrencyLimitError";
+import {
+	CONCURRENCY_DEFAULTS,
+	type NormalizedConcurrencyConfig,
+	readConcurrencyConfig,
+} from "./concurrency/readConcurrencyConfig";
+
 // Cost Estimation
 import { CostEstimator } from "./cost/CostEstimator";
 import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
@@ -224,6 +236,13 @@ export {
 	registerTraceRoutes,
 	WorkflowRegistry,
 	type RegisteredWorkflow,
+	// Concurrency gate (Tier 2 #6)
+	ConcurrencyLimitError,
+	type ConcurrencyLimitInfo,
+	isConcurrencyLimitError,
+	readConcurrencyConfig,
+	type NormalizedConcurrencyConfig,
+	CONCURRENCY_DEFAULTS,
 	TracingLogger,
 	traceSanitize,
 	// Cost Estimation

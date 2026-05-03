@@ -8,6 +8,7 @@ import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
+import { ConcurrencyLimitError } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
@@ -566,6 +567,32 @@ export default class HttpTrigger extends TriggerBase {
 					workflow_name: `${this.configuration?.name || "unknown"}`,
 					workflow_path: `${workflowNameInPath}`,
 				});
+
+				// Tier 2 #6 — concurrency gate denial. Surface as 429 with a
+				// Retry-After header (in seconds, rounded up) and a structured
+				// JSON body so callers can build smart back-off without
+				// parsing the message string.
+				if (e instanceof ConcurrencyLimitError) {
+					const retryAfterSeconds = Math.max(1, Math.ceil(e.info.retryAfterMs / 1000));
+					span.setStatus({ code: SpanStatusCode.OK, message: "concurrency_limit_reached" });
+					this.logger.log(
+						`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
+							`limit=${e.info.concurrencyLimit} inFlight=${e.info.currentInFlight} → 429`,
+					);
+					c.header("Retry-After", String(retryAfterSeconds));
+					return c.json(
+						{
+							error: "Concurrency limit reached",
+							workflowName: e.info.workflowName,
+							concurrencyKey: e.info.concurrencyKey,
+							concurrencyLimit: e.info.concurrencyLimit,
+							currentInFlight: e.info.currentInFlight,
+							retryAfterMs: e.info.retryAfterMs,
+							runId: e.info.runId,
+						},
+						429,
+					);
+				}
 
 				if (e instanceof GlobalError) {
 					const error_context = e as GlobalError;

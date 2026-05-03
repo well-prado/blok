@@ -673,6 +673,29 @@ export class PostgresRunStore implements RunStore {
 		return this.memory.purgeExpiredIdempotencyCache(now);
 	}
 
+	// === Concurrency gating (Tier 2 #6) ===
+	// Delegates to the in-memory layer pending a durable PG schema. Same
+	// trade-off as the idempotency cache above: single-process gating is
+	// effective; cross-process gating requires the deferred PG migration.
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	) {
+		return this.memory.acquireConcurrencySlot(workflowName, concurrencyKey, concurrencyLimit, runId, leaseExpiresAt);
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		this.memory.releaseConcurrencySlot(workflowName, concurrencyKey, runId);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		return this.memory.purgeExpiredConcurrencySlots(now);
+	}
+
 	// === Write Queue ===
 
 	private enqueueWrite(fn: () => Promise<void>): void {
