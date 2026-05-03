@@ -7,14 +7,18 @@ icon: "git-branch"
 import { StudioRunHeader, StudioStepRail, StudioSubRunsStrip } from "/snippets/studio-mocks.jsx";
 
 A sub-workflow step invokes another named workflow as if calling a
-function. The parent step blocks until the child completes, the
-child's `ctx.response` becomes the parent step's output, and the
-child's full trace nests under the parent in Studio.
+function. By default the parent step blocks until the child completes
+and the child's `ctx.response` becomes the parent step's output;
+opt into fire-and-forget dispatch with `wait: false` and the parent
+returns immediately with `{runId, workflowName, scheduledAt}` while
+the child runs asynchronously.
 
 This is the Tier 2 composition primitive — pair it with
 [idempotent caching](/d/reliability/idempotency) and
 [retry](/d/reliability/retry) and a sub-workflow becomes a cacheable,
-retriable, replayable unit of work.
+retriable, replayable unit of work. Add `wait: false` to the mix and
+you get [at-most-once dispatch deduplication](#at-most-once-dispatch-with-wait-false)
+matching Trigger.dev / Stripe semantics.
 
 ## Quickstart
 
@@ -100,8 +104,10 @@ HTTP-triggered. The child's `ctx.response` lands on the parent's
 </ParamField>
 
 <ParamField path="wait" type="boolean" default="true">
-  Block until the child completes. `wait: false` (fire-and-forget) is
-  rejected at workflow load — planned for a follow-up release.
+  Block until the child completes. `wait: false` is fire-and-forget —
+  the parent step returns immediately with `{runId, workflowName,
+  scheduledAt}` and the child runs asynchronously. See
+  [Wait modes](#wait-modes) for the full contract.
 </ParamField>
 
 <ParamField path="as / spread / ephemeral / active / stop">
@@ -155,9 +161,75 @@ HTTP-triggered. The child's `ctx.response` lands on the parent's
   </Step>
 </Steps>
 
-If the child throws, the exception propagates to the parent step. The
-parent's `retry` (if set) catches it and tries again with a fresh
-child run.
+If the child throws under `wait: true`, the exception propagates to
+the parent step. The parent's `retry` (if set) catches it and tries
+again with a fresh child run. Under `wait: false`, child errors are
+caught and routed to `tracker.failRun(childRunId, err)` plus
+`console.error` — they do NOT propagate to the parent (which has
+already returned).
+
+## Wait modes
+
+The parent step's behavior depends on `wait`:
+
+### `wait: true` (default) — synchronous
+
+The parent step `await`s the child runner to completion. The child's
+`ctx.response` becomes the parent step's `model.data` and lands on
+`state[<id>]` via `applyStepOutput`. Errors propagate to the parent
+step (and its `retry` loop, if configured).
+
+```ts
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",
+  inputs: { user: $.state.user, order: $.state.order },
+  // wait: true (default)
+}
+```
+
+`state["send-receipt"]` carries the child's full response shape.
+
+### `wait: false` — fire-and-forget
+
+The parent step returns IMMEDIATELY with dispatch metadata. The child
+runs asynchronously via `setImmediate`. Errors are caught + routed to
+the tracker, NOT propagated to the parent.
+
+```ts
+{
+  id: "queue-email",
+  subworkflow: "send-receipt-email",
+  inputs: { orderId: $.state.charge.id, email: $.req.body.email },
+  wait: false,
+}
+```
+
+`state["queue-email"]` carries:
+
+```ts
+{
+  runId: "run_abc123",
+  workflowName: "send-receipt-email",
+  scheduledAt: 1735741200000,        // ms since epoch when dispatch was queued
+}
+```
+
+Callers poll `GET /__blok/runs/<runId>` for the actual outcome. The
+child still appears in Studio's Sub-runs strip with status
+transitioning `running → completed | failed` independently of the
+parent's lifecycle.
+
+### Comparison
+
+| | `wait: true` | `wait: false` |
+|---|---|---|
+| Parent step output | child's `ctx.response` | `{runId, workflowName, scheduledAt}` |
+| Child error propagation | thrown → parent's `retry` loop | caught → `tracker.failRun` + `console.error` |
+| Parent step duration | full child execution | ~ms (dispatch overhead only) |
+| Studio Sub-runs strip | yes | yes |
+| Lineage (`parentRunId`, `parentNodeRunId`) | preserved | preserved |
+| Cross-process | no | no (single-process `setImmediate`) |
 
 ## Output shape
 
@@ -186,10 +258,13 @@ of the parent's state, use `spread: true` on the parent step.
 
 ## Composing with idempotency caching
 
-Setting `idempotencyKey` on a sub-workflow step caches the **entire**
-child workflow's result. On a cache hit, the child workflow is **never
-invoked** — no child run record, no child `NODE_STARTED` events, no
-side effects fire.
+`idempotencyKey` on a sub-workflow step caches the parent step's
+output. The shape of the cache changes based on `wait`:
+
+### `wait: true` — caches the whole child result
+
+Cache HIT means the child workflow is **never invoked** — no child run
+record, no child `NODE_STARTED` events, no side effects fire.
 
 ```ts
 {
@@ -201,34 +276,80 @@ side effects fire.
 }
 ```
 
-This is the headline composition pattern AND the primary footgun:
-
 <Warning>
-**A cache hit on a sub-workflow step suppresses every side effect
-inside the child.** If the child sends an email, charges a card, or
-posts to Slack, an `idempotencyKey` on the parent step will skip those
-side effects entirely on cache hit.
+**A cache hit on a `wait: true` sub-workflow step suppresses every
+side effect inside the child.** If the child sends an email, charges
+a card, or posts to Slack, an `idempotencyKey` on the parent step will
+skip those side effects entirely on cache hit.
 
-If your child has unconditional side effects, do not put
-`idempotencyKey` on the parent step. Instead, cache the individual
-pure-compute steps inside the child (LLM calls, fetches, transforms)
-so the side effects fire every invocation while expensive computation
-gets reused.
+If your child has unconditional side effects under `wait: true`, do
+not put `idempotencyKey` on the parent step. Instead, cache the
+individual pure-compute steps inside the child (LLM calls, fetches,
+transforms) so the side effects fire every invocation while expensive
+computation gets reused.
 </Warning>
 
-When the child is purely deterministic (LLM call → transform → return),
-caching the whole sub-workflow is the right move. When the child sends
-emails or makes payments, cache inside it instead.
+When the child is purely deterministic under `wait: true` (LLM call →
+transform → return), caching the whole sub-workflow is the right move.
+When the child sends emails or makes payments, cache inside it instead.
+
+### At-most-once dispatch with `wait: false`
+
+`wait: false + idempotencyKey` is the **headline composition pattern**:
+at-most-once dispatch deduplication, matching Trigger.dev and Stripe
+semantics.
+
+```ts
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",
+  inputs: { orderId: $.state.charge.id, email: $.req.body.email },
+  wait: false,
+  idempotencyKey: $.req.body.requestId,
+}
+```
+
+Behavior:
+
+- **First call**: dispatch fires; the cache stores
+  `{runId, workflowName, scheduledAt}` against the key.
+- **Subsequent call (same key)**: cache HIT returns the SAME `runId`
+  for the lifetime of the cache entry — regardless of the original
+  child's outcome (success OR failure).
+- **To retry on child failure**: the caller uses a NEW idempotency
+  key. The cached `runId` always points at the original (possibly
+  long-completed or long-failed) child run; the caller polls
+  `/__blok/runs/<runId>` to check current state.
+
+This matches Stripe's documented behavior: "If you retry a request
+with an idempotency key, Stripe returns the original result regardless
+of whether it succeeded or failed." The pattern is intentional, not a
+footgun.
+
+### Cache contract summary
+
+| | `wait: true + idempotencyKey` | `wait: false + idempotencyKey` |
+|---|---|---|
+| What's cached | Child's full `ctx.response` | Dispatch metadata `{runId, workflowName, scheduledAt}` |
+| Cache HIT behavior | Child not invoked at all (no side effects) | Same `runId` returned; original child's outcome stands |
+| Retry on failure | Re-runs the child | Use a new key |
+| Risk profile | Footgun for side-effecting children | Standard at-most-once dispatch |
 
 ## Composing with retry
 
-`retry` on a sub-workflow step retries the whole child on failure.
-Each retry creates a fresh child run record under the same parent — so
-Studio's "sub-runs" strip on the parent shows N sequential attempts.
+Retry on a sub-workflow step behaves differently per wait mode:
 
-The retry budget includes child execution time, so a 30-second child
-with `maxAttempts: 3` can run for ~90 seconds plus backoff before
-failing terminally.
+- **`wait: true`** — `retry` covers full child execution. Each retry
+  creates a fresh child run record under the same parent, so Studio's
+  sub-runs strip on the parent shows N sequential attempts. The retry
+  budget includes child execution time: a 30-second child with
+  `maxAttempts: 3` can run for ~90 seconds plus backoff before failing
+  terminally.
+- **`wait: false`** — `retry` covers only the **dispatch** (registry
+  lookup, recursion guard). The async child's failure does NOT trigger
+  parent retry — the parent step has already returned successfully
+  with the runId. To retry on async child failure, the caller uses a
+  new idempotency key.
 
 ## Composing with replay
 
@@ -340,8 +461,22 @@ registration and HMR notes.
 ## Common pitfalls
 
 <AccordionGroup>
-  <Accordion title="Caching a sub-workflow that sends emails">
-    See the warning above. Cache inside the child, not at the parent step.
+  <Accordion title="Caching a `wait: true` sub-workflow that sends emails">
+    See the warning above. Cache inside the child, not at the parent
+    step. (`wait: false` is fine — the cache holds dispatch metadata,
+    not the response.)
+  </Accordion>
+  <Accordion title="Expecting `wait: false` errors to retry">
+    They don't. Once `setImmediate` fires the dispatch, the parent
+    step has already returned; child errors land in `tracker.failRun`,
+    not in the parent's retry loop. To retry on async child failure,
+    the caller uses a new idempotency key.
+  </Accordion>
+  <Accordion title="Polling the cached runId after `wait: false + idempotencyKey`">
+    The cached `runId` always points at the original child run. If
+    that run failed, polling shows the failure forever — that's the
+    at-most-once contract. Use a new idempotency key to dispatch
+    fresh.
   </Accordion>
   <Accordion title="Forgetting that the child reads from req.body, not state">
     The parent's `inputs` become `request.body` for the child. Inside
@@ -362,11 +497,18 @@ registration and HMR notes.
 
 ## What's not yet supported
 
-- **`wait: false` (fire-and-forget).** Schema rejects with a clear
-  deferred-feature error. Planned for a follow-up release.
-- **Cross-process dispatch.** The current implementation is in-process.
-  Horizontal-scale users with strict isolation needs (HTTP self-call or
-  worker queue dispatch) are tracked as a follow-up.
+- **Cross-process dispatch.** The current implementation is in-process
+  for both wait modes — `wait: false` uses `setImmediate`, not a queue
+  or HTTP self-call. Horizontal-scale users with strict isolation
+  needs are tracked as a follow-up.
+- **Studio `↳ async` indicator.** Today both `wait: true` and
+  `wait: false` show the same `↳ sub` badge in the step rail; the
+  Sub-runs strip on the parent surfaces the actual status. A distinct
+  async indicator is on the roadmap.
+- **Cancellation API for fire-and-forget children**
+  (`POST /__blok/runs/:childId/cancel`). The skeleton exists via
+  `tracker.failRun` but cancellation propagation to the running
+  child is deferred.
 - **Polymorphic workflow names** (`subworkflow: $.req.body.kind`).
   Workflow names are static today; runtime resolution is deferred.
 - **Durable Postgres lineage.** The PG run store currently delegates

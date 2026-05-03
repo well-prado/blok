@@ -1,0 +1,387 @@
+---
+title: "Concurrency keys"
+description: "Per-tenant rate limiting and named-mutex semantics on triggers — limit how many runs of a workflow can be in flight for a given key."
+icon: "lock"
+---
+
+import { StudioRunHeader, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `concurrencyKey` on a trigger and the runner gates incoming runs
+against an in-flight count for the resolved key. The named-mutex pattern
+serializes per-tenant work; bumping `concurrencyLimit` turns it into a
+fairness throttle.
+
+Unlike the per-step reliability primitives, `concurrencyKey` lives on
+the **trigger config** (`trigger.http` or `trigger.worker`). The gate
+runs at run-entry, before any step executes.
+
+## Quickstart
+
+A multi-tenant render endpoint that allows up to five concurrent renders
+per tenant:
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "render-pdf",
+  version: "1.0.0",
+  trigger: {
+    http: {
+      method: "POST",
+      path: "/render",
+      concurrencyKey: $.req.body.tenantId,
+      concurrencyLimit: 5,
+    },
+  },
+  steps: [
+    { id: "fetch", use: "@blokjs/api-call", inputs: { url: $.req.body.sourceUrl } },
+    { id: "render", use: "@blokjs/pdf-render", inputs: { html: $.state.fetch } },
+    {
+      id: "upload",
+      use: "@blokjs/s3-upload",
+      inputs: { key: $.req.body.outputKey, body: $.state.render },
+    },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "render-pdf",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/render",
+      "concurrencyKey": "$.req.body.tenantId",
+      "concurrencyLimit": 5
+    }
+  },
+  "steps": [
+    { "id": "fetch", "use": "@blokjs/api-call", "inputs": { "url": "$.req.body.sourceUrl" } },
+    { "id": "render", "use": "@blokjs/pdf-render", "inputs": { "html": "$.state.fetch" } },
+    { "id": "upload", "use": "@blokjs/s3-upload", "inputs": { "key": "$.req.body.outputKey", "body": "$.state.render" } }
+  ]
+}
+```
+</CodeGroup>
+
+POST six times in parallel with the same `tenantId`. The first five
+acquire a slot and run. The sixth returns `429`:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+Content-Type: application/json
+
+{
+  "error": "Concurrency limit reached",
+  "workflowName": "render-pdf",
+  "concurrencyKey": "tenant-abc",
+  "concurrencyLimit": 5,
+  "currentInFlight": 5,
+  "retryAfterMs": 1000,
+  "runId": "run_throttled_..."
+}
+```
+
+## Field reference
+
+The three fields are defined as a reusable mixin in
+[core/workflow-helper/src/types/TriggerOpts.ts:19-50](core/workflow-helper/src/types/TriggerOpts.ts#L19-L50)
+and spread into both `HttpTriggerOptsSchema` and
+`WorkerTriggerOptsSchema`.
+
+<ParamField path="concurrencyKey" type="string">
+  Per-key concurrency gate. Literal string or `$.<path>` proxy
+  expression evaluated against the live `ctx` at run-entry. When set,
+  runs sharing the resolved key contend for at most `concurrencyLimit`
+  concurrent slots. When unset, no gating applies — zero overhead.
+</ParamField>
+
+<ParamField path="concurrencyLimit" type="integer (1-10000)" default="1">
+  Maximum concurrent runs for the resolved `concurrencyKey`. Default
+  `1` matches Trigger.dev's named-mutex pattern (exclusive lock per
+  key). Bump for throughput-oriented use cases.
+</ParamField>
+
+<ParamField path="concurrencyLeaseMs" type="integer ms (>= 1000)" default="3600000">
+  Lease duration for the slot in milliseconds. Default 1h. Process-wide
+  override via `BLOK_CONCURRENCY_LEASE_MS`. The lease is the crash-
+  safety upper bound on slot leaks.
+</ParamField>
+
+`concurrencyLimit` and `concurrencyLeaseMs` both require
+`concurrencyKey`. Setting either without `concurrencyKey` is rejected
+at workflow load with `` "`concurrencyLimit` requires `concurrencyKey` to be set." ``.
+
+## Mental model — named mutex per key
+
+The default `concurrencyLimit: 1` plus a key derived from request data
+gives you a classic named mutex: at most one run for a given resource.
+
+```ts
+// Exactly one checkout at a time per cart
+trigger: {
+  http: {
+    method: "POST",
+    path: "/checkout/:cartId",
+    concurrencyKey: $.req.params.cartId,
+    // concurrencyLimit defaults to 1
+  },
+}
+```
+
+Concurrent checkouts on the same cart serialize: the second 429s with
+`Retry-After: 1`, the client backs off and retries, and the runner
+admits it once the first releases.
+
+For per-tenant rate limiting, raise the limit:
+
+```ts
+// Up to five renders per tenant in flight at once
+{ concurrencyKey: $.req.body.tenantId, concurrencyLimit: 5 }
+```
+
+The contract is `(workflowName, resolvedKey)`-scoped — different
+workflows and different keys never contend with each other.
+
+## Worker triggers
+
+Worker triggers carry both a pre-existing `concurrency` field (parallel
+consumers) and the new concurrency-key fields. They're orthogonal:
+
+```ts
+trigger: {
+  worker: {
+    queue: "render-jobs",
+    concurrency: 10,                        // 10 parallel consumers (parallelism cap)
+    concurrencyKey: $.req.body.tenantId,    // per-tenant fairness within those consumers
+    concurrencyLimit: 2,                    // max 2 concurrent per tenant
+  },
+}
+```
+
+A burst of 100 jobs from `tenant-A` distributes 2 to A's slots; the
+remaining 8 worker slots are free for other tenants.
+
+When a job hits the limit, the worker NACKs with `willRetry: true`
+regardless of `job.attempts` — throttling is transient resource state,
+not a permanent failure, so it doesn't count against the workflow's
+retry budget. The job-queue back-off (BullMQ delay, NATS redelivery)
+handles spacing.
+
+## Run lifecycle
+
+The gate runs in [core/runner/src/TriggerBase.ts](core/runner/src/TriggerBase.ts)
+between `tracker.startRun()` and `runner.run()`:
+
+<Steps>
+  <Step title="Resolve key">
+    The runner evaluates `concurrencyKey` against the live `ctx` (proxy
+    expressions compile to `js/ctx....`). Failure to resolve (throw or
+    `null`/`undefined`) is fail-open — the gate is skipped and the run
+    proceeds.
+  </Step>
+  <Step title="Acquire slot">
+    `runStore.acquireConcurrencySlot(workflow, key, limit, runId,
+    leaseExpiresAt)` returns `{acquired, currentInFlight}`. SQLite wraps
+    this in a transaction so two simultaneous acquires can't both grant
+    a slot at the limit.
+  </Step>
+  <Step title="On grant — run">
+    The lock is held until the workflow's `finally` block calls
+    `releaseConcurrencySlot`. Idempotent at the store layer — a stale
+    re-release after lease expiry is a no-op.
+  </Step>
+  <Step title="On denial — throttle">
+    `tracker.markRunThrottled(...)` flips status to `"throttled"` and
+    emits <StudioEventBadge type="RUN_THROTTLED" />. The runner throws
+    `ConcurrencyLimitError` with structured info; trigger transports
+    translate it to `429` (HTTP) or NACK (Worker).
+  </Step>
+</Steps>
+
+The throttled status is distinct from `"failed"` — no step ran, nothing
+threw application logic. SLA dashboards filter on status to separate
+rate-limit pressure from real errors.
+
+## Lease semantics
+
+Slots have a hard `expires_at` timestamp. Happy path: the workflow's
+`finally` block releases the slot. Crash path (process dies before
+release): the next acquire to the same `(workflow, key)` bucket lazy-
+purges the stale entry.
+
+Default 1h lease; override per-trigger:
+
+```ts
+{ concurrencyKey: $.req.body.userId, concurrencyLeaseMs: 4 * 60 * 60 * 1000 }  // 4h
+```
+
+Or process-wide via env var:
+
+```bash
+BLOK_CONCURRENCY_LEASE_MS=14400000 bun run dev
+```
+
+A workflow that legitimately runs longer than the lease keeps holding
+its slot — the lease only matters when the process exits abnormally.
+
+## Composition with prior tiers
+
+The gate sits at the run level, above the per-step primitives. It
+composes cleanly with the rest of the reliability stack.
+
+| Feature | Interaction |
+|---|---|
+| [Idempotency cache](/d/reliability/idempotency) | Cache check happens INSIDE step execution. A run that's all cache hits still holds a slot for the duration of the cache fetches and persistence applies (~ms). |
+| [Per-step retry](/d/reliability/retry) | Retry happens within a single granted slot. The retry loop never re-enters the gate. |
+| [Replay](/d/reliability/replay) | Replays go through the gate on the new run. If the workflow is over-limit at replay time, the new run throttles too — correct, since the limit is dynamic state. |
+| [Sub-workflows](/d/composition/sub-workflows) | Children invoke directly via `SubworkflowNode`, NOT through `TriggerBase.run()`. Sub-workflow steps DO NOT contend for the parent's slot — only the top-level run does. |
+| [Scheduling](/d/scheduling/overview) | The scheduling gate (`debounce` / `delay`) runs BEFORE the concurrency gate. A delayed run that becomes throttled at dispatch flips `delayed → throttled` cleanly. |
+
+<Note>
+Sub-workflows don't contend for their parent's slot. If you need to
+gate inside a sub-workflow step, do it on the child workflow's trigger
+config — the child runs through its own dispatch path when invoked
+out-of-band, but in-process invocations from a parent skip the trigger
+entirely.
+</Note>
+
+## Studio surface
+
+Throttled runs appear in the runs list with an amber **Throttled**
+badge and a <StudioEventBadge type="RUN_THROTTLED" /> entry on the
+event timeline carrying `{durationMs, concurrencyKey,
+concurrencyLimit, currentInFlight}`.
+
+<StudioRunHeader
+  workflowName="render-pdf"
+  runId="run_throttled_a91c2"
+  status="throttled"
+  durationMs={3}
+  triggerSummary="POST /render"
+  startedAt="2026-05-03 11:14:02"
+  nodeCount={3}
+  completedNodes={0}
+  showReplayButton={false}
+/>
+
+The status filter dropdown includes throttled alongside the other
+terminal states. No dedicated "in-flight per key" tile yet — that's
+on the roadmap.
+
+## Storage
+
+The gate is durable on SQLite (default for production). Migration v7
+adds a `concurrency_locks` table with a primary key on
+`(workflow_name, concurrency_key, run_id)` plus indexes on `expires_at`
+and `(workflow_name, concurrency_key)`. The schema is documented on
+the [trace storage page](/d/reference/trace-storage#concurrency_locks-migration-v7).
+
+| Backend | Behavior |
+|---|---|
+| **SQLite** (default) | Durable. Read-modify-write wrapped in a transaction so two acquires can't both grant at the limit. |
+| **InMemory** (dev) | `Map<bucketKey, Map<runId, expiresAt>>`. Cleared on process exit. |
+| **Postgres** | Currently delegates to its in-memory layer — same-process gating works, cross-process and cross-restart gating do not. A durable PG schema is planned. |
+
+`BLOK_TRACE_ENABLED=false` disables the gate (the same store backs
+trace recording and the lock table).
+
+## Recipes
+
+<AccordionGroup>
+  <Accordion title="Multi-tenant SaaS rate limiter">
+    `concurrencyKey: $.req.body.tenantId` with `concurrencyLimit: 5`.
+    Each tenant gets up to 5 concurrent renders; the 6th returns
+    `429 Too Many Requests`. The client retries after `Retry-After`
+    seconds and the runner admits as slots free up.
+  </Accordion>
+
+  <Accordion title="Mutex per resource (cart, document, user record)">
+    `concurrencyKey: $.req.params.cartId` with the default
+    `concurrencyLimit: 1`. The classic named mutex. Concurrent
+    checkouts on the same cart serialize.
+  </Accordion>
+
+  <Accordion title="Worker fairness across tenants">
+    Worker `concurrency: 10` with `concurrencyKey: $.req.body.tenantId`
+    and `concurrencyLimit: 2`. Up to 10 jobs in parallel total, but no
+    single tenant gets more than 2 worker slots — keeps a noisy tenant
+    from starving the others.
+  </Accordion>
+
+  <Accordion title="Long-running ML pipeline with custom lease">
+    `concurrencyLeaseMs: 14400000` (4h) for a workflow that legitimately
+    runs longer than the default lease. The lease only matters in the
+    crash path; happy-path release fires from the `finally` block
+    regardless.
+  </Accordion>
+
+  <Accordion title="Production kill-switch">
+    `BLOK_CONCURRENCY_DISABLED=1 bun run prod` — short-circuits the gate
+    process-wide. Useful for emergency capacity recovery without
+    redeploying code.
+  </Accordion>
+</AccordionGroup>
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Setting concurrencyLimit without concurrencyKey">
+    Rejected at workflow load. The limit is meaningless without a key
+    to scope it — fix the config rather than working around the
+    rejection.
+  </Accordion>
+
+  <Accordion title="Expecting sub-workflows to contend for the parent's slot">
+    They don't. Children invoke in-process via `SubworkflowNode` and
+    bypass `TriggerBase.run()` entirely. If you need inner-loop fairness,
+    add `concurrencyKey` to the child workflow's trigger config and
+    invoke it out-of-band (e.g. via `wait: false` plus an HTTP
+    self-call) — step-level concurrency keys are a planned follow-up.
+  </Accordion>
+
+  <Accordion title="Treating throttled as a failure">
+    It isn't — no step ran. SLA dashboards should filter throttled out
+    of error rate calculations. The 429 response is a back-pressure
+    signal, not a bug.
+  </Accordion>
+
+  <Accordion title="Default lease too short for long workflows">
+    The 1h default is conservative. If your workflow has legitimate runs
+    longer than that and you've seen "phantom" admission of new runs
+    while the previous is still working, raise `concurrencyLeaseMs` so
+    the lease outlasts realistic worst-case execution.
+  </Accordion>
+</AccordionGroup>
+
+## Not yet shipped
+
+- **`onLimit: "queue"` (defer instead of reject)** — needs the
+  deferred-run plumbing from [scheduling](/d/scheduling/overview);
+  lands as additive once the design settles.
+- **Cross-process backend** (NATS KV / Redis) — current implementation
+  is single-process. Use SQLite for production until cross-process
+  gating ships.
+- **Step-level concurrency keys** — different invariant set, separate
+  plan. Today the gate is at the run level only.
+- **Durable Postgres schema for `concurrency_locks`** — Postgres still
+  delegates to in-memory (same trade-off as the idempotency cache).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Scheduling overview" icon="clock" href="/d/scheduling/overview">
+    Delay, TTL, and debounce gates run BEFORE the concurrency gate.
+  </Card>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Cache hits still hold a slot briefly — the gate runs at the run level.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The `concurrency_locks` table and `RUN_THROTTLED` event reference.
+  </Card>
+</Columns>

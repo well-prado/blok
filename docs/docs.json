@@ -42,7 +42,17 @@
 							"d/reliability/overview",
 							"d/reliability/idempotency",
 							"d/reliability/retry",
-							"d/reliability/replay"
+							"d/reliability/replay",
+							"d/reliability/concurrency-keys",
+							"d/reliability/max-duration"
+						]
+					},
+					{
+						"group": "Scheduling",
+						"pages": [
+							"d/scheduling/overview",
+							"d/scheduling/delay-and-ttl",
+							"d/scheduling/debounce"
 						]
 					},
 					{

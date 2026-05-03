@@ -1,10 +1,13 @@
 ---
 title: "Reliability"
-description: "How idempotent caching, per-step retry, and replay compose into a safe-rerun story for Blok workflows."
+description: "How idempotent caching, retry, replay, step timeouts, and concurrency keys compose into a safe-rerun story for Blok workflows."
 icon: "shield-check"
 ---
 
-Blok ships three opt-in reliability primitives on every v2 step:
+Blok ships five opt-in reliability primitives. Three live on every v2
+step (caching, retry, replay), one caps per-attempt wall-clock
+(`maxDuration`), and one gates inbound dispatches at the trigger
+(concurrency keys).
 
 <Columns cols={3}>
   <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
@@ -24,32 +27,59 @@ Blok ships three opt-in reliability primitives on every v2 step:
   </Card>
 </Columns>
 
-All three are independent and zero-overhead when omitted. They also
-compose: caching layers above persistence, retry wraps execution, and
-replay re-fires the trigger so caches and code changes both apply.
+<Columns cols={2}>
+  <Card title="Step timeouts" icon="timer" href="/d/reliability/max-duration">
+    Cap each `step.process()` attempt with `maxDuration: "30s"`. Final-
+    attempt timeout flips the run to `timedOut` (distinct from
+    `failed`). Composes with `retry` per-attempt.
+  </Card>
+  <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
+    Per-tenant rate limiting on triggers. `concurrencyKey:
+    $.req.body.tenantId` plus a `concurrencyLimit`. Over-limit HTTP
+    returns `429 Retry-After`; worker NACKs.
+  </Card>
+</Columns>
+
+All five are independent and zero-overhead when omitted. They also
+compose: caching layers above persistence, retry wraps execution,
+`maxDuration` caps each attempt, replay re-fires the trigger so caches
+and code changes both apply, and concurrency keys gate dispatches
+before any of the above.
+
+For deferred dispatch (delay, TTL, debounce) see the dedicated
+[scheduling section](/d/scheduling/overview) — those gates run BEFORE
+the concurrency gate.
 
 ## The mental model
 
 Workflow steps already auto-persist their output to `ctx.state[id]`
 (the v2 default-store rule). The reliability primitives bolt on around
-that:
+that — some at the run level (before any step runs), some at the step
+level:
 
 ```
-step starts
-  ├── cache check (idempotencyKey?)
-  │     └── HIT → replay cached data through persistence rules → next step
-  │     └── MISS → fall through
+trigger fires
+  ├── debounce / delay gates    (per /d/scheduling/overview)
+  ├── concurrency gate          (per /d/reliability/concurrency-keys)
+  │     └── over-limit → throttled → 429 / NACK
   │
-  ├── retry loop (1..maxAttempts)
-  │     ├── step.process(ctx, step)
-  │     │     ├── success → cache write → persist → next step
-  │     │     └── error → backoff and try again
-  │     └── final attempt fails → NODE_FAILED → propagate
+  ├── for each step:
+  │     ├── cache check (idempotencyKey?)
+  │     │     └── HIT → replay cached data through persistence rules → next step
+  │     │     └── MISS → fall through
+  │     │
+  │     ├── retry loop (1..maxAttempts)
+  │     │     ├── wrap with maxDuration timeout (Promise.race + setTimeout)
+  │     │     ├── step.process(ctx, step)
+  │     │     │     ├── success → cache write → persist → next step
+  │     │     │     ├── error → backoff and try again
+  │     │     │     └── timeout → backoff and try again
+  │     │     └── final attempt fails → NODE_FAILED, run flips failed | timedOut
 ```
 
-Each layer is a separate decision the step author makes. A step with
-neither `idempotencyKey` nor `retry` runs through the same code path as
-before — the extra fields cost nothing when absent.
+Each layer is a separate decision the author makes. A workflow with
+none of these fields runs through the same code path as before — the
+extra fields cost nothing when absent.
 
 ## Pairing the primitives
 

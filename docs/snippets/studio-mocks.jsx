@@ -20,6 +20,12 @@ const STATUS_DOT = {
 	failed: "bg-red-400",
 	cancelled: "bg-purple-400",
 	skipped: "bg-zinc-500",
+	throttled: "bg-amber-300",
+	delayed: "bg-yellow-400",
+	expired: "bg-zinc-500",
+	debounced: "bg-cyan-400",
+	crashed: "bg-red-500",
+	timedOut: "bg-orange-400",
 };
 
 /* Single Studio chrome wrapper — gives all mocks the dark Studio look. */
@@ -292,6 +298,12 @@ const EVENT_STYLES = {
 	NODE_ATTEMPT_FAILED: { label: "Attempt Failed", className: "text-amber-400 bg-amber-400/10" },
 	VARS_UPDATED: { label: "Vars Updated", className: "text-yellow-400 bg-yellow-400/10" },
 	LOG_ENTRY: { label: "Log Entry", className: "text-zinc-300 bg-zinc-300/10" },
+	RUN_THROTTLED: { label: "Run Throttled", className: "text-amber-300 bg-amber-300/10" },
+	RUN_DELAYED: { label: "Run Delayed", className: "text-yellow-400 bg-yellow-400/10" },
+	RUN_EXPIRED: { label: "Run Expired", className: "text-zinc-500 bg-zinc-500/10" },
+	RUN_DEBOUNCED: { label: "Run Debounced", className: "text-cyan-400 bg-cyan-400/10" },
+	RUN_CRASHED: { label: "Run Crashed", className: "text-red-500 bg-red-500/10" },
+	RUN_TIMED_OUT: { label: "Run Timed Out", className: "text-orange-400 bg-orange-400/10" },
 };
 
 export const StudioEventTimeline = ({ events = [] }) => (

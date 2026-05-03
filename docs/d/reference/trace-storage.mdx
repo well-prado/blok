@@ -23,13 +23,22 @@ disables the tracker — and as a side effect, the cache.
 
 ## Run states
 
+The `WorkflowRunStatus` enum has eleven values — the original five
+plus six added across Tier 2.
+
 | Status | Meaning |
 |---|---|
 | `pending` | Run started but no node has reached `running` yet. |
 | `running` | At least one node is executing. |
 | `completed` | All steps finished successfully. |
 | `failed` | A step failed terminally (after retry exhaustion, if configured). |
-| `cancelled` | Run was explicitly cancelled. |
+| `cancelled` | Run was explicitly cancelled by an operator. |
+| `throttled` | Tier 2 #6 — concurrency-gate denial at run-entry. No step ran. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `delayed` | Tier 2 #5 — scheduled for future dispatch via `trigger.delay`. Transitions to `running` when the timer fires. See [delay & TTL](/d/scheduling/delay-and-ttl). |
+| `expired` | Tier 2 #5 — TTL exceeded before dispatch. Auto-cancelled without execution. |
+| `debounced` | Tier 2 #7 — coalesced into another run via `debounce.key`. Terminal in leading mode (execution went to a sibling); transient in trailing mode. See [debounce](/d/scheduling/debounce). |
+| `crashed` | Tier 2 quick-wins — runner itself crashed (uncaught exception, OOM, signal). Currently manual via `tracker.markRunCrashed()`. |
+| `timedOut` | Tier 2 quick-wins — a step's final retry attempt exceeded its `maxDuration` cap. Distinct from `failed` for SLA reporting. See [step timeouts](/d/reliability/max-duration). |
 
 ## Event vocabulary
 
@@ -65,10 +74,23 @@ renders each with a label and color:
 | <StudioEventBadge type="NODE_ATTEMPT_FAILED" /> | `tracker.recordNodeAttemptFailed()` | `↻N` indicator + attempts disclosure |
 | <StudioEventBadge type="VARS_UPDATED" /> | `tracker.updateVars()` | inspector update |
 | <StudioEventBadge type="LOG_ENTRY" /> | `tracker.addLog()` | log viewer line |
+| <StudioEventBadge type="RUN_THROTTLED" /> | `tracker.markRunThrottled()` (Tier 2 #6) | amber Throttled badge |
+| <StudioEventBadge type="RUN_DELAYED" /> | `tracker.markRunDelayed()` (Tier 2 #5) | yellow Delayed badge |
+| <StudioEventBadge type="RUN_EXPIRED" /> | `tracker.markRunExpired()` (Tier 2 #5) | zinc Expired badge |
+| <StudioEventBadge type="RUN_DEBOUNCED" /> | `tracker.markRunDebounced()` (Tier 2 #7) | cyan Debounced badge |
+| <StudioEventBadge type="RUN_CRASHED" /> | `tracker.markRunCrashed()` (Tier 2 quick-wins) | red Crashed badge |
+| <StudioEventBadge type="RUN_TIMED_OUT" /> | `RunnerSteps` on final-attempt `StepTimeoutError` (Tier 2 quick-wins) | orange Timed Out badge |
 
-`NODE_CACHED` and `NODE_ATTEMPT_FAILED` are the events Tier 1 added.
-Studio renders both as distinct visual states so SSE consumers can
-filter cleanly.
+Event payloads:
+
+| Event | Payload |
+|---|---|
+| `RUN_THROTTLED` | `{durationMs, concurrencyKey, concurrencyLimit, currentInFlight}` |
+| `RUN_DELAYED` | `{scheduledAt, delayMs, expiresAt?}` |
+| `RUN_EXPIRED` | `{expiresAt, expiredAt, lateBy}` |
+| `RUN_DEBOUNCED` | `{debounceKey, mode, intoRunId?, pingCount?}` |
+| `RUN_CRASHED` | `{durationMs, error}` |
+| `RUN_TIMED_OUT` | `{durationMs, stepId, maxDurationMs, attemptsExhausted}` |
 
 ## WorkflowRun fields
 
@@ -82,10 +104,17 @@ Every run record carries:
 | `triggerType` | `"http"`, `"worker"`, `"subworkflow"`, etc. |
 | `triggerSummary` | Human-readable summary (`"GET /users/:id"`, `"<parent> → <child>"`). |
 | `status` | One of the run states above. |
-| `startedAt` / `completedAt` | Timestamps. |
+| `startedAt` / `finishedAt` / `durationMs` | Timestamps. |
+| `tags` | String array. Filter via `?tags=a,b,c` on `GET /__blok/runs`. |
+| `metadata` | Free-form `Record<string, unknown>`. Filter via `?metadata.<key>=<value>` (Tier 2 quick-wins). |
 | `replayOf` | Source run id when this run was created via [replay](/d/reliability/replay). |
 | `parentRunId` | Parent run id when this run was started by a [sub-workflow step](/d/composition/sub-workflows). |
 | `parentNodeRunId` | The specific NodeRun (sub-workflow step) inside the parent. |
+| `scheduledAt` | Tier 2 #5 — scheduled dispatch time (ms since epoch) for `delay` / `debounce`. |
+| `expiresAt` | Tier 2 #5 — TTL deadline (ms since epoch). |
+| `debounceKey` | Tier 2 #7 — resolved debounce key. |
+| `debounceMode` | Tier 2 #7 — `"leading"` or `"trailing"`. |
+| `pingCount` | Tier 2 #7 — pings absorbed by this run. Surfaces in Studio as **Pings: N**. |
 
 ## NodeRun fields
 
@@ -108,11 +137,36 @@ consume them directly.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /__blok/runs` | List of recent runs. |
+| `GET /__blok/runs` | List of recent runs. Filters: `?status=<status>`, `?tags=a,b,c` (AND), `?metadata.<key>=<value>` (AND across keys). |
 | `GET /__blok/runs/:runId` | Single run with its node runs. |
 | `GET /__blok/runs/:runId/events` | Event stream (SSE). |
 | `GET /__blok/runs/:runId/subruns` | Child runs from sub-workflow invocations, sorted oldest-first. Empty array on miss; 404 if the parent doesn't exist. |
 | `POST /__blok/runs/:runId/replay` | Re-fire the captured trigger payload. Optional body: `{ method?, path?, headers?, body? }`. Returns `{ newRunId, originalRunId, workflowName, replayOf }`. |
+
+### Filtering runs
+
+`GET /__blok/runs` accepts these filter parameters:
+
+- **`status=<status>`** — match a single run state (any of the eleven
+  values listed above).
+- **`tags=a,b,c`** — runs whose `tags` array contains ALL of the
+  listed values (AND semantics).
+- **`metadata.<key>=<value>`** — runs whose `metadata.<key>` equals
+  the given value (string-compared). Multiple `metadata.*=*` pairs
+  combine with AND across keys.
+
+```bash
+# All "completed" runs tagged user-123 AND with metadata tier=premium
+curl 'http://localhost:4000/__blok/runs?status=completed&tags=user-123&metadata.tier=premium'
+
+# Multiple metadata pairs (AND across keys)
+curl 'http://localhost:4000/__blok/runs?metadata.tier=premium&metadata.region=us'
+```
+
+Studio's runs list exposes the same filters through the **Tags** and
+**Metadata** inputs in `RunFilters`. Metadata filters use `json_extract`
+on SQLite (sequential scan; acceptable given the `evictOldRuns` cap on
+the runs table) and object lookup on InMemory.
 
 ## SQLite schema
 
@@ -128,7 +182,9 @@ maps those back to `undefined` in the parsed types.
 | 3 | Phase 2.1 | `workflow_runs.environment` + index |
 | 4 | Tier 1 | `node_runs.cached_json`; new `idempotency_cache` table + `idx_idem_expires` |
 | 5 | Tier 1 | `node_runs.attempts_json`; `workflow_runs.replay_of` + index |
-| 6 | Tier 2 | `workflow_runs.parent_run_id`; `workflow_runs.parent_node_run_id`; `idx_runs_parent_run` |
+| 6 | Tier 2 #4 | `workflow_runs.parent_run_id`; `workflow_runs.parent_node_run_id`; `idx_runs_parent_run` |
+| 7 | Tier 2 #6 | new `concurrency_locks` table + `idx_locks_expires` + `idx_locks_workflow_key` |
+| 8 | Tier 2 #5+#7 | `workflow_runs.scheduled_at`, `expires_at`, `debounce_key`, `debounce_mode`, `ping_count` + indexes |
 
 ### `idempotency_cache` (migration v4)
 
@@ -166,6 +222,43 @@ ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
 ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
 ```
+
+### `concurrency_locks` (migration v7)
+
+```sql
+CREATE TABLE IF NOT EXISTS concurrency_locks (
+  workflow_name TEXT NOT NULL,
+  concurrency_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (workflow_name, concurrency_key, run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_locks_expires ON concurrency_locks(expires_at);
+CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key);
+```
+
+The PK on `(workflow_name, concurrency_key, run_id)` lets a single run
+hold at most one slot per bucket while still permitting up to
+`concurrencyLimit` runs to coexist within a bucket. `expires_at` is
+the lease upper bound for crash safety. See
+[concurrency keys](/d/reliability/concurrency-keys).
+
+### Scheduling columns (migration v8)
+
+```sql
+ALTER TABLE workflow_runs ADD COLUMN scheduled_at INTEGER;
+ALTER TABLE workflow_runs ADD COLUMN expires_at INTEGER;
+ALTER TABLE workflow_runs ADD COLUMN debounce_key TEXT;
+ALTER TABLE workflow_runs ADD COLUMN debounce_mode TEXT;
+ALTER TABLE workflow_runs ADD COLUMN ping_count INTEGER;
+CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key);
+```
+
+All five columns are nullable; pre-Tier-2-#5+#7 rows get NULL on the
+new fields. The indexes support the future "list scheduled runs"
+Studio view and the debounce coordinator's restart-recovery lookup.
 
 ## Postgres store — current limits
 
