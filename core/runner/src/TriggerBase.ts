@@ -295,6 +295,38 @@ export default abstract class TriggerBase extends Trigger {
 							now + concCfg.leaseMs,
 						);
 						if (!result.acquired) {
+							// Tier 2 #6 follow-up — when the trigger is configured with
+							// `onLimit: "queue"`, defer the run via the in-process scheduler
+							// (Tier 2 #5+#7 plumbing) and re-attempt acquisition after a 1s
+							// delay instead of throwing. HTTP gets 202 + Location, Worker
+							// ACKs without retry. Re-defer happens transparently when the
+							// timer fires and the gate denies again.
+							if (concCfg.onLimit === "queue") {
+								const retryAfterMs = 1000;
+								const scheduledAt = now + retryAfterMs;
+
+								tracker.markRunQueued(traceRunId, {
+									concurrencyKey: resolvedKey,
+									concurrencyLimit: concCfg.limit,
+									currentInFlight: result.currentInFlight,
+									scheduledAt,
+								});
+
+								const expiresAtForDispatch: number | undefined = undefined;
+								DeferredRunScheduler.getInstance().schedule(traceRunId, scheduledAt, async () => {
+									await this.dispatchDeferred(ctx, traceRunId as string, expiresAtForDispatch);
+								});
+
+								throw new DeferredDispatchSignal({
+									runId: traceRunId,
+									workflowName,
+									status: "queued",
+									scheduledAt,
+									debounced: false,
+									pingCount: 1,
+								});
+							}
+
 							tracker.markRunThrottled(traceRunId, {
 								concurrencyKey: resolvedKey,
 								concurrencyLimit: concCfg.limit,

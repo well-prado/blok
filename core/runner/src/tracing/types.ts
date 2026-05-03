@@ -43,6 +43,7 @@ export type WorkflowRunStatus =
 	| "delayed"
 	| "expired"
 	| "debounced"
+	| "queued"
 	| "crashed"
 	| "timedOut";
 
@@ -345,6 +346,16 @@ export type RunEventType =
 	 * closes.
 	 */
 	| "RUN_DEBOUNCED"
+	/**
+	 * Tier 2 #6 follow-up — concurrency gate denied a run AND the trigger
+	 * is configured with `onLimit: "queue"`. Instead of throwing, the run
+	 * is deferred via `DeferredRunScheduler` and re-attempts acquisition
+	 * after a 1s delay. Payload `{concurrencyKey, concurrencyLimit,
+	 * currentInFlight, scheduledAt}`. Status flips to `"queued"`;
+	 * transitions to `"running"` when the timer fires (and may flip back
+	 * to `"queued"` on re-denial).
+	 */
+	| "RUN_QUEUED"
 	/**
 	 * Tier 2 quick-wins — run crashed (uncaught exception / OOM /
 	 * signal). Payload `{durationMs, error}`. Distinct from `RUN_FAILED`

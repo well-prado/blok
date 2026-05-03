@@ -24,6 +24,15 @@ export interface NormalizedConcurrencyConfig {
 	limit: number;
 	/** Lease duration for the slot in milliseconds. */
 	leaseMs: number;
+	/**
+	 * Behavior when the gate denies acquisition.
+	 * - `"throw"` (default): emit `ConcurrencyLimitError` → HTTP 429 / Worker NACK.
+	 * - `"queue"`: defer the run via `DeferredRunScheduler`, throw
+	 *   `DeferredDispatchSignal` with status `"queued"`.
+	 *
+	 * Tier 2 #6 follow-up. Reuses the Tier 2 #5+#7 deferred-dispatch plumbing.
+	 */
+	onLimit: "throw" | "queue";
 }
 
 /**
@@ -46,6 +55,7 @@ export function readConcurrencyConfig(
 					concurrencyKey?: unknown;
 					concurrencyLimit?: unknown;
 					concurrencyLeaseMs?: unknown;
+					onLimit?: unknown;
 			  }
 			| undefined;
 		if (!cfg) continue;
@@ -61,7 +71,11 @@ export function readConcurrencyConfig(
 		// Per-trigger value wins over env override; env wins over the hard default.
 		const leaseMs = perTriggerLease ?? envLease ?? DEFAULT_LEASE_MS;
 
-		return { keyExpression, limit, leaseMs };
+		// onLimit: only "throw" (default) and "queue" are valid; anything else
+		// falls back to "throw" (defensive — schema already rejects bad values).
+		const onLimit: "throw" | "queue" = cfg.onLimit === "queue" ? "queue" : "throw";
+
+		return { keyExpression, limit, leaseMs, onLimit };
 	}
 
 	return null;

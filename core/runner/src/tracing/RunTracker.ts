@@ -244,6 +244,48 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
+	/**
+	 * Tier 2 #6 follow-up — mark a run as queued because the concurrency
+	 * gate denied it AND the trigger is configured with `onLimit: "queue"`.
+	 * The run will be re-attempted after `scheduledAt`; `scheduledAt` is
+	 * persisted on the run record so Studio can render a "queued · retries
+	 * at <time>" badge.
+	 *
+	 * Distinct from `markRunThrottled` because queued runs WILL eventually
+	 * execute (or stay queued indefinitely until a slot frees), while
+	 * throttled runs are terminal and `failRun` semantics are skipped.
+	 *
+	 * Caller is responsible for actually scheduling the retry via
+	 * `DeferredRunScheduler`. This method only flips status + emits the
+	 * `RUN_QUEUED` event. Re-marking with a later `scheduledAt` updates
+	 * the field (used when re-defer happens after a timer-fired re-acquire
+	 * also fails).
+	 */
+	markRunQueued(
+		runId: string,
+		info: {
+			concurrencyKey: string;
+			concurrencyLimit: number;
+			currentInFlight: number;
+			scheduledAt: number;
+		},
+	): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		this.store.updateRun(runId, {
+			status: "queued",
+			scheduledAt: info.scheduledAt,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_QUEUED", undefined, undefined, {
+			concurrencyKey: info.concurrencyKey,
+			concurrencyLimit: info.concurrencyLimit,
+			currentInFlight: info.currentInFlight,
+			scheduledAt: info.scheduledAt,
+		});
+	}
+
 	// === Scheduling lifecycle (Tier 2 #5 + #7) ===
 
 	/**

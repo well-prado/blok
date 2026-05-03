@@ -467,6 +467,33 @@ describe("HttpTriggerOptsSchema", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it("accepts onLimit: 'queue' with concurrencyKey", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-q",
+			onLimit: "queue",
+		}) as { onLimit?: "throw" | "queue" };
+		expect(result.onLimit).toBe("queue");
+	});
+
+	it("accepts onLimit: 'throw' explicitly", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-t",
+			onLimit: "throw",
+		}) as { onLimit?: "throw" | "queue" };
+		expect(result.onLimit).toBe("throw");
+	});
+
+	it("rejects onLimit set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				onLimit: "queue",
+			}),
+		).toThrow(/onLimit.+requires.+concurrencyKey/i);
+	});
 });
 
 describe("WorkerTriggerOptsSchema concurrency keys", () => {

@@ -41,6 +41,7 @@ describe("readConcurrencyConfig", () => {
 			keyExpression: "tenant-x",
 			limit: 5,
 			leaseMs: CONCURRENCY_DEFAULTS.leaseMs,
+			onLimit: "throw",
 		});
 	});
 
@@ -59,6 +60,7 @@ describe("readConcurrencyConfig", () => {
 			keyExpression: "$.req.body.tenantId",
 			limit: 2,
 			leaseMs: CONCURRENCY_DEFAULTS.leaseMs,
+			onLimit: "throw",
 		});
 	});
 
@@ -107,5 +109,26 @@ describe("readConcurrencyConfig", () => {
 			http: { method: "POST", concurrencyKey: "  tenant-x  " },
 		});
 		expect(cfg?.keyExpression).toBe("tenant-x");
+	});
+
+	it("defaults onLimit to 'throw' when unset", () => {
+		const cfg = readConcurrencyConfig({
+			http: { method: "POST", concurrencyKey: "x" },
+		});
+		expect(cfg?.onLimit).toBe("throw");
+	});
+
+	it("reads onLimit:'queue' when set", () => {
+		const cfg = readConcurrencyConfig({
+			http: { method: "POST", concurrencyKey: "x", onLimit: "queue" },
+		});
+		expect(cfg?.onLimit).toBe("queue");
+	});
+
+	it("normalizes invalid onLimit values to 'throw'", () => {
+		const cfg = readConcurrencyConfig({
+			http: { method: "POST", concurrencyKey: "x", onLimit: "not-a-mode" },
+		});
+		expect(cfg?.onLimit).toBe("throw");
 	});
 });

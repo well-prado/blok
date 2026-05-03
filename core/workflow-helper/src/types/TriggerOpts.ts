@@ -47,14 +47,30 @@ export const ConcurrencyOptsFields = {
 				"Defaults to 3600000 (1h). Tunable per-trigger; process-wide override via " +
 				"`BLOK_CONCURRENCY_LEASE_MS`. Crash-safety upper bound on slot leaks.",
 		),
+	onLimit: z
+		.enum(["throw", "queue"])
+		.optional()
+		.describe(
+			"OPTIONAL. Behavior when the concurrency gate denies a run. " +
+				"`'throw'` (default): HTTP returns 429 + Retry-After / Worker NACKs with redelivery " +
+				"(transient resource state, doesn't count against the workflow's retry budget). " +
+				"`'queue'`: defer the run via the in-process scheduler and re-attempt acquisition " +
+				"after a 1s delay. Reuses the Tier 2 #5+#7 deferred-dispatch plumbing; HTTP returns " +
+				"202 Accepted + Location, Worker ACKs without retry. Requires `concurrencyKey` to be set.",
+		),
 } as const;
 
 /**
- * Cross-field refinement: `concurrencyLimit` set without `concurrencyKey`
- * is meaningless and rejected at validation time. Same for `concurrencyLeaseMs`.
+ * Cross-field refinement: `concurrencyLimit` / `concurrencyLeaseMs` / `onLimit`
+ * set without `concurrencyKey` are meaningless and rejected at validation time.
  */
 export const concurrencyRefinement = (
-	val: { concurrencyKey?: string; concurrencyLimit?: number; concurrencyLeaseMs?: number },
+	val: {
+		concurrencyKey?: string;
+		concurrencyLimit?: number;
+		concurrencyLeaseMs?: number;
+		onLimit?: "throw" | "queue";
+	},
 	ctx: z.RefinementCtx,
 ): void => {
 	if (val.concurrencyLimit !== undefined && val.concurrencyKey === undefined) {
@@ -69,6 +85,13 @@ export const concurrencyRefinement = (
 			code: z.ZodIssueCode.custom,
 			path: ["concurrencyLeaseMs"],
 			message: "`concurrencyLeaseMs` requires `concurrencyKey` to be set.",
+		});
+	}
+	if (val.onLimit !== undefined && val.concurrencyKey === undefined) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["onLimit"],
+			message: "`onLimit` requires `concurrencyKey` to be set.",
 		});
 	}
 };

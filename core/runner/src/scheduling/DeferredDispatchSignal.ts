@@ -1,7 +1,8 @@
 /**
  * Tier 2 #5 + #7 — thrown by `TriggerBase.run()` when a workflow's
  * scheduling gates (debounce / delay) defer the run to a future
- * dispatch.
+ * dispatch. Tier 2 #6 follow-up extends this to cover `onLimit:"queue"`
+ * (concurrency-gate-deferred runs); same transport translation.
  *
  * NOT a true error — a control-flow exception. Trigger transports
  * catch it and translate it into the appropriate transport-level
@@ -20,8 +21,13 @@ export interface DeferredDispatchInfo {
 	runId: string;
 	/** Workflow name. */
 	workflowName: string;
-	/** Resolved status the run was placed in (`"delayed"` or `"debounced"`). */
-	status: "delayed" | "debounced";
+	/**
+	 * Resolved status the run was placed in:
+	 * - `"delayed"` — Tier 2 #5 (`trigger.delay`).
+	 * - `"debounced"` — Tier 2 #7 (`trigger.debounce`).
+	 * - `"queued"` — Tier 2 #6 follow-up (`trigger.onLimit:"queue"`).
+	 */
+	status: "delayed" | "debounced" | "queued";
 	/** ms since epoch when the run is scheduled to dispatch. */
 	scheduledAt: number;
 	/** ms since epoch when the run will expire if not dispatched. Undefined when no TTL. */

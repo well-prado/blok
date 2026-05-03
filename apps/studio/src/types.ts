@@ -14,6 +14,13 @@ export type WorkflowRunStatus =
 	| "expired"
 	/** Tier 2 #7: coalesced into another run via the debounce key. */
 	| "debounced"
+	/**
+	 * Tier 2 #6 follow-up: gate denied + `onLimit:"queue"` deferred the run.
+	 * Will retry acquisition after `scheduledAt`; eventually transitions to
+	 * `running` (and on completion to `completed`) or stays `queued` if the
+	 * slot keeps being occupied.
+	 */
+	| "queued"
 	/** Tier 2 quick-wins: runner crashed (uncaught exception / OOM / signal). */
 	| "crashed"
 	/** Tier 2 quick-wins: step's final retry attempt exceeded `maxDuration`. */
@@ -205,6 +212,11 @@ export type RunEventType =
 	| "RUN_EXPIRED"
 	/** Tier 2 #7: coalesced into another run. Payload `{debounceKey, mode, intoRunId?, pingCount, scheduledAt?}`. */
 	| "RUN_DEBOUNCED"
+	/**
+	 * Tier 2 #6 follow-up: concurrency gate denied + `onLimit:"queue"` deferred
+	 * the run. Payload `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}`.
+	 */
+	| "RUN_QUEUED"
 	/** Tier 2 quick-wins: runner crashed. Payload `{durationMs, error}`. */
 	| "RUN_CRASHED"
 	/** Tier 2 quick-wins: step's final retry attempt timed out. Payload `{durationMs, stepId, maxDurationMs, attemptsExhausted}`. */

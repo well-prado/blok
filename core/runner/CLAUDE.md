@@ -321,9 +321,60 @@ DBs upgrade transparently.
   gating is a deferred follow-up. Same trade-off as Tier 1's
   idempotency cache.
 
+**`onLimit: "queue"` (Tier 2 #6 follow-up)**:
+
+Triggers can opt into queue-on-deny instead of reject-on-deny:
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/render",
+    concurrencyKey: $.req.body.tenantId,
+    concurrencyLimit: 5,
+    onLimit: "queue",   // default "throw" (current behavior)
+  },
+}
+```
+
+When the gate denies AND `onLimit === "queue"`:
+- `tracker.markRunQueued(traceRunId, {concurrencyKey, concurrencyLimit,
+  currentInFlight, scheduledAt})` flips status to `"queued"` and
+  persists `scheduledAt = now + 1000ms`.
+- `DeferredRunScheduler.schedule(traceRunId, scheduledAt, dispatchFn)`
+  registers a timer that calls `this.dispatchDeferred(ctx, traceRunId,
+  undefined)` when it fires.
+- `DeferredDispatchSignal` is thrown with `status: "queued"`. HTTP
+  translates to `202 Accepted` + `Location`; Worker ACKs without retry.
+
+When the timer fires, `dispatchDeferred` re-enters `run(ctx)` with the
+existing `_blokDispatchReentry` flag. The reentered `run()` skips the
+scheduling gates (existing behavior) and re-attempts the concurrency
+gate. On grant, the run continues normally. On re-denial, the same
+queue path executes again — `markRunQueued` updates `scheduledAt`,
+`DeferredRunScheduler.schedule()` replaces the existing timer (the
+scheduler's "replace on same runId" semantics), and the signal is
+re-thrown. The `dispatchDeferred` swallows the signal so timer
+callbacks don't crash on uncaught rejections.
+
+Indefinite retry — there is no internal cap on how many times a run
+can re-defer. The trigger-level lease (default 1h) bounds slot leaks
+if a holder process dies, so queued runs eventually progress. Trade-
+offs documented:
+- Thundering herd: when a slot frees, all queued runs for the bucket
+  wake up at the next 1s tick and contend; only one wins. Future
+  improvement: capped exponential backoff with jitter, or a wakeup-
+  on-release model. Single-process v1 ships fixed-1s.
+- Each retry attempt counts as a brief in-flight request (~ms) and
+  the inner re-entered `run()` increments `inFlightRequests`. Brief
+  metric flicker only.
+
 **Not yet shipped**:
-- `onLimit: "queue"` (defer the run instead of rejecting) — needs
-  Tier 2 #5's deferred-run plumbing. Lands as additive when #5 ships.
+- Capped exponential backoff for re-defer (fixed 1s today).
+- Wakeup-on-release model (cross-process plumbing prerequisite).
+- `concurrencyQueueTimeoutMs` (TTL on queued runs). Workaround: use
+  the trigger-level `ttl` once the HTTP "TTL requires delay"
+  restriction is lifted, or kill-switch + redeploy.
 - Cross-process backend (NATS KV / Redis). Single-process semantics
   ship first.
 - Step-level concurrency keys (different invariant set, separate

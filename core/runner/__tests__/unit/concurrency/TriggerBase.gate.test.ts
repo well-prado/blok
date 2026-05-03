@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Runner from "../../../src/Runner";
 import TriggerBase from "../../../src/TriggerBase";
 import { ConcurrencyLimitError } from "../../../src/concurrency/ConcurrencyLimitError";
+import { DeferredDispatchSignal } from "../../../src/scheduling/DeferredDispatchSignal";
+import { DeferredRunScheduler } from "../../../src/scheduling/DeferredRunScheduler";
 import { RunTracker } from "../../../src/tracing/RunTracker";
 
 /**
@@ -214,5 +216,163 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		const tracker = RunTracker.getInstance();
 		const probe = tracker.acquireConcurrencySlot("test-wf", "tenant-explode", 1, "probe-run", Date.now() + 60_000);
 		expect(probe.acquired).toBe(true);
+	});
+});
+
+describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follow-up)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+		process.env.BLOK_CONCURRENCY_DISABLED = undefined;
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+		process.env.BLOK_CONCURRENCY_DISABLED = undefined;
+	});
+
+	it("defers the run as DeferredDispatchSignal when limit hit and onLimit:'queue'", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		const tracker = RunTracker.getInstance();
+		tracker.acquireConcurrencySlot("test-wf", "tenant-q", 1, "holder", Date.now() + 60_000);
+
+		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(DeferredDispatchSignal);
+	});
+
+	it("DeferredDispatchSignal carries status='queued' and scheduledAt in the future", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q2", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		const tracker = RunTracker.getInstance();
+		tracker.acquireConcurrencySlot("test-wf", "tenant-q2", 1, "holder", Date.now() + 60_000);
+
+		const before = Date.now();
+		try {
+			await t.run(makeCtx());
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(DeferredDispatchSignal);
+			const info = (err as DeferredDispatchSignal).info;
+			expect(info.status).toBe("queued");
+			expect(info.scheduledAt).toBeGreaterThanOrEqual(before + 1000);
+			expect(info.debounced).toBe(false);
+			expect(info.pingCount).toBe(1);
+			expect(info.runId).toBeTruthy();
+			expect(info.workflowName).toBe("test-wf");
+		}
+	});
+
+	it("flips run status to 'queued' and registers a retry timer", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q3", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		const tracker = RunTracker.getInstance();
+		const scheduler = DeferredRunScheduler.getInstance();
+		tracker.acquireConcurrencySlot("test-wf", "tenant-q3", 1, "holder", Date.now() + 60_000);
+
+		try {
+			await t.run(makeCtx());
+		} catch {
+			// expected
+		}
+
+		const queuedRuns = tracker.getStore().getRuns({ status: "queued" });
+		expect(queuedRuns.runs.length).toBeGreaterThanOrEqual(1);
+		const queued = queuedRuns.runs.find((r) => r.workflowName === "test-wf");
+		expect(queued).toBeDefined();
+		expect(queued?.scheduledAt).toBeGreaterThan(0);
+		expect(scheduler.size()).toBeGreaterThan(0);
+	});
+
+	it("emits a RUN_QUEUED event when the gate defers", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q4", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		const tracker = RunTracker.getInstance();
+		tracker.acquireConcurrencySlot("test-wf", "tenant-q4", 1, "holder", Date.now() + 60_000);
+
+		const events: Array<{ type: string; payload?: unknown }> = [];
+		const handler = (e: { type: string; payload?: unknown }) => events.push(e);
+		tracker.on("event", handler);
+
+		try {
+			await t.run(makeCtx());
+		} catch {
+			// expected
+		} finally {
+			tracker.off("event", handler);
+		}
+
+		const queuedEvents = events.filter((e) => e.type === "RUN_QUEUED");
+		expect(queuedEvents.length).toBe(1);
+		const payload = queuedEvents[0].payload as {
+			concurrencyKey: string;
+			concurrencyLimit: number;
+			currentInFlight: number;
+			scheduledAt: number;
+		};
+		expect(payload.concurrencyKey).toBe("tenant-q4");
+		expect(payload.concurrencyLimit).toBe(1);
+		expect(payload.currentInFlight).toBe(1);
+		expect(payload.scheduledAt).toBeGreaterThan(0);
+	});
+
+	it("granted-slot path is unchanged when onLimit:'queue' but slot is available", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q5", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		// No holder pre-acquired — gate should grant cleanly.
+		const result = await t.run(makeCtx());
+		expect(result.ctx).toBeDefined();
+
+		// Lock released after run.
+		const tracker = RunTracker.getInstance();
+		const probe = tracker.acquireConcurrencySlot("test-wf", "tenant-q5", 1, "probe", Date.now() + 60_000);
+		expect(probe.acquired).toBe(true);
+	});
+
+	it("after holder releases, timer-fired re-acquire grants the queued run", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "tenant-q6", concurrencyLimit: 1, onLimit: "queue" },
+		});
+
+		const tracker = RunTracker.getInstance();
+		const scheduler = DeferredRunScheduler.getInstance();
+		tracker.acquireConcurrencySlot("test-wf", "tenant-q6", 1, "holder", Date.now() + 60_000);
+
+		// Queue the run.
+		try {
+			await t.run(makeCtx());
+		} catch {
+			// expected
+		}
+
+		// Holder releases its slot.
+		tracker.releaseConcurrencySlot("test-wf", "tenant-q6", "holder");
+
+		// Manually drain the scheduler — re-enters run() which will now acquire.
+		await scheduler.drainAll();
+
+		// The previously-queued run should now have transitioned to "completed"
+		// (TestTrigger.getRunner returns an empty runner, so the workflow finishes immediately).
+		const completed = tracker
+			.getStore()
+			.getRuns({ status: "completed" })
+			.runs.find((r) => r.workflowName === "test-wf");
+		expect(completed).toBeDefined();
 	});
 });
