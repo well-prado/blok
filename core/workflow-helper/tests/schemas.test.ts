@@ -11,8 +11,10 @@ import {
 import {
 	ConcurrencyOptsSchema,
 	CronTriggerOptsSchema,
+	DebounceOptsSchema,
 	HttpTriggerOptsSchema,
 	QueueTriggerOptsSchema,
+	SchedulingOptsSchema,
 	TRIGGER_SCHEMAS,
 	TriggersSchema,
 	WebhookTriggerOptsSchema,
@@ -507,6 +509,184 @@ describe("ConcurrencyOptsSchema (standalone)", () => {
 
 	it("rejects leaseMs without key", () => {
 		expect(() => ConcurrencyOptsSchema.parse({ concurrencyLeaseMs: 60_000 })).toThrow();
+	});
+});
+
+// =============================================================================
+// Tier 2 #5 + #7 — Scheduling: delay / TTL / debounce
+// =============================================================================
+
+describe("DebounceOptsSchema", () => {
+	it("accepts the minimal shape with defaults", () => {
+		const result = DebounceOptsSchema.parse({ key: "doc-1", delay: "500ms" });
+		expect(result.key).toBe("doc-1");
+		expect(result.mode).toBe("trailing");
+		expect(result.delay).toBe("500ms");
+	});
+
+	it("accepts numeric delay", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 500 })).not.toThrow();
+	});
+
+	it('accepts mode "leading"', () => {
+		const result = DebounceOptsSchema.parse({ key: "k", mode: "leading", delay: 100 });
+		expect(result.mode).toBe("leading");
+	});
+
+	it("accepts maxDelay >= delay (numbers)", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 500, maxDelay: 5000 })).not.toThrow();
+	});
+
+	it("rejects maxDelay < delay (numbers)", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 5000, maxDelay: 500 })).toThrow(/maxDelay.+>=.+delay/i);
+	});
+
+	it("does not enforce maxDelay/delay relationship at the schema layer when string units differ", () => {
+		// Schema-layer relaxation — runtime parseDuration normalizes.
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "5s", maxDelay: "1m" })).not.toThrow();
+	});
+
+	it("rejects empty key", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "", delay: 500 })).toThrow();
+	});
+
+	it("rejects bad mode", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", mode: "throttle" as never, delay: 500 })).toThrow();
+	});
+
+	it("rejects malformed delay strings", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "1h30m" })).toThrow();
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "garbage" })).toThrow();
+	});
+});
+
+describe("SchedulingOptsSchema (standalone)", () => {
+	it("accepts an empty object (all fields optional)", () => {
+		expect(() => SchedulingOptsSchema.parse({})).not.toThrow();
+	});
+
+	it("accepts delay as number or duration string", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: 1000 })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1h" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "30m" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "500ms" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1d" })).not.toThrow();
+	});
+
+	it("rejects malformed duration strings", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: "1h30m" })).toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1.5h" })).toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "abc" })).toThrow();
+	});
+
+	it("rejects negative numeric delay", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: -1 })).toThrow();
+	});
+
+	it("accepts ttl with same surface as delay", () => {
+		expect(() => SchedulingOptsSchema.parse({ ttl: "2h" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ ttl: 60_000 })).not.toThrow();
+	});
+
+	it("accepts debounce nested under scheduling", () => {
+		expect(() =>
+			SchedulingOptsSchema.parse({
+				debounce: { key: "doc-1", delay: "500ms", maxDelay: "5s" },
+			}),
+		).not.toThrow();
+	});
+
+	it("does NOT enforce HTTP-specific ttl-without-delay rule (that's per-trigger)", () => {
+		// Standalone schema permissive; per-trigger refinement enforces the rule.
+		expect(() => SchedulingOptsSchema.parse({ ttl: "2h" })).not.toThrow();
+	});
+});
+
+describe("HttpTriggerOptsSchema scheduling fields", () => {
+	it("accepts delay (number)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: 5000 })).not.toThrow();
+	});
+
+	it("accepts delay (duration string)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: "1h" })).not.toThrow();
+	});
+
+	it("accepts delay + ttl together", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: "1h", ttl: "2h" })).not.toThrow();
+	});
+
+	it("rejects ttl WITHOUT delay (HTTP-only rule)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", ttl: "2h" })).toThrow(/HTTP.+ttl.+requires.+delay/i);
+	});
+
+	it("accepts debounce alone", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "$.req.body.docId", delay: "500ms", maxDelay: "5s" },
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts debounce + concurrency together", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "doc", delay: 500 },
+				concurrencyKey: "tenant-x",
+				concurrencyLimit: 3,
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts a $-proxy compiled string for debounce.key", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "js/ctx.request.body.userId", delay: 1000 },
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("WorkerTriggerOptsSchema scheduling fields", () => {
+	it("accepts delay as a number (back-compat)", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "q",
+			delay: 60_000,
+		}) as { delay: number | string };
+		expect(result.delay).toBe(60_000);
+	});
+
+	it("accepts delay as a duration string (Tier 2 #5)", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "q",
+			delay: "1h",
+		}) as { delay: number | string };
+		expect(result.delay).toBe("1h");
+	});
+
+	it("accepts ttl WITHOUT delay (worker-specific rule)", () => {
+		// Worker queue-time TTL is independent of delay.
+		expect(() => WorkerTriggerOptsSchema.parse({ queue: "q", ttl: "1h" })).not.toThrow();
+	});
+
+	it("accepts debounce + concurrency stacked (orthogonal gates)", () => {
+		expect(() =>
+			WorkerTriggerOptsSchema.parse({
+				queue: "q",
+				concurrency: 10,
+				concurrencyKey: "tenant",
+				concurrencyLimit: 2,
+				debounce: { key: "$.req.body.docId", delay: 500, maxDelay: 5000 },
+				delay: "5s",
+				ttl: "30m",
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects malformed delay strings", () => {
+		expect(() => WorkerTriggerOptsSchema.parse({ queue: "q", delay: "1.5h" })).toThrow();
 	});
 });
 

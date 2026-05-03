@@ -9,6 +9,7 @@ import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
+import { DeferredDispatchSignal } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
@@ -567,6 +568,34 @@ export default class HttpTrigger extends TriggerBase {
 					workflow_name: `${this.configuration?.name || "unknown"}`,
 					workflow_path: `${workflowNameInPath}`,
 				});
+
+				// Tier 2 #5 + #7 — scheduling-deferred run. Surface as 202
+				// Accepted with a `Location` header pointing at the run's
+				// detail endpoint and a structured JSON body. The actual
+				// dispatch happens later via the in-process scheduler.
+				if (e instanceof DeferredDispatchSignal) {
+					const targetRunId = e.info.intoRunId ?? e.info.runId;
+					this.logger.log(
+						`[scheduling] ${e.info.workflowName} runId=${e.info.runId} status=${e.info.status} ` +
+							`scheduledAt=${e.info.scheduledAt}${e.info.expiresAt ? ` expiresAt=${e.info.expiresAt}` : ""} ` +
+							`pingCount=${e.info.pingCount} → 202`,
+					);
+					span.setStatus({ code: SpanStatusCode.OK, message: `deferred:${e.info.status}` });
+					c.header("Location", `/__blok/runs/${targetRunId}`);
+					return c.json(
+						{
+							runId: e.info.runId,
+							workflowName: e.info.workflowName,
+							status: e.info.status,
+							scheduledAt: e.info.scheduledAt,
+							expiresAt: e.info.expiresAt,
+							debounced: e.info.debounced,
+							pingCount: e.info.pingCount,
+							intoRunId: e.info.intoRunId,
+						},
+						202,
+					);
+				}
 
 				// Tier 2 #6 — concurrency gate denial. Surface as 429 with a
 				// Retry-After header (in seconds, rounded up) and a structured

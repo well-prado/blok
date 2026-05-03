@@ -154,6 +154,11 @@ export class RunTracker extends EventEmitter {
 			replayOf: opts.replayOf,
 			parentRunId: opts.parentRunId,
 			parentNodeRunId: opts.parentNodeRunId,
+			scheduledAt: opts.scheduledAt,
+			expiresAt: opts.expiresAt,
+			debounceKey: opts.debounceKey,
+			debounceMode: opts.debounceMode,
+			pingCount: opts.pingCount,
 		};
 
 		this.store.saveRun(run);
@@ -236,6 +241,133 @@ export class RunTracker extends EventEmitter {
 			concurrencyKey: info.concurrencyKey,
 			concurrencyLimit: info.concurrencyLimit,
 			currentInFlight: info.currentInFlight,
+		});
+	}
+
+	// === Scheduling lifecycle (Tier 2 #5 + #7) ===
+
+	/**
+	 * Tier 2 #5 — mark a run as `delayed`. Called immediately after
+	 * `startRun` for runs that should be deferred. The run record carries
+	 * `scheduledAt` (and optionally `expiresAt`) so Studio can render a
+	 * "Delayed → fires at <time>" badge.
+	 *
+	 * Caller is responsible for actually scheduling the dispatch via
+	 * `DeferredRunScheduler`. This method only flips status + emits the
+	 * `RUN_DELAYED` event.
+	 */
+	markRunDelayed(runId: string, info: { scheduledAt: number; delayMs: number; expiresAt?: number }): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		this.store.updateRun(runId, {
+			status: "delayed",
+			scheduledAt: info.scheduledAt,
+			expiresAt: info.expiresAt,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_DELAYED", undefined, undefined, {
+			scheduledAt: info.scheduledAt,
+			delayMs: info.delayMs,
+			expiresAt: info.expiresAt,
+		});
+	}
+
+	/**
+	 * Tier 2 #5 — mark a run as `expired` because its TTL was exceeded
+	 * before dispatch. Distinct from `failed` (no step ran) and
+	 * `cancelled` (operator action — TTL is automatic).
+	 */
+	markRunExpired(runId: string, info: { expiresAt: number; expiredAt: number }): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		const finishedAt = info.expiredAt;
+		const durationMs = finishedAt - run.startedAt;
+		const lateBy = info.expiredAt - info.expiresAt;
+
+		this.store.updateRun(runId, {
+			status: "expired",
+			finishedAt,
+			durationMs,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_EXPIRED", undefined, undefined, {
+			expiresAt: info.expiresAt,
+			expiredAt: info.expiredAt,
+			lateBy,
+		});
+	}
+
+	/**
+	 * Tier 2 #7 — mark a run as `debounced`. In **leading** mode this is
+	 * terminal: the ping was suppressed because a sibling fired
+	 * immediately (`intoRunId` carries the sibling's id). In **trailing**
+	 * mode this is transient: the same run is marked `debounced` while
+	 * the timer is active and flips to `running` when the window closes
+	 * (no separate transition method needed — `tracker` updates status
+	 * directly via store before invoking the runner).
+	 */
+	markRunDebounced(
+		runId: string,
+		info: {
+			debounceKey: string;
+			mode: "leading" | "trailing";
+			intoRunId?: string;
+			pingCount?: number;
+			scheduledAt?: number;
+		},
+	): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		const isTerminal = info.mode === "leading" && info.intoRunId !== undefined;
+		const finishedAt = isTerminal ? Date.now() : undefined;
+		const durationMs = isTerminal && finishedAt ? finishedAt - run.startedAt : undefined;
+
+		this.store.updateRun(runId, {
+			status: "debounced",
+			debounceKey: info.debounceKey,
+			debounceMode: info.mode,
+			pingCount: info.pingCount,
+			scheduledAt: info.scheduledAt,
+			...(isTerminal ? { finishedAt, durationMs } : {}),
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_DEBOUNCED", undefined, undefined, {
+			debounceKey: info.debounceKey,
+			mode: info.mode,
+			intoRunId: info.intoRunId,
+			pingCount: info.pingCount,
+			scheduledAt: info.scheduledAt,
+		});
+	}
+
+	/**
+	 * Tier 2 #7 — record an additional ping into an existing trailing-mode
+	 * debounce window. Increments `pingCount` and updates `scheduledAt`.
+	 * Does NOT emit a new event (avoid event-stream bloat under burst).
+	 */
+	recordDebouncePing(runId: string, opts: { pingCount: number; scheduledAt: number }): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+		this.store.updateRun(runId, {
+			pingCount: opts.pingCount,
+			scheduledAt: opts.scheduledAt,
+		});
+	}
+
+	/**
+	 * Tier 2 #7 — transition a `delayed`/`debounced` run into `running`
+	 * when its timer fires. Studio sees the status change via the
+	 * existing run-update SSE stream.
+	 */
+	transitionRunToRunning(runId: string): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+		this.store.updateRun(runId, {
+			status: "running",
+			startedAt: run.startedAt, // preserve the original submission time
 		});
 	}
 

@@ -36,6 +36,9 @@ import {
 	// Cron
 	CronTriggerOpts,
 	CronTriggerOptsSchema,
+	// Scheduling: delay/ttl/debounce (Tier 2 #5 + #7)
+	DebounceOpts,
+	DebounceOptsSchema,
 	// HTTP method enum (canonical names + legacy * preprocess)
 	HTTP_METHODS,
 	// HTTP (preferred name)
@@ -56,6 +59,9 @@ import {
 	// SSE
 	SSETriggerOpts,
 	SSETriggerOptsSchema,
+	SchedulingOpts,
+	SchedulingOptsFields,
+	SchedulingOptsSchema,
 	// Trigger registry
 	TRIGGER_SCHEMAS,
 	TriggerConfigMap,
@@ -75,9 +81,11 @@ import {
 	WorkerTriggerOpts,
 	WorkerTriggerOptsSchema,
 	concurrencyRefinement,
+	makeSchedulingRefinement,
 	validateTriggerConfig,
 } from "./types/TriggerOpts";
 import { WorkflowV2, WorkflowV2Schema } from "./types/WorkflowOpts";
+import { parseDuration, tryParseDuration } from "./utils/parseDuration";
 
 export {
 	AddElse,
@@ -132,6 +140,13 @@ export {
 	ConcurrencyOptsFields,
 	ConcurrencyOptsSchema,
 	concurrencyRefinement,
+	// Scheduling: delay/ttl/debounce (Tier 2 #5 + #7)
+	DebounceOpts,
+	DebounceOptsSchema,
+	makeSchedulingRefinement,
+	SchedulingOpts,
+	SchedulingOptsFields,
+	SchedulingOptsSchema,
 	// Trigger types — preferred names
 	HttpTriggerOpts,
 	HttpTriggerOptsSchema,
@@ -163,4 +178,7 @@ export {
 	TRIGGER_SCHEMAS,
 	AnyTriggerOpts,
 	validateTriggerConfig,
+	// Duration parser (Tier 2 #5 + #7)
+	parseDuration,
+	tryParseDuration,
 };

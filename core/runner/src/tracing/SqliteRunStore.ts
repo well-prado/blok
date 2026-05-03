@@ -74,6 +74,31 @@ interface RunRow {
 	 * invoked this sub-workflow. Added in migration v6.
 	 */
 	parent_node_run_id: string | null;
+	/**
+	 * Tier 2 #5 · scheduled dispatch time (ms since epoch). NULL for
+	 * immediate runs. Added in migration v8.
+	 */
+	scheduled_at: number | null;
+	/**
+	 * Tier 2 #5 · TTL deadline (ms since epoch). NULL when no TTL is
+	 * configured. Added in migration v8.
+	 */
+	expires_at: number | null;
+	/**
+	 * Tier 2 #7 · resolved debounce key. NULL on non-debounced runs.
+	 * Added in migration v8.
+	 */
+	debounce_key: string | null;
+	/**
+	 * Tier 2 #7 · debounce mode (`leading` | `trailing`). NULL on non-
+	 * debounced runs. Added in migration v8.
+	 */
+	debounce_mode: string | null;
+	/**
+	 * Tier 2 #7 · pings absorbed by this run. NULL pre-Tier-2-#7;
+	 * `1`+ on debounced runs. Added in migration v8.
+	 */
+	ping_count: number | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -404,6 +429,38 @@ export class SqliteRunStore implements RunStore {
 					CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key);
 				`,
 			},
+			{
+				// Tier 2 #5 + #7 · scheduling fields on workflow_runs:
+				//  - `scheduled_at` — dispatch time (ms since epoch) for
+				//    runs deferred via `trigger.delay`. NULL on immediate
+				//    runs.
+				//  - `expires_at` — TTL deadline (ms since epoch). When
+				//    `now > expires_at` at dispatch time, the run is
+				//    marked `expired` and skipped.
+				//  - `debounce_key` — resolved key for runs that absorbed
+				//    pings via `trigger.debounce`. NULL on non-debounced
+				//    runs.
+				//  - `debounce_mode` — `leading` | `trailing`.
+				//  - `ping_count` — number of pings absorbed by this run.
+				// Indexes:
+				//  - `idx_runs_scheduled_at` for "list scheduled runs"
+				//    queries (Studio surface).
+				//  - `idx_runs_debounce_key` for the debounce coordinator's
+				//    "is there an active run for this key?" lookup
+				//    (in-memory map is the hot path; SQLite is the
+				//    fallback / restart-recovery).
+				// Existing rows: NULL on every new column. Backward-compat.
+				version: 8,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN scheduled_at INTEGER;
+					ALTER TABLE workflow_runs ADD COLUMN expires_at INTEGER;
+					ALTER TABLE workflow_runs ADD COLUMN debounce_key TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN debounce_mode TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN ping_count INTEGER;
+					CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at);
+					CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key);
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -437,8 +494,9 @@ export class SqliteRunStore implements RunStore {
 			(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 			 status, started_at, finished_at, duration_ms, error_json,
 			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
-			 parent_run_id, parent_node_run_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 parent_run_id, parent_node_run_id,
+			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -459,6 +517,11 @@ export class SqliteRunStore implements RunStore {
 			run.replayOf ?? null,
 			run.parentRunId ?? null,
 			run.parentNodeRunId ?? null,
+			run.scheduledAt ?? null,
+			run.expiresAt ?? null,
+			run.debounceKey ?? null,
+			run.debounceMode ?? null,
+			run.pingCount ?? null,
 		);
 	}
 
@@ -505,6 +568,30 @@ export class SqliteRunStore implements RunStore {
 		if (updates.parentNodeRunId !== undefined) {
 			setClauses.push("parent_node_run_id = ?");
 			values.push(updates.parentNodeRunId);
+		}
+		if (updates.scheduledAt !== undefined) {
+			setClauses.push("scheduled_at = ?");
+			values.push(updates.scheduledAt);
+		}
+		if (updates.expiresAt !== undefined) {
+			setClauses.push("expires_at = ?");
+			values.push(updates.expiresAt);
+		}
+		if (updates.debounceKey !== undefined) {
+			setClauses.push("debounce_key = ?");
+			values.push(updates.debounceKey);
+		}
+		if (updates.debounceMode !== undefined) {
+			setClauses.push("debounce_mode = ?");
+			values.push(updates.debounceMode);
+		}
+		if (updates.pingCount !== undefined) {
+			setClauses.push("ping_count = ?");
+			values.push(updates.pingCount);
+		}
+		if (updates.startedAt !== undefined) {
+			setClauses.push("started_at = ?");
+			values.push(updates.startedAt);
 		}
 
 		if (setClauses.length === 0) return;
@@ -1261,6 +1348,11 @@ export class SqliteRunStore implements RunStore {
 			replayOf: row.replay_of ?? undefined,
 			parentRunId: row.parent_run_id ?? undefined,
 			parentNodeRunId: row.parent_node_run_id ?? undefined,
+			scheduledAt: row.scheduled_at ?? undefined,
+			expiresAt: row.expires_at ?? undefined,
+			debounceKey: row.debounce_key ?? undefined,
+			debounceMode: (row.debounce_mode ?? undefined) as "leading" | "trailing" | undefined,
+			pingCount: row.ping_count ?? undefined,
 		};
 	}
 

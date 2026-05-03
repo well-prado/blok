@@ -8,6 +8,9 @@ export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = 
 	cancelled: "text-purple-400 bg-purple-400/10",
 	skipped: "text-zinc-500 bg-zinc-500/10",
 	throttled: "text-amber-300 bg-amber-300/10",
+	delayed: "text-yellow-400 bg-yellow-400/10",
+	expired: "text-zinc-500 bg-zinc-500/10",
+	debounced: "text-cyan-400 bg-cyan-400/10",
 };
 
 export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
@@ -18,6 +21,9 @@ export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string
 	cancelled: "bg-purple-400",
 	skipped: "bg-zinc-500",
 	throttled: "bg-amber-300",
+	delayed: "bg-yellow-400",
+	expired: "bg-zinc-500",
+	debounced: "bg-cyan-400",
 };
 
 export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
@@ -28,6 +34,9 @@ export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = 
 	cancelled: "Cancelled",
 	skipped: "Skipped",
 	throttled: "Throttled",
+	delayed: "Delayed",
+	expired: "Expired",
+	debounced: "Debounced",
 };
 
 export const TIMELINE_BAR_COLORS: Record<NodeRunStatus, string> = {
@@ -53,6 +62,9 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	NODE_CACHED: "Node Cached",
 	NODE_ATTEMPT_FAILED: "Attempt Failed",
 	RUN_THROTTLED: "Run Throttled",
+	RUN_DELAYED: "Run Delayed",
+	RUN_EXPIRED: "Run Expired",
+	RUN_DEBOUNCED: "Run Debounced",
 };
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
@@ -70,6 +82,9 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	NODE_CACHED: "text-emerald-400 bg-emerald-400/10",
 	NODE_ATTEMPT_FAILED: "text-amber-400 bg-amber-400/10",
 	RUN_THROTTLED: "text-amber-300 bg-amber-300/10",
+	RUN_DELAYED: "text-yellow-400 bg-yellow-400/10",
+	RUN_EXPIRED: "text-zinc-500 bg-zinc-500/10",
+	RUN_DEBOUNCED: "text-cyan-400 bg-cyan-400/10",
 };
 
 export const LOG_LEVEL_COLORS = {

@@ -296,6 +296,127 @@ DBs upgrade transparently.
 - Step-level concurrency keys (different invariant set, separate
   plan).
 
+## Delay / TTL / Debounce (Tier 2 #5 + #7)
+
+Trigger authors opt in by adding `delay`, `ttl`, or `debounce` to a
+trigger config block:
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/welcome",
+    delay: "1h",                    // schedule for 1h from now
+    ttl: "2h",                       // expire if not started within 2h
+  },
+}
+
+trigger: {
+  http: {
+    method: "POST",
+    path: "/save/:docId",
+    debounce: {
+      key: $.req.params.docId,      // per-doc coalescing
+      mode: "trailing",              // default; or "leading"
+      delay: "500ms",                // wait for silence
+      maxDelay: "5s",                // tail-latency bound (trailing only)
+    },
+  },
+}
+```
+
+The gates run in `TriggerBase.run()` BEFORE the concurrency gate
+(Tier 2 #6). Order: debounce → delay. The debounce gate handles its
+own scheduling (so `delay` is effectively ignored on debounced
+triggers).
+
+**Debounce semantics**:
+- **Trailing** (default): each ping resets a `delayMs` timer; the run
+  fires after `delayMs` of silence. Latest payload wins via the
+  closure captured by `DebounceCoordinator.onFire`. `maxDelayMs`
+  bounds tail latency — even with continuous pings, the first ping's
+  run fires at `maxDelayMs`.
+- **Leading**: first ping fires synchronously through the normal
+  pipeline. Subsequent pings within `delayMs` are suppressed (status
+  `debounced` terminal). Window closes after `delayMs` of silence.
+
+**One run record per ping**. The first ping creates a `delayed` (or
+`debounced` for trailing-fresh) run; coalesce losers get `debounced`
+terminal status with `intoRunId` pointing at the active run. The
+active run's `pingCount` is incremented for each absorbed ping (via
+`tracker.recordDebouncePing`). Trade-off: 1000 pings = 1000 records.
+Use `evictOldRuns` to bound storage.
+
+**HTTP transport**: deferred runs return `202 Accepted` with
+`Location: /__blok/runs/:id` and structured JSON. Caller polls the
+detail endpoint OR consumes the SSE event stream to track dispatch.
+
+**Worker transport**: deferred runs ACK without retry. The in-process
+scheduler owns the eventual dispatch — re-queueing would create a
+duplicate. Existing job-queue back-off doesn't apply.
+
+**Re-entry**: when a deferred timer fires, the dispatcher
+(`DeferredRunScheduler` for delay; `DebounceCoordinator.onFire` for
+trailing-debounce) calls `dispatchDeferred(ctx, traceRunId, expiresAt)`
+which:
+1. Checks TTL — if past `expiresAt`, marks run `expired` + emits
+   `RUN_EXPIRED`.
+2. Transitions run to `running` (status flips from delayed/debounced
+   → running).
+3. Re-enters `run(ctx)` with `_blokDispatchReentry = true` on ctx so
+   the scheduling gates are skipped on the second pass. The existing
+   `traceRunId` is reused.
+
+**Composition with prior tiers**:
+- **Concurrency gate** (Tier 2 #6) runs AFTER scheduling gates. A
+  delayed run that becomes throttled at dispatch flips status
+  `delayed → throttled` cleanly.
+- **Idempotency cache** (Tier 1) check happens INSIDE step execution,
+  AFTER `dispatchDeferred` re-enters. So cache hits on a delayed run
+  short-circuit the steps (no expensive work) but still hold a
+  concurrency slot briefly.
+- **Sub-workflows** (Tier 2 #4) don't go through `TriggerBase.run()`
+  — they invoke directly via `SubworkflowNode`. Children DO NOT
+  inherit the parent's delay/TTL/debounce.
+- **Replay** picks up the lineage `replayOf` and goes through the
+  scheduling gates on the new run (could re-defer if config still
+  configures delay).
+
+**Failure modes**:
+- Debounce key resolution fails (`js/ctx.bad.path` throws or returns
+  null) → fail-open (skip the gate). Use `BLOK_MAPPER_MODE=strict`
+  for fail-fast in production.
+- Tracker inactive (`BLOK_TRACE_ENABLED=false`) → all gates disabled
+  (deferred dispatch needs persistence to survive within-process).
+
+**Sqlite**: migration v8 adds `scheduled_at`, `expires_at`,
+`debounce_key`, `debounce_mode`, `ping_count` to `workflow_runs` plus
+indexes on `scheduled_at` and `(workflow_name, debounce_key)`.
+Additive; pre-Tier-2-#5+#7 DBs upgrade transparently.
+
+**Backends**:
+- In-memory `DeferredRunScheduler` + `DebounceCoordinator` for v1.
+- Restart recovery: best-effort — runs in `delayed` status on boot
+  are re-scheduled (lost ctx; their captured payload survives via the
+  `WorkflowRun` record).
+- Sqlite-backed durable scheduler is a deferred follow-up.
+
+**Not yet shipped**:
+- Sqlite-backed durable scheduler (in-memory + setTimeout for v1).
+- Cross-process debounce keys (NATS KV / Redis).
+- Long delays (>24h) — recommend cron trigger + external scheduler
+  for those use cases.
+- `mode: "throttle"` (rate-cap, fire every N ms regardless of pings).
+- Dispatch-time payload merging (each ping CONTRIBUTES to the final
+  payload, not just OVERWRITES). v1 ships "latest wins".
+- NATS adapter consumer-side delay enforcement (currently NATS stores
+  `x-delay` in headers but the consumer doesn't enforce it — pre-
+  existing issue, not regressed by this PR).
+
+**Kill-switch**: `BLOK_SCHEDULING_DISABLED=1` short-circuits all
+gates → runs proceed synchronously even if configured with delay/
+ttl/debounce.
+
 ## Input resolution (Mapper)
 
 `@blokjs/shared`'s `Mapper` resolves `${path}` interpolations and

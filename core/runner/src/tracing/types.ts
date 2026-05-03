@@ -11,8 +11,27 @@
  * - `throttled` (Tier 2 #6): rejected at run-entry because the
  *   concurrency limit for the resolved `concurrencyKey` was reached.
  *   Distinct from `failed` — no step ran; nothing produced an error.
+ * - `delayed` (Tier 2 #5): scheduled to start at a future time. The
+ *   run record exists; the dispatch is pending. Transitions to
+ *   `running` when the timer fires.
+ * - `expired` (Tier 2 #5): TTL exceeded before dispatch. Auto-cancelled
+ *   without execution. Distinct from `cancelled` (which is operator-
+ *   initiated) and `failed` (which implies a step ran).
+ * - `debounced` (Tier 2 #7): coalesced into another run via the
+ *   `debounce.key` mechanism. The "loser" of a leading-mode coalesce;
+ *   in trailing mode this state is transient (run flips to `running`
+ *   when the debounce timer fires).
  */
-export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "throttled";
+export type WorkflowRunStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	| "throttled"
+	| "delayed"
+	| "expired"
+	| "debounced";
 
 /**
  * Structured failure detail attached to a {@link WorkflowRun} or
@@ -100,6 +119,40 @@ export interface WorkflowRun {
 	 * the exact sub-workflow step on the parent's run-detail page.
 	 */
 	parentNodeRunId?: string;
+	/**
+	 * Tier 2 #5 · scheduled dispatch time (ms since epoch). Set when the
+	 * run is created with `delay` on the trigger config, OR when the
+	 * debounce coordinator parks a coalescing run. Absent on immediate
+	 * runs.
+	 */
+	scheduledAt?: number;
+	/**
+	 * Tier 2 #5 · TTL deadline (ms since epoch). When `now > expiresAt`
+	 * at dispatch time, the run is marked `expired` and skipped. Set
+	 * from `trigger.ttl` plus the original submission timestamp. Absent
+	 * when no TTL is configured.
+	 */
+	expiresAt?: number;
+	/**
+	 * Tier 2 #7 · resolved debounce key (`debounce.key` after
+	 * `js/...`-expression evaluation). Pings sharing this key + workflow
+	 * name coalesce into the same `WorkflowRun`. Absent on non-debounced
+	 * runs.
+	 */
+	debounceKey?: string;
+	/**
+	 * Tier 2 #7 · debounce mode that produced this run. Surfaces in
+	 * Studio's run detail so users can tell `leading` (immediate-fire)
+	 * vs `trailing` (silence-then-fire) at a glance.
+	 */
+	debounceMode?: "leading" | "trailing";
+	/**
+	 * Tier 2 #7 · number of pings absorbed by this run before dispatch.
+	 * Starts at 1 (the first ping). Subsequent same-key pings increment
+	 * this rather than creating new run records. Surfaces on Studio's
+	 * run row as "Pings: N".
+	 */
+	pingCount?: number;
 }
 
 // === Node Lifecycle ===
@@ -258,7 +311,27 @@ export type RunEventType =
 	 * The run's status flips to `"throttled"` (distinct from `"failed"` —
 	 * no step ran). Studio surfaces a Throttled badge.
 	 */
-	| "RUN_THROTTLED";
+	| "RUN_THROTTLED"
+	/**
+	 * Tier 2 #5 — run scheduled for later dispatch via `trigger.delay`.
+	 * Payload `{scheduledAt, delayMs, expiresAt?}`. Status flips to
+	 * `"delayed"`; transitions to `"running"` when the timer fires.
+	 */
+	| "RUN_DELAYED"
+	/**
+	 * Tier 2 #5 — TTL exceeded; run auto-cancelled before dispatch.
+	 * Payload `{expiresAt, expiredAt, lateBy}`. Status flips to `"expired"`.
+	 */
+	| "RUN_EXPIRED"
+	/**
+	 * Tier 2 #7 — run coalesced into a debounce window. Payload
+	 * `{debounceKey, mode, intoRunId?, pingCount?}`. Status flips to
+	 * `"debounced"`. In leading mode this is terminal (the run never
+	 * executes — execution went to a sibling). In trailing mode this is
+	 * transient and the same run flips to `"running"` when the window
+	 * closes.
+	 */
+	| "RUN_DEBOUNCED";
 
 export interface RunEvent {
 	id: string;
@@ -335,6 +408,30 @@ export interface StartRunOptions {
 	 */
 	parentRunId?: string;
 	parentNodeRunId?: string;
+	/**
+	 * Tier 2 #5 · scheduled dispatch time (ms since epoch). When set, the
+	 * run is created with status `"delayed"` instead of `"running"`.
+	 */
+	scheduledAt?: number;
+	/**
+	 * Tier 2 #5 · TTL deadline (ms since epoch). Persists onto the run
+	 * for the dispatcher to consult.
+	 */
+	expiresAt?: number;
+	/**
+	 * Tier 2 #7 · resolved debounce key. When set, pings sharing this
+	 * key + workflow name coalesce.
+	 */
+	debounceKey?: string;
+	/**
+	 * Tier 2 #7 · debounce mode that produced this run.
+	 */
+	debounceMode?: "leading" | "trailing";
+	/**
+	 * Tier 2 #7 · initial ping count for the run (typically 1 — the
+	 * first ping). Subsequent pings increment via direct store update.
+	 */
+	pingCount?: number;
 }
 
 export interface StartNodeOptions {

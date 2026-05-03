@@ -85,6 +85,144 @@ export const ConcurrencyOptsSchema = z.object(ConcurrencyOptsFields).superRefine
 export type ConcurrencyOpts = z.input<typeof ConcurrencyOptsSchema>;
 
 // =============================================================================
+// Scheduling: delay / TTL / debounce (Tier 2 #5 + #7) — shared across HTTP & Worker
+// =============================================================================
+
+/**
+ * Duration value: a non-negative integer (interpreted as milliseconds) or a
+ * single-unit string (`"500ms"`, `"30s"`, `"5m"`, `"2h"`, `"1d"`). Validated
+ * at trigger-config parse time; converted to milliseconds at run-entry time
+ * by `parseDuration` (`@blokjs/helper`).
+ */
+const DurationSchema = z.union([
+	z.number().int().min(0),
+	z
+		.string()
+		.min(1)
+		.regex(/^\d+(ms|s|m|h|d)$/, {
+			message: 'Duration must be a non-negative integer + unit (ms|s|m|h|d), e.g. "500ms", "30s", "5m", "2h", "1d".',
+		}),
+]);
+
+/**
+ * Per-key debounce configuration. When set, repeated triggers sharing the
+ * resolved `key` collapse into one delayed run. Modes:
+ *
+ * - `"trailing"` (default): each ping resets a `delay` ms timer; the run
+ *   fires after `delay` ms of silence. `maxDelay` (when set) bounds the
+ *   tail latency — even with continuous pings, the run fires after
+ *   `maxDelay` ms.
+ * - `"leading"`: the first ping in a window fires immediately; subsequent
+ *   pings within `delay` ms are dropped with status `"debounced"`. Window
+ *   resets when `delay` ms of silence pass.
+ *
+ * `key` is a literal string OR a `js/...` expression that evaluates to a
+ * string at run-entry time (typically derived from the request payload via
+ * a `$`-proxy expression like `$.req.body.userId`).
+ */
+export const DebounceOptsSchema = z
+	.object({
+		key: z
+			.string()
+			.min(1)
+			.describe(
+				"Debounce key — literal string or `js/ctx.<path>` expression. Pings sharing the resolved key collapse.",
+			),
+		mode: z
+			.enum(["leading", "trailing"])
+			.default("trailing")
+			.describe(
+				"`trailing` (default) waits for `delay` ms of silence then fires once with the latest payload. " +
+					"`leading` fires immediately and suppresses follow-ups within `delay` ms.",
+			),
+		delay: DurationSchema.describe("Debounce window. Number (ms) or string (`500ms`, `5s`, `2m`, etc.)."),
+		maxDelay: DurationSchema.optional().describe(
+			"OPTIONAL. Force a fire after this many ms even if pings keep coming. Bounds tail latency. " +
+				"Must be >= `delay` when set. Ignored in leading mode.",
+		),
+	})
+	.refine(
+		(d) => {
+			if (d.maxDelay === undefined) return true;
+			// Accept any combo at the schema layer — duration normalization happens at runtime.
+			// We DO check the easy numeric case to catch obvious typos early.
+			if (typeof d.delay === "number" && typeof d.maxDelay === "number") {
+				return d.maxDelay >= d.delay;
+			}
+			return true;
+		},
+		{
+			message: "`debounce.maxDelay` must be >= `debounce.delay`.",
+			path: ["maxDelay"],
+		},
+	);
+
+/** Inferred type of the {@link DebounceOptsSchema}. */
+export type DebounceOpts = z.input<typeof DebounceOptsSchema>;
+
+/**
+ * Reusable Zod field bag for run-scheduling primitives. Spread into a
+ * trigger's `z.object({...})` and pair with {@link schedulingRefinement}
+ * for cross-field validation.
+ *
+ * - `delay`: defer the run by N (number = ms, or string = `"1h"`).
+ * - `ttl`: expire if not started within N. Auto-cancels with status
+ *   `"expired"`.
+ * - `debounce`: coalesce rapid same-key triggers into one delayed run.
+ *
+ * Zero-overhead default: when none of these fields are set, the trigger
+ * behaves exactly as before.
+ */
+export const SchedulingOptsFields = {
+	delay: DurationSchema.optional().describe(
+		"OPTIONAL. Defer the run by this many ms (number) or duration string (`'1h'`, `'30m'`, `'500ms'`). " +
+			"When set, the trigger schedules the run for later and returns immediately. " +
+			"HTTP returns 202 Accepted with `Location: /__blok/runs/:id`. Worker forwards to the adapter's native delay.",
+	),
+	ttl: DurationSchema.optional().describe(
+		"OPTIONAL. Expire if not started within this many ms (number) or duration string. " +
+			"At dispatch time, runs older than `ttl` are skipped with status `'expired'`. " +
+			"For HTTP, `ttl` requires `delay` to be set (otherwise immediate-dispatch makes TTL meaningless). " +
+			"For Worker, `ttl` is independent of `delay` (queue-time TTL applies regardless).",
+	),
+	debounce: DebounceOptsSchema.optional().describe(
+		"OPTIONAL. Per-key trigger coalescing. See `DebounceOptsSchema` for modes and timing semantics.",
+	),
+} as const;
+
+/**
+ * Cross-field refinement for scheduling fields. Per-trigger callers pass
+ * the trigger kind so HTTP and Worker can have different rules for
+ * `ttl`-without-`delay`.
+ */
+export function makeSchedulingRefinement(triggerKind: "http" | "worker") {
+	return (
+		val: { delay?: number | string; ttl?: number | string; debounce?: DebounceOpts },
+		ctx: z.RefinementCtx,
+	): void => {
+		// HTTP: TTL without delay is meaningless (the request is dispatched
+		// immediately). Worker: TTL alone is the queue-time TTL — allowed.
+		if (triggerKind === "http" && val.ttl !== undefined && val.delay === undefined) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["ttl"],
+				message: "HTTP `ttl` requires `delay` to be set (TTL is only meaningful for deferred runs).",
+			});
+		}
+	};
+}
+
+/**
+ * Standalone schema exposing just the scheduling fields. Useful for tests
+ * and tools. Real triggers spread {@link SchedulingOptsFields} into their
+ * own `z.object` and apply {@link makeSchedulingRefinement}.
+ */
+export const SchedulingOptsSchema = z.object(SchedulingOptsFields);
+
+/** Inferred shape of the scheduling-options field bag. */
+export type SchedulingOpts = z.input<typeof SchedulingOptsSchema>;
+
+// =============================================================================
 // HTTP Trigger
 // =============================================================================
 
@@ -156,8 +294,12 @@ export const HttpTriggerOptsSchema = z
 					"Off (undefined / false) by default. Will be removed after one minor version.",
 			),
 		...ConcurrencyOptsFields,
+		...SchedulingOptsFields,
 	})
-	.superRefine(concurrencyRefinement);
+	.superRefine((val, ctx) => {
+		concurrencyRefinement(val, ctx);
+		makeSchedulingRefinement("http")(val, ctx);
+	});
 
 /** Configuration for an HTTP trigger. Use with `addTrigger("http", ...)`. */
 export type HttpTriggerOpts = z.input<typeof HttpTriggerOptsSchema>;
@@ -237,10 +379,17 @@ export const WorkerTriggerOptsSchema = z
 		timeout: z.number().optional().describe("Job timeout in milliseconds"),
 		retries: z.number().default(3).describe("Number of retry attempts"),
 		priority: z.number().default(0).describe("Job priority (higher = more priority)"),
-		delay: z.number().optional().describe("Delay before processing in milliseconds"),
+		// `delay` (and `ttl`, `debounce`) live in SchedulingOptsFields below.
+		// The legacy number-only `delay` (pre-Tier-2-#5+#7) is superseded by
+		// the duration-or-number SchedulingOptsFields.delay. Number values
+		// remain accepted for back-compat — only the type widens.
 		...ConcurrencyOptsFields,
+		...SchedulingOptsFields,
 	})
-	.superRefine(concurrencyRefinement);
+	.superRefine((val, ctx) => {
+		concurrencyRefinement(val, ctx);
+		makeSchedulingRefinement("worker")(val, ctx);
+	});
 export type WorkerTriggerOpts = z.input<typeof WorkerTriggerOptsSchema>;
 
 // =============================================================================

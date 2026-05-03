@@ -17,6 +17,10 @@ import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
+import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
+import { DeferredDispatchSignal } from "./scheduling/DeferredDispatchSignal";
+import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
+import { type NormalizedSchedulingConfig, readSchedulingConfig } from "./scheduling/readSchedulingConfig";
 import { RunTracker } from "./tracing/RunTracker";
 import { TracingLogger } from "./tracing/TracingLogger";
 import type TriggerResponse from "./types/TriggerResponse";
@@ -202,9 +206,21 @@ export default abstract class TriggerBase extends Trigger {
 		let acquiredLock: { workflowName: string; concurrencyKey: string; runId: string } | null = null;
 
 		// --- Trace: start run ---
+		// Tier 2 #5 + #7 · skip startRun on re-entry from a deferred timer.
+		// The deferred dispatcher (DeferredRunScheduler / DebounceCoordinator)
+		// re-enters `run(ctx)` with `_blokDispatchReentry = true` after the
+		// wait window closes; the existing run record is reused via
+		// `ctx._traceRunId`.
 		const tracker = RunTracker.getInstance();
 		let traceRunId: string | undefined;
-		if (tracker.active) {
+		const ctxRecord = ctx as Record<string, unknown>;
+		const isReentryAtTrace = ctxRecord._blokDispatchReentry === true;
+
+		if (tracker.active && isReentryAtTrace) {
+			traceRunId = ctxRecord._traceRunId as string | undefined;
+			// Logger wrapping was already applied on the first pass — no
+			// need to re-wrap (and re-wrapping would double-route logs).
+		} else if (tracker.active) {
 			const runner = this.getRunner();
 			const stepCount = runner.getStepCount?.() ?? this.configuration.steps?.length ?? 0;
 			// Tier 1 · replay lineage. The replay endpoint
@@ -228,13 +244,34 @@ export default abstract class TriggerBase extends Trigger {
 				replayOf,
 			});
 			traceRunId = run.id;
-			(ctx as Record<string, unknown>)._traceRunId = run.id;
+			ctxRecord._traceRunId = run.id;
 
 			// Wrap logger to forward log entries to RunTracker
 			ctx.logger = new TracingLogger(ctx.logger, run.id, tracker);
 		}
 
 		try {
+			// --- Scheduling gates (Tier 2 #5 + #7) ---
+			// Run BEFORE the concurrency gate. Order: debounce → delay.
+			// Each gate may throw `DeferredDispatchSignal` to short-circuit
+			// the immediate dispatch path; the transport layer (HTTP/Worker)
+			// catches it and translates to 202 Accepted / NACK.
+			//
+			// Skipped on re-entry from a deferred timer (the timer callback
+			// sets `_blokDispatchReentry = true` on ctx) so we don't loop.
+			// Also skipped when:
+			//  - tracker inactive (deferred dispatch needs persistence to
+			//    survive even within the process lifetime)
+			//  - `BLOK_SCHEDULING_DISABLED=1` (kill-switch).
+			const isReentry = (ctx as Record<string, unknown>)._blokDispatchReentry === true;
+			if (!isReentry && traceRunId && process.env.BLOK_SCHEDULING_DISABLED !== "1") {
+				const schedCfg = readSchedulingConfig(this.configuration.trigger as Record<string, unknown> | undefined);
+				if (schedCfg) {
+					const signal = this.maybeDeferRun(ctx, traceRunId, schedCfg);
+					if (signal) throw signal;
+				}
+			}
+
 			// --- Concurrency gate (Tier 2 #6) ---
 			// Runs after `tracker.startRun` so denied attempts appear in
 			// Studio with status "throttled". Skipped when:
@@ -420,9 +457,12 @@ export default abstract class TriggerBase extends Trigger {
 			// --- Trace: fail run ---
 			// Tier 2 #6: ConcurrencyLimitError already flipped the run's
 			// status to "throttled" via markRunThrottled — don't override
-			// it with "failed" here. The transport layer (HTTP/Worker)
-			// catches the error and translates it into 429 / NACK.
-			if (traceRunId && !(err instanceof ConcurrencyLimitError)) {
+			// it with "failed". The transport layer translates → 429 / NACK.
+			//
+			// Tier 2 #5 + #7: DeferredDispatchSignal already flipped the
+			// run's status to "delayed" or "debounced". Don't override it
+			// with "failed". The transport layer translates → 202 Accepted.
+			if (traceRunId && !(err instanceof ConcurrencyLimitError) && !(err instanceof DeferredDispatchSignal)) {
 				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
 			}
 
@@ -442,6 +482,180 @@ export default abstract class TriggerBase extends Trigger {
 				env: process.env.NODE_ENV || "development",
 			});
 			this.inFlightRequests--;
+		}
+	}
+
+	/**
+	 * Tier 2 #5 + #7 — evaluate the scheduling gates and either return a
+	 * `DeferredDispatchSignal` (the caller throws it) or null (the caller
+	 * proceeds with immediate dispatch).
+	 *
+	 * Order: debounce → delay. They DON'T compose in a single PR (a
+	 * trigger may use one or the other; both at once would be unusual).
+	 * If both are configured, debounce takes precedence — the debounce
+	 * coordinator handles its own scheduling (the `delay` field is
+	 * effectively ignored on debounced triggers).
+	 */
+	private maybeDeferRun(
+		ctx: Context,
+		traceRunId: string,
+		schedCfg: NormalizedSchedulingConfig,
+	): DeferredDispatchSignal | null {
+		const tracker = RunTracker.getInstance();
+		const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
+
+		// === Debounce gate (Tier 2 #7) ===
+		if (schedCfg.debounce) {
+			const resolvedKey = resolveIdempotencyKey(schedCfg.debounce.keyExpression, ctx);
+			if (resolvedKey === null) {
+				// Fail-open — same semantics as concurrency-key resolution.
+				return null;
+			}
+
+			const onFire = async (): Promise<void> => {
+				try {
+					await this.dispatchDeferred(ctx, traceRunId, undefined);
+				} catch (err) {
+					console.error(
+						`[blok][scheduling] debounce dispatchDeferred failed for run ${traceRunId}:`,
+						err instanceof Error ? err.stack || err.message : err,
+					);
+				}
+			};
+
+			const result = DebounceCoordinator.getInstance().register({
+				workflowName,
+				debounceKey: resolvedKey,
+				mode: schedCfg.debounce.mode,
+				delayMs: schedCfg.debounce.delayMs,
+				maxDelayMs: schedCfg.debounce.maxDelayMs,
+				runId: traceRunId,
+				onFire,
+			});
+
+			if (result.outcome === "fire-immediate") {
+				// Leading-mode fresh window: caller runs the workflow synchronously.
+				// The coordinator already opened its window so subsequent pings
+				// within `delayMs` will coalesce. Caller continues to the
+				// concurrency gate + runner.run path.
+				return null;
+			}
+
+			if (result.outcome === "schedule-trailing") {
+				// Trailing-mode fresh window: this run is the active one. Mark
+				// `debounced` (transient) and throw the signal.
+				tracker.markRunDebounced(traceRunId, {
+					debounceKey: resolvedKey,
+					mode: schedCfg.debounce.mode,
+					pingCount: result.pingCount,
+					scheduledAt: result.scheduledAt,
+				});
+				return new DeferredDispatchSignal({
+					runId: traceRunId,
+					workflowName,
+					status: "debounced",
+					scheduledAt: result.scheduledAt ?? Date.now(),
+					debounced: true,
+					pingCount: result.pingCount,
+				});
+			}
+
+			// Coalesce — this ping joined an existing window. Mark THIS run
+			// `debounced` terminal pointing at the active run, and bump the
+			// active run's pingCount (best-effort — the active run is in the
+			// store).
+			tracker.markRunDebounced(traceRunId, {
+				debounceKey: resolvedKey,
+				mode: schedCfg.debounce.mode,
+				intoRunId: result.activeRunId,
+				pingCount: result.pingCount,
+			});
+			tracker.recordDebouncePing(result.activeRunId, {
+				pingCount: result.pingCount,
+				scheduledAt: result.scheduledAt ?? Date.now(),
+			});
+			return new DeferredDispatchSignal({
+				runId: traceRunId,
+				workflowName,
+				status: "debounced",
+				scheduledAt: result.scheduledAt ?? Date.now(),
+				debounced: true,
+				pingCount: result.pingCount,
+				intoRunId: result.activeRunId,
+			});
+		}
+
+		// === Delay gate (Tier 2 #5) ===
+		if (schedCfg.delayMs !== undefined && schedCfg.delayMs > 0) {
+			const scheduledAt = Date.now() + schedCfg.delayMs;
+			const expiresAt = schedCfg.ttlMs !== undefined ? Date.now() + schedCfg.ttlMs : undefined;
+
+			tracker.markRunDelayed(traceRunId, {
+				scheduledAt,
+				delayMs: schedCfg.delayMs,
+				expiresAt,
+			});
+
+			DeferredRunScheduler.getInstance().schedule(traceRunId, scheduledAt, async () => {
+				await this.dispatchDeferred(ctx, traceRunId, expiresAt);
+			});
+
+			return new DeferredDispatchSignal({
+				runId: traceRunId,
+				workflowName,
+				status: "delayed",
+				scheduledAt,
+				expiresAt,
+				debounced: false,
+				pingCount: 1,
+			});
+		}
+
+		return null;
+	}
+
+	/**
+	 * Tier 2 #5 + #7 — re-enter the dispatch pipeline for a deferred run.
+	 *
+	 * Called by the `DeferredRunScheduler` timer (delay) or
+	 * `DebounceCoordinator.onFire` (debounce trailing) when the wait
+	 * window closes. Checks TTL, transitions the run to `running`, and
+	 * re-enters `run(ctx)` with the `_blokDispatchReentry` flag so the
+	 * scheduling gates are skipped on the second pass.
+	 *
+	 * The re-entered `run(ctx)` reuses the existing `traceRunId` (already
+	 * stashed on `ctx._traceRunId` from the first pass).
+	 */
+	protected async dispatchDeferred(ctx: Context, traceRunId: string, expiresAt: number | undefined): Promise<void> {
+		const tracker = RunTracker.getInstance();
+
+		// TTL check — fire-once-then-give-up. If the dispatch is past its
+		// TTL, mark the run `expired` and abort.
+		if (expiresAt !== undefined && Date.now() > expiresAt) {
+			tracker.markRunExpired(traceRunId, {
+				expiresAt,
+				expiredAt: Date.now(),
+			});
+			return;
+		}
+
+		// Flip status delayed/debounced → running.
+		tracker.transitionRunToRunning(traceRunId);
+
+		// Re-enter the dispatch pipeline. The reentry flag short-circuits
+		// the scheduling gates so we don't loop. The existing traceRunId
+		// is preserved (no second startRun call — see top of run()).
+		const ctxRecord = ctx as Record<string, unknown>;
+		ctxRecord._blokDispatchReentry = true;
+		try {
+			await this.run(ctx);
+		} catch (err) {
+			// The re-entered `run()` already handled tracker.failRun /
+			// markRunThrottled internally. Swallow here so timer callbacks
+			// don't crash on uncaught rejections.
+			void err;
+		} finally {
+			ctxRecord._blokDispatchReentry = false;
 		}
 	}
 

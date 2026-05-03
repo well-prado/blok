@@ -19,11 +19,12 @@
  *    - Ack on success, retry or DLQ on failure
  */
 
-import type { HelperResponse, WorkerTriggerOpts } from "@blokjs/helper";
+import { type HelperResponse, type WorkerTriggerOpts, tryParseDuration } from "@blokjs/helper";
 import {
 	type BlokService,
 	ConcurrencyLimitError,
 	DefaultLogger,
+	DeferredDispatchSignal,
 	type GlobalOptions,
 	NodeMap,
 	TriggerBase,
@@ -422,6 +423,25 @@ export abstract class WorkerTrigger extends TriggerBase {
 			} catch (error) {
 				const errorMessage = (error as Error).message;
 
+				// Tier 2 #5 + #7 — deferred dispatch (delay/TTL/debounce).
+				// The run was deferred to a future timer; ACK without retry.
+				// The in-process scheduler owns the eventual dispatch, NOT
+				// the broker — re-queueing here would create a duplicate.
+				if (error instanceof DeferredDispatchSignal) {
+					span.setAttribute("success", false);
+					span.setAttribute("deferred", true);
+					span.setAttribute("deferred_status", error.info.status);
+					span.setStatus({ code: SpanStatusCode.OK, message: `deferred:${error.info.status}` });
+
+					this.logger.log(
+						`[scheduling] job ${jobId} runId=${error.info.runId} status=${error.info.status} ` +
+							`scheduledAt=${error.info.scheduledAt} pingCount=${error.info.pingCount} → ACK (no requeue)`,
+					);
+
+					await job.complete();
+					return;
+				}
+
 				// Tier 2 #6 — concurrency gate denial. Distinct from a normal
 				// failure: NACK with redelivery so the broker re-queues the
 				// job with its existing back-off semantics. Doesn't count
@@ -460,8 +480,17 @@ export abstract class WorkerTrigger extends TriggerBase {
 				span.setStatus({ code: SpanStatusCode.ERROR, message: errorMessage });
 
 				if (shouldRetry) {
-					// Retry with exponential backoff
-					const backoffMs = this.calculateBackoff(job.attempts, config.delay);
+					// Retry with exponential backoff. `config.delay` widened to
+					// `string | number | undefined` in Tier 2 #5 (duration strings).
+					// `calculateBackoff` only handles numbers; normalize via
+					// tryParseDuration. Fail-open to undefined → default backoff.
+					const delayMs =
+						typeof config.delay === "number"
+							? config.delay
+							: typeof config.delay === "string"
+								? (tryParseDuration(config.delay) ?? undefined)
+								: undefined;
+					const backoffMs = this.calculateBackoff(job.attempts, delayMs);
 					workerRetries.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,

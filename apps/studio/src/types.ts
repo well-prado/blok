@@ -7,7 +7,13 @@ export type WorkflowRunStatus =
 	| "failed"
 	| "cancelled"
 	/** Tier 2 #6: rejected at run-entry by the concurrency gate. No step ran. */
-	| "throttled";
+	| "throttled"
+	/** Tier 2 #5: scheduled for a future dispatch; timer pending. */
+	| "delayed"
+	/** Tier 2 #5: TTL exceeded before dispatch. Auto-cancelled without execution. */
+	| "expired"
+	/** Tier 2 #7: coalesced into another run via the debounce key. */
+	| "debounced";
 
 export interface WorkflowRun {
 	id: string;
@@ -45,6 +51,16 @@ export interface WorkflowRun {
 	 * parent run that invoked this sub-workflow.
 	 */
 	parentNodeRunId?: string;
+	/** Tier 2 #5: scheduled dispatch time (ms since epoch). */
+	scheduledAt?: number;
+	/** Tier 2 #5: TTL deadline (ms since epoch). */
+	expiresAt?: number;
+	/** Tier 2 #7: resolved debounce key. */
+	debounceKey?: string;
+	/** Tier 2 #7: debounce mode (`leading` | `trailing`). */
+	debounceMode?: "leading" | "trailing";
+	/** Tier 2 #7: pings absorbed by this run before dispatch. */
+	pingCount?: number;
 }
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
@@ -178,7 +194,13 @@ export type RunEventType =
 	 * Tier 2 #6 concurrency gate denied the run. Payload carries
 	 * `{ concurrencyKey, concurrencyLimit, currentInFlight, durationMs }`.
 	 */
-	| "RUN_THROTTLED";
+	| "RUN_THROTTLED"
+	/** Tier 2 #5: scheduled for a future dispatch. Payload `{scheduledAt, delayMs, expiresAt?}`. */
+	| "RUN_DELAYED"
+	/** Tier 2 #5: TTL exceeded before dispatch. Payload `{expiresAt, expiredAt, lateBy}`. */
+	| "RUN_EXPIRED"
+	/** Tier 2 #7: coalesced into another run. Payload `{debounceKey, mode, intoRunId?, pingCount, scheduledAt?}`. */
+	| "RUN_DEBOUNCED";
 
 export interface RunEvent {
 	id: string;

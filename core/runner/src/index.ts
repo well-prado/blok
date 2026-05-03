@@ -106,6 +106,21 @@ import {
 	readConcurrencyConfig,
 } from "./concurrency/readConcurrencyConfig";
 
+// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
+import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
+import {
+	type DeferredDispatchInfo,
+	DeferredDispatchSignal,
+	isDeferredDispatchSignal,
+} from "./scheduling/DeferredDispatchSignal";
+import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
+import {
+	type NormalizedDebounceConfig,
+	type NormalizedSchedulingConfig,
+	SCHEDULING_DEFAULTS,
+	readSchedulingConfig,
+} from "./scheduling/readSchedulingConfig";
+
 // Cost Estimation
 import { CostEstimator } from "./cost/CostEstimator";
 import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
@@ -243,6 +258,16 @@ export {
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,
+	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
+	DeferredDispatchSignal,
+	type DeferredDispatchInfo,
+	isDeferredDispatchSignal,
+	DeferredRunScheduler,
+	DebounceCoordinator,
+	readSchedulingConfig,
+	type NormalizedDebounceConfig,
+	type NormalizedSchedulingConfig,
+	SCHEDULING_DEFAULTS,
 	TracingLogger,
 	traceSanitize,
 	// Cost Estimation
