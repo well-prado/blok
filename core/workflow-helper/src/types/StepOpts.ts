@@ -339,19 +339,161 @@ export const V2BranchStepSchema: z.ZodType<{
 export type V2BranchStep = z.infer<typeof V2BranchStepSchema>;
 
 /**
- * Discriminated v2 step — either a regular step or a branch.
+ * V2 sub-workflow step — invoke another named workflow inline.
  *
- * The discriminator is the presence of the `branch` key (no kind field needed).
+ * The parent step blocks until the child workflow completes (`wait: true`,
+ * the default). The child gets its own `ctx`, its own trace run record,
+ * and runs through the same `RunnerSteps` machinery as a top-level run.
+ * The child's `ctx.response` becomes the parent step's output, so it
+ * lands on `state[<id>]` like any other step (mirrors HTTP semantics:
+ * sub-workflow looks like a function call).
+ *
+ * Inputs flow from parent → child as `ctx.request.body` — the child
+ * reads them via `$.req.body.<key>` exactly as if it had been
+ * HTTP-triggered.
+ *
+ * **Composition with Tier 1**:
+ * - `idempotencyKey` on this step caches the entire sub-workflow's
+ *   result. Cache hit = child workflow is NEVER invoked (no side
+ *   effects fire on rerun). Documented footgun + headline pattern.
+ * - `retry` retries the whole sub-workflow on failure.
+ * - Replay re-creates fresh sub-run lineage automatically.
+ *
+ * @example
+ *   {
+ *     id: "send-receipt",
+ *     subworkflow: "send-receipt-email",
+ *     inputs: { user: $.state.user, order: $.state.order },
+ *     wait: true,           // default; `wait: false` deferred to a follow-up
+ *     idempotencyKey: $.req.body.requestId,
+ *   }
  */
-export const V2StepSchema: z.ZodType<V2RegularStep | V2BranchStep> = z.lazy(() =>
-	z.union([V2BranchStepSchema, V2RegularStepSchema]),
+export const V2SubworkflowStepSchema: z.ZodType<{
+	id: string;
+	subworkflow: string;
+	inputs?: Record<string, unknown>;
+	wait?: boolean;
+	as?: string;
+	spread?: boolean;
+	ephemeral?: boolean;
+	active?: boolean;
+	stop?: boolean;
+	idempotencyKey?: string;
+	idempotencyKeyTTL?: number;
+	retry?: RetryConfig;
+}> = z.lazy(() =>
+	z
+		.object({
+			id: z
+				.string()
+				.min(1)
+				.describe(
+					"Stable identifier. The sub-workflow's output lands on $.state[id] " + "after the child completes. Required.",
+				),
+			subworkflow: z
+				.string()
+				.min(1)
+				.describe(
+					"Name of the workflow to invoke. Looked up in the WorkflowRegistry " +
+						"at run time — must match the `name:` field of an HTTP-loaded or " +
+						"manually-registered workflow.",
+				),
+			inputs: z
+				.record(z.unknown())
+				.optional()
+				.describe(
+					"Inputs passed to the child as `ctx.request.body`. The child reads " +
+						"them via `$.req.body.<key>` exactly as if HTTP-triggered. " +
+						"May contain $ proxy refs.",
+				),
+			wait: z
+				.boolean()
+				.optional()
+				.describe(
+					"If true (default), parent step blocks until child completes and " +
+						"the child's ctx.response becomes the parent step's output. " +
+						"`wait: false` (fire-and-forget) is planned but not yet supported " +
+						"in v0.3.x.",
+				),
+			as: z
+				.string()
+				.min(1)
+				.optional()
+				.describe("Alternative state key (defaults to id). Mutually exclusive with spread."),
+			spread: z
+				.boolean()
+				.optional()
+				.describe("Shallow-merge child's response keys into state. Mutually exclusive with as."),
+			ephemeral: z
+				.boolean()
+				.optional()
+				.describe("If true, child output is NOT stored in state. Only ctx.prev carries it."),
+			active: z.boolean().optional().describe("If false, the step is skipped at runtime. Default true."),
+			stop: z.boolean().optional().describe("If true, the workflow halts after this step completes."),
+			idempotencyKey: z
+				.string()
+				.min(1)
+				.optional()
+				.describe(
+					"When set, the entire sub-workflow's result is cached against the " +
+						"triple (parentWorkflow, step.id, key). Cache HIT means the child " +
+						"workflow is NEVER invoked — including any side effects. Use with " +
+						"care for sub-workflows that send emails, charge cards, etc.",
+				),
+			idempotencyKeyTTL: z
+				.number()
+				.int()
+				.min(0)
+				.optional()
+				.describe("Cache lifetime in milliseconds. Defaults to 24h. Pass 0 to immediately expire."),
+			retry: RetryConfigSchema.optional().describe(
+				"Retry the WHOLE sub-workflow on failure. Each retry creates a fresh " +
+					"child run record under the same parent.",
+			),
+		})
+		.refine((step) => step.wait !== false, {
+			message:
+				"`wait: false` (fire-and-forget) is planned but not yet supported in v0.3.x. " +
+				"Omit `wait` or set `wait: true`.",
+			path: ["wait"],
+		})
+		.refine((step) => !(step.as && step.spread), {
+			message: "`as` and `spread` are mutually exclusive — pick one.",
+			path: ["spread"],
+		}),
 );
 
-export type V2Step = V2RegularStep | V2BranchStep;
+export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
+
+/**
+ * Discriminated v2 step — regular, branch, or sub-workflow.
+ *
+ * Discriminators (no `kind` field needed):
+ * - presence of `branch` → branch step
+ * - presence of `subworkflow` → sub-workflow step
+ * - otherwise → regular step
+ */
+export const V2StepSchema: z.ZodType<V2RegularStep | V2BranchStep | V2SubworkflowStep> = z.lazy(() =>
+	z.union([V2BranchStepSchema, V2SubworkflowStepSchema, V2RegularStepSchema]),
+);
+
+export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep;
 
 /**
  * Type guard — true when the step is a branch.
  */
 export function isBranchStep(step: V2Step): step is V2BranchStep {
 	return typeof step === "object" && step !== null && "branch" in step;
+}
+
+/**
+ * Type guard — true when the step is a sub-workflow invocation.
+ */
+export function isSubworkflowStep(step: V2Step): step is V2SubworkflowStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"subworkflow" in step &&
+		typeof (step as { subworkflow?: unknown }).subworkflow === "string"
+	);
 }

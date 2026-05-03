@@ -499,6 +499,13 @@ export class PostgresRunStore implements RunStore {
 		return this.memory.getNodeRun(nodeRunId);
 	}
 
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		// Tier 2 sub-workflow lineage. Same in-memory delegation strategy
+		// as the idempotency cache — durable PG schema for parent_run_id
+		// is deferred to a follow-up.
+		return this.memory.getRunsByParent(parentRunId);
+	}
+
 	getEvents(runId: string, since?: number): RunEvent[] {
 		return this.memory.getEvents(runId, since);
 	}

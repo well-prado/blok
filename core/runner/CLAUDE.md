@@ -151,6 +151,68 @@ starts from scratch, runs the current code, and produces a new trace.
 This is intentional: combine replay with idempotency caching to skip
 expensive steps on the new run while still picking up code changes.
 
+## Sub-workflows (Tier 2 #4)
+
+Any v2 workflow can invoke another named workflow as a step:
+
+```ts
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",
+  inputs: { user: $.state.user, order: $.state.order },
+  // wait: true is the default; `wait: false` is rejected with a
+  // deferred-feature error in v0.3.x (planned for a follow-up).
+}
+```
+
+The child workflow is looked up by name in `WorkflowRegistry`
+(`src/workflow/WorkflowRegistry.ts`), gets its own `Context`, runs
+through the same `RunnerSteps` machinery as a top-level run, and
+returns its `ctx.response` as the parent step's output (so it lands on
+`state[<id>]` like any other step). Mirrors HTTP function-call
+semantics — sub-workflow inputs become the child's `request.body`.
+
+**Workflow registration**: triggers feed the registry at boot. The
+HTTP trigger's `buildFileBasedRoutes()` calls
+`WorkflowRegistry.getInstance().registerAll(...)` after scanning
+workflows. Future trigger types (worker, cron) feed the same registry.
+Sub-workflow lookup is decoupled from any particular trigger.
+
+**Lineage**: child's `WorkflowRun.parentRunId` carries the parent's
+run id; `parentNodeRunId` carries the specific NodeRun (the
+sub-workflow step). Studio renders a "called from #..." breadcrumb on
+the child and a "Sub-runs (N)" strip on the parent's run header.
+Endpoint: `GET /__blok/runs/:runId/subruns` returns the child runs
+sorted oldest-first.
+
+**Composition with Tier 1**:
+- Parent step's `idempotencyKey` caches the **whole** sub-workflow
+  result. Cache HIT means the child workflow is NEVER invoked —
+  including any side effects. This is the headline pattern AND the
+  primary footgun. Document prominently for sub-workflows that have
+  unconditional side effects (sends emails, charges cards, etc.).
+- Parent step's `retry` retries the whole sub-workflow on failure;
+  each retry creates a fresh child run record under the same parent.
+- Replay creates fresh sub-run lineage automatically.
+
+**Recursion guard**: hard-coded cap at 10 levels of nesting,
+overridable via `BLOK_MAX_SUBWORKFLOW_DEPTH`. Throws a clear error
+when exceeded — bounds blast radius of accidental cycles
+(workflow A calls B calls A).
+
+**Sqlite**: migration v6 adds `workflow_runs.parent_run_id` +
+`workflow_runs.parent_node_run_id` columns + index on parent_run_id.
+Additive; pre-existing rows get NULL.
+
+**Not yet shipped**:
+- `wait: false` (fire-and-forget) — schema accepts and rejects with
+  a clear deferred-feature error.
+- Cross-process sub-workflow dispatch (HTTP self-call) — current
+  implementation is in-process only. Horizontal-scale users with
+  isolation needs may want this in a follow-up.
+- Polymorphic workflow names (`subworkflow: $.req.body.kind`) —
+  workflow names are static today.
+
 ## Tests
 
 ```bash

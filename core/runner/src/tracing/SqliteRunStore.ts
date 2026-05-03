@@ -62,6 +62,17 @@ interface RunRow {
 	 * Added in migration v5.
 	 */
 	replay_of: string | null;
+	/**
+	 * Tier 2 sub-workflow lineage. NULL on first-class triggered runs;
+	 * carries the parent run's id when this run was started by a
+	 * `subworkflow:` step. Added in migration v6.
+	 */
+	parent_run_id: string | null;
+	/**
+	 * Tier 2 sub-workflow lineage. The specific parent NodeRun that
+	 * invoked this sub-workflow. Added in migration v6.
+	 */
+	parent_node_run_id: string | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -354,6 +365,22 @@ export class SqliteRunStore implements RunStore {
 					CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of);
 				`,
 			},
+			{
+				// Tier 2 · sub-workflow lineage. Adds parent/child run linkage:
+				//  - `workflow_runs.parent_run_id` — the parent run that
+				//    invoked this run via a `subworkflow:` step.
+				//  - `workflow_runs.parent_node_run_id` — the specific
+				//    NodeRun within the parent that was the sub-workflow
+				//    step (lets Studio jump to the exact invocation site).
+				// Index on parent_run_id for efficient `getRunsByParent` queries.
+				// Existing rows: NULL on both → "first-class triggered run".
+				version: 6,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -386,8 +413,9 @@ export class SqliteRunStore implements RunStore {
 			INSERT OR REPLACE INTO workflow_runs
 			(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 			 status, started_at, finished_at, duration_ms, error_json,
-			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
+			 parent_run_id, parent_node_run_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -406,6 +434,8 @@ export class SqliteRunStore implements RunStore {
 			run.completedNodes,
 			run.environment ?? null,
 			run.replayOf ?? null,
+			run.parentRunId ?? null,
+			run.parentNodeRunId ?? null,
 		);
 	}
 
@@ -444,6 +474,14 @@ export class SqliteRunStore implements RunStore {
 		if (updates.replayOf !== undefined) {
 			setClauses.push("replay_of = ?");
 			values.push(updates.replayOf);
+		}
+		if (updates.parentRunId !== undefined) {
+			setClauses.push("parent_run_id = ?");
+			values.push(updates.parentRunId);
+		}
+		if (updates.parentNodeRunId !== undefined) {
+			setClauses.push("parent_node_run_id = ?");
+			values.push(updates.parentNodeRunId);
 		}
 
 		if (setClauses.length === 0) return;
@@ -673,6 +711,14 @@ export class SqliteRunStore implements RunStore {
 			| NodeRunRow
 			| undefined;
 		return row ? this.rowToNodeRun(row) : undefined;
+	}
+
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		const rows = this.stmt(
+			"getRunsByParent",
+			"SELECT * FROM workflow_runs WHERE parent_run_id = ? ORDER BY started_at ASC",
+		).all(parentRunId) as unknown as RunRow[];
+		return rows.map((r) => this.rowToRun(r));
 	}
 
 	getEvents(runId: string, since?: number): RunEvent[] {
@@ -1105,6 +1151,8 @@ export class SqliteRunStore implements RunStore {
 			// historical data without a backfill.
 			environment: row.environment ?? "production",
 			replayOf: row.replay_of ?? undefined,
+			parentRunId: row.parent_run_id ?? undefined,
+			parentNodeRunId: row.parent_node_run_id ?? undefined,
 		};
 	}
 

@@ -7,6 +7,7 @@ import { TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
+import { WorkflowRegistry } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
@@ -137,6 +138,29 @@ export default class HttpTrigger extends TriggerBase {
 				this.logger.log(`[blok]   ${r.method.padEnd(7)} ${r.path}  ←  ${r.workflowKey}`);
 			}
 		}
+
+		// Tier 2 · feed the WorkflowRegistry so the `subworkflow:` step
+		// primitive can look up child workflows by name. The route table
+		// may contain multiple entries per workflow (one per method/path);
+		// dedupe by workflow name before registering. clear-then-register
+		// keeps HMR semantics — a re-scan invalidates stale entries.
+		const registry = WorkflowRegistry.getInstance();
+		registry.clear();
+		const registered = new Set<string>();
+		for (const r of table) {
+			const wfName = (r.workflow as { name?: string })?.name ?? r.workflowKey;
+			if (registered.has(wfName)) continue;
+			registered.add(wfName);
+			registry.register({
+				name: wfName,
+				source: r.source,
+				workflow: r.workflow,
+			});
+		}
+		if (registered.size > 0) {
+			this.logger.log(`[blok] workflow registry — ${registered.size} workflow(s) callable as sub-workflow`);
+		}
+
 		return table;
 	}
 

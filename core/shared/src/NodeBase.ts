@@ -96,6 +96,31 @@ export default abstract class NodeBase {
 		factor?: number;
 	};
 
+	// =========================================================================
+	// V2 sub-workflow knobs — populated by Configuration.getSteps for steps
+	// that invoke another workflow (`subworkflow: "<name>"` shape). Read by
+	// `SubworkflowNode.run()` to look up the child workflow in the
+	// WorkflowRegistry. Mirrors the Zod schema in `@blokjs/helper`.
+	// =========================================================================
+
+	/**
+	 * Name of the workflow to invoke when this step runs. When set, the
+	 * step's `node` ref is `"@blokjs/subworkflow"` (a sentinel) and the
+	 * runner resolves it to a `SubworkflowNode` that looks up the child
+	 * by this name in the `WorkflowRegistry` singleton.
+	 */
+	public subworkflow?: string;
+
+	/**
+	 * If true (default), the parent step blocks until the child workflow
+	 * completes. The child's `ctx.response` becomes the parent step's
+	 * output (lands on `state[<id>]` like any other step).
+	 *
+	 * `wait: false` (fire-and-forget) is rejected at workflow load time
+	 * in v0.3.x — the schema includes a deferred-feature error message.
+	 */
+	public wait?: boolean;
+
 	public async process(ctx: Context, step?: Step): Promise<ResponseContext> {
 		let response: ResponseContext = {
 			success: true,

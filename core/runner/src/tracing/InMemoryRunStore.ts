@@ -109,6 +109,15 @@ export class InMemoryRunStore implements RunStore {
 		return this.nodeRunIndex.get(nodeRunId);
 	}
 
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		const matches: WorkflowRun[] = [];
+		for (const run of this.runs.values()) {
+			if (run.parentRunId === parentRunId) matches.push(run);
+		}
+		matches.sort((a, b) => a.startedAt - b.startedAt);
+		return matches;
+	}
+
 	getEvents(runId: string, since?: number): RunEvent[] {
 		const events = this.events.get(runId) || [];
 		if (since) {

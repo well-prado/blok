@@ -11,12 +11,12 @@ import { LogViewer } from "@/components/trace/LogViewer";
 import { RequestBuilder } from "@/components/trace/RequestBuilder";
 import { StepRail } from "@/components/trace/StepRail";
 import { TraceGraph } from "@/components/trace/TraceGraph";
-import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
+import { useRunDetail, useSubRuns, useTraceStream } from "@/hooks/useRunDetail";
 import { exportRunCsv, exportRunJson, replayRun } from "@/lib/api";
 import { formatTimestamp } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, ArrowLeft, Loader2, RotateCcw, Send } from "lucide-react";
+import { Activity, ArrowLeft, GitBranch, Loader2, RotateCcw, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 /**
@@ -50,6 +50,8 @@ function RunTracePage() {
 
 	// SSE
 	useTraceStream(runId);
+	// Tier 2 sub-workflow lineage — fetch this run's children (if any).
+	const { data: subRuns } = useSubRuns(runId);
 
 	// Default-select a step so the rail + inspector are never empty when
 	// the run has any nodes. Priority: failed > running > first.
@@ -205,6 +207,17 @@ function RunTracePage() {
 							replay of {run.replayOf.slice(0, 8)}
 						</Link>
 					)}
+					{run.parentRunId && (
+						<Link
+							to="/runs/$runId"
+							params={{ runId: run.parentRunId }}
+							className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
+							title={`Called from run ${run.parentRunId}`}
+						>
+							<GitBranch className="w-2.5 h-2.5" />
+							called from {run.parentRunId.slice(0, 8)}
+						</Link>
+					)}
 
 					<div className="ml-auto flex items-center gap-2">
 						{isFinished && isHttpTrigger && (
@@ -263,6 +276,36 @@ function RunTracePage() {
 				<div className="ml-9 mt-1">
 					<TagEditor runId={run.id} tags={run.tags || []} />
 				</div>
+				{subRuns && subRuns.length > 0 && (
+					<div className="ml-9 mt-2 flex items-center gap-2 text-[11px] text-zinc-500 flex-wrap">
+						<span className="flex items-center gap-1 uppercase tracking-wide font-semibold text-zinc-500">
+							<GitBranch className="w-3 h-3" />
+							sub-runs ({subRuns.length})
+						</span>
+						{subRuns.map((sub) => (
+							<Link
+								key={sub.id}
+								to="/runs/$runId"
+								params={{ runId: sub.id }}
+								className="flex items-center gap-1.5 px-1.5 py-0.5 rounded font-mono bg-raised hover:bg-hover text-zinc-400 hover:text-zinc-100 transition-colors"
+								title={`${sub.workflowName} · ${sub.status}`}
+							>
+								<span
+									className={cn(
+										"w-1.5 h-1.5 rounded-full shrink-0",
+										sub.status === "completed" && "bg-green-500",
+										sub.status === "failed" && "bg-red-500",
+										sub.status === "running" && "bg-blue-500 animate-pulse",
+										sub.status === "cancelled" && "bg-zinc-500",
+										sub.status === "pending" && "bg-zinc-600",
+									)}
+								/>
+								{sub.workflowName}
+								<span className="text-zinc-600">{sub.id.slice(0, 8)}</span>
+							</Link>
+						))}
+					</div>
+				)}
 			</header>
 
 			{/* 3-pane shell */}

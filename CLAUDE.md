@@ -28,6 +28,7 @@ blokctl trace                      # Open Blok Studio
 6. **Rename outputs:** `as: "<name>"` stores the result at `ctx.state[<name>]` instead of `ctx.state[<id>]`. Mutually exclusive with `spread`.
 7. **Cache expensive steps:** add `idempotencyKey: "<string>"` (literal or `$.<path>`). On rerun with the same triple `(workflow, step.id, key)`, the runner replays the cached result through the same persistence rules and skips `step.process()`. Default TTL 24h; override per step via `idempotencyKeyTTL: <ms>`. Caching layers ABOVE persistence — `ephemeral`/`spread`/`as` apply identically to cached and fresh results.
 8. **Retry transient failures:** add `retry: { maxAttempts, minTimeoutInMs?, maxTimeoutInMs?, factor? }`. Per-attempt failures emit `NODE_ATTEMPT_FAILED` and surface in Studio. Default behaviour is no retry (`maxAttempts: 1`).
+9. **Invoke another workflow as a step:** `{ id: "X", subworkflow: "<name>", inputs: {...} }`. Child runs in its own ctx with isolated `state`; parent step's `inputs` becomes child `ctx.request.body`. Child's `ctx.response` lands on parent's `state[<id>]`. Compose with `idempotencyKey` on the parent step to cache the **entire** sub-workflow's result (cached HIT = child workflow not invoked, side effects do NOT fire). `wait: false` (fire-and-forget) is planned but not yet supported. Recursion capped at `BLOK_MAX_SUBWORKFLOW_DEPTH` (default 10).
 
 When a user has data flow issues, check these rules first.
 

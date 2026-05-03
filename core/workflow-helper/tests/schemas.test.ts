@@ -6,6 +6,7 @@ import {
 	StepConditionSchema,
 	StepOptsSchema,
 	V2RegularStepSchema,
+	V2SubworkflowStepSchema,
 } from "../src/types/StepOpts";
 import {
 	CronTriggerOptsSchema,
@@ -211,6 +212,78 @@ describe("RetryConfigSchema", () => {
 		const result = RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: 1000, maxTimeoutInMs: 1000 });
 		expect(result.minTimeoutInMs).toBe(1000);
 		expect(result.maxTimeoutInMs).toBe(1000);
+	});
+});
+
+describe("V2SubworkflowStepSchema", () => {
+	const baseStep = { id: "call-child", subworkflow: "send-receipt" };
+
+	it("accepts the minimal shape (id + subworkflow)", () => {
+		const result = V2SubworkflowStepSchema.parse(baseStep);
+		expect(result.id).toBe("call-child");
+		expect(result.subworkflow).toBe("send-receipt");
+	});
+
+	it("requires a non-empty id", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ subworkflow: "x" })).toThrow();
+		expect(() => V2SubworkflowStepSchema.parse({ id: "", subworkflow: "x" })).toThrow();
+	});
+
+	it("requires a non-empty subworkflow name", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ id: "x" })).toThrow();
+		expect(() => V2SubworkflowStepSchema.parse({ id: "x", subworkflow: "" })).toThrow();
+	});
+
+	it("accepts inputs as an arbitrary record", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			inputs: { user: { id: 1 }, total: 99.99 },
+		});
+		expect(result.inputs).toEqual({ user: { id: 1 }, total: 99.99 });
+	});
+
+	it("accepts wait: true explicitly", () => {
+		const result = V2SubworkflowStepSchema.parse({ ...baseStep, wait: true });
+		expect(result.wait).toBe(true);
+	});
+
+	it("rejects wait: false with a clear deferred-feature message", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ ...baseStep, wait: false })).toThrow(/wait: false.*not yet supported/);
+	});
+
+	it("rejects as + spread combo (mutually exclusive)", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ ...baseStep, as: "out", spread: true })).toThrow(/mutually exclusive/);
+	});
+
+	it("threads idempotencyKey + idempotencyKeyTTL", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "req-123",
+			idempotencyKeyTTL: 60_000,
+		});
+		expect(result.idempotencyKey).toBe("req-123");
+		expect(result.idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("threads a retry config", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			retry: { maxAttempts: 3, minTimeoutInMs: 500, factor: 2 },
+		});
+		expect(result.retry?.maxAttempts).toBe(3);
+		expect(result.retry?.minTimeoutInMs).toBe(500);
+	});
+
+	it("accepts active/stop/ephemeral/as flags", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			active: false,
+			stop: true,
+			ephemeral: true,
+		});
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+		expect(result.ephemeral).toBe(true);
 	});
 });
 

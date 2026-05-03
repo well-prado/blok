@@ -22,7 +22,10 @@ import {
 	V2RegularStepSchema,
 	V2Step,
 	V2StepSchema,
+	V2SubworkflowStep,
+	V2SubworkflowStepSchema,
 	isBranchStep,
+	isSubworkflowStep,
 } from "./types/StepOpts";
 import {
 	AnyTriggerOpts,
@@ -105,6 +108,10 @@ export {
 	V2BranchStep,
 	V2BranchStepSchema,
 	isBranchStep,
+	// v2 sub-workflow step
+	V2SubworkflowStep,
+	V2SubworkflowStepSchema,
+	isSubworkflowStep,
 	// retry configuration
 	RetryConfig,
 	RetryConfigSchema,

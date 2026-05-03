@@ -234,6 +234,83 @@ describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
 	});
 });
 
+describe("v2 DSL — workflow() with sub-workflow steps", () => {
+	it("accepts a minimal sub-workflow step (id + subworkflow)", () => {
+		const wf = workflow({
+			name: "Parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "call-child", subworkflow: "send-receipt" }],
+		});
+		const step = wf._config.steps[0] as { id: string; subworkflow: string };
+		expect(step.id).toBe("call-child");
+		expect(step.subworkflow).toBe("send-receipt");
+	});
+
+	it("compiles $ proxy expressions inside sub-workflow inputs", () => {
+		const wf = workflow({
+			name: "Parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "notify",
+					subworkflow: "send-email",
+					inputs: { to: $.req.body.email, subject: $.state.subject },
+				},
+			],
+		});
+		const step = wf._config.steps[0] as { inputs: Record<string, unknown> };
+		expect(step.inputs.to).toBe("js/ctx.req.body.email");
+		expect(step.inputs.subject).toBe("js/ctx.state.subject");
+	});
+
+	it("threads idempotencyKey + retry onto a sub-workflow step", () => {
+		const wf = workflow({
+			name: "Cached parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "expensive",
+					subworkflow: "llm-pipeline",
+					inputs: { topic: $.req.body.topic },
+					idempotencyKey: $.req.body.requestId as unknown as string,
+					retry: { maxAttempts: 3 },
+				},
+			],
+		});
+		const step = wf._config.steps[0] as {
+			idempotencyKey: string;
+			retry: { maxAttempts: number };
+		};
+		expect(step.idempotencyKey).toBe("js/ctx.req.body.requestId");
+		expect(step.retry.maxAttempts).toBe(3);
+	});
+
+	it("rejects wait: false at workflow load time (deferred to follow-up)", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				steps: [{ id: "bg", subworkflow: "child", wait: false }],
+			}),
+		).toThrow(/wait: false.*not yet supported/);
+	});
+
+	it("rejects empty subworkflow name", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				steps: [{ id: "bg", subworkflow: "" }],
+			}),
+		).toThrow();
+	});
+});
+
 describe("v2 DSL — branch() primitive", () => {
 	it("creates a branch step with when/then/else", () => {
 		const b = branch({

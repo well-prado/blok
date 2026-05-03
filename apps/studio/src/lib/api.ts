@@ -113,6 +113,15 @@ export function fetchRunEvents(runId: string, since?: number): Promise<RunEvent[
 	return fetchJson(`/runs/${encodeURIComponent(runId)}/events${qs}`);
 }
 
+/**
+ * Tier 2 · sub-workflow lineage. Returns runs that were started by a
+ * `subworkflow:` step inside the given parent run, sorted oldest-first.
+ * Returns `[]` when the run has no children.
+ */
+export function fetchSubRuns(runId: string): Promise<import("@/types").WorkflowRun[]> {
+	return fetchJson(`/runs/${encodeURIComponent(runId)}/subruns`);
+}
+
 // === Logs (cross-run) ===
 export interface LogsResponse {
 	logs: Array<{

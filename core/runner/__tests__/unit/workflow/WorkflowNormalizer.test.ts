@@ -251,6 +251,98 @@ describe("WorkflowNormalizer — v2 input", () => {
 	});
 });
 
+describe("WorkflowNormalizer — sub-workflow step", () => {
+	it("normalizes a minimal sub-workflow step", () => {
+		const v2 = {
+			name: "Parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "call-child", subworkflow: "send-receipt" }],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].name).toBe("call-child");
+		expect(out.steps[0].node).toBe("@blokjs/subworkflow");
+		expect(out.steps[0].type).toBe("subworkflow");
+		expect(out.steps[0].subworkflow).toBe("send-receipt");
+		// Default wait when omitted = true (block on completion).
+		expect(out.steps[0].wait).toBe(true);
+	});
+
+	it("places sub-workflow inputs on nodes[id].inputs (so blueprint mapper resolves $ refs)", () => {
+		const v2 = {
+			name: "Parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "notify",
+					subworkflow: "send-email",
+					inputs: { to: "js/ctx.req.body.email", subject: "Order #1" },
+				},
+			],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.nodes.notify.inputs).toEqual({
+			to: "js/ctx.req.body.email",
+			subject: "Order #1",
+		});
+	});
+
+	it("threads idempotencyKey + retry through onto the InternalStep", () => {
+		const v2 = {
+			name: "Cached parent",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "expensive",
+					subworkflow: "llm-pipeline",
+					idempotencyKey: "req-abc",
+					idempotencyKeyTTL: 60_000,
+					retry: { maxAttempts: 3, minTimeoutInMs: 200, factor: 2 },
+				},
+			],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].idempotencyKey).toBe("req-abc");
+		expect(out.steps[0].idempotencyKeyTTL).toBe(60_000);
+		expect(out.steps[0].retry).toEqual({ maxAttempts: 3, minTimeoutInMs: 200, factor: 2 });
+	});
+
+	it("rejects empty subworkflow name with a clear error", () => {
+		const v2 = {
+			name: "Bad",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "x", subworkflow: "" }],
+		};
+		// Empty subworkflow name fails the discriminator check at top of
+		// the loop and falls through to the regular-step path, which then
+		// throws because `use` is also missing.
+		expect(() => normalizeWorkflow(v2)).toThrow();
+	});
+
+	it("rejects wait: false at runtime (defensive — schema also rejects)", () => {
+		const v2 = {
+			name: "Bad",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "bg", subworkflow: "child", wait: false }],
+		};
+		expect(() => normalizeWorkflow(v2)).toThrow(/wait: false.*not yet supported/);
+	});
+
+	it("rejects as + spread combo on a sub-workflow step", () => {
+		const v2 = {
+			name: "Bad",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "x", subworkflow: "child", as: "out", spread: true }],
+		};
+		expect(() => normalizeWorkflow(v2)).toThrow(/mutually exclusive/);
+	});
+});
+
 describe("WorkflowNormalizer — v2 builder envelope", () => {
 	it("unwraps {_blokV2: true, _config: {...}}", () => {
 		const builder = {

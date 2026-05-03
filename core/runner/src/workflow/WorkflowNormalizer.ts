@@ -66,6 +66,8 @@ interface InternalStep {
 	idempotencyKey?: string;
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
+	subworkflow?: string;
+	wait?: boolean;
 	[key: string]: unknown;
 }
 
@@ -140,6 +142,17 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			const { internalStep, nodeConfig } = normalizeBranchStep(step, i);
 			internalSteps.push(internalStep);
 			internalNodes[internalStep.name] = nodeConfig;
+			continue;
+		}
+
+		// v2 sub-workflow — { id, subworkflow: "<name>", inputs?, wait? }
+		// Discriminator is the presence of a non-empty `subworkflow` string.
+		// Resolves to a SubworkflowNode that looks up the child in the
+		// WorkflowRegistry at run time.
+		if (typeof step.subworkflow === "string" && step.subworkflow.length > 0) {
+			const { internalStep, nodeConfig } = normalizeSubworkflowStep(step, i);
+			internalSteps.push(internalStep);
+			if (nodeConfig) internalNodes[internalStep.name] = nodeConfig;
 			continue;
 		}
 
@@ -336,6 +349,95 @@ function normalizeBranchStep(
 		flow: true,
 	};
 	const nodeConfig: InternalNodeConfig = { conditions };
+
+	return { internalStep, nodeConfig };
+}
+
+const SUBWORKFLOW_NODE_REF = "@blokjs/subworkflow";
+
+/**
+ * Normalize a v2 sub-workflow step into the canonical InternalStep
+ * shape. Resolves to a `SubworkflowNode` at run time
+ * (Configuration.nodeTypes.subworkflow).
+ *
+ * Inputs are placed on `nodeConfig.inputs` so the existing
+ * blueprint-mapper resolution path resolves `$.state.<id>` /
+ * `$.req.body.<key>` refs into concrete values BEFORE the
+ * sub-workflow node runs (mirrors how regular steps work).
+ */
+function normalizeSubworkflowStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig | null } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: sub-workflow step at index ${index} is missing \`id\`.`);
+	}
+	const subworkflow = pickString(step.subworkflow);
+	if (!subworkflow) {
+		throw new Error(
+			`[blok] WorkflowNormalizer: sub-workflow step "${id}" is missing \`subworkflow\` (workflow name to invoke).`,
+		);
+	}
+	// `wait: false` is rejected at schema level for v0.3.x. Defensive
+	// runtime check here so JSON workflows that bypass Zod also fail
+	// loudly rather than silently fire-and-forget.
+	if (step.wait === false) {
+		throw new Error(
+			`[blok] WorkflowNormalizer: sub-workflow step "${id}" sets \`wait: false\` — fire-and-forget is not yet supported in v0.3.x. Omit \`wait\` or set \`wait: true\`.`,
+		);
+	}
+
+	// Persistence + retry + idempotency knobs — pass through verbatim
+	// (mirrors normalizeRegularStep). `as` and `spread` mutual exclusion
+	// is also enforced at the schema level; defensive check here.
+	const ephemeral = step.ephemeral === true;
+	const as = pickString(step.as);
+	const spread = step.spread === true;
+	if (as && spread) {
+		throw new Error(
+			`[blok] WorkflowNormalizer: sub-workflow step "${id}" sets both \`as\` and \`spread\` — they are mutually exclusive.`,
+		);
+	}
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: SUBWORKFLOW_NODE_REF,
+		type: "subworkflow",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+		as,
+		spread,
+		ephemeral,
+		subworkflow,
+		// Default `wait: true` when omitted. The schema rejects `false`
+		// already, but we still want the field present on the InternalStep
+		// for downstream readers.
+		wait: step.wait === undefined ? true : Boolean(step.wait),
+	};
+
+	if (typeof step.idempotencyKey === "string" && step.idempotencyKey.length > 0) {
+		internalStep.idempotencyKey = step.idempotencyKey;
+	}
+	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
+		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
+	}
+	if (isPlainObject(step.retry)) {
+		const r = step.retry as Record<string, unknown>;
+		if (typeof r.maxAttempts === "number" && Number.isInteger(r.maxAttempts)) {
+			const retry: RetryConfig = { maxAttempts: r.maxAttempts };
+			if (typeof r.minTimeoutInMs === "number") retry.minTimeoutInMs = r.minTimeoutInMs;
+			if (typeof r.maxTimeoutInMs === "number") retry.maxTimeoutInMs = r.maxTimeoutInMs;
+			if (typeof r.factor === "number") retry.factor = r.factor;
+			internalStep.retry = retry;
+		}
+	}
+
+	// Inputs land on nodeConfig so the blueprint mapper resolves
+	// $.<path> / js/... refs before SubworkflowNode reads them via
+	// `ctx.config[step.name]`.
+	const inlineInputs = isPlainObject(step.inputs) ? (step.inputs as Record<string, unknown>) : null;
+	const nodeConfig: InternalNodeConfig | null = inlineInputs ? { inputs: inlineInputs } : null;
 
 	return { internalStep, nodeConfig };
 }

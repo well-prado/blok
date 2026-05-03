@@ -152,6 +152,8 @@ export class RunTracker extends EventEmitter {
 			metadata: opts.metadata,
 			environment,
 			replayOf: opts.replayOf,
+			parentRunId: opts.parentRunId,
+			parentNodeRunId: opts.parentNodeRunId,
 		};
 
 		this.store.saveRun(run);
@@ -472,6 +474,15 @@ export class RunTracker extends EventEmitter {
 
 	getEvents(runId: string, since?: number): RunEvent[] {
 		return this.store.getEvents(runId, since);
+	}
+
+	/**
+	 * Tier 2 sub-workflow lineage. Returns every run that was started by
+	 * a `subworkflow:` step inside the given parent run. Powers Studio's
+	 * "Sub-runs" list on a parent's run-detail page.
+	 */
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		return this.store.getRunsByParent(parentRunId);
 	}
 
 	getLogs(runId: string, nodeId?: string): TraceLogEntry[] {

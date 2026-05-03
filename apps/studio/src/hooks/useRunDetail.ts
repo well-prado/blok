@@ -14,6 +14,19 @@ export function useRunDetail(runId: string) {
 }
 
 /**
+ * Tier 2 · sub-workflow lineage. Fetch the runs that were started by
+ * `subworkflow:` steps inside the given parent run. Returns an empty
+ * array when this run has no children.
+ */
+export function useSubRuns(runId: string) {
+	return useQuery({
+		queryKey: ["run", runId, "subruns"],
+		queryFn: () => import("@/lib/api").then((m) => m.fetchSubRuns(runId)),
+		enabled: !!runId,
+	});
+}
+
+/**
  * Subscribe to SSE stream for a run and update the TanStack Query cache
  * in real-time as events arrive.
  */

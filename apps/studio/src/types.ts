@@ -27,6 +27,17 @@ export interface WorkflowRun {
 	 * a "Replay of #..." breadcrumb that links back to the source.
 	 */
 	replayOf?: string;
+	/**
+	 * Tier 2 · sub-workflow lineage. When this run was started by a
+	 * `subworkflow:` step in another workflow, this carries the parent
+	 * run's id. Studio renders a "called from #..." breadcrumb.
+	 */
+	parentRunId?: string;
+	/**
+	 * Tier 2 · sub-workflow lineage. The specific NodeRun within the
+	 * parent run that invoked this sub-workflow.
+	 */
+	parentNodeRunId?: string;
 }
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";

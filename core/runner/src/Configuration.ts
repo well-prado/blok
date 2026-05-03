@@ -257,10 +257,15 @@ export default class Configuration implements Config {
 				idempotencyKey?: string;
 				idempotencyKeyTTL?: number;
 				retry?: NodeBase["retry"];
+				subworkflow?: string;
+				wait?: boolean;
 			};
 			if (v2Idem.idempotencyKey !== undefined) node.idempotencyKey = v2Idem.idempotencyKey;
 			if (v2Idem.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Idem.idempotencyKeyTTL;
 			if (v2Idem.retry !== undefined) node.retry = v2Idem.retry;
+			// V2 sub-workflow knobs — read by SubworkflowNode at run time.
+			if (v2Idem.subworkflow !== undefined) node.subworkflow = v2Idem.subworkflow;
+			if (v2Idem.wait !== undefined) node.wait = v2Idem.wait;
 			nodes.push(node);
 		}
 
@@ -359,6 +364,8 @@ export default class Configuration implements Config {
 				idempotencyKey?: string;
 				idempotencyKeyTTL?: number;
 				retry?: NodeBase["retry"];
+				subworkflow?: string;
+				wait?: boolean;
 			};
 			if (v2Flow.as !== undefined) node.as = v2Flow.as;
 			node.spread = v2Flow.spread === true;
@@ -366,6 +373,10 @@ export default class Configuration implements Config {
 			if (v2Flow.idempotencyKey !== undefined) node.idempotencyKey = v2Flow.idempotencyKey;
 			if (v2Flow.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Flow.idempotencyKeyTTL;
 			if (v2Flow.retry !== undefined) node.retry = v2Flow.retry;
+			// V2 sub-workflow knobs — also flow through nested branches so a
+			// `branch.then[0]` step that invokes a sub-workflow works.
+			if (v2Flow.subworkflow !== undefined) node.subworkflow = v2Flow.subworkflow;
+			if (v2Flow.wait !== undefined) node.wait = v2Flow.wait;
 
 			// const validator = z.instanceof(NodeBase);
 			// validator.parse(node);
@@ -412,6 +423,9 @@ export default class Configuration implements Config {
 			},
 			"runtime.ruby": {
 				resolver: async (node: RunnerNode) => await this.runtimeResolver(node),
+			},
+			subworkflow: {
+				resolver: async (node: RunnerNode) => await this.subworkflowResolver(node),
 			},
 		};
 	}
@@ -483,6 +497,39 @@ export default class Configuration implements Config {
 		const stepStreamLogs = (node as { stream_logs?: boolean }).stream_logs;
 		const streamLogs = stepStreamLogs !== undefined ? stepStreamLogs : isStreamLogsEnabled();
 		return new RuntimeAdapterNode(adapter, targetNode, { streamLogs }) as RunnerNode;
+	}
+
+	/**
+	 * Resolve a `subworkflow` step into a fully-wired `SubworkflowNode` —
+	 * the dispatch class that looks up the named child workflow in the
+	 * `WorkflowRegistry` and runs it inline with isolated state.
+	 *
+	 * The returned node carries the parent's `globalOptions` so the
+	 * child `Configuration.init()` can resolve `module` step references
+	 * against the same node registry.
+	 */
+	protected async subworkflowResolver(node: RunnerNode): Promise<RunnerNode> {
+		const v2 = node as RunnerNode & { subworkflow?: string; wait?: boolean };
+		if (typeof v2.subworkflow !== "string" || v2.subworkflow.length === 0) {
+			throw new Error(
+				`[blok] subworkflowResolver: step "${node.name}" is missing the \`subworkflow\` field after normalization.`,
+			);
+		}
+		// Lazy import to avoid a circular dep (SubworkflowNode imports
+		// Configuration to construct the child).
+		const { SubworkflowNode } = await import("./SubworkflowNode");
+		const subworkflowNode = new SubworkflowNode();
+		subworkflowNode.node = node.node;
+		subworkflowNode.name = node.name;
+		subworkflowNode.type = node.type;
+		subworkflowNode.active = node.active !== undefined ? node.active : true;
+		subworkflowNode.stop = node.stop !== undefined ? node.stop : false;
+		subworkflowNode.subworkflow = v2.subworkflow;
+		subworkflowNode.wait = v2.wait !== false;
+		// `globalOptions` is the runner's node registry — child Configuration.init
+		// needs it for `module:` step resolution.
+		subworkflowNode.globalOptions = this.globalOptions;
+		return subworkflowNode as RunnerNode;
 	}
 
 	protected async moduleResolver(node: RunnerNode, opts: GlobalOptions): Promise<RunnerNode> {

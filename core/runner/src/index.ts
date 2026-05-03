@@ -91,6 +91,9 @@ import { registerTraceRoutes } from "./tracing/TraceRouter";
 import { TracingLogger } from "./tracing/TracingLogger";
 import { sanitize as traceSanitize } from "./tracing/sanitize";
 
+// Workflow registry (Tier 2 sub-workflow primitive)
+import { type RegisteredWorkflow, WorkflowRegistry } from "./workflow/WorkflowRegistry";
+
 // Cost Estimation
 import { CostEstimator } from "./cost/CostEstimator";
 import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
@@ -219,6 +222,8 @@ export {
 	// Tracing (Blok Studio)
 	RunTracker,
 	registerTraceRoutes,
+	WorkflowRegistry,
+	type RegisteredWorkflow,
 	TracingLogger,
 	traceSanitize,
 	// Cost Estimation

@@ -51,6 +51,14 @@ export interface RunStore {
 	deleteDashboard(dashboardId: string): boolean;
 	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void;
 
+	// === Sub-workflow lineage (Tier 2) ===
+	/**
+	 * Return every run whose `parentRunId` matches the given run id, sorted
+	 * oldest-first. Used by Studio's "Sub-runs" list on a parent's run-detail
+	 * page. Returns `[]` when the run has no children.
+	 */
+	getRunsByParent(parentRunId: string): WorkflowRun[];
+
 	// === Cleanup ===
 	clearAll(): number;
 	deleteRunsBefore(timestamp: number): number;

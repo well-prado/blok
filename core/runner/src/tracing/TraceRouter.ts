@@ -703,6 +703,22 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		res.json(events);
 	});
 
+	/**
+	 * Tier 2 · sub-workflow lineage. Returns the runs that were started
+	 * by `subworkflow:` steps inside the given parent run. Studio renders
+	 * these as a "Sub-runs" list on the parent's run detail page.
+	 */
+	router.get("/runs/:runId/subruns", (req: TraceRequest, res: TraceResponse) => {
+		const { runId } = req.params;
+		const run = t.getRun(runId);
+		if (!run) {
+			res.status(404).json({ error: `Run '${runId}' not found` });
+			return;
+		}
+		const subruns = t.getRunsByParent(runId);
+		res.json(subruns);
+	});
+
 	router.delete("/runs", (_req: TraceRequest, res: TraceResponse) => {
 		const deleted = t.clearAll();
 		res.json({ deleted });
