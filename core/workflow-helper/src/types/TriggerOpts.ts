@@ -94,7 +94,12 @@ export type ConcurrencyOpts = z.input<typeof ConcurrencyOptsSchema>;
  * at trigger-config parse time; converted to milliseconds at run-entry time
  * by `parseDuration` (`@blokjs/helper`).
  */
-const DurationSchema = z.union([
+/**
+ * Duration value: a non-negative integer (ms) or a single-unit string
+ * (`"500ms"`, `"30s"`, `"5m"`, `"2h"`, `"1d"`). Reused by Tier 2 #5+#7
+ * scheduling fields and the Tier 2 quick-wins `maxDuration` step field.
+ */
+export const DurationSchema = z.union([
 	z.number().int().min(0),
 	z
 		.string()

@@ -609,6 +609,21 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const workflow = req.query.workflow;
 		const status = req.query.status;
 		const tags = req.query.tags ? req.query.tags.split(",").map((t: string) => t.trim()) : undefined;
+		// Tier 2 quick-wins — `metadata.<key>=<value>` query params parsed
+		// into a `Record<string, string>` for the RunQuery filter. Multiple
+		// pairs combine with AND semantics. Keys are restricted by the
+		// SqliteRunStore implementation (`/^[a-zA-Z0-9_-]+$/`) for JSON
+		// path safety; non-matching keys silently drop.
+		let metadata: Record<string, string> | undefined;
+		for (const [key, value] of Object.entries(req.query as Record<string, string>)) {
+			if (key.startsWith("metadata.") && typeof value === "string" && value.length > 0) {
+				const metaKey = key.slice("metadata.".length);
+				if (metaKey.length > 0) {
+					if (!metadata) metadata = {};
+					metadata[metaKey] = value;
+				}
+			}
+		}
 		const limit = Number.parseInt(req.query.limit || "50", 10);
 		const offset = Number.parseInt(req.query.offset || "0", 10);
 		const sort = (req.query.sort as "asc" | "desc") || "desc";
@@ -643,6 +658,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 			workflow,
 			status: status as "running" | "completed" | "failed" | undefined,
 			tags,
+			metadata,
 			limit: needsPostFilter ? Math.max(limit, 1000) : limit,
 			offset: needsPostFilter ? 0 : offset,
 			sort,

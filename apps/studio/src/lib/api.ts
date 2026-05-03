@@ -92,6 +92,16 @@ export function fetchRuns(params?: {
 	 * pass it here automatically.
 	 */
 	env?: string;
+	/**
+	 * Tier 2 quick-wins — filter by tags. AND semantics: all listed
+	 * tags must be present on the run. Sent as `?tags=a,b,c`.
+	 */
+	tags?: string[];
+	/**
+	 * Tier 2 quick-wins — filter by metadata key=value pairs. AND
+	 * semantics across keys. Sent as `?metadata.k1=v1&metadata.k2=v2`.
+	 */
+	metadata?: Record<string, string>;
 }): Promise<RunListResponse> {
 	const query = new URLSearchParams();
 	if (params?.workflow) query.set("workflow", params.workflow);
@@ -100,6 +110,14 @@ export function fetchRuns(params?: {
 	if (params?.offset) query.set("offset", String(params.offset));
 	if (params?.sort) query.set("sort", params.sort);
 	if (params?.env) query.set("env", params.env);
+	if (params?.tags && params.tags.length > 0) {
+		query.set("tags", params.tags.join(","));
+	}
+	if (params?.metadata) {
+		for (const [k, v] of Object.entries(params.metadata)) {
+			query.set(`metadata.${k}`, v);
+		}
+	}
 	const qs = query.toString();
 	return fetchJson(`/runs${qs ? `?${qs}` : ""}`);
 }

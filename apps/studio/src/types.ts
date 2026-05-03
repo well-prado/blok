@@ -13,7 +13,11 @@ export type WorkflowRunStatus =
 	/** Tier 2 #5: TTL exceeded before dispatch. Auto-cancelled without execution. */
 	| "expired"
 	/** Tier 2 #7: coalesced into another run via the debounce key. */
-	| "debounced";
+	| "debounced"
+	/** Tier 2 quick-wins: runner crashed (uncaught exception / OOM / signal). */
+	| "crashed"
+	/** Tier 2 quick-wins: step's final retry attempt exceeded `maxDuration`. */
+	| "timedOut";
 
 export interface WorkflowRun {
 	id: string;
@@ -200,7 +204,11 @@ export type RunEventType =
 	/** Tier 2 #5: TTL exceeded before dispatch. Payload `{expiresAt, expiredAt, lateBy}`. */
 	| "RUN_EXPIRED"
 	/** Tier 2 #7: coalesced into another run. Payload `{debounceKey, mode, intoRunId?, pingCount, scheduledAt?}`. */
-	| "RUN_DEBOUNCED";
+	| "RUN_DEBOUNCED"
+	/** Tier 2 quick-wins: runner crashed. Payload `{durationMs, error}`. */
+	| "RUN_CRASHED"
+	/** Tier 2 quick-wins: step's final retry attempt timed out. Payload `{durationMs, stepId, maxDurationMs, attemptsExhausted}`. */
+	| "RUN_TIMED_OUT";
 
 export interface RunEvent {
 	id: string;

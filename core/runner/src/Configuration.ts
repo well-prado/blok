@@ -1,5 +1,6 @@
 // import { NodeBase } from "@blokjs/shared";
 // import { z } from "zod";
+import { tryParseDuration } from "@blokjs/helper";
 import type { NodeBase } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
 import RunnerNode from "./RunnerNode";
@@ -259,6 +260,7 @@ export default class Configuration implements Config {
 				retry?: NodeBase["retry"];
 				subworkflow?: string;
 				wait?: boolean;
+				maxDuration?: number | string;
 			};
 			if (v2Idem.idempotencyKey !== undefined) node.idempotencyKey = v2Idem.idempotencyKey;
 			if (v2Idem.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Idem.idempotencyKeyTTL;
@@ -266,6 +268,11 @@ export default class Configuration implements Config {
 			// V2 sub-workflow knobs — read by SubworkflowNode at run time.
 			if (v2Idem.subworkflow !== undefined) node.subworkflow = v2Idem.subworkflow;
 			if (v2Idem.wait !== undefined) node.wait = v2Idem.wait;
+			// Tier 2 quick-wins — parse maxDuration string/number → ms.
+			if (v2Idem.maxDuration !== undefined) {
+				const parsed = tryParseDuration(v2Idem.maxDuration);
+				if (parsed !== null) node.maxDurationMs = parsed;
+			}
 			nodes.push(node);
 		}
 
@@ -366,6 +373,7 @@ export default class Configuration implements Config {
 				retry?: NodeBase["retry"];
 				subworkflow?: string;
 				wait?: boolean;
+				maxDuration?: number | string;
 			};
 			if (v2Flow.as !== undefined) node.as = v2Flow.as;
 			node.spread = v2Flow.spread === true;
@@ -377,6 +385,10 @@ export default class Configuration implements Config {
 			// `branch.then[0]` step that invokes a sub-workflow works.
 			if (v2Flow.subworkflow !== undefined) node.subworkflow = v2Flow.subworkflow;
 			if (v2Flow.wait !== undefined) node.wait = v2Flow.wait;
+			if (v2Flow.maxDuration !== undefined) {
+				const parsed = tryParseDuration(v2Flow.maxDuration);
+				if (parsed !== null) node.maxDurationMs = parsed;
+			}
 
 			// const validator = z.instanceof(NodeBase);
 			// validator.parse(node);
@@ -475,6 +487,7 @@ export default class Configuration implements Config {
 			idempotencyKey?: string;
 			idempotencyKeyTTL?: number;
 			retry?: NodeBase["retry"];
+			maxDuration?: number | string;
 		};
 		if (v2.as !== undefined) targetNode.as = v2.as;
 		targetNode.spread = v2.spread === true;
@@ -487,6 +500,10 @@ export default class Configuration implements Config {
 		if (v2.idempotencyKey !== undefined) targetNode.idempotencyKey = v2.idempotencyKey;
 		if (v2.idempotencyKeyTTL !== undefined) targetNode.idempotencyKeyTTL = v2.idempotencyKeyTTL;
 		if (v2.retry !== undefined) targetNode.retry = v2.retry;
+		if (v2.maxDuration !== undefined) {
+			const parsed = tryParseDuration(v2.maxDuration);
+			if (parsed !== null) targetNode.maxDurationMs = parsed;
+		}
 
 		// Wrap in RuntimeAdapterNode to integrate with existing Runner.
 		// Per-step `stream_logs: true|false` overrides the global

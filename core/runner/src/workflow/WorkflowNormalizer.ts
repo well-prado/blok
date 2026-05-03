@@ -68,6 +68,12 @@ interface InternalStep {
 	retry?: RetryConfig;
 	subworkflow?: string;
 	wait?: boolean;
+	/**
+	 * Tier 2 quick-wins — per-attempt execution timeout. Number (ms) or
+	 * duration string (`"30s"`, etc.). Configuration thread-through
+	 * normalizes to milliseconds via `parseDuration`.
+	 */
+	maxDuration?: number | string;
 	[key: string]: unknown;
 }
 
@@ -263,6 +269,9 @@ function normalizeRegularStep(
 			internalStep.retry = retry;
 		}
 	}
+	if (typeof step.maxDuration === "number" || typeof step.maxDuration === "string") {
+		internalStep.maxDuration = step.maxDuration;
+	}
 
 	// Build node config — only include `inputs` if present.
 	let nodeConfig: InternalNodeConfig | null = null;
@@ -426,6 +435,9 @@ function normalizeSubworkflowStep(
 			if (typeof r.factor === "number") retry.factor = r.factor;
 			internalStep.retry = retry;
 		}
+	}
+	if (typeof step.maxDuration === "number" || typeof step.maxDuration === "string") {
+		internalStep.maxDuration = step.maxDuration;
 	}
 
 	// Inputs land on nodeConfig so the blueprint mapper resolves

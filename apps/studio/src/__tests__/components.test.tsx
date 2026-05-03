@@ -38,32 +38,36 @@ describe("StatusBadge", () => {
 });
 
 describe("RunFilters", () => {
-	it("renders all status options", () => {
+	it("renders all status options including new Tier 2 statuses", () => {
 		render(<RunFilters status="" onStatusChange={() => {}} />);
+		// Status select renders option text; getAllByText handles dupes if any.
 		expect(screen.getByText("All")).toBeInTheDocument();
 		expect(screen.getByText("Running")).toBeInTheDocument();
 		expect(screen.getByText("Completed")).toBeInTheDocument();
 		expect(screen.getByText("Failed")).toBeInTheDocument();
+		expect(screen.getByText("Throttled")).toBeInTheDocument();
+		expect(screen.getByText("Delayed")).toBeInTheDocument();
+		expect(screen.getByText("Crashed")).toBeInTheDocument();
+		expect(screen.getByText("Timed Out")).toBeInTheDocument();
 	});
 
-	it("calls onStatusChange when clicking a filter", async () => {
+	it("calls onStatusChange when selecting a status (Tier 2 quick-wins)", async () => {
 		const user = userEvent.setup();
 		const handleChange = vi.fn();
 		render(<RunFilters status="" onStatusChange={handleChange} />);
 
-		await user.click(screen.getByText("Running"));
+		const select = screen.getByRole("combobox");
+		await user.selectOptions(select, "running");
 		expect(handleChange).toHaveBeenCalledWith("running");
 
-		await user.click(screen.getByText("Failed"));
+		await user.selectOptions(select, "failed");
 		expect(handleChange).toHaveBeenCalledWith("failed");
 	});
 
-	it("all buttons have type=button", () => {
+	it("renders tags and metadata text inputs", () => {
 		render(<RunFilters status="" onStatusChange={() => {}} />);
-		const buttons = screen.getAllByRole("button");
-		for (const button of buttons) {
-			expect(button).toHaveAttribute("type", "button");
-		}
+		expect(screen.getByPlaceholderText("user-123, premium")).toBeInTheDocument();
+		expect(screen.getByPlaceholderText("tier=premium, plan=pro")).toBeInTheDocument();
 	});
 });
 

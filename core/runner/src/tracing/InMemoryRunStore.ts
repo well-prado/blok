@@ -94,6 +94,16 @@ export class InMemoryRunStore implements RunStore {
 			const filterTags = opts.tags;
 			runs = runs.filter((r) => r.tags && filterTags.every((tag) => r.tags?.includes(tag)));
 		}
+		if (opts?.metadata) {
+			const entries = Object.entries(opts.metadata);
+			if (entries.length > 0) {
+				runs = runs.filter(
+					(r) =>
+						r.metadata != null &&
+						entries.every(([k, v]) => r.metadata?.[k] !== undefined && String(r.metadata[k]) === v),
+				);
+			}
+		}
 
 		// asc = oldest first (a.startedAt - b.startedAt), desc = newest first
 		const sortDir = opts?.sort === "asc" ? 1 : -1;

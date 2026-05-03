@@ -21,6 +21,17 @@
  *   `debounce.key` mechanism. The "loser" of a leading-mode coalesce;
  *   in trailing mode this state is transient (run flips to `running`
  *   when the debounce timer fires).
+ * - `crashed` (Tier 2 quick-wins): the runner itself crashed (uncaught
+ *   exception, OOM, signal). Distinct from `failed` (which implies a
+ *   step's `process()` threw cleanly). Currently MANUAL — call
+ *   `tracker.markRunCrashed(runId, {error})` from custom triggers /
+ *   ops harnesses. Auto-flip on uncaught TriggerBase errors is a
+ *   deferred follow-up.
+ * - `timedOut` (Tier 2 quick-wins): a step's final retry attempt
+ *   exceeded its `maxDuration` cap. Distinct from `failed` so SLA
+ *   dashboards can separate timeout-driven failures (network /
+ *   capacity) from logic failures (bugs). Auto-flipped by
+ *   `RunnerSteps` on final-attempt `StepTimeoutError`.
  */
 export type WorkflowRunStatus =
 	| "pending"
@@ -31,7 +42,9 @@ export type WorkflowRunStatus =
 	| "throttled"
 	| "delayed"
 	| "expired"
-	| "debounced";
+	| "debounced"
+	| "crashed"
+	| "timedOut";
 
 /**
  * Structured failure detail attached to a {@link WorkflowRun} or
@@ -331,7 +344,22 @@ export type RunEventType =
 	 * transient and the same run flips to `"running"` when the window
 	 * closes.
 	 */
-	| "RUN_DEBOUNCED";
+	| "RUN_DEBOUNCED"
+	/**
+	 * Tier 2 quick-wins — run crashed (uncaught exception / OOM /
+	 * signal). Payload `{durationMs, error}`. Distinct from `RUN_FAILED`
+	 * (which implies a step's `process()` threw cleanly). Currently
+	 * manual via `tracker.markRunCrashed(runId, {error})`.
+	 */
+	| "RUN_CRASHED"
+	/**
+	 * Tier 2 quick-wins — a step's final retry attempt exceeded its
+	 * `maxDuration` cap. Payload `{durationMs, stepId, maxDurationMs,
+	 * attemptsExhausted}`. Auto-emitted by `RunnerSteps` when the
+	 * timeout fires on the last attempt. Run status flips to
+	 * `"timedOut"`.
+	 */
+	| "RUN_TIMED_OUT";
 
 export interface RunEvent {
 	id: string;
@@ -491,6 +519,15 @@ export interface RunQuery {
 	workflow?: string;
 	status?: WorkflowRunStatus;
 	tags?: string[];
+	/**
+	 * Tier 2 quick-wins — filter by metadata key=value pairs. Multiple
+	 * pairs combine with AND semantics (a run matches only when all
+	 * declared keys match the requested values, compared via stringified
+	 * equality). Backed by `json_extract` on SQLite + `Object` lookup
+	 * on InMemory. Sequential scan (no index); acceptable given the
+	 * `evictOldRuns` size cap on the runs table.
+	 */
+	metadata?: Record<string, string>;
 	limit?: number;
 	offset?: number;
 	sort?: "asc" | "desc";

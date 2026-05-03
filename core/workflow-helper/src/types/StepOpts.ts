@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ConditionElseOpts } from "../components/AddElse";
 import type { ConditionOpts } from "../components/AddIf";
+import { DurationSchema } from "./TriggerOpts";
 
 /**
  * RuntimeKind represents all supported runtime environments.
@@ -277,6 +278,15 @@ export const V2RegularStepSchema = z
 			"Retry configuration with capped exponential backoff. " +
 				"When omitted, the step runs at most once (no retry) — matches pre-v0.3.x behavior.",
 		),
+		maxDuration: DurationSchema.optional().describe(
+			"OPTIONAL. Per-attempt execution timeout. Number (ms) or duration " +
+				"string ('30s', '5m', '500ms'). When the step's `step.process()` " +
+				"exceeds this duration, the attempt fails with a StepTimeoutError. " +
+				"Pairs with `retry` — each attempt gets its own timeout (total " +
+				"budget = maxDuration × maxAttempts). On final-attempt timeout, the " +
+				'run auto-flips to `"timedOut"` status (distinct from `"failed"` ' +
+				"so SLA dashboards can separate timeouts from logic failures).",
+		),
 		// Legacy aliases — accepted for v1 → v2 migration but discouraged.
 		set_var: z
 			.boolean()
@@ -459,6 +469,13 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 			retry: RetryConfigSchema.optional().describe(
 				"Retry the WHOLE sub-workflow on failure. Each retry creates a fresh " +
 					"child run record under the same parent.",
+			),
+			maxDuration: DurationSchema.optional().describe(
+				"OPTIONAL. Per-attempt execution timeout. Caps the synchronous wait for " +
+					"`wait: true` sub-workflows. No-op for `wait: false` (parent returns " +
+					"immediately; the child's max-duration is the child's concern). Number " +
+					"(ms) or duration string. On final-attempt timeout, the run auto-flips " +
+					'to `"timedOut"`.',
 			),
 		})
 		.refine((step) => !(step.as && step.spread), {

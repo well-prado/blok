@@ -97,6 +97,21 @@ export default abstract class NodeBase {
 		factor?: number;
 	};
 
+	/**
+	 * Tier 2 quick-wins — per-attempt execution timeout in milliseconds.
+	 * When set, `RunnerSteps` wraps each `step.process()` in a setTimeout-
+	 * based Promise.race. On timeout, throws `StepTimeoutError` (which the
+	 * retry loop treats as any other error). On final-attempt timeout,
+	 * the run auto-flips to `"timedOut"` status. When undefined, the
+	 * step runs without a per-attempt cap (matches pre-quick-wins
+	 * behaviour).
+	 *
+	 * Originally set as a duration string or number on the step schema;
+	 * `Configuration.getSteps` converts to milliseconds via
+	 * `parseDuration` before assigning here.
+	 */
+	public maxDurationMs?: number;
+
 	// =========================================================================
 	// V2 sub-workflow knobs — populated by Configuration.getSteps for steps
 	// that invoke another workflow (`subworkflow: "<name>"` shape). Read by

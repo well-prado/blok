@@ -733,6 +733,22 @@ export class SqliteRunStore implements RunStore {
 			conditions.push("status = ?");
 			params.push(opts.status);
 		}
+		// Tier 2 quick-wins — metadata key=value filter via json_extract.
+		// Multiple key=value pairs combine with AND semantics. Indexed scans
+		// aren't possible against arbitrary JSON keys; sequential scan is
+		// acceptable given the runs table has size cap via evictOldRuns.
+		if (opts?.metadata) {
+			const entries = Object.entries(opts.metadata);
+			for (const [k, v] of entries) {
+				// Use prefixed paths for safety: only allow keys matching
+				// /^[a-zA-Z0-9_-]+$/ to prevent JSON path injection. Keys with
+				// special characters silently skip filtering — caller can
+				// always fall back to client-side filter for those.
+				if (!/^[a-zA-Z0-9_-]+$/.test(k)) continue;
+				conditions.push(`json_extract(metadata_json, '$.${k}') = ?`);
+				params.push(v);
+			}
+		}
 		const tags = opts?.tags;
 		if (tags && tags.length > 0) {
 			// For each tag, check that it exists in the JSON array

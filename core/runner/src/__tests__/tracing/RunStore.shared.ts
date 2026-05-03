@@ -185,6 +185,64 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				const { runs } = store.getRuns({ tags: ["env:prod"] });
 				expect(runs).toHaveLength(2);
 			});
+
+			// Tier 2 quick-wins — metadata filter tests
+			it("should filter by single metadata key=value", () => {
+				store.saveRun(makeRun("run_1", { metadata: { tier: "premium", region: "us" } }));
+				store.saveRun(makeRun("run_2", { metadata: { tier: "free" } }));
+				store.saveRun(makeRun("run_3", { metadata: { tier: "premium", region: "eu" } }));
+
+				const { runs } = store.getRuns({ metadata: { tier: "premium" } });
+				expect(runs).toHaveLength(2);
+			});
+
+			it("should filter by multiple metadata keys (AND semantics)", () => {
+				store.saveRun(makeRun("run_1", { metadata: { tier: "premium", region: "us" } }));
+				store.saveRun(makeRun("run_2", { metadata: { tier: "premium", region: "eu" } }));
+				store.saveRun(makeRun("run_3", { metadata: { tier: "free", region: "us" } }));
+
+				const { runs } = store.getRuns({ metadata: { tier: "premium", region: "us" } });
+				expect(runs).toHaveLength(1);
+				expect(runs[0].id).toBe("run_1");
+			});
+
+			it("should return empty when metadata key doesn't exist", () => {
+				store.saveRun(makeRun("run_1", { metadata: { tier: "premium" } }));
+				const { runs } = store.getRuns({ metadata: { tier: "enterprise" } });
+				expect(runs).toHaveLength(0);
+			});
+
+			it("metadata filter combines with status + tags", () => {
+				store.saveRun(
+					makeRun("run_1", {
+						status: "completed",
+						tags: ["env:prod"],
+						metadata: { tier: "premium" },
+					}),
+				);
+				store.saveRun(
+					makeRun("run_2", {
+						status: "running",
+						tags: ["env:prod"],
+						metadata: { tier: "premium" },
+					}),
+				);
+				store.saveRun(
+					makeRun("run_3", {
+						status: "completed",
+						tags: ["env:dev"],
+						metadata: { tier: "premium" },
+					}),
+				);
+
+				const { runs } = store.getRuns({
+					status: "completed",
+					tags: ["env:prod"],
+					metadata: { tier: "premium" },
+				});
+				expect(runs).toHaveLength(1);
+				expect(runs[0].id).toBe("run_1");
+			});
 		});
 
 		// === Node Runs ===

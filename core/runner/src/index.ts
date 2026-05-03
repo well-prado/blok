@@ -100,11 +100,14 @@ import {
 	type ConcurrencyLimitInfo,
 	isConcurrencyLimitError,
 } from "./concurrency/ConcurrencyLimitError";
+
 import {
 	CONCURRENCY_DEFAULTS,
 	type NormalizedConcurrencyConfig,
 	readConcurrencyConfig,
 } from "./concurrency/readConcurrencyConfig";
+// Per-step timeout (Tier 2 quick-wins)
+import { StepTimeoutError, isStepTimeoutError } from "./timeouts/StepTimeoutError";
 
 // Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
@@ -258,6 +261,9 @@ export {
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,
+	// Per-step timeout (Tier 2 quick-wins)
+	StepTimeoutError,
+	isStepTimeoutError,
 	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 	DeferredDispatchSignal,
 	type DeferredDispatchInfo,

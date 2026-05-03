@@ -1,6 +1,7 @@
 import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
 import type BlokResponse from "./BlokResponse";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
+import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
@@ -34,6 +35,31 @@ function computeBackoff(
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, ms);
+	});
+}
+
+/**
+ * Tier 2 quick-wins — wrap a Promise in a setTimeout-based timeout
+ * race. On timeout, rejects with `StepTimeoutError`. The underlying
+ * `fn()` continues to run (no AbortSignal cancellation in v1) but
+ * the runner has already moved on — orphaned resolution settles
+ * harmlessly into the void.
+ */
+function wrapWithTimeout<T>(fn: () => Promise<T>, ms: number, stepName: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			reject(new StepTimeoutError(stepName, ms));
+		}, ms);
+		fn().then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			(err) => {
+				clearTimeout(timer);
+				reject(err);
+			},
+		);
 	});
 }
 
@@ -160,13 +186,22 @@ export default abstract class RunnerSteps {
 					// through the catch block below.
 					const retryConfig = (step as NodeBase).retry;
 					const maxAttempts = retryConfig ? Math.max(1, retryConfig.maxAttempts) : 1;
+					// Tier 2 quick-wins — per-attempt timeout. When unset, the
+					// step runs without a cap. Numeric `maxDurationMs` arrives
+					// pre-parsed from `Configuration` (string `"30s"` →
+					// `30000` via `parseDuration`).
+					const maxDurationMs = (step as NodeBase).maxDurationMs;
 					let attempt = 0;
 
 					while (true) {
 						attempt += 1;
 
 						try {
-							const model = await step.process(ctx, step as unknown as Step);
+							const processInvocation = (): Promise<{ data: unknown }> => step.process(ctx, step as unknown as Step);
+							const model =
+								typeof maxDurationMs === "number" && maxDurationMs > 0
+									? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
+									: await processInvocation();
 							ctx.response = model.data as BlokResponse;
 
 							// Treat soft errors (data carries `.error`) the same as
@@ -239,6 +274,25 @@ export default abstract class RunnerSteps {
 								if (existing && existing.status === "running") {
 									tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
 								}
+							}
+							// Tier 2 quick-wins — final-attempt timeout flips
+							// the run to "timedOut" (distinct from "failed").
+							// Only when the FINAL error was a StepTimeoutError;
+							// mixed failures (some retries timed out, final
+							// retry threw a different error) keep the normal
+							// "failed" status.
+							if (
+								tracker &&
+								traceRunId &&
+								typeof maxDurationMs === "number" &&
+								maxDurationMs > 0 &&
+								nodeErr instanceof StepTimeoutError
+							) {
+								tracker.markRunTimedOut(traceRunId, {
+									stepId: step.name,
+									maxDurationMs,
+									attemptsExhausted: attempt,
+								});
 							}
 							const stepDuration = (performance.now() - stepStart).toFixed(1);
 							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";

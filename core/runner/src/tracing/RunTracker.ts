@@ -13,11 +13,11 @@ import type {
 	RunErrorDetail,
 	RunEvent,
 	RunEventType,
+	RunQuery,
 	StartNodeOptions,
 	StartRunOptions,
 	TraceLogEntry,
 	WorkflowRun,
-	WorkflowRunStatus,
 	WorkflowSummary,
 } from "./types";
 
@@ -344,6 +344,61 @@ export class RunTracker extends EventEmitter {
 	}
 
 	/**
+	 * Tier 2 quick-wins — mark a run as `crashed` (uncaught exception,
+	 * OOM, signal). Distinct from `failRun` because the failure was
+	 * NOT a step's `process()` throwing — it was the runner itself
+	 * giving up. Currently manual; call from custom triggers / ops
+	 * harnesses when uncaught failures are detected.
+	 */
+	markRunCrashed(runId: string, info: { error: Error | unknown }): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "crashed",
+			finishedAt,
+			durationMs,
+			error: toRunErrorDetail(info.error),
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_CRASHED", undefined, undefined, {
+			durationMs,
+			error: toRunErrorDetail(info.error),
+		});
+	}
+
+	/**
+	 * Tier 2 quick-wins — mark a run as `timedOut` because a step's
+	 * final retry attempt exceeded its `maxDuration` cap. Distinct
+	 * from `failed` so SLA dashboards can separate timeout-driven
+	 * failures (network / capacity) from logic failures (bugs).
+	 * Auto-called by `RunnerSteps` on final-attempt `StepTimeoutError`.
+	 */
+	markRunTimedOut(runId: string, info: { stepId: string; maxDurationMs: number; attemptsExhausted: number }): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "timedOut",
+			finishedAt,
+			durationMs,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_TIMED_OUT", undefined, undefined, {
+			durationMs,
+			stepId: info.stepId,
+			maxDurationMs: info.maxDurationMs,
+			attemptsExhausted: info.attemptsExhausted,
+		});
+	}
+
+	/**
 	 * Tier 2 #7 — record an additional ping into an existing trailing-mode
 	 * debounce window. Increments `pingCount` and updates `scheduledAt`.
 	 * Does NOT emit a new event (avoid event-stream bloat under burst).
@@ -637,14 +692,7 @@ export class RunTracker extends EventEmitter {
 		return this.store.getRun(runId);
 	}
 
-	getRuns(opts?: {
-		workflow?: string;
-		status?: WorkflowRunStatus;
-		tags?: string[];
-		limit?: number;
-		offset?: number;
-		sort?: "asc" | "desc";
-	}): { runs: WorkflowRun[]; total: number } {
+	getRuns(opts?: RunQuery): { runs: WorkflowRun[]; total: number } {
 		return this.store.getRuns(opts);
 	}
 
