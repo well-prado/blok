@@ -1,0 +1,170 @@
+---
+title: "Workflow Registry"
+description: "Process-wide name → workflow lookup. Powers sub-workflow dispatch."
+icon: "book-open"
+---
+
+The `WorkflowRegistry` is a singleton that maps workflow `name:` →
+definition. The [sub-workflow primitive](/d/composition/sub-workflows)
+calls into it at run time to look up the child to invoke.
+
+For most authors this is invisible — triggers register workflows
+automatically at boot. The registry surfaces explicitly when:
+
+- You want to compose workflows in unit tests.
+- You're building a custom trigger that should expose its workflows as
+  sub-workflow targets.
+- You see a workflow-name collision error at startup.
+
+## Auto-registration
+
+The HTTP trigger registers every scanned workflow on boot via
+`buildFileBasedRoutes()`. Each workflow file's exported definition
+lands in the registry under its `name:` field. A boot log line
+confirms:
+
+```
+[blok] workflow registry — N workflow(s) callable as sub-workflow
+```
+
+Future trigger types (worker, cron) feed the same registry. The
+lookup is decoupled from any particular trigger.
+
+## API
+
+```ts
+import { WorkflowRegistry, type RegisteredWorkflow } from "@blokjs/runner";
+
+const registry = WorkflowRegistry.getInstance();
+
+// Inspect what's registered
+registry.list();              // → RegisteredWorkflow[]
+registry.has("send-email");   // → boolean
+registry.get("send-email");   // → RegisteredWorkflow | undefined
+
+// Manual registration (rare — usually triggers do this)
+registry.register({
+  name: "send-email",
+  source: "/path/to/file.ts",     // or "<inline>" for builder-constructed
+  workflow: definition,
+});
+
+// Bulk register; stops on first collision
+registry.registerAll([
+  { name: "a", source: "...", workflow: defA },
+  { name: "b", source: "...", workflow: defB },
+]);
+
+// Drop everything (HMR / test cleanup)
+registry.clear();
+```
+
+### `RegisteredWorkflow` shape
+
+<ParamField path="name" type="string" required>
+  The workflow's `name:` field. The lookup key.
+</ParamField>
+
+<ParamField path="source" type="string" required>
+  Filesystem path of the source file, or `"<inline>"` for
+  builder-constructed workflows.
+</ParamField>
+
+<ParamField path="workflow" type="unknown" required>
+  Raw workflow object, pre-normalization. The runner re-runs it
+  through the normalizer when it materializes the child Configuration.
+</ParamField>
+
+### Singleton lifecycle
+
+The registry is a process-wide singleton.
+`WorkflowRegistry.getInstance()` always returns the same instance. For
+test isolation, `WorkflowRegistry.resetInstance()` drops the singleton
+so the next call starts fresh.
+
+## Collision rule
+
+`register()` throws when a workflow with the same `name` is already
+registered from a different `source`. Re-registration of the same
+`(name, source)` pair is a no-op — this makes HMR-style "scan, clear,
+re-register" cycles work without false positives.
+
+```
+[blok] WorkflowRegistry: workflow name collision —
+"checkout" is already registered from "/app/triggers/http/src/workflows/v1/checkout.ts";
+cannot also register from "/app/triggers/http/src/workflows/v2/checkout.ts".
+Workflow names must be unique across the process.
+```
+
+If you hit this, rename one of the workflows. The registry is
+strict-by-default — silent override would mask the wrong workflow
+being called from a sub-workflow step.
+
+## HMR pattern
+
+Triggers that re-scan workflow files on change should:
+
+```ts
+const registry = WorkflowRegistry.getInstance();
+registry.clear();
+registry.registerAll(scannedEntries);
+```
+
+The HTTP trigger does exactly this in `buildFileBasedRoutes()`. Stale
+entries from a renamed or deleted file don't survive a re-scan.
+
+## Manual registration in tests
+
+When testing a workflow that contains a sub-workflow step, register
+the child workflow before invoking the parent:
+
+```ts
+import { WorkflowRegistry } from "@blokjs/runner";
+
+beforeEach(() => {
+  WorkflowRegistry.resetInstance();
+  WorkflowRegistry.getInstance().register({
+    name: "send-receipt-email",
+    source: "<inline>",
+    workflow: childWorkflowDef,
+  });
+});
+```
+
+`resetInstance()` is the safest way to start each test from a clean
+state — no leakage from prior tests' registrations.
+
+## Sub-runs lookup
+
+Once parent and child runs exist, you can fetch the child runs of a
+given parent:
+
+```bash
+curl http://localhost:4000/__blok/runs/<parentRunId>/subruns
+```
+
+Returns child runs sorted oldest-first. Empty array on miss; 404 only
+when the parent itself doesn't exist. See
+[trace storage](/d/reference/trace-storage) for the full HTTP API.
+
+## What's not in the registry
+
+- **HTTP route table.** Routes are keyed on `(method, path)` and
+  managed by the trigger. The registry is keyed on `name:`.
+- **Sub-workflow inputs.** The registry only maps name → definition;
+  the parent step's `inputs` are passed via `ctx.request.body` at
+  dispatch time.
+- **Workflow versioning.** `subworkflow: "X@1.2.0"` is not supported —
+  workflow names are static today.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    The primary consumer.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The `/__blok/runs/:runId/subruns` endpoint and the `parentRunId`
+    field.
+  </Card>
+</Columns>

@@ -37,6 +37,27 @@
 						"pages": ["d/fundamentals/blok-concept"]
 					},
 					{
+						"group": "Reliability",
+						"pages": [
+							"d/reliability/overview",
+							"d/reliability/idempotency",
+							"d/reliability/retry",
+							"d/reliability/replay"
+						]
+					},
+					{
+						"group": "Composition",
+						"pages": ["d/composition/sub-workflows"]
+					},
+					{
+						"group": "Reference",
+						"pages": [
+							"d/reference/v2-step-shapes",
+							"d/reference/trace-storage",
+							"d/reference/workflow-registry"
+						]
+					},
+					{
 						"group": "CLI",
 						"pages": [
 							"d/cli/overview",

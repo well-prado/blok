@@ -1,0 +1,395 @@
+---
+title: "Sub-workflows"
+description: "Invoke another named workflow as a step. Function-call semantics, with full support for caching, retry, and replay."
+icon: "git-branch"
+---
+
+import { StudioRunHeader, StudioStepRail, StudioSubRunsStrip } from "/snippets/studio-mocks.jsx";
+
+A sub-workflow step invokes another named workflow as if calling a
+function. The parent step blocks until the child completes, the
+child's `ctx.response` becomes the parent step's output, and the
+child's full trace nests under the parent in Studio.
+
+This is the Tier 2 composition primitive — pair it with
+[idempotent caching](/d/reliability/idempotency) and
+[retry](/d/reliability/retry) and a sub-workflow becomes a cacheable,
+retriable, replayable unit of work.
+
+## Quickstart
+
+The child workflow is just a normal v2 workflow. Its `name:` field is
+the public identifier other workflows reference.
+
+<CodeGroup>
+```ts triggers/http/src/workflows/send-receipt-email.ts
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "send-receipt-email",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/internal/send-receipt" } },
+  steps: [
+    {
+      id: "send",
+      use: "@blokjs/sendgrid",
+      inputs: {
+        to: $.req.body.email,
+        body: $.req.body.body,
+      },
+    },
+    {
+      id: "respond",
+      use: "@blokjs/respond",
+      inputs: {
+        body: {
+          messageId: $.state.send.id,
+          sentAt: $.state.send.timestamp,
+        },
+      },
+    },
+  ],
+});
+```
+
+```ts triggers/http/src/workflows/checkout.ts
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "checkout",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/checkout" } },
+  steps: [
+    {
+      id: "charge",
+      use: "@blokjs/stripe-charge",
+      inputs: { amount: $.req.body.amount, card: $.req.body.card },
+    },
+    {
+      id: "send-receipt",
+      subworkflow: "send-receipt-email",
+      inputs: {
+        email: $.req.body.email,
+        body: $.state.charge.receipt,
+      },
+    },
+  ],
+});
+```
+</CodeGroup>
+
+The parent's `inputs` become the child's `ctx.request.body`. The child
+reads them via `$.req.body.<key>` exactly as if it had been
+HTTP-triggered. The child's `ctx.response` lands on the parent's
+`state["send-receipt"]`.
+
+## Field reference
+
+<ParamField path="id" type="string" required>
+  Stable identifier. The child's response lands at `$.state[id]`.
+</ParamField>
+
+<ParamField path="subworkflow" type="string" required>
+  Name of the workflow to invoke. Must match a `name:` field registered
+  in the [Workflow Registry](/d/reference/workflow-registry).
+</ParamField>
+
+<ParamField path="inputs" type="Record<string, unknown>">
+  Inputs passed to the child as `ctx.request.body`. May contain
+  `$`-proxy refs.
+</ParamField>
+
+<ParamField path="wait" type="boolean" default="true">
+  Block until the child completes. `wait: false` (fire-and-forget) is
+  rejected at workflow load — planned for a follow-up release.
+</ParamField>
+
+<ParamField path="as / spread / ephemeral / active / stop">
+  Identical semantics to a regular step. See
+  [v2 step shapes](/d/reference/v2-step-shapes).
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Cache the **whole** sub-workflow's result. Read the warning below
+  before using on side-effect-bearing children.
+</ParamField>
+
+<ParamField path="idempotencyKeyTTL" type="number" default="86400000">
+  Cache lifetime in milliseconds. Default 24h.
+</ParamField>
+
+<ParamField path="retry" type="RetryConfig">
+  Retry the entire sub-workflow on failure. Each retry creates a fresh
+  child run record under the same parent.
+</ParamField>
+
+## How dispatch works
+
+<Steps>
+  <Step title="Lookup">
+    Find the child workflow by name in the
+    [Workflow Registry](/d/reference/workflow-registry). The HTTP
+    trigger auto-registers every scanned workflow at boot.
+  </Step>
+  <Step title="Materialize">
+    Build a child `Configuration` and `Runner` from the registered
+    definition.
+  </Step>
+  <Step title="Isolate">
+    Build a fresh child `Context` — new `id`, fresh `state`, fresh
+    `response`, fresh `error`. Share `logger` / `env` / `eventLogger`
+    with the parent for log routing consistency.
+  </Step>
+  <Step title="Guard">
+    Increment the recursion depth counter and refuse to proceed past
+    `BLOK_MAX_SUBWORKFLOW_DEPTH` (default `10`).
+  </Step>
+  <Step title="Track">
+    Start a tracked child run with `parentRunId` and `parentNodeRunId`
+    pointing back at the invoking parent step.
+  </Step>
+  <Step title="Run">
+    Execute the child to completion (or failure). The child's
+    `ctx.response` becomes the parent step's output, applied through
+    the parent step's `as` / `spread` / `ephemeral` rules.
+  </Step>
+</Steps>
+
+If the child throws, the exception propagates to the parent step. The
+parent's `retry` (if set) catches it and tries again with a fresh
+child run.
+
+## Output shape
+
+The parent reads the child's response at `$.state[<step.id>]`. Whatever
+the child puts in `ctx.response` (typically via `@blokjs/respond` as
+the last step) becomes the parent's input.
+
+```ts
+// parent
+{
+  id: "fulfill",
+  subworkflow: "ship-order",
+  inputs: { orderId: $.state.charge.orderId },
+}
+
+// later in the same parent
+{
+  id: "log",
+  use: "@blokjs/postgres-write",
+  inputs: { row: { trackingId: $.state.fulfill.trackingId } },
+}
+```
+
+If the child author wants to expose multiple outputs at the top level
+of the parent's state, use `spread: true` on the parent step.
+
+## Composing with idempotency caching
+
+Setting `idempotencyKey` on a sub-workflow step caches the **entire**
+child workflow's result. On a cache hit, the child workflow is **never
+invoked** — no child run record, no child `NODE_STARTED` events, no
+side effects fire.
+
+```ts
+{
+  id: "callPipeline",
+  subworkflow: "generate-and-send-email",
+  inputs: { topic: $.req.body.topic, email: $.state.user.email },
+  idempotencyKey: $.req.body.requestId,
+  retry: { maxAttempts: 3 },
+}
+```
+
+This is the headline composition pattern AND the primary footgun:
+
+<Warning>
+**A cache hit on a sub-workflow step suppresses every side effect
+inside the child.** If the child sends an email, charges a card, or
+posts to Slack, an `idempotencyKey` on the parent step will skip those
+side effects entirely on cache hit.
+
+If your child has unconditional side effects, do not put
+`idempotencyKey` on the parent step. Instead, cache the individual
+pure-compute steps inside the child (LLM calls, fetches, transforms)
+so the side effects fire every invocation while expensive computation
+gets reused.
+</Warning>
+
+When the child is purely deterministic (LLM call → transform → return),
+caching the whole sub-workflow is the right move. When the child sends
+emails or makes payments, cache inside it instead.
+
+## Composing with retry
+
+`retry` on a sub-workflow step retries the whole child on failure.
+Each retry creates a fresh child run record under the same parent — so
+Studio's "sub-runs" strip on the parent shows N sequential attempts.
+
+The retry budget includes child execution time, so a 30-second child
+with `maxAttempts: 3` can run for ~90 seconds plus backoff before
+failing terminally.
+
+## Composing with replay
+
+[Replaying](/d/reliability/replay) the parent run starts a fresh
+parent run with `replayOf` set. Each sub-workflow step in the replayed
+parent either:
+
+- **Hits the cache** (when `idempotencyKey` is set and the entry hasn't
+  expired) — child workflow does not run again.
+- **Misses the cache** — child runs fresh and gets a new `parentRunId`
+  pointing at the new parent run.
+
+Sub-run lineage on the new parent is independent of the original —
+clean slate, picks up code changes everywhere caching didn't apply.
+
+## Recursion guard
+
+Sub-workflows can themselves invoke sub-workflows. Depth is tracked on
+the child's ctx and capped at `10` by default.
+
+```bash
+# Override when intentional:
+BLOK_MAX_SUBWORKFLOW_DEPTH=20 bun run dev
+```
+
+When the cap is exceeded, the runner throws:
+
+```
+[blok] Sub-workflow recursion limit exceeded (depth 11 > 10).
+Likely a cycle: workflow "alpha" called sub-workflow "beta" too deep.
+Bump via BLOK_MAX_SUBWORKFLOW_DEPTH if intentional.
+```
+
+This is a hard fail — workflows form an acyclic call graph by default.
+
+## Studio surface
+
+The parent run header shows a "sub-runs" strip with each child
+clickable for drill-through. The step rail shows a `↳ sub` indicator
+on the invoking step:
+
+<StudioRunHeader
+  workflowName="checkout"
+  runId="run_2bdc89e1f3"
+  status="completed"
+  durationMs={3892}
+  triggerSummary="POST /checkout"
+  startedAt="2026-05-03 11:14:02"
+  nodeCount={2}
+  completedNodes={2}
+  showReplayButton={true}
+  subRuns={[
+    { id: "run_a91c2fee03", workflowName: "send-receipt-email", status: "completed" },
+  ]}
+/>
+
+<StudioStepRail
+  activeIndex={1}
+  steps={[
+    { id: "1", name: "charge", status: "completed", durationMs: 412 },
+    { id: "2", name: "send-receipt", status: "completed", subworkflow: true, durationMs: 3480 },
+  ]}
+/>
+
+The child run carries a "called from #..." breadcrumb pointing back at
+the parent:
+
+<StudioRunHeader
+  workflowName="send-receipt-email"
+  runId="run_a91c2fee03"
+  status="completed"
+  durationMs={3480}
+  triggerSummary="checkout → send-receipt-email"
+  startedAt="2026-05-03 11:14:03"
+  nodeCount={2}
+  completedNodes={2}
+  parentRunId="run_2bdc89e1f3"
+  showReplayButton={false}
+/>
+
+When a parent invokes multiple children sequentially:
+
+<StudioSubRunsStrip
+  subRuns={[
+    { id: "run_a91c2fee03", workflowName: "validate-payment", status: "completed" },
+    { id: "run_b73e44219c", workflowName: "send-receipt-email", status: "completed" },
+    { id: "run_c552fa018e", workflowName: "update-inventory", status: "running" },
+  ]}
+/>
+
+Click-through navigation, not inline embedding — each sub-run gets its
+own full detail page.
+
+## Workflow discoverability
+
+By default, every workflow under the HTTP trigger's scanned directory
+is auto-registered when `buildFileBasedRoutes()` runs. The trigger
+logs:
+
+```
+[blok] workflow registry — N workflow(s) callable as sub-workflow
+```
+
+If two workflows share the same `name:` field from different sources,
+the registry throws at startup. Rename one. See the
+[registry reference](/d/reference/workflow-registry) for manual
+registration and HMR notes.
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Caching a sub-workflow that sends emails">
+    See the warning above. Cache inside the child, not at the parent step.
+  </Accordion>
+  <Accordion title="Forgetting that the child reads from req.body, not state">
+    The parent's `inputs` become `request.body` for the child. Inside
+    the child, use `$.req.body.foo`, not `$.state.foo` (parent state
+    isn't visible).
+  </Accordion>
+  <Accordion title="Recursion through a shared utility workflow">
+    If `validate` calls `lookup-user` which calls `validate`, you'll
+    hit the depth cap. Refactor the utility into a non-sub-workflow
+    node.
+  </Accordion>
+  <Accordion title="Workflow name collisions">
+    The registry is strict. If you accidentally give two workflows the
+    same `name:`, startup fails fast — fix the name rather than try to
+    work around it.
+  </Accordion>
+</AccordionGroup>
+
+## What's not yet supported
+
+- **`wait: false` (fire-and-forget).** Schema rejects with a clear
+  deferred-feature error. Planned for a follow-up release.
+- **Cross-process dispatch.** The current implementation is in-process.
+  Horizontal-scale users with strict isolation needs (HTTP self-call or
+  worker queue dispatch) are tracked as a follow-up.
+- **Polymorphic workflow names** (`subworkflow: $.req.body.kind`).
+  Workflow names are static today; runtime resolution is deferred.
+- **Durable Postgres lineage.** The PG run store currently delegates
+  parent/child lineage to its in-memory layer. Cross-process and
+  cross-restart lineage doesn't survive on PG yet.
+
+<Tip>
+A visual workflow editor (React Flow, like n8n) is on the roadmap for
+Studio. It will render parent + child relationships as a graph. Until
+then, the Sub-runs strip and the step rail give you the same drill-down
+through navigation.
+</Tip>
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Workflow Registry" icon="book-open" href="/d/reference/workflow-registry">
+    Name resolution and manual registration.
+  </Card>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Composes with sub-workflows; read the footgun warning.
+  </Card>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    Retries the whole child.
+  </Card>
+</Columns>

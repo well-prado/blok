@@ -1,0 +1,242 @@
+---
+title: "Per-step retry"
+description: "Retry a step with capped exponential backoff on transient failure."
+icon: "rotate-cw"
+---
+
+import { StudioStepRail, StudioAttemptsDisclosure, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `retry` on any v2 step and the runner wraps `step.process()` in a
+retry loop with capped exponential backoff. Per-attempt failures emit
+<StudioEventBadge type="NODE_ATTEMPT_FAILED" /> events; the terminal
+<StudioEventBadge type="NODE_FAILED" /> only fires after all attempts
+are exhausted.
+
+The shape mirrors Trigger.dev's `retry` config so authors moving
+between platforms read familiar semantics.
+
+## Quickstart
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Fetch with retry",
+  version: "1.0.0",
+  trigger: { http: { method: "GET", path: "/users/:id" } },
+  steps: [
+    {
+      id: "fetch",
+      use: "@blokjs/api-call",
+      inputs: { url: "https://flaky.example.com/users/" },
+      retry: {
+        maxAttempts: 3,
+        minTimeoutInMs: 500,
+        maxTimeoutInMs: 10_000,
+        factor: 2,
+      },
+    },
+    {
+      id: "respond",
+      use: "@blokjs/respond",
+      inputs: { body: $.state.fetch },
+    },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "Fetch with retry",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "GET", "path": "/users/:id" } },
+  "steps": [
+    {
+      "id": "fetch",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://flaky.example.com/users/" },
+      "retry": {
+        "maxAttempts": 3,
+        "minTimeoutInMs": 500,
+        "maxTimeoutInMs": 10000,
+        "factor": 2
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/respond",
+      "inputs": { "body": "$.state.fetch" }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+## Field reference
+
+<ParamField path="maxAttempts" type="integer (1-20)" required>
+  Total attempts including the first run. `1` means no retry. Capped at `20`.
+</ParamField>
+
+<ParamField path="minTimeoutInMs" type="integer (>= 0)" default="1000">
+  Initial backoff before the second attempt.
+</ParamField>
+
+<ParamField path="maxTimeoutInMs" type="integer (>= 0)" default="30000">
+  Cap on the backoff between attempts.
+</ParamField>
+
+<ParamField path="factor" type="number (>= 1)" default="2">
+  Exponential growth factor.
+</ParamField>
+
+A `retry` block is rejected at workflow load time when `minTimeoutInMs >
+maxTimeoutInMs`.
+
+The default behavior with `retry` omitted is `maxAttempts: 1` — the
+step runs at most once, exactly as it did before retry was introduced.
+
+## Backoff formula
+
+```
+delay(attempt) = min(maxTimeoutInMs, minTimeoutInMs * factor^(attempt - 1))
+```
+
+With the defaults (`min=1000`, `max=30000`, `factor=2`):
+
+| Attempt | Delay before | Cumulative delay |
+|---|---|---|
+| 1 | 0 (first run) | 0 |
+| 2 | 1000 ms | 1000 ms |
+| 3 | 2000 ms | 3000 ms |
+| 4 | 4000 ms | 7000 ms |
+| 5 | 8000 ms | 15000 ms |
+| 6+ | clipped to 30000 ms | grows linearly past that |
+
+No jitter is added, matching Trigger.dev's default.
+
+## What gets retried
+
+Both **thrown errors** and **soft errors** participate in retry. A soft
+error is when `step.process()` returns successfully but populates
+`ctx.response.error`; the runner treats this identically to a thrown
+exception so authors get uniform retry semantics across nodes that
+throw and nodes that report errors via the response envelope.
+
+Failed attempts never cache. When a step has both `idempotencyKey` and
+`retry`, the cache is written only after a successful attempt. A step
+that recovers on attempt 3 caches the success.
+
+## Per-attempt observability
+
+Each failed attempt:
+
+- Emits a <StudioEventBadge type="NODE_ATTEMPT_FAILED" /> event with
+  `{ attempt, error }`.
+- Appends to the node's `attempts[]` array on the trace record (capped
+  at the most-recent 10 entries).
+- Shows up in the trace store and in Studio's attempts disclosure.
+
+The terminal <StudioEventBadge type="NODE_FAILED" /> fires only after
+the final attempt fails.
+
+## Studio surface
+
+A `↻N` indicator appears next to the step name in the rail when at
+least one attempt failed before the outcome:
+
+<StudioStepRail
+  activeIndex={0}
+  steps={[
+    { id: "1", name: "fetch", status: "completed", attempts: 2, durationMs: 3142 },
+    { id: "2", name: "respond", status: "completed", durationMs: 6 },
+  ]}
+/>
+
+Open the step detail to see the attempts disclosure with per-attempt
+timestamps and error messages:
+
+<StudioAttemptsDisclosure
+  attempts={[
+    { attempt: 1, timestamp: "10:42:15.001", error: "ECONNRESET — upstream reset connection" },
+    { attempt: 2, timestamp: "10:42:16.512", error: "503 Service Unavailable" },
+  ]}
+/>
+
+## HTTP-trigger gotcha
+
+The total retry budget can exceed the HTTP client's request timeout.
+With `maxAttempts: 5`, `minTimeoutInMs: 2000`, `maxTimeoutInMs: 60000`,
+`factor: 3`, the worst-case wall-clock delay alone is over a minute
+before the step has even completed an attempt. The synchronous HTTP
+request handler blocks that whole time.
+
+<Note>
+For long retry budgets, prefer worker triggers (NATS, BullMQ) over
+HTTP. HTTP triggers should keep retry counts low (typically 1–3 with
+short timeouts) so the response stays within the client's expectation.
+</Note>
+
+## Composition with idempotency caching
+
+A cache hit short-circuits before the retry loop runs. With both fields
+set:
+
+<Steps>
+  <Step title="Cache check">
+    Hit → return cached, skip retry entirely.
+  </Step>
+  <Step title="Cache miss">
+    Enter the retry loop.
+  </Step>
+  <Step title="Successful attempt">
+    Write cache, persist, advance to the next step.
+  </Step>
+  <Step title="Exhaustion">
+    Emit <StudioEventBadge type="NODE_FAILED" />. No cache write.
+  </Step>
+</Steps>
+
+See the [idempotency page](/d/reliability/idempotency#composition-with-retry).
+
+## Composition with replay
+
+[Replay](/d/reliability/replay) re-fires the trigger with the captured
+payload. The new run runs the current step code with whatever retry
+config is currently authored. If you've fixed the retry config (e.g.
+raised `maxAttempts` from 1 to 3), the replay benefits from the new
+config.
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Setting maxAttempts very high without lowering maxTimeoutInMs">
+    A long backoff cap means each retry takes a long time to start,
+    blowing through HTTP timeouts.
+  </Accordion>
+  <Accordion title="Retrying on errors that aren't transient">
+    Validation errors, 4xx responses, and bad-input errors don't get
+    better with time. Filter them inside the node so the retry only
+    fires on truly transient failures.
+  </Accordion>
+  <Accordion title="Soft errors retry too">
+    A returned `error` (not just a thrown exception) participates in
+    retry. If a node decides to fail gracefully and retry would make
+    things worse, return success and surface the failure another way.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Pair with retry to make safe reruns cheap.
+  </Card>
+  <Card title="Replay" icon="history" href="/d/reliability/replay">
+    Re-fire past runs with new code and retry config.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    The full field list.
+  </Card>
+</Columns>

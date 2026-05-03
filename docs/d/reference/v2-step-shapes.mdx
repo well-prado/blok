@@ -1,0 +1,302 @@
+---
+title: "v2 step shape reference"
+description: "Complete field reference for regular, branch, and sub-workflow steps."
+icon: "braces"
+---
+
+A v2 workflow's `steps[]` array is a discriminated union of three shapes:
+
+<Columns cols={3}>
+  <Card title="Regular step" icon="square-function">
+    Invokes a node with inputs. The 95% case.
+  </Card>
+  <Card title="Branch step" icon="git-fork">
+    `branch({ when, then, else })`. Conditional sub-pipelines.
+  </Card>
+  <Card title="Sub-workflow step" icon="git-branch">
+    `subworkflow: "<name>"`. Invokes another named workflow.
+  </Card>
+</Columns>
+
+The discriminator is which key is present:
+
+| Key present | Step kind |
+|---|---|
+| `branch: {...}` | Branch step |
+| `subworkflow: "..."` | Sub-workflow step |
+| (otherwise) | Regular step |
+
+## Regular step
+
+Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/StepOpts.ts) (`V2RegularStepSchema`).
+
+### Identity
+
+<ParamField path="id" type="string (min 1)" required>
+  Stable identifier. Other steps reference output as `$.state[id]`.
+</ParamField>
+
+<ParamField path="use" type="string (min 1)" required>
+  Node reference (e.g. `@blokjs/api-call`, `my-custom-node`). Type is
+  inferred from this when `type` is not set.
+</ParamField>
+
+<ParamField path="type" type="NodeType enum">
+  `"module"` / `"local"` / `"runtime.{python3,nodejs,bun,go,java,rust,php,csharp,ruby,docker,wasm}"`.
+  Inferred from `use` when omitted (`@blokjs/*` → `"module"`; runtime.*
+  prefixes are explicit).
+</ParamField>
+
+<ParamField path="runtime" type="RuntimeKind enum">
+  Optional runtime hint. Most authors don't need this — `type` already
+  encodes it.
+</ParamField>
+
+### Inputs
+
+<ParamField path="inputs" type="Record<string, unknown>">
+  Inputs passed to the node. May contain `$`-proxy refs (e.g.
+  `$.state.foo`, `$.req.body.id`) or `js/...` expressions for runtime
+  evaluation.
+</ParamField>
+
+### Persistence
+
+<ParamField path="as" type="string (min 1)" default="id">
+  Alternative state key. The output is stored at `state[as]` instead of
+  `state[id]`.
+</ParamField>
+
+<ParamField path="spread" type="boolean" default="false">
+  If true, the result.data object's top-level keys are shallow-merged
+  into `state`. Mutually exclusive with `as`.
+</ParamField>
+
+<ParamField path="ephemeral" type="boolean" default="false">
+  If true, the step's output is not stored in state. Only `ctx.prev`
+  carries it to the next step.
+</ParamField>
+
+`as` and `spread` together fail at workflow load time with
+`` "`as` and `spread` are mutually exclusive — pick one." ``.
+
+### Reliability (Tier 1)
+
+<ParamField path="idempotencyKey" type="string">
+  Cache key — literal or `$`-proxy. See
+  [idempotent step caching](/d/reliability/idempotency).
+</ParamField>
+
+<ParamField path="idempotencyKeyTTL" type="integer ms (>= 0)" default="86400000">
+  Cache lifetime. `0` immediately expires.
+</ParamField>
+
+<ParamField path="retry" type="RetryConfig">
+  Retry config. See [per-step retry](/d/reliability/retry).
+</ParamField>
+
+### Control
+
+<ParamField path="active" type="boolean" default="true">
+  If false, the step is skipped at runtime.
+</ParamField>
+
+<ParamField path="stop" type="boolean" default="false">
+  If true, the workflow halts after this step completes.
+</ParamField>
+
+<ParamField path="stream_logs" type="boolean">
+  Per-step opt-in for live log streaming. Inherits `BLOK_STREAM_LOGS`.
+</ParamField>
+
+### Legacy
+
+<ParamField path="set_var" type="boolean">
+  **Deprecated.** v2 default-stores. `true` is a no-op; `false` is
+  normalized to `ephemeral: true`.
+</ParamField>
+
+## Branch step
+
+Authoritative source: `V2BranchStepSchema`.
+
+```ts
+{
+  id: "route",
+  branch: {
+    when: '$.req.method === "POST"',
+    then: [
+      { id: "create", use: "...", inputs: {} },
+    ],
+    else: [
+      { id: "read",  use: "...", inputs: {} },
+    ],
+  },
+  active: true,
+  stop: false,
+}
+```
+
+<ParamField path="id" type="string (min 1)" required>
+  Stable identifier for the branch. Visible in traces.
+</ParamField>
+
+<ParamField path="branch.when" type="string" required>
+  JavaScript expression. Truthy → run `then`; falsy → run `else`.
+  `$`-proxy expressions compile to strings at the call site (e.g.
+  `$.req.query.kind === "true"`).
+</ParamField>
+
+<ParamField path="branch.then" type="V2Step[]" required>
+  Steps to execute when `when` is truthy.
+</ParamField>
+
+<ParamField path="branch.else" type="V2Step[]">
+  Steps to execute when `when` is falsy.
+</ParamField>
+
+<ParamField path="active" type="boolean" default="true">
+  If false, the entire branch is skipped.
+</ParamField>
+
+<ParamField path="stop" type="boolean" default="false">
+  If true, the workflow halts after this step.
+</ParamField>
+
+For equality comparisons in `when`, use a string literal:
+`'$.req.method === "POST"'`. JavaScript's `===` operator can't be
+intercepted by the proxy.
+
+## Sub-workflow step
+
+Authoritative source: `V2SubworkflowStepSchema`. See
+[sub-workflows](/d/composition/sub-workflows) for the full author guide.
+
+<ParamField path="id" type="string (min 1)" required>
+  Stable identifier. The child's response lands at `$.state[id]`.
+</ParamField>
+
+<ParamField path="subworkflow" type="string (min 1)" required>
+  Name of the workflow to invoke. Must match a `name:` field
+  registered in the [Workflow Registry](/d/reference/workflow-registry).
+</ParamField>
+
+<ParamField path="inputs" type="Record<string, unknown>">
+  Inputs passed to the child as `ctx.request.body`.
+</ParamField>
+
+<ParamField path="wait" type="boolean" default="true">
+  If true (default), parent step blocks until child completes.
+  `wait: false` is rejected at load time — planned for a follow-up
+  release.
+</ParamField>
+
+<ParamField path="as / spread / ephemeral / active / stop">
+  Persistence and control knobs apply identically to regular steps.
+</ParamField>
+
+<ParamField path="idempotencyKey" type="string">
+  Caches the **whole** sub-workflow's result. Read the
+  [composition warning](/d/composition/sub-workflows#composing-with-idempotency-caching)
+  before using on side-effect-bearing children.
+</ParamField>
+
+<ParamField path="idempotencyKeyTTL" type="integer ms (>= 0)" default="86400000">
+  Cache lifetime. Default 24h.
+</ParamField>
+
+<ParamField path="retry" type="RetryConfig">
+  Retries the whole child on failure; each retry creates a fresh child
+  run record under the same parent.
+</ParamField>
+
+`as` and `spread` are mutually exclusive (same rule as regular steps).
+`wait: false` fails workflow load with a clear deferred-feature error.
+
+## RetryConfig
+
+Authoritative source: `RetryConfigSchema`.
+
+```ts
+{
+  maxAttempts: 3,           // required, 1..20
+  minTimeoutInMs: 500,      // optional, default 1000
+  maxTimeoutInMs: 10000,    // optional, default 30000
+  factor: 2,                // optional, default 2
+}
+```
+
+<ParamField path="maxAttempts" type="integer (1-20)" required>
+  Total attempts including the first run. `1` means no retry.
+</ParamField>
+
+<ParamField path="minTimeoutInMs" type="integer (>= 0)" default="1000">
+  Initial backoff delay before the second attempt.
+</ParamField>
+
+<ParamField path="maxTimeoutInMs" type="integer (>= 0)" default="30000">
+  Cap on the backoff delay between attempts.
+</ParamField>
+
+<ParamField path="factor" type="number (>= 1)" default="2">
+  Exponential backoff factor: `delay = min(maxTimeout, minTimeout * factor^(attempt-1))`.
+</ParamField>
+
+A `RetryConfig` with `minTimeoutInMs > maxTimeoutInMs` fails workflow
+load with `` "`minTimeoutInMs` must be <= `maxTimeoutInMs`." ``.
+
+## Discriminator semantics
+
+The v2 step union is evaluated in this order:
+`[V2BranchStepSchema, V2SubworkflowStepSchema, V2RegularStepSchema]`.
+
+A step that includes both `branch` and `subworkflow` keys is parsed as
+a branch and the `subworkflow` field is ignored — don't mix them. The
+schema validators are strict on the keys present, so extraneous fields
+trigger validation errors at workflow load time (except in the few
+legacy aliases like `set_var`).
+
+## Type guards (TypeScript only)
+
+Available from `@blokjs/helper`:
+
+```ts
+import { isBranchStep, isSubworkflowStep, type V2Step } from "@blokjs/helper";
+
+function describe(step: V2Step): string {
+  if (isBranchStep(step)) return "branch";
+  if (isSubworkflowStep(step)) return "sub-workflow";
+  return "regular";
+}
+```
+
+## JSON Schema
+
+The full machine-readable schema lives at
+[`core/workflow-helper/dist/workflow.schema.json`](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/dist/workflow.schema.json),
+regenerated on every `bun run build` of `@blokjs/workflow-helper`. The
+Blok VS Code extension wires this schema into editor IntelliSense for
+both TS and JSON workflows — every field's `.describe(...)` text shows
+on hover.
+
+To regenerate manually:
+
+```bash
+cd core/workflow-helper
+bun run build
+# → writes dist/workflow.schema.json
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Workflows" icon="workflow" href="/d/introduction/workflows">
+    The high-level v2 workflow guide.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    How step data is persisted.
+  </Card>
+  <Card title="Workflow Registry" icon="book-open" href="/d/reference/workflow-registry">
+    Sub-workflow name lookup.
+  </Card>
+</Columns>

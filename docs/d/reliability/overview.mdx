@@ -1,0 +1,83 @@
+---
+title: "Reliability"
+description: "How idempotent caching, per-step retry, and replay compose into a safe-rerun story for Blok workflows."
+icon: "shield-check"
+---
+
+Blok ships three opt-in reliability primitives on every v2 step:
+
+<Columns cols={3}>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Cache a step's result against a key. Same key → cached result. Step
+    never runs again until TTL expires. For LLM calls, paid APIs,
+    anything you don't want billed twice.
+  </Card>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    Wrap `step.process()` in a retry loop with capped exponential
+    backoff. For transient failures: flaky upstreams, rate-limited APIs,
+    jittery network.
+  </Card>
+  <Card title="Replay" icon="history" href="/d/reliability/replay">
+    Re-trigger any past run with its captured payload. Click in Studio
+    or POST to `/__blok/runs/:id/replay`. For debugging — fix a node
+    and run against the original input.
+  </Card>
+</Columns>
+
+All three are independent and zero-overhead when omitted. They also
+compose: caching layers above persistence, retry wraps execution, and
+replay re-fires the trigger so caches and code changes both apply.
+
+## The mental model
+
+Workflow steps already auto-persist their output to `ctx.state[id]`
+(the v2 default-store rule). The reliability primitives bolt on around
+that:
+
+```
+step starts
+  ├── cache check (idempotencyKey?)
+  │     └── HIT → replay cached data through persistence rules → next step
+  │     └── MISS → fall through
+  │
+  ├── retry loop (1..maxAttempts)
+  │     ├── step.process(ctx, step)
+  │     │     ├── success → cache write → persist → next step
+  │     │     └── error → backoff and try again
+  │     └── final attempt fails → NODE_FAILED → propagate
+```
+
+Each layer is a separate decision the step author makes. A step with
+neither `idempotencyKey` nor `retry` runs through the same code path as
+before — the extra fields cost nothing when absent.
+
+## Pairing the primitives
+
+<Tip>
+**Cost-sensitive AI pipeline.** Cache the LLM step on `requestId`; let
+the storage step retry on transient DB errors. A client retry of the
+parent HTTP call hits the cache on the LLM step and only re-runs the
+storage write.
+</Tip>
+
+<Tip>
+**Debugging a production failure.** Hit replay from Studio. The
+original payload re-fires through the current code. Cached steps
+short-circuit; the broken step runs fresh against the new code.
+</Tip>
+
+<Tip>
+**Multi-step pipeline with one fragile dependency.** Add `retry` to
+just the fragile step. The rest of the workflow stays simple.
+</Tip>
+
+## What's not here
+
+- **Long pauses** (`wait.for("3 days")`) — needs checkpoint/resume; out
+  of scope.
+- **Cross-process replay** — the replay endpoint dispatches in-process;
+  a multi-region replay needs an external trigger.
+- **Durable Postgres caches** — the SQLite store persists caches; the
+  Postgres store currently caches in-memory only.
+
+See each feature page for the full author surface and the field reference.

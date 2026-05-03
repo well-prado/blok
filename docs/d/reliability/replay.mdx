@@ -1,0 +1,142 @@
+---
+title: "Replay"
+description: "Re-fire any past run with its captured payload to debug against current code."
+icon: "history"
+---
+
+import { StudioRunHeader } from "/snippets/studio-mocks.jsx";
+
+Every HTTP-triggered run captures its payload. Replay re-dispatches
+that payload through the current code and produces a new trace, with
+explicit lineage back to the source run.
+
+Replay is a thin re-trigger — not a checkpoint resume. The new run
+starts from scratch. Combine replay with
+[idempotent caching](/d/reliability/idempotency) to skip expensive
+steps that already produced a stable answer while picking up code
+changes everywhere else.
+
+## From Studio
+
+Open the run detail page for a `completed`, `failed`, or `cancelled`
+run. Click **Replay**. A new run kicks off with the same payload as
+the original, runs through the current code, and links back via a
+"replay of #..." breadcrumb in the new run's header:
+
+<StudioRunHeader
+  workflowName="ai-content-pipeline"
+  runId="run_4f3a2c1b9e"
+  status="completed"
+  durationMs={2143}
+  triggerSummary="POST /generate"
+  startedAt="2026-05-03 10:42:15"
+  nodeCount={4}
+  completedNodes={4}
+  replayOf="run_8a92c4f01b9d"
+  showReplayButton={true}
+/>
+
+The button is hidden for `pending` and `running` runs to prevent
+accidental double-trigger. Power users can still curl the endpoint to
+fork an in-flight run.
+
+## From HTTP
+
+```bash
+# Re-trigger run abc123 with the same captured payload
+curl -X POST http://localhost:4000/__blok/runs/abc123/replay
+```
+
+```bash
+# Replay with payload override (any of method, path, headers, body work)
+curl -X POST http://localhost:4000/__blok/runs/abc123/replay \
+  -H 'Content-Type: application/json' \
+  -d '{"body": {"requestId": "fresh-key"}}'
+```
+
+Response shape:
+
+```json
+{
+  "newRunId": "run_xyz789",
+  "originalRunId": "abc123",
+  "workflowName": "AI content pipeline",
+  "replayOf": "abc123"
+}
+```
+
+## Lineage
+
+The replay endpoint adds an `X-Blok-Replay-Of: <originalRunId>` header
+to the dispatched request. The trigger reads that header and persists
+it as `WorkflowRun.replayOf` on the new run. Studio renders the
+breadcrumb on the new run that links back to the source.
+
+| Field on the new run | Value |
+|---|---|
+| `replayOf` | id of the source run |
+| `triggerType` | the original trigger type (`http`, etc.) |
+| `parentRunId` | unset — replay is not a sub-workflow invocation |
+
+## Pairing with caching
+
+The headline pattern: replay a failed AI-pipeline run after fixing the
+last step. The first six steps had `idempotencyKey: $.req.body.requestId`,
+hit the cache, and skip OpenAI charges entirely. Only the broken step
+runs against the new code.
+
+Without `idempotencyKey`, every step runs again. That's fine for cheap
+workflows, expensive for AI pipelines or paid APIs.
+
+## What replay is not
+
+- **Not a process resume.** The new run starts at step 1. There is no
+  "continue where the original failed."
+- **Not a checkpoint replay.** Blok does not snapshot in-memory state
+  mid-run; replay re-fires the trigger with the original payload only.
+- **Not idempotent by itself.** Replaying a workflow with a side-effect
+  step (sending an email, writing a row) will fire that side effect
+  again unless caching or external idempotency primitives prevent it.
+
+## Edge cases
+
+<AccordionGroup>
+  <Accordion title="Workflow no longer exists">
+    The endpoint returns the underlying trigger's 404 path. Restore the
+    workflow file or accept that historical runs of deleted workflows
+    can't replay.
+  </Accordion>
+  <Accordion title="Workflow schema changed">
+    Replay runs the current code with the original payload — that's the
+    point. If the schema is incompatible, errors surface on the new run
+    naturally.
+  </Accordion>
+  <Accordion title="Original is still running">
+    Replay just queues another run; it doesn't try to stop the original.
+  </Accordion>
+</AccordionGroup>
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Replaying side-effect runs">
+    A run that sent an email last time will send another on replay
+    unless protected by Blok's cache or the target system's idempotency
+    primitives.
+  </Accordion>
+  <Accordion title="Confusing replay with retry">
+    Retry happens inside a single run; replay creates a new run. They
+    compose, but they're different layers.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Pair with replay to make reruns cheap.
+  </Card>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    For transient-failure handling within one run.
+  </Card>
+</Columns>

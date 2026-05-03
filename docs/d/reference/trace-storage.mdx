@@ -1,0 +1,209 @@
+---
+title: "Trace storage"
+description: "How Blok records workflow runs, the event vocabulary, and the SQLite schema used by Blok Studio."
+icon: "database"
+---
+
+import { StudioEventTimeline, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Every workflow execution produces a trace. Blok records it through the
+`RunTracker` in `@blokjs/runner`, which writes to one of three stores:
+
+| Store | When | Durability |
+|---|---|---|
+| `SqliteRunStore` | default | persists to `.blok/runs.db` |
+| `InMemoryRunStore` | dev / tests | process-local |
+| `PostgresRunStore` | when configured | partial — see notes below |
+
+The same store backs the [idempotency cache](/d/reliability/idempotency)
+and the run lineage records used by
+[sub-workflows](/d/composition/sub-workflows) and
+[replay](/d/reliability/replay). Setting `BLOK_TRACE_ENABLED=false`
+disables the tracker — and as a side effect, the cache.
+
+## Run states
+
+| Status | Meaning |
+|---|---|
+| `pending` | Run started but no node has reached `running` yet. |
+| `running` | At least one node is executing. |
+| `completed` | All steps finished successfully. |
+| `failed` | A step failed terminally (after retry exhaustion, if configured). |
+| `cancelled` | Run was explicitly cancelled. |
+
+## Event vocabulary
+
+`RunEventType` is the full list of events a run can emit. Studio
+renders each with a label and color:
+
+<StudioEventTimeline
+  events={[
+    { timestamp: "10:42:15.001", type: "RUN_STARTED",    summary: "ai-content-pipeline · POST /generate" },
+    { timestamp: "10:42:15.012", type: "NODE_STARTED",   summary: "draft" },
+    { timestamp: "10:42:16.342", type: "NODE_COMPLETED", summary: "draft · 1.33s" },
+    { timestamp: "10:42:16.355", type: "NODE_STARTED",   summary: "review" },
+    { timestamp: "10:42:16.362", type: "NODE_CACHED",   summary: "review · cache hit from run_8a92c4" },
+    { timestamp: "10:42:16.401", type: "NODE_STARTED",   summary: "store" },
+    { timestamp: "10:42:16.504", type: "NODE_ATTEMPT_FAILED", summary: "store · attempt 1: ECONNRESET" },
+    { timestamp: "10:42:17.512", type: "NODE_COMPLETED", summary: "store · 1.11s after 1 attempt" },
+    { timestamp: "10:42:17.524", type: "RUN_COMPLETED",  summary: "ai-content-pipeline · 2.52s" },
+  ]}
+/>
+
+| Event | Fires when | Studio surface |
+|---|---|---|
+| <StudioEventBadge type="RUN_STARTED" /> | `tracker.startRun()` | run row appears |
+| <StudioEventBadge type="RUN_COMPLETED" /> | `tracker.completeRun()` | row turns green |
+| <StudioEventBadge type="RUN_FAILED" /> | `tracker.failRun()` | row turns red |
+| <StudioEventBadge type="NODE_STARTED" /> | `tracker.startNode()` | step appears in rail |
+| <StudioEventBadge type="NODE_COMPLETED" /> | `tracker.completeNode()` | step turns green |
+| <StudioEventBadge type="NODE_FAILED" /> | `tracker.failNode()` | step turns red |
+| <StudioEventBadge type="NODE_SKIPPED" /> | `tracker.skipNode()` | step shown skipped |
+| <StudioEventBadge type="NODE_PROGRESS" /> | streaming Progress frame | progress bar |
+| <StudioEventBadge type="NODE_PARTIAL_RESULT" /> | streaming PartialResult frame | live snapshot |
+| <StudioEventBadge type="NODE_CACHED" /> | `tracker.markNodeCached()` | CACHED badge + lineage banner |
+| <StudioEventBadge type="NODE_ATTEMPT_FAILED" /> | `tracker.recordNodeAttemptFailed()` | `↻N` indicator + attempts disclosure |
+| <StudioEventBadge type="VARS_UPDATED" /> | `tracker.updateVars()` | inspector update |
+| <StudioEventBadge type="LOG_ENTRY" /> | `tracker.addLog()` | log viewer line |
+
+`NODE_CACHED` and `NODE_ATTEMPT_FAILED` are the events Tier 1 added.
+Studio renders both as distinct visual states so SSE consumers can
+filter cleanly.
+
+## WorkflowRun fields
+
+Every run record carries:
+
+| Field | Description |
+|---|---|
+| `id` | Run id. |
+| `workflowName` | The workflow's `name:` field. |
+| `workflowPath` | Source file path. |
+| `triggerType` | `"http"`, `"worker"`, `"subworkflow"`, etc. |
+| `triggerSummary` | Human-readable summary (`"GET /users/:id"`, `"<parent> → <child>"`). |
+| `status` | One of the run states above. |
+| `startedAt` / `completedAt` | Timestamps. |
+| `replayOf` | Source run id when this run was created via [replay](/d/reliability/replay). |
+| `parentRunId` | Parent run id when this run was started by a [sub-workflow step](/d/composition/sub-workflows). |
+| `parentNodeRunId` | The specific NodeRun (sub-workflow step) inside the parent. |
+
+## NodeRun fields
+
+Each step within a run produces a `NodeRun`:
+
+| Field | Description |
+|---|---|
+| `id` | NodeRun id. |
+| `runId` | Parent WorkflowRun id. |
+| `nodeName` | Step `id`. |
+| `nodeType` | Step `type` (`"module"`, `"runtime.python3"`, `"subworkflow"`, etc.). |
+| `status` | `pending` / `running` / `completed` / `failed` / `skipped` / `cached`. |
+| `cached` | When set: `{ sourceRunId, sourceNodeRunId, cachedAt }` — points back at the run that produced the cached value. |
+| `attempts` | Per-attempt failures: `{ attempt, error, timestamp }[]`. Capped at the most-recent 10 entries. |
+
+## HTTP API
+
+Blok Studio reads from these. They're stable; agents and tooling can
+consume them directly.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /__blok/runs` | List of recent runs. |
+| `GET /__blok/runs/:runId` | Single run with its node runs. |
+| `GET /__blok/runs/:runId/events` | Event stream (SSE). |
+| `GET /__blok/runs/:runId/subruns` | Child runs from sub-workflow invocations, sorted oldest-first. Empty array on miss; 404 if the parent doesn't exist. |
+| `POST /__blok/runs/:runId/replay` | Re-fire the captured trigger payload. Optional body: `{ method?, path?, headers?, body? }`. Returns `{ newRunId, originalRunId, workflowName, replayOf }`. |
+
+## SQLite schema
+
+The default store keeps everything in `.blok/runs.db`. Migrations are
+additive — old databases are upgraded in place on first run after each
+release. Pre-existing rows get NULL on new columns, and the runner
+maps those back to `undefined` in the parsed types.
+
+| Version | Era | Adds |
+|---|---|---|
+| 1 | base | `workflow_runs`, `node_runs`, `run_events`, `log_entries` tables + indexes |
+| 2 | base | `dashboards` |
+| 3 | Phase 2.1 | `workflow_runs.environment` + index |
+| 4 | Tier 1 | `node_runs.cached_json`; new `idempotency_cache` table + `idx_idem_expires` |
+| 5 | Tier 1 | `node_runs.attempts_json`; `workflow_runs.replay_of` + index |
+| 6 | Tier 2 | `workflow_runs.parent_run_id`; `workflow_runs.parent_node_run_id`; `idx_runs_parent_run` |
+
+### `idempotency_cache` (migration v4)
+
+```sql
+CREATE TABLE IF NOT EXISTS idempotency_cache (
+  workflow_name TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  cached_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  source_run_id TEXT NOT NULL,
+  source_node_run_id TEXT NOT NULL,
+  PRIMARY KEY (workflow_name, step_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_idem_expires ON idempotency_cache(expires_at);
+```
+
+Expired entries are lazy-purged on read. The runner also exposes
+`purgeExpiredIdempotencyCache(now)` for periodic external cleanup if
+you want eager eviction.
+
+### Replay lineage (migration v5)
+
+```sql
+ALTER TABLE node_runs ADD COLUMN attempts_json TEXT;
+ALTER TABLE workflow_runs ADD COLUMN replay_of TEXT;
+CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of);
+```
+
+### Sub-workflow lineage (migration v6)
+
+```sql
+ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
+ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
+```
+
+## Postgres store — current limits
+
+The `PostgresRunStore` implementation delegates the new methods
+(`getRunsByParent`, idempotency cache reads/writes) to its in-memory
+layer. That means:
+
+- **Same-process hits work.** Idempotency caches survive within a
+  single process for the configured TTL.
+- **Cross-process hits do not.** Two processes running PG-backed Blok
+  don't share their caches yet.
+- **Cross-restart hits do not.** Restarting the process clears the cache.
+
+A durable PG schema is planned. Until then, prefer SQLite for
+production caching unless you can tolerate per-process cache state.
+
+## InMemory store
+
+Process-local `Map` for runs, node runs, events, idempotency cache,
+and log entries. Cleared on `clearAll()` and on process exit. Suitable
+for unit tests and dev.
+
+## Studio
+
+Open via `blokctl trace` or visit `/__blok` on the running trigger.
+The runs list and run-detail pages are the main consumers of the
+events and fields above.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    What produces these traces.
+  </Card>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Produces `NODE_CACHED` events.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Uses `parentRunId` and the `/subruns` endpoint.
+  </Card>
+</Columns>
