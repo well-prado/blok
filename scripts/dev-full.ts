@@ -485,6 +485,37 @@ async function main() {
 		}
 	}
 
+	// =========================================================================
+	// Pre-build core packages so trigger-http boots against current `dist/`
+	// =========================================================================
+	//
+	// The trigger imports `@blokjs/runner`, `@blokjs/helper`, `@blokjs/shared`
+	// from their `dist/` folders (the workspace symlinks resolve to the
+	// package roots, but `package.json#main` points at `dist/index.js`).
+	// If `dist/` is stale or being rebuilt mid-flight when trigger-http
+	// boots, the import fails with "Cannot find module '@blokjs/...'" and
+	// `bun --watch` silently sits in a broken state — Studio's `/__blok`
+	// proxy then logs ECONNREFUSED forever until the user restarts.
+	//
+	// Prevent that whole class of bug by ensuring every core dist is fresh
+	// BEFORE we spawn the trigger. Order matters: shared + helper first
+	// (no internal deps), then runner (imports shared + helper).
+	console.log("\nBuilding core workspace packages (shared, helper, runner)…");
+	try {
+		execSync("bun run --filter @blokjs/shared --filter @blokjs/helper build", {
+			cwd: REPO_ROOT,
+			stdio: "inherit",
+		});
+		execSync("bun run --filter @blokjs/runner build", {
+			cwd: REPO_ROOT,
+			stdio: "inherit",
+		});
+	} catch (e) {
+		console.error("\nCore workspace build failed — the trigger would crash on boot. Aborting.");
+		console.error((e as Error).message);
+		process.exit(1);
+	}
+
 	// Spawn each SDK + pipe its output.
 	const children: { proc: ChildProcess; label: string; grpcPort: number }[] = [];
 	const cleanupHandlers: Array<() => void> = [];

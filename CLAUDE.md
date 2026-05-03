@@ -83,6 +83,13 @@ Old (v1) workflows keep working — the runner normalizes them at load time:
 | `as and spread are mutually exclusive` | Step has both fields set | Pick one — `as: "name"` to rename, `spread: true` to flatten |
 | `branch step is missing 'when'` | Branch with no condition string | Set `when: "..."` (or pass a `$` proxy expression) |
 | `Two workflows claim GET /path` | Route collision in file-based routing | Set explicit `trigger.http.path` on one to disambiguate |
+| `[blok][mapper] Failed to resolve ...` | A `js/...` or `${...}` expression in step inputs threw at run time (typo, undefined access, syntax error). Default mode logs + passes the literal string through (silent miscompile risk). | Read the hint in the warning. Set `BLOK_MAPPER_MODE=strict` to fail fast in production — the `MapperResolutionError` carries workflow + step + expression context. |
+
+### Production env vars worth setting
+
+- `BLOK_MAPPER_MODE=strict` — fail-fast on input expression resolution errors. Strongly recommended for production. Default `warn` preserves v1 silent-fallback behavior with diagnostics.
+- `BLOK_TRACE_ENABLED=false` — disable Studio trace recording (also disables idempotency cache reads/writes since they share the store).
+- `BLOK_MAX_SUBWORKFLOW_DEPTH=10` — recursion cap for sub-workflow steps. Bump if you have legitimate deep nesting.
 
 ## Generating Node Code
 

@@ -213,6 +213,47 @@ Additive; pre-existing rows get NULL.
 - Polymorphic workflow names (`subworkflow: $.req.body.kind`) —
   workflow names are static today.
 
+## Input resolution (Mapper)
+
+`@blokjs/shared`'s `Mapper` resolves `${path}` interpolations and
+`js/...` expressions inside step `inputs` against the live `ctx`
+(see `core/shared/src/utils/Mapper.ts`). Called from
+`NodeBase.process` → `blueprintMapper` before every step runs.
+
+**Failure mode is configurable** via the `BLOK_MAPPER_MODE` env var:
+
+| Mode | Behavior on resolution failure |
+|---|---|
+| `warn` (default) | Log a structured warning via `ctx.logger.logLevel("warn", ...)` (routes to console + Studio's log viewer via `TracingLogger`) and pass the literal expression string through to the node. Backward-compatible with v1. |
+| `strict` | Throw `MapperResolutionError` with full context (workflow name, step name, expression, underlying cause + heuristic hint). The step fails fast. **Recommended for production.** |
+| `silent` | Pre-v0.3.x behavior — full suppression (no log, no throw). Opt-out for tests / workflows that intentionally use undefined-tolerant resolution. |
+
+Production deployments should set `BLOK_MAPPER_MODE=strict` —
+silent miscompiles (where a `js/ctx.bad.path` evaluation fails and
+the literal string passes through to the node, producing wrong output
+downstream) have historically been a major source of subtle bugs.
+
+The structured warning includes:
+- Which workflow + step the failure came from
+- The literal expression that failed
+- The underlying JS error message
+- A heuristic **hint** (e.g., "the path `ctx.req.body` is undefined or
+  doesn't have a `userId` field — check the trigger payload")
+- The fix prompt ("set `BLOK_MAPPER_MODE=strict` to fail fast")
+
+`MapperResolutionError` is exported from `@blokjs/shared` for
+`instanceof` checks (e.g., a custom trigger may translate it into a
+400-class HTTP response).
+
+**Bug fixes shipped with the v0.3.x rewrite**:
+- Falsy values (`0`, `false`, `""`) now correctly preserved in
+  `${path}` resolution (was: `||` fell through to JS eval)
+- Object values now JSON-encoded in interpolation (was: silent
+  `[object Object]` coercion)
+- `js/` prefix stripping uses `slice(3)` instead of `replace("js/", "")`
+- `${...}` expressions get `func` and `vars` in scope (was: only
+  `js/...` expressions did, asymmetric)
+
 ## Tests
 
 ```bash

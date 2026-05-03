@@ -9,6 +9,7 @@ import type ResponseContext from "./types/ResponseContext";
 import type Step from "./types/Step";
 import type VarsContext from "./types/VarsContext";
 import mapper from "./utils/Mapper";
+import { MapperResolutionError } from "./utils/MapperResolutionError";
 
 export default abstract class NodeBase {
 	public flow = false;
@@ -201,10 +202,18 @@ export default abstract class NodeBase {
 		let newObj: ParamsDictionary | string = obj;
 
 		try {
-			if (typeof obj === "string") newObj = mapper.replaceString(obj, ctx, data as ParamsDictionary);
+			if (typeof obj === "string")
+				newObj = mapper.replaceString(obj, ctx, data as ParamsDictionary) as unknown as string;
 			else mapper.replaceObjectStrings(newObj, ctx, data as ParamsDictionary);
 		} catch (e) {
-			console.log("MAPPER ERROR", e);
+			// `MapperResolutionError` (strict mode) carries full diagnostic
+			// context — let it escape so the step's error envelope surfaces
+			// the workflow / step / expression that failed.
+			if (e instanceof MapperResolutionError) throw e;
+			// Anything else here is an UNEXPECTED bug in the mapper itself
+			// (recursion fault, OOM, logger crash). Surface loudly via
+			// stderr WITH the stack trace — never silently swallow.
+			console.error("[blok][mapper] unexpected error during input resolution:", e);
 		}
 
 		return newObj;
