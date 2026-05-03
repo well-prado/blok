@@ -143,6 +143,97 @@ describe("v2 DSL — workflow() factory", () => {
 	});
 });
 
+describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
+	it("preserves a literal idempotencyKey on the compiled step", () => {
+		const wf = workflow({
+			name: "Idem",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "fetch",
+					use: "@blokjs/api-call",
+					inputs: { url: "https://example.com" },
+					idempotencyKey: "static-key",
+					idempotencyKeyTTL: 60_000,
+				},
+			],
+		});
+		const step = wf._config.steps[0] as { idempotencyKey: string; idempotencyKeyTTL: number };
+		expect(step.idempotencyKey).toBe("static-key");
+		expect(step.idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("compiles a $ proxy idempotencyKey to its js/ctx string at definition time", () => {
+		const wf = workflow({
+			name: "Idem",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "fetch",
+					use: "@blokjs/api-call",
+					inputs: { url: "https://example.com" },
+					idempotencyKey: $.req.body.requestId as unknown as string,
+				},
+			],
+		});
+		const step = wf._config.steps[0] as { idempotencyKey: string };
+		expect(step.idempotencyKey).toBe("js/ctx.req.body.requestId");
+	});
+
+	it("preserves a retry block on the compiled step", () => {
+		const wf = workflow({
+			name: "Retried",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "flaky",
+					use: "@blokjs/api-call",
+					inputs: { url: "https://example.com" },
+					retry: { maxAttempts: 4, minTimeoutInMs: 250, factor: 3 },
+				},
+			],
+		});
+		const step = wf._config.steps[0] as { retry: { maxAttempts: number; minTimeoutInMs: number; factor: number } };
+		expect(step.retry.maxAttempts).toBe(4);
+		expect(step.retry.minTimeoutInMs).toBe(250);
+		expect(step.retry.factor).toBe(3);
+	});
+
+	it("rejects retry config with maxAttempts out of range", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [{ id: "x", use: "@blokjs/foo", retry: { maxAttempts: 0 } }],
+			}),
+		).toThrow();
+
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [{ id: "x", use: "@blokjs/foo", retry: { maxAttempts: 99 } }],
+			}),
+		).toThrow();
+	});
+
+	it("rejects an empty idempotencyKey via the workflow factory", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [{ id: "x", use: "@blokjs/foo", idempotencyKey: "" }],
+			}),
+		).toThrow();
+	});
+});
+
 describe("v2 DSL — branch() primitive", () => {
 	it("creates a branch step with when/then/else", () => {
 		const b = branch({

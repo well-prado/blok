@@ -44,6 +44,13 @@ const IF_ELSE_NODE_REF = "@blokjs/if-else";
 
 let _wildcardWarnedFiles = new Set<string>();
 
+interface RetryConfig {
+	maxAttempts: number;
+	minTimeoutInMs?: number;
+	maxTimeoutInMs?: number;
+	factor?: number;
+}
+
 interface InternalStep {
 	name: string;
 	node: string;
@@ -56,6 +63,9 @@ interface InternalStep {
 	ephemeral?: boolean;
 	stream_logs?: boolean;
 	flow?: boolean;
+	idempotencyKey?: string;
+	idempotencyKeyTTL?: number;
+	retry?: RetryConfig;
 	[key: string]: unknown;
 }
 
@@ -220,6 +230,26 @@ function normalizeRegularStep(
 		ephemeral,
 	};
 	if (typeof step.stream_logs === "boolean") internalStep.stream_logs = step.stream_logs;
+	// Idempotency cache + retry — pass through verbatim. The runner reads
+	// these in RunnerSteps to wrap step.process() with cache-check + retry-
+	// loop. They never reach PersistenceHelper.applyStepOutput; caching
+	// layers ABOVE that.
+	if (typeof step.idempotencyKey === "string" && step.idempotencyKey.length > 0) {
+		internalStep.idempotencyKey = step.idempotencyKey;
+	}
+	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
+		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
+	}
+	if (isPlainObject(step.retry)) {
+		const r = step.retry as Record<string, unknown>;
+		if (typeof r.maxAttempts === "number" && Number.isInteger(r.maxAttempts)) {
+			const retry: RetryConfig = { maxAttempts: r.maxAttempts };
+			if (typeof r.minTimeoutInMs === "number") retry.minTimeoutInMs = r.minTimeoutInMs;
+			if (typeof r.maxTimeoutInMs === "number") retry.maxTimeoutInMs = r.maxTimeoutInMs;
+			if (typeof r.factor === "number") retry.factor = r.factor;
+			internalStep.retry = retry;
+		}
+	}
 
 	// Build node config — only include `inputs` if present.
 	let nodeConfig: InternalNodeConfig | null = null;

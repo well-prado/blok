@@ -74,6 +74,83 @@ disable persistence for every step that didn't explicitly set the field
 cross-runtime-chain in Phase 6 and is now covered by
 `__tests__/unit/RuntimeAdapterNode.test.ts`.
 
+## Idempotency caching (Tier 1)
+
+Step authors opt in by setting `idempotencyKey` on the step:
+
+```ts
+{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "..." }, idempotencyKey: $.req.body.requestId }
+```
+
+The runner consults the cache **before** `step.process()`. On hit, it
+calls `PersistenceHelper.applyStepOutput(ctx, step, { data: cached.data })`
+to populate state through the same `ephemeral`/`spread`/`as` rules as a
+fresh run, marks the node `cached` for tracing, emits a `NODE_CACHED`
+event, and continues to the next step — `step.process()` is never
+called.
+
+Cache namespace: `(workflowName, step.id, resolvedKey)`. The triple
+prevents collisions across workflows and across same-id steps in
+different workflows. Resolved key is either the literal string or the
+result of evaluating a `js/ctx....` expression against the live ctx.
+
+Cache TTL: 24h default (`DEFAULT_IDEMPOTENCY_TTL_MS`); override per
+step via `idempotencyKeyTTL: <ms>`. A TTL of 0 marks an entry as
+immediately expired (kill-switch).
+
+Cache backend: same store as run tracing — `SqliteRunStore` migration
+v4 added the `idempotency_cache` table; `InMemoryRunStore` keeps a
+parallel `Map`. `BLOK_TRACE_ENABLED=false` disables caching too (the
+store backs both).
+
+**Caching layers ABOVE `PersistenceHelper.applyStepOutput`, never
+within it.** A cache hit feeds data through the same persistence rules
+a fresh result would. This is the contract that makes the v2
+`set_var=undefined` default safe to coexist with caching.
+
+## Retry (Tier 1)
+
+Step authors opt in:
+
+```ts
+{
+  id: "flaky",
+  use: "@blokjs/api-call",
+  retry: { maxAttempts: 3, minTimeoutInMs: 500, maxTimeoutInMs: 10000, factor: 2 },
+}
+```
+
+`RunnerSteps` wraps `step.process()` with a `for attempt 1..maxAttempts`
+loop and capped exponential backoff:
+`delay = min(maxTimeoutInMs, minTimeoutInMs * factor^(attempt-1))`.
+Defaults: min=1000, max=30000, factor=2. No jitter — matches Trigger.dev.
+
+Per-attempt failures emit `NODE_ATTEMPT_FAILED` and append to
+`NodeRun.attempts[]` (capped at 10 entries by `MAX_STORED_ATTEMPTS`).
+The terminal `NODE_FAILED` only fires after all attempts are
+exhausted. Default `maxAttempts: 1` preserves pre-Phase-4 behaviour
+exactly.
+
+Retry composes with idempotency caching: a cache hit short-circuits
+`step.process()` entirely, so retry never enters the picture. A cache
+miss on attempt N writes the cache only on success of the final
+successful attempt.
+
+## Replay (Tier 1)
+
+`POST /__blok/runs/:runId/replay` re-dispatches the original HTTP
+trigger with the captured payload. The endpoint sets the
+`X-Blok-Replay-Of: <originalRunId>` header on the dispatched request;
+`TriggerBase.run()` reads it from `ctx.request.headers` and passes
+`replayOf` into `tracker.startRun()`, which persists onto
+`WorkflowRun.replayOf`. Studio renders a "replay of #..." breadcrumb
+on the new run that links back to the source.
+
+Replay is a thin re-trigger, not a checkpoint resume — the new run
+starts from scratch, runs the current code, and produces a new trace.
+This is intentional: combine replay with idempotency caching to skip
+expensive steps on the new run while still picking up code changes.
+
 ## Tests
 
 ```bash

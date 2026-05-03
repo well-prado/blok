@@ -22,6 +22,14 @@ import type {
 } from "./types";
 
 /**
+ * Cap on the number of `NODE_ATTEMPT_FAILED` entries kept on a single
+ * `NodeRun.attempts` array. Bounds store growth on extreme retry counts —
+ * a runaway loop generating 1000 attempts can't bloat the run store. The
+ * latest attempts are always preserved (older ones are dropped).
+ */
+const MAX_STORED_ATTEMPTS = 10;
+
+/**
  * Build a {@link RunErrorDetail} from any thrown error. When the source is
  * a typed `BlokError` (master plan §17), all 17+ structured fields are
  * preserved; otherwise the legacy `{message, stack}` shape falls through.
@@ -143,6 +151,7 @@ export class RunTracker extends EventEmitter {
 			tags: opts.tags,
 			metadata: opts.metadata,
 			environment,
+			replayOf: opts.replayOf,
 		};
 
 		this.store.saveRun(run);
@@ -253,6 +262,72 @@ export class RunTracker extends EventEmitter {
 		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_COMPLETED", nodeRun.nodeName, nodeRunId, {
 			durationMs,
 			metrics: nodeMetrics,
+		});
+	}
+
+	/**
+	 * Tier 1 idempotency cache hit. Marks the node as completed without
+	 * having actually run, attaches the source-run/source-node lineage so
+	 * Studio can render a CACHED badge with click-through, and emits a
+	 * `NODE_CACHED` event so SSE subscribers see the short-circuit live.
+	 *
+	 * Caller is responsible for replaying the cached result through
+	 * `PersistenceHelper.applyStepOutput` — this method only records the
+	 * tracing side. Caching layers ABOVE persistence, never within it.
+	 */
+	markNodeCached(
+		nodeRunId: string,
+		source: { sourceRunId: string; sourceNodeRunId: string; cachedAt: number },
+		outputs?: unknown,
+	): void {
+		const nodeRun = this.store.getNodeRun(nodeRunId);
+		if (!nodeRun) return;
+
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - nodeRun.startedAt;
+
+		this.store.updateNodeRun(nodeRunId, {
+			status: "completed",
+			finishedAt,
+			durationMs,
+			outputs,
+			cached: { ...source },
+		});
+
+		const run = this.store.getRun(nodeRun.runId);
+		if (run) {
+			this.store.updateRun(nodeRun.runId, {
+				completedNodes: run.completedNodes + 1,
+			});
+		}
+
+		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_CACHED", nodeRun.nodeName, nodeRunId, {
+			durationMs,
+			source: { ...source },
+		});
+	}
+
+	/**
+	 * Tier 1 retry: record a single failed attempt before the next retry. The
+	 * node stays in `running` status — `failNode` is the terminal call that
+	 * fires only after `retry.maxAttempts` is exhausted.
+	 *
+	 * Per-node attempt history is capped at {@link MAX_STORED_ATTEMPTS} (10)
+	 * to bound store growth on extreme retry counts. The cap matches the
+	 * risk-register decision in `tier1-idempotency-replay-retry.md`.
+	 */
+	recordNodeAttemptFailed(nodeRunId: string, info: { attempt: number; error: unknown }): void {
+		const nodeRun = this.store.getNodeRun(nodeRunId);
+		if (!nodeRun) return;
+		const errorDetail = toRunErrorDetail(info.error);
+		const next = [...(nodeRun.attempts ?? []), { attempt: info.attempt, error: errorDetail, timestamp: Date.now() }];
+		const capped = next.length > MAX_STORED_ATTEMPTS ? next.slice(-MAX_STORED_ATTEMPTS) : next;
+		this.store.updateNodeRun(nodeRunId, { attempts: capped });
+
+		const run = this.store.getRun(nodeRun.runId);
+		this.emitEvent(nodeRun.runId, run?.workflowName || "", "NODE_ATTEMPT_FAILED", nodeRun.nodeName, nodeRunId, {
+			attempt: info.attempt,
+			error: errorDetail,
 		});
 	}
 

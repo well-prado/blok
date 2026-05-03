@@ -54,6 +54,48 @@ export default abstract class NodeBase {
 	 */
 	public ephemeral = false;
 
+	// =========================================================================
+	// V2 idempotency cache + retry knobs — populated by Configuration.getSteps
+	// from the step definition. Read by RunnerSteps before delegating to
+	// `step.process()`. Caching layers ABOVE PersistenceHelper.applyStepOutput;
+	// retry wraps the same call site.
+	//
+	// Mirrors the Zod schema in `@blokjs/helper/src/types/StepOpts.ts`. Kept
+	// as a structural interface here to avoid a runtime dep from shared on
+	// helper.
+	// =========================================================================
+
+	/**
+	 * Optional cache key for this step's result. When set, the runner consults
+	 * the idempotency cache before executing — a hit returns the cached result
+	 * (and emits a NODE_CACHED event); a miss runs the step and caches its
+	 * result on success. Cache namespace is (workflowName, name, idempotencyKey).
+	 *
+	 * Author-facing values may be a literal string ("user-123") or a $ proxy
+	 * expression compiled to `js/ctx....`. The runner resolves the expression
+	 * against the live ctx at run time before consulting the cache.
+	 */
+	public idempotencyKey?: string;
+
+	/**
+	 * Optional cache lifetime in milliseconds. Defaults to 24 hours
+	 * (86_400_000) when undefined. Pass 0 to mark a stored result as
+	 * immediately expired (effectively disables caching for this step).
+	 */
+	public idempotencyKeyTTL?: number;
+
+	/**
+	 * Optional retry configuration with capped exponential backoff. When
+	 * undefined, the step runs at most once (matches pre-v0.3.x behaviour).
+	 * Per-attempt failures emit `NODE_ATTEMPT_FAILED` trace events.
+	 */
+	public retry?: {
+		maxAttempts: number;
+		minTimeoutInMs?: number;
+		maxTimeoutInMs?: number;
+		factor?: number;
+	};
+
 	public async process(ctx: Context, step?: Step): Promise<ResponseContext> {
 		let response: ResponseContext = {
 			success: true,

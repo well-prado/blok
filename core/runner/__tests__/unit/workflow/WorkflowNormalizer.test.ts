@@ -110,6 +110,70 @@ describe("WorkflowNormalizer — v2 input", () => {
 		expect(out.steps[2].ephemeral).toBe(true);
 	});
 
+	it("carries idempotencyKey + idempotencyKeyTTL onto the internal step", () => {
+		const v2 = {
+			name: "Idem",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "fetch",
+					use: "@blokjs/api-call",
+					inputs: { url: "https://example.com" },
+					idempotencyKey: "user-123",
+					idempotencyKeyTTL: 60_000,
+				},
+			],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].idempotencyKey).toBe("user-123");
+		expect(out.steps[0].idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("ignores empty-string idempotencyKey (treats as absent)", () => {
+		const v2 = {
+			name: "Idem",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "fetch", use: "@blokjs/api-call", idempotencyKey: "" }],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].idempotencyKey).toBeUndefined();
+	});
+
+	it("carries a retry config block onto the internal step", () => {
+		const v2 = {
+			name: "Retried",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "flaky",
+					use: "@blokjs/api-call",
+					retry: { maxAttempts: 4, minTimeoutInMs: 250, maxTimeoutInMs: 5000, factor: 3 },
+				},
+			],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].retry).toEqual({
+			maxAttempts: 4,
+			minTimeoutInMs: 250,
+			maxTimeoutInMs: 5000,
+			factor: 3,
+		});
+	});
+
+	it("ignores retry config without an integer maxAttempts (defensive)", () => {
+		const v2 = {
+			name: "Bad",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "x", use: "@blokjs/api-call", retry: { minTimeoutInMs: 100 } as Record<string, unknown> }],
+		};
+		const out = normalizeWorkflow(v2);
+		expect(out.steps[0].retry).toBeUndefined();
+	});
+
 	it("rejects steps with both `as` and `spread`", () => {
 		const v2 = {
 			name: "Bad",

@@ -52,16 +52,21 @@ import { buildParityContext } from "./workflows";
 
 import workflowJson from "../../../../../triggers/http/workflows/json/cross-runtime-chain.json" with { type: "json" };
 
+/**
+ * v2 step shape — `id` + `use` with inline `inputs`. This workflow was
+ * migrated from v1 in commit `329b80b`; before this fix the test was
+ * still reading the legacy `name` + `node` + top-level `nodes{}` shape.
+ */
 interface WorkflowStep {
-	name: string;
-	node: string;
+	id: string;
+	use: string;
 	type: string;
+	inputs?: Record<string, unknown>;
 }
 
 interface WorkflowDef {
 	name: string;
 	steps: WorkflowStep[];
-	nodes: Record<string, { inputs: Record<string, unknown> }>;
 }
 
 const WORKFLOW = workflowJson as WorkflowDef;
@@ -171,21 +176,22 @@ describe.skipIf(!ALL_TOOLCHAINS_AVAILABLE)(
 			const runtimeStepNames = ["go", "rust", "java", "csharp", "php", "ruby", "python"] as const;
 
 			for (const stepName of runtimeStepNames) {
-				const stepDef = WORKFLOW.steps.find((s) => s.name === stepName);
+				const stepDef = WORKFLOW.steps.find((s) => s.id === stepName);
 				if (!stepDef) throw new Error(`step ${stepName} missing from workflow JSON`);
 				const profile = PROFILE_BY_STEP_TYPE[stepDef.type];
 				if (!profile) throw new Error(`no profile for ${stepDef.type}`);
 				const sdk = sdks.get(profile.id);
 				if (!sdk) throw new Error(`SDK '${profile.id}' not running`);
 
-				// Resolve the `js/ctx.vars['prev_step'].chain` refs in
-				// the workflow JSON to the actual values from `vars`.
-				const stepInputs = WORKFLOW.nodes[stepName]?.inputs ?? {};
+				// Resolve the `js/ctx.state['<prev_step>'].chain` refs
+				// (v2 shape — inputs live inline on the step) to the
+				// actual values from `vars`.
+				const stepInputs = stepDef.inputs ?? {};
 				const resolvedInputs = resolveJsRefs(stepInputs, vars);
 
 				const node = new ChainNode();
 				node.name = stepName;
-				node.node = stepDef.node;
+				node.node = stepDef.use;
 				node.type = stepDef.type;
 
 				// The chain-test handlers in every SDK read from
@@ -265,9 +271,12 @@ function resolveJsRefs(inputs: Record<string, unknown>, vars: Record<string, unk
 
 function resolveOne(raw: unknown, vars: Record<string, unknown>): unknown {
 	if (typeof raw !== "string" || !raw.startsWith("js/")) return raw;
-	// Match `ctx.vars['<step>'].path.parts...`
+	// Match either v2 `ctx.state['<step>'].path...` or legacy
+	// `ctx.vars['<step>'].path...`. v2 is the canonical shape; the v1
+	// alias is preserved here for any older workflow JSON in the
+	// fixture directory that hasn't been migrated yet.
 	const expr = raw.slice(3); // drop "js/"
-	const match = expr.match(/^ctx\.vars\['([^']+)'\]\.(.+)$/);
+	const match = expr.match(/^ctx\.(?:state|vars)\['([^']+)'\]\.(.+)$/);
 	if (!match) return raw;
 	const [, step, pathExpr] = match;
 	const stepVal = vars[step] as Record<string, unknown> | undefined;

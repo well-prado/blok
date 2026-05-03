@@ -109,6 +109,57 @@ export type StepConditionOpts = z.infer<typeof StepConditionSchema>;
 // =============================================================================
 
 /**
+ * Retry configuration for a v2 step.
+ *
+ * Wraps `step.process(ctx, step)` in a retry loop with capped exponential
+ * backoff. Per-attempt failures emit `NODE_ATTEMPT_FAILED` trace events.
+ *
+ * Defaults applied by the runner when fields are omitted:
+ * - `minTimeoutInMs`: 1000
+ * - `maxTimeoutInMs`: 30000
+ * - `factor`: 2
+ *
+ * Shape mirrors Trigger.dev's `retry` config so authors moving between
+ * platforms read familiar semantics. No jitter is added — matches
+ * Trigger.dev's default.
+ */
+export const RetryConfigSchema = z
+	.object({
+		maxAttempts: z
+			.number()
+			.int()
+			.min(1)
+			.max(20)
+			.describe("Total attempts including the first run. 1 = no retry. Capped at 20."),
+		minTimeoutInMs: z
+			.number()
+			.int()
+			.min(0)
+			.optional()
+			.describe("Initial backoff delay in ms before the second attempt. Default 1000."),
+		maxTimeoutInMs: z
+			.number()
+			.int()
+			.min(0)
+			.optional()
+			.describe("Cap on the backoff delay between attempts. Default 30000."),
+		factor: z
+			.number()
+			.min(1)
+			.optional()
+			.describe("Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."),
+	})
+	.refine(
+		(r) => r.minTimeoutInMs === undefined || r.maxTimeoutInMs === undefined || r.minTimeoutInMs <= r.maxTimeoutInMs,
+		{
+			message: "`minTimeoutInMs` must be <= `maxTimeoutInMs`.",
+			path: ["maxTimeoutInMs"],
+		},
+	);
+
+export type RetryConfig = z.infer<typeof RetryConfigSchema>;
+
+/**
  * V2 regular step — invokes a node with inputs.
  *
  * **Identity**
@@ -201,6 +252,31 @@ export const V2RegularStepSchema = z
 			.boolean()
 			.optional()
 			.describe("Per-step opt-in for live log streaming. Inherits from BLOK_STREAM_LOGS env when unset."),
+		idempotencyKey: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"When set, the step's result is cached against the triple " +
+					"(workflowName, step.id, idempotencyKey). On a subsequent run with the " +
+					"same triple, execution is skipped and the cached result populates state " +
+					"through the same persistence rules (ephemeral / spread / as). " +
+					"Accepts a literal string or a $ proxy expression that compiles to " +
+					"`js/ctx....` (e.g. $.req.body.requestId).",
+			),
+		idempotencyKeyTTL: z
+			.number()
+			.int()
+			.min(0)
+			.optional()
+			.describe(
+				"Cache lifetime in milliseconds. Defaults to 24h (86_400_000) when omitted. " +
+					"Pass 0 to mark a cached result as immediately expired (effectively disables caching).",
+			),
+		retry: RetryConfigSchema.optional().describe(
+			"Retry configuration with capped exponential backoff. " +
+				"When omitted, the step runs at most once (no retry) — matches pre-v0.3.x behavior.",
+		),
 		// Legacy aliases — accepted for v1 → v2 migration but discouraged.
 		set_var: z
 			.boolean()

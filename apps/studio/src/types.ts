@@ -21,6 +21,12 @@ export interface WorkflowRun {
 	metadata?: Record<string, unknown>;
 	nodeCount: number;
 	completedNodes: number;
+	/**
+	 * Tier 1 · replay lineage. When this run was started via the replay
+	 * endpoint, this carries the original run's id so Studio can render
+	 * a "Replay of #..." breadcrumb that links back to the source.
+	 */
+	replayOf?: string;
 }
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
@@ -104,6 +110,26 @@ export interface NodeRun {
 		/** gRPC adapter only: bytes received in the SDK's response. */
 		response_bytes?: number;
 	};
+	/**
+	 * Tier 1 idempotency cache hit lineage. When set, this node short-
+	 * circuited via the cache instead of running. Studio renders a CACHED
+	 * badge with click-through to the source run/node.
+	 */
+	cached?: {
+		sourceRunId: string;
+		sourceNodeRunId: string;
+		cachedAt: number;
+	};
+	/**
+	 * Tier 1 retry attempts that failed before the node ultimately
+	 * succeeded or was fail-noded. Capped at 10 entries by the runner.
+	 * Studio renders this as an "Attempts (N)" disclosure.
+	 */
+	attempts?: Array<{
+		attempt: number;
+		error: NodeRunErrorDetail;
+		timestamp: number;
+	}>;
 }
 
 export type RunEventType =
@@ -119,7 +145,17 @@ export type RunEventType =
 	/** §17 Phase 5: streaming `Progress` frame from the SDK. */
 	| "NODE_PROGRESS"
 	/** §17 Phase 5: streaming `PartialResult` frame from the SDK. */
-	| "NODE_PARTIAL_RESULT";
+	| "NODE_PARTIAL_RESULT"
+	/**
+	 * Tier 1: idempotency cache hit — the step short-circuited via the
+	 * cache instead of running. Payload carries the source run/node lineage.
+	 */
+	| "NODE_CACHED"
+	/**
+	 * Tier 1: retry attempt failed; another attempt will follow.
+	 * Final failure (after exhausting maxAttempts) emits NODE_FAILED.
+	 */
+	| "NODE_ATTEMPT_FAILED";
 
 export interface RunEvent {
 	id: string;

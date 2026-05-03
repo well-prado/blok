@@ -3,6 +3,7 @@ import type { RunStore } from "./RunStore";
 
 const esmRequire = createRequire(import.meta.url);
 import type {
+	CachedStepResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -55,6 +56,12 @@ interface RunRow {
 	 * legacy data still shows up under the default env scope.
 	 */
 	environment: string | null;
+	/**
+	 * Tier 1 replay lineage. NULL on first-class triggered runs; carries
+	 * the source run id when started via `POST /__blok/runs/:id/replay`.
+	 * Added in migration v5.
+	 */
+	replay_of: string | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -81,6 +88,27 @@ interface NodeRunRow {
 	depth: number;
 	step_index: number;
 	metrics_json: string | null;
+	/**
+	 * JSON-serialized {@link NodeRun.cached} lineage. NULL on rows that did
+	 * not short-circuit via the idempotency cache. Added in migration v4.
+	 */
+	cached_json: string | null;
+	/**
+	 * JSON-serialized {@link NodeRun.attempts} array. NULL when the node
+	 * succeeded on first try (`maxAttempts: 1` default). Added in migration v5.
+	 */
+	attempts_json: string | null;
+}
+
+interface IdempotencyCacheRow {
+	workflow_name: string;
+	step_id: string;
+	idempotency_key: string;
+	data_json: string;
+	cached_at: number;
+	expires_at: number | null;
+	source_run_id: string;
+	source_node_run_id: string;
 }
 
 interface EventRow {
@@ -284,6 +312,48 @@ export class SqliteRunStore implements RunStore {
 					CREATE INDEX IF NOT EXISTS idx_runs_environment ON workflow_runs(environment);
 				`,
 			},
+			{
+				// Tier 1 · idempotency caching. Adds:
+				//  - `node_runs.cached_json` for cache-hit lineage on a node
+				//    that short-circuited rather than ran.
+				//  - `idempotency_cache` table for the cache backend keyed
+				//    on (workflow_name, step_id, idempotency_key). Existing
+				//    `node_runs` rows get NULL `cached_json` (a non-cached
+				//    historical execution).
+				version: 4,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN cached_json TEXT;
+
+					CREATE TABLE IF NOT EXISTS idempotency_cache (
+						workflow_name TEXT NOT NULL,
+						step_id TEXT NOT NULL,
+						idempotency_key TEXT NOT NULL,
+						data_json TEXT NOT NULL,
+						cached_at INTEGER NOT NULL,
+						expires_at INTEGER,
+						source_run_id TEXT NOT NULL,
+						source_node_run_id TEXT NOT NULL,
+						PRIMARY KEY (workflow_name, step_id, idempotency_key)
+					);
+
+					CREATE INDEX IF NOT EXISTS idx_idem_expires ON idempotency_cache(expires_at);
+				`,
+			},
+			{
+				// Tier 1 · retry loop + replay lineage. Adds:
+				//  - `node_runs.attempts_json` for the per-attempt failure
+				//    history before the node ultimately succeeded or was
+				//    fail-noded (capped at MAX_STORED_ATTEMPTS by RunTracker).
+				//  - `workflow_runs.replay_of` for the source run id when a
+				//    run is started via `POST /__blok/runs/:id/replay`.
+				// Existing rows: NULL on both → "no retries; not a replay".
+				version: 5,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN attempts_json TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN replay_of TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of);
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -316,8 +386,8 @@ export class SqliteRunStore implements RunStore {
 			INSERT OR REPLACE INTO workflow_runs
 			(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 			 status, started_at, finished_at, duration_ms, error_json,
-			 tags_json, metadata_json, node_count, completed_nodes, environment)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -335,6 +405,7 @@ export class SqliteRunStore implements RunStore {
 			run.nodeCount,
 			run.completedNodes,
 			run.environment ?? null,
+			run.replayOf ?? null,
 		);
 	}
 
@@ -370,6 +441,10 @@ export class SqliteRunStore implements RunStore {
 			setClauses.push("metadata_json = ?");
 			values.push(JSON.stringify(updates.metadata));
 		}
+		if (updates.replayOf !== undefined) {
+			setClauses.push("replay_of = ?");
+			values.push(updates.replayOf);
+		}
 
 		if (setClauses.length === 0) return;
 
@@ -385,8 +460,8 @@ export class SqliteRunStore implements RunStore {
 			(id, run_id, node_name, node_type, runtime_kind,
 			 status, started_at, finished_at, duration_ms,
 			 inputs_json, outputs_json, error_json,
-			 parent_node_id, depth, step_index, metrics_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 parent_node_id, depth, step_index, metrics_json, cached_json, attempts_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			nodeRun.id,
@@ -405,6 +480,8 @@ export class SqliteRunStore implements RunStore {
 			nodeRun.depth,
 			nodeRun.stepIndex,
 			nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
+			nodeRun.cached ? JSON.stringify(nodeRun.cached) : null,
+			nodeRun.attempts ? JSON.stringify(nodeRun.attempts) : null,
 		);
 	}
 
@@ -435,6 +512,14 @@ export class SqliteRunStore implements RunStore {
 		if (updates.metrics !== undefined) {
 			setClauses.push("metrics_json = ?");
 			values.push(JSON.stringify(updates.metrics));
+		}
+		if (updates.cached !== undefined) {
+			setClauses.push("cached_json = ?");
+			values.push(JSON.stringify(updates.cached));
+		}
+		if (updates.attempts !== undefined) {
+			setClauses.push("attempts_json = ?");
+			values.push(JSON.stringify(updates.attempts));
 		}
 
 		if (setClauses.length === 0) return;
@@ -907,7 +992,63 @@ export class SqliteRunStore implements RunStore {
 		this.db.exec("DELETE FROM node_runs");
 		this.db.exec("DELETE FROM workflow_runs");
 		this.db.exec("DELETE FROM dashboards");
+		this.db.exec("DELETE FROM idempotency_cache");
 		return count;
+	}
+
+	// === Idempotency cache ===
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string): CachedStepResult | null {
+		const row = this.stmt(
+			"getIdempotencyCache",
+			"SELECT * FROM idempotency_cache WHERE workflow_name = ? AND step_id = ? AND idempotency_key = ?",
+		).get(workflowName, stepId, key) as IdempotencyCacheRow | undefined;
+		if (!row) return null;
+		if (row.expires_at !== null && row.expires_at <= Date.now()) {
+			// Lazy purge — remove the expired entry inline so subsequent
+			// reads don't even pay for the row materialization.
+			this.stmt(
+				"deleteExpiredIdempotency",
+				"DELETE FROM idempotency_cache WHERE workflow_name = ? AND step_id = ? AND idempotency_key = ?",
+			).run(workflowName, stepId, key);
+			return null;
+		}
+		return {
+			data: JSON.parse(row.data_json),
+			cachedAt: row.cached_at,
+			expiresAt: row.expires_at,
+			sourceRunId: row.source_run_id,
+			sourceNodeRunId: row.source_node_run_id,
+		};
+	}
+
+	setIdempotencyCache(workflowName: string, stepId: string, key: string, entry: CachedStepResult): void {
+		this.stmt(
+			"setIdempotencyCache",
+			`
+			INSERT OR REPLACE INTO idempotency_cache
+			(workflow_name, step_id, idempotency_key, data_json, cached_at, expires_at,
+			 source_run_id, source_node_run_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+		).run(
+			workflowName,
+			stepId,
+			key,
+			JSON.stringify(entry.data),
+			entry.cachedAt,
+			entry.expiresAt,
+			entry.sourceRunId,
+			entry.sourceNodeRunId,
+		);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		const result = this.stmt(
+			"purgeExpiredIdempotency",
+			"DELETE FROM idempotency_cache WHERE expires_at IS NOT NULL AND expires_at <= ?",
+		).run(now);
+		return result.changes;
 	}
 
 	deleteRunsBefore(timestamp: number): number {
@@ -963,6 +1104,7 @@ export class SqliteRunStore implements RunStore {
 			// "production" so the EnvChip default-scope still surfaces
 			// historical data without a backfill.
 			environment: row.environment ?? "production",
+			replayOf: row.replay_of ?? undefined,
 		};
 	}
 
@@ -984,6 +1126,8 @@ export class SqliteRunStore implements RunStore {
 			depth: row.depth,
 			stepIndex: row.step_index,
 			metrics: row.metrics_json ? JSON.parse(row.metrics_json) : undefined,
+			cached: row.cached_json ? (JSON.parse(row.cached_json) as NodeRun["cached"]) : undefined,
+			attempts: row.attempts_json ? (JSON.parse(row.attempts_json) as NodeRun["attempts"]) : undefined,
 		};
 	}
 

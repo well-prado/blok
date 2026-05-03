@@ -1,5 +1,6 @@
 import type { RunStore } from "./RunStore";
 import type {
+	CachedStepResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -23,6 +24,13 @@ export class InMemoryRunStore implements RunStore {
 	private events: Map<string, RunEvent[]> = new Map(); // runId → RunEvent[]
 	private logs: Map<string, TraceLogEntry[]> = new Map(); // runId → LogEntry[]
 	private dashboards: Map<string, Dashboard> = new Map();
+	private idempotencyCache: Map<string, CachedStepResult> = new Map();
+
+	private idemKey(workflowName: string, stepId: string, key: string): string {
+		// US (\x1f) is non-printable and never appears in identifiers, so it
+		// cannot collide with characters in workflow / step / key strings.
+		return `${workflowName}\x1f${stepId}\x1f${key}`;
+	}
 
 	// === Writes ===
 
@@ -354,6 +362,7 @@ export class InMemoryRunStore implements RunStore {
 		this.events.clear();
 		this.logs.clear();
 		this.dashboards.clear();
+		this.idempotencyCache.clear();
 		return count;
 	}
 
@@ -379,6 +388,34 @@ export class InMemoryRunStore implements RunStore {
 			if (run?.status === "running") continue;
 			this.deleteRun(runId);
 		}
+	}
+
+	// === Idempotency cache ===
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string): CachedStepResult | null {
+		const k = this.idemKey(workflowName, stepId, key);
+		const entry = this.idempotencyCache.get(k);
+		if (!entry) return null;
+		if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+			this.idempotencyCache.delete(k);
+			return null;
+		}
+		return entry;
+	}
+
+	setIdempotencyCache(workflowName: string, stepId: string, key: string, entry: CachedStepResult): void {
+		this.idempotencyCache.set(this.idemKey(workflowName, stepId, key), entry);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		let removed = 0;
+		for (const [k, entry] of this.idempotencyCache.entries()) {
+			if (entry.expiresAt !== null && entry.expiresAt <= now) {
+				this.idempotencyCache.delete(k);
+				removed++;
+			}
+		}
+		return removed;
 	}
 
 	close(): void {

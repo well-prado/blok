@@ -265,6 +265,27 @@ describe("RuntimeAdapterNode", () => {
 			});
 		});
 
+		it("declares optional idempotencyKey + idempotencyKeyTTL + retry on NodeBase (Phase 2 wiring)", () => {
+			// Phase 2 lands the field declarations + Configuration thread-through.
+			// Phase 3 wires RunnerSteps to actually consult them. This test pins
+			// the NodeBase contract: the fields are declared, default to
+			// undefined, and accept the documented shapes. If a future refactor
+			// drops them from the base class, RunnerSteps' cache-check + retry-
+			// loop wrapper would silently no-op.
+			const target = makeTarget("idem-step");
+			expect(target.idempotencyKey).toBeUndefined();
+			expect(target.idempotencyKeyTTL).toBeUndefined();
+			expect(target.retry).toBeUndefined();
+
+			target.idempotencyKey = "user-123";
+			target.idempotencyKeyTTL = 60_000;
+			target.retry = { maxAttempts: 3, minTimeoutInMs: 250, maxTimeoutInMs: 5000, factor: 2 };
+
+			expect(target.idempotencyKey).toBe("user-123");
+			expect(target.idempotencyKeyTTL).toBe(60_000);
+			expect(target.retry).toEqual({ maxAttempts: 3, minTimeoutInMs: 250, maxTimeoutInMs: 5000, factor: 2 });
+		});
+
 		it("skips ctx.state[name] when set_var is explicitly false (legacy v1 ephemeral semantic)", async () => {
 			const adapter = makeStreamingAdapter([], successResult);
 			const target = makeTarget("legacy-step");

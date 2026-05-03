@@ -1,7 +1,41 @@
 import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
 import type BlokResponse from "./BlokResponse";
+import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";
+import { applyStepOutput } from "./workflow/PersistenceHelper";
+
+/**
+ * Default TTL for idempotency cache entries when the step author does not
+ * pass `idempotencyKeyTTL` explicitly. 24 hours, matching Trigger.dev's
+ * default and the decision recorded in the Tier 1 ROADMAP session.
+ */
+const DEFAULT_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Compute the delay before retry attempt N+1 using capped exponential
+ * backoff. Mirrors Trigger.dev's `retry` semantics — no jitter by default.
+ *
+ * `delay = min(maxTimeoutInMs, minTimeoutInMs * factor^(attempt - 1))`
+ *
+ * Defaults: min=1000, max=30000, factor=2 — same as Trigger.dev.
+ */
+function computeBackoff(
+	config: { minTimeoutInMs?: number; maxTimeoutInMs?: number; factor?: number },
+	attempt: number,
+): number {
+	const min = config.minTimeoutInMs ?? 1000;
+	const max = config.maxTimeoutInMs ?? 30000;
+	const factor = config.factor ?? 2;
+	const raw = min * factor ** Math.max(0, attempt - 1);
+	return Math.min(max, Math.floor(raw));
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
 
 export default abstract class RunnerSteps {
 	/**
@@ -81,27 +115,89 @@ export default abstract class RunnerSteps {
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;
 					}
 
+					// === Tier 1: idempotency cache lookup ===
+					// Resolve the step's idempotency key against the live ctx,
+					// then consult the cache. On hit, short-circuit step.process
+					// entirely: replay the cached result through the same v2
+					// persistence rules (ephemeral / spread / as), mark the
+					// node cached for tracing, log "cached", and skip to the
+					// next step. Caching layers ABOVE PersistenceHelper —
+					// applyStepOutput's rules apply identically to cached and
+					// freshly-computed results.
+					const workflowName = (ctx as { workflow_name?: string }).workflow_name ?? "";
+					const cacheStore = tracker && traceRunId ? tracker.getStore() : null;
+					const resolvedIdemKey =
+						cacheStore && workflowName ? resolveIdempotencyKey((step as NodeBase).idempotencyKey, ctx) : null;
+
+					if (cacheStore && resolvedIdemKey && nodeRunId) {
+						const hit = cacheStore.getIdempotencyCache(workflowName, step.name, resolvedIdemKey);
+						if (hit) {
+							applyStepOutput(ctx, step, { data: hit.data });
+							ctx.response = hit.data as BlokResponse;
+							tracker?.markNodeCached(
+								nodeRunId,
+								{
+									sourceRunId: hit.sourceRunId,
+									sourceNodeRunId: hit.sourceNodeRunId,
+									cachedAt: hit.cachedAt,
+								},
+								hit.data,
+							);
+							ctx.logger.log(`${stepPrefix} → cached (from run ${hit.sourceRunId})`);
+							continue;
+						}
+					}
+
 					ctx.logger.log(`${stepPrefix} → started`);
 					const stepStart = performance.now();
 
-					try {
-						const model = await step.process(ctx, step as unknown as Step);
-						ctx.response = model.data as BlokResponse;
+					// === Tier 1: retry loop ===
+					// Wraps step.process() with capped exponential backoff per
+					// `step.retry`. Default `maxAttempts: 1` preserves
+					// pre-Phase-4 behaviour exactly (single attempt, no retry).
+					// Soft errors (model.data.error returned from the SDK)
+					// participate in retry alongside thrown errors — both flow
+					// through the catch block below.
+					const retryConfig = (step as NodeBase).retry;
+					const maxAttempts = retryConfig ? Math.max(1, retryConfig.maxAttempts) : 1;
+					let attempt = 0;
 
-						const stepDuration = (performance.now() - stepStart).toFixed(1);
+					while (true) {
+						attempt += 1;
 
-						// --- Trace: complete or fail node ---
-						if (tracker && nodeRunId) {
-							if (ctx.response.error) {
-								// Pass the error VERBATIM so RunTracker's
-								// `toRunErrorDetail` can preserve BlokError
-								// fields (category, retryable, remediation,
-								// causes, …) when the SDK supplied a typed
-								// failure. Strings and bare Errors fall
-								// through to the legacy `{message, stack}`
-								// shape.
-								tracker.failNode(nodeRunId, ctx.response.error);
-							} else {
+						try {
+							const model = await step.process(ctx, step as unknown as Step);
+							ctx.response = model.data as BlokResponse;
+
+							// Treat soft errors (data carries `.error`) the same as
+							// thrown errors so retry semantics are uniform.
+							if (ctx.response?.error) {
+								throw ctx.response.error;
+							}
+
+							// === Tier 1: idempotency cache write ===
+							// Cache on the success path only — failed steps are
+							// re-runnable. Honour `idempotencyKeyTTL` per step;
+							// default 24h. A TTL of 0 stores an immediately-
+							// expired entry (useful as a kill-switch).
+							if (cacheStore && resolvedIdemKey && nodeRunId && traceRunId) {
+								const ttlField = (step as NodeBase).idempotencyKeyTTL;
+								const ttlMs = typeof ttlField === "number" ? ttlField : DEFAULT_IDEMPOTENCY_TTL_MS;
+								const now = Date.now();
+								const expiresAt = ttlMs > 0 ? now + ttlMs : now - 1;
+								cacheStore.setIdempotencyCache(workflowName, step.name, resolvedIdemKey, {
+									data: model.data,
+									cachedAt: now,
+									expiresAt,
+									sourceRunId: traceRunId,
+									sourceNodeRunId: nodeRunId,
+								});
+							}
+
+							const stepDuration = (performance.now() - stepStart).toFixed(1);
+
+							// --- Trace: complete node ---
+							if (tracker && nodeRunId) {
 								// `_stepMetrics` is stashed on ctx by RuntimeAdapterNode
 								// when an adapter returns metrics (gRPC wire bytes,
 								// duration, cpu, memory). Threading it through
@@ -113,28 +209,47 @@ export default abstract class RunnerSteps {
 								ctxAny._stepMetrics = undefined;
 								tracker.completeNode(nodeRunId, sanitize(ctx.response.data), stepMetrics);
 							}
-						}
 
-						if (ctx.response.error) {
-							ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms)`);
-							throw ctx.response.error;
-						}
-
-						ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms)`);
-					} catch (nodeErr) {
-						// --- Trace: fail node on exception ---
-						if (tracker && nodeRunId) {
-							const existing = tracker.getNodeRun(nodeRunId);
-							if (existing && existing.status === "running") {
-								tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
+							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
+							ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms${attemptSuffix})`);
+							break;
+						} catch (nodeErr) {
+							if (attempt < maxAttempts && retryConfig) {
+								// More attempts remain — record this as a soft
+								// failure and back off before retrying. The node
+								// stays in `running` status; failNode is the
+								// terminal call.
+								if (tracker && nodeRunId) {
+									tracker.recordNodeAttemptFailed(nodeRunId, { attempt, error: nodeErr });
+								}
+								const backoffMs = computeBackoff(retryConfig, attempt);
+								const errMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+								ctx.logger.log(
+									`${stepPrefix} → attempt ${attempt}/${maxAttempts} failed (${errMsg}), retrying in ${backoffMs}ms`,
+								);
+								await sleep(backoffMs);
+								continue;
 							}
-						}
 
-						// Enrich error with step context so developers know which step failed
-						const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-						const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
-						(enrichedError as Error & { cause?: unknown }).cause = nodeErr;
-						throw enrichedError;
+							// Final attempt — fail the node and propagate the
+							// enriched error so RunnerSteps' outer catch can
+							// wrap it as a GlobalError.
+							if (tracker && nodeRunId) {
+								const existing = tracker.getNodeRun(nodeRunId);
+								if (existing && existing.status === "running") {
+									tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
+								}
+							}
+							const stepDuration = (performance.now() - stepStart).toFixed(1);
+							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
+							ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms${attemptSuffix})`);
+
+							// Enrich error with step context so developers know which step failed
+							const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+							const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
+							(enrichedError as Error & { cause?: unknown }).cause = nodeErr;
+							throw enrichedError;
+						}
 					}
 				} else {
 					stepName = step.name;

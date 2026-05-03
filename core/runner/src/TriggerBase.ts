@@ -200,12 +200,25 @@ export default abstract class TriggerBase extends Trigger {
 		if (tracker.active) {
 			const runner = this.getRunner();
 			const stepCount = runner.getStepCount?.() ?? this.configuration.steps?.length ?? 0;
+			// Tier 1 · replay lineage. The replay endpoint
+			// (TraceRouter.POST /__blok/runs/:id/replay) sets
+			// `X-Blok-Replay-Of: <originalRunId>` on the dispatched HTTP
+			// request. Read it here so the new run carries `replayOf` and
+			// Studio can render a "Replay of #..." breadcrumb.
+			const reqHeaders = (ctx.request?.headers ?? {}) as Record<string, string | string[] | undefined>;
+			const replayOfHeader = reqHeaders["x-blok-replay-of"] ?? reqHeaders["X-Blok-Replay-Of"];
+			const replayOf = Array.isArray(replayOfHeader)
+				? replayOfHeader[0]
+				: typeof replayOfHeader === "string"
+					? replayOfHeader
+					: undefined;
 			const run = tracker.startRun({
 				workflowName: this.configuration.name || ctx.workflow_name || "unknown",
 				workflowPath: ctx.workflow_path || "",
 				triggerType: this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown",
 				triggerSummary: this.buildTraceTriggerSummary(ctx),
 				nodeCount: stepCount,
+				replayOf,
 			});
 			traceRunId = run.id;
 			(ctx as Record<string, unknown>)._traceRunId = run.id;

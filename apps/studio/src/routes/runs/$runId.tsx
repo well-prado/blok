@@ -194,6 +194,17 @@ function RunTracePage() {
 						ms={run.status === "running" ? run.startedAt : run.durationMs}
 						running={run.status === "running"}
 					/>
+					{run.replayOf && (
+						<Link
+							to="/runs/$runId"
+							params={{ runId: run.replayOf }}
+							className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono uppercase tracking-wide bg-raised text-zinc-400 hover:text-zinc-100 hover:bg-hover transition-colors"
+							title={`Replay of run ${run.replayOf}`}
+						>
+							<RotateCcw className="w-2.5 h-2.5" />
+							replay of {run.replayOf.slice(0, 8)}
+						</Link>
+					)}
 
 					<div className="ml-auto flex items-center gap-2">
 						{isFinished && isHttpTrigger && (

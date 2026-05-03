@@ -75,6 +75,57 @@ export function ActiveStepPanel({ node, logs, totalSteps, transport }: Props) {
 
 			{/* ── Body ─────────────────────────────────────────────────── */}
 			<div className="flex-1 overflow-y-auto">
+				{/* Tier 1 · cached-step lineage. Highest-priority banner — operators
+				    debugging an unexpected output need to know immediately that
+				    this step did not actually run on this run. */}
+				{node.cached && (
+					<div className="px-8 pt-5">
+						<div className="flex items-start gap-3 rounded-md border border-blok-green-500/30 bg-blok-green-500/5 px-4 py-3">
+							<span className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-blok-green-500/15 text-blok-green-500 shrink-0 mt-0.5">
+								cached
+							</span>
+							<div className="text-[12px] text-zinc-300 leading-relaxed">
+								This step short-circuited via the idempotency cache.
+								<div className="mt-1 text-zinc-500 font-mono text-[11px]">
+									source run{" "}
+									<a
+										href={`/runs/${node.cached.sourceRunId}`}
+										className="text-zinc-300 hover:text-blok-green-500 underline decoration-zinc-700 hover:decoration-blok-green-500"
+									>
+										{node.cached.sourceRunId}
+									</a>{" "}
+									· cached {Math.max(0, Math.floor((Date.now() - node.cached.cachedAt) / 1000))}s ago
+								</div>
+							</div>
+						</div>
+					</div>
+				)}
+
+				{/* Tier 1 · retry attempts disclosure. Renders the per-attempt
+				    failure history before the node ultimately succeeded or
+				    was fail-noded. Capped at 10 by the runner. */}
+				{node.attempts && node.attempts.length > 0 && (
+					<div className="px-8 pt-5">
+						<details className="rounded-md border border-status-warning/30 bg-status-warning/5 px-4 py-3">
+							<summary className="cursor-pointer text-[12px] text-zinc-200 font-medium select-none">
+								<span className="font-mono text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-status-warning/15 text-status-warning mr-2">
+									retry
+								</span>
+								{node.attempts.length} failed attempt{node.attempts.length === 1 ? "" : "s"} before outcome
+							</summary>
+							<ul className="mt-3 space-y-2 text-[11.5px]">
+								{node.attempts.map((a) => (
+									<li key={a.timestamp} className="flex items-start gap-3 font-mono">
+										<span className="text-zinc-500 shrink-0">#{a.attempt}</span>
+										<span className="text-zinc-500 shrink-0">{new Date(a.timestamp).toISOString().slice(11, 23)}</span>
+										<span className="text-status-failed break-words">{a.error.message}</span>
+									</li>
+								))}
+							</ul>
+						</details>
+					</div>
+				)}
+
 				{/* Live progress (Phase 5 streaming) — sits above content
 				    when the SDK is still emitting frames. */}
 				{node.progress && (

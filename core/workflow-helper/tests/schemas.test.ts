@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { NodeTypeSchema, RuntimeKindSchema, StepConditionSchema, StepOptsSchema } from "../src/types/StepOpts";
+import {
+	NodeTypeSchema,
+	RetryConfigSchema,
+	RuntimeKindSchema,
+	StepConditionSchema,
+	StepOptsSchema,
+	V2RegularStepSchema,
+} from "../src/types/StepOpts";
 import {
 	CronTriggerOptsSchema,
 	HttpTriggerOptsSchema,
@@ -74,6 +81,136 @@ describe("StepOptsSchema", () => {
 		expect(() =>
 			StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "module", set_var: "yes" }),
 		).toThrow();
+	});
+});
+
+describe("V2RegularStepSchema — idempotencyKey + retry", () => {
+	const baseStep = { id: "fetch", use: "@blokjs/api-call" };
+
+	it("accepts a non-empty idempotencyKey string", () => {
+		const result = V2RegularStepSchema.parse({ ...baseStep, idempotencyKey: "user-123" });
+		expect(result.idempotencyKey).toBe("user-123");
+	});
+
+	it("accepts a js-expression-style idempotencyKey (string compiled from $ proxy)", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "js/ctx.req.body.requestId",
+		});
+		expect(result.idempotencyKey).toBe("js/ctx.req.body.requestId");
+	});
+
+	it("rejects an empty idempotencyKey string", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, idempotencyKey: "" })).toThrow();
+	});
+
+	it("rejects a non-string idempotencyKey", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: 42 as unknown as string,
+			}),
+		).toThrow();
+	});
+
+	it("accepts an integer idempotencyKeyTTL in milliseconds", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "k",
+			idempotencyKeyTTL: 60_000,
+		});
+		expect(result.idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("accepts idempotencyKeyTTL of 0 (immediately expired)", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "k",
+			idempotencyKeyTTL: 0,
+		});
+		expect(result.idempotencyKeyTTL).toBe(0);
+	});
+
+	it("rejects negative idempotencyKeyTTL", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: "k",
+				idempotencyKeyTTL: -1,
+			}),
+		).toThrow();
+	});
+
+	it("rejects non-integer idempotencyKeyTTL", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: "k",
+				idempotencyKeyTTL: 1.5,
+			}),
+		).toThrow();
+	});
+
+	it("accepts a minimal retry config (maxAttempts only)", () => {
+		const result = V2RegularStepSchema.parse({ ...baseStep, retry: { maxAttempts: 3 } });
+		expect(result.retry?.maxAttempts).toBe(3);
+		expect(result.retry?.minTimeoutInMs).toBeUndefined();
+		expect(result.retry?.factor).toBeUndefined();
+	});
+
+	it("accepts a full retry config", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			retry: { maxAttempts: 5, minTimeoutInMs: 500, maxTimeoutInMs: 10_000, factor: 2 },
+		});
+		expect(result.retry?.maxAttempts).toBe(5);
+		expect(result.retry?.minTimeoutInMs).toBe(500);
+		expect(result.retry?.maxTimeoutInMs).toBe(10_000);
+		expect(result.retry?.factor).toBe(2);
+	});
+});
+
+describe("RetryConfigSchema", () => {
+	it("requires maxAttempts", () => {
+		expect(() => RetryConfigSchema.parse({} as unknown as { maxAttempts: number })).toThrow();
+	});
+
+	it("rejects maxAttempts < 1", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 0 })).toThrow();
+	});
+
+	it("rejects maxAttempts > 20", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 21 })).toThrow();
+	});
+
+	it("rejects non-integer maxAttempts", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 1.5 })).toThrow();
+	});
+
+	it("rejects factor < 1", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, factor: 0.5 })).toThrow();
+	});
+
+	it("accepts factor === 1 (constant backoff)", () => {
+		const result = RetryConfigSchema.parse({ maxAttempts: 3, factor: 1 });
+		expect(result.factor).toBe(1);
+	});
+
+	it("rejects negative timeouts", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: -1 })).toThrow();
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, maxTimeoutInMs: -1 })).toThrow();
+	});
+
+	it("rejects minTimeoutInMs > maxTimeoutInMs", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: 5000, maxTimeoutInMs: 1000 })).toThrow(
+			/maxTimeoutInMs/,
+		);
+	});
+
+	it("accepts minTimeoutInMs === maxTimeoutInMs (capped at first delay)", () => {
+		const result = RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: 1000, maxTimeoutInMs: 1000 });
+		expect(result.minTimeoutInMs).toBe(1000);
+		expect(result.maxTimeoutInMs).toBe(1000);
 	});
 });
 

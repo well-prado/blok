@@ -250,6 +250,17 @@ export default class Configuration implements Config {
 			node.as = (step as RunnerNode & { as?: string }).as;
 			node.spread = (step as RunnerNode & { spread?: boolean }).spread === true;
 			node.ephemeral = (step as RunnerNode & { ephemeral?: boolean }).ephemeral === true;
+			// V2 idempotency cache + retry knobs — read by RunnerSteps before
+			// delegating to step.process(). Caching layers ABOVE
+			// PersistenceHelper; retry wraps the same call site.
+			const v2Idem = step as RunnerNode & {
+				idempotencyKey?: string;
+				idempotencyKeyTTL?: number;
+				retry?: NodeBase["retry"];
+			};
+			if (v2Idem.idempotencyKey !== undefined) node.idempotencyKey = v2Idem.idempotencyKey;
+			if (v2Idem.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Idem.idempotencyKeyTTL;
+			if (v2Idem.retry !== undefined) node.retry = v2Idem.retry;
 			nodes.push(node);
 		}
 
@@ -337,6 +348,24 @@ export default class Configuration implements Config {
 			// workflows that explicitly set `set_var: false` are normalized
 			// to `ephemeral: true` upstream by WorkflowNormalizer.
 			if (step.set_var !== undefined) node.set_var = step.set_var;
+			// V2 persistence + idempotency + retry knobs flow through nested
+			// flow steps too. Without this, a `branch.then[0]` step with
+			// `idempotencyKey` set would NOT be cached on rerun. Mirrors the
+			// same trio Configuration.getSteps copies onto top-level steps.
+			const v2Flow = step as RunnerNode & {
+				as?: string;
+				spread?: boolean;
+				ephemeral?: boolean;
+				idempotencyKey?: string;
+				idempotencyKeyTTL?: number;
+				retry?: NodeBase["retry"];
+			};
+			if (v2Flow.as !== undefined) node.as = v2Flow.as;
+			node.spread = v2Flow.spread === true;
+			node.ephemeral = v2Flow.ephemeral === true;
+			if (v2Flow.idempotencyKey !== undefined) node.idempotencyKey = v2Flow.idempotencyKey;
+			if (v2Flow.idempotencyKeyTTL !== undefined) node.idempotencyKeyTTL = v2Flow.idempotencyKeyTTL;
+			if (v2Flow.retry !== undefined) node.retry = v2Flow.retry;
 
 			// const validator = z.instanceof(NodeBase);
 			// validator.parse(node);
@@ -425,10 +454,25 @@ export default class Configuration implements Config {
 		// though the GO step ran fine).
 		if (node.set_var !== undefined) targetNode.set_var = node.set_var;
 		// V2 persistence knobs — flow through to PersistenceHelper.
-		const v2 = node as RunnerNode & { as?: string; spread?: boolean; ephemeral?: boolean };
+		const v2 = node as RunnerNode & {
+			as?: string;
+			spread?: boolean;
+			ephemeral?: boolean;
+			idempotencyKey?: string;
+			idempotencyKeyTTL?: number;
+			retry?: NodeBase["retry"];
+		};
 		if (v2.as !== undefined) targetNode.as = v2.as;
 		targetNode.spread = v2.spread === true;
 		targetNode.ephemeral = v2.ephemeral === true;
+		// V2 idempotency cache + retry knobs — copied here so the targetNode
+		// surfaces them for any future code that inspects the inner SDK node
+		// directly. The OUTER RuntimeAdapterNode also carries them via
+		// getSteps/getFlow so RunnerSteps' cache-check + retry-loop wrapper
+		// works regardless of which side it reads.
+		if (v2.idempotencyKey !== undefined) targetNode.idempotencyKey = v2.idempotencyKey;
+		if (v2.idempotencyKeyTTL !== undefined) targetNode.idempotencyKeyTTL = v2.idempotencyKeyTTL;
+		if (v2.retry !== undefined) targetNode.retry = v2.retry;
 
 		// Wrap in RuntimeAdapterNode to integrate with existing Runner.
 		// Per-step `stream_logs: true|false` overrides the global

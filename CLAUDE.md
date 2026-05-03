@@ -26,6 +26,8 @@ blokctl trace                      # Open Blok Studio
 4. **Opt out of persistence with `ephemeral: true`** on the step. Side-effect-only steps (logging, audit) typically do this.
 5. **Multi-output nodes:** add `spread: true` to flatten `result.data` keys into `ctx.state` instead of nesting under the step's id. Useful in data-pipeline workflows.
 6. **Rename outputs:** `as: "<name>"` stores the result at `ctx.state[<name>]` instead of `ctx.state[<id>]`. Mutually exclusive with `spread`.
+7. **Cache expensive steps:** add `idempotencyKey: "<string>"` (literal or `$.<path>`). On rerun with the same triple `(workflow, step.id, key)`, the runner replays the cached result through the same persistence rules and skips `step.process()`. Default TTL 24h; override per step via `idempotencyKeyTTL: <ms>`. Caching layers ABOVE persistence — `ephemeral`/`spread`/`as` apply identically to cached and fresh results.
+8. **Retry transient failures:** add `retry: { maxAttempts, minTimeoutInMs?, maxTimeoutInMs?, factor? }`. Per-attempt failures emit `NODE_ATTEMPT_FAILED` and surface in Studio. Default behaviour is no retry (`maxAttempts: 1`).
 
 When a user has data flow issues, check these rules first.
 

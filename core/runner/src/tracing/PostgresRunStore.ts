@@ -640,6 +640,32 @@ export class PostgresRunStore implements RunStore {
 		this.closed = true;
 	}
 
+	// === Idempotency cache (Tier 1) ===
+	//
+	// PG durable cache is out of scope for this PR — delegate to the
+	// in-memory layer this store already uses for hot reads. Same-process
+	// hits work exactly like the SQLite store; cross-process / cross-restart
+	// hits are deferred to a follow-up PG schema migration. Operators
+	// running PG today retain pre-Phase-3 behaviour (no caching) on a fresh
+	// process and gain in-memory caching within a single process lifetime.
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string) {
+		return this.memory.getIdempotencyCache(workflowName, stepId, key);
+	}
+
+	setIdempotencyCache(
+		workflowName: string,
+		stepId: string,
+		key: string,
+		entry: Parameters<typeof this.memory.setIdempotencyCache>[3],
+	): void {
+		this.memory.setIdempotencyCache(workflowName, stepId, key, entry);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		return this.memory.purgeExpiredIdempotencyCache(now);
+	}
+
 	// === Write Queue ===
 
 	private enqueueWrite(fn: () => Promise<void>): void {

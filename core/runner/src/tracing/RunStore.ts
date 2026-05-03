@@ -1,4 +1,5 @@
 import type {
+	CachedStepResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -54,6 +55,26 @@ export interface RunStore {
 	clearAll(): number;
 	deleteRunsBefore(timestamp: number): number;
 	evictOldRuns(maxRuns: number): void;
+
+	// === Idempotency cache (Tier 1) ===
+	/**
+	 * Look up a previously-cached step result. Returns null on miss or
+	 * when the entry has expired (expired entries are lazily purged on read).
+	 */
+	getIdempotencyCache(workflowName: string, stepId: string, key: string): CachedStepResult | null;
+
+	/**
+	 * Store a step result keyed by (workflowName, stepId, key). Overwrites any
+	 * previous entry for the same triple. Pass `expiresAt: null` for no TTL.
+	 */
+	setIdempotencyCache(workflowName: string, stepId: string, key: string, entry: CachedStepResult): void;
+
+	/**
+	 * Delete every entry whose `expiresAt` is non-null and `<= now`. Returns
+	 * the number of rows removed. Cheap to call periodically; safe under
+	 * concurrent reads.
+	 */
+	purgeExpiredIdempotencyCache(now: number): number;
 
 	// === Lifecycle ===
 	close(): void;

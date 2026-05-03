@@ -64,6 +64,17 @@ export interface WorkflowRun {
 	 * SQLite databases still work because the column is optional.
 	 */
 	environment?: string;
+	/**
+	 * Tier 1 · replay lineage. When this run was started via
+	 * `POST /__blok/runs/:id/replay`, this carries the original run's id.
+	 * Studio renders a "Replay of #..." breadcrumb that links back to the
+	 * source run. Absent on first-class triggered runs.
+	 *
+	 * Plumbed end-to-end via the `X-Blok-Replay-Of` HTTP header that the
+	 * replay endpoint sets on the dispatched request. TriggerBase reads
+	 * the header and threads it into `tracker.startRun({ replayOf })`.
+	 */
+	replayOf?: string;
 }
 
 // === Node Lifecycle ===
@@ -121,6 +132,52 @@ export interface NodeRun {
 		/** Bytes received from the SDK in the response. */
 		response_bytes?: number;
 	};
+	/**
+	 * Tier 1 idempotency cache lineage. Populated by `RunTracker.markNodeCached`
+	 * when the step short-circuited via a cache hit instead of running. Studio
+	 * renders a "CACHED" badge with a click-through to the source run/node.
+	 * Absent on regular completed nodes.
+	 */
+	cached?: {
+		sourceRunId: string;
+		sourceNodeRunId: string;
+		cachedAt: number;
+	};
+	/**
+	 * Tier 1 retry attempts. One entry per `NODE_ATTEMPT_FAILED` event the
+	 * step emitted before either succeeding or exhausting `retry.maxAttempts`.
+	 * Capped at 10 entries (`MAX_STORED_ATTEMPTS`) — extreme retry counts
+	 * are bounded so a runaway loop can't bloat the run store.
+	 *
+	 * Studio renders this as a collapsible "Attempts (N)" disclosure on the
+	 * step's panel. The final outcome lives on the node's status / error
+	 * fields; this array carries only the failed attempts that came before.
+	 */
+	attempts?: Array<{
+		attempt: number;
+		error: RunErrorDetail;
+		timestamp: number;
+	}>;
+}
+
+/**
+ * Stored result of a previously-successful step execution, keyed by
+ * `(workflowName, step.id, idempotencyKey)`. On cache hit, RunnerSteps
+ * skips `step.process()` and replays the cached `data` through the same
+ * `PersistenceHelper.applyStepOutput` rules — caching layers ABOVE
+ * persistence, never within it.
+ */
+export interface CachedStepResult {
+	/** The data the step originally returned. */
+	data: unknown;
+	/** ms since epoch when the entry was written. */
+	cachedAt: number;
+	/** ms since epoch when the entry expires; null = no expiry. */
+	expiresAt: number | null;
+	/** Run that originally produced this result. */
+	sourceRunId: string;
+	/** Node run that originally produced this result. */
+	sourceNodeRunId: string;
 }
 
 // === Events ===
@@ -138,7 +195,20 @@ export type RunEventType =
 	/** §17 Phase 5: streaming `Progress` frame from the SDK. */
 	| "NODE_PROGRESS"
 	/** §17 Phase 5: streaming `PartialResult` frame from the SDK. */
-	| "NODE_PARTIAL_RESULT";
+	| "NODE_PARTIAL_RESULT"
+	/**
+	 * Tier 1 idempotency cache hit: the step short-circuited via the
+	 * idempotency cache instead of running. Payload carries
+	 * `{ durationMs, source: { sourceRunId, sourceNodeRunId, cachedAt } }`.
+	 * Studio renders a CACHED badge on the affected node.
+	 */
+	| "NODE_CACHED"
+	/**
+	 * Tier 1 retry: a step attempt failed and another retry will follow.
+	 * Payload carries `{ attempt, error }`. Final attempt failure (after
+	 * exhausting `retry.maxAttempts`) emits `NODE_FAILED` instead.
+	 */
+	| "NODE_ATTEMPT_FAILED";
 
 export interface RunEvent {
 	id: string;
@@ -202,6 +272,12 @@ export interface StartRunOptions {
 	nodeCount: number;
 	tags?: string[];
 	metadata?: Record<string, unknown>;
+	/**
+	 * Tier 1 · replay lineage. When a run is started via the replay endpoint,
+	 * this carries the original run's id so Studio can render a "Replay of #..."
+	 * breadcrumb. Plumbed end-to-end via the `X-Blok-Replay-Of` HTTP header.
+	 */
+	replayOf?: string;
 }
 
 export interface StartNodeOptions {

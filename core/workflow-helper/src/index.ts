@@ -10,6 +10,8 @@ import { $, type DollarProxy, type ExprPath, JS_EXPR_TAG, unwrapProxies } from "
 import {
 	NodeType,
 	NodeTypeSchema,
+	RetryConfig,
+	RetryConfigSchema,
 	RuntimeKind,
 	RuntimeKindSchema,
 	StepInputs,
@@ -103,6 +105,9 @@ export {
 	V2BranchStep,
 	V2BranchStepSchema,
 	isBranchStep,
+	// retry configuration
+	RetryConfig,
+	RetryConfigSchema,
 	// v2 workflow envelope
 	WorkflowV2,
 	WorkflowV2Schema,

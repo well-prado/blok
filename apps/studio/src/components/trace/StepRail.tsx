@@ -70,6 +70,24 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 				)}
 			/>
 			<span className="flex-1 truncate">{n.nodeName}</span>
+			{/* Tier 1: CACHED badge — node short-circuited via the idempotency cache. */}
+			{n.cached && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-blok-green-500/15 text-blok-green-500 shrink-0"
+					title={`Reused result from run ${n.cached.sourceRunId}`}
+				>
+					cached
+				</span>
+			)}
+			{/* Tier 1: retry indicator — node had at least one failed attempt before final outcome. */}
+			{n.attempts && n.attempts.length > 0 && (
+				<span
+					className="font-mono text-[9px] px-1 py-px rounded bg-status-warning/15 text-status-warning shrink-0"
+					title={`${n.attempts.length} failed attempt${n.attempts.length === 1 ? "" : "s"} before outcome`}
+				>
+					↻{n.attempts.length}
+				</span>
+			)}
 			{n.durationMs != null && (
 				<span
 					className={cn(

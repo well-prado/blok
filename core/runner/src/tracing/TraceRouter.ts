@@ -744,6 +744,11 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const finalUrl = overrides.path ? `${protocol}://${host}${overrides.path}` : url;
 		const customHeaders: Record<string, string> = {
 			"Content-Type": "application/json",
+			// Tier 1 · replay lineage. TriggerBase reads this header and threads
+			// it into `tracker.startRun({ replayOf })`, which persists onto the
+			// new run's WorkflowRun.replayOf field. Studio renders a
+			// "Replay of #..." breadcrumb that links back to the source run.
+			"X-Blok-Replay-Of": runId,
 			...((overrides.headers as Record<string, string>) || {}),
 		};
 		const body = overrides.body !== undefined ? JSON.stringify(overrides.body) : undefined;
@@ -766,6 +771,10 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 				newRunId: event.runId,
 				originalRunId: runId,
 				workflowName: run.workflowName,
+				// Tier 1 · explicit lineage in the API response so Studio
+				// doesn't have to fetch the new run separately to confirm
+				// the replay relationship.
+				replayOf: runId,
 			});
 		};
 

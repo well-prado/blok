@@ -212,6 +212,13 @@ export interface ReplayResponse {
 	newRunId: string;
 	originalRunId: string;
 	workflowName: string;
+	/**
+	 * Tier 1 explicit replay lineage — same value as `originalRunId`,
+	 * surfaced under the field name the new run's WorkflowRun will carry
+	 * so callers don't need separate paths for "from response" vs
+	 * "from a fetched run record".
+	 */
+	replayOf: string;
 }
 
 export function replayRun(

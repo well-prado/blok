@@ -47,6 +47,8 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	LOG_ENTRY: "Log Entry",
 	NODE_PROGRESS: "Node Progress",
 	NODE_PARTIAL_RESULT: "Node Partial Result",
+	NODE_CACHED: "Node Cached",
+	NODE_ATTEMPT_FAILED: "Attempt Failed",
 };
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
@@ -61,6 +63,8 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	LOG_ENTRY: "text-zinc-300 bg-zinc-300/10",
 	NODE_PROGRESS: "text-cyan-400 bg-cyan-400/10",
 	NODE_PARTIAL_RESULT: "text-cyan-300 bg-cyan-300/10",
+	NODE_CACHED: "text-emerald-400 bg-emerald-400/10",
+	NODE_ATTEMPT_FAILED: "text-amber-400 bg-amber-400/10",
 };
 
 export const LOG_LEVEL_COLORS = {
