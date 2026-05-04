@@ -878,20 +878,52 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 			return;
 		}
 
-		const cancellable = ["delayed", "debounced", "queued"];
+		// Tier 2 follow-up · "running" added so cooperative AbortSignal
+		// cancellation can flip in-flight runs to `cancelled` via
+		// `tracker.abortRunningRun(runId)`. Other terminal states
+		// (completed/failed/throttled/expired/crashed/timedOut) remain
+		// non-cancellable.
+		const cancellable = ["delayed", "debounced", "queued", "running"];
 		if (!cancellable.includes(run.status)) {
 			res.status(400).json({
-				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', or 'queued' state can be cancelled. Running runs require cooperative AbortSignal cancellation (deferred follow-up).`,
+				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', 'queued', or 'running' state can be cancelled.`,
 				runId,
 				status: run.status,
 			});
 			return;
 		}
 
-		// Capture previousStatus BEFORE cancelRun mutates the run record
-		// (the in-memory store mutates the underlying object in-place, so
-		// `run.status` would otherwise read back as "cancelled" here).
+		// Capture previousStatus BEFORE cancelRun mutates the run record.
 		const previousStatus = run.status;
+
+		// Tier 2 follow-up · running runs use cooperative AbortSignal.
+		// `abortRunningRun` fires the controller AND flips status via
+		// cancelRun in one atomic-feeling call. Returns 200 — the
+		// in-flight step's between-step check will throw shortly.
+		if (run.status === "running") {
+			const aborted = t.abortRunningRun(runId);
+			if (!aborted) {
+				// No registered controller — likely a stale state where
+				// the run is mid-finalization. Still return success since
+				// the run is on its way to terminal anyway.
+				res.json({
+					cancelled: true,
+					runId,
+					previousStatus,
+					newStatus: "cancelled",
+					note: "No active AbortController; run will reach terminal state naturally.",
+				});
+				return;
+			}
+			res.json({
+				cancelled: true,
+				runId,
+				previousStatus,
+				newStatus: "cancelled",
+				note: "Cancellation initiated via AbortSignal; in-flight step will abort cooperatively.",
+			});
+			return;
+		}
 
 		// Best-effort scheduler cleanup (both methods are idempotent).
 		DeferredRunScheduler.getInstance().cancel(runId);

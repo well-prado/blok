@@ -118,6 +118,9 @@ import {
 // Per-step timeout (Tier 2 quick-wins)
 import { StepTimeoutError, isStepTimeoutError } from "./timeouts/StepTimeoutError";
 
+// Cooperative cancellation (Tier 2 follow-up)
+import { RunCancelledError, isRunCancelledError } from "./RunCancelledError";
+
 // Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import {
@@ -280,6 +283,9 @@ export {
 	// Per-step timeout (Tier 2 quick-wins)
 	StepTimeoutError,
 	isStepTimeoutError,
+	// Cooperative cancellation (Tier 2 follow-up)
+	RunCancelledError,
+	isRunCancelledError,
 	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 	DeferredDispatchSignal,
 	type DeferredDispatchInfo,

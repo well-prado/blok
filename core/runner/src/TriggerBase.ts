@@ -3,6 +3,7 @@ import { metrics } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";
 import DefaultLogger from "./DefaultLogger";
+import { RunCancelledError } from "./RunCancelledError";
 import Runner from "./Runner";
 import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
@@ -395,6 +396,14 @@ export default abstract class TriggerBase extends Trigger {
 			traceRunId = run.id;
 			ctxRecord._traceRunId = run.id;
 
+			// Tier 2 follow-up · register the ctx's AbortController so the
+			// cancel API can fire it for `running` runs. Stashed on
+			// _PRIVATE_ by createContext; lookup via the optional shape.
+			const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
+			if (privateSlot?.abortController) {
+				tracker.registerAbortController(run.id, privateSlot.abortController);
+			}
+
 			// Wrap logger to forward log entries to RunTracker
 			ctx.logger = new TracingLogger(ctx.logger, run.id, tracker);
 		}
@@ -661,7 +670,16 @@ export default abstract class TriggerBase extends Trigger {
 			// Tier 2 #5 + #7: DeferredDispatchSignal already flipped the
 			// run's status to "delayed" or "debounced". Don't override it
 			// with "failed". The transport layer translates → 202 Accepted.
-			if (traceRunId && !(err instanceof ConcurrencyLimitError) && !(err instanceof DeferredDispatchSignal)) {
+			//
+			// Tier 2 follow-up: RunCancelledError is thrown by RunnerSteps
+			// when an operator cancels via `abortRunningRun`. The tracker
+			// has already flipped the run to "cancelled"; don't override.
+			if (
+				traceRunId &&
+				!(err instanceof ConcurrencyLimitError) &&
+				!(err instanceof DeferredDispatchSignal) &&
+				!(err instanceof RunCancelledError)
+			) {
 				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
 			}
 
@@ -682,6 +700,13 @@ export default abstract class TriggerBase extends Trigger {
 						err instanceof Error ? err.stack || err.message : err,
 					);
 				});
+			}
+
+			// Tier 2 follow-up · clean up the AbortController registration
+			// once the run is terminal. Idempotent — safe even if the run
+			// was cancelled mid-flight (the tracker already aborted).
+			if (traceRunId) {
+				tracker.unregisterAbortController(traceRunId);
 			}
 
 			const durationMs = performance.now() - runStart;
@@ -967,6 +992,15 @@ export default abstract class TriggerBase extends Trigger {
 		// (legacy alias). All step outputs land here unless `ephemeral: true`.
 		const state: Record<string, unknown> = {};
 
+		// Tier 2 follow-up · cooperative cancellation. Each context owns
+		// an AbortController whose signal flips when an operator cancels
+		// the run via `POST /__blok/runs/:runId/cancel` while it's in
+		// `running` status. RunnerSteps' between-step check throws
+		// `RunCancelledError` which TriggerBase catches without flipping
+		// the run to `failed` (the tracker has already flipped it to
+		// `cancelled`).
+		const abortController = new AbortController();
+
 		const ctx: Context = {
 			id: requestId,
 			workflow_name: this.configuration.name,
@@ -982,7 +1016,10 @@ export default abstract class TriggerBase extends Trigger {
 			// to either propagate. Authors writing `ctx.vars[k] = v` keep
 			// working; the runner reads via state.
 			vars: state,
-			_PRIVATE_: null,
+			signal: abortController.signal,
+			// Stash the controller on _PRIVATE_ so TriggerBase.run can
+			// hand it to the tracker without exposing it on the public ctx.
+			_PRIVATE_: { abortController },
 		};
 
 		// V2 read-only aliases — same object reference, no copy.

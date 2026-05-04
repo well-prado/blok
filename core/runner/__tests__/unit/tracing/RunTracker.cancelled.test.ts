@@ -76,14 +76,16 @@ describe("RunTracker — cancelRun (Tier 2 polish)", () => {
 		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
 	});
 
-	it("rejects cancellation for a running run", () => {
+	it("accepts cancellation for a running run (Tier 2 follow-up: cooperative AbortSignal)", () => {
 		const tracker = RunTracker.getInstance();
 		const runId = startBaseRun();
-		// Run is `running` immediately after startRun.
+		// Run is `running` immediately after startRun. Tier 2 follow-up
+		// extended cancelRun to accept "running" so abortRunningRun can
+		// flip status before the in-flight step's RunCancelledError throws.
 
 		const ok = tracker.cancelRun(runId);
-		expect(ok).toBe(false);
-		expect(tracker.getStore().getRun(runId)?.status).toBe("running");
+		expect(ok).toBe(true);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
 	});
 
 	it("rejects cancellation for a completed run", () => {
@@ -109,6 +111,77 @@ describe("RunTracker — cancelRun (Tier 2 polish)", () => {
 		expect(tracker.cancelRun(runId)).toBe(true);
 		expect(tracker.cancelRun(runId)).toBe(false);
 		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+});
+
+describe("RunTracker — abortRunningRun (Tier 2 follow-up: cooperative AbortSignal)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	function startRun(): string {
+		return RunTracker.getInstance().startRun({
+			workflowName: "wf",
+			workflowPath: "/p",
+			triggerType: "http",
+			triggerSummary: "POST /test",
+			nodeCount: 1,
+		}).id;
+	}
+
+	it("fires the registered AbortController and flips status to cancelled", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startRun();
+		const controller = new AbortController();
+		tracker.registerAbortController(runId, controller);
+
+		expect(controller.signal.aborted).toBe(false);
+		const result = tracker.abortRunningRun(runId);
+
+		expect(result).toBe(true);
+		expect(controller.signal.aborted).toBe(true);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("returns false when the run is not in 'running' status", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startRun();
+		tracker.completeRun(runId);
+
+		const controller = new AbortController();
+		tracker.registerAbortController(runId, controller);
+		expect(tracker.abortRunningRun(runId)).toBe(false);
+		// Controller was NOT aborted because the run wasn't running.
+		expect(controller.signal.aborted).toBe(false);
+	});
+
+	it("returns false for unknown runId", () => {
+		expect(RunTracker.getInstance().abortRunningRun("ghost")).toBe(false);
+	});
+
+	it("aborts even when no controller is registered (still flips status)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startRun();
+		// No registerAbortController call.
+		const result = tracker.abortRunningRun(runId);
+		// Status flips because cancelRun accepts running; the abort itself is a no-op.
+		expect(result).toBe(true);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("unregisterAbortController removes the controller; subsequent abort doesn't fire it", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startRun();
+		const controller = new AbortController();
+		tracker.registerAbortController(runId, controller);
+		tracker.unregisterAbortController(runId);
+
+		tracker.abortRunningRun(runId);
+		expect(controller.signal.aborted).toBe(false);
 	});
 });
 

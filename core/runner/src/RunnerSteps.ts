@@ -1,5 +1,6 @@
 import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
 import type BlokResponse from "./BlokResponse";
+import { RunCancelledError } from "./RunCancelledError";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
@@ -90,6 +91,16 @@ export default abstract class RunnerSteps {
 
 			for (let i = 0; i < steps.length; i++) {
 				const step: NodeBase = steps[i];
+
+				// Tier 2 follow-up · cooperative cancellation. Operators can
+				// abort `running` runs via `POST /__blok/runs/:runId/cancel`,
+				// which fires the ctx's AbortController. The check is between
+				// steps so a long-running step's `step.process()` doesn't have
+				// to consult the signal itself (though nodes that want finer
+				// granularity can read `ctx.signal.aborted` themselves).
+				if (ctx.signal?.aborted) {
+					throw new RunCancelledError(traceRunId);
+				}
 
 				if (!step.active) {
 					// Track skipped nodes

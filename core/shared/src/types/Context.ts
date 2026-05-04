@@ -105,6 +105,24 @@ type Context = {
 	 */
 	publish?: (name: string, value: unknown) => void;
 
+	/**
+	 * Tier 2 follow-up · cooperative cancellation. AbortSignal whose
+	 * `aborted` flips to true when an operator cancels the run via
+	 * `POST /__blok/runs/:runId/cancel` while it's in `running` status.
+	 *
+	 * Nodes that perform long-running work (loops, fetch, db queries)
+	 * should consult `ctx.signal.aborted` periodically and abort early
+	 * — or pass the signal to fetch/abort-aware APIs:
+	 *
+	 *     await fetch(url, { signal: ctx.signal });
+	 *     if (ctx.signal?.aborted) throw new Error("aborted");
+	 *
+	 * Always present on contexts created by `TriggerBase.createContext`.
+	 * Optional on the type for back-compat with hand-built contexts in
+	 * tests.
+	 */
+	signal?: AbortSignal;
+
 	_PRIVATE_: unknown;
 };
 

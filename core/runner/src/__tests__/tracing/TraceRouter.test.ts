@@ -1262,14 +1262,18 @@ describe("TraceRouter", () => {
 			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
 		});
 
-		it("returns 400 when the run is in a non-cancellable state (running)", () => {
-			// runs.run1 is `completed` (set by seedData), but seedData also keeps run3 in `running`.
+		it("accepts cancellation for a running run (Tier 2 follow-up: cooperative AbortSignal)", () => {
+			// runs.run3 is `running` per seedData. Tier 2 follow-up extended
+			// the cancel route to accept "running" via abortRunningRun.
 			const req = new MockRequest({ params: { runId: runs.run3.id } });
 			const res = new MockResponse();
 			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
 
-			expect(res.statusCode).toBe(400);
-			expect((res.jsonBody as { error: string }).error).toContain("Cannot cancel run in 'running' state");
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { cancelled: boolean; previousStatus: string; newStatus: string };
+			expect(body.cancelled).toBe(true);
+			expect(body.previousStatus).toBe("running");
+			expect(body.newStatus).toBe("cancelled");
 		});
 
 		it("returns 400 when the run is already completed", () => {

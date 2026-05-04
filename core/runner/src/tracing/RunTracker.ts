@@ -520,7 +520,11 @@ export class RunTracker extends EventEmitter {
 		const run = this.store.getRun(runId);
 		if (!run) return false;
 
-		const cancellable = ["delayed", "debounced", "queued"];
+		// Tier 2 follow-up · "running" added so cooperative AbortSignal
+		// cancellation can flip status to "cancelled" before the in-flight
+		// step throws `RunCancelledError`. The tracker's `abortRunningRun`
+		// calls this method right after firing the AbortController.
+		const cancellable = ["delayed", "debounced", "queued", "running"];
 		if (!cancellable.includes(run.status)) return false;
 
 		const previousStatus = run.status;
@@ -539,6 +543,59 @@ export class RunTracker extends EventEmitter {
 		});
 
 		return true;
+	}
+
+	// === Cooperative cancellation (Tier 2 follow-up) ===
+
+	/**
+	 * Per-process map from runId to the AbortController owned by the
+	 * trigger's createContext call. Populated by TriggerBase right after
+	 * `startRun()`; cleared in TriggerBase's finally block. Used by
+	 * `abortRunningRun` to fire the signal when an operator cancels a
+	 * `running` run via the cancel API.
+	 */
+	private abortControllers: Map<string, AbortController> = new Map();
+
+	registerAbortController(runId: string, controller: AbortController): void {
+		this.abortControllers.set(runId, controller);
+	}
+
+	unregisterAbortController(runId: string): void {
+		this.abortControllers.delete(runId);
+	}
+
+	/**
+	 * Tier 2 follow-up · cooperative cancellation for `running` runs.
+	 *
+	 * Fires the run's AbortController (so `ctx.signal.aborted` becomes
+	 * true and any node consulting it can abort early) AND flips the run
+	 * status to `"cancelled"` immediately via `cancelRun`. RunnerSteps'
+	 * between-step abort check throws `RunCancelledError` shortly after,
+	 * which TriggerBase catches without re-flipping the status.
+	 *
+	 * Returns true when an AbortController was registered for this run
+	 * AND the status was successfully flipped; false otherwise (run not
+	 * found, run not in `running` status, or no controller registered —
+	 * e.g. controller already cleaned up).
+	 */
+	abortRunningRun(runId: string): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || run.status !== "running") return false;
+
+		const controller = this.abortControllers.get(runId);
+		if (controller) {
+			try {
+				controller.abort();
+			} catch {
+				// AbortController.abort never throws on first call; double-abort is safe.
+			}
+		}
+
+		// Flip status now so polls return cancelled immediately. The
+		// in-flight step's throw will land in TriggerBase.run's catch
+		// shortly; the catch sees status is already terminal and skips
+		// failRun (RunCancelledError instanceof check).
+		return this.cancelRun(runId);
 	}
 
 	// === Concurrency gate pass-throughs (Tier 2 #6) ===
