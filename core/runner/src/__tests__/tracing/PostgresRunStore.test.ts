@@ -423,3 +423,98 @@ describe("PostgresRunStore: aggregations", () => {
 		expect(tags).toContain("region:us");
 	});
 });
+
+describe("PostgresRunStore: durable schema (Tier 2 follow-up · migration v3)", () => {
+	let store: PostgresRunStore;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		store = new PostgresRunStore({
+			connectionString: "postgres://test:test@localhost:5432/test",
+		});
+	});
+
+	afterEach(() => {
+		store.close();
+	});
+
+	// The vitest pg mock returns a fresh `query` per Pool construction so
+	// asserting on the module-scope mockQuery doesn't see the writes (the
+	// new Pool's query is a different fn ref). Instead, instrument
+	// `this.pool.query` on each store directly: replace it with a spy
+	// after construction, then assert against that spy's calls.
+	function instrumentPoolQuery(s: PostgresRunStore): ReturnType<typeof vi.fn> {
+		const inner = s as unknown as { pool: { query: ReturnType<typeof vi.fn> } };
+		const spy = vi.fn().mockResolvedValue({ rows: [] });
+		inner.pool.query = spy;
+		return spy;
+	}
+
+	async function flushAndFilter(s: PostgresRunStore, spy: ReturnType<typeof vi.fn>, sqlSubstring: string) {
+		await (s as unknown as { flush(): Promise<void> }).flush();
+		return spy.mock.calls.filter((c: unknown[]) => String(c[0]).includes(sqlSubstring));
+	}
+
+	it("setIdempotencyCache writes to memory and enqueues a PG INSERT", async () => {
+		const spy = instrumentPoolQuery(store);
+		store.setIdempotencyCache("wf", "step", "key1", {
+			data: { x: 1 },
+			cachedAt: Date.now(),
+			expiresAt: Date.now() + 60_000,
+			sourceRunId: "src",
+			sourceNodeRunId: "src-node",
+		});
+		expect(store.getIdempotencyCache("wf", "step", "key1")).toBeDefined();
+		const calls = await flushAndFilter(store, spy, "INSERT INTO idempotency_cache");
+		expect(calls.length).toBeGreaterThan(0);
+	});
+
+	it("acquireConcurrencySlot persists granted leases to PG", async () => {
+		const spy = instrumentPoolQuery(store);
+		const result = store.acquireConcurrencySlot("wf", "k", 5, "run_1", Date.now() + 60_000);
+		expect(result.acquired).toBe(true);
+		const calls = await flushAndFilter(store, spy, "INSERT INTO concurrency_locks");
+		expect(calls.length).toBeGreaterThan(0);
+	});
+
+	it("releaseConcurrencySlot enqueues a DELETE", async () => {
+		const spy = instrumentPoolQuery(store);
+		store.acquireConcurrencySlot("wf", "k", 1, "run_1", Date.now() + 60_000);
+		store.releaseConcurrencySlot("wf", "k", "run_1");
+		const calls = await flushAndFilter(store, spy, "DELETE FROM concurrency_locks WHERE workflow_name");
+		expect(calls.length).toBeGreaterThan(0);
+	});
+
+	it("upsertScheduledDispatch writes to memory and enqueues a PG UPSERT", async () => {
+		const spy = instrumentPoolQuery(store);
+		store.upsertScheduledDispatch({
+			runId: "disp_1",
+			workflowName: "wf",
+			triggerType: "http",
+			scheduledAt: Date.now() + 60_000,
+			expiresAt: Date.now() + 120_000,
+			dispatchStatus: "delayed",
+			payload: { method: "POST" },
+			createdAt: Date.now(),
+		});
+		expect(store.getScheduledDispatches().length).toBe(1);
+		const calls = await flushAndFilter(store, spy, "INSERT INTO scheduled_dispatches");
+		expect(calls.length).toBeGreaterThan(0);
+	});
+
+	it("deleteScheduledDispatch enqueues a PG DELETE", async () => {
+		const spy = instrumentPoolQuery(store);
+		store.upsertScheduledDispatch({
+			runId: "disp_2",
+			workflowName: "wf",
+			triggerType: "http",
+			scheduledAt: Date.now(),
+			dispatchStatus: "delayed",
+			payload: null,
+			createdAt: Date.now(),
+		});
+		store.deleteScheduledDispatch("disp_2");
+		const calls = await flushAndFilter(store, spy, "DELETE FROM scheduled_dispatches WHERE run_id");
+		expect(calls.length).toBeGreaterThan(0);
+	});
+});
