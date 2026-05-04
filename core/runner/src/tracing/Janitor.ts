@@ -21,6 +21,7 @@
  * Kill-switch: `BLOK_JANITOR_DISABLED=1`.
  */
 
+import { JanitorMetrics } from "../monitoring/JanitorMetrics";
 import type { RunStore } from "./RunStore";
 
 interface JanitorLogger {
@@ -131,6 +132,8 @@ export class Janitor {
 		};
 
 		try {
+			// PR 3 D3 — record per-table duration + rows purged via OTel.
+			const idemStart = Date.now();
 			try {
 				stats.idempotencyCachePurged = this.store.purgeExpiredIdempotencyCache(start);
 			} catch (err) {
@@ -138,7 +141,13 @@ export class Janitor {
 					`[blok][janitor] purgeExpiredIdempotencyCache failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+			JanitorMetrics.getInstance().recordSweep(
+				{ table: "idempotency_cache" },
+				Date.now() - idemStart,
+				stats.idempotencyCachePurged,
+			);
 
+			const locksStart = Date.now();
 			try {
 				stats.concurrencySlotsPurged = this.store.purgeExpiredConcurrencySlots(start);
 			} catch (err) {
@@ -146,7 +155,13 @@ export class Janitor {
 					`[blok][janitor] purgeExpiredConcurrencySlots failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+			JanitorMetrics.getInstance().recordSweep(
+				{ table: "concurrency_locks" },
+				Date.now() - locksStart,
+				stats.concurrencySlotsPurged,
+			);
 
+			const dispStart = Date.now();
 			try {
 				stats.scheduledDispatchesPurged = this.store.purgeExpiredScheduledDispatches(start);
 			} catch (err) {
@@ -154,6 +169,11 @@ export class Janitor {
 					`[blok][janitor] purgeExpiredScheduledDispatches failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+			JanitorMetrics.getInstance().recordSweep(
+				{ table: "scheduled_dispatches" },
+				Date.now() - dispStart,
+				stats.scheduledDispatchesPurged,
+			);
 
 			stats.durationMs = Date.now() - start;
 

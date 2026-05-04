@@ -67,6 +67,27 @@ export class ConcurrencyMetrics {
 			unit: "1",
 		});
 
+	// PR 3 D1 — backend install observability. Operators who misconfigure
+	// the cross-process backend (NATS KV unreachable / auth failure) get a
+	// silent fallback to the in-process backend. This counter surfaces
+	// install attempts so misconfiguration is visible in metrics.
+	private readonly backendInstallCounter = metrics
+		.getMeter("blok")
+		.createCounter("blok_concurrency_backend_install_total", {
+			description: "Concurrency backend install attempts (success / failure).",
+			unit: "1",
+		});
+
+	// PR 3 D2 — OCC retry depth histogram. The 95% fail-close rate at
+	// 200-way contention seen in LOAD-TESTS.md is invisible without a
+	// histogram. Recorded per acquireSlot exit point with bucket
+	// boundaries [0, 1, 2, 3, 5, 10] — OCC retry budget caps at 10.
+	private readonly occRetriesHistogram = metrics.getMeter("blok").createHistogram("blok_concurrency_occ_retries", {
+		description: "OCC retry attempts on cross-process concurrency backends.",
+		unit: "{retries}",
+		advice: { explicitBucketBoundaries: [0, 1, 2, 3, 5, 10] },
+	});
+
 	private constructor() {}
 
 	static getInstance(): ConcurrencyMetrics {
@@ -103,5 +124,18 @@ export class ConcurrencyMetrics {
 
 	recordDispatchFired(attrs: SchedulingAttributes): void {
 		this.dispatchFiredCounter.add(1, attrs as unknown as Record<string, string>);
+	}
+
+	// PR 3 D1 — backend install attempt outcome.
+	recordBackendInstall(attrs: { backend: string; status: "success" | "failure" }): void {
+		this.backendInstallCounter.add(1, attrs as unknown as Record<string, string>);
+	}
+
+	// PR 3 D2 — OCC retry depth + outcome (success | denied | fail-closed).
+	recordOccRetries(
+		attrs: ConcurrencyAttributes & { outcome: "success" | "denied" | "fail-closed" },
+		attempts: number,
+	): void {
+		this.occRetriesHistogram.record(attempts, attrs as unknown as Record<string, string>);
 	}
 }

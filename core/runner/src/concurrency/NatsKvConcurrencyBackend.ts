@@ -22,6 +22,7 @@
  * an explicit `purgeExpired` sweep is also exposed for janitor use.
  */
 
+import { ConcurrencyMetrics } from "../monitoring/ConcurrencyMetrics";
 import type { ConcurrencySlotResult } from "../tracing/types";
 import type { ConcurrencyBackend } from "./ConcurrencyBackend";
 
@@ -180,6 +181,9 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		const kv = this.requireKv();
 		const bucketKey = this.bucketKey(workflowName, concurrencyKey);
 
+		// PR 3 D2 — record OCC retry depth + outcome on every exit path.
+		const metricAttrs = { workflow_name: workflowName, concurrency_key: concurrencyKey };
+
 		for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
 			const entry = await this.safeGet(kv, bucketKey);
 
@@ -192,6 +196,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 				console.warn(
 					`[blok][concurrency][nats-kv] acquireSlot fetch-failed for ${workflowName}:${concurrencyKey} (attempt ${attempt + 1}); failing closed`,
 				);
+				ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "fail-closed" }, attempt);
 				return { acquired: false, currentInFlight: -1 };
 			}
 
@@ -200,6 +205,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 				const initial: BucketState = { leases: [{ runId, expiresAt: leaseExpiresAt }] };
 				try {
 					await kv.create(bucketKey, JSON.stringify(initial));
+					ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "success" }, attempt);
 					return { acquired: true, currentInFlight: 1 };
 				} catch {
 					// Race — another process created. Retry.
@@ -218,6 +224,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 				active[existingIdx] = { runId, expiresAt: leaseExpiresAt };
 				try {
 					await kv.update(bucketKey, JSON.stringify({ leases: active }), entry.revision);
+					ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "success" }, attempt);
 					return { acquired: true, currentInFlight: active.length };
 				} catch {
 					continue;
@@ -226,6 +233,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 
 			// Limit check.
 			if (active.length >= concurrencyLimit) {
+				ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "denied" }, attempt);
 				return { acquired: false, currentInFlight: active.length };
 			}
 
@@ -233,6 +241,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 			const updated: BucketState = { leases: [...active, { runId, expiresAt: leaseExpiresAt }] };
 			try {
 				await kv.update(bucketKey, JSON.stringify(updated), entry.revision);
+				ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "success" }, attempt);
 				return { acquired: true, currentInFlight: updated.leases.length };
 			} catch {}
 		}
@@ -241,6 +250,7 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		console.warn(
 			`[blok][concurrency][nats-kv] acquireSlot exhausted ${MAX_CAS_RETRIES} CAS retries for ${workflowName}:${concurrencyKey}; denying slot to runId=${runId}`,
 		);
+		ConcurrencyMetrics.getInstance().recordOccRetries({ ...metricAttrs, outcome: "fail-closed" }, MAX_CAS_RETRIES);
 		return { acquired: false, currentInFlight: -1 };
 	}
 

@@ -23,6 +23,7 @@ import { type HelperResponse, type WorkerTriggerOpts, tryParseDuration } from "@
 import {
 	type BlokService,
 	ConcurrencyLimitError,
+	ConcurrencyMetrics,
 	DefaultLogger,
 	DeferredDispatchSignal,
 	type GlobalOptions,
@@ -214,14 +215,24 @@ export abstract class WorkerTrigger extends TriggerBase {
 			// backend (NATS KV) when the operator opted in via
 			// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null preserves the
 			// existing in-process behavior.
+			//
+			// PR 3 D1 — record install attempts via OTel counter.
 			try {
 				const backend = createConcurrencyBackend();
 				if (backend) {
 					await backend.connect();
 					RunTracker.getInstance().setConcurrencyBackend(backend);
+					ConcurrencyMetrics.getInstance().recordBackendInstall({
+						backend: backend.name,
+						status: "success",
+					});
 					this.logger.log(`[concurrency] backend installed: ${backend.name}`);
 				}
 			} catch (err) {
+				ConcurrencyMetrics.getInstance().recordBackendInstall({
+					backend: "unknown",
+					status: "failure",
+				});
 				this.logger.error(
 					`[concurrency] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
 				);

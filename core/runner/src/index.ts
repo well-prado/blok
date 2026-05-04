@@ -126,6 +126,8 @@ import { PayloadTooLargeError, isPayloadTooLargeError } from "./PayloadTooLargeE
 
 // Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
+// Janitor sweep OTel metrics (PR 3 D3)
+import { JanitorMetrics } from "./monitoring/JanitorMetrics";
 
 // Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
@@ -297,6 +299,8 @@ export {
 	isPayloadTooLargeError,
 	// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 	ConcurrencyMetrics,
+	// Janitor sweep OTel metrics (PR 3 D3)
+	JanitorMetrics,
 	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 	DeferredDispatchSignal,
 	type DeferredDispatchInfo,

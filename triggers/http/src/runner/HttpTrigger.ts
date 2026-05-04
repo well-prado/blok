@@ -389,6 +389,9 @@ export default class HttpTrigger extends TriggerBase {
 				// backend (NATS KV) when the operator opted in via
 				// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null = the existing
 				// in-process behavior is preserved (zero overhead).
+				//
+				// PR 3 D1 — record install attempts via OTel counter so the
+				// silent fallback (connect failure → in-process) is visible.
 				try {
 					const backend = createConcurrencyBackend();
 					if (backend) {
@@ -396,15 +399,27 @@ export default class HttpTrigger extends TriggerBase {
 							.connect()
 							.then(() => {
 								RunTracker.getInstance().setConcurrencyBackend(backend);
+								ConcurrencyMetrics.getInstance().recordBackendInstall({
+									backend: backend.name,
+									status: "success",
+								});
 								this.logger.log(`[concurrency] backend installed: ${backend.name}`);
 							})
 							.catch((err: unknown) => {
+								ConcurrencyMetrics.getInstance().recordBackendInstall({
+									backend: backend.name,
+									status: "failure",
+								});
 								this.logger.error(
 									`[concurrency] backend connect failed (${backend.name}): ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
 								);
 							});
 					}
 				} catch (err) {
+					ConcurrencyMetrics.getInstance().recordBackendInstall({
+						backend: "unknown",
+						status: "failure",
+					});
 					this.logger.error(
 						`[concurrency] createConcurrencyBackend failed: ${err instanceof Error ? err.message : String(err)}`,
 					);
