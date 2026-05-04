@@ -271,6 +271,18 @@ export interface NodeRun {
 	 * visible to Studio without recomputing from outputs heuristics.
 	 */
 	wait?: boolean;
+	/**
+	 * PR 5 E3 — sub-workflow nesting depth surfaced for Studio.
+	 *
+	 * Set on subworkflow node runs. Top-level workflow's sub-workflow
+	 * step has `subworkflowDepth = 1`; that child's sub-workflow step
+	 * has `subworkflowDepth = 2`; etc. Bounded by
+	 * `BLOK_MAX_SUBWORKFLOW_DEPTH` (default 10).
+	 *
+	 * Studio renders `↳ async (N)` / `↳ sub (N)` only when N >= 2 to
+	 * keep top-level invocations un-cluttered.
+	 */
+	subworkflowDepth?: number;
 }
 
 /**
@@ -547,6 +559,13 @@ export interface StartNodeOptions {
 	 * Persisted onto `NodeRun.wait` so Studio can render `↳ async` vs `↳ sub`.
 	 */
 	wait?: boolean;
+	/**
+	 * PR 5 E3 — sub-workflow nesting depth. Only meaningful when
+	 * `nodeType === "subworkflow"`. The runner computes
+	 * `parentDepth + 1` from `ctx._subworkflowDepth` at start-time and
+	 * passes here so Studio can render `↳ sub (N)` for N >= 2.
+	 */
+	subworkflowDepth?: number;
 }
 
 // === Custom Dashboards ===

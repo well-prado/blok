@@ -182,6 +182,13 @@ export interface NodeRun {
 	 *   a distinct `↳ async` badge (vs `↳ sub`) in StepRail.
 	 */
 	wait?: boolean;
+	/**
+	 * PR 5 E3 — sub-workflow nesting depth. Top-level workflow's
+	 * sub-workflow step has `subworkflowDepth = 1`; nested sub-workflows
+	 * have higher values. Studio renders `↳ sub (N)` / `↳ async (N)`
+	 * only when N >= 2 to keep top-level invocations un-cluttered.
+	 */
+	subworkflowDepth?: number;
 }
 
 export type RunEventType =

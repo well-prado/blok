@@ -58,6 +58,30 @@ export const ConcurrencyOptsFields = {
 				"after a 1s delay. Reuses the Tier 2 #5+#7 deferred-dispatch plumbing; HTTP returns " +
 				"202 Accepted + Location, Worker ACKs without retry. Requires `concurrencyKey` to be set.",
 		),
+	// PR 5 B2 — TTL on queued runs.
+	concurrencyQueueTimeoutMs: z
+		.number()
+		.int()
+		.min(1000)
+		.optional()
+		.describe(
+			'OPTIONAL. Time-to-live for queued runs in milliseconds. When set AND `onLimit: "queue"`, ' +
+				"queued runs that age past this timeout flip to `expired` instead of re-queueing. " +
+				'Requires `onLimit: "queue"`. Without this, queued runs retry indefinitely (lease-bounded only).',
+		),
+	// PR 5 B3 — capped exponential backoff for onLimit:queue re-defer.
+	concurrencyQueueRetry: z
+		.object({
+			minBackoffMs: z.number().int().min(0).optional().describe("Initial backoff (default 1000)."),
+			maxBackoffMs: z.number().int().min(0).optional().describe("Cap on the backoff between retries (default 30000)."),
+			factor: z.number().min(1).optional().describe("Exponential factor (default 2)."),
+		})
+		.optional()
+		.describe(
+			'OPTIONAL. Capped exponential backoff config for `onLimit: "queue"` re-defer. ' +
+				"Replaces the fixed 1s retry. delay = min(maxBackoffMs, minBackoffMs * factor^attempt). " +
+				'Requires `onLimit: "queue"`.',
+		),
 } as const;
 
 /**
@@ -70,6 +94,8 @@ export const concurrencyRefinement = (
 		concurrencyLimit?: number;
 		concurrencyLeaseMs?: number;
 		onLimit?: "throw" | "queue";
+		concurrencyQueueTimeoutMs?: number;
+		concurrencyQueueRetry?: { minBackoffMs?: number; maxBackoffMs?: number; factor?: number };
 	},
 	ctx: z.RefinementCtx,
 ): void => {
@@ -92,6 +118,22 @@ export const concurrencyRefinement = (
 			code: z.ZodIssueCode.custom,
 			path: ["onLimit"],
 			message: "`onLimit` requires `concurrencyKey` to be set.",
+		});
+	}
+	// PR 5 B2 — concurrencyQueueTimeoutMs requires onLimit: "queue".
+	if (val.concurrencyQueueTimeoutMs !== undefined && val.onLimit !== "queue") {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["concurrencyQueueTimeoutMs"],
+			message: '`concurrencyQueueTimeoutMs` requires `onLimit: "queue"`.',
+		});
+	}
+	// PR 5 B3 — concurrencyQueueRetry requires onLimit: "queue".
+	if (val.concurrencyQueueRetry !== undefined && val.onLimit !== "queue") {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			path: ["concurrencyQueueRetry"],
+			message: '`concurrencyQueueRetry` requires `onLimit: "queue"`.',
 		});
 	}
 };

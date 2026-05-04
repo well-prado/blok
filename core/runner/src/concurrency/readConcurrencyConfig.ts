@@ -33,6 +33,23 @@ export interface NormalizedConcurrencyConfig {
 	 * Tier 2 #6 follow-up. Reuses the Tier 2 #5+#7 deferred-dispatch plumbing.
 	 */
 	onLimit: "throw" | "queue";
+	/**
+	 * PR 5 B2 — TTL on queued runs in milliseconds. When set AND
+	 * `onLimit === "queue"`, queued runs that age past this timeout flip
+	 * to `expired` instead of re-queueing. Undefined = retry indefinitely
+	 * (lease-bounded).
+	 */
+	queueTimeoutMs?: number;
+	/**
+	 * PR 5 B3 — capped exponential backoff config for `onLimit:queue`
+	 * re-defer. Replaces the fixed 1s. Defaults applied at gate time:
+	 * min=1000, max=30000, factor=2.
+	 */
+	queueRetry?: {
+		minBackoffMs?: number;
+		maxBackoffMs?: number;
+		factor?: number;
+	};
 }
 
 /**
@@ -56,6 +73,8 @@ export function readConcurrencyConfig(
 					concurrencyLimit?: unknown;
 					concurrencyLeaseMs?: unknown;
 					onLimit?: unknown;
+					concurrencyQueueTimeoutMs?: unknown;
+					concurrencyQueueRetry?: unknown;
 			  }
 			| undefined;
 		if (!cfg) continue;
@@ -75,7 +94,19 @@ export function readConcurrencyConfig(
 		// falls back to "throw" (defensive — schema already rejects bad values).
 		const onLimit: "throw" | "queue" = cfg.onLimit === "queue" ? "queue" : "throw";
 
-		return { keyExpression, limit, leaseMs, onLimit };
+		// PR 5 B2 — queue TTL. Only meaningful when onLimit === "queue".
+		const queueTimeoutMs =
+			onLimit === "queue" && Number.isInteger(cfg.concurrencyQueueTimeoutMs)
+				? (cfg.concurrencyQueueTimeoutMs as number)
+				: undefined;
+
+		// PR 5 B3 — capped exponential backoff. Only meaningful when onLimit === "queue".
+		const queueRetry =
+			onLimit === "queue" && cfg.concurrencyQueueRetry && typeof cfg.concurrencyQueueRetry === "object"
+				? (cfg.concurrencyQueueRetry as NormalizedConcurrencyConfig["queueRetry"])
+				: undefined;
+
+		return { keyExpression, limit, leaseMs, onLimit, queueTimeoutMs, queueRetry };
 	}
 
 	return null;

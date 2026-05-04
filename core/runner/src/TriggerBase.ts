@@ -588,7 +588,51 @@ export default abstract class TriggerBase extends Trigger {
 							// ACKs without retry. Re-defer happens transparently when the
 							// timer fires and the gate denies again.
 							if (concCfg.onLimit === "queue") {
-								const retryAfterMs = 1000;
+								// PR 5 B2 — TTL on queued runs. Compute on
+								// the first queue attempt and persist on the
+								// run record so re-defer attempts can check
+								// it. The existing `expiresAt` field on
+								// WorkflowRun is reused.
+								const existingRun = tracker.getStore().getRun(traceRunId);
+								const queueExpiresAt =
+									existingRun?.expiresAt !== undefined
+										? existingRun.expiresAt
+										: concCfg.queueTimeoutMs !== undefined
+											? now + concCfg.queueTimeoutMs
+											: undefined;
+
+								if (queueExpiresAt !== undefined && now > queueExpiresAt) {
+									// TTL elapsed — flip to expired, no further re-defer.
+									tracker.markRunExpired(traceRunId, {
+										expiresAt: queueExpiresAt,
+										expiredAt: now,
+									});
+									ConcurrencyMetrics.getInstance().recordDenied({
+										workflow_name: workflowName,
+										concurrency_key: resolvedKey,
+										mode: "queue",
+									});
+									// Throw a Deferred-style signal with status=expired so the
+									// HTTP transport returns 410-ish via the existing 202-path
+									// translation. (For now, falls through to ConcurrencyLimitError;
+									// transport-side mapping can be added later.)
+									throw new ConcurrencyLimitError({
+										workflowName,
+										concurrencyKey: resolvedKey,
+										concurrencyLimit: concCfg.limit,
+										currentInFlight: result.currentInFlight,
+										retryAfterMs: 0,
+										runId: traceRunId,
+									});
+								}
+
+								// PR 5 B3 — capped exponential backoff for re-defer.
+								// Track attempt count via existing pingCount field on the run record.
+								const attempt = existingRun?.pingCount ?? 0;
+								const minBackoff = concCfg.queueRetry?.minBackoffMs ?? 1000;
+								const maxBackoff = concCfg.queueRetry?.maxBackoffMs ?? 30_000;
+								const factor = concCfg.queueRetry?.factor ?? 2;
+								const retryAfterMs = Math.min(maxBackoff, minBackoff * factor ** attempt);
 								const scheduledAt = now + retryAfterMs;
 
 								tracker.markRunQueued(traceRunId, {
@@ -596,6 +640,15 @@ export default abstract class TriggerBase extends Trigger {
 									concurrencyLimit: concCfg.limit,
 									currentInFlight: result.currentInFlight,
 									scheduledAt,
+								});
+
+								// Bump pingCount (= attempt counter for backoff) and
+								// persist queueExpiresAt on first queue attempt.
+								tracker.getStore().updateRun(traceRunId, {
+									pingCount: attempt + 1,
+									...(queueExpiresAt !== undefined && existingRun?.expiresAt === undefined
+										? { expiresAt: queueExpiresAt }
+										: {}),
 								});
 
 								ConcurrencyMetrics.getInstance().recordDenied({

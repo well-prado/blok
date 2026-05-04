@@ -72,7 +72,9 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 			<span className="flex-1 truncate">{n.nodeName}</span>
 			{/* Tier 2: sub-workflow indicator — `↳ sub` (sync) or `↳ async`
 			    (fire-and-forget). Drill into the child via the "Sub-runs"
-			    strip in the run header. */}
+			    strip in the run header. PR 5 E3 — append depth count
+			    when nested (depth >= 2) so operators see "↳ sub (3)" for
+			    a third-level nested invocation. */}
 			{n.nodeType === "subworkflow" && (
 				<span
 					className={cn(
@@ -81,11 +83,16 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 					)}
 					title={
 						n.wait === false
-							? "Async sub-workflow (fire-and-forget) — child runs independently; parent does NOT block"
-							: "Sub-workflow invocation (synchronous) — see Sub-runs in the header"
+							? `Async sub-workflow (fire-and-forget) — child runs independently; parent does NOT block${
+									n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` · nested at depth ${n.subworkflowDepth}` : ""
+								}`
+							: `Sub-workflow invocation (synchronous) — see Sub-runs in the header${
+									n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` · nested at depth ${n.subworkflowDepth}` : ""
+								}`
 					}
 				>
 					{n.wait === false ? "↳ async" : "↳ sub"}
+					{n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` (${n.subworkflowDepth})` : ""}
 				</span>
 			)}
 			{/* PR 4: wait.for / wait.until step — workflow paused at this

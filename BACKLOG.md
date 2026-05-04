@@ -5,6 +5,15 @@
 **Companion docs**: [REVIEW.md](REVIEW.md), [LOAD-TESTS.md](LOAD-TESTS.md)
 **Status of the original ROADMAP** (`cmokx9n1n00267gmfgq79lqoi`): **complete** for Tier 1 + Tier 2 + quick wins. Tier 3 (CRIU-style checkpoint) explicitly out of scope.
 
+**Detailed PR plans** (in `/Users/wellingtonprado/.claude/plans/`):
+- [pr1-tier2-bug-fixes.md](../../.claude/plans/pr1-tier2-bug-fixes.md) — A1+A2+A3+H1+H2 ✓ SHIPPED `7605bb7`
+- [pr2-tier2-production-hardening.md](../../.claude/plans/pr2-tier2-production-hardening.md) — A4+A5+A6+I2 ✓ SHIPPED `7b0f5c8`
+- [pr3-tier2-observability-metrics.md](../../.claude/plans/pr3-tier2-observability-metrics.md) — D1+D2+D3+D5 ✓ SHIPPED `e21f0e7`
+- [pr4-wait-for-step-primitive.md](../../.claude/plans/pr4-wait-for-step-primitive.md) — B1 wait.for() ✓ SHIPPED `20d3be1`
+- [pr5-tier2-smaller-followups.md](../../.claude/plans/pr5-tier2-smaller-followups.md) — B2+B3+G1+E3 ✓ SHIPPED (this commit)
+
+**ALL 5 PRs COMPLETE.** Tier A bugs + Tier B new features + Tier D observability + Tier G/E polish all shipped. The reliability surface is now production-ready with the headline `wait.for()` Trigger.dev parity feature.
+
 This is the post-ROADMAP backlog. It rolls up:
 
 - Bugs surfaced in [REVIEW.md](REVIEW.md) (2 HIGH, 4 MED).

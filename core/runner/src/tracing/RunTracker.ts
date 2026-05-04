@@ -565,7 +565,7 @@ export class RunTracker extends EventEmitter {
 	 * `DebounceCoordinator.getInstance().cancel(workflowName, debounceKey)`.
 	 * Done this way to avoid an import cycle from tracing → scheduling.
 	 */
-	cancelRun(runId: string): boolean {
+	cancelRun(runId: string, options?: { cascade?: boolean }): boolean {
 		const run = this.store.getRun(runId);
 		if (!run) return false;
 
@@ -590,6 +590,24 @@ export class RunTracker extends EventEmitter {
 			durationMs,
 			previousStatus,
 		});
+
+		// PR 5 G1 — cascade to fire-and-forget children. Sub-workflow
+		// children with `wait: true` (sync) cancel automatically via the
+		// AbortSignal chain in createChildContext; children with
+		// `wait: false` (async / fire-and-forget) need explicit cascade
+		// because the parent step has already returned before the cancel.
+		// Walk getRunsByParent recursively (bounded by
+		// BLOK_MAX_SUBWORKFLOW_DEPTH).
+		if (options?.cascade !== false) {
+			const children = this.store.getRunsByParent(runId);
+			for (const child of children) {
+				if (cancellable.includes(child.status)) {
+					// Recursive — bounded by max-depth; each level reduces
+					// the candidate pool until none remain.
+					this.cancelRun(child.id, { cascade: true });
+				}
+			}
+		}
 
 		return true;
 	}
@@ -718,6 +736,7 @@ export class RunTracker extends EventEmitter {
 			depth: opts.depth,
 			stepIndex: opts.stepIndex,
 			wait: opts.wait,
+			subworkflowDepth: opts.subworkflowDepth,
 		};
 
 		this.store.saveNodeRun(nodeRun);
