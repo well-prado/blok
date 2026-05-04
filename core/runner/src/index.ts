@@ -121,6 +121,9 @@ import { StepTimeoutError, isStepTimeoutError } from "./timeouts/StepTimeoutErro
 // Cooperative cancellation (Tier 2 follow-up)
 import { RunCancelledError, isRunCancelledError } from "./RunCancelledError";
 
+// Durable-scheduler payload size cap (PR 2 A4)
+import { PayloadTooLargeError, isPayloadTooLargeError } from "./PayloadTooLargeError";
+
 // Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 
@@ -289,6 +292,9 @@ export {
 	// Cooperative cancellation (Tier 2 follow-up)
 	RunCancelledError,
 	isRunCancelledError,
+	// Durable-scheduler payload size cap (PR 2 A4)
+	PayloadTooLargeError,
+	isPayloadTooLargeError,
 	// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 	ConcurrencyMetrics,
 	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)

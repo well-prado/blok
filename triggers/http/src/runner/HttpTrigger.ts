@@ -13,6 +13,7 @@ import { ConcurrencyMetrics } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler } from "@blokjs/runner";
 import { Janitor } from "@blokjs/runner";
+import { PayloadTooLargeError } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
 import { createConcurrencyBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
@@ -671,6 +672,25 @@ export default class HttpTrigger extends TriggerBase {
 					);
 				}
 
+				// PR 2 A4 — durable scheduler payload too large. Surface as
+				// 413 Payload Too Large with structured info so callers know
+				// the dispatch was rejected because the body would push the
+				// `scheduled_dispatches` row past the configured cap. Operators
+				// raise the cap via BLOK_DISPATCH_PAYLOAD_MAX_BYTES (default 1MB).
+				if (e instanceof PayloadTooLargeError) {
+					span.setStatus({ code: SpanStatusCode.OK, message: "payload_too_large_for_durable_scheduling" });
+					this.logger.log(`[scheduling] payload too large: ${e.actualBytes} bytes > cap of ${e.maxBytes} bytes → 413`);
+					return c.json(
+						{
+							error: "Payload too large for durable scheduling",
+							actualBytes: e.actualBytes,
+							maxBytes: e.maxBytes,
+							configurable: "BLOK_DISPATCH_PAYLOAD_MAX_BYTES",
+						},
+						413,
+					);
+				}
+
 				// Tier 2 #6 — concurrency gate denial. Surface as 429 with a
 				// Retry-After header (in seconds, rounded up) and a structured
 				// JSON body so callers can build smart back-off without
@@ -780,11 +800,25 @@ export default class HttpTrigger extends TriggerBase {
 		"proxy-authorization",
 	]);
 
+	/** PR 2 A4 — default 1MB cap on the durable scheduler payload row. */
+	private static readonly DEFAULT_DISPATCH_PAYLOAD_MAX_BYTES = 1_048_576;
+
+	private getDispatchPayloadMaxBytes(): number {
+		const raw = process.env.BLOK_DISPATCH_PAYLOAD_MAX_BYTES;
+		if (!raw || !/^\d+$/.test(raw)) return HttpTrigger.DEFAULT_DISPATCH_PAYLOAD_MAX_BYTES;
+		return Number(raw);
+	}
+
 	/**
 	 * Tier 2 #5+#7 follow-up · extract a JSON-serializable subset of the
 	 * Hono-built ctx that's enough for `restoreDispatch()` to reconstruct
 	 * an equivalent ctx after a process restart. Sensitive headers are
 	 * stripped before persistence.
+	 *
+	 * PR 2 A4 — caps the serialized payload at `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`
+	 * (default 1MB). Throws `PayloadTooLargeError` on overflow; the HTTP
+	 * transport translates to 413 Payload Too Large with structured info.
+	 * Prevents sqlite bloat + boot-recovery latency on uncapped request bodies.
 	 */
 	protected override extractDispatchPayload(ctx: Context): unknown {
 		const req = ctx.request as RequestContext | undefined;
@@ -795,7 +829,7 @@ export default class HttpTrigger extends TriggerBase {
 			if (HttpTrigger.DISPATCH_HEADER_DENYLIST.has(k.toLowerCase())) continue;
 			headers[k] = v;
 		}
-		return {
+		const payload = {
 			method: req.method,
 			path: req.path,
 			url: (req as unknown as { url?: string }).url,
@@ -806,6 +840,15 @@ export default class HttpTrigger extends TriggerBase {
 			workflowName: ctx.workflow_name,
 			workflowPath: ctx.workflow_path,
 		};
+
+		// PR 2 A4 · size cap. Serialize once + measure; the same JSON
+		// gets written to sqlite by upsertScheduledDispatch.
+		const serialized = JSON.stringify(payload);
+		const maxBytes = this.getDispatchPayloadMaxBytes();
+		if (serialized.length > maxBytes) {
+			throw new PayloadTooLargeError(serialized.length, maxBytes);
+		}
+		return payload;
 	}
 
 	/**

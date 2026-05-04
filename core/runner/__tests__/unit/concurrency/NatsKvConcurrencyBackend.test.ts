@@ -161,3 +161,124 @@ describe("NatsKvConcurrencyBackend (Tier 2 #6 follow-up)", () => {
 		expect(result.acquired).toBe(true);
 	});
 });
+
+/**
+ * PR 2 A6 — `safeGet` distinguishes legitimate "not found" from "fetch
+ * failed" so the OCC loop fails fast on broker outages instead of
+ * spinning 10× CAS retries.
+ */
+describe("PR 2 A6 — safeGet error distinction", () => {
+	it("acquireSlot fails fast on broker fetch failure (non-NotFound error)", async () => {
+		// Fake KV whose `get` throws a generic error (simulates broker outage).
+		const failingKv = {
+			async get() {
+				throw new Error("connection refused");
+			},
+			async create() {
+				throw new Error("connection refused");
+			},
+			async update() {
+				throw new Error("connection refused");
+			},
+			async delete() {
+				/* no-op */
+			},
+			async *keys() {
+				/* no-op */
+			},
+		};
+		const { NatsKvConcurrencyBackend } = await import("../../../src/concurrency/NatsKvConcurrencyBackend");
+		const backend = new NatsKvConcurrencyBackend({ servers: ["nats://test"] });
+		(backend as unknown as { kv: typeof failingKv }).kv = failingKv;
+		(backend as unknown as { connected: boolean }).connected = true;
+
+		const start = Date.now();
+		const result = await backend.acquireSlot("wf", "k", 1, "run_1", Date.now() + 60_000);
+		const elapsed = Date.now() - start;
+
+		// Fail-fast — must NOT spin 10× retries.
+		expect(result.acquired).toBe(false);
+		expect(result.currentInFlight).toBe(-1);
+		// Single attempt should be near-instant; spin would take many ms.
+		// Generous 100ms bound; without the fix, this would take >>10ms × 10.
+		expect(elapsed).toBeLessThan(100);
+	});
+
+	it("acquireSlot treats {code: 'NotFound'} error as legitimate miss + creates new bucket", async () => {
+		const data = new Map<string, { value: string; revision: number }>();
+		let revisionCounter = 1;
+		const notFoundKv = {
+			async get(key: string) {
+				const entry = data.get(key);
+				if (!entry) {
+					const err = new Error("key not found") as Error & { code: string };
+					err.code = "NotFound";
+					throw err;
+				}
+				return {
+					key,
+					revision: entry.revision,
+					string: () => entry.value,
+					json<T>(): T {
+						return JSON.parse(entry.value) as T;
+					},
+				};
+			},
+			async create(key: string, value: string) {
+				if (data.has(key)) throw new Error("key exists");
+				revisionCounter++;
+				data.set(key, { value, revision: revisionCounter });
+				return revisionCounter;
+			},
+			async update() {
+				return revisionCounter;
+			},
+			async delete(key: string) {
+				data.delete(key);
+			},
+			async *keys() {
+				for (const k of data.keys()) yield k;
+			},
+		};
+		const { NatsKvConcurrencyBackend } = await import("../../../src/concurrency/NatsKvConcurrencyBackend");
+		const backend = new NatsKvConcurrencyBackend({ servers: ["nats://test"] });
+		(backend as unknown as { kv: typeof notFoundKv }).kv = notFoundKv;
+		(backend as unknown as { connected: boolean }).connected = true;
+
+		const result = await backend.acquireSlot("wf", "k", 5, "run_1", Date.now() + 60_000);
+		expect(result.acquired).toBe(true);
+		expect(result.currentInFlight).toBe(1);
+		expect(data.size).toBe(1);
+	});
+
+	it("releaseSlot fails fast on broker fetch failure (lease falls back to TTL)", async () => {
+		const failingKv = {
+			async get() {
+				throw new Error("connection refused");
+			},
+			async create() {
+				throw new Error("nope");
+			},
+			async update() {
+				throw new Error("nope");
+			},
+			async delete() {
+				/* no-op */
+			},
+			async *keys() {
+				/* no-op */
+			},
+		};
+		const { NatsKvConcurrencyBackend } = await import("../../../src/concurrency/NatsKvConcurrencyBackend");
+		const backend = new NatsKvConcurrencyBackend({ servers: ["nats://test"] });
+		(backend as unknown as { kv: typeof failingKv }).kv = failingKv;
+		(backend as unknown as { connected: boolean }).connected = true;
+
+		const start = Date.now();
+		await backend.releaseSlot("wf", "k", "run_1");
+		const elapsed = Date.now() - start;
+
+		// Fail-fast — single attempt, no spin.
+		expect(elapsed).toBeLessThan(100);
+	});
+});

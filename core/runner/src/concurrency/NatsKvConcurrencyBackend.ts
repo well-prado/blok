@@ -183,6 +183,18 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
 			const entry = await this.safeGet(kv, bucketKey);
 
+			// PR 2 A6 — fetch failure (broker unreachable / non-NotFound
+			// error). Spinning 10× CAS retries on a connection problem just
+			// burns latency. Fail-fast so the trigger sees the issue and
+			// can fall back / alert. Existing run continues with no slot;
+			// the gate is conservative.
+			if (entry === "fetch-failed") {
+				console.warn(
+					`[blok][concurrency][nats-kv] acquireSlot fetch-failed for ${workflowName}:${concurrencyKey} (attempt ${attempt + 1}); failing closed`,
+				);
+				return { acquired: false, currentInFlight: -1 };
+			}
+
 			if (!entry) {
 				// Bucket doesn't exist — create with first lease.
 				const initial: BucketState = { leases: [{ runId, expiresAt: leaseExpiresAt }] };
@@ -238,6 +250,14 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 
 		for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
 			const entry = await this.safeGet(kv, bucketKey);
+			// PR 2 A6 — fetch failure on release. Lease will expire via
+			// TTL; safe to fail-fast.
+			if (entry === "fetch-failed") {
+				console.warn(
+					`[blok][concurrency][nats-kv] releaseSlot fetch-failed for ${workflowName}:${concurrencyKey} (attempt ${attempt + 1}); lease for runId=${runId} will expire via TTL`,
+				);
+				return;
+			}
 			if (!entry) return; // Idempotent — bucket already gone.
 
 			const current = this.parseBucket(entry);
@@ -274,7 +294,9 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		// Iterate all bucket keys.
 		for await (const key of kv.keys()) {
 			const entry = await this.safeGet(kv, key);
-			if (!entry) continue;
+			// Treat both legitimate misses and fetch failures as "skip
+			// this bucket" — purge is a best-effort sweep.
+			if (!entry || entry === "fetch-failed") continue;
 			const current = this.parseBucket(entry);
 			const active = current.leases.filter((l) => l.expiresAt > now);
 			const expired = current.leases.length - active.length;
@@ -301,12 +323,25 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		return purged;
 	}
 
-	private async safeGet(kv: NatsKv, key: string): Promise<NatsKvEntry | null> {
+	/**
+	 * PR 2 A6 — distinguishes legitimate "key not found" from "broker
+	 * unreachable / non-NotFound error". Returns:
+	 *   - `NatsKvEntry` on a successful fetch.
+	 *   - `null` when the key doesn't exist (NotFound code or null entry).
+	 *   - `"fetch-failed"` for any other error (transient broker outage,
+	 *     auth failure, network blip, etc.) so the OCC loop can fail-fast
+	 *     instead of spinning 10× before fail-closing.
+	 */
+	private async safeGet(kv: NatsKv, key: string): Promise<NatsKvEntry | null | "fetch-failed"> {
 		try {
 			const e = await kv.get(key);
 			return e ?? null;
-		} catch {
-			return null;
+		} catch (err) {
+			// NATS surfaces "not found" via a code. Different `nats`
+			// package versions use different shapes; cover the common ones.
+			const code = (err as { code?: string }).code;
+			if (code === "NotFound" || code === "404") return null;
+			return "fetch-failed";
 		}
 	}
 

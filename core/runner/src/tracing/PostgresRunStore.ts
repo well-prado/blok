@@ -364,8 +364,16 @@ export class PostgresRunStore implements RunStore {
 			}
 
 			// Tier 2 follow-up · rehydrate scheduled dispatches.
+			// PR 2 A5 — ORDER BY scheduled_at ASC so past-due dispatches
+			// hydrate first. recoverDispatches's past-due → fire-immediately
+			// path benefits from the ordering. No LIMIT applied — rows are
+			// small (payload capped at 1MB via PR 2 A4). Operators with
+			// extreme backlogs can pre-truncate via the Janitor's
+			// purgeExpiredScheduledDispatches sweep.
 			try {
-				const { rows: dispatchRows } = await client.query("SELECT * FROM scheduled_dispatches");
+				const { rows: dispatchRows } = await client.query(
+					"SELECT * FROM scheduled_dispatches ORDER BY scheduled_at ASC",
+				);
 				for (const row of dispatchRows) {
 					this.memory.upsertScheduledDispatch({
 						runId: row.run_id,
