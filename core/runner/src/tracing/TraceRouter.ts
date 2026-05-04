@@ -1,4 +1,6 @@
 import http from "node:http";
+import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
+import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import { RunTracker } from "./RunTracker";
 import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
 
@@ -845,6 +847,74 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 		// Cleanup if client disconnects
 		req.on("close", cleanup);
+	});
+
+	// === Cancellation (Tier 2 polish) ===
+
+	/**
+	 * Cancel a pending (delayed/debounced/queued) run before it executes.
+	 *
+	 * `POST /__blok/runs/:runId/cancel`
+	 *
+	 * Returns:
+	 * - `200 { cancelled: true, runId, previousStatus, newStatus: "cancelled" }` on success
+	 * - `400 { error }` when the run isn't in a cancellable state
+	 *   (running/completed/failed/throttled/expired/crashed/timedOut/cancelled)
+	 * - `404 { error }` when the runId doesn't exist
+	 *
+	 * Cancels the underlying scheduler entry (`DeferredRunScheduler` for
+	 * delayed/queued runs; `DebounceCoordinator` for debounced trailing-mode
+	 * runs) AND flips the run's status to `"cancelled"` via
+	 * `tracker.cancelRun(runId)`. Both scheduler `.cancel()` methods are
+	 * idempotent so calling them on a runId that doesn't have a pending
+	 * timer is a safe no-op.
+	 */
+	router.post("/runs/:runId/cancel", (req: TraceRequest, res: TraceResponse) => {
+		const { runId } = req.params;
+		const run = t.getRun(runId);
+
+		if (!run) {
+			res.status(404).json({ error: `Run '${runId}' not found` });
+			return;
+		}
+
+		const cancellable = ["delayed", "debounced", "queued"];
+		if (!cancellable.includes(run.status)) {
+			res.status(400).json({
+				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', or 'queued' state can be cancelled. Running runs require cooperative AbortSignal cancellation (deferred follow-up).`,
+				runId,
+				status: run.status,
+			});
+			return;
+		}
+
+		// Capture previousStatus BEFORE cancelRun mutates the run record
+		// (the in-memory store mutates the underlying object in-place, so
+		// `run.status` would otherwise read back as "cancelled" here).
+		const previousStatus = run.status;
+
+		// Best-effort scheduler cleanup (both methods are idempotent).
+		DeferredRunScheduler.getInstance().cancel(runId);
+		if (run.debounceKey) {
+			DebounceCoordinator.getInstance().cancel(run.workflowName, run.debounceKey);
+		}
+
+		const cancelled = t.cancelRun(runId);
+		if (!cancelled) {
+			// Race: status changed between our check and the call.
+			res.status(409).json({
+				error: `Could not cancel run '${runId}'. It may have just transitioned to a non-cancellable state.`,
+				runId,
+			});
+			return;
+		}
+
+		res.json({
+			cancelled: true,
+			runId,
+			previousStatus,
+			newStatus: "cancelled",
+		});
 	});
 
 	// === AI Error Explanation ===

@@ -70,15 +70,22 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 				)}
 			/>
 			<span className="flex-1 truncate">{n.nodeName}</span>
-			{/* Tier 2: sub-workflow indicator — `↳ sub` hints that this
-			    step invokes another workflow. Drill into the child via
-			    the "Sub-runs" strip in the run header. */}
+			{/* Tier 2: sub-workflow indicator — `↳ sub` (sync) or `↳ async`
+			    (fire-and-forget). Drill into the child via the "Sub-runs"
+			    strip in the run header. */}
 			{n.nodeType === "subworkflow" && (
 				<span
-					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-zinc-700/40 text-zinc-300 shrink-0"
-					title="Sub-workflow invocation — see Sub-runs in the header"
+					className={cn(
+						"font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded shrink-0",
+						n.wait === false ? "bg-orange-300/15 text-orange-300" : "bg-zinc-700/40 text-zinc-300",
+					)}
+					title={
+						n.wait === false
+							? "Async sub-workflow (fire-and-forget) — child runs independently; parent does NOT block"
+							: "Sub-workflow invocation (synchronous) — see Sub-runs in the header"
+					}
 				>
-					↳ sub
+					{n.wait === false ? "↳ async" : "↳ sub"}
 				</span>
 			)}
 			{/* Tier 1: CACHED badge — node short-circuited via the idempotency cache. */}

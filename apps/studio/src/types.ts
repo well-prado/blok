@@ -175,6 +175,13 @@ export interface NodeRun {
 		error: NodeRunErrorDetail;
 		timestamp: number;
 	}>;
+	/**
+	 * Tier 2 #4 sub-workflow mode. Only set for `nodeType === "subworkflow"`.
+	 * - `true` (default) — synchronous: parent step blocks on child completion.
+	 * - `false` — fire-and-forget: child runs asynchronously. Studio renders
+	 *   a distinct `↳ async` badge (vs `↳ sub`) in StepRail.
+	 */
+	wait?: boolean;
 }
 
 export type RunEventType =
@@ -217,6 +224,11 @@ export type RunEventType =
 	 * the run. Payload `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}`.
 	 */
 	| "RUN_QUEUED"
+	/**
+	 * Tier 2 polish: operator cancelled a pending (delayed/debounced/queued) run
+	 * via `POST /__blok/runs/:runId/cancel`. Payload `{durationMs, previousStatus}`.
+	 */
+	| "RUN_CANCELLED"
 	/** Tier 2 quick-wins: runner crashed. Payload `{durationMs, error}`. */
 	| "RUN_CRASHED"
 	/** Tier 2 quick-wins: step's final retry attempt timed out. Payload `{durationMs, stepId, maxDurationMs, attemptsExhausted}`. */

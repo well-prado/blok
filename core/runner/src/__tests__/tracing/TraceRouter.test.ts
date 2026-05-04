@@ -1206,6 +1206,81 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	// === Cancellation (Tier 2 polish) ===
+
+	describe("POST /runs/:runId/cancel", () => {
+		it("returns 404 for unknown run", () => {
+			const req = new MockRequest({ params: { runId: "run_nonexistent" } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(404);
+		});
+
+		it("cancels a delayed run successfully", () => {
+			const run = tracker.startRun({
+				workflowName: "delay-test",
+				workflowPath: "/p",
+				triggerType: "http",
+				triggerSummary: "POST /delay",
+				nodeCount: 1,
+			});
+			tracker.markRunDelayed(run.id, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+
+			const req = new MockRequest({ params: { runId: run.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { cancelled: boolean; previousStatus: string; newStatus: string };
+			expect(body.cancelled).toBe(true);
+			expect(body.previousStatus).toBe("delayed");
+			expect(body.newStatus).toBe("cancelled");
+			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
+		});
+
+		it("cancels a queued run successfully", () => {
+			const run = tracker.startRun({
+				workflowName: "queue-test",
+				workflowPath: "/p",
+				triggerType: "http",
+				triggerSummary: "POST /queue",
+				nodeCount: 1,
+			});
+			tracker.markRunQueued(run.id, {
+				concurrencyKey: "k",
+				concurrencyLimit: 1,
+				currentInFlight: 1,
+				scheduledAt: Date.now() + 1000,
+			});
+
+			const req = new MockRequest({ params: { runId: run.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
+		});
+
+		it("returns 400 when the run is in a non-cancellable state (running)", () => {
+			// runs.run1 is `completed` (set by seedData), but seedData also keeps run3 in `running`.
+			const req = new MockRequest({ params: { runId: runs.run3.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(400);
+			expect((res.jsonBody as { error: string }).error).toContain("Cannot cancel run in 'running' state");
+		});
+
+		it("returns 400 when the run is already completed", () => {
+			const req = new MockRequest({ params: { runId: runs.run1.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(400);
+		});
+	});
+
 	// === AI Error Explanation ===
 
 	describe("POST /runs/:runId/explain", () => {

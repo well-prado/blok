@@ -75,6 +75,7 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	RUN_EXPIRED: "Run Expired",
 	RUN_DEBOUNCED: "Run Debounced",
 	RUN_QUEUED: "Run Queued",
+	RUN_CANCELLED: "Run Cancelled",
 	RUN_CRASHED: "Run Crashed",
 	RUN_TIMED_OUT: "Run Timed Out",
 };
@@ -98,6 +99,7 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	RUN_EXPIRED: "text-zinc-500 bg-zinc-500/10",
 	RUN_DEBOUNCED: "text-cyan-400 bg-cyan-400/10",
 	RUN_QUEUED: "text-lime-300 bg-lime-300/10",
+	RUN_CANCELLED: "text-purple-400 bg-purple-400/10",
 	RUN_CRASHED: "text-red-500 bg-red-500/10",
 	RUN_TIMED_OUT: "text-orange-400 bg-orange-400/10",
 };

@@ -129,6 +129,11 @@ export default abstract class RunnerSteps {
 
 					if (tracker && traceRunId) {
 						const configAny = ctx.config as unknown as Record<string, Record<string, unknown>>;
+						// Tier 2 #4 sub-workflow: capture the `wait` mode so
+						// Studio can render `↳ async` (wait:false) vs `↳ sub`
+						// (wait:true / default) in StepRail. Only meaningful
+						// for subworkflow steps; undefined elsewhere.
+						const subworkflowWait = stepType === "subworkflow" ? (stepAny.wait as boolean | undefined) : undefined;
 						const nodeRun = tracker.startNode(traceRunId, {
 							nodeName: step.name,
 							nodeType: stepType,
@@ -136,6 +141,7 @@ export default abstract class RunnerSteps {
 							inputs: sanitize(configAny?.[step.name]?.inputs ?? stepAny.config),
 							depth: depthLevel,
 							stepIndex: i,
+							wait: subworkflowWait,
 						});
 						nodeRunId = nodeRun.id;
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;

@@ -468,6 +468,44 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
+	/**
+	 * Tier 2 polish — cancel a pending (delayed/debounced/queued) run.
+	 * Idempotent. Returns true when the run existed AND was in a cancellable
+	 * state; false when the run doesn't exist OR is already running/completed/
+	 * failed/throttled/expired/crashed/timedOut/cancelled.
+	 *
+	 * **Caller responsibility**: this method only updates the run record
+	 * (status → `"cancelled"`) and emits `RUN_CANCELLED`. The caller must
+	 * separately clear any pending scheduler timers via
+	 * `DeferredRunScheduler.getInstance().cancel(runId)` and (when applicable)
+	 * `DebounceCoordinator.getInstance().cancel(workflowName, debounceKey)`.
+	 * Done this way to avoid an import cycle from tracing → scheduling.
+	 */
+	cancelRun(runId: string): boolean {
+		const run = this.store.getRun(runId);
+		if (!run) return false;
+
+		const cancellable = ["delayed", "debounced", "queued"];
+		if (!cancellable.includes(run.status)) return false;
+
+		const previousStatus = run.status;
+		const finishedAt = Date.now();
+		const durationMs = finishedAt - run.startedAt;
+
+		this.store.updateRun(runId, {
+			status: "cancelled",
+			finishedAt,
+			durationMs,
+		});
+
+		this.emitEvent(runId, run.workflowName, "RUN_CANCELLED", undefined, undefined, {
+			durationMs,
+			previousStatus,
+		});
+
+		return true;
+	}
+
 	// === Concurrency gate pass-throughs (Tier 2 #6) ===
 
 	/**
@@ -505,6 +543,7 @@ export class RunTracker extends EventEmitter {
 			parentNodeId: opts.parentNodeId,
 			depth: opts.depth,
 			stepIndex: opts.stepIndex,
+			wait: opts.wait,
 		};
 
 		this.store.saveNodeRun(nodeRun);

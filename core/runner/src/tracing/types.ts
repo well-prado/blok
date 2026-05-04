@@ -250,6 +250,17 @@ export interface NodeRun {
 		error: RunErrorDetail;
 		timestamp: number;
 	}>;
+	/**
+	 * Tier 2 #4 sub-workflow mode — only set for `nodeType === "subworkflow"`.
+	 * - `true` (default) — synchronous: parent step blocks on child completion.
+	 * - `false` — fire-and-forget: parent returns dispatch metadata immediately;
+	 *   child runs asynchronously via `setImmediate`. Studio renders a distinct
+	 *   `↳ async` badge in StepRail to differentiate from synchronous siblings.
+	 *
+	 * Captured at `tracker.startNode()` time so it survives the trace and is
+	 * visible to Studio without recomputing from outputs heuristics.
+	 */
+	wait?: boolean;
 }
 
 /**
@@ -356,6 +367,14 @@ export type RunEventType =
 	 * to `"queued"` on re-denial).
 	 */
 	| "RUN_QUEUED"
+	/**
+	 * Tier 2 polish — operator cancelled a pending (delayed/debounced/
+	 * queued) run via `POST /__blok/runs/:runId/cancel`. Payload
+	 * `{durationMs, previousStatus}`. Status flips to `"cancelled"`.
+	 * Currently only pre-execution states are cancellable; running runs
+	 * require cooperative `AbortSignal` (deferred follow-up).
+	 */
+	| "RUN_CANCELLED"
 	/**
 	 * Tier 2 quick-wins — run crashed (uncaught exception / OOM /
 	 * signal). Payload `{durationMs, error}`. Distinct from `RUN_FAILED`
@@ -481,6 +500,11 @@ export interface StartNodeOptions {
 	parentNodeId?: string;
 	depth: number;
 	stepIndex: number;
+	/**
+	 * Tier 2 #4 sub-workflow mode. Only meaningful when `nodeType === "subworkflow"`.
+	 * Persisted onto `NodeRun.wait` so Studio can render `↳ async` vs `↳ sub`.
+	 */
+	wait?: boolean;
 }
 
 // === Custom Dashboards ===
