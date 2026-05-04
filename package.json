@@ -23,7 +23,7 @@
 	],
 	"scripts": {
 		"ci:publish": "bun run build && bunx changeset publish",
-		"doc:dev": "cd docs && bunx mintlify dev",
+		"doc:dev": "cd docs && bunx mint@latest dev",
 		"doc:generate": "bunx typedoc --skipErrorChecking && bun run ./docs/generateRefLinks.js",
 		"prepare": "husky",
 		"lint": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
