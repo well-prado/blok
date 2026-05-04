@@ -721,6 +721,15 @@ export default abstract class TriggerBase extends Trigger {
 				return null;
 			}
 
+			// Tier 2 follow-up · persist debounce dispatches alongside delay/queue
+			// entries. The DebounceCoordinator timer remains the in-process source
+			// of truth (silence-window semantics + latest-payload coalesce); the
+			// persisted row is for crash-recovery only. On boot, recovered
+			// debounced rows fire via setTimeout (no silence-window re-establishment
+			// — the time has already passed).
+			const persistPayload = this.extractDispatchPayload(ctx);
+			const triggerType = this.getTriggerType();
+
 			const onFire = async (): Promise<void> => {
 				try {
 					await this.dispatchDeferred(ctx, traceRunId, undefined);
@@ -729,6 +738,13 @@ export default abstract class TriggerBase extends Trigger {
 						`[blok][scheduling] debounce dispatchDeferred failed for run ${traceRunId}:`,
 						err instanceof Error ? err.stack || err.message : err,
 					);
+				} finally {
+					// Best-effort cleanup — the DeferredRunScheduler delete-on-fire
+					// path doesn't apply here (debounce uses its own timer). Use
+					// the scheduler's persistedOnly cancel to delete the row.
+					if (persistPayload !== null) {
+						DeferredRunScheduler.getInstance().cancel(traceRunId, true);
+					}
 				}
 			};
 
@@ -759,6 +775,27 @@ export default abstract class TriggerBase extends Trigger {
 					pingCount: result.pingCount,
 					scheduledAt: result.scheduledAt,
 				});
+				// Tier 2 follow-up · durable debounce. Write a `dispatch_status:
+				// "debounced"` row so a process crash mid-window leaves a recoverable
+				// pointer at the active run + its captured payload.
+				if (persistPayload !== null && tracker.active) {
+					try {
+						tracker.getStore().upsertScheduledDispatch({
+							runId: traceRunId,
+							workflowName,
+							triggerType,
+							scheduledAt: result.scheduledAt ?? Date.now(),
+							dispatchStatus: "debounced",
+							payload: persistPayload,
+							createdAt: Date.now(),
+						});
+					} catch (err) {
+						console.error(
+							`[blok][scheduling] persist debounce dispatch failed for run ${traceRunId}:`,
+							err instanceof Error ? err.stack || err.message : err,
+						);
+					}
+				}
 				return new DeferredDispatchSignal({
 					runId: traceRunId,
 					workflowName,
@@ -783,6 +820,34 @@ export default abstract class TriggerBase extends Trigger {
 				pingCount: result.pingCount,
 				scheduledAt: result.scheduledAt ?? Date.now(),
 			});
+			// Tier 2 follow-up · update the active run's persisted dispatch with
+			// the latest payload + new scheduledAt. Trailing mode: each ping
+			// resets the dispatch time, and the coordinator captures the latest
+			// onFire closure — we mirror that into the persisted row so a crash
+			// recovery uses the latest payload.
+			if (
+				result.outcome === "coalesce" &&
+				schedCfg.debounce.mode === "trailing" &&
+				persistPayload !== null &&
+				tracker.active
+			) {
+				try {
+					tracker.getStore().upsertScheduledDispatch({
+						runId: result.activeRunId,
+						workflowName,
+						triggerType,
+						scheduledAt: result.scheduledAt ?? Date.now(),
+						dispatchStatus: "debounced",
+						payload: persistPayload,
+						createdAt: Date.now(),
+					});
+				} catch (err) {
+					console.error(
+						`[blok][scheduling] persist debounce coalesce failed for run ${result.activeRunId}:`,
+						err instanceof Error ? err.stack || err.message : err,
+					);
+				}
+			}
 			return new DeferredDispatchSignal({
 				runId: traceRunId,
 				workflowName,

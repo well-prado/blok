@@ -287,3 +287,119 @@ describe("TriggerBase — scheduling gates (Tier 2 #5 + #7)", () => {
 		expect(completed.runs.length).toBe(1);
 	});
 });
+
+describe("TriggerBase — debounce persistence (Tier 2 follow-up · durable debounce)", () => {
+	class PersistingTrigger extends TriggerBase {
+		async listen(): Promise<number> {
+			return 0;
+		}
+		override getRunner(): Runner {
+			return new Runner([]);
+		}
+		setTriggerConfig(cfg: Record<string, unknown>): void {
+			this.configuration.trigger = cfg as never;
+			this.configuration.name = "persist-wf";
+		}
+		// Opt into durable persistence by returning a non-null payload.
+		protected override extractDispatchPayload(ctx: Context): unknown {
+			return {
+				method: ctx.request.method,
+				path: ctx.request.path,
+				body: ctx.request.body,
+				workflowName: ctx.workflow_name,
+				workflowPath: ctx.workflow_path,
+			};
+		}
+	}
+
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+		DebounceCoordinator.resetInstance();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+		DebounceCoordinator.resetInstance();
+	});
+
+	it("trailing-fresh window persists a debounced row to scheduled_dispatches", async () => {
+		vi.useFakeTimers();
+		const t = new PersistingTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", debounce: { key: "doc-1", mode: "trailing", delay: 500 } },
+		});
+
+		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const tracker = RunTracker.getInstance();
+		const rows = tracker.getStore().getScheduledDispatches({ status: "debounced" });
+		expect(rows.length).toBe(1);
+		expect(rows[0].dispatchStatus).toBe("debounced");
+		expect((rows[0].payload as { method: string }).method).toBe("POST");
+	});
+
+	it("coalesce updates the persisted row's scheduledAt + payload (latest-payload-wins)", async () => {
+		vi.useFakeTimers();
+		const t = new PersistingTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", debounce: { key: "doc-1", mode: "trailing", delay: 500 } },
+		});
+
+		await expect(t.run(makeCtx({ tenantId: "first" }))).rejects.toBeInstanceOf(DeferredDispatchSignal);
+		const tracker = RunTracker.getInstance();
+		const firstRow = tracker.getStore().getScheduledDispatches({ status: "debounced" })[0];
+		const firstPayload = (firstRow.payload as { body: { tenantId: string } }).body.tenantId;
+		expect(firstPayload).toBe("first");
+
+		// Advance time partially — still inside the window.
+		await vi.advanceTimersByTimeAsync(100);
+
+		// Second ping — coalesces.
+		await expect(t.run(makeCtx({ tenantId: "second" }))).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const rows = tracker.getStore().getScheduledDispatches({ status: "debounced" });
+		// Single row keyed on the active run id; payload updated with the latest ping.
+		expect(rows.length).toBe(1);
+		const updatedPayload = (rows[0].payload as { body: { tenantId: string } }).body.tenantId;
+		expect(updatedPayload).toBe("second");
+		// scheduledAt was reset to now+delayMs (later than the first row's).
+		expect(rows[0].scheduledAt).toBeGreaterThan(firstRow.scheduledAt);
+	});
+
+	it("trailing fire deletes the persisted row", async () => {
+		vi.useFakeTimers();
+		const t = new PersistingTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", debounce: { key: "doc-1", mode: "trailing", delay: 500 } },
+		});
+
+		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const tracker = RunTracker.getInstance();
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(1);
+
+		// Advance past the silence window — trailing fire happens.
+		await vi.advanceTimersByTimeAsync(600);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Row should be cleaned up by onFire's finally block.
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
+	});
+
+	it("default trigger (no extractDispatchPayload override) does NOT persist debounce dispatches", async () => {
+		vi.useFakeTimers();
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", debounce: { key: "doc-1", mode: "trailing", delay: 500 } },
+		});
+
+		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const tracker = RunTracker.getInstance();
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
+	});
+});
