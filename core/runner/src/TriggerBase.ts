@@ -74,6 +74,37 @@ export default abstract class TriggerBase extends Trigger {
 		return new Runner(this.configuration.steps);
 	}
 
+	/**
+	 * Tier 2 #5+#7 follow-up — durable scheduler hook.
+	 *
+	 * When a trigger supports re-firing deferred dispatches across process
+	 * restarts, it overrides this method to extract a JSON-serializable
+	 * subset of `ctx` sufficient for `restoreDispatch(payload)` (defined
+	 * by the trigger) to reconstruct an equivalent ctx and re-enter
+	 * `dispatchDeferred`.
+	 *
+	 * Returns `null` (default) when the trigger does NOT support
+	 * cross-restart durability — the scheduler then runs purely in-memory
+	 * for that trigger (existing pre-follow-up behaviour).
+	 *
+	 * Override in `HttpTrigger` to return `{method, path, headers, body,
+	 * params, query, workflowPath}` (with sensitive header keys stripped).
+	 * Worker triggers don't override — broker handles delay durability.
+	 */
+	protected extractDispatchPayload(_ctx: Context): unknown | null {
+		return null;
+	}
+
+	/**
+	 * Returns the trigger type string used to tag persisted scheduled
+	 * dispatch rows (`scheduled_dispatches.trigger_type`). Mirrors the
+	 * convention from `tracker.startRun({triggerType})`. Override when
+	 * the class name doesn't naturally produce the right tag.
+	 */
+	protected getTriggerType(): string {
+		return this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown";
+	}
+
 	// --- Hot Module Replacement ---
 
 	/**
@@ -313,9 +344,27 @@ export default abstract class TriggerBase extends Trigger {
 								});
 
 								const expiresAtForDispatch: number | undefined = undefined;
-								DeferredRunScheduler.getInstance().schedule(traceRunId, scheduledAt, async () => {
-									await this.dispatchDeferred(ctx, traceRunId as string, expiresAtForDispatch);
-								});
+								// Tier 2 #5+#7 follow-up · durable scheduling. Persist the
+								// dispatch row only when the subclass provides a payload
+								// (HttpTrigger.extractDispatchPayload returns the request
+								// subset; default returns null = in-memory only).
+								const persistPayload = this.extractDispatchPayload(ctx);
+								DeferredRunScheduler.getInstance().schedule(
+									traceRunId,
+									scheduledAt,
+									async () => {
+										await this.dispatchDeferred(ctx, traceRunId as string, expiresAtForDispatch);
+									},
+									persistPayload === null
+										? undefined
+										: {
+												workflowName,
+												triggerType: this.getTriggerType(),
+												expiresAt: expiresAtForDispatch,
+												dispatchStatus: "queued",
+												payload: persistPayload,
+											},
+								);
 
 								throw new DeferredDispatchSignal({
 									runId: traceRunId,
@@ -628,9 +677,24 @@ export default abstract class TriggerBase extends Trigger {
 				expiresAt,
 			});
 
-			DeferredRunScheduler.getInstance().schedule(traceRunId, scheduledAt, async () => {
-				await this.dispatchDeferred(ctx, traceRunId, expiresAt);
-			});
+			// Tier 2 #5+#7 follow-up · durable scheduling.
+			const persistPayload = this.extractDispatchPayload(ctx);
+			DeferredRunScheduler.getInstance().schedule(
+				traceRunId,
+				scheduledAt,
+				async () => {
+					await this.dispatchDeferred(ctx, traceRunId, expiresAt);
+				},
+				persistPayload === null
+					? undefined
+					: {
+							workflowName,
+							triggerType: this.getTriggerType(),
+							expiresAt,
+							dispatchStatus: "delayed",
+							payload: persistPayload,
+						},
+			);
 
 			return new DeferredDispatchSignal({
 				runId: traceRunId,

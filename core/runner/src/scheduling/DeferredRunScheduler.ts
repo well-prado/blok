@@ -1,15 +1,14 @@
 /**
- * Tier 2 #5 — in-memory scheduler for deferred workflow runs.
- *
- * Trade-off: setTimeout-based, in-process, lost on crash. The plan
- * documents this as the v1 trade-off. Crash-safety: pre-Tier-2-#5 runs
- * with status `"delayed"` are persisted to sqlite via `RunTracker`, and
- * `RunTracker.recoverScheduledRuns()` re-schedules them on boot via this
- * class.
+ * Tier 2 #5 — in-memory scheduler for deferred workflow runs. Tier 2
+ * #5+#7 follow-up adds optional sqlite-backed durability via the
+ * {@link DeferredScheduleOptions.persist} parameter.
  *
  * Process-wide singleton; obtained via {@link DeferredRunScheduler.getInstance}.
  * Reset between tests via {@link DeferredRunScheduler.resetInstance}.
  */
+import { RunTracker } from "../tracing/RunTracker";
+import type { ScheduledDispatchRow } from "../tracing/types";
+
 export type DeferredDispatchFn = () => Promise<void>;
 
 interface ScheduledEntry {
@@ -17,6 +16,30 @@ interface ScheduledEntry {
 	dispatchAt: number;
 	timer: NodeJS.Timeout;
 	dispatchFn: DeferredDispatchFn;
+	/** When set, persistence cleanup runs on cancel/fire. */
+	persisted: boolean;
+}
+
+/**
+ * Optional persistence payload — when supplied to `schedule()`, the
+ * scheduler writes a `scheduled_dispatches` row before registering the
+ * timer, and deletes it on cancel or fire. Trigger boot recovery
+ * (e.g. `HttpTrigger.recoverDispatches`) reads these rows to re-register
+ * timers across process restarts.
+ */
+export interface DeferredScheduleOptions {
+	workflowName: string;
+	/** Trigger type — `"http"` for v1; future triggers can opt in. */
+	triggerType: string;
+	/** TTL deadline (ms since epoch). When set, expired rows get marked `expired` on boot recovery. */
+	expiresAt?: number;
+	/** Mirrors the run record's status. */
+	dispatchStatus: ScheduledDispatchRow["dispatchStatus"];
+	/**
+	 * JSON-serializable trigger-defined payload sufficient to reconstruct
+	 * dispatch on boot. Trigger packages choose what to put here.
+	 */
+	payload: unknown;
 }
 
 export class DeferredRunScheduler {
@@ -45,8 +68,40 @@ export class DeferredRunScheduler {
 	 *
 	 * Re-scheduling the same `runId` cancels the previous timer and
 	 * replaces it (used by the debounce coordinator's "reset on ping").
+	 *
+	 * When `persist` is provided, the scheduler also writes a
+	 * `scheduled_dispatches` row before registering the timer (so a
+	 * crash leaves the dispatch recoverable), and deletes the row on
+	 * cancel or fire.
 	 */
-	schedule(runId: string, dispatchAt: number, dispatchFn: DeferredDispatchFn): void {
+	schedule(runId: string, dispatchAt: number, dispatchFn: DeferredDispatchFn, persist?: DeferredScheduleOptions): void {
+		// Persist BEFORE the timer so a crash between persist + setTimeout
+		// still leaves the row recoverable.
+		const persisted = persist !== undefined;
+		if (persisted) {
+			const tracker = RunTracker.getInstance();
+			if (tracker.active) {
+				try {
+					tracker.getStore().upsertScheduledDispatch({
+						runId,
+						workflowName: persist.workflowName,
+						triggerType: persist.triggerType,
+						scheduledAt: dispatchAt,
+						expiresAt: persist.expiresAt,
+						dispatchStatus: persist.dispatchStatus,
+						payload: persist.payload,
+						createdAt: Date.now(),
+					});
+				} catch (err) {
+					// Don't block the dispatch on persistence failure — log and continue.
+					console.error(
+						`[blok][scheduling] persist failed for run ${runId}; continuing in-memory only:`,
+						err instanceof Error ? err.stack || err.message : err,
+					);
+				}
+			}
+		}
+
 		// Replace any existing entry for this runId.
 		const existing = this.entries.get(runId);
 		if (existing) clearTimeout(existing.timer);
@@ -54,6 +109,9 @@ export class DeferredRunScheduler {
 		const delay = Math.max(0, dispatchAt - Date.now());
 		const timer = setTimeout(() => {
 			this.entries.delete(runId);
+			// Best-effort delete the persisted row before invoking dispatchFn —
+			// dispatch will write the run's terminal status separately.
+			if (persisted) this.deletePersistedRow(runId);
 			void dispatchFn().catch((err: unknown) => {
 				console.error(
 					`[blok][scheduling] DeferredRunScheduler dispatch failed for run ${runId}:`,
@@ -66,19 +124,44 @@ export class DeferredRunScheduler {
 		// the desired behavior for delayed runs in long-running services.
 		// `unref()` would be wrong here.
 
-		this.entries.set(runId, { runId, dispatchAt, timer, dispatchFn });
+		this.entries.set(runId, { runId, dispatchAt, timer, dispatchFn, persisted });
 	}
 
 	/**
 	 * Cancel a pending dispatch. Returns true if the entry existed and
-	 * was cancelled; false otherwise. Idempotent.
+	 * was cancelled; false otherwise. Idempotent. When the entry was
+	 * persisted, also deletes the `scheduled_dispatches` row.
+	 *
+	 * `cancelPersistedOnly` (default false) lets callers force the
+	 * persistence-row delete even when the in-memory timer is gone (e.g.
+	 * recovery cleanup that knows about a row but never had a timer).
 	 */
-	cancel(runId: string): boolean {
+	cancel(runId: string, cancelPersistedOnly = false): boolean {
 		const entry = this.entries.get(runId);
-		if (!entry) return false;
+		if (!entry) {
+			if (cancelPersistedOnly) {
+				return this.deletePersistedRow(runId);
+			}
+			return false;
+		}
 		clearTimeout(entry.timer);
 		this.entries.delete(runId);
+		if (entry.persisted) this.deletePersistedRow(runId);
 		return true;
+	}
+
+	private deletePersistedRow(runId: string): boolean {
+		const tracker = RunTracker.getInstance();
+		if (!tracker.active) return false;
+		try {
+			return tracker.getStore().deleteScheduledDispatch(runId);
+		} catch (err) {
+			console.error(
+				`[blok][scheduling] persist-cleanup failed for run ${runId}:`,
+				err instanceof Error ? err.stack || err.message : err,
+			);
+			return false;
+		}
 	}
 
 	/** True if `runId` has a pending timer. */

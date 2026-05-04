@@ -479,14 +479,26 @@ indexes on `scheduled_at` and `(workflow_name, debounce_key)`.
 Additive; pre-Tier-2-#5+#7 DBs upgrade transparently.
 
 **Backends**:
-- In-memory `DeferredRunScheduler` + `DebounceCoordinator` for v1.
-- Restart recovery: best-effort — runs in `delayed` status on boot
-  are re-scheduled (lost ctx; their captured payload survives via the
-  `WorkflowRun` record).
-- Sqlite-backed durable scheduler is a deferred follow-up.
+- In-memory `DeferredRunScheduler` + `DebounceCoordinator` for the
+  hot path (timers + closures live in process memory).
+- **Sqlite-backed durability (Tier 2 #5+#7 follow-up)**: HTTP `delay`
+  and `onLimit:queue` dispatches additionally write a row to the
+  `scheduled_dispatches` table (migration v9) before registering the
+  timer. The row carries `{runId, workflowName, triggerType,
+  scheduledAt, expiresAt, dispatchStatus, payload}` where `payload`
+  is a JSON-serializable subset of the request (method, path,
+  headers, body, params, query) sufficient to reconstruct dispatch.
+  Sensitive headers (authorization, cookie, x-api-key, etc.) are
+  stripped before persistence. On `HttpTrigger.listen()`,
+  `recoverDispatches()` scans the table and either marks past-TTL
+  rows as `expired` or re-registers timers via `restoreDispatch(row)`
+  which rebuilds a minimal `Context` and re-enters `dispatchDeferred`.
+  Persistence is opt-in per trigger via the new
+  `extractDispatchPayload(ctx)` virtual method on TriggerBase
+  (returns `null` by default — workers don't override since their
+  brokers handle delay durably).
 
 **Not yet shipped**:
-- Sqlite-backed durable scheduler (in-memory + setTimeout for v1).
 - Cross-process debounce keys (NATS KV / Redis).
 - Long delays (>24h) — recommend cron trigger + external scheduler
   for those use cases.

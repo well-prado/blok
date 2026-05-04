@@ -12,6 +12,7 @@ import type {
 	RunEvent,
 	RunEventType,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
@@ -459,6 +460,52 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE workflow_runs ADD COLUMN ping_count INTEGER;
 					CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at);
 					CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key);
+				`,
+			},
+			{
+				// Tier 2 #5+#7 follow-up · durable scheduler.
+				//
+				// `scheduled_dispatches` persists the minimum payload needed
+				// to re-fire a deferred dispatch after a process crash. The
+				// `DeferredRunScheduler` writes a row when a dispatch is
+				// scheduled, deletes it when the dispatch fires or is
+				// cancelled. On boot, HttpTrigger.recoverDispatches scans
+				// the table, marks past-due+TTL-expired rows as `expired`,
+				// and re-registers timers for live dispatches.
+				//
+				// Workers don't need this — broker (BullMQ/NATS) already
+				// owns delayed delivery.
+				//
+				// Columns:
+				//  - `run_id` — PK, FK-style reference to `workflow_runs.id`.
+				//  - `workflow_name` — used by trigger boot recovery to
+				//    filter rows it owns (when multiple HTTP triggers
+				//    share the same store).
+				//  - `trigger_type` — `"http"` for v1; future triggers
+				//    can opt in by writing this column.
+				//  - `scheduled_at` — ms since epoch when to fire.
+				//  - `expires_at` — TTL deadline (NULL = no TTL).
+				//  - `dispatch_status` — `"delayed"` | `"queued"` |
+				//    `"debounced"`. Mirrors the run record's status.
+				//  - `payload_json` — JSON-serialized minimal Context
+				//    subset (HTTP: method, path, headers, body, params,
+				//    query, workflow_path). Headers are pre-stripped of
+				//    sensitive keys (authorization, cookie, x-api-key).
+				//  - `created_at` — when the row was first written.
+				version: 9,
+				sql: `
+					CREATE TABLE IF NOT EXISTS scheduled_dispatches (
+						run_id TEXT PRIMARY KEY,
+						workflow_name TEXT NOT NULL,
+						trigger_type TEXT NOT NULL,
+						scheduled_at INTEGER NOT NULL,
+						expires_at INTEGER,
+						dispatch_status TEXT NOT NULL,
+						payload_json TEXT NOT NULL,
+						created_at INTEGER NOT NULL
+					);
+					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_at ON scheduled_dispatches(scheduled_at);
+					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name);
 				`,
 			},
 		];
@@ -1306,6 +1353,81 @@ export class SqliteRunStore implements RunStore {
 	purgeExpiredConcurrencySlots(now: number): number {
 		const result = this.stmt("purgeExpiredLocks", "DELETE FROM concurrency_locks WHERE expires_at <= ?").run(now);
 		return result.changes;
+	}
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
+		this.stmt(
+			"upsertScheduledDispatch",
+			`INSERT INTO scheduled_dispatches
+				(run_id, workflow_name, trigger_type, scheduled_at, expires_at, dispatch_status, payload_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(run_id) DO UPDATE SET
+				scheduled_at = excluded.scheduled_at,
+				expires_at = excluded.expires_at,
+				dispatch_status = excluded.dispatch_status,
+				payload_json = excluded.payload_json`,
+		).run(
+			row.runId,
+			row.workflowName,
+			row.triggerType,
+			row.scheduledAt,
+			row.expiresAt ?? null,
+			row.dispatchStatus,
+			JSON.stringify(row.payload ?? null),
+			row.createdAt,
+		);
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		const result = this.stmt("deleteScheduledDispatch", "DELETE FROM scheduled_dispatches WHERE run_id = ?").run(runId);
+		return result.changes > 0;
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[] {
+		const triggerType = opts?.triggerType;
+		const status = opts?.status;
+		const clauses: string[] = [];
+		const args: (string | number)[] = [];
+		if (triggerType) {
+			clauses.push("trigger_type = ?");
+			args.push(triggerType);
+		}
+		if (status) {
+			clauses.push("dispatch_status = ?");
+			args.push(status);
+		}
+		const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+		const sql = `SELECT * FROM scheduled_dispatches ${where} ORDER BY scheduled_at ASC`;
+		const rows = this.db.prepare(sql).all(...args) as Array<{
+			run_id: string;
+			workflow_name: string;
+			trigger_type: string;
+			scheduled_at: number;
+			expires_at: number | null;
+			dispatch_status: string;
+			payload_json: string;
+			created_at: number;
+		}>;
+		return rows.map((r) => {
+			let parsedPayload: unknown = null;
+			try {
+				parsedPayload = JSON.parse(r.payload_json);
+			} catch {
+				parsedPayload = null;
+			}
+			return {
+				runId: r.run_id,
+				workflowName: r.workflow_name,
+				triggerType: r.trigger_type,
+				scheduledAt: r.scheduled_at,
+				expiresAt: r.expires_at ?? undefined,
+				dispatchStatus: r.dispatch_status as ScheduledDispatchRow["dispatchStatus"],
+				payload: parsedPayload,
+				createdAt: r.created_at,
+			};
+		});
 	}
 
 	deleteRunsBefore(timestamp: number): number {

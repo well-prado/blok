@@ -6,6 +6,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowSummary,
@@ -120,6 +121,32 @@ export interface RunStore {
 	 * the gate also lazy-purges per-key on every acquire call.
 	 */
 	purgeExpiredConcurrencySlots(now: number): number;
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+	/**
+	 * Persist a scheduled dispatch row, or replace an existing one with
+	 * the same `runId` (debounce reset, queue re-defer). Idempotent.
+	 *
+	 * Called by `DeferredRunScheduler.schedule()` when a `persist` payload
+	 * is provided. The row carries everything the trigger needs to
+	 * reconstruct dispatch on boot.
+	 */
+	upsertScheduledDispatch(row: ScheduledDispatchRow): void;
+
+	/**
+	 * Delete a scheduled dispatch row. Returns true when a row existed.
+	 * Idempotent — safe to call on rows that have already been deleted
+	 * (e.g. after the timer fires + cancel races).
+	 */
+	deleteScheduledDispatch(runId: string): boolean;
+
+	/**
+	 * List scheduled dispatches, optionally filtered by trigger type
+	 * and/or status. Used by trigger boot recovery (HttpTrigger) to
+	 * find rows it owns.
+	 */
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[];
 
 	// === Lifecycle ===
 	close(): void;

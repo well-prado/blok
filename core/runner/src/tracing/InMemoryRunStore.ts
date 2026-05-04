@@ -7,6 +7,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
@@ -27,6 +28,7 @@ export class InMemoryRunStore implements RunStore {
 	private dashboards: Map<string, Dashboard> = new Map();
 	private idempotencyCache: Map<string, CachedStepResult> = new Map();
 	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
+	private scheduledDispatches: Map<string, ScheduledDispatchRow> = new Map();
 
 	private idemKey(workflowName: string, stepId: string, key: string): string {
 		// US (\x1f) is non-printable and never appears in identifiers, so it
@@ -502,6 +504,30 @@ export class InMemoryRunStore implements RunStore {
 			if (bucket.size === 0) this.concurrencyLocks.delete(bucketKey);
 		}
 		return removed;
+	}
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
+		// Clone to avoid external mutations bleeding into the store.
+		this.scheduledDispatches.set(row.runId, { ...row });
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		return this.scheduledDispatches.delete(runId);
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[] {
+		const triggerType = opts?.triggerType;
+		const status = opts?.status;
+		const out: ScheduledDispatchRow[] = [];
+		for (const row of this.scheduledDispatches.values()) {
+			if (triggerType && row.triggerType !== triggerType) continue;
+			if (status && row.dispatchStatus !== status) continue;
+			out.push({ ...row });
+		}
+		out.sort((a, b) => a.scheduledAt - b.scheduledAt);
+		return out;
 	}
 
 	close(): void {

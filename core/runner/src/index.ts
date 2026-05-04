@@ -116,7 +116,7 @@ import {
 	DeferredDispatchSignal,
 	isDeferredDispatchSignal,
 } from "./scheduling/DeferredDispatchSignal";
-import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
+import { DeferredRunScheduler, type DeferredScheduleOptions } from "./scheduling/DeferredRunScheduler";
 import {
 	type NormalizedDebounceConfig,
 	type NormalizedSchedulingConfig,
@@ -269,6 +269,7 @@ export {
 	type DeferredDispatchInfo,
 	isDeferredDispatchSignal,
 	DeferredRunScheduler,
+	type DeferredScheduleOptions,
 	DebounceCoordinator,
 	readSchedulingConfig,
 	type NormalizedDebounceConfig,
@@ -584,6 +585,7 @@ export type {
 	PaginatedResult,
 	StartRunOptions,
 	StartNodeOptions,
+	ScheduledDispatchRow,
 } from "./tracing/types";
 
 // Tracing store factory + concrete stores — exposed so the CLI's

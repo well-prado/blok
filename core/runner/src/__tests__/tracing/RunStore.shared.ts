@@ -607,5 +607,107 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(denied.currentInFlight).toBe(1);
 			});
 		});
+
+		// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+		describe("scheduled dispatches", () => {
+			it("upsertScheduledDispatch persists a row and getScheduledDispatches returns it", () => {
+				const now = Date.now();
+				store.upsertScheduledDispatch({
+					runId: "run_1",
+					workflowName: "send-welcome",
+					triggerType: "http",
+					scheduledAt: now + 60_000,
+					expiresAt: now + 120_000,
+					dispatchStatus: "delayed",
+					payload: { method: "POST", path: "/welcome", body: { email: "u@x.com" } },
+					createdAt: now,
+				});
+				const rows = store.getScheduledDispatches();
+				expect(rows.length).toBe(1);
+				expect(rows[0].runId).toBe("run_1");
+				expect(rows[0].dispatchStatus).toBe("delayed");
+				expect((rows[0].payload as { body: { email: string } }).body.email).toBe("u@x.com");
+			});
+
+			it("upsertScheduledDispatch with same runId replaces the row (re-defer)", () => {
+				const now = Date.now();
+				store.upsertScheduledDispatch({
+					runId: "run_1",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: now + 1000,
+					dispatchStatus: "queued",
+					payload: { v: 1 },
+					createdAt: now,
+				});
+				store.upsertScheduledDispatch({
+					runId: "run_1",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: now + 5000,
+					dispatchStatus: "queued",
+					payload: { v: 2 },
+					createdAt: now,
+				});
+				const rows = store.getScheduledDispatches();
+				expect(rows.length).toBe(1);
+				expect(rows[0].scheduledAt).toBe(now + 5000);
+				expect((rows[0].payload as { v: number }).v).toBe(2);
+			});
+
+			it("deleteScheduledDispatch removes the row and is idempotent", () => {
+				const now = Date.now();
+				store.upsertScheduledDispatch({
+					runId: "run_1",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: now,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: now,
+				});
+				expect(store.deleteScheduledDispatch("run_1")).toBe(true);
+				expect(store.deleteScheduledDispatch("run_1")).toBe(false);
+				expect(store.getScheduledDispatches().length).toBe(0);
+			});
+
+			it("getScheduledDispatches filters by triggerType + status; returns rows sorted by scheduledAt ASC", () => {
+				const now = Date.now();
+				store.upsertScheduledDispatch({
+					runId: "h_q",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: now + 5000,
+					dispatchStatus: "queued",
+					payload: null,
+					createdAt: now,
+				});
+				store.upsertScheduledDispatch({
+					runId: "h_d",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: now + 1000,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: now,
+				});
+				store.upsertScheduledDispatch({
+					runId: "w_d",
+					workflowName: "wf",
+					triggerType: "worker",
+					scheduledAt: now + 1000,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: now,
+				});
+				expect(store.getScheduledDispatches().length).toBe(3);
+				expect(store.getScheduledDispatches({ triggerType: "http" }).length).toBe(2);
+				expect(store.getScheduledDispatches({ status: "queued" }).length).toBe(1);
+				const httpRows = store.getScheduledDispatches({ triggerType: "http" });
+				expect(httpRows[0].runId).toBe("h_d");
+				expect(httpRows[1].runId).toBe("h_q");
+			});
+		});
 	});
 }

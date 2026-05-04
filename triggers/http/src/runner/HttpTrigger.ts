@@ -10,6 +10,9 @@ import { registerTraceRoutes } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
+import { DeferredRunScheduler } from "@blokjs/runner";
+import { RunTracker } from "@blokjs/runner";
+import type { ScheduledDispatchRow } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
@@ -343,6 +346,15 @@ export default class HttpTrigger extends TriggerBase {
 				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
 					this.enableHotReload();
 				}
+
+				// Tier 2 #5+#7 follow-up · re-fire HTTP dispatches that were
+				// pending when this process (or its predecessor) crashed.
+				// Idempotent — safe to call multiple times.
+				this.recoverDispatches().catch((err: unknown) => {
+					this.logger.error(
+						`[scheduling] HTTP dispatch recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				});
 
 				done(this.endCounter(this.initializer));
 			}) as Server;
@@ -692,5 +704,155 @@ export default class HttpTrigger extends TriggerBase {
 				span.end();
 			}
 		});
+	}
+
+	// === Tier 2 #5+#7 follow-up · durable scheduling for HTTP delays ===
+
+	/** Header keys that are NEVER persisted to disk (sensitive credentials). */
+	private static readonly DISPATCH_HEADER_DENYLIST = new Set([
+		"authorization",
+		"cookie",
+		"set-cookie",
+		"x-api-key",
+		"x-auth-token",
+		"proxy-authorization",
+	]);
+
+	/**
+	 * Tier 2 #5+#7 follow-up · extract a JSON-serializable subset of the
+	 * Hono-built ctx that's enough for `restoreDispatch()` to reconstruct
+	 * an equivalent ctx after a process restart. Sensitive headers are
+	 * stripped before persistence.
+	 */
+	protected override extractDispatchPayload(ctx: Context): unknown {
+		const req = ctx.request as RequestContext | undefined;
+		if (!req) return null;
+		const headers: Record<string, unknown> = {};
+		const rawHeaders = (req.headers ?? {}) as Record<string, unknown>;
+		for (const [k, v] of Object.entries(rawHeaders)) {
+			if (HttpTrigger.DISPATCH_HEADER_DENYLIST.has(k.toLowerCase())) continue;
+			headers[k] = v;
+		}
+		return {
+			method: req.method,
+			path: req.path,
+			url: (req as unknown as { url?: string }).url,
+			headers,
+			body: req.body,
+			params: req.params,
+			query: req.query,
+			workflowName: ctx.workflow_name,
+			workflowPath: ctx.workflow_path,
+		};
+	}
+
+	/**
+	 * Tier 2 #5+#7 follow-up · scan the durable scheduler table on boot
+	 * and re-fire HTTP dispatches that were pending when the process died.
+	 *
+	 * Behavior per row:
+	 * - Past-due AND past TTL: mark `expired`, delete the row.
+	 * - Past-due, not expired: immediately invoke restoreDispatch.
+	 * - Future-scheduled: register a fresh timer pointing at restoreDispatch.
+	 *
+	 * Idempotent — safe to call multiple times (HMR re-loads, etc.). The
+	 * underlying scheduler's `schedule()` replaces existing timers for the
+	 * same runId; persisted rows just register the same timer again.
+	 *
+	 * Skips rows whose `workflowName` doesn't match a workflow this trigger
+	 * owns (multi-trigger processes).
+	 */
+	async recoverDispatches(): Promise<{ recovered: number; expired: number; skipped: number }> {
+		const tracker = RunTracker.getInstance();
+		if (!tracker.active) return { recovered: 0, expired: 0, skipped: 0 };
+
+		const rows = tracker.getStore().getScheduledDispatches({ triggerType: "http" });
+		const now = Date.now();
+		let recovered = 0;
+		let expired = 0;
+		let skipped = 0;
+
+		for (const row of rows) {
+			// Skip rows for workflows this trigger doesn't own. The
+			// WorkflowRegistry tracks which workflows are registered;
+			// fallback: if the workflow name matches our own configuration,
+			// we own it.
+			const ownsWorkflow =
+				row.workflowName === this.configuration.name || WorkflowRegistry.getInstance().has(row.workflowName);
+			if (!ownsWorkflow) {
+				skipped++;
+				continue;
+			}
+
+			// Past TTL → mark expired and delete.
+			if (row.expiresAt !== undefined && now > row.expiresAt) {
+				tracker.markRunExpired(row.runId, { expiresAt: row.expiresAt, expiredAt: now });
+				tracker.getStore().deleteScheduledDispatch(row.runId);
+				expired++;
+				continue;
+			}
+
+			// Live (past-due or future): re-register the timer.
+			DeferredRunScheduler.getInstance().schedule(
+				row.runId,
+				row.scheduledAt,
+				async () => {
+					await this.restoreDispatch(row);
+				},
+				{
+					workflowName: row.workflowName,
+					triggerType: "http",
+					expiresAt: row.expiresAt,
+					dispatchStatus: row.dispatchStatus,
+					payload: row.payload,
+				},
+			);
+			recovered++;
+		}
+
+		if (recovered + expired > 0) {
+			this.logger.log(
+				`[scheduling] HTTP dispatch recovery: ${recovered} re-scheduled, ${expired} expired, ${skipped} skipped`,
+			);
+		}
+		return { recovered, expired, skipped };
+	}
+
+	/**
+	 * Tier 2 #5+#7 follow-up · re-create a Context from a persisted
+	 * dispatch payload and re-enter `dispatchDeferred`.
+	 *
+	 * Public method for testability (call from tests with a hand-built row);
+	 * normally invoked by the scheduler timer registered in `recoverDispatches`.
+	 */
+	async restoreDispatch(row: ScheduledDispatchRow): Promise<void> {
+		const payload = (row.payload ?? {}) as {
+			method?: string;
+			path?: string;
+			url?: string;
+			headers?: Record<string, unknown>;
+			body?: unknown;
+			params?: Record<string, string>;
+			query?: Record<string, string>;
+			workflowName?: string;
+			workflowPath?: string;
+		};
+
+		const ctx: Context = this.createContext(undefined, payload.workflowPath || "", row.runId);
+		ctx.request = {
+			body: payload.body,
+			headers: (payload.headers ?? {}) as Record<string, string>,
+			params: (payload.params ?? {}) as ParamsDictionary,
+			query: (payload.query ?? {}) as Record<string, string>,
+			method: payload.method ?? "POST",
+			path: payload.path ?? "/",
+			url: payload.url,
+		} as unknown as RequestContext;
+
+		// Stash the existing traceRunId so the re-entered run() reuses it
+		// (otherwise a new run would be created with a different id).
+		(ctx as Record<string, unknown>)._traceRunId = row.runId;
+
+		await this.dispatchDeferred(ctx, row.runId, row.expiresAt);
 	}
 }

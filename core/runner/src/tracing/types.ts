@@ -301,6 +301,38 @@ export interface ConcurrencySlotResult {
 	currentInFlight: number;
 }
 
+// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+/**
+ * A persisted scheduled dispatch — one row per pending HTTP-trigger
+ * deferral. Written by `DeferredRunScheduler.schedule()` when a
+ * `persist` payload is provided; deleted on cancel or fire.
+ *
+ * Boot recovery (HttpTrigger.recoverDispatches) scans this table,
+ * marks past-due+TTL-expired rows as `"expired"`, and re-registers
+ * timers for live dispatches.
+ */
+export interface ScheduledDispatchRow {
+	runId: string;
+	workflowName: string;
+	/** `"http"` for v1; future triggers can opt in. */
+	triggerType: string;
+	/** ms since epoch when to dispatch. */
+	scheduledAt: number;
+	/** ms since epoch TTL deadline (undefined = no TTL). */
+	expiresAt?: number;
+	/** Mirrors the run record's status — `"delayed" | "queued" | "debounced"`. */
+	dispatchStatus: "delayed" | "queued" | "debounced";
+	/**
+	 * JSON-serialized minimal Context subset, trigger-defined.
+	 * For HTTP: `{method, path, headers, body, params, query, workflowPath}`
+	 * with sensitive header keys stripped (authorization, cookie, x-api-key).
+	 */
+	payload: unknown;
+	/** ms since epoch when the row was first written. */
+	createdAt: number;
+}
+
 // === Events ===
 
 export type RunEventType =

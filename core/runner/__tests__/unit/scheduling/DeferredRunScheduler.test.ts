@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeferredRunScheduler } from "../../../src/scheduling/DeferredRunScheduler";
+import { RunTracker } from "../../../src/tracing/RunTracker";
 
 describe("DeferredRunScheduler", () => {
 	beforeEach(() => {
@@ -115,5 +116,128 @@ describe("DeferredRunScheduler", () => {
 		expect(good).toHaveBeenCalledTimes(1);
 		expect(errSpy).toHaveBeenCalled();
 		errSpy.mockRestore();
+	});
+});
+
+describe("DeferredRunScheduler — durable persistence (Tier 2 #5+#7 follow-up)", () => {
+	beforeEach(() => {
+		DeferredRunScheduler.resetInstance();
+		RunTracker.resetInstance();
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		DeferredRunScheduler.resetInstance();
+		RunTracker.resetInstance();
+	});
+
+	it("schedule with persist writes a row to the store; cancel deletes it", () => {
+		const sched = DeferredRunScheduler.getInstance();
+		const tracker = RunTracker.getInstance();
+		const fn = vi.fn(async () => undefined);
+
+		sched.schedule("run-1", Date.now() + 60_000, fn, {
+			workflowName: "wf",
+			triggerType: "http",
+			dispatchStatus: "delayed",
+			payload: { method: "POST", path: "/x", body: { foo: "bar" } },
+		});
+
+		const rows = tracker.getStore().getScheduledDispatches();
+		expect(rows.length).toBe(1);
+		expect(rows[0].runId).toBe("run-1");
+		expect(rows[0].dispatchStatus).toBe("delayed");
+
+		const cancelled = sched.cancel("run-1");
+		expect(cancelled).toBe(true);
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
+	});
+
+	it("timer fire deletes the persisted row before invoking dispatchFn", async () => {
+		const sched = DeferredRunScheduler.getInstance();
+		const tracker = RunTracker.getInstance();
+
+		const dispatched: string[] = [];
+		const fn = vi.fn(async () => {
+			// Inside the dispatch, the row should already be gone.
+			dispatched.push(
+				...tracker
+					.getStore()
+					.getScheduledDispatches()
+					.map((r) => r.runId),
+			);
+		});
+
+		sched.schedule("run-2", Date.now() + 100, fn, {
+			workflowName: "wf",
+			triggerType: "http",
+			dispatchStatus: "delayed",
+			payload: null,
+		});
+
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(1);
+
+		await vi.advanceTimersByTimeAsync(150);
+		await Promise.resolve();
+
+		expect(fn).toHaveBeenCalledTimes(1);
+		// The dispatchFn observed an empty store: persistence was cleared first.
+		expect(dispatched.length).toBe(0);
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
+	});
+
+	it("re-scheduling the same runId updates the persisted row in place", () => {
+		const sched = DeferredRunScheduler.getInstance();
+		const tracker = RunTracker.getInstance();
+
+		sched.schedule("run-3", Date.now() + 1000, async () => undefined, {
+			workflowName: "wf",
+			triggerType: "http",
+			dispatchStatus: "queued",
+			payload: { v: 1 },
+		});
+		sched.schedule("run-3", Date.now() + 5000, async () => undefined, {
+			workflowName: "wf",
+			triggerType: "http",
+			dispatchStatus: "queued",
+			payload: { v: 2 },
+		});
+
+		const rows = tracker.getStore().getScheduledDispatches();
+		expect(rows.length).toBe(1);
+		expect((rows[0].payload as { v: number }).v).toBe(2);
+	});
+
+	it("schedule WITHOUT persist does not write a row (zero-overhead default)", () => {
+		const sched = DeferredRunScheduler.getInstance();
+		const tracker = RunTracker.getInstance();
+		sched.schedule("run-4", Date.now() + 1000, async () => undefined);
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
+	});
+
+	it("cancel(runId, true) deletes a persisted row even when the timer is gone", () => {
+		const sched = DeferredRunScheduler.getInstance();
+		const tracker = RunTracker.getInstance();
+
+		// Persist a row directly (simulating a row from a prior process).
+		tracker.getStore().upsertScheduledDispatch({
+			runId: "orphan",
+			workflowName: "wf",
+			triggerType: "http",
+			scheduledAt: Date.now() + 10_000,
+			dispatchStatus: "delayed",
+			payload: null,
+			createdAt: Date.now(),
+		});
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(1);
+
+		// No in-memory entry exists for "orphan". Default cancel returns false.
+		expect(sched.cancel("orphan")).toBe(false);
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(1);
+
+		// cancelPersistedOnly=true forces the persisted-row delete.
+		expect(sched.cancel("orphan", true)).toBe(true);
+		expect(tracker.getStore().getScheduledDispatches().length).toBe(0);
 	});
 });

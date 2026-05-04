@@ -696,6 +696,23 @@ export class PostgresRunStore implements RunStore {
 		return this.memory.purgeExpiredConcurrencySlots(now);
 	}
 
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+	// Postgres delegates to in-memory for v1 — durable PG schema for
+	// cross-process scheduler coordination is a deferred follow-up
+	// (same trade-off as concurrency_locks + idempotency_cache).
+
+	upsertScheduledDispatch(row: Parameters<typeof this.memory.upsertScheduledDispatch>[0]): void {
+		this.memory.upsertScheduledDispatch(row);
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		return this.memory.deleteScheduledDispatch(runId);
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }) {
+		return this.memory.getScheduledDispatches(opts);
+	}
+
 	// === Write Queue ===
 
 	private enqueueWrite(fn: () => Promise<void>): void {
