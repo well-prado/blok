@@ -248,6 +248,15 @@ export abstract class WorkerTrigger extends TriggerBase {
 				this.logger.error(`[janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
+			// Tier 2 follow-up · install graceful shutdown handlers
+			// (SIGTERM / SIGINT). Idempotent; opt-out via
+			// `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
+			try {
+				WorkerTrigger.installShutdownHandlers(this, this.logger);
+			} catch (err) {
+				this.logger.error(`[shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
 			// Connect to job backend
 			await this.adapter.connect();
 			this.logger.log(`Connected to ${this.adapter.provider} worker system`);

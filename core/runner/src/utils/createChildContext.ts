@@ -50,6 +50,27 @@ export function createChildContext(
 	} as Context["response"];
 	const state: Record<string, unknown> = {};
 
+	// Tier 2 follow-up · cooperative cancellation. Child gets its own
+	// AbortController so it has independent lifecycle (cancellation of
+	// THIS sub-workflow doesn't propagate up to the parent). But we
+	// chain off the parent's signal: if the parent gets cancelled, the
+	// child should abort too — otherwise long-running sub-workflows
+	// would orphan when the parent exits.
+	const childAbortController = new AbortController();
+	if (parent.signal) {
+		if (parent.signal.aborted) {
+			childAbortController.abort();
+		} else {
+			parent.signal.addEventListener(
+				"abort",
+				() => {
+					if (!childAbortController.signal.aborted) childAbortController.abort();
+				},
+				{ once: true },
+			);
+		}
+	}
+
 	const ctx: Context = {
 		id,
 		workflow_name: opts.workflowName,
@@ -65,7 +86,11 @@ export function createChildContext(
 		state,
 		vars: state,
 		env: parent.env,
-		_PRIVATE_: parent._PRIVATE_,
+		signal: childAbortController.signal,
+		// Stash the controller in a child-specific _PRIVATE_ slot so the
+		// tracker can fire it via abortRunningRun on direct sub-run cancel.
+		// Don't mutate the parent's _PRIVATE_ (intentional isolation).
+		_PRIVATE_: { abortController: childAbortController },
 	};
 
 	// V2 read-only aliases — same object reference, no copy. Mirrors

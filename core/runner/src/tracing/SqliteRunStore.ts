@@ -1355,6 +1355,35 @@ export class SqliteRunStore implements RunStore {
 		return result.changes;
 	}
 
+	getConcurrencySnapshot(now: number): Array<{
+		workflowName: string;
+		concurrencyKey: string;
+		leases: Array<{ runId: string; expiresAt: number }>;
+	}> {
+		const rows = this.db
+			.prepare("SELECT workflow_name, concurrency_key, run_id, expires_at FROM concurrency_locks WHERE expires_at > ?")
+			.all(now) as Array<{
+			workflow_name: string;
+			concurrency_key: string;
+			run_id: string;
+			expires_at: number;
+		}>;
+		const buckets = new Map<
+			string,
+			{ workflowName: string; concurrencyKey: string; leases: Array<{ runId: string; expiresAt: number }> }
+		>();
+		for (const r of rows) {
+			const key = `${r.workflow_name}\x1f${r.concurrency_key}`;
+			let bucket = buckets.get(key);
+			if (!bucket) {
+				bucket = { workflowName: r.workflow_name, concurrencyKey: r.concurrency_key, leases: [] };
+				buckets.set(key, bucket);
+			}
+			bucket.leases.push({ runId: r.run_id, expiresAt: r.expires_at });
+		}
+		return Array.from(buckets.values());
+	}
+
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 
 	upsertScheduledDispatch(row: ScheduledDispatchRow): void {

@@ -9,6 +9,7 @@ import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
+import { ConcurrencyMetrics } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler } from "@blokjs/runner";
 import { Janitor } from "@blokjs/runner";
@@ -371,6 +372,16 @@ export default class HttpTrigger extends TriggerBase {
 					Janitor.getInstance(RunTracker.getInstance().getStore(), this.logger).start();
 				} catch (err) {
 					this.logger.error(`[janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+
+				// Tier 2 follow-up · install graceful shutdown handlers
+				// (SIGTERM / SIGINT) so backend connections + janitor +
+				// scheduler all drain cleanly on process exit. Idempotent;
+				// opt-out via `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
+				try {
+					HttpTrigger.installShutdownHandlers(this, this.logger);
+				} catch (err) {
+					this.logger.error(`[shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 
 				// Tier 2 #6 follow-up · install the cross-process concurrency
@@ -839,6 +850,11 @@ export default class HttpTrigger extends TriggerBase {
 			if (row.expiresAt !== undefined && now > row.expiresAt) {
 				tracker.markRunExpired(row.runId, { expiresAt: row.expiresAt, expiredAt: now });
 				tracker.getStore().deleteScheduledDispatch(row.runId);
+				ConcurrencyMetrics.getInstance().recordDispatchExpired({
+					workflow_name: row.workflowName,
+					trigger_type: "http",
+					dispatch_status: row.dispatchStatus,
+				});
 				expired++;
 				continue;
 			}
@@ -858,6 +874,11 @@ export default class HttpTrigger extends TriggerBase {
 					payload: row.payload,
 				},
 			);
+			ConcurrencyMetrics.getInstance().recordDispatchRecovered({
+				workflow_name: row.workflowName,
+				trigger_type: "http",
+				dispatch_status: row.dispatchStatus,
+			});
 			recovered++;
 		}
 

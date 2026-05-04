@@ -849,6 +849,46 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		req.on("close", cleanup);
 	});
 
+	// === Concurrency observability (Tier 2 follow-up) ===
+
+	/**
+	 * Concurrency backend health probe. Returns the configured backend
+	 * (`"in-process"` when none) and basic state. Useful for k8s-style
+	 * health checks AND Studio's "Backend status" tile.
+	 *
+	 * GET /__blok/concurrency/health
+	 */
+	router.get("/concurrency/health", (_req: TraceRequest, res: TraceResponse) => {
+		const backend = t.getConcurrencyBackend();
+		res.json({
+			backend: backend?.name ?? "in-process",
+			disabled: process.env.BLOK_CONCURRENCY_DISABLED === "1",
+			leaseMs: process.env.BLOK_CONCURRENCY_LEASE_MS ? Number(process.env.BLOK_CONCURRENCY_LEASE_MS) : 60 * 60 * 1000,
+		});
+	});
+
+	/**
+	 * Snapshot of currently in-flight concurrency slots, grouped by
+	 * (workflowName, concurrencyKey) bucket. Powers Studio's per-key
+	 * in-flight tile.
+	 *
+	 * GET /__blok/concurrency/state
+	 */
+	router.get("/concurrency/state", (_req: TraceRequest, res: TraceResponse) => {
+		const buckets = t.getStore().getConcurrencySnapshot(Date.now());
+		const totalLeases = buckets.reduce((sum, b) => sum + b.leases.length, 0);
+		res.json({
+			totalBuckets: buckets.length,
+			totalLeases,
+			buckets: buckets.map((b) => ({
+				workflowName: b.workflowName,
+				concurrencyKey: b.concurrencyKey,
+				inFlight: b.leases.length,
+				leases: b.leases,
+			})),
+		});
+	});
+
 	// === Cancellation (Tier 2 polish) ===
 
 	/**

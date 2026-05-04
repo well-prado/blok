@@ -122,6 +122,20 @@ export interface RunStore {
 	 */
 	purgeExpiredConcurrencySlots(now: number): number;
 
+	/**
+	 * Snapshot of in-flight concurrency slots — used by the
+	 * `/__blok/concurrency/state` endpoint and Studio's in-flight tile.
+	 *
+	 * Returns one entry per `(workflowName, concurrencyKey)` bucket with
+	 * an array of currently-held leases (un-expired). Empty buckets are
+	 * omitted. Sort order is unspecified — caller sorts as needed.
+	 */
+	getConcurrencySnapshot(now: number): Array<{
+		workflowName: string;
+		concurrencyKey: string;
+		leases: Array<{ runId: string; expiresAt: number }>;
+	}>;
+
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 
 	/**

@@ -506,6 +506,27 @@ export class InMemoryRunStore implements RunStore {
 		return removed;
 	}
 
+	getConcurrencySnapshot(now: number): Array<{
+		workflowName: string;
+		concurrencyKey: string;
+		leases: Array<{ runId: string; expiresAt: number }>;
+	}> {
+		const out: Array<{
+			workflowName: string;
+			concurrencyKey: string;
+			leases: Array<{ runId: string; expiresAt: number }>;
+		}> = [];
+		for (const [bucketKey, bucket] of this.concurrencyLocks.entries()) {
+			const [workflowName, concurrencyKey] = bucketKey.split("\x1f");
+			const leases: Array<{ runId: string; expiresAt: number }> = [];
+			for (const [runId, expiresAt] of bucket) {
+				if (expiresAt > now) leases.push({ runId, expiresAt });
+			}
+			if (leases.length > 0) out.push({ workflowName, concurrencyKey, leases });
+		}
+		return out;
+	}
+
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 
 	upsertScheduledDispatch(row: ScheduledDispatchRow): void {

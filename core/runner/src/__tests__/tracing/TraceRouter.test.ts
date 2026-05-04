@@ -1208,6 +1208,52 @@ describe("TraceRouter", () => {
 
 	// === Cancellation (Tier 2 polish) ===
 
+	describe("Concurrency observability (Tier 2 follow-up)", () => {
+		it("GET /concurrency/health returns the configured backend (in-process default)", () => {
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/health")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { backend: string; disabled: boolean };
+			expect(body.backend).toBe("in-process");
+			expect(body.disabled).toBe(false);
+		});
+
+		it("GET /concurrency/state returns empty buckets when no slots in flight", () => {
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/state")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { totalBuckets: number; totalLeases: number };
+			expect(body.totalBuckets).toBe(0);
+			expect(body.totalLeases).toBe(0);
+		});
+
+		it("GET /concurrency/state returns active buckets after slots are acquired", () => {
+			tracker.getStore().acquireConcurrencySlot("wf-A", "tenant-1", 5, "run_1", Date.now() + 60_000);
+			tracker.getStore().acquireConcurrencySlot("wf-A", "tenant-1", 5, "run_2", Date.now() + 60_000);
+			tracker.getStore().acquireConcurrencySlot("wf-B", "tenant-1", 5, "run_3", Date.now() + 60_000);
+
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/state")!(req, res);
+
+			const body = res.jsonBody as {
+				totalBuckets: number;
+				totalLeases: number;
+				buckets: Array<{ workflowName: string; concurrencyKey: string; inFlight: number }>;
+			};
+			expect(body.totalBuckets).toBe(2);
+			expect(body.totalLeases).toBe(3);
+			const wfA = body.buckets.find((b) => b.workflowName === "wf-A");
+			expect(wfA?.inFlight).toBe(2);
+			const wfB = body.buckets.find((b) => b.workflowName === "wf-B");
+			expect(wfB?.inFlight).toBe(1);
+		});
+	});
+
 	describe("POST /runs/:runId/cancel", () => {
 		it("returns 404 for unknown run", () => {
 			const req = new MockRequest({ params: { runId: "run_nonexistent" } });

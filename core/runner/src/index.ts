@@ -121,6 +121,9 @@ import { StepTimeoutError, isStepTimeoutError } from "./timeouts/StepTimeoutErro
 // Cooperative cancellation (Tier 2 follow-up)
 import { RunCancelledError, isRunCancelledError } from "./RunCancelledError";
 
+// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
+import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
+
 // Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import {
@@ -286,6 +289,8 @@ export {
 	// Cooperative cancellation (Tier 2 follow-up)
 	RunCancelledError,
 	isRunCancelledError,
+	// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
+	ConcurrencyMetrics,
 	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
 	DeferredDispatchSignal,
 	type DeferredDispatchInfo,

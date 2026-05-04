@@ -907,6 +907,10 @@ export class PostgresRunStore implements RunStore {
 		return removed;
 	}
 
+	getConcurrencySnapshot(now: number) {
+		return this.memory.getConcurrencySnapshot(now);
+	}
+
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 	// Tier 2 follow-up (migration v3) — PG mirror is now real durable
 	// storage. Boot recovery (`HttpTrigger.recoverDispatches`) reads the

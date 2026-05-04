@@ -12,6 +12,7 @@ import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } fr
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { CircuitBreaker } from "./monitoring/CircuitBreaker";
 import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
+import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 import { HealthCheck } from "./monitoring/HealthCheck";
 import type { DependencyCheckFn } from "./monitoring/HealthCheck";
 import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
@@ -184,6 +185,95 @@ export default abstract class TriggerBase extends Trigger {
 	/** Test-only — reset the install flag so tests can re-install handlers. */
 	static resetCrashHandlersInstalled(): void {
 		TriggerBase.crashHandlersInstalled = false;
+	}
+
+	// --- Graceful shutdown (Tier 2 follow-up) ---
+
+	/** Flag — set true after `installShutdownHandlers` has run once in this process. */
+	private static shutdownHandlersInstalled = false;
+
+	/**
+	 * Install SIGTERM + SIGINT handlers that drain process resources
+	 * cleanly before exit. Mirrors the `installCrashHandlers` pattern —
+	 * idempotent + opt-out via `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
+	 *
+	 * Drain order:
+	 * 1. Stop accepting new work — calls `trigger.stop()` if available
+	 *    (HttpTrigger drains in-flight requests + closes the server).
+	 * 2. Stop the periodic janitor sweep so it doesn't fire mid-drain.
+	 * 3. Cancel pending deferred dispatches in the in-memory scheduler.
+	 *    (Persisted rows in `scheduled_dispatches` survive — the next
+	 *    boot recovers them.)
+	 * 4. Disconnect the cross-process concurrency backend (NATS KV)
+	 *    so locks held by this process release on the broker side.
+	 * 5. `process.exit(0)`.
+	 *
+	 * Errors during drain are caught + logged; the process still exits
+	 * (cleanup is best-effort; the operator wants a clean exit).
+	 *
+	 * Why this is a `static` method: shutdown handlers must be installed
+	 * once per process, regardless of how many trigger subclasses
+	 * coexist. Subclasses pass `this` so the handler can call their
+	 * specific `stop()`.
+	 */
+	static installShutdownHandlers(trigger: TriggerBase, logger?: CrashAutoflipLogger): void {
+		if (TriggerBase.shutdownHandlersInstalled) return;
+		if (process.env.BLOK_GRACEFUL_SHUTDOWN_DISABLED === "1") return;
+		TriggerBase.shutdownHandlersInstalled = true;
+
+		const onSignal = async (signal: NodeJS.Signals) => {
+			logger?.log?.(`[blok][shutdown] received ${signal} — draining...`);
+			try {
+				// 1. Stop the trigger (drain in-flight, close server).
+				const stoppable = trigger as TriggerBase & { stop?: () => Promise<void> };
+				if (typeof stoppable.stop === "function") {
+					await stoppable.stop();
+				}
+
+				// 2. Stop the janitor.
+				try {
+					const { Janitor } = await import("./tracing/Janitor");
+					const janitor = (Janitor as unknown as { instance?: { stop(): void } }).instance;
+					if (janitor) janitor.stop();
+				} catch {
+					// Janitor may not have been imported yet.
+				}
+
+				// 3. Clear pending deferred dispatches (in-memory only —
+				// persisted rows survive for next-boot recovery).
+				try {
+					DeferredRunScheduler.getInstance().clear();
+				} catch {
+					// Best-effort.
+				}
+
+				// 4. Disconnect cross-process concurrency backend.
+				const backend = RunTracker.getInstance().getConcurrencyBackend();
+				if (backend) {
+					try {
+						await backend.disconnect();
+					} catch (err) {
+						logger?.error?.(
+							`[blok][shutdown] backend disconnect failed: ${err instanceof Error ? err.message : String(err)}`,
+						);
+					}
+				}
+
+				logger?.log?.("[blok][shutdown] graceful shutdown complete");
+			} catch (err) {
+				logger?.error?.(`[blok][shutdown] drain error: ${err instanceof Error ? err.message : String(err)}`);
+			} finally {
+				process.exit(0);
+			}
+		};
+
+		process.on("SIGTERM", onSignal);
+		process.on("SIGINT", onSignal);
+	}
+
+	/** Test-only — reset the install flag so tests can re-install handlers. */
+	static resetShutdownHandlersInstalled(): void {
+		TriggerBase.shutdownHandlersInstalled = false;
 	}
 
 	/**
@@ -470,6 +560,12 @@ export default abstract class TriggerBase extends Trigger {
 									scheduledAt,
 								});
 
+								ConcurrencyMetrics.getInstance().recordDenied({
+									workflow_name: workflowName,
+									concurrency_key: resolvedKey,
+									mode: "queue",
+								});
+
 								const expiresAtForDispatch: number | undefined = undefined;
 								// Tier 2 #5+#7 follow-up · durable scheduling. Persist the
 								// dispatch row only when the subclass provides a payload
@@ -508,6 +604,11 @@ export default abstract class TriggerBase extends Trigger {
 								concurrencyLimit: concCfg.limit,
 								currentInFlight: result.currentInFlight,
 							});
+							ConcurrencyMetrics.getInstance().recordDenied({
+								workflow_name: workflowName,
+								concurrency_key: resolvedKey,
+								mode: "throw",
+							});
 							throw new ConcurrencyLimitError({
 								workflowName,
 								concurrencyKey: resolvedKey,
@@ -518,6 +619,10 @@ export default abstract class TriggerBase extends Trigger {
 							});
 						}
 						acquiredLock = { workflowName, concurrencyKey: resolvedKey, runId: traceRunId };
+						ConcurrencyMetrics.getInstance().recordAcquired({
+							workflow_name: workflowName,
+							concurrency_key: resolvedKey,
+						});
 					}
 				}
 			}
@@ -699,6 +804,10 @@ export default abstract class TriggerBase extends Trigger {
 						`[blok][concurrency] releaseConcurrencySlot failed for ${lock.workflowName}:${lock.concurrencyKey}:${lock.runId}:`,
 						err instanceof Error ? err.stack || err.message : err,
 					);
+				});
+				ConcurrencyMetrics.getInstance().recordReleased({
+					workflow_name: lock.workflowName,
+					concurrency_key: lock.concurrencyKey,
 				});
 			}
 
