@@ -25,6 +25,21 @@ import { RunTracker } from "./tracing/RunTracker";
 import { TracingLogger } from "./tracing/TracingLogger";
 import type TriggerResponse from "./types/TriggerResponse";
 
+/**
+ * Tier 2 quick-wins follow-up · structural logger interface used by
+ * `installCrashHandlers` and `recoverOrphanedRuns`. Both `error` and
+ * `log` are optional so callers can pass a `DefaultLogger`, the Hono
+ * `console` shim, a custom logger, or omit it entirely.
+ *
+ * Single-arg calls (one pre-formatted string) are intentional — Node's
+ * `process.on("uncaughtException")` handlers can't await, and the
+ * `DefaultLogger` interface only takes `(message: string)`.
+ */
+interface CrashAutoflipLogger {
+	error?: (message: string) => void;
+	log?: (message: string) => void;
+}
+
 export default abstract class TriggerBase extends Trigger {
 	public configuration: Configuration;
 
@@ -103,6 +118,109 @@ export default abstract class TriggerBase extends Trigger {
 	 */
 	protected getTriggerType(): string {
 		return this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown";
+	}
+
+	// --- Crash auto-flip (Tier 2 quick-wins follow-up) ---
+
+	/** Flag — set true after `installCrashHandlers` has run once in this process. */
+	private static crashHandlersInstalled = false;
+
+	/**
+	 * Tier 2 quick-wins follow-up — install process-level handlers for
+	 * `uncaughtException` and `unhandledRejection`. When fired, flip
+	 * every in-flight `running` run to `"crashed"` (with the captured
+	 * error) BEFORE re-throwing / letting Node's default behavior take
+	 * over. Idempotent — safe to call from every trigger's `listen()`;
+	 * only the first call installs handlers.
+	 *
+	 * Kill-switch: `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
+	 *
+	 * Why sync: `process.on("uncaughtException")` handlers can't await.
+	 * `markAllRunningRunsAsCrashed` is sync (sqlite + in-memory writes
+	 * complete before the handler returns).
+	 */
+	static installCrashHandlers(logger?: CrashAutoflipLogger): void {
+		if (TriggerBase.crashHandlersInstalled) return;
+		if (process.env.BLOK_CRASH_AUTOFLIP_DISABLED === "1") return;
+		TriggerBase.crashHandlersInstalled = true;
+
+		const onUncaught = (err: Error) => {
+			try {
+				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
+				logger?.error?.(
+					`[blok][crash-autoflip] uncaughtException — flipped ${flipped} running run(s) to crashed: ${err.stack || err.message}`,
+				);
+			} catch (markErr) {
+				// Last-ditch — at least log so the operator knows the autoflip itself failed.
+				console.error("[blok][crash-autoflip] markAllRunningRunsAsCrashed failed:", markErr);
+			}
+			// Re-emit / let the runtime crash as expected — we don't want to
+			// silently swallow uncaught errors. Without this, Node would
+			// continue running with the handler attached but operators
+			// expect the process to die on uncaught exceptions.
+			throw err;
+		};
+
+		const onRejection = (reason: unknown) => {
+			const err = reason instanceof Error ? reason : new Error(String(reason));
+			try {
+				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
+				logger?.error?.(
+					`[blok][crash-autoflip] unhandledRejection — flipped ${flipped} running run(s) to crashed: ${err.stack || err.message}`,
+				);
+			} catch (markErr) {
+				console.error("[blok][crash-autoflip] markAllRunningRunsAsCrashed failed:", markErr);
+			}
+			// Don't re-throw — unhandledRejection is a warning, not a crash.
+			// Node's default behavior (warn + continue) still applies because
+			// our handler is additive, not replacing the default.
+		};
+
+		process.on("uncaughtException", onUncaught);
+		process.on("unhandledRejection", onRejection);
+	}
+
+	/** Test-only — reset the install flag so tests can re-install handlers. */
+	static resetCrashHandlersInstalled(): void {
+		TriggerBase.crashHandlersInstalled = false;
+	}
+
+	/**
+	 * Tier 2 quick-wins follow-up — boot recovery for orphaned `running`
+	 * runs. Scans the store for runs in `running` status whose
+	 * `startedAt` is older than `thresholdMs` ago (default 2 minutes,
+	 * override via `BLOK_ORPHAN_THRESHOLD_MS` env var). Flips each to
+	 * `"crashed"` with `Error("Orphaned — process restarted before run completed")`.
+	 *
+	 * Catches the case where the previous process died via SIGKILL or
+	 * OOM and the `installCrashHandlers` path never ran. Returns the
+	 * count flipped for observability + tests.
+	 *
+	 * Idempotent — safe to call multiple times; runs are flipped to
+	 * a terminal status so a second pass finds none.
+	 */
+	static recoverOrphanedRuns(thresholdMs?: number, logger?: CrashAutoflipLogger): number {
+		if (process.env.BLOK_CRASH_AUTOFLIP_DISABLED === "1") return 0;
+
+		const envThreshold = process.env.BLOK_ORPHAN_THRESHOLD_MS;
+		const threshold =
+			thresholdMs ?? (envThreshold && /^\d+$/.test(envThreshold) ? Number(envThreshold) : 2 * 60 * 1000);
+
+		const tracker = RunTracker.getInstance();
+		if (!tracker.active) return 0;
+
+		const cutoff = Date.now() - threshold;
+		const flipped = tracker.markAllRunningRunsAsCrashed(
+			new Error("Orphaned — process restarted before run completed"),
+			{ maxStartedAt: cutoff },
+		);
+
+		if (flipped > 0) {
+			logger?.log?.(
+				`[blok][crash-autoflip] boot recovery — flipped ${flipped} orphaned run(s) older than ${threshold}ms to crashed`,
+			);
+		}
+		return flipped;
 	}
 
 	// --- Hot Module Replacement ---

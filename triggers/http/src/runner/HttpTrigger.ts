@@ -348,6 +348,21 @@ export default class HttpTrigger extends TriggerBase {
 					this.enableHotReload();
 				}
 
+				// Tier 2 quick-wins follow-up · install process-level handlers
+				// that flip in-flight `running` runs to `crashed` on uncaught
+				// errors, AND scan for orphaned runs from a previous (dead)
+				// process. Both are idempotent + opt-out via
+				// `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
+				try {
+					HttpTrigger.installCrashHandlers(this.logger);
+					const orphaned = HttpTrigger.recoverOrphanedRuns(undefined, this.logger);
+					if (orphaned > 0) {
+						this.logger.log(`[crash-autoflip] flipped ${orphaned} orphaned run(s) to crashed on boot`);
+					}
+				} catch (err) {
+					this.logger.error(`[crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+
 				// Tier 2 #6 follow-up · install the cross-process concurrency
 				// backend (NATS KV) when the operator opted in via
 				// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null = the existing

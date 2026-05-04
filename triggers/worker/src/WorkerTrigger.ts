@@ -226,6 +226,19 @@ export abstract class WorkerTrigger extends TriggerBase {
 				);
 			}
 
+			// Tier 2 quick-wins follow-up · install crash handlers + recover
+			// orphaned runs from a previous (dead) process. Idempotent + opt-out
+			// via `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
+			try {
+				WorkerTrigger.installCrashHandlers(this.logger);
+				const orphaned = WorkerTrigger.recoverOrphanedRuns(undefined, this.logger);
+				if (orphaned > 0) {
+					this.logger.log(`[crash-autoflip] flipped ${orphaned} orphaned run(s) to crashed on boot`);
+				}
+			} catch (err) {
+				this.logger.error(`[crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
 			// Connect to job backend
 			await this.adapter.connect();
 			this.logger.log(`Connected to ${this.adapter.provider} worker system`);

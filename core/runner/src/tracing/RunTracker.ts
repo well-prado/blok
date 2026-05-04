@@ -415,6 +415,39 @@ export class RunTracker extends EventEmitter {
 	}
 
 	/**
+	 * Tier 2 quick-wins follow-up — bulk-flip every run currently in
+	 * `running` status to `crashed`. Returns the count flipped.
+	 *
+	 * Used by:
+	 * - Process-level uncaught-exception handlers
+	 *   (`TriggerBase.installCrashHandlers`) — flip in-flight runs
+	 *   before the process dies.
+	 * - Boot recovery (`TriggerBase.recoverOrphanedRuns`) — flip runs
+	 *   that were `running` from the previous (dead) process.
+	 *
+	 * Synchronous + safe to call from a `process.on("uncaughtException")`
+	 * handler (which can't await). Backed by sync sqlite/in-memory
+	 * writes that complete before the handler returns.
+	 *
+	 * Optional `opts.maxStartedAt` filter — only flip runs whose
+	 * `startedAt` is at or before this timestamp. Used by boot recovery
+	 * to avoid flipping runs from the current (live) process.
+	 */
+	markAllRunningRunsAsCrashed(error: Error | unknown, opts?: { maxStartedAt?: number }): number {
+		// Snapshot the runs first — markRunCrashed mutates the store and
+		// could perturb iteration if we read+update inline.
+		const { runs } = this.store.getRuns({ status: "running" });
+		const candidates =
+			opts?.maxStartedAt !== undefined ? runs.filter((r) => r.startedAt <= (opts.maxStartedAt as number)) : runs;
+
+		for (const run of candidates) {
+			this.markRunCrashed(run.id, { error });
+		}
+
+		return candidates.length;
+	}
+
+	/**
 	 * Tier 2 quick-wins — mark a run as `timedOut` because a step's
 	 * final retry attempt exceeded its `maxDuration` cap. Distinct
 	 * from `failed` so SLA dashboards can separate timeout-driven
