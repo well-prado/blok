@@ -47,22 +47,28 @@ timer fires and re-enters the runner.
 
 ## New run states
 
-Three new lifecycle states surface on `WorkflowRun.status` (full enum
-on the [trace storage page](/d/reference/trace-storage#run-states)):
+Four lifecycle states surface on `WorkflowRun.status` from the
+scheduling and queue gates (full enum on the
+[trace storage page](/d/reference/trace-storage#run-states)):
 
 | Status | Meaning |
 |---|---|
-| `delayed` | Scheduled. The run record exists; the dispatch is pending. Transitions to `running` when the timer fires. |
+| `delayed` | Scheduled via `delay`. The run record exists; the dispatch is pending. Transitions to `running` when the timer fires. |
 | `expired` | TTL exceeded before dispatch. Auto-cancelled without execution. Distinct from `cancelled` (operator-initiated) and `failed` (a step ran). |
 | `debounced` | Coalesced into another run via the `debounce.key` mechanism. In leading mode this is terminal (execution went to a sibling); in trailing mode it's transient until the window closes. |
+| `queued` | Concurrency gate denied with `onLimit: "queue"`. Re-attempts acquisition every second until a slot frees, then transitions to `running`. See [concurrency keys](/d/reliability/concurrency-keys#queue-mode-onlimit-queue). |
 
-And three matching event types:
+And four matching event types:
 
 | Event | Payload |
 |---|---|
 | <StudioEventBadge type="RUN_DELAYED" /> | `{scheduledAt, delayMs, expiresAt?}` |
 | <StudioEventBadge type="RUN_EXPIRED" /> | `{expiresAt, expiredAt, lateBy}` |
 | <StudioEventBadge type="RUN_DEBOUNCED" /> | `{debounceKey, mode, intoRunId?, pingCount?}` |
+| <StudioEventBadge type="RUN_QUEUED" /> | `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}` |
+
+All four states are cancellable while waiting — see
+[cancellation](/d/reliability/cancellation).
 
 ## Duration grammar
 
@@ -118,24 +124,29 @@ Worker triggers ACK deferred jobs without requeueing. The in-process
 scheduler owns the eventual dispatch — re-queueing would create a
 duplicate.
 
-## Single-process semantics
+## Durability
 
-The current scheduler is **in-memory and single-process** (a
-`setTimeout`-based dispatcher per process). Pending dispatches are
-lost if the process crashes. Worker triggers stay crash-safe via the
-underlying queue (BullMQ, NATS) but HTTP-triggered delays do not.
+The scheduler is in-memory `setTimeout`-based for the hot path, with
+optional sqlite-backed persistence for crash recovery. The
+[delay & TTL](/d/scheduling/delay-and-ttl#durability) and
+[debounce](/d/scheduling/debounce#durability) pages cover the
+mechanics in detail; here's the summary:
 
-A SQLite-backed durable scheduler is on the roadmap. Until then:
+| Trigger | Hot path | Persistence | Crash recovery |
+|---|---|---|---|
+| HTTP `delay` / `onLimit: "queue"` | `setTimeout` | sqlite `scheduled_dispatches` table (migration v9) | `recoverDispatches()` re-registers timers on boot; past-TTL rows flip to `expired` |
+| HTTP `debounce` | `DebounceCoordinator` (in-memory) | optional via `extractDispatchPayload` | recovered timers fire immediately (silence-window state lost) |
+| Worker `delay` / `ttl` | broker (BullMQ delay, NATS x-delay) | broker-managed | broker handles redelivery |
 
-- **Long delays (>24h)** — use a cron trigger plus an external
-  scheduler instead. The setTimeout-based dispatcher isn't built for
-  multi-day deferrals.
-- **Restart recovery** — runs in `delayed` status on boot are best-
-  effort re-scheduled (the captured payload survives via the run
-  record, but in-flight ping context is lost).
+Single-process limitations:
+
+- **Long delays (>24h)** — `setTimeout` survives a restart via the
+  persisted row, but the underlying timer max is implementation-
+  defined. For day-scale schedules, consider a cron trigger plus an
+  external scheduler.
 - **Cross-process debounce** — pings handled by different processes
-  don't coalesce. Pin a debounce route to a single process if you
-  need strict coalescing under horizontal scale.
+  don't coalesce. Pin a debounce route to a single process for strict
+  coalescing under horizontal scale.
 
 ## Composition with prior tiers
 

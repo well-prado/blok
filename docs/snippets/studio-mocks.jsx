@@ -24,6 +24,7 @@ const STATUS_DOT = {
 	delayed: "bg-yellow-400",
 	expired: "bg-zinc-500",
 	debounced: "bg-cyan-400",
+	queued: "bg-lime-300",
 	crashed: "bg-red-500",
 	timedOut: "bg-orange-400",
 };
@@ -176,12 +177,20 @@ export const StudioStepRail = ({ steps = [], activeIndex = 0 }) => {
 									<span className="font-mono text-[10px] text-zinc-600 w-3 shrink-0">{i + 1}</span>
 									<span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
 									<span className="flex-1 truncate">{s.name}</span>
-									{s.subworkflow && (
+									{s.subworkflow && s.wait !== false && (
 										<span
 											className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-zinc-700/40 text-zinc-300 shrink-0"
-											title="Sub-workflow invocation"
+											title="Sub-workflow invocation (synchronous) — see Sub-runs in the header"
 										>
 											↳ sub
+										</span>
+									)}
+									{s.subworkflow && s.wait === false && (
+										<span
+											className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-orange-300/15 text-orange-300 shrink-0"
+											title="Async sub-workflow (fire-and-forget) — child runs independently; parent does NOT block"
+										>
+											↳ async
 										</span>
 									)}
 									{s.cached && (
@@ -302,6 +311,8 @@ const EVENT_STYLES = {
 	RUN_DELAYED: { label: "Run Delayed", className: "text-yellow-400 bg-yellow-400/10" },
 	RUN_EXPIRED: { label: "Run Expired", className: "text-zinc-500 bg-zinc-500/10" },
 	RUN_DEBOUNCED: { label: "Run Debounced", className: "text-cyan-400 bg-cyan-400/10" },
+	RUN_QUEUED: { label: "Run Queued", className: "text-lime-300 bg-lime-300/10" },
+	RUN_CANCELLED: { label: "Run Cancelled", className: "text-purple-400 bg-purple-400/10" },
 	RUN_CRASHED: { label: "Run Crashed", className: "text-red-500 bg-red-500/10" },
 	RUN_TIMED_OUT: { label: "Run Timed Out", className: "text-orange-400 bg-orange-400/10" },
 };
@@ -364,6 +375,88 @@ export const StudioSubRunsStrip = ({
 					<span className="text-zinc-600">{sub.id.slice(0, 8)}</span>
 				</button>
 			))}
+		</div>
+	</StudioFrame>
+);
+
+/* In-flight concurrency tile — header strip on the All Runs page when
+   any concurrency slots are in flight. Mirrors ConcurrencyTile.tsx. */
+export const StudioConcurrencyTile = ({
+	backendName = "in-process",
+	totalLeases = 7,
+	totalBuckets = 2,
+	buckets = [
+		{ workflowName: "render-pdf", concurrencyKey: "tenant-a", inFlight: 5 },
+		{ workflowName: "checkout", concurrencyKey: "cart-42", inFlight: 2 },
+	],
+}) => (
+	<StudioFrame title="Studio · all runs">
+		<div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-3">
+			<div className="flex items-center gap-2 mb-2">
+				<span className="text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">In-flight slots</span>
+				<span className="font-mono text-[11px] text-zinc-300">{totalLeases}</span>
+				<span className="text-zinc-600 text-[11px]">across {totalBuckets} buckets</span>
+				{backendName !== "in-process" && (
+					<span
+						className="ml-auto font-mono text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0"
+						style={{ background: "rgba(57,192,104,0.15)", color: BRAND_GREEN }}
+						title={`Concurrency backend: ${backendName}`}
+					>
+						{backendName}
+					</span>
+				)}
+			</div>
+			<ul className="m-0 p-0 list-none space-y-1">
+				{buckets.map((b) => (
+					<li
+						key={`${b.workflowName}\x1f${b.concurrencyKey}`}
+						className="flex items-center gap-3 text-[11.5px] m-0 font-mono"
+					>
+						<span className="text-zinc-300 truncate flex-1">{b.workflowName}</span>
+						<span className="text-zinc-500 truncate">{b.concurrencyKey}</span>
+						<span className="text-amber-300 shrink-0 w-10 text-right">{b.inFlight} ⟳</span>
+					</li>
+				))}
+			</ul>
+		</div>
+	</StudioFrame>
+);
+
+/* Saved Filters dropdown — preset filter combinations a user can save. */
+export const StudioSavedFilters = ({
+	presets = [
+		{ name: "Failures last hour", active: false },
+		{ name: "Tenant A premium", active: true },
+		{ name: "Throttled today", active: false },
+	],
+}) => (
+	<StudioFrame title="Studio · runs filter">
+		<div className="flex items-center gap-3 flex-wrap">
+			<span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">Saved</span>
+			<div className="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 flex items-center gap-1.5">
+				{presets.map((p) => (
+					<button
+						key={p.name}
+						type="button"
+						onClick={(e) => e.preventDefault()}
+						className={`text-[11px] px-1.5 py-0.5 rounded font-mono ${
+							p.active ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-100"
+						}`}
+					>
+						{p.name}
+					</button>
+				))}
+				<span className="text-zinc-700">·</span>
+				<button
+					type="button"
+					onClick={(e) => e.preventDefault()}
+					className="text-[11px] text-zinc-500 hover:text-zinc-100 px-1.5 py-0.5 rounded font-mono"
+					title="Save current filter combination"
+				>
+					+ save
+				</button>
+			</div>
+			<span className="text-[11px] text-zinc-600">localStorage · per-browser</span>
 		</div>
 	</StudioFrame>
 );

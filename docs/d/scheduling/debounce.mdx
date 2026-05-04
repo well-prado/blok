@@ -262,6 +262,40 @@ Location: /__blok/runs/run_a91c2
 active run in the coalesce case) so callers can poll a single endpoint
 to track dispatch.
 
+## Durability
+
+Debounce coalescing crosses two state planes: the silence-window
+timer (in-memory) and the persisted dispatch row (sqlite-backed when
+the trigger overrides `extractDispatchPayload`).
+
+| State | Layer | Crash behavior |
+|---|---|---|
+| Active run record + `pingCount` + latest payload | sqlite `workflow_runs` (migration v8) | Survives restart |
+| Silence-window timer (`setTimeout`) | in-memory `DebounceCoordinator` | Lost — recovered timers fire immediately on boot instead of waiting for additional silence |
+| Persisted dispatch row (when opted in) | sqlite `scheduled_dispatches` (migration v9) | Survives restart |
+
+The HTTP trigger overrides `extractDispatchPayload` by default, so
+debounce dispatches go through the durability layer described on the
+[delay & TTL page](/d/scheduling/delay-and-ttl#durability). On boot,
+`HttpTrigger.recoverDispatches()` re-registers timers for any
+`debounced` rows it finds:
+
+- **Past TTL** → marked `expired`, row deleted.
+- **Active dispatch** → re-registered to fire on next tick (silence-
+  window state is gone; the recovered timer doesn't wait for fresh
+  silence). New live pings post-restart open a fresh debounce window
+  using the in-memory coordinator as usual.
+
+Latest-payload-wins still applies — coalesce upserts the row keyed on
+the active run id with the new `scheduledAt` and new payload. The
+recovered timer fires with the most recently captured payload.
+
+For workloads where mid-window crash recovery matters (autosave with
+strict no-loss guarantees), the persisted dispatch row plus
+recover-and-fire-immediately is the v1 contract. Cross-process
+debounce coordination remains single-process only — see the warning
+in the next section.
+
 ## Studio surface
 
 Debounced runs appear with a cyan **Debounced** badge:

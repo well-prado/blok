@@ -264,6 +264,15 @@ Spread from [`ConcurrencyOptsFields`](core/workflow-helper/src/types/TriggerOpts
   `BLOK_CONCURRENCY_LEASE_MS`. Requires `concurrencyKey`.
 </ParamField>
 
+<ParamField path="onLimit" type='"throw" | "queue"' default='"throw"'>
+  Behavior when the gate denies a run. `"throw"` returns
+  `429 Retry-After` (HTTP) or NACKs (worker). `"queue"` defers via
+  the in-process scheduler — HTTP returns `202 Accepted`, worker ACKs.
+  See
+  [queue mode](/d/reliability/concurrency-keys#queue-mode-onlimit-queue).
+  Requires `concurrencyKey`.
+</ParamField>
+
 ### Scheduling fields
 
 Spread from [`SchedulingOptsFields`](core/workflow-helper/src/types/TriggerOpts.ts#L181-L196).

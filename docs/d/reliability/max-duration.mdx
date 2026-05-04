@@ -139,11 +139,24 @@ it naturally completes — its eventual return value is discarded. For
 steps backed by network requests, this means the upstream connection
 stays open until the underlying client times out independently.
 
-This is the v1 trade-off. Cooperative `AbortSignal`-based cancellation
-is on the roadmap, but it requires nodes to consult `ctx.signal` —
-opt-in across the runtime adapters (HTTP, gRPC, Docker). Until then,
-treat `maxDuration` as a "fail this attempt fast" knob, not a "stop
-the work" knob.
+This is a per-step trade-off, not a global one. Every `Context` now
+carries `ctx.signal: AbortSignal`, and operator-initiated cancellation
+via `POST /__blok/runs/:id/cancel` fires that signal cooperatively.
+Nodes that want true-abort semantics under `maxDuration` should
+consult `ctx.signal.aborted` periodically or pass it to fetch:
+
+```ts
+async execute(ctx, input) {
+  // Pass to abort-aware APIs:
+  return await fetch(input.url, { signal: ctx.signal });
+}
+```
+
+See [cancellation](/d/reliability/cancellation) for the full
+cooperative pattern. `maxDuration` itself stays setTimeout-based — it
+rejects the wrapper, declares the attempt failed, and lets the retry
+loop continue. Whether the underlying work also aborts depends on
+whether the node consults `ctx.signal`.
 
 <Note>
 For network-backed steps, set the underlying client's request timeout
@@ -276,11 +289,13 @@ The step rail shows the failed step with a `↻N` retry indicator:
     wrapper is the reporting path.
   </Accordion>
 
-  <Accordion title="Expecting cancellation">
+  <Accordion title="Expecting maxDuration to abort the underlying work">
     `maxDuration` rejects the wrapper promise but doesn't abort the
-    underlying work. Long-running CPU-bound steps will keep consuming
-    CPU until they finish. For abortable work, wait for the
-    cooperative `AbortSignal` follow-up.
+    underlying work on its own. For true-abort semantics, the node
+    must consult `ctx.signal.aborted` periodically or pass `ctx.signal`
+    to fetch / abort-aware APIs. See
+    [cancellation](/d/reliability/cancellation) for the cooperative
+    pattern.
   </Accordion>
 
   <Accordion title="Treating timedOut as a synonym of failed">
@@ -298,13 +313,14 @@ The step rail shows the failed step with a `↻N` retry indicator:
 
 ## Not yet shipped
 
-- **Cooperative `AbortSignal`-based cancellation** — v1 uses
-  `setTimeout`. Proper cancellation requires nodes to consult
-  `ctx.signal` across all runtime adapters; opt-in follow-up.
-- **Auto-flip to `crashed` on uncaught `TriggerBase` errors** — the
-  status + tracker method are wired, but auto-flip is deferred. Today
-  custom triggers can call `tracker.markRunCrashed(runId, {error})`
-  manually.
+- **Cross-runtime `ctx.signal` propagation** — `Context.signal` is
+  available in TypeScript nodes today. Propagation through gRPC and
+  Docker runtime adapters (so non-TS nodes can also abort
+  cooperatively) is on the roadmap.
+- **`maxDuration` auto-firing `ctx.signal.abort()`** — today the
+  wrapper rejection and the abort signal are independent. Wiring the
+  timeout to fire the signal automatically would let nodes inherit
+  abort semantics for free, without operator-initiated cancellation.
 
 ## Related
 

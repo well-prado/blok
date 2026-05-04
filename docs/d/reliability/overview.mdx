@@ -4,10 +4,11 @@ description: "How idempotent caching, retry, replay, step timeouts, and concurre
 icon: "shield-check"
 ---
 
-Blok ships five opt-in reliability primitives. Three live on every v2
+Blok ships six opt-in reliability primitives. Three live on every v2
 step (caching, retry, replay), one caps per-attempt wall-clock
-(`maxDuration`), and one gates inbound dispatches at the trigger
-(concurrency keys).
+(`maxDuration`), one gates inbound dispatches at the trigger
+(concurrency keys), and one ends runs gracefully (cancellation +
+crash recovery).
 
 <Columns cols={3}>
   <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
@@ -27,7 +28,7 @@ step (caching, retry, replay), one caps per-attempt wall-clock
   </Card>
 </Columns>
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="Step timeouts" icon="timer" href="/d/reliability/max-duration">
     Cap each `step.process()` attempt with `maxDuration: "30s"`. Final-
     attempt timeout flips the run to `timedOut` (distinct from
@@ -36,15 +37,22 @@ step (caching, retry, replay), one caps per-attempt wall-clock
   <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
     Per-tenant rate limiting on triggers. `concurrencyKey:
     $.req.body.tenantId` plus a `concurrencyLimit`. Over-limit HTTP
-    returns `429 Retry-After`; worker NACKs.
+    returns `429 Retry-After`; worker NACKs. `onLimit: "queue"` defers
+    instead of rejecting.
+  </Card>
+  <Card title="Cancellation & crash recovery" icon="x-circle" href="/d/reliability/cancellation">
+    `POST /__blok/runs/:id/cancel` aborts a run cleanly. Crash auto-
+    flip + orphan recovery handle uncaught exceptions, OOM, and
+    signals.
   </Card>
 </Columns>
 
-All five are independent and zero-overhead when omitted. They also
+All six are independent and zero-overhead when omitted. They also
 compose: caching layers above persistence, retry wraps execution,
 `maxDuration` caps each attempt, replay re-fires the trigger so caches
-and code changes both apply, and concurrency keys gate dispatches
-before any of the above.
+and code changes both apply, concurrency keys gate dispatches before
+any of the above, and cancellation cleanly ends a run at any
+lifecycle stage.
 
 For deferred dispatch (delay, TTL, debounce) see the dedicated
 [scheduling section](/d/scheduling/overview) — those gates run BEFORE

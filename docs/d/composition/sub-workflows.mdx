@@ -365,6 +365,33 @@ parent either:
 Sub-run lineage on the new parent is independent of the original —
 clean slate, picks up code changes everywhere caching didn't apply.
 
+## Cancellation cascade
+
+When a parent run is cancelled via
+[`POST /__blok/runs/:id/cancel`](/d/reliability/cancellation), every
+synchronous (`wait: true`) child currently in flight also receives the
+abort signal. The mechanism is `createChildContext`, which builds a
+fresh `AbortController` for the child and chains it to the parent's
+signal:
+
+```ts
+// core/runner/src/utils/createChildContext.ts
+const childController = new AbortController();
+parent.signal?.addEventListener("abort", () => childController.abort());
+childCtx.signal = childController.signal;
+```
+
+Cancelling the child does NOT cascade back up to the parent —
+independent lifecycle preserved. Cancelling a `wait: false` child does
+NOT cascade either, because the parent step has already returned by the
+time the child runs; cancel async children directly via their own
+`runId`.
+
+For nodes inside a child to actually abort on cascade, they need to
+consult `ctx.signal.aborted` (or pass `ctx.signal` to `fetch`) — see
+[cancellation](/d/reliability/cancellation) for the cooperative
+pattern.
+
 ## Recursion guard
 
 Sub-workflows can themselves invoke sub-workflows. Depth is tracked on
@@ -388,8 +415,9 @@ This is a hard fail — workflows form an acyclic call graph by default.
 ## Studio surface
 
 The parent run header shows a "sub-runs" strip with each child
-clickable for drill-through. The step rail shows a `↳ sub` indicator
-on the invoking step:
+clickable for drill-through. The step rail shows a `↳ sub` (zinc)
+indicator for synchronous sub-workflow steps and a `↳ async` (orange)
+indicator for fire-and-forget steps:
 
 <StudioRunHeader
   workflowName="checkout"
@@ -411,6 +439,17 @@ on the invoking step:
   steps={[
     { id: "1", name: "charge", status: "completed", durationMs: 412 },
     { id: "2", name: "send-receipt", status: "completed", subworkflow: true, durationMs: 3480 },
+  ]}
+/>
+
+A `wait: false` step is rendered with the orange `↳ async` badge so
+operators can tell sync from fire-and-forget at a glance:
+
+<StudioStepRail
+  activeIndex={1}
+  steps={[
+    { id: "1", name: "charge", status: "completed", durationMs: 412 },
+    { id: "2", name: "queue-email", status: "completed", subworkflow: true, wait: false, durationMs: 4 },
   ]}
 />
 
@@ -501,19 +540,13 @@ registration and HMR notes.
   for both wait modes — `wait: false` uses `setImmediate`, not a queue
   or HTTP self-call. Horizontal-scale users with strict isolation
   needs are tracked as a follow-up.
-- **Studio `↳ async` indicator.** Today both `wait: true` and
-  `wait: false` show the same `↳ sub` badge in the step rail; the
-  Sub-runs strip on the parent surfaces the actual status. A distinct
-  async indicator is on the roadmap.
-- **Cancellation API for fire-and-forget children**
-  (`POST /__blok/runs/:childId/cancel`). The skeleton exists via
-  `tracker.failRun` but cancellation propagation to the running
-  child is deferred.
+- **Cancellation cascade to fire-and-forget children.** Cancelling
+  the parent does NOT propagate to `wait: false` children (the
+  parent step has already returned by the time the child runs). Cancel
+  async children directly via their own `runId` —
+  [`POST /__blok/runs/:childId/cancel`](/d/reliability/cancellation).
 - **Polymorphic workflow names** (`subworkflow: $.req.body.kind`).
   Workflow names are static today; runtime resolution is deferred.
-- **Durable Postgres lineage.** The PG run store currently delegates
-  parent/child lineage to its in-memory layer. Cross-process and
-  cross-restart lineage doesn't survive on PG yet.
 
 <Tip>
 A visual workflow editor (React Flow, like n8n) is on the roadmap for

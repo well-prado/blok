@@ -190,7 +190,7 @@ Worker adapters forward `delay` to the native queue primitive:
 | Adapter | Native delay |
 |---|---|
 | **BullMQ** | `Job.delay = delayMs`. Redis-backed; durable across restarts. |
-| **NATS** | `x-delay` header on the message. Note: the NATS adapter does NOT enforce delay on the consumer side in v1 — pre-existing limitation, scheduled to ship in a follow-up. |
+| **NATS** | `x-delay` header on the message. The consumer-side hold is enforced via `setTimeout` in `NATSAdapter` — the consumer holds the message for the remaining delay before invoking the handler. Single-process trade-off: a long delay holds one consumer slot for its duration. |
 | **InMemory** | `setTimeout`-based. Process-local; cleared on restart. |
 
 Deferred jobs ACK without retry — the in-process scheduler owns the
@@ -228,6 +228,81 @@ for deferred runs).
 ```
 
 For worker triggers, TTL alone is the queue-time TTL — accepted.
+
+## Durability
+
+The HTTP scheduler combines an in-memory `setTimeout` with optional
+sqlite persistence so dispatches survive process restart.
+
+### Persistence opt-in
+
+Persistence is opt-in per trigger via `extractDispatchPayload(ctx)`,
+a virtual method on `TriggerBase`. The default returns `null`
+(in-memory only). The HTTP trigger overrides it to capture a
+JSON-serializable subset of the request:
+
+```ts
+{
+  method, path, url, headers, body, params, query,
+  workflowName, workflowPath
+}
+```
+
+When the method returns non-null, `DeferredRunScheduler.schedule()`
+writes a row to `scheduled_dispatches` (sqlite migration v9) BEFORE
+registering the timer. Cancel and timer-fire delete the row.
+Re-scheduling the same `runId` updates the row in place. Persistence
+failures are logged and the in-memory timer still fires (best-effort
+durability).
+
+Source:
+[`triggers/http/src/runner/HttpTrigger.ts`](https://github.com/deskree-inc/blok/blob/main/triggers/http/src/runner/HttpTrigger.ts) ·
+[`core/runner/src/scheduling/DeferredRunScheduler.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DeferredRunScheduler.ts).
+
+### Sensitive header denylist
+
+Headers commonly carrying credentials are stripped before persistence:
+
+| Stripped | Reason |
+|---|---|
+| `authorization` | Bearer tokens, API keys |
+| `cookie` / `set-cookie` | Session identifiers |
+| `x-api-key` | Common API key header |
+| `x-auth-token` | Common auth token header |
+| `proxy-authorization` | Proxy credentials |
+
+Custom headers (`x-tenant-id`, `x-trace-id`, etc.) pass through
+unchanged. Add to the denylist via the `DISPATCH_HEADER_DENYLIST` set
+in `HttpTrigger.ts` if your application uses non-standard credential
+headers.
+
+### Boot recovery
+
+`HttpTrigger.listen()` calls `recoverDispatches()` after the server is
+ready. It scans `scheduled_dispatches` for rows with
+`triggerType: "http"` and:
+
+| Row state | Action |
+|---|---|
+| Past TTL (`now > expires_at`) | Mark `expired`, delete row, emit <StudioEventBadge type="RUN_EXPIRED" /> |
+| Past-due, not expired (`scheduled_at <= now`) | Re-register timer with 0ms delay (fires immediately) |
+| Future | Re-register timer pointing at `restoreDispatch(row)` |
+| Workflow no longer in registry | Skip (warning logged) |
+
+The recovery loop emits two OpenTelemetry counters:
+`blok_scheduling_dispatch_recovered_total` and
+`blok_scheduling_dispatch_expired_total`. See
+[observability](/d/operations/observability) for the full counter list.
+
+### What's persisted vs not
+
+| Trigger | `delay` | `ttl` | `debounce` | Cross-restart |
+|---|---|---|---|---|
+| HTTP | yes (sqlite) | yes (TTL check on dispatch) | opt-in via `extractDispatchPayload` (silence-window state lost; recovered timers fire immediately) | yes |
+| Worker | broker-managed (BullMQ delay, NATS x-delay enforced consumer-side in v1) | broker-managed | yes (broker handles redelivery) | yes |
+
+Workers stay crash-safe via the broker — Blok doesn't need to persist
+worker-trigger state. The persistence layer is HTTP-only.
 
 ## Studio surface
 
@@ -306,10 +381,12 @@ The events timeline carries the dispatch lifecycle:
     or just poll on a sensible interval (1s, 10s, etc.).
   </Accordion>
 
-  <Accordion title="NATS adapter and consumer-side delay">
-    The NATS adapter stores `x-delay` in headers but doesn't enforce
-    it on the consumer side in v1. Pre-existing limitation; tracked
-    as a follow-up.
+  <Accordion title="Long delays through the NATS adapter">
+    The NATS consumer holds the message via `setTimeout` for the
+    remaining delay. A long delay (hours+) holds one consumer slot for
+    its duration, which can stall throughput on busy queues. For long
+    delays prefer the trigger-level `delay` (sqlite-backed durable
+    scheduler) over a queue-level delay header.
   </Accordion>
 </AccordionGroup>
 

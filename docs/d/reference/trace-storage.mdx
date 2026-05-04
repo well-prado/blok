@@ -23,8 +23,8 @@ disables the tracker — and as a side effect, the cache.
 
 ## Run states
 
-The `WorkflowRunStatus` enum has eleven values — the original five
-plus six added across Tier 2.
+The `WorkflowRunStatus` enum has twelve values — the original five
+plus seven added across Tier 2 and its follow-ups.
 
 | Status | Meaning |
 |---|---|
@@ -32,13 +32,14 @@ plus six added across Tier 2.
 | `running` | At least one node is executing. |
 | `completed` | All steps finished successfully. |
 | `failed` | A step failed terminally (after retry exhaustion, if configured). |
-| `cancelled` | Run was explicitly cancelled by an operator. |
-| `throttled` | Tier 2 #6 — concurrency-gate denial at run-entry. No step ran. See [concurrency keys](/d/reliability/concurrency-keys). |
-| `delayed` | Tier 2 #5 — scheduled for future dispatch via `trigger.delay`. Transitions to `running` when the timer fires. See [delay & TTL](/d/scheduling/delay-and-ttl). |
-| `expired` | Tier 2 #5 — TTL exceeded before dispatch. Auto-cancelled without execution. |
-| `debounced` | Tier 2 #7 — coalesced into another run via `debounce.key`. Terminal in leading mode (execution went to a sibling); transient in trailing mode. See [debounce](/d/scheduling/debounce). |
-| `crashed` | Tier 2 quick-wins — runner itself crashed (uncaught exception, OOM, signal). Currently manual via `tracker.markRunCrashed()`. |
-| `timedOut` | Tier 2 quick-wins — a step's final retry attempt exceeded its `maxDuration` cap. Distinct from `failed` for SLA reporting. See [step timeouts](/d/reliability/max-duration). |
+| `cancelled` | Run was explicitly cancelled by an operator via `POST /__blok/runs/:id/cancel`. Cancellable from `delayed`, `debounced`, `queued`, AND `running` states. See [cancellation](/d/reliability/cancellation). |
+| `throttled` | Concurrency-gate denial at run-entry under `onLimit: "throw"`. No step ran. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `delayed` | Scheduled for future dispatch via `trigger.delay`. Transitions to `running` when the timer fires. See [delay & TTL](/d/scheduling/delay-and-ttl). |
+| `expired` | TTL exceeded before dispatch. Auto-cancelled without execution. |
+| `debounced` | Coalesced into another run via `debounce.key`. Terminal in leading mode (execution went to a sibling); transient in trailing mode. See [debounce](/d/scheduling/debounce). |
+| `queued` | Concurrency-gate denial at run-entry under `onLimit: "queue"`. Re-attempts acquisition every second until a slot frees. See [queue mode](/d/reliability/concurrency-keys#queue-mode-onlimit-queue). |
+| `crashed` | Runner crashed (uncaught exception, `unhandledRejection`, OOM, signal). Auto-flipped by `installCrashHandlers()` on `uncaughtException`; on boot, `recoverOrphanedRuns()` flips runs that were `running` for longer than `BLOK_ORPHAN_THRESHOLD_MS` (default 2 min). See [cancellation](/d/reliability/cancellation#crash-auto-flip). |
+| `timedOut` | A step's final retry attempt exceeded its `maxDuration` cap. Distinct from `failed` for SLA reporting. See [step timeouts](/d/reliability/max-duration). |
 
 ## Event vocabulary
 
@@ -77,9 +78,11 @@ renders each with a label and color:
 | <StudioEventBadge type="RUN_THROTTLED" /> | `tracker.markRunThrottled()` (Tier 2 #6) | amber Throttled badge |
 | <StudioEventBadge type="RUN_DELAYED" /> | `tracker.markRunDelayed()` (Tier 2 #5) | yellow Delayed badge |
 | <StudioEventBadge type="RUN_EXPIRED" /> | `tracker.markRunExpired()` (Tier 2 #5) | zinc Expired badge |
-| <StudioEventBadge type="RUN_DEBOUNCED" /> | `tracker.markRunDebounced()` (Tier 2 #7) | cyan Debounced badge |
-| <StudioEventBadge type="RUN_CRASHED" /> | `tracker.markRunCrashed()` (Tier 2 quick-wins) | red Crashed badge |
-| <StudioEventBadge type="RUN_TIMED_OUT" /> | `RunnerSteps` on final-attempt `StepTimeoutError` (Tier 2 quick-wins) | orange Timed Out badge |
+| <StudioEventBadge type="RUN_DEBOUNCED" /> | `tracker.markRunDebounced()` | cyan Debounced badge |
+| <StudioEventBadge type="RUN_QUEUED" /> | `tracker.markRunQueued()` (concurrency `onLimit: "queue"`) | lime Queued badge |
+| <StudioEventBadge type="RUN_CANCELLED" /> | `tracker.cancelRun()` via `POST /__blok/runs/:id/cancel` | purple Cancelled badge |
+| <StudioEventBadge type="RUN_CRASHED" /> | `tracker.markAllRunningRunsAsCrashed()` from `installCrashHandlers` or `recoverOrphanedRuns` | red Crashed badge |
+| <StudioEventBadge type="RUN_TIMED_OUT" /> | `RunnerSteps` on final-attempt `StepTimeoutError` | orange Timed Out badge |
 
 Event payloads:
 
@@ -89,6 +92,8 @@ Event payloads:
 | `RUN_DELAYED` | `{scheduledAt, delayMs, expiresAt?}` |
 | `RUN_EXPIRED` | `{expiresAt, expiredAt, lateBy}` |
 | `RUN_DEBOUNCED` | `{debounceKey, mode, intoRunId?, pingCount?}` |
+| `RUN_QUEUED` | `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}` |
+| `RUN_CANCELLED` | `{durationMs, previousStatus}` |
 | `RUN_CRASHED` | `{durationMs, error}` |
 | `RUN_TIMED_OUT` | `{durationMs, stepId, maxDurationMs, attemptsExhausted}` |
 
@@ -142,6 +147,9 @@ consume them directly.
 | `GET /__blok/runs/:runId/events` | Event stream (SSE). |
 | `GET /__blok/runs/:runId/subruns` | Child runs from sub-workflow invocations, sorted oldest-first. Empty array on miss; 404 if the parent doesn't exist. |
 | `POST /__blok/runs/:runId/replay` | Re-fire the captured trigger payload. Optional body: `{ method?, path?, headers?, body? }`. Returns `{ newRunId, originalRunId, workflowName, replayOf }`. |
+| `POST /__blok/runs/:runId/cancel` | Cancel a run in `delayed`, `debounced`, `queued`, or `running` state. Returns `{cancelled, runId, previousStatus, newStatus, note?}`. `400` for non-cancellable states; `404` for unknown runId. See [cancellation](/d/reliability/cancellation). |
+| `GET /__blok/concurrency/health` | Concurrency-gate liveness: `{backend, disabled, leaseMs}`. See [concurrency observability endpoints](/d/reliability/concurrency-keys#observability-endpoints). |
+| `GET /__blok/concurrency/state` | In-flight slot snapshot: `{totalBuckets, totalLeases, buckets[]}` with un-expired leases per `(workflow, key)` bucket. |
 
 ### Filtering runs
 
@@ -185,6 +193,7 @@ maps those back to `undefined` in the parsed types.
 | 6 | Tier 2 #4 | `workflow_runs.parent_run_id`; `workflow_runs.parent_node_run_id`; `idx_runs_parent_run` |
 | 7 | Tier 2 #6 | new `concurrency_locks` table + `idx_locks_expires` + `idx_locks_workflow_key` |
 | 8 | Tier 2 #5+#7 | `workflow_runs.scheduled_at`, `expires_at`, `debounce_key`, `debounce_mode`, `ping_count` + indexes |
+| 9 | Tier 2 #5+#7 follow-up | new `scheduled_dispatches` table + `idx_scheduled_dispatches_at` + `idx_scheduled_dispatches_trigger` |
 
 ### `idempotency_cache` (migration v4)
 
@@ -260,20 +269,61 @@ All five columns are nullable; pre-Tier-2-#5+#7 rows get NULL on the
 new fields. The indexes support the future "list scheduled runs"
 Studio view and the debounce coordinator's restart-recovery lookup.
 
-## Postgres store — current limits
+### `scheduled_dispatches` (migration v9)
 
-The `PostgresRunStore` implementation delegates the new methods
-(`getRunsByParent`, idempotency cache reads/writes) to its in-memory
-layer. That means:
+```sql
+CREATE TABLE IF NOT EXISTS scheduled_dispatches (
+  run_id TEXT PRIMARY KEY,
+  workflow_name TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  scheduled_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  dispatch_status TEXT NOT NULL,    -- 'delayed' | 'queued' | 'debounced'
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_at ON scheduled_dispatches(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name);
+```
 
-- **Same-process hits work.** Idempotency caches survive within a
-  single process for the configured TTL.
-- **Cross-process hits do not.** Two processes running PG-backed Blok
-  don't share their caches yet.
-- **Cross-restart hits do not.** Restarting the process clears the cache.
+The HTTP trigger persists `delay`, `onLimit: "queue"`, and (when
+opted in) `debounce` dispatches here. On boot, `recoverDispatches()`
+re-registers timers and flips past-TTL rows to `expired`. See
+[delay & TTL durability](/d/scheduling/delay-and-ttl#durability).
 
-A durable PG schema is planned. Until then, prefer SQLite for
-production caching unless you can tolerate per-process cache state.
+The [periodic janitor](/d/operations/janitor-and-shutdown#janitor)
+sweeps expired rows alongside `idempotency_cache` and
+`concurrency_locks` to bound storage growth.
+
+## Postgres store
+
+The `PostgresRunStore` runs a hybrid model: synchronous reads against
+an in-memory mirror for hot-path performance, with asynchronous
+writes to PG via the existing write queue. The mirror is rehydrated
+from PG on `loadRecent()` at boot.
+
+PG migration v3 adds the three Tier 2 cache / lock / dispatch tables:
+
+- `idempotency_cache` (Tier 1)
+- `concurrency_locks` (Tier 2 #6)
+- `scheduled_dispatches` (Tier 2 #5+#7)
+
+This means:
+
+- **Within-process hits work.** Both reads and writes go through the
+  in-memory mirror.
+- **Cross-restart hits work.** The mirror rehydrates from PG on boot.
+  Idempotency caches, concurrency leases, and scheduled dispatches
+  survive restart.
+- **Cross-process gating still requires NATS KV.** PG persistence
+  here is for crash-recovery within a single PG-backed process. For
+  multi-process concurrency coordination, set
+  `BLOK_CONCURRENCY_BACKEND=nats-kv` — see
+  [concurrency keys](/d/reliability/concurrency-keys#cross-process-backend-nats-kv).
+
+The migration is forward-compatible: it silently ignores `relation
+does not exist` errors during the first migration window so a pre-v3
+PG schema doesn't crash the loader.
 
 ## InMemory store
 

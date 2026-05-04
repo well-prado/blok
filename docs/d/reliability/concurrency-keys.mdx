@@ -4,7 +4,7 @@ description: "Per-tenant rate limiting and named-mutex semantics on triggers —
 icon: "lock"
 ---
 
-import { StudioRunHeader, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+import { StudioRunHeader, StudioEventBadge, StudioConcurrencyTile } from "/snippets/studio-mocks.jsx";
 
 Set `concurrencyKey` on a trigger and the runner gates incoming runs
 against an in-flight count for the resolved key. The named-mutex pattern
@@ -113,8 +113,17 @@ and spread into both `HttpTriggerOptsSchema` and
   safety upper bound on slot leaks.
 </ParamField>
 
-`concurrencyLimit` and `concurrencyLeaseMs` both require
-`concurrencyKey`. Setting either without `concurrencyKey` is rejected
+<ParamField path="onLimit" type='"throw" | "queue"' default='"throw"'>
+  Behavior when the gate denies a run. `"throw"` (default) returns
+  `429 Retry-After` (HTTP) or NACKs (worker) — the existing behavior.
+  `"queue"` defers the run via the in-process scheduler and re-attempts
+  acquisition every second until a slot frees. HTTP returns
+  `202 Accepted` with `Location`; worker ACKs without retry. New run
+  state `"queued"` (transient) — see [Queue mode](#queue-mode-onlimit-queue).
+</ParamField>
+
+All four fields require `concurrencyKey`. Setting `concurrencyLimit`,
+`concurrencyLeaseMs`, or `onLimit` without `concurrencyKey` is rejected
 at workflow load with `` "`concurrencyLimit` requires `concurrencyKey` to be set." ``.
 
 ## Mental model — named mutex per key
@@ -230,6 +239,69 @@ BLOK_CONCURRENCY_LEASE_MS=14400000 bun run dev
 A workflow that legitimately runs longer than the lease keeps holding
 its slot — the lease only matters when the process exits abnormally.
 
+## Queue mode (`onLimit: "queue"`)
+
+The default `onLimit: "throw"` rejects over-limit runs immediately
+with a `429`. Switch to `onLimit: "queue"` and over-limit runs defer
+on the in-process scheduler instead, retrying acquisition every second
+until a slot frees:
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/render",
+    concurrencyKey: $.req.body.tenantId,
+    concurrencyLimit: 5,
+    onLimit: "queue",
+  },
+}
+```
+
+The 6th request from a tenant returns `202 Accepted` instead of `429`:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_abc123
+Content-Type: application/json
+
+{
+  "runId": "run_abc123",
+  "workflowName": "render-pdf",
+  "status": "queued",
+  "scheduledAt": 1735741201000,
+  "debounced": false,
+  "pingCount": 1
+}
+```
+
+The client polls `Location` until status flips from `queued` to
+`running` to `completed | failed`. The mechanism reuses the
+[scheduling deferred-dispatch plumbing](/d/scheduling/overview) — when
+the timer fires, the run re-enters the gate and either acquires (then
+runs) or re-defers (status flips `queued → running → queued` briefly,
+scheduler timer is replaced).
+
+<Note>
+Queue mode trades immediate back-pressure for tail latency: callers
+don't need to implement client-side retry, but a hot bucket can have
+many queued runs all waking on the same 1s tick (a thundering herd).
+The trigger-level lease (default 1h) bounds slot leaks if a holder
+process dies, so queued runs eventually make progress.
+</Note>
+
+| | `onLimit: "throw"` (default) | `onLimit: "queue"` |
+|---|---|---|
+| HTTP response | `429 Too Many Requests` | `202 Accepted` + `Location` |
+| Worker behavior | NACK with redelivery | ACK without retry |
+| New run state | `throttled` (terminal) | `queued` (transient) |
+| Event | <StudioEventBadge type="RUN_THROTTLED" /> | <StudioEventBadge type="RUN_QUEUED" /> |
+| Re-defer cap | n/a | indefinite (lease-bounded) |
+| Cancellation | terminal — operator does nothing | `POST /__blok/runs/:id/cancel` aborts the queued run |
+
+`onLimit: "queue"` runs are cancellable while waiting — see
+[cancellation](/d/reliability/cancellation).
+
 ## Composition with prior tiers
 
 The gate sits at the run level, above the per-step primitives. It
@@ -270,9 +342,62 @@ concurrencyLimit, currentInFlight}`.
   showReplayButton={false}
 />
 
-The status filter dropdown includes throttled alongside the other
-terminal states. No dedicated "in-flight per key" tile yet — that's
-on the roadmap.
+The status filter dropdown carries `throttled` and `queued` alongside
+the other terminal and transient states.
+
+When at least one slot is in flight, Studio's All Runs page renders an
+in-flight tile in the header showing live `(workflow, key)` buckets
+sorted by lease count, with a backend badge if a non-default backend
+is configured:
+
+<StudioConcurrencyTile
+  backendName="nats-kv"
+  totalLeases={7}
+  totalBuckets={2}
+  buckets={[
+    { workflowName: "render-pdf", concurrencyKey: "tenant-a", inFlight: 5 },
+    { workflowName: "checkout", concurrencyKey: "cart-42", inFlight: 2 },
+  ]}
+/>
+
+The tile is hidden when no slots are in flight — keeps the page
+uncluttered at idle. It's wired to the `/concurrency/state`
+[observability endpoint](#observability-endpoints) below.
+
+## Observability endpoints
+
+Two REST endpoints expose live gate state for dashboards and
+debugging:
+
+```bash
+$ curl http://localhost:4000/__blok/concurrency/health
+{ "backend": "in-process", "disabled": false, "leaseMs": 3600000 }
+
+$ curl http://localhost:4000/__blok/concurrency/state
+{
+  "totalBuckets": 2,
+  "totalLeases": 7,
+  "buckets": [
+    {
+      "workflowName": "render-pdf",
+      "concurrencyKey": "tenant-a",
+      "inFlight": 5,
+      "leases": [...]
+    },
+    {
+      "workflowName": "checkout",
+      "concurrencyKey": "cart-42",
+      "inFlight": 2,
+      "leases": [...]
+    }
+  ]
+}
+```
+
+The `state` endpoint returns un-expired leases only. Six OpenTelemetry
+counters surface the same data through the existing Prometheus
+exporter — see [observability](/d/operations/observability) for the
+full list.
 
 ## Storage
 
@@ -286,10 +411,51 @@ the [trace storage page](/d/reference/trace-storage#concurrency_locks-migration-
 |---|---|
 | **SQLite** (default) | Durable. Read-modify-write wrapped in a transaction so two acquires can't both grant at the limit. |
 | **InMemory** (dev) | `Map<bucketKey, Map<runId, expiresAt>>`. Cleared on process exit. |
-| **Postgres** | Currently delegates to its in-memory layer — same-process gating works, cross-process and cross-restart gating do not. A durable PG schema is planned. |
+| **Postgres** | Migration v3 persists `concurrency_locks` to PG. Hybrid model — sync reads against an in-memory mirror, writes async-persist via the existing write queue. Survives restart in-process, but cross-process gating still requires the dedicated NATS KV backend below. |
 
 `BLOK_TRACE_ENABLED=false` disables the gate (the same store backs
 trace recording and the lock table).
+
+### Cross-process backend (NATS KV)
+
+Single-process backends cap horizontal scale at one Blok process per
+unique key bucket. Switch to the NATS KV backend to coordinate the
+gate across multiple processes:
+
+```bash
+BLOK_CONCURRENCY_BACKEND=nats-kv \
+BLOK_CONCURRENCY_NATS_SERVERS=nats://localhost:4222 \
+bun run http:dev
+```
+
+When set, the `RunTracker` delegates `acquireConcurrencySlot` and
+`releaseConcurrencySlot` to a `NatsKvConcurrencyBackend` that reads
+and writes one JSON document per `(workflowName, concurrencyKey)`
+bucket, using NATS KV's revision-based compare-and-swap (OCC) to
+serialize concurrent acquires. The trigger installs the backend in
+`listen()` before serving traffic; connect failures log and fall back
+to the in-process SQLite gate.
+
+The full env var reference and connection options live on the
+[env vars page](/d/operations/env-vars#concurrency-backend-nats-kv).
+Source: [`core/runner/src/concurrency/NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
+
+| Aspect | Behavior |
+|---|---|
+| **Acquire** | One `kv.get` + `kv.update` round-trip per attempt. Bounded retry (10) on CAS failure, then fail-closed. |
+| **Lazy purge** | Expired leases are pruned inside the same `acquireSlot` call that observes them. |
+| **Idempotent re-acquire** | Same `runId` refreshes its lease without double-counting. |
+| **Lease leak protection** | Per-lease `expiresAt` filtered on every acquire; no separate sweeper required. |
+| **High-cardinality buckets** | Single-document model has linear JSON growth; for >50 active leases per bucket, contention rises. A per-lease key model is on the roadmap. |
+
+When to switch:
+
+- **Single process** — leave it default (SQLite). Zero ops overhead,
+  highest throughput per key.
+- **Two or more processes sharing a workflow** — NATS KV is the only
+  way to coordinate the gate. Without it, each process tracks its own
+  bucket and the effective limit is `concurrencyLimit × processCount`.
+- **Strict per-tenant isolation under horizontal scale** — NATS KV.
 
 ## Recipes
 
@@ -361,16 +527,18 @@ trace recording and the lock table).
 
 ## Not yet shipped
 
-- **`onLimit: "queue"` (defer instead of reject)** — needs the
-  deferred-run plumbing from [scheduling](/d/scheduling/overview);
-  lands as additive once the design settles.
-- **Cross-process backend** (NATS KV / Redis) — current implementation
-  is single-process. Use SQLite for production until cross-process
-  gating ships.
+- **Capped exponential backoff for `onLimit: "queue"` re-defer.** v1
+  uses a fixed 1s retry interval. A hot bucket can wake all queued
+  runs on the same tick (thundering herd).
+- **Wakeup-on-release model.** Today re-defer is timer-driven. A
+  release signal from the holder would let the next queued run
+  acquire immediately instead of waiting for the next tick.
+- **`concurrencyQueueTimeoutMs`** — TTL on queued runs. v1 retries
+  indefinitely (lease-bounded).
+- **Redis backend** — same architecture as NATS KV; could use Lua for
+  single round-trip atomic acquire. Pending user pull.
 - **Step-level concurrency keys** — different invariant set, separate
   plan. Today the gate is at the run level only.
-- **Durable Postgres schema for `concurrency_locks`** — Postgres still
-  delegates to in-memory (same trade-off as the idempotency cache).
 
 ## Related
 

@@ -44,7 +44,8 @@
 							"d/reliability/retry",
 							"d/reliability/replay",
 							"d/reliability/concurrency-keys",
-							"d/reliability/max-duration"
+							"d/reliability/max-duration",
+							"d/reliability/cancellation"
 						]
 					},
 					{
@@ -58,6 +59,19 @@
 					{
 						"group": "Composition",
 						"pages": ["d/composition/sub-workflows"]
+					},
+					{
+						"group": "Studio",
+						"pages": ["d/studio/index"]
+					},
+					{
+						"group": "Operations",
+						"pages": [
+							"d/operations/overview",
+							"d/operations/env-vars",
+							"d/operations/observability",
+							"d/operations/janitor-and-shutdown"
+						]
 					},
 					{
 						"group": "Reference",
