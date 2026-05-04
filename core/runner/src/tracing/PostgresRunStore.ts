@@ -256,6 +256,15 @@ export class PostgresRunStore implements RunStore {
 						);
 					},
 				},
+				{
+					// PR 4 — wait.for / wait.until step primitive needs a
+					// resume cursor so dispatchDeferred re-entry skips
+					// already-completed pre-wait steps. Mirror sqlite v10.
+					version: 4,
+					up: async () => {
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS last_completed_step_index INTEGER");
+					},
+				},
 			];
 
 			for (const m of migrations) {

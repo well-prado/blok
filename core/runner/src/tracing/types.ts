@@ -167,6 +167,16 @@ export interface WorkflowRun {
 	 * run row as "Pings: N".
 	 */
 	pingCount?: number;
+	/**
+	 * PR 4 · `wait.for(duration)` / `wait.until(date)` resume cursor.
+	 *
+	 * Set after each non-wait step completes. On
+	 * `dispatchDeferred` re-entry from a wait step, the runner skips
+	 * steps with `stepIndex <= lastCompletedStepIndex` to avoid
+	 * re-running pre-wait steps. Undefined for runs that never
+	 * encountered a wait step (preserves existing semantics).
+	 */
+	lastCompletedStepIndex?: number;
 }
 
 // === Node Lifecycle ===

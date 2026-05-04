@@ -124,6 +124,9 @@ import { RunCancelledError, isRunCancelledError } from "./RunCancelledError";
 // Durable-scheduler payload size cap (PR 2 A4)
 import { PayloadTooLargeError, isPayloadTooLargeError } from "./PayloadTooLargeError";
 
+// Wait step primitive (PR 4)
+import { WaitDispatchRequest, isWaitDispatchRequest } from "./WaitDispatchRequest";
+
 // Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 // Janitor sweep OTel metrics (PR 3 D3)
@@ -297,6 +300,9 @@ export {
 	// Durable-scheduler payload size cap (PR 2 A4)
 	PayloadTooLargeError,
 	isPayloadTooLargeError,
+	// Wait step primitive (PR 4)
+	WaitDispatchRequest,
+	isWaitDispatchRequest,
 	// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
 	ConcurrencyMetrics,
 	// Janitor sweep OTel metrics (PR 3 D3)

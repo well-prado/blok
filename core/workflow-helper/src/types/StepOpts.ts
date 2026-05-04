@@ -487,24 +487,90 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
 
 /**
- * Discriminated v2 step — regular, branch, or sub-workflow.
+ * V2 wait step (PR 4 · `wait.for(duration)` / `wait.until(date)`).
+ *
+ * Pauses workflow execution mid-run for the specified duration (or until
+ * the absolute deadline). Composes with the durable scheduler — long
+ * waits survive process restart via the existing
+ * `scheduled_dispatches` infrastructure (PR 4 P3 adds
+ * `last_completed_step_index` so the runner skips past completed
+ * pre-wait steps on resume).
+ *
+ * Author surface:
+ * ```ts
+ * { id: "wait-3d", wait: { for: "3d" } }
+ * { id: "wait-deadline", wait: { until: $.req.body.scheduledAt } }
+ * ```
+ *
+ * Cannot combine with `idempotencyKey` (the wait IS the checkpoint) or
+ * `retry` (waits don't fail in a retryable way).
+ */
+export const V2WaitStepSchema = z
+	.object({
+		id: z.string().min(1).describe("Stable identifier."),
+		wait: z
+			.object({
+				for: DurationSchema.optional().describe(
+					"Wait this long. Mutually exclusive with `until`. " +
+						"Number (ms) or duration string (`500ms`, `30s`, `5m`, `2h`, `1d`).",
+				),
+				until: z
+					.union([z.number(), z.string()])
+					.optional()
+					.describe(
+						"Wait until this absolute time. Number is ms-since-epoch; " +
+							"string is an ISO date or a $-proxy expression. Mutually exclusive with `for`.",
+					),
+			})
+			.strict(),
+		as: z.string().min(1).optional().describe("Alternative state key (defaults to `id`)."),
+		ephemeral: z.boolean().optional().describe("If true, no state entry is recorded."),
+		active: z.boolean().optional(),
+		stop: z.boolean().optional(),
+	})
+	.strict()
+	.refine((s) => (s.wait.for !== undefined) !== (s.wait.until !== undefined), {
+		message: "`wait.for` and `wait.until` are mutually exclusive — pick one.",
+		path: ["wait"],
+	});
+
+export type V2WaitStep = z.infer<typeof V2WaitStepSchema>;
+
+/**
+ * Discriminated v2 step — regular, branch, sub-workflow, or wait.
  *
  * Discriminators (no `kind` field needed):
  * - presence of `branch` → branch step
  * - presence of `subworkflow` → sub-workflow step
+ * - presence of `wait` (object) → wait step
  * - otherwise → regular step
  */
-export const V2StepSchema: z.ZodType<V2RegularStep | V2BranchStep | V2SubworkflowStep> = z.lazy(() =>
-	z.union([V2BranchStepSchema, V2SubworkflowStepSchema, V2RegularStepSchema]),
+export const V2StepSchema: z.ZodType<V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep> = z.lazy(() =>
+	z.union([V2BranchStepSchema, V2SubworkflowStepSchema, V2WaitStepSchema, V2RegularStepSchema]),
 );
 
-export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep;
+export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep;
 
 /**
  * Type guard — true when the step is a branch.
  */
 export function isBranchStep(step: V2Step): step is V2BranchStep {
 	return typeof step === "object" && step !== null && "branch" in step;
+}
+
+/**
+ * Type guard — true when the step is a wait (PR 4 `wait.for` / `wait.until`).
+ */
+export function isWaitStep(step: V2Step): step is V2WaitStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"wait" in step &&
+		typeof (step as { wait?: unknown }).wait === "object" &&
+		(step as { wait?: unknown }).wait !== null &&
+		((step as { wait?: { for?: unknown } }).wait?.for !== undefined ||
+			(step as { wait?: { until?: unknown } }).wait?.until !== undefined)
+	);
 }
 
 /**

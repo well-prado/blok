@@ -1,6 +1,7 @@
 import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
 import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
+import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
@@ -89,8 +90,30 @@ export default abstract class RunnerSteps {
 			let flow_step = 0;
 			let stepName = "";
 
+			// PR 4 — wait.for / wait.until resume cursor.
+			//
+			// On `dispatchDeferred` re-entry from a wait step, the runner
+			// must skip past pre-wait steps that already completed in the
+			// previous pass. `lastCompletedStepIndex` is set on the run
+			// record before each WaitDispatchRequest throw and read here
+			// at runSteps entry. Default `-1` = no resume; runner starts
+			// at i = 0.
+			const persistedRun = !deep && tracker && traceRunId ? tracker.getStore().getRun(traceRunId) : undefined;
+			const resumeFromIndex =
+				persistedRun?.lastCompletedStepIndex !== undefined ? persistedRun.lastCompletedStepIndex + 1 : 0;
+
 			for (let i = 0; i < steps.length; i++) {
 				const step: NodeBase = steps[i];
+
+				// PR 4 — skip pre-wait steps on resume. State + NodeRuns
+				// from the first pass are still on `ctx.state` / in the
+				// store; the runner just advances past them.
+				if (i < resumeFromIndex) {
+					ctx.logger.log(
+						`[step ${i + 1}/${steps.length}] ${step.name} → skipped (resumed past wait at lastCompletedStepIndex=${persistedRun?.lastCompletedStepIndex})`,
+					);
+					continue;
+				}
 
 				// Tier 2 follow-up · cooperative cancellation. Operators can
 				// abort `running` runs via `POST /__blok/runs/:runId/cancel`,
@@ -156,6 +179,89 @@ export default abstract class RunnerSteps {
 						});
 						nodeRunId = nodeRun.id;
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;
+					}
+
+					// === PR 4: wait.for(duration) / wait.until(date) step ===
+					// Two paths:
+					//   1. First pass: compute deadline, mark NodeRun complete
+					//      (the wait step has no `process()` body), set the
+					//      run's resume cursor (lastCompletedStepIndex = i - 1),
+					//      throw WaitDispatchRequest. TriggerBase translates to
+					//      DeferredDispatchSignal → 202 Accepted.
+					//   2. Re-entry (dispatchDeferred): the resume cursor logic
+					//      at the top of runSteps already skipped indices < i.
+					//      For the wait step itself at i = lastCompletedStepIndex
+					//      + 1, treat it as satisfied and advance.
+					//      Detection: existence of run.scheduledAt + wait step =
+					//      we're on the second pass.
+					if (stepType === "wait") {
+						const waitForMs = stepAny.waitForMs as number | undefined;
+						const waitUntil = stepAny.waitUntil as number | string | undefined;
+
+						// Compute the deadline (resolves $-proxy and ISO strings).
+						const computeDeadline = (): number => {
+							if (typeof waitForMs === "number") return Date.now() + waitForMs;
+							if (typeof waitUntil === "number") return waitUntil;
+							if (typeof waitUntil === "string") {
+								// Try parsing as a number first (ms-since-epoch as a string).
+								const asNum = Number(waitUntil);
+								if (!Number.isNaN(asNum)) return asNum;
+								// ISO-date string.
+								const t = Date.parse(waitUntil);
+								if (!Number.isNaN(t)) return t;
+								// Fallback: treat as 0 (immediate).
+								return Date.now();
+							}
+							return Date.now();
+						};
+
+						// Detect re-entry: on first pass the run has no
+						// scheduledAt (or it's from trigger-level delay); on
+						// re-entry from a wait dispatch, the run was marked
+						// `delayed` with scheduledAt set to the wait deadline.
+						const isReentry =
+							(ctx as Record<string, unknown>)._blokDispatchReentry === true &&
+							resumeFromIndex > 0 &&
+							i === resumeFromIndex;
+
+						const deadline = computeDeadline();
+						const now = Date.now();
+
+						if (isReentry || deadline <= now) {
+							// Wait already satisfied (timer fired AND we're on
+							// re-entry past the deadline) OR the deadline is
+							// in the past (e.g., wait.for(0) or wait.until(<past>)).
+							// Mark NodeRun complete and advance.
+							if (tracker && nodeRunId) {
+								tracker.completeNode(nodeRunId, { __waited__: true, deadline });
+							}
+							ctx.logger.log(`[step ${i + 1}/${steps.length}] ${step.name} (wait) → satisfied`);
+							// Advance the resume cursor so a subsequent wait at a
+							// later index can rely on it.
+							if (tracker && traceRunId) {
+								tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
+							}
+							continue;
+						}
+
+						// First pass: schedule + throw WaitDispatchRequest.
+						// Set resume cursor BEFORE throwing so re-entry knows
+						// where to pick up. Cursor = i - 1 (the last non-wait
+						// step that completed).
+						if (tracker && traceRunId) {
+							tracker.getStore().updateRun(traceRunId, {
+								lastCompletedStepIndex: i - 1,
+							});
+						}
+						ctx.logger.log(
+							`[step ${i + 1}/${steps.length}] ${step.name} (wait) → scheduled (deadline=${new Date(deadline).toISOString()})`,
+						);
+						throw new WaitDispatchRequest({
+							scheduledAt: deadline,
+							stepIndex: i,
+							stepId: step.name,
+							lastCompletedStepIndex: i - 1,
+						});
 					}
 
 					// === Tier 1: idempotency cache lookup ===
@@ -260,6 +366,14 @@ export default abstract class RunnerSteps {
 								const stepMetrics = ctxAny._stepMetrics as Parameters<typeof tracker.completeNode>[2];
 								ctxAny._stepMetrics = undefined;
 								tracker.completeNode(nodeRunId, sanitize(ctx.response.data), stepMetrics);
+								// PR 4 — advance the resume cursor after each
+								// successful non-wait step. A subsequent wait step
+								// reads this value to set its own cursor before
+								// throwing WaitDispatchRequest. Only at top-level
+								// (deep=false); nested branch flow doesn't update.
+								if (!deep && traceRunId) {
+									tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
+								}
 							}
 
 							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
@@ -345,6 +459,15 @@ export default abstract class RunnerSteps {
 			// failRun'd on top of an already-cancelled status. Pass through
 			// untouched so the catch in TriggerBase.run sees the right type.
 			if (e instanceof RunCancelledError) {
+				throw e;
+			}
+
+			// PR 4 — WaitDispatchRequest is the wait.for / wait.until
+			// step's signal to TriggerBase that it should schedule a
+			// deferred dispatch. Same pass-through rationale as
+			// RunCancelledError — the catch in TriggerBase.run translates
+			// it to DeferredDispatchSignal + 202.
+			if (e instanceof WaitDispatchRequest) {
 				throw e;
 			}
 

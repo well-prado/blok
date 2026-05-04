@@ -100,6 +100,12 @@ interface RunRow {
 	 * `1`+ on debounced runs. Added in migration v8.
 	 */
 	ping_count: number | null;
+	/**
+	 * PR 4 · wait.for / wait.until resume cursor. NULL = no wait
+	 * encountered; `i` = runner finished step i and may resume at i+1
+	 * after a wait dispatchDeferred re-entry. Added in migration v10.
+	 */
+	last_completed_step_index: number | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -508,6 +514,21 @@ export class SqliteRunStore implements RunStore {
 					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name);
 				`,
 			},
+			{
+				// PR 4 — wait.for(duration) / wait.until(date) step primitive.
+				//
+				// On dispatchDeferred re-entry, the runner needs to know which
+				// steps already completed in the previous pass so it can skip
+				// past them. last_completed_step_index is the canonical
+				// resume cursor — runner increments after each non-wait
+				// step, then on re-entry skips steps with
+				// stepIndex <= last_completed_step_index. Default NULL (= no
+				// resume cursor; runner starts at step 0 as today).
+				version: 10,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN last_completed_step_index INTEGER;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -542,8 +563,9 @@ export class SqliteRunStore implements RunStore {
 			 status, started_at, finished_at, duration_ms, error_json,
 			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
 			 parent_run_id, parent_node_run_id,
-			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count,
+			 last_completed_step_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -569,6 +591,7 @@ export class SqliteRunStore implements RunStore {
 			run.debounceKey ?? null,
 			run.debounceMode ?? null,
 			run.pingCount ?? null,
+			run.lastCompletedStepIndex ?? null,
 		);
 	}
 
@@ -635,6 +658,10 @@ export class SqliteRunStore implements RunStore {
 		if (updates.pingCount !== undefined) {
 			setClauses.push("ping_count = ?");
 			values.push(updates.pingCount);
+		}
+		if (updates.lastCompletedStepIndex !== undefined) {
+			setClauses.push("last_completed_step_index = ?");
+			values.push(updates.lastCompletedStepIndex);
 		}
 		if (updates.startedAt !== undefined) {
 			setClauses.push("started_at = ?");
@@ -1528,6 +1555,7 @@ export class SqliteRunStore implements RunStore {
 			debounceKey: row.debounce_key ?? undefined,
 			debounceMode: (row.debounce_mode ?? undefined) as "leading" | "trailing" | undefined,
 			pingCount: row.ping_count ?? undefined,
+			lastCompletedStepIndex: row.last_completed_step_index ?? undefined,
 		};
 	}
 

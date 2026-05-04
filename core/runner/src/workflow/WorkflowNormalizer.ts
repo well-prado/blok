@@ -1,3 +1,5 @@
+import { parseDuration } from "@blokjs/helper";
+
 /**
  * WorkflowNormalizer — accepts v1 or v2 workflow shapes and projects both
  * to the single canonical internal shape that `Configuration.getSteps` /
@@ -74,6 +76,18 @@ interface InternalStep {
 	 * normalizes to milliseconds via `parseDuration`.
 	 */
 	maxDuration?: number | string;
+	/**
+	 * PR 4 — `wait.for(duration)` / `wait.until(date)` step.
+	 *
+	 * Discriminates by `type === "wait"` and the presence of either
+	 * `waitForMs` (numeric ms after parseDuration) or `waitUntil` (number
+	 * ms-since-epoch OR string for $-proxy / ISO).
+	 *
+	 * `wait?: boolean` above is the sub-workflow `wait: true|false` flag
+	 * — separate concern, separate field.
+	 */
+	waitForMs?: number;
+	waitUntil?: number | string;
 	[key: string]: unknown;
 }
 
@@ -159,6 +173,17 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			const { internalStep, nodeConfig } = normalizeSubworkflowStep(step, i);
 			internalSteps.push(internalStep);
 			if (nodeConfig) internalNodes[internalStep.name] = nodeConfig;
+			continue;
+		}
+
+		// v2 wait — { id, wait: { for?, until? } } (PR 4).
+		// Discriminator: `wait` is an object (sub-workflow uses `wait: boolean`).
+		if (
+			isPlainObject(step.wait) &&
+			((step.wait as { for?: unknown }).for !== undefined || (step.wait as { until?: unknown }).until !== undefined)
+		) {
+			const internalStep = normalizeWaitStep(step, i);
+			internalSteps.push(internalStep);
 			continue;
 		}
 
@@ -447,6 +472,76 @@ function normalizeSubworkflowStep(
 	const nodeConfig: InternalNodeConfig | null = inlineInputs ? { inputs: inlineInputs } : null;
 
 	return { internalStep, nodeConfig };
+}
+
+const WAIT_NODE_REF = "@blokjs/wait";
+
+/**
+ * PR 4 — normalize a v2 wait step.
+ *
+ * Wait steps are intercepted by `RunnerSteps` BEFORE `step.process` is
+ * invoked (the wait IS the runner-level deferral); the resolved node is
+ * a no-op placeholder. The runner reads `waitForMs` / `waitUntil` off
+ * the InternalStep to decide how long to wait.
+ *
+ * `wait.for` (duration string or number) is parsed to milliseconds via
+ * `parseDuration`. `wait.until` is left as-is — the runner resolves
+ * $-proxy expressions against the live ctx at first-pass invocation.
+ */
+function normalizeWaitStep(step: Record<string, unknown>, index: number): InternalStep {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: wait step at index ${index} is missing \`id\`.`);
+	}
+	const waitObj = step.wait as { for?: unknown; until?: unknown };
+	const hasFor = waitObj.for !== undefined;
+	const hasUntil = waitObj.until !== undefined;
+	if (hasFor === hasUntil) {
+		throw new Error(
+			`[blok] WorkflowNormalizer: wait step "${id}" must set exactly one of \`wait.for\` or \`wait.until\`.`,
+		);
+	}
+
+	let waitForMs: number | undefined;
+	let waitUntil: number | string | undefined;
+
+	if (hasFor) {
+		const raw = waitObj.for;
+		if (typeof raw === "number") {
+			waitForMs = raw;
+		} else if (typeof raw === "string") {
+			// parseDuration may throw on invalid grammar — let it surface.
+			waitForMs = parseDuration(raw);
+		} else {
+			throw new Error(
+				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.for\` (must be number ms or duration string).`,
+			);
+		}
+	}
+	if (hasUntil) {
+		const raw = waitObj.until;
+		if (typeof raw !== "number" && typeof raw !== "string") {
+			throw new Error(
+				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.until\` (must be number ms or string).`,
+			);
+		}
+		waitUntil = raw;
+	}
+
+	const ephemeral = step.ephemeral === true;
+	const as = pickString(step.as);
+
+	return {
+		name: id,
+		node: WAIT_NODE_REF,
+		type: "wait",
+		active: step.active === undefined ? true : step.active === true,
+		stop: step.stop === true,
+		as,
+		ephemeral,
+		waitForMs,
+		waitUntil,
+	};
 }
 
 function normalizeTrigger(rawTrigger: unknown, sourcePath?: string): Record<string, unknown> {

@@ -5,6 +5,7 @@ import Configuration from "./Configuration";
 import DefaultLogger from "./DefaultLogger";
 import { RunCancelledError } from "./RunCancelledError";
 import Runner from "./Runner";
+import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import type { HMREvent } from "./hmr/FileWatcher";
@@ -804,6 +805,52 @@ export default abstract class TriggerBase extends Trigger {
 		} catch (err) {
 			runSuccess = false;
 
+			// PR 4 — wait.for / wait.until step requesting deferred dispatch.
+			// Translate to the existing scheduling pipeline:
+			//   1. Mark run "delayed" with the wait deadline as scheduledAt.
+			//   2. Persist the dispatch row (durable scheduler) so the wait
+			//      survives process restart.
+			//   3. Register a setTimeout via DeferredRunScheduler.
+			//   4. Throw DeferredDispatchSignal — HTTP transport returns 202.
+			// The runner already set lastCompletedStepIndex before throwing
+			// WaitDispatchRequest so the dispatchDeferred re-entry skips
+			// past completed pre-wait steps.
+			if (err instanceof WaitDispatchRequest && traceRunId) {
+				const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
+				const scheduledAt = err.info.scheduledAt;
+				const delayMs = Math.max(0, scheduledAt - Date.now());
+
+				tracker.markRunDelayed(traceRunId, { scheduledAt, delayMs });
+
+				const persistPayload = this.extractDispatchPayload(ctx);
+				DeferredRunScheduler.getInstance().schedule(
+					traceRunId,
+					scheduledAt,
+					async () => {
+						await this.dispatchDeferred(ctx, traceRunId as string, undefined);
+					},
+					persistPayload === null
+						? undefined
+						: {
+								workflowName,
+								triggerType: this.getTriggerType(),
+								dispatchStatus: "delayed",
+								payload: persistPayload,
+							},
+				);
+
+				// Throw DeferredDispatchSignal so the transport layer can
+				// translate to 202 Accepted (HTTP) / ACK without retry (Worker).
+				throw new DeferredDispatchSignal({
+					runId: traceRunId,
+					workflowName,
+					status: "delayed",
+					scheduledAt,
+					debounced: false,
+					pingCount: 1,
+				});
+			}
+
 			// --- Trace: fail run ---
 			// Tier 2 #6: ConcurrencyLimitError already flipped the run's
 			// status to "throttled" via markRunThrottled — don't override
@@ -816,11 +863,15 @@ export default abstract class TriggerBase extends Trigger {
 			// Tier 2 follow-up: RunCancelledError is thrown by RunnerSteps
 			// when an operator cancels via `abortRunningRun`. The tracker
 			// has already flipped the run to "cancelled"; don't override.
+			//
+			// PR 4: WaitDispatchRequest is handled above (translated to
+			// DeferredDispatchSignal); shouldn't reach here.
 			if (
 				traceRunId &&
 				!(err instanceof ConcurrencyLimitError) &&
 				!(err instanceof DeferredDispatchSignal) &&
-				!(err instanceof RunCancelledError)
+				!(err instanceof RunCancelledError) &&
+				!(err instanceof WaitDispatchRequest)
 			) {
 				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
 			}

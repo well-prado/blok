@@ -88,6 +88,16 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 					{n.wait === false ? "↳ async" : "↳ sub"}
 				</span>
 			)}
+			{/* PR 4: wait.for / wait.until step — workflow paused at this
+			    step, resumes when the deadline fires. */}
+			{n.nodeType === "wait" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-cyan-300/15 text-cyan-300 shrink-0"
+					title="Wait step — workflow paused until the deadline fires"
+				>
+					↳ wait
+				</span>
+			)}
 			{/* Tier 1: CACHED badge — node short-circuited via the idempotency cache. */}
 			{n.cached && (
 				<span

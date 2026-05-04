@@ -7,6 +7,8 @@ import {
 	StepOptsSchema,
 	V2RegularStepSchema,
 	V2SubworkflowStepSchema,
+	V2WaitStepSchema,
+	isWaitStep,
 } from "../src/types/StepOpts";
 import {
 	ConcurrencyOptsSchema,
@@ -778,6 +780,66 @@ describe("TRIGGER_SCHEMAS", () => {
 		expect(TRIGGER_SCHEMAS.http).not.toBeNull();
 		expect(TRIGGER_SCHEMAS.cron).not.toBeNull();
 		expect(TRIGGER_SCHEMAS.queue).not.toBeNull();
+	});
+});
+
+// PR 4 P1 — wait step schema.
+describe("V2WaitStepSchema (PR 4 wait.for / wait.until)", () => {
+	it("accepts { id, wait: { for } } with a duration string", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-3d", wait: { for: "3d" } });
+		expect(result.id).toBe("wait-3d");
+		expect(result.wait.for).toBe("3d");
+	});
+
+	it("accepts { id, wait: { for } } with a numeric millisecond value", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-ms", wait: { for: 60_000 } });
+		expect(result.wait.for).toBe(60_000);
+	});
+
+	it("accepts { id, wait: { until } } with a numeric ms-since-epoch", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-deadline", wait: { until: 1735741200000 } });
+		expect(result.wait.until).toBe(1735741200000);
+	});
+
+	it("accepts { id, wait: { until } } with a string (ISO date or $-proxy expression)", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-iso", wait: { until: "2026-12-31T00:00:00Z" } });
+		expect(result.wait.until).toBe("2026-12-31T00:00:00Z");
+	});
+
+	it("rejects when both `for` and `until` are set", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: { for: "1h", until: 0 } })).toThrow(/mutually exclusive/i);
+	});
+
+	it("rejects when neither `for` nor `until` is set", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: {} })).toThrow();
+	});
+
+	it("requires a non-empty id", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "", wait: { for: "1h" } })).toThrow();
+		expect(() => V2WaitStepSchema.parse({ wait: { for: "1h" } })).toThrow();
+	});
+
+	it("accepts optional as / ephemeral / active / stop", () => {
+		const result = V2WaitStepSchema.parse({
+			id: "x",
+			wait: { for: "30s" },
+			as: "waitMarker",
+			ephemeral: true,
+			active: false,
+			stop: true,
+		});
+		expect(result.as).toBe("waitMarker");
+		expect(result.ephemeral).toBe(true);
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+	});
+
+	it("isWaitStep returns true for wait shapes and false for others", () => {
+		const wait = { id: "x", wait: { for: "1h" } };
+		expect(isWaitStep(wait as never)).toBe(true);
+		expect(isWaitStep({ id: "x", use: "node-x" } as never)).toBe(false);
+		expect(isWaitStep({ id: "x", subworkflow: "y" } as never)).toBe(false);
+		expect(isWaitStep({ id: "x", branch: { when: "true", then: [] } } as never)).toBe(false);
 	});
 });
 
