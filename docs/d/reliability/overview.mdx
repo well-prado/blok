@@ -111,11 +111,20 @@ just the fragile step. The rest of the workflow stays simple.
 
 ## What's not here
 
-- **Long pauses** (`wait.for("3 days")`) — needs checkpoint/resume; out
-  of scope.
-- **Cross-process replay** — the replay endpoint dispatches in-process;
+- **A built-in `wait.for("3 days")` step primitive.** Trigger.dev v3+
+  ships this as a step type. Blok doesn't yet — but every load-bearing
+  primitive is in place: the durable scheduler with sqlite-backed
+  persistence (`scheduled_dispatches`, migration v9), the
+  `dispatchDeferred` re-entry pattern, idempotency caching as a
+  per-step checkpoint, and cooperative cancellation via `ctx.signal`.
+  A `wait.for(duration)` step is a feature-add (~2-3 days), not an
+  architectural prerequisite. Until then, compose the same effect
+  with a delayed sub-workflow:
+  `{ id: "wait", subworkflow: "post-wait-half", wait: false }` paired
+  with `delay: "3d"` on the child trigger. See
+  [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md)
+  for the implementation sketch.
+- **Cross-process replay.** The replay endpoint dispatches in-process;
   a multi-region replay needs an external trigger.
-- **Durable Postgres caches** — the SQLite store persists caches; the
-  Postgres store currently caches in-memory only.
 
 See each feature page for the full author surface and the field reference.

@@ -98,10 +98,16 @@ Cache TTL: 24h default (`DEFAULT_IDEMPOTENCY_TTL_MS`); override per
 step via `idempotencyKeyTTL: <ms>`. A TTL of 0 marks an entry as
 immediately expired (kill-switch).
 
-Cache backend: same store as run tracing — `SqliteRunStore` migration
-v4 added the `idempotency_cache` table; `InMemoryRunStore` keeps a
-parallel `Map`. `BLOK_TRACE_ENABLED=false` disables caching too (the
-store backs both).
+Cache backend: same store as run tracing.
+- `SqliteRunStore` migration v4 added the `idempotency_cache` table.
+- `InMemoryRunStore` keeps a parallel `Map` (cleared on restart).
+- `PostgresRunStore` is hybrid: sync reads hit an in-memory mirror;
+  writes async-persist to PG via the `idempotency_cache` table
+  (migration v3, shipped in commit `f735efe`). `loadRecent()`
+  rehydrates the mirror on boot so cache entries survive restarts
+  within a single PG-backed process.
+
+`BLOK_TRACE_ENABLED=false` disables caching too (the store backs both).
 
 **Caching layers ABOVE `PersistenceHelper.applyStepOutput`, never
 within it.** A cache hit feeds data through the same persistence rules
@@ -317,9 +323,13 @@ DBs upgrade transparently.
 **Backends**:
 - SQLite (default for production; single-process via SQLite locks).
 - InMemory (dev / tests).
-- Postgres delegates to in-memory — durable PG schema for cross-process
-  gating is a deferred follow-up. Same trade-off as Tier 1's
-  idempotency cache.
+- Postgres is hybrid: sync reads from an in-memory mirror; writes
+  async-persist to the `concurrency_locks` table (migration v3,
+  shipped in commit `f735efe`). `loadRecent()` rehydrates the mirror
+  on boot so leases survive process restart within a single
+  PG-backed process. **Cross-process** coordination still requires
+  the dedicated `BLOK_CONCURRENCY_BACKEND=nats-kv` backend (see
+  below) — PG persistence here is for crash-recovery only.
 
 **Cross-process backend (Tier 2 #6 follow-up)**:
 - Set `BLOK_CONCURRENCY_BACKEND=nats-kv` to switch the gate from local
@@ -533,13 +543,139 @@ Additive; pre-Tier-2-#5+#7 DBs upgrade transparently.
 - `mode: "throttle"` (rate-cap, fire every N ms regardless of pings).
 - Dispatch-time payload merging (each ping CONTRIBUTES to the final
   payload, not just OVERWRITES). v1 ships "latest wins".
-- NATS adapter consumer-side delay enforcement (currently NATS stores
-  `x-delay` in headers but the consumer doesn't enforce it — pre-
-  existing issue, not regressed by this PR).
 
 **Kill-switch**: `BLOK_SCHEDULING_DISABLED=1` short-circuits all
 gates → runs proceed synchronously even if configured with delay/
 ttl/debounce.
+
+**NATS adapter consumer-side x-delay**: shipped in commit `6caa7df`
+(Tier 2 polish bundle). `NATSAdapter.computeXDelayHoldMs` enforces
+the `x-delay` header on the consumer side via setTimeout-based hold
+before invoking the handler. Single-process trade-off: a long delay
+holds one consumer slot for its duration. For long delays prefer the
+trigger-level `delay` (sqlite-backed durable scheduler) over a
+queue-level delay header.
+
+## Cancellation, crashes, janitor, observability (Tier 2 follow-ups)
+
+A bundle of operational primitives shipped in commits `f828631`,
+`7ae309d`, `7624e49`, `8d998fb`, `6caa7df`.
+
+**Cooperative cancellation** — every ctx now carries `ctx.signal:
+AbortSignal` (created by `TriggerBase.createContext` and stashed on
+`ctx._PRIVATE_.abortController`). `POST /__blok/runs/:runId/cancel`
+fires the signal via `tracker.abortRunningRun(runId)` AND flips run
+status to `"cancelled"`. `RunnerSteps` checks `ctx.signal.aborted`
+between steps and throws `RunCancelledError`. Nodes performing
+long-running work should consult `ctx.signal.aborted` periodically
+or pass the signal to fetch: `await fetch(url, { signal: ctx.signal })`.
+Sub-workflow children inherit a chained AbortSignal — parent abort
+cascades to in-flight children automatically.
+
+**Caveat (REVIEW.md HIGH bug)**: cancellation does NOT currently work
+for runs that came from `delayed` / `debounced` / `queued` state.
+The first-pass `finally` unregisters the AbortController before the
+deferred timer re-enters; the re-entered run never re-registers. Fix
+in BACKLOG.md item #2.
+
+**Crash auto-flip + orphan recovery** —
+`TriggerBase.installCrashHandlers()` registers `uncaughtException` +
+`unhandledRejection` handlers that synchronously flip every in-flight
+`running` run to `"crashed"` before the process dies (re-throws so
+Node still exits). `TriggerBase.recoverOrphanedRuns()` is a boot
+scan that flips runs older than `BLOK_ORPHAN_THRESHOLD_MS` (default
+2min) to `"crashed"`. Both wired into HTTP + Worker `listen()`.
+Kill-switch: `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
+
+**Caveat (REVIEW.md HIGH bug)**: `markAllRunningRunsAsCrashed` calls
+`store.getRuns({status: "running"})` with no explicit limit, which
+inherits SqliteRunStore's default `LIMIT=50`. Net: only 50 orphans
+flip per boot. Fix in BACKLOG.md item #1.
+
+**Janitor** — periodic background sweep (`Janitor` singleton in
+`src/tracing/Janitor.ts`). Default 5min interval (override via
+`BLOK_JANITOR_INTERVAL_MS`); kill-switch `BLOK_JANITOR_DISABLED=1`.
+Sweeps three lazy-purge methods on schedule: `purgeExpiredIdempotencyCache`,
+`purgeExpiredConcurrencySlots`, `purgeExpiredScheduledDispatches`.
+`unref()`'d so it doesn't keep the event loop alive on its own.
+`inFlight` flag prevents overlapping sweeps under slow stores.
+
+**Observability endpoints** —
+- `GET /__blok/concurrency/health` returns `{backend, disabled, leaseMs}`.
+- `GET /__blok/concurrency/state` returns
+  `{totalBuckets, totalLeases, buckets[]}` with active leases per
+  `(workflow, key)` bucket. Powers Studio's `ConcurrencyTile`.
+
+**OTel counters** (via `ConcurrencyMetrics` singleton):
+- `blok_concurrency_acquired_total`
+- `blok_concurrency_denied_total{mode}` (mode: `"throw"` | `"queue"`)
+- `blok_concurrency_released_total`
+- `blok_scheduling_dispatch_recovered_total`
+- `blok_scheduling_dispatch_expired_total`
+- `blok_scheduling_dispatch_fired_total`
+
+No-op cleanly without an exporter; surfaced via the Prometheus
+exporter automatically.
+
+**Graceful shutdown** —
+`TriggerBase.installShutdownHandlers(trigger, logger?)` registers
+SIGTERM + SIGINT handlers. Drain order: `trigger.stop()` →
+`Janitor.stop()` → `DeferredRunScheduler.clear()` (in-memory only;
+persisted rows survive for next-boot recovery) →
+`backend.disconnect()` (NATS drain) → `process.exit(0)`. Best-effort
+errors caught + logged. Idempotent + opt-out via
+`BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
+
+## On `wait.for("3 days")` and similar long-pause patterns
+
+Blok does NOT yet ship a built-in `wait.for(duration)` step
+primitive (Trigger.dev v3+ has one). The original ROADMAP framed
+this as "needs CRIU or full state-machine rewrite — out of scope".
+That framing was accurate when written but is no longer true after
+the Tier 2 follow-ups. The composable building blocks now exist:
+
+- **Durable scheduler** — `scheduled_dispatches` (migration v9) +
+  `DeferredRunScheduler.schedule(..., persist={...})` persists a
+  dispatch to sqlite BEFORE the timer fires. `recoverDispatches()`
+  re-registers timers on boot.
+- **Re-entry pattern** — `dispatchDeferred(ctx, traceRunId, expiresAt)`
+  flips `_blokDispatchReentry = true` and re-enters `run(ctx)` with
+  the same `traceRunId`. The re-entered run skips scheduling gates
+  and reuses the existing run record.
+- **Per-step checkpoint** — `idempotencyKey` per step caches the
+  result against `(workflowName, stepId, key)`. On hit, the cached
+  result replays through `applyStepOutput` and `step.process()` is
+  never called. This is the de-facto checkpoint mechanism — re-runs
+  from step 0 short-circuit completed steps.
+- **Step-output persistence** — every NodeRun's inputs+outputs are
+  persisted in `node_runs`.
+- **Cooperative cancellation** — `ctx.signal` flows through to nodes
+  that opt in.
+
+What's missing is just the **step shape**: a `wait: { for, until }`
+field that, on first invocation, schedules + throws
+`DeferredDispatchSignal`; on re-entry, recognizes "I've already
+waited" (via a sentinel idempotency cache hit OR a `lastCompletedStep`
+field on the run) and continues to the next step.
+
+Effort estimate: ~2-3 days. Matches the Tier 2 #4 (sub-workflow)
+plan structure. Tracked in [BACKLOG.md](../../BACKLOG.md).
+
+Until that ships, compose the same effect with sub-workflows:
+
+```ts
+// Workflow A — pre-wait
+{ id: "queue-continuation", subworkflow: "post-wait-half",
+  inputs: { state: $.state }, wait: false }
+
+// Workflow B — has delay on its trigger
+{ name: "post-wait-half",
+  trigger: { http: { method: "POST", path: "/internal/...", delay: "3d" } },
+  steps: [ /* the post-wait steps */ ] }
+```
+
+Author has to manually split the workflow at the wait boundary.
+Less ergonomic than `wait.for()` but durable + crash-safe today.
 
 ## Input resolution (Mapper)
 
