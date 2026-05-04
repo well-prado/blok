@@ -1,9 +1,10 @@
+import type { NodeRun, TraceLogEntry } from "@/types";
+import { useEffect, useState } from "react";
+
 import { JsonViewer } from "@/components/shared/JsonViewer";
 import { BlokErrorFrame } from "@/components/trace/BlokErrorFrame";
 import { cn } from "@/lib/utils";
-import type { NodeRun, TraceLogEntry } from "@/types";
 import { ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
 
 /**
  * Center-pane "Active step" view (Direction A · Phase 1.3).
@@ -118,7 +119,7 @@ export function ActiveStepPanel({ node, logs, totalSteps, transport }: Props) {
 									<li key={a.timestamp} className="flex items-start gap-3 font-mono">
 										<span className="text-zinc-500 shrink-0">#{a.attempt}</span>
 										<span className="text-zinc-500 shrink-0">{new Date(a.timestamp).toISOString().slice(11, 23)}</span>
-										<span className="text-status-failed break-words">{a.error.message}</span>
+										<span className="text-status-failed wrap-break-word">{a.error.message}</span>
 									</li>
 								))}
 							</ul>
@@ -211,7 +212,7 @@ export function ActiveStepPanel({ node, logs, totalSteps, transport }: Props) {
 											>
 												{log.level}
 											</span>
-											<span className="text-zinc-200 break-words">{log.message}</span>
+											<span className="text-zinc-200 wrap-break-word">{log.message}</span>
 										</div>
 									))}
 								</div>
