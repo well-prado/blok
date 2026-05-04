@@ -12,6 +12,7 @@ import { ConcurrencyLimitError } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
+import { createConcurrencyBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
@@ -345,6 +346,31 @@ export default class HttpTrigger extends TriggerBase {
 				// Enable HMR in development mode
 				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
 					this.enableHotReload();
+				}
+
+				// Tier 2 #6 follow-up · install the cross-process concurrency
+				// backend (NATS KV) when the operator opted in via
+				// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null = the existing
+				// in-process behavior is preserved (zero overhead).
+				try {
+					const backend = createConcurrencyBackend();
+					if (backend) {
+						backend
+							.connect()
+							.then(() => {
+								RunTracker.getInstance().setConcurrencyBackend(backend);
+								this.logger.log(`[concurrency] backend installed: ${backend.name}`);
+							})
+							.catch((err: unknown) => {
+								this.logger.error(
+									`[concurrency] backend connect failed (${backend.name}): ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
+								);
+							});
+					}
+				} catch (err) {
+					this.logger.error(
+						`[concurrency] createConcurrencyBackend failed: ${err instanceof Error ? err.message : String(err)}`,
+					);
 				}
 
 				// Tier 2 #5+#7 follow-up · re-fire HTTP dispatches that were

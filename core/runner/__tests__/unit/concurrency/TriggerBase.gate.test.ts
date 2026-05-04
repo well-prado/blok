@@ -88,7 +88,7 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 
 		// Lock released — a fresh acquire on the same key should succeed.
 		const tracker = RunTracker.getInstance();
-		const probe = tracker.acquireConcurrencySlot("test-wf", "tenant-x", 1, "probe-run", Date.now() + 60_000);
+		const probe = await tracker.acquireConcurrencySlot("test-wf", "tenant-x", 1, "probe-run", Date.now() + 60_000);
 		expect(probe.acquired).toBe(true);
 	});
 
@@ -100,7 +100,13 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 
 		// Pre-acquire a slot so the next run hits the limit.
 		const tracker = RunTracker.getInstance();
-		const preAcquire = tracker.acquireConcurrencySlot("test-wf", "tenant-x", 1, "holder-run", Date.now() + 60_000);
+		const preAcquire = await tracker.acquireConcurrencySlot(
+			"test-wf",
+			"tenant-x",
+			1,
+			"holder-run",
+			Date.now() + 60_000,
+		);
 		expect(preAcquire.acquired).toBe(true);
 
 		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(ConcurrencyLimitError);
@@ -121,8 +127,8 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		});
 
 		const tracker = RunTracker.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-y", 2, "h1", Date.now() + 60_000);
-		tracker.acquireConcurrencySlot("test-wf", "tenant-y", 2, "h2", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-y", 2, "h1", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-y", 2, "h2", Date.now() + 60_000);
 
 		try {
 			await t.run(makeCtx());
@@ -146,7 +152,7 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		});
 
 		const tracker = RunTracker.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-z", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-z", 1, "holder", Date.now() + 60_000);
 
 		const events: Array<{ type: string; runId: string }> = [];
 		const handler = (event: { type: string; runId: string }) => events.push(event);
@@ -173,7 +179,7 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 
 		const tracker = RunTracker.getInstance();
 		// Pre-fill the bucket — without the kill-switch this would deny.
-		tracker.acquireConcurrencySlot("test-wf", "tenant-x", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-x", 1, "holder", Date.now() + 60_000);
 
 		// The kill-switch makes the gate inert, so this run completes normally.
 		const result = await t.run(makeCtx());
@@ -214,7 +220,13 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 
 		// Lock released — fresh acquire succeeds.
 		const tracker = RunTracker.getInstance();
-		const probe = tracker.acquireConcurrencySlot("test-wf", "tenant-explode", 1, "probe-run", Date.now() + 60_000);
+		const probe = await tracker.acquireConcurrencySlot(
+			"test-wf",
+			"tenant-explode",
+			1,
+			"probe-run",
+			Date.now() + 60_000,
+		);
 		expect(probe.acquired).toBe(true);
 	});
 });
@@ -239,7 +251,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 		});
 
 		const tracker = RunTracker.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-q", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q", 1, "holder", Date.now() + 60_000);
 
 		await expect(t.run(makeCtx())).rejects.toBeInstanceOf(DeferredDispatchSignal);
 	});
@@ -251,7 +263,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 		});
 
 		const tracker = RunTracker.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-q2", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q2", 1, "holder", Date.now() + 60_000);
 
 		const before = Date.now();
 		try {
@@ -277,7 +289,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 
 		const tracker = RunTracker.getInstance();
 		const scheduler = DeferredRunScheduler.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-q3", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q3", 1, "holder", Date.now() + 60_000);
 
 		try {
 			await t.run(makeCtx());
@@ -300,7 +312,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 		});
 
 		const tracker = RunTracker.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-q4", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q4", 1, "holder", Date.now() + 60_000);
 
 		const events: Array<{ type: string; payload?: unknown }> = [];
 		const handler = (e: { type: string; payload?: unknown }) => events.push(e);
@@ -340,7 +352,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 
 		// Lock released after run.
 		const tracker = RunTracker.getInstance();
-		const probe = tracker.acquireConcurrencySlot("test-wf", "tenant-q5", 1, "probe", Date.now() + 60_000);
+		const probe = await tracker.acquireConcurrencySlot("test-wf", "tenant-q5", 1, "probe", Date.now() + 60_000);
 		expect(probe.acquired).toBe(true);
 	});
 
@@ -352,7 +364,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 
 		const tracker = RunTracker.getInstance();
 		const scheduler = DeferredRunScheduler.getInstance();
-		tracker.acquireConcurrencySlot("test-wf", "tenant-q6", 1, "holder", Date.now() + 60_000);
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q6", 1, "holder", Date.now() + 60_000);
 
 		// Queue the run.
 		try {
@@ -362,7 +374,7 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 		}
 
 		// Holder releases its slot.
-		tracker.releaseConcurrencySlot("test-wf", "tenant-q6", "holder");
+		await tracker.releaseConcurrencySlot("test-wf", "tenant-q6", "holder");
 
 		// Manually drain the scheduler — re-enters run() which will now acquire.
 		await scheduler.drainAll();

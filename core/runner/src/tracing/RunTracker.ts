@@ -3,10 +3,12 @@ import { EventEmitter } from "node:events";
 import http from "node:http";
 import https from "node:https";
 import { v4 as uuid } from "uuid";
+import type { ConcurrencyBackend } from "../concurrency/ConcurrencyBackend";
 import { InMemoryRunStore } from "./InMemoryRunStore";
 import type { RunStore } from "./RunStore";
 import { createStore } from "./createStore";
 import type {
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -509,22 +511,55 @@ export class RunTracker extends EventEmitter {
 	// === Concurrency gate pass-throughs (Tier 2 #6) ===
 
 	/**
-	 * Acquire a concurrency slot for `(workflowName, concurrencyKey)`. Pass
-	 * through to the underlying RunStore. Returns the acquire outcome —
-	 * caller decides whether to proceed or call `markRunThrottled`.
+	 * Tier 2 #6 follow-up · cross-process concurrency backend.
+	 *
+	 * When set (via {@link setConcurrencyBackend}), the tracker's
+	 * `acquireConcurrencySlot` and `releaseConcurrencySlot` methods
+	 * delegate to the backend instead of the local sync `RunStore` impl.
+	 * Used to coordinate across processes via NATS KV / Redis.
+	 *
+	 * Default `null` — preserves zero-overhead in-process behavior.
+	 * Trigger packages install a backend in `listen()` when the operator
+	 * sets `BLOK_CONCURRENCY_BACKEND=nats-kv`.
 	 */
-	acquireConcurrencySlot(
+	private concurrencyBackend: ConcurrencyBackend | null = null;
+
+	setConcurrencyBackend(backend: ConcurrencyBackend | null): void {
+		this.concurrencyBackend = backend;
+	}
+
+	getConcurrencyBackend(): ConcurrencyBackend | null {
+		return this.concurrencyBackend;
+	}
+
+	/**
+	 * Acquire a concurrency slot for `(workflowName, concurrencyKey)`.
+	 * Delegates to the configured cross-process backend when set; falls
+	 * back to the local sync `RunStore` impl otherwise.
+	 *
+	 * Async — the cross-process backend (NATS KV) is async-only. The
+	 * sync fallback is wrapped in `Promise.resolve()` so the call site
+	 * is uniform.
+	 */
+	async acquireConcurrencySlot(
 		workflowName: string,
 		concurrencyKey: string,
 		concurrencyLimit: number,
 		runId: string,
 		leaseExpiresAt: number,
-	): ReturnType<typeof this.store.acquireConcurrencySlot> {
+	): Promise<ConcurrencySlotResult> {
+		if (this.concurrencyBackend) {
+			return this.concurrencyBackend.acquireSlot(workflowName, concurrencyKey, concurrencyLimit, runId, leaseExpiresAt);
+		}
 		return this.store.acquireConcurrencySlot(workflowName, concurrencyKey, concurrencyLimit, runId, leaseExpiresAt);
 	}
 
 	/** Release a slot acquired via `acquireConcurrencySlot`. Idempotent. */
-	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+	async releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): Promise<void> {
+		if (this.concurrencyBackend) {
+			await this.concurrencyBackend.releaseSlot(workflowName, concurrencyKey, runId);
+			return;
+		}
 		this.store.releaseConcurrencySlot(workflowName, concurrencyKey, runId);
 	}
 

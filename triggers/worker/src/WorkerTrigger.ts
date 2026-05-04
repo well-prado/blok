@@ -27,8 +27,10 @@ import {
 	DeferredDispatchSignal,
 	type GlobalOptions,
 	NodeMap,
+	RunTracker,
 	TriggerBase,
 	type TriggerResponse,
+	createConcurrencyBackend,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -207,6 +209,23 @@ export abstract class WorkerTrigger extends TriggerBase {
 		const startTime = this.startCounter();
 
 		try {
+			// Tier 2 #6 follow-up · install the cross-process concurrency
+			// backend (NATS KV) when the operator opted in via
+			// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null preserves the
+			// existing in-process behavior.
+			try {
+				const backend = createConcurrencyBackend();
+				if (backend) {
+					await backend.connect();
+					RunTracker.getInstance().setConcurrencyBackend(backend);
+					this.logger.log(`[concurrency] backend installed: ${backend.name}`);
+				}
+			} catch (err) {
+				this.logger.error(
+					`[concurrency] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
+				);
+			}
+
 			// Connect to job backend
 			await this.adapter.connect();
 			this.logger.log(`Connected to ${this.adapter.provider} worker system`);

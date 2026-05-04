@@ -101,6 +101,14 @@ import {
 	isConcurrencyLimitError,
 } from "./concurrency/ConcurrencyLimitError";
 
+// Cross-process concurrency backend (Tier 2 #6 follow-up)
+import type { ConcurrencyBackend } from "./concurrency/ConcurrencyBackend";
+import {
+	NatsKvConcurrencyBackend,
+	type NatsKvConcurrencyConfig,
+	readNatsKvConfigFromEnv,
+} from "./concurrency/NatsKvConcurrencyBackend";
+import { createConcurrencyBackend } from "./concurrency/createConcurrencyBackend";
 import {
 	CONCURRENCY_DEFAULTS,
 	type NormalizedConcurrencyConfig,
@@ -261,6 +269,12 @@ export {
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,
+	// Cross-process concurrency backend (Tier 2 #6 follow-up)
+	type ConcurrencyBackend,
+	createConcurrencyBackend,
+	NatsKvConcurrencyBackend,
+	type NatsKvConcurrencyConfig,
+	readNatsKvConfigFromEnv,
 	// Per-step timeout (Tier 2 quick-wins)
 	StepTimeoutError,
 	isStepTimeoutError,

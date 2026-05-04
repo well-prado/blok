@@ -318,7 +318,7 @@ export default abstract class TriggerBase extends Trigger {
 					if (resolvedKey !== null) {
 						const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
 						const now = Date.now();
-						const result = tracker.acquireConcurrencySlot(
+						const result = await tracker.acquireConcurrencySlot(
 							workflowName,
 							resolvedKey,
 							concCfg.limit,
@@ -551,9 +551,19 @@ export default abstract class TriggerBase extends Trigger {
 		} finally {
 			// Release the concurrency slot if the gate granted one. Idempotent
 			// at the store layer — a double-release (gate granted but then
-			// crash + lazy-purge) is a no-op.
+			// crash + lazy-purge) is a no-op. `releaseConcurrencySlot` is async
+			// (Tier 2 #6 follow-up cross-process backend); fire-and-forget here
+			// — the finally block can't `await` cleanly across all callers, and
+			// release errors don't change the run outcome. Errors logged via
+			// the backend's own catch handlers.
 			if (acquiredLock) {
-				tracker.releaseConcurrencySlot(acquiredLock.workflowName, acquiredLock.concurrencyKey, acquiredLock.runId);
+				const lock = acquiredLock;
+				void tracker.releaseConcurrencySlot(lock.workflowName, lock.concurrencyKey, lock.runId).catch((err) => {
+					console.error(
+						`[blok][concurrency] releaseConcurrencySlot failed for ${lock.workflowName}:${lock.concurrencyKey}:${lock.runId}:`,
+						err instanceof Error ? err.stack || err.message : err,
+					);
+				});
 			}
 
 			const durationMs = performance.now() - runStart;

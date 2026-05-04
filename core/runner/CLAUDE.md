@@ -315,11 +315,39 @@ on `(workflow_name, concurrency_key, run_id)` plus indexes on
 DBs upgrade transparently.
 
 **Backends**:
-- SQLite (default for production).
+- SQLite (default for production; single-process via SQLite locks).
 - InMemory (dev / tests).
 - Postgres delegates to in-memory — durable PG schema for cross-process
   gating is a deferred follow-up. Same trade-off as Tier 1's
   idempotency cache.
+
+**Cross-process backend (Tier 2 #6 follow-up)**:
+- Set `BLOK_CONCURRENCY_BACKEND=nats-kv` to switch the gate from local
+  store to a NATS KV-backed implementation that coordinates across
+  processes. Default unset / `"memory"` preserves single-process
+  semantics with zero overhead.
+- Storage model: one JSON document per `(workflowName, concurrencyKey)`
+  bucket with revision-based compare-and-swap (OCC). Acquire = read +
+  filter expired + check limit + CAS update; bounded retry (10) +
+  fail-closed on retry exhaustion. Per-bucket lazy-purge inside acquire.
+- `RunTracker.acquireConcurrencySlot` and `releaseConcurrencySlot`
+  become async — when a backend is set, calls are awaited; when null
+  (default), the existing sync store impl is wrapped in `Promise.resolve`.
+  `TriggerBase.run`'s gate already runs in async context; release in
+  the finally block is fire-and-forget.
+- `HttpTrigger.listen()` and `WorkerTrigger.listen()` instantiate the
+  backend via `createConcurrencyBackend()` and install it via
+  `RunTracker.setConcurrencyBackend()` before serving traffic. Connect
+  errors log + fall back to the in-process behavior.
+- Env vars: `BLOK_CONCURRENCY_BACKEND` (default unset),
+  `BLOK_CONCURRENCY_NATS_SERVERS` (comma-separated URLs),
+  `BLOK_CONCURRENCY_NATS_TOKEN`, `BLOK_CONCURRENCY_NATS_USER`,
+  `BLOK_CONCURRENCY_NATS_PASS`, `BLOK_CONCURRENCY_NATS_KV_BUCKET`
+  (default `"blok-concurrency"`).
+- Trade-offs: each acquire is a single round-trip (get + update);
+  contention spike on a single hot key triggers OCC retries (capped
+  at 10 then deny). For very high-cardinality buckets (>50 active
+  leases each), consider a per-lease key model in a future iteration.
 
 **`onLimit: "queue"` (Tier 2 #6 follow-up)**:
 
