@@ -26,6 +26,7 @@ import {
 	DefaultLogger,
 	DeferredDispatchSignal,
 	type GlobalOptions,
+	Janitor,
 	NodeMap,
 	RunTracker,
 	TriggerBase,
@@ -237,6 +238,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 				}
 			} catch (err) {
 				this.logger.error(`[crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
+			// Tier 2 follow-up · start the periodic storage janitor.
+			// Idempotent (singleton); opt-out via `BLOK_JANITOR_DISABLED=1`.
+			try {
+				Janitor.getInstance(RunTracker.getInstance().getStore(), this.logger).start();
+			} catch (err) {
+				this.logger.error(`[janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
 			// Connect to job backend

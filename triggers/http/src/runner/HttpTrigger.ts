@@ -11,6 +11,7 @@ import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler } from "@blokjs/runner";
+import { Janitor } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
 import { createConcurrencyBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
@@ -361,6 +362,15 @@ export default class HttpTrigger extends TriggerBase {
 					}
 				} catch (err) {
 					this.logger.error(`[crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+
+				// Tier 2 follow-up · start the periodic storage janitor for
+				// stale idempotency_cache + concurrency_locks + scheduled_dispatches
+				// rows. Idempotent (singleton); opt-out via `BLOK_JANITOR_DISABLED=1`.
+				try {
+					Janitor.getInstance(RunTracker.getInstance().getStore(), this.logger).start();
+				} catch (err) {
+					this.logger.error(`[janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 
 				// Tier 2 #6 follow-up · install the cross-process concurrency

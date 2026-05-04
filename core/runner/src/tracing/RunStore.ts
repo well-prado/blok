@@ -148,6 +148,18 @@ export interface RunStore {
 	 */
 	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[];
 
+	/**
+	 * Janitor sweep — delete every `scheduled_dispatches` row whose
+	 * `expires_at` has elapsed (`expires_at IS NOT NULL AND expires_at < now`).
+	 * Rows without a TTL are left alone (their owning runs may legitimately
+	 * stay queued indefinitely). Returns the count of deleted rows.
+	 *
+	 * Forward-scheduled rows whose owning runs were deleted (orphan dispatch
+	 * rows) get reaped on the next `HttpTrigger.recoverDispatches()` call,
+	 * not here. This sweep only handles past-TTL rows.
+	 */
+	purgeExpiredScheduledDispatches(now: number): number;
+
 	// === Lifecycle ===
 	close(): void;
 }

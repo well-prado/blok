@@ -530,6 +530,17 @@ export class InMemoryRunStore implements RunStore {
 		return out;
 	}
 
+	purgeExpiredScheduledDispatches(now: number): number {
+		let removed = 0;
+		for (const [runId, row] of this.scheduledDispatches.entries()) {
+			if (row.expiresAt !== undefined && row.expiresAt < now) {
+				this.scheduledDispatches.delete(runId);
+				removed++;
+			}
+		}
+		return removed;
+	}
+
 	close(): void {
 		// No-op for in-memory store
 	}

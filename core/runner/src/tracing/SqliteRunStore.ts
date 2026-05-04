@@ -1430,6 +1430,14 @@ export class SqliteRunStore implements RunStore {
 		});
 	}
 
+	purgeExpiredScheduledDispatches(now: number): number {
+		const result = this.stmt(
+			"purgeExpiredScheduledDispatches",
+			"DELETE FROM scheduled_dispatches WHERE expires_at IS NOT NULL AND expires_at < ?",
+		).run(now);
+		return result.changes;
+	}
+
 	deleteRunsBefore(timestamp: number): number {
 		// Foreign key CASCADE handles child tables
 		const result = this.db

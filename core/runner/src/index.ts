@@ -86,6 +86,7 @@ import { WorkflowVisualizer } from "./visualization/WorkflowVisualizer";
 import { PerformanceProfiler } from "./monitoring/PerformanceProfiler";
 
 // Tracing (Blok Studio)
+import { Janitor } from "./tracing/Janitor";
 import { RunTracker } from "./tracing/RunTracker";
 import { registerTraceRoutes } from "./tracing/TraceRouter";
 import { TracingLogger } from "./tracing/TracingLogger";
@@ -259,6 +260,7 @@ export {
 	PerformanceProfiler,
 	// Tracing (Blok Studio)
 	RunTracker,
+	Janitor,
 	registerTraceRoutes,
 	WorkflowRegistry,
 	type RegisteredWorkflow,
@@ -601,6 +603,7 @@ export type {
 	StartNodeOptions,
 	ScheduledDispatchRow,
 } from "./tracing/types";
+export type { JanitorStats } from "./tracing/Janitor";
 
 // Tracing store factory + concrete stores — exposed so the CLI's
 // standalone `blokctl studio` mode can spin up its own SQLite-backed

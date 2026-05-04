@@ -672,6 +672,47 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(store.getScheduledDispatches().length).toBe(0);
 			});
 
+			it("purgeExpiredScheduledDispatches deletes rows whose expires_at < now; leaves untimed rows untouched", () => {
+				const past = Date.now() - 1000;
+				const future = Date.now() + 60_000;
+
+				store.upsertScheduledDispatch({
+					runId: "expired",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: past,
+					expiresAt: past,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: past,
+				});
+				store.upsertScheduledDispatch({
+					runId: "still_alive",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: future,
+					expiresAt: future,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: Date.now(),
+				});
+				store.upsertScheduledDispatch({
+					runId: "untimed",
+					workflowName: "wf",
+					triggerType: "http",
+					scheduledAt: future,
+					dispatchStatus: "delayed",
+					payload: null,
+					createdAt: Date.now(),
+				});
+
+				const purged = store.purgeExpiredScheduledDispatches(Date.now());
+				expect(purged).toBe(1);
+
+				const remaining = store.getScheduledDispatches().map((r) => r.runId);
+				expect(remaining.sort()).toEqual(["still_alive", "untimed"]);
+			});
+
 			it("getScheduledDispatches filters by triggerType + status; returns rows sorted by scheduledAt ASC", () => {
 				const now = Date.now();
 				store.upsertScheduledDispatch({

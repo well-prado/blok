@@ -713,6 +713,10 @@ export class PostgresRunStore implements RunStore {
 		return this.memory.getScheduledDispatches(opts);
 	}
 
+	purgeExpiredScheduledDispatches(now: number): number {
+		return this.memory.purgeExpiredScheduledDispatches(now);
+	}
+
 	// === Write Queue ===
 
 	private enqueueWrite(fn: () => Promise<void>): void {
