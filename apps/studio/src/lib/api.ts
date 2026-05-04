@@ -441,3 +441,32 @@ export function explainRunError(runId: string, nodeId?: string): Promise<import(
 		body: JSON.stringify(nodeId ? { nodeId } : {}),
 	});
 }
+
+// === Concurrency observability (Tier 2 follow-up) ===
+
+export interface ConcurrencyHealth {
+	backend: string;
+	disabled: boolean;
+	leaseMs: number;
+}
+
+export interface ConcurrencyBucket {
+	workflowName: string;
+	concurrencyKey: string;
+	inFlight: number;
+	leases: Array<{ runId: string; expiresAt: number }>;
+}
+
+export interface ConcurrencyState {
+	totalBuckets: number;
+	totalLeases: number;
+	buckets: ConcurrencyBucket[];
+}
+
+export function fetchConcurrencyHealth(): Promise<ConcurrencyHealth> {
+	return fetchJson("/concurrency/health");
+}
+
+export function fetchConcurrencyState(): Promise<ConcurrencyState> {
+	return fetchJson("/concurrency/state");
+}

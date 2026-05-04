@@ -56,11 +56,16 @@ describe("RunFilters", () => {
 		const handleChange = vi.fn();
 		render(<RunFilters status="" onStatusChange={handleChange} />);
 
-		const select = screen.getByRole("combobox");
-		await user.selectOptions(select, "running");
+		// Status select is the first combobox; the second is the Saved Filters
+		// dropdown added in Bundle B. Identify by its current value (empty
+		// string for "All").
+		const selects = screen.getAllByRole("combobox");
+		const statusSelect = selects[0];
+		if (!statusSelect) throw new Error("status select not found");
+		await user.selectOptions(statusSelect, "running");
 		expect(handleChange).toHaveBeenCalledWith("running");
 
-		await user.selectOptions(select, "failed");
+		await user.selectOptions(statusSelect, "failed");
 		expect(handleChange).toHaveBeenCalledWith("failed");
 	});
 
