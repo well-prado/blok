@@ -379,54 +379,35 @@ describe("Tier 2 quick-wins follow-up · recoverOrphanedRuns benchmarks", () => 
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("benchmark: markAllRunningRunsAsCrashed (the orphan-recovery path)", () => {
+	it("benchmark: markAllRunningRunsAsCrashed (the orphan-recovery path) — POST PR 1 A1 fix", () => {
+		// PR 1 A1 fix: markAllRunningRunsAsCrashed now loops in chunks
+		// until drained (was capped at 50/call by SqliteRunStore default
+		// LIMIT=50). Single call now drains all 10K seeded orphans.
 		const start = performance.now();
 		const flipped = tracker.markAllRunningRunsAsCrashed(new Error("boot recovery"));
 		const elapsed = performance.now() - start;
 
 		console.log(`[bench] markAllRunningRunsAsCrashed — flipped ${flipped} runs in ${elapsed.toFixed(2)}ms`);
 
-		// Note: SqliteRunStore.getRuns({ status: "running" }) caps at 1000
-		// by default. So `flipped` should be at most 1000 even though we
-		// seeded 10000. This is a known finding documented in REVIEW.md.
-		expect(flipped).toBeGreaterThan(0);
-		expect(flipped).toBeLessThanOrEqual(1000); // sqlite caps; rest stuck on first call
-		// Soft bound: 1000 row-by-row updates + events should be < 5s.
-		expect(elapsed).toBeLessThan(5000);
+		// All 10K should flip in a single call after the A1 fix.
+		expect(flipped).toBe(RUN_COUNT);
+		// Soft bound: 10K row-by-row updates + events should be < 30s on a laptop.
+		expect(elapsed).toBeLessThan(30_000);
 	});
 
-	it("benchmark: recoverOrphanedRuns multi-pass — quantifies the LIMIT=50 problem", () => {
-		// REVIEW FINDING (severity upgraded from MEDIUM to HIGH):
-		// `SqliteRunStore.getRuns(opts?)` defaults `opts.limit` to 50.
-		// `markAllRunningRunsAsCrashed` calls `getRuns({ status: "running" })`
-		// with NO explicit limit, so each pass flips at most 50 runs.
-		// Recovering 10K orphans needs 200 passes; 100K needs 2000.
-		// This benchmark confirms the bottleneck and times the multi-pass
-		// drain so we can recommend a fix in REVIEW.md.
-		let totalFlipped = 0;
-		const passes: number[] = [];
-		const MAX_PASSES = 20;
+	it("benchmark: second markAllRunningRunsAsCrashed call after drain returns 0 — POST PR 1 A1 fix", () => {
+		// After the previous test drains all rows, a second call should
+		// return 0 immediately (no remaining `running` rows to flip).
+		const start = performance.now();
+		const flipped = tracker.markAllRunningRunsAsCrashed(new Error("second-pass"));
+		const elapsed = performance.now() - start;
 
-		for (let pass = 0; pass < MAX_PASSES; pass++) {
-			const start = performance.now();
-			const flipped = tracker.markAllRunningRunsAsCrashed(new Error("multi-pass"));
-			passes.push(performance.now() - start);
-			totalFlipped += flipped;
-			if (flipped === 0) break;
-		}
-
-		const totalMs = passes.reduce((a, b) => a + b, 0);
-		const avgPassMs = totalMs / passes.length;
 		console.log(
-			`[bench] recoverOrphanedRuns multi-pass — ${passes.length} passes capped at LIMIT=50 each, ${totalFlipped} total flipped, ${totalMs.toFixed(2)}ms total (avg ${avgPassMs.toFixed(2)}ms/pass)`,
-		);
-		console.log(
-			"[bench]   FINDING: SqliteRunStore.getRuns default LIMIT=50 caps each pass — orphan recovery on 100K running runs would need ~2000 passes.",
+			`[bench] markAllRunningRunsAsCrashed (second pass after drain) — ${flipped} flipped in ${elapsed.toFixed(2)}ms`,
 		);
 
-		// Assertion documents the cap behavior, not full drain.
-		expect(passes.length).toBeLessThanOrEqual(MAX_PASSES);
-		expect(totalMs).toBeLessThan(10_000);
+		expect(flipped).toBe(0);
+		expect(elapsed).toBeLessThan(100);
 	});
 });
 

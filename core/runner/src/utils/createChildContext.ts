@@ -56,7 +56,17 @@ export function createChildContext(
 	// chain off the parent's signal: if the parent gets cancelled, the
 	// child should abort too — otherwise long-running sub-workflows
 	// would orphan when the parent exits.
+	//
+	// PR 1 follow-up · A3 fix. `addEventListener({once: true})` only
+	// auto-removes the listener when abort fires. If the parent never
+	// aborts AND the parent ctx outlives many child invocations, listeners
+	// accumulate and Node's MaxListenersExceededWarning fires at the 11th.
+	// Pass a child-scoped AbortSignal as the listener's `signal:` option
+	// so the listener auto-removes when the child completes (the
+	// SubworkflowNode dispatch path calls `listenerCleanup.abort()` in
+	// its finally block).
 	const childAbortController = new AbortController();
+	const listenerCleanup = new AbortController();
 	if (parent.signal) {
 		if (parent.signal.aborted) {
 			childAbortController.abort();
@@ -66,7 +76,7 @@ export function createChildContext(
 				() => {
 					if (!childAbortController.signal.aborted) childAbortController.abort();
 				},
-				{ once: true },
+				{ once: true, signal: listenerCleanup.signal },
 			);
 		}
 	}
@@ -90,7 +100,10 @@ export function createChildContext(
 		// Stash the controller in a child-specific _PRIVATE_ slot so the
 		// tracker can fire it via abortRunningRun on direct sub-run cancel.
 		// Don't mutate the parent's _PRIVATE_ (intentional isolation).
-		_PRIVATE_: { abortController: childAbortController },
+		// `listenerCleanup` is exposed so SubworkflowNode can abort it on
+		// child completion, which removes the parent.signal listener (PR 1
+		// A3 fix — prevents listener accumulation on long-lived parents).
+		_PRIVATE_: { abortController: childAbortController, listenerCleanup },
 	};
 
 	// V2 read-only aliases — same object reference, no copy. Mirrors

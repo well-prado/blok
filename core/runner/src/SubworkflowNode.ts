@@ -168,6 +168,15 @@ export class SubworkflowNode extends RunnerNode {
 		} catch (err) {
 			if (childRunId) tracker.failRun(childRunId, err);
 			throw err;
+		} finally {
+			// PR 1 follow-up · A3 fix. Abort the listener-cleanup signal so
+			// the parent.signal listener (registered in createChildContext)
+			// auto-removes. Without this, listeners accumulate on long-lived
+			// parents that fire many sub-workflows.
+			const childPrivate = childCtx._PRIVATE_ as { listenerCleanup?: AbortController } | null;
+			if (childPrivate?.listenerCleanup && !childPrivate.listenerCleanup.signal.aborted) {
+				childPrivate.listenerCleanup.abort();
+			}
 		}
 
 		// === 7. Apply parent persistence + return child's response ===
@@ -225,6 +234,14 @@ export class SubworkflowNode extends RunnerNode {
 						`[blok][subworkflow] async child '${childWorkflowName}' (run ${childRunId ?? "?"}) failed:`,
 						err instanceof Error ? err.stack || err.message : err,
 					);
+				} finally {
+					// PR 1 follow-up · A3 fix. Same listener-cleanup hook as the
+					// sync path so async sub-workflows also auto-remove the
+					// parent.signal listener on completion.
+					const childPrivate = childCtx._PRIVATE_ as { listenerCleanup?: AbortController } | null;
+					if (childPrivate?.listenerCleanup && !childPrivate.listenerCleanup.signal.aborted) {
+						childPrivate.listenerCleanup.abort();
+					}
 				}
 			})();
 		});

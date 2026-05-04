@@ -338,6 +338,16 @@ export default abstract class RunnerSteps {
 				return await this.runSteps(ctx, [...flow_steps, ...nextSteps], true, stepName);
 			}
 		} catch (e: unknown) {
+			// PR 1 follow-up · A2 fix companion. RunCancelledError carries
+			// the cancellation contract end-to-end — wrapping it as
+			// GlobalError would defeat TriggerBase.run's `instanceof
+			// RunCancelledError` discrimination and the run would get
+			// failRun'd on top of an already-cancelled status. Pass through
+			// untouched so the catch in TriggerBase.run sees the right type.
+			if (e instanceof RunCancelledError) {
+				throw e;
+			}
+
 			let error_context = <Error>{};
 			if (e instanceof GlobalError) {
 				error_context = e as GlobalError;

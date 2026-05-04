@@ -66,6 +66,26 @@ describe("RunTracker — markAllRunningRunsAsCrashed (Tier 2 quick-wins follow-u
 		expect(tracker.getStore().getRun(r3)?.status).toBe("crashed");
 	});
 
+	it("flips ALL orphans in a single call regardless of store LIMIT (PR 1 A1 fix)", () => {
+		// REVIEW.md A1: SqliteRunStore.getRuns defaults LIMIT=50; without
+		// the loop-in-chunks fix, only the first 50 of N flipped. This
+		// regression test seeds 200 running runs and asserts a single
+		// markAllRunningRunsAsCrashed call drains them all.
+		const tracker = RunTracker.getInstance();
+		const N = 200;
+		const ids: string[] = [];
+		for (let i = 0; i < N; i++) {
+			ids.push(startRun(`wf-${i}`));
+		}
+
+		const flipped = tracker.markAllRunningRunsAsCrashed(new Error("mass-orphan"));
+
+		expect(flipped).toBe(N);
+		for (const id of ids) {
+			expect(tracker.getStore().getRun(id)?.status).toBe("crashed");
+		}
+	});
+
 	it("respects maxStartedAt filter (orphan-recovery threshold)", () => {
 		const tracker = RunTracker.getInstance();
 		const r1 = startRun("wf-A");

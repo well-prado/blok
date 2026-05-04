@@ -32,6 +32,24 @@ import type {
 const MAX_STORED_ATTEMPTS = 10;
 
 /**
+ * PR 1 follow-up · terminal status guard.
+ *
+ * Once a run reaches a terminal status, late-arriving completeRun/failRun
+ * calls (e.g., from a runner that didn't see a parallel cancel) must NOT
+ * overwrite it. Cancellation, expiry, throttling, crashes, and timeouts
+ * all win over a stale "the steps finished" signal.
+ */
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+	"completed",
+	"failed",
+	"cancelled",
+	"throttled",
+	"expired",
+	"crashed",
+	"timedOut",
+]);
+
+/**
  * Build a {@link RunErrorDetail} from any thrown error. When the source is
  * a typed `BlokError` (master plan §17), all 17+ structured fields are
  * preserved; otherwise the legacy `{message, stack}` shape falls through.
@@ -180,6 +198,13 @@ export class RunTracker extends EventEmitter {
 		const run = this.store.getRun(runId);
 		if (!run) return;
 
+		// PR 1 follow-up · terminal-status guard. Don't overwrite a run that
+		// has already reached a terminal status (cancelled / expired / etc.)
+		// — a late completeRun from a runner that didn't see a parallel
+		// cancel must not flip the status back. Defense in depth against the
+		// REVIEW.md A2 class of bug.
+		if (TERMINAL_STATUSES.has(run.status)) return;
+
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - run.startedAt;
 
@@ -199,6 +224,9 @@ export class RunTracker extends EventEmitter {
 	failRun(runId: string, error: Error | unknown): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+
+		// PR 1 follow-up · terminal-status guard. Same rationale as completeRun.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - run.startedAt;
@@ -434,17 +462,38 @@ export class RunTracker extends EventEmitter {
 	 * to avoid flipping runs from the current (live) process.
 	 */
 	markAllRunningRunsAsCrashed(error: Error | unknown, opts?: { maxStartedAt?: number }): number {
-		// Snapshot the runs first — markRunCrashed mutates the store and
-		// could perturb iteration if we read+update inline.
-		const { runs } = this.store.getRuns({ status: "running" });
-		const candidates =
-			opts?.maxStartedAt !== undefined ? runs.filter((r) => r.startedAt <= (opts.maxStartedAt as number)) : runs;
+		// PR 1 follow-up · A1 fix. `getRuns` defaults `opts?.limit ?? 50` in
+		// SqliteRunStore — left unbounded, this method silently flips at
+		// most 50 orphans per call. Loop until the store returns fewer rows
+		// than the page size (= no more matches under the LIMIT).
+		//
+		// Bounded outer loop: cap at 1000 iterations defensively. With the
+		// 50-row page size that's 50K orphans handled per single call —
+		// well above any realistic boot-recovery scenario.
+		let totalFlipped = 0;
+		const PAGE_SIZE = 50; // mirrors SqliteRunStore.getRuns default LIMIT
+		const MAX_PAGES = 1000;
 
-		for (const run of candidates) {
-			this.markRunCrashed(run.id, { error });
+		for (let page = 0; page < MAX_PAGES; page++) {
+			// Snapshot the runs first — markRunCrashed mutates the store and
+			// could perturb iteration if we read+update inline.
+			const { runs } = this.store.getRuns({ status: "running" });
+			const candidates =
+				opts?.maxStartedAt !== undefined ? runs.filter((r) => r.startedAt <= (opts.maxStartedAt as number)) : runs;
+
+			if (candidates.length === 0) break;
+
+			for (const run of candidates) {
+				this.markRunCrashed(run.id, { error });
+			}
+			totalFlipped += candidates.length;
+
+			// If we got fewer rows than the page size, the store has no more
+			// matches under the LIMIT — exit early.
+			if (runs.length < PAGE_SIZE) break;
 		}
 
-		return candidates.length;
+		return totalFlipped;
 	}
 
 	/**

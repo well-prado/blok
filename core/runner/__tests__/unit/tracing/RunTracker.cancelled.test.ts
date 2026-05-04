@@ -114,6 +114,74 @@ describe("RunTracker — cancelRun (Tier 2 polish)", () => {
 	});
 });
 
+describe("RunTracker — terminal status guards (PR 1 follow-up)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	function startBaseRun(workflowName = "wf"): string {
+		const tracker = RunTracker.getInstance();
+		const run = tracker.startRun({
+			workflowName,
+			workflowPath: "/p",
+			triggerType: "http",
+			triggerSummary: "POST /test",
+			nodeCount: 1,
+		});
+		return run.id;
+	}
+
+	it("completeRun is a no-op on a cancelled run (defense in depth for A2)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+
+		// Late-arriving completeRun (e.g., from a runner that didn't see
+		// the cancel) must not flip status back.
+		tracker.completeRun(runId, { result: "late" });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("failRun is a no-op on a cancelled run (defense in depth for A2)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+
+		tracker.failRun(runId, new Error("late failure"));
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("completeRun preserves expired status when called late", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.markRunExpired(runId, { expiresAt: Date.now(), expiredAt: Date.now() });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("expired");
+
+		tracker.completeRun(runId);
+		expect(tracker.getStore().getRun(runId)?.status).toBe("expired");
+	});
+
+	it("failRun preserves throttled status when called late", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.markRunThrottled(runId, {
+			concurrencyKey: "k",
+			concurrencyLimit: 1,
+			currentInFlight: 1,
+		});
+		expect(tracker.getStore().getRun(runId)?.status).toBe("throttled");
+
+		tracker.failRun(runId, new Error("late"));
+		expect(tracker.getStore().getRun(runId)?.status).toBe("throttled");
+	});
+});
+
 describe("RunTracker — abortRunningRun (Tier 2 follow-up: cooperative AbortSignal)", () => {
 	beforeEach(() => {
 		RunTracker.resetInstance();

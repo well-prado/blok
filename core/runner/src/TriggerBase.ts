@@ -460,6 +460,22 @@ export default abstract class TriggerBase extends Trigger {
 			traceRunId = ctxRecord._traceRunId as string | undefined;
 			// Logger wrapping was already applied on the first pass — no
 			// need to re-wrap (and re-wrapping would double-route logs).
+
+			// PR 1 follow-up · A2 fix. The first-pass `finally` block
+			// unregisters the AbortController via `tracker.unregisterAbortController`.
+			// Without re-registering on re-entry, `tracker.abortRunningRun(runId)`
+			// can't fire the controller — the controller stays on
+			// `ctx._PRIVATE_.abortController` but the tracker's lookup
+			// returns undefined. Operator cancel of a `running` run that
+			// came from delayed/queued/debounced flips status to "cancelled"
+			// but the in-flight step never sees `ctx.signal.aborted`.
+			// Re-register here mirroring the first-pass branch below.
+			if (traceRunId) {
+				const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
+				if (privateSlot?.abortController) {
+					tracker.registerAbortController(traceRunId, privateSlot.abortController);
+				}
+			}
 		} else if (tracker.active) {
 			const runner = this.getRunner();
 			const stepCount = runner.getStepCount?.() ?? this.configuration.steps?.length ?? 0;
