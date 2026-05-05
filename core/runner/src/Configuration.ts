@@ -1,5 +1,6 @@
 // import { NodeBase } from "@blokjs/shared";
 // import { z } from "zod";
+import { sep as pathSep, resolve as resolvePath } from "node:path";
 import { tryParseDuration } from "@blokjs/helper";
 import type { NodeBase } from "@blokjs/shared";
 import ConfigurationResolver from "./ConfigurationResolver";
@@ -575,8 +576,15 @@ export default class Configuration implements Config {
 	}
 
 	protected async localResolver(node: RunnerNode): Promise<RunnerNode> {
-		const path = `${process.env.NODES_PATH}/${node.node}`;
-		return new (await import(path)).default() as Promise<RunnerNode>;
+		// Security review FW-3 — canonicalize the resolved path against
+		// NODES_PATH so a node.node value like "../../malicious" can't
+		// walk the filesystem outside the configured directory.
+		const base = resolvePath(process.env.NODES_PATH || ".");
+		const target = resolvePath(base, node.node);
+		if (target !== base && !target.startsWith(base + pathSep)) {
+			throw new Error(`[blok] local node path escapes NODES_PATH: '${node.node}' resolves outside ${base}`);
+		}
+		return new (await import(target)).default() as Promise<RunnerNode>;
 	}
 }
 

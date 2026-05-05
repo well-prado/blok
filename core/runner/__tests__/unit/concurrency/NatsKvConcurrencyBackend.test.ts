@@ -282,3 +282,79 @@ describe("PR 2 A6 — safeGet error distinction", () => {
 		expect(elapsed).toBeLessThan(100);
 	});
 });
+
+/**
+ * Security review FW-5 — production refusal for the default bucket name.
+ *
+ * Two deployments sharing a NATS server with the default bucket
+ * (`blok-concurrency`) would silently contend on the same
+ * `(workflow, key)` buckets, corrupting concurrency state across
+ * tenants. Production deployments must set BLOK_CONCURRENCY_NATS_KV_BUCKET
+ * to a deployment-unique value.
+ */
+describe("Security review FW-5 — NATS KV production-default-deny", () => {
+	// Snapshot + restore via JSON copy of process.env. Avoids the `delete`
+	// operator (biome rejects it) by reassigning process.env wholesale.
+	const originalEnv = { ...process.env };
+
+	function setEnv(updates: Record<string, string | undefined>) {
+		const next = { ...originalEnv } as NodeJS.ProcessEnv;
+		for (const [k, v] of Object.entries(updates)) {
+			if (v === undefined) {
+				next[k] = undefined as unknown as string;
+			} else {
+				next[k] = v;
+			}
+		}
+		// Strip undefined values so `process.env.X === undefined` for unset keys.
+		for (const k of Object.keys(next)) {
+			if (next[k] === undefined) {
+				next[k] = undefined as unknown as string;
+			}
+		}
+		process.env = next;
+	}
+
+	afterEach(() => {
+		process.env = { ...originalEnv };
+	});
+
+	it("connect() refuses to start in BLOK_ENV=production with the default bucket", async () => {
+		setEnv({ BLOK_ENV: "production", BLOK_CONCURRENCY_NATS_KV_BUCKET: undefined });
+		const backend = new NatsKvConcurrencyBackend();
+
+		await expect(backend.connect()).rejects.toThrow(/refuses to start in production with the default bucket name/);
+	});
+
+	it("connect() refuses to start in NODE_ENV=production with the default bucket", async () => {
+		setEnv({
+			BLOK_ENV: undefined,
+			NODE_ENV: "production",
+			BLOK_CONCURRENCY_NATS_KV_BUCKET: undefined,
+		});
+		const backend = new NatsKvConcurrencyBackend();
+
+		await expect(backend.connect()).rejects.toThrow(/refuses to start in production with the default bucket name/);
+	});
+
+	it("connect() permits production with an explicit bucket name", async () => {
+		setEnv({
+			BLOK_ENV: "production",
+			BLOK_CONCURRENCY_NATS_KV_BUCKET: "blok-concurrency-acme-prod",
+		});
+		const backend = new NatsKvConcurrencyBackend();
+
+		// The production guard passes; connect proceeds and fails on the
+		// next line (no real `nats` module wired in test). The error
+		// message is NOT the FW-5 refusal.
+		await expect(backend.connect()).rejects.not.toThrow(/refuses to start in production/);
+	});
+
+	it("connect() permits the default bucket in non-production", async () => {
+		setEnv({ BLOK_ENV: "development", BLOK_CONCURRENCY_NATS_KV_BUCKET: undefined });
+		const backend = new NatsKvConcurrencyBackend();
+
+		// Same — guard passes, connect fails on missing nats module.
+		await expect(backend.connect()).rejects.not.toThrow(/refuses to start in production/);
+	});
+});

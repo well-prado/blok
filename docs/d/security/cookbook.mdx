@@ -1,0 +1,474 @@
+---
+title: "Security cookbook"
+description: "Practical recipes for adding auth, RBAC, sanitization, and deployment hardening to your Blok workflows."
+icon: "book-open"
+---
+
+The [threat model](/d/security/threat-model) draws the line between
+what Blok protects and what you protect. This page covers the second
+half — the recipes for the things on your side of the line, plus a
+handful of operator settings the framework exposes for hardening.
+
+Each recipe is self-contained. Skip to whichever applies.
+
+## Add authentication to your HTTP-trigger workflows
+
+Blok doesn't auto-apply auth to user-authored routes. Two patterns
+work, depending on how much of the trigger you control:
+
+### Pattern A: Workflow-level first-step gate (recommended)
+
+The most portable approach — author the workflow with an `auth-check`
+step as step zero. The step inspects `ctx.request.headers`, validates
+the credential, and either continues or short-circuits with `401`.
+
+```ts
+// triggers/http/src/workflows/api/users-create.ts
+import { workflow, branch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Create user",
+  version: "1.0.0",
+  trigger: {
+    http: { method: "POST", path: "/api/users" },
+  },
+  steps: [
+    {
+      id: "auth-check",
+      use: "validate-bearer-token",
+      inputs: { authorization: $.req.headers.authorization },
+    },
+    branch({
+      id: "guard",
+      when: "$.state['auth-check'].authenticated === false",
+      then: [
+        {
+          id: "deny",
+          use: "@blokjs/respond",
+          inputs: {
+            status: 401,
+            body: { error: "Unauthorized" },
+          },
+          stop: true,
+        },
+      ],
+      else: [
+        {
+          id: "create",
+          use: "create-user",
+          inputs: {
+            payload: $.req.body,
+            actor: $.state["auth-check"].identity,
+          },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+The `validate-bearer-token` node is yours to write — it returns
+`{ authenticated: boolean, identity?: { sub, roles, ... } }`. Once you
+have it, every protected workflow chains `auth-check` + `branch` and
+the rest of the steps see a populated `ctx.state["auth-check"].identity`.
+
+For domain-heavy services, factor the auth pair into a named
+sub-workflow and invoke it as a step:
+
+```ts
+{
+  id: "auth",
+  subworkflow: "shared.auth-and-deny-if-unauth",
+  inputs: { authorization: $.req.headers.authorization },
+}
+```
+
+### Pattern B: Shared auth sub-workflow (recommended for multi-route services)
+
+Instead of inlining the auth gate into every workflow, define **one**
+shared auth workflow and invoke it as a sub-workflow at the top of
+every protected workflow. The reusable workflow handles credential
+extraction, validation, and the deny path; the parent workflow just
+chains it as step zero and continues only when authentication
+succeeded.
+
+The shared auth workflow:
+
+```ts
+// triggers/http/src/workflows/shared/auth.ts
+import { workflow, branch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "shared.auth-and-deny-if-unauth",
+  version: "1.0.0",
+  // No HTTP trigger — invoked only as a sub-workflow.
+  trigger: {},
+  steps: [
+    {
+      id: "validate",
+      use: "validate-bearer-token",
+      inputs: { authorization: $.req.body.authorization },
+    },
+    branch({
+      id: "guard",
+      when: "$.state.validate.authenticated === false",
+      then: [
+        {
+          id: "deny",
+          use: "@blokjs/respond",
+          inputs: { status: 401, body: { error: "Unauthorized" } },
+          stop: true,
+        },
+      ],
+      else: [
+        {
+          // Pass identity back to the parent.
+          id: "ok",
+          use: "@blokjs/respond",
+          inputs: { identity: $.state.validate.identity },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+The protected workflow:
+
+```ts
+// triggers/http/src/workflows/api/users-create.ts
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Create user",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/api/users" } },
+  steps: [
+    {
+      id: "auth",
+      subworkflow: "shared.auth-and-deny-if-unauth",
+      inputs: { authorization: $.req.headers.authorization },
+    },
+    {
+      id: "create",
+      use: "create-user",
+      inputs: {
+        payload: $.req.body,
+        actor: $.state.auth.identity,
+      },
+    },
+  ],
+});
+```
+
+When the sub-workflow's deny branch fires (`stop: true`), the child
+returns a `401` response and the parent step's result carries the deny
+state. The parent's `state.auth.identity` is populated only on the
+success path — downstream steps reference it freely.
+
+To make this even more ergonomic, factor the chaining into a small
+helper:
+
+```ts
+// triggers/http/src/lib/withAuth.ts
+import { type Step } from "@blokjs/helper";
+
+export function withAuth(steps: Step[]): Step[] {
+  return [
+    {
+      id: "auth",
+      subworkflow: "shared.auth-and-deny-if-unauth",
+      inputs: { authorization: "$.req.headers.authorization" },
+    },
+    ...steps,
+  ];
+}
+
+// In any workflow:
+export default workflow({
+  name: "...",
+  trigger: { http: { method: "POST", path: "/api/..." } },
+  steps: withAuth([
+    { id: "create", use: "create-user", inputs: { /* ... */ } },
+  ]),
+});
+```
+
+One auth implementation. One place to update when the credential
+strategy changes. Apply it to whichever workflows need it.
+
+### Don't lean on `core/runner/src/security/AuthMiddleware.ts`
+
+A scaffolded `AuthMiddleware` class lives in the runner package
+([source](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/AuthMiddleware.ts)).
+It is not currently wired into any trigger and ships as
+example-grade code with known gaps (algorithm confusion, comparison
+timing). Treat it as a reference for shape — write your own
+equivalent against a hardened library (`jose`, `node-jsonwebtoken`,
+`hono/jwt`) rather than instantiating that class directly.
+
+## Add RBAC to workflow steps
+
+Once a request is authenticated, decide who's allowed to run it. The
+simplest pattern uses a `branch` step that checks role claims on
+`ctx.state.identity` (populated by your auth step) and short-circuits
+when authorization fails.
+
+```ts
+import { workflow, branch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Delete user",
+  version: "1.0.0",
+  trigger: {
+    http: { method: "DELETE", path: "/api/users/:id" },
+  },
+  steps: [
+    {
+      id: "auth",
+      subworkflow: "shared.auth-and-deny-if-unauth",
+      inputs: { authorization: $.req.headers.authorization },
+    },
+    branch({
+      id: "rbac",
+      when: '!$.state.auth.identity.roles.includes("admin")',
+      then: [
+        {
+          id: "forbidden",
+          use: "@blokjs/respond",
+          inputs: { status: 403, body: { error: "Admin role required" } },
+          stop: true,
+        },
+      ],
+      else: [
+        {
+          id: "delete",
+          use: "delete-user",
+          inputs: { userId: $.req.params.id },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+For more elaborate policies (resource ownership, attribute-based
+rules), pull the decision into a dedicated node:
+
+```ts
+{
+  id: "authorize",
+  use: "rbac-check",
+  inputs: {
+    identity: $.state.auth.identity,
+    resource: { type: "user", id: $.req.params.id },
+    action: "delete",
+  },
+},
+```
+
+The node returns `{ allowed: boolean, reason?: string }`; the next
+`branch` does the routing. The
+[`RBAC.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/RBAC.ts)
+and
+[`ABAC.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/ABAC.ts)
+files in `core/runner/src/security/` are reference implementations —
+look at them when designing your own policy node.
+
+## Extend trace data sanitization
+
+Blok redacts a default list of sensitive field names from trace
+storage. Domain-specific fields (SSNs, account numbers, PHI) need to
+be added per deployment.
+
+### Per-deployment via env var
+
+```bash
+BLOK_TRACE_SANITIZE_FIELDS=ssn,dob,creditcard,account_number,phi
+```
+
+Comma-separated, case-insensitive. The runner merges your list with
+the framework defaults — you don't need to repeat `password`, `token`,
+etc.
+
+The matcher uses exact (lower-cased) field-name equality. Substring
+matches are not applied to avoid false positives like
+`tokenizer_config` or `password_strength`. If you want stricter
+behavior, redact at the boundary instead — sanitize the field before
+it lands in `ctx.state` or a `ctx.logger.*` payload.
+
+### Per-step opt-out for sensitive cached steps
+
+Idempotency cache writes pass through sanitize, so the cached value
+is the redacted shape — not the raw step output. If a step's output
+should never be cached at all (rather than cached-redacted), disable
+caching on that step:
+
+```ts
+{
+  id: "decrypt-payment-token",
+  use: "decrypt-payment-token",
+  // No idempotencyKey — the result is never cached.
+}
+```
+
+If you've already set an `idempotencyKey` and want to invalidate it
+without removing the field, set TTL to zero:
+
+```ts
+{
+  id: "fetch-pii",
+  use: "fetch-pii",
+  idempotencyKey: $.req.body.requestId,
+  idempotencyKeyTTL: 0,  // expires immediately
+}
+```
+
+A TTL of `0` short-circuits the cache (treated as immediately
+expired). Use this as a kill-switch when you discover PII landed in a
+cached value.
+
+### Don't put plaintext secrets in `ctx.logger.*`
+
+Sanitize covers logger payloads, but only based on the field-name
+list. A line like `ctx.logger.logLevel("info", "user logged in",
+{ identity: { sub: "u1", token: "abc" } })` will redact `token`
+because the field name matches. A line like
+`ctx.logger.logLevel("info", "user logged in: token=abc")` will not
+— the secret is in a string literal, not a field. Pre-commit linting
+that blocks string-concatenation of secrets is the right defense
+here; sanitize is the safety net, not the policy.
+
+## Secure the trace API and Studio
+
+In production, Blok refuses to mount the trace API until you
+register an authorize hook. There are two paths.
+
+### Path A: Register `setTraceAuth(...)`
+
+```ts
+import HttpTrigger from "@blokjs/trigger-http";
+
+const trigger = new HttpTrigger({ /* ... */ });
+
+trigger.setTraceAuth(async (req) => {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  if (!token) return false;
+
+  // Verify against your auth provider — JWT, opaque token, OIDC, etc.
+  return await verifyOperatorToken(token);
+});
+
+await trigger.listen();
+```
+
+The hook runs before every `/__blok/*` route. Return `true` to allow,
+`false` (or throw) to reject with `401`. Failures are logged once per
+request and don't leak the underlying exception.
+
+In development (`BLOK_ENV !== "production"` and `NODE_ENV !==
+"production"`), `setTraceAuth` is optional — Blok serves `/__blok/*`
+open. Register the hook for parity with production if your dev
+environment is exposed.
+
+### Path B: Disable the gate, firewall the surface separately
+
+If `/__blok/*` lives behind a private network or a reverse proxy
+that already authenticates, opt out of the framework gate:
+
+```bash
+BLOK_TRACE_AUTH_DISABLED=1
+```
+
+Pair with `BLOK_TRACE_CORS_ORIGIN=<your-studio-origin>` (or omit to
+keep CORS closed). This is the right pattern for a Blok process
+that runs inside a VPC and is only reached by your operations
+tooling — moving auth to the network layer is simpler than
+re-implementing it inside Blok.
+
+### CORS
+
+The trace API defaults to a single allow-listed origin. Set
+`BLOK_TRACE_CORS_ORIGIN=https://studio.example.com` to allow your
+hosted Studio instance. The wildcard (`*`) is only honored when the
+auth gate is also disabled — Blok refuses the combination
+"`/__blok/*` open AND `*` CORS" in production.
+
+## Sub-workflow access control
+
+`SubworkflowNode` looks up children in `WorkflowRegistry` by name.
+Anyone with workflow-authoring rights can compose any registered
+child — there's no built-in authorization on the composition step.
+
+### Filter the registry at boot
+
+The simplest pattern: the trigger setup code only registers the
+sub-workflows the parent process is allowed to invoke. In a
+multi-tenant deployment where different tenants have different
+allowed compositions, do the filtering in your workflow loader
+before calling `WorkflowRegistry.registerAll(...)`:
+
+```ts
+import { WorkflowRegistry } from "@blokjs/runner";
+
+const allWorkflows = await loadWorkflowsFromDisk();
+const tenantId = process.env.TENANT_ID!;
+const allowed = allWorkflows.filter((w) =>
+  isAllowedForTenant(w.name, tenantId),
+);
+
+WorkflowRegistry.getInstance().registerAll(allowed);
+```
+
+Children that aren't registered for this process throw a clear "child
+workflow not found" error at runtime — the boundary is enforced by
+absence, not by an authorization decision the parent has to remember.
+
+### Or: deploy separate processes per tenant
+
+For strong isolation, run a dedicated Blok process per tenant. The
+sub-workflow registry, the run store, the concurrency gate — all
+become naturally tenant-scoped. The trade-off is operational cost
+(more processes to manage); the win is that sub-workflow boundaries
+are also process boundaries.
+
+### Future: registry-level authorization hook
+
+`WorkflowRegistry.setAuthorizeFn(...)` is on the roadmap but not
+shipped. Until then, the two patterns above are the supported
+isolation strategies.
+
+## Production deployment checklist
+
+The same list lives on the [threat model](/d/security/threat-model#production-deployment-checklist)
+page; the actionable form lives here.
+
+| Step | What to do |
+|---|---|
+| Set `BLOK_ENV=production` | Activates the trace-auth gate, NATS KV bucket check, etc. |
+| Register `trigger.setTraceAuth(...)` | Required for `/__blok/*` in production. Or set `BLOK_TRACE_AUTH_DISABLED=1` if you've firewalled it separately. |
+| Set `BLOK_TRACE_CORS_ORIGIN=<studio-origin>` | Closes the cross-origin attack surface on `/__blok/*`. |
+| Set `BLOK_MAPPER_MODE=strict` | Fail-fast on workflow expression errors. |
+| Use Postgres with TLS | `BLOK_TRACE_STORE=postgres` and `BLOK_TRACE_PG_*` connecting via `sslmode=verify-full`. |
+| Set `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` | Required when `BLOK_CONCURRENCY_BACKEND=nats-kv`. |
+| Extend `BLOK_TRACE_SANITIZE_FIELDS` | Add domain-specific PII / PHI / secret field names. |
+| Tune `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` | Default 1MB; raise for media uploads, lower for small-payload services. |
+| Wire auth on user-authored routes | Pattern A above (workflow-level) or Pattern B (Hono middleware). |
+| Add CI lint blocking `console.log(secret)` patterns | Sanitize covers trace storage, not application logs. |
+| Add CI lint blocking direct `process.env` reads in node code | Use `SecretManager` or a typed env-config layer. |
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Threat model" icon="shield-check" href="/d/security/threat-model">
+    The framework-vs-user split that motivates these recipes.
+  </Card>
+  <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
+    Every supported environment variable with defaults and
+    kill-switches.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/d/operations/observability">
+    `/__blok/concurrency/health` and `/__blok/concurrency/state` for
+    runtime visibility.
+  </Card>
+</Columns>

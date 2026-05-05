@@ -117,6 +117,21 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 	async connect(): Promise<void> {
 		if (this.connected) return;
 
+		// Security review FW-5 — refuse to start in production with the
+		// default bucket name. Two deployments sharing a NATS server with
+		// the default would contend on the same `(workflow, key)` buckets,
+		// silently corrupting concurrency state across tenants. The fix
+		// is operator-mandatory: set BLOK_CONCURRENCY_NATS_KV_BUCKET
+		// per-deployment.
+		const blokEnv = process.env.BLOK_ENV;
+		const nodeEnv = process.env.NODE_ENV;
+		const isProd = blokEnv === "production" || nodeEnv === "production";
+		if (isProd && this.config.bucketName === DEFAULT_BUCKET_NAME) {
+			throw new Error(
+				`[blok] NATS KV concurrency backend refuses to start in production with the default bucket name ('${DEFAULT_BUCKET_NAME}'). Set BLOK_CONCURRENCY_NATS_KV_BUCKET to a deployment-unique value (e.g. 'blok-concurrency-acme-prod') to prevent cross-deployment collision on a shared NATS server.`,
+			);
+		}
+
 		let natsModule: NatsModule;
 		try {
 			natsModule = (await import("nats")) as unknown as NatsModule;

@@ -7,6 +7,7 @@ import type { ConcurrencyBackend } from "../concurrency/ConcurrencyBackend";
 import { InMemoryRunStore } from "./InMemoryRunStore";
 import type { RunStore } from "./RunStore";
 import { createStore } from "./createStore";
+import { sanitize } from "./sanitize";
 import type {
 	ConcurrencySlotResult,
 	Dashboard,
@@ -831,11 +832,19 @@ export class RunTracker extends EventEmitter {
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - nodeRun.startedAt;
 
+		// Security review FW-10 — the idempotency cache holds raw step
+		// output (correct: downstream steps need actual values to run),
+		// but trace storage of a cache hit must mirror the live-run path
+		// where `completeNode` calls `sanitize(ctx.response.data)`.
+		// Without this, a cached step's outputs row could contain raw
+		// `password`/`token` fields that the live run would have redacted.
+		const sanitizedOutputs = outputs === undefined ? undefined : sanitize(outputs);
+
 		this.store.updateNodeRun(nodeRunId, {
 			status: "completed",
 			finishedAt,
 			durationMs,
-			outputs,
+			outputs: sanitizedOutputs,
 			cached: { ...source },
 		});
 
@@ -967,9 +976,18 @@ export class RunTracker extends EventEmitter {
 	// === Logging ===
 
 	addLog(entry: Omit<TraceLogEntry, "id" | "timestamp">): void {
+		// Security review FW-6 — pipe arbitrary log payload through
+		// the sensitive-field redactor before persisting or emitting.
+		// `ctx.logger.logLevel("warn", "x", { password: "..." })` lands
+		// here; without sanitize the secret would persist + stream via
+		// SSE to anyone with /__blok/runs/:id/events access.
+		const sanitizedData =
+			entry.data === undefined ? undefined : (sanitize(entry.data) as Record<string, unknown> | undefined);
+
 		const log: TraceLogEntry = {
 			id: `log_${uuid().replace(/-/g, "").slice(0, 12)}`,
 			...entry,
+			data: sanitizedData,
 			timestamp: Date.now(),
 		};
 
@@ -979,7 +997,7 @@ export class RunTracker extends EventEmitter {
 		this.emitEvent(entry.runId, run?.workflowName || "", "LOG_ENTRY", entry.nodeName, entry.nodeId, {
 			level: entry.level,
 			message: entry.message,
-			data: entry.data,
+			data: sanitizedData,
 		});
 	}
 

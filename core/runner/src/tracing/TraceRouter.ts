@@ -5,6 +5,33 @@ import { RunTracker } from "./RunTracker";
 import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
 
 /**
+ * Security review FW-2 — sensitive headers that are NEVER honored when
+ * supplied via the replay endpoint's `overrides.headers`. Combined with
+ * the FW-1 trace-auth gate, this blocks the replay-as-auth-bypass attack
+ * where an unauthenticated client posts to `/__blok/runs/:id/replay`
+ * with an attacker-controlled `Authorization` header that the runner
+ * would otherwise dispatch verbatim to the user-authored route.
+ */
+const REPLAY_HEADER_DENYLIST = new Set([
+	"authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"proxy-authorization",
+]);
+
+function filterReplayHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+	if (!headers) return {};
+	const filtered: Record<string, string> = {};
+	for (const [k, v] of Object.entries(headers)) {
+		if (REPLAY_HEADER_DENYLIST.has(k.toLowerCase())) continue;
+		filtered[k] = v;
+	}
+	return filtered;
+}
+
+/**
  * Minimal interfaces matching the Express API surface used by trace routes.
  * This avoids a hard dependency on express in the runner package.
  */
@@ -36,6 +63,26 @@ interface TraceRouter {
 }
 
 /**
+ * Security review FW-1 — authorize hook signature for `/__blok/*` routes.
+ *
+ * Triggers register a function that decides whether to serve trace API
+ * requests. Returning `true` allows the request; `false` (or a thrown
+ * error) returns `401`. In production, the trace router refuses to serve
+ * any route until an authorize hook is registered (or the operator sets
+ * `BLOK_TRACE_AUTH_DISABLED=1` to opt out — typically because they've
+ * firewalled `/__blok/*` separately).
+ */
+export type TraceAuthorizeFn = (req: TraceRequest) => Promise<boolean> | boolean;
+
+export interface TraceRouterOptions {
+	/**
+	 * Authorize hook for trace API requests. See {@link TraceAuthorizeFn}.
+	 * Required in production unless `BLOK_TRACE_AUTH_DISABLED=1` is set.
+	 */
+	authorize?: TraceAuthorizeFn;
+}
+
+/**
  * Register trace API routes on an Express-compatible router.
  *
  * This function avoids importing express directly so the runner package
@@ -47,23 +94,69 @@ interface TraceRouter {
  * import { Router } from "express";
  * import { registerTraceRoutes } from "@blokjs/runner";
  * const traceRouter = Router();
- * registerTraceRoutes(traceRouter);
+ * registerTraceRoutes(traceRouter, undefined, { authorize: myAuthFn });
  * app.use("/__blok", traceRouter);
  * ```
  */
-export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): void {
+export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, options?: TraceRouterOptions): void {
 	const t = tracker || RunTracker.getInstance();
 
 	// --- CORS for cross-origin Studio UI ---
+	// Security review FW-4 — `BLOK_TRACE_CORS_ORIGIN` overrides the
+	// permissive `*` default. Set to a single allow-listed origin in
+	// production to prevent cross-origin reads of trace data.
+	const corsOrigin = process.env.BLOK_TRACE_CORS_ORIGIN || "*";
+
+	// Security review FW-1 — production-default-deny on /__blok/* unless
+	// the operator either registers an authorize hook (preferred) or
+	// explicitly opts out via BLOK_TRACE_AUTH_DISABLED=1.
+	const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
+	const authDisabled = process.env.BLOK_TRACE_AUTH_DISABLED === "1";
+	const authorize = options?.authorize;
+
 	router.use((req: TraceRequest, res: TraceResponse, next: () => void) => {
-		res.setHeader("Access-Control-Allow-Origin", "*");
+		res.setHeader("Access-Control-Allow-Origin", corsOrigin);
 		res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
 		res.setHeader("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
 		if (req.method === "OPTIONS") {
 			res.sendStatus(204);
 			return;
 		}
-		next();
+
+		// Dev OR explicit opt-out → pass through (preserves previous behaviour).
+		if (!isProd || authDisabled) {
+			next();
+			return;
+		}
+
+		// Production WITHOUT an authorize hook → 503 with a hint.
+		if (!authorize) {
+			res.status(503).json({
+				error: "Trace endpoints require auth in production",
+				hint: "Register an authorize hook before listen() — `trigger.setTraceAuth(req => ...)` — or set BLOK_TRACE_AUTH_DISABLED=1 to opt out (typically because /__blok/* is already firewalled).",
+				docs: "https://github.com/deskree-inc/blok/blob/main/docs/d/security/cookbook.mdx#secure-the-trace-api-and-studio",
+			});
+			return;
+		}
+
+		// Production WITH an authorize hook → consult it. Wrap in
+		// `Promise.resolve().then(...)` so a SYNC throw inside the
+		// authorize function is caught the same as an async rejection.
+		Promise.resolve()
+			.then(() => authorize(req))
+			.then((ok) => {
+				if (ok) {
+					next();
+				} else {
+					res.status(401).json({ error: "Unauthorized" });
+				}
+			})
+			.catch((err) => {
+				// Don't leak the underlying error message — log it once,
+				// return a generic 401.
+				console.error("[blok][trace-auth] authorize() threw:", (err as Error)?.message ?? err);
+				res.status(401).json({ error: "Unauthorized" });
+			});
 	});
 
 	// === Utility Endpoints ===
@@ -776,14 +869,18 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const overrides = (req.body || {}) as Record<string, unknown>;
 		const finalMethod = ((overrides.method as string) || method).toUpperCase();
 		const finalUrl = overrides.path ? `${protocol}://${host}${overrides.path}` : url;
+		// Security review FW-2 — strip sensitive headers from overrides
+		// BEFORE merging, then layer the framework-controlled headers
+		// LAST so an attacker can't replace `X-Blok-Replay-Of`.
+		const safeOverrideHeaders = filterReplayHeaders(overrides.headers as Record<string, string>);
 		const customHeaders: Record<string, string> = {
 			"Content-Type": "application/json",
+			...safeOverrideHeaders,
 			// Tier 1 · replay lineage. TriggerBase reads this header and threads
 			// it into `tracker.startRun({ replayOf })`, which persists onto the
 			// new run's WorkflowRun.replayOf field. Studio renders a
 			// "Replay of #..." breadcrumb that links back to the source run.
 			"X-Blok-Replay-Of": runId,
-			...((overrides.headers as Record<string, string>) || {}),
 		};
 		const body = overrides.body !== undefined ? JSON.stringify(overrides.body) : undefined;
 

@@ -74,6 +74,10 @@
 						]
 					},
 					{
+						"group": "Security",
+						"pages": ["d/security/threat-model", "d/security/cookbook"]
+					},
+					{
 						"group": "Reference",
 						"pages": [
 							"d/reference/v2-step-shapes",

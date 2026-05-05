@@ -178,4 +178,65 @@ describe("PR 2 A4 — extractDispatchPayload size cap", () => {
 		const ctx = makeCtx(body);
 		expect(() => t.callExtractDispatchPayload(ctx)).toThrow(PayloadTooLargeError);
 	});
+
+	// === Security review FW-7 ===
+	// Sensitive fields in body / params / query are persisted with values
+	// redacted, mirroring the trace-storage sanitize contract. Without the
+	// redactor, a delayed POST with `{password, ssn}` writes plaintext to
+	// scheduled_dispatches.payload_json (sqlite/PG) where it survives until
+	// dispatch fires or the Janitor sweeps the row.
+
+	it("redacts sensitive fields in body (FW-7)", () => {
+		const t = new TestHttpTrigger();
+		const ctx = makeCtx({
+			user: "u1",
+			password: "secret123",
+			apiKey: "k_xyz",
+			nested: { token: "abc" },
+		});
+		const payload = t.callExtractDispatchPayload(ctx) as { body: Record<string, unknown> };
+		expect(payload.body.user).toBe("u1");
+		expect(payload.body.password).toBe("[REDACTED]");
+		expect(payload.body.apiKey).toBe("[REDACTED]");
+		expect((payload.body.nested as Record<string, unknown>).token).toBe("[REDACTED]");
+	});
+
+	it("redacts sensitive fields in params (FW-7)", () => {
+		const t = new TestHttpTrigger();
+		const ctx = makeCtx({});
+		(ctx.request as unknown as { params: Record<string, string> }).params = {
+			userId: "u1",
+			token: "leaky",
+		};
+		const payload = t.callExtractDispatchPayload(ctx) as { params: Record<string, unknown> };
+		expect(payload.params.userId).toBe("u1");
+		expect(payload.params.token).toBe("[REDACTED]");
+	});
+
+	it("redacts sensitive fields in query (FW-7)", () => {
+		const t = new TestHttpTrigger();
+		const ctx = makeCtx({});
+		(ctx.request as unknown as { query: Record<string, string> }).query = {
+			page: "1",
+			access_token: "leaky",
+		};
+		const payload = t.callExtractDispatchPayload(ctx) as { query: Record<string, unknown> };
+		expect(payload.query.page).toBe("1");
+		expect(payload.query.access_token).toBe("[REDACTED]");
+	});
+
+	it("preserves non-sensitive body fields verbatim (FW-7)", () => {
+		const t = new TestHttpTrigger();
+		const ctx = makeCtx({
+			docId: "d-42",
+			title: "Hello",
+			counts: [1, 2, 3],
+			nested: { ok: true },
+		});
+		const payload = t.callExtractDispatchPayload(ctx) as { body: Record<string, unknown> };
+		expect(payload.body.docId).toBe("d-42");
+		expect(payload.body.title).toBe("Hello");
+		expect(payload.body.counts).toEqual([1, 2, 3]);
+		expect(payload.body.nested).toEqual({ ok: true });
+	});
 });

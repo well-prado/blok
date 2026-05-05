@@ -16,6 +16,8 @@ import { DeferredRunScheduler } from "@blokjs/runner";
 import { Janitor } from "@blokjs/runner";
 import { PayloadTooLargeError } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
+import { traceRedactSensitive } from "@blokjs/runner";
+import type { TraceAuthorizeFn } from "@blokjs/runner";
 import { createConcurrencyBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
@@ -53,6 +55,32 @@ export default class HttpTrigger extends TriggerBase {
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
 	private logger = new DefaultLogger();
+
+	/**
+	 * Security review FW-1 — operator-supplied authorize hook for the
+	 * `/__blok/*` trace API + Studio backend. In production the trace
+	 * router refuses to serve any route until this is registered (or
+	 * the operator sets `BLOK_TRACE_AUTH_DISABLED=1`). See
+	 * docs/d/security/cookbook.mdx#secure-the-trace-api-and-studio.
+	 */
+	private traceAuthFn: TraceAuthorizeFn | undefined;
+
+	/**
+	 * Register the authorize hook for `/__blok/*` (Blok Studio + trace
+	 * API). Call before {@link listen}.
+	 *
+	 * In `BLOK_ENV=production` (or `NODE_ENV=production`), the trace
+	 * router returns `503` until this is registered or
+	 * `BLOK_TRACE_AUTH_DISABLED=1` is set.
+	 *
+	 * @param authorize  Function that returns `true` to allow a trace
+	 *                   API request, `false` (or throws) to reject with
+	 *                   `401`. Sees the raw request including method,
+	 *                   path, headers, query, and body.
+	 */
+	public setTraceAuth(authorize: TraceAuthorizeFn): void {
+		this.traceAuthFn = authorize;
+	}
 
 	constructor() {
 		super();
@@ -286,7 +314,11 @@ export default class HttpTrigger extends TriggerBase {
 			// as workflow lookups.
 			if (process.env.BLOK_TRACE_ENABLED !== "false") {
 				const { traceAdapter, traceApp } = createTraceRouterAdapter();
-				registerTraceRoutes(traceAdapter);
+				// Security review FW-1 — thread the operator-registered
+				// authorize hook (if any) into the trace router. Production
+				// without `setTraceAuth(...)` returns 503 from inside the
+				// trace router middleware.
+				registerTraceRoutes(traceAdapter, undefined, { authorize: this.traceAuthFn });
 				this.app.route("/__blok", traceApp);
 			}
 
@@ -869,14 +901,24 @@ export default class HttpTrigger extends TriggerBase {
 			if (HttpTrigger.DISPATCH_HEADER_DENYLIST.has(k.toLowerCase())) continue;
 			headers[k] = v;
 		}
+		// Security review FW-7 — pipe body/params/query through the
+		// sensitive-field redactor before persisting. Without redaction,
+		// a delayed POST with `{password, ssn}` writes raw plaintext to
+		// scheduled_dispatches.payload_json, which survives until the
+		// dispatch fires or the Janitor sweeps the row.
+		//
+		// `traceRedactSensitive` (vs full `traceSanitize`) skips the
+		// 10KB trace-storage truncation — the dispatch path has its
+		// own 1MB cap below; double-truncating would silently shrink
+		// payloads below the cap into a tiny preview envelope.
 		const payload = {
 			method: req.method,
 			path: req.path,
 			url: (req as unknown as { url?: string }).url,
 			headers,
-			body: req.body,
-			params: req.params,
-			query: req.query,
+			body: traceRedactSensitive(req.body),
+			params: traceRedactSensitive(req.params),
+			query: traceRedactSensitive(req.query),
 			workflowName: ctx.workflow_name,
 			workflowPath: ctx.workflow_path,
 		};

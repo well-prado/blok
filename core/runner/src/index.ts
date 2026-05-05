@@ -90,7 +90,7 @@ import { Janitor } from "./tracing/Janitor";
 import { RunTracker } from "./tracing/RunTracker";
 import { registerTraceRoutes } from "./tracing/TraceRouter";
 import { TracingLogger } from "./tracing/TracingLogger";
-import { sanitize as traceSanitize } from "./tracing/sanitize";
+import { redactSensitive as traceRedactSensitive, sanitize as traceSanitize } from "./tracing/sanitize";
 
 // Workflow registry (Tier 2 sub-workflow primitive)
 import { type RegisteredWorkflow, WorkflowRegistry } from "./workflow/WorkflowRegistry";
@@ -326,6 +326,7 @@ export {
 	SCHEDULING_DEFAULTS,
 	TracingLogger,
 	traceSanitize,
+	traceRedactSensitive,
 	// Cost Estimation
 	CostEstimator,
 	PRICING,
@@ -368,6 +369,9 @@ export {
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type { HttpRuntimeAdapterOptions } from "./adapters/HttpRuntimeAdapter";
+
+// Security review FW-1 · trace API authorize hook signature
+export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
 
 // gRPC adapter types
 export type {

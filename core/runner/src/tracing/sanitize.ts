@@ -17,6 +17,14 @@ const DEFAULT_SENSITIVE_FIELDS = new Set([
 	"client_secret",
 	"session",
 	"cookie",
+	"bearer",
+	"bearer_token",
+	"jwt",
+	"csrf",
+	"csrftoken",
+	"csrf_token",
+	"oauth",
+	"oauth_token",
 ]);
 
 const DEFAULT_MAX_PAYLOAD_BYTES = 10 * 1024; // 10KB
@@ -66,6 +74,26 @@ function redactFields(obj: unknown, sensitiveFields: Set<string>, depth = 0): un
 	}
 
 	return String(obj);
+}
+
+/**
+ * Redact sensitive fields from a payload WITHOUT applying the
+ * trace-storage size cap. Use this when the caller has its own
+ * size budget (e.g. `extractDispatchPayload` enforces a 1MB cap
+ * via `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` and would double-truncate
+ * if it called `sanitize()` directly).
+ *
+ * Same field list + extension semantics as `sanitize()`. Honors
+ * `BLOK_TRACE_SANITIZE_FIELDS` for runtime additions.
+ */
+export function redactSensitive(payload: unknown): unknown {
+	if (payload === null || payload === undefined) return payload;
+	try {
+		const sensitiveFields = getSensitiveFields();
+		return redactFields(payload, sensitiveFields);
+	} catch {
+		return { _error: "Failed to redact payload" };
+	}
 }
 
 /**
