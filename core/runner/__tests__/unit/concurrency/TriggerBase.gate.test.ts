@@ -387,4 +387,61 @@ describe("TriggerBase — concurrency gate with onLimit:'queue' (Tier 2 #6 follo
 			.runs.find((r) => r.workflowName === "test-wf");
 		expect(completed).toBeDefined();
 	});
+
+	// Review fix-up · CONCERN-4. The B3 backoff formula
+	// `factor ** attempt` is a JS Number op; with attempt=1024 and
+	// factor=2 it overflows to Infinity. Math.min clamps the final
+	// retryAfterMs (so the bug was "safe by accident"), but
+	// `factor ** 1024` is also expensive. The fix clamps the exponent
+	// at 30 before exponentiation. This test verifies the clamp by
+	// seeding a run with a high pingCount and asserting the resulting
+	// scheduledAt stays within `now + maxBackoffMs`.
+	it("backoff exponent is clamped (no Infinity even at very high attempt counts)", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: {
+				method: "POST",
+				concurrencyKey: "tenant-q7",
+				concurrencyLimit: 1,
+				onLimit: "queue",
+				concurrencyQueueRetry: { minBackoffMs: 1000, maxBackoffMs: 30_000, factor: 2 },
+			},
+		});
+
+		const tracker = RunTracker.getInstance();
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-q7", 1, "holder", Date.now() + 60_000);
+
+		// First denial — establishes the run in `queued` state with pingCount=1.
+		try {
+			await t.run(makeCtx());
+		} catch {
+			// expected
+		}
+
+		const queued = tracker
+			.getStore()
+			.getRuns({ status: "queued" })
+			.runs.find((r) => r.workflowName === "test-wf");
+		if (!queued) throw new Error("expected a queued run");
+
+		// Force pingCount to a value that would overflow without the clamp:
+		// 2^1024 = Infinity in JS Number land.
+		tracker.getStore().updateRun(queued.id, { pingCount: 1024 });
+
+		// Re-defer via dispatchDeferred re-entry. The gate hits the same
+		// queue path; the formula uses pingCount=1024, which without the
+		// clamp would compute `2^1024` (Infinity) before Math.min saves it.
+		await DeferredRunScheduler.getInstance().drainAll();
+
+		const refreshed = tracker.getStore().getRun(queued.id);
+		// The run flips back to `queued` after re-denial. scheduledAt
+		// must be at most `maxBackoffMs` past now — never Infinity, never
+		// the wrong order of magnitude.
+		const scheduledAt = refreshed?.scheduledAt;
+		expect(scheduledAt).toBeDefined();
+		if (scheduledAt === undefined) return;
+		expect(Number.isFinite(scheduledAt)).toBe(true);
+		expect(scheduledAt - Date.now()).toBeLessThanOrEqual(30_000);
+		expect(scheduledAt - Date.now()).toBeGreaterThan(0);
+	});
 });

@@ -861,6 +861,27 @@ describe("V2WaitStepSchema (PR 4 wait.for / wait.until)", () => {
 			} as unknown as never),
 		).toThrow(/retryable way|retry.*not supported on wait/i);
 	});
+
+	// Review fix-up — three more rejections that the original polish PR
+	// missed. Each has a feature-specific helpful message instead of the
+	// generic "Unrecognized key in object" that .strict() emits.
+	it("rejects `maxDuration` with a helpful message", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, maxDuration: "30s" } as unknown as never),
+		).toThrow(/wait IS the duration|maxDuration.*not supported on wait/i);
+	});
+
+	it("rejects `concurrencyKey` with a helpful message about trigger-config scope", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, concurrencyKey: "k" } as unknown as never),
+		).toThrow(/trigger config|concurrencyKey.*not supported on wait/i);
+	});
+
+	it("rejects `spread` with a helpful message about no-data-to-spread", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, spread: true } as unknown as never)).toThrow(
+			/no data to spread|spread.*not supported on wait/i,
+		);
+	});
 });
 
 describe("validateTriggerConfig", () => {

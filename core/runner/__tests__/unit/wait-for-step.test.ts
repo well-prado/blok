@@ -211,4 +211,25 @@ describe("PR 4 — wait.for(duration) integration", () => {
 		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
 		expect(DeferredRunScheduler.getInstance().has(runId)).toBe(true);
 	});
+
+	// Review fix-up · BUG-2. A malformed `wait.until` string used to fall
+	// through to `Date.now()` (immediate no-op). The original review caught
+	// this — silent failures are the worst kind. Now: throws a helpful
+	// error so the trace + Studio's error surface show the failure.
+	it("wait.until(<unparseable string>) throws a helpful error instead of silently completing", async () => {
+		const t = new TestTrigger();
+		t.configureWait(undefined, "tommorrow"); // intentional typo
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-run-7");
+
+		// The thrown error gets wrapped by the runner's error handling, but
+		// the message must surface the typo + parsing guidance.
+		await expect(t.run(ctx)).rejects.toThrow(/wait\.until.*cannot parse.*tommorrow/i);
+
+		// The pre-wait step ran (the failure happened AT the wait step,
+		// not before it).
+		expect(t.stepA.runCount).toBe(1);
+		// The post-wait step never ran.
+		expect(t.stepB.runCount).toBe(0);
+	});
 });

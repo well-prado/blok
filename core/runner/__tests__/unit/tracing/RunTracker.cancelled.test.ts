@@ -418,3 +418,113 @@ describe("RunTracker — cancelRun cascade (PR 5 G1)", () => {
 		expect(store.getRun(childId)?.status).toBe("delayed");
 	});
 });
+
+// Review fix-up · BUG-1. Every markRun* method that flips status now
+// guards against overwriting a terminal status. Without these guards,
+// concurrent operator-cancel + crash auto-flip + scheduled-dispatch
+// re-entry races could silently undo a `cancelled` / `crashed` /
+// `failed` / `expired` outcome by re-flipping the run to a transient
+// state. One test per method.
+describe("RunTracker — markRun* terminal-status guards (review fix-up)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	function startBaseRun(): string {
+		const tracker = RunTracker.getInstance();
+		const run = tracker.startRun({
+			workflowName: "wf",
+			workflowPath: "/p",
+			triggerType: "http",
+			triggerSummary: "POST /test",
+			nodeCount: 1,
+		});
+		return run.id;
+	}
+
+	it("markRunThrottled is a no-op on a cancelled run", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunThrottled(runId, { concurrencyKey: "k", concurrencyLimit: 1, currentInFlight: 1 });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunQueued is a no-op on a cancelled run (race in onLimit:queue path)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunQueued(runId, {
+			concurrencyKey: "k",
+			concurrencyLimit: 1,
+			currentInFlight: 1,
+			scheduledAt: Date.now() + 1000,
+		});
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunDelayed is a no-op on a cancelled run (race in wait.for re-entry)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunDelayed(runId, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunExpired is a no-op on a cancelled run (TTL fires after operator cancel)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunExpired(runId, { expiresAt: Date.now() - 1000, expiredAt: Date.now() });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunDebounced is a no-op on a cancelled run", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunDebounced(runId, {
+			debounceKey: "k",
+			mode: "trailing",
+			pingCount: 1,
+			scheduledAt: Date.now() + 500,
+		});
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunCrashed is a no-op on a cancelled run (boot orphan recovery race)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunCrashed(runId, { error: new Error("boot crash") });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRunTimedOut is a no-op on a cancelled run (maxDuration fires after cancel)", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.cancelRun(runId);
+		tracker.markRunTimedOut(runId, { stepId: "x", maxDurationMs: 1000, attemptsExhausted: 3 });
+		expect(tracker.getStore().getRun(runId)?.status).toBe("cancelled");
+	});
+
+	it("markRun* preserves crashed status when called after auto-flip", () => {
+		const tracker = RunTracker.getInstance();
+		const runId = startBaseRun();
+		tracker.markRunCrashed(runId, { error: new Error("boom") });
+		// All subsequent transitions are no-ops.
+		tracker.markRunDelayed(runId, { scheduledAt: Date.now() + 1000, delayMs: 1000 });
+		tracker.markRunExpired(runId, { expiresAt: 0, expiredAt: 0 });
+		tracker.markRunQueued(runId, {
+			concurrencyKey: "k",
+			concurrencyLimit: 1,
+			currentInFlight: 1,
+			scheduledAt: Date.now() + 1000,
+		});
+		expect(tracker.getStore().getRun(runId)?.status).toBe("crashed");
+	});
+});

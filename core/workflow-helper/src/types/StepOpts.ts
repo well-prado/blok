@@ -527,13 +527,13 @@ export const V2WaitStepSchema = z
 		ephemeral: z.boolean().optional().describe("If true, no state entry is recorded."),
 		active: z.boolean().optional(),
 		stop: z.boolean().optional(),
-		// PR 1-5 polish — explicit rejection of `idempotencyKey` and `retry`
-		// on wait steps. `.strict()` below would reject these as
-		// "unrecognized key" with a generic message; `.never()` lets us
-		// produce a feature-specific error explaining WHY the field is
-		// rejected so authors don't have to guess. `.optional()` permits
-		// undefined (the normal case for wait steps that don't pass
-		// either field).
+		// PR 1-5 polish + review fix-up — explicit rejection of fields that
+		// are meaningless on wait steps. `.strict()` below would reject
+		// these as "unrecognized key" with a generic message; `.never()`
+		// lets us produce a feature-specific error explaining WHY the
+		// field is rejected so authors don't have to guess. `.optional()`
+		// permits undefined (the normal case for wait steps that don't
+		// pass any of these fields).
 		idempotencyKey: z
 			.never({
 				errorMap: () => ({
@@ -545,6 +545,32 @@ export const V2WaitStepSchema = z
 			.never({
 				errorMap: () => ({
 					message: "`retry` is not supported on wait steps — waits don't fail in a retryable way.",
+				}),
+			})
+			.optional(),
+		// Review fix-up — three more rejections the original polish PR
+		// missed. All three could appear plausible to an author coming
+		// from regular steps; the helpful message saves them a
+		// debugging session.
+		maxDuration: z
+			.never({
+				errorMap: () => ({
+					message: "`maxDuration` is not supported on wait steps — the wait IS the duration.",
+				}),
+			})
+			.optional(),
+		concurrencyKey: z
+			.never({
+				errorMap: () => ({
+					message:
+						"`concurrencyKey` is not supported on wait steps — concurrency gating lives on the trigger config, not on per-step waits.",
+				}),
+			})
+			.optional(),
+		spread: z
+			.never({
+				errorMap: () => ({
+					message: "`spread` is not supported on wait steps — wait steps produce no data to spread.",
 				}),
 			})
 			.optional(),

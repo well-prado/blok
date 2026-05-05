@@ -322,6 +322,20 @@ export class PostgresRunStore implements RunStore {
 		}
 	}
 
+	/**
+	 * Review fix-up · CONCERN-2. Per-table cap on `loadRecent`'s rehydration
+	 * queries. Without it, a deployment with 1M+ idempotency cache entries
+	 * spends seconds + memory on every boot loading rows it'll never read
+	 * before the Janitor sweeps them. Default 100K rows per table — well
+	 * above any reasonable hot-set size yet bounded for boot latency.
+	 */
+	private getLoadRecentLimit(): number {
+		const raw = process.env.BLOK_PG_LOADRECENT_LIMIT;
+		if (!raw || !/^\d+$/.test(raw)) return 100_000;
+		const n = Number(raw);
+		return n > 0 ? n : 100_000;
+	}
+
 	private async loadRecent(): Promise<void> {
 		const client = await this.pool.connect();
 		try {
@@ -369,11 +383,20 @@ export class PostgresRunStore implements RunStore {
 			}
 
 			// Tier 2 follow-up · rehydrate idempotency cache (un-expired entries only).
+			//
+			// Review fix-up · CONCERN-2. Add `ORDER BY cached_at DESC LIMIT N`.
+			// Newest cache entries are most likely to be re-hit by the next
+			// idempotent step; older ones the Janitor will sweep on its next
+			// pass. Without this LIMIT, deployments with 1M+ rows OOM at boot.
 			const now = Date.now();
+			const loadRecentLimit = this.getLoadRecentLimit();
 			try {
 				const { rows: idemRows } = await client.query(
-					"SELECT * FROM idempotency_cache WHERE expires_at IS NULL OR expires_at > $1",
-					[now],
+					`SELECT * FROM idempotency_cache
+					 WHERE expires_at IS NULL OR expires_at > $1
+					 ORDER BY cached_at DESC
+					 LIMIT $2`,
+					[now, loadRecentLimit],
 				);
 				for (const row of idemRows) {
 					this.memory.setIdempotencyCache(row.workflow_name, row.step_id, row.idempotency_key, {
@@ -392,8 +415,18 @@ export class PostgresRunStore implements RunStore {
 			}
 
 			// Tier 2 follow-up · rehydrate concurrency leases (un-expired only).
+			//
+			// Review fix-up · CONCERN-2. Add `ORDER BY expires_at DESC LIMIT N`.
+			// Locks with the longest remaining lease are most likely still
+			// active and worth restoring; expired ones are filtered already.
 			try {
-				const { rows: lockRows } = await client.query("SELECT * FROM concurrency_locks WHERE expires_at > $1", [now]);
+				const { rows: lockRows } = await client.query(
+					`SELECT * FROM concurrency_locks
+					 WHERE expires_at > $1
+					 ORDER BY expires_at DESC
+					 LIMIT $2`,
+					[now, loadRecentLimit],
+				);
 				for (const row of lockRows) {
 					this.memory.acquireConcurrencySlot(
 						row.workflow_name,
@@ -412,13 +445,17 @@ export class PostgresRunStore implements RunStore {
 			// Tier 2 follow-up · rehydrate scheduled dispatches.
 			// PR 2 A5 — ORDER BY scheduled_at ASC so past-due dispatches
 			// hydrate first. recoverDispatches's past-due → fire-immediately
-			// path benefits from the ordering. No LIMIT applied — rows are
-			// small (payload capped at 1MB via PR 2 A4). Operators with
-			// extreme backlogs can pre-truncate via the Janitor's
-			// purgeExpiredScheduledDispatches sweep.
+			// path benefits from the ordering.
+			//
+			// Review fix-up · CONCERN-2. Add LIMIT for defense-in-depth.
+			// Even with the 1MB payload cap (PR 2 A4), 100K dispatches × 1MB
+			// = 100GB of JSON-decode work at boot. Past-due first means the
+			// LIMIT caps how many recover per boot; the rest surface on the
+			// Janitor's next sweep or a subsequent boot.
 			try {
 				const { rows: dispatchRows } = await client.query(
-					"SELECT * FROM scheduled_dispatches ORDER BY scheduled_at ASC",
+					"SELECT * FROM scheduled_dispatches ORDER BY scheduled_at ASC LIMIT $1",
+					[loadRecentLimit],
 				);
 				for (const row of dispatchRows) {
 					this.memory.upsertScheduledDispatch({

@@ -48,9 +48,12 @@ export class JanitorMetrics {
 
 	recordSweep(attrs: JanitorAttributes, durationMs: number, rowsPurged: number): void {
 		this.sweepDurationHistogram.record(durationMs, attrs as unknown as Record<string, string>);
-		// Don't increment when 0 — keeps the counter clean of no-op sweeps.
-		if (rowsPurged > 0) {
-			this.purgedCounter.add(rowsPurged, attrs as unknown as Record<string, string>);
-		}
+		// Review fix-up · GAP-2. Always record the counter, even when zero.
+		// Without zero-row recordings, operators can't distinguish
+		// "Janitor running, table clean" from "Janitor not running" by
+		// looking at the counter alone. The duration histogram captures
+		// liveness too, but pairing them under the same emit cadence
+		// keeps dashboards consistent.
+		this.purgedCounter.add(rowsPurged, attrs as unknown as Record<string, string>);
 	}
 }

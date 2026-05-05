@@ -630,11 +630,20 @@ export default abstract class TriggerBase extends Trigger {
 
 								// PR 5 B3 — capped exponential backoff for re-defer.
 								// Track attempt count via existing pingCount field on the run record.
+								//
+								// Review fix-up · CONCERN-4. Clamp the exponent before
+								// `factor ** attempt`. Math.min would clamp the result
+								// (saving us from Infinity), but `factor ** 1024` is
+								// expensive and wasteful; clamping the exponent at
+								// `MAX_BACKOFF_EXPONENT` keeps the math cheap regardless
+								// of how many times a queue re-defers.
+								const MAX_BACKOFF_EXPONENT = 30;
 								const attempt = existingRun?.pingCount ?? 0;
 								const minBackoff = concCfg.queueRetry?.minBackoffMs ?? 1000;
 								const maxBackoff = concCfg.queueRetry?.maxBackoffMs ?? 30_000;
 								const factor = concCfg.queueRetry?.factor ?? 2;
-								const retryAfterMs = Math.min(maxBackoff, minBackoff * factor ** attempt);
+								const safeExponent = Math.min(attempt, MAX_BACKOFF_EXPONENT);
+								const retryAfterMs = Math.min(maxBackoff, minBackoff * factor ** safeExponent);
 								const scheduledAt = now + retryAfterMs;
 
 								tracker.markRunQueued(traceRunId, {

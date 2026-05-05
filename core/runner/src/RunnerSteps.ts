@@ -209,6 +209,12 @@ export default abstract class RunnerSteps {
 						const waitUntil = stepAny.waitUntil as number | string | undefined;
 
 						// Compute the deadline (resolves $-proxy and ISO strings).
+						// Review fix-up · BUG-2. A malformed `until` string used to
+						// silently fall through to `Date.now()` (immediate no-op).
+						// Authors expecting "wait until tomorrow" with a typo got a
+						// no-op with no warning — the worst kind of footgun. Throw
+						// instead so the failure surfaces immediately, both in the
+						// run trace + Studio's error surface.
 						const computeDeadline = (): number => {
 							if (typeof waitForMs === "number") return Date.now() + waitForMs;
 							if (typeof waitUntil === "number") return waitUntil;
@@ -219,9 +225,14 @@ export default abstract class RunnerSteps {
 								// ISO-date string.
 								const t = Date.parse(waitUntil);
 								if (!Number.isNaN(t)) return t;
-								// Fallback: treat as 0 (immediate).
-								return Date.now();
+								// Fail-fast on unparseable strings (the helpful path).
+								throw new Error(
+									`wait.until: cannot parse '${waitUntil}' as a number or date. Use ms-since-epoch (number or numeric string) or a valid ISO date string.`,
+								);
 							}
+							// Schema rejects this combination, but defensive: treat
+							// unsupported input as immediate so the runner doesn't
+							// hang on a never-firing timer.
 							return Date.now();
 						};
 

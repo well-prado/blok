@@ -256,6 +256,11 @@ export class RunTracker extends EventEmitter {
 	): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status. A
+		// concurrent operator-cancel or crash auto-flip might have flipped
+		// the run between read and write; preserve the earlier terminal
+		// outcome rather than re-marking as throttled.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - run.startedAt;
@@ -302,6 +307,11 @@ export class RunTracker extends EventEmitter {
 	): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status (e.g.,
+		// `cancelled` from a concurrent operator-cancel during the
+		// onLimit:queue re-defer race). The TTL-expired path is handled
+		// separately in TriggerBase via QueueExpiredError.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		this.store.updateRun(runId, {
 			status: "queued",
@@ -331,6 +341,10 @@ export class RunTracker extends EventEmitter {
 	markRunDelayed(runId: string, info: { scheduledAt: number; delayMs: number; expiresAt?: number }): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status — e.g.,
+		// a wait.for() re-entry race where the operator cancelled the run
+		// while WaitDispatchRequest was being thrown.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		this.store.updateRun(runId, {
 			status: "delayed",
@@ -353,6 +367,10 @@ export class RunTracker extends EventEmitter {
 	markRunExpired(runId: string, info: { expiresAt: number; expiredAt: number }): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status. A
+		// run that was cancelled by an operator before the dispatch timer
+		// fired should stay `cancelled`, not flip to `expired`.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const finishedAt = info.expiredAt;
 		const durationMs = finishedAt - run.startedAt;
@@ -392,6 +410,10 @@ export class RunTracker extends EventEmitter {
 	): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status. A
+		// trailing debounce timer firing into a cancelled active run
+		// should NOT flip the run back to debounced.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const isTerminal = info.mode === "leading" && info.intoRunId !== undefined;
 		const finishedAt = isTerminal ? Date.now() : undefined;
@@ -425,6 +447,10 @@ export class RunTracker extends EventEmitter {
 	markRunCrashed(runId: string, info: { error: Error | unknown }): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status. A
+		// run that was already cancelled / failed / timedOut shouldn't
+		// be flipped to crashed by the boot orphan-recovery pass.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - run.startedAt;
@@ -506,6 +532,10 @@ export class RunTracker extends EventEmitter {
 	markRunTimedOut(runId: string, info: { stepId: string; maxDurationMs: number; attemptsExhausted: number }): void {
 		const run = this.store.getRun(runId);
 		if (!run) return;
+		// Review fix-up · BUG-1. Don't overwrite a terminal status — a
+		// run that was cancelled mid-step shouldn't flip to timedOut
+		// when the maxDuration timer fires after the cancel.
+		if (TERMINAL_STATUSES.has(run.status)) return;
 
 		const finishedAt = Date.now();
 		const durationMs = finishedAt - run.startedAt;
