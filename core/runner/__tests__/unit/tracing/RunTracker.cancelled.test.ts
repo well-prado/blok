@@ -315,3 +315,106 @@ describe("RunTracker — startNode wait field (Tier 2 #4 indicator)", () => {
 		expect(stored?.wait).toBeUndefined();
 	});
 });
+
+describe("RunTracker — cancelRun cascade (PR 5 G1)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+	});
+
+	function startBaseRun(workflowName = "wf", parentRunId?: string): string {
+		const tracker = RunTracker.getInstance();
+		const run = tracker.startRun({
+			workflowName,
+			workflowPath: "/p",
+			triggerType: parentRunId ? "subworkflow" : "http",
+			triggerSummary: "POST /test",
+			nodeCount: 1,
+			parentRunId,
+		});
+		return run.id;
+	}
+
+	it("cascades cancellation to in-flight async children (parent + 3 children)", () => {
+		const tracker = RunTracker.getInstance();
+		const parentId = startBaseRun();
+		// Three async (wait:false) children, each in a different cancellable state.
+		const childRunningId = startBaseRun("child-running", parentId);
+		const childDelayedId = startBaseRun("child-delayed", parentId);
+		tracker.markRunDelayed(childDelayedId, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+		const childQueuedId = startBaseRun("child-queued", parentId);
+		tracker.markRunQueued(childQueuedId, {
+			concurrencyKey: "k",
+			concurrencyLimit: 1,
+			currentInFlight: 1,
+			scheduledAt: Date.now() + 1_000,
+		});
+
+		const ok = tracker.cancelRun(parentId);
+		expect(ok).toBe(true);
+
+		const store = tracker.getStore();
+		expect(store.getRun(parentId)?.status).toBe("cancelled");
+		expect(store.getRun(childRunningId)?.status).toBe("cancelled");
+		expect(store.getRun(childDelayedId)?.status).toBe("cancelled");
+		expect(store.getRun(childQueuedId)?.status).toBe("cancelled");
+	});
+
+	it("preserves children already in terminal state (cancel respects status guard)", () => {
+		const tracker = RunTracker.getInstance();
+		const parentId = startBaseRun();
+
+		const completedChild = startBaseRun("child-done", parentId);
+		tracker.completeRun(completedChild, { ok: true });
+
+		const failedChild = startBaseRun("child-fail", parentId);
+		tracker.failRun(failedChild, new Error("boom"));
+
+		const cancellableChild = startBaseRun("child-delayed", parentId);
+		tracker.markRunDelayed(cancellableChild, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+
+		tracker.cancelRun(parentId);
+
+		const store = tracker.getStore();
+		expect(store.getRun(parentId)?.status).toBe("cancelled");
+		// Terminal children stay terminal — cascade only touches cancellable states.
+		expect(store.getRun(completedChild)?.status).toBe("completed");
+		expect(store.getRun(failedChild)?.status).toBe("failed");
+		// The cancellable sibling still gets cascaded.
+		expect(store.getRun(cancellableChild)?.status).toBe("cancelled");
+	});
+
+	it("recurses through nested descendants (3-level tree)", () => {
+		const tracker = RunTracker.getInstance();
+		const grandparentId = startBaseRun("grandparent");
+		const parentId = startBaseRun("parent", grandparentId);
+		const grandchildAId = startBaseRun("grandchild-a", parentId);
+		const grandchildBId = startBaseRun("grandchild-b", parentId);
+		tracker.markRunDelayed(grandchildBId, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+
+		tracker.cancelRun(grandparentId);
+
+		const store = tracker.getStore();
+		expect(store.getRun(grandparentId)?.status).toBe("cancelled");
+		expect(store.getRun(parentId)?.status).toBe("cancelled");
+		expect(store.getRun(grandchildAId)?.status).toBe("cancelled");
+		expect(store.getRun(grandchildBId)?.status).toBe("cancelled");
+	});
+
+	it("opt-out via { cascade: false } leaves children untouched", () => {
+		const tracker = RunTracker.getInstance();
+		const parentId = startBaseRun();
+		const childId = startBaseRun("child", parentId);
+		tracker.markRunDelayed(childId, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+
+		tracker.cancelRun(parentId, { cascade: false });
+
+		const store = tracker.getStore();
+		expect(store.getRun(parentId)?.status).toBe("cancelled");
+		// Child is still delayed — explicit opt-out preserved its lifecycle.
+		expect(store.getRun(childId)?.status).toBe("delayed");
+	});
+});

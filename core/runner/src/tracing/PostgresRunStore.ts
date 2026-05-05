@@ -265,6 +265,43 @@ export class PostgresRunStore implements RunStore {
 						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS last_completed_step_index INTEGER");
 					},
 				},
+				{
+					// PR 1-5 polish · catch up to sqlite's workflow_runs columns.
+					// PG migrations historically lagged: v3 added the cache /
+					// locks / dispatches tables and v4 added
+					// `last_completed_step_index`, but the columns sqlite added
+					// across migrations 3 / 5 / 6 / 8 (`environment`,
+					// `replay_of`, `parent_run_id`, `parent_node_run_id`,
+					// `scheduled_at`, `expires_at`, `debounce_key`,
+					// `debounce_mode`, `ping_count`) were never mirrored.
+					// `saveRun`/`updateRun`/`rowToRun` silently dropped them
+					// across restarts, so PG-backed deployments lost replay
+					// lineage, sub-workflow lineage, and ALL Tier 2 #5+#7
+					// scheduling state on every restart. This migration adds
+					// the columns + indexes so PG matches sqlite. Pre-existing
+					// rows get NULL on every new column (backward-compat;
+					// `rowToRun` reads NULL `environment` as "production" to
+					// match sqlite's legacy default).
+					version: 5,
+					up: async () => {
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS environment TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS replay_of TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS parent_run_id TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS parent_node_run_id TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS scheduled_at BIGINT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS expires_at BIGINT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS debounce_key TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS debounce_mode TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS ping_count INTEGER");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_environment ON workflow_runs(environment)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at)");
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key)",
+						);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -409,14 +446,24 @@ export class PostgresRunStore implements RunStore {
 
 	saveRun(run: WorkflowRun): void {
 		this.memory.saveRun(run);
+		// PR 1-5 polish · column set mirrors sqlite saveRun (24 columns).
+		// PG migration v5 added the trailing 9 (environment / replay_of /
+		// parent_run_id / parent_node_run_id / scheduled_at / expires_at /
+		// debounce_key / debounce_mode / ping_count); PG migration v4 added
+		// last_completed_step_index. Without these the PG mirror silently
+		// dropped scheduling + lineage + resume-cursor state across restart.
 		this.enqueueWrite(() =>
 			this.pool
 				.query(
 					`INSERT INTO workflow_runs
 				(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 				 status, started_at, finished_at, duration_ms, error_json,
-				 tags_json, metadata_json, node_count, completed_nodes)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+				 tags_json, metadata_json, node_count, completed_nodes,
+				 environment, replay_of, parent_run_id, parent_node_run_id,
+				 scheduled_at, expires_at, debounce_key, debounce_mode,
+				 ping_count, last_completed_step_index)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+				        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
 				ON CONFLICT (id) DO UPDATE SET
 				 status = EXCLUDED.status,
 				 finished_at = EXCLUDED.finished_at,
@@ -424,7 +471,17 @@ export class PostgresRunStore implements RunStore {
 				 error_json = EXCLUDED.error_json,
 				 tags_json = EXCLUDED.tags_json,
 				 metadata_json = EXCLUDED.metadata_json,
-				 completed_nodes = EXCLUDED.completed_nodes`,
+				 completed_nodes = EXCLUDED.completed_nodes,
+				 environment = EXCLUDED.environment,
+				 replay_of = EXCLUDED.replay_of,
+				 parent_run_id = EXCLUDED.parent_run_id,
+				 parent_node_run_id = EXCLUDED.parent_node_run_id,
+				 scheduled_at = EXCLUDED.scheduled_at,
+				 expires_at = EXCLUDED.expires_at,
+				 debounce_key = EXCLUDED.debounce_key,
+				 debounce_mode = EXCLUDED.debounce_mode,
+				 ping_count = EXCLUDED.ping_count,
+				 last_completed_step_index = EXCLUDED.last_completed_step_index`,
 					[
 						run.id,
 						run.workflowName,
@@ -440,6 +497,16 @@ export class PostgresRunStore implements RunStore {
 						run.metadata ? JSON.stringify(run.metadata) : null,
 						run.nodeCount,
 						run.completedNodes,
+						run.environment ?? null,
+						run.replayOf ?? null,
+						run.parentRunId ?? null,
+						run.parentNodeRunId ?? null,
+						run.scheduledAt ?? null,
+						run.expiresAt ?? null,
+						run.debounceKey ?? null,
+						run.debounceMode ?? null,
+						run.pingCount ?? null,
+						run.lastCompletedStepIndex ?? null,
 					],
 				)
 				.then(() => {}),
@@ -480,6 +547,55 @@ export class PostgresRunStore implements RunStore {
 		if (updates.metadata !== undefined) {
 			setClauses.push(`metadata_json = $${paramIdx++}`);
 			values.push(JSON.stringify(updates.metadata));
+		}
+		// PR 1-5 polish · scheduling, lineage, and resume-cursor fields
+		// updateRun must mirror sqlite. Each marker tracker method
+		// (markRunDelayed / markRunQueued / markRunDebounced / markRunExpired
+		// / recordDebouncePing / transitionRunToRunning / RunnerSteps wait
+		// branch) updates one or more of these. Without these clauses the
+		// in-memory mirror has the value but PG keeps the original (or
+		// NULL).
+		if (updates.replayOf !== undefined) {
+			setClauses.push(`replay_of = $${paramIdx++}`);
+			values.push(updates.replayOf);
+		}
+		if (updates.parentRunId !== undefined) {
+			setClauses.push(`parent_run_id = $${paramIdx++}`);
+			values.push(updates.parentRunId);
+		}
+		if (updates.parentNodeRunId !== undefined) {
+			setClauses.push(`parent_node_run_id = $${paramIdx++}`);
+			values.push(updates.parentNodeRunId);
+		}
+		if (updates.scheduledAt !== undefined) {
+			setClauses.push(`scheduled_at = $${paramIdx++}`);
+			values.push(updates.scheduledAt);
+		}
+		if (updates.expiresAt !== undefined) {
+			setClauses.push(`expires_at = $${paramIdx++}`);
+			values.push(updates.expiresAt);
+		}
+		if (updates.debounceKey !== undefined) {
+			setClauses.push(`debounce_key = $${paramIdx++}`);
+			values.push(updates.debounceKey);
+		}
+		if (updates.debounceMode !== undefined) {
+			setClauses.push(`debounce_mode = $${paramIdx++}`);
+			values.push(updates.debounceMode);
+		}
+		if (updates.pingCount !== undefined) {
+			setClauses.push(`ping_count = $${paramIdx++}`);
+			values.push(updates.pingCount);
+		}
+		if (updates.lastCompletedStepIndex !== undefined) {
+			setClauses.push(`last_completed_step_index = $${paramIdx++}`);
+			values.push(updates.lastCompletedStepIndex);
+		}
+		// `transitionRunToRunning` (Tier 2 #5+#7) preserves the original
+		// startedAt by updating it. Mirror sqlite, which also accepts it.
+		if (updates.startedAt !== undefined) {
+			setClauses.push(`started_at = $${paramIdx++}`);
+			values.push(updates.startedAt);
 		}
 
 		if (setClauses.length === 0) return;
@@ -1045,6 +1161,21 @@ export class PostgresRunStore implements RunStore {
 			metadata: row.metadata_json ? (parseJson(row.metadata_json) as Record<string, unknown>) : undefined,
 			nodeCount: Number(row.node_count),
 			completedNodes: Number(row.completed_nodes),
+			// PR 1-5 polish · pre-v5 PG rows have NULL on the columns added
+			// by migration v5. Mirror sqlite's `rowToRun`: NULL `environment`
+			// reads as "production" (the legacy default scope) so historical
+			// data still surfaces under the EnvChip default. Every other new
+			// column maps NULL → undefined.
+			environment: ((row.environment as string | null) ?? "production") as string,
+			replayOf: (row.replay_of as string | null) ?? undefined,
+			parentRunId: (row.parent_run_id as string | null) ?? undefined,
+			parentNodeRunId: (row.parent_node_run_id as string | null) ?? undefined,
+			scheduledAt: row.scheduled_at != null ? Number(row.scheduled_at) : undefined,
+			expiresAt: row.expires_at != null ? Number(row.expires_at) : undefined,
+			debounceKey: (row.debounce_key as string | null) ?? undefined,
+			debounceMode: ((row.debounce_mode as string | null) ?? undefined) as "leading" | "trailing" | undefined,
+			pingCount: row.ping_count != null ? Number(row.ping_count) : undefined,
+			lastCompletedStepIndex: row.last_completed_step_index != null ? Number(row.last_completed_step_index) : undefined,
 		};
 	}
 

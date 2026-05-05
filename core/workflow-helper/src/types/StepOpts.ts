@@ -527,6 +527,27 @@ export const V2WaitStepSchema = z
 		ephemeral: z.boolean().optional().describe("If true, no state entry is recorded."),
 		active: z.boolean().optional(),
 		stop: z.boolean().optional(),
+		// PR 1-5 polish — explicit rejection of `idempotencyKey` and `retry`
+		// on wait steps. `.strict()` below would reject these as
+		// "unrecognized key" with a generic message; `.never()` lets us
+		// produce a feature-specific error explaining WHY the field is
+		// rejected so authors don't have to guess. `.optional()` permits
+		// undefined (the normal case for wait steps that don't pass
+		// either field).
+		idempotencyKey: z
+			.never({
+				errorMap: () => ({
+					message: "`idempotencyKey` is not supported on wait steps — the wait itself is the checkpoint.",
+				}),
+			})
+			.optional(),
+		retry: z
+			.never({
+				errorMap: () => ({
+					message: "`retry` is not supported on wait steps — waits don't fail in a retryable way.",
+				}),
+			})
+			.optional(),
 	})
 	.strict()
 	.refine((s) => (s.wait.for !== undefined) !== (s.wait.until !== undefined), {

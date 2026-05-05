@@ -29,6 +29,7 @@ import {
 	type GlobalOptions,
 	Janitor,
 	NodeMap,
+	QueueExpiredError,
 	RunTracker,
 	TriggerBase,
 	type TriggerResponse,
@@ -497,6 +498,25 @@ export abstract class WorkerTrigger extends TriggerBase {
 					this.logger.log(
 						`[scheduling] job ${jobId} runId=${error.info.runId} status=${error.info.status} ` +
 							`scheduledAt=${error.info.scheduledAt} pingCount=${error.info.pingCount} → ACK (no requeue)`,
+					);
+
+					await job.complete();
+					return;
+				}
+
+				// PR 1-5 polish — queue-mode TTL elapsed. The run is already
+				// flipped to `expired` (see TriggerBase queue branch); ACK
+				// without retry so the broker doesn't redeliver — the run
+				// will never succeed (timer won't re-fire). Distinct from
+				// the throttled NACK below.
+				if (error instanceof QueueExpiredError) {
+					span.setAttribute("success", false);
+					span.setAttribute("queue_expired", true);
+					span.setStatus({ code: SpanStatusCode.OK, message: "queue_expired" });
+
+					this.logger.log(
+						`[concurrency] job ${jobId} runId=${error.info.runId} key='${error.info.concurrencyKey}' ` +
+							`queueExpiredAt=${error.info.queueExpiredAt} → ACK (no requeue, run expired)`,
 					);
 
 					await job.complete();

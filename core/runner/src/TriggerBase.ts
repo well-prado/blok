@@ -7,6 +7,7 @@ import { RunCancelledError } from "./RunCancelledError";
 import Runner from "./Runner";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
+import { QueueExpiredError } from "./concurrency/QueueExpiredError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import type { HMREvent } from "./hmr/FileWatcher";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
@@ -612,16 +613,17 @@ export default abstract class TriggerBase extends Trigger {
 										concurrency_key: resolvedKey,
 										mode: "queue",
 									});
-									// Throw a Deferred-style signal with status=expired so the
-									// HTTP transport returns 410-ish via the existing 202-path
-									// translation. (For now, falls through to ConcurrencyLimitError;
-									// transport-side mapping can be added later.)
-									throw new ConcurrencyLimitError({
+									// PR 1-5 polish · throw a dedicated error so the HTTP
+									// transport returns 410 Gone instead of 429 Retry-After.
+									// Conflating queue-expired (permanently dead — the timer
+									// won't re-fire) with throttled (transient resource
+									// pressure) misleads clients into retrying. Status was
+									// already flipped to `expired` above, so the run record
+									// reflects reality regardless of the transport choice.
+									throw new QueueExpiredError({
 										workflowName,
 										concurrencyKey: resolvedKey,
-										concurrencyLimit: concCfg.limit,
-										currentInFlight: result.currentInFlight,
-										retryAfterMs: 0,
+										queueExpiredAt: queueExpiresAt,
 										runId: traceRunId,
 									});
 								}
@@ -919,9 +921,14 @@ export default abstract class TriggerBase extends Trigger {
 			//
 			// PR 4: WaitDispatchRequest is handled above (translated to
 			// DeferredDispatchSignal); shouldn't reach here.
+			//
+			// PR 1-5 polish: QueueExpiredError flipped the run's status to
+			// "expired" via markRunExpired — don't override it with
+			// "failed". The HTTP transport translates → 410 Gone.
 			if (
 				traceRunId &&
 				!(err instanceof ConcurrencyLimitError) &&
+				!(err instanceof QueueExpiredError) &&
 				!(err instanceof DeferredDispatchSignal) &&
 				!(err instanceof RunCancelledError) &&
 				!(err instanceof WaitDispatchRequest)

@@ -9,6 +9,7 @@ import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
+import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler } from "@blokjs/runner";
@@ -703,6 +704,30 @@ export default class HttpTrigger extends TriggerBase {
 							configurable: "BLOK_DISPATCH_PAYLOAD_MAX_BYTES",
 						},
 						413,
+					);
+				}
+
+				// PR 1-5 polish — queue-mode TTL elapsed. The tracker already
+				// flipped the run to `expired` (see TriggerBase queue branch);
+				// surface as 410 Gone (NOT 429) so HTTP clients don't retry a
+				// permanently-dead run. No `Retry-After` header — would
+				// contradict the 410 contract. Distinct from
+				// ConcurrencyLimitError (transient, 429) below.
+				if (e instanceof QueueExpiredError) {
+					span.setStatus({ code: SpanStatusCode.OK, message: "queue_expired" });
+					this.logger.log(
+						`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
+							`queueExpiredAt=${e.info.queueExpiredAt} → 410`,
+					);
+					return c.json(
+						{
+							error: "Queued run expired",
+							workflowName: e.info.workflowName,
+							concurrencyKey: e.info.concurrencyKey,
+							queueExpiredAt: e.info.queueExpiredAt,
+							runId: e.info.runId,
+						},
+						410,
 					);
 				}
 

@@ -841,6 +841,26 @@ describe("V2WaitStepSchema (PR 4 wait.for / wait.until)", () => {
 		expect(isWaitStep({ id: "x", subworkflow: "y" } as never)).toBe(false);
 		expect(isWaitStep({ id: "x", branch: { when: "true", then: [] } } as never)).toBe(false);
 	});
+
+	// PR 1-5 polish — explicit refinements for idempotencyKey + retry produce
+	// helpful error messages rather than the generic "Unrecognized key(s) in
+	// object" that .strict() emits on its own. Authors should know WHY the
+	// field was rejected, not just that it's unknown.
+	it("rejects `idempotencyKey` with a helpful message about checkpoint semantics", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, idempotencyKey: "k" } as unknown as never),
+		).toThrow(/wait IS the checkpoint|idempotencyKey.*not supported on wait/i);
+	});
+
+	it("rejects `retry` with a helpful message about non-retryable waits", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({
+				id: "x",
+				wait: { for: "1h" },
+				retry: { maxAttempts: 3 },
+			} as unknown as never),
+		).toThrow(/retryable way|retry.*not supported on wait/i);
+	});
 });
 
 describe("validateTriggerConfig", () => {

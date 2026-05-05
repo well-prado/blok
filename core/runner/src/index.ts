@@ -101,6 +101,8 @@ import {
 	type ConcurrencyLimitInfo,
 	isConcurrencyLimitError,
 } from "./concurrency/ConcurrencyLimitError";
+// Queue-mode TTL expiry (PR 1-5 polish · 410 Gone vs 429)
+import { QueueExpiredError, type QueueExpiredInfo, isQueueExpiredError } from "./concurrency/QueueExpiredError";
 
 // Cross-process concurrency backend (Tier 2 #6 follow-up)
 import type { ConcurrencyBackend } from "./concurrency/ConcurrencyBackend";
@@ -282,6 +284,10 @@ export {
 	ConcurrencyLimitError,
 	type ConcurrencyLimitInfo,
 	isConcurrencyLimitError,
+	// Queue-mode TTL expiry (PR 1-5 polish)
+	QueueExpiredError,
+	type QueueExpiredInfo,
+	isQueueExpiredError,
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,
