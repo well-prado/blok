@@ -36,7 +36,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.2.9";
+const GITHUB_REPO_RELEASE_TAG = "v0.3.0";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
