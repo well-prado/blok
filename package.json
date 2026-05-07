@@ -23,6 +23,7 @@
 	],
 	"scripts": {
 		"ci:publish": "bun run build && bunx changeset publish",
+		"release": "bun run scripts/release.ts",
 		"doc:dev": "cd docs && bunx mint@latest dev",
 		"doc:generate": "bunx typedoc --skipErrorChecking && bun run ./docs/generateRefLinks.js",
 		"prepare": "husky",

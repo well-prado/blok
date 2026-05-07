@@ -26,12 +26,16 @@ Everything is an **author-decision**; ship in whatever order the user pulls. Sev
 
 ---
 
-## Tier A — Correctness bugs (must fix; blocks production)
+## Tier A — Correctness bugs (all SHIPPED)
 
-These are confirmed correctness regressions in shipped code. Each has file:line refs and a reproduction in [REVIEW.md](REVIEW.md).
+> **All Tier A items shipped** via PRs #50 / #52 — commits `7605bb7`
+> (A1 + A2 + A3) and `7b0f5c8` (A4 + A5 + A6). The descriptions below
+> are preserved as engineering history; file:line refs may have drifted
+> as the surrounding code evolved.
 
 ### A1 · Orphan-recovery LIMIT=50 cap
 
+**Status**: SHIPPED in commit `7605bb7`.
 **Severity**: HIGH. Silent data inconsistency at scale.
 **Effort**: ~30 minutes + 1 regression test.
 **Where**: [`core/runner/src/tracing/RunTracker.ts:436-448`](core/runner/src/tracing/RunTracker.ts#L436-L448) calls `this.store.getRuns({ status: "running" })` with no `limit`. SqliteRunStore at [`SqliteRunStore.ts:810`](core/runner/src/tracing/SqliteRunStore.ts#L810) defaults `opts?.limit ?? 50`. `recoverOrphanedRuns` ([`TriggerBase.ts:293-315`](core/runner/src/TriggerBase.ts#L293-L315)) calls this exactly once per boot.
@@ -56,6 +60,7 @@ These are confirmed correctness regressions in shipped code. Each has file:line 
 
 ### A2 · Cancel-after-redispatch broken
 
+**Status**: SHIPPED in commit `7605bb7`.
 **Severity**: HIGH. Operator can't cancel runs that came from `delayed`/`debounced`/`queued`.
 **Effort**: ~30 minutes + 1 regression test.
 **Where**:
@@ -85,6 +90,7 @@ These are confirmed correctness regressions in shipped code. Each has file:line 
 
 ### A3 · `createChildContext` listener leak
 
+**Status**: SHIPPED in commit `7605bb7`.
 **Severity**: MEDIUM. Memory pressure + Node `MaxListenersExceededWarning` on long-lived parents that fire many sub-workflows.
 **Effort**: ~1 hour + 1 test.
 **Where**: [`createChildContext.ts:60-72`](core/runner/src/utils/createChildContext.ts#L60-L72) attaches `addEventListener("abort", ..., { once: true })` to the parent's signal. `{ once: true }` only auto-removes when abort fires — if the parent never aborts, listeners accumulate.
@@ -122,6 +128,7 @@ The "child completion" hook lives in `SubworkflowNode.run`'s finally / catch.
 
 ### A4 · `payload_json` size cap
 
+**Status**: SHIPPED in commit `7b0f5c8`.
 **Severity**: MEDIUM. Storage bloat + boot recovery latency.
 **Effort**: ~1 hour.
 **Where**: [`HttpTrigger.ts:789-809`](triggers/http/src/runner/HttpTrigger.ts#L789-L809) captures `req.body` raw. SQLite TEXT column has no size cap; PG JSONB likewise.
@@ -144,6 +151,7 @@ The "child completion" hook lives in `SubworkflowNode.run`'s finally / catch.
 
 ### A5 · PG `loadRecent` reads unbounded
 
+**Status**: SHIPPED in commit `7b0f5c8`.
 **Severity**: MEDIUM. OOM at boot for long-lived processes.
 **Effort**: ~2 hours.
 **Where**: [`PostgresRunStore.ts`](core/runner/src/tracing/PostgresRunStore.ts) — `loadRecent()` reads `idempotency_cache`, `concurrency_locks`, `scheduled_dispatches` without LIMIT.
@@ -163,6 +171,7 @@ The "child completion" hook lives in `SubworkflowNode.run`'s finally / catch.
 
 ### A6 · NATS KV `safeGet` swallows ALL errors
 
+**Status**: SHIPPED in commit `7b0f5c8`.
 **Severity**: MEDIUM. 10× latency hit on NATS broker outage.
 **Effort**: ~30 minutes.
 **Where**: [`NatsKvConcurrencyBackend.ts:304-310`](core/runner/src/concurrency/NatsKvConcurrencyBackend.ts#L304-L310). On any error from `kv.get`, returns null. The OCC retry loop interprets null as "no entry" → `kv.create` → throws → caught → continue, 10× before fail-closing.
@@ -484,6 +493,7 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ### H1 · HTTP cancellation integration test
 
+**Status**: SHIPPED in commit `7605bb7`.
 **Severity**: HIGH (would have caught bug A2).
 **Effort**: ~half day.
 **Why**: existing test asserts API returns 200 but doesn't verify the in-flight step actually aborts.
@@ -494,6 +504,7 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ### H2 · Cancel-after-redispatch test
 
+**Status**: SHIPPED in commit `7605bb7`.
 **Severity**: HIGH (would catch the regression after fix A2).
 **Effort**: ~1 hour.
 **Why**: see bug A2.
@@ -530,10 +541,9 @@ Gate behind `BLOK_BENCHMARK_REAL_NATS=1`. Use `docker-compose.yml`'s NATS servic
 
 ### I2 · Add Janitor + observability mentions to root `CLAUDE.md`
 
+**Status**: SHIPPED in commit `7b0f5c8`. Root `CLAUDE.md` Context Rule 13 now covers Janitor, observability endpoints, OTel counters, graceful shutdown, and the durable-scheduler payload cap.
 **Severity**: LOW.
 **Effort**: ~10 minutes.
-
-Context Rule 12 in root `CLAUDE.md` covers `BLOK_CRASH_AUTOFLIP_DISABLED` and cooperative cancellation. Missing: `BLOK_JANITOR_*`, `BLOK_GRACEFUL_SHUTDOWN_DISABLED`, the observability endpoints. Either extend CR12 or add a new CR13.
 
 ### I3 · Migration guides for v1 → v2 + reliability primitives
 

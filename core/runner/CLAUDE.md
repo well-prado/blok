@@ -572,11 +572,13 @@ or pass the signal to fetch: `await fetch(url, { signal: ctx.signal })`.
 Sub-workflow children inherit a chained AbortSignal — parent abort
 cascades to in-flight children automatically.
 
-**Caveat (REVIEW.md HIGH bug)**: cancellation does NOT currently work
-for runs that came from `delayed` / `debounced` / `queued` state.
-The first-pass `finally` unregisters the AbortController before the
-deferred timer re-enters; the re-entered run never re-registers. Fix
-in BACKLOG.md item #2.
+**Cancellation across re-entry** (was BACKLOG A2 — SHIPPED `7605bb7`):
+the deferred-dispatch reentry branch re-registers the AbortController
+on `tracker.abortControllers`, so `tracker.abortRunningRun(runId)` now
+fires the signal correctly after a `delayed` / `debounced` / `queued`
+run resumes. `RunCancelledError` also passes through `RunnerSteps`'s
+outer `GlobalError` wrapper unwrapped so `TriggerBase.run`'s
+`instanceof` discrimination works in production.
 
 **Crash auto-flip + orphan recovery** —
 `TriggerBase.installCrashHandlers()` registers `uncaughtException` +
@@ -587,10 +589,12 @@ scan that flips runs older than `BLOK_ORPHAN_THRESHOLD_MS` (default
 2min) to `"crashed"`. Both wired into HTTP + Worker `listen()`.
 Kill-switch: `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
 
-**Caveat (REVIEW.md HIGH bug)**: `markAllRunningRunsAsCrashed` calls
-`store.getRuns({status: "running"})` with no explicit limit, which
-inherits SqliteRunStore's default `LIMIT=50`. Net: only 50 orphans
-flip per boot. Fix in BACKLOG.md item #1.
+**Orphan recovery is page-aware** (was BACKLOG A1 — SHIPPED `7605bb7`):
+`markAllRunningRunsAsCrashed` loops `store.getRuns({status: "running"})`
+in pages until drained instead of inheriting the default `LIMIT=50`.
+Page-aware short-circuit: exits early when a page returns fewer rows
+than the page size. A process that died with N orphaned `running` runs
+no longer leaves N-50 stuck.
 
 **Janitor** — periodic background sweep (`Janitor` singleton in
 `src/tracing/Janitor.ts`). Default 5min interval (override via
@@ -721,8 +725,8 @@ The structured warning includes:
 ## Tests
 
 ```bash
-pnpm test:dev                      # Watch mode
-pnpm test                          # Single run
-pnpm test:integration              # Integration tests
-pnpm test:all                      # Unit + integration
+bun run test:dev                   # Watch mode
+bun run test                       # Single run
+bun run test:integration           # Integration tests
+bun run test:all                   # Unit + integration
 ```

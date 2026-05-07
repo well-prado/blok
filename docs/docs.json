@@ -126,7 +126,7 @@
 					},
 					{
 						"group": "DevTools",
-						"pages": ["c/devtools/index"]
+						"pages": ["c/devtools/index", "c/devtools/release-runbook"]
 					},
 					{
 						"group": "Migration Guides",
