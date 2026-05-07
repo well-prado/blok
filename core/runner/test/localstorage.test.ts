@@ -28,7 +28,7 @@ function createLocator(): WorkflowLocator {
 		trigger: {
 			http: {
 				method: "GET",
-				path: "/",
+				path: "/countries",
 				accept: "application/json",
 			},
 		},

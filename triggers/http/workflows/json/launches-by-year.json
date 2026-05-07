@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
+			"path": "/launches-by-year",
 			"accept": "application/json"
 		}
 	},

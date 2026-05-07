@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "*",
-			"path": "/",
+			"path": "/weather",
 			"accept": "application/json"
 		}
 	},

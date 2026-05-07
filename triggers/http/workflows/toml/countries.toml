@@ -4,7 +4,7 @@ version = "1.0.0"
 
 [trigger.http]
 method = "GET"
-path = "/"
+path = "/countries"
 accept = "application/json"
 
 [[steps]]

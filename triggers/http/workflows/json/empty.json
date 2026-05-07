@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
+			"path": "/empty",
 			"accept": "application/json"
 		}
 	},

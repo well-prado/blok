@@ -7,7 +7,7 @@ export default workflow({
 	trigger: {
 		http: {
 			method: "GET",
-			path: "/",
+			path: "/countries-helper",
 			accept: "application/json",
 		},
 	},
