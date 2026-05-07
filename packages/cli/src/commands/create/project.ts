@@ -36,7 +36,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.3.0";
+const GITHUB_REPO_RELEASE_TAG = "v0.4.0";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -550,6 +550,12 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blokjs/trigger-queue": "triggers/queue",
 		};
 
+		// The version range scaffolded projects pin @blokjs/* deps at.
+		// Bumped alongside major framework releases (0.4 was the
+		// explicit-path-only routing release; 0.5 will drop the
+		// BLOK_ROUTING_LEGACY escape hatch).
+		const BLOKJS_DEP_RANGE = "^0.4.0";
+
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
 			if (!deps) continue;
@@ -558,7 +564,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const pkg of Object.keys(deps)) {
 				if (pkg.startsWith("@blok/")) {
 					const newPkg = pkg.replace("@blok/", "@blokjs/");
-					deps[newPkg] = "^0.2.0";
+					deps[newPkg] = BLOKJS_DEP_RANGE;
 					delete deps[pkg];
 				}
 			}
@@ -569,8 +575,22 @@ export async function createProject(opts: OptionValues, version: string, current
 					if (localRepoPath && workspacePackageMap[pkg]) {
 						deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
 					} else {
-						deps[pkg] = "^0.2.0";
+						deps[pkg] = BLOKJS_DEP_RANGE;
 					}
+				}
+				// Pre-existing range references — bump if they're below the
+				// current floor so the scaffold's `npm install` resolves to
+				// the v0.4 surface rather than the stale 0.2.x line.
+				else if (
+					typeof ver === "string" &&
+					(ver === "^0.2.0" ||
+						ver === "^0.2" ||
+						ver === "0.2.0" ||
+						ver.startsWith("^0.2.") ||
+						ver.startsWith("0.2.")) &&
+					(pkg.startsWith("@blokjs/") || pkg === "blokctl")
+				) {
+					deps[pkg] = BLOKJS_DEP_RANGE;
 				}
 			}
 		}
