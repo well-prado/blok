@@ -199,9 +199,17 @@ export default class Configuration implements Config {
 		if (preloaded !== undefined) {
 			// Boot-time scan path — workflow object already loaded, just
 			// normalize it through the same v1→v2 pipeline as disk-loaded
-			// workflows.
+			// workflows. **Deep-clone first** so per-request mutations
+			// (`NodeBase.blueprintMapper` → `mapper.replaceObjectStrings`
+			// resolves `js/...` expressions in place) don't bleed across
+			// requests by baking the first request's resolved values into
+			// the shared route-table workflow object. JSON-clone is safe:
+			// workflow definitions are pure data, and helper proxies like
+			// `$.req.body` serialize to their `js/...` string form via
+			// `Symbol.toPrimitive` / `toJSON`.
 			const { normalizeWorkflow } = await import("./workflow/WorkflowNormalizer");
-			this.workflow = normalizeWorkflow(preloaded, workflowNameInPath) as unknown as typeof this.workflow;
+			const fresh = JSON.parse(JSON.stringify(preloaded));
+			this.workflow = normalizeWorkflow(fresh, workflowNameInPath) as unknown as typeof this.workflow;
 		} else {
 			const resolver = new ConfigurationResolver(opts as GlobalOptions);
 			this.workflow = await resolver.get("local", workflowNameInPath as string);
@@ -440,6 +448,14 @@ export default class Configuration implements Config {
 			subworkflow: {
 				resolver: async (node: RunnerNode) => await this.subworkflowResolver(node),
 			},
+			// PR 4 · `wait.for(duration)` / `wait.until(date)` step. Resolves
+			// to a stub node — RunnerSteps intercepts before step.process()
+			// runs, so the stub's `run()` should never fire in practice.
+			// Without this entry, getSteps() throws `Node type wait not found`
+			// at workflow load.
+			wait: {
+				resolver: async (node: RunnerNode) => await this.waitResolver(node),
+			},
 		};
 	}
 
@@ -573,6 +589,27 @@ export default class Configuration implements Config {
 		if (node.stop !== undefined) (clone as RunnerNode).stop = node.stop;
 		if (node.set_var !== undefined) (clone as RunnerNode).set_var = node.set_var;
 		return clone as RunnerNode;
+	}
+
+	/**
+	 * PR 4 · resolve a `wait` step to a stub node. The runner's wait
+	 * primitive (`wait.for`/`wait.until`) is implemented at the
+	 * RunnerSteps level — this resolver exists only to satisfy
+	 * getSteps() at workflow load time so `Node type wait not found`
+	 * doesn't fire on otherwise-valid wait steps.
+	 */
+	protected async waitResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { WaitNode } = await import("./WaitNode");
+		const stub = new WaitNode();
+		stub.node = node.node;
+		stub.name = node.name;
+		stub.type = node.type;
+		stub.active = node.active !== undefined ? node.active : true;
+		stub.stop = node.stop !== undefined ? node.stop : false;
+		const v2 = node as RunnerNode & { waitForMs?: number; waitUntil?: number | string };
+		if (v2.waitForMs !== undefined) stub.waitForMs = v2.waitForMs;
+		if (v2.waitUntil !== undefined) stub.waitUntil = v2.waitUntil;
+		return stub;
 	}
 
 	protected async localResolver(node: RunnerNode): Promise<RunnerNode> {
