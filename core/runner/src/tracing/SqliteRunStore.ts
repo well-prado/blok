@@ -3,6 +3,8 @@ import type { RunStore } from "./RunStore";
 
 const esmRequire = createRequire(import.meta.url);
 import type {
+	CachedStepResult,
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
@@ -10,6 +12,7 @@ import type {
 	RunEvent,
 	RunEventType,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
@@ -49,6 +52,60 @@ interface RunRow {
 	metadata_json: string | null;
 	node_count: number;
 	completed_nodes: number;
+	/**
+	 * Environment scope (Phase 2.1). NULL on rows from before the column
+	 * was added — `rowToRun` defaults those to `"production"` so the
+	 * legacy data still shows up under the default env scope.
+	 */
+	environment: string | null;
+	/**
+	 * Tier 1 replay lineage. NULL on first-class triggered runs; carries
+	 * the source run id when started via `POST /__blok/runs/:id/replay`.
+	 * Added in migration v5.
+	 */
+	replay_of: string | null;
+	/**
+	 * Tier 2 sub-workflow lineage. NULL on first-class triggered runs;
+	 * carries the parent run's id when this run was started by a
+	 * `subworkflow:` step. Added in migration v6.
+	 */
+	parent_run_id: string | null;
+	/**
+	 * Tier 2 sub-workflow lineage. The specific parent NodeRun that
+	 * invoked this sub-workflow. Added in migration v6.
+	 */
+	parent_node_run_id: string | null;
+	/**
+	 * Tier 2 #5 · scheduled dispatch time (ms since epoch). NULL for
+	 * immediate runs. Added in migration v8.
+	 */
+	scheduled_at: number | null;
+	/**
+	 * Tier 2 #5 · TTL deadline (ms since epoch). NULL when no TTL is
+	 * configured. Added in migration v8.
+	 */
+	expires_at: number | null;
+	/**
+	 * Tier 2 #7 · resolved debounce key. NULL on non-debounced runs.
+	 * Added in migration v8.
+	 */
+	debounce_key: string | null;
+	/**
+	 * Tier 2 #7 · debounce mode (`leading` | `trailing`). NULL on non-
+	 * debounced runs. Added in migration v8.
+	 */
+	debounce_mode: string | null;
+	/**
+	 * Tier 2 #7 · pings absorbed by this run. NULL pre-Tier-2-#7;
+	 * `1`+ on debounced runs. Added in migration v8.
+	 */
+	ping_count: number | null;
+	/**
+	 * PR 4 · wait.for / wait.until resume cursor. NULL = no wait
+	 * encountered; `i` = runner finished step i and may resume at i+1
+	 * after a wait dispatchDeferred re-entry. Added in migration v10.
+	 */
+	last_completed_step_index: number | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -75,6 +132,27 @@ interface NodeRunRow {
 	depth: number;
 	step_index: number;
 	metrics_json: string | null;
+	/**
+	 * JSON-serialized {@link NodeRun.cached} lineage. NULL on rows that did
+	 * not short-circuit via the idempotency cache. Added in migration v4.
+	 */
+	cached_json: string | null;
+	/**
+	 * JSON-serialized {@link NodeRun.attempts} array. NULL when the node
+	 * succeeded on first try (`maxAttempts: 1` default). Added in migration v5.
+	 */
+	attempts_json: string | null;
+}
+
+interface IdempotencyCacheRow {
+	workflow_name: string;
+	step_id: string;
+	idempotency_key: string;
+	data_json: string;
+	cached_at: number;
+	expires_at: number | null;
+	source_run_id: string;
+	source_node_run_id: string;
 }
 
 interface EventRow {
@@ -266,6 +344,191 @@ export class SqliteRunStore implements RunStore {
 					);
 				`,
 			},
+			{
+				// Phase 2.1 · environment scoping. Add `environment` to
+				// workflow_runs so list views can filter by env. Existing
+				// rows get NULL (which `rowToRun` reads as `production` —
+				// see RunRow comment) so legacy data still appears under
+				// the default scope without a backfill.
+				version: 3,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN environment TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_environment ON workflow_runs(environment);
+				`,
+			},
+			{
+				// Tier 1 · idempotency caching. Adds:
+				//  - `node_runs.cached_json` for cache-hit lineage on a node
+				//    that short-circuited rather than ran.
+				//  - `idempotency_cache` table for the cache backend keyed
+				//    on (workflow_name, step_id, idempotency_key). Existing
+				//    `node_runs` rows get NULL `cached_json` (a non-cached
+				//    historical execution).
+				version: 4,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN cached_json TEXT;
+
+					CREATE TABLE IF NOT EXISTS idempotency_cache (
+						workflow_name TEXT NOT NULL,
+						step_id TEXT NOT NULL,
+						idempotency_key TEXT NOT NULL,
+						data_json TEXT NOT NULL,
+						cached_at INTEGER NOT NULL,
+						expires_at INTEGER,
+						source_run_id TEXT NOT NULL,
+						source_node_run_id TEXT NOT NULL,
+						PRIMARY KEY (workflow_name, step_id, idempotency_key)
+					);
+
+					CREATE INDEX IF NOT EXISTS idx_idem_expires ON idempotency_cache(expires_at);
+				`,
+			},
+			{
+				// Tier 1 · retry loop + replay lineage. Adds:
+				//  - `node_runs.attempts_json` for the per-attempt failure
+				//    history before the node ultimately succeeded or was
+				//    fail-noded (capped at MAX_STORED_ATTEMPTS by RunTracker).
+				//  - `workflow_runs.replay_of` for the source run id when a
+				//    run is started via `POST /__blok/runs/:id/replay`.
+				// Existing rows: NULL on both → "no retries; not a replay".
+				version: 5,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN attempts_json TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN replay_of TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of);
+				`,
+			},
+			{
+				// Tier 2 · sub-workflow lineage. Adds parent/child run linkage:
+				//  - `workflow_runs.parent_run_id` — the parent run that
+				//    invoked this run via a `subworkflow:` step.
+				//  - `workflow_runs.parent_node_run_id` — the specific
+				//    NodeRun within the parent that was the sub-workflow
+				//    step (lets Studio jump to the exact invocation site).
+				// Index on parent_run_id for efficient `getRunsByParent` queries.
+				// Existing rows: NULL on both → "first-class triggered run".
+				version: 6,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
+					CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
+				`,
+			},
+			{
+				// Tier 2 #6 · concurrency keys. Adds a per-(workflow, key)
+				// in-flight slot table. Composite PK on (workflow_name,
+				// concurrency_key, run_id) lets a single run hold at most
+				// one slot per bucket while still permitting the
+				// `concurrencyLimit` runs to coexist within a bucket.
+				// `expires_at` is the lease upper bound — covers
+				// crash-safety when a process dies before releasing.
+				version: 7,
+				sql: `
+					CREATE TABLE IF NOT EXISTS concurrency_locks (
+						workflow_name TEXT NOT NULL,
+						concurrency_key TEXT NOT NULL,
+						run_id TEXT NOT NULL,
+						acquired_at INTEGER NOT NULL,
+						expires_at INTEGER NOT NULL,
+						PRIMARY KEY (workflow_name, concurrency_key, run_id)
+					);
+					CREATE INDEX IF NOT EXISTS idx_locks_expires ON concurrency_locks(expires_at);
+					CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key);
+				`,
+			},
+			{
+				// Tier 2 #5 + #7 · scheduling fields on workflow_runs:
+				//  - `scheduled_at` — dispatch time (ms since epoch) for
+				//    runs deferred via `trigger.delay`. NULL on immediate
+				//    runs.
+				//  - `expires_at` — TTL deadline (ms since epoch). When
+				//    `now > expires_at` at dispatch time, the run is
+				//    marked `expired` and skipped.
+				//  - `debounce_key` — resolved key for runs that absorbed
+				//    pings via `trigger.debounce`. NULL on non-debounced
+				//    runs.
+				//  - `debounce_mode` — `leading` | `trailing`.
+				//  - `ping_count` — number of pings absorbed by this run.
+				// Indexes:
+				//  - `idx_runs_scheduled_at` for "list scheduled runs"
+				//    queries (Studio surface).
+				//  - `idx_runs_debounce_key` for the debounce coordinator's
+				//    "is there an active run for this key?" lookup
+				//    (in-memory map is the hot path; SQLite is the
+				//    fallback / restart-recovery).
+				// Existing rows: NULL on every new column. Backward-compat.
+				version: 8,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN scheduled_at INTEGER;
+					ALTER TABLE workflow_runs ADD COLUMN expires_at INTEGER;
+					ALTER TABLE workflow_runs ADD COLUMN debounce_key TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN debounce_mode TEXT;
+					ALTER TABLE workflow_runs ADD COLUMN ping_count INTEGER;
+					CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at);
+					CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key);
+				`,
+			},
+			{
+				// Tier 2 #5+#7 follow-up · durable scheduler.
+				//
+				// `scheduled_dispatches` persists the minimum payload needed
+				// to re-fire a deferred dispatch after a process crash. The
+				// `DeferredRunScheduler` writes a row when a dispatch is
+				// scheduled, deletes it when the dispatch fires or is
+				// cancelled. On boot, HttpTrigger.recoverDispatches scans
+				// the table, marks past-due+TTL-expired rows as `expired`,
+				// and re-registers timers for live dispatches.
+				//
+				// Workers don't need this — broker (BullMQ/NATS) already
+				// owns delayed delivery.
+				//
+				// Columns:
+				//  - `run_id` — PK, FK-style reference to `workflow_runs.id`.
+				//  - `workflow_name` — used by trigger boot recovery to
+				//    filter rows it owns (when multiple HTTP triggers
+				//    share the same store).
+				//  - `trigger_type` — `"http"` for v1; future triggers
+				//    can opt in by writing this column.
+				//  - `scheduled_at` — ms since epoch when to fire.
+				//  - `expires_at` — TTL deadline (NULL = no TTL).
+				//  - `dispatch_status` — `"delayed"` | `"queued"` |
+				//    `"debounced"`. Mirrors the run record's status.
+				//  - `payload_json` — JSON-serialized minimal Context
+				//    subset (HTTP: method, path, headers, body, params,
+				//    query, workflow_path). Headers are pre-stripped of
+				//    sensitive keys (authorization, cookie, x-api-key).
+				//  - `created_at` — when the row was first written.
+				version: 9,
+				sql: `
+					CREATE TABLE IF NOT EXISTS scheduled_dispatches (
+						run_id TEXT PRIMARY KEY,
+						workflow_name TEXT NOT NULL,
+						trigger_type TEXT NOT NULL,
+						scheduled_at INTEGER NOT NULL,
+						expires_at INTEGER,
+						dispatch_status TEXT NOT NULL,
+						payload_json TEXT NOT NULL,
+						created_at INTEGER NOT NULL
+					);
+					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_at ON scheduled_dispatches(scheduled_at);
+					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name);
+				`,
+			},
+			{
+				// PR 4 — wait.for(duration) / wait.until(date) step primitive.
+				//
+				// On dispatchDeferred re-entry, the runner needs to know which
+				// steps already completed in the previous pass so it can skip
+				// past them. last_completed_step_index is the canonical
+				// resume cursor — runner increments after each non-wait
+				// step, then on re-entry skips steps with
+				// stepIndex <= last_completed_step_index. Default NULL (= no
+				// resume cursor; runner starts at step 0 as today).
+				version: 10,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN last_completed_step_index INTEGER;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -298,8 +561,11 @@ export class SqliteRunStore implements RunStore {
 			INSERT OR REPLACE INTO workflow_runs
 			(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 			 status, started_at, finished_at, duration_ms, error_json,
-			 tags_json, metadata_json, node_count, completed_nodes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
+			 parent_run_id, parent_node_run_id,
+			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count,
+			 last_completed_step_index)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -316,6 +582,16 @@ export class SqliteRunStore implements RunStore {
 			run.metadata ? JSON.stringify(run.metadata) : null,
 			run.nodeCount,
 			run.completedNodes,
+			run.environment ?? null,
+			run.replayOf ?? null,
+			run.parentRunId ?? null,
+			run.parentNodeRunId ?? null,
+			run.scheduledAt ?? null,
+			run.expiresAt ?? null,
+			run.debounceKey ?? null,
+			run.debounceMode ?? null,
+			run.pingCount ?? null,
+			run.lastCompletedStepIndex ?? null,
 		);
 	}
 
@@ -351,6 +627,46 @@ export class SqliteRunStore implements RunStore {
 			setClauses.push("metadata_json = ?");
 			values.push(JSON.stringify(updates.metadata));
 		}
+		if (updates.replayOf !== undefined) {
+			setClauses.push("replay_of = ?");
+			values.push(updates.replayOf);
+		}
+		if (updates.parentRunId !== undefined) {
+			setClauses.push("parent_run_id = ?");
+			values.push(updates.parentRunId);
+		}
+		if (updates.parentNodeRunId !== undefined) {
+			setClauses.push("parent_node_run_id = ?");
+			values.push(updates.parentNodeRunId);
+		}
+		if (updates.scheduledAt !== undefined) {
+			setClauses.push("scheduled_at = ?");
+			values.push(updates.scheduledAt);
+		}
+		if (updates.expiresAt !== undefined) {
+			setClauses.push("expires_at = ?");
+			values.push(updates.expiresAt);
+		}
+		if (updates.debounceKey !== undefined) {
+			setClauses.push("debounce_key = ?");
+			values.push(updates.debounceKey);
+		}
+		if (updates.debounceMode !== undefined) {
+			setClauses.push("debounce_mode = ?");
+			values.push(updates.debounceMode);
+		}
+		if (updates.pingCount !== undefined) {
+			setClauses.push("ping_count = ?");
+			values.push(updates.pingCount);
+		}
+		if (updates.lastCompletedStepIndex !== undefined) {
+			setClauses.push("last_completed_step_index = ?");
+			values.push(updates.lastCompletedStepIndex);
+		}
+		if (updates.startedAt !== undefined) {
+			setClauses.push("started_at = ?");
+			values.push(updates.startedAt);
+		}
 
 		if (setClauses.length === 0) return;
 
@@ -366,8 +682,8 @@ export class SqliteRunStore implements RunStore {
 			(id, run_id, node_name, node_type, runtime_kind,
 			 status, started_at, finished_at, duration_ms,
 			 inputs_json, outputs_json, error_json,
-			 parent_node_id, depth, step_index, metrics_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 parent_node_id, depth, step_index, metrics_json, cached_json, attempts_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			nodeRun.id,
@@ -386,6 +702,8 @@ export class SqliteRunStore implements RunStore {
 			nodeRun.depth,
 			nodeRun.stepIndex,
 			nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
+			nodeRun.cached ? JSON.stringify(nodeRun.cached) : null,
+			nodeRun.attempts ? JSON.stringify(nodeRun.attempts) : null,
 		);
 	}
 
@@ -416,6 +734,14 @@ export class SqliteRunStore implements RunStore {
 		if (updates.metrics !== undefined) {
 			setClauses.push("metrics_json = ?");
 			values.push(JSON.stringify(updates.metrics));
+		}
+		if (updates.cached !== undefined) {
+			setClauses.push("cached_json = ?");
+			values.push(JSON.stringify(updates.cached));
+		}
+		if (updates.attempts !== undefined) {
+			setClauses.push("attempts_json = ?");
+			values.push(JSON.stringify(updates.attempts));
 		}
 
 		if (setClauses.length === 0) return;
@@ -480,6 +806,22 @@ export class SqliteRunStore implements RunStore {
 		if (opts?.status) {
 			conditions.push("status = ?");
 			params.push(opts.status);
+		}
+		// Tier 2 quick-wins — metadata key=value filter via json_extract.
+		// Multiple key=value pairs combine with AND semantics. Indexed scans
+		// aren't possible against arbitrary JSON keys; sequential scan is
+		// acceptable given the runs table has size cap via evictOldRuns.
+		if (opts?.metadata) {
+			const entries = Object.entries(opts.metadata);
+			for (const [k, v] of entries) {
+				// Use prefixed paths for safety: only allow keys matching
+				// /^[a-zA-Z0-9_-]+$/ to prevent JSON path injection. Keys with
+				// special characters silently skip filtering — caller can
+				// always fall back to client-side filter for those.
+				if (!/^[a-zA-Z0-9_-]+$/.test(k)) continue;
+				conditions.push(`json_extract(metadata_json, '$.${k}') = ?`);
+				params.push(v);
+			}
 		}
 		const tags = opts?.tags;
 		if (tags && tags.length > 0) {
@@ -569,6 +911,14 @@ export class SqliteRunStore implements RunStore {
 			| NodeRunRow
 			| undefined;
 		return row ? this.rowToNodeRun(row) : undefined;
+	}
+
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		const rows = this.stmt(
+			"getRunsByParent",
+			"SELECT * FROM workflow_runs WHERE parent_run_id = ? ORDER BY started_at ASC",
+		).all(parentRunId) as unknown as RunRow[];
+		return rows.map((r) => this.rowToRun(r));
 	}
 
 	getEvents(runId: string, since?: number): RunEvent[] {
@@ -888,7 +1238,260 @@ export class SqliteRunStore implements RunStore {
 		this.db.exec("DELETE FROM node_runs");
 		this.db.exec("DELETE FROM workflow_runs");
 		this.db.exec("DELETE FROM dashboards");
+		this.db.exec("DELETE FROM idempotency_cache");
+		this.db.exec("DELETE FROM concurrency_locks");
 		return count;
+	}
+
+	// === Idempotency cache ===
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string): CachedStepResult | null {
+		const row = this.stmt(
+			"getIdempotencyCache",
+			"SELECT * FROM idempotency_cache WHERE workflow_name = ? AND step_id = ? AND idempotency_key = ?",
+		).get(workflowName, stepId, key) as IdempotencyCacheRow | undefined;
+		if (!row) return null;
+		if (row.expires_at !== null && row.expires_at <= Date.now()) {
+			// Lazy purge — remove the expired entry inline so subsequent
+			// reads don't even pay for the row materialization.
+			this.stmt(
+				"deleteExpiredIdempotency",
+				"DELETE FROM idempotency_cache WHERE workflow_name = ? AND step_id = ? AND idempotency_key = ?",
+			).run(workflowName, stepId, key);
+			return null;
+		}
+		return {
+			data: JSON.parse(row.data_json),
+			cachedAt: row.cached_at,
+			expiresAt: row.expires_at,
+			sourceRunId: row.source_run_id,
+			sourceNodeRunId: row.source_node_run_id,
+		};
+	}
+
+	setIdempotencyCache(workflowName: string, stepId: string, key: string, entry: CachedStepResult): void {
+		this.stmt(
+			"setIdempotencyCache",
+			`
+			INSERT OR REPLACE INTO idempotency_cache
+			(workflow_name, step_id, idempotency_key, data_json, cached_at, expires_at,
+			 source_run_id, source_node_run_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`,
+		).run(
+			workflowName,
+			stepId,
+			key,
+			JSON.stringify(entry.data),
+			entry.cachedAt,
+			entry.expiresAt,
+			entry.sourceRunId,
+			entry.sourceNodeRunId,
+		);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		const result = this.stmt(
+			"purgeExpiredIdempotency",
+			"DELETE FROM idempotency_cache WHERE expires_at IS NOT NULL AND expires_at <= ?",
+		).run(now);
+		return result.changes;
+	}
+
+	// === Concurrency gating (Tier 2 #6) ===
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ConcurrencySlotResult {
+		// Wrap the read-modify-write in a transaction so two concurrent
+		// `acquireConcurrencySlot` calls can't both see N < limit and
+		// both grant a slot. better-sqlite3 / bun:sqlite serialize within
+		// a single connection; the transaction is the safety net for any
+		// future multi-connection setup.
+		const txn = this.db.transaction((): ConcurrencySlotResult => {
+			const now = Date.now();
+
+			// Lazy-purge expired leases for THIS bucket so we don't deny
+			// based on a slot held by a process that crashed mid-run.
+			this.stmt(
+				"deleteExpiredLocksForBucket",
+				"DELETE FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND expires_at <= ?",
+			).run(workflowName, concurrencyKey, now);
+
+			// Idempotent re-acquire — if the same runId already holds a
+			// slot, refresh its lease (UPSERT on PK) and report success
+			// without growing the count.
+			const existing = this.stmt(
+				"getLockForRun",
+				"SELECT 1 FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+			).get(workflowName, concurrencyKey, runId) as { 1: number } | undefined;
+
+			if (existing) {
+				this.stmt(
+					"refreshLockLease",
+					"UPDATE concurrency_locks SET expires_at = ? WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+				).run(leaseExpiresAt, workflowName, concurrencyKey, runId);
+				const count =
+					(
+						this.stmt(
+							"countLocksForBucket",
+							"SELECT COUNT(*) as c FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ?",
+						).get(workflowName, concurrencyKey) as { c: number } | undefined
+					)?.c ?? 0;
+				return { acquired: true, currentInFlight: count };
+			}
+
+			const currentCount =
+				(
+					this.stmt(
+						"countLocksForBucket",
+						"SELECT COUNT(*) as c FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ?",
+					).get(workflowName, concurrencyKey) as { c: number } | undefined
+				)?.c ?? 0;
+
+			if (currentCount >= concurrencyLimit) {
+				return { acquired: false, currentInFlight: currentCount };
+			}
+
+			this.stmt(
+				"insertLock",
+				`INSERT INTO concurrency_locks
+				(workflow_name, concurrency_key, run_id, acquired_at, expires_at)
+				VALUES (?, ?, ?, ?, ?)`,
+			).run(workflowName, concurrencyKey, runId, now, leaseExpiresAt);
+
+			return { acquired: true, currentInFlight: currentCount + 1 };
+		});
+
+		return txn();
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		this.stmt(
+			"releaseLock",
+			"DELETE FROM concurrency_locks WHERE workflow_name = ? AND concurrency_key = ? AND run_id = ?",
+		).run(workflowName, concurrencyKey, runId);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		const result = this.stmt("purgeExpiredLocks", "DELETE FROM concurrency_locks WHERE expires_at <= ?").run(now);
+		return result.changes;
+	}
+
+	getConcurrencySnapshot(now: number): Array<{
+		workflowName: string;
+		concurrencyKey: string;
+		leases: Array<{ runId: string; expiresAt: number }>;
+	}> {
+		const rows = this.db
+			.prepare("SELECT workflow_name, concurrency_key, run_id, expires_at FROM concurrency_locks WHERE expires_at > ?")
+			.all(now) as Array<{
+			workflow_name: string;
+			concurrency_key: string;
+			run_id: string;
+			expires_at: number;
+		}>;
+		const buckets = new Map<
+			string,
+			{ workflowName: string; concurrencyKey: string; leases: Array<{ runId: string; expiresAt: number }> }
+		>();
+		for (const r of rows) {
+			const key = `${r.workflow_name}\x1f${r.concurrency_key}`;
+			let bucket = buckets.get(key);
+			if (!bucket) {
+				bucket = { workflowName: r.workflow_name, concurrencyKey: r.concurrency_key, leases: [] };
+				buckets.set(key, bucket);
+			}
+			bucket.leases.push({ runId: r.run_id, expiresAt: r.expires_at });
+		}
+		return Array.from(buckets.values());
+	}
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
+		this.stmt(
+			"upsertScheduledDispatch",
+			`INSERT INTO scheduled_dispatches
+				(run_id, workflow_name, trigger_type, scheduled_at, expires_at, dispatch_status, payload_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(run_id) DO UPDATE SET
+				scheduled_at = excluded.scheduled_at,
+				expires_at = excluded.expires_at,
+				dispatch_status = excluded.dispatch_status,
+				payload_json = excluded.payload_json`,
+		).run(
+			row.runId,
+			row.workflowName,
+			row.triggerType,
+			row.scheduledAt,
+			row.expiresAt ?? null,
+			row.dispatchStatus,
+			JSON.stringify(row.payload ?? null),
+			row.createdAt,
+		);
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		const result = this.stmt("deleteScheduledDispatch", "DELETE FROM scheduled_dispatches WHERE run_id = ?").run(runId);
+		return result.changes > 0;
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[] {
+		const triggerType = opts?.triggerType;
+		const status = opts?.status;
+		const clauses: string[] = [];
+		const args: (string | number)[] = [];
+		if (triggerType) {
+			clauses.push("trigger_type = ?");
+			args.push(triggerType);
+		}
+		if (status) {
+			clauses.push("dispatch_status = ?");
+			args.push(status);
+		}
+		const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+		const sql = `SELECT * FROM scheduled_dispatches ${where} ORDER BY scheduled_at ASC`;
+		const rows = this.db.prepare(sql).all(...args) as Array<{
+			run_id: string;
+			workflow_name: string;
+			trigger_type: string;
+			scheduled_at: number;
+			expires_at: number | null;
+			dispatch_status: string;
+			payload_json: string;
+			created_at: number;
+		}>;
+		return rows.map((r) => {
+			let parsedPayload: unknown = null;
+			try {
+				parsedPayload = JSON.parse(r.payload_json);
+			} catch {
+				parsedPayload = null;
+			}
+			return {
+				runId: r.run_id,
+				workflowName: r.workflow_name,
+				triggerType: r.trigger_type,
+				scheduledAt: r.scheduled_at,
+				expiresAt: r.expires_at ?? undefined,
+				dispatchStatus: r.dispatch_status as ScheduledDispatchRow["dispatchStatus"],
+				payload: parsedPayload,
+				createdAt: r.created_at,
+			};
+		});
+	}
+
+	purgeExpiredScheduledDispatches(now: number): number {
+		const result = this.stmt(
+			"purgeExpiredScheduledDispatches",
+			"DELETE FROM scheduled_dispatches WHERE expires_at IS NOT NULL AND expires_at < ?",
+		).run(now);
+		return result.changes;
 	}
 
 	deleteRunsBefore(timestamp: number): number {
@@ -940,6 +1543,19 @@ export class SqliteRunStore implements RunStore {
 			metadata: row.metadata_json ? JSON.parse(row.metadata_json) : undefined,
 			nodeCount: row.node_count,
 			completedNodes: row.completed_nodes,
+			// Pre-Phase-2.1 rows have NULL `environment` — present them as
+			// "production" so the EnvChip default-scope still surfaces
+			// historical data without a backfill.
+			environment: row.environment ?? "production",
+			replayOf: row.replay_of ?? undefined,
+			parentRunId: row.parent_run_id ?? undefined,
+			parentNodeRunId: row.parent_node_run_id ?? undefined,
+			scheduledAt: row.scheduled_at ?? undefined,
+			expiresAt: row.expires_at ?? undefined,
+			debounceKey: row.debounce_key ?? undefined,
+			debounceMode: (row.debounce_mode ?? undefined) as "leading" | "trailing" | undefined,
+			pingCount: row.ping_count ?? undefined,
+			lastCompletedStepIndex: row.last_completed_step_index ?? undefined,
 		};
 	}
 
@@ -961,6 +1577,8 @@ export class SqliteRunStore implements RunStore {
 			depth: row.depth,
 			stepIndex: row.step_index,
 			metrics: row.metrics_json ? JSON.parse(row.metrics_json) : undefined,
+			cached: row.cached_json ? (JSON.parse(row.cached_json) as NodeRun["cached"]) : undefined,
+			attempts: row.attempts_json ? (JSON.parse(row.attempts_json) as NodeRun["attempts"]) : undefined,
 		};
 	}
 

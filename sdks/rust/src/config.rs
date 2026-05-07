@@ -17,10 +17,13 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            port: 8080,
+            port: 9002,
             host: "0.0.0.0".into(),
             version: "1.0.0".into(),
-            grpc_port: 50051,
+            // Rust SDK default gRPC port. Mirrors the runner's
+            // `DEFAULT_GRPC_PORTS.rust = 10002` (HTTP port 9002 + 1000) so a
+            // freshly-launched runner and SDK pair speak by default.
+            grpc_port: 10002,
             enable_grpc: false,
             log_level: LogLevel::Info,
             enable_cors: false,
@@ -32,10 +35,10 @@ impl Default for ServerConfig {
 impl ServerConfig {
     /// Load configuration from environment variables with defaults.
     ///
-    /// - `PORT` (default: 8080)
+    /// - `PORT` (default: 9002 — matches `DEFAULT_PORTS.rust` on the runner side)
     /// - `HOST` (default: 0.0.0.0)
     /// - `VERSION` (default: 1.0.0)
-    /// - `GRPC_PORT` (default: 50051)
+    /// - `GRPC_PORT` (default: 10002 — matches `DEFAULT_GRPC_PORTS.rust`)
     /// - `ENABLE_GRPC` (default: false)
     /// - `LOG_LEVEL` (default: INFO)
     /// - `ENABLE_CORS` (default: false)
@@ -45,13 +48,13 @@ impl ServerConfig {
             port: env::var("PORT")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(8080),
+                .unwrap_or(9002),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
             version: env::var("VERSION").unwrap_or_else(|_| "1.0.0".into()),
             grpc_port: env::var("GRPC_PORT")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(50051),
+                .unwrap_or(10002),
             enable_grpc: env::var("ENABLE_GRPC")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -89,9 +92,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.port, 8080);
+        assert_eq!(cfg.port, 9002);
         assert_eq!(cfg.host, "0.0.0.0");
         assert_eq!(cfg.version, "1.0.0");
+        assert_eq!(cfg.grpc_port, 10002);
         assert!(!cfg.enable_grpc);
         assert!(!cfg.enable_cors);
     }

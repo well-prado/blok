@@ -59,3 +59,36 @@ test("Initialize the workflow without inputs", (t) => {
 		}),
 	).toThrow();
 });
+
+test("StepOptsSchema accepts per-step stream_logs flag (master plan §17 Phase 5)", () => {
+	// Per-step `stream_logs: true|false` overrides the env-wide
+	// `BLOK_STREAM_LOGS` flag. Both boolean values must validate; the
+	// field must remain optional so existing workflows pass through
+	// unchanged.
+	expect(() =>
+		StepOptsSchema.parse({
+			name: "long-running-step",
+			node: "runtime-thing",
+			type: "runtime.python3",
+			stream_logs: true,
+		}),
+	).not.toThrow();
+
+	expect(() =>
+		StepOptsSchema.parse({
+			name: "noisy-step",
+			node: "runtime-thing",
+			type: "runtime.python3",
+			stream_logs: false,
+		}),
+	).not.toThrow();
+
+	// Backwards-compat: the field is optional.
+	expect(() =>
+		StepOptsSchema.parse({
+			name: "default-step",
+			node: "runtime-thing",
+			type: "runtime.python3",
+		}),
+	).not.toThrow();
+});

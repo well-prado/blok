@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"ignore": ["node_modules", "dist"]
+		"ignore": ["node_modules", "dist", "**/routeTree.gen.ts"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -19,12 +19,20 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true
+			"recommended": true,
+			"suspicious": {
+				"noThenProperty": "off"
+			}
 		}
 	},
 	"overrides": [
 		{
-			"include": ["**/__tests__/**/*.ts", "**/*.test.ts", "**/*.spec.ts"],
+			"include": [
+				"**/__tests__/**/*.ts",
+				"**/tests/**/*.ts",
+				"**/*.test.ts",
+				"**/*.spec.ts"
+			],
 			"linter": {
 				"rules": {
 					"suspicious": {

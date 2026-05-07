@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using Blok.Core.Errors;
 using Blok.Core.Types;
 
 namespace Blok.Core.Node;
@@ -79,6 +80,25 @@ public class NodeRegistry
                 result.Vars = request.Context.Vars;
             }
 
+            return result;
+        }
+        catch (BlokError be)
+        {
+            // Structured BlokError path (master plan §17): pass the instance
+            // through verbatim so the gRPC servicer can serialize every field
+            // (category, severity, remediation, retryable hints, cause chain,
+            // context snapshot, etc.) into the proto NodeError.
+            stopwatch.Stop();
+            var result = new ExecutionResult
+            {
+                Success = false,
+                Data = null,
+                Errors = be,
+                Metrics = new ExecutionMetrics
+                {
+                    DurationMs = stopwatch.Elapsed.TotalMilliseconds,
+                },
+            };
             return result;
         }
         catch (Exception ex)

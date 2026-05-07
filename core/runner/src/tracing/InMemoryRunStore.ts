@@ -1,10 +1,13 @@
 import type { RunStore } from "./RunStore";
 import type {
+	CachedStepResult,
+	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
@@ -23,6 +26,19 @@ export class InMemoryRunStore implements RunStore {
 	private events: Map<string, RunEvent[]> = new Map(); // runId → RunEvent[]
 	private logs: Map<string, TraceLogEntry[]> = new Map(); // runId → LogEntry[]
 	private dashboards: Map<string, Dashboard> = new Map();
+	private idempotencyCache: Map<string, CachedStepResult> = new Map();
+	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
+	private scheduledDispatches: Map<string, ScheduledDispatchRow> = new Map();
+
+	private idemKey(workflowName: string, stepId: string, key: string): string {
+		// US (\x1f) is non-printable and never appears in identifiers, so it
+		// cannot collide with characters in workflow / step / key strings.
+		return `${workflowName}\x1f${stepId}\x1f${key}`;
+	}
+
+	private concurrencyBucketKey(workflowName: string, concurrencyKey: string): string {
+		return `${workflowName}\x1f${concurrencyKey}`;
+	}
 
 	// === Writes ===
 
@@ -80,6 +96,16 @@ export class InMemoryRunStore implements RunStore {
 			const filterTags = opts.tags;
 			runs = runs.filter((r) => r.tags && filterTags.every((tag) => r.tags?.includes(tag)));
 		}
+		if (opts?.metadata) {
+			const entries = Object.entries(opts.metadata);
+			if (entries.length > 0) {
+				runs = runs.filter(
+					(r) =>
+						r.metadata != null &&
+						entries.every(([k, v]) => r.metadata?.[k] !== undefined && String(r.metadata[k]) === v),
+				);
+			}
+		}
 
 		// asc = oldest first (a.startedAt - b.startedAt), desc = newest first
 		const sortDir = opts?.sort === "asc" ? 1 : -1;
@@ -99,6 +125,15 @@ export class InMemoryRunStore implements RunStore {
 
 	getNodeRun(nodeRunId: string): NodeRun | undefined {
 		return this.nodeRunIndex.get(nodeRunId);
+	}
+
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		const matches: WorkflowRun[] = [];
+		for (const run of this.runs.values()) {
+			if (run.parentRunId === parentRunId) matches.push(run);
+		}
+		matches.sort((a, b) => a.startedAt - b.startedAt);
+		return matches;
 	}
 
 	getEvents(runId: string, since?: number): RunEvent[] {
@@ -354,6 +389,8 @@ export class InMemoryRunStore implements RunStore {
 		this.events.clear();
 		this.logs.clear();
 		this.dashboards.clear();
+		this.idempotencyCache.clear();
+		this.concurrencyLocks.clear();
 		return count;
 	}
 
@@ -379,6 +416,150 @@ export class InMemoryRunStore implements RunStore {
 			if (run?.status === "running") continue;
 			this.deleteRun(runId);
 		}
+	}
+
+	// === Idempotency cache ===
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string): CachedStepResult | null {
+		const k = this.idemKey(workflowName, stepId, key);
+		const entry = this.idempotencyCache.get(k);
+		if (!entry) return null;
+		if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+			this.idempotencyCache.delete(k);
+			return null;
+		}
+		return entry;
+	}
+
+	setIdempotencyCache(workflowName: string, stepId: string, key: string, entry: CachedStepResult): void {
+		this.idempotencyCache.set(this.idemKey(workflowName, stepId, key), entry);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		let removed = 0;
+		for (const [k, entry] of this.idempotencyCache.entries()) {
+			if (entry.expiresAt !== null && entry.expiresAt <= now) {
+				this.idempotencyCache.delete(k);
+				removed++;
+			}
+		}
+		return removed;
+	}
+
+	// === Concurrency gating (Tier 2 #6) ===
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	): ConcurrencySlotResult {
+		const bucketKey = this.concurrencyBucketKey(workflowName, concurrencyKey);
+		let bucket = this.concurrencyLocks.get(bucketKey);
+		if (!bucket) {
+			bucket = new Map();
+			this.concurrencyLocks.set(bucketKey, bucket);
+		}
+
+		// Lazy-purge expired leases for THIS bucket so we don't deny based
+		// on a slot held by a process that crashed mid-run.
+		const now = Date.now();
+		for (const [otherRunId, expiresAt] of bucket) {
+			if (expiresAt <= now) bucket.delete(otherRunId);
+		}
+
+		// Idempotent re-acquire — if the same runId already holds a slot,
+		// refresh its lease and report success without growing the count.
+		if (bucket.has(runId)) {
+			bucket.set(runId, leaseExpiresAt);
+			return { acquired: true, currentInFlight: bucket.size };
+		}
+
+		if (bucket.size >= concurrencyLimit) {
+			return { acquired: false, currentInFlight: bucket.size };
+		}
+
+		bucket.set(runId, leaseExpiresAt);
+		return { acquired: true, currentInFlight: bucket.size };
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		const bucketKey = this.concurrencyBucketKey(workflowName, concurrencyKey);
+		const bucket = this.concurrencyLocks.get(bucketKey);
+		if (!bucket) return;
+		bucket.delete(runId);
+		if (bucket.size === 0) this.concurrencyLocks.delete(bucketKey);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		let removed = 0;
+		for (const [bucketKey, bucket] of this.concurrencyLocks.entries()) {
+			for (const [runId, expiresAt] of bucket) {
+				if (expiresAt <= now) {
+					bucket.delete(runId);
+					removed++;
+				}
+			}
+			if (bucket.size === 0) this.concurrencyLocks.delete(bucketKey);
+		}
+		return removed;
+	}
+
+	getConcurrencySnapshot(now: number): Array<{
+		workflowName: string;
+		concurrencyKey: string;
+		leases: Array<{ runId: string; expiresAt: number }>;
+	}> {
+		const out: Array<{
+			workflowName: string;
+			concurrencyKey: string;
+			leases: Array<{ runId: string; expiresAt: number }>;
+		}> = [];
+		for (const [bucketKey, bucket] of this.concurrencyLocks.entries()) {
+			const [workflowName, concurrencyKey] = bucketKey.split("\x1f");
+			const leases: Array<{ runId: string; expiresAt: number }> = [];
+			for (const [runId, expiresAt] of bucket) {
+				if (expiresAt > now) leases.push({ runId, expiresAt });
+			}
+			if (leases.length > 0) out.push({ workflowName, concurrencyKey, leases });
+		}
+		return out;
+	}
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+
+	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
+		// Clone to avoid external mutations bleeding into the store.
+		this.scheduledDispatches.set(row.runId, { ...row });
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		return this.scheduledDispatches.delete(runId);
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[] {
+		const triggerType = opts?.triggerType;
+		const status = opts?.status;
+		const out: ScheduledDispatchRow[] = [];
+		for (const row of this.scheduledDispatches.values()) {
+			if (triggerType && row.triggerType !== triggerType) continue;
+			if (status && row.dispatchStatus !== status) continue;
+			out.push({ ...row });
+		}
+		out.sort((a, b) => a.scheduledAt - b.scheduledAt);
+		return out;
+	}
+
+	purgeExpiredScheduledDispatches(now: number): number {
+		let removed = 0;
+		for (const [runId, row] of this.scheduledDispatches.entries()) {
+			if (row.expiresAt !== undefined && row.expiresAt < now) {
+				this.scheduledDispatches.delete(runId);
+				removed++;
+			}
+		}
+		return removed;
 	}
 
 	close(): void {

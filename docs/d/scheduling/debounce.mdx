@@ -1,0 +1,415 @@
+---
+title: "Debounce"
+description: "Coalesce rapid same-key triggers into one delayed run. Trailing for autosave; leading for click suppression."
+icon: "filter"
+---
+
+import { StudioRunHeader, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `debounce` on a trigger and rapid same-key dispatches collapse
+into one run instead of N. Trailing mode waits for silence; leading
+mode fires once and suppresses follow-ups. The pattern matches Lodash
+`_.debounce` semantics with a few additions for tail-latency
+guarantees.
+
+## Quickstart — document autosave
+
+A document save endpoint that collapses rapid keystrokes into one save
+500ms after the user stops typing, but no later than 5s after the
+first keystroke:
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "save-doc",
+  version: "1.0.0",
+  trigger: {
+    http: {
+      method: "POST",
+      path: "/save/:docId",
+      debounce: {
+        key: $.req.params.docId,
+        mode: "trailing",
+        delay: "500ms",
+        maxDelay: "5s",
+      },
+    },
+  },
+  steps: [
+    { id: "save", use: "@blokjs/postgres-write", inputs: { row: $.req.body } },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "save-doc",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/save/:docId",
+      "debounce": {
+        "key": "$.req.params.docId",
+        "mode": "trailing",
+        "delay": "500ms",
+        "maxDelay": "5s"
+      }
+    }
+  },
+  "steps": [
+    { "id": "save", "use": "@blokjs/postgres-write", "inputs": { "row": "$.req.body" } }
+  ]
+}
+```
+</CodeGroup>
+
+The first POST creates a `delayed` run with `pingCount: 1`. Each
+subsequent POST within 500ms returns 202 Accepted with `intoRunId`
+pointing at the active run, and bumps the active run's `pingCount`.
+The save fires once when 500ms of silence pass, OR when 5s have
+elapsed since the first ping (whichever comes first).
+
+## Field reference
+
+Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](core/workflow-helper/src/types/TriggerOpts.ts#L128-L163).
+
+<ParamField path="key" type="string" required>
+  Debounce key — literal string or `$.<path>` proxy expression
+  evaluated against the live `ctx`. Pings sharing the resolved key
+  collapse. Typically derived from the request payload (`$.req.params.docId`,
+  `$.req.body.userId`).
+</ParamField>
+
+<ParamField path="mode" type='"leading" | "trailing"' default='"trailing"'>
+  `trailing` (default) waits for `delay` ms of silence then fires once
+  with the latest payload. `leading` fires immediately and suppresses
+  follow-ups within `delay` ms.
+</ParamField>
+
+<ParamField path="delay" type="number ms or duration string" required>
+  Debounce window. Number (ms) or
+  [duration string](/d/scheduling/overview#duration-grammar)
+  (`"500ms"`, `"5s"`, `"2m"`). In trailing mode, this is the silence
+  window. In leading mode, this is the suppression window after the
+  first fire.
+</ParamField>
+
+<ParamField path="maxDelay" type="number ms or duration string">
+  Force a fire after this many ms even if pings keep coming. Bounds
+  tail latency. Must be `>= delay` when set. Ignored in leading mode
+  (the run already fired).
+</ParamField>
+
+## Modes
+
+### Trailing (default) — wait for silence
+
+Each ping resets a `delay` ms timer. The run fires after `delay` ms
+of silence. The first ping creates a `debounced` run (transient);
+subsequent pings within the window are `debounced` terminal with
+`intoRunId` pointing at the active run.
+
+```
+T=0ms    POST → run_a created, pingCount=1, status="debounced", timer=500ms
+T=200ms  POST → run_b created, status="debounced" terminal, intoRunId=run_a, run_a.pingCount=2, timer reset to 700ms
+T=400ms  POST → run_c created, status="debounced" terminal, intoRunId=run_a, run_a.pingCount=3, timer reset to 900ms
+T=900ms  silence → timer fires → run_a flips to "running", executes the save, completes
+```
+
+### Trailing with `maxDelay` — bounded tail latency
+
+Continuous pings extend the silence window indefinitely. `maxDelay`
+caps the wait — the active run fires at `firstPingAt + maxDelay`
+regardless of subsequent pings.
+
+```
+T=0ms     POST → run_a created, timer=500ms, maxDelayDeadline=5000ms
+T=400ms   POST → timer reset to 900ms
+T=900ms   POST → timer reset to 1400ms
+... continuous pings ...
+T=5000ms  maxDelay hit → run_a fires regardless of pings still arriving
+```
+
+This is the right pattern for autosave: collapse keystrokes for typing
+sessions (trailing), but guarantee a save within 5s even if the user
+keeps typing (`maxDelay`).
+
+### Leading — fire then suppress
+
+The first ping fires synchronously through the normal pipeline.
+Subsequent pings within `delay` ms are dropped with `debounced`
+terminal status. The window closes after `delay` ms of silence.
+
+```
+T=0ms    POST → run_a fires immediately, completes at T=20ms
+T=100ms  POST → run_b created, "debounced" terminal, intoRunId=run_a
+T=300ms  POST → run_c created, "debounced" terminal, intoRunId=run_a
+T=500ms  silence → window closes
+T=600ms  POST → run_d fires immediately (new window)
+```
+
+Useful for click suppression: protect a like button or favorite
+endpoint from double-firing on rapid clicks.
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/like/:postId",
+    debounce: {
+      key: $.req.params.postId,
+      mode: "leading",
+      delay: "1s",
+    },
+  },
+}
+```
+
+## One run record per ping
+
+Each ping creates its own run record via `tracker.startRun()`. The
+trade-off: a 1000-ping burst writes 1000 rows (1 active + 999
+coalesce-loser terminals). Storage grows linearly with ping volume.
+
+The `evictOldRuns` cap on the runs table bounds total storage; tune
+`BLOK_RUNS_CAP` (or the equivalent config) if you expect heavy
+debounce traffic.
+
+`pingCount` on the active run reflects the number of pings absorbed.
+Studio renders it on the run row as **Pings: N**.
+
+## Behavior
+
+The debounce gate runs first, before [delay](/d/scheduling/delay-and-ttl)
+and [concurrency](/d/reliability/concurrency-keys). It owns its own
+scheduling — a debounce config effectively shadows any `delay` on the
+same trigger.
+
+<Steps>
+  <Step title="Resolve key">
+    The runner evaluates `debounce.key` against the live `ctx`. Failure
+    to resolve (throw or `null`) is fail-open — the gate is skipped
+    and the run proceeds synchronously.
+  </Step>
+  <Step title="Register on coordinator">
+    `DebounceCoordinator.register(...)` returns one of three outcomes:
+    `fire-immediate` (leading + fresh window), `schedule-trailing`
+    (trailing + fresh window), or `coalesce` (existing window).
+  </Step>
+  <Step title="On fire-immediate — run synchronously">
+    Caller proceeds through the normal pipeline. The window now
+    suppresses follow-ups for `delay` ms.
+  </Step>
+  <Step title="On schedule-trailing — defer">
+    Mark run `debounced` (transient), register the timer, throw
+    `DeferredDispatchSignal`. HTTP returns 202; worker ACKs.
+  </Step>
+  <Step title="On coalesce — return 202 with `intoRunId`">
+    Mark THIS ping's run `debounced` (terminal) with `intoRunId` set
+    to the active run. Bump the active run's `pingCount` via
+    `tracker.recordDebouncePing` (no event emitted to avoid timeline
+    bloat under burst). HTTP returns 202; worker ACKs.
+  </Step>
+  <Step title="Fire — when the timer expires">
+    `DebounceCoordinator.onFire` calls `dispatchDeferred` on the
+    active run. Status flips `debounced → running` and the steps
+    execute.
+  </Step>
+</Steps>
+
+## HTTP responses
+
+The first ping in a fresh window:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_a91c2
+
+{
+  "runId": "run_a91c2",
+  "workflowName": "save-doc",
+  "status": "debounced",
+  "scheduledAt": 1735741200500,
+  "expiresAt": null,
+  "debounced": true,
+  "pingCount": 1,
+  "intoRunId": null
+}
+```
+
+A coalesce ping (same key, within the window):
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_a91c2
+
+{
+  "runId": "run_b73e4",
+  "workflowName": "save-doc",
+  "status": "debounced",
+  "scheduledAt": null,
+  "expiresAt": null,
+  "debounced": true,
+  "pingCount": 1,
+  "intoRunId": "run_a91c2"
+}
+```
+
+`Location` always points at the run that will actually execute (the
+active run in the coalesce case) so callers can poll a single endpoint
+to track dispatch.
+
+## Durability
+
+Debounce coalescing crosses two state planes: the silence-window
+timer (in-memory) and the persisted dispatch row (sqlite-backed when
+the trigger overrides `extractDispatchPayload`).
+
+| State | Layer | Crash behavior |
+|---|---|---|
+| Active run record + `pingCount` + latest payload | sqlite `workflow_runs` (migration v8) | Survives restart |
+| Silence-window timer (`setTimeout`) | in-memory `DebounceCoordinator` | Lost — recovered timers fire immediately on boot instead of waiting for additional silence |
+| Persisted dispatch row (when opted in) | sqlite `scheduled_dispatches` (migration v9) | Survives restart |
+
+The HTTP trigger overrides `extractDispatchPayload` by default, so
+debounce dispatches go through the durability layer described on the
+[delay & TTL page](/d/scheduling/delay-and-ttl#durability). On boot,
+`HttpTrigger.recoverDispatches()` re-registers timers for any
+`debounced` rows it finds:
+
+- **Past TTL** → marked `expired`, row deleted.
+- **Active dispatch** → re-registered to fire on next tick (silence-
+  window state is gone; the recovered timer doesn't wait for fresh
+  silence). New live pings post-restart open a fresh debounce window
+  using the in-memory coordinator as usual.
+
+Latest-payload-wins still applies — coalesce upserts the row keyed on
+the active run id with the new `scheduledAt` and new payload. The
+recovered timer fires with the most recently captured payload.
+
+For workloads where mid-window crash recovery matters (autosave with
+strict no-loss guarantees), the persisted dispatch row plus
+recover-and-fire-immediately is the v1 contract. Cross-process
+debounce coordination remains single-process only — see the warning
+in the next section.
+
+## Studio surface
+
+Debounced runs appear with a cyan **Debounced** badge:
+
+<StudioRunHeader
+  workflowName="save-doc"
+  runId="run_a91c2"
+  status="debounced"
+  durationMs={2}
+  triggerSummary="POST /save/doc-123"
+  startedAt="2026-05-03 10:42:15"
+  nodeCount={1}
+  completedNodes={0}
+  showReplayButton={false}
+/>
+
+The events timeline carries one <StudioEventBadge type="RUN_DEBOUNCED" />
+per ping with the resolved `debounceKey`, `mode`, optional `intoRunId`,
+and `pingCount`. Coalesce losers don't emit additional events on the
+active run — `tracker.recordDebouncePing` updates the count silently
+to keep the timeline readable under burst.
+
+## Recipes
+
+<AccordionGroup>
+  <Accordion title="Document autosave (trailing + maxDelay)">
+    `mode: "trailing", delay: "500ms", maxDelay: "5s"` keyed on
+    `$.req.params.docId`. Rapid keystrokes collapse into one save
+    after silence; continuous typing guarantees a save within 5
+    seconds of the first keystroke.
+  </Accordion>
+
+  <Accordion title="Click suppression (leading)">
+    `mode: "leading", delay: "1s"` keyed on `$.req.params.postId`. The
+    first like fires; rapid double-clicks within a second drop
+    silently.
+  </Accordion>
+
+  <Accordion title="Search-typeahead (trailing)">
+    `mode: "trailing", delay: "300ms"` keyed on `$.req.body.sessionId`
+    (one debounce window per search session). Fires once when the user
+    stops typing for 300ms.
+  </Accordion>
+
+  <Accordion title="Workflow-wide singleton lock">
+    `mode: "leading", delay: "100ms"` keyed on a **literal string**
+    (e.g. `"global-rebuild-lock"`). The first request fires; concurrent
+    requests within 100ms drop. Useful for self-protecting endpoints
+    that should never run twice in quick succession.
+  </Accordion>
+
+  <Accordion title="Latest-wins payload">
+    Trailing mode with continuous pings — each ping overwrites the
+    captured payload via the closure on the active run. The fire
+    consumes the latest payload, not the first. Document this if your
+    payloads aren't append-only.
+  </Accordion>
+</AccordionGroup>
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Setting maxDelay < delay">
+    Rejected at workflow load (when both are numeric). Make sure the
+    floor (delay) doesn't exceed the ceiling (maxDelay).
+  </Accordion>
+
+  <Accordion title="Expecting maxDelay to apply to leading mode">
+    It doesn't. Leading mode fires immediately, so there's no tail to
+    bound. The schema accepts `maxDelay` on leading-mode debounce for
+    forward-compatibility but it's ignored at runtime.
+  </Accordion>
+
+  <Accordion title="Coalesce losers polluting the runs list">
+    1000 pings under heavy burst = 1000 run records. Tune
+    `evictOldRuns` to bound storage, or filter by `status != debounced`
+    in dashboards. Keep `debounced` records short-lived if they're
+    cluttering the list.
+  </Accordion>
+
+  <Accordion title="Cross-process pings under horizontal scale">
+    `DebounceCoordinator` is in-process. Two processes handling the
+    same key won't coalesce — both will fire. Pin the route to a
+    single process for strict coalescing, or wait for the cross-
+    process backend (planned).
+  </Accordion>
+
+  <Accordion title="Debounce key resolves to null">
+    Fail-open — the gate is skipped and the run proceeds synchronously.
+    Use `BLOK_MAPPER_MODE=strict` if you want fail-fast on missing
+    payload fields in production.
+  </Accordion>
+</AccordionGroup>
+
+## Not yet shipped
+
+- **`mode: "throttle"`** — rate-cap (fire every N ms regardless of
+  pings). Different invariant from debounce; could compose with
+  [concurrency keys](/d/reliability/concurrency-keys) once it lands.
+- **Dispatch-time payload merging** — each ping CONTRIBUTES to the
+  final payload (instead of OVERWRITES). v1 ships latest-wins;
+  contribute-style merging is on the roadmap.
+- **Cross-process debounce** — single-process semantics for v1.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Scheduling overview" icon="clock" href="/d/scheduling/overview">
+    The full set of scheduling primitives.
+  </Card>
+  <Card title="Delay & TTL" icon="hourglass" href="/d/scheduling/delay-and-ttl">
+    Defer dispatch and bound staleness.
+  </Card>
+  <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
+    Per-key rate limiting that runs after debounce.
+  </Card>
+</Columns>

@@ -1,24 +1,22 @@
-import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
+import { branch, workflow } from "@blokjs/helper";
 
-const step: Step = Workflow({
+export default workflow({
 	name: "Empty",
 	version: "1.0.0",
 	description: "Workflow for load testing",
-})
-	.addTrigger("http", {
-		method: "GET",
-		path: "/",
-		accept: "application/json",
-	})
-	.addCondition({
-		node: {
-			name: "filter-request",
-			node: "@blokjs/if-else",
-			type: "module",
+	trigger: {
+		http: {
+			method: "GET",
+			path: "/",
+			accept: "application/json",
 		},
-		conditions: () => {
-			return [new AddIf('ctx.request.query.countries === "true"').build(), new AddElse().build()];
-		},
-	});
-
-export default step;
+	},
+	steps: [
+		branch({
+			id: "filter-request",
+			when: 'ctx.request.query.countries === "true"',
+			then: [],
+			else: [],
+		}),
+	],
+});

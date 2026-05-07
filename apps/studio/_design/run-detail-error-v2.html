@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blok Studio · Direction A · Run Detail (FAILED) Hi-Fi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,wght@1,400;1,500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --blok-green-500: #2bcd71;
+        --blok-green-600: #22a85b;
+        --blok-green-100: rgba(43,205,113,0.12);
+        --bg-canvas: #0b0b0d;
+        --bg-raised: #111113;
+        --bg-overlay: #18181b;
+        --bg-hover: #1f1f23;
+        --ink-1: #f4f4f5;
+        --ink-2: #a1a1aa;
+        --ink-3: #52525b;
+        --hairline: rgba(244,244,245,0.06);
+        --hairline-2: rgba(244,244,245,0.1);
+        --status-running: #3b82f6;
+        --status-failed: #ef4444;
+        --status-completed: var(--blok-green-500);
+        --selected-bg: rgba(43,205,113,0.08);
+        --err-bg: rgba(239,68,68,0.08);
+        --err-border: rgba(239,68,68,0.28);
+        --warn-bg: rgba(245,158,11,0.10);
+        --font-mono: "JetBrains Mono","Fira Code","SF Mono",ui-monospace,monospace;
+        --font-display: "Newsreader",Georgia,serif;
+        --font-ui: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+      }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;background:var(--bg-canvas);color:var(--ink-1);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+      ::-webkit-scrollbar{width:6px;height:6px}
+      ::-webkit-scrollbar-track{background:transparent}
+      ::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:3px}
+
+      .junior-banner{background:var(--bg-overlay);border-bottom:1px solid var(--hairline-2);padding:14px 24px;font-size:12px;color:var(--ink-2)}
+      .junior-pill{display:inline-block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;background:var(--err-bg);color:var(--status-failed);padding:2px 8px;border-radius:999px;margin-right:12px;border:1px solid var(--err-border)}
+
+      .shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;height:calc(100vh - 64px);min-height:800px;max-width:1600px;margin:0 auto}
+      .top{grid-column:1/-1;background:var(--bg-canvas);border-bottom:1px solid var(--hairline-2);display:flex;align-items:center;gap:12px;padding:0 16px}
+      .brand{display:flex;align-items:center;gap:8px;margin-right:4px}
+      .brand svg{height:18px}
+      .brand .wordmark{font-weight:600;font-size:13px;letter-spacing:.03em}
+      .env-chip{display:flex;align-items:center;gap:6px;background:var(--bg-raised);border:1px solid var(--hairline-2);padding:4px 10px 4px 8px;border-radius:6px;font-size:12px;cursor:pointer}
+      .env-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--blok-green-500);box-shadow:0 0 0 3px rgba(43,205,113,.18)}
+      .env-chip .label{color:var(--ink-1);font-weight:500}
+      .env-chip .caret{color:var(--ink-3);font-size:10px}
+      .top .spacer{flex:1}
+      .top .ticker{display:flex;align-items:center;gap:12px;font-size:11px;color:var(--ink-2);font-family:var(--font-mono)}
+      .live-pulse{display:inline-flex;align-items:center;gap:6px;color:var(--blok-green-500);font-weight:500}
+      .live-dot{width:6px;height:6px;border-radius:50%;background:var(--blok-green-500);animation:brand-pulse 2s ease-in-out infinite}
+      @keyframes brand-pulse{0%,100%{box-shadow:0 0 0 0 rgba(43,205,113,.5)}50%{box-shadow:0 0 0 4px rgba(43,205,113,0)}}
+      .kbd{font-family:var(--font-mono);font-size:10px;background:var(--bg-raised);border:1px solid var(--hairline-2);padding:1px 5px;border-radius:3px;color:var(--ink-2)}
+
+      .sidebar{background:var(--bg-canvas);border-right:1px solid var(--hairline);padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+      .nav-section{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);padding:12px 12px 6px}
+      .nav-link{display:flex;align-items:center;gap:10px;padding:6px 12px;font-size:13px;color:var(--ink-2);border-radius:5px;cursor:pointer;position:relative}
+      .nav-link:hover{background:var(--bg-hover);color:var(--ink-1)}
+      .nav-link.active{background:var(--selected-bg);color:var(--ink-1)}
+      .nav-link.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--blok-green-500);border-radius:0 2px 2px 0}
+      .nav-link svg{width:14px;height:14px;opacity:.7}
+      .nav-link.active svg{opacity:1}
+      .nav-link .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+      .nav-link.active .count{color:var(--blok-green-500)}
+
+      .body{display:flex;flex-direction:column;background:var(--bg-canvas);overflow:hidden}
+      .run-header{padding:14px 20px 14px;border-bottom:1px solid var(--hairline-2);display:flex;align-items:flex-start;gap:16px}
+      .run-header .back{color:var(--ink-3);cursor:pointer;margin-top:6px}
+      .run-header .meta{flex:1;min-width:0}
+      .run-title{font-size:18px;font-weight:600;margin:0;display:flex;align-items:center;gap:12px}
+      .status-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;padding:2px 8px;border-radius:999px;font-family:var(--font-mono)}
+      .status-badge .dot{width:6px;height:6px;border-radius:50%}
+      .status-badge.failed{background:var(--err-bg);color:var(--status-failed)}
+      .status-badge.failed .dot{background:var(--status-failed)}
+      .duration-display{font-family:var(--font-display);font-style:italic;font-weight:500;font-size:28px;color:var(--ink-1);line-height:1;letter-spacing:-.01em}
+      .duration-display .unit{font-size:14px;color:var(--ink-3);margin-left:2px}
+      .run-submeta{display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--ink-2);font-family:var(--font-mono);flex-wrap:wrap}
+      .run-submeta .sep{color:var(--ink-3)}
+      .run-submeta .chip-version{background:var(--bg-raised);border:1px solid var(--hairline-2);padding:1px 6px;border-radius:3px;color:var(--ink-1)}
+      .run-actions{display:flex;gap:8px;align-items:flex-start;margin-top:4px}
+      .btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:6px 11px;border-radius:5px;cursor:pointer;border:1px solid transparent}
+      .btn-primary{background:var(--status-failed);color:#fff;font-weight:600}
+      .btn-secondary{background:var(--bg-raised);color:var(--ink-1);border-color:var(--hairline-2)}
+      .btn-secondary:hover{background:var(--bg-hover)}
+      .btn-ghost{background:transparent;color:var(--ink-2)}
+      .btn-ghost:hover{background:var(--bg-hover);color:var(--ink-1)}
+      .btn .kbd{margin-left:4px}
+
+      .panes{flex:1;display:grid;grid-template-columns:240px 1fr 320px;min-height:0;overflow:hidden}
+
+      /* STEP RAIL — failed step highlighted */
+      .step-rail{background:var(--bg-canvas);border-right:1px solid var(--hairline);overflow-y:auto;padding:8px 0}
+      .rail-header{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);padding:8px 16px 4px;display:flex;justify-content:space-between}
+      .step-row{display:flex;align-items:center;gap:10px;padding:7px 16px 7px 14px;cursor:pointer;position:relative;font-size:12.5px;color:var(--ink-2)}
+      .step-row:hover{background:var(--bg-hover)}
+      .step-row.active{background:var(--err-bg);color:var(--ink-1)}
+      .step-row.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;background:var(--status-failed)}
+      .step-row .idx{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);width:12px}
+      .step-row .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+      .step-row .dot.completed{background:var(--blok-green-500)}
+      .step-row .dot.failed{background:var(--status-failed)}
+      .step-row .dot.skipped{background:var(--ink-3);opacity:.5}
+      .step-row .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .step-row .dur{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)}
+      .step-row.active .dur{color:var(--ink-2)}
+      .step-row.skip{opacity:.5}
+
+      .center-pane{background:var(--bg-canvas);overflow-y:auto}
+
+      .err-page{padding:0}
+
+      /* Big error banner — page topic */
+      .err-banner{
+        margin:0 0 24px 0;
+        background:var(--err-bg);
+        border-bottom:1px solid var(--err-border);
+        padding:24px 32px 28px;
+      }
+      .err-cat-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;font-family:var(--font-mono);font-size:11px}
+      .err-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:10px}
+      .err-pill.cat{background:rgba(239,68,68,.18);color:var(--status-failed);border:1px solid var(--err-border)}
+      .err-pill.sev{background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
+      .err-pill.retry{background:rgba(59,130,246,.16);color:var(--status-running);border:1px solid rgba(59,130,246,.3)}
+      .err-cat-row .meta{margin-left:auto;color:var(--ink-3)}
+
+      .err-headline{
+        font-family:var(--font-mono);
+        font-size:18px;
+        font-weight:500;
+        color:var(--ink-1);
+        margin:0 0 12px;
+        line-height:1.4;
+        letter-spacing:-.005em;
+      }
+      .err-headline .tok-class{color:#f4c280}
+      .err-headline .tok-host{color:var(--blok-green-500)}
+      .err-headline .tok-detail{color:var(--ink-2)}
+
+      .err-blame{font-size:12.5px;color:var(--ink-2);font-family:var(--font-mono);line-height:1.6}
+      .err-blame b{color:var(--ink-1);font-weight:500}
+
+      /* Remediation card */
+      .err-section{padding:0 32px 24px}
+      .err-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:24px 0 8px;font-weight:600}
+      .remediation{
+        background:var(--bg-overlay);
+        border-left:3px solid var(--blok-green-500);
+        border-radius:0 6px 6px 0;
+        padding:14px 18px;
+        font-size:13px;
+        color:var(--ink-1);
+        line-height:1.6;
+      }
+      .remediation p{margin:0 0 8px}
+      .remediation p:last-child{margin:0}
+      .remediation code{font-family:var(--font-mono);background:var(--bg-canvas);padding:2px 6px;border-radius:3px;font-size:12px;border:1px solid var(--hairline)}
+      .docs-link{display:inline-flex;align-items:center;gap:6px;color:var(--blok-green-500);text-decoration:none;font-family:var(--font-mono);font-size:12px;margin-top:10px;padding:6px 0;font-weight:500}
+      .docs-link:hover{text-decoration:underline}
+
+      /* Causes list */
+      .causes-list{display:flex;flex-direction:column;gap:0;background:var(--bg-raised);border:1px solid var(--hairline-2);border-radius:6px;overflow:hidden}
+      .cause-row{display:grid;grid-template-columns:80px 1fr 110px;gap:14px;padding:11px 16px;border-bottom:1px solid var(--hairline);font-size:12px;font-family:var(--font-mono);align-items:center}
+      .cause-row:last-child{border-bottom:0}
+      .cause-row .step{color:var(--ink-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
+      .cause-row .desc{color:var(--ink-1)}
+      .cause-row .when{color:var(--ink-3);text-align:right;font-size:11px}
+      .cause-row.head{background:var(--bg-overlay);font-weight:600;color:var(--ink-2);text-transform:uppercase;font-size:10px;letter-spacing:.06em;padding:8px 16px}
+
+      /* Context snapshot */
+      .ctx-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;background:var(--bg-raised);border:1px solid var(--hairline-2);border-radius:6px;overflow:hidden}
+      .ctx-item{padding:10px 14px;border-right:1px solid var(--hairline);border-bottom:1px solid var(--hairline);font-family:var(--font-mono);font-size:11.5px}
+      .ctx-item:nth-child(2n){border-right:0}
+      .ctx-item:nth-last-child(-n+2){border-bottom:0}
+      .ctx-item .k{color:var(--ink-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+      .ctx-item .v{color:var(--ink-1)}
+
+      /* Right pane — failed metrics */
+      .inspector{background:var(--bg-overlay);border-left:1px solid var(--hairline);overflow-y:auto;padding:18px 20px 32px}
+      .inspector h4{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:0 0 8px;font-weight:600}
+      .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:22px;border:1px solid var(--hairline);border-radius:8px;overflow:hidden}
+      .metric{padding:12px 14px;border-right:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
+      .metric:nth-child(2n){border-right:0}
+      .metric:nth-last-child(-n+2){border-bottom:0}
+      .metric .label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin-bottom:4px}
+      .metric .value{font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--ink-1)}
+      .metric .value.err{color:var(--status-failed)}
+      .metric .value .unit{color:var(--ink-3);font-size:11px;margin-left:2px}
+
+      .ai-explain{margin-top:18px;background:var(--bg-canvas);border:1px solid var(--hairline-2);border-radius:8px;padding:14px}
+      .ai-explain h5{margin:0 0 10px;font-size:11px;color:var(--ink-2);font-weight:600;text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:8px}
+      .ai-explain h5 .ai-pill{background:var(--blok-green-100);color:var(--blok-green-500);font-size:9px;padding:1px 6px;border-radius:3px;letter-spacing:.06em}
+      .ai-explain p{margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.55}
+      .ai-actions{margin-top:10px;display:flex;gap:8px;font-family:var(--font-mono);font-size:11px}
+      .ai-actions button{background:transparent;border:1px solid var(--hairline-2);color:var(--ink-2);padding:3px 8px;border-radius:4px;cursor:pointer;font-family:var(--font-mono);font-size:11px}
+      .ai-actions button:hover{background:var(--bg-hover);color:var(--ink-1)}
+
+      .footer-keys{margin-top:24px;padding-top:14px;border-top:1px solid var(--hairline);display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink-3)}
+      .footer-keys span{display:inline-flex;align-items:center;gap:5px}
+    </style>
+  </head>
+  <body>
+    <div class="junior-banner">
+      <span class="junior-pill">Junior · v0.1 · Run-detail FAILED state</span>
+      <span><b>Signature reframe.</b> When a run has an error, the BlokError
+      becomes the page topic — not a row in a sidebar. Category +
+      severity + retryable as pills. Single-sentence headline in mono
+      type. Remediation as a brand-green left-bar callout. Causes as a
+      table. Context snapshot as a 2-col mono grid. AI Explain lives in
+      the inspector as a separate offer, not interleaved with the typed
+      data. <b>Compare:</b> the same data shape in current
+      <code>BlokErrorDetail.tsx</code> renders as 7 stacked subcomponents
+      in a 320px drawer.</span>
+    </div>
+
+    <div class="shell">
+      <div class="top">
+        <div class="brand">
+          <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+            <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+          </svg>
+          <span class="wordmark">blok</span>
+        </div>
+        <div class="env-chip"><span class="dot"></span><span class="label">production</span><span class="caret">▾</span></div>
+        <div class="spacer"></div>
+        <div class="ticker">
+          <span class="live-pulse"><span class="live-dot"></span>Live · 3 active</span>
+          <span>·</span><span>blok-prod</span><span>·</span><span>14:55:48 GMT</span>
+        </div>
+        <span class="kbd">⌘K</span>
+      </div>
+
+      <aside class="sidebar">
+        <div class="nav-section">Operate</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zm0 10h16v6H4z"/></svg>Overview</a>
+        <a class="nav-link active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/></svg>Runs<span class="count">2</span></a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/></svg>Logs<span class="count">live</span></a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Queues<span class="count">12</span></a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l5-5 4 4 7-7"/><path d="M14 9h6v6"/></svg>Metrics</a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>Deployments</a>
+        <div class="nav-section">Configure</div>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16v12H4z"/><path d="M4 10h16"/></svg>Workflows<span class="count">14</span></a>
+        <a class="nav-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>Alerts</a>
+      </aside>
+
+      <div class="body">
+        <header class="run-header">
+          <span class="back">←</span>
+          <div class="meta">
+            <h1 class="run-title">
+              order-process
+              <span class="status-badge failed"><span class="dot"></span>failed</span>
+            </h1>
+            <div class="run-submeta">
+              <span style="color: var(--ink-1); font-weight: 500">run_4d8a17b5</span>
+              <span class="sep">·</span>
+              <span class="chip-version">v3.1.4</span>
+              <span class="sep">·</span>
+              <span>POST /orders</span>
+              <span class="sep">·</span>
+              <span>started 14:55:42.317</span>
+              <span class="sep">·</span>
+              <span style="color: var(--status-failed)">failed at step 3 / 6</span>
+            </div>
+          </div>
+          <div class="duration-display">5,372<span class="unit"> ms</span></div>
+          <div class="run-actions">
+            <button class="btn btn-primary">↻ Retry from failed step <span class="kbd" style="background:rgba(255,255,255,0.16);border-color:transparent;color:#fff">r</span></button>
+            <button class="btn btn-secondary">Replay from start</button>
+            <button class="btn btn-ghost">⋯</button>
+          </div>
+        </header>
+
+        <div class="panes">
+          <aside class="step-rail">
+            <div class="rail-header">
+              <span>Steps</span>
+              <span style="color: var(--status-failed)">failed at 3</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">1</span><span class="dot completed"></span>
+              <span class="name">validate</span><span class="dur">12 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">2</span><span class="dot completed"></span>
+              <span class="name">price</span><span class="dur">28 ms</span>
+            </div>
+            <div class="step-row active">
+              <span class="idx">3</span><span class="dot failed"></span>
+              <span class="name">charge</span><span class="dur" style="color: var(--status-failed)">5,332 ms</span>
+            </div>
+            <div class="step-row skip">
+              <span class="idx">4</span><span class="dot skipped"></span>
+              <span class="name">fulfill</span><span class="dur">—</span>
+            </div>
+            <div class="step-row skip">
+              <span class="idx">5</span><span class="dot skipped"></span>
+              <span class="name">notify</span><span class="dur">—</span>
+            </div>
+            <div class="step-row skip">
+              <span class="idx">6</span><span class="dot skipped"></span>
+              <span class="name">verify</span><span class="dur">—</span>
+            </div>
+          </aside>
+
+          <main class="center-pane">
+            <div class="err-page">
+              <!-- BIG ERROR BANNER -->
+              <div class="err-banner">
+                <div class="err-cat-row">
+                  <span class="err-pill cat">DEPENDENCY</span>
+                  <span class="err-pill sev">TRANSIENT</span>
+                  <span class="err-pill retry">retry in 1.5 s · attempt 4/3</span>
+                  <span class="meta">step <b style="color:var(--ink-1);font-weight:500">charge</b> · runtime.csharp · grpc · 14:55:48.823</span>
+                </div>
+                <h2 class="err-headline">
+                  <span class="tok-class">ConnectionRefused</span><span class="tok-detail">:</span> gRPC dial tcp <span class="tok-host">127.0.0.1:10004</span> <span class="tok-detail">→ connection refused</span>
+                </h2>
+                <p class="err-blame">
+                  The C# SDK isn't responding on its gRPC port.
+                  <b>3 retries</b> exhausted; circuit breaker now <b>OPEN</b>
+                  for <b>30 s</b>. The runner will not retry this dependency
+                  until the breaker closes or a manual reset is issued.
+                </p>
+              </div>
+
+              <div class="err-section">
+                <h3>Remediation</h3>
+                <div class="remediation">
+                  <p>Verify the C# SDK is running on its gRPC port and that <code>BLOK_TRANSPORT=grpc</code> is set on its environment:</p>
+                  <p style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-canvas); padding: 10px 14px; border-radius: 5px; border: 1px solid var(--hairline); color: var(--ink-2)">
+                    <span style="color: var(--ink-3)">$</span>
+                    lsof -iTCP:10004 -sTCP:LISTEN<br>
+                    <span style="color: var(--ink-3)">$</span>
+                    bun run dev <span style="color: var(--ink-3)">--only=csharp</span>
+                  </p>
+                  <p>If the SDK is up but unreachable, check that the trigger's <code>RUNTIME_CSHARP_GRPC_PORT</code> matches what the SDK is actually listening on.</p>
+                  <a class="docs-link" href="#">↗ docs.blok.io/errors/dependency-grpc-unreachable</a>
+                </div>
+
+                <h3>Causes <span style="color:var(--ink-3);font-weight:400;text-transform:none;letter-spacing:0;font-size:11px">3 events leading to this error</span></h3>
+                <div class="causes-list">
+                  <div class="cause-row head">
+                    <div class="step">when</div>
+                    <div class="desc">event</div>
+                    <div class="when" style="text-align:right">delta</div>
+                  </div>
+                  <div class="cause-row">
+                    <div class="step">14:55:43</div>
+                    <div class="desc">grpc.execute → DeadlineExceeded after 5000ms</div>
+                    <div class="when">— 5 s</div>
+                  </div>
+                  <div class="cause-row">
+                    <div class="step">14:55:48</div>
+                    <div class="desc">health check failed · 3rd consecutive · circuit breaker tripped OPEN</div>
+                    <div class="when">— 0.4 s</div>
+                  </div>
+                  <div class="cause-row">
+                    <div class="step">14:55:48</div>
+                    <div class="desc">ConnectionRefused on retry attempt 4/3 · escalated to step failure</div>
+                    <div class="when">now</div>
+                  </div>
+                </div>
+
+                <h3>Context snapshot</h3>
+                <div class="ctx-grid">
+                  <div class="ctx-item"><div class="k">adapter.kind</div><div class="v">csharp</div></div>
+                  <div class="ctx-item"><div class="k">transport</div><div class="v">grpc</div></div>
+                  <div class="ctx-item"><div class="k">port</div><div class="v">10004</div></div>
+                  <div class="ctx-item"><div class="k">attempt</div><div class="v">4 of 3</div></div>
+                  <div class="ctx-item"><div class="k">last successful response</div><div class="v">14:55:39 (9 s ago)</div></div>
+                  <div class="ctx-item"><div class="k">circuit breaker</div><div class="v" style="color:var(--status-failed)">OPEN · resets 14:56:18</div></div>
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <aside class="inspector">
+            <h4>Failed step metrics</h4>
+            <div class="metric-grid">
+              <div class="metric">
+                <div class="label">Wall</div>
+                <div class="value err">5.33<span class="unit">s</span></div>
+              </div>
+              <div class="metric">
+                <div class="label">Wire out</div>
+                <div class="value">412<span class="unit">B</span></div>
+              </div>
+              <div class="metric">
+                <div class="label">Wire in</div>
+                <div class="value">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Retries</div>
+                <div class="value err">3 / 3</div>
+              </div>
+              <div class="metric">
+                <div class="label">Circuit</div>
+                <div class="value err">OPEN</div>
+              </div>
+              <div class="metric">
+                <div class="label">Reset in</div>
+                <div class="value">29<span class="unit">s</span></div>
+              </div>
+            </div>
+
+            <div class="ai-explain">
+              <h5>Explain <span class="ai-pill">AI</span></h5>
+              <p>
+                This is a <b>dependency outage</b>, not an application bug.
+                The <code>charge</code> step calls the C# SDK over gRPC,
+                and the C# SDK is not currently listening on port 10004
+                in this environment. Three other runs in the last 90 s
+                failed for the same reason — almost certainly the C# SDK
+                process crashed or wasn't started for this deploy.
+              </p>
+              <div class="ai-actions">
+                <button>Show similar errors</button>
+                <button>Suggest fix</button>
+              </div>
+            </div>
+
+            <div class="footer-keys">
+              <span><span class="kbd">r</span> retry from step</span>
+              <span><span class="kbd">⇧R</span> replay all</span>
+              <span><span class="kbd">[ ]</span> sibling runs</span>
+              <span><span class="kbd">y</span> copy id</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

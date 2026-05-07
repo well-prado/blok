@@ -13,6 +13,7 @@ from blok.node.node_handler import NodeHandler
 from blok.node.node_registry import NodeRegistry
 from blok.server.runtime_server import RuntimeServer
 from blok.config.server_config import ServerConfig
+from blok.errors.blok_error import BlokError
 from blok.errors.node_error import NodeError, ErrorCategory
 from blok.logging.logger import Logger, LogLevel
 
@@ -28,6 +29,9 @@ __all__ = [
     "NodeRegistry",
     "RuntimeServer",
     "ServerConfig",
+    # Preferred structured error API (master plan §17).
+    "BlokError",
+    # Legacy error type — kept for back-compat.
     "NodeError",
     "ErrorCategory",
     "Logger",

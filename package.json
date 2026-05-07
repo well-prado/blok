@@ -23,7 +23,7 @@
 	],
 	"scripts": {
 		"ci:publish": "bun run build && bunx changeset publish",
-		"doc:dev": "cd docs && bunx mintlify dev",
+		"doc:dev": "cd docs && bunx mint@latest dev",
 		"doc:generate": "bunx typedoc --skipErrorChecking && bun run ./docs/generateRefLinks.js",
 		"prepare": "husky",
 		"lint": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
@@ -37,6 +37,8 @@
 		"helper:test": "bun run --filter @blokjs/helper test:dev",
 		"helper:dev": "bun run --filter @blokjs/helper build:dev",
 		"http:dev": "bun run --filter @blokjs/trigger-http dev",
+		"dev": "bun run scripts/dev-full.ts",
+		"sdks:build": "bash scripts/sdks-build.sh",
 		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
 		"build": "bun run --filter @blokjs/shared --filter @blokjs/helper build && bun run --filter @blokjs/runner build && bun run --filter blokctl --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter node-name --filter node-ui-name build"

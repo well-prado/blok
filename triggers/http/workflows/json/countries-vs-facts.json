@@ -1,7 +1,7 @@
 {
 	"name": "Movies or Countries",
-	"description": "Workflow description",
 	"version": "1.0.0",
+	"description": "Workflow description",
 	"trigger": {
 		"http": {
 			"method": "GET",
@@ -11,56 +11,24 @@
 	},
 	"steps": [
 		{
-			"name": "filter-request",
-			"node": "@blokjs/if-else",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"filter-request": {
-			"conditions": [
-				{
-					"type": "if",
-					"steps": [
-						{
-							"name": "get-countries",
-							"node": "@blokjs/api-call",
-							"type": "module"
-						}
-					],
-					"condition": "ctx.request.query.countries === \"true\""
-				},
-				{
-					"type": "else",
-					"steps": [
-						{
-							"name": "get-facts",
-							"node": "@blokjs/api-call",
-							"type": "module"
-						}
-					]
-				}
-			]
-		},
-		"get-facts": {
-			"inputs": {
-				"url": "https://catfact.ninja/fact",
-				"method": "GET",
-				"headers": {
-					"Content-Type": "application/json"
-				},
-				"responseType": "application/json"
-			}
-		},
-		"get-countries": {
-			"inputs": {
-				"url": "https://countriesnow.space/api/v0.1/countries/capital",
-				"method": "GET",
-				"headers": {
-					"Content-Type": "application/json"
-				},
-				"responseType": "application/json"
+			"id": "filter-request",
+			"branch": {
+				"when": "ctx.request.query.countries === \"true\"",
+				"then": [
+					{
+						"id": "get-countries",
+						"use": "@blokjs/api-call",
+						"type": "module"
+					}
+				],
+				"else": [
+					{
+						"id": "get-facts",
+						"use": "@blokjs/api-call",
+						"type": "module"
+					}
+				]
 			}
 		}
-	}
+	]
 }

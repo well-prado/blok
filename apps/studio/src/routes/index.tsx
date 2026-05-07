@@ -37,11 +37,35 @@ function DashboardPage() {
 
 	if (!workflows || workflows.length === 0) {
 		return (
-			<div className="p-6">
+			<div className="p-8">
 				<EmptyState
-					icon={<Workflow className="w-12 h-12" />}
-					title="No workflows yet"
-					description="Run a workflow to see it appear here. Blok Studio automatically tracks all workflow executions."
+					icon={<Workflow className="w-10 h-10" />}
+					title="No workflows yet · production"
+					description={
+						<>
+							Trigger your first run to see it stream in real time here. Once a workflow runs in
+							<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+								production
+							</code>
+							this page shows live success rate, p50 / p95 latency, and the last 50 events as they happen.
+						</>
+					}
+					snippets={[
+						{
+							lang: "curl · http",
+							code: `curl -X POST http://localhost:4000/cross-runtime-chain \\
+  -H 'content-type: application/json' \\
+  -d '{}'`,
+						},
+						{
+							lang: "typescript · sdk",
+							code: `// triggers/http/src/workflows/cross-runtime-chain.ts
+await blok.run("cross-runtime-chain", {
+  input: { },
+});`,
+						},
+					]}
+					docLink={{ href: "https://docs.blok.io/quickstart", label: "docs.blok.io/quickstart" }}
 				/>
 			</div>
 		);
@@ -49,10 +73,11 @@ function DashboardPage() {
 
 	return (
 		<div className="p-6 max-w-7xl mx-auto space-y-6">
-			{/* Header */}
+			{/* Header — Newsreader italic on the page H1 per brand-spec
+			    (hero numerals + page H1s only). */}
 			<div>
-				<h1 className="text-lg font-semibold text-zinc-100">Dashboard</h1>
-				<p className="text-sm text-zinc-500">Overview of all workflow executions</p>
+				<h1 className="text-2xl font-medium font-display italic tracking-tight text-zinc-100">Overview</h1>
+				<p className="text-sm text-zinc-500 mt-1">Live trace of every workflow execution.</p>
 			</div>
 
 			{/* Stats */}
@@ -73,7 +98,7 @@ function DashboardPage() {
 				{/* Live feed */}
 				<div>
 					<h2 className="text-sm font-medium text-zinc-400 mb-3">Live Feed</h2>
-					<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+					<div className="rounded-lg border border-zinc-800 bg-overlay p-3">
 						<LiveFeed />
 					</div>
 				</div>

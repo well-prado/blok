@@ -1,0 +1,3 @@
+# Built binaries — produced by `go build -o bin/blok ./cmd/server`.
+# Reproducible from source; not committed.
+bin/

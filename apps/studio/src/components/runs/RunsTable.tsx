@@ -1,3 +1,4 @@
+import { BulkActionToolbar } from "@/components/runs/BulkActionToolbar";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -11,8 +12,8 @@ import {
 	getSortedRowModel,
 	useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronLeft, ChevronRight, GitCompareArrows } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowUpDown, Check, ChevronLeft, ChevronRight, GitCompareArrows } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 interface RunsTableProps {
 	runs: WorkflowRun[];
@@ -22,6 +23,14 @@ interface RunsTableProps {
 	onPageChange: (page: number) => void;
 	showWorkflow?: boolean;
 	enableCompare?: boolean;
+	/**
+	 * Phase 4 · enable bulk-select with the floating action toolbar
+	 * (replay/compare/export/clear). Coexists with `enableCompare` —
+	 * when both are on, the bulk checkbox is the primary control and
+	 * Compare appears as a toolbar action whenever exactly 2 are
+	 * selected.
+	 */
+	enableBulk?: boolean;
 }
 
 export function RunsTable({
@@ -32,10 +41,38 @@ export function RunsTable({
 	onPageChange,
 	showWorkflow = false,
 	enableCompare = false,
+	enableBulk = false,
 }: RunsTableProps) {
 	const navigate = useNavigate();
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [compareSelection, setCompareSelection] = useState<string[]>([]);
+	const [bulkSelection, setBulkSelection] = useState<Set<string>>(() => new Set());
+
+	// Esc clears bulk selection
+	useEffect(() => {
+		if (!enableBulk) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+			if (e.key === "Escape" && bulkSelection.size > 0) {
+				setBulkSelection(new Set());
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [enableBulk, bulkSelection.size]);
+
+	const toggleBulk = (id: string) => {
+		setBulkSelection((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
+
+	const toggleAll = () => {
+		setBulkSelection((prev) => (prev.size === runs.length ? new Set() : new Set(runs.map((r) => r.id))));
+	};
 
 	const handleCompare = () => {
 		if (compareSelection.length === 2) {
@@ -46,10 +83,67 @@ export function RunsTable({
 		}
 	};
 
+	// `toggleBulk` and `toggleAll` are stable across renders for our purposes —
+	// they read fresh `bulkSelection` via setState callback — so we don't include
+	// them in deps. The selection-driven re-render is captured by `bulkSelection`.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: toggleBulk/toggleAll are stable refs.
 	const columns = useMemo<ColumnDef<WorkflowRun>[]>(() => {
 		const cols: ColumnDef<WorkflowRun>[] = [];
 
-		if (enableCompare) {
+		if (enableBulk) {
+			cols.push({
+				id: "bulk",
+				header: () => (
+					<button
+						type="button"
+						onClick={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							toggleAll();
+						}}
+						className={cn(
+							"w-4 h-4 rounded-sm border flex items-center justify-center transition-colors shrink-0",
+							bulkSelection.size === runs.length && runs.length > 0
+								? "bg-blok-green-500 border-blok-green-500"
+								: bulkSelection.size > 0
+									? "bg-blok-green-500/40 border-blok-green-500/60"
+									: "border-zinc-700 hover:border-zinc-500",
+						)}
+						title={bulkSelection.size === runs.length ? "Deselect all" : "Select all"}
+					>
+						{bulkSelection.size === runs.length && runs.length > 0 && (
+							<Check className="w-3 h-3 text-[#00231b]" strokeWidth={3} />
+						)}
+						{bulkSelection.size > 0 && bulkSelection.size < runs.length && (
+							<span className="w-1.5 h-0.5 bg-zinc-100 rounded-full" />
+						)}
+					</button>
+				),
+				cell: ({ row }) => {
+					const isSelected = bulkSelection.has(row.original.id);
+					return (
+						<button
+							type="button"
+							onClick={(e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								toggleBulk(row.original.id);
+							}}
+							className={cn(
+								"w-4 h-4 rounded-sm border flex items-center justify-center transition-colors shrink-0",
+								isSelected ? "bg-blok-green-500 border-blok-green-500" : "border-zinc-700 hover:border-zinc-500",
+							)}
+							title="Select"
+						>
+							{isSelected && <Check className="w-3 h-3 text-[#00231b]" strokeWidth={3} />}
+						</button>
+					);
+				},
+				size: 36,
+			});
+		}
+
+		if (enableCompare && !enableBulk) {
 			cols.push({
 				id: "compare",
 				header: "",
@@ -157,8 +251,7 @@ export function RunsTable({
 		);
 
 		return cols;
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [showWorkflow, enableCompare, compareSelection]);
+	}, [showWorkflow, enableCompare, enableBulk, compareSelection, bulkSelection, runs.length]);
 
 	const table = useReactTable({
 		data: runs,
@@ -173,8 +266,18 @@ export function RunsTable({
 
 	return (
 		<div>
-			{/* Compare bar */}
-			{enableCompare && compareSelection.length > 0 && (
+			{/* Bulk-action toolbar (Phase 4) — appears whenever the bulk
+			    selection has at least one row. Replay / Compare (when ==2) /
+			    Export JSON / Export CSV / Clear. Renders above the table to
+			    avoid floating-chrome occlusion. */}
+			{enableBulk && (
+				<BulkActionToolbar selectedIds={bulkSelection} runs={runs} onClear={() => setBulkSelection(new Set())} />
+			)}
+
+			{/* Compare bar — legacy 2-way compare radio. Only shown when
+			    bulk is OFF; when bulk is on, Compare lives in the bulk
+			    toolbar instead. */}
+			{enableCompare && !enableBulk && compareSelection.length > 0 && (
 				<div className="mb-3 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2">
 					<GitCompareArrows className="w-4 h-4 text-zinc-500" />
 					<span className="text-xs text-zinc-400">{compareSelection.length}/2 runs selected</span>
@@ -233,11 +336,12 @@ export function RunsTable({
 								className={cn(
 									"border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors cursor-pointer",
 									compareSelection.includes(row.original.id) && "bg-blue-500/5",
+									bulkSelection.has(row.original.id) && "bg-blok-green-500/5",
 								)}
 							>
 								{row.getVisibleCells().map((cell) => (
 									<td key={cell.id} className="px-3 py-2.5">
-										{cell.column.id === "compare" ? (
+										{cell.column.id === "compare" || cell.column.id === "bulk" ? (
 											flexRender(cell.column.columnDef.cell, cell.getContext())
 										) : (
 											<Link to="/runs/$runId" params={{ runId: row.original.id }} className="block">

@@ -8,14 +8,12 @@ trigger:
     path: "/"
     accept: application/json
 steps:
-- name: get-countries-api
-  node: "@blokjs/api-call"
+- id: get-countries-api
+  use: "@blokjs/api-call"
   type: module
-nodes:
-  get-countries-api:
-    inputs:
-      url: https://countriesnow.space/api/v0.1/countries/capital
-      method: GET
-      headers:
-        Content-Type: application/json
-      responseType: application/json
+  inputs:
+    url: https://countriesnow.space/api/v0.1/countries/capital
+    method: GET
+    headers:
+      Content-Type: application/json
+    responseType: application/json

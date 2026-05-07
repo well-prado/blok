@@ -9,6 +9,12 @@ import type { ConditionElseOpts } from "./AddElse";
 import type { ConditionOpts } from "./AddIf";
 import HelperResponse from "./HelperResponse";
 
+/**
+ * Builder step that adds workflow steps and conditional branches.
+ *
+ * Each call returns a new {@link StepNode} carrying the accumulated config
+ * so workflow definitions remain immutable from the outside.
+ */
 export default class StepNode extends HelperResponse {
 	addStep(config: StepOpts): StepNode {
 		StepOptsSchema.parse(config);
@@ -23,6 +29,9 @@ export default class StepNode extends HelperResponse {
 			node: config.node,
 			type: config.type,
 			runtime: config.runtime,
+			set_var: config.set_var,
+			active: config.active,
+			stop: config.stop,
 		});
 
 		const helperResponse = new StepNode();

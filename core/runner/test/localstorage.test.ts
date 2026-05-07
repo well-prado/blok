@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type HelperResponse, Workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 import { beforeAll, expect, test } from "vitest";
 import LocalStorage from "../src/LocalStorage";
 import type { WorkflowLocator } from "../src/types/GlobalOptions";
@@ -14,34 +14,40 @@ beforeAll(async () => {
 	locator = createLocator();
 });
 
+/**
+ * Builds the helper-side reference workflow as a v2 builder. Mirrors
+ * the v2 shape of `workflows/json/countries.json` so the
+ * format-equivalence tests below verify JSON / YAML / XML / TOML all
+ * deserialize to the same object.
+ */
 function createLocator(): WorkflowLocator {
-	const step1Inputs = {
-		url: "https://countriesnow.space/api/v0.1/countries/capital",
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		responseType: "application/json",
-	};
-
-	const step = Workflow({
+	const wf = workflow({
 		name: "World Countries",
 		version: "1.0.0",
 		description: "Workflow description",
-	})
-		.addTrigger("http", {
-			method: "GET",
-			path: "/",
-			accept: "application/json",
-		})
-		.addStep({
-			name: "get-countries-api",
-			node: "@blokjs/api-call",
-			type: "module",
-			inputs: step1Inputs,
-		}) as HelperResponse;
+		trigger: {
+			http: {
+				method: "GET",
+				path: "/",
+				accept: "application/json",
+			},
+		},
+		steps: [
+			{
+				id: "get-countries-api",
+				use: "@blokjs/api-call",
+				type: "module",
+				inputs: {
+					url: "https://countriesnow.space/api/v0.1/countries/capital",
+					method: "GET",
+					headers: { "Content-Type": "application/json" },
+					responseType: "application/json",
+				},
+			},
+		],
+	});
 
-	locator["countries-helper"] = step;
+	locator["countries-helper"] = wf;
 
 	return locator;
 }

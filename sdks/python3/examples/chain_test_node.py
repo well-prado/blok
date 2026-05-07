@@ -16,14 +16,22 @@ class ChainTestNode(NodeHandler):
     def execute(self, ctx: Context, config: Dict[str, Any]) -> Any:
         body = ctx.request.body_map()
 
-        # Read existing chain (default to empty list)
+        # Read existing chain — gRPC inputs first (carried on `node.config`),
+        # HTTP body fallback (legacy wire shape where the runner mapped
+        # resolvedInputs → request.body). Dual-read keeps the
+        # cross-runtime-chain demo working over both transports during
+        # the §11 deprecation window.
         chain: list = []
-        if body and isinstance(body.get("chain"), list):
+        if isinstance(config.get("chain"), list):
+            chain = list(config["chain"])
+        elif body and isinstance(body.get("chain"), list):
             chain = list(body["chain"])
 
-        # Read origin
+        # Read origin — same dual-read.
         origin = "unknown"
-        if body and isinstance(body.get("origin"), str):
+        if isinstance(config.get("origin"), str) and config["origin"]:
+            origin = config["origin"]
+        elif body and isinstance(body.get("origin"), str):
             origin = body["origin"]
 
         # Append this language's entry

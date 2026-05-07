@@ -8,14 +8,14 @@ path = "/"
 accept = "application/json"
 
 [[steps]]
-name = "get-countries-api"
-node = "@blokjs/api-call"
+id = "get-countries-api"
+use = "@blokjs/api-call"
 type = "module"
 
-[nodes.get-countries-api.inputs]
+[steps.inputs]
 url = "https://countriesnow.space/api/v0.1/countries/capital"
 method = "GET"
 responseType = "application/json"
 
-  [nodes.get-countries-api.inputs.headers]
+  [steps.inputs.headers]
   Content-Type = "application/json"

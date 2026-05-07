@@ -1,5 +1,6 @@
 package com.blok.blok.middleware;
 
+import com.blok.blok.errors.BlokError;
 import com.blok.blok.errors.ErrorCategory;
 import com.blok.blok.errors.NodeException;
 import com.blok.blok.node.NodeHandler;
@@ -13,9 +14,10 @@ import java.util.Map;
  * Middleware that catches all exceptions during node execution
  * and converts them to structured NodeExceptions.
  * <p>
- * NodeExceptions are re-thrown as-is. All other exceptions
- * (including RuntimeExceptions) are wrapped in an EXECUTION NodeException
- * with the stack trace captured in the details.
+ * Structured exceptions ({@link BlokError}, {@link NodeException}) are
+ * re-thrown as-is so the registry / gRPC servicer can serialize them
+ * losslessly. All other exceptions are wrapped in an EXECUTION
+ * NodeException with the stack trace captured in the details.
  */
 public class RecoveryMiddleware implements Middleware {
 
@@ -24,8 +26,13 @@ public class RecoveryMiddleware implements Middleware {
         return (ctx, config) -> {
             try {
                 return next.execute(ctx, config);
+            } catch (BlokError e) {
+                // Master plan §17 BlokError passes through verbatim — the
+                // registry catches it directly and stashes the typed instance
+                // on `ExecutionResult.errors` for the gRPC servicer.
+                throw e;
             } catch (NodeException e) {
-                // Structured exceptions pass through as-is
+                // Legacy structured exceptions pass through as-is too.
                 throw e;
             } catch (Exception e) {
                 // Capture stack trace

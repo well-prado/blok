@@ -1,6 +1,30 @@
 /** Mirror of backend tracing types for the Studio frontend. */
 
-export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type WorkflowRunStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	/** Tier 2 #6: rejected at run-entry by the concurrency gate. No step ran. */
+	| "throttled"
+	/** Tier 2 #5: scheduled for a future dispatch; timer pending. */
+	| "delayed"
+	/** Tier 2 #5: TTL exceeded before dispatch. Auto-cancelled without execution. */
+	| "expired"
+	/** Tier 2 #7: coalesced into another run via the debounce key. */
+	| "debounced"
+	/**
+	 * Tier 2 #6 follow-up: gate denied + `onLimit:"queue"` deferred the run.
+	 * Will retry acquisition after `scheduledAt`; eventually transitions to
+	 * `running` (and on completion to `completed`) or stays `queued` if the
+	 * slot keeps being occupied.
+	 */
+	| "queued"
+	/** Tier 2 quick-wins: runner crashed (uncaught exception / OOM / signal). */
+	| "crashed"
+	/** Tier 2 quick-wins: step's final retry attempt exceeded `maxDuration`. */
+	| "timedOut";
 
 export interface WorkflowRun {
 	id: string;
@@ -21,9 +45,61 @@ export interface WorkflowRun {
 	metadata?: Record<string, unknown>;
 	nodeCount: number;
 	completedNodes: number;
+	/**
+	 * Tier 1 · replay lineage. When this run was started via the replay
+	 * endpoint, this carries the original run's id so Studio can render
+	 * a "Replay of #..." breadcrumb that links back to the source.
+	 */
+	replayOf?: string;
+	/**
+	 * Tier 2 · sub-workflow lineage. When this run was started by a
+	 * `subworkflow:` step in another workflow, this carries the parent
+	 * run's id. Studio renders a "called from #..." breadcrumb.
+	 */
+	parentRunId?: string;
+	/**
+	 * Tier 2 · sub-workflow lineage. The specific NodeRun within the
+	 * parent run that invoked this sub-workflow.
+	 */
+	parentNodeRunId?: string;
+	/** Tier 2 #5: scheduled dispatch time (ms since epoch). */
+	scheduledAt?: number;
+	/** Tier 2 #5: TTL deadline (ms since epoch). */
+	expiresAt?: number;
+	/** Tier 2 #7: resolved debounce key. */
+	debounceKey?: string;
+	/** Tier 2 #7: debounce mode (`leading` | `trailing`). */
+	debounceMode?: "leading" | "trailing";
+	/** Tier 2 #7: pings absorbed by this run before dispatch. */
+	pingCount?: number;
 }
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+/**
+ * Structured failure detail per master plan §17. Mirrors the runner-side
+ * `RunErrorDetail` shape from `core/runner/src/tracing/types.ts`. All
+ * structured fields are optional — for unstructured throws only
+ * `message` and `stack` are populated.
+ */
+export interface NodeRunErrorDetail {
+	message: string;
+	stack?: string;
+	code?: string;
+	/** One of the 12 `BlokErrorCategory` values, e.g. `"DEPENDENCY"`. */
+	category?: string;
+	/** `"INFO" | "WARN" | "ERROR" | "FATAL"`. */
+	severity?: string;
+	httpStatus?: number;
+	retryable?: boolean;
+	retryAfterMs?: number;
+	description?: string;
+	remediation?: string;
+	docUrl?: string;
+	details?: unknown;
+	contextSnapshot?: unknown;
+	causes?: ReadonlyArray<Record<string, unknown>>;
+}
 
 export interface NodeRun {
 	id: string;
@@ -37,10 +113,35 @@ export interface NodeRun {
 	durationMs?: number;
 	inputs?: unknown;
 	outputs?: unknown;
-	error?: {
-		message: string;
-		code?: string;
-		stack?: string;
+	/**
+	 * Failure detail. When the node threw a typed `BlokError` (master plan
+	 * §17), the structured fields (category, retryable, remediation,
+	 * causes, …) are populated and rendered by `NodeDetail` with the
+	 * full §17.10 affordances. Unstructured throws set only `message`
+	 * and `stack`.
+	 */
+	error?: NodeRunErrorDetail;
+	/**
+	 * Latest streaming `Progress` frame from the SDK (master plan §17
+	 * Phase 5 follow-up). Studio renders it as a live progress bar
+	 * that drives forward as new frames arrive. Absent for unary
+	 * calls and SDKs that don't emit progress.
+	 */
+	progress?: {
+		/** 0–100, clamped. */
+		percent: number;
+		/** Free-form phase label (e.g. `"validating"`). May be empty. */
+		phase: string;
+		/** Wall-clock receipt timestamp (ms since epoch). */
+		updatedAt: number;
+	};
+	/**
+	 * Latest streaming `PartialResult` snapshot — useful for showing
+	 * interim state of a long-running computation.
+	 */
+	partialResult?: {
+		snapshot: unknown;
+		updatedAt: number;
 	};
 	parentNodeId?: string;
 	depth: number;
@@ -49,7 +150,45 @@ export interface NodeRun {
 		duration_ms?: number;
 		cpu_ms?: number;
 		memory_bytes?: number;
+		/** gRPC adapter only: bytes sent on the wire to the SDK. */
+		request_bytes?: number;
+		/** gRPC adapter only: bytes received in the SDK's response. */
+		response_bytes?: number;
 	};
+	/**
+	 * Tier 1 idempotency cache hit lineage. When set, this node short-
+	 * circuited via the cache instead of running. Studio renders a CACHED
+	 * badge with click-through to the source run/node.
+	 */
+	cached?: {
+		sourceRunId: string;
+		sourceNodeRunId: string;
+		cachedAt: number;
+	};
+	/**
+	 * Tier 1 retry attempts that failed before the node ultimately
+	 * succeeded or was fail-noded. Capped at 10 entries by the runner.
+	 * Studio renders this as an "Attempts (N)" disclosure.
+	 */
+	attempts?: Array<{
+		attempt: number;
+		error: NodeRunErrorDetail;
+		timestamp: number;
+	}>;
+	/**
+	 * Tier 2 #4 sub-workflow mode. Only set for `nodeType === "subworkflow"`.
+	 * - `true` (default) — synchronous: parent step blocks on child completion.
+	 * - `false` — fire-and-forget: child runs asynchronously. Studio renders
+	 *   a distinct `↳ async` badge (vs `↳ sub`) in StepRail.
+	 */
+	wait?: boolean;
+	/**
+	 * PR 5 E3 — sub-workflow nesting depth. Top-level workflow's
+	 * sub-workflow step has `subworkflowDepth = 1`; nested sub-workflows
+	 * have higher values. Studio renders `↳ sub (N)` / `↳ async (N)`
+	 * only when N >= 2 to keep top-level invocations un-cluttered.
+	 */
+	subworkflowDepth?: number;
 }
 
 export type RunEventType =
@@ -61,7 +200,46 @@ export type RunEventType =
 	| "NODE_FAILED"
 	| "NODE_SKIPPED"
 	| "VARS_UPDATED"
-	| "LOG_ENTRY";
+	| "LOG_ENTRY"
+	/** §17 Phase 5: streaming `Progress` frame from the SDK. */
+	| "NODE_PROGRESS"
+	/** §17 Phase 5: streaming `PartialResult` frame from the SDK. */
+	| "NODE_PARTIAL_RESULT"
+	/**
+	 * Tier 1: idempotency cache hit — the step short-circuited via the
+	 * cache instead of running. Payload carries the source run/node lineage.
+	 */
+	| "NODE_CACHED"
+	/**
+	 * Tier 1: retry attempt failed; another attempt will follow.
+	 * Final failure (after exhausting maxAttempts) emits NODE_FAILED.
+	 */
+	| "NODE_ATTEMPT_FAILED"
+	/**
+	 * Tier 2 #6 concurrency gate denied the run. Payload carries
+	 * `{ concurrencyKey, concurrencyLimit, currentInFlight, durationMs }`.
+	 */
+	| "RUN_THROTTLED"
+	/** Tier 2 #5: scheduled for a future dispatch. Payload `{scheduledAt, delayMs, expiresAt?}`. */
+	| "RUN_DELAYED"
+	/** Tier 2 #5: TTL exceeded before dispatch. Payload `{expiresAt, expiredAt, lateBy}`. */
+	| "RUN_EXPIRED"
+	/** Tier 2 #7: coalesced into another run. Payload `{debounceKey, mode, intoRunId?, pingCount, scheduledAt?}`. */
+	| "RUN_DEBOUNCED"
+	/**
+	 * Tier 2 #6 follow-up: concurrency gate denied + `onLimit:"queue"` deferred
+	 * the run. Payload `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}`.
+	 */
+	| "RUN_QUEUED"
+	/**
+	 * Tier 2 polish: operator cancelled a pending (delayed/debounced/queued) run
+	 * via `POST /__blok/runs/:runId/cancel`. Payload `{durationMs, previousStatus}`.
+	 */
+	| "RUN_CANCELLED"
+	/** Tier 2 quick-wins: runner crashed. Payload `{durationMs, error}`. */
+	| "RUN_CRASHED"
+	/** Tier 2 quick-wins: step's final retry attempt timed out. Payload `{durationMs, stepId, maxDurationMs, attemptsExhausted}`. */
+	| "RUN_TIMED_OUT";
 
 export interface RunEvent {
 	id: string;

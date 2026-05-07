@@ -24,6 +24,27 @@ import { v4 as uuid } from "uuid";
 import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 
 /**
+ * Tier 2 polish — compute the consumer-side hold time for a NATS message
+ * with an `x-delay` header. NATS JetStream stores `x-delay` as opaque
+ * metadata; the broker does NOT defer delivery on it. The consumer is
+ * responsible for honouring the delay between the message's first-publish
+ * timestamp and `createdMs + delay`.
+ *
+ * Returns the milliseconds to wait. Clamps to >= 0; returns 0 when the
+ * delay has already elapsed (the message was queued for longer than the
+ * delay) or when no delay was set.
+ *
+ * Exported for unit testability — the consumer message handler in
+ * `NATSWorkerAdapter.process()` mocks the NATS client extensively, so
+ * isolating the math here keeps the surface easy to verify.
+ */
+export function computeXDelayHoldMs(delay: number, createdMs: number, nowMs: number): number {
+	if (!delay || delay <= 0) return 0;
+	const dispatchAt = createdMs + delay;
+	return Math.max(0, dispatchAt - nowMs);
+}
+
+/**
  * NATS worker adapter configuration
  */
 export interface NATSWorkerConfig {
@@ -228,6 +249,18 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 								}
 							},
 						};
+
+						// Tier 2 polish — enforce `x-delay` header on the consumer side.
+						// NATS JetStream stores `x-delay` as opaque metadata; the broker
+						// does NOT defer delivery on it. We implement consumer-side
+						// holding here. createdMs is the message's first-publish timestamp;
+						// hold until createdMs + delay. Single-process semantics — for
+						// long deferrals, prefer trigger-level `delay` (DeferredRunScheduler).
+						const createdMs = info.timestampNanos ? Number(info.timestampNanos / BigInt(1_000_000)) : Date.now();
+						const waitMs = computeXDelayHoldMs(delay, createdMs, Date.now());
+						if (waitMs > 0) {
+							await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+						}
 
 						await handler(workerJob);
 					} catch (error) {

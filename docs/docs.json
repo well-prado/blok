@@ -37,6 +37,55 @@
 						"pages": ["d/fundamentals/blok-concept"]
 					},
 					{
+						"group": "Reliability",
+						"pages": [
+							"d/reliability/overview",
+							"d/reliability/idempotency",
+							"d/reliability/retry",
+							"d/reliability/replay",
+							"d/reliability/concurrency-keys",
+							"d/reliability/max-duration",
+							"d/reliability/cancellation"
+						]
+					},
+					{
+						"group": "Scheduling",
+						"pages": [
+							"d/scheduling/overview",
+							"d/scheduling/delay-and-ttl",
+							"d/scheduling/debounce"
+						]
+					},
+					{
+						"group": "Composition",
+						"pages": ["d/composition/sub-workflows"]
+					},
+					{
+						"group": "Studio",
+						"pages": ["d/studio/index"]
+					},
+					{
+						"group": "Operations",
+						"pages": [
+							"d/operations/overview",
+							"d/operations/env-vars",
+							"d/operations/observability",
+							"d/operations/janitor-and-shutdown"
+						]
+					},
+					{
+						"group": "Security",
+						"pages": ["d/security/threat-model", "d/security/cookbook"]
+					},
+					{
+						"group": "Reference",
+						"pages": [
+							"d/reference/v2-step-shapes",
+							"d/reference/trace-storage",
+							"d/reference/workflow-registry"
+						]
+					},
+					{
 						"group": "CLI",
 						"pages": [
 							"d/cli/overview",

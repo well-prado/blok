@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 from blok.node.node_handler import NodeHandler
 from blok.types.execution_request import ExecutionRequest
 from blok.types.execution_result import ExecutionMetrics, ExecutionResult
+from blok.errors.blok_error import BlokError
 from blok.errors.node_error import NodeError
 
 
@@ -102,6 +103,16 @@ class NodeRegistry:
             if ctx_vars:
                 result.with_vars(ctx_vars)
 
+            return result
+
+        except BlokError as e:
+            # Structured-error path (master plan §17). The BlokError instance
+            # is passed through verbatim so the gRPC servicer can serialize
+            # every field (category, severity, remediation, retryable hints,
+            # cause chain, etc.) into the proto NodeError.
+            duration_ms = (time.monotonic() - start_time) * 1000.0
+            result = ExecutionResult(success=False, data=None, errors=e)
+            result.with_metrics(ExecutionMetrics(duration_ms=duration_ms))
             return result
 
         except NodeError as e:

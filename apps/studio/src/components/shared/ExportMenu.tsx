@@ -41,7 +41,7 @@ export function ExportMenu({ onExportJson, onExportCsv, label = "Export", size =
 			</button>
 
 			{open && (
-				<div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl overflow-hidden">
+				<div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-zinc-800 bg-overlay shadow-xl overflow-hidden">
 					<button
 						type="button"
 						onClick={() => {

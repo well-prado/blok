@@ -1,7 +1,7 @@
 {
 	"name": "Films Workflow",
-	"description": "This workflow returns a list of films from Postgres",
 	"version": "1.0.0",
+	"description": "This workflow returns a list of films from Postgres",
 	"trigger": {
 		"http": {
 			"method": "GET",
@@ -11,13 +11,9 @@
 	},
 	"steps": [
 		{
-			"name": "get-films",
-			"node": "postgres-query",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"get-films": {
+			"id": "get-films",
+			"use": "postgres-query",
+			"type": "module",
 			"inputs": {
 				"host": "localhost",
 				"port": 5432,
@@ -27,5 +23,5 @@
 				"query": "SELECT * FROM \"film\" ORDER BY \"title\" LIMIT 50"
 			}
 		}
-	}
+	]
 }

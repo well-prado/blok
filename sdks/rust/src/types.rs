@@ -140,6 +140,15 @@ pub struct ExecutionResult {
     pub metrics: Option<ExecutionMetrics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vars: Option<HashMap<String, serde_json::Value>>,
+
+    /// Structured error per master plan §17. When the handler returned a
+    /// typed `BlokError`, the registry stashes the instance here verbatim so
+    /// the gRPC servicer can serialize every field (category, severity,
+    /// remediation, retry hints, cause chain, context snapshot) into the
+    /// proto `NodeError`. The `errors` field above mirrors the message for
+    /// HTTP / loose-JSON consumers.
+    #[serde(skip)]
+    pub blok_error: Option<crate::blok_error::BlokError>,
 }
 
 impl ExecutionResult {
@@ -152,6 +161,7 @@ impl ExecutionResult {
             logs: None,
             metrics: None,
             vars: None,
+            blok_error: None,
         }
     }
 
@@ -164,6 +174,7 @@ impl ExecutionResult {
             logs: None,
             metrics: Some(metrics),
             vars: None,
+            blok_error: None,
         }
     }
 
@@ -176,6 +187,7 @@ impl ExecutionResult {
             logs: None,
             metrics: None,
             vars: None,
+            blok_error: None,
         }
     }
 
@@ -191,6 +203,24 @@ impl ExecutionResult {
             logs: None,
             metrics: None,
             vars: None,
+            blok_error: None,
+        }
+    }
+
+    /// Create an error result from a structured `BlokError`. The instance is
+    /// preserved verbatim on `blok_error` (for the gRPC servicer) and a
+    /// best-effort JSON projection is mirrored into `errors` (for HTTP /
+    /// loose-JSON consumers).
+    pub fn from_blok_error(err: crate::blok_error::BlokError) -> Self {
+        let json = err.to_json_value();
+        Self {
+            success: false,
+            data: serde_json::Value::Null,
+            errors: Some(json),
+            logs: None,
+            metrics: None,
+            vars: None,
+            blok_error: Some(err),
         }
     }
 

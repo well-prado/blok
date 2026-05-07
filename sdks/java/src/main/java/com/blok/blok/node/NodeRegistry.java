@@ -1,5 +1,6 @@
 package com.blok.blok.node;
 
+import com.blok.blok.errors.BlokError;
 import com.blok.blok.errors.NodeException;
 import com.blok.blok.middleware.Middleware;
 import com.blok.blok.types.*;
@@ -131,6 +132,24 @@ public class NodeRegistry {
                 result.setVars(ctx.getVars());
             }
 
+            return result;
+
+        } catch (BlokError e) {
+            // Structured BlokError path (master plan §17): pass the instance
+            // through verbatim so the gRPC servicer can serialize every field
+            // (category, severity, remediation, retryable hints, cause chain,
+            // context snapshot, etc.) into the proto NodeError.
+            long durationNanos = System.nanoTime() - startNanos;
+            double durationMs = durationNanos / 1_000_000.0;
+            long memAfter = runtime.totalMemory() - runtime.freeMemory();
+            long memUsed = Math.max(0, memAfter - memBefore);
+
+            ExecutionMetrics metrics = new ExecutionMetrics(durationMs, null, memUsed);
+
+            ExecutionResult result = new ExecutionResult();
+            result.setSuccess(false);
+            result.setErrors(e);
+            result.setMetrics(metrics);
             return result;
 
         } catch (NodeException e) {

@@ -1,11 +1,31 @@
 @import "tailwindcss";
 
 @theme {
-	--color-zinc-925: #111113;
+	/* ── Brand (Direction A · Linear-grade Operator) ────────────── */
+	/* Real Blok green from docs/assets/logo/dark.svg. The wordmark
+	   icon, primary CTA, focus ring, completed-status, and the live-
+	   feed pulse are the only places this color appears — keep it
+	   one accent, not a palette. */
+	--color-blok-green-500: #2bcd71;
+	--color-blok-green-600: #22a85b;
 
+	/* ── Surface ladder ─────────────────────────────────────────── */
+	/* 4-step neutral so dark-mode depth comes from layering, not
+	   shadows (shadows look bad on dark UI). Tailwind v4 maps these
+	   `--color-*` tokens to `bg-canvas`, `bg-raised`, `bg-overlay`,
+	   `bg-hover` (and matching `text-` / `border-` utilities). */
+	--color-canvas: #0b0b0d;
+	--color-raised: #111113;
+	--color-overlay: #18181b;
+	--color-hover: #1f1f23;
+	--color-zinc-925: #111113; /* preserved alias for legacy refs */
+
+	/* ── Status palette (preserved) ─────────────────────────────── */
+	/* Tightened `completed` to the brand green so every successful
+	   run shares the brand DNA without changing existing semantics. */
 	--color-status-pending: #71717a;
 	--color-status-running: #3b82f6;
-	--color-status-completed: #22c55e;
+	--color-status-completed: #2bcd71;
 	--color-status-failed: #ef4444;
 	--color-status-cancelled: #a855f7;
 	--color-status-skipped: #6b7280;
@@ -14,6 +34,14 @@
 	--color-log-info: #3b82f6;
 	--color-log-warn: #f59e0b;
 	--color-log-error: #ef4444;
+
+	/* ── Type ────────────────────────────────────────────────────── */
+	/* JetBrains Mono is for IDs / durations / payloads. Newsreader
+	   italic is reserved for hero numerals (a single concession to
+	   Direction C). Use `font-display italic` on duration banners,
+	   page H1s, big stat numbers — and nowhere else. */
+	--font-mono: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace, monospace;
+	--font-display: "Newsreader", Georgia, "Times New Roman", serif;
 }
 
 /* Custom scrollbar */
@@ -72,6 +100,33 @@
 }
 .animate-slide-in {
 	animation: slide-in 0.25s ease-out;
+}
+
+/* Phase 7 motion polish · Direction A. Status dots that change color
+   via SSE (running → completed / running → failed) fade across the
+   transition rather than snapping. 320ms is fast enough to feel
+   instant during normal flows but slow enough to be perceived during
+   fast-finishing chains where multiple steps complete in one frame. */
+.transition-status {
+	transition: background-color 320ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow
+		320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Brand-green pulse for live-feed indicators that need to read as
+   "this is healthy and refreshing". Used by env-chip dot and live-tail
+   indicators throughout the UI. The keyframe sweeps the box-shadow
+   ring out to 4px and back, signaling a slow heartbeat. */
+@keyframes brand-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 rgba(43, 205, 113, 0.5);
+	}
+	50% {
+		box-shadow: 0 0 0 4px rgba(43, 205, 113, 0);
+	}
+}
+.animate-brand-pulse {
+	animation: brand-pulse 2s ease-in-out infinite;
 }
 
 /* Monospace for code/payloads */

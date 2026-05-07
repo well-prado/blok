@@ -205,20 +205,23 @@ function DashboardsPage() {
 
 	if (!dashboards || dashboards.length === 0) {
 		return (
-			<div className="p-6 flex flex-col items-center">
+			<div className="p-8">
 				<EmptyState
-					icon={<LayoutGrid className="w-12 h-12" />}
+					icon={<LayoutGrid className="w-10 h-10" />}
 					title="No dashboards yet"
-					description="Create your first custom dashboard to visualize workflow metrics."
+					description="Custom dashboards compose chart widgets — duration histograms, p95 latency, error rate, queue depth — into a single named view. Pin one per environment, share the URL with on-call."
+					action={
+						<button
+							type="button"
+							onClick={handleCreateDashboard}
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors"
+						>
+							<Plus className="w-3.5 h-3.5" />
+							Create dashboard
+						</button>
+					}
+					docLink={{ href: "https://docs.blok.io/studio/dashboards", label: "docs.blok.io/studio/dashboards" }}
 				/>
-				<button
-					type="button"
-					onClick={handleCreateDashboard}
-					className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-				>
-					<Plus className="w-4 h-4" />
-					Create Dashboard
-				</button>
 			</div>
 		);
 	}
@@ -226,7 +229,7 @@ function DashboardsPage() {
 	return (
 		<div className="h-full flex flex-col">
 			{/* Header bar */}
-			<div className="shrink-0 border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+			<div className="shrink-0 border-b border-zinc-800 bg-canvas/60 px-4 py-3">
 				<div className="flex items-center gap-3">
 					<h1 className="text-sm font-semibold text-zinc-100">Dashboards</h1>
 
@@ -246,7 +249,7 @@ function DashboardsPage() {
 											type="text"
 											value={renameValue}
 											onChange={(e) => setRenameValue(e.target.value)}
-											className="px-2 py-0.5 text-xs bg-zinc-800 border border-blue-500 rounded text-zinc-200 outline-none w-32"
+											className="px-2 py-0.5 text-xs bg-raised border border-blok-green-500 rounded text-zinc-200 outline-none w-32"
 											onBlur={() => setRenaming(null)}
 										/>
 									</form>
@@ -278,7 +281,7 @@ function DashboardsPage() {
 
 										{/* Dropdown menu */}
 										{showMenu === d.id && (
-											<div className="absolute top-full left-0 mt-1 w-40 bg-zinc-900 border border-zinc-800 rounded-md shadow-lg z-50 py-1">
+											<div className="absolute top-full left-0 mt-1 w-40 bg-overlay border border-zinc-800 rounded-md shadow-lg z-50 py-1">
 												<button
 													type="button"
 													onClick={() => {
@@ -339,7 +342,9 @@ function DashboardsPage() {
 							onClick={() => setIsEditing(!isEditing)}
 							className={cn(
 								"flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-								isEditing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
+								isEditing
+									? "bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600"
+									: "bg-zinc-800 text-zinc-300 hover:bg-zinc-700",
 							)}
 						>
 							{isEditing ? (

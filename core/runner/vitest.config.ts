@@ -17,7 +17,13 @@ export default defineConfig({
 			},
 		},
 		include: ["src/**/__tests__/**/*.test.ts", "test/**/*.test.ts", "__tests__/**/*.test.ts"],
-		exclude: ["node_modules", "dist"],
+		// Integration tests (`*.integration.test.ts`) need the dedicated
+		// `vitest.integration.config.ts` runner — that config uses
+		// `pool: "forks"` with `singleFork: true` because spawning real
+		// SDK binaries doesn't tolerate parallel test workers (port +
+		// resource races). Excluding them here keeps `bun run test` fast
+		// and reliable. Integration suite runs via `bun run test:integration`.
+		exclude: ["node_modules", "dist", "__tests__/integration/**"],
 		testTimeout: 10000,
 		hookTimeout: 10000,
 	},

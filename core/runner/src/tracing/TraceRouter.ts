@@ -1,6 +1,35 @@
 import http from "node:http";
+import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
+import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import { RunTracker } from "./RunTracker";
 import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
+
+/**
+ * Security review FW-2 — sensitive headers that are NEVER honored when
+ * supplied via the replay endpoint's `overrides.headers`. Combined with
+ * the FW-1 trace-auth gate, this blocks the replay-as-auth-bypass attack
+ * where an unauthenticated client posts to `/__blok/runs/:id/replay`
+ * with an attacker-controlled `Authorization` header that the runner
+ * would otherwise dispatch verbatim to the user-authored route.
+ */
+const REPLAY_HEADER_DENYLIST = new Set([
+	"authorization",
+	"cookie",
+	"set-cookie",
+	"x-api-key",
+	"x-auth-token",
+	"proxy-authorization",
+]);
+
+function filterReplayHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+	if (!headers) return {};
+	const filtered: Record<string, string> = {};
+	for (const [k, v] of Object.entries(headers)) {
+		if (REPLAY_HEADER_DENYLIST.has(k.toLowerCase())) continue;
+		filtered[k] = v;
+	}
+	return filtered;
+}
 
 /**
  * Minimal interfaces matching the Express API surface used by trace routes.
@@ -34,6 +63,26 @@ interface TraceRouter {
 }
 
 /**
+ * Security review FW-1 — authorize hook signature for `/__blok/*` routes.
+ *
+ * Triggers register a function that decides whether to serve trace API
+ * requests. Returning `true` allows the request; `false` (or a thrown
+ * error) returns `401`. In production, the trace router refuses to serve
+ * any route until an authorize hook is registered (or the operator sets
+ * `BLOK_TRACE_AUTH_DISABLED=1` to opt out — typically because they've
+ * firewalled `/__blok/*` separately).
+ */
+export type TraceAuthorizeFn = (req: TraceRequest) => Promise<boolean> | boolean;
+
+export interface TraceRouterOptions {
+	/**
+	 * Authorize hook for trace API requests. See {@link TraceAuthorizeFn}.
+	 * Required in production unless `BLOK_TRACE_AUTH_DISABLED=1` is set.
+	 */
+	authorize?: TraceAuthorizeFn;
+}
+
+/**
  * Register trace API routes on an Express-compatible router.
  *
  * This function avoids importing express directly so the runner package
@@ -45,23 +94,69 @@ interface TraceRouter {
  * import { Router } from "express";
  * import { registerTraceRoutes } from "@blokjs/runner";
  * const traceRouter = Router();
- * registerTraceRoutes(traceRouter);
+ * registerTraceRoutes(traceRouter, undefined, { authorize: myAuthFn });
  * app.use("/__blok", traceRouter);
  * ```
  */
-export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): void {
+export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, options?: TraceRouterOptions): void {
 	const t = tracker || RunTracker.getInstance();
 
 	// --- CORS for cross-origin Studio UI ---
+	// Security review FW-4 — `BLOK_TRACE_CORS_ORIGIN` overrides the
+	// permissive `*` default. Set to a single allow-listed origin in
+	// production to prevent cross-origin reads of trace data.
+	const corsOrigin = process.env.BLOK_TRACE_CORS_ORIGIN || "*";
+
+	// Security review FW-1 — production-default-deny on /__blok/* unless
+	// the operator either registers an authorize hook (preferred) or
+	// explicitly opts out via BLOK_TRACE_AUTH_DISABLED=1.
+	const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
+	const authDisabled = process.env.BLOK_TRACE_AUTH_DISABLED === "1";
+	const authorize = options?.authorize;
+
 	router.use((req: TraceRequest, res: TraceResponse, next: () => void) => {
-		res.setHeader("Access-Control-Allow-Origin", "*");
+		res.setHeader("Access-Control-Allow-Origin", corsOrigin);
 		res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
 		res.setHeader("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
 		if (req.method === "OPTIONS") {
 			res.sendStatus(204);
 			return;
 		}
-		next();
+
+		// Dev OR explicit opt-out → pass through (preserves previous behaviour).
+		if (!isProd || authDisabled) {
+			next();
+			return;
+		}
+
+		// Production WITHOUT an authorize hook → 503 with a hint.
+		if (!authorize) {
+			res.status(503).json({
+				error: "Trace endpoints require auth in production",
+				hint: "Register an authorize hook before listen() — `trigger.setTraceAuth(req => ...)` — or set BLOK_TRACE_AUTH_DISABLED=1 to opt out (typically because /__blok/* is already firewalled).",
+				docs: "https://github.com/deskree-inc/blok/blob/main/docs/d/security/cookbook.mdx#secure-the-trace-api-and-studio",
+			});
+			return;
+		}
+
+		// Production WITH an authorize hook → consult it. Wrap in
+		// `Promise.resolve().then(...)` so a SYNC throw inside the
+		// authorize function is caught the same as an async rejection.
+		Promise.resolve()
+			.then(() => authorize(req))
+			.then((ok) => {
+				if (ok) {
+					next();
+				} else {
+					res.status(401).json({ error: "Unauthorized" });
+				}
+			})
+			.catch((err) => {
+				// Don't leak the underlying error message — log it once,
+				// return a generic 401.
+				console.error("[blok][trace-auth] authorize() threw:", (err as Error)?.message ?? err);
+				res.status(401).json({ error: "Unauthorized" });
+			});
 	});
 
 	// === Utility Endpoints ===
@@ -371,28 +466,321 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		res.json({ removed: true });
 	});
 
+	// === Queues (Phase 5) ===
+	//
+	// Direction A · Phase 5. Honest "what's configured to receive
+	// work" page — Blok's HTTP triggers are stateless (no queue depth)
+	// so this view is workflow-by-trigger-type with throughput +
+	// last-run timing, not a JetStream-style depth dashboard.
+	// JetStream-backed worker queues will surface real depth here when
+	// the NATS integration grows the capability — for now we mark
+	// `depth: null` everywhere so the UI knows to show "—" instead of
+	// "0".
+	//
+	// Query params:
+	//   ?env=<name>  filter by environment scope (Phase 2.1)
+	router.get("/queues", (req: TraceRequest, res: TraceResponse) => {
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+
+		// Reuse the workflow-summary aggregation; queues are workflows
+		// reframed by their trigger type. Pull recent runs to compute
+		// per-trigger-type throughput counts.
+		const workflows = t.getWorkflowSummaries();
+		const recent = t.getRuns({ limit: 500, sort: "desc" }).runs;
+
+		// env post-filter on the recent-run window
+		const recentInScope = envFilter ? recent.filter((r) => (r.environment ?? "production") === envFilter) : recent;
+
+		// Group workflows by their first trigger type (HTTP triggers
+		// dominate today; future triggers will surface in this list).
+		const queues = workflows.map((w) => {
+			const wfRecent = recentInScope.filter((r) => r.workflowName === w.name);
+			const triggerType = w.triggerTypes[0] ?? "unknown";
+			const lastRun = wfRecent[0];
+			return {
+				id: w.name,
+				name: w.name,
+				triggerType,
+				triggerTypes: w.triggerTypes,
+				// Stateless HTTP triggers have no queue depth; depth
+				// will populate when NATS JetStream integration lands.
+				depth: null as number | null,
+				runs24h: wfRecent.length,
+				totalRuns: w.totalRuns,
+				lastRunAt: lastRun?.startedAt ?? w.lastRunAt,
+				lastRunStatus: lastRun?.status ?? w.lastRunStatus,
+				avgDurationMs: w.avgDurationMs,
+				errorRate: w.errorRate,
+			};
+		});
+
+		res.json({ queues, total: queues.length, env: envFilter ?? null });
+	});
+
+	// === Deployments (Phase 5) ===
+	//
+	// Read-only "what versions are running where" view. Blok workflows
+	// declare a `version` string in their definition; we group runs by
+	// `workflowName + version` and report counts + success rate per
+	// pair. Studio lists these as "what's deployed", and clicking a
+	// row drills into the workflow's runs filtered to that version.
+	//
+	// Source: scan recent run metadata. Workflow versions live in the
+	// trigger's workflow registry but the runner doesn't keep that
+	// catalog at this layer — recent runs are the source of truth for
+	// "what version produced what trace".
+	router.get("/deployments", (req: TraceRequest, res: TraceResponse) => {
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+		const limit = Math.min(Number.parseInt(req.query.limit || "500", 10), 2000);
+
+		const runs = t.getRuns({ limit, sort: "desc" }).runs;
+		const inScope = envFilter ? runs.filter((r) => (r.environment ?? "production") === envFilter) : runs;
+
+		// Group by `workflowName::version`. Version is read from the
+		// run's metadata if present, else "unknown" so the row still
+		// surfaces.
+		const buckets = new Map<
+			string,
+			{
+				workflowName: string;
+				version: string;
+				environment: string;
+				runs: number;
+				succeeded: number;
+				failed: number;
+				lastRunAt: number;
+				firstRunAt: number;
+				avgDurationMs: number;
+				_durationSum: number;
+			}
+		>();
+
+		for (const run of inScope) {
+			const version = (run.metadata?.version as string | undefined) ?? "unknown";
+			const env = run.environment ?? "production";
+			const key = `${run.workflowName}::${version}::${env}`;
+			let b = buckets.get(key);
+			if (!b) {
+				b = {
+					workflowName: run.workflowName,
+					version,
+					environment: env,
+					runs: 0,
+					succeeded: 0,
+					failed: 0,
+					lastRunAt: 0,
+					firstRunAt: run.startedAt,
+					avgDurationMs: 0,
+					_durationSum: 0,
+				};
+				buckets.set(key, b);
+			}
+			b.runs += 1;
+			if (run.status === "completed") b.succeeded += 1;
+			if (run.status === "failed") b.failed += 1;
+			if (run.startedAt > b.lastRunAt) b.lastRunAt = run.startedAt;
+			if (run.startedAt < b.firstRunAt) b.firstRunAt = run.startedAt;
+			if (run.durationMs) b._durationSum += run.durationMs;
+		}
+
+		const deployments = [...buckets.values()].map((b) => {
+			const { _durationSum, ...rest } = b;
+			return {
+				...rest,
+				avgDurationMs: b.runs > 0 ? Math.round(_durationSum / b.runs) : 0,
+				successRate: b.runs > 0 ? b.succeeded / b.runs : 0,
+			};
+		});
+		deployments.sort((a, b) => b.lastRunAt - a.lastRunAt);
+
+		res.json({ deployments, total: deployments.length, env: envFilter ?? null });
+	});
+
+	// === Logs (cross-run aggregator) ===
+	//
+	// Direction A · Phase 3 · the page that doesn't exist in current
+	// Studio. Aggregates `TraceLogEntry`s across recent runs into a
+	// flat feed so operators can grep across workflows during an
+	// incident without having to know which run-id to open.
+	//
+	// Pagination is deliberately simple — `limit` + `since` (epoch ms)
+	// with `desc` sort. We over-fetch from the store (limit*4 runs ×
+	// up-to-N logs each) and apply filters in memory because the
+	// underlying log store doesn't have an indexed multi-key query.
+	// At ≤1000 rows this stays well under 50ms even on the in-memory
+	// backend; SQLite can be similarly fast since each `getLogs(runId)`
+	// is a single indexed query. When the cap is reached, the response
+	// signals truncation via `truncated: true` so the client can prompt
+	// for narrower filters.
+	//
+	// Query params (all optional):
+	//   ?workflow=<name>                exact match
+	//   ?level=info,warn,error,debug    comma-separated
+	//   ?q=<text>                       case-insensitive substring of message
+	//   ?since=<epoch ms>               only logs newer than this
+	//   ?limit=<int>                    max rows returned, default 200, cap 1000
+	router.get("/logs", (req: TraceRequest, res: TraceResponse) => {
+		const workflowFilter =
+			typeof req.query.workflow === "string" && req.query.workflow.length > 0 ? req.query.workflow : undefined;
+		const levelFilter = (() => {
+			if (typeof req.query.level !== "string" || req.query.level.length === 0) return undefined;
+			return new Set(req.query.level.split(",").map((s: string) => s.trim().toLowerCase()));
+		})();
+		const qRaw = typeof req.query.q === "string" ? req.query.q.trim() : "";
+		const q = qRaw.length > 0 ? qRaw.toLowerCase() : undefined;
+		const since = req.query.since ? Number.parseInt(req.query.since, 10) : undefined;
+		const limit = Math.min(Number.parseInt(req.query.limit || "200", 10), 1000);
+		// Phase 2.1 · environment scoping. Default `production` matches
+		// SqliteRunStore.rowToRun's NULL → "production" mapping so legacy
+		// runs still surface under the default scope.
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+
+		// Pull recent runs so we can flatten their logs. We over-pull
+		// (limit*4 runs cap'd at 200) so a noisy run with 50+ logs
+		// doesn't crowd out logs from quieter neighbors.
+		const runs = t.getRuns({ limit: Math.min(limit * 4, 200), sort: "desc" }).runs;
+		const matches: Array<{
+			id: string;
+			runId: string;
+			workflowName: string;
+			workflowPath: string;
+			nodeId: string | undefined;
+			nodeName: string | undefined;
+			level: string;
+			message: string;
+			timestamp: number;
+			data: unknown;
+		}> = [];
+		let truncated = false;
+
+		outer: for (const run of runs) {
+			if (workflowFilter && run.workflowName !== workflowFilter) continue;
+			if (envFilter && (run.environment ?? "production") !== envFilter) continue;
+			const logs = t.getLogs(run.id);
+			for (const log of logs) {
+				if (since !== undefined && log.timestamp <= since) continue;
+				if (levelFilter && !levelFilter.has(log.level)) continue;
+				if (q && !log.message.toLowerCase().includes(q)) continue;
+				matches.push({
+					id: log.id,
+					runId: run.id,
+					workflowName: run.workflowName,
+					workflowPath: run.workflowPath,
+					nodeId: log.nodeId,
+					nodeName: log.nodeName,
+					level: log.level,
+					message: log.message,
+					timestamp: log.timestamp,
+					data: log.data,
+				});
+				if (matches.length >= limit) {
+					truncated = true;
+					break outer;
+				}
+			}
+		}
+
+		matches.sort((a, b) => b.timestamp - a.timestamp);
+		res.json({
+			logs: matches,
+			total: matches.length,
+			truncated,
+			query: { workflow: workflowFilter, level: req.query.level, q: qRaw, since, limit },
+		});
+	});
+
 	// === Run Endpoints ===
 
 	router.get("/runs", (req: TraceRequest, res: TraceResponse) => {
 		const workflow = req.query.workflow;
 		const status = req.query.status;
 		const tags = req.query.tags ? req.query.tags.split(",").map((t: string) => t.trim()) : undefined;
+		// Tier 2 quick-wins — `metadata.<key>=<value>` query params parsed
+		// into a `Record<string, string>` for the RunQuery filter. Multiple
+		// pairs combine with AND semantics. Keys are restricted by the
+		// SqliteRunStore implementation (`/^[a-zA-Z0-9_-]+$/`) for JSON
+		// path safety; non-matching keys silently drop.
+		let metadata: Record<string, string> | undefined;
+		for (const [key, value] of Object.entries(req.query as Record<string, string>)) {
+			if (key.startsWith("metadata.") && typeof value === "string" && value.length > 0) {
+				const metaKey = key.slice("metadata.".length);
+				if (metaKey.length > 0) {
+					if (!metadata) metadata = {};
+					metadata[metaKey] = value;
+				}
+			}
+		}
 		const limit = Number.parseInt(req.query.limit || "50", 10);
 		const offset = Number.parseInt(req.query.offset || "0", 10);
 		const sort = (req.query.sort as "asc" | "desc") || "desc";
+		// Phase 2.1 · environment scoping. Same post-filter pattern as
+		// `categoryFilter` below: applied after `getRuns()` returns so it
+		// works against any store (SQLite has the column; InMemory just
+		// stores the object). Empty string + "all" both bypass the
+		// filter (Studio's EnvChip can dispatch a "show all envs"
+		// view in a follow-up).
+		const envFilter =
+			typeof req.query.env === "string" && req.query.env.length > 0 && req.query.env !== "all"
+				? req.query.env
+				: undefined;
+		// Master plan §17.10: optional category filter. The filter is
+		// applied AFTER `getRuns()` returns so it works against any
+		// store backend (in-memory, sqlite, postgres) without a schema
+		// change. The trade-off is that pagination math now reflects
+		// the post-filter count, not the underlying store count — this
+		// is the right behavior for a UI filter (the user sees "12
+		// dependency failures" not "12 of 1247 runs that happen to be
+		// dependency failures").
+		const categoryFilter =
+			typeof req.query.category === "string" && req.query.category.length > 0
+				? req.query.category.toUpperCase()
+				: undefined;
 
+		// Combined filter mode — when EITHER category OR env post-filters
+		// are active we have to over-fetch + re-paginate after applying
+		// them.
+		const needsPostFilter = Boolean(categoryFilter || envFilter);
 		const result = t.getRuns({
 			workflow,
 			status: status as "running" | "completed" | "failed" | undefined,
 			tags,
-			limit,
-			offset,
+			metadata,
+			limit: needsPostFilter ? Math.max(limit, 1000) : limit,
+			offset: needsPostFilter ? 0 : offset,
 			sort,
 		});
 
+		let runs = result.runs;
+		let total = result.total;
+		if (categoryFilter) {
+			runs = runs.filter((r) => {
+				const category = r.error?.category;
+				return typeof category === "string" && category.toUpperCase() === categoryFilter;
+			});
+			total = runs.length;
+		}
+		if (envFilter) {
+			// Default `production` for legacy rows where env is NULL —
+			// matches the SqliteRunStore.rowToRun default.
+			runs = runs.filter((r) => (r.environment ?? "production") === envFilter);
+			total = runs.length;
+		}
+		if (needsPostFilter) {
+			runs = runs.slice(offset, offset + limit);
+		}
+
 		res.json({
-			runs: result.runs,
-			total: result.total,
+			runs,
+			total,
 			page: Math.floor(offset / limit) + 1,
 		});
 	});
@@ -424,6 +812,22 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 		const events = t.getEvents(runId, since);
 		res.json(events);
+	});
+
+	/**
+	 * Tier 2 · sub-workflow lineage. Returns the runs that were started
+	 * by `subworkflow:` steps inside the given parent run. Studio renders
+	 * these as a "Sub-runs" list on the parent's run detail page.
+	 */
+	router.get("/runs/:runId/subruns", (req: TraceRequest, res: TraceResponse) => {
+		const { runId } = req.params;
+		const run = t.getRun(runId);
+		if (!run) {
+			res.status(404).json({ error: `Run '${runId}' not found` });
+			return;
+		}
+		const subruns = t.getRunsByParent(runId);
+		res.json(subruns);
 	});
 
 	router.delete("/runs", (_req: TraceRequest, res: TraceResponse) => {
@@ -465,9 +869,18 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 		const overrides = (req.body || {}) as Record<string, unknown>;
 		const finalMethod = ((overrides.method as string) || method).toUpperCase();
 		const finalUrl = overrides.path ? `${protocol}://${host}${overrides.path}` : url;
+		// Security review FW-2 — strip sensitive headers from overrides
+		// BEFORE merging, then layer the framework-controlled headers
+		// LAST so an attacker can't replace `X-Blok-Replay-Of`.
+		const safeOverrideHeaders = filterReplayHeaders(overrides.headers as Record<string, string>);
 		const customHeaders: Record<string, string> = {
 			"Content-Type": "application/json",
-			...((overrides.headers as Record<string, string>) || {}),
+			...safeOverrideHeaders,
+			// Tier 1 · replay lineage. TriggerBase reads this header and threads
+			// it into `tracker.startRun({ replayOf })`, which persists onto the
+			// new run's WorkflowRun.replayOf field. Studio renders a
+			// "Replay of #..." breadcrumb that links back to the source run.
+			"X-Blok-Replay-Of": runId,
 		};
 		const body = overrides.body !== undefined ? JSON.stringify(overrides.body) : undefined;
 
@@ -489,6 +902,10 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 				newRunId: event.runId,
 				originalRunId: runId,
 				workflowName: run.workflowName,
+				// Tier 1 · explicit lineage in the API response so Studio
+				// doesn't have to fetch the new run separately to confirm
+				// the replay relationship.
+				replayOf: runId,
 			});
 		};
 
@@ -527,6 +944,146 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker): 
 
 		// Cleanup if client disconnects
 		req.on("close", cleanup);
+	});
+
+	// === Concurrency observability (Tier 2 follow-up) ===
+
+	/**
+	 * Concurrency backend health probe. Returns the configured backend
+	 * (`"in-process"` when none) and basic state. Useful for k8s-style
+	 * health checks AND Studio's "Backend status" tile.
+	 *
+	 * GET /__blok/concurrency/health
+	 */
+	router.get("/concurrency/health", (_req: TraceRequest, res: TraceResponse) => {
+		const backend = t.getConcurrencyBackend();
+		res.json({
+			backend: backend?.name ?? "in-process",
+			disabled: process.env.BLOK_CONCURRENCY_DISABLED === "1",
+			leaseMs: process.env.BLOK_CONCURRENCY_LEASE_MS ? Number(process.env.BLOK_CONCURRENCY_LEASE_MS) : 60 * 60 * 1000,
+		});
+	});
+
+	/**
+	 * Snapshot of currently in-flight concurrency slots, grouped by
+	 * (workflowName, concurrencyKey) bucket. Powers Studio's per-key
+	 * in-flight tile.
+	 *
+	 * GET /__blok/concurrency/state
+	 */
+	router.get("/concurrency/state", (_req: TraceRequest, res: TraceResponse) => {
+		const buckets = t.getStore().getConcurrencySnapshot(Date.now());
+		const totalLeases = buckets.reduce((sum, b) => sum + b.leases.length, 0);
+		res.json({
+			totalBuckets: buckets.length,
+			totalLeases,
+			buckets: buckets.map((b) => ({
+				workflowName: b.workflowName,
+				concurrencyKey: b.concurrencyKey,
+				inFlight: b.leases.length,
+				leases: b.leases,
+			})),
+		});
+	});
+
+	// === Cancellation (Tier 2 polish) ===
+
+	/**
+	 * Cancel a pending (delayed/debounced/queued) run before it executes.
+	 *
+	 * `POST /__blok/runs/:runId/cancel`
+	 *
+	 * Returns:
+	 * - `200 { cancelled: true, runId, previousStatus, newStatus: "cancelled" }` on success
+	 * - `400 { error }` when the run isn't in a cancellable state
+	 *   (running/completed/failed/throttled/expired/crashed/timedOut/cancelled)
+	 * - `404 { error }` when the runId doesn't exist
+	 *
+	 * Cancels the underlying scheduler entry (`DeferredRunScheduler` for
+	 * delayed/queued runs; `DebounceCoordinator` for debounced trailing-mode
+	 * runs) AND flips the run's status to `"cancelled"` via
+	 * `tracker.cancelRun(runId)`. Both scheduler `.cancel()` methods are
+	 * idempotent so calling them on a runId that doesn't have a pending
+	 * timer is a safe no-op.
+	 */
+	router.post("/runs/:runId/cancel", (req: TraceRequest, res: TraceResponse) => {
+		const { runId } = req.params;
+		const run = t.getRun(runId);
+
+		if (!run) {
+			res.status(404).json({ error: `Run '${runId}' not found` });
+			return;
+		}
+
+		// Tier 2 follow-up · "running" added so cooperative AbortSignal
+		// cancellation can flip in-flight runs to `cancelled` via
+		// `tracker.abortRunningRun(runId)`. Other terminal states
+		// (completed/failed/throttled/expired/crashed/timedOut) remain
+		// non-cancellable.
+		const cancellable = ["delayed", "debounced", "queued", "running"];
+		if (!cancellable.includes(run.status)) {
+			res.status(400).json({
+				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', 'queued', or 'running' state can be cancelled.`,
+				runId,
+				status: run.status,
+			});
+			return;
+		}
+
+		// Capture previousStatus BEFORE cancelRun mutates the run record.
+		const previousStatus = run.status;
+
+		// Tier 2 follow-up · running runs use cooperative AbortSignal.
+		// `abortRunningRun` fires the controller AND flips status via
+		// cancelRun in one atomic-feeling call. Returns 200 — the
+		// in-flight step's between-step check will throw shortly.
+		if (run.status === "running") {
+			const aborted = t.abortRunningRun(runId);
+			if (!aborted) {
+				// No registered controller — likely a stale state where
+				// the run is mid-finalization. Still return success since
+				// the run is on its way to terminal anyway.
+				res.json({
+					cancelled: true,
+					runId,
+					previousStatus,
+					newStatus: "cancelled",
+					note: "No active AbortController; run will reach terminal state naturally.",
+				});
+				return;
+			}
+			res.json({
+				cancelled: true,
+				runId,
+				previousStatus,
+				newStatus: "cancelled",
+				note: "Cancellation initiated via AbortSignal; in-flight step will abort cooperatively.",
+			});
+			return;
+		}
+
+		// Best-effort scheduler cleanup (both methods are idempotent).
+		DeferredRunScheduler.getInstance().cancel(runId);
+		if (run.debounceKey) {
+			DebounceCoordinator.getInstance().cancel(run.workflowName, run.debounceKey);
+		}
+
+		const cancelled = t.cancelRun(runId);
+		if (!cancelled) {
+			// Race: status changed between our check and the call.
+			res.status(409).json({
+				error: `Could not cancel run '${runId}'. It may have just transitioned to a non-cancellable state.`,
+				runId,
+			});
+			return;
+		}
+
+		res.json({
+			cancelled: true,
+			runId,
+			previousStatus,
+			newStatus: "cancelled",
+		});
 	});
 
 	// === AI Error Explanation ===

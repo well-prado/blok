@@ -45,6 +45,9 @@ interface PoolConfig {
  */
 export class DockerRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind: RuntimeKind;
+	// Docker adapter shells out to a containerized HTTP server, so it
+	// reports the same transport tag as the in-process HTTP adapter.
+	public readonly transport = "http" as const;
 	private image: string;
 	private pool: Map<string, ContainerInstance> = new Map();
 	private poolConfig: PoolConfig;
@@ -52,7 +55,13 @@ export class DockerRuntimeAdapter implements RuntimeAdapter {
 	private healthCheckInterval?: NodeJS.Timeout;
 	private nextPort = 9000;
 
-	constructor(kind: RuntimeKind = "docker", image: string, poolConfig?: Partial<PoolConfig>) {
+	// `kind` is required: there is no sensible default across the multi-language
+	// adapter matrix (callers explicitly choose `python3`/`go`/`docker`/etc.).
+	// The previous `kind: RuntimeKind = "docker"` default tripped biome's
+	// `useDefaultParameterLast` rule and led to autofixes that broke a unit
+	// test depending on the default. Removing the default is the canonical
+	// resolution.
+	constructor(kind: RuntimeKind, image: string, poolConfig?: Partial<PoolConfig>) {
 		this.kind = kind;
 		this.image = image;
 		this.poolConfig = {

@@ -9,19 +9,15 @@
     </http>
 </trigger>
 <steps>
-    <name>get-countries-api</name>
-    <node>@blokjs/api-call</node>
+    <id>get-countries-api</id>
+    <use>@blokjs/api-call</use>
     <type>module</type>
+    <inputs>
+        <url>https://countriesnow.space/api/v0.1/countries/capital</url>
+        <method>GET</method>
+        <headers>
+            <Content-Type>application/json</Content-Type>
+        </headers>
+        <responseType>application/json</responseType>
+    </inputs>
 </steps>
-<nodes>
-    <get-countries-api>
-        <inputs>
-            <url>https://countriesnow.space/api/v0.1/countries/capital</url>
-            <method>GET</method>
-            <headers>
-                <Content-Type>application/json</Content-Type>
-            </headers>
-            <responseType>application/json</responseType>
-        </inputs>
-    </get-countries-api>
-</nodes>

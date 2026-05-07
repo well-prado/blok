@@ -1,0 +1,180 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Blok Workflow v2",
+	"description": "Schema for Blok v2 JSON workflows. Steps inline their `inputs`; output auto-persists to ctx.state[id]. Use the `branch` step shape for if/else flow control. See https://blok.build/docs/workflow-v2 for full reference.",
+	"type": "object",
+	"properties": {
+		"name": {
+			"type": "string",
+			"minLength": 3,
+			"description": "Workflow display name. Min 3 characters. Shown in Studio."
+		},
+		"version": {
+			"type": "string",
+			"minLength": 5,
+			"description": "Semantic version (x.x.x). Used for trace recording and audit."
+		},
+		"description": {
+			"type": "string",
+			"description": "What this workflow does. Optional but recommended — surfaces in Studio and CLI."
+		},
+		"trigger": {
+			"type": "object",
+			"additionalProperties": {},
+			"propertyNames": {
+				"enum": [
+					"http",
+					"grpc",
+					"manual",
+					"cron",
+					"queue",
+					"pubsub",
+					"worker",
+					"webhook",
+					"sse",
+					"websocket"
+				]
+			},
+			"description": "Trigger configuration. Most workflows use { http: { method: 'GET' } }. See TRIGGER_SCHEMAS for per-kind shapes."
+		},
+		"steps": {
+			"type": "array",
+			"items": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the branch step. Visible in traces."
+							},
+							"branch": {
+								"type": "object",
+								"properties": {
+									"when": {
+										"type": "string",
+										"minLength": 1,
+										"description": "JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. $ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true')."
+									},
+									"then": {
+										"type": "array",
+										"items": {},
+										"description": "Steps to execute when `when` is truthy."
+									},
+									"else": {
+										"type": "array",
+										"items": {},
+										"description": "Steps to execute when `when` is falsy. Optional."
+									}
+								},
+								"required": ["when", "then"],
+								"additionalProperties": false,
+								"description": "Conditional sub-pipeline."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": ["id", "branch"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier. Other steps reference this step's output as $.state[id]. Required."
+							},
+							"use": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Node reference. Examples: '@blokjs/api-call', 'my-custom-node'. Type is inferred from this value when `type` is not set."
+							},
+							"type": {
+								"type": "string",
+								"enum": [
+									"local",
+									"module",
+									"runtime.python3",
+									"runtime.nodejs",
+									"runtime.bun",
+									"runtime.go",
+									"runtime.java",
+									"runtime.rust",
+									"runtime.php",
+									"runtime.csharp",
+									"runtime.ruby",
+									"runtime.docker",
+									"runtime.wasm"
+								],
+								"description": "Node type (module/local/runtime.*). When omitted, inferred from `use`: runtime.* prefixes are explicit; @blokjs/* and most others default to 'module'."
+							},
+							"inputs": {
+								"type": "object",
+								"additionalProperties": {},
+								"description": "Inputs passed to the node. May contain $ proxy references (e.g. $.state.foo, $.req.body.id) or 'js/...' expressions for runtime evaluation."
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Alternative name for this step's output in state. Defaults to `id`. Useful when the id is implementation-detail-y and the output is referenced by a domain term."
+							},
+							"spread": {
+								"type": "boolean",
+								"description": "If true, the result.data object's top-level keys are shallow-merged into state. Use for multi-output nodes in data-pipeline workflows. Mutually exclusive with `as`."
+							},
+							"ephemeral": {
+								"type": "boolean",
+								"description": "If true, this step's output is NOT stored in state. Only ctx.prev carries it to the immediately next step. Use for side-effects (logging, audit, telemetry)."
+							},
+							"runtime": {
+								"type": "string",
+								"enum": [
+									"nodejs",
+									"bun",
+									"python3",
+									"go",
+									"java",
+									"rust",
+									"php",
+									"csharp",
+									"ruby",
+									"docker",
+									"wasm"
+								],
+								"description": "Optional runtime hint. Most authors don't need this; the type already encodes it."
+							},
+							"active": {
+								"type": "boolean",
+								"description": "If false, the step is skipped at runtime. Default true."
+							},
+							"stop": {
+								"type": "boolean",
+								"description": "If true, the workflow halts after this step completes. Default false."
+							},
+							"stream_logs": {
+								"type": "boolean",
+								"description": "Per-step opt-in for live log streaming. Inherits from BLOK_STREAM_LOGS env when unset."
+							},
+							"set_var": {
+								"type": "boolean",
+								"description": "@deprecated v2 default-stores every step's output. `set_var: true` is a no-op; `set_var: false` is normalized to `ephemeral: true`."
+							}
+						},
+						"required": ["id", "use"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"minItems": 1,
+			"description": "Pipeline of steps to execute in order. At least one step required."
+		}
+	},
+	"required": ["name", "version", "trigger", "steps"],
+	"additionalProperties": false
+}

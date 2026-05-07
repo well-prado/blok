@@ -19,14 +19,21 @@
  *    - Ack on success, retry or DLQ on failure
  */
 
-import type { HelperResponse, WorkerTriggerOpts } from "@blokjs/helper";
+import { type HelperResponse, type WorkerTriggerOpts, tryParseDuration } from "@blokjs/helper";
 import {
 	type BlokService,
+	ConcurrencyLimitError,
+	ConcurrencyMetrics,
 	DefaultLogger,
+	DeferredDispatchSignal,
 	type GlobalOptions,
+	Janitor,
 	NodeMap,
+	QueueExpiredError,
+	RunTracker,
 	TriggerBase,
 	type TriggerResponse,
+	createConcurrencyBackend,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -205,6 +212,63 @@ export abstract class WorkerTrigger extends TriggerBase {
 		const startTime = this.startCounter();
 
 		try {
+			// Tier 2 #6 follow-up · install the cross-process concurrency
+			// backend (NATS KV) when the operator opted in via
+			// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null preserves the
+			// existing in-process behavior.
+			//
+			// PR 3 D1 — record install attempts via OTel counter.
+			try {
+				const backend = createConcurrencyBackend();
+				if (backend) {
+					await backend.connect();
+					RunTracker.getInstance().setConcurrencyBackend(backend);
+					ConcurrencyMetrics.getInstance().recordBackendInstall({
+						backend: backend.name,
+						status: "success",
+					});
+					this.logger.log(`[concurrency] backend installed: ${backend.name}`);
+				}
+			} catch (err) {
+				ConcurrencyMetrics.getInstance().recordBackendInstall({
+					backend: "unknown",
+					status: "failure",
+				});
+				this.logger.error(
+					`[concurrency] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
+				);
+			}
+
+			// Tier 2 quick-wins follow-up · install crash handlers + recover
+			// orphaned runs from a previous (dead) process. Idempotent + opt-out
+			// via `BLOK_CRASH_AUTOFLIP_DISABLED=1`.
+			try {
+				WorkerTrigger.installCrashHandlers(this.logger);
+				const orphaned = WorkerTrigger.recoverOrphanedRuns(undefined, this.logger);
+				if (orphaned > 0) {
+					this.logger.log(`[crash-autoflip] flipped ${orphaned} orphaned run(s) to crashed on boot`);
+				}
+			} catch (err) {
+				this.logger.error(`[crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
+			// Tier 2 follow-up · start the periodic storage janitor.
+			// Idempotent (singleton); opt-out via `BLOK_JANITOR_DISABLED=1`.
+			try {
+				Janitor.getInstance(RunTracker.getInstance().getStore(), this.logger).start();
+			} catch (err) {
+				this.logger.error(`[janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
+			// Tier 2 follow-up · install graceful shutdown handlers
+			// (SIGTERM / SIGINT). Idempotent; opt-out via
+			// `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1`.
+			try {
+				WorkerTrigger.installShutdownHandlers(this, this.logger);
+			} catch (err) {
+				this.logger.error(`[shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
+
 			// Connect to job backend
 			await this.adapter.connect();
 			this.logger.log(`Connected to ${this.adapter.provider} worker system`);
@@ -420,6 +484,74 @@ export abstract class WorkerTrigger extends TriggerBase {
 				await job.complete();
 			} catch (error) {
 				const errorMessage = (error as Error).message;
+
+				// Tier 2 #5 + #7 — deferred dispatch (delay/TTL/debounce).
+				// The run was deferred to a future timer; ACK without retry.
+				// The in-process scheduler owns the eventual dispatch, NOT
+				// the broker — re-queueing here would create a duplicate.
+				if (error instanceof DeferredDispatchSignal) {
+					span.setAttribute("success", false);
+					span.setAttribute("deferred", true);
+					span.setAttribute("deferred_status", error.info.status);
+					span.setStatus({ code: SpanStatusCode.OK, message: `deferred:${error.info.status}` });
+
+					this.logger.log(
+						`[scheduling] job ${jobId} runId=${error.info.runId} status=${error.info.status} ` +
+							`scheduledAt=${error.info.scheduledAt} pingCount=${error.info.pingCount} → ACK (no requeue)`,
+					);
+
+					await job.complete();
+					return;
+				}
+
+				// PR 1-5 polish — queue-mode TTL elapsed. The run is already
+				// flipped to `expired` (see TriggerBase queue branch); ACK
+				// without retry so the broker doesn't redeliver — the run
+				// will never succeed (timer won't re-fire). Distinct from
+				// the throttled NACK below.
+				if (error instanceof QueueExpiredError) {
+					span.setAttribute("success", false);
+					span.setAttribute("queue_expired", true);
+					span.setStatus({ code: SpanStatusCode.OK, message: "queue_expired" });
+
+					this.logger.log(
+						`[concurrency] job ${jobId} runId=${error.info.runId} key='${error.info.concurrencyKey}' ` +
+							`queueExpiredAt=${error.info.queueExpiredAt} → ACK (no requeue, run expired)`,
+					);
+
+					await job.complete();
+					return;
+				}
+
+				// Tier 2 #6 — concurrency gate denial. Distinct from a normal
+				// failure: NACK with redelivery so the broker re-queues the
+				// job with its existing back-off semantics. Doesn't count
+				// against the workflow's retry budget (different invariant).
+				// We always pass `willRetry: true` regardless of `job.attempts`
+				// because throttling is a transient resource state, not a
+				// permanent failure.
+				if (error instanceof ConcurrencyLimitError) {
+					span.setAttribute("success", false);
+					span.setAttribute("will_retry", true);
+					span.setAttribute("throttled", true);
+					span.setStatus({ code: SpanStatusCode.OK, message: "concurrency_limit_reached" });
+
+					this.logger.log(
+						`[concurrency] job ${jobId} key='${error.info.concurrencyKey}' ` +
+							`limit=${error.info.concurrencyLimit} inFlight=${error.info.currentInFlight} → NACK + redelivery`,
+					);
+
+					workerRetries.add(1, {
+						env: process.env.NODE_ENV,
+						queue: config.queue,
+						workflow_name: this.configuration?.name || "unknown",
+						reason: "throttled",
+					});
+
+					await job.fail(error as Error, true);
+					return;
+				}
+
 				const shouldRetry = job.attempts < job.maxRetries;
 
 				// Set span error
@@ -429,8 +561,17 @@ export abstract class WorkerTrigger extends TriggerBase {
 				span.setStatus({ code: SpanStatusCode.ERROR, message: errorMessage });
 
 				if (shouldRetry) {
-					// Retry with exponential backoff
-					const backoffMs = this.calculateBackoff(job.attempts, config.delay);
+					// Retry with exponential backoff. `config.delay` widened to
+					// `string | number | undefined` in Tier 2 #5 (duration strings).
+					// `calculateBackoff` only handles numbers; normalize via
+					// tryParseDuration. Fail-open to undefined → default backoff.
+					const delayMs =
+						typeof config.delay === "number"
+							? config.delay
+							: typeof config.delay === "string"
+								? (tryParseDuration(config.delay) ?? undefined)
+								: undefined;
+					const backoffMs = this.calculateBackoff(job.attempts, delayMs);
 					workerRetries.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,

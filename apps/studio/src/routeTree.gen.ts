@@ -10,7 +10,11 @@
 
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as WebhooksRouteImport } from "./routes/webhooks"
+import { Route as SettingsRouteImport } from "./routes/settings"
+import { Route as QueuesRouteImport } from "./routes/queues"
 import { Route as MetricsRouteImport } from "./routes/metrics"
+import { Route as LogsRouteImport } from "./routes/logs"
+import { Route as DeploymentsRouteImport } from "./routes/deployments"
 import { Route as DashboardsRouteImport } from "./routes/dashboards"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
@@ -23,9 +27,29 @@ const WebhooksRoute = WebhooksRouteImport.update({
   path: "/webhooks",
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: "/settings",
+  path: "/settings",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QueuesRoute = QueuesRouteImport.update({
+  id: "/queues",
+  path: "/queues",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MetricsRoute = MetricsRouteImport.update({
   id: "/metrics",
   path: "/metrics",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LogsRoute = LogsRouteImport.update({
+  id: "/logs",
+  path: "/logs",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeploymentsRoute = DeploymentsRouteImport.update({
+  id: "/deployments",
+  path: "/deployments",
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardsRoute = DashboardsRouteImport.update({
@@ -62,7 +86,11 @@ const RunsRunIdRoute = RunsRunIdRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/dashboards": typeof DashboardsRoute
+  "/deployments": typeof DeploymentsRoute
+  "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
+  "/queues": typeof QueuesRoute
+  "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
@@ -72,7 +100,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/dashboards": typeof DashboardsRoute
+  "/deployments": typeof DeploymentsRoute
+  "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
+  "/queues": typeof QueuesRoute
+  "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
@@ -83,7 +115,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/dashboards": typeof DashboardsRoute
+  "/deployments": typeof DeploymentsRoute
+  "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
+  "/queues": typeof QueuesRoute
+  "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
   "/runs/diff": typeof RunsDiffRoute
@@ -95,7 +131,11 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/dashboards"
+    | "/deployments"
+    | "/logs"
     | "/metrics"
+    | "/queues"
+    | "/settings"
     | "/webhooks"
     | "/runs/$runId"
     | "/runs/diff"
@@ -105,7 +145,11 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/dashboards"
+    | "/deployments"
+    | "/logs"
     | "/metrics"
+    | "/queues"
+    | "/settings"
     | "/webhooks"
     | "/runs/$runId"
     | "/runs/diff"
@@ -115,7 +159,11 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/dashboards"
+    | "/deployments"
+    | "/logs"
     | "/metrics"
+    | "/queues"
+    | "/settings"
     | "/webhooks"
     | "/runs/$runId"
     | "/runs/diff"
@@ -126,7 +174,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardsRoute: typeof DashboardsRoute
+  DeploymentsRoute: typeof DeploymentsRoute
+  LogsRoute: typeof LogsRoute
   MetricsRoute: typeof MetricsRoute
+  QueuesRoute: typeof QueuesRoute
+  SettingsRoute: typeof SettingsRoute
   WebhooksRoute: typeof WebhooksRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   RunsDiffRoute: typeof RunsDiffRoute
@@ -143,11 +195,39 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof WebhooksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/settings": {
+      id: "/settings"
+      path: "/settings"
+      fullPath: "/settings"
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/queues": {
+      id: "/queues"
+      path: "/queues"
+      fullPath: "/queues"
+      preLoaderRoute: typeof QueuesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/metrics": {
       id: "/metrics"
       path: "/metrics"
       fullPath: "/metrics"
       preLoaderRoute: typeof MetricsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/logs": {
+      id: "/logs"
+      path: "/logs"
+      fullPath: "/logs"
+      preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/deployments": {
+      id: "/deployments"
+      path: "/deployments"
+      fullPath: "/deployments"
+      preLoaderRoute: typeof DeploymentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/dashboards": {
@@ -198,7 +278,11 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardsRoute: DashboardsRoute,
+  DeploymentsRoute: DeploymentsRoute,
+  LogsRoute: LogsRoute,
   MetricsRoute: MetricsRoute,
+  QueuesRoute: QueuesRoute,
+  SettingsRoute: SettingsRoute,
   WebhooksRoute: WebhooksRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   RunsDiffRoute: RunsDiffRoute,

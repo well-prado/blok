@@ -1,0 +1,209 @@
+---
+title: "Observability"
+description: "REST endpoints and OpenTelemetry counters for the concurrency gate and the scheduling dispatcher. Integrates with the existing Prometheus exporter."
+icon: "chart-line"
+---
+
+import { StudioConcurrencyTile } from "/snippets/studio-mocks.jsx";
+
+Two REST endpoints expose live concurrency state, and six
+OpenTelemetry counters track gate and dispatcher behavior over time.
+Both surface through the existing Prometheus exporter — no
+additional config required if you already scrape Blok.
+
+## REST endpoints
+
+### `GET /__blok/concurrency/health`
+
+Returns the gate's liveness and configuration:
+
+```bash
+$ curl http://localhost:4000/__blok/concurrency/health
+{
+  "backend": "in-process",
+  "disabled": false,
+  "leaseMs": 3600000
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `backend` | `"in-process"` \| `"nats-kv"` | Which backend the gate uses. See [cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv). |
+| `disabled` | `boolean` | `true` when `BLOK_CONCURRENCY_DISABLED=1`. |
+| `leaseMs` | `integer` | Process-wide default lease duration. Per-trigger `concurrencyLeaseMs` overrides this. |
+
+Useful for liveness checks (is the runtime up + the gate operational)
+and for dashboards that want to surface the active backend name.
+
+### `GET /__blok/concurrency/state`
+
+Returns un-expired leases per `(workflow, key)` bucket, sorted by
+inFlight descending:
+
+```bash
+$ curl http://localhost:4000/__blok/concurrency/state
+{
+  "totalBuckets": 2,
+  "totalLeases": 7,
+  "buckets": [
+    {
+      "workflowName": "render-pdf",
+      "concurrencyKey": "tenant-a",
+      "inFlight": 5,
+      "leases": [
+        { "runId": "run_abc", "expiresAt": 1735741800000 },
+        { "runId": "run_def", "expiresAt": 1735741810000 }
+      ]
+    },
+    {
+      "workflowName": "checkout",
+      "concurrencyKey": "cart-42",
+      "inFlight": 2,
+      "leases": [...]
+    }
+  ]
+}
+```
+
+Studio's All Runs page consumes this endpoint to render the in-flight
+tile (5-second poll):
+
+<StudioConcurrencyTile
+  backendName="in-process"
+  totalLeases={7}
+  totalBuckets={2}
+  buckets={[
+    { workflowName: "render-pdf", concurrencyKey: "tenant-a", inFlight: 5 },
+    { workflowName: "checkout", concurrencyKey: "cart-42", inFlight: 2 },
+  ]}
+/>
+
+External tooling (Grafana, custom dashboards, alerting) can poll the
+same endpoint directly. Lease leak protection: `leases` are filtered
+by `expiresAt > now` server-side — expired entries don't appear.
+
+Source:
+[`core/runner/src/tracing/TraceRouter.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/TraceRouter.ts).
+
+## OpenTelemetry counters
+
+Six counters track gate and dispatcher behavior. They surface through
+the existing Prometheus exporter automatically — if you're already
+scraping Blok, these will appear in the next scrape window.
+
+### Concurrency gate
+
+| Counter | Labels | Increments when |
+|---|---|---|
+| `blok_concurrency_acquired_total` | `workflowName` | A run successfully acquires a concurrency slot. |
+| `blok_concurrency_denied_total` | `workflowName`, `mode` (`"throw"` \| `"queue"`) | The gate denies a run (over-limit). The `mode` label distinguishes `onLimit: "throw"` from `onLimit: "queue"`. |
+| `blok_concurrency_released_total` | `workflowName` | A run releases its slot in the `finally` block. |
+
+The acquired/released count should converge over time. A persistent
+divergence (more `acquired_total` than `released_total`) suggests
+slot leaks — most often from a runtime crash that bypassed the
+release path. Lease expiration eventually reclaims those, but the gap
+is the early-warning signal.
+
+### Scheduling dispatcher
+
+| Counter | Labels | Increments when |
+|---|---|---|
+| `blok_scheduling_dispatch_recovered_total` | `workflowName` | `HttpTrigger.recoverDispatches()` re-registers a timer for a persisted dispatch on boot. |
+| `blok_scheduling_dispatch_expired_total` | `workflowName` | `HttpTrigger.recoverDispatches()` flips a past-TTL persisted dispatch to `expired` on boot. |
+| `blok_scheduling_dispatch_fired_total` | `workflowName`, `dispatchStatus` (`"delayed"` \| `"queued"` \| `"debounced"`) | A scheduled dispatch fires through `dispatchDeferred()`. |
+
+The `_recovered_total` + `_expired_total` counters fire only at boot
+(during the recovery scan) — useful for confirming the durable
+scheduler is operating after a restart. `_fired_total` fires on every
+dispatch and gives you a steady-state rate of scheduled work
+flowing through the system.
+
+Source:
+[`core/runner/src/monitoring/ConcurrencyMetrics.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/monitoring/ConcurrencyMetrics.ts).
+
+## Wiring with Prometheus
+
+Blok ships with a Prometheus exporter that registers the six counters
+automatically when the OTel SDK is configured. If you're already
+scraping the existing Blok metrics endpoint, no additional config
+needed — the counters appear in the next scrape.
+
+Sample Prometheus query:
+
+```promql
+# Per-workflow denial rate by mode (per second)
+rate(blok_concurrency_denied_total[5m])
+
+# Acquired vs released — divergence indicates slot leaks
+rate(blok_concurrency_acquired_total[5m]) - rate(blok_concurrency_released_total[5m])
+
+# Scheduled dispatch fire rate by status
+sum by (dispatchStatus) (rate(blok_scheduling_dispatch_fired_total[5m]))
+```
+
+If your OTel pipeline targets something other than Prometheus
+(Jaeger, Grafana Cloud, Honeycomb), the counters surface through the
+configured exporter the same way.
+
+## Sample dashboards
+
+The most useful dashboards combine REST and counter data:
+
+<AccordionGroup>
+  <Accordion title="Tenant-level rate-limit pressure">
+    `rate(blok_concurrency_denied_total{mode="throw"}[5m])` shows
+    `429` rate per workflow. Pair with the
+    [`/concurrency/state`](#get-blok-concurrency-state) endpoint for
+    per-tenant in-flight counts.
+  </Accordion>
+
+  <Accordion title="Queue mode backlog depth">
+    Queue mode (`onLimit: "queue"`) re-defers indefinitely until a
+    slot frees. `rate(blok_concurrency_denied_total{mode="queue"}[5m])`
+    measures back-pressure. The same data shows up as `queued` runs
+    in the runs list — filter by status to see the backlog.
+  </Accordion>
+
+  <Accordion title="Slot leak detector">
+    `rate(blok_concurrency_acquired_total[5m]) -
+    rate(blok_concurrency_released_total[5m])` should stay near zero.
+    A persistent positive value means slots are being acquired but
+    not released — usually a process crash that bypassed the
+    `finally` block. Lease expiration cleans up; the metric is the
+    early warning.
+  </Accordion>
+
+  <Accordion title="Boot recovery health">
+    On every Blok process restart, look for a brief spike in
+    `blok_scheduling_dispatch_recovered_total` (timers re-registered)
+    plus any `blok_scheduling_dispatch_expired_total` (past-TTL
+    rows). High `_expired_total` after restart suggests the runtime
+    was down longer than your scheduling TTLs accounted for.
+  </Accordion>
+</AccordionGroup>
+
+## Studio integration
+
+Studio's [in-flight tile](/d/studio/index#in-flight-concurrency-tile) reads
+from `/concurrency/state`. The status filter dropdown picks up every
+[run state](/d/reference/trace-storage#run-states) including the
+deferred-dispatch states (`delayed`, `debounced`, `queued`).
+
+For the per-feature events behind each counter, see the
+[full event vocabulary](/d/reference/trace-storage#event-vocabulary)
+on the trace storage page.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
+    Gate behavior the counters and endpoints describe.
+  </Card>
+  <Card title="Scheduling overview" icon="clock" href="/d/scheduling/overview">
+    Deferred-dispatch behavior the dispatch counters describe.
+  </Card>
+  <Card title="Studio" icon="layout-dashboard" href="/d/studio/index">
+    The in-flight tile and runs-list filters that consume these endpoints.
+  </Card>
+</Columns>

@@ -1,0 +1,405 @@
+---
+title: "Delay & TTL"
+description: "Defer a run by `delay: \"1h\"` and bound staleness with `ttl: \"30m\"`. HTTP returns 202 Accepted; worker queues forward to native delay."
+icon: "hourglass"
+---
+
+import { StudioRunHeader, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `delay` on a trigger config and the run is scheduled for later
+instead of dispatched immediately. Set `ttl` on top to expire runs
+that don't get started in time. Pair them and you get a "fire this
+in 1h, but not at all if it's been more than 2h" contract that's
+useful for staged communications and best-effort jobs.
+
+## Quickstart
+
+A welcome email scheduled an hour after signup, with a two-hour TTL
+in case the scheduler is unavailable when the timer fires:
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "welcome-email",
+  version: "1.0.0",
+  trigger: {
+    http: {
+      method: "POST",
+      path: "/welcome",
+      delay: "1h",
+      ttl: "2h",
+    },
+  },
+  steps: [
+    {
+      id: "send",
+      use: "@blokjs/sendgrid",
+      inputs: { to: $.req.body.email, body: $.req.body.body },
+    },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "welcome-email",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/welcome",
+      "delay": "1h",
+      "ttl": "2h"
+    }
+  },
+  "steps": [
+    {
+      "id": "send",
+      "use": "@blokjs/sendgrid",
+      "inputs": { "to": "$.req.body.email", "body": "$.req.body.body" }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+POST returns immediately:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_abc123
+
+{
+  "runId": "run_abc123",
+  "workflowName": "welcome-email",
+  "status": "delayed",
+  "scheduledAt": 1735741200000,
+  "expiresAt": 1735744800000,
+  "debounced": false,
+  "pingCount": 1,
+  "intoRunId": null
+}
+```
+
+An hour later, if the scheduler still has capacity, the timer fires
+and the workflow runs. If something held up dispatch past the two-hour
+TTL, the run gets `expired` status and the steps never execute.
+
+## Field reference
+
+Defined in [core/workflow-helper/src/types/TriggerOpts.ts:181-196](core/workflow-helper/src/types/TriggerOpts.ts#L181-L196).
+
+<ParamField path="delay" type="number ms or duration string">
+  Defer the run by this many ms (number) or
+  [duration string](/d/scheduling/overview#duration-grammar) (`"1h"`,
+  `"30m"`, `"500ms"`). When set, the trigger schedules the run for
+  later and returns immediately. HTTP returns
+  [202 Accepted](#http-transport); worker queues forward to the
+  adapter's native delay primitive (BullMQ, NATS, etc.).
+</ParamField>
+
+<ParamField path="ttl" type="number ms or duration string">
+  Expire if not started within this many ms or duration string. At
+  dispatch time, runs older than `ttl` are skipped with status
+  `expired`.
+
+  - **HTTP**: `ttl` requires `delay` to be set. Without `delay`, the
+    request is dispatched immediately and TTL is meaningless. Setting
+    `ttl` without `delay` is rejected at workflow load.
+  - **Worker**: `ttl` is independent of `delay` (queue-time TTL applies
+    regardless).
+</ParamField>
+
+## Behavior
+
+The deferred-run lifecycle, end-to-end:
+
+<Steps>
+  <Step title="Trigger fires">
+    HTTP POST or worker job lands. `TriggerBase.run()` calls
+    `tracker.startRun()` to allocate a run id.
+  </Step>
+  <Step title="Schedule">
+    The runner persists `scheduledAt = now + delayMs` and
+    `expiresAt = now + ttlMs` (if `ttl` is set), marks status
+    `delayed`, emits <StudioEventBadge type="RUN_DELAYED" />, and
+    registers the dispatch on the in-process scheduler.
+  </Step>
+  <Step title="Return">
+    HTTP returns `202 Accepted` with `Location: /__blok/runs/<runId>`.
+    Worker ACKs without requeueing.
+  </Step>
+  <Step title="Timer fires">
+    `dispatchDeferred(ctx, traceRunId, expiresAt)` checks the TTL: if
+    `now > expiresAt`, the run flips to `expired` and emits
+    <StudioEventBadge type="RUN_EXPIRED" />. Otherwise it transitions
+    the run to `running` and re-enters `run(ctx)` with
+    `_blokDispatchReentry = true` so the scheduling gates aren't
+    re-evaluated on the second pass.
+  </Step>
+  <Step title="Run">
+    The runner proceeds through the [concurrency gate](/d/reliability/concurrency-keys)
+    and into step execution. The original `traceRunId` is reused
+    throughout.
+  </Step>
+</Steps>
+
+## HTTP transport
+
+Deferred HTTP requests return `202 Accepted` immediately:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_abc123
+Content-Type: application/json
+
+{
+  "runId": "run_abc123",
+  "workflowName": "welcome-email",
+  "status": "delayed",
+  "scheduledAt": 1735741200000,
+  "expiresAt": 1735744800000,
+  "debounced": false,
+  "pingCount": 1,
+  "intoRunId": null
+}
+```
+
+The handler returns BEFORE the workflow runs. Callers track dispatch
+via:
+
+- **Polling** — `GET /__blok/runs/<runId>` returns the latest status.
+- **SSE stream** — `GET /__blok/runs/<runId>/events` for live events.
+
+```bash
+# Initial POST
+curl -i -X POST http://localhost:4000/welcome -d '{"email":"u@x.com"}'
+# → 202 Accepted, Location: /__blok/runs/run_abc123
+
+# Poll until completion
+curl http://localhost:4000/__blok/runs/run_abc123 | jq '.status'
+# → "delayed", later "running", finally "completed"
+```
+
+## Worker transport
+
+Worker adapters forward `delay` to the native queue primitive:
+
+| Adapter | Native delay |
+|---|---|
+| **BullMQ** | `Job.delay = delayMs`. Redis-backed; durable across restarts. |
+| **NATS** | `x-delay` header on the message. The consumer-side hold is enforced via `setTimeout` in `NATSAdapter` — the consumer holds the message for the remaining delay before invoking the handler. Single-process trade-off: a long delay holds one consumer slot for its duration. |
+| **InMemory** | `setTimeout`-based. Process-local; cleared on restart. |
+
+Deferred jobs ACK without retry — the in-process scheduler owns the
+eventual dispatch and re-queueing would create a duplicate.
+
+## TTL semantics
+
+The TTL check fires at **dispatch time**, not at submission. A run
+created at `t=0` with `delay: "1h"` and `ttl: "2h"` has:
+
+- `scheduledAt = t + 60min`
+- `expiresAt = t + 120min`
+
+When the timer fires at `t + 60min`, the dispatcher checks `now >
+expiresAt`. If the dispatcher is healthy, `now ≈ scheduledAt`, well
+under `expiresAt`, and the run executes. If the dispatcher is delayed
+(load spike, restart recovery), the run can fire well after
+`scheduledAt` — and if it fires after `expiresAt`, status flips to
+`expired` and the steps never run.
+
+```ts
+// "Send within 1h of signup, or not at all"
+{ delay: "5m", ttl: "1h" }
+```
+
+`scheduledAt` ensures the run waits at least 5 minutes; `expiresAt`
+caps the wait at one hour. A late-firing dispatcher won't cause
+stale welcome emails.
+
+For HTTP triggers, TTL without delay is rejected at workflow load:
+
+```
+[blok] HTTP `ttl` requires `delay` to be set (TTL is only meaningful
+for deferred runs).
+```
+
+For worker triggers, TTL alone is the queue-time TTL — accepted.
+
+## Durability
+
+The HTTP scheduler combines an in-memory `setTimeout` with optional
+sqlite persistence so dispatches survive process restart.
+
+### Persistence opt-in
+
+Persistence is opt-in per trigger via `extractDispatchPayload(ctx)`,
+a virtual method on `TriggerBase`. The default returns `null`
+(in-memory only). The HTTP trigger overrides it to capture a
+JSON-serializable subset of the request:
+
+```ts
+{
+  method, path, url, headers, body, params, query,
+  workflowName, workflowPath
+}
+```
+
+When the method returns non-null, `DeferredRunScheduler.schedule()`
+writes a row to `scheduled_dispatches` (sqlite migration v9) BEFORE
+registering the timer. Cancel and timer-fire delete the row.
+Re-scheduling the same `runId` updates the row in place. Persistence
+failures are logged and the in-memory timer still fires (best-effort
+durability).
+
+Source:
+[`triggers/http/src/runner/HttpTrigger.ts`](https://github.com/deskree-inc/blok/blob/main/triggers/http/src/runner/HttpTrigger.ts) ·
+[`core/runner/src/scheduling/DeferredRunScheduler.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DeferredRunScheduler.ts).
+
+### Sensitive header denylist
+
+Headers commonly carrying credentials are stripped before persistence:
+
+| Stripped | Reason |
+|---|---|
+| `authorization` | Bearer tokens, API keys |
+| `cookie` / `set-cookie` | Session identifiers |
+| `x-api-key` | Common API key header |
+| `x-auth-token` | Common auth token header |
+| `proxy-authorization` | Proxy credentials |
+
+Custom headers (`x-tenant-id`, `x-trace-id`, etc.) pass through
+unchanged. Add to the denylist via the `DISPATCH_HEADER_DENYLIST` set
+in `HttpTrigger.ts` if your application uses non-standard credential
+headers.
+
+### Boot recovery
+
+`HttpTrigger.listen()` calls `recoverDispatches()` after the server is
+ready. It scans `scheduled_dispatches` for rows with
+`triggerType: "http"` and:
+
+| Row state | Action |
+|---|---|
+| Past TTL (`now > expires_at`) | Mark `expired`, delete row, emit <StudioEventBadge type="RUN_EXPIRED" /> |
+| Past-due, not expired (`scheduled_at <= now`) | Re-register timer with 0ms delay (fires immediately) |
+| Future | Re-register timer pointing at `restoreDispatch(row)` |
+| Workflow no longer in registry | Skip (warning logged) |
+
+The recovery loop emits two OpenTelemetry counters:
+`blok_scheduling_dispatch_recovered_total` and
+`blok_scheduling_dispatch_expired_total`. See
+[observability](/d/operations/observability) for the full counter list.
+
+### What's persisted vs not
+
+| Trigger | `delay` | `ttl` | `debounce` | Cross-restart |
+|---|---|---|---|---|
+| HTTP | yes (sqlite) | yes (TTL check on dispatch) | opt-in via `extractDispatchPayload` (silence-window state lost; recovered timers fire immediately) | yes |
+| Worker | broker-managed (BullMQ delay, NATS x-delay enforced consumer-side in v1) | broker-managed | yes (broker handles redelivery) | yes |
+
+Workers stay crash-safe via the broker — Blok doesn't need to persist
+worker-trigger state. The persistence layer is HTTP-only.
+
+## Studio surface
+
+Delayed runs appear with a yellow **Delayed** badge:
+
+<StudioRunHeader
+  workflowName="welcome-email"
+  runId="run_abc123"
+  status="delayed"
+  durationMs={2}
+  triggerSummary="POST /welcome"
+  startedAt="2026-05-03 10:42:15"
+  nodeCount={1}
+  completedNodes={0}
+  showReplayButton={false}
+/>
+
+The events timeline carries the dispatch lifecycle:
+
+- <StudioEventBadge type="RUN_DELAYED" /> — initial schedule.
+- <StudioEventBadge type="RUN_STARTED" /> — when the timer fires.
+- <StudioEventBadge type="RUN_EXPIRED" /> — if TTL exceeded before
+  dispatch (terminal).
+
+## Recipes
+
+<AccordionGroup>
+  <Accordion title="Welcome email scheduled 1h after signup">
+    `delay: "1h"` plus `ttl: "2h"` — fires an hour after signup, but
+    skips if the scheduler is so backed up that more than two hours
+    pass.
+  </Accordion>
+
+  <Accordion title="Reminder workflow with deadline">
+    `delay: "30m"` plus `ttl: "1h"` — sends a follow-up after a
+    half-hour, but only if the original action is still relevant.
+  </Accordion>
+
+  <Accordion title="Worker job with queue-time TTL only">
+    Worker `{ ttl: "30m" }` — incoming jobs that sit in the queue
+    longer than 30 minutes are dropped on dequeue. No delay needed;
+    the TTL alone bounds staleness.
+  </Accordion>
+
+  <Accordion title="Delay sliced into a number for clarity">
+    `delay: 60_000` instead of `delay: "1m"` — the number form
+    bypasses the duration parser. Both work; pick the form that reads
+    best in context.
+  </Accordion>
+
+  <Accordion title="Production kill-switch">
+    `BLOK_SCHEDULING_DISABLED=1 bun run prod` — skips all scheduling
+    gates. Runs proceed synchronously even with `delay` / `ttl`
+    configured. Useful when the in-process scheduler isn't behaving
+    and you want to fall back to immediate dispatch.
+  </Accordion>
+</AccordionGroup>
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Setting HTTP `ttl` without `delay`">
+    Rejected at workflow load. TTL on an immediately-dispatched HTTP
+    trigger is meaningless. Either add a `delay` or remove `ttl`.
+  </Accordion>
+
+  <Accordion title="Long delays (>24h) on HTTP triggers">
+    Don't. The in-process scheduler is `setTimeout`-based and won't
+    survive restarts. For day-scale schedules, use a cron trigger plus
+    an external scheduler.
+  </Accordion>
+
+  <Accordion title="Polling for status without backoff">
+    The 202 Accepted contract is fire-and-forget. Polling `/__blok/runs/<id>`
+    every 100ms while waiting an hour is wasteful — use the SSE stream
+    or just poll on a sensible interval (1s, 10s, etc.).
+  </Accordion>
+
+  <Accordion title="Long delays through the NATS adapter">
+    The NATS consumer holds the message via `setTimeout` for the
+    remaining delay. A long delay (hours+) holds one consumer slot for
+    its duration, which can stall throughput on busy queues. For long
+    delays prefer the trigger-level `delay` (sqlite-backed durable
+    scheduler) over a queue-level delay header.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Scheduling overview" icon="clock" href="/d/scheduling/overview">
+    The full set of scheduling primitives.
+  </Card>
+  <Card title="Debounce" icon="filter" href="/d/scheduling/debounce">
+    Coalesce rapid same-key triggers.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    Run states, events, and the SQLite migrations.
+  </Card>
+</Columns>

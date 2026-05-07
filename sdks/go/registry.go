@@ -111,7 +111,13 @@ func (r *NodeRegistry) Execute(req *ExecutionRequest) *ExecutionResult {
 			},
 		}
 
-		if nodeErr, ok := err.(*NodeError); ok {
+		// Structured BlokError path (master plan §17): pass the instance
+		// through verbatim so the gRPC servicer can serialize every field
+		// (category, severity, remediation, retryable hints, cause chain,
+		// context snapshot, etc.) into the proto NodeError.
+		if blokErr, ok := err.(*BlokError); ok {
+			errResult.Errors = blokErr
+		} else if nodeErr, ok := err.(*NodeError); ok {
 			errResult.Errors = nodeErr.ToMap()
 		} else {
 			errResult.Errors = map[string]string{

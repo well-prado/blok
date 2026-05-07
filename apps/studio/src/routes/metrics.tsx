@@ -30,11 +30,20 @@ function MetricsPage() {
 
 	if (!metrics || metrics.totalRuns === 0) {
 		return (
-			<div className="p-6">
+			<div className="p-8">
 				<EmptyState
-					icon={<BarChart3 className="w-12 h-12" />}
+					icon={<BarChart3 className="w-10 h-10" />}
 					title="No metrics yet"
-					description="Execute some workflows to see metrics and analytics here."
+					description="Once workflows run, this page aggregates duration histograms, p50/p95 latency, success rate per workflow, and node-level performance breakdowns."
+					snippets={[
+						{
+							lang: "curl · http",
+							code: `curl -X POST http://localhost:4000/cross-runtime-chain \\
+  -H 'content-type: application/json' \\
+  -d '{}'`,
+						},
+					]}
+					docLink={{ href: "https://docs.blok.io/studio/metrics", label: "docs.blok.io/studio/metrics" }}
 				/>
 			</div>
 		);
@@ -45,15 +54,15 @@ function MetricsPage() {
 			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div>
-					<h1 className="text-lg font-semibold text-zinc-100">Metrics</h1>
-					<p className="text-sm text-zinc-500">Execution analytics and performance insights</p>
+					<h1 className="text-2xl font-medium font-display italic tracking-tight text-zinc-100">Metrics</h1>
+					<p className="text-sm text-zinc-500 mt-1">Execution analytics and performance insights.</p>
 				</div>
 				{/* Workflow filter */}
 				{workflows && workflows.length > 1 && (
 					<select
 						value={selectedWorkflow || ""}
 						onChange={(e) => setSelectedWorkflow(e.target.value || undefined)}
-						className="text-sm bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-300 outline-none focus:border-blue-500"
+						className="text-sm bg-raised border border-zinc-800 rounded-md px-3 py-1.5 text-zinc-300 outline-none focus:border-blok-green-500"
 					>
 						<option value="">All Workflows</option>
 						{workflows.map((wf) => (
@@ -87,13 +96,13 @@ function MetricsPage() {
 			{/* Charts */}
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				{/* Execution Timeline */}
-				<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+				<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 					<h3 className="text-sm font-medium text-zinc-300 mb-4">Execution Timeline (24h)</h3>
 					<ExecutionTimeline data={metrics.executionTimeline} />
 				</div>
 
 				{/* Duration Distribution */}
-				<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+				<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 					<h3 className="text-sm font-medium text-zinc-300 mb-4">Duration Distribution</h3>
 					<DurationDistribution data={metrics.durationDistribution} />
 				</div>
@@ -103,7 +112,7 @@ function MetricsPage() {
 			<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				{/* Workflow Breakdown */}
 				{!selectedWorkflow && metrics.workflowBreakdown.length > 0 && (
-					<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+					<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 						<h3 className="text-sm font-medium text-zinc-300 mb-4">Workflow Breakdown</h3>
 						<WorkflowBreakdown data={metrics.workflowBreakdown} />
 					</div>
@@ -112,10 +121,7 @@ function MetricsPage() {
 				{/* Node Performance */}
 				{metrics.nodePerformance.length > 0 && (
 					<div
-						className={cn(
-							"rounded-lg border border-zinc-800 bg-zinc-900/50 p-4",
-							selectedWorkflow ? "lg:col-span-2" : "",
-						)}
+						className={cn("rounded-lg border border-zinc-800 bg-overlay p-4", selectedWorkflow ? "lg:col-span-2" : "")}
 					>
 						<h3 className="text-sm font-medium text-zinc-300 mb-4">Node Performance</h3>
 						<NodePerformance data={metrics.nodePerformance} />
@@ -136,7 +142,7 @@ function MetricCard({
 	color?: string;
 }) {
 	return (
-		<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+		<div className="rounded-lg border border-zinc-800 bg-overlay p-3">
 			<div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-1">{label}</div>
 			<div className={cn("text-lg font-semibold font-mono", color || "text-zinc-100")}>{value}</div>
 		</div>

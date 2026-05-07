@@ -1,5 +1,6 @@
 import { JsonViewer } from "@/components/shared/JsonViewer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { BlokErrorDetail } from "@/components/trace/BlokErrorDetail";
 import { ExplainError } from "@/components/trace/ExplainError";
 import { formatBytes, formatDuration } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -62,20 +63,39 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 					)}
 				</div>
 
-				{/* Error */}
+				{/* Live progress (master plan §17 Phase 5 follow-up) —
+				    SDKs that emit `Progress` frames during ExecuteStream
+				    drive this bar forward. Always renders the latest
+				    snapshot; absent for unary calls + SDKs that don't
+				    emit progress. */}
+				{node.progress && <ProgressBar percent={node.progress.percent} phase={node.progress.phase} />}
+
+				{/* Live partial result — interim snapshot from a
+				    long-running computation (e.g. row count of an
+				    in-progress export). Collapsed by default since
+				    the snapshot can be large. */}
+				{node.partialResult && (
+					<details className="text-xs">
+						<summary className="cursor-pointer text-zinc-500 hover:text-zinc-300 select-none">
+							Partial result <span className="text-zinc-600">(live)</span>
+						</summary>
+						<div className="mt-2 pl-2 border-l border-zinc-800">
+							<JsonViewer data={node.partialResult.snapshot} defaultExpanded={false} />
+						</div>
+					</details>
+				)}
+
+				{/* Error — typed BlokError gets rich rendering (category pill,
+				    severity, retryable hint, remediation, doc_url, causes,
+				    context snapshot, stack). Untyped errors fall through to
+				    the message + stack render inside `BlokErrorDetail`. */}
 				{node.error && (
-					<div className="rounded-md border border-red-900/50 bg-red-950/30 p-3">
-						<div className="flex items-center justify-between mb-1">
+					<div className="space-y-2">
+						<div className="flex items-center justify-between">
 							<span className="text-xs font-medium text-red-400">Error</span>
 							<ExplainError runId={node.runId} nodeId={node.id} compact />
 						</div>
-						<p className="text-xs text-red-300 font-mono break-all">{node.error.message}</p>
-						{node.error.code && <p className="text-[11px] text-red-400/70 mt-1">Code: {node.error.code}</p>}
-						{node.error.stack && (
-							<pre className="mt-2 text-[10px] text-red-400/60 overflow-x-auto whitespace-pre-wrap break-all max-h-40">
-								{node.error.stack}
-							</pre>
-						)}
+						<BlokErrorDetail error={node.error} />
 					</div>
 				)}
 
@@ -138,6 +158,32 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 		<div>
 			<h4 className="text-xs font-medium text-zinc-500 mb-2">{title}</h4>
 			<div className="rounded-md border border-zinc-800 bg-zinc-900 p-3">{children}</div>
+		</div>
+	);
+}
+
+/**
+ * Live progress bar for the §17 Phase 5 streaming `Progress` frames.
+ * Render-only; the parent passes the latest `{percent, phase}` and we
+ * project that into a horizontal bar with the phase label inline.
+ *
+ * Tone: cyan/teal to distinguish from status colors (green/red/amber).
+ * Width is the percent value clamped 0–100 to absorb out-of-range
+ * frames without breaking the layout.
+ */
+function ProgressBar({ percent, phase }: { percent: number; phase: string }) {
+	const clamped = Math.max(0, Math.min(100, percent));
+	return (
+		<div className="rounded-md border border-cyan-900/50 bg-cyan-950/20 p-2.5">
+			<div className="flex items-center justify-between mb-1.5 text-[10px]">
+				<span className="font-medium uppercase tracking-wider text-cyan-300/80">Progress</span>
+				<span className="font-mono text-cyan-200/80">
+					{clamped}%{phase ? ` · ${phase}` : ""}
+				</span>
+			</div>
+			<div className="h-1.5 rounded-full overflow-hidden bg-cyan-950/60">
+				<div className="h-full bg-cyan-500/70 transition-all duration-200" style={{ width: `${clamped}%` }} />
+			</div>
 		</div>
 	);
 }

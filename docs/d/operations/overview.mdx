@@ -1,0 +1,117 @@
+---
+title: "Operations"
+description: "Configuring, observing, and operating Blok in production — env vars, kill-switches, observability endpoints, the storage janitor, and graceful shutdown."
+icon: "wrench"
+---
+
+This section covers the operational surface — what to set in env, what
+to watch on dashboards, and how the runtime behaves under restart and
+shutdown. It's the "running Blok in production" companion to the
+[reliability](/d/reliability/overview) and
+[scheduling](/d/scheduling/overview) author guides.
+
+<Columns cols={2}>
+  <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
+    Every supported environment variable, grouped by feature, with
+    defaults and kill-switches. The single page operators bookmark.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/d/operations/observability">
+    `/__blok/concurrency/{health,state}` REST endpoints and the six
+    OpenTelemetry counters surfaced through the Prometheus exporter.
+  </Card>
+</Columns>
+
+<Columns cols={2}>
+  <Card title="Janitor & shutdown" icon="broom" href="/d/operations/janitor-and-shutdown">
+    The periodic storage janitor that bounds growth, plus the
+    SIGTERM/SIGINT graceful shutdown drain order.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The data model behind all of the above — run states, events,
+    SQLite migrations, and the Postgres durability scope.
+  </Card>
+</Columns>
+
+## What's covered here vs elsewhere
+
+| Topic | Lives in |
+|---|---|
+| Author opt-in (per-step / per-trigger fields) | The [reliability](/d/reliability/overview) and [scheduling](/d/scheduling/overview) feature pages. |
+| Env vars + kill-switches reference table | [Env vars](/d/operations/env-vars). |
+| OpenTelemetry counters + Prometheus integration | [Observability](/d/operations/observability). |
+| Concurrency `/health` + `/state` REST endpoints | [Observability](/d/operations/observability) and [concurrency keys](/d/reliability/concurrency-keys#observability-endpoints). |
+| Periodic storage cleanup | [Janitor & shutdown](/d/operations/janitor-and-shutdown#janitor). |
+| SIGTERM/SIGINT drain order | [Janitor & shutdown](/d/operations/janitor-and-shutdown#graceful-shutdown). |
+| Crash auto-flip + orphan recovery | [Cancellation & crash recovery](/d/reliability/cancellation#crash-auto-flip). |
+| SQLite + Postgres schema | [Trace storage](/d/reference/trace-storage). |
+
+## Operating mental model
+
+Three layers of state determine production behavior:
+
+1. **Hot path** — in-memory data structures: scheduler timers, debounce
+   coordinator, in-process concurrency Map, idempotency cache mirror.
+   Lost on process exit; reconstructed from the durable layer on boot.
+2. **Durable layer** — sqlite (default) or Postgres. Stores
+   `workflow_runs`, `node_runs`, `idempotency_cache`,
+   `concurrency_locks`, and `scheduled_dispatches`. Survives restart.
+3. **Cross-process layer** (opt-in) — NATS KV for the concurrency
+   gate. Coordinates state across multiple Blok processes. Only
+   matters if you run more than one Blok process per shared key
+   bucket.
+
+Operators tune env vars against the layer they're targeting:
+
+- **Hot path tuning** — `BLOK_*_DISABLED` kill-switches, lease
+  durations, janitor intervals.
+- **Durable layer tuning** — `BLOK_TRACE_STORE`, `BLOK_TRACE_PG_*`,
+  `BLOK_TRACE_RETENTION_DAYS`.
+- **Cross-process tuning** — `BLOK_CONCURRENCY_BACKEND` and the
+  `BLOK_CONCURRENCY_NATS_*` family.
+
+The [env vars page](/d/operations/env-vars) groups them in this same
+order so you can find what you're looking for by intent rather than
+prefix.
+
+## When to reach for what
+
+<AccordionGroup>
+  <Accordion title="Production traffic spike — need to relieve back-pressure">
+    Set `BLOK_CONCURRENCY_DISABLED=1` or `BLOK_SCHEDULING_DISABLED=1`
+    as a kill-switch (no redeploy). Both flip the runtime to
+    "synchronous, no gating" — runs proceed without the gate but the
+    rest of the pipeline still works. See
+    [env vars · kill-switches](/d/operations/env-vars#kill-switches).
+  </Accordion>
+
+  <Accordion title="Need to know what's stuck in flight right now">
+    `curl /__blok/concurrency/state` for live `(workflow, key)`
+    buckets. The same data feeds Studio's
+    [in-flight tile](/d/studio/index#in-flight-concurrency-tile).
+  </Accordion>
+
+  <Accordion title="Storage is growing unbounded">
+    Tune the [janitor](/d/operations/janitor-and-shutdown#janitor)
+    interval down. Default 5 minutes; aggressive deployments can run
+    every 60 seconds.
+  </Accordion>
+
+  <Accordion title="Restart leaves runs stuck in `running`">
+    [Orphan recovery](/d/reliability/cancellation#orphan-recovery)
+    flips them to `crashed` after `BLOK_ORPHAN_THRESHOLD_MS` (default
+    2 min). Tune up if your workflows legitimately run longer.
+  </Accordion>
+
+  <Accordion title="Adding a second Blok process behind a load balancer">
+    The default in-process concurrency gate can't coordinate across
+    processes. Switch to NATS KV — see
+    [concurrency keys · cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv).
+  </Accordion>
+
+  <Accordion title="Need Prometheus metrics in our existing dashboard">
+    Six new OpenTelemetry counters surface through the existing
+    Prometheus exporter — see
+    [observability](/d/operations/observability#opentelemetry-counters).
+    No additional config needed if you already scrape Blok.
+  </Accordion>
+</AccordionGroup>

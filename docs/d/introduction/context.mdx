@@ -1,8 +1,10 @@
 ---
-title: Context Object
+title: "Context object"
+description: "How nodes share data within a workflow run — request, state, prev, response, and the $-proxy."
+icon: "box"
 ---
 
-The Context Object (`ctx`) is a crucial component in Blok that facilitates data sharing and state management across different [Nodes](./nodes.mdx) within a single [Workflow](./workflows.mdx) execution instance. It acts as a shared memory space, allowing Nodes to pass information to subsequent Nodes, access initial trigger data, and maintain state throughout the lifecycle of a workflow run.
+The Context Object (`ctx`) facilitates data sharing across the [nodes](/d/introduction/nodes) of a single [workflow](/d/introduction/workflows) run. It's the shared memory space where each step's output lands and where later steps look it up.
 
 ## What is the Context Object?
 
@@ -112,101 +114,90 @@ Nodes typically read the data they need from the context (or directly from their
 
 Context is essential for **passing data between nodes** and making dynamic decisions in workflows.
 
-### Example: Using `ctx.request.params`
+### Example: using `ctx.request.params`
 
-In this workflow, we extract `id` from the request URL and fetch details from MongoDB:
-
-```json
-{
-    "name": "Get Movie Details",
-    "description": "Fetches a movie by ID",
-    "version": "1.0.0",
-    "trigger": {
-        "http": {
-            "method": "GET",
-            "path": "/movies/:id",
-            "accept": "application/json"
-        }
-    },
-    "steps": [
-        {
-            "name": "get-movie",
-            "node": "mongo-query",
-            "type": "local"
-        }
-    ],
-    "nodes": {
-        "get-movie": {
-            "inputs": {
-                "collection": "movies",
-                "id": "${ctx.request.params.id}"
-            }
-        }
-    }
-}
-```
-
-#### How it Works:
-- `path: "/movies/:id"` defines a **dynamic route**.
-- The MongoDB node retrieves the movie using:
-  ```json
-  "id": "${ctx.request.params.id}"
-  ```
-  This extracts `id` from the URL (e.g., `/movies/123` → `ctx.request.params.id = 123`).
-
-### Example: Using `ctx.vars`
-
-This workflow **stores an API response in a variable** and **uses it in a later step**:
+This workflow extracts `id` from the request URL and fetches a record:
 
 ```json
 {
-    "name": "Fetch and Process Data",
-    "description": "Stores fetched data and processes it",
-    "version": "1.0.0",
-    "trigger": {
-        "http": {
-            "method": "GET",
-            "path": "/fetch-data",
-            "accept": "application/json"
-        }
+  "name": "Get Movie Details",
+  "description": "Fetches a movie by ID",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "GET", "path": "/movies/:id" } },
+  "steps": [
+    {
+      "id": "get-movie",
+      "use": "mongo-query",
+      "type": "local",
+      "inputs": {
+        "collection": "movies",
+        "id": "$.req.params.id"
+      }
     },
-    "steps": [
-        {
-            "name": "fetch-data",
-            "node": "@blokjs/api-call",
-            "type": "module",
-            "set_var": true
-        },
-        {
-            "name": "process-data",
-            "node": "@blokjs/mapper",
-            "type": "module"
-        }
-    ],
-    "nodes": {
-        "fetch-data": {
-            "inputs": {
-                "url": "https://api.publicapis.org/entries",
-                "method": "GET",
-                "headers": {},
-                "var": "apiResponse"
-            }
-        },
-        "process-data": {
-            "inputs": {
-                "mapper": {
-                    "totalApis": "js/ctx.vars['fetch-data'].count",
-                    "categories": "js/ctx.vars['fetch-data'].categories"
-                }
-            }
-        }
+    {
+      "id": "respond",
+      "use": "@blokjs/respond",
+      "inputs": { "body": "$.state.get-movie" }
     }
+  ]
 }
 ```
 
-#### How it Works:
-- The **API call node (`fetch-data`)** fetches API data and stores it in `ctx.vars['fetch-data']`.
-- The **mapper node (`process-data`)** extracts and processes values from `ctx.vars['fetch-data']`.
+How it works:
+- `path: "/movies/:id"` defines a dynamic route.
+- The mongo node retrieves the movie using `$.req.params.id` — which
+  resolves to whatever's at `:id` in the URL (e.g. `/movies/123` →
+  `123`).
+- The `respond` step returns the movie data because `$.state.get-movie`
+  reads the previous step's output.
+
+### Example: chaining steps via `$.state`
+
+This workflow stores an API response and uses it in a later step:
+
+```json
+{
+  "name": "Fetch and Process Data",
+  "description": "Fetches and transforms an external response",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "GET", "path": "/fetch-data" } },
+  "steps": [
+    {
+      "id": "fetch-data",
+      "use": "@blokjs/api-call",
+      "inputs": {
+        "url": "https://api.publicapis.org/entries",
+        "method": "GET"
+      }
+    },
+    {
+      "id": "process-data",
+      "use": "@blokjs/mapper",
+      "inputs": {
+        "mapper": {
+          "totalApis": "$.state.fetch-data.count",
+          "categories": "$.state.fetch-data.categories"
+        }
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/respond",
+      "inputs": { "body": "$.state.process-data" }
+    }
+  ]
+}
+```
+
+How it works:
+- Every step's output is automatically stored at `ctx.state[<id>]`.
+  No `set_var: true` needed — that's the v2 default.
+- `process-data` reads from `$.state.fetch-data.count` and
+  `$.state.fetch-data.categories` directly.
+- The `respond` step returns the transformed data.
+
+For background on `$.state` vs `ctx.vars` (the v1 alias) and `$.req`
+vs `ctx.request`, see [v2 step shapes](/d/reference/v2-step-shapes).
 
 ## Best Practices for Using the Context Object
 

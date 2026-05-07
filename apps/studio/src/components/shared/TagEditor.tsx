@@ -69,7 +69,7 @@ export function TagEditor({ runId, tags }: TagEditorProps) {
 						}
 					}}
 					placeholder="tag name"
-					className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 outline-none focus:border-blue-500 w-20"
+					className="text-[10px] px-1.5 py-0.5 rounded bg-raised border border-zinc-800 text-zinc-300 outline-none focus:border-blok-green-500 w-20"
 				/>
 			) : (
 				<button

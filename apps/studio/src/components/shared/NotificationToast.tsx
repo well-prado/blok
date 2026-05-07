@@ -58,8 +58,8 @@ function ToastItem({ toast, onDismiss }: { toast: Notification; onDismiss: (id: 
 		// biome-ignore lint/a11y/useKeyWithClickEvents: toast notification dismissal does not need keyboard interaction
 		<div
 			className={cn(
-				"bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg p-3",
-				"animate-slide-in cursor-pointer hover:bg-zinc-800/80 transition-colors",
+				"bg-overlay border border-zinc-800 rounded-lg shadow-lg p-3",
+				"animate-slide-in cursor-pointer hover:bg-hover/80 transition-colors",
 			)}
 			role="presentation"
 			onClick={() => {
@@ -129,7 +129,7 @@ export function NotificationBell() {
 				<>
 					{/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop overlay does not need keyboard interaction */}
 					<div className="fixed inset-0 z-40" role="presentation" onClick={() => setOpen(false)} />
-					<div className="absolute bottom-6 right-0 z-50 w-72 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl">
+					<div className="absolute bottom-6 right-0 z-50 w-72 bg-overlay border border-zinc-800 rounded-lg shadow-xl">
 						{/* Header */}
 						<div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
 							<span className="text-xs font-medium text-zinc-300">Notifications</span>

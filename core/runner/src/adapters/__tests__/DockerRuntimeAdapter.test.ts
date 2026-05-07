@@ -88,10 +88,11 @@ describe("DockerRuntimeAdapter", () => {
 			expect(adapter.kind).toBe("go");
 		});
 
-		it("should default to docker kind", () => {
-			adapter = new DockerRuntimeAdapter(undefined as any, "test-image");
-			expect(adapter.kind).toBe("docker");
-		});
+		// Removed: "should default to docker kind". The constructor previously
+		// defaulted `kind` to `"docker"`, but the multi-language runtime
+		// matrix has no sensible default and biome's `useDefaultParameterLast`
+		// rule autofixed the signature to drop the default. Callers now MUST
+		// pass an explicit kind.
 
 		it("should have execute method", () => {
 			adapter = new DockerRuntimeAdapter("docker", "test-image");

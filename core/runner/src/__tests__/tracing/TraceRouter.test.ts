@@ -1206,6 +1206,131 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	// === Cancellation (Tier 2 polish) ===
+
+	describe("Concurrency observability (Tier 2 follow-up)", () => {
+		it("GET /concurrency/health returns the configured backend (in-process default)", () => {
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/health")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { backend: string; disabled: boolean };
+			expect(body.backend).toBe("in-process");
+			expect(body.disabled).toBe(false);
+		});
+
+		it("GET /concurrency/state returns empty buckets when no slots in flight", () => {
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/state")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { totalBuckets: number; totalLeases: number };
+			expect(body.totalBuckets).toBe(0);
+			expect(body.totalLeases).toBe(0);
+		});
+
+		it("GET /concurrency/state returns active buckets after slots are acquired", () => {
+			tracker.getStore().acquireConcurrencySlot("wf-A", "tenant-1", 5, "run_1", Date.now() + 60_000);
+			tracker.getStore().acquireConcurrencySlot("wf-A", "tenant-1", 5, "run_2", Date.now() + 60_000);
+			tracker.getStore().acquireConcurrencySlot("wf-B", "tenant-1", 5, "run_3", Date.now() + 60_000);
+
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/concurrency/state")!(req, res);
+
+			const body = res.jsonBody as {
+				totalBuckets: number;
+				totalLeases: number;
+				buckets: Array<{ workflowName: string; concurrencyKey: string; inFlight: number }>;
+			};
+			expect(body.totalBuckets).toBe(2);
+			expect(body.totalLeases).toBe(3);
+			const wfA = body.buckets.find((b) => b.workflowName === "wf-A");
+			expect(wfA?.inFlight).toBe(2);
+			const wfB = body.buckets.find((b) => b.workflowName === "wf-B");
+			expect(wfB?.inFlight).toBe(1);
+		});
+	});
+
+	describe("POST /runs/:runId/cancel", () => {
+		it("returns 404 for unknown run", () => {
+			const req = new MockRequest({ params: { runId: "run_nonexistent" } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(404);
+		});
+
+		it("cancels a delayed run successfully", () => {
+			const run = tracker.startRun({
+				workflowName: "delay-test",
+				workflowPath: "/p",
+				triggerType: "http",
+				triggerSummary: "POST /delay",
+				nodeCount: 1,
+			});
+			tracker.markRunDelayed(run.id, { scheduledAt: Date.now() + 60_000, delayMs: 60_000 });
+
+			const req = new MockRequest({ params: { runId: run.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { cancelled: boolean; previousStatus: string; newStatus: string };
+			expect(body.cancelled).toBe(true);
+			expect(body.previousStatus).toBe("delayed");
+			expect(body.newStatus).toBe("cancelled");
+			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
+		});
+
+		it("cancels a queued run successfully", () => {
+			const run = tracker.startRun({
+				workflowName: "queue-test",
+				workflowPath: "/p",
+				triggerType: "http",
+				triggerSummary: "POST /queue",
+				nodeCount: 1,
+			});
+			tracker.markRunQueued(run.id, {
+				concurrencyKey: "k",
+				concurrencyLimit: 1,
+				currentInFlight: 1,
+				scheduledAt: Date.now() + 1000,
+			});
+
+			const req = new MockRequest({ params: { runId: run.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			expect(tracker.getRun(run.id)?.status).toBe("cancelled");
+		});
+
+		it("accepts cancellation for a running run (Tier 2 follow-up: cooperative AbortSignal)", () => {
+			// runs.run3 is `running` per seedData. Tier 2 follow-up extended
+			// the cancel route to accept "running" via abortRunningRun.
+			const req = new MockRequest({ params: { runId: runs.run3.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { cancelled: boolean; previousStatus: string; newStatus: string };
+			expect(body.cancelled).toBe(true);
+			expect(body.previousStatus).toBe("running");
+			expect(body.newStatus).toBe("cancelled");
+		});
+
+		it("returns 400 when the run is already completed", () => {
+			const req = new MockRequest({ params: { runId: runs.run1.id } });
+			const res = new MockResponse();
+			router.findHandler("POST", "/runs/:runId/cancel")!(req, res);
+
+			expect(res.statusCode).toBe(400);
+		});
+	});
+
 	// === AI Error Explanation ===
 
 	describe("POST /runs/:runId/explain", () => {

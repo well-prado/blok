@@ -5,14 +5,16 @@ import com.blok.blok.logging.LogLevel;
 import java.util.Objects;
 
 /**
- * Configuration for the blok HTTP server.
+ * Configuration for the blok runtime server(s).
  * Can be created from environment variables via {@link #fromEnv()}.
  * <p>
  * Environment variables:
  * <ul>
- *   <li>PORT - HTTP port (default: 8080)</li>
+ *   <li>PORT - HTTP port (default: 9003 — matches the runner's DEFAULT_PORTS.java)</li>
  *   <li>HOST - Bind address (default: 0.0.0.0)</li>
  *   <li>VERSION - Runtime version (default: 1.0.0)</li>
+ *   <li>GRPC_PORT - gRPC port (default: 10003 — matches DEFAULT_GRPC_PORTS.java = HTTP+1000)</li>
+ *   <li>BLOK_TRANSPORT - "http" | "grpc" | "both" (default: "http")</li>
  *   <li>LOG_LEVEL - Minimum log level: DEBUG, INFO, WARN, ERROR (default: INFO)</li>
  *   <li>ENABLE_CORS - Enable CORS: true/false (default: false)</li>
  *   <li>SHUTDOWN_TIMEOUT - Graceful shutdown timeout in seconds (default: 10)</li>
@@ -20,9 +22,30 @@ import java.util.Objects;
  */
 public class ServerConfig {
 
+    /** Selects which server(s) to start. */
+    public enum Transport {
+        /** HTTP only (default; preserves existing behavior). */
+        HTTP,
+        /** gRPC only on {@link ServerConfig#getGrpcPort()}. */
+        GRPC,
+        /** HTTP and gRPC concurrently — used during migration. */
+        BOTH;
+
+        public static Transport fromString(String value) {
+            if (value == null) return HTTP;
+            return switch (value.toLowerCase()) {
+                case "grpc" -> GRPC;
+                case "both" -> BOTH;
+                default -> HTTP;
+            };
+        }
+    }
+
     private int port;
     private String host;
     private String version;
+    private int grpcPort;
+    private Transport transport;
     private LogLevel logLevel;
     private boolean enableCors;
     private int shutdownTimeoutSec;
@@ -31,9 +54,11 @@ public class ServerConfig {
      * Creates a ServerConfig with default values.
      */
     public ServerConfig() {
-        this.port = 8080;
+        this.port = 9003;
         this.host = "0.0.0.0";
         this.version = "1.0.0";
+        this.grpcPort = 10003;
+        this.transport = Transport.HTTP;
         this.logLevel = LogLevel.INFO;
         this.enableCors = false;
         this.shutdownTimeoutSec = 10;
@@ -66,6 +91,22 @@ public class ServerConfig {
         String version = System.getenv("VERSION");
         if (version != null && !version.isBlank()) {
             config.version = version.trim();
+        }
+
+        String grpcPortStr = System.getenv("GRPC_PORT");
+        if (grpcPortStr != null && !grpcPortStr.isBlank()) {
+            try {
+                int gport = Integer.parseInt(grpcPortStr.trim());
+                if (gport > 0) {
+                    config.grpcPort = gport;
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        String transport = System.getenv("BLOK_TRANSPORT");
+        if (transport != null && !transport.isBlank()) {
+            config.transport = Transport.fromString(transport.trim());
         }
 
         String logLevel = System.getenv("LOG_LEVEL");
@@ -127,6 +168,22 @@ public class ServerConfig {
         this.version = version != null ? version : "1.0.0";
     }
 
+    public int getGrpcPort() {
+        return grpcPort;
+    }
+
+    public void setGrpcPort(int grpcPort) {
+        this.grpcPort = grpcPort;
+    }
+
+    public Transport getTransport() {
+        return transport;
+    }
+
+    public void setTransport(Transport transport) {
+        this.transport = transport != null ? transport : Transport.HTTP;
+    }
+
     public LogLevel getLogLevel() {
         return logLevel;
     }
@@ -157,6 +214,8 @@ public class ServerConfig {
         if (o == null || getClass() != o.getClass()) return false;
         ServerConfig that = (ServerConfig) o;
         return port == that.port &&
+                grpcPort == that.grpcPort &&
+                transport == that.transport &&
                 enableCors == that.enableCors &&
                 shutdownTimeoutSec == that.shutdownTimeoutSec &&
                 Objects.equals(host, that.host) &&
@@ -166,7 +225,7 @@ public class ServerConfig {
 
     @Override
     public int hashCode() {
-        return Objects.hash(port, host, version, logLevel, enableCors, shutdownTimeoutSec);
+        return Objects.hash(port, host, version, grpcPort, transport, logLevel, enableCors, shutdownTimeoutSec);
     }
 
     @Override
@@ -175,6 +234,8 @@ public class ServerConfig {
                 "port=" + port +
                 ", host='" + host + '\'' +
                 ", version='" + version + '\'' +
+                ", grpcPort=" + grpcPort +
+                ", transport=" + transport +
                 ", logLevel=" + logLevel +
                 ", enableCors=" + enableCors +
                 ", shutdownTimeoutSec=" + shutdownTimeoutSec +

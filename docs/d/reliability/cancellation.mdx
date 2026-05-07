@@ -1,0 +1,368 @@
+---
+title: "Cancellation & crash recovery"
+description: "Cancel runs at any lifecycle stage, give nodes a cooperative AbortSignal, and let crashed or orphaned runs flip to a terminal state automatically."
+icon: "x-circle"
+---
+
+import { StudioRunHeader, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+A run can end three ways outside the happy path: an operator cancels
+it, the runtime process crashes, or a long-running process leaves it
+orphaned across a restart. Blok handles each cleanly so a `running`
+run never sits in storage forever.
+
+The cancellation API spans every lifecycle state where a run is
+still cancellable — `delayed`, `debounced`, `queued`, and `running`.
+For `running` runs, cancellation is cooperative: the runner fires an
+`AbortSignal` on the ctx and nodes that consult it abort their work.
+Crash auto-flip and orphan recovery handle the cases where the
+runtime itself fails.
+
+## Cancel API
+
+```
+POST /__blok/runs/:runId/cancel
+```
+
+Cancellable from `delayed`, `debounced`, `queued`, AND `running`
+states. Returns `200` with the transition record on success:
+
+```bash
+$ curl -X POST http://localhost:4000/__blok/runs/run_abc123/cancel
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "cancelled": true,
+  "runId": "run_abc123",
+  "previousStatus": "delayed",
+  "newStatus": "cancelled"
+}
+```
+
+For `running` runs, the response includes a `note` explaining the
+cooperative semantics:
+
+```bash
+$ curl -X POST http://localhost:4000/__blok/runs/run_xyz789/cancel
+HTTP/1.1 200 OK
+
+{
+  "cancelled": true,
+  "runId": "run_xyz789",
+  "previousStatus": "running",
+  "newStatus": "cancelled",
+  "note": "Cancellation initiated via AbortSignal; in-flight step will abort cooperatively."
+}
+```
+
+### Response codes
+
+| Code | Body | When |
+|---|---|---|
+| `200` | `{cancelled: true, runId, previousStatus, newStatus, note?}` | Run was in a cancellable state and the transition succeeded. |
+| `400` | `{error, runId, status}` | Run is in a non-cancellable terminal state (`completed`, `failed`, `throttled`, `expired`, `crashed`, `timedOut`, `cancelled`). |
+| `404` | `{error}` | RunId doesn't exist. |
+| `409` | `{error, runId}` | Race — the run's status changed between the read and the cancel call. |
+
+The `cancelled` status is **terminal**. Re-cancelling a cancelled run
+returns `400` (idempotent at the contract level).
+
+## What gets cancelled in each state
+
+| From | What stops |
+|---|---|
+| `delayed` | Scheduler timer cancelled (`DeferredRunScheduler.cancel(runId)`); persisted dispatch row deleted. |
+| `debounced` | Coordinator window cancelled (`DebounceCoordinator.cancel(workflowName, debounceKey)`); persisted dispatch row deleted (when present). |
+| `queued` | Scheduler timer cancelled; the next acquisition attempt won't fire. |
+| `running` | `AbortSignal` on `ctx.signal` is fired. The runner's between-step abort check throws `RunCancelledError` on the next iteration. |
+
+The route handler in
+[`core/runner/src/tracing/TraceRouter.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/TraceRouter.ts)
+captures `previousStatus` BEFORE calling `cancelRun` to avoid the
+in-place-mutation race. Scheduler and coordinator `.cancel()` are
+both idempotent, so order of operations doesn't matter under contention.
+
+## Cooperative cancellation for `running` runs
+
+Every `Context` carries `ctx.signal: AbortSignal`. The runner fires
+the signal when the operator cancels a `running` run, but **whether
+the underlying step actually stops depends on the node**.
+
+Source: [`core/shared/src/types/Context.ts`](https://github.com/deskree-inc/blok/blob/main/core/shared/src/types/Context.ts)
+declares the field; [`core/runner/src/RunnerSteps.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/RunnerSteps.ts)
+checks `ctx.signal.aborted` between steps and throws `RunCancelledError`.
+
+### Pass `ctx.signal` to abort-aware APIs
+
+`fetch`, `axios`, and most modern HTTP clients accept an `AbortSignal`.
+Pass it through and the request aborts when the signal fires:
+
+```ts
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
+
+export default defineNode({
+  name: "long-fetch",
+  input: z.object({ url: z.string() }),
+  output: z.object({ data: z.unknown() }),
+  async execute(ctx, input) {
+    // Abort the fetch when the run is cancelled.
+    const res = await fetch(input.url, { signal: ctx.signal });
+    return { data: await res.json() };
+  },
+});
+```
+
+When the operator cancels the run, `ctx.signal.aborted` flips to
+`true`, the fetch promise rejects with `AbortError`, and the node
+throws naturally.
+
+### Consult `ctx.signal.aborted` in loops
+
+For work that isn't backed by an abort-aware API (CPU-bound loops,
+custom polling), check the signal periodically:
+
+```ts
+async execute(ctx, input) {
+  while (hasMoreWork(input)) {
+    if (ctx.signal?.aborted) {
+      throw new Error("Aborted by operator");
+    }
+    await processBatch(input);
+  }
+  return { ok: true };
+}
+```
+
+The runner's between-step check catches abort BETWEEN steps. The
+in-step check catches it WITHIN a step. Both layers compose — the
+coarser between-step check is the floor; finer in-step checks are the
+node author's call.
+
+### `RunCancelledError`
+
+Thrown by the runner's between-step abort check. Exported from
+`@blokjs/runner` for `instanceof` differentiation:
+
+```ts
+import { RunCancelledError, isRunCancelledError } from "@blokjs/runner";
+
+try {
+  await runWorkflow(...);
+} catch (err) {
+  if (isRunCancelledError(err)) {
+    // operator cancelled — distinct from a step-level failure
+  } else {
+    throw err;
+  }
+}
+```
+
+The error is a clean signal, not a step failure. The tracker has
+already flipped status to `cancelled` and emitted
+<StudioEventBadge type="RUN_CANCELLED" /> by the time the error
+propagates.
+
+## Child-context signal cascade
+
+Sub-workflows participate in the cascade. When a parent run is
+cancelled, every synchronous (`wait: true`) child currently in flight
+also receives the abort signal. The mechanism is in
+[`createChildContext`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/utils/createChildContext.ts):
+
+```ts
+const childController = new AbortController();
+parent.signal?.addEventListener("abort", () => childController.abort());
+childCtx.signal = childController.signal;
+```
+
+| Lifecycle | Cascade |
+|---|---|
+| Parent cancelled → sync child running | child receives abort signal |
+| Parent cancelled → async (`wait: false`) child | NO cascade — parent step has already returned. Cancel async children directly via their own `runId`. |
+| Sync child cancelled | NO upward cascade — independent lifecycle preserved. |
+| Sync child throws `RunCancelledError` | propagates to parent step (and its `retry` loop, if configured). |
+
+See [sub-workflows · cancellation cascade](/d/composition/sub-workflows#cancellation-cascade)
+for the composition deep-dive.
+
+## Crash auto-flip
+
+The runner installs process-level handlers that flip in-flight runs
+to `crashed` when the process itself fails:
+
+```ts
+// installCrashHandlers — registered by HttpTrigger.listen() and WorkerTrigger.listen()
+process.on("uncaughtException", (err) => {
+  RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
+  throw err;  // re-throw to preserve Node's default exit behavior
+});
+
+process.on("unhandledRejection", (reason) => {
+  RunTracker.getInstance().markAllRunningRunsAsCrashed(reason);
+  // doesn't re-throw — mirror Node's warn-and-continue behavior
+});
+```
+
+The handler is idempotent (guarded by a static flag, HMR-safe). It
+emits <StudioEventBadge type="RUN_CRASHED" /> with payload
+`{durationMs, error}` for each affected run before the process exits.
+
+Disable via `BLOK_CRASH_AUTOFLIP_DISABLED=1` if you have your own
+crash handling.
+
+Source:
+[`core/runner/src/TriggerBase.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/TriggerBase.ts) ·
+[`core/runner/src/tracing/RunTracker.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/RunTracker.ts).
+
+## Orphan recovery
+
+Crash auto-flip catches `uncaughtException` and `unhandledRejection`,
+but it can't catch `SIGKILL`, OOM, or signal-driven exits — those
+kill the process before any handler runs. For those cases, every
+trigger calls `recoverOrphanedRuns()` on boot:
+
+```
+[blok][orphan-recovery] flipped 3 stale `running` runs older than
+2 min to `crashed` status
+```
+
+The threshold is `BLOK_ORPHAN_THRESHOLD_MS` (default 2 min). Runs in
+`running` status with `startedAt` older than the threshold are
+flipped to `crashed` and emit <StudioEventBadge type="RUN_CRASHED" />.
+
+Tune the threshold up if your workflows legitimately run longer than
+two minutes — a too-low threshold will incorrectly flip in-flight
+work as crashed during HMR or a graceful restart. Tune down to
+shorten the recovery window for short-running workflows.
+
+| Trigger | When fires |
+|---|---|
+| `installCrashHandlers` | `uncaughtException`, `unhandledRejection`. Flips runs immediately, before exit. |
+| `recoverOrphanedRuns` | Process boot. Flips runs in `running` status older than `BLOK_ORPHAN_THRESHOLD_MS`. |
+
+Both are wired by `HttpTrigger.listen()` and `WorkerTrigger.listen()`.
+Custom triggers should mirror the pattern.
+
+## Studio surface
+
+A cancelled run appears with a purple **Cancelled** badge:
+
+<StudioRunHeader
+  workflowName="long-running-pipeline"
+  runId="run_cancelled_a91"
+  status="cancelled"
+  durationMs={1240}
+  triggerSummary="POST /pipeline"
+  startedAt="2026-05-04 14:20:01"
+  nodeCount={5}
+  completedNodes={2}
+  showReplayButton={true}
+/>
+
+A crashed run appears with a red **Crashed** badge:
+
+<StudioRunHeader
+  workflowName="render-pdf"
+  runId="run_crashed_c33"
+  status="crashed"
+  durationMs={4218}
+  triggerSummary="POST /render"
+  startedAt="2026-05-04 14:18:47"
+  nodeCount={3}
+  completedNodes={1}
+  showReplayButton={true}
+/>
+
+The events timeline carries one <StudioEventBadge type="RUN_CANCELLED" />
+or <StudioEventBadge type="RUN_CRASHED" /> entry. Cancelled runs are
+[replayable](/d/reliability/replay) — the original payload re-fires
+through the current code with a fresh ctx and fresh AbortController.
+
+## Composition with prior tiers
+
+| Feature | Interaction |
+|---|---|
+| [Idempotency cache](/d/reliability/idempotency) | Cache writes happen only on success — cancelled and crashed runs do NOT cache (the step never reached the success path). |
+| [Per-step retry](/d/reliability/retry) | If `RunCancelledError` propagates through a retry loop, it short-circuits — cancellation is not a retry-eligible failure. |
+| [Step timeouts](/d/reliability/max-duration) | `maxDuration` rejects the wrapper but doesn't fire `ctx.signal`. Operator cancellation fires the signal, which (combined with cooperative nodes) DOES abort the underlying work. |
+| [Concurrency keys](/d/reliability/concurrency-keys) | Cancelled runs release their concurrency slot in the `finally` block, just like completed/failed runs. |
+| [Sub-workflows](/d/composition/sub-workflows) | Sync (`wait: true`) children receive the parent's abort signal via `createChildContext`'s chained controller. Async (`wait: false`) children do NOT — cancel them via their own `runId`. |
+| [Scheduling](/d/scheduling/overview) | `delayed` / `debounced` / `queued` runs are all cancellable. The cancel handler clears the scheduler timer + deletes any persisted dispatch row. |
+| [Replay](/d/reliability/replay) | Cancelled runs are replayable. The new run gets a fresh ctx, fresh AbortController, and a clean cancellation lifecycle. |
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Expecting cancellation to propagate to async children">
+    `wait: false` children don't receive the parent's abort signal —
+    the parent step has already returned by the time the child runs.
+    Cancel async children directly via
+    `POST /__blok/runs/:childId/cancel`.
+  </Accordion>
+
+  <Accordion title="Nodes that don't consult ctx.signal">
+    Cancelling a `running` run flips status to `cancelled` and fires
+    the abort signal, but the in-flight step keeps running until its
+    next signal check (or until it naturally completes). For
+    third-party nodes you don't control, the wrap-around protection
+    is the runner's between-step check — the NEXT step never starts.
+  </Accordion>
+
+  <Accordion title="Cancelling a crashed or completed run">
+    Returns `400` with `{error, status}`. Cancellation only
+    transitions FROM transient or cancellable states (`delayed`,
+    `debounced`, `queued`, `running`). Terminal states stay terminal.
+  </Accordion>
+
+  <Accordion title="Crash auto-flip running across HMR or graceful restart">
+    By default, runs in `running` for more than 2 min on boot get
+    flipped to `crashed`. If your workflows legitimately run longer,
+    raise `BLOK_ORPHAN_THRESHOLD_MS` to a value above realistic
+    worst-case execution time.
+  </Accordion>
+
+  <Accordion title="Cancellation race with completion">
+    The route returns `409 Conflict` if the run's status changed
+    between the read and the cancel call (e.g. the workflow completed
+    in the same window). Idempotent — operators can retry safely.
+  </Accordion>
+
+  <Accordion title="Treating `cancelled` and `failed` the same">
+    Don't. Cancelled runs are explicit operator decisions, not bugs.
+    SLA dashboards should filter them out of error rates. Crashed runs
+    ARE faults — track them separately from `failed` (logic errors)
+    so capacity / process-health issues surface distinctly.
+  </Accordion>
+</AccordionGroup>
+
+## Not yet shipped
+
+- **Cross-runtime `ctx.signal` propagation.** TypeScript nodes get
+  `Context.signal` today. Propagation through the gRPC and Docker
+  runtime adapters (so non-TS nodes can also abort cooperatively) is
+  on the roadmap.
+- **`maxDuration` auto-firing `ctx.signal.abort()`.** Per-step timeout
+  and operator cancellation are independent today. Wiring `maxDuration`
+  expiry to fire the signal would let nodes inherit abort semantics
+  for free.
+- **Cascade to fire-and-forget children.** Cancelling the parent does
+  NOT abort `wait: false` children; cancel each by their own `runId`.
+- **Bulk cancellation.** No batch endpoint today
+  (`POST /__blok/runs/cancel?status=delayed`). Cancel runs one at a
+  time.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Step timeouts" icon="timer" href="/d/reliability/max-duration">
+    `maxDuration` is per-attempt; cancellation is run-level.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Cancellation cascades through chained child contexts.
+  </Card>
+  <Card title="Janitor & shutdown" icon="broom" href="/d/operations/janitor-and-shutdown">
+    Graceful shutdown drains in-flight runs and triggers crash auto-flip cleanly.
+  </Card>
+</Columns>

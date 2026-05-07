@@ -32,6 +32,7 @@ export interface HttpRuntimeAdapterOptions {
  */
 export class HttpRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind: RuntimeKind;
+	public readonly transport = "http" as const;
 	private baseUrl: string;
 	private timeoutMs: number;
 
@@ -113,11 +114,31 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 	/**
 	 * Create the ExecutionRequest payload for the SDK container.
 	 *
-	 * Data flow priority:
-	 * 1. If the node has resolved inputs (from blueprint Mapper), use those as request.body
-	 *    This allows workflows to define explicit inputs like: "chain": "js/ctx.response.data.chain"
-	 * 2. Otherwise, fall back to ctx.response.data (previous step output)
-	 *    This enables zero-config chaining where SDK nodes automatically receive prior output
+	 * Sends two shapes in the same envelope so the migration to the new
+	 * canonical wire format is backward-compatible:
+	 *
+	 *   1. **Legacy keys** — `node.config` + `context.{request,response,vars,env}`.
+	 *      Existing SDK HTTP servers (Rust, Python, Go HTTP, others) read
+	 *      these keys today and keep working unchanged.
+	 *
+	 *   2. **New canonical keys** — `step` / `inputs` / `trigger` / `state` /
+	 *      `workflow`. Same field names + structure as the gRPC proto so SDK
+	 *      authors who adopt the new shape get a uniform mental model across
+	 *      transports. The "inputs unwrapped at the wire layer" property
+	 *      (FIXES.md #3) holds for both shapes.
+	 *
+	 * Data flow priority for the legacy `request.body`:
+	 * 1. If the node has resolved inputs (from the blueprint Mapper), use
+	 *    those as `request.body` so workflows that define explicit inputs
+	 *    like `"chain": "js/ctx.response.data.chain"` keep working.
+	 * 2. Otherwise, fall back to `ctx.response.data` (previous step output)
+	 *    enabling zero-config chaining for SDK nodes that read body fields.
+	 *
+	 * The new `trigger.body` always reflects the actual trigger body
+	 * (`ctx.request?.body`) — separated from inputs at the wire layer.
+	 *
+	 * Deprecation timeline: legacy keys will be removed in the next minor
+	 * version once SDK HTTP servers have all adopted the new shape.
 	 */
 	private createExecutionRequest(node: RunnerNode, ctx: Context): unknown {
 		const nodeConfig = ctx.config
@@ -130,17 +151,31 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 		const resolvedInputs = nodeConfig?.inputs as Record<string, unknown> | undefined;
 
 		// Use resolved inputs if available, otherwise fall back to previous step data
-		const requestBody = resolvedInputs || (ctx.response?.data ?? {});
+		const legacyRequestBody = resolvedInputs || (ctx.response?.data ?? {});
 
 		// Unwrap the {inputs: {...}} wrapper that comes from @blokjs/helper StepNode.
 		// SDK nodes expect config to contain the inputs directly (e.g. config.operation),
 		// not wrapped as config.inputs.operation.
 		const unwrappedConfig = resolvedInputs || (nodeConfig as Record<string, unknown>)?.inputs || nodeConfig || {};
 
+		const stepInfo = (ctx as Record<string, unknown>)._stepInfo as
+			| { name?: string; index?: number; total?: number; depth?: number }
+			| undefined;
+
+		const headers = ctx.request?.headers ?? {};
+		const params = ctx.request?.params ?? {};
+		const query = ctx.request?.query ?? {};
+		const cookies = ctx.request?.cookies ?? {};
+		const method = ctx.request?.method ?? "";
+		const url = ctx.request?.url ?? "";
+		const baseUrl = ctx.request?.baseUrl ?? "";
+
 		return {
+			// ===== Legacy keys (kept for one minor for backward compat) =====
 			node: {
 				name: node.node,
 				type: node.type,
+				version: "",
 				config: unwrappedConfig,
 			},
 			context: {
@@ -148,14 +183,14 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 				workflow_name: ctx.workflow_name,
 				workflow_path: ctx.workflow_path,
 				request: {
-					body: requestBody,
-					headers: ctx.request?.headers ?? {},
-					params: ctx.request?.params ?? {},
-					query: ctx.request?.query ?? {},
-					method: ctx.request?.method ?? "",
-					url: ctx.request?.url ?? "",
-					cookies: ctx.request?.cookies ?? {},
-					baseUrl: ctx.request?.baseUrl ?? "",
+					body: legacyRequestBody,
+					headers,
+					params,
+					query,
+					method,
+					url,
+					cookies,
+					baseUrl,
 				},
 				response: {
 					data: null,
@@ -165,6 +200,37 @@ export class HttpRuntimeAdapter implements RuntimeAdapter {
 				},
 				vars: ctx.vars ?? {},
 				env: ctx.env ?? {},
+			},
+
+			// ===== New canonical keys (mirror the gRPC proto v1 schema) =====
+			step: {
+				name: stepInfo?.name ?? node.name,
+				index: stepInfo?.index ?? 0,
+				total: stepInfo?.total ?? 1,
+				depth: stepInfo?.depth ?? 0,
+			},
+			inputs: unwrappedConfig,
+			trigger: {
+				body: ctx.request?.body ?? null,
+				headers,
+				params,
+				query,
+				cookies,
+				method,
+				url,
+				baseUrl,
+				triggerKind: "",
+			},
+			state: {
+				previousOutput: ctx.response?.data ?? null,
+				vars: ctx.vars ?? {},
+				env: ctx.env ?? {},
+			},
+			workflow: {
+				runId: ctx.id,
+				name: ctx.workflow_name ?? "",
+				path: ctx.workflow_path ?? "",
+				version: "",
 			},
 		};
 	}
