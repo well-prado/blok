@@ -1,0 +1,212 @@
+---
+title: "v0.4 · Explicit-path-only routing"
+description: "How to migrate workflows from filename-derived URLs to explicit `trigger.http.path` declarations."
+icon: "route"
+---
+
+Blok 0.4 makes `trigger.http.path` **required** on every HTTP-triggered
+workflow. The legacy URL-derivation systems — filename-to-URL mapping
+under `BLOK_FILE_BASED_ROUTING=true`, and the `/<workflow-key>/<sub>`
+catch-all dispatch for manual TS workflows — are deprecated and gated
+behind a flag that will be removed in v0.5.
+
+The change is mechanical: every workflow that used to depend on
+filename derivation gets its file-derived URL written into the
+workflow file as a literal string. The CLI ships a codemod for the
+JSON workflows; TS workflows are a one-line manual edit.
+
+## Why
+
+URLs are an external API contract. The pre-v0.4 model leaked file
+structure into that contract — rename a file, the URL changes;
+restructure folders, every consumer of the API breaks. Explicit
+declarations are how every mature backend framework (Express, Hono,
+Fastify, FastAPI, Laravel, Trigger.dev) handles routing, and aligning
+with that mental model removes a category of surprise from the Blok
+authoring experience.
+
+The collision-detection improvements that fall out of this are also
+significant — under the old model, two unrelated files in the same
+folder declaring `path: "/"` would silently both depend on the
+catch-all to disambiguate. Under v0.4, the same configuration is a
+clean error at workflow load.
+
+## What changes
+
+| Aspect | v0.3 | v0.4 |
+|---|---|---|
+| `trigger.http.path` | Optional (filename derivation as fallback) | **Required** at workflow load |
+| Filename-to-URL derivation | On by default with `BLOK_FILE_BASED_ROUTING=true` | Removed unless `BLOK_ROUTING_LEGACY=1` |
+| Catch-all `/<workflow-key>/<sub>` for manual TS workflows | On by default | Removed unless `BLOK_ROUTING_LEGACY=1` |
+| Workflow load with no path | Silently uses derived URL | Throws `MissingExplicitPathError` |
+| Boot warnings | None | Deprecation warning per affected workflow when `BLOK_ROUTING_LEGACY=1` |
+
+## Migrate JSON workflows: `blokctl migrate paths`
+
+The CLI ships a codemod that walks every JSON workflow under
+`workflows/json/` (or `triggers/http/workflows/json/`) and writes the
+file-derived URL into `trigger.http.path` where it's missing or set
+to the placeholder `"/"`.
+
+```bash
+# Preview the changes (no writes)
+blokctl migrate paths --dry-run
+
+# Apply (writes <name>.json.bak alongside each modified file)
+blokctl migrate paths
+
+# Apply without backups
+blokctl migrate paths --no-backup
+
+# Point at a non-default location
+blokctl migrate paths --dir custom/workflows/path
+```
+
+The codemod is **idempotent** — re-running it on a fully-migrated
+repo is a no-op. Each workflow is reported as one of:
+
+- **`✓ added explicit path`** — `trigger.http.path` was missing, set
+  to the file-derived URL.
+- **`✓ rewrote "/" → /<filename>`** — `trigger.http.path` was the
+  collision-prone placeholder `"/"`, rewritten to the file-derived
+  URL.
+- **`· already explicit`** — `trigger.http.path` was already set to
+  something other than `"/"`. Left alone.
+
+After running, verify the diff and delete the `.bak` files when
+you're satisfied.
+
+## Migrate TS workflows: manual edit
+
+The codemod doesn't touch TS workflows — they require AST rewriting
+and existing TS workflows in your repo are usually a small number.
+For each TS workflow under `triggers/http/src/workflows/`, set
+`trigger.http.path` explicitly:
+
+```ts
+// Before — depends on filename derivation
+export default workflow({
+  name: "Users",
+  trigger: { http: { method: "GET" } },
+  steps: [/* ... */],
+});
+
+// After — explicit path
+export default workflow({
+  name: "Users",
+  trigger: { http: { method: "GET", path: "/users" } },
+  steps: [/* ... */],
+});
+```
+
+The CLI's `migrate paths` command prints a notice listing TS workflow
+files it found, as a reminder to edit them manually.
+
+## Catch-all `/<workflow-key>/<sub>` dispatch
+
+If you've been relying on `Workflows.ts` registrations responding at
+URLs derived from their map key (e.g. `Workflows.ts["users-helper"]`
+serving `POST /users-helper/<sub>`), pick an explicit URL and write
+it into the workflow:
+
+```ts
+// Workflows.ts
+export default {
+  "users-helper": usersHelper,
+};
+
+// triggers/http/src/workflows/users-helper.ts
+export default workflow({
+  name: "Users helper",
+  trigger: {
+    http: { method: "POST", path: "/api/users-helper" }, // pick one — typically /<key>
+  },
+  steps: [/* ... */],
+});
+```
+
+The `legacyKeyPrefix` option on the HTTP trigger schema (which
+exposed both the new explicit path AND the legacy `/<key>/<sub>` URL)
+remains — it lets you publish at both URLs during cutover. Drop it
+once consumers are off the legacy URL.
+
+## Escape hatch: `BLOK_ROUTING_LEGACY=1`
+
+If you can't migrate immediately (large workflow fleet, gradual
+rollout), set the env flag to keep the v0.3 routing behavior:
+
+```bash
+BLOK_ROUTING_LEGACY=1 bun run dev
+```
+
+With the flag set, the runner falls back to the legacy URL-derivation
+rules and emits a one-line deprecation warning at boot for every
+affected workflow:
+
+```
+[blok][routing] DEPRECATED — workflow at workflows/json/users/list.json
+has no explicit `trigger.http.path`. Using file-derived URL "/users/list".
+Run `blokctl migrate paths` to write the explicit path. The
+BLOK_ROUTING_LEGACY flag will be removed in v0.5.
+```
+
+The flag will be **removed in v0.5** with no further fallback. Treat
+the warnings as a punch list.
+
+## Verifying
+
+After running the codemod, start the dev orchestrator and confirm
+the registered routes match expectations:
+
+```bash
+bun run dev
+```
+
+The trigger logs each registered route at boot:
+
+```
+[blok] file-based routing — N route(s) registered:
+[blok]   POST    /api/users  ←  users-create
+[blok]   GET     /api/users/:id  ←  users-get
+```
+
+Hit the routes you care about and watch them in Studio at
+`http://localhost:5555`.
+
+## Errors you might see
+
+### `MissingExplicitPathError`
+
+```
+[blok][routing] workflow at workflows/json/users/list.json is missing
+`trigger.http.path`. Would have derived "/users/list" from the file
+location, but explicit-path-only routing is enabled (default since v0.4).
+
+Fix options:
+  1. Add `trigger.http.path` to the workflow file.
+  2. Run `blokctl migrate paths` to auto-fill from the file location.
+  3. Set BLOK_ROUTING_LEGACY=1 to opt into the deprecated v0.3 behavior (removed in v0.5).
+```
+
+The workflow loaded but has no explicit path. Pick one of the three
+options. Option 2 (the codemod) is the recommended path.
+
+### `RouteCollisionError` after migration
+
+Two workflows now declare the same `(method, path)` pair. Under v0.3
+this would have been silently disambiguated by the catch-all
+dispatch's filename prefix. Under v0.4 it's a real bug — pick unique
+paths for each workflow.
+
+## Timeline
+
+- **v0.4** (this release): `path` required by default, escape hatch
+  via `BLOK_ROUTING_LEGACY=1`, codemod available.
+- **v0.5**: escape hatch removed. Workflows without `path` fail to
+  load with no fallback.
+
+## Related
+
+- [Trigger options · HTTP](/d/reference/v2-step-shapes#trigger-options) — the
+  full HTTP trigger schema.
+- [`blokctl migrate paths`](/d/cli/overview) — codemod CLI reference.

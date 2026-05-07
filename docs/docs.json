@@ -130,7 +130,10 @@
 					},
 					{
 						"group": "Migration Guides",
-						"pages": ["c/migration-guides/index"]
+						"pages": [
+							"c/migration-guides/index",
+							"c/migration-guides/v0.4-explicit-paths"
+						]
 					}
 				]
 			},

@@ -4,13 +4,20 @@ import type { ScannedWorkflow } from "./scanWorkflows";
  * WorkflowRouter — builds the explicit route table from scanned workflows
  * plus any manually-registered TS workflows from `Workflows.ts`.
  *
- * **Source priority for the URL path:**
- * 1. `trigger.http.path` set explicitly on the workflow → wins.
- * 2. The default path derived from the file location → fallback.
- * 3. The manual-registration key from `Workflows.ts` (legacy `/<key>` URL)
- *    → only used when the workflow is NOT scanned (e.g. it's exported but
- *    not present on disk under the scan roots). For v2 migration this is
- *    the path of last resort.
+ * **Routing model (v0.4+):** `trigger.http.path` is REQUIRED. Each
+ * workflow declares its own URL explicitly. Filename-derived URLs and
+ * the legacy `/<workflow-key>/<sub>` catch-all are gone — except behind
+ * the deprecation flag.
+ *
+ * **Legacy escape hatch:** set `BLOK_ROUTING_LEGACY=1` (or `=true`) to
+ * keep the v0.3 behavior — workflows without an explicit `path` fall
+ * back to the file-derived URL (for scanned JSON workflows) or the
+ * `/<workflow-key>/<sub>` catch-all (for manual TS registrations). A
+ * deprecation warning is emitted at boot for every affected workflow.
+ * This flag will be removed in v0.5.
+ *
+ * **Migration**: run `blokctl migrate paths` to write explicit
+ * `trigger.http.path` into every JSON workflow that's missing it.
  *
  * **Collision detection** (at boot, fail loudly):
  * - Exact duplicate `(method, path)` pair → throw with both source paths.
@@ -18,6 +25,13 @@ import type { ScannedWorkflow } from "./scanWorkflows";
  * - Param vs literal at the same depth → log a warning (Hono routes
  *   literals first; this is usually intended but worth surfacing).
  */
+
+const LEGACY_FLAG_ENV = "BLOK_ROUTING_LEGACY";
+
+function isLegacyRoutingEnabled(): boolean {
+	const raw = process.env[LEGACY_FLAG_ENV];
+	return raw === "1" || raw === "true";
+}
 
 /** A single registered route entry, ready for `app.<method>(path, handler)`. */
 export interface RouteEntry {
@@ -45,6 +59,23 @@ export class RouteCollisionError extends Error {
 }
 
 /**
+ * Thrown when a workflow is missing an explicit `trigger.http.path`
+ * and the legacy escape hatch (`BLOK_ROUTING_LEGACY=1`) is not set.
+ *
+ * v0.4 made explicit paths required. Run `blokctl migrate paths` to
+ * auto-fill missing paths from the file location, OR set the legacy
+ * flag to opt back into the v0.3 behavior (will be removed in v0.5).
+ */
+export class MissingExplicitPathError extends Error {
+	constructor(source: string, hint: string) {
+		super(
+			`[blok][routing] workflow at ${source} is missing \`trigger.http.path\`. ${hint}\nFix options:\n  1. Add \`trigger.http.path\` to the workflow file.\n  2. Run \`blokctl migrate paths\` to auto-fill from the file location.\n  3. Set BLOK_ROUTING_LEGACY=1 to opt into the deprecated v0.3 behavior (removed in v0.5).`,
+		);
+		this.name = "MissingExplicitPathError";
+	}
+}
+
+/**
  * Build the route table from a mix of scanned workflows and manually-
  * registered TS workflows.
  *
@@ -58,13 +89,30 @@ export function buildRouteTable(
 ): RouteEntry[] {
 	const out: RouteEntry[] = [];
 	const seen = new Map<string, RouteEntry>();
+	const legacyMode = isLegacyRoutingEnabled();
 
 	for (const sw of scanned) {
 		const triggerCfg = extractHttpTrigger(sw.workflow);
 		if (!triggerCfg) continue; // not http-triggered → not a routed workflow
 		const method = normalizeMethod(triggerCfg.method);
 		const explicitPath = typeof triggerCfg.path === "string" ? triggerCfg.path : undefined;
-		const finalPath = explicitPath ?? sw.defaultPath;
+
+		let finalPath: string;
+		if (explicitPath) {
+			finalPath = explicitPath;
+		} else if (legacyMode) {
+			// Deprecated path: fall back to the file-derived URL and warn.
+			finalPath = sw.defaultPath;
+			options.onWarning?.(
+				`[blok][routing] DEPRECATED — workflow at ${sw.source} has no explicit \`trigger.http.path\`. Using file-derived URL "${finalPath}". Run \`blokctl migrate paths\` to write the explicit path. The BLOK_ROUTING_LEGACY flag will be removed in v0.5.`,
+			);
+		} else {
+			throw new MissingExplicitPathError(
+				sw.source,
+				`Would have derived "${sw.defaultPath}" from the file location, but explicit-path-only routing is enabled (default since v0.4).`,
+			);
+		}
+
 		const workflowKey = sw.name ?? deriveKeyFromPath(sw.source);
 		const entry: RouteEntry = {
 			method,
@@ -84,11 +132,25 @@ export function buildRouteTable(
 		if (!triggerCfg) continue;
 		const method = normalizeMethod(triggerCfg.method);
 		const explicitPath = typeof triggerCfg.path === "string" ? triggerCfg.path : undefined;
-		// Manual registrations: if the author set an explicit path, use it.
-		// Otherwise we leave them to the legacy catch-all (no explicit
-		// registration produced). This preserves v1 URL behaviour
-		// (`/<key>/<sub-path>`) for un-migrated workflows.
-		if (!explicitPath) continue;
+
+		// Manual TS workflows: explicit path is REQUIRED in v0.4+. Under
+		// legacy mode, we silently skip un-pathed manual entries so they
+		// can still respond via the catch-all dispatch in HttpTrigger
+		// (`/<workflow-key>/<sub>`); a deprecation warning is emitted
+		// once per workflow.
+		if (!explicitPath) {
+			if (legacyMode) {
+				options.onWarning?.(
+					`[blok][routing] DEPRECATED — manual workflow Workflows.ts[${JSON.stringify(mr.key)}] has no explicit \`trigger.http.path\`. Falling through to catch-all dispatch /${mr.key}/<sub-path>. The BLOK_ROUTING_LEGACY flag will be removed in v0.5.`,
+				);
+				continue;
+			}
+			throw new MissingExplicitPathError(
+				`Workflows.ts[${JSON.stringify(mr.key)}]`,
+				"Manual TS workflow registrations also require an explicit `trigger.http.path` in v0.4+.",
+			);
+		}
+
 		const entry: RouteEntry = {
 			method,
 			path: explicitPath,
