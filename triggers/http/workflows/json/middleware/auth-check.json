@@ -1,0 +1,59 @@
+{
+	"name": "auth-check",
+	"version": "1.0.0",
+	"description": "v0.5 middleware — header-based bearer-token check. Reads `Authorization: Bearer <token>`, asserts the token equals the literal value the workflow caller embeds in `X-Expected-Token` (demo only — real deployments swap this for JWT verify). On mismatch, throws a GlobalError with code 401 and a structured body that the trigger emits as the HTTP 401 response. On success, stashes the token at `ctx.state.identity` for downstream middleware/steps to read.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "extract-token",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "(ctx.request.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
+			}
+		},
+		{
+			"id": "expected",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "ctx.request.headers['x-expected-token'] || ''"
+			}
+		},
+		{
+			"id": "deny-if-mismatch",
+			"branch": {
+				"when": "ctx.state['extract-token'] === '' || ctx.state['extract-token'] !== ctx.state.expected",
+				"then": [
+					{
+						"id": "respond-401",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Unauthorized",
+							"code": 401,
+							"name": "UnauthorizedError",
+							"body": {
+								"error": "Unauthorized",
+								"reason": "missing or invalid bearer token",
+								"hint": "set Authorization: Bearer <token> matching the X-Expected-Token header"
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "stash-identity",
+			"use": "@blokjs/ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "identity",
+				"value": {
+					"token": "js/ctx.state['extract-token']",
+					"via": "auth-check"
+				}
+			}
+		}
+	]
+}

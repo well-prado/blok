@@ -305,11 +305,17 @@ export default class Configuration implements Config {
 
 				if (isFlowWithProperties) {
 					const steps = currentNode.steps as unknown as RunnerNode[];
-					nodes[key] = await this.getFlow(steps);
-					const copyBlueprintNode = { ...workflow_nodes[key] } as RunnerNodeBase;
-					(copyBlueprintNode as unknown as Flow).steps = [];
-
-					nodes[key] = { ...nodes[key], ...copyBlueprintNode };
+					const flow = await this.getFlow(steps);
+					// Spread the metadata FIRST, then the resolved flow — this
+					// keeps the resolved NodeBase[] in `flow.steps` and lets
+					// the metadata (e.g. forEach's in/as/mode/concurrency,
+					// loop's while/maxIterations) survive on the merged config.
+					// The earlier code spread metadata AFTER flow with a
+					// `copyBlueprintNode.steps = []` reset, which clobbered
+					// the resolved steps array — broken for any node config
+					// that needed both inner steps AND sibling fields.
+					const { steps: _drop, ...metadata } = workflow_nodes[key] as Record<string, unknown>;
+					nodes[key] = { ...metadata, ...flow };
 				} else if (isFlow) {
 					const steps = currentNode.steps as unknown as RunnerNode[];
 					nodes[key] = await this.getFlow(steps);
@@ -334,6 +340,51 @@ export default class Configuration implements Config {
 						try: await this.getFlow((currentNode.try as unknown as Flow).steps),
 						catch: await this.getFlow((currentNode.catch as unknown as Flow).steps),
 					};
+				} else if (
+					typeof workflow_nodes[key] === "object" &&
+					Array.isArray((currentNode as unknown as { try?: unknown }).try) &&
+					Array.isArray((currentNode as unknown as { catch?: unknown }).catch)
+				) {
+					// v0.5 · tryCatch step. `try`, `catch`, and optional `finally`
+					// each carry their own inner-step array (set by
+					// `normalizeTryCatchStep`). Resolve each block as its own Flow
+					// so TryCatchNode.run() can dispatch them through child Runners.
+					const raw = workflow_nodes[key] as Record<string, unknown>;
+					const merged: Record<string, unknown> = {
+						try: (await this.getFlow(raw.try as RunnerNode[])).steps,
+						catch: (await this.getFlow(raw.catch as RunnerNode[])).steps,
+					};
+					if (Array.isArray(raw.finally)) {
+						merged.finally = (await this.getFlow(raw.finally as RunnerNode[])).steps;
+					}
+					nodes[key] = merged as unknown as Node[string];
+				} else if (
+					typeof workflow_nodes[key] === "object" &&
+					(currentNode as unknown as { cases?: unknown }).cases !== undefined &&
+					Array.isArray((currentNode as unknown as { cases?: unknown }).cases)
+				) {
+					// v0.5 · switch step. Each case carries its own inner-step
+					// list at `case.steps` (set by `normalizeSwitchStep`); resolve
+					// each independently via getFlow. Optional `default` is its
+					// own resolved Flow. The merged config preserves the `on`
+					// expression so the blueprint mapper can rewrite it before
+					// SwitchNode.run() reads ctx.config[name].on at run time.
+					const raw = workflow_nodes[key] as Record<string, unknown>;
+					const rawCases = raw.cases as Array<{ when: unknown; steps: unknown }>;
+					const resolvedCases = await Promise.all(
+						rawCases.map(async (c) => ({
+							when: c.when,
+							steps: (await this.getFlow(c.steps as RunnerNode[])).steps,
+						})),
+					);
+					const merged: Record<string, unknown> = {
+						on: raw.on,
+						cases: resolvedCases,
+					};
+					if (Array.isArray(raw.default)) {
+						merged.default = (await this.getFlow(raw.default as RunnerNode[])).steps;
+					}
+					nodes[key] = merged as unknown as Node[string];
 				} else {
 					nodes[key] = { ...workflow_nodes[key] };
 				}
@@ -455,6 +506,23 @@ export default class Configuration implements Config {
 			// at workflow load.
 			wait: {
 				resolver: async (node: RunnerNode) => await this.waitResolver(node),
+			},
+			// v0.5 · `forEach({...})` step — iterate a collection running
+			// inner steps per item. Sequential or parallel-bounded.
+			forEach: {
+				resolver: async (node: RunnerNode) => await this.forEachResolver(node),
+			},
+			// v0.5 · `loop({...})` step — while-loop with maxIterations cap.
+			loop: {
+				resolver: async (node: RunnerNode) => await this.loopResolver(node),
+			},
+			// v0.5 · `switchOn({...})` step — N-way branch; first matching case wins.
+			switch: {
+				resolver: async (node: RunnerNode) => await this.switchResolver(node),
+			},
+			// v0.5 · `tryCatch({...})` step — JS-like try/catch/finally semantics.
+			tryCatch: {
+				resolver: async (node: RunnerNode) => await this.tryCatchResolver(node),
 			},
 		};
 	}
@@ -610,6 +678,74 @@ export default class Configuration implements Config {
 		if (v2.waitForMs !== undefined) stub.waitForMs = v2.waitForMs;
 		if (v2.waitUntil !== undefined) stub.waitUntil = v2.waitUntil;
 		return stub;
+	}
+
+	/**
+	 * v0.5 · resolve a `forEach` step. The actual iteration logic lives
+	 * in `ForEachNode.run()`; the inner `steps` array is pre-resolved by
+	 * the existing isFlowWithProperties path in `getNodes()`.
+	 */
+	protected async forEachResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { ForEachNode } = await import("./ForEachNode");
+		const n = new ForEachNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `loop` step. While-loop semantics live in
+	 * `LoopNode.run()`. Inner `steps` resolved by isFlowWithProperties.
+	 */
+	protected async loopResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { LoopNode } = await import("./LoopNode");
+		const n = new LoopNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `switch` step. The N-way match logic lives in
+	 * `SwitchNode.run()`. Cases + default each carry their own resolved
+	 * inner-step list — see the dedicated `cases` branch in `getNodes()`.
+	 */
+	protected async switchResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { SwitchNode } = await import("./SwitchNode");
+		const n = new SwitchNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `tryCatch` step. JS-like try/catch/finally semantics
+	 * live in `TryCatchNode.run()`. Each block (try, catch, finally) is
+	 * pre-resolved by the dedicated tryCatch branch in `getNodes()` so
+	 * the runtime can dispatch them through child Runners on-demand.
+	 */
+	protected async tryCatchResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { TryCatchNode } = await import("./TryCatchNode");
+		const n = new TryCatchNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
 	}
 
 	protected async localResolver(node: RunnerNode): Promise<RunnerNode> {

@@ -1,0 +1,25 @@
+{
+	"name": "Hello",
+	"version": "1.0.0",
+	"description": "Minimal endpoint that responds with a greeting. The interesting bit isn't the workflow — it's that the operator has called WorkflowRegistry.getInstance().useGlobalMiddleware([\"request-id\", \"audit-log\"]) at process boot, so EVERY workflow in the process (this one included) runs those two middleware first, without any per-trigger or per-workflow config. The workflow itself stays minimal. Demonstrates: process-wide middleware that wraps every workflow without touching workflow files. Useful for ops concerns (request IDs, audit logging, OpenTelemetry spans) that should apply uniformly. Resolution order: process-global -> trigger-level -> workflow-level -> workflow steps.",
+	"trigger": {
+		"http": {
+			"method": "GET",
+			"path": "/hello"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"message": "hello",
+					"requestId": "$.state.requestId"
+				}
+			}
+		}
+	]
+}

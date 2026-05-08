@@ -21,7 +21,7 @@ export default class App {
 	}
 
 	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+		await this.tracer.startActiveSpan("initialization", async (span: Span) => {
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 

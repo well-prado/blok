@@ -1,0 +1,109 @@
+{
+	"name": "GitHub Webhook Router",
+	"version": "1.0.0",
+	"description": "Receives GitHub webhook events and dispatches to event-specific sub-workflows. Signature verification middleware runs first to authenticate the webhook. Switch routes by the X-GitHub-Event header. Related events (PR + PR review, issues + issue comments) share a handler via array `when`. Anything unknown logs and returns 200 (GitHub retries non-200s, so we don't want to fail unknown events). Demonstrates: switch with array `when` for grouping, fallback default that's a no-op log, middleware for webhook signature auth.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/webhooks/github",
+			"middleware": ["github-signature-verify"]
+		}
+	},
+	"steps": [
+		{
+			"id": "route-event",
+			"switch": {
+				"on": "$.req.headers['x-github-event']",
+				"cases": [
+					{
+						"when": "push",
+						"do": [
+							{
+								"id": "handle",
+								"subworkflow": "handle-push",
+								"inputs": {
+									"event": "$.req.body",
+									"deliveryId": "$.req.headers['x-github-delivery']"
+								}
+							}
+						]
+					},
+					{
+						"when": [
+							"pull_request",
+							"pull_request_review",
+							"pull_request_review_comment"
+						],
+						"do": [
+							{
+								"id": "handle",
+								"subworkflow": "handle-pr-event",
+								"inputs": {
+									"event": "$.req.body",
+									"action": "$.req.body.action"
+								}
+							}
+						]
+					},
+					{
+						"when": ["issues", "issue_comment"],
+						"do": [
+							{
+								"id": "handle",
+								"subworkflow": "handle-issue-event",
+								"inputs": {
+									"event": "$.req.body"
+								}
+							}
+						]
+					},
+					{
+						"when": "release",
+						"do": [
+							{
+								"id": "handle",
+								"subworkflow": "handle-release",
+								"inputs": {
+									"event": "$.req.body"
+								}
+							}
+						]
+					},
+					{
+						"when": "workflow_run",
+						"do": [
+							{
+								"id": "handle",
+								"subworkflow": "handle-workflow-run",
+								"inputs": {
+									"event": "$.req.body"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "log-unknown-event",
+						"use": "audit-log",
+						"type": "module",
+						"inputs": {
+							"event": "github-webhook-unhandled",
+							"eventType": "$.req.headers['x-github-event']",
+							"deliveryId": "$.req.headers['x-github-delivery']"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": { "ok": true }
+			}
+		}
+	]
+}

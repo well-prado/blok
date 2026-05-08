@@ -1,0 +1,115 @@
+{
+	"name": "Data Export Pipeline",
+	"version": "1.0.0",
+	"description": "Exports paginated user data to S3. Counts pages, builds the page-number list, then iterates each page sequentially (rate-limit friendly). Each page fetch is wrapped in tryCatch: try with retry + maxDuration handles transient failures gracefully; catch records the failed page to a DLQ table without aborting the whole export. After the loop, an assemble step writes everything to S3 and the response includes the public URL plus row counts. Demonstrates: forEach + tryCatch nested with per-step retry, resilient ETL pattern that survives transient failures, idempotencyKey on assemble for safe replay.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/exports/users",
+			"middleware": ["auth-check", "admin-only"]
+		}
+	},
+	"steps": [
+		{
+			"id": "count-users",
+			"use": "user-count",
+			"type": "module"
+		},
+		{
+			"id": "build-page-list",
+			"use": "expr",
+			"type": "module",
+			"inputs": {
+				"expression": "Array.from({length: Math.ceil($.state['count-users'].total / 100)}, (_, i) => i + 1)"
+			}
+		},
+		{
+			"id": "fetch-pages",
+			"forEach": {
+				"in": "$.state['build-page-list']",
+				"as": "page",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "page-fetch",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "fetch",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"retry": {
+										"maxAttempts": 3,
+										"minTimeoutInMs": 1000,
+										"factor": 2
+									},
+									"maxDuration": "30s",
+									"inputs": {
+										"url": "https://api.example.com/users",
+										"method": "GET",
+										"headers": {
+											"Authorization": "Bearer $.env.UPSTREAM_API_TOKEN"
+										},
+										"query": {
+											"page": "$.state.page",
+											"size": 100
+										}
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "record-failed-page",
+									"use": "db-insert",
+									"type": "module",
+									"inputs": {
+										"table": "export_failures",
+										"data": {
+											"exportId": "$.req.body.exportId",
+											"page": "$.state.page",
+											"error": "$.error.message",
+											"errorCode": "$.error.code",
+											"failedAt": "new Date().toISOString()"
+										}
+									}
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "assemble",
+			"use": "export-assemble",
+			"type": "module",
+			"idempotencyKey": "export-$.req.body.exportId",
+			"maxDuration": "120s",
+			"inputs": {
+				"exportId": "$.req.body.exportId",
+				"pages": "$.state['fetch-pages'].filter(p => p['fetch'] !== undefined)",
+				"format": "csv",
+				"destination": {
+					"type": "s3",
+					"bucket": "$.env.EXPORT_BUCKET",
+					"key": "exports/$.req.body.exportId.csv"
+				}
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"exportId": "$.req.body.exportId",
+					"url": "$.state.assemble.s3Url",
+					"rowCount": "$.state.assemble.totalRows",
+					"failedPages": "$.state.assemble.failedPageCount",
+					"dlqUrl": "/exports/$.req.body.exportId/failures"
+				}
+			}
+		}
+	]
+}

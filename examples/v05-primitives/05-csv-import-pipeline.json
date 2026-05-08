@@ -1,0 +1,111 @@
+{
+	"name": "CSV Import Pipeline",
+	"version": "1.0.0",
+	"description": "Receives a CSV file in the body, parses it, and processes each row through validate -> transform -> insert. Each row is wrapped in its own tryCatch so a single bad row doesn't abort the import — failed rows go to a dead-letter table for later inspection. Demonstrates: forEach (sequential, since DB inserts shouldn't run wild) + per-iteration tryCatch + DLQ pattern.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/imports/csv",
+			"accept": "text/csv",
+			"middleware": ["auth-check", "admin-only"]
+		}
+	},
+	"steps": [
+		{
+			"id": "parse-csv",
+			"use": "csv-parser",
+			"type": "module",
+			"inputs": {
+				"data": "$.req.body",
+				"headers": true,
+				"delimiter": ","
+			}
+		},
+		{
+			"id": "process-rows",
+			"forEach": {
+				"in": "$.state['parse-csv'].rows",
+				"as": "row",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "import-row",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "validate",
+									"use": "row-validator",
+									"type": "module",
+									"inputs": {
+										"row": "$.state.row",
+										"rowNumber": "$.state.rowIndex"
+									}
+								},
+								{
+									"id": "transform",
+									"use": "row-transformer",
+									"type": "module",
+									"inputs": {
+										"row": "$.state.row"
+									}
+								},
+								{
+									"id": "insert",
+									"use": "db-insert",
+									"type": "module",
+									"idempotencyKey": "$.req.body.importId-$.state.rowIndex",
+									"inputs": {
+										"table": "users",
+										"data": "$.state.transform"
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "send-to-dlq",
+									"use": "db-insert",
+									"type": "module",
+									"inputs": {
+										"table": "import_failures",
+										"data": {
+											"importId": "$.req.body.importId",
+											"rowNumber": "$.state.rowIndex",
+											"row": "$.state.row",
+											"error": "$.error.message",
+											"errorCode": "$.error.code",
+											"failedAt": "new Date().toISOString()"
+										}
+									}
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "summarize",
+			"use": "import-summary",
+			"type": "module",
+			"inputs": {
+				"results": "$.state['process-rows']",
+				"importId": "$.req.body.importId"
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"importId": "$.req.body.importId",
+					"totalRows": "$.state['parse-csv'].rows.length",
+					"succeeded": "$.state.summarize.succeeded",
+					"failed": "$.state.summarize.failed",
+					"dlqUrl": "/imports/csv/$.req.body.importId/failures"
+				}
+			}
+		}
+	]
+}

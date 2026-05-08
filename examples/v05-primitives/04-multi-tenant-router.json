@@ -1,0 +1,85 @@
+{
+	"name": "Multi-Tenant Router",
+	"version": "1.0.0",
+	"description": "Routes incoming requests to the right tenant-specific sub-workflow based on the X-Tenant-Id header. Each tenant has its own workflow registered separately with its own auth, business rules, rate limits — keeping them properly isolated. The trigger here is just the dispatch layer. The request-id middleware runs first to inject a correlation ID. Demonstrates: switch + subworkflow combination, default arm rejecting unknown tenants, middleware for cross-cutting concerns.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/api/process",
+			"middleware": ["request-id"]
+		}
+	},
+	"steps": [
+		{
+			"id": "route-by-tenant",
+			"switch": {
+				"on": "$.req.headers['x-tenant-id']",
+				"cases": [
+					{
+						"when": "acme",
+						"do": [
+							{
+								"id": "delegate",
+								"subworkflow": "acme-process",
+								"inputs": {
+									"body": "$.req.body",
+									"requestId": "$.state.requestId"
+								}
+							}
+						]
+					},
+					{
+						"when": "globex",
+						"do": [
+							{
+								"id": "delegate",
+								"subworkflow": "globex-process",
+								"inputs": {
+									"body": "$.req.body",
+									"requestId": "$.state.requestId"
+								}
+							}
+						]
+					},
+					{
+						"when": "initech",
+						"do": [
+							{
+								"id": "delegate",
+								"subworkflow": "initech-process",
+								"inputs": {
+									"body": "$.req.body",
+									"requestId": "$.state.requestId"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "respond-unknown-tenant",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 403,
+							"body": {
+								"error": "Unknown tenant",
+								"hint": "Set the X-Tenant-Id header to one of: acme, globex, initech"
+							}
+						},
+						"stop": true
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": "$.state.delegate"
+			}
+		}
+	]
+}

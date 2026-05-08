@@ -177,6 +177,15 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			return this.zodErrorToGlobalError(error as ZodError);
 		}
 
+		// Preserve an already-typed GlobalError verbatim — authors throwing
+		// a GlobalError with custom `code` (e.g. `@blokjs/throw` setting 401
+		// for an auth-check middleware) AND `json` body must reach the HTTP
+		// trigger's response handler with those fields intact. Reconstructing
+		// would clobber them and force a 500.
+		if (error instanceof GlobalError) {
+			return error;
+		}
+
 		if (error instanceof Error) {
 			const globalError = new GlobalError(error.message);
 			globalError.setStack(error.stack);
