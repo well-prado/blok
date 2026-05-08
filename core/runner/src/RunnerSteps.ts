@@ -496,13 +496,40 @@ export default abstract class RunnerSteps {
 			if (e instanceof GlobalError) {
 				error_context = e as GlobalError;
 			} else {
-				error_context = new GlobalError((e as Error).message);
-				// Preserve the original error chain so outer handlers
-				// (notably v0.5 TryCatchNode's `$.error.message` resolution)
-				// can peel back through `.cause` to the author's original
-				// `throw new Error("...")` text instead of the runner's
-				// `[step N/M] <name> failed: ...` enriched prefix.
-				(error_context as Error & { cause?: unknown }).cause = e;
+				// Walk the `.cause` chain looking for a GlobalError. The
+				// step-enrichment wrap at line ~455 sets `cause = nodeErr`,
+				// and `nodeErr` may itself be a GlobalError thrown from
+				// `defineNode`-built nodes (e.g. `@blokjs/throw` setting
+				// `code: 401` for an auth-check middleware). Without this
+				// walk, the outer wrap below would force the framework's
+				// generic `[step N/M] X failed: ...` message + default 500
+				// code, clobbering the author's structured rejection.
+				let inner: unknown = e;
+				let foundGlobal: GlobalError | null = null;
+				while (
+					typeof inner === "object" &&
+					inner !== null &&
+					"cause" in inner &&
+					(inner as { cause?: unknown }).cause !== undefined &&
+					(inner as { cause?: unknown }).cause !== inner
+				) {
+					inner = (inner as { cause: unknown }).cause;
+					if (inner instanceof GlobalError) {
+						foundGlobal = inner;
+						break;
+					}
+				}
+				if (foundGlobal) {
+					error_context = foundGlobal;
+				} else {
+					error_context = new GlobalError((e as Error).message);
+					// Preserve the original error chain so outer handlers
+					// (notably v0.5 TryCatchNode's `$.error.message` resolution)
+					// can peel back through `.cause` to the author's original
+					// `throw new Error("...")` text instead of the runner's
+					// `[step N/M] <name> failed: ...` enriched prefix.
+					(error_context as Error & { cause?: unknown }).cause = e;
+				}
 			}
 
 			throw error_context;

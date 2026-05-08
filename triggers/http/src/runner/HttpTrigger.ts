@@ -7,7 +7,7 @@ import { TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
-import { WorkflowRegistry } from "@blokjs/runner";
+import { Configuration, Runner, WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
@@ -199,7 +199,83 @@ export default class HttpTrigger extends TriggerBase {
 			this.logger.log(`[blok] workflow registry — ${registered.size} workflow(s) callable as sub-workflow`);
 		}
 
+		// v0.5 · register middleware-only workflows (workflow.middleware === true).
+		// These don't appear in the route table because they have no trigger;
+		// register them under their own `name` so `trigger.http.middleware: [...]`
+		// lookups in `runMiddlewareChain` can find them.
+		let middlewareCount = 0;
+		for (const sw of scannedJson) {
+			const wfObj = sw.workflow as { name?: unknown; middleware?: unknown } | undefined;
+			if (!wfObj || wfObj.middleware !== true) continue;
+			const wfName = typeof wfObj.name === "string" ? wfObj.name : sw.name;
+			if (!wfName) continue;
+			if (registered.has(wfName)) continue;
+			registered.add(wfName);
+			registry.register({
+				name: wfName,
+				source: sw.source,
+				workflow: sw.workflow,
+				isMiddleware: true,
+			});
+			middlewareCount++;
+		}
+		if (middlewareCount > 0) {
+			this.logger.log(`[blok] middleware registry — ${middlewareCount} middleware workflow(s) registered`);
+		}
+
 		return table;
+	}
+
+	/**
+	 * v0.5 · scan WORKFLOWS_PATH/json/ for middleware-only workflows
+	 * (`middleware: true`) and register them in WorkflowRegistry. Runs
+	 * even when file-based routing is OFF — the catch-all dispatch path
+	 * also honours `trigger.http.middleware: [...]` references and needs
+	 * the middleware registry populated.
+	 *
+	 * Idempotent: if `buildFileBasedRoutes` already ran (file-based
+	 * routing enabled) and registered these entries, this skips re-adding
+	 * the same `(name, source)` pairs. Non-middleware workflows that
+	 * already claim a name win (no overwrite).
+	 */
+	private async scanAndRegisterMiddleware(): Promise<void> {
+		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
+		const scanned = await scanWorkflows(
+			[
+				{
+					dir: path.join(workflowsRoot, "json"),
+					kind: "json",
+					stripLeadingSegments: 0,
+				},
+			],
+			{
+				onLoadError: (file, err) => {
+					this.logger.error(`[blok] middleware scan: workflow load error in ${file}: ${err.message}`);
+				},
+			},
+		);
+
+		const registry = WorkflowRegistry.getInstance();
+		let count = 0;
+		for (const sw of scanned) {
+			const wfObj = sw.workflow as { name?: unknown; middleware?: unknown } | undefined;
+			if (!wfObj || wfObj.middleware !== true) continue;
+			const wfName = typeof wfObj.name === "string" ? wfObj.name : sw.name;
+			if (!wfName) continue;
+			const existing = registry.get(wfName);
+			if (existing && !existing.isMiddleware) continue;
+			if (existing && existing.source === sw.source) continue;
+			registry.register({
+				name: wfName,
+				source: sw.source,
+				workflow: sw.workflow,
+				isMiddleware: true,
+			});
+			count++;
+		}
+		if (count > 0) {
+			this.logger.log(`[blok] middleware registry — ${count} middleware workflow(s) registered (catch-all path)`);
+		}
 	}
 
 	/**
@@ -283,6 +359,17 @@ export default class HttpTrigger extends TriggerBase {
 			fileBasedRoutes = await this.buildFileBasedRoutes();
 		} catch (err) {
 			this.logger.error(`[blok] file-based routing setup failed: ${(err as Error).message}`);
+		}
+
+		// v0.5 · scan + register middleware-only workflows even when
+		// file-based routing is off (the catch-all dispatch path also
+		// honours `trigger.http.middleware: [...]`). buildFileBasedRoutes
+		// already does this for routed + middleware workflows when enabled;
+		// this fallback covers the off case so middleware works uniformly.
+		try {
+			await this.scanAndRegisterMiddleware();
+		} catch (err) {
+			this.logger.error(`[blok] middleware scan failed: ${(err as Error).message}`);
 		}
 
 		return new Promise((done) => {
@@ -490,6 +577,65 @@ export default class HttpTrigger extends TriggerBase {
 	 * @param opts.runtimeWorkflow - legacy catch-all path: workflow synthesised at request
 	 *   time from the remote-node-execution header payload.
 	 */
+	/**
+	 * v0.5 · dispatch a chain of middleware workflows on the same parent ctx.
+	 *
+	 * Each entry in `names` is the `name:` of a workflow registered with
+	 * `middleware: true`. For each:
+	 *
+	 * - Materialize a fresh `Configuration` for the middleware (resolves
+	 *   its inner steps + nodes against the same nodeMap as the main
+	 *   workflow — so `@blokjs/throw` etc. resolve from `@blokjs/helpers`).
+	 * - Save the parent ctx.config; swap in the middleware's resolved
+	 *   nodeConfig (`mwConfig.nodes`) so the blueprint mapper finds the
+	 *   middleware's step inputs.
+	 * - Run via `new Runner(...).run(ctx, { deep: true })` — `deep: true`
+	 *   prevents the inner runSteps from inheriting the outer run's
+	 *   `lastCompletedStepIndex` cursor (PR 4 wait/resume hazard).
+	 * - Restore parent ctx.config in `finally`.
+	 *
+	 * State mutations from middleware (e.g. `ctx.state.identity` from
+	 * auth-check) carry forward to subsequent middleware AND the main
+	 * workflow because they share the same ctx.
+	 *
+	 * Short-circuit: middleware author throws (typically via `@blokjs/throw`
+	 * with a `code:` and `body:`). The throw propagates to the outer catch
+	 * in `runWorkflowExecution`, which uses the GlobalError's structured
+	 * code+body fields to format the HTTP response. The main workflow does
+	 * NOT run when middleware throws.
+	 *
+	 * Missing middleware (name not registered) is a configuration error —
+	 * we throw a clear message naming the unknown middleware.
+	 */
+	private async runMiddlewareChain(ctx: Context, names: readonly string[]): Promise<void> {
+		const registry = WorkflowRegistry.getInstance();
+		for (const mwName of names) {
+			const entry = registry.getMiddleware(mwName);
+			if (!entry) {
+				const known = registry
+					.list()
+					.filter((e) => e.isMiddleware)
+					.map((e) => e.name);
+				const knownStr = known.length > 0 ? known.join(", ") : "(none registered)";
+				throw new Error(
+					`[blok] middleware "${mwName}" not found in WorkflowRegistry. Available middleware: ${knownStr}. Make sure the middleware workflow has \`"middleware": true\` set at the workflow root and is in a scanned WORKFLOWS_PATH directory.`,
+				);
+			}
+
+			const mwConfig = new Configuration();
+			await mwConfig.init(mwName, this.nodeMap, entry.workflow);
+
+			const parentConfig = ctx.config;
+			(ctx as { config: unknown }).config = mwConfig.nodes;
+			try {
+				const mwRunner = new Runner(mwConfig.steps as unknown as ConstructorParameters<typeof Runner>[0]);
+				await mwRunner.run(ctx, { deep: true, stepName: `mw:${mwName}` });
+			} finally {
+				(ctx as { config: unknown }).config = parentConfig;
+			}
+		}
+	}
+
 	private async runWorkflowExecution(
 		c: HonoContext<AppBindings>,
 		opts: {
@@ -643,6 +789,21 @@ export default class HttpTrigger extends TriggerBase {
 					path: explicitRoute ? c.req.path : subPath,
 					url: c.req.url,
 				} as unknown as RequestContext;
+
+				// v0.5 · trigger-level middleware chain. Each named middleware
+				// is a workflow with `middleware: true`; we materialize a
+				// fresh Configuration per middleware and run its steps on the
+				// SAME parent ctx so state mutations (e.g. ctx.state.identity
+				// from auth-check) carry forward to the main workflow.
+				// Middleware errors propagate to the outer catch — `@blokjs/throw`
+				// with `code: 401` produces a 401 HTTP response naturally.
+				const httpTriggerCfg = (this.configuration.trigger as { http?: { middleware?: unknown } } | undefined)?.http;
+				const middlewareNames = Array.isArray(httpTriggerCfg?.middleware)
+					? (httpTriggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
+					: [];
+				if (middlewareNames.length > 0) {
+					await this.runMiddlewareChain(ctx, middlewareNames);
+				}
 
 				const response: TriggerResponse = await this.run(ctx);
 				ctx = response.ctx;

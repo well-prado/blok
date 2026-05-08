@@ -111,6 +111,12 @@ export interface InternalWorkflow {
 	trigger: Record<string, unknown>;
 	steps: InternalStep[];
 	nodes: Record<string, InternalNodeConfig>;
+	/**
+	 * v0.5 — when true, this workflow is registered as middleware and is
+	 * NOT exposed as a public HTTP route. Invoked from another workflow's
+	 * `trigger.http.middleware: [...]` array.
+	 */
+	middleware?: true;
 }
 
 /**
@@ -141,6 +147,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
+	const middleware = wf.middleware === true ? (true as const) : undefined;
 
 	// --- Trigger normalization (method "*" → "ANY") ---
 	const trigger = normalizeTrigger(wf.trigger, sourcePath);
@@ -249,6 +256,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		trigger,
 		steps: internalSteps,
 		nodes: internalNodes,
+		...(middleware ? { middleware } : {}),
 	};
 }
 
