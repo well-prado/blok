@@ -229,16 +229,25 @@ as a starting point if you want field-level encryption inside a node.
 `ctx.env` is populated with `process.env` and threaded through to every
 node and runtime adapter — TS nodes read `ctx.env.API_KEY`, gRPC /
 Docker / HTTP runtime adapters serialize the env into the request
-payload that crosses the SDK boundary. **Every loaded node sees every
-environment variable in the runner process.** Source:
+payload that crosses the SDK boundary. By default **every loaded node
+sees every environment variable in the runner process**. Source:
 [`TriggerBase.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/TriggerBase.ts)
 (search `Object.defineProperty(ctx, "env"`).
 
 This is the same trust model as Express middleware or Django apps —
 your code shares one process and reads one `process.env`. The
 implication: a malicious or sloppy third-party node can read secrets
-unrelated to its declared purpose. Defenses:
+unrelated to its declared purpose. Defenses, in order of strength:
 
+- **Allowlist what nodes can see** (recommended). Set
+  `BLOK_NODE_ENV_ALLOW=DATABASE_URL,STRIPE_KEY` (exact names) and/or
+  `BLOK_NODE_ENV_ALLOW_PREFIX=PUBLIC_,SAFE_` (prefix matches). When
+  either is set, `ctx.env` becomes a Proxy that hides every key not
+  in the allowlist — reads return `undefined`, `Object.keys` excludes
+  them, `key in env` is `false`. Default behaviour (neither set) is
+  allow-all, preserving backwards compatibility. Set
+  `BLOK_ENV=production` to get a boot warning when no allowlist is
+  configured (suppress with `BLOK_SUPPRESS_ENV_ALLOW_WARNING=1`).
 - **Vet third-party nodes** before loading them. Treat npm-installed
   nodes the same way you treat npm-installed Express middleware.
 - **Deploy separate Blok processes for separate trust domains.**
@@ -248,8 +257,12 @@ unrelated to its declared purpose. Defenses:
   only consumed by an external service, plumb it through a secret
   manager rather than `process.env`.
 
-A per-node env-var allowlist is on the roadmap. Until it ships,
-process boundaries are the only enforced isolation.
+The allowlist is operator-controlled (single env var pair, set at
+deploy time) rather than per-node. That's a deliberate trade — the
+operator decides the env-var contract once for the whole process,
+which composes cleanly with separate-process deployment for stronger
+trust domains. A per-node declarative allowlist is plausible follow-up
+work but not on the immediate roadmap.
 
 ### Sub-workflow access control
 

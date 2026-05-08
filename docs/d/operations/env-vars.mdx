@@ -40,6 +40,19 @@ store).
 |---|---|---|
 | `BLOK_MAX_SUBWORKFLOW_DEPTH` | `10` | Recursion cap for sub-workflow steps. Throws `Sub-workflow recursion limit exceeded` when exceeded. See [sub-workflows · recursion guard](/d/composition/sub-workflows#recursion-guard). |
 
+## Node env-var allowlist
+
+Operator-controlled gate on which environment variables nodes can read
+through `ctx.env`. Default behaviour (neither set) is allow-all —
+preserves backwards compatibility. Setting either makes `ctx.env` a
+filtering Proxy. See [threat model · environment variables and node trust](/d/security/threat-model#environment-variables-and-node-trust).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_NODE_ENV_ALLOW` | unset | Comma-separated exact names. Example: `DATABASE_URL,STRIPE_KEY`. |
+| `BLOK_NODE_ENV_ALLOW_PREFIX` | unset | Comma-separated prefixes. Example: `PUBLIC_,SAFE_`. |
+| `BLOK_SUPPRESS_ENV_ALLOW_WARNING` | unset | Set to `1` to silence the boot warning when `BLOK_ENV=production` and no allowlist is configured. |
+
 ## Concurrency gate
 
 | Variable | Default | Purpose |

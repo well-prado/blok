@@ -28,6 +28,7 @@ import { type NormalizedSchedulingConfig, readSchedulingConfig } from "./schedul
 import { RunTracker } from "./tracing/RunTracker";
 import { TracingLogger } from "./tracing/TracingLogger";
 import type TriggerResponse from "./types/TriggerResponse";
+import { getEnvForCtx } from "./utils/envAllowlist";
 
 /**
  * Tier 2 quick-wins follow-up · structural logger interface used by
@@ -1319,7 +1320,7 @@ export default abstract class TriggerBase extends Trigger {
 		});
 
 		Object.defineProperty(ctx, "env", {
-			value: process.env,
+			value: getEnvForCtx(),
 			enumerable: true,
 		});
 
