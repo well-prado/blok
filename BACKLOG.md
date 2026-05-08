@@ -522,6 +522,7 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ### H3 · NatsKvConcurrencyBackend real-NATS integration test
 
+**Status**: SHIPPED. 11 tests at `__tests__/integration/concurrency/nats-kv-real-broker.integration.test.ts`. Default-skip; run with `BLOK_BENCHMARK_REAL_NATS=1 bun run test:integration` against `docker compose up -d nats`.
 **Severity**: MEDIUM.
 **Effort**: ~half day.
 **Why**: today's tests all use a fake KV mock. Real broker behavior (lazy compaction, key length limits, drain semantics) untested.
@@ -532,6 +533,7 @@ Gate behind `BLOK_BENCHMARK_REAL_NATS=1`. Use `docker-compose.yml`'s NATS servic
 
 ### H4 · Durable scheduler crash-restart integration test
 
+**Status**: SHIPPED. 6 tests at `triggers/http/__tests__/unit/HttpTrigger.recoverDispatches.test.ts`. Simulates crash-restart in-process by persisting durable rows + dropping in-memory scheduler state + creating a fresh trigger that consumes the survived state — same crossing point a real crash exercises.
 **Severity**: MEDIUM.
 **Effort**: ~half day.
 **Why**: today's tests verify writes are queued + load on init, but no full process-kill/restart test.
