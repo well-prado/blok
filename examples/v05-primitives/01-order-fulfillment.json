@@ -1,0 +1,170 @@
+{
+	"name": "Order Fulfillment",
+	"version": "1.0.0",
+	"description": "E-commerce order endpoint. Auth + rate-limit middleware run first. Then validate the body, route by order type (physical/digital/subscription), fan out line items in parallel for inventory + reservation, charge payment with retry, and audit the outcome regardless of success or failure. Demonstrates: trigger-level middleware chain, switch with array `when`, forEach parallel with concurrency cap, tryCatch with finally, $.error proxy in catch.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/orders",
+			"accept": "application/json",
+			"middleware": ["auth-check", "rate-limit"]
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-body",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["type", "items", "total", "currency"]
+				},
+				"data": "$.req.body"
+			}
+		},
+		{
+			"id": "route-by-order-type",
+			"switch": {
+				"on": "$.req.body.type",
+				"cases": [
+					{
+						"when": ["physical", "subscription"],
+						"do": [
+							{
+								"id": "process-items",
+								"forEach": {
+									"in": "$.req.body.items",
+									"as": "item",
+									"mode": "parallel",
+									"concurrency": 5,
+									"do": [
+										{
+											"id": "check-inventory",
+											"use": "inventory-check",
+											"type": "module",
+											"inputs": {
+												"sku": "$.state.item.sku",
+												"qty": "$.state.item.quantity"
+											}
+										},
+										{
+											"id": "reserve",
+											"use": "inventory-reserve",
+											"type": "module",
+											"idempotencyKey": "$.req.body.id-$.state.item.sku",
+											"inputs": {
+												"sku": "$.state.item.sku",
+												"qty": "$.state.item.quantity",
+												"orderId": "$.req.body.id"
+											}
+										}
+									]
+								}
+							}
+						]
+					},
+					{
+						"when": "digital",
+						"do": [
+							{
+								"id": "generate-license",
+								"use": "license-create",
+								"type": "module",
+								"inputs": {
+									"productId": "$.req.body.productId",
+									"userId": "$.state.identity.sub"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "respond-bad-type",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 400,
+							"body": { "error": "Unknown order type" }
+						},
+						"stop": true
+					}
+				]
+			}
+		},
+		{
+			"id": "charge-payment",
+			"tryCatch": {
+				"try": [
+					{
+						"id": "stripe-charge",
+						"use": "stripe-charge",
+						"type": "module",
+						"idempotencyKey": "$.req.body.id",
+						"retry": { "maxAttempts": 3, "minTimeoutInMs": 500, "factor": 2 },
+						"maxDuration": "10s",
+						"inputs": {
+							"amount": "$.req.body.total",
+							"currency": "$.req.body.currency",
+							"customerId": "$.state.identity.stripeCustomerId"
+						}
+					}
+				],
+				"catch": [
+					{
+						"id": "notify-slack",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "$.env.SLACK_WEBHOOK_URL",
+							"method": "POST",
+							"body": {
+								"text": "Charge failed for order $.req.body.id: $.error.message"
+							}
+						}
+					},
+					{
+						"id": "respond-payment-failed",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 402,
+							"body": {
+								"error": "Payment failed",
+								"orderId": "$.req.body.id",
+								"reason": "$.error.message"
+							}
+						},
+						"stop": true
+					}
+				],
+				"finally": [
+					{
+						"id": "audit-outcome",
+						"use": "audit-log",
+						"type": "module",
+						"inputs": {
+							"event": "order-fulfillment",
+							"orderId": "$.req.body.id",
+							"userId": "$.state.identity.sub",
+							"total": "$.req.body.total"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond-created",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 201,
+				"body": {
+					"orderId": "$.req.body.id",
+					"chargeId": "$.state['stripe-charge'].id"
+				}
+			}
+		}
+	]
+}

@@ -1,0 +1,1194 @@
+---
+title: "v0.5 Primitives — Implementation Guide"
+description: "Concrete spec for shipping forEach, loop, switch, tryCatch, and middleware: TS DSL contracts, internal node implementations, helper nodes, real-API mappings for the 15 example workflows, test plan, and docs structure."
+icon: "wrench"
+---
+
+This guide is the executable spec for turning the [v0.5 primitives roadmap](/c/devtools/workflow-primitives-roadmap) and the [15 mock examples](https://github.com/deskree-inc/blok/tree/main/examples/v05-primitives) into shipped code. Every example becomes a real, curl-able workflow against public APIs (no API keys required) plus a few in-memory helper nodes. Three Docker services (Redis, Postgres, MailHog) cover the cases that genuinely need state.
+
+The doc is intentionally specific — every function signature, every Zod schema, every test, every real-API substitution is named here so a future agent can execute without re-deriving design.
+
+---
+
+## Architecture overview
+
+Each new primitive ships in three layers:
+
+1. **TS DSL helper** in [`core/workflow-helper/src/components/`](https://github.com/deskree-inc/blok/tree/main/core/workflow-helper/src/components) — author-facing function, returns a typed step object that JSON-stringifies to the v0.5 JSON shape.
+2. **Workflow normalizer discriminator** in [`core/runner/src/workflow/WorkflowNormalizer.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/workflow/WorkflowNormalizer.ts) — recognizes the new step shape and converts it to an internal step + config map entry.
+3. **Internal flow node** in `core/runner/src/nodes/` — the runtime implementation. Either a `defineNode({ flow: true, ... })` (for `forEach`, `loop`, `switch`) or runner-intercepted (for `tryCatch`, which needs error-handling control the flow-node pattern doesn't give).
+
+Plus, for middleware:
+
+4. **`WorkflowRegistry` extensions** — global middleware + middleware lookup.
+5. **`TriggerBase.run()` extensions** — middleware chain resolution and execution.
+
+The key reuse: every primitive uses `defineNode` with the v2 `this.flow` discriminator we already shipped. The runner's `RunnerSteps` already handles flow-node recursion. Inner-step config bubbling already shipped (the `innerNodes` map from the recent `branch` fix).
+
+---
+
+## TS DSL contracts
+
+The TS DSL function for each primitive returns a typed step object. The compiled output **exactly mirrors** the JSON shape — TS authors write `forEach({...})` and what lands in the workflow is `{ id, forEach: {...} }`. JSON authors write the same shape directly.
+
+Core principle: **TS gives you autocomplete + Zod validation at definition time. JSON gives you the same shape with no type checking. The runner accepts both identically.**
+
+### `forEach`
+
+```ts
+import type { ForEachStep, V2Step } from "@blokjs/helper";
+
+export interface ForEachOpts {
+  /** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+  id: string;
+  /** Array source. Literal expression string or `$` proxy. */
+  in: string | unknown;
+  /**
+   * Per-iteration variable name. Each iteration sets `ctx.state[as]` to the
+   * current item and `ctx.state[as + "Index"]` to the 0-based position.
+   * Cleared after the forEach completes.
+   */
+  as: string;
+  /** Sub-pipeline run for each item. */
+  do: V2Step[];
+  /** Default `"sequential"` (one at a time, awaited). */
+  mode?: "sequential" | "parallel";
+  /** When `mode: "parallel"`, max concurrent inner pipelines. Default 10. */
+  concurrency?: number;
+  /** Skip the entire forEach at runtime. Default true. */
+  active?: boolean;
+  /** Halt the workflow after this step completes. */
+  stop?: boolean;
+}
+
+export function forEach(opts: ForEachOpts): ForEachStep;
+```
+
+**Compiled output:**
+
+```ts
+{
+  id: opts.id,
+  forEach: {
+    in: typeof opts.in === "string" ? opts.in : unwrapProxies(opts.in),
+    as: opts.as,
+    mode: opts.mode ?? "sequential",
+    concurrency: opts.concurrency ?? 10,
+    do: unwrapProxies(opts.do),
+  },
+  // active / stop hoisted to top level if set
+}
+```
+
+**Zod validation at definition time:**
+
+```ts
+const ForEachSchema = z.object({
+  id: z.string().min(1),
+  in: z.union([z.string().min(1), z.unknown()]),
+  as: z.string().min(1).regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "as must be a valid identifier"),
+  do: z.array(V2StepSchema).min(1),
+  mode: z.enum(["sequential", "parallel"]).default("sequential"),
+  concurrency: z.number().int().min(1).max(1000).default(10),
+  active: z.boolean().optional(),
+  stop: z.boolean().optional(),
+});
+```
+
+### `loop`
+
+```ts
+export interface LoopOpts {
+  id: string;
+  /**
+   * JS expression evaluated against ctx BEFORE each iteration.
+   * Loop continues while truthy. Falsy → exit.
+   */
+  while: string | unknown;
+  /** Sub-pipeline run each iteration. */
+  do: V2Step[];
+  /**
+   * Hard cap on iterations. Default 1000 (override via env `BLOK_LOOP_MAX_ITERATIONS`).
+   * Hitting the cap throws `LoopMaxIterationsError`.
+   */
+  maxIterations?: number;
+  active?: boolean;
+  stop?: boolean;
+}
+
+export function loop(opts: LoopOpts): LoopStep;
+```
+
+**Iteration variable:** `ctx.state[id + "Index"]` is the 0-based loop counter, available in `while` expression and inner steps.
+
+### `switch` (helper named `switchOn`)
+
+`switch` is a JS reserved word, so the helper function is named `switchOn`. The JSON shape stays `switch:` (where it's not a keyword).
+
+```ts
+export interface SwitchCase {
+  /** Match value. Strict equality (`===`). Array means "any of these". */
+  when: string | number | boolean | (string | number | boolean)[];
+  do: V2Step[];
+}
+
+export interface SwitchOpts {
+  id: string;
+  /** Value to switch on. Literal or `$` proxy. */
+  on: string | unknown;
+  cases: SwitchCase[];
+  /** Run when no case matches. Omitted = no-op (skip the switch step). */
+  default?: V2Step[];
+  active?: boolean;
+  stop?: boolean;
+}
+
+export function switchOn(opts: SwitchOpts): SwitchStep;
+```
+
+**Compiled output:** `{ id, switch: { on, cases, default } }` — JSON shape uses `switch:` key (acceptable since JSON keys aren't reserved-word constrained).
+
+### `tryCatch`
+
+```ts
+export interface TryCatchOpts {
+  id: string;
+  /** Run first. If any step throws or returns an error, switch to catch[]. */
+  try: V2Step[];
+  /** Runs when try[] errors. Has access to `$.error`. */
+  catch: V2Step[];
+  /** Always runs, after try[] succeeds OR after catch[] finishes (even on catch errors). */
+  finally?: V2Step[];
+  active?: boolean;
+  stop?: boolean;
+}
+
+export function tryCatch(opts: TryCatchOpts): TryCatchStep;
+```
+
+**`$.error` proxy:** new proxy variable accessible only inside `catch[]`. Shape: `{ message: string, code?: number, name?: string, stack?: string, cause?: unknown }`. Resolves at expression-evaluation time inside catch steps.
+
+### Middleware shape
+
+Two flavors of middleware:
+
+#### Middleware as a workflow
+
+```ts
+import { middleware } from "@blokjs/helper";
+
+export default middleware({
+  name: "auth-check",
+  version: "1.0.0",
+  description: "JWT auth middleware",
+  steps: [
+    // Same step shape as a regular workflow.
+    // Use `stop: true` on a step to short-circuit the chain.
+  ],
+});
+```
+
+`middleware()` is a thin wrapper around `workflow({...})` that sets `middleware: true` and skips the `trigger:` requirement. Compiled output:
+
+```ts
+{
+  name: "auth-check",
+  version: "1.0.0",
+  description: "...",
+  middleware: true,
+  steps: [...],
+}
+```
+
+#### Middleware references on triggers / workflows
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/api/process",
+    middleware: ["auth-check", "rate-limit"],   // string[] of middleware workflow names
+  },
+}
+
+// OR on the workflow:
+workflow({
+  name: "Admin Delete",
+  trigger: { http: { ... } },
+  middleware: ["auth-check", "admin-only", "audit-log"],
+  steps: [...],
+});
+
+// OR process-global:
+import { WorkflowRegistry } from "@blokjs/runner";
+WorkflowRegistry.getInstance().useGlobalMiddleware(["request-id", "audit-log"]);
+```
+
+Resolution order at run-entry: process-global → trigger-level → workflow-level → workflow steps. Stop semantics: any middleware step with `stop: true` short-circuits the chain (response sent, main steps skipped).
+
+---
+
+## Workflow normalizer extensions
+
+The discriminator chain in `normalizeWorkflow()` gains four new branches, in this order:
+
+```ts
+// Existing v0.4:
+if (isPlainObject(step.branch))               { /* normalize branch */ }
+if (typeof step.subworkflow === "string")     { /* normalize subworkflow */ }
+if (isPlainObject(step.wait))                 { /* normalize wait */ }
+
+// New v0.5:
+if (isPlainObject(step.forEach))              { /* normalize forEach */ }
+if (isPlainObject(step.loop))                 { /* normalize loop */ }
+if (isPlainObject(step.switch))               { /* normalize switch */ }
+if (isPlainObject(step.tryCatch))             { /* normalize tryCatch */ }
+
+// Fallback:
+const { internalStep, nodeConfig } = normalizeRegularStep(step, ...);
+```
+
+Each `normalizeXStep()` function follows the same pattern as `normalizeBranchStep()` (already shipped):
+
+1. Validate the shape (throw `MissingFieldError` on missing required fields).
+2. Recursively normalize inner steps via `normalizeStepList(steps, sourcePath)` (a new shared helper that runs the discriminator chain).
+3. Return `{ internalStep, nodeConfig, innerNodes }` where `innerNodes` is the bubbled-up config map (so inner step inputs can be looked up via `ctx.config[innerStepName]`).
+
+The top-level `normalizeWorkflow()` merges every primitive's `innerNodes` into `internalNodes` via `Object.assign()` — same pattern we shipped for `branch` in the recent fix.
+
+---
+
+## Internal node implementations
+
+Each primitive has a runtime node in `core/runner/src/nodes/`. They use `defineNode({ flow: true, ... })` so they integrate with the existing flow-node machinery (`processFlow()` → returns `NodeBase[]` of sub-steps to recurse into).
+
+### `ForEachNode`
+
+```ts
+// core/runner/src/nodes/ForEachNode.ts
+import { defineNode } from "../defineNode";
+import { z } from "zod";
+import type { Context, NodeBase } from "@blokjs/shared";
+import { Runner } from "../Runner";
+
+export const ForEachNode = defineNode({
+  name: "@blokjs/forEach",
+  description: "Iterate over a collection, sequential or parallel.",
+  flow: true,
+  input: z.object({
+    in: z.string(),
+    as: z.string(),
+    mode: z.enum(["sequential", "parallel"]),
+    concurrency: z.number().int().min(1).max(1000),
+    steps: z.array(z.any()),  // pre-resolved to NodeBase[] by the runner
+  }),
+  output: z.array(z.any()),
+
+  async execute(ctx, input) {
+    const items = resolveExpr(input.in, ctx);
+    if (!Array.isArray(items)) {
+      throw new Error(`forEach.in must resolve to an array, got ${typeof items}`);
+    }
+    if (items.length === 0) return [];
+
+    const runner = new Runner(input.steps as NodeBase[]);
+    const results: unknown[] = [];
+
+    if (input.mode === "sequential") {
+      for (let i = 0; i < items.length; i++) {
+        const childCtx = createIterationContext(ctx, input.as, items[i], i);
+        await runner.run(childCtx);
+        results.push(childCtx.response.data);
+      }
+    } else {
+      // Parallel with bounded concurrency (p-limit pattern, in-tree to avoid dep)
+      const sema = new Semaphore(input.concurrency);
+      await Promise.all(items.map(async (item, i) => {
+        await sema.acquire();
+        try {
+          const childCtx = createIterationContext(ctx, input.as, item, i);
+          await runner.run(childCtx);
+          results[i] = childCtx.response.data;  // index-preserving
+        } finally {
+          sema.release();
+        }
+      }));
+    }
+
+    return results;
+  },
+});
+```
+
+**Implementation notes:**
+
+- `createIterationContext()` clones `ctx`, sets `state[as] = item`, sets `state[as + "Index"] = i`. Doesn't share mutations with parent (per-iteration isolation).
+- Per-iteration step output lands in the iteration's `state` scope; the iteration's `ctx.response.data` becomes the array element in `results`.
+- The forEach step's own output (in parent ctx.state[forEachId]) is the full results array.
+- Errors in any iteration propagate up — the parent's error handling (`tryCatch` wrapping the forEach, or parent-level retry) decides what happens.
+
+### `LoopNode`
+
+```ts
+// core/runner/src/nodes/LoopNode.ts
+export const LoopNode = defineNode({
+  name: "@blokjs/loop",
+  flow: true,
+  input: z.object({
+    while: z.string(),
+    maxIterations: z.number().int().min(1),
+    steps: z.array(z.any()),
+  }),
+  output: z.unknown(),
+
+  async execute(ctx, input) {
+    const runner = new Runner(input.steps as NodeBase[]);
+    let iteration = 0;
+    let lastResult: unknown = undefined;
+
+    while (true) {
+      // Set the loop index BEFORE evaluating while so the condition can use it
+      const loopIndexKey = `${ctx.currentStepId}Index`;
+      (ctx.state as Record<string, unknown>)[loopIndexKey] = iteration;
+
+      const shouldContinue = evalExpression(input.while, ctx);
+      if (!shouldContinue) break;
+
+      if (iteration >= input.maxIterations) {
+        throw new LoopMaxIterationsError(
+          `Loop ${ctx.currentStepId} exceeded maxIterations=${input.maxIterations}`,
+        );
+      }
+
+      const childCtx = cloneContextForIteration(ctx);
+      await runner.run(childCtx);
+      ctx.state = mergeState(ctx.state, childCtx.state);  // carry state forward
+      lastResult = childCtx.response.data;
+      iteration++;
+    }
+
+    return lastResult;
+  },
+});
+```
+
+**Implementation notes:**
+
+- The while-expression evaluation is the same `Mapper` machinery used for step inputs (`Mapper.replaceObjectStrings` etc.).
+- State is merged forward so condition variables survive across iterations.
+- `LoopMaxIterationsError` extends `BlokError` so callers can `instanceof` discriminate (vs operator-cancel or step timeout).
+- Exported from `@blokjs/runner` for consumer use.
+
+### `SwitchNode`
+
+```ts
+// core/runner/src/nodes/SwitchNode.ts
+export const SwitchNode = defineNode({
+  name: "@blokjs/switch",
+  flow: true,
+  input: z.object({
+    on: z.string(),
+    cases: z.array(z.object({
+      when: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number(), z.boolean()]))]),
+      steps: z.array(z.any()),
+    })),
+    default: z.array(z.any()).optional(),
+  }),
+  output: z.array(z.any()),  // returns the matching arm's steps
+
+  async execute(ctx, input) {
+    const value = evalExpression(input.on, ctx);
+
+    for (const c of input.cases) {
+      const matches = Array.isArray(c.when) ? c.when.includes(value) : c.when === value;
+      if (matches) return c.steps as NodeBase[];
+    }
+
+    return (input.default ?? []) as NodeBase[];
+  },
+});
+```
+
+**Implementation notes:**
+
+- Strict equality (`===`) — no coercion.
+- First match wins (no fall-through).
+- Empty `default` (or omitted) returns `[]` — the runner treats empty flow result as "skip step, advance" (already supported via the empty-array fix in `defineNode`).
+
+### `TryCatchNode` — runner-intercepted
+
+`tryCatch` is the only primitive that's runner-intercepted (not a flow node) because it needs to install error-handling around a step list, which the flow-node return-an-array pattern doesn't give cleanly.
+
+```ts
+// core/runner/src/RunnerSteps.ts (extension)
+// In the step iteration loop:
+if (step.tryCatch) {
+  return await this.runTryCatchStep(ctx, step);
+}
+
+private async runTryCatchStep(ctx: Context, step: TryCatchInternalStep) {
+  const tryRunner = new Runner(step.tryCatch.try);
+  const catchRunner = new Runner(step.tryCatch.catch);
+  const finallyRunner = step.tryCatch.finally ? new Runner(step.tryCatch.finally) : null;
+
+  let caughtError: Error | null = null;
+  let finalResponse: ResponseContext;
+
+  try {
+    await tryRunner.run(ctx);
+    finalResponse = ctx.response;
+  } catch (err: unknown) {
+    caughtError = err instanceof Error ? err : new Error(String(err));
+    // Expose $.error to catch[] via ctx
+    (ctx as unknown as Record<string, unknown>).error = serializeError(caughtError);
+    try {
+      await catchRunner.run(ctx);
+      finalResponse = ctx.response;
+    } catch (catchErr: unknown) {
+      // Catch block itself threw — this propagates up after finally runs.
+      caughtError = catchErr instanceof Error ? catchErr : new Error(String(catchErr));
+      finalResponse = { success: false, data: null, error: caughtError };
+    }
+  } finally {
+    if (finallyRunner) {
+      try {
+        await finallyRunner.run(ctx);
+      } catch (finallyErr) {
+        // Finally errors are logged but don't override the prior error (matches JS semantics).
+        ctx.logger.error(`tryCatch.finally threw: ${finallyErr}`);
+      }
+    }
+  }
+
+  if (caughtError && !ctx.response.success) throw caughtError;
+  return finalResponse;
+}
+```
+
+**Implementation notes:**
+
+- `$.error` proxy resolves to `ctx.error` set inside the catch path.
+- Cleared after `finally` completes so downstream steps don't see stale error state.
+- `finally` ALWAYS runs, even if catch throws (matches JS `try/catch/finally` semantics).
+- If catch succeeds (no rethrow), the tryCatch step succeeds — error is consumed.
+- If catch rethrows, the tryCatch step fails, error propagates to the parent step's error handling.
+
+---
+
+## Helper nodes needed
+
+The 15 examples reference fictional nodes. For real workflows we need a small library of generic helpers. Each is a thin `defineNode` wrapper. Naming: `@blokjs/<verb-noun>`.
+
+| Node | Purpose | Inputs | Outputs |
+|---|---|---|---|
+| `@blokjs/expr` | Evaluate a JS expression in ctx, return result | `{ expression: string }` | `unknown` |
+| `@blokjs/ctx-publish` | Set `ctx.state[name] = value` (alternative to step-default-store for explicit naming) | `{ name: string, value: unknown }` | `{ name, value }` |
+| `@blokjs/ctx-publish-many` | Set multiple `ctx.state[k] = v` in one step | `{ values: Record<string, unknown> }` | `{ count: number }` |
+| `@blokjs/throw` | Force-throw an error with a custom message | `{ message: string, code?: number }` | (never returns) |
+| `@blokjs/log` | Emit a log line at a level | `{ level: "info" \| "warn" \| "error", message: string }` | `{ level, message }` |
+| `@blokjs/audit-log` | Append an event to an in-memory audit ring (or a real store via `BLOK_AUDIT_STORE` env) | `{ event: string, ...attrs }` | `{ event, attrs, timestamp }` |
+| `@blokjs/metrics-emit` | Emit a metric (no-op without OTel exporter) | `{ event: string, value?: number, attrs?: Record<string, unknown> }` | `{ event, attrs }` |
+| `@blokjs/in-memory-kv` | Simple in-memory key-value store for testing | `{ action: "get" \| "set" \| "delete" \| "list", key?: string, value?: unknown }` | depends on action |
+| `@blokjs/json-schema` | Validate data against a JSON schema | `{ schema: object, data: unknown }` | `{ valid: boolean, errors: string[] }` |
+| `@blokjs/respond` | Already exists — terminal HTTP response | `{ status, body, headers? }` | `{ status, body, headers }` |
+| `@blokjs/api-call` | Already exists — generic HTTP fetch | `{ url, method, headers, body, ... }` | response-shaped |
+
+The new ones (`expr`, `ctx-publish`, `ctx-publish-many`, `throw`, `log`, `audit-log`, `metrics-emit`, `in-memory-kv`, `json-schema`) ship in a new package: `@blokjs/helpers` (or fold into `@blokjs/runner` as defineNode constants — TBD).
+
+**Recommendation:** new monorepo package `nodes/utility/helpers@1.0.0/` that exports all of them. Mirrors the existing pattern (`@blokjs/api-call`, `@blokjs/if-else`, `@blokjs/react`).
+
+---
+
+## Per-example real-API mapping
+
+For each of the 15 mock examples, this section names exactly what changes to make it real, what public APIs to use, and how to curl test it. **No API keys required for any of these.**
+
+The shared real-API toolkit:
+
+| API | Endpoint | What it returns |
+|---|---|---|
+| **httpbin.org** | `POST /post` | Echoes the request body — perfect for "fake stripe", "fake DB insert", "fake webhook target" |
+| **httpbin.org** | `GET /uuid` | Random UUID — useful for ID generation |
+| **httpbin.org** | `GET /delay/:n` | Delays response by N seconds — useful for timeout/retry testing |
+| **httpbin.org** | `GET /status/:code` | Returns HTTP status N — useful for "fake error" steps |
+| **catfact.ninja** | `GET /fact` | Random cat fact |
+| **countriesnow.space** | `POST /countries/capital` | Country list with capitals |
+| **jsonplaceholder.typicode.com** | `GET /users` | 10 fake users (paginated) |
+| **jsonplaceholder.typicode.com** | `GET /users/:id` | Single user |
+| **jsonplaceholder.typicode.com** | `POST /posts` | Echo a fake post creation |
+| **api.github.com** | `GET /repos/:owner/:repo/events` | Real GitHub-shaped events for the github webhook router |
+| **pokeapi.co** | `GET /api/v2/pokemon/:name` | Pokemon data — useful for tenant-router cases |
+
+### Example 01 — order-fulfillment
+
+**Real-API substitutions:**
+
+| Mock node | Replace with |
+|---|---|
+| `inventory-check`, `inventory-reserve` | Two-step pattern using `@blokjs/in-memory-kv` (action: "get" then "set") |
+| `license-create` | `@blokjs/api-call` to `httpbin.org/uuid` returning the UUID as the license key |
+| `stripe-charge` | `@blokjs/api-call` to `httpbin.org/post` (echoes the charge body, returns 200; flip to `httpbin.org/status/402` to test the catch arm) |
+| `audit-log`, `metrics-emit` | New helper nodes |
+| `auth-check`, `rate-limit` | Real middleware workflows (see examples 07 + 08) |
+
+**Curl tests:**
+
+```bash
+# Happy path — physical order with one item
+curl -X POST http://localhost:4000/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_JWT" \
+  -d '{"id":"o1","type":"physical","items":[{"sku":"A","quantity":2}],"total":99,"currency":"USD"}'
+# Expect 201 with orderId, chargeId
+
+# Forced failure — flip to httpbin.org/status/402 in stripe-charge inputs
+# Expect 402 with payment-failed body, audit event written
+
+# Bad type — should hit default arm
+curl -X POST http://localhost:4000/orders -d '{"id":"o2","type":"unknown","items":[],"total":0,"currency":"USD"}'
+# Expect 400 with "Unknown order type"
+```
+
+### Example 02 — async-job-poller
+
+**Real-API substitutions:**
+
+For polling we need a job that completes after N polls. Use `@blokjs/in-memory-kv` to track call counts:
+
+| Mock | Replace with |
+|---|---|
+| `submit-job` to `api.example.com/jobs` | `@blokjs/api-call` to `httpbin.org/post`, persist returned UUID as job ID. Then `@blokjs/in-memory-kv` set `job-{id}` to `{status:"pending", count:0}` |
+| `check-status` | `@blokjs/in-memory-kv` get `job-{id}`, increment count. After 3 calls, flip status to "done". Wrap in a sub-workflow `fake-job-status` for clarity |
+
+**Curl test:**
+
+```bash
+JOB=$(curl -s -X POST http://localhost:4000/jobs -H "Content-Type: application/json" -d '{"task":"render"}')
+echo $JOB
+# Expect: {result: ..., attempts: 3} after ~6s (3 polls @ 2s each)
+```
+
+### Example 03 — webhook-fanout
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `subscriber-list` | `@blokjs/in-memory-kv` action `list` returning a fixed array of webhook URLs (5 different `httpbin.org/post` URLs with different paths) |
+| Inner `post` step | `@blokjs/api-call` already real |
+| `auth-check` middleware | Real (example 07) |
+
+**Curl test:**
+
+```bash
+curl -X POST http://localhost:4000/events/dispatch \
+  -H "Authorization: Bearer $TEST_JWT" \
+  -d '{"id":"evt-1","type":"order.created","payload":{...}}'
+# Expect 200 with dispatched: 5
+```
+
+### Example 04 — multi-tenant-router
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `acme-process`, `globex-process`, `initech-process` sub-workflows | Three real sub-workflows that each call a different public API: acme → countriesnow.space, globex → catfact.ninja, initech → pokeapi.co |
+| `request-id` middleware | Real (new — generates UUID, stores at `ctx.state.requestId`) |
+
+**Curl tests:**
+
+```bash
+curl -X POST http://localhost:4000/api/process -H "X-Tenant-Id: acme" -d '{}'
+# Expect countries data
+
+curl -X POST http://localhost:4000/api/process -H "X-Tenant-Id: globex" -d '{}'
+# Expect cat fact
+
+curl -X POST http://localhost:4000/api/process -H "X-Tenant-Id: unknown" -d '{}'
+# Expect 403 unknown tenant
+```
+
+### Example 05 — csv-import-pipeline
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `csv-parser` | New helper node `@blokjs/csv-parse` (thin wrapper around the `csv-parse` npm pkg) |
+| `row-validator`, `row-transformer` | `@blokjs/expr` for inline validation/transform |
+| `db-insert` to `users` | `@blokjs/in-memory-kv` action `set` with key `user-{id}` |
+| `db-insert` to `import_failures` | `@blokjs/in-memory-kv` action `set` with key `failure-{id}` |
+| `auth-check`, `admin-only` | Real middleware |
+
+**Curl test:**
+
+```bash
+curl -X POST http://localhost:4000/imports/csv \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -H "Content-Type: text/csv" \
+  --data-binary @sample.csv
+# sample.csv has 5 valid rows + 1 missing-required-field row
+# Expect: succeeded:5, failed:1, dlq has the bad row
+
+curl http://localhost:4000/imports/csv/{importId}/failures
+# Expect the bad row with reason
+```
+
+### Example 06 — admin-delete-user
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `user-service` action `delete` | `@blokjs/in-memory-kv` action `delete` with key `user-{id}` |
+| `auth-check`, `admin-only`, `audit-log` middleware | Real |
+
+**Curl tests:**
+
+```bash
+curl -X POST http://localhost:4000/admin/_seed-user \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -d '{"id":"u1","email":"alice@example.com"}'
+# (Bonus endpoint for setup — populates the in-memory KV)
+
+curl -X DELETE http://localhost:4000/admin/users/u1 \
+  -H "Authorization: Bearer $ADMIN_JWT"
+# Expect 204, audit log shows the action
+
+curl -X DELETE http://localhost:4000/admin/users/u1 \
+  -H "Authorization: Bearer $USER_JWT"
+# Expect 403 from admin-only middleware
+```
+
+### Example 07 — auth-check middleware
+
+Real implementation:
+
+| Step | Real |
+|---|---|
+| `extract-token` | `@blokjs/expr` returning the bearer token |
+| `verify-jwt` | New helper node `@blokjs/verify-jwt-hs256` using `jose` library — does proper HS256 + exp validation. Set `JWT_SECRET` env var for testing. |
+| `deny-if-invalid` branch | Real (already exists) |
+| `stash-identity` | `@blokjs/ctx-publish` |
+
+**Test JWT generation** (one-liner for the test runner):
+
+```ts
+import { SignJWT } from "jose";
+const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+const token = await new SignJWT({ sub: "user-1", roles: ["user"] })
+  .setProtectedHeader({ alg: "HS256" })
+  .setIssuedAt()
+  .setExpirationTime("1h")
+  .sign(secret);
+console.log(token);
+```
+
+### Example 08 — rate-limit middleware
+
+Real implementation:
+
+| Step | Real |
+|---|---|
+| `compute-key` | `@blokjs/expr` |
+| `check-bucket` token-bucket | New helper `@blokjs/rate-limit-token-bucket` using **Redis** (Docker compose service) for the bucket state. Falls back to in-memory `Map` if `REDIS_URL` is unset. |
+| `deny-if-exceeded` branch | Real |
+
+**Docker compose:**
+
+```yaml
+# infra/development/docker-compose.yml (add)
+services:
+  redis:
+    image: redis:7-alpine
+    ports: [ "6379:6379" ]
+```
+
+**Curl test:**
+
+```bash
+# Spam 110 requests in 60s, verify 429s after the 100th
+for i in $(seq 1 110); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X GET http://localhost:4000/some-rate-limited-route
+done | sort | uniq -c
+# Expect: 100 200s, 10 429s
+```
+
+### Example 09 — polling-with-backoff
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `compute-delay` expr | Real (uses `@blokjs/expr`) |
+| `wait-backoff` with computed delay | Real (`wait` already supports `$.state` references) |
+| `check` to `api.example.com/status` | `@blokjs/api-call` to a sub-workflow `fake-status` that returns "pending" twice then "ready" via in-memory KV counter |
+
+**Curl test:**
+
+```bash
+TEST_URL=http://localhost:4000/_internal/fake-status?id=1
+curl -X POST http://localhost:4000/poll -d "{\"url\":\"$TEST_URL\"}"
+# Expect ready: true, attempts: 3, ~7s total elapsed (1+2+4)
+```
+
+### Example 10 — github-webhook-router
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `github-signature-verify` middleware | Real — uses HMAC-SHA256 of body with `GITHUB_WEBHOOK_SECRET` env, compares to `X-Hub-Signature-256` header. New helper node. |
+| `handle-push`, `handle-pr-event`, etc. sub-workflows | Each real, just calls `@blokjs/audit-log` then `@blokjs/respond` 200 |
+
+**Curl test:**
+
+```bash
+SECRET="testsecret"
+BODY='{"ref":"refs/heads/main","commits":[]}'
+SIG="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | cut -d' ' -f2)"
+
+curl -X POST http://localhost:4000/webhooks/github \
+  -H "X-GitHub-Event: push" \
+  -H "X-GitHub-Delivery: $(uuidgen)" \
+  -H "X-Hub-Signature-256: $SIG" \
+  -d "$BODY"
+# Expect 200, audit log shows handle-push fired
+```
+
+### Example 11 — user-signup-saga
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `user-create` | `@blokjs/in-memory-kv` set `user-{email}` |
+| `email-send` | `@blokjs/api-call` to **MailHog** (Docker service) on `localhost:1025` (SMTP) or `localhost:8025/api/v2/messages` (REST). Or skip with `httpbin.org/post`. |
+| `profile-create` | `@blokjs/in-memory-kv` set `profile-{userId}` |
+| `user-delete` (rollback) | `@blokjs/in-memory-kv` delete |
+| `metrics-emit` | New helper node |
+
+**Docker compose:**
+
+```yaml
+services:
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports: [ "1025:1025", "8025:8025" ]
+```
+
+**Curl tests:**
+
+```bash
+# Happy
+curl -X POST http://localhost:4000/signup -d '{"email":"a@b.com","password":"x","displayName":"A"}'
+# Expect 201, MailHog has the welcome email
+
+# Force failure — set EMAIL_SEND_FAIL=1 env var, profile-create succeeds anyway
+# But our example fails on email send. Test rollback by hardcoding a failure case.
+```
+
+### Example 12 — data-export-pipeline
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `user-count` | `@blokjs/api-call` to `jsonplaceholder.typicode.com/users` (returns 10 users; we hard-code `total: 10`) |
+| Inner `fetch` per page | `@blokjs/api-call` to `jsonplaceholder.typicode.com/users?_page={n}&_limit=2` (5 pages of 2) |
+| `record-failed-page` | `@blokjs/in-memory-kv` |
+| `export-assemble` | `@blokjs/expr` joining the page results into a CSV string. Skip S3 upload (just return the CSV inline). |
+| `auth-check`, `admin-only` | Real |
+
+**Curl test:**
+
+```bash
+curl -X POST http://localhost:4000/exports/users \
+  -H "Authorization: Bearer $ADMIN_JWT" \
+  -d '{"exportId":"exp-1"}'
+# Expect 200 with rowCount: 10, csv body in response
+```
+
+### Example 13 — nested-control-flow
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `inventory-reserve`, `shipping-schedule` | `@blokjs/api-call` to httpbin echo |
+| `license-create` | `@blokjs/api-call` to httpbin uuid |
+| `service-schedule` | `@blokjs/api-call` to httpbin echo |
+| `throw-unknown` | `@blokjs/throw` |
+| `audit-log` | New helper |
+
+**Curl test:**
+
+```bash
+curl -X POST http://localhost:4000/orders/process \
+  -H "Authorization: Bearer $TEST_JWT" \
+  -d '{
+    "id":"o-1",
+    "shipTo":"123 Main St",
+    "items":[
+      {"type":"physical","sku":"A","qty":1,"required":true},
+      {"type":"digital","productId":"P1"},
+      {"type":"unknown","required":false}
+    ]
+  }'
+# Expect 200, itemsProcessed:3, audit log shows item-process-failure for the unknown one (skipped because required:false)
+```
+
+### Example 14 — travel-booking-saga
+
+**Real-API substitutions:**
+
+| Mock | Replace with |
+|---|---|
+| `flight-api`, `hotel-api`, `car-api` | Three sub-workflows that simulate booking via `@blokjs/in-memory-kv` set with the booking ID. Cancellation deletes the same key. Inject failure via a query param `?fail=hotel` to test the saga. |
+| `auth-check` | Real |
+
+**Curl tests:**
+
+```bash
+# Happy
+curl -X POST http://localhost:4000/travel/book \
+  -H "Authorization: Bearer $TEST_JWT" \
+  -d '{"bookingId":"b1","from":"SFO","to":"NYC","date":"2026-06-01","nights":3}'
+# Expect 201 with flight, hotel, car IDs
+
+# Force hotel failure
+curl -X POST 'http://localhost:4000/travel/book?fail=hotel' \
+  -H "Authorization: Bearer $TEST_JWT" \
+  -d '{"bookingId":"b2","from":"SFO","to":"NYC","date":"2026-06-01","nights":3}'
+# Expect 502, in-memory KV shows the flight was booked then cancelled (no hotel/car keys)
+```
+
+### Example 15 — hello-with-global-middleware
+
+**Real-API substitutions:**
+
+| Mock | Real |
+|---|---|
+| `request-id`, `audit-log` middleware | Both real |
+| `useGlobalMiddleware()` registration | Wired in `triggers/http/src/Workflows.ts` boot — call `WorkflowRegistry.useGlobalMiddleware(["request-id", "audit-log"])` |
+
+**Curl test:**
+
+```bash
+curl http://localhost:4000/hello -H "X-Trace-Id: optional-trace"
+# Expect 200 with message:hello, requestId set (auto-generated)
+# Audit log fires for every request to /hello
+```
+
+---
+
+## Test infrastructure
+
+Three layers of tests:
+
+### Unit tests (per primitive)
+
+In `core/runner/__tests__/unit/nodes/` — one file per primitive. Pattern follows the existing `defineNode.test.ts`:
+
+```ts
+// ForEachNode.test.ts
+describe("ForEachNode", () => {
+  it("returns an empty array when input is empty");
+  it("runs sequentially when mode=sequential");
+  it("runs in parallel when mode=parallel with bounded concurrency");
+  it("propagates errors to the parent");
+  it("preserves index order in parallel results");
+  it("isolates per-iteration state");
+  it("resolves $.req / $.state expressions in `in`");
+});
+```
+
+Same pattern for `LoopNode`, `SwitchNode`, `TryCatchNode`, plus middleware chain in `TriggerBase.middleware.test.ts`.
+
+### Integration tests (per example)
+
+In `core/runner/__tests__/integration/v05-examples/` — one file per example. Each spawns the trigger via existing test infrastructure and curls the routes.
+
+```ts
+// 01-order-fulfillment.integration.test.ts
+describe("01 order-fulfillment", () => {
+  beforeAll(/* boot trigger with the example workflow + helper nodes */);
+
+  it("happy path: physical order returns 201", async () => {
+    const res = await fetch("http://localhost:0/orders", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${jwt}` },
+      body: JSON.stringify({...}),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("failure: bad order type returns 400", async () => {...});
+  it("failure: stripe error triggers catch + audit", async () => {...});
+});
+```
+
+### Curl smoke tests (per example, manual)
+
+Shell script `examples/v05-primitives/_smoke.sh` that boots the trigger and runs every curl from the per-example mappings above. Outputs a green/red dashboard. Useful for manual validation and CI later.
+
+---
+
+## Documentation structure
+
+Three new pages + updates to existing ones:
+
+### New: `docs/d/composition/control-flow.mdx`
+
+Single page covering all four flow primitives. Sections:
+
+1. **Overview** — table of all primitives with one-line summaries
+2. **`branch`** — already shipped, recap
+3. **`switch`** — multi-branch by value, examples, when-to-use vs `branch`
+4. **`forEach`** — sequential vs parallel, concurrency cap, examples
+5. **`loop`** — while-condition, maxIterations safety, examples
+6. **`tryCatch`** — try/catch/finally, `$.error` proxy, composition with retry
+7. **Composition guide** — when to nest what, depth limits, common anti-patterns
+8. **Reliability composition** — how each primitive composes with `idempotencyKey`, `retry`, `maxDuration`
+
+### New: `docs/d/composition/middleware.mdx`
+
+Covers the middleware system end-to-end:
+
+1. **What is middleware** — vs sub-workflow, vs first-step gate
+2. **Three layers** — process-global, trigger-level, workflow-level
+3. **Resolution order**
+4. **Writing a middleware** — `middleware()` helper, `middleware: true` flag
+5. **Common patterns** — auth, rate-limit, request-id, audit-log
+6. **Error handling** — middleware errors, `stop: true` semantics
+7. **Performance** — middleware ordering for fast denial paths
+8. **Testing middleware** — unit pattern + integration pattern
+
+### New: `docs/c/migration-guides/v0.5-control-flow.mdx`
+
+Migration guide for users coming from blueprint-runner / pre-v0.5:
+
+1. Mapping `for@1.0.0` / `foreach@1.0.0` → `forEach`
+2. Mapping `while@1.0.0` → `loop`
+3. Mapping `if-else` with multiple `if` conditions → `switch`
+4. Mapping `try-catch@1.0.0` → `tryCatch`
+5. Mapping `if-error@1.0.0` → step `retry` + `tryCatch`
+6. Mapping `trigger-node middleware` → first-class `middleware`
+
+### Updates
+
+- **Root `CLAUDE.md`** — extend the v2 step shapes table with `forEach` / `loop` / `switch` / `tryCatch`. Add Context Rule for middleware.
+- **`docs/d/security/cookbook.mdx`** — replace "Pattern A: Workflow-level first-step gate" with the middleware shape (Pattern A is a fallback; middleware is the new canonical answer).
+- **`docs/d/reference/v2-step-shapes.mdx`** — add the new step shapes to the reference.
+- **`AGENTS.md`** — extend the architecture description.
+
+---
+
+## Implementation phases
+
+Six phases, ordered by dependency. Each phase is independently shippable + testable. Phase A unblocks the most user value; F closes the loop.
+
+### Phase A — `forEach` + `loop` primitives + helpers (3-4 days)
+
+Deliverables:
+1. New package `nodes/utility/helpers@1.0.0/` with `expr`, `ctx-publish`, `ctx-publish-many`, `throw`, `log`, `audit-log`, `metrics-emit`, `in-memory-kv`, `json-schema`. Each `defineNode`, each tested.
+2. `ForEachNode` + `LoopNode` in `core/runner/src/nodes/`. Plus `LoopMaxIterationsError`. Tested.
+3. `forEach()` + `loop()` helpers in `core/workflow-helper/src/components/`. Zod schemas + TS types.
+4. Normalizer extensions for `step.forEach` / `step.loop`. Inner-step config bubbling.
+5. `Configuration.nodeTypes()` registration for the two new internal node refs.
+6. **Real working example 03 (webhook-fanout)** — first end-to-end real workflow + integration test + curl smoke.
+
+Ships as one PR. Ends with a green `bun run http:dev` + curl test for example 03.
+
+### Phase B — `switch` primitive (1-2 days)
+
+Deliverables:
+1. `SwitchNode` in `core/runner/src/nodes/`. Tested (single match, array `when`, default, no-match).
+2. `switchOn()` helper. Zod schema. TS types.
+3. Normalizer extension.
+4. `Configuration.nodeTypes()` registration.
+5. **Real working examples 02 (job-poller), 04 (multi-tenant), 10 (github-webhook), 13 (nested)** — these all use `switch` heavily.
+
+Ships as one PR.
+
+### Phase C — `tryCatch` + `$.error` proxy (2-3 days)
+
+Deliverables:
+1. Runner-intercepted `tryCatch` execution in `RunnerSteps.ts`. Tested for try-success, try-fail/catch-success, try-fail/catch-fail, finally-always-runs, finally-throws-handled.
+2. `$.error` proxy in `core/workflow-helper/src/proxy/$.ts`.
+3. `tryCatch()` helper. Zod schema.
+4. Normalizer extension for `step.tryCatch`.
+5. **Real working examples 01 (order-fulfillment), 05 (csv-import), 11 (signup-saga), 12 (data-export), 14 (travel-saga)** — these use `tryCatch`.
+
+Ships as one PR.
+
+### Phase D — Middleware (3-4 days)
+
+Deliverables:
+1. `middleware: boolean` flag added to `WorkflowV2Schema`.
+2. `middleware: string[]` field added to every `*TriggerOpts` schema (HTTP, Worker, Queue, etc.).
+3. `WorkflowRegistry`:
+   - `middleware: true` workflows allowed (no `trigger:` required).
+   - `getMiddleware(name): RegisteredWorkflow | undefined`.
+   - `useGlobalMiddleware(names: string[]): void`.
+   - `getGlobalMiddleware(): string[]`.
+4. `TriggerBase.run()`:
+   - Resolve middleware chain at run-entry: `[...global, ...trigger, ...workflow]`.
+   - Run each middleware workflow via `Runner` against the same `ctx`.
+   - Short-circuit on `stop: true` or non-success response.
+   - Errors bubble up like regular step errors.
+5. `middleware()` helper in `@blokjs/helper`.
+6. **Real working examples 06 (admin-delete), 07 (auth-check), 08 (rate-limit), 15 (global-middleware)** — these define + use middleware.
+7. Real `auth-check` middleware using `jose` for JWT.
+8. Real `rate-limit` middleware with Redis backend (Docker compose extension).
+9. Real `request-id` middleware (`crypto.randomUUID`).
+
+Ships as one PR. Includes the docker-compose.yml updates.
+
+### Phase E — Studio rendering (1-2 days)
+
+Deliverables:
+1. New step type icons in Studio's StepRail: forEach (loop with arrow), loop (curly arrow), switch (branching arrows), tryCatch (shield).
+2. Iteration count badge on forEach/loop step renders ("3/10 iterations").
+3. tryCatch render: green outline if try succeeded, red if catch fired.
+4. Middleware chain header: "Ran 3 middleware: auth-check, rate-limit, request-id" on the run header.
+
+Ships as a Studio-only PR. Does not gate the framework primitives — they work without it.
+
+### Phase F — Documentation + remaining examples (2-3 days)
+
+Deliverables:
+1. `docs/d/composition/control-flow.mdx` — comprehensive primitives doc.
+2. `docs/d/composition/middleware.mdx` — middleware doc.
+3. `docs/c/migration-guides/v0.5-control-flow.mdx` — blueprint-runner → v0.5 migration.
+4. CLAUDE.md / AGENTS.md updates.
+5. Remaining examples (whichever didn't ship in their primitive's phase) made real + tested.
+6. Smoke script `examples/v05-primitives/_smoke.sh` — boots the trigger, runs all 15 curl tests, prints dashboard.
+7. PR review pass on docs structure / readability.
+
+Ships as final v0.5 docs PR.
+
+---
+
+## Open design questions (decisions before code)
+
+These need a call from the user before we start coding so we don't backtrack.
+
+### Q1. `switch` helper function name
+
+JS reserved word means we can't use `switch()`. Options:
+
+| Name | Pros | Cons |
+|---|---|---|
+| `switchOn({...})` | Preserves "switch" word, intent clear | Verb form is unusual |
+| `match({...})` | Pattern-matching language convention | Different word from JSON shape |
+| Just use object form `{ id, switch: {...} }` | Zero new word | No autocomplete on the helper call |
+
+**Recommendation:** `switchOn`. Same word the JSON uses, no collision.
+
+### Q2. `forEach` variable scoping
+
+When `as: "item"` is set, where does `ctx.state.item` live? Options:
+
+| Approach | Detail |
+|---|---|
+| **Per-iteration scope** | Inner steps see `ctx.state.item`; clears after the forEach. Inner step IDs that match `as` collide. |
+| **Namespaced** | `ctx.iter.item` — separate from `ctx.state`. No collision but adds a new namespace. |
+| **Documented convention** | Per-iteration scope with rule: "don't use the same name as a step `id`." |
+
+**Recommendation:** documented convention (the third option). `ctx.state.item` is the most natural mapping. Document the no-collision rule. Lint rule in v0.6 if it bites users.
+
+### Q3. `loop` counter sugar
+
+Should we add `count: 10` for "do this 10 times"? Or only `while`?
+
+**Recommendation:** `while` only for v0.5. `count` is `loop({ while: '$.state.iIndex < 10', do: [...] })` — slightly verbose but unambiguous. Add `count` sugar in v0.6 if users ask.
+
+### Q4. `tryCatch` — does an error in `catch` propagate after `finally`?
+
+JS semantics: yes. The error propagates from `catch` after `finally` finishes. We match.
+
+If `finally` itself throws, JS replaces the original error. We diverge: log the finally error, propagate the original. Reason: original errors are usually more actionable for debugging.
+
+**Recommendation:** as stated above.
+
+### Q5. Middleware vs sub-workflow — crisp distinction?
+
+Both are workflows. Both are looked up in `WorkflowRegistry`. Both run during request handling. What's the difference?
+
+| Aspect | Sub-workflow | Middleware |
+|---|---|---|
+| **Invocation** | Explicit step in parent (`{subworkflow: "name"}`) | Implicit chain at run-entry |
+| **Context** | Isolated child ctx (own `state`, own `request.body` from inputs) | Same ctx as main workflow (state shared) |
+| **Order** | Inline at the step's position in `steps[]` | Always before main steps |
+| **Short-circuit** | Returns to parent step | `stop: true` aborts the whole request |
+| **Use case** | Encapsulate composable business logic (signup → email → profile) | Cross-cutting concerns (auth, rate-limit, audit) |
+
+**Recommendation:** crisply documented in `docs/d/composition/middleware.mdx`. The `middleware: true` flag in the workflow envelope is the formal distinguishing marker — middleware-marked workflows can't be invoked as sub-workflows and vice versa.
+
+### Q6. `$.error` proxy availability
+
+Should `$.error` be available everywhere or only inside `catch[]`?
+
+**Recommendation:** only inside `catch[]`. Outside, it's `undefined`. Resolved at expression-evaluation time — the runner sets `ctx.error` when entering a catch block and clears it on exit. Documented.
+
+Alternative considered: `$.tryError` (more explicit, doesn't shadow potentially-named `error` keys in user data). Slightly safer but unfamiliar. Going with `$.error` because it's the obvious choice.
+
+### Q7. Helper nodes package — bundled with `@blokjs/runner` or separate?
+
+The new helpers (`expr`, `ctx-publish`, etc.) — should they be:
+
+| Option | Pros | Cons |
+|---|---|---|
+| Separate package `@blokjs/helpers` | Clean dependency boundary, can version independently | Another package to install |
+| Bundled in `@blokjs/runner` exports | Always available, no extra install | Bloats runner exports |
+| Bundled in scaffold | Only present in scaffolded projects | Not available to library consumers |
+
+**Recommendation:** separate package `nodes/utility/helpers@1.0.0/` published as `@blokjs/helpers`. Mirrors the existing `@blokjs/api-call`, `@blokjs/if-else`, `@blokjs/react` pattern. Add to scaffold dependencies by default.
+
+---
+
+## Total effort + sequencing
+
+Pulling it together:
+
+| Phase | Days | Cumulative |
+|---|---|---|
+| A — forEach + loop + helpers | 3-4 | 3-4 |
+| B — switch | 1-2 | 4-6 |
+| C — tryCatch + `$.error` | 2-3 | 6-9 |
+| D — Middleware | 3-4 | 9-13 |
+| E — Studio rendering | 1-2 | 10-15 |
+| F — Documentation + remaining examples | 2-3 | 12-18 |
+
+**Total: ~12-18 working days** for everything. Each phase ships independently — each one is a real, working release-able chunk that exercises 2-5 of the 15 examples. The user can review/feedback after each.
+
+---
+
+## Open work items before we start
+
+Things to do once before Phase A kicks off:
+
+1. **Confirm Q1-Q7 design questions above.** I'll ship recommendations unless overridden.
+2. **Decide branch + PR strategy.** This work spans 6 phases. Options:
+   - One mega-branch, one mega-PR (hard to review).
+   - Branch-per-phase, PRs in sequence (review-friendly).
+   - All on `feat/v05-primitives` with phase commits.
+   **Recommendation:** branch-per-phase. `feat/v05-foreach-loop`, `feat/v05-switch`, etc. Each phase = one PR.
+3. **Set up the helpers package skeleton.** Phase A's first commit creates `nodes/utility/helpers@1.0.0/` with package.json, tsconfig, vitest config, README — empty otherwise. Subsequent commits add helpers as needed.
+4. **Pick a v0.5 release date.** v0.5 also includes the routing-legacy drop and AuthMiddleware removal (per the [post-v0.4 roadmap](/c/devtools/post-v04-roadmap)). Earliest reasonable: 2026-06-07. Conservative: 2026-07-07.
+
+---
+
+## Acceptance gate
+
+A phase is "done" when:
+
+1. Tests pass: full nx run-many, no regressions.
+2. Real example(s) for that phase work end-to-end via `bun run http:dev` + curl. Integration tests cover the curls.
+3. Studio (if Phase E shipped already) renders the new step types correctly.
+4. Docs for the phase's deliverables exist in `docs/d/composition/control-flow.mdx` (or related), even if not the final polish.
+5. The relevant Q-questions above have either been answered as recommended or revised.
+
+This guide IS the spec. If something here is wrong or incomplete, edit the guide first, then implement against the updated guide.

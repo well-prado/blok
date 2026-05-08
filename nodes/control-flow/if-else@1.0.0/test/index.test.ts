@@ -74,8 +74,10 @@ describe("IfElse Node - Function-First", () => {
 		];
 
 		(mockContext.request as JsonLikeObject).method = "GET";
-		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
-		const steps = result.data as NodeBase[];
+		// Flow nodes (definition.flow === true) return their sub-steps as
+		// an array directly — no BlokResponse wrap. The runner's
+		// processFlow() reads the array straight off `result`.
+		const steps = (await IfElseNode.handle(mockContext, conditions)) as unknown as NodeBase[];
 		expect(steps[0].name).toEqual("step1");
 	});
 
@@ -98,8 +100,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
-		const steps = result.data as NodeBase[];
+		const steps = (await IfElseNode.handle(mockContext, conditions)) as unknown as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});
 
@@ -161,8 +162,7 @@ describe("IfElse Node - Function-First", () => {
 		];
 
 		(mockContext.request as JsonLikeObject).method = "GET";
-		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
-		const steps = result.data as NodeBase[];
+		const steps = (await IfElseNode.handle(mockContext, conditions)) as unknown as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});
 
@@ -185,8 +185,7 @@ describe("IfElse Node - Function-First", () => {
 			},
 		];
 
-		const result = (await IfElseNode.handle(mockContext, conditions)) as IBlokResponse;
-		const steps = result.data as NodeBase[];
+		const steps = (await IfElseNode.handle(mockContext, conditions)) as unknown as NodeBase[];
 		expect(steps[0].name).toEqual("step2");
 	});
 });

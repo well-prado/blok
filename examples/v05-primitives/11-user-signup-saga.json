@@ -1,0 +1,122 @@
+{
+	"name": "User Signup Flow",
+	"version": "1.0.0",
+	"description": "Multi-step signup wrapped in tryCatch. Try arm: create the account, send the welcome email, create the profile, respond 201. Catch arm: if any step failed, conditionally roll back whatever did succeed (account creation), then respond 500 with the error. Finally: always emit a metric tagged with the outcome — runs even if catch itself throws. Demonstrates: tryCatch with all three arms, branch inside catch for conditional rollback (only delete the account if it actually got created), $.error proxy carrying the failure that triggered the catch.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/signup",
+			"middleware": ["rate-limit"]
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-input",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["email", "password", "displayName"]
+				},
+				"data": "$.req.body"
+			}
+		},
+		{
+			"id": "signup-saga",
+			"tryCatch": {
+				"try": [
+					{
+						"id": "create-account",
+						"use": "user-create",
+						"type": "module",
+						"idempotencyKey": "signup-$.req.body.email",
+						"inputs": {
+							"email": "$.req.body.email",
+							"password": "$.req.body.password"
+						}
+					},
+					{
+						"id": "send-welcome",
+						"use": "email-send",
+						"type": "module",
+						"retry": { "maxAttempts": 3, "minTimeoutInMs": 500 },
+						"inputs": {
+							"template": "welcome",
+							"to": "$.state['create-account'].email",
+							"variables": {
+								"displayName": "$.req.body.displayName",
+								"verifyUrl": "$.env.APP_URL/verify/$.state['create-account'].verificationToken"
+							}
+						}
+					},
+					{
+						"id": "create-profile",
+						"use": "profile-create",
+						"type": "module",
+						"inputs": {
+							"userId": "$.state['create-account'].id",
+							"displayName": "$.req.body.displayName"
+						}
+					},
+					{
+						"id": "respond-201",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 201,
+							"body": {
+								"userId": "$.state['create-account'].id",
+								"email": "$.state['create-account'].email"
+							}
+						}
+					}
+				],
+				"catch": [
+					{
+						"id": "rollback-if-account-created",
+						"branch": {
+							"when": "$.state['create-account'] !== undefined",
+							"then": [
+								{
+									"id": "delete-account",
+									"use": "user-delete",
+									"type": "module",
+									"inputs": {
+										"userId": "$.state['create-account'].id",
+										"reason": "signup-saga-rollback"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "respond-failed",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 500,
+							"body": {
+								"error": "Signup failed",
+								"reason": "$.error.message",
+								"step": "$.error.name"
+							}
+						}
+					}
+				],
+				"finally": [
+					{
+						"id": "metric",
+						"use": "metrics-emit",
+						"type": "module",
+						"inputs": {
+							"event": "signup-attempt",
+							"outcome": "$.state['create-account'] && $.state['create-profile'] ? 'success' : 'failed'",
+							"emailDomain": "$.req.body.email.split('@')[1]"
+						}
+					}
+				]
+			}
+		}
+	]
+}

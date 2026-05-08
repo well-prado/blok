@@ -1,0 +1,81 @@
+{
+	"name": "Poll With Exponential Backoff",
+	"version": "1.0.0",
+	"description": "Polls an external service with exponentially growing wait between attempts: 1s, 2s, 4s, 8s, 16s. Stops when the response is ready OR after 5 attempts (~31s total). Demonstrates: loop with computed-from-state condition, dynamic wait duration via $.state expression (the wait primitive accepts $.state references for `for`), maxIterations as a hard safety cap mirroring the while condition.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/poll",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "init-attempt",
+			"use": "ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "attempt",
+				"value": 0
+			}
+		},
+		{
+			"id": "poll-with-backoff",
+			"loop": {
+				"while": "$.state.lastStatus !== 'ready' && $.state.attempt < 5",
+				"maxIterations": 5,
+				"do": [
+					{
+						"id": "compute-delay",
+						"use": "expr",
+						"type": "module",
+						"inputs": {
+							"expression": "`${Math.pow(2, $.state.attempt)}s`"
+						}
+					},
+					{
+						"id": "wait-backoff",
+						"wait": {
+							"for": "$.state['compute-delay']"
+						}
+					},
+					{
+						"id": "check",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"maxDuration": "5s",
+						"inputs": {
+							"url": "$.req.body.url",
+							"method": "GET"
+						}
+					},
+					{
+						"id": "advance",
+						"use": "ctx-publish-many",
+						"type": "module",
+						"inputs": {
+							"values": {
+								"lastStatus": "$.state.check.status",
+								"attempt": "$.state.attempt + 1"
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"ready": "$.state.lastStatus === 'ready'",
+					"attempts": "$.state.attempt",
+					"finalStatus": "$.state.lastStatus",
+					"data": "$.state.check"
+				}
+			}
+		}
+	]
+}
