@@ -1,0 +1,519 @@
+---
+title: "Post-v0.4 Roadmap"
+description: "Everything that's left on Blok after v0.4 — the v0.4.1 patch, v0.5 breaking changes, the open BACKLOG by tier, doc hygiene, infra investments, and the v1.0 path."
+icon: "map"
+---
+
+This page is the single forward-looking plan for Blok after the v0.4.0 release. It rolls up:
+
+- What's already on `main` but not yet on npm (the v0.4.1 patch)
+- Breaking changes accumulating for v0.5 (and when to ship them)
+- Open BACKLOG.md items, grouped and ranked by user demand
+- Documentation and code-hygiene drift to clean up
+- Infrastructure investments (CI, performance, security audit)
+- v1.0 considerations
+
+Companion docs:
+
+- [ROADMAP.md](https://github.com/deskree-inc/blok/blob/main/ROADMAP.md) — the multi-phase strategic vision (Phase 6 / gRPC just shipped; this page covers Phase 7+)
+- [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md) — the post-Tier-2 demand-driven backlog with file:line refs
+- [release-runbook](/c/devtools/release-runbook) — how to ship a patch or minor release
+- [v0.4 explicit-paths migration guide](/c/migration-guides/v0.4-explicit-paths)
+
+---
+
+## State of the world after v0.4.0
+
+What shipped, what's solid, what's known:
+
+| Area | State |
+|---|---|
+| **npm packages** | All 8 at `0.4.0` — `@blokjs/{shared,helper,runner,trigger-worker,api-call,if-else,react}`, `blokctl` |
+| **Tests** | 2023 unit (core/runner) + 90 (trigger-http) + 23 (AuthMiddleware) + 11 H3 integration (skipped without real broker) + 34/34 cross-runtime parity |
+| **Default transport** | gRPC for all non-NodeJS SDKs (Phase 6, shipped v0.3) |
+| **Routing** | Explicit `trigger.http.path` required (v0.4); `BLOK_ROUTING_LEGACY=1` escape hatch with deprecation warning |
+| **Reliability** | Tier 1 (idempotency + retry + replay) + Tier 2 (sub-workflows, concurrency, delay/TTL/debounce, wait.for, cancellation, crash recovery, janitor, observability, graceful shutdown) all shipped |
+| **Security primitives** | Scaffolded but unwired: OAuthOIDCProvider, RBAC, ABAC, AuditLogger, SecretManager, EncryptionAtRest, PIIDetector, TLSConfig. AuthMiddleware deprecated as of v0.4.1, removed in v0.5 |
+| **Studio** | UI bundled into `blokctl` tarball at `dist/studio-dist/`; backend (`/__blok/*`) auto-exposed by `@blokjs/runner` on every HTTP trigger |
+| **CI** | None — tests run via local pre-commit hook. CI bootstrap is a tracked v0.4.x infra investment |
+
+Test counts above sum to **~2150 tests** across the workspace, all green at HEAD.
+
+---
+
+## v0.4.1 patch — already on main, not yet on npm
+
+A single patch release captures everything merged on `main` after v0.4.0 was published. Five commits worth of user-visible content:
+
+| Commit | Surface | Why a patch (not a minor) |
+|---|---|---|
+| `c342ab8` `fix: defineNode flow nodes return empty arrays cleanly` | Bug fix in `defineNode.handle` so flow nodes (e.g. `branch({then:[],else:[]})`) don't crash with "Spread syntax requires iterable" | Real user-facing bug — the scaffold's `empty.ts` load-test stub hits it |
+| `b1f0b72` `chore(security): deprecate AuthMiddleware` | JSDoc `@deprecated` + once-per-process runtime warning + cookbook update | No API removal — backwards compatible. Users see the deprecation warning and can migrate to `jose` / `hono/jwt` before v0.5 |
+| `6a64f7a` `feat: WorkflowRegistry.setAuthorizeFn` | New API for multi-tenant sub-workflow access control | Default-allow preserves backwards compatibility — pure addition |
+| `59c4863` `feat: BLOK_NODE_ENV_ALLOW + ALLOW_PREFIX` | Operator-controlled `ctx.env` allowlist, hybrid default-allow | Default-allow preserves backwards compatibility — pure addition |
+| `ec7a281` `test: ship Tier H3 + H4 integration tests` | Test investments only | No runtime change |
+
+### v0.4.1 release plan
+
+1. **Pre-flight check** (~1 min)
+
+   ```bash
+   bun run release --dry-run --skip-build --skip-tests
+   ```
+
+   Will fail on lockstep version mismatch (everything is at `0.4.0` on disk; we need to bump to `0.4.1`).
+
+2. **Manual lockstep bump** (~5 min) — edit the 8 public `package.json` files from `0.4.0` to `0.4.1`. Cross-package dep ranges are already at `^0.4.0` which includes `0.4.1`, so no other range edits needed. Bump `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in [packages/cli/src/commands/create/project.ts](https://github.com/deskree-inc/blok/blob/main/packages/cli/src/commands/create/project.ts) — `BLOKJS_DEP_RANGE` stays `^0.4.0` (any 0.4.x is fine), but `GITHUB_REPO_RELEASE_TAG` becomes `v0.4.1`.
+
+3. **Tag** (~1 min)
+
+   ```bash
+   git tag -a v0.4.1 -m "0.4.1 — defineNode empty-array fix, AuthMiddleware deprecation, setAuthorizeFn, ctx.env allowlist"
+   ```
+
+4. **Local-pack validation** (~10 min) — see [release-runbook](/c/devtools/release-runbook#local-pack-validation).
+
+5. **Publish with batched OTP** (~1 min)
+
+   ```bash
+   bun run release --otp <code> --yes --skip-build --skip-tests
+   ```
+
+   `--skip-build/--skip-tests` is fine because pre-commit gated everything in main; rebuild is unnecessary if the workspace is clean.
+
+6. **Push tag**
+
+   ```bash
+   git push --tags
+   ```
+
+7. **Post-publish smoke test** — see [release-runbook · Post-publish smoke test](/c/devtools/release-runbook#post-publish-smoke-test). For v0.4.1 specifically, also test:
+   - `blokctl create project` clones the v0.4.1 tag (verify scaffolded `package.json` cross-deps at `^0.4.0` resolve to `0.4.1` from npm)
+   - The empty-arms branch in scaffolded `triggers/http/src/workflows/empty.ts` no longer crashes when hit (`curl http://localhost:4000/empty-helper`)
+   - Instantiating `AuthMiddleware` emits the deprecation warning to stderr
+
+### What's deliberately NOT in v0.4.1
+
+- **Removal of `BLOK_ROUTING_LEGACY` escape hatch** — that's a v0.5 breaking change. Grace period started 2026-05-07; conventional 1-2 months.
+- **Removal of AuthMiddleware** — v0.5. v0.4.1 only deprecates.
+- **Tier C/D/E/F/G feature work** — demand-driven, ships when a user pulls. Not bundled into the patch.
+
+**Estimated v0.4.1 ship effort: ~30 minutes end-to-end.** It's the single highest-leverage thing remaining for the framework right now.
+
+---
+
+## v0.5 — accumulated breaking changes
+
+v0.5 is a coordinated cleanup release that drops every escape hatch and deprecated surface accumulated through 0.4.x. The version bump signals "if you depended on a v0.3 or v0.4 transition flag, read this first."
+
+### Breaking changes shipped in v0.5
+
+#### 1. Drop `BLOK_ROUTING_LEGACY=1` escape hatch
+
+**Affected files:**
+- [triggers/http/src/runner/WorkflowRouter.ts](https://github.com/deskree-inc/blok/blob/main/triggers/http/src/runner/WorkflowRouter.ts) — remove the `legacyMode` branch, the `isLegacyRoutingEnabled()` helper, and the deprecation warning. Strict-mode becomes the only mode.
+- [triggers/http/__tests__/unit/WorkflowRouter.test.ts](https://github.com/deskree-inc/blok/blob/main/triggers/http/__tests__/unit/WorkflowRouter.test.ts) — remove the legacy-mode test cases.
+- [docs/c/migration-guides/v0.4-explicit-paths.mdx](https://github.com/deskree-inc/blok/blob/main/docs/c/migration-guides/v0.4-explicit-paths.mdx) — update the "v0.5 removal timeline" to "removed in this version."
+
+**Effort:** ~30 minutes mechanical work + docs + 1 changeset.
+
+**Pre-conditions:** ≥1 month after v0.4.0 published on npm (started 2026-05-07). Earliest reasonable v0.5: **2026-06-07**. More conservative: 2 months → **2026-07-07**.
+
+#### 2. Remove `AuthMiddleware`, `JWTAuthProvider`, `APIKeyAuthProvider`
+
+**Affected files:**
+- [core/runner/src/security/AuthMiddleware.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/AuthMiddleware.ts) — delete entire file.
+- [core/runner/src/security/index.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/index.ts) — drop the three classes + their config types from the barrel exports.
+- [core/runner/src/index.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/index.ts) — drop the same from the runner's top-level barrel.
+- [core/runner/src/__tests__/security/AuthMiddleware.test.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/__tests__/security/AuthMiddleware.test.ts) — delete (23 tests).
+- [docs/d/security/cookbook.mdx](https://github.com/deskree-inc/blok/blob/main/docs/d/security/cookbook.mdx) — drop the "AuthMiddleware is deprecated" section entirely; the recommended pattern (Pattern A workflow-level gate with `jose`/`hono/jwt`) stays as the canonical recipe.
+- [documentation/modules/security.md](https://github.com/deskree-inc/blok/blob/main/documentation/modules/security.md) — drop the AuthMiddleware section.
+- [documentation/structure/AI_INDEX.md](https://github.com/deskree-inc/blok/blob/main/documentation/structure/AI_INDEX.md) — drop the AuthMiddleware row.
+- [documentation/structure/SITE_MAP.md](https://github.com/deskree-inc/blok/blob/main/documentation/structure/SITE_MAP.md) — drop the AuthMiddleware row (item 47).
+
+Note: the rest of `core/runner/src/security/` (OAuthOIDCProvider, RBAC, ABAC, AuditLogger, SecretManager, EncryptionAtRest, PIIDetector, TLSConfig) **stays**. Those are production-grade composable primitives — only AuthMiddleware was deprecated as example-grade.
+
+**Effort:** ~30 minutes mechanical removal + docs + 1 changeset.
+
+**Pre-conditions:** v0.4.1 has been on npm long enough that any user importing AuthMiddleware has seen the deprecation warning. Same window as the routing legacy drop.
+
+#### 3. Drop legacy `set_var` field (candidate, not committed)
+
+**Status:** Open question for v0.5.
+
+The v2 step shape default-stores every step's output to `ctx.state[id]`. The legacy `set_var: false` is normalized to `ephemeral: true` at workflow load. Since v2 was the default surface in v0.3, anyone writing new workflows already uses `ephemeral: true`. The `set_var` shim costs nothing at runtime (load-time normalization only).
+
+**Decision criteria for v0.5:**
+
+- **If** there are still v1 JSON workflows actively maintained by the community, keep the shim through v0.5.
+- **If** the v1 surface is effectively dead (no GitHub issues, no npm telemetry showing legacy-shape workflows), drop in v0.5.
+
+**Recommendation:** keep through v0.5, drop in v1.0. The runtime cost is zero; the migration burden of forcing `set_var` removal on top of routing-legacy removal is high.
+
+#### 4. Drop legacy `name`/`node` v1 step shape (candidate, not committed)
+
+**Status:** Open question. Same rationale as `set_var`. The `WorkflowNormalizer` accepts both shapes; cost is load-time only.
+
+**Recommendation:** keep through v0.5, revisit at v1.0.
+
+### v0.5 release plan
+
+Same flow as v0.4.1 but with a minor bump:
+
+1. Pre-flight + manual lockstep bump to `0.5.0` across all 8 packages.
+2. Bump `BLOKJS_DEP_RANGE` → `^0.5.0` (this WILL break v0.4.x scaffolds — that's the point of a minor bump).
+3. Bump `GITHUB_REPO_RELEASE_TAG` → `v0.5.0`.
+4. Update cross-package dep ranges across the monorepo from `^0.4.0` → `^0.5.0` (the `bun run release` pre-flight will catch any miss).
+5. Run the v0.5 cleanup commits (drop routing legacy + remove AuthMiddleware).
+6. Tag, validate, publish.
+7. Update the `v0.4 explicit-paths migration guide` to reflect "removed in v0.5."
+
+**Estimated v0.5 ship effort: ~1-2 hours including breaking changes + ~half day of coordinated migration-guide and cookbook updates.**
+
+---
+
+## Open BACKLOG.md items, by tier
+
+Status as of 2026-05-07 — every item below is **open**, demand-driven, with file:line refs in [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md). All Tier A bugs, all H3+H4 integration tests, all I1+I2 docs are SHIPPED.
+
+### Tier C — Cross-process scaling (4 items, ~7-10 days total)
+
+These add cross-process coordination to existing single-process primitives. None block production single-process deployments; they unlock horizontal scaling.
+
+#### C1 · Cross-process debounce keys (NATS KV / Redis)
+
+**Effort:** ~1-2 days.
+**Why now or later:** Currently `DebounceCoordinator` is in-process. Two pods handling the same `(workflow, debounceKey)` won't coalesce — both fire. Affects multi-pod deployments using `debounce: { trailing }` for autosave-style endpoints.
+
+**Sketch:** mirror `NatsKvConcurrencyBackend`'s OCC pattern. One JSON document per `(workflow, debounceKey)` holding `{firstPingAt, lastPingAt, pingCount, activeRunId, scheduledAt, mode, delayMs, maxDelayMs}`. CAS-update on each ping. Active process owns the timer; coalesce losers update the doc and ACK.
+
+**Trade-off:** cross-process debounce coordination via NATS KV adds a network round-trip per ping. For high-throughput debounce (autosave at 100Hz per doc), this can be the bottleneck. Document the latency and offer a per-key-fanout escape hatch.
+
+**Reference:** [BACKLOG.md C1](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c1--cross-process-debounce-keys-nats-kv--redis), [core/runner/src/scheduling/DebounceCoordinator.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DebounceCoordinator.ts)
+
+#### C2 · Cross-process scheduler coordination
+
+**Effort:** ~2-3 days.
+**Why now or later:** With separate sqlite files per process (typical setup), each process owns its own dispatches — no double-fire. With PG-backed deployments sharing one DB, two processes both running `recoverDispatches()` could double-fire the same row.
+
+**Sketch:** add `claimed_by` + `claimed_at` columns to the `scheduled_dispatches` table (PG migration v10). On boot, only claim rows that are unclaimed OR claimed by a stale process (lease expired). Heartbeat the claim while the timer is registered.
+
+**Reference:** [BACKLOG.md C2](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c2--cross-process-scheduler-coordination), [core/runner/src/tracing/PostgresRunStore.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/PostgresRunStore.ts)
+
+#### C3 · Per-lease key model for high-cardinality NATS KV buckets
+
+**Effort:** ~1-2 days.
+**Why now or later:** Today's NATS KV uses one document per `(workflow, key)` bucket holding all leases. With >50 active leases per bucket, the JSON doc grows + CAS contention escalates. Per-lease keys would distribute contention.
+
+**Recommendation:** wait for a real workload. Document the 1–50 leases assumption prominently in [`docs/d/reliability/concurrency-keys.mdx`](https://github.com/deskree-inc/blok/blob/main/docs/d/reliability/concurrency-keys.mdx) until then. The H3 integration tests we just shipped exercise the document model under contention; they'll surface the limit.
+
+**Reference:** [BACKLOG.md C3](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c3--per-lease-key-model-for-high-cardinality-nats-kv-buckets)
+
+#### C4 · Redis backend (alternative to NATS KV)
+
+**Effort:** ~1-2 days (architecture mirrors NATS KV).
+**Why now or later:** Some operators run Redis but not NATS. Redis Lua scripts allow single-round-trip atomic acquire (no OCC retries needed) — actually simpler than NATS KV.
+
+**Sketch:** mirror `NatsKvConcurrencyBackend`'s structure with a `RedisConcurrencyBackend` class. Env: `BLOK_CONCURRENCY_BACKEND=redis`, `BLOK_CONCURRENCY_REDIS_URL`. Uses ioredis or node-redis. Atomic acquire via Lua script — single round-trip instead of OCC retry loop.
+
+**Reference:** [BACKLOG.md C4](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c4--redis-backend-alternative-to-nats-kv)
+
+### Tier D — Observability (1 open, ~30 minutes)
+
+Most Tier D items shipped in commit `e21f0e7`. One opt-in remains.
+
+#### D6 · Per-bucket OTel labels on concurrency metrics
+
+**Effort:** ~30 minutes (high-cardinality risk → opt-in).
+**Why now or later:** Today's counters are workflow-tagged. Per-tenant troubleshooting needs `concurrency_key` tag too. Risk: high-cardinality (per-tenant) labels blow up Prometheus storage.
+
+**Sketch:** add behind `BLOK_METRICS_PER_KEY=1` opt-in. When set, [`ConcurrencyMetrics`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/monitoring/ConcurrencyMetrics.ts) adds the `concurrency_key` attribute to acquired/denied/released counters.
+
+**Reference:** [BACKLOG.md D6](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#d6--per-bucket-otel-labels-on-concurrency-metrics)
+
+### Tier E — Studio polish (3 items, ~5-7 days total)
+
+#### E1 · "Scheduled runs" dedicated view
+
+**Effort:** ~half day. Mirror the existing All Runs page; filter `status IN (delayed, queued, debounced)`; sort by `scheduledAt`.
+
+#### E2 · Saved filters server-side
+
+**Effort:** ~1 day. Move localStorage-only filter presets to the `dashboards` sqlite table (or a new `saved_filters` table). New endpoints: `POST/GET/DELETE /__blok/saved-filters`.
+
+#### E4 · Visual workflow graph
+
+**Effort:** ~3-5 days. React Flow renders parent + child relationships as a graph (n8n-style). The Sub-runs strip is the current drill-down; this is a visualisation upgrade.
+
+**Reference:** [BACKLOG.md E1, E2, E4](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#tier-e--studio-polish), [apps/studio/](https://github.com/deskree-inc/blok/tree/main/apps/studio)
+
+### Tier F — Filters (2 items, ~2 days total)
+
+#### F1 · Indexed metadata filters
+
+**Effort:** ~1 day. Today, metadata filter uses sequential scan via `json_extract`. At 100K+ rows, query time grows linearly. Promote scalar fields to dedicated indexed columns via `BLOK_INDEXED_METADATA_KEYS=tier,region`.
+
+#### F2 · Filter operators beyond `=`
+
+**Effort:** ~1 day. Extend the query parser. Grammar: `metadata.tier!=free`, `metadata.count>10`, `metadata.region IN (us, eu)`. Translate to `json_extract` SQL operators.
+
+**Reference:** [BACKLOG.md F1, F2](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#tier-f--filters)
+
+### Tier G — Sub-workflow polish (2 items, ~4-5 days total)
+
+G1 (cancellation cascade) shipped in `a67d992`. Two open:
+
+#### G2 · Cross-process sub-workflow dispatch
+
+**Effort:** ~3-4 days. Today's sub-workflow dispatch is in-process (`setImmediate` for async, await for sync). Add `dispatch: "in-process" | "http-self"` field on the sub-workflow step. `http-self` does an HTTP self-call to the registered workflow's URL, lifting child execution to the trigger layer.
+
+#### G3 · Polymorphic workflow names
+
+**Effort:** ~1 day. Today `subworkflow: "X"` is static. `subworkflow: $.req.body.kind` would allow dynamic dispatch. Trade-off: workflow name resolution becomes a runtime concern (typos surface late). Add behind a strict flag with required allowlist: `workflowName: { kind: "expression", value: "$.req.body.kind", allowList: [...] }`.
+
+**Reference:** [BACKLOG.md G2, G3](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#tier-g--sub-workflow-polish)
+
+### Tier I — Documentation (1 open, ~half day)
+
+I1 + I2 shipped (root + runner CLAUDE.md + reliability docs).
+
+#### I3 · v1 → v2 + reliability primitives migration guide
+
+**Effort:** ~half day.
+**Why now or later:** A single guide covering the v2 step shape, `idempotencyKey`, `retry`, `maxDuration`, `concurrencyKey`, `delay`/`ttl`/`debounce`, sub-workflows, `wait.for`. Each section a 5-minute migration recipe. New page: `docs/c/migration-guides/v1-to-v2-reliability.mdx`.
+
+**Reference:** [BACKLOG.md I3](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#i3--migration-guides-for-v1--v2--reliability-primitives)
+
+---
+
+## Documentation and code-hygiene drift
+
+Surface that needs cleaning, not feature work. Most are 5-15 minute fixes.
+
+### Empty placeholder docs
+
+Two MDX files exist as 0-byte placeholders, leaving blank pages in the rendered Mintlify site:
+
+- [docs/c/devtools/index.mdx](https://github.com/deskree-inc/blok/blob/main/docs/c/devtools/index.mdx) — should be a DevTools landing page summarising the release runbook + this roadmap + future devtools content.
+- [docs/c/migration-guides/index.mdx](https://github.com/deskree-inc/blok/blob/main/docs/c/migration-guides/index.mdx) — should be a Migration Guides landing page linking the v0.4 explicit-paths guide and the planned v1→v2 reliability guide.
+
+**Effort:** ~30 minutes for both.
+
+### Stale internal-tracking docs in `documentation/`
+
+The `documentation/` folder (lowercase, separate from public Mintlify `docs/`) contains internal-tracking files that drift independently:
+
+- [documentation/structure/AI_INDEX.md:114](https://github.com/deskree-inc/blok/blob/main/documentation/structure/AI_INDEX.md#L114) — lists `Auth Middleware (JWT/API key)` as a maintained module. Now deprecated.
+- [documentation/structure/SITE_MAP.md:95](https://github.com/deskree-inc/blok/blob/main/documentation/structure/SITE_MAP.md#L95) — lists Auth Middleware page item 47 with a planned URL. Will be removed in v0.5.
+- [documentation/modules/security.md:15](https://github.com/deskree-inc/blok/blob/main/documentation/modules/security.md#L15) — describes AuthMiddleware as a 417-line shipped module without the deprecation context.
+- [documentation/modules/core-runner.md:97](https://github.com/deskree-inc/blok/blob/main/documentation/modules/core-runner.md#L97) — same.
+- [documentation/DOCS_PROGRESS.md](https://github.com/deskree-inc/blok/blob/main/documentation/DOCS_PROGRESS.md) — lists AuthMiddleware as ✅ shipped without deprecation context.
+- [documentation/DOCS_ROADMAP.md:338](https://github.com/deskree-inc/blok/blob/main/documentation/DOCS_ROADMAP.md#L338) — Phase 4.2 Auth Middleware doc page tracked as P1, not yet written. Should be removed (v0.5 deprecation supersedes).
+
+**Recommendation:** sweep all six files in one commit when v0.5 ships (drops the AuthMiddleware code and the docs together). For v0.4.1 the runtime warning + JSDoc deprecation is sufficient.
+
+**Bigger question:** should `documentation/` exist at all? It's an internal-tracking parallel to `docs/`. The duplication has caused drift (the public `docs/d/security/cookbook.mdx` was kept current but the internal `documentation/modules/security.md` was not). Two viable consolidations:
+
+1. **Delete `documentation/`** — move whatever's not duplicated into `docs/c/` (For Contributors) or into agent-private `.claude/plans/`. Single source of truth.
+2. **Keep `documentation/` as agent-private** — move it to `.claude/docs/` or similar, off the published surface.
+
+Either is ~half day of carefully-staged work. **Recommendation:** decide before v0.5 to avoid shipping more drift.
+
+### `sdks/CLAUDE.md` describes the HTTP contract; gRPC is now default
+
+[sdks/CLAUDE.md](https://github.com/deskree-inc/blok/blob/main/sdks/CLAUDE.md) opens with "All SDKs implement the same HTTP contract. The runner communicates with them via `HttpRuntimeAdapter`." Phase 6 made gRPC the default, with HTTP as opt-in via `RUNTIME_TRANSPORT=http` (deprecated, removed in v0.4.0 per the file-level comment in [`core/runner/src/adapters/HttpRuntimeAdapter.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/adapters/HttpRuntimeAdapter.ts)).
+
+The doc needs updating to (a) describe gRPC as the primary transport, (b) keep HTTP as legacy reference for SDK contributors, (c) link to the proto file.
+
+**Effort:** ~30 minutes.
+
+### `docs/d/operations/env-vars.mdx` claims sqlite default for `BLOK_TRACE_STORE`
+
+The env-vars page at line 24 says:
+
+```
+| BLOK_TRACE_STORE | sqlite | Run store backend: sqlite, inmemory, or postgres. |
+```
+
+But [core/runner/src/tracing/createStore.ts:38](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/createStore.ts#L38) reads:
+
+```ts
+const type = opts?.type || (process.env.BLOK_TRACE_STORE as StoreType) || "memory";
+```
+
+So when no env var is set, the default is **memory**, not **sqlite**. The doc is wrong, OR the code default should change to sqlite (which is what most users probably expect for production).
+
+**Recommendation:** decide which is correct, then align. For production durability, `sqlite` is the better default; for tests, `memory` is right. A pragmatic fix: keep `memory` for `NODE_ENV=test`, default to `sqlite` otherwise.
+
+**Effort:** ~1 hour (decision + code change + doc fix + test).
+
+### Pre-existing TypeScript hint at AuthMiddleware.ts:411
+
+```
+'key' is declared but its value is never read.
+```
+
+Pre-existing — not introduced by the v0.4.1 deprecation. Will be resolved when AuthMiddleware is removed in v0.5. No action needed before then.
+
+### `BACKLOG.md` body still has present-tense engineering descriptions for SHIPPED items
+
+Most of `BACKLOG.md` was cleaned up via the SHIPPED markers added in the v0.4 → v0.4.1 commits (commits `aeb2816`, `c342ab8`, `ec7a281`). A pass through every Tier A/B/D/E/G/H/I item now shows the correct SHIPPED status at the top of each subsection. The engineering descriptions are preserved as historical context.
+
+**No drift remaining.** This was largely cleaned up during the v0.4.1 work session.
+
+---
+
+## Infrastructure investments
+
+Tracked but not blocking. Each is a multi-day project; pick when capacity is available.
+
+### CI/CD bootstrap
+
+**Status:** None. `.github/workflows/` does not exist.
+
+**Why it matters:**
+
+- Today's gate is the local `pre-commit` hook running `biome check` + `nx run-many -t test` (~3.5 seconds for the runner suite, longer for the full nx run). Catches most regressions, but only on the developer's machine.
+- A passing pre-commit on macOS doesn't guarantee the same on Linux (the multi-language SDKs ship Docker containers; cross-platform issues sneak through).
+- Per-PR test runs would catch what local pre-commits miss, especially for changes that touch the SDK side.
+- The release-pipeline-hardening recommendation in the [release-runbook](/c/devtools/release-runbook) — option (1) "changesets bot in CI" — depends on CI existing.
+
+**Why not yet:**
+
+- Bootstrapping CI on a multi-runtime monorepo (Node + Go + Rust + Java + C# + PHP + Ruby + Python + NATS + sqlite + Postgres + Redis) is non-trivial. Each SDK needs a job; cross-runtime parity tests need orchestration; the build matrix is real.
+- Currently no contributor PRs to gate against. As long as commits flow through one developer with a working local environment, CI is a quality investment, not a correctness gate.
+
+**Recommendation:** stage in three increments:
+
+1. **Lightweight `pre-commit` mirror** (~half day) — single GitHub Action that runs on PRs to `main`: `bun install && bunx biome check && bunx nx run-many -t test`. No SDK matrix. Catches ~80% of regressions.
+2. **SDK matrix** (~1-2 days) — one job per SDK with the appropriate toolchain (`actions/setup-go@v5`, `actions/setup-java@v4`, etc.). Run that SDK's parity tests. Slow but parallel.
+3. **Release automation** (~half day) — wire the existing `bun run release` script into a release-tag-triggered workflow.
+
+### Performance benchmarking harness
+
+**Status:** [core/runner/src/__tests__/tier2-followups/Tier2Benchmarks.test.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/__tests__/tier2-followups/Tier2Benchmarks.test.ts) exists and runs as part of the unit suite (~3 seconds). Single-snapshot benchmarks; no historical regression detection.
+
+**What's missing:**
+
+- A bench harness that runs benchmarks separately from unit tests (so unit suites stay fast).
+- Persistent storage of benchmark results (sqlite or JSON over git history).
+- A regression detection step that fails CI when a benchmark drops by >X%.
+
+**Effort:** ~2-3 days for a real harness; ~1 day for a stub that just stores baselines.
+
+**Priority:** lower than CI bootstrap, but the existing benchmarks are good seeds.
+
+### Security audit
+
+**Status:** Threat model documented at [docs/d/security/threat-model.mdx](https://github.com/deskree-inc/blok/blob/main/docs/d/security/threat-model.mdx); cookbook at [docs/d/security/cookbook.mdx](https://github.com/deskree-inc/blok/blob/main/docs/d/security/cookbook.mdx). FW-1 through FW-10 framework hardenings shipped (commit `bf131eb`). FW-9 (env allowlist) shipped (commit `59c4863`). Self-audit, no external review.
+
+**Recommendation:** schedule formal external audit before v1.0. Pre-1.0 self-audit is acceptable; v1.0 with a "production-ready" claim should have third-party signoff. Engage a firm with Node.js + workflow-orchestrator experience.
+
+**Effort:** ~$15-30K for a 2-week external review covering supply chain (dependencies), node trust model, sub-workflow boundaries, env-var leakage, NATS KV multi-tenancy, the Studio API. Output: a CVSS-scored finding report + remediation plan.
+
+**Timing:** schedule for the v1.0 release window (12-24 months out per ROADMAP.md).
+
+---
+
+## v1.0 considerations
+
+Far-term — this is a horizon section, not a near-term plan.
+
+### What v1.0 means for Blok
+
+The pre-1.0 era:
+
+- Lockstep major bumps across 8 packages.
+- Breaking changes in minor releases (0.4 → 0.5).
+- "It works on the developer's laptop" is the stability commitment.
+
+v1.0 inverts those:
+
+- Independent semver per package (so `@blokjs/runner@1.5.0` doesn't force `@blokjs/helper` to bump).
+- Breaking changes only in major releases.
+- Stability commitment backed by API freeze + deprecation cycles.
+- LTS support window declared.
+
+### Blockers between 0.5 and 1.0
+
+Roughly in priority order:
+
+| Blocker | Effort | Notes |
+|---|---|---|
+| Independent semver migration | ~1 week | Migrate from lockstep to per-package versions; update changesets config; update release runbook |
+| All 7 SDKs at parity | varies | Currently the gRPC contract is shared but feature parity (e.g., wait.for, sub-workflows, idempotency cache writes) needs per-SDK validation |
+| Cross-runtime test matrix in CI | ~1 week | The 34/34 parity tests run locally; need to run on every PR |
+| Production deployment patterns | ~1-2 weeks | Documented Kubernetes deployment, AWS Lambda, Vercel, Fly.io, Render. Each with operator guidance |
+| Formal security audit | ~3-4 weeks lead time | External review (see above) |
+| Migration guide v0.x → v1.0 | ~half day | Single page documenting the breaking surface |
+| Stable npm dist-tag strategy | ~1 hour | `latest`, `next`, `lts` semantics |
+
+**Total:** ~6-8 weeks of focused work plus calendar time for the audit. A reasonable v1.0 target is **Q4 2026 or Q1 2027** if v0.5 ships in summer 2026.
+
+### What v1.0 explicitly will NOT include
+
+- CRIU process-snapshot checkpointing (covered by composable building blocks via `wait.for`).
+- Step-level concurrency keys (different invariant set; deferred to a later major).
+- Long delays >24h via internal scheduler (recommend cron + external scheduler).
+- Debounce `mode: "throttle"` (different from coalesce; deferred unless user pulls).
+
+These are tracked as "out of scope" in [BACKLOG.md Tier J](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#tier-j--out-of-scope-deliberately).
+
+---
+
+## Recommended order
+
+Given the goals "ship reliably + unblock production users":
+
+1. **v0.4.1 patch** (~30 min) — push the 5 stacked commits to npm. Gives users the empty-arms branch fix, the AuthMiddleware deprecation warning, the setAuthorizeFn API, and the env allowlist. Highest leverage per minute spent. **Use the new `bun run release` script.**
+
+2. **Doc hygiene pass** (~1 day) — fill the empty `index.mdx` files; fix the env-vars store-default drift; write `c/migration-guides/v1-to-v2-reliability.mdx` (Tier I3); decide on `documentation/` vs `docs/` consolidation. Low effort, high signal-to-noise.
+
+3. **CI bootstrap (lightweight)** (~half day) — single GitHub Action mirroring pre-commit on every PR. Doesn't need SDK matrix. Lays groundwork for release automation.
+
+4. **v0.5 release** (~6-8 weeks after v0.4.1 published) — drop `BLOK_ROUTING_LEGACY` + remove AuthMiddleware. Coordinated breaking-change release with migration guide updates.
+
+5. **Demand-driven Tier C/D/E/F/G work** — pull when a user reports they need it. Don't speculate.
+
+6. **CI matrix expansion** + **performance harness** — when contributor velocity makes it worthwhile.
+
+7. **v1.0 lead-up** — security audit + cross-runtime CI matrix + production patterns. Calendar-dominated, not effort-dominated.
+
+This is the playbook. Each step's effort fits a single working session; cumulative timeline spans ~6 months from v0.4.1 to v1.0 if the demand-driven work is balanced with the planned releases.
+
+---
+
+## Quick-reference table
+
+Single-screen view of everything still open:
+
+| ID | Description | Effort | Blocked on |
+|---|---|---|---|
+| **v0.4.1** | Push stacked commits to npm | 30m | Manual lockstep bump |
+| **Hygiene** | Fill empty MDX, fix store-default, decide on `documentation/` | 1d | — |
+| **I3** | v1→v2 reliability migration guide | half day | — |
+| **CI-1** | Lightweight GitHub Action (pre-commit mirror) | half day | — |
+| **v0.5** | Drop routing-legacy + remove AuthMiddleware | 1-2h | 1-2 month grace period |
+| **C1** | Cross-process debounce keys | 1-2d | User pull |
+| **C2** | Cross-process scheduler coordination | 2-3d | User pull (PG-only) |
+| **C3** | Per-lease NATS KV keys | 1-2d | User pull (>50 leases per bucket) |
+| **C4** | Redis concurrency backend | 1-2d | User pull (Redis-only deployment) |
+| **D6** | Per-bucket OTel labels | 30m | User pull |
+| **E1** | Scheduled runs Studio view | half day | User pull |
+| **E2** | Saved filters server-side | 1d | User pull |
+| **E4** | Visual workflow graph (React Flow) | 3-5d | User pull |
+| **F1** | Indexed metadata filters | 1d | User pull |
+| **F2** | Filter operators beyond `=` | 1d | User pull |
+| **G2** | Cross-process sub-workflow dispatch | 3-4d | User pull |
+| **G3** | Polymorphic workflow names | 1d | User pull |
+| **CI-2** | SDK matrix in CI | 1-2d | CI-1 done |
+| **Bench** | Performance benchmark harness | 2-3d | CI-1 done |
+| **Audit** | External security audit | 3-4w | v1.0 lead-up |
+
+Total demand-driven work: ~3-4 weeks if shipped sequentially. Each is independent and can be parallelized.
+
+---
+
+## Where to keep this current
+
+This page is a living document. Update it whenever a backlog item ships or a new blocker emerges. The companion file [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md) tracks per-item file:line refs and recommended fix sketches; this page is the strategic rollup.
