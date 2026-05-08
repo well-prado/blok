@@ -202,6 +202,7 @@ Caller (`acquireSlot` / `releaseSlot`) checks for `"fetch-failed"` and short-cir
 
 ### B1 · `wait.for(duration)` and `wait.until(date)` step primitive
 
+**Status**: SHIPPED in commit `20d3be1`.
 **Severity**: FEATURE (not a bug — currently composable via sub-workflows).
 **Effort**: ~2-3 days end-to-end.
 **Why now**: the original ROADMAP wrote this off as "needs CRIU." After Tier 2 follow-ups, every load-bearing primitive exists: durable scheduler, re-entry, idempotency caching as checkpoint, persisted step outputs, cooperative cancellation. Just need to expose the step shape.
@@ -248,6 +249,7 @@ Caller (`acquireSlot` / `releaseSlot`) checks for `"fetch-failed"` and short-cir
 
 ### B2 · `concurrencyQueueTimeoutMs` (TTL on queued runs)
 
+**Status**: SHIPPED in commit `a67d992`.
 **Severity**: FEATURE.
 **Effort**: ~1 day.
 **Why**: today, `onLimit: "queue"` retries indefinitely (lease-bounded only). Operator who wants "give up after 30 min" has no surface.
@@ -273,6 +275,7 @@ trigger: {
 
 ### B3 · Capped exponential backoff for `onLimit: "queue"`
 
+**Status**: SHIPPED in commit `a67d992`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~half day.
 **Why**: when a slot frees, every queued run on the bucket wakes on the next 1s tick → thundering herd. Backoff with jitter spreads the wakeups.
@@ -334,6 +337,7 @@ Mirror `NatsKvConcurrencyBackend`'s structure with a `RedisConcurrencyBackend` c
 
 ### D1 · Backend connect-failure metric
 
+**Status**: SHIPPED in commit `e21f0e7`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~30 minutes.
 **Why**: today, NATS KV connect failure logs + falls back to in-process silently. Operators who misconfigure the backend won't notice the gate is silently in-process.
@@ -344,6 +348,7 @@ Add a counter `blok_concurrency_backend_install_total{status="success" | "failur
 
 ### D2 · OCC retry depth histogram
 
+**Status**: SHIPPED in commit `e21f0e7`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~30 minutes.
 **Why**: 95% fail-close rate at 200-way contention is invisible without a metric. See [LOAD-TESTS.md §2](LOAD-TESTS.md#2-nats-kv--occ-retry-distribution-at-higher-contention-200-limit10).
@@ -354,6 +359,7 @@ Add `blok_concurrency_occ_retries{outcome="success" | "fail-closed"}` histogram.
 
 ### D3 · Janitor sweep duration metric
 
+**Status**: SHIPPED in commit `e21f0e7`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~30 minutes.
 **Why**: operators tuning `BLOK_JANITOR_INTERVAL_MS` need to know how long sweeps actually take.
@@ -372,6 +378,7 @@ Histogram `blok_janitor_sweep_duration_ms{table}` for each of the three tables. 
 
 ### D5 · Backend `disconnect()` deadline on shutdown
 
+**Status**: SHIPPED in commit `e21f0e7`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~30 minutes.
 **Where**: [`TriggerBase.ts:253-260`](core/runner/src/TriggerBase.ts#L253-L260).
@@ -415,6 +422,7 @@ Move to server: new endpoint `POST /__blok/saved-filters`, `GET /__blok/saved-fi
 
 ### E3 · Sub-workflow async indicator nesting
 
+**Status**: SHIPPED in commit `a67d992`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~1 hour.
 **Why**: today the `↳ async` badge shows on the immediate sub-workflow step. Nested fire-and-forget (parent fires-and-forgets child that fires-and-forgets grandchild) doesn't surface the depth.
@@ -459,6 +467,7 @@ Alternative: SQLite virtual columns + index expressions. Less invasive.
 
 ### G1 · Cancellation cascade to fire-and-forget children
 
+**Status**: SHIPPED in commit `a67d992`.
 **Severity**: NICE-TO-HAVE.
 **Effort**: ~half day.
 **Why**: today, cancelling a parent run does NOT propagate to async (`wait: false`) children — the parent step has already returned by the time the child runs.

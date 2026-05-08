@@ -704,4 +704,83 @@ describe("defineNode", () => {
 			expect(result).toHaveProperty("error");
 		});
 	});
+
+	describe("Flow Nodes (definition.flow === true)", () => {
+		it("returns the sub-step array directly when flow:true with non-empty result", async () => {
+			const child = defineNode({
+				name: "child",
+				description: "child step",
+				input: z.object({}),
+				output: z.object({ ok: z.boolean() }),
+				async execute() {
+					return { ok: true };
+				},
+			});
+
+			const flowNode = defineNode({
+				name: "router",
+				description: "flow router",
+				flow: true,
+				input: z.array(z.unknown()),
+				output: z.array(z.unknown()),
+				async execute() {
+					return [child] as unknown as { ok: boolean }[];
+				},
+			});
+
+			const ctx = createTestContext();
+			const result = await flowNode.handle(ctx, []);
+			expect(Array.isArray(result)).toBe(true);
+			expect((result as unknown[]).length).toBe(1);
+			expect("success" in (result as object)).toBe(false);
+		});
+
+		it("returns an empty array directly when flow:true (regression: empty branch arms)", async () => {
+			// Reproduces the scaffold's empty.ts load-test stub:
+			// branch({ when: ..., then: [], else: [] }) — both arms empty.
+			// Pre-fix, defineNode wrapped [] as a BlokResponse, which the
+			// runner's flow path then tried to spread → "Spread syntax requires
+			// iterable" at RunnerSteps.ts.
+			const flowNode = defineNode({
+				name: "empty-router",
+				description: "flow router with empty arms",
+				flow: true,
+				input: z.array(z.unknown()),
+				output: z.array(z.unknown()),
+				async execute() {
+					return [] as unknown[];
+				},
+			});
+
+			const ctx = createTestContext();
+			const result = await flowNode.handle(ctx, []);
+			expect(Array.isArray(result)).toBe(true);
+			expect((result as unknown[]).length).toBe(0);
+			expect("success" in (result as object)).toBe(false);
+			expect("data" in (result as object)).toBe(false);
+		});
+
+		it("flow node returning a non-array fails the run with a clear error", async () => {
+			const flowNode = defineNode({
+				name: "bad-flow",
+				description: "flow node returning non-array",
+				flow: true,
+				input: z.array(z.unknown()),
+				output: z.unknown(),
+				async execute() {
+					return "not an array" as unknown as never[];
+				},
+			});
+
+			const ctx = createTestContext();
+			const result = await flowNode.handle(ctx, []);
+			// Throws inside handle() → caught and routed through
+			// mapErrorToGlobalError; surfaces as success:false response.
+			expect(Array.isArray(result)).toBe(false);
+			const wrapped = result as { success?: boolean; error?: { message?: string } };
+			expect(wrapped.success).toBe(false);
+			expect(wrapped.error?.message).toContain('Flow node "bad-flow"');
+			expect(wrapped.error?.message).toContain("must return an array");
+		});
+	});
 });
