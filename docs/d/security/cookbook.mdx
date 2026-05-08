@@ -197,15 +197,25 @@ export default workflow({
 One auth implementation. One place to update when the credential
 strategy changes. Apply it to whichever workflows need it.
 
-### Don't lean on `core/runner/src/security/AuthMiddleware.ts`
+### `AuthMiddleware` is deprecated — use a hardened library
 
 A scaffolded `AuthMiddleware` class lives in the runner package
 ([source](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/AuthMiddleware.ts)).
-It is not currently wired into any trigger and ships as
-example-grade code with known gaps (algorithm confusion, comparison
-timing). Treat it as a reference for shape — write your own
-equivalent against a hardened library (`jose`, `node-jsonwebtoken`,
-`hono/jwt`) rather than instantiating that class directly.
+**It is deprecated as of v0.4.1 and will be removed in v0.5.** It is
+not wired into any trigger, ships as example-grade code (HS256-only
+JWT verification, no JWKS, no key rotation, non-constant-time API-key
+lookup), and is not a maintained part of the framework's auth
+surface.
+
+Instantiating `AuthMiddleware`, `JWTAuthProvider`, or
+`APIKeyAuthProvider` emits a once-per-process deprecation warning.
+Suppress with `BLOK_SUPPRESS_AUTHMIDDLEWARE_WARNING=1` if you've
+intentionally pinned to v0.4.x and don't want the noise.
+
+Use the workflow-level gate pattern above (Pattern A) with a hardened
+library (`jose`, `hono/jwt`, `node-jsonwebtoken`) at the verification
+step. That keeps auth in your authored workflow code where it can
+evolve independently of the framework.
 
 ## Add RBAC to workflow steps
 
