@@ -58,7 +58,11 @@ export class ForEachNode extends RunnerNode {
 		const runIteration = async (item: unknown, index: number): Promise<unknown> => {
 			const childCtx = this.cloneCtxForIteration(ctx, as, item, index);
 			const runner = new Runner(steps);
-			await runner.run(childCtx);
+			// `deep: true` — inner pipelines must not inherit the outer
+			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume logic)
+			// or every iteration's nested steps get marked "skipped (resumed
+			// past wait...)" and the iteration produces no output.
+			await runner.run(childCtx, { deep: true, stepName: this.name });
 			// After Runner.runSteps, `childCtx.response` is set to the last
 			// step's resolved data (RunnerSteps line ~349: `ctx.response =
 			// model.data`). So `childCtx.response` IS the iteration's

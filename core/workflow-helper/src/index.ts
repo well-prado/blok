@@ -8,6 +8,7 @@ import { type BranchOpts, branch } from "./components/branch";
 import { type ForEachOpts, forEach } from "./components/forEach";
 import { type LoopOpts, loop } from "./components/loop";
 import { type SwitchCase, type SwitchOpts, switchOn } from "./components/switchOn";
+import { type TryCatchOpts, tryCatch } from "./components/tryCatch";
 import { type WorkflowV2Builder, type WorkflowOpts as WorkflowV2Opts, workflow } from "./components/workflowV2";
 import { $, type DollarProxy, type ExprPath, JS_EXPR_TAG, unwrapProxies } from "./proxy/$";
 import {
@@ -33,6 +34,8 @@ import {
 	V2SubworkflowStepSchema,
 	V2SwitchStep,
 	V2SwitchStepSchema,
+	V2TryCatchStep,
+	V2TryCatchStepSchema,
 	V2WaitStep,
 	V2WaitStepSchema,
 	isBranchStep,
@@ -40,6 +43,7 @@ import {
 	isLoopStep,
 	isSubworkflowStep,
 	isSwitchStep,
+	isTryCatchStep,
 	isWaitStep,
 } from "./types/StepOpts";
 import {
@@ -123,6 +127,7 @@ export {
 	forEach,
 	loop,
 	switchOn,
+	tryCatch,
 	$,
 	unwrapProxies,
 	// v2 DSL types
@@ -131,6 +136,7 @@ export {
 	type LoopOpts,
 	type SwitchOpts,
 	type SwitchCase,
+	type TryCatchOpts,
 	type WorkflowV2Opts,
 	type WorkflowV2Builder,
 	type DollarProxy,
@@ -162,6 +168,9 @@ export {
 	V2SwitchStep,
 	V2SwitchStepSchema,
 	isSwitchStep,
+	V2TryCatchStep,
+	V2TryCatchStepSchema,
+	isTryCatchStep,
 	// retry configuration
 	RetryConfig,
 	RetryConfigSchema,

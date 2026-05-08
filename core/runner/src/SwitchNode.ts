@@ -81,7 +81,9 @@ export class SwitchNode extends RunnerNode {
 		// Lazy import — same circular-dep guard ForEach/Loop use.
 		const { default: Runner } = await import("./Runner");
 		const runner = new Runner(selected);
-		await runner.run(ctx);
+		// `deep: true` so the inner runSteps doesn't inherit the outer
+		// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume logic).
+		await runner.run(ctx, { deep: true, stepName: this.name });
 
 		// Switch is a passthrough — the matched case ran on the parent ctx,
 		// so state mutations are already visible to downstream steps. The

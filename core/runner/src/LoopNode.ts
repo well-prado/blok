@@ -76,7 +76,9 @@ export class LoopNode extends RunnerNode {
 
 			const childCtx = this.cloneCtxForIteration(ctx);
 			const runner = new Runner(steps);
-			await runner.run(childCtx);
+			// `deep: true` — inner pipelines must not inherit the outer
+			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume).
+			await runner.run(childCtx, { deep: true, stepName: this.name });
 			// After Runner.runSteps, childCtx.response is the last step's
 			// resolved data (RunnerSteps line ~349). Use it as the
 			// iteration's output value.

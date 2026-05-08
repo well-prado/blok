@@ -736,7 +736,70 @@ export const V2SwitchStepSchema = z.lazy(() =>
 export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
 
 /**
- * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, loop, or switch.
+ * V2 tryCatch step — JS-like exception handling for sub-pipelines.
+ *
+ * - `try` block runs first.
+ * - On error, the `catch` block runs with `ctx.error` populated
+ *   (`$.error.message`, `$.error.name`, `$.error.stack`). Errors thrown
+ *   inside `catch` propagate to the next outer handler — they DO NOT
+ *   re-trigger `catch`.
+ * - `finally` (if provided) runs unconditionally after try/catch — on
+ *   normal completion, after a caught error, AND after an uncaught
+ *   error from inside `catch`. Errors from `finally` propagate.
+ *
+ * State mutations from any block are visible to subsequent top-level
+ * steps (passthrough flow, like switch).
+ *
+ * @example
+ *   tryCatch({
+ *     id: "saga",
+ *     try: [
+ *       { id: "create", use: "user-create", inputs: { email: $.req.body.email } },
+ *       { id: "notify", use: "email-send", inputs: { to: $.state.create.email } },
+ *     ],
+ *     catch: [
+ *       { id: "rollback", use: "user-delete",
+ *         inputs: { userId: $.state.create.id, reason: $.error.message } },
+ *     ],
+ *     finally: [
+ *       { id: "metric", use: "@blokjs/metrics-emit", inputs: { event: "saga-attempt" } },
+ *     ],
+ *   })
+ */
+export const V2TryCatchStepSchema = z.lazy(() =>
+	z.object({
+		id: z.string().min(1).describe("Stable identifier for the tryCatch step. Visible in traces."),
+		tryCatch: z
+			.object({
+				try: z
+					.array(z.unknown())
+					.min(1)
+					.describe("Sub-pipeline run first. If any step throws, control jumps to `catch`."),
+				catch: z
+					.array(z.unknown())
+					.min(1)
+					.describe(
+						"Sub-pipeline run when `try` throws. Has access to `$.error` " +
+							"(message, name, stack). Errors here propagate — they do NOT re-trigger catch.",
+					),
+				finally: z
+					.array(z.unknown())
+					.optional()
+					.describe(
+						"Sub-pipeline run unconditionally after try/catch. Runs even if " +
+							"`catch` itself throws. Errors here propagate.",
+					),
+			})
+			.describe("tryCatch configuration."),
+		active: z.boolean().optional(),
+		stop: z.boolean().optional(),
+	}),
+);
+
+export type V2TryCatchStep = z.infer<typeof V2TryCatchStepSchema>;
+
+/**
+ * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, loop, switch, or tryCatch.
  *
  * Discriminators (no `kind` field needed):
  * - presence of `branch` → branch step
@@ -745,10 +808,18 @@ export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
  * - presence of `forEach` → forEach step (v0.5)
  * - presence of `loop` → loop step (v0.5)
  * - presence of `switch` → switch step (v0.5)
+ * - presence of `tryCatch` → tryCatch step (v0.5)
  * - otherwise → regular step
  */
 export const V2StepSchema: z.ZodType<
-	V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep | V2SwitchStep
+	| V2RegularStep
+	| V2BranchStep
+	| V2SubworkflowStep
+	| V2WaitStep
+	| V2ForEachStep
+	| V2LoopStep
+	| V2SwitchStep
+	| V2TryCatchStep
 > = z.lazy(() =>
 	z.union([
 		V2BranchStepSchema,
@@ -757,6 +828,7 @@ export const V2StepSchema: z.ZodType<
 		V2ForEachStepSchema,
 		V2LoopStepSchema,
 		V2SwitchStepSchema,
+		V2TryCatchStepSchema,
 		V2RegularStepSchema,
 	]),
 );
@@ -768,7 +840,8 @@ export type V2Step =
 	| V2WaitStep
 	| V2ForEachStep
 	| V2LoopStep
-	| V2SwitchStep;
+	| V2SwitchStep
+	| V2TryCatchStep;
 
 /**
  * Type guard — true when the step is a branch.
@@ -840,5 +913,18 @@ export function isSwitchStep(step: V2Step): step is V2SwitchStep {
 		"switch" in step &&
 		typeof (step as { switch?: unknown }).switch === "object" &&
 		(step as { switch?: unknown }).switch !== null
+	);
+}
+
+/**
+ * Type guard — true when the step is a tryCatch (v0.5).
+ */
+export function isTryCatchStep(step: V2Step): step is V2TryCatchStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"tryCatch" in step &&
+		typeof (step as { tryCatch?: unknown }).tryCatch === "object" &&
+		(step as { tryCatch?: unknown }).tryCatch !== null
 	);
 }

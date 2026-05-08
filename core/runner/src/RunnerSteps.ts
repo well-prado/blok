@@ -497,6 +497,12 @@ export default abstract class RunnerSteps {
 				error_context = e as GlobalError;
 			} else {
 				error_context = new GlobalError((e as Error).message);
+				// Preserve the original error chain so outer handlers
+				// (notably v0.5 TryCatchNode's `$.error.message` resolution)
+				// can peel back through `.cause` to the author's original
+				// `throw new Error("...")` text instead of the runner's
+				// `[step N/M] <name> failed: ...` enriched prefix.
+				(error_context as Error & { cause?: unknown }).cause = e;
 			}
 
 			throw error_context;

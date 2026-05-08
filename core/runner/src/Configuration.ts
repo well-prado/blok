@@ -342,6 +342,24 @@ export default class Configuration implements Config {
 					};
 				} else if (
 					typeof workflow_nodes[key] === "object" &&
+					Array.isArray((currentNode as unknown as { try?: unknown }).try) &&
+					Array.isArray((currentNode as unknown as { catch?: unknown }).catch)
+				) {
+					// v0.5 · tryCatch step. `try`, `catch`, and optional `finally`
+					// each carry their own inner-step array (set by
+					// `normalizeTryCatchStep`). Resolve each block as its own Flow
+					// so TryCatchNode.run() can dispatch them through child Runners.
+					const raw = workflow_nodes[key] as Record<string, unknown>;
+					const merged: Record<string, unknown> = {
+						try: (await this.getFlow(raw.try as RunnerNode[])).steps,
+						catch: (await this.getFlow(raw.catch as RunnerNode[])).steps,
+					};
+					if (Array.isArray(raw.finally)) {
+						merged.finally = (await this.getFlow(raw.finally as RunnerNode[])).steps;
+					}
+					nodes[key] = merged as unknown as Node[string];
+				} else if (
+					typeof workflow_nodes[key] === "object" &&
 					(currentNode as unknown as { cases?: unknown }).cases !== undefined &&
 					Array.isArray((currentNode as unknown as { cases?: unknown }).cases)
 				) {
@@ -501,6 +519,10 @@ export default class Configuration implements Config {
 			// v0.5 · `switchOn({...})` step — N-way branch; first matching case wins.
 			switch: {
 				resolver: async (node: RunnerNode) => await this.switchResolver(node),
+			},
+			// v0.5 · `tryCatch({...})` step — JS-like try/catch/finally semantics.
+			tryCatch: {
+				resolver: async (node: RunnerNode) => await this.tryCatchResolver(node),
 			},
 		};
 	}
@@ -699,6 +721,24 @@ export default class Configuration implements Config {
 	protected async switchResolver(node: RunnerNode): Promise<RunnerNode> {
 		const { SwitchNode } = await import("./SwitchNode");
 		const n = new SwitchNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `tryCatch` step. JS-like try/catch/finally semantics
+	 * live in `TryCatchNode.run()`. Each block (try, catch, finally) is
+	 * pre-resolved by the dedicated tryCatch branch in `getNodes()` so
+	 * the runtime can dispatch them through child Runners on-demand.
+	 */
+	protected async tryCatchResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { TryCatchNode } = await import("./TryCatchNode");
+		const n = new TryCatchNode();
 		n.node = node.node;
 		n.name = node.name;
 		n.type = node.type;

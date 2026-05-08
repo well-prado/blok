@@ -215,6 +215,15 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			continue;
 		}
 
+		// v0.5 tryCatch — { id, tryCatch: { try, catch, finally? } }
+		if (isPlainObject(step.tryCatch)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeTryCatchStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
 		// v2 regular — { id, use, inputs?, as?, spread?, ephemeral?, ... }
 		// or v1 regular — { name, node, type } + nodes[name].inputs
 		const { internalStep, nodeConfig } = normalizeRegularStep(step, nodesInput, i);
@@ -594,6 +603,7 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 const FOR_EACH_NODE_REF = "@blokjs/forEach";
 const LOOP_NODE_REF = "@blokjs/loop";
 const SWITCH_NODE_REF = "@blokjs/switch";
+const TRY_CATCH_NODE_REF = "@blokjs/tryCatch";
 
 /**
  * Normalize a v0.5 forEach step into the internal shape. Inner steps
@@ -748,6 +758,17 @@ function normalizeStepBlock(rawSteps: unknown[]): {
 			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
+		if (isPlainObject((s as Record<string, unknown>).tryCatch)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeTryCatchStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
 		if (typeof (s as Record<string, unknown>).subworkflow === "string") {
 			const { internalStep: nestedStep, nodeConfig: nestedConfig } = normalizeSubworkflowStep(
 				s as Record<string, unknown>,
@@ -831,6 +852,62 @@ function normalizeSwitchStep(
 		on: sw.on,
 		cases,
 		...(defaultSteps !== undefined ? { default: defaultSteps } : {}),
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Normalize a v0.5 tryCatch step into the internal shape. Each of `try`,
+ * `catch`, and optional `finally` carries its own inner-step list —
+ * Configuration resolves them via a dedicated branch in `getNodes()` so
+ * each block becomes its own resolved Flow (steps: NodeBase[]).
+ *
+ * TryCatchNode at run time reads the resolved nodeConfig:
+ *   { try: NodeBase[], catch: NodeBase[], finally?: NodeBase[] }
+ * and runs them according to JS-like try/catch/finally semantics.
+ */
+function normalizeTryCatchStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step at index ${index} is missing \`id\`.`);
+	}
+	const tc = step.tryCatch as Record<string, unknown>;
+	if (!Array.isArray(tc.try) || (tc.try as unknown[]).length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step "${id}" requires a non-empty \`try\` block.`);
+	}
+	if (!Array.isArray(tc.catch) || (tc.catch as unknown[]).length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step "${id}" requires a non-empty \`catch\` block.`);
+	}
+
+	const innerNodes: Record<string, InternalNodeConfig> = {};
+
+	const tryBlock = normalizeStepBlock(tc.try as unknown[]);
+	Object.assign(innerNodes, tryBlock.innerNodes);
+
+	const catchBlock = normalizeStepBlock(tc.catch as unknown[]);
+	Object.assign(innerNodes, catchBlock.innerNodes);
+
+	let finallyBlock: { innerInternal: InternalStep[]; innerNodes: Record<string, InternalNodeConfig> } | undefined;
+	if (Array.isArray(tc.finally)) {
+		finallyBlock = normalizeStepBlock(tc.finally as unknown[]);
+		Object.assign(innerNodes, finallyBlock.innerNodes);
+	}
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: TRY_CATCH_NODE_REF,
+		type: "tryCatch",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	const nodeConfig: InternalNodeConfig = {
+		try: tryBlock.innerInternal,
+		catch: catchBlock.innerInternal,
+		...(finallyBlock !== undefined ? { finally: finallyBlock.innerInternal } : {}),
 	} as InternalNodeConfig;
 
 	return { internalStep, nodeConfig, innerNodes };
