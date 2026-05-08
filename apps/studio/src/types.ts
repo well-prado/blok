@@ -189,6 +189,15 @@ export interface NodeRun {
 	 * only when N >= 2 to keep top-level invocations un-cluttered.
 	 */
 	subworkflowDepth?: number;
+	/**
+	 * v0.5 — origin middleware name. Set when this NodeRun was emitted
+	 * during the trigger's `runMiddlewareChain` dispatch (e.g.
+	 * "auth-check", "rate-limit"). Studio renders `mw:<name>` on the
+	 * step row so operators can see at a glance which middleware in the
+	 * trigger.http.middleware chain produced this nested step. Absent
+	 * on the main workflow's own steps.
+	 */
+	middleware?: string;
 }
 
 export type RunEventType =

@@ -1,0 +1,34 @@
+{
+	"name": "Admin Delete User",
+	"version": "1.0.0",
+	"description": "Admin-only endpoint that deletes a user. Three middleware run in order before the handler: auth-check verifies the JWT and stashes ctx.state.identity, admin-only checks the identity has the admin role and short-circuits 403 otherwise, audit-log records the action with who/what/when. Then the handler is a single deletion step. Demonstrates: stacking multiple middleware on a single trigger, and how middleware lets the workflow itself stay tiny — the cross-cutting concerns are factored out.",
+	"trigger": {
+		"http": {
+			"method": "DELETE",
+			"path": "/admin/users/:id",
+			"middleware": ["auth-check", "admin-only", "audit-log"]
+		}
+	},
+	"steps": [
+		{
+			"id": "delete-user",
+			"use": "user-service",
+			"type": "module",
+			"idempotencyKey": "delete-user-$.req.params.id",
+			"inputs": {
+				"action": "delete",
+				"userId": "$.req.params.id",
+				"deletedBy": "$.state.identity.sub"
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 204,
+				"body": null
+			}
+		}
+	]
+}

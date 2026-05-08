@@ -70,6 +70,18 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 				)}
 			/>
 			<span className="flex-1 truncate">{n.nodeName}</span>
+			{/* v0.5 middleware origin — when this step was produced by a
+			    trigger.http.middleware dispatch, badge it with the
+			    middleware's name so operators can tell `auth-check`'s
+			    inner steps apart from `rate-limit`'s inner steps. */}
+			{n.middleware && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-emerald-300/15 text-emerald-300 shrink-0"
+					title={`middleware origin — emitted by trigger.http.middleware: "${n.middleware}"`}
+				>
+					mw:{n.middleware}
+				</span>
+			)}
 			{/* Tier 2: sub-workflow indicator — `↳ sub` (sync) or `↳ async`
 			    (fire-and-forget). Drill into the child via the "Sub-runs"
 			    strip in the run header. PR 5 E3 — append depth count
@@ -103,6 +115,48 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 					title="Wait step — workflow paused until the deadline fires"
 				>
 					↳ wait
+				</span>
+			)}
+			{/* v0.5 forEach — collection iteration. Output is the array of
+			    per-iteration results; show its length so operators can see
+			    the iteration count at a glance. */}
+			{n.nodeType === "forEach" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-purple-300/15 text-purple-300 shrink-0"
+					title={
+						Array.isArray(n.outputs)
+							? `forEach — iterated ${n.outputs.length} item${n.outputs.length === 1 ? "" : "s"}`
+							: "forEach — collection iteration; each child step rail row is one iteration's inner step"
+					}
+				>
+					↳ forEach{Array.isArray(n.outputs) ? ` (${n.outputs.length})` : ""}
+				</span>
+			)}
+			{/* v0.5 loop — while-loop with hard maxIterations cap. */}
+			{n.nodeType === "loop" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-blue-300/15 text-blue-300 shrink-0"
+					title="loop — while-condition; runs until the expression goes falsy or maxIterations cap is hit"
+				>
+					↳ loop
+				</span>
+			)}
+			{/* v0.5 switch — N-way branch; first matching `when` wins. */}
+			{n.nodeType === "switch" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-amber-300/15 text-amber-300 shrink-0"
+					title="switch — N-way branch; the matched case's inner steps appear indented below"
+				>
+					↳ switch
+				</span>
+			)}
+			{/* v0.5 tryCatch — JS-like try/catch/finally. */}
+			{n.nodeType === "tryCatch" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-rose-300/15 text-rose-300 shrink-0"
+					title="tryCatch — try/catch/finally; failures in `try` jump to `catch`, finally always runs"
+				>
+					↳ try
 				</span>
 			)}
 			{/* Tier 1: CACHED badge — node short-circuited via the idempotency cache. */}

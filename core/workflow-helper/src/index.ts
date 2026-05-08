@@ -5,6 +5,10 @@ import Step from "./components/StepNode";
 import Trigger from "./components/Trigger";
 import Workflow from "./components/Workflow";
 import { type BranchOpts, branch } from "./components/branch";
+import { type ForEachOpts, forEach } from "./components/forEach";
+import { type LoopOpts, loop } from "./components/loop";
+import { type SwitchCase, type SwitchOpts, switchOn } from "./components/switchOn";
+import { type TryCatchOpts, tryCatch } from "./components/tryCatch";
 import { type WorkflowV2Builder, type WorkflowOpts as WorkflowV2Opts, workflow } from "./components/workflowV2";
 import { $, type DollarProxy, type ExprPath, JS_EXPR_TAG, unwrapProxies } from "./proxy/$";
 import {
@@ -18,16 +22,28 @@ import {
 	StepOpts,
 	V2BranchStep,
 	V2BranchStepSchema,
+	V2ForEachStep,
+	V2ForEachStepSchema,
+	V2LoopStep,
+	V2LoopStepSchema,
 	V2RegularStep,
 	V2RegularStepSchema,
 	V2Step,
 	V2StepSchema,
 	V2SubworkflowStep,
 	V2SubworkflowStepSchema,
+	V2SwitchStep,
+	V2SwitchStepSchema,
+	V2TryCatchStep,
+	V2TryCatchStepSchema,
 	V2WaitStep,
 	V2WaitStepSchema,
 	isBranchStep,
+	isForEachStep,
+	isLoopStep,
 	isSubworkflowStep,
+	isSwitchStep,
+	isTryCatchStep,
 	isWaitStep,
 } from "./types/StepOpts";
 import {
@@ -107,10 +123,20 @@ export {
 	// v2 DSL primitives — the canonical authoring surface
 	workflow,
 	branch,
+	// v0.5 control-flow primitives
+	forEach,
+	loop,
+	switchOn,
+	tryCatch,
 	$,
 	unwrapProxies,
 	// v2 DSL types
 	type BranchOpts,
+	type ForEachOpts,
+	type LoopOpts,
+	type SwitchOpts,
+	type SwitchCase,
+	type TryCatchOpts,
 	type WorkflowV2Opts,
 	type WorkflowV2Builder,
 	type DollarProxy,
@@ -132,6 +158,19 @@ export {
 	V2WaitStep,
 	V2WaitStepSchema,
 	isWaitStep,
+	// v0.5 forEach + loop step shapes
+	V2ForEachStep,
+	V2ForEachStepSchema,
+	isForEachStep,
+	V2LoopStep,
+	V2LoopStepSchema,
+	isLoopStep,
+	V2SwitchStep,
+	V2SwitchStepSchema,
+	isSwitchStep,
+	V2TryCatchStep,
+	V2TryCatchStepSchema,
+	isTryCatchStep,
 	// retry configuration
 	RetryConfig,
 	RetryConfigSchema,

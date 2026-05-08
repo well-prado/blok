@@ -72,9 +72,22 @@ export const WorkflowV2Schema = z.object({
 		.describe("What this workflow does. Optional but recommended — surfaces in Studio and CLI."),
 	trigger: z
 		.record(TriggersSchema, z.unknown())
+		.optional()
 		.describe(
 			"Trigger configuration. Most workflows use { http: { method: 'GET' } }. " +
-				"See TRIGGER_SCHEMAS for per-kind shapes.",
+				"Optional ONLY when `middleware: true` is set — middleware-only workflows " +
+				"are invoked from another workflow's `trigger.http.middleware: [...]` array " +
+				"and don't have a public route of their own. See TRIGGER_SCHEMAS for per-kind shapes.",
+		),
+	middleware: z
+		.literal(true)
+		.optional()
+		.describe(
+			"v0.5 — when true, this workflow is registered as middleware and is NOT exposed as a " +
+				"public HTTP route. It's invoked by another workflow that lists this one's `name` in " +
+				"its `trigger.http.middleware: [...]` array. Middleware runs on the parent ctx (state " +
+				"mutations carry forward) and can short-circuit by setting `ctx.response` and using a " +
+				"step with `stop: true`. Middleware-only workflows MAY omit `trigger`.",
 		),
 	steps: z.array(V2StepSchema).min(1).describe("Pipeline of steps to execute in order. At least one step required."),
 });

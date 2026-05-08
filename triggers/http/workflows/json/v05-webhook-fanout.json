@@ -1,0 +1,49 @@
+{
+	"name": "v05-webhook-fanout",
+	"version": "1.0.0",
+	"description": "v0.5 forEach (parallel, bounded concurrency) primitive — receives an event payload + a list of subscribers, then dispatches the event to every subscriber URL in parallel with concurrency capped at 5. Each iteration is an api-call POST. Returns the per-subscriber dispatch results so callers can inspect which deliveries succeeded.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "dispatch-to-each",
+			"forEach": {
+				"in": "js/ctx.request.body.subscribers",
+				"as": "subscriber",
+				"mode": "parallel",
+				"concurrency": 5,
+				"do": [
+					{
+						"id": "post",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "js/ctx.state.subscriber.url",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Webhook-Subscriber": "js/ctx.state.subscriber.id",
+								"X-Event-Id": "js/ctx.request.body.event.id"
+							},
+							"body": "js/ctx.request.body.event",
+							"responseType": "application/json"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "summary",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ eventId: ctx.request.body.event.id, dispatched: (ctx.state['dispatch-to-each'] || []).length, subscriberIds: (ctx.request.body.subscribers || []).map(s => s.id) })"
+			}
+		}
+	]
+}

@@ -1,0 +1,97 @@
+{
+	"name": "v05-event-router",
+	"version": "1.0.0",
+	"description": "v0.5 switch primitive — N-way event router. Receives an event { event, payload } and dispatches to a per-event handler that POSTs a synthesized envelope to httpbin.org/post (which echoes our payload back). Demonstrates: literal `when` (single match), array `when` (group related events), `default` fallback for unknown events, and that case mutations carry forward to subsequent top-level steps.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "route",
+			"switch": {
+				"on": "js/ctx.request.body.event",
+				"cases": [
+					{
+						"when": "ping",
+						"do": [
+							{
+								"id": "ping-handler",
+								"use": "@blokjs/api-call",
+								"type": "module",
+								"inputs": {
+									"url": "https://httpbin.org/post",
+									"method": "POST",
+									"headers": {
+										"Content-Type": "application/json",
+										"X-Handler": "ping"
+									},
+									"body": {
+										"ack": "pong",
+										"payload": "js/ctx.request.body.payload"
+									},
+									"responseType": "application/json"
+								}
+							}
+						]
+					},
+					{
+						"when": ["order.created", "order.paid", "order.refunded"],
+						"do": [
+							{
+								"id": "order-handler",
+								"use": "@blokjs/api-call",
+								"type": "module",
+								"inputs": {
+									"url": "https://httpbin.org/post",
+									"method": "POST",
+									"headers": {
+										"Content-Type": "application/json",
+										"X-Handler": "order-family"
+									},
+									"body": {
+										"recorded": true,
+										"event": "js/ctx.request.body.event",
+										"payload": "js/ctx.request.body.payload"
+									},
+									"responseType": "application/json"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "default-handler",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Handler": "unknown"
+							},
+							"body": {
+								"warning": "unknown event",
+								"event": "js/ctx.request.body.event"
+							},
+							"responseType": "application/json"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "summary",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ routedAs: (((ctx.state['ping-handler'] && 'ping') || (ctx.state['order-handler'] && 'order-family') || (ctx.state['default-handler'] && 'unknown')) || null), event: ctx.request.body.event, echo: (ctx.state['ping-handler'] || ctx.state['order-handler'] || ctx.state['default-handler']) && (ctx.state['ping-handler'] || ctx.state['order-handler'] || ctx.state['default-handler']).json })"
+			}
+		}
+	]
+}

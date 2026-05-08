@@ -69,6 +69,13 @@ export interface DollarProxy {
 	readonly env: ExprPath;
 	readonly step: ExprPath;
 	readonly workflow: ExprPath;
+	/**
+	 * The captured error inside a `tryCatch.catch` block (v0.5).
+	 * Resolves to `ctx.error`; undefined inside `try`, `finally`, and
+	 * any step outside a tryCatch. Use `$.error.message`, `$.error.name`,
+	 * `$.error.stack`.
+	 */
+	readonly error: ExprPath;
 	/** Escape hatch — any property; returns a sub-path. */
 	readonly [key: string]: ExprPath;
 }

@@ -1,0 +1,70 @@
+{
+	"name": "rate-limit",
+	"version": "1.0.0",
+	"description": "v0.5 middleware — fixed-window rate limiter using @blokjs/in-memory-kv. The bucket key is `ctx.state.identity.token` if auth-check ran first, falling back to the X-Forwarded-For header. Each request reads the current bucket counter, increments it, and rejects with 429 + Retry-After when the counter exceeds the per-window limit. Demo defaults: 5 requests per 60-second window. The bucket auto-resets when the window's `expiresAt` timestamp passes — checked on every request via the same expr step, no background reaper needed.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "compute-key",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "(ctx.state.identity && ctx.state.identity.token) ? `user:${ctx.state.identity.token}` : `ip:${ctx.request.headers['x-forwarded-for'] || ctx.request.headers['x-real-ip'] || 'unknown'}`"
+			}
+		},
+		{
+			"id": "load-bucket",
+			"use": "@blokjs/in-memory-kv",
+			"type": "module",
+			"inputs": {
+				"action": "get",
+				"key": "js/`bucket:${ctx.state['compute-key']}`"
+			}
+		},
+		{
+			"id": "next-state",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((b) => { const now = Date.now(); const limit = 5; const windowMs = 60000; if (!b || typeof b.expiresAt !== 'number' || b.expiresAt <= now) { return { count: 1, expiresAt: now + windowMs, exceeded: false, retryAfterSec: 0 }; } if (b.count + 1 > limit) { return { count: b.count, expiresAt: b.expiresAt, exceeded: true, retryAfterSec: Math.max(1, Math.ceil((b.expiresAt - now) / 1000)) }; } return { count: b.count + 1, expiresAt: b.expiresAt, exceeded: false, retryAfterSec: 0 }; })((ctx.state['load-bucket'] && ctx.state['load-bucket'].value) || null)"
+			}
+		},
+		{
+			"id": "save-bucket",
+			"use": "@blokjs/in-memory-kv",
+			"type": "module",
+			"inputs": {
+				"action": "set",
+				"key": "js/`bucket:${ctx.state['compute-key']}`",
+				"value": {
+					"count": "js/ctx.state['next-state'].count",
+					"expiresAt": "js/ctx.state['next-state'].expiresAt"
+				}
+			}
+		},
+		{
+			"id": "deny-if-exceeded",
+			"branch": {
+				"when": "ctx.state['next-state'].exceeded",
+				"then": [
+					{
+						"id": "respond-429",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Rate limit exceeded",
+							"code": 429,
+							"name": "RateLimitExceededError",
+							"body": {
+								"error": "Rate limit exceeded",
+								"limit": 5,
+								"windowSeconds": 60,
+								"retryAfterSec": "js/ctx.state['next-state'].retryAfterSec"
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

@@ -129,7 +129,9 @@
 						"pages": [
 							"c/devtools/index",
 							"c/devtools/release-runbook",
-							"c/devtools/post-v04-roadmap"
+							"c/devtools/post-v04-roadmap",
+							"c/devtools/workflow-primitives-roadmap",
+							"c/devtools/workflow-primitives-implementation"
 						]
 					},
 					{

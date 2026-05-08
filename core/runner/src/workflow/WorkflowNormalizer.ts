@@ -111,6 +111,12 @@ export interface InternalWorkflow {
 	trigger: Record<string, unknown>;
 	steps: InternalStep[];
 	nodes: Record<string, InternalNodeConfig>;
+	/**
+	 * v0.5 — when true, this workflow is registered as middleware and is
+	 * NOT exposed as a public HTTP route. Invoked from another workflow's
+	 * `trigger.http.middleware: [...]` array.
+	 */
+	middleware?: true;
 }
 
 /**
@@ -141,6 +147,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
+	const middleware = wf.middleware === true ? (true as const) : undefined;
 
 	// --- Trigger normalization (method "*" → "ANY") ---
 	const trigger = normalizeTrigger(wf.trigger, sourcePath);
@@ -159,9 +166,10 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 
 		// v2 branch — { id, branch: { when, then, else? } }
 		if (isPlainObject(step.branch)) {
-			const { internalStep, nodeConfig } = normalizeBranchStep(step, i);
+			const { internalStep, nodeConfig, innerNodes } = normalizeBranchStep(step, i);
 			internalSteps.push(internalStep);
 			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
 			continue;
 		}
 
@@ -184,6 +192,42 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		) {
 			const internalStep = normalizeWaitStep(step, i);
 			internalSteps.push(internalStep);
+			continue;
+		}
+
+		// v0.5 forEach — { id, forEach: { in, as, mode?, concurrency?, do: [...] } }
+		if (isPlainObject(step.forEach)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeForEachStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
+		// v0.5 loop — { id, loop: { while, maxIterations?, do: [...] } }
+		if (isPlainObject(step.loop)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeLoopStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
+		// v0.5 switch — { id, switch: { on, cases: [{when, do}], default? } }
+		if (isPlainObject(step.switch)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeSwitchStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
+		// v0.5 tryCatch — { id, tryCatch: { try, catch, finally? } }
+		if (isPlainObject(step.tryCatch)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeTryCatchStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
 			continue;
 		}
 
@@ -212,6 +256,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		trigger,
 		steps: internalSteps,
 		nodes: internalNodes,
+		...(middleware ? { middleware } : {}),
 	};
 }
 
@@ -320,7 +365,7 @@ function normalizeRegularStep(
 function normalizeBranchStep(
 	step: Record<string, unknown>,
 	index: number,
-): { internalStep: InternalStep; nodeConfig: InternalNodeConfig } {
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
 	const id = pickString(step.id);
 	if (!id) {
 		throw new Error(`[blok] WorkflowNormalizer: branch step at index ${index} is missing \`id\`.`);
@@ -337,36 +382,54 @@ function normalizeBranchStep(
 	// `nodesInput` because v2 branches inline `inputs` on each nested step.
 	const thenInternal: InternalStep[] = [];
 	const elseInternal: InternalStep[] = [];
+	const innerNodes: Record<string, InternalNodeConfig> = {};
 
 	for (let i = 0; i < thenSteps.length; i++) {
 		const s = thenSteps[i];
 		if (!isPlainObject(s)) continue;
 		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const { internalStep } = normalizeBranchStep(s as Record<string, unknown>, i);
-			thenInternal.push(internalStep);
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeBranchStep(s as Record<string, unknown>, i);
+			thenInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
-		const { internalStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
+		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
 		// Inline inputs on the step itself so nested-flow execution finds them.
 		// (RunnerSteps recursively executes flow nodes' inner steps.)
 		if (nodeConfig?.inputs) {
-			(internalStep as Record<string, unknown>).inputs = nodeConfig.inputs;
+			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
 		}
-		thenInternal.push(internalStep);
+		// Also surface the nodeConfig in the bubbled-up innerNodes map so
+		// BlokService.run can read inputs via `ctx.config[step.name]` when
+		// the inner step actually executes.
+		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
+		thenInternal.push(regularStep);
 	}
 	for (let i = 0; i < elseSteps.length; i++) {
 		const s = elseSteps[i];
 		if (!isPlainObject(s)) continue;
 		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const { internalStep } = normalizeBranchStep(s as Record<string, unknown>, i);
-			elseInternal.push(internalStep);
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeBranchStep(s as Record<string, unknown>, i);
+			elseInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
-		const { internalStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
+		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
 		if (nodeConfig?.inputs) {
-			(internalStep as Record<string, unknown>).inputs = nodeConfig.inputs;
+			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
 		}
-		elseInternal.push(internalStep);
+		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
+		elseInternal.push(regularStep);
 	}
 
 	const conditions: InternalCondition[] = [{ type: "if", condition: when, steps: thenInternal }];
@@ -384,7 +447,7 @@ function normalizeBranchStep(
 	};
 	const nodeConfig: InternalNodeConfig = { conditions };
 
-	return { internalStep, nodeConfig };
+	return { internalStep, nodeConfig, innerNodes };
 }
 
 const SUBWORKFLOW_NODE_REF = "@blokjs/subworkflow";
@@ -542,6 +605,320 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 		waitForMs,
 		waitUntil,
 	};
+}
+
+// v0.5 forEach reference for the internal step's `node` field.
+const FOR_EACH_NODE_REF = "@blokjs/forEach";
+const LOOP_NODE_REF = "@blokjs/loop";
+const SWITCH_NODE_REF = "@blokjs/switch";
+const TRY_CATCH_NODE_REF = "@blokjs/tryCatch";
+
+/**
+ * Normalize a v0.5 forEach step into the internal shape. Inner steps
+ * are recursively normalized via `normalizeRegularStep` so they get
+ * their inputs inlined; their nodeConfigs bubble up via `innerNodes`
+ * for the top-level `internalNodes` map (same pattern as branch).
+ */
+function normalizeForEachStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: forEach step at index ${index} is missing \`id\`.`);
+	}
+	const fe = step.forEach as Record<string, unknown>;
+	const inField = fe.in;
+	if (inField === undefined) {
+		throw new Error(`[blok] WorkflowNormalizer: forEach step "${id}" is missing \`in\`.`);
+	}
+	const as = pickString(fe.as);
+	if (!as) {
+		throw new Error(`[blok] WorkflowNormalizer: forEach step "${id}" is missing \`as\` (per-iteration variable name).`);
+	}
+	const mode = fe.mode === "parallel" ? "parallel" : "sequential";
+	const concurrency = typeof fe.concurrency === "number" && fe.concurrency > 0 ? fe.concurrency : 10;
+	const doSteps = Array.isArray(fe.do) ? (fe.do as unknown[]) : [];
+
+	const { innerInternal, innerNodes } = normalizeStepBlock(doSteps);
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: FOR_EACH_NODE_REF,
+		type: "forEach",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	// nodeConfig — top-level `steps` triggers Configuration's
+	// isFlowWithProperties path which materializes into NodeBase[].
+	const nodeConfig: InternalNodeConfig = {
+		in: inField,
+		as,
+		mode,
+		concurrency,
+		steps: innerInternal,
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Normalize a v0.5 loop step into the internal shape. Same inner-step
+ * propagation pattern as forEach.
+ */
+function normalizeLoopStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: loop step at index ${index} is missing \`id\`.`);
+	}
+	const lp = step.loop as Record<string, unknown>;
+	const whileExpr = pickString(lp.while);
+	if (!whileExpr) {
+		throw new Error(`[blok] WorkflowNormalizer: loop step "${id}" is missing \`while\` (the JS condition string).`);
+	}
+	const maxIterations = typeof lp.maxIterations === "number" && lp.maxIterations > 0 ? lp.maxIterations : 1000;
+	const doSteps = Array.isArray(lp.do) ? (lp.do as unknown[]) : [];
+
+	const { innerInternal, innerNodes } = normalizeStepBlock(doSteps);
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: LOOP_NODE_REF,
+		type: "loop",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	const nodeConfig: InternalNodeConfig = {
+		while: whileExpr,
+		maxIterations,
+		steps: innerInternal,
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Helper used by `normalizeSwitchStep` — converts an array of authored
+ * step shapes (the `do` block of a case or the `default` block) into
+ * resolved InternalSteps + a merged innerNodes map. Mirrors the inner
+ * loop in `normalizeForEachStep` / `normalizeLoopStep`, recursing into
+ * nested branch / forEach / loop / switch as needed.
+ */
+function normalizeStepBlock(rawSteps: unknown[]): {
+	innerInternal: InternalStep[];
+	innerNodes: Record<string, InternalNodeConfig>;
+} {
+	const innerInternal: InternalStep[] = [];
+	const innerNodes: Record<string, InternalNodeConfig> = {};
+
+	for (let i = 0; i < rawSteps.length; i++) {
+		const s = rawSteps[i];
+		if (!isPlainObject(s)) continue;
+		if (isPlainObject((s as Record<string, unknown>).branch)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeBranchStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (isPlainObject((s as Record<string, unknown>).wait)) {
+			const nestedStep = normalizeWaitStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			continue;
+		}
+		if (isPlainObject((s as Record<string, unknown>).forEach)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeForEachStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (isPlainObject((s as Record<string, unknown>).loop)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeLoopStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (isPlainObject((s as Record<string, unknown>).switch)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeSwitchStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (isPlainObject((s as Record<string, unknown>).tryCatch)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeTryCatchStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (typeof (s as Record<string, unknown>).subworkflow === "string") {
+			const { internalStep: nestedStep, nodeConfig: nestedConfig } = normalizeSubworkflowStep(
+				s as Record<string, unknown>,
+				i,
+			);
+			innerInternal.push(nestedStep);
+			if (nestedConfig) innerNodes[nestedStep.name] = nestedConfig;
+			continue;
+		}
+		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
+		if (nodeConfig?.inputs) {
+			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
+		}
+		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
+		innerInternal.push(regularStep);
+	}
+
+	return { innerInternal, innerNodes };
+}
+
+/**
+ * Normalize a v0.5 switch step into the internal shape. The cases and
+ * optional default each carry their own inner-step list — Configuration
+ * resolves them via a dedicated branch in `getNodes()` (mirrors the
+ * tryCatch path: each sub-block becomes its own resolved Flow).
+ *
+ * SwitchNode at run time reads the resolved nodeConfig:
+ *   { on, cases: [{when, steps: NodeBase[]}], default?: NodeBase[] }
+ * and runs the matched case (or default) through a child Runner.
+ */
+function normalizeSwitchStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step at index ${index} is missing \`id\`.`);
+	}
+	const sw = step.switch as Record<string, unknown>;
+	if (sw.on === undefined) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" is missing \`on\` (the value to match against).`);
+	}
+	const rawCases = Array.isArray(sw.cases) ? (sw.cases as unknown[]) : [];
+	if (rawCases.length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" has no \`cases\` (need at least one).`);
+	}
+
+	const cases: Array<{ when: unknown; steps: InternalStep[] }> = [];
+	const innerNodes: Record<string, InternalNodeConfig> = {};
+
+	for (let ci = 0; ci < rawCases.length; ci++) {
+		const c = rawCases[ci];
+		if (!isPlainObject(c)) {
+			throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" cases[${ci}] is not an object.`);
+		}
+		const cobj = c as Record<string, unknown>;
+		if (cobj.when === undefined) {
+			throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" cases[${ci}] is missing \`when\`.`);
+		}
+		const doSteps = Array.isArray(cobj.do) ? (cobj.do as unknown[]) : [];
+		const { innerInternal, innerNodes: caseInner } = normalizeStepBlock(doSteps);
+		Object.assign(innerNodes, caseInner);
+		cases.push({ when: cobj.when, steps: innerInternal });
+	}
+
+	let defaultSteps: InternalStep[] | undefined;
+	if (Array.isArray(sw.default)) {
+		const { innerInternal, innerNodes: defaultInner } = normalizeStepBlock(sw.default as unknown[]);
+		Object.assign(innerNodes, defaultInner);
+		defaultSteps = innerInternal;
+	}
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: SWITCH_NODE_REF,
+		type: "switch",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	const nodeConfig: InternalNodeConfig = {
+		on: sw.on,
+		cases,
+		...(defaultSteps !== undefined ? { default: defaultSteps } : {}),
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Normalize a v0.5 tryCatch step into the internal shape. Each of `try`,
+ * `catch`, and optional `finally` carries its own inner-step list —
+ * Configuration resolves them via a dedicated branch in `getNodes()` so
+ * each block becomes its own resolved Flow (steps: NodeBase[]).
+ *
+ * TryCatchNode at run time reads the resolved nodeConfig:
+ *   { try: NodeBase[], catch: NodeBase[], finally?: NodeBase[] }
+ * and runs them according to JS-like try/catch/finally semantics.
+ */
+function normalizeTryCatchStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step at index ${index} is missing \`id\`.`);
+	}
+	const tc = step.tryCatch as Record<string, unknown>;
+	if (!Array.isArray(tc.try) || (tc.try as unknown[]).length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step "${id}" requires a non-empty \`try\` block.`);
+	}
+	if (!Array.isArray(tc.catch) || (tc.catch as unknown[]).length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: tryCatch step "${id}" requires a non-empty \`catch\` block.`);
+	}
+
+	const innerNodes: Record<string, InternalNodeConfig> = {};
+
+	const tryBlock = normalizeStepBlock(tc.try as unknown[]);
+	Object.assign(innerNodes, tryBlock.innerNodes);
+
+	const catchBlock = normalizeStepBlock(tc.catch as unknown[]);
+	Object.assign(innerNodes, catchBlock.innerNodes);
+
+	let finallyBlock: { innerInternal: InternalStep[]; innerNodes: Record<string, InternalNodeConfig> } | undefined;
+	if (Array.isArray(tc.finally)) {
+		finallyBlock = normalizeStepBlock(tc.finally as unknown[]);
+		Object.assign(innerNodes, finallyBlock.innerNodes);
+	}
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: TRY_CATCH_NODE_REF,
+		type: "tryCatch",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	const nodeConfig: InternalNodeConfig = {
+		try: tryBlock.innerInternal,
+		catch: catchBlock.innerInternal,
+		...(finallyBlock !== undefined ? { finally: finallyBlock.innerInternal } : {}),
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
 }
 
 function normalizeTrigger(rawTrigger: unknown, sourcePath?: string): Record<string, unknown> {

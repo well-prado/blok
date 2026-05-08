@@ -283,6 +283,16 @@ export interface NodeRun {
 	 * keep top-level invocations un-cluttered.
 	 */
 	subworkflowDepth?: number;
+	/**
+	 * v0.5 — origin middleware name when the trigger's
+	 * `runMiddlewareChain` produced this NodeRun. The trigger sets a
+	 * `_blokMiddlewareName` sentinel on ctx before dispatching each
+	 * middleware; RunnerSteps reads it and propagates here so Studio's
+	 * StepRail can surface a `mw:<name>` badge on the inner steps a
+	 * middleware produced (otherwise indistinguishable from regular
+	 * depth-1 nested steps).
+	 */
+	middleware?: string;
 }
 
 /**
@@ -566,6 +576,13 @@ export interface StartNodeOptions {
 	 * passes here so Studio can render `↳ sub (N)` for N >= 2.
 	 */
 	subworkflowDepth?: number;
+	/**
+	 * v0.5 — origin middleware name. Set when the parent ctx carries
+	 * `_blokMiddlewareName` (HttpTrigger.runMiddlewareChain stash).
+	 * Propagates onto `NodeRun.middleware` so Studio's StepRail can
+	 * surface a `mw:<name>` badge.
+	 */
+	middleware?: string;
 }
 
 // === Custom Dashboards ===

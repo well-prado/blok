@@ -1,0 +1,597 @@
+---
+title: "Workflow Primitives Roadmap"
+description: "Loops, switch, try-catch, and global middleware — the next layer of v2 workflow primitives modeled on the proven blueprint-runner patterns."
+icon: "code"
+---
+
+A plan for expanding Blok's v2 workflow surface beyond `branch` / `wait` / `subworkflow` to cover the missing control-flow shapes (loops, switch, try-catch) and add cross-workflow composition (global middleware). Anchored in research from the original [`deskree-inc/blueprint-runner`](https://github.com/deskree-inc/blueprint-runner) where most of these patterns first shipped.
+
+The goal is the same as the existing primitives: **first-class, AI-readable, human-readable shapes that compile down to a small set of internal node refs**, so authors write `forEach({ in, do })` instead of cobbling together flow nodes by hand.
+
+---
+
+## What blueprint-runner taught us
+
+The first version of Blok shipped a complete control-flow library as `utility/control-flow/*` nodes. Each one is a flow node — `BlueprintNode` with a `processFlow()` method that picks which sub-steps to run based on its inputs. The runner recurses into them.
+
+Inventory from the source:
+
+| Node | Path in blueprint-runner | What it does |
+|---|---|---|
+| `for` | [`src/nodes/utility/control-flow/for@1.0.0/`](https://github.com/deskree-inc/blueprint-runner/tree/main/src/nodes/utility/control-flow/for%401.0.0) | Iterate through an array, run nested steps per item |
+| `foreach` | [`src/nodes/utility/control-flow/foreach@1.0.0/`](https://github.com/deskree-inc/blueprint-runner/tree/main/src/nodes/utility/control-flow/foreach%401.0.0) | Same as `for` but parallel — uses `Promise.all` over each item's step pipeline |
+| `while` | [`src/nodes/utility/control-flow/while@1.0.0/`](https://github.com/deskree-inc/blueprint-runner/tree/main/src/nodes/utility/control-flow/while%401.0.0) | Loop while condition (`js/...` expression) evaluates truthy; re-evaluated after each pass |
+| `try-catch` | [`src/nodes/utility/control-flow/try-catch@1.0.0/`](https://github.com/deskree-inc/blueprint-runner/tree/main/src/nodes/utility/control-flow/try-catch%401.0.0) | Two step lists at the same level: `try` runs first; on error, `catch` runs |
+| `if-error` | [`src/nodes/utility/control-flow/if-error@1.0.0/`](https://github.com/deskree-inc/blueprint-runner/tree/main/src/nodes/utility/control-flow/if-error%401.0.0) | Error guard step — re-throws with custom code/message |
+| `if-else` | (root flow node) | The conditional we already ported as `branch` |
+
+There was no `switch` primitive — `if-else` carried multiple `if` conditions evaluated in order with a final `else`, which is the exact pattern v2 `branch` lost in the simplification (one `when`, one `then`, one `else`). Switch is the natural replacement.
+
+### Notable patterns we should keep
+
+1. **Each iteration gets a fresh ctx clone** so loop bodies don't bleed state across iterations. Blueprint-runner's `while`/`foreach`/`try-catch` all do `_.cloneDeep(ctx.config)` per pass.
+2. **Foreach is parallel by default** via `Promise.all`. Sequential is a separate primitive (`for`). Worth keeping that distinction in v2.
+3. **Try-catch separates `try` and `catch` step lists at the same level**, not nested. This reads cleaner than nested branches.
+4. **Trigger-level middleware** lived in [`src/triggers/trigger-node.ts`](https://github.com/deskree-inc/blueprint-runner/blob/main/src/triggers/trigger-node.ts) — runs before any workflow execution, validates auth headers, sets up ctx. We already have `TriggerBase.run()` as the gate; expanding it to chain user-supplied middleware workflows is a small surface change.
+
+### What's worth dropping
+
+1. **`if-error` as a separate primitive** — we have step-level `retry: { maxAttempts }` and `tryCatch.catch[]` runs on any thrown error. The blueprint-runner `if-error` is overlap with both.
+2. **The bare `for` primitive** (counter-based loop with index) — we can fold this into `loop({ count })` instead of a separate `for` node. JavaScript `Array.from({length: N}, (_, i) => i)` is verbose but doable, and most "for X times" patterns in real workflows are actually iterations.
+
+---
+
+## What we have today (v2)
+
+For reference, current v2 step shapes in [@blokjs/helper](https://github.com/deskree-inc/blok/tree/main/core/workflow-helper/src/components):
+
+```ts
+// Regular step
+{ id, use, type?, inputs?, idempotencyKey?, retry?, maxDuration?, ... }
+
+// Branch (if/else)
+branch({ id, when, then: Step[], else?: Step[] })
+
+// Sub-workflow call
+{ id, subworkflow: "name", inputs?, wait?, idempotencyKey? }
+
+// Wait / sleep
+{ id, wait: { for?: "1h", until?: $.req.body.at } }
+```
+
+Each compiles down at workflow-load time into the runner's `InternalStep` shape. The discriminator chain in [`WorkflowNormalizer.normalizeWorkflow`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/workflow/WorkflowNormalizer.ts) checks for `step.branch`, `step.subworkflow`, `step.wait` in turn before falling through to the regular step handler.
+
+This is the extension point.
+
+---
+
+## Proposed v0.5 primitives
+
+Five new shapes, each compiling to a single internal node ref. Names chosen to read like English, not C++.
+
+### 1. `forEach({ in, as, do, mode? })` — iterate over a collection
+
+```ts
+forEach({
+  id: "process-orders",
+  in: $.state.orders,            // array source
+  as: "order",                   // each item lands at $.state.order
+  mode: "sequential",            // default; use "parallel" for Promise.all
+  do: [
+    { id: "validate", use: "@blokjs/api-call", inputs: { url: "..." } },
+    { id: "charge",   use: "stripe-charge",     inputs: { amount: $.state.order.total } },
+  ],
+})
+```
+
+JSON form:
+
+```json
+{
+  "id": "process-orders",
+  "forEach": {
+    "in": "$.state.orders",
+    "as": "order",
+    "mode": "sequential",
+    "do": [
+      { "id": "validate", "use": "@blokjs/api-call", "inputs": { "url": "..." } },
+      { "id": "charge",   "use": "stripe-charge",     "inputs": { "amount": "$.state.order.total" } }
+    ]
+  }
+}
+```
+
+**Semantics:**
+
+- `in` resolves to an array. Empty array → zero iterations, return `[]`.
+- `as` is the per-iteration variable name. Each iteration gets a fresh `ctx.state[as]` (and `ctx.state[as + "Index"]` for the index).
+- Inner steps land their outputs in a per-iteration scope; on completion they're collected into `ctx.state[<forEach.id>]` as an array of results.
+- `mode: "sequential"` (default) — `for...of` await each. `mode: "parallel"` — `Promise.all`. Parallel mode is the blueprint-runner `foreach` semantic; sequential is what most v2 users will reach for first.
+- Branch / loop / sub-workflow steps inside `do` work normally (recursion).
+- Per-step `retry`, `idempotencyKey`, `maxDuration` apply to each iteration of that step.
+
+**Reliability composition:**
+
+- `idempotencyKey` on the whole `forEach` — caches the FULL result array. Useful for retries.
+- `idempotencyKey` on inner steps — caches per-iteration. Combine with `as: "order.id"` for per-order dedup.
+
+**Compiles to:** new internal node ref `@blokjs/forEach` with config `{ in, as, mode, steps: do[] }`. Implementation lives in `core/runner/src/nodes/forEach.ts`, registered in `Configuration.nodeTypes()`.
+
+### 2. `loop({ while, do, maxIterations? })` — conditional loop
+
+```ts
+loop({
+  id: "poll-job",
+  while: '$.state["check-job"].status !== "done"',
+  maxIterations: 30,
+  do: [
+    { id: "wait-tick", wait: { for: "2s" } },
+    { id: "check-job", use: "@blokjs/api-call", inputs: { url: "$.state.jobUrl" } },
+  ],
+})
+```
+
+JSON form:
+
+```json
+{
+  "id": "poll-job",
+  "loop": {
+    "while": "$.state['check-job'].status !== 'done'",
+    "maxIterations": 30,
+    "do": [
+      { "id": "wait-tick", "wait": { "for": "2s" } },
+      { "id": "check-job", "use": "@blokjs/api-call", "inputs": { "url": "$.state.jobUrl" } }
+    ]
+  }
+}
+```
+
+**Semantics:**
+
+- `while` is a JS expression (or `$.<path>` proxy). Evaluated BEFORE each iteration; if falsy, the loop exits.
+- `maxIterations` is a hard safety cap (defaults to 1000; configurable via `BLOK_LOOP_MAX_ITERATIONS`). Hitting the cap throws `LoopMaxIterationsError`.
+- Each iteration gets `ctx.state[id + "Index"]` for the 0-based counter.
+- The final result at `ctx.state[id]` is the last iteration's `ctx.prev.data`.
+
+**Why no `count`?** A counter-based loop is `loop({ while: '$.state[id + "Index"] < 10', ... })`. Adding a separate `count: 10` field is sugar; defer until users ask. Same logic for blueprint-runner's `for` node.
+
+**Reliability composition:**
+
+- Pair with `wait: { for: "Xs" }` for polling patterns.
+- Per-iteration `idempotencyKey` is the typical "don't redo step N if I've already done it" pattern.
+
+**Compiles to:** `@blokjs/loop` with `{ while, maxIterations, steps: do[] }`.
+
+### 3. `switch({ on, cases, default? })` — multi-branch by value
+
+```ts
+switch({
+  id: "route-by-kind",
+  on: $.req.body.kind,
+  cases: [
+    { when: "order",  do: [{ id: "process-order",  subworkflow: "process-order" }] },
+    { when: "refund", do: [{ id: "process-refund", subworkflow: "process-refund" }] },
+    { when: "void",   do: [{ id: "process-void",   subworkflow: "process-void" }] },
+  ],
+  default: [
+    { id: "respond-400", use: "@blokjs/respond", inputs: { status: 400, body: { error: "Unknown kind" } } },
+  ],
+})
+```
+
+JSON form:
+
+```json
+{
+  "id": "route-by-kind",
+  "switch": {
+    "on": "$.req.body.kind",
+    "cases": [
+      { "when": "order",  "do": [{ "id": "process-order",  "subworkflow": "process-order" }] },
+      { "when": "refund", "do": [{ "id": "process-refund", "subworkflow": "process-refund" }] },
+      { "when": "void",   "do": [{ "id": "process-void",   "subworkflow": "process-void" }] }
+    ],
+    "default": [
+      { "id": "respond-400", "use": "@blokjs/respond", "inputs": { "status": 400, "body": { "error": "Unknown kind" } } }
+    ]
+  }
+}
+```
+
+**Semantics:**
+
+- `on` is evaluated once, compared via strict equality (`===`) against each `case.when`.
+- First match wins. `cases` order matters.
+- `case.when` can be a literal value (string/number/boolean) OR an array of values for "any of these" matches: `when: ["order", "subscription"]`.
+- No fall-through (this isn't C). Each `case.do` runs independently.
+- `default` runs only when no `case.when` matches; omitted means "no-op" (run nothing, fall through to next workflow step).
+
+**Why not multi-`when` arrays in `branch` instead?** `switch` makes the intent immediate to the reader: "I'm picking one of N paths by a value." Nested `branch` calls obscure that.
+
+**Compiles to:** `@blokjs/switch` with `{ on, cases: [{when, steps}], default: [...] }`.
+
+### 4. `tryCatch({ try, catch, finally? })` — error handling
+
+```ts
+tryCatch({
+  id: "send-email-safe",
+  try: [
+    { id: "render", use: "render-template", inputs: { template: "welcome", data: $.state.user } },
+    { id: "send",   use: "send-email",      inputs: { to: $.state.user.email, body: $.state.render.html } },
+  ],
+  catch: [
+    { id: "log-failure", use: "@blokjs/api-call", inputs: { url: process.env.SLACK_WEBHOOK, body: { text: $.error.message } } },
+    { id: "respond-202", use: "@blokjs/respond",  inputs: { status: 202, body: { queued: true } } },
+  ],
+  finally: [
+    { id: "metrics", use: "metrics-emit", inputs: { event: "email-attempt", outcome: $.state.send ? "ok" : "failed" } },
+  ],
+})
+```
+
+JSON form:
+
+```json
+{
+  "id": "send-email-safe",
+  "tryCatch": {
+    "try":     [ { "id": "render", "use": "render-template" }, { "id": "send", "use": "send-email" } ],
+    "catch":   [ { "id": "log-failure", "use": "@blokjs/api-call" }, { "id": "respond-202", "use": "@blokjs/respond" } ],
+    "finally": [ { "id": "metrics", "use": "metrics-emit" } ]
+  }
+}
+```
+
+**Semantics:**
+
+- `try[]` runs in order. If any step throws, runner catches and switches to `catch[]` immediately (skipping remaining `try` steps).
+- The thrown error is exposed as `$.error` inside `catch` — same shape as a step's `model.error` (`message`, `code`, `name`, `stack`).
+- `finally[]` runs after `try` succeeds OR after `catch` finishes. Even runs on uncaught errors during `catch`.
+- A `tryCatch` step's own output is the last successful step's output (from `try` or `catch`).
+
+**Composition with step-level `retry`:**
+
+- Step-level `retry: { maxAttempts: 3 }` happens BEFORE `tryCatch.catch` fires. Only after retries are exhausted does the catch run. This matches user intuition: "catch is when ALL recovery attempts fail."
+
+**Why not just lean on step retry?** Retry handles transient failures inside one step. `tryCatch` handles compensating logic that spans multiple steps — e.g., "if any of [render, send] fail, log to Slack and respond 202 anyway." Different shape, different intent.
+
+**Compiles to:** `@blokjs/tryCatch` flow node with config `{ try, catch, finally }`.
+
+### 5. `globalWorkflow` / `middleware` — pre-execution hooks
+
+The "global workflow" / "auth before each request" feature splits cleanly into two layers:
+
+#### 5a. Trigger-level middleware (cross-cutting)
+
+```ts
+// triggers/http/src/Workflows.ts (or via blokctl create middleware)
+import { workflow } from "@blokjs/helper";
+
+export const authCheck = workflow({
+  name: "auth-check",
+  version: "1.0.0",
+  // no `trigger:` — this is a middleware workflow, not a routed one
+  middleware: true,
+  steps: [
+    {
+      id: "verify-jwt",
+      use: "verify-jwt-node",
+      inputs: { token: $.req.headers.authorization },
+    },
+    branch({
+      id: "deny-if-invalid",
+      when: '!$.state["verify-jwt"].valid',
+      then: [
+        {
+          id: "respond-401",
+          use: "@blokjs/respond",
+          inputs: { status: 401, body: { error: "Unauthorized" } },
+          stop: true,
+        },
+      ],
+    }),
+  ],
+});
+```
+
+Then on the trigger config:
+
+```ts
+// Apply auth-check to every HTTP route
+trigger: {
+  http: {
+    method: "ANY",
+    path: "/api/*",
+    middleware: ["auth-check", "rate-limit"],   // run in order, before the workflow's own steps
+  },
+}
+```
+
+**Semantics:**
+
+- Middleware workflows are registered in `WorkflowRegistry` like sub-workflows (`middleware: true` flag). They have steps but no `trigger:`.
+- `trigger.<kind>.middleware: string[]` lists middleware workflow names to run before the main workflow's steps.
+- Each middleware workflow runs with the same `ctx` as the main workflow. State changes (`ctx.state`, `ctx.publish`) carry over.
+- A middleware step with `stop: true` short-circuits — the trigger sends the current `ctx.response` and the main workflow never runs. This is how auth denials bail out early.
+- Errors thrown in middleware bubble up like errors in any step. Apply `tryCatch` inside middleware if you need fallback logic.
+
+**Compiles to:** `WorkflowRegistry` learns `getMiddleware(name) → RegisteredWorkflow | undefined`. `TriggerBase.run()` resolves the middleware list at run-entry, runs each through the same `Runner` machinery as sub-workflows (with shared ctx), and short-circuits on `stop: true` or non-success response.
+
+#### 5b. Workflow-level middleware (per-route)
+
+Same shape but on the workflow itself instead of the trigger:
+
+```ts
+workflow({
+  name: "Delete user",
+  trigger: { http: { method: "DELETE", path: "/api/users/:id" } },
+  middleware: ["auth-check", "admin-only"],   // overrides/appends trigger-level list
+  steps: [...],
+})
+```
+
+**Resolution order:** trigger-level middleware → workflow-level middleware → workflow's own steps. Workflow-level can override trigger-level via a config flag if needed (`middlewareMode: "replace"` vs default `"append"`); ship `"append"` first, add `"replace"` only when a user pulls.
+
+#### 5c. Process-wide global middleware
+
+Operator-level — every workflow in the process runs through these regardless of trigger or workflow config. Useful for audit logging, metrics, request ID injection.
+
+```ts
+import { WorkflowRegistry } from "@blokjs/runner";
+
+WorkflowRegistry.getInstance().useGlobalMiddleware(["request-id", "audit-log"]);
+```
+
+Resolution order: process-wide → trigger-level → workflow-level → main steps. Stop semantics same as above.
+
+**Why three layers?** They model real deployment patterns. Operators set process-wide for ops concerns. Triggers set their own for cross-cutting auth. Workflows override for per-route specifics. Each layer is opt-in — empty/undefined skips it for zero overhead.
+
+---
+
+## Step shape discriminator (updated)
+
+After v0.5 the `WorkflowNormalizer` discriminator chain becomes (in order):
+
+| Discriminator | Compiles to | Runner behavior |
+|---|---|---|
+| `step.branch` | `@blokjs/if-else` | already shipped |
+| `step.subworkflow` | `@blokjs/subworkflow` | already shipped |
+| `step.wait` | `@blokjs/wait` (runner-intercepted) | already shipped |
+| `step.forEach` | `@blokjs/forEach` (NEW) | new flow node |
+| `step.loop` | `@blokjs/loop` (NEW) | new flow node |
+| `step.switch` | `@blokjs/switch` (NEW) | new flow node |
+| `step.tryCatch` | `@blokjs/tryCatch` (NEW) | new flow node |
+| (regular step shape) | `module` / `runtime.<kind>` | already shipped |
+
+The order matters because branch and switch are similar — branch wins on `step.branch`, switch on `step.switch`. No ambiguity by design.
+
+---
+
+## Implementation plan
+
+Each primitive ships as one self-contained PR. Estimates assume the v0.4 reliability infrastructure (Tier 1 + Tier 2) is the runtime baseline.
+
+### Phase A — Loops (forEach + loop): 2-3 days
+
+1. **Schemas + helpers** in `core/workflow-helper/src/components/`:
+   - `forEach.ts` — `forEach({...})` factory with Zod schema validation.
+   - `loop.ts` — `loop({...})` factory.
+2. **Internal nodes** in `core/runner/src/nodes/`:
+   - `ForEachNode.ts` — flow node implementing sequential + parallel iteration.
+   - `LoopNode.ts` — flow node implementing while-loop with maxIterations safety cap.
+   - Both use `defineNode({ flow: true, ... })` per current v2 pattern.
+3. **Normalizer** — extend `WorkflowNormalizer.ts` discriminator chain. Inner-step nodeConfig propagation already shipped via the `innerNodes` bubble-up from the recent branch-fix work.
+4. **Configuration resolver** — register `@blokjs/forEach` and `@blokjs/loop` in `Configuration.nodeTypes()`.
+5. **Tests:**
+   - Unit: forEach with empty array, single item, sequential vs parallel, error propagation.
+   - Unit: loop with finite condition, maxIterations cap, infinite loop guard.
+   - Integration: actual `bun run http:dev` curl validation against scaffolded examples.
+
+### Phase B — Switch: 1 day
+
+Single new internal node `@blokjs/switch`. Conceptually a generalisation of branch — same flow-node pattern, just N arms instead of 2.
+
+1. `switch.ts` helper.
+2. `SwitchNode.ts` flow node — strict-equality match against `cases[].when` (handle scalar OR array `when` for "any of"), fall back to `default[]`.
+3. Normalizer + resolver registration.
+4. Tests + curl validation.
+
+### Phase C — TryCatch: 2 days
+
+1. `tryCatch.ts` helper.
+2. `TryCatchNode.ts` — flow node OR runner-intercepted (decision: runner-intercepted is cleaner because we need to install error handlers around the `try` step list, which a flow node can't do as elegantly).
+3. New `$.error` proxy variable accessible only inside `catch[]` — extends the proxy shape in `core/workflow-helper/src/proxy/$.ts`.
+4. Compose with step-level `retry` — retries happen BEFORE the catch fires.
+5. Tests:
+   - Try succeeds → catch never runs, finally runs.
+   - Try throws → catch runs, finally runs.
+   - Catch throws → finally still runs, error propagates up.
+   - Step-level retry exhausts → catch fires.
+
+### Phase D — Middleware: 3-4 days
+
+This is the largest deliverable because it touches `WorkflowRegistry`, `TriggerBase`, the workflow shape, and trigger configs.
+
+1. **Schema:**
+   - Add `middleware: boolean` flag to v2 workflow schema (top-level).
+   - Add `middleware: string[]` to v2 workflow schema AND to every `*TriggerOpts` (HTTP, Worker, Queue, etc.).
+   - Add `WorkflowRegistry.useGlobalMiddleware(names: string[])` API.
+2. **Resolution:**
+   - `TriggerBase.resolveMiddlewareChain(workflow)` returns `[...global, ...trigger, ...workflow]` deduped, in order.
+   - At run-entry (in `TriggerBase.run`), execute each middleware workflow through `Runner` against the SAME `ctx`. State carries over.
+   - `stop: true` on any middleware step short-circuits — return current `ctx.response` to the trigger transport, skip the main workflow.
+3. **Sub-workflow registration:**
+   - Middleware workflows register the same way as sub-workflows. `middleware: true` flag distinguishes them; they don't take routes.
+   - `WorkflowRegistry.has(name)` works for them; `WorkflowRegistry.getMiddleware(name)` is the typed accessor.
+4. **Tests:**
+   - Single trigger-level middleware that allows passes through.
+   - Single trigger-level middleware that denies (`stop: true` after a `respond` step) short-circuits.
+   - Workflow-level appends to trigger-level.
+   - Process-global runs first.
+   - Middleware errors propagate (and can be caught by `tryCatch` inside the middleware itself).
+5. **Docs:** new cookbook section "Compose middleware across triggers and workflows" + replace the cookbook's "Pattern A: Workflow-level first-step gate" recommendation with the middleware shape.
+
+### Phase E — Studio surface: 1-2 days
+
+Studio rendering for the new shapes:
+
+- forEach / loop / switch / tryCatch each get a distinctive icon + sub-step nesting in the StepRail.
+- Iteration count badge on forEach/loop steps in the run trace.
+- `tryCatch` shows whether catch fired (red border) vs try succeeded (green).
+- Middleware chain shows on the run header — "ran 3 middlewares: auth-check, rate-limit, request-id."
+
+This is the polish layer; the primitives work without it.
+
+### Phase F — Documentation: 2-3 days
+
+1. New page: `docs/d/composition/control-flow.mdx` — covers `branch`, `switch`, `forEach`, `loop`, `tryCatch` together. Each with a recipe + when-to-use guidance.
+2. New page: `docs/d/composition/middleware.mdx` — covers the three layers (process / trigger / workflow), resolution order, common patterns (auth, rate-limit, audit logging).
+3. Update [`docs/c/migration-guides/`](https://github.com/deskree-inc/blok/tree/main/docs/c/migration-guides) — add `v0.5-control-flow.mdx` showing v1-style `if-error` and nested-branch patterns migrated to the new primitives.
+4. Update root [`CLAUDE.md`](https://github.com/deskree-inc/blok/blob/main/CLAUDE.md) Context Rules — extend the v2 step shapes table with the new primitives.
+
+### Total estimate
+
+~10-13 days end-to-end if shipped sequentially. Each phase is independently shippable and testable; merge order can be A → B → C → D → E → F or interleave.
+
+---
+
+## Author ergonomics — what humans see
+
+The whole point of this work is ergonomics. A human reading a v2 workflow should grasp the control flow without reading the runner source. Compare:
+
+**Before (v2 today, no loops or switch):** a workflow that POSTs to N webhooks needs an external mapper node that returns a `BlokService[]` array, plus careful handling of `set_var` / `as` to thread results — basically writing a flow node by hand.
+
+**After (v0.5 with forEach):**
+
+```ts
+forEach({
+  id: "fan-out-webhooks",
+  in: $.state.webhookUrls,
+  as: "url",
+  mode: "parallel",
+  do: [
+    { id: "post", use: "@blokjs/api-call", inputs: { url: $.state.url, method: "POST", body: $.req.body } },
+  ],
+})
+```
+
+Reads top-to-bottom in English: "for each URL in `state.webhookUrls`, in parallel, POST the body." No flow-node-by-hand, no mapper node, no thread-the-needle on state names.
+
+Same story for `switch` (multi-tenant routing), `loop` (polling), `tryCatch` (compensating logic), and `middleware` (auth-once-not-N-times).
+
+**AI ergonomics** — these shapes are also AI-friendly:
+
+- Each primitive's name describes intent (`forEach`, `loop`, `switch`, `tryCatch`).
+- The Zod schemas validate at workflow-load, so `bun run dev` surfaces typos with line+column.
+- The runtime errors are deterministic (no `opts.inputs undefined` mystery — that bug is fixed in main and won't reappear because the inner-step config bubbling is now part of the normalizer contract).
+- Studio's run trace renders each iteration / case explicitly, so AI tools building docs from runs can introspect what actually happened.
+
+This is what the user articulated as Blok's vision: "AI-first enhanced but also human-readable, modular, tools to enable AI/humans to easily create documentation."
+
+---
+
+## Open design questions
+
+A handful of decisions worth flagging before we start coding. Each has a recommended default but isn't load-bearing for the overall plan.
+
+### Q1. `forEach` parallel mode — how to bound concurrency?
+
+`mode: "parallel"` with `Promise.all` over a 10K-item array spawns 10K concurrent step pipelines. That's almost always wrong.
+
+**Options:**
+1. Add `mode: "parallel"` always with a `concurrency: 5` (default 10) cap. Sequential is `concurrency: 1`.
+2. Keep `mode: "sequential" | "parallel"` discrete, add `concurrency` only for parallel.
+
+**Recommendation:** option 1. `mode` becomes a hint; `concurrency` is the actual knob. Default 10 — sane for typical fan-out, prevents accidental fork-bombs.
+
+### Q2. `loop` — break / continue?
+
+Blueprint-runner's `while` had no break/continue. Body runs until condition is false.
+
+**Options:**
+1. Add `stop: true` semantics (already exists for regular steps) — break out of the loop.
+2. Add `continue: true` semantics — skip to next iteration.
+
+**Recommendation:** option 1 only for v0.5. `continue` is rare and can be emulated with `branch({ when: skipCondition, then: [...] })` inside the loop body.
+
+### Q3. `tryCatch` — does `finally` run on uncaught catch errors?
+
+If `catch[]` itself throws, does `finally[]` still run?
+
+**Recommendation:** yes — match JS semantics. `finally` ALWAYS runs. The error from `catch` propagates after `finally` completes.
+
+### Q4. Middleware — synchronous chain or stage-aware?
+
+Express middleware has `req`, `res`, `next` and explicit stage control. Our middleware is just "run these workflows first."
+
+**Recommendation:** keep it simple. Each middleware is a workflow that runs against the same ctx. `stop: true` on any step short-circuits the chain. No `next()` plumbing.
+
+If users later want post-execution middleware (after the main workflow), add `trigger.<kind>.middlewareAfter: string[]` then. Don't ship the more complex version preemptively.
+
+### Q5. Switch — exhaustiveness checking?
+
+If `default` is omitted and no case matches, what happens?
+
+**Recommendation:** no-op (skip the switch step entirely; runner moves to the next workflow step). This matches `branch({ when: ..., then: [...] })` without `else` — same semantics. Authors who want strict checks add a `default: [{ ... respond 400 }]`.
+
+### Q6. Naming — `forEach` vs `for_each` vs `for`
+
+JavaScript `for...of` is the closest analogue but the v2 keyword is reserved. `forEach` matches `Array.prototype.forEach`. JSON form needs `forEach` (camelCase) too.
+
+**Recommendation:** `forEach` everywhere. Mirror JS conventions; AI tools already know that name.
+
+### Q7. Compatibility — keep v1 `if-error` shape?
+
+Blueprint-runner workflows imported from old projects might use `if-error`. The current normalizer doesn't recognize it.
+
+**Recommendation:** add a v1→v2 migration shim in the normalizer that recognizes `node: "utility/control-flow/if-error@1.0.0"` and converts to `tryCatch` at workflow-load. Same pattern as `set_var: false → ephemeral: true`. Drop the shim in v1.0.
+
+---
+
+## What this UNblocks
+
+Once shipped, this primitive set lets users express patterns that are awkward today:
+
+| Use case | Today | After v0.5 |
+|---|---|---|
+| Fan out N notifications | mapper node + manual NodeBase[] return | `forEach({ in: $.state.users, mode: "parallel", do: [...] })` |
+| Poll an async job | not really expressible — would need recursive sub-workflow + `wait` | `loop({ while: '$.state.status !== "done"', do: [{ wait }, { check }] })` |
+| Multi-tenant route by `kind` | nested `branch` 3 levels deep | `switch({ on: $.req.body.kind, cases: [...] })` |
+| Compensating logic on multi-step flow | every step gets `retry`, hope the last error is the right one | `tryCatch({ try: [...], catch: [...] })` |
+| Auth on every route in a trigger | first-step gate copy-pasted into every workflow | `trigger.http.middleware: ["auth-check"]` once |
+| Audit log every workflow run | nothing — operator has to wrap each | `WorkflowRegistry.useGlobalMiddleware(["audit-log"])` |
+
+These are the patterns I keep seeing in the workflows you've described. Shipping them as first-class primitives means:
+
+1. **Less code to write** — one primitive call vs N flow-node-by-hand.
+2. **Better Studio rendering** — the runner knows the shape, renders it with proper iteration / case / error indicators.
+3. **Better runtime behavior** — bounded concurrency on `forEach`, max-iterations safety on `loop`, automatic error routing on `tryCatch`, deterministic middleware order.
+4. **AI-readable** — the names map to JS conventions, AI tools generate them correctly first try.
+
+---
+
+## What stays out of v0.5
+
+A few patterns from blueprint-runner that we should NOT port:
+
+- **`mapper@1.0.0` as a primitive** — current Blok recommends transforming data inside a regular `defineNode` with Zod schemas instead of a generic mapper. Stronger types, better AI introspection.
+- **`variable-setter@1.0.0` as a primitive** — same. v2 step output auto-stores at `ctx.state[id]`. Use `as: "name"` to rename. Use `ctx.publish(name, value)` for explicit side-channel. No need for a generic setter.
+- **`if-error` as a primitive** — covered by step `retry` + `tryCatch`. See the migration shim in Q7.
+
+---
+
+## Recommended sequencing
+
+Pulling everything together — six phases, ordered by user impact:
+
+1. **Phase A — Loops** (forEach + loop). Highest user impact; "I need to iterate" is the most common missing primitive.
+2. **Phase B — Switch**. Multi-branch routing is the #2 pain point after loops.
+3. **Phase C — TryCatch**. Compensating logic. Users live with current step retry until this lands.
+4. **Phase D — Middleware**. Cross-cutting auth pattern. Important for production deployments but workflows can ship the first-step gate workaround indefinitely.
+5. **Phase E — Studio polish**. Visual indicators for the new shapes.
+6. **Phase F — Docs**. Migration guide + cookbook updates.
+
+Total ~10-13 working days. Each phase is independently shippable; A+B+C are the core that unlocks "powerful workflows," D+E+F are the polish layer.
+
+This goes into v0.5 alongside the breaking changes already queued in [`post-v04-roadmap.mdx`](/c/devtools/post-v04-roadmap) (drop `BLOK_ROUTING_LEGACY`, remove `AuthMiddleware`).
