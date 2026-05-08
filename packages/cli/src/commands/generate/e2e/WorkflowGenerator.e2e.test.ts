@@ -291,7 +291,7 @@ describe("WorkflowGenerator E2E", () => {
 
 	describe("markdown fence cleanup", () => {
 		it("should strip markdown JSON fences from LLM response", async () => {
-			const wrappedJson = "```json\n" + VALID_HTTP_WORKFLOW + "\n```";
+			const wrappedJson = `\`\`\`json\n${VALID_HTTP_WORKFLOW}\n\`\`\``;
 
 			mockedGenerateText.mockResolvedValueOnce({
 				text: wrappedJson,

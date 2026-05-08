@@ -186,10 +186,10 @@ async function runContractTests(sdk: SdkEndpoint): Promise<void> {
 		const req = makeExecutionRequest("hello-world", { name: "Blok" });
 		const { status, body } = await post(`${sdk.url}/execute`, req);
 		assert(status === 200, `Expected 200, got ${status}`);
-		assert(body.success === true, `Expected success: true`);
+		assert(body.success === true, "Expected success: true");
 
 		const msg = typeof body.data === "string" ? body.data : body.data?.message;
-		assert(msg && msg.includes("Blok"), `Expected "Blok" in message, got: ${JSON.stringify(body.data)}`);
+		assert(msg?.includes("Blok"), `Expected "Blok" in message, got: ${JSON.stringify(body.data)}`);
 	});
 
 	// 5. HelloWorld with config prefix
@@ -197,13 +197,10 @@ async function runContractTests(sdk: SdkEndpoint): Promise<void> {
 		const req = makeExecutionRequest("hello-world", { name: "Test" }, { prefix: "Greetings" });
 		const { status, body } = await post(`${sdk.url}/execute`, req);
 		assert(status === 200, `Expected 200, got ${status}`);
-		assert(body.success === true, `Expected success: true`);
+		assert(body.success === true, "Expected success: true");
 
 		const msg = typeof body.data === "string" ? body.data : body.data?.message;
-		assert(
-			msg && msg.includes("Greetings"),
-			`Expected "Greetings" prefix in message, got: ${JSON.stringify(body.data)}`,
-		);
+		assert(msg?.includes("Greetings"), `Expected "Greetings" prefix in message, got: ${JSON.stringify(body.data)}`);
 	});
 
 	// 6. Non-existent node returns success: false

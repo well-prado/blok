@@ -5,7 +5,7 @@ import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import { waitForGrpcPort } from "../../services/health-probe.js";
 import { detectRr } from "../../services/runtime-detector.js";
-import { readProjectConfig } from "../../services/runtime-setup.js";
+import { readProjectConfig, validateProjectRuntimes } from "../../services/runtime-setup.js";
 
 const runningProcesses: ChildProcess[] = [];
 
@@ -117,6 +117,41 @@ export async function devProject(opts: OptionValues) {
 
 	// Read project runtime config
 	const config = readProjectConfig(currentPath);
+
+	// Validate runtime versions unless --skip-version-check is set
+	const skipVersionCheck = opts.skipVersionCheck === true;
+	const validationResults = await validateProjectRuntimes(currentPath);
+
+	if (validationResults.length > 0) {
+		const failures = validationResults.filter((r) => !r.satisfied);
+		const successes = validationResults.filter((r) => r.satisfied);
+
+		if (failures.length > 0 && !skipVersionCheck) {
+			console.error("\n  Runtime version requirements not met:\n");
+			for (const f of failures) {
+				console.error(f.message);
+				console.error();
+			}
+			console.error("  Tip: Use --skip-version-check to bypass this check.\n");
+			process.exit(1);
+		}
+
+		// Print version check results
+		if (failures.length > 0 && skipVersionCheck) {
+			console.log("\n  Runtime version warnings:");
+			for (const f of failures) {
+				console.log(`  ! ${f.label}  ${f.found || "not installed"} (requires ${f.required}) — SKIPPED`);
+			}
+		}
+
+		if (successes.length > 0) {
+			if (failures.length === 0) console.log("\n  Runtime version check:");
+			for (const s of successes) {
+				console.log(s.message);
+			}
+		}
+		console.log();
+	}
 
 	// Collect runtime process definitions. `port` here is the port the CLI
 	// health-probes after spawn — gRPC port when transport=grpc, HTTP port

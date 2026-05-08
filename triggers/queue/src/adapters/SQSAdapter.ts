@@ -13,6 +13,7 @@
  * - SQS_VISIBILITY_TIMEOUT: Visibility timeout in seconds (default: 30)
  */
 
+import type { MessageAttributeValue, SQSClient } from "@aws-sdk/client-sqs";
 import type { QueueTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
@@ -33,11 +34,22 @@ export interface SQSConfig {
 export class SQSAdapter implements QueueAdapter {
 	readonly provider = "sqs" as const;
 
-	private client: any;
+	private client: SQSClient | undefined;
 	private connected = false;
 	private config: SQSConfig;
 	private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
 	private shouldStop = false;
+
+	/**
+	 * Type-narrowing accessor for `this.client`. Field is undefined until
+	 * `connect()` runs.
+	 */
+	private requireClient(): SQSClient {
+		if (!this.client) {
+			throw new Error("[SQSAdapter] client is not initialised — call connect() first");
+		}
+		return this.client;
+	}
 
 	constructor(config?: Partial<SQSConfig>) {
 		this.config = {
@@ -67,8 +79,7 @@ export class SQSAdapter implements QueueAdapter {
 			console.log(`[SQSAdapter] Connected to AWS SQS: ${this.config.region}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to AWS SQS: ${(error as Error).message}. ` +
-					`Make sure @aws-sdk/client-sqs is installed: npm install @aws-sdk/client-sqs`,
+				`Failed to connect to AWS SQS: ${(error as Error).message}. Make sure @aws-sdk/client-sqs is installed: npm install @aws-sdk/client-sqs`,
 			);
 		}
 	}
@@ -129,7 +140,7 @@ export class SQSAdapter implements QueueAdapter {
 				AttributeNames: ["All"],
 			});
 
-			const response = await this.client.send(command);
+			const response = await this.requireClient().send(command);
 
 			if (response.Messages && response.Messages.length > 0) {
 				for (const msg of response.Messages) {
@@ -145,7 +156,8 @@ export class SQSAdapter implements QueueAdapter {
 					const headers: Record<string, string> = {};
 					if (msg.MessageAttributes) {
 						for (const [key, attr] of Object.entries(msg.MessageAttributes)) {
-							headers[key] = (attr as any).StringValue || String((attr as any).BinaryValue) || "";
+							const sqsAttr = attr as MessageAttributeValue;
+							headers[key] = sqsAttr.StringValue || (sqsAttr.BinaryValue ? String(sqsAttr.BinaryValue) : "");
 						}
 					}
 
@@ -164,7 +176,7 @@ export class SQSAdapter implements QueueAdapter {
 								QueueUrl: queueUrl,
 								ReceiptHandle: msg.ReceiptHandle,
 							});
-							await this.client.send(deleteCommand);
+							await this.requireClient().send(deleteCommand);
 						},
 						nack: async (_requeue = true) => {
 							// In SQS, messages automatically return to queue after visibility timeout
@@ -176,7 +188,7 @@ export class SQSAdapter implements QueueAdapter {
 									ReceiptHandle: msg.ReceiptHandle,
 									VisibilityTimeout: 0, // Return message to queue immediately
 								});
-								await this.client.send(changeCommand);
+								await this.requireClient().send(changeCommand);
 							}
 						},
 					};
@@ -228,7 +240,7 @@ export class SQSAdapter implements QueueAdapter {
 		try {
 			const { ListQueuesCommand } = await import("@aws-sdk/client-sqs");
 			const command = new ListQueuesCommand({ MaxResults: 1 });
-			await this.client.send(command);
+			await this.requireClient().send(command);
 			return true;
 		} catch {
 			return false;

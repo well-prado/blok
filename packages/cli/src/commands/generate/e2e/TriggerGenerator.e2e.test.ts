@@ -345,7 +345,7 @@ describe("TriggerGenerator E2E", () => {
 
 	describe("markdown fence cleanup", () => {
 		it("should strip markdown TypeScript fences from LLM response", async () => {
-			const wrappedCode = "```typescript\n" + VALID_QUEUE_TRIGGER + "\n```";
+			const wrappedCode = `\`\`\`typescript\n${VALID_QUEUE_TRIGGER}\n\`\`\``;
 			mockedGenerateText.mockResolvedValueOnce({ text: wrappedCode } as never);
 			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
 

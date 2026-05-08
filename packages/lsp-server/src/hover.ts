@@ -122,7 +122,7 @@ function findQuotedWordAt(
 function createDocHover(doc: HoverDoc, range: Range): Hover {
 	let value = `**${doc.title}**\n\n${doc.description}\n\n`;
 	if (doc.example) {
-		value += "```json\n" + doc.example + "\n```";
+		value += `\`\`\`json\n${doc.example}\n\`\`\``;
 	}
 
 	return {

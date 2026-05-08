@@ -41,6 +41,66 @@
 import { EventEmitter } from "node:events";
 
 // ---------------------------------------------------------------------------
+// Cloud-vendor SDK shapes — minimal local types
+// ---------------------------------------------------------------------------
+//
+// AWS Secrets Manager and GCP Secret Manager are loaded as OPTIONAL
+// peer dependencies via `await import("@aws-sdk/client-secrets-manager")`
+// / `await import("@google-cloud/secret-manager")`. The corresponding
+// type packages aren't installed (would force every consumer to install
+// 50MB+ of SDK types they don't use), so we declare the narrow surface
+// the providers below actually call. This avoids `any` while keeping
+// the providers truly optional.
+
+/** Minimal shape of an AWS Secrets Manager command instance — all SDK
+ *  command classes are opaque to us; we just hand them to `client.send`. */
+interface AwsCommand {
+	readonly input: unknown;
+}
+
+/** Minimal AWS Secrets Manager client — only `send()` is called. */
+interface AwsSecretsClient {
+	send(command: AwsCommand): Promise<AwsCommandOutput>;
+}
+
+/** Per-command response surface used by this file. AWS responses share a
+ *  common envelope; we only read the fields we use. */
+interface AwsCommandOutput {
+	SecretString?: string;
+	SecretList?: Array<{ Name?: string }>;
+	NextToken?: string;
+}
+
+/** Constructor signature for AWS SDK command classes — they all accept
+ *  a plain-object input. Used to type the dynamically-imported `sdk`
+ *  bag so the constructor calls in `set()` are checked. */
+type AwsCommandCtor = new (input: Record<string, unknown>) => AwsCommand;
+
+/** Shape of the dynamically-imported AWS SDK module. Only the
+ *  constructors actually used in this file are typed. */
+interface AwsSecretsManagerSDK {
+	SecretsManagerClient: new (config: Record<string, unknown>) => AwsSecretsClient;
+	GetSecretValueCommand: AwsCommandCtor;
+	UpdateSecretCommand: AwsCommandCtor;
+	CreateSecretCommand: AwsCommandCtor;
+	DeleteSecretCommand: AwsCommandCtor;
+	ListSecretsCommand: AwsCommandCtor;
+	DescribeSecretCommand: AwsCommandCtor;
+}
+
+/** Minimal GCP Secret Manager client — only the methods this file calls
+ *  are typed. The GCP SDK returns tuples `[response, metadata]` which we
+ *  destructure; reflected here as the `[T]` tuple shape. */
+interface GcpSecretsClient {
+	accessSecretVersion(req: { name: string }): Promise<[{ payload?: { data?: string | Uint8Array | Buffer } }]>;
+	createSecret(req: Record<string, unknown>): Promise<unknown>;
+	addSecretVersion(req: { parent: string; payload: { data: Buffer } }): Promise<unknown>;
+	deleteSecret(req: { name: string }): Promise<unknown>;
+	listSecrets(req: { parent: string }): Promise<[Array<{ name?: string }>]>;
+	getSecret(req: { name: string }): Promise<unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
 
@@ -410,15 +470,15 @@ export class InMemorySecretProvider implements SecretProvider {
 	 * @param key - The secret key
 	 */
 	async exists(key: string): Promise<boolean> {
-		if (!this.store.has(key)) return false;
-
-		// Check expiration
-		const entry = this.store.get(key)!;
+		// `has`-then-`get` is the pattern; the `get` cannot return undefined
+		// here because `has` returned true. Defensive-default to avoid the
+		// non-null assertion biome flags.
+		const entry = this.store.get(key);
+		if (!entry) return false;
 		if (entry.metadata?.expiresAt && entry.metadata.expiresAt < Date.now()) {
 			this.store.delete(key);
 			return false;
 		}
-
 		return true;
 	}
 
@@ -580,7 +640,7 @@ export class VaultSecretProvider implements SecretProvider {
 	 */
 	async list(prefix?: string): Promise<string[]> {
 		const path = prefix ?? "";
-		const url = this.buildUrl("metadata", path) + "?list=true";
+		const url = `${this.buildUrl("metadata", path)}?list=true`;
 
 		const response = await fetch(url, {
 			method: "LIST",
@@ -703,8 +763,7 @@ export class AWSSecretsProvider implements SecretProvider {
 	private accessKeyId: string | undefined;
 	private secretAccessKey: string | undefined;
 	private profile: string | undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	private client: any = null;
+	private client: AwsSecretsClient | null = null;
 
 	constructor(config: {
 		region: string;
@@ -862,8 +921,7 @@ export class AWSSecretsProvider implements SecretProvider {
 	/**
 	 * Lazily initialize and cache the AWS SecretsManager client
 	 */
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	private async getClient(): Promise<any> {
+	private async getClient(): Promise<AwsSecretsClient> {
 		if (this.client) return this.client;
 
 		const { SecretsManagerClient } = await this.getSDK();
@@ -892,11 +950,10 @@ export class AWSSecretsProvider implements SecretProvider {
 	/**
 	 * Dynamically import the AWS Secrets Manager SDK
 	 */
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	private async getSDK(): Promise<any> {
+	private async getSDK(): Promise<AwsSecretsManagerSDK> {
 		try {
 			// @ts-ignore -- optional peer dependency, loaded dynamically at runtime
-			return await import("@aws-sdk/client-secrets-manager");
+			return (await import("@aws-sdk/client-secrets-manager")) as AwsSecretsManagerSDK;
 		} catch {
 			throw new Error(
 				"AWS Secrets Manager SDK not found. Install it with: npm install @aws-sdk/client-secrets-manager",
@@ -935,8 +992,7 @@ export class GCPSecretProvider implements SecretProvider {
 	readonly name = "gcp";
 	private projectId: string;
 	private keyFile: string | undefined;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	private client: any = null;
+	private client: GcpSecretsClient | null = null;
 
 	constructor(config: { projectId: string; keyFile?: string }) {
 		this.projectId = config.projectId;
@@ -1079,13 +1135,14 @@ export class GCPSecretProvider implements SecretProvider {
 	/**
 	 * Lazily initialize and cache the GCP Secret Manager client
 	 */
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	private async getClient(): Promise<any> {
+	private async getClient(): Promise<GcpSecretsClient> {
 		if (this.client) return this.client;
 
 		try {
 			// @ts-ignore -- optional peer dependency, loaded dynamically at runtime
-			const module = await import("@google-cloud/secret-manager");
+			const module = (await import("@google-cloud/secret-manager")) as {
+				SecretManagerServiceClient: new (options: Record<string, unknown>) => GcpSecretsClient;
+			};
 			const { SecretManagerServiceClient } = module;
 
 			const options: Record<string, unknown> = {};
@@ -1350,13 +1407,17 @@ export class SecretManager extends EventEmitter {
 	 */
 	async resolveTemplate(template: string): Promise<string> {
 		const matches: { placeholder: string; key: string }[] = [];
-		let match: RegExpExecArray | null;
 
 		// Reset regex state
 		SECRET_TEMPLATE_REGEX.lastIndex = 0;
 
-		while ((match = SECRET_TEMPLATE_REGEX.exec(template)) !== null) {
+		// Sticky-regex iteration — pull each match in its own statement so
+		// the assignment isn't inside the loop condition (biome flags
+		// assign-in-expression).
+		let match = SECRET_TEMPLATE_REGEX.exec(template);
+		while (match !== null) {
 			matches.push({ placeholder: match[0], key: match[1] });
+			match = SECRET_TEMPLATE_REGEX.exec(template);
 		}
 
 		if (matches.length === 0) return template;

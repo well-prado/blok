@@ -7,7 +7,14 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"ignore": ["node_modules", "dist", "**/routeTree.gen.ts"]
+		"ignore": [
+			"node_modules",
+			"dist",
+			"**/routeTree.gen.ts",
+			"sdks/*/vendor/**",
+			"sdks/*/.venv/**",
+			"sdks/python3/**/__pycache__/**"
+		]
 	},
 	"formatter": {
 		"enabled": true,

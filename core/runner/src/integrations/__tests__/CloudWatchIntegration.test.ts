@@ -53,7 +53,7 @@ describe("CloudWatchIntegration", () => {
 			if (orig) {
 				process.env.AWS_REGION = orig;
 			} else {
-				delete process.env.AWS_REGION;
+				process.env.AWS_REGION = undefined;
 			}
 		});
 	});

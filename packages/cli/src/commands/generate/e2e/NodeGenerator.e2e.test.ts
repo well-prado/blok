@@ -305,7 +305,7 @@ describe("NodeGenerator E2E", () => {
 
 	describe("code with markdown fences", () => {
 		it("should return code as-is from LLM (cleanup happens at CLI layer)", async () => {
-			const wrappedCode = "```typescript\n" + VALID_FUNCTION_FIRST_NODE + "\n```";
+			const wrappedCode = `\`\`\`typescript\n${VALID_FUNCTION_FIRST_NODE}\n\`\`\``;
 			mockedGenerateText.mockResolvedValueOnce({ text: wrappedCode } as never);
 			mockValidPass();
 

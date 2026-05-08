@@ -10,6 +10,7 @@
  */
 
 import type { QueueTriggerOpts } from "@blokjs/helper";
+import type { Channel, ChannelModel, ConsumeMessage } from "amqplib";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
@@ -27,11 +28,32 @@ export interface RabbitMQConfig {
 export class RabbitMQAdapter implements QueueAdapter {
 	readonly provider = "rabbitmq" as const;
 
-	private connection: any;
-	private channel: any;
+	private connection: ChannelModel | undefined;
+	private channel: Channel | undefined;
 	private connected = false;
 	private config: RabbitMQConfig;
 	private consumerTags: Map<string, string> = new Map();
+
+	/**
+	 * Type-narrowing accessor for `this.channel`. Field is undefined until
+	 * `connect()` runs.
+	 */
+	private requireChannel(): Channel {
+		if (!this.channel) {
+			throw new Error("[RabbitMQAdapter] channel is not initialised — call connect() first");
+		}
+		return this.channel;
+	}
+
+	/**
+	 * Type-narrowing accessor for `this.connection`.
+	 */
+	private requireConnection(): ChannelModel {
+		if (!this.connection) {
+			throw new Error("[RabbitMQAdapter] connection is not initialised — call connect() first");
+		}
+		return this.connection;
+	}
 
 	constructor(config?: Partial<RabbitMQConfig>) {
 		this.config = {
@@ -73,8 +95,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 			console.log(`[RabbitMQAdapter] Connected to RabbitMQ: ${this.config.url}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to RabbitMQ: ${(error as Error).message}. ` +
-					`Make sure amqplib is installed: npm install amqplib`,
+				`Failed to connect to RabbitMQ: ${(error as Error).message}. Make sure amqplib is installed: npm install amqplib`,
 			);
 		}
 	}
@@ -86,19 +107,22 @@ export class RabbitMQAdapter implements QueueAdapter {
 		if (!this.connected) return;
 
 		try {
+			const channel = this.requireChannel();
+			const connection = this.requireConnection();
+
 			// Cancel all consumers
 			for (const [queue, tag] of this.consumerTags) {
 				try {
-					await this.channel.cancel(tag);
-				} catch (err) {
+					await channel.cancel(tag);
+				} catch (_err) {
 					console.warn(`[RabbitMQAdapter] Error canceling consumer for ${queue}`);
 				}
 			}
 
 			this.consumerTags.clear();
 
-			await this.channel.close();
-			await this.connection.close();
+			await channel.close();
+			await connection.close();
 			this.connected = false;
 			console.log("[RabbitMQAdapter] Disconnected from RabbitMQ");
 		} catch (error) {
@@ -115,16 +139,17 @@ export class RabbitMQAdapter implements QueueAdapter {
 		}
 
 		const queue = config.topic; // In RabbitMQ context, topic is the queue name
+		const channel = this.requireChannel();
 
 		// Assert queue exists (creates if not)
-		await this.channel.assertQueue(queue, {
+		await channel.assertQueue(queue, {
 			durable: true,
 		});
 
 		// Start consuming
-		const { consumerTag } = await this.channel.consume(
+		const { consumerTag } = await channel.consume(
 			queue,
-			async (msg: any) => {
+			async (msg: ConsumeMessage | null) => {
 				if (!msg) return;
 
 				// Parse message content
@@ -152,10 +177,10 @@ export class RabbitMQAdapter implements QueueAdapter {
 					topic: queue,
 					timestamp: msg.properties.timestamp ? new Date(msg.properties.timestamp) : new Date(),
 					ack: async () => {
-						this.channel.ack(msg);
+						channel.ack(msg);
 					},
 					nack: async (requeue = true) => {
-						this.channel.nack(msg, false, requeue);
+						channel.nack(msg, false, requeue);
 					},
 				};
 
@@ -182,7 +207,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 	async unsubscribe(topic: string): Promise<void> {
 		const consumerTag = this.consumerTags.get(topic);
 		if (consumerTag) {
-			await this.channel.cancel(consumerTag);
+			await this.requireChannel().cancel(consumerTag);
 			this.consumerTags.delete(topic);
 			console.log(`[RabbitMQAdapter] Unsubscribed from queue: ${topic}`);
 		}
@@ -203,7 +228,7 @@ export class RabbitMQAdapter implements QueueAdapter {
 
 		try {
 			// Try to check channel status
-			await this.channel.checkQueue("amq.rabbitmq.reply-to");
+			await this.requireChannel().checkQueue("amq.rabbitmq.reply-to");
 			return true;
 		} catch {
 			// Queue might not exist but channel is healthy

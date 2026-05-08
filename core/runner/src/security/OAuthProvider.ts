@@ -400,7 +400,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 	 * Bearer token from the Authorization header.
 	 */
 	async authenticate(request: AuthRequest): Promise<AuthResult> {
-		const headerValue = request.headers["authorization"] ?? request.headers["Authorization"];
+		const headerValue = request.headers.authorization ?? request.headers.Authorization;
 		if (!headerValue) {
 			return { authenticated: false, error: "No authorization header" };
 		}
@@ -473,7 +473,7 @@ export class OAuthOIDCProvider implements AuthProvider {
 			return this.discoveryCache;
 		}
 
-		const url = issuerUrl.replace(/\/+$/, "") + "/.well-known/openid-configuration";
+		const url = `${issuerUrl.replace(/\/+$/, "")}/.well-known/openid-configuration`;
 
 		const response = await fetch(url, {
 			method: "GET",

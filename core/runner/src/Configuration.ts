@@ -30,6 +30,7 @@ import type Mapper from "./types/Mapper";
 import type Node from "./types/Node";
 import type Trigger from "./types/Trigger";
 import type TryCatch from "./types/TryCatch";
+import { RuntimeVersionValidator } from "./version/RuntimeVersionValidator";
 
 export default class Configuration implements Config {
 	public workflow: Config = <Config>{};
@@ -643,6 +644,9 @@ export default class Configuration implements Config {
 			throw new Error(`Node ${node.node} not found`);
 		}
 
+		// Validate runtime requirements if the node declares them
+		this.validateNodeRuntimeRequirements(nodeHandler);
+
 		const clone = Object.assign(Object.create(Object.getPrototypeOf(nodeHandler)), nodeHandler);
 		// Copy step-level metadata from the workflow JSON onto the clone.
 		// Without this, `step.type` is undefined for module nodes and
@@ -746,6 +750,39 @@ export default class Configuration implements Config {
 		n.stop = node.stop !== undefined ? node.stop : false;
 		if (node.set_var !== undefined) n.set_var = node.set_var;
 		return n;
+	}
+
+	/**
+	 * Check if a resolved node has runtimeRequirements and validate them
+	 * against the currently known runtime versions in the RuntimeRegistry.
+	 */
+	private validateNodeRuntimeRequirements(node: unknown): void {
+		const fnNode = node as { runtimeRequirements?: Partial<Record<string, string>>; name?: string };
+		if (!fnNode.runtimeRequirements) return;
+
+		const registry = RuntimeRegistry.getInstance();
+		const runtimeVersions: Record<string, string> = {};
+		for (const kind of registry.getRegisteredKinds()) {
+			const version = registry.getVersion(kind);
+			if (version) {
+				runtimeVersions[kind] = version;
+			}
+		}
+
+		// If no runtime versions are known yet, skip validation
+		// (versions are populated when health checks succeed)
+		if (Object.keys(runtimeVersions).length === 0) return;
+
+		const validator = new RuntimeVersionValidator(runtimeVersions);
+		const results = validator.validateNode({
+			name: fnNode.name || "unknown",
+			runtimeRequirements: fnNode.runtimeRequirements,
+		});
+
+		const failures = results.filter((r) => !r.valid);
+		if (failures.length > 0) {
+			throw new Error(RuntimeVersionValidator.formatErrors(failures));
+		}
 	}
 
 	protected async localResolver(node: RunnerNode): Promise<RunnerNode> {

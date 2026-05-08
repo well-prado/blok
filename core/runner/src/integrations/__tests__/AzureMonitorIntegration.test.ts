@@ -70,7 +70,7 @@ describe("AzureMonitorIntegration", () => {
 			if (orig) {
 				process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = orig;
 			} else {
-				delete process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
+				process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = undefined;
 			}
 		});
 	});
@@ -88,7 +88,7 @@ describe("AzureMonitorIntegration", () => {
 
 			// Clear env var too
 			const orig = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
-			delete process.env.APPLICATIONINSIGHTS_CONNECTION_STRING;
+			process.env.APPLICATIONINSIGHTS_CONNECTION_STRING = undefined;
 
 			const result = await noConn.init();
 			expect(result).toBe(false);

@@ -27,6 +27,12 @@ export interface RuntimePackageManifest {
 	protocols: ("http" | "grpc" | "both")[];
 	dockerImage?: string;
 	minBlokVersion?: string;
+	/**
+	 * Minimum runtime versions required by this package.
+	 * Keys are runtime kind identifiers, values are semver constraints.
+	 * @example { python3: ">=3.11.0", go: ">=1.21.0" }
+	 */
+	runtimeVersions?: Partial<Record<string, string>>;
 	nodeCount: number;
 	nodes: RuntimeNodeInfo[];
 	createdAt: number;

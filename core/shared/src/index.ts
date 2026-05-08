@@ -13,6 +13,7 @@ import NodeBase from "./NodeBase";
 import Trigger from "./Trigger";
 import ConfigContext from "./types/ConfigContext";
 import Context from "./types/Context";
+import EnvContext from "./types/EnvContext";
 import ErrorContext from "./types/ErrorContext";
 import FunctionContext from "./types/FunctionContext";
 import LoggerContext from "./types/LoggerContext";
@@ -29,6 +30,7 @@ export {
 	Context,
 	RequestContext,
 	ResponseContext,
+	EnvContext,
 	ErrorContext,
 	LoggerContext,
 	ConfigContext,

@@ -1,4 +1,5 @@
-import type { Context, ResponseContext } from "@blokjs/shared";
+import type { Context, EnvContext, ResponseContext, VarsContext } from "@blokjs/shared";
+import type { z } from "zod";
 import type BlokService from "../Blok";
 import type { IBlokResponse } from "../BlokResponse";
 import type { FunctionNode } from "../defineNode";
@@ -14,17 +15,17 @@ export interface TestContextOverrides {
 	id?: string;
 	/** Override the request context */
 	request?: {
-		body?: any;
+		body?: unknown;
 		headers?: Record<string, string>;
 		query?: Record<string, string>;
 		params?: Record<string, string>;
 	};
 	/** Override the response context */
 	response?: Partial<ResponseContext>;
-	/** Override context vars */
-	vars?: Record<string, any>;
-	/** Override environment variables */
-	env?: Record<string, any>;
+	/** Override context vars (alias for state in v2) */
+	vars?: VarsContext;
+	/** Override environment variables — shape matches `EnvContext` */
+	env?: EnvContext;
 	/** Override error context */
 	error?: { message: string[] | string; code?: number };
 	/** Provide a custom logger (defaults to TestLogger) */
@@ -34,7 +35,7 @@ export interface TestContextOverrides {
 	/** Override workflow path */
 	workflow_path?: string;
 	/** Override config context */
-	config?: Record<string, any>;
+	config?: Record<string, unknown>;
 }
 
 /**
@@ -46,7 +47,7 @@ export interface TestResult<O> {
 	/** The output data from the node, or null on failure */
 	data: O | null;
 	/** Error information if the node failed */
-	error: any;
+	error: unknown;
 	/** The context after node execution */
 	context: Context;
 	/** Execution duration in milliseconds */
@@ -71,8 +72,15 @@ export interface TestMetrics {
 	lastDurationMs: number;
 }
 
-/** Union type for anything that can be tested as a node */
-type TestableNode = BlokService<any> | FunctionNode<any, any>;
+/**
+ * Union type for anything that can be tested as a node — either a
+ * class-based `BlokService` (legacy) or a defineNode-built `FunctionNode`.
+ * Both generics are widened to their constraints (`unknown` for
+ * BlokService's data shape, `z.ZodTypeAny` for FunctionNode's input/output
+ * schemas) so the harness can dispatch without caring about the specific
+ * schema parameters of the underlying node.
+ */
+type TestableNode = BlokService<unknown> | FunctionNode<z.ZodTypeAny, z.ZodTypeAny>;
 
 /**
  * NodeTestHarness - Main testing utility for Blok nodes.
@@ -107,7 +115,14 @@ type TestableNode = BlokService<any> | FunctionNode<any, any>;
  * @typeParam I - Input type for the node
  * @typeParam O - Output type for the node
  */
-export class NodeTestHarness<I = any, O = any> {
+/**
+ * I/O default to `unknown` so authors can `new NodeTestHarness(myNode)`
+ * with zero generic specification — assertion helpers (`assertOutput`,
+ * `assertContextVar`) accept `unknown` expected values, and `execute()`
+ * accepts `unknown` input. Authors who want stronger types can specify
+ * `new NodeTestHarness<MyInput, MyOutput>(myNode)` to lock the surface.
+ */
+export class NodeTestHarness<I = unknown, O = unknown> {
 	private node: TestableNode;
 	private executionHistory: TestResult<O>[];
 
@@ -128,12 +143,20 @@ export class NodeTestHarness<I = any, O = any> {
 	createContext(overrides?: TestContextOverrides): Context {
 		const logger = overrides?.logger ?? new TestLogger();
 
+		// `RequestContext.body` is structurally typed as `ParamsDictionary`
+		// (a string-indexed map of strings). Real workflows pass arbitrary
+		// JSON here; the runtime path (`HttpTrigger.runWorkflowExecution`)
+		// also casts user-supplied bodies through `as unknown as` to
+		// satisfy the declared shape. Mirror that pattern here so authors
+		// can pass any JSON-like body in tests without fighting the type.
+		const requestBody = overrides?.request?.body ?? {};
+
 		const ctx: Context = {
 			id: overrides?.id ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 			workflow_name: overrides?.workflow_name ?? "test-workflow",
 			workflow_path: overrides?.workflow_path ?? "/test",
 			request: {
-				body: overrides?.request?.body ?? {},
+				body: requestBody as JsonLikeObject as Context["request"]["body"],
 				headers: overrides?.request?.headers ?? {},
 				query: overrides?.request?.query ?? {},
 				params: overrides?.request?.params ?? {},
@@ -301,7 +324,7 @@ export class NodeTestHarness<I = any, O = any> {
 	 * @param expected - The expected value
 	 * @throws Error if the variable is not set or does not match
 	 */
-	assertContextVar(result: TestResult<O>, key: string, expected: any): void {
+	assertContextVar(result: TestResult<O>, key: string, expected: unknown): void {
 		const vars = result.context.vars as Record<string, unknown> | undefined;
 
 		if (!vars) {
@@ -356,16 +379,18 @@ export class NodeTestHarness<I = any, O = any> {
 	/**
 	 * Format an error value into a readable string.
 	 */
-	private formatError(error: any): string {
+	private formatError(error: unknown): string {
 		if (error === null || error === undefined) {
 			return "(no error)";
 		}
 		if (error instanceof Error) {
 			return error.message;
 		}
-		if (typeof error === "object" && "context" in error) {
+		if (typeof error === "object" && error !== null && "context" in error) {
 			// GlobalError format
-			return error.context?.message ?? JSON.stringify(error.context);
+			const ctxErr = error as { context?: { message?: string } | unknown };
+			const ctx = ctxErr.context as { message?: string } | undefined;
+			return ctx?.message ?? JSON.stringify(ctx);
 		}
 		if (typeof error === "object") {
 			return JSON.stringify(error);

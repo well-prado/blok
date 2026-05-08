@@ -64,7 +64,7 @@ export class RuntimeDiscovery {
 
 		if (version) {
 			// Check if this is a semver range or exact version
-			if (version.startsWith("^") || version.startsWith("~")) {
+			if (version.startsWith("^") || version.startsWith("~") || version.startsWith(">=")) {
 				resolvedVersion = this.resolveVersion(name, version);
 			} else {
 				resolvedVersion = version;
@@ -212,10 +212,10 @@ export class RuntimeDiscovery {
 
 	/**
 	 * Resolve a semver range to a specific version available in the catalog.
-	 * Supports exact versions, ^ (caret), and ~ (tilde) ranges.
+	 * Supports exact versions, >= (minimum), ^ (caret), and ~ (tilde) ranges.
 	 *
 	 * @param name - The package name
-	 * @param range - The semver range string (e.g., "^1.2.0", "~2.0.0", "1.5.3")
+	 * @param range - The semver range string (e.g., ">=1.0.0", "^1.2.0", "~2.0.0", "1.5.3")
 	 * @returns The resolved version string, or undefined if no match found
 	 */
 	resolveVersion(name: string, range: string): string | undefined {
@@ -223,12 +223,21 @@ export class RuntimeDiscovery {
 		if (versions.length === 0) return undefined;
 
 		// Exact version match
-		if (!range.startsWith("^") && !range.startsWith("~")) {
+		if (!range.startsWith("^") && !range.startsWith("~") && !range.startsWith(">=")) {
 			return versions.includes(range) ? range : undefined;
 		}
 
-		const prefix = range[0];
-		const baseVersion = range.slice(1);
+		let prefix: string;
+		let baseVersion: string;
+
+		if (range.startsWith(">=")) {
+			prefix = ">=";
+			baseVersion = range.slice(2);
+		} else {
+			prefix = range[0];
+			baseVersion = range.slice(1);
+		}
+
 		const baseParts = baseVersion.split(".").map(Number);
 
 		if (baseParts.length < 3) {
@@ -243,6 +252,11 @@ export class RuntimeDiscovery {
 		const matching = versions.filter((v) => {
 			const parts = v.split(".").map(Number);
 			const [major, minor, patch] = [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+
+			if (prefix === ">=") {
+				// Minimum version: any version >= base
+				return this.semverGte(major, minor, patch, baseMajor, baseMinor, basePatch);
+			}
 
 			if (prefix === "^") {
 				// Caret: allows changes that do not modify the left-most non-zero digit

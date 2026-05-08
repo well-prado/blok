@@ -700,7 +700,14 @@ export class NodeResultCache {
 			case "node-input":
 				return `node:${nodeName}:${sha256(nodeName + JSON.stringify(input))}`;
 			case "custom":
-				return this.customKeyFn!(nodeName, input);
+				// Constructor (line ~484) throws when strategy === "custom" but
+				// customKeyFn is missing, so by the time we get here the fn is
+				// guaranteed defined. Defensive runtime check keeps TS happy
+				// without `!`.
+				if (!this.customKeyFn) {
+					throw new Error('NodeResultCache: "custom" key strategy requires a customKeyFn to be provided.');
+				}
+				return this.customKeyFn(nodeName, input);
 			default:
 				return `node:${nodeName}:${sha256(nodeName + JSON.stringify(input))}`;
 		}

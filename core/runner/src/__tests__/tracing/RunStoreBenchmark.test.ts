@@ -299,7 +299,9 @@ describe("RunStore Performance Benchmarks", () => {
 		});
 
 		afterEach(() => {
-			/* keep data between tests */
+			/* keep data between tests — both pre-suite and post-suite
+			   hooks intentionally no-op so the SQLite handle survives
+			   the whole describe block. Single hook, no duplication. */
 		});
 
 		// We need to initialize store before running suite
@@ -307,11 +309,6 @@ describe("RunStore Performance Benchmarks", () => {
 		const sqliteStore = new SqliteRunStore(join(dir, "bench.db"));
 
 		runBenchmarkSuite("SQLite", sqliteStore);
-
-		// Cleanup after all tests
-		afterEach(() => {
-			// Don't close between tests
-		});
 
 		it("cleanup temp dir", () => {
 			sqliteStore.close();

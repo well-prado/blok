@@ -15,13 +15,16 @@
  */
 
 import type { QueueTriggerOpts } from "@blokjs/helper";
+import type { Consumer, Kafka, KafkaMessage, SASLOptions } from "kafkajs";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
-// Dynamic import for optional dependency
-let Kafka: any;
-let Consumer: any;
-let EachMessagePayload: any;
+// `kafkajs` is an optional peer dep — we resolve the runtime constructor
+// via `await import("kafkajs")`. The `import type` above is erased at
+// compile time so projects that don't install kafkajs can still use this
+// trigger as long as they don't actually call the Kafka adapter.
+type KafkaCtor = typeof Kafka;
+let KafkaClass: KafkaCtor | undefined;
 
 /**
  * Kafka connection configuration
@@ -30,11 +33,13 @@ export interface KafkaConfig {
 	brokers: string[];
 	clientId: string;
 	ssl?: boolean;
-	sasl?: {
-		mechanism: "plain" | "scram-sha-256" | "scram-sha-512";
-		username: string;
-		password: string;
-	};
+	/**
+	 * SASL auth options — typed as kafkajs's `SASLOptions` (a discriminated
+	 * union over the supported mechanisms). Was previously typed inline
+	 * with a narrower mechanism enum that didn't satisfy kafkajs's stricter
+	 * `SASLOptions | Mechanism` shape.
+	 */
+	sasl?: SASLOptions;
 }
 
 /**
@@ -43,8 +48,32 @@ export interface KafkaConfig {
 export class KafkaAdapter implements QueueAdapter {
 	readonly provider = "kafka" as const;
 
-	private kafka: any;
-	private consumer: any;
+	private kafka: Kafka | undefined;
+	private consumer: Consumer | undefined;
+
+	/**
+	 * Type-narrowing accessor for `this.consumer`. The field is undefined
+	 * until `connect()` runs; methods that operate on the consumer should
+	 * call this so the compiler enforces the precondition without us
+	 * sprinkling non-null assertions.
+	 */
+	private requireConsumer(): Consumer {
+		if (!this.consumer) {
+			throw new Error("[KafkaAdapter] consumer is not initialised — call connect() first");
+		}
+		return this.consumer;
+	}
+
+	/**
+	 * Type-narrowing accessor for `this.kafka`. Same contract as
+	 * {@link requireConsumer}.
+	 */
+	private requireKafka(): Kafka {
+		if (!this.kafka) {
+			throw new Error("[KafkaAdapter] kafka client is not initialised — call connect() first");
+		}
+		return this.kafka;
+	}
 	private connected = false;
 	private config: KafkaConfig;
 	private subscriptions: Map<string, (message: QueueMessage) => Promise<void>> = new Map();
@@ -81,9 +110,9 @@ export class KafkaAdapter implements QueueAdapter {
 		try {
 			// Dynamic import of kafkajs
 			const kafkajs = await import("kafkajs");
-			Kafka = kafkajs.Kafka;
+			KafkaClass = kafkajs.Kafka;
 
-			this.kafka = new Kafka({
+			this.kafka = new KafkaClass({
 				clientId: this.config.clientId,
 				brokers: this.config.brokers,
 				ssl: this.config.ssl,
@@ -100,8 +129,7 @@ export class KafkaAdapter implements QueueAdapter {
 			console.log(`[KafkaAdapter] Connected to Kafka: ${this.config.brokers.join(", ")}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to Kafka: ${(error as Error).message}. ` +
-					`Make sure kafkajs is installed: npm install kafkajs`,
+				`Failed to connect to Kafka: ${(error as Error).message}. Make sure kafkajs is installed: npm install kafkajs`,
 			);
 		}
 	}
@@ -113,7 +141,7 @@ export class KafkaAdapter implements QueueAdapter {
 		if (!this.connected) return;
 
 		try {
-			await this.consumer.disconnect();
+			await this.requireConsumer().disconnect();
 			this.connected = false;
 			this.subscriptions.clear();
 			console.log("[KafkaAdapter] Disconnected from Kafka");
@@ -132,8 +160,10 @@ export class KafkaAdapter implements QueueAdapter {
 
 		const topic = config.topic;
 
+		const consumer = this.requireConsumer();
+
 		// Subscribe to topic
-		await this.consumer.subscribe({
+		await consumer.subscribe({
 			topic,
 			fromBeginning: false,
 		});
@@ -142,7 +172,7 @@ export class KafkaAdapter implements QueueAdapter {
 		this.subscriptions.set(topic, handler);
 
 		// Start consuming if not already running
-		await this.consumer.run({
+		await consumer.run({
 			eachMessage: async ({
 				topic: msgTopic,
 				partition,
@@ -150,7 +180,7 @@ export class KafkaAdapter implements QueueAdapter {
 			}: {
 				topic: string;
 				partition: number;
-				message: any;
+				message: KafkaMessage;
 			}) => {
 				const messageHandler = this.subscriptions.get(msgTopic);
 				if (!messageHandler) return;
@@ -190,7 +220,7 @@ export class KafkaAdapter implements QueueAdapter {
 						// Kafka doesn't have native nack - handled by consumer group rebalance
 						// Could implement retry topic pattern here
 						console.warn(
-							`[KafkaAdapter] Message nack not fully supported in Kafka. ` + `Consider implementing dead letter topic.`,
+							"[KafkaAdapter] Message nack not fully supported in Kafka. " + "Consider implementing dead letter topic.",
 						);
 					},
 				};
@@ -227,7 +257,7 @@ export class KafkaAdapter implements QueueAdapter {
 		if (!this.connected) return false;
 
 		try {
-			const admin = this.kafka.admin();
+			const admin = this.requireKafka().admin();
 			await admin.connect();
 			await admin.listTopics();
 			await admin.disconnect();

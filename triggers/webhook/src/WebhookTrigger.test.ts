@@ -2,7 +2,7 @@
  * WebhookTrigger Tests
  */
 
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { sourceHandlers } from "./WebhookTrigger";
 
@@ -45,7 +45,7 @@ describe("Source Handlers", () => {
 			const secret = "my-secret";
 			const rawBody = '{"action":"created"}';
 			const hmac = crypto.createHmac("sha256", secret);
-			const signature = "sha256=" + hmac.update(rawBody).digest("hex");
+			const signature = `sha256=${hmac.update(rawBody).digest("hex")}`;
 
 			const result = handler.verifySignature(rawBody, signature, secret);
 			expect(result.valid).toBe(true);

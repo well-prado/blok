@@ -122,8 +122,14 @@ export class InMemoryAdapter implements WorkerAdapter {
 			throw new Error("Not connected. Call connect() first.");
 		}
 
-		if (!this.jobs.has(queue)) {
-			this.jobs.set(queue, []);
+		// Get-or-init the per-queue job list. Same pattern as `stats`
+		// below — the previous code used `set-if-absent` then `.get()!`,
+		// but that non-null assertion is what biome flags. Pulling the
+		// reference once and seeding when missing keeps the type exact.
+		let jobs = this.jobs.get(queue);
+		if (!jobs) {
+			jobs = [];
+			this.jobs.set(queue, jobs);
 		}
 		if (!this.stats.has(queue)) {
 			this.stats.set(queue, { completed: 0, failed: 0 });
@@ -145,8 +151,6 @@ export class InMemoryAdapter implements WorkerAdapter {
 		if (job.status === "delayed") {
 			job.scheduledAt = new Date(Date.now() + job.delay);
 		}
-
-		const jobs = this.jobs.get(queue)!;
 
 		// Insert sorted by priority (higher first)
 		const insertIdx = jobs.findIndex((j) => j.status === "waiting" && j.priority < job.priority);
@@ -245,7 +249,7 @@ export class InMemoryAdapter implements WorkerAdapter {
 
 				if (requeue && internalJob.attempts < internalJob.maxRetries) {
 					// Requeue with backoff
-					const backoff = Math.min(1000 * Math.pow(2, internalJob.attempts), 30000);
+					const backoff = Math.min(1000 * 2 ** internalJob.attempts, 30000);
 					internalJob.status = "delayed";
 					internalJob.scheduledAt = new Date(Date.now() + backoff);
 				} else {
