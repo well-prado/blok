@@ -1,0 +1,53 @@
+{
+	"name": "rate-limit",
+	"version": "1.0.0",
+	"description": "Reusable rate-limit middleware. Token-bucket per IP (or per identity if auth-check ran first and set ctx.state.identity). On exceeded, short-circuits with 429 + Retry-After header. Apply via `trigger.http.middleware: [\"rate-limit\"]`. Order matters in the middleware list — typically [\"auth-check\", \"rate-limit\"] so authenticated users get a per-user bucket, but [\"rate-limit\", \"auth-check\"] is also valid if you want IP-based pre-auth limits.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "compute-key",
+			"use": "expr",
+			"type": "module",
+			"inputs": {
+				"expression": "$.state.identity ? `user:${$.state.identity.sub}` : `ip:${$.req.headers['x-forwarded-for'] || $.req.headers['x-real-ip']}`"
+			}
+		},
+		{
+			"id": "check-bucket",
+			"use": "token-bucket-check",
+			"type": "module",
+			"inputs": {
+				"key": "$.state['compute-key']",
+				"limit": 100,
+				"windowSeconds": 60
+			}
+		},
+		{
+			"id": "deny-if-exceeded",
+			"branch": {
+				"when": "$.state['check-bucket'].exceeded",
+				"then": [
+					{
+						"id": "respond-429",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 429,
+							"headers": {
+								"Retry-After": "$.state['check-bucket'].retryAfterSec",
+								"X-RateLimit-Limit": "100",
+								"X-RateLimit-Remaining": "0",
+								"X-RateLimit-Reset": "$.state['check-bucket'].resetAt"
+							},
+							"body": {
+								"error": "Rate limit exceeded",
+								"retryAfterSec": "$.state['check-bucket'].retryAfterSec"
+							}
+						},
+						"stop": true
+					}
+				]
+			}
+		}
+	]
+}

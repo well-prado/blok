@@ -1,0 +1,69 @@
+{
+	"name": "Webhook Fan-out",
+	"version": "1.0.0",
+	"description": "Receives an event payload and dispatches it to every registered webhook subscriber for that event type. Concurrency is capped at 10 to prevent fork-bombing the upstream when there are thousands of subscribers. Per-step retry handles transient HTTP failures. Per-step idempotencyKey ensures the same (event, subscriber) pair never gets double-delivered if the workflow is replayed. Demonstrates: forEach parallel with bounded concurrency, retry + idempotencyKey + maxDuration composition on each iteration.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/events/dispatch",
+			"middleware": ["auth-check"]
+		}
+	},
+	"steps": [
+		{
+			"id": "load-subscribers",
+			"use": "subscriber-list",
+			"type": "module",
+			"inputs": {
+				"eventType": "$.req.body.type"
+			}
+		},
+		{
+			"id": "dispatch-to-each",
+			"forEach": {
+				"in": "$.state['load-subscribers']",
+				"as": "subscriber",
+				"mode": "parallel",
+				"concurrency": 10,
+				"do": [
+					{
+						"id": "post",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"retry": {
+							"maxAttempts": 3,
+							"minTimeoutInMs": 500,
+							"maxTimeoutInMs": 10000,
+							"factor": 2
+						},
+						"idempotencyKey": "$.req.body.id-$.state.subscriber.id",
+						"maxDuration": "10s",
+						"inputs": {
+							"url": "$.state.subscriber.url",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Webhook-Signature": "$.state.subscriber.signature",
+								"X-Event-Id": "$.req.body.id"
+							},
+							"body": "$.req.body"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond-summary",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"eventId": "$.req.body.id",
+					"dispatched": "$.state['dispatch-to-each'].length",
+					"subscriberIds": "$.state['load-subscribers'].map(s => s.id)"
+				}
+			}
+		}
+	]
+}
