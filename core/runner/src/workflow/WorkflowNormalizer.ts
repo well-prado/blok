@@ -159,9 +159,16 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 
 		// v2 branch — { id, branch: { when, then, else? } }
 		if (isPlainObject(step.branch)) {
-			const { internalStep, nodeConfig } = normalizeBranchStep(step, i);
+			const { internalStep, nodeConfig, innerNodes } = normalizeBranchStep(step, i);
 			internalSteps.push(internalStep);
 			internalNodes[internalStep.name] = nodeConfig;
+			// Promote every inner step's nodeConfig into the top-level nodes map
+			// so BlokService.run can find `ctx.config[innerStep.name].inputs`
+			// when the runner descends into the matching arm. Without this,
+			// inner steps with `inputs:` defined inline crash with
+			// `opts.inputs undefined` because their config was only attached
+			// to the inner step instance, not the global lookup map.
+			Object.assign(internalNodes, innerNodes);
 			continue;
 		}
 
@@ -320,7 +327,7 @@ function normalizeRegularStep(
 function normalizeBranchStep(
 	step: Record<string, unknown>,
 	index: number,
-): { internalStep: InternalStep; nodeConfig: InternalNodeConfig } {
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
 	const id = pickString(step.id);
 	if (!id) {
 		throw new Error(`[blok] WorkflowNormalizer: branch step at index ${index} is missing \`id\`.`);
@@ -337,13 +344,20 @@ function normalizeBranchStep(
 	// `nodesInput` because v2 branches inline `inputs` on each nested step.
 	const thenInternal: InternalStep[] = [];
 	const elseInternal: InternalStep[] = [];
+	const innerNodes: Record<string, InternalNodeConfig> = {};
 
 	for (let i = 0; i < thenSteps.length; i++) {
 		const s = thenSteps[i];
 		if (!isPlainObject(s)) continue;
 		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const { internalStep } = normalizeBranchStep(s as Record<string, unknown>, i);
+			const {
+				internalStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeBranchStep(s as Record<string, unknown>, i);
 			thenInternal.push(internalStep);
+			innerNodes[internalStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
 		const { internalStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
@@ -352,20 +366,31 @@ function normalizeBranchStep(
 		if (nodeConfig?.inputs) {
 			(internalStep as Record<string, unknown>).inputs = nodeConfig.inputs;
 		}
+		// Also surface the nodeConfig in the bubbled-up innerNodes map so
+		// BlokService.run can read inputs via `ctx.config[step.name]` when
+		// the inner step actually executes.
+		if (nodeConfig) innerNodes[internalStep.name] = nodeConfig;
 		thenInternal.push(internalStep);
 	}
 	for (let i = 0; i < elseSteps.length; i++) {
 		const s = elseSteps[i];
 		if (!isPlainObject(s)) continue;
 		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const { internalStep } = normalizeBranchStep(s as Record<string, unknown>, i);
+			const {
+				internalStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeBranchStep(s as Record<string, unknown>, i);
 			elseInternal.push(internalStep);
+			innerNodes[internalStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
 		const { internalStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
 		if (nodeConfig?.inputs) {
 			(internalStep as Record<string, unknown>).inputs = nodeConfig.inputs;
 		}
+		if (nodeConfig) innerNodes[internalStep.name] = nodeConfig;
 		elseInternal.push(internalStep);
 	}
 
@@ -384,7 +409,7 @@ function normalizeBranchStep(
 	};
 	const nodeConfig: InternalNodeConfig = { conditions };
 
-	return { internalStep, nodeConfig };
+	return { internalStep, nodeConfig, innerNodes };
 }
 
 const SUBWORKFLOW_NODE_REF = "@blokjs/subworkflow";

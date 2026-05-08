@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "ANY",
-			"path": "/:function?",
+			"path": "/image-capture/:function?",
 			"accept": "application/json"
 		}
 	},

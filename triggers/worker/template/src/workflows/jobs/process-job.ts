@@ -1,45 +1,47 @@
-import { type Step, Workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 
 /**
- * Example Worker workflow - triggered when a job is received from the queue
+ * Example Worker workflow — fires when a job is received from the queue.
  *
- * The job data is available in ctx.request:
- * - ctx.request.body: The job payload
- * - ctx.request.headers: Job headers/metadata
- * - ctx.request.params.queue: The queue name
- * - ctx.request.params.jobId: Unique job ID
- * - ctx.request.params.attempt: Current attempt number (0-based)
+ * The job payload + metadata land on ctx.request:
+ *   - ctx.request.body                 — the job payload as posted
+ *   - ctx.request.headers              — job headers
+ *   - ctx.request.params.queue         — queue name
+ *   - ctx.request.params.jobId         — unique job ID
+ *   - ctx.request.params.attempt       — retry attempt (0-based)
+ *   - ctx.vars._worker_job             — full job metadata
  *
- * Additional metadata is available in ctx.vars._worker_job:
- * - id: Unique job ID
- * - queue: Queue name
- * - attempts: Current attempt number
- * - maxRetries: Maximum retry count
- * - priority: Job priority (if set)
- * - createdAt: When the job was created (ISO string)
+ * v2 reliability knobs available on each step (uncomment to use):
+ *   idempotencyKey: "$.req.params.jobId"    — skip re-runs of the same job
+ *   retry: { maxAttempts: 3 }                — retry on transient failures
+ *   maxDuration: "30s"                       — fail the step if it hangs
+ *
+ * Trigger-level reliability:
+ *   concurrencyKey: "$.req.body.tenantId"    — per-tenant fairness
+ *   onLimit: "queue"                          — defer instead of reject
  */
-const step: Step = Workflow({
+export default workflow({
 	name: "Process Background Job",
 	version: "1.0.0",
 	description: "Handles incoming worker jobs from the queue",
-})
-	.addTrigger("worker", {
-		queue: "background-jobs",
-	})
-	.addStep({
-		name: "process-job",
-		node: "@blokjs/api-call",
-		type: "module",
-		inputs: {
-			url: "https://httpbin.org/post",
-			method: "POST",
-			body: {
-				job: "js/ctx.request.body",
-				queue: "js/ctx.request.params.queue",
-				jobId: "js/ctx.request.params.jobId",
-				attempt: "js/ctx.request.params.attempt",
+	trigger: {
+		worker: { queue: "background-jobs" },
+	},
+	steps: [
+		{
+			id: "process-job",
+			use: "@blokjs/api-call",
+			type: "module",
+			inputs: {
+				url: "https://httpbin.org/post",
+				method: "POST",
+				body: {
+					job: "js/ctx.request.body",
+					queue: "js/ctx.request.params.queue",
+					jobId: "js/ctx.request.params.jobId",
+					attempt: "js/ctx.request.params.attempt",
+				},
 			},
 		},
-	});
-
-export default step;
+	],
+});
