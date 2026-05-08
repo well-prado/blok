@@ -627,11 +627,18 @@ export default class HttpTrigger extends TriggerBase {
 
 			const parentConfig = ctx.config;
 			(ctx as { config: unknown }).config = mwConfig.nodes;
+			// Sentinel so RunnerSteps can tag every NodeRun emitted during
+			// this middleware's execution with `middleware: mwName`. Studio
+			// reads that field to render a `mw:<name>` badge on the inner
+			// step rows so operators can see which middleware in the chain
+			// produced each nested step.
+			(ctx as { _blokMiddlewareName?: string })._blokMiddlewareName = mwName;
 			try {
 				const mwRunner = new Runner(mwConfig.steps as unknown as ConstructorParameters<typeof Runner>[0]);
 				await mwRunner.run(ctx, { deep: true, stepName: `mw:${mwName}` });
 			} finally {
 				(ctx as { config: unknown }).config = parentConfig;
+				(ctx as { _blokMiddlewareName?: string })._blokMiddlewareName = undefined;
 			}
 		}
 	}

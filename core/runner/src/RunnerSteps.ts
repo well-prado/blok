@@ -177,6 +177,13 @@ export default abstract class RunnerSteps {
 							stepType === "subworkflow"
 								? (((ctx as Record<string, unknown>)._subworkflowDepth as number | undefined) ?? 0) + 1
 								: undefined;
+						// v0.5 middleware origin tagging — when the trigger's
+						// `runMiddlewareChain` is dispatching a middleware
+						// workflow on this ctx, it sets `_blokMiddlewareName`
+						// to the middleware's name. Surface that here so
+						// Studio's StepRail can render a `mw:<name>` origin
+						// badge on every inner step the middleware produced.
+						const middleware = (ctx as Record<string, unknown>)._blokMiddlewareName as string | undefined;
 						const nodeRun = tracker.startNode(traceRunId, {
 							nodeName: step.name,
 							nodeType: stepType,
@@ -186,6 +193,7 @@ export default abstract class RunnerSteps {
 							stepIndex: i,
 							wait: subworkflowWait,
 							subworkflowDepth,
+							middleware,
 						});
 						nodeRunId = nodeRun.id;
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;
