@@ -1,7 +1,7 @@
 {
 	"name": "Movies or Countries",
 	"version": "1.0.0",
-	"description": "Workflow description",
+	"description": "Branches on a query param: with ?countries=true returns countries; otherwise returns a random cat fact.",
 	"trigger": {
 		"http": {
 			"method": "GET",
@@ -18,14 +18,30 @@
 					{
 						"id": "get-countries",
 						"use": "@blokjs/api-call",
-						"type": "module"
+						"type": "module",
+						"inputs": {
+							"url": "https://countriesnow.space/api/v0.1/countries/capital",
+							"method": "GET",
+							"headers": {
+								"Content-Type": "application/json"
+							},
+							"responseType": "application/json"
+						}
 					}
 				],
 				"else": [
 					{
 						"id": "get-facts",
 						"use": "@blokjs/api-call",
-						"type": "module"
+						"type": "module",
+						"inputs": {
+							"url": "https://catfact.ninja/fact",
+							"method": "GET",
+							"headers": {
+								"Content-Type": "application/json"
+							},
+							"responseType": "application/json"
+						}
 					}
 				]
 			}

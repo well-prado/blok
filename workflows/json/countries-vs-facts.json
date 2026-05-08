@@ -1,7 +1,7 @@
 {
 	"name": "Movies or Countries",
-	"description": "Workflow description",
 	"version": "1.0.0",
+	"description": "Branches on a query param: with ?countries=true returns countries; otherwise returns a random cat fact.",
 	"trigger": {
 		"http": {
 			"method": "GET",
@@ -11,56 +11,40 @@
 	},
 	"steps": [
 		{
-			"name": "filter-request",
-			"node": "control-flow/if-else@1.0.0",
-			"type": "local"
-		}
-	],
-	"nodes": {
-		"filter-request": {
-			"conditions": [
-				{
-					"type": "if",
-					"steps": [
-						{
-							"name": "get-countries",
-							"node": "@blokjs/api-call",
-							"type": "module"
+			"id": "filter-request",
+			"branch": {
+				"when": "ctx.request.query.countries === \"true\"",
+				"then": [
+					{
+						"id": "get-countries",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://countriesnow.space/api/v0.1/countries/capital",
+							"method": "GET",
+							"headers": {
+								"Content-Type": "application/json"
+							},
+							"responseType": "application/json"
 						}
-					],
-					"condition": "ctx.request.query.countries === \"true\""
-				},
-				{
-					"type": "else",
-					"steps": [
-						{
-							"name": "get-facts",
-							"node": "@blokjs/api-call",
-							"type": "module"
+					}
+				],
+				"else": [
+					{
+						"id": "get-facts",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://catfact.ninja/fact",
+							"method": "GET",
+							"headers": {
+								"Content-Type": "application/json"
+							},
+							"responseType": "application/json"
 						}
-					]
-				}
-			]
-		},
-		"get-facts": {
-			"inputs": {
-				"url": "https://catfact.ninja/fact",
-				"method": "GET",
-				"headers": {
-					"Content-Type": "application/json"
-				},
-				"responseType": "application/json"
-			}
-		},
-		"get-countries": {
-			"inputs": {
-				"url": "https://countriesnow.space/api/v0.1/countries/capital",
-				"method": "GET",
-				"headers": {
-					"Content-Type": "application/json"
-				},
-				"responseType": "application/json"
+					}
+				]
 			}
 		}
-	}
+	]
 }

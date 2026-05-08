@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "ANY",
-			"path": "/:function?",
+			"path": "/db-manager/:function?",
 			"accept": "application/json"
 		}
 	},

@@ -169,6 +169,12 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			const { internalStep, nodeConfig, innerNodes } = normalizeBranchStep(step, i);
 			internalSteps.push(internalStep);
 			internalNodes[internalStep.name] = nodeConfig;
+			// Promote every inner step's nodeConfig into the top-level nodes map
+			// so BlokService.run can find `ctx.config[innerStep.name].inputs`
+			// when the runner descends into the matching arm. Without this,
+			// inner steps with `inputs:` defined inline crash with
+			// `opts.inputs undefined` because their config was only attached
+			// to the inner step instance, not the global lookup map.
 			Object.assign(internalNodes, innerNodes);
 			continue;
 		}

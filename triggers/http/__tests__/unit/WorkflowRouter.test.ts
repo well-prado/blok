@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MissingExplicitPathError, RouteCollisionError, buildRouteTable } from "../../src/runner/WorkflowRouter";
+import {
+	MissingExplicitPathError,
+	RouteCollisionError,
+	buildRouteTable,
+	scorePathSpecificity,
+} from "../../src/runner/WorkflowRouter";
 import type { ScannedWorkflow } from "../../src/runner/scanWorkflows";
 
 /**
@@ -326,6 +331,44 @@ describe("buildRouteTable", () => {
 			expect(out[0].path).toBe("/explicit-a");
 			expect(out[1].path).toBe("/explicit-b");
 			expect(warnings.filter((w) => w.includes("DEPRECATED")).length).toBe(0);
+		});
+	});
+
+	describe("specificity sort (literal beats parameterized)", () => {
+		it("registers literal paths before parameterized ones (regardless of scan order)", () => {
+			// Scan order: parameterized FIRST (alphabetical accident), literal SECOND.
+			// After sort: literal must register first so Hono picks it for an
+			// exact match before the catch-all swallows it.
+			const out = buildRouteTable([
+				scanned({ source: "/wf/mongodb.json", defaultPath: "/x", explicitPath: "/:collection/:id?", method: "ANY" }),
+				scanned({ source: "/wf/countries.json", defaultPath: "/c", explicitPath: "/countries" }),
+			]);
+			expect(out.map((r) => r.path)).toEqual(["/countries", "/:collection/:id?"]);
+		});
+
+		it("orders by segment specificity then by length", () => {
+			const out = buildRouteTable([
+				scanned({ source: "/a.json", defaultPath: "/a", explicitPath: "/:any", method: "ANY" }),
+				scanned({ source: "/b.json", defaultPath: "/b", explicitPath: "/users/:id", method: "GET" }),
+				scanned({ source: "/c.json", defaultPath: "/c", explicitPath: "/users/list" }),
+				scanned({ source: "/d.json", defaultPath: "/d", explicitPath: "/health" }),
+			]);
+			// Expected: literals first (longer first), then mixed, then bare param
+			expect(out.map((r) => r.path)).toEqual(["/users/list", "/users/:id", "/health", "/:any"]);
+		});
+
+		it("optional `:param?` ranks lower than required `:param`", () => {
+			const out = buildRouteTable([
+				scanned({ source: "/a.json", defaultPath: "/a", explicitPath: "/users/:id?", method: "ANY" }),
+				scanned({ source: "/b.json", defaultPath: "/b", explicitPath: "/users/:id", method: "GET" }),
+			]);
+			expect(out.map((r) => r.path)).toEqual(["/users/:id", "/users/:id?"]);
+		});
+
+		it("scorePathSpecificity: literal > param > optional param", () => {
+			expect(scorePathSpecificity("/users/list")).toBeGreaterThan(scorePathSpecificity("/users/:id"));
+			expect(scorePathSpecificity("/users/:id")).toBeGreaterThan(scorePathSpecificity("/users/:id?"));
+			expect(scorePathSpecificity("/a/b/c")).toBeGreaterThan(scorePathSpecificity("/a/b"));
 		});
 	});
 });

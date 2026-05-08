@@ -167,7 +167,50 @@ export function buildRouteTable(
 	// Param-vs-literal warnings (non-fatal).
 	warnAmbiguousLiterals(out, options.onWarning);
 
-	return out;
+	// Sort by specificity so explicit literal paths register BEFORE catch-all
+	// param paths. Hono (like Express) matches in registration order when
+	// multiple routes overlap; without this sort, a workflow with `path: "/:id"`
+	// scanned alphabetically before `path: "/users"` would shadow the literal.
+	// Stable sort preserves scan order within the same specificity bucket.
+	return sortBySpecificity(out);
+}
+
+/**
+ * Score a path by route specificity (higher = more specific). Used by
+ * {@link buildRouteTable} so explicit literal routes are registered before
+ * parameterized catch-alls.
+ *
+ * Heuristic: tally each segment.
+ *   - literal segment      → +100
+ *   - `:param`             → +10
+ *   - `:param?` (optional) → +1
+ *   - `*` (Hono wildcard)  → +0
+ * Tie-break favours longer paths (more segments = more specific).
+ *
+ * Exported for tests; internal otherwise.
+ */
+export function scorePathSpecificity(path: string): number {
+	const segs = path.split("/").filter(Boolean);
+	let score = 0;
+	for (const s of segs) {
+		if (s === "*" || s.startsWith("*")) continue;
+		if (s.startsWith(":")) {
+			score += s.endsWith("?") ? 1 : 10;
+		} else if (s.startsWith("{") || s.includes(":")) {
+			// Hono regex syntax `{:param}` or named params with regex.
+			score += 10;
+		} else {
+			score += 100;
+		}
+	}
+	// Tie-break: longer paths beat shorter ones with the same score base.
+	return score * 1000 + segs.length;
+}
+
+function sortBySpecificity(routes: readonly RouteEntry[]): RouteEntry[] {
+	// Stable sort: routes with equal specificity keep their scan order
+	// (the JS spec guarantees Array.prototype.sort is stable as of ES2019).
+	return [...routes].sort((a, b) => scorePathSpecificity(b.path) - scorePathSpecificity(a.path));
 }
 
 // ---------------------------------------------------------------------------
