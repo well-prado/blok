@@ -202,6 +202,72 @@ describe("SubworkflowNode — dispatch", () => {
 		await expect(node.run(parentCtx)).rejects.toThrow(/not found in WorkflowRegistry/);
 	});
 
+	it("default-allows composition when no authorize hook is installed", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-default-allow",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-default-allow"),
+		});
+		const node = makeSubworkflowNode({ stepName: "call", subworkflowName: "child-default-allow" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { call: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
+	it("denies composition when the authorize hook returns false", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-restricted",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-restricted"),
+		});
+		WorkflowRegistry.getInstance().setAuthorizeFn(() => false);
+		const node = makeSubworkflowNode({ stepName: "call", subworkflowName: "child-restricted" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { call: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/Sub-workflow access denied/);
+	});
+
+	it("authorize hook receives parent + child name + ctx", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-tenant-a",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-tenant-a"),
+		});
+		const calls: Array<[string, string, string]> = [];
+		WorkflowRegistry.getInstance().setAuthorizeFn((parent, child, ctx) => {
+			calls.push([parent, child, ctx.workflow_name]);
+			return true;
+		});
+		const node = makeSubworkflowNode({ stepName: "call", subworkflowName: "child-tenant-a" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { call: { inputs: {} } } as unknown as Context["config"];
+
+		await node.run(parentCtx);
+
+		expect(calls).toEqual([["parent-wf", "child-tenant-a", "parent-wf"]]);
+	});
+
+	it("supports async authorize hooks (e.g. tenant DB lookups)", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-async-allow",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-async-allow"),
+		});
+		WorkflowRegistry.getInstance().setAuthorizeFn(async () => {
+			await new Promise((r) => setTimeout(r, 1));
+			return true;
+		});
+		const node = makeSubworkflowNode({ stepName: "call", subworkflowName: "child-async-allow" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { call: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
 	it("child run is queryable via tracker.getRunsByParent (Phase 4 lineage API)", async () => {
 		WorkflowRegistry.getInstance().register({
 			name: "child-by-parent",

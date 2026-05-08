@@ -17,12 +17,30 @@
  * `clear()` before re-registering when workflow files change (HMR);
  * the in-repo HTTP trigger does this on every scan.
  *
+ * **Authorization** (optional): operators can install a process-wide
+ * `(parentName, childName, ctx) => boolean | Promise<boolean>` hook via
+ * `setAuthorizeFn()` to gate which parent workflows may invoke which
+ * children. Default behavior (no fn set) is allow-all — preserves
+ * backwards compatibility. See `docs/d/security/cookbook.mdx` for the
+ * multi-tenant patterns.
+ *
  * **Why a separate class** (vs reusing the HTTP trigger's RouteEntry[]):
  * - Decoupled from HTTP — worker/cron triggers feed the same registry.
  * - Lookup by `name:` is what authors write; route table is keyed on
  *   `(method, path)` which sub-workflow callers don't know.
  * - Test isolation — `resetInstance()` is cheap.
  */
+
+import type { Context } from "@blokjs/shared";
+
+/**
+ * Hook that decides whether a parent workflow may invoke a child via a
+ * sub-workflow step. Return `true` (or a promise resolving to `true`) to
+ * allow; `false` to deny. The `ctx` is the parent's running context, so
+ * the hook can do per-request decisions (e.g. read tenant id from
+ * `ctx.req.headers`).
+ */
+export type WorkflowAuthorizeFn = (parentName: string, childName: string, ctx: Context) => boolean | Promise<boolean>;
 
 export interface RegisteredWorkflow {
 	/** The workflow's `name:` field. Sub-workflow steps reference this. */
@@ -40,6 +58,7 @@ export interface RegisteredWorkflow {
 export class WorkflowRegistry {
 	private static instance: WorkflowRegistry | null = null;
 	private workflows = new Map<string, RegisteredWorkflow>();
+	private authorizeFn: WorkflowAuthorizeFn | null = null;
 
 	static getInstance(): WorkflowRegistry {
 		if (!WorkflowRegistry.instance) {
@@ -51,6 +70,38 @@ export class WorkflowRegistry {
 	/** Test-only — drop the singleton so suites start fresh. */
 	static resetInstance(): void {
 		WorkflowRegistry.instance = null;
+	}
+
+	/**
+	 * Install a process-wide authorize hook for sub-workflow composition.
+	 * Pass `null` to clear (default behavior is allow-all). The hook fires
+	 * on every sub-workflow invocation, before the child is materialized.
+	 *
+	 * Multi-tenant operators typically read a tenant id off `ctx` and
+	 * consult an allow-list. The synchronous variant is fine for
+	 * in-memory lookups; return a promise if the decision needs an
+	 * external store.
+	 *
+	 * @example
+	 * ```ts
+	 * WorkflowRegistry.getInstance().setAuthorizeFn((parent, child, ctx) => {
+	 *   const tenant = ctx.req.headers["x-tenant"];
+	 *   return tenantAllowList[tenant]?.includes(child) ?? false;
+	 * });
+	 * ```
+	 */
+	setAuthorizeFn(fn: WorkflowAuthorizeFn | null): void {
+		this.authorizeFn = fn;
+	}
+
+	/**
+	 * Returns `true` when no authorize hook is installed (default-allow),
+	 * otherwise delegates to the hook. Called by `SubworkflowNode` before
+	 * materializing the child workflow.
+	 */
+	async authorize(parentName: string, childName: string, ctx: Context): Promise<boolean> {
+		if (!this.authorizeFn) return true;
+		return await this.authorizeFn(parentName, childName, ctx);
 	}
 
 	/**
@@ -97,6 +148,8 @@ export class WorkflowRegistry {
 	/**
 	 * Drop every registered workflow. Triggers call this before
 	 * re-scanning on HMR so stale entries don't survive a file rename.
+	 * Does NOT reset the authorize hook — operator-installed hooks
+	 * persist across HMR. Use `setAuthorizeFn(null)` explicitly to clear.
 	 */
 	clear(): void {
 		this.workflows.clear();

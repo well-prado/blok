@@ -442,11 +442,45 @@ become naturally tenant-scoped. The trade-off is operational cost
 (more processes to manage); the win is that sub-workflow boundaries
 are also process boundaries.
 
-### Future: registry-level authorization hook
+### Registry-level authorization hook
 
-`WorkflowRegistry.setAuthorizeFn(...)` is on the roadmap but not
-shipped. Until then, the two patterns above are the supported
-isolation strategies.
+`WorkflowRegistry.setAuthorizeFn(...)` installs a process-wide hook
+that gates every sub-workflow invocation. Default behavior (no hook
+installed) is allow-all — preserves backwards compatibility. The hook
+fires after the child is found in the registry but before its
+configuration is materialized.
+
+```ts
+import { WorkflowRegistry } from "@blokjs/runner";
+
+WorkflowRegistry.getInstance().setAuthorizeFn((parentName, childName, ctx) => {
+  const tenant = ctx.req.headers["x-tenant-id"];
+  if (typeof tenant !== "string") return false;
+  return tenantAllowList[tenant]?.includes(childName) ?? false;
+});
+```
+
+Sync and async hooks are both supported — return `boolean` for
+in-memory lookups, `Promise<boolean>` if the decision needs an
+external store. The `ctx` is the parent's running context, so
+per-request authorization (read tenant id off `ctx.req.headers`,
+caller identity off `ctx.state.identity`, etc.) is straightforward.
+
+Denial throws `Sub-workflow access denied: workflow "<parent>" is
+not authorized to invoke "<child>"`. The parent step's `retry` config
+will retry — pin `retry: undefined` (the default) on sub-workflow
+steps where denial is permanent so a denied invocation doesn't
+re-run the gate uselessly.
+
+This API composes with the two patterns above:
+
+- The boot-time filter caps the *namespace* of children visible to
+  the process (a denied parent can't even reference an absent child).
+- The authorize hook caps which *parents* may invoke each visible
+  child at request time.
+- Per-tenant processes give you both, plus storage isolation.
+
+Pick whichever level fits your isolation model.
 
 ## Production deployment checklist
 

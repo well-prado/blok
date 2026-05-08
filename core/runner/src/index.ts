@@ -93,7 +93,7 @@ import { TracingLogger } from "./tracing/TracingLogger";
 import { redactSensitive as traceRedactSensitive, sanitize as traceSanitize } from "./tracing/sanitize";
 
 // Workflow registry (Tier 2 sub-workflow primitive)
-import { type RegisteredWorkflow, WorkflowRegistry } from "./workflow/WorkflowRegistry";
+import { type RegisteredWorkflow, type WorkflowAuthorizeFn, WorkflowRegistry } from "./workflow/WorkflowRegistry";
 
 // Concurrency gate (Tier 2 #6)
 import {
@@ -280,6 +280,7 @@ export {
 	registerTraceRoutes,
 	WorkflowRegistry,
 	type RegisteredWorkflow,
+	type WorkflowAuthorizeFn,
 	// Concurrency gate (Tier 2 #6)
 	ConcurrencyLimitError,
 	type ConcurrencyLimitInfo,

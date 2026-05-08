@@ -106,6 +106,21 @@ export class SubworkflowNode extends RunnerNode {
 			);
 		}
 
+		// === 2.5. Registry-level authorization ===
+		// Default-allow when no hook is installed (preserves pre-v0.4.1
+		// behavior). Operators install a hook via
+		// WorkflowRegistry.getInstance().setAuthorizeFn(...) for
+		// multi-tenant access control. Throws on denial; the parent
+		// step's retry loop (if any) will retry — author should pin
+		// `retry: undefined` on sub-workflow steps where denial is
+		// permanent.
+		const allowed = await registry.authorize(ctx.workflow_name, this.subworkflow, ctx);
+		if (!allowed) {
+			throw new Error(
+				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${this.subworkflow}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
+			);
+		}
+
 		// === 3. Materialize child Configuration + Runner ===
 		// `preloaded` = entry.workflow skips the disk re-read; the
 		// normalizer still runs so v1→v2 conversion happens for legacy

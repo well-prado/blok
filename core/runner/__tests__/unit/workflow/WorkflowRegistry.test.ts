@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Context } from "@blokjs/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type RegisteredWorkflow, WorkflowRegistry } from "../../../src/workflow/WorkflowRegistry";
 
 describe("WorkflowRegistry", () => {
@@ -99,6 +100,74 @@ describe("WorkflowRegistry", () => {
 			registry.register(entry);
 			expect(registry.get("found")).toBe(entry);
 			expect(registry.has("found")).toBe(true);
+		});
+	});
+
+	describe("authorize hook (setAuthorizeFn)", () => {
+		const stubCtx = (overrides: Partial<Context> = {}): Context =>
+			({
+				workflow_name: "parent",
+				request: { headers: {}, body: {}, query: {}, params: {} },
+				...overrides,
+			}) as unknown as Context;
+
+		it("default-allows when no fn is installed", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			expect(await registry.authorize("parent", "child", stubCtx())).toBe(true);
+		});
+
+		it("delegates to the installed fn (sync false)", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			const fn = vi.fn().mockReturnValue(false);
+			registry.setAuthorizeFn(fn);
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(false);
+			expect(fn).toHaveBeenCalledWith("p", "c", expect.objectContaining({ workflow_name: "parent" }));
+		});
+
+		it("delegates to the installed fn (async true)", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setAuthorizeFn(async () => true);
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(true);
+		});
+
+		it("delegates to the installed fn (async false)", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setAuthorizeFn(async () => false);
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(false);
+		});
+
+		it("setAuthorizeFn(null) clears the hook", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setAuthorizeFn(() => false);
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(false);
+			registry.setAuthorizeFn(null);
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(true);
+		});
+
+		it("hook receives parentName, childName, ctx in order", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			const calls: Array<[string, string, string]> = [];
+			registry.setAuthorizeFn((parent, child, ctx) => {
+				calls.push([parent, child, ctx.workflow_name]);
+				return true;
+			});
+			await registry.authorize("orders", "send-receipt", stubCtx({ workflow_name: "orders" }));
+			expect(calls).toEqual([["orders", "send-receipt", "orders"]]);
+		});
+
+		it("clear() does NOT reset the authorize hook (HMR-friendly)", async () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setAuthorizeFn(() => false);
+			registry.clear();
+			expect(await registry.authorize("p", "c", stubCtx())).toBe(false);
+		});
+
+		it("resetInstance() drops the hook (test isolation)", async () => {
+			const registry1 = WorkflowRegistry.getInstance();
+			registry1.setAuthorizeFn(() => false);
+			WorkflowRegistry.resetInstance();
+			const registry2 = WorkflowRegistry.getInstance();
+			expect(await registry2.authorize("p", "c", stubCtx())).toBe(true);
 		});
 	});
 
