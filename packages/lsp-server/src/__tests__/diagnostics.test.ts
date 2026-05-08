@@ -316,7 +316,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ node: "@blok/api-call", type: "module" }],
+					steps: [{ node: "@blokjs/api-call", type: "module" }],
 					nodes: {},
 				}),
 			);
@@ -344,7 +344,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "step1", node: "@blok/api-call" }],
+					steps: [{ name: "step1", node: "@blokjs/api-call" }],
 					nodes: {},
 				}),
 			);
@@ -358,7 +358,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "step1", node: "@blok/api-call", type: "invalid" }],
+					steps: [{ name: "step1", node: "@blokjs/api-call", type: "invalid" }],
 					nodes: { step1: {} },
 				}),
 			);
@@ -373,8 +373,8 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
 					steps: [
-						{ name: "step1", node: "@blok/api-call", type: "module" },
-						{ name: "step1", node: "@blok/if-else", type: "module" },
+						{ name: "step1", node: "@blokjs/api-call", type: "module" },
+						{ name: "step1", node: "@blokjs/if-else", type: "module" },
 					],
 					nodes: { step1: {} },
 				}),
@@ -418,7 +418,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "api-call", node: "@blok/api-call", type: "module" }],
+					steps: [{ name: "api-call", node: "@blokjs/api-call", type: "module" }],
 					nodes: {},
 				}),
 			);
@@ -433,7 +433,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "step1", node: "@blok/api-call", type: "module" }],
+					steps: [{ name: "step1", node: "@blokjs/api-call", type: "module" }],
 					nodes: { step1: {}, unused_node: {} },
 				}),
 			);
@@ -448,7 +448,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					name: "test",
 					version: "1.0.0",
 					trigger: { http: { method: "GET", path: "/" } },
-					steps: [{ name: "router", node: "@blok/if-else", type: "module" }],
+					steps: [{ name: "router", node: "@blokjs/if-else", type: "module" }],
 					nodes: {
 						router: {
 							conditions: [
@@ -477,7 +477,7 @@ describe("WorkflowDiagnostics (LSP)", () => {
 					version: "1.0.0",
 					description: "User management API",
 					trigger: { http: { method: "GET", path: "/api/users" } },
-					steps: [{ name: "fetch-users", node: "@blok/api-call", type: "module" }],
+					steps: [{ name: "fetch-users", node: "@blokjs/api-call", type: "module" }],
 					nodes: {
 						"fetch-users": {
 							inputs: { url: "https://api.example.com/users" },

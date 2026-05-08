@@ -1,4 +1,3 @@
-import type { ConnectRouter } from "@connectrpc/connect";
 import {
 	DefaultLogger,
 	type GlobalOptions,
@@ -6,8 +5,9 @@ import {
 	type ParamsDictionary,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
+import type { ConnectRouter } from "@connectrpc/connect";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import fastify from "fastify";
 import { v4 as uuid } from "uuid";
@@ -16,8 +16,8 @@ import nodes from "./Nodes";
 import workflows from "./Workflows";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 
-import { type Step, Workflow } from "@blok/helper";
-import type { TriggerOpts } from "@blok/helper/dist/types/TriggerOpts";
+import { type Step, Workflow } from "@blokjs/helper";
+import type { TriggerOpts } from "@blokjs/helper/dist/types/TriggerOpts";
 import {
 	MessageEncoding,
 	MessageType,
@@ -142,6 +142,19 @@ export default class GRpcTrigger extends TriggerBase {
 				ctx = response.ctx;
 				const average = response.metrics;
 
+				// Support both module nodes (wrapped BlokResponse with .data/.contentType)
+				// and runtime adapter nodes (raw data without wrapper)
+				const hasWrapper =
+					ctx.response && typeof ctx.response === "object" && "data" in ctx.response && "contentType" in ctx.response;
+				if (!hasWrapper) {
+					// Runtime adapter node: ctx.response is raw data, wrap it
+					ctx.response = {
+						data: ctx.response,
+						contentType: "application/json",
+						success: true,
+						error: null,
+					} as typeof ctx.response;
+				}
 				if (ctx.response.contentType === undefined || ctx.response.contentType === "")
 					ctx.response.contentType = "application/json";
 

@@ -1,4 +1,4 @@
-import { DefaultLogger } from "@blok/runner";
+import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import HttpTrigger from "./runner/HttpTrigger";
 
@@ -21,7 +21,7 @@ export default class App {
 	}
 
 	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+		await this.tracer.startActiveSpan("initialization", async (span: Span) => {
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 

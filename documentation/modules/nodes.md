@@ -11,7 +11,7 @@ Nodes are the building blocks of Blok workflows. Each node performs a single tas
 
 ### 1. if-else@1.0.0 (Conditional Logic)
 - **Path:** `nodes/control-flow/if-else@1.0.0/`
-- **Package:** `@blok/if-else`
+- **Package:** `@blokjs/if-else`
 - **Purpose:** Evaluates conditions and routes workflow execution
 - **Files:**
   - `index.ts` — Main implementation (function-first via defineNode)
@@ -32,7 +32,7 @@ Nodes are the building blocks of Blok workflows. Each node performs a single tas
 
 ### 2. api-call@1.0.0 (HTTP API Client)
 - **Path:** `nodes/web/api-call@1.0.0/`
-- **Package:** `@blok/api-call`
+- **Package:** `@blokjs/api-call`
 - **Purpose:** Makes HTTP requests to external APIs
 - **Files:**
   - `index.ts` — Main implementation (function-first)
@@ -54,7 +54,7 @@ Nodes are the building blocks of Blok workflows. Each node performs a single tas
 
 ### 3. react@1.0.0 (React SSR)
 - **Path:** `nodes/web/react@1.0.0/`
-- **Package:** `@blok/react`
+- **Package:** `@blokjs/react`
 - **Purpose:** Server-side renders React components
 - **Files:**
   - `index.ts` — Main implementation (function-first)

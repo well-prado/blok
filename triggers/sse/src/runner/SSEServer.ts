@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
-import type { HMREvent } from "@blok/runner";
-import { registerTraceRoutes } from "@blok/runner";
+import type { HMREvent } from "@blokjs/runner";
+import { registerTraceRoutes } from "@blokjs/runner";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
@@ -21,8 +21,8 @@ export default class SSEServer extends SSETrigger {
 	private port: string | number = process.env.PORT || 4001;
 	private server: Server | null = null;
 
-	protected nodes = nodes;
-	protected workflows = workflows;
+	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected workflows: Record<string, import("@blokjs/helper").HelperResponse> = workflows;
 
 	/**
 	 * Gracefully stop the SSE server.

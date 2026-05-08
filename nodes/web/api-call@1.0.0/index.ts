@@ -8,8 +8,8 @@
  * Migrated: ~40 lines, 60% less code, fully type-safe
  */
 
-import { defineNode } from "@blok/runner";
-import type { JsonLikeObject } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
+import type { JsonLikeObject } from "@blokjs/runner";
 import { z } from "zod";
 import { runApiCall } from "./util";
 

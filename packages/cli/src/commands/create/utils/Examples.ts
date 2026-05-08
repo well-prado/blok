@@ -1,6 +1,6 @@
-const node_file = `import ApiCall from "@blok/api-call";
-import IfElse from "@blok/if-else";
-import type { NodeBase } from "@blok/shared";
+const node_file = `import ApiCall from "@blokjs/api-call";
+import IfElse from "@blokjs/if-else";
+import type { NodeBase } from "@blokjs/shared";
 import ChainInit from "./nodes/chain-init/index";
 import ChainVerify from "./nodes/chain-verify/index";
 import ExampleNodes from "./nodes/examples/index";
@@ -9,8 +9,8 @@ import RuntimeBridge from "./nodes/runtime-bridge/index";
 const nodes: {
 	[key: string]: NodeBase;
 } = {
-	"@blok/api-call": ApiCall,
-	"@blok/if-else": IfElse,
+	"@blokjs/api-call": ApiCall,
+	"@blokjs/if-else": IfElse,
 	"chain-init": ChainInit,
 	"chain-verify": ChainVerify,
 	"runtime-bridge": RuntimeBridge,
@@ -75,32 +75,30 @@ Examples:
 For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
 `;
 
+// v2 workflow template — LLM- and human-friendly. Every step's output
+// auto-persists to ctx.state[id]. Reference earlier outputs via
+// $.state.<id> in inputs (compiles to "js/ctx.state.<id>" at runtime).
+// Opt out of persistence with "ephemeral": true.
 const workflow_template = `
 {
-	"name": "",
-	"description": "",
+	"name": "My Workflow",
+	"description": "What this workflow does",
 	"version": "1.0.0",
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
 			"accept": "application/json"
 		}
 	},
 	"steps": [
 		{
-			"name": "node-name",
-			"node": "node-module-name",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"name": {
+			"id": "echo",
+			"use": "@blokjs/respond",
 			"inputs": {
-
+				"body": "$.req.body"
 			}
 		}
-	}
+	]
 }
 `;
 
@@ -733,7 +731,7 @@ Available in js/ expressions: \\\`ctx\\\`, \\\`data\\\` (ctx.response.data), \\\
 Use \\\`defineNode()\\\` for all new nodes. Never use the legacy class-based pattern.
 
 \`\`\`typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -779,7 +777,7 @@ export default defineNode({
     "http": { "method": "POST", "path": "/api/process", "accept": "application/json" }
   },
   "steps": [
-    { "name": "fetch",   "node": "@blok/api-call", "type": "module" },
+    { "name": "fetch",   "node": "@blokjs/api-call", "type": "module" },
     { "name": "process", "node": "my-node",        "type": "module", "set_var": true },
     { "name": "go-step", "node": "chain-test",     "type": "runtime.go" }
   ],
@@ -841,7 +839,73 @@ export default defineNode({
 | \\\`webhook\\\` | \\\`{ "source": "github", "events": ["push"] }\\\` |
 | \\\`websocket\\\` | \\\`{ "events": ["message"], "path": "/ws" }\\\` |
 | \\\`sse\\\` | \\\`{ "events": ["update"], "path": "/stream" }\\\` |
-| \\\`worker\\\` | \\\`{ "queue": "jobs", "concurrency": 5 }\\\` |
+| \\\`worker\\\` | \\\`{ "queue": "jobs", "concurrency": 5, "retries": 3 }\\\` |
+
+### Worker Trigger
+
+The worker trigger processes background jobs from a queue with retry logic and concurrency control.
+
+\\\`\\\`\\\`typescript
+Workflow({ name: "Process Job", version: "1.0.0" })
+  .addTrigger("worker", { queue: "background-jobs" })
+  .addStep({
+    name: "process",
+    node: "my-processor",
+    type: "module",
+    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" },
+  });
+\\\`\\\`\\\`
+
+Job context: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue\\\` = queue name, \\\`ctx.request.params.jobId\\\` = job ID, \\\`ctx.request.params.attempt\\\` = attempt count, \\\`ctx.vars._worker_job\\\` = full metadata.
+
+Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev only).
+
+### NATS JetStream
+
+Recommended queue/worker backend. Environment variables:
+\\\`\\\`\\\`
+NATS_SERVERS=localhost:4222
+NATS_STREAM_NAME=blok-queue     # or blok-worker for worker trigger
+NATS_TOKEN=                      # optional auth
+\\\`\\\`\\\`
+
+Queue providers: \\\`kafka\\\`, \\\`rabbitmq\\\`, \\\`sqs\\\`, \\\`redis\\\`, \\\`beanstalk\\\`, \\\`nats\\\`
+
+### Standalone Workers (Go, Rust, Python)
+
+Go, Rust, and Python SDKs include standalone NATS workers that connect directly to NATS without the TypeScript runner:
+
+\\\`\\\`\\\`
+WORKER_CONCURRENCY=1             # Max concurrent jobs
+WORKER_MAX_RETRIES=3             # Max delivery attempts
+WORKER_QUEUES=queue1,queue2      # Queues to consume
+\\\`\\\`\\\`
+
+---
+
+## Testing Utilities
+
+\\\`@blokjs/runner\\\` provides testing utilities for nodes and workflows.
+
+### NodeTestHarness — Unit test a single node:
+\\\`\\\`\\\`typescript
+import { NodeTestHarness } from "@blokjs/runner";
+const harness = new NodeTestHarness(myNode);
+const result = await harness.execute({ input: "data" });
+harness.assertSuccess(result);
+harness.assertOutput(result, { expected: "output" });
+\\\`\\\`\\\`
+
+### WorkflowTestRunner — Integration test a workflow:
+\\\`\\\`\\\`typescript
+import { WorkflowTestRunner } from "@blokjs/runner";
+const runner = new WorkflowTestRunner({ verbose: true });
+runner.registerNode("validate", ValidateNode);
+runner.mockNode("external-api", async (input) => ({ result: "mocked" }));
+runner.loadWorkflow(workflowDefinition);
+const result = await runner.execute({ input: "data" });
+// result.success, result.output, result.trace, result.nodeResults
+\\\`\\\`\\\`
 
 ---
 
@@ -930,7 +994,7 @@ When users have data flow issues, check these three things first.
 Always use \\\`defineNode()\\\`. Never class-based BlokService.
 
 \\\`\\\`\\\`typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -951,12 +1015,48 @@ export default defineNode({
 - No \\\`any\\\` types — use \\\`z.unknown()\\\` if dynamic
 - \\\`export default defineNode(...)\\\`
 
+## Worker Workflows
+
+Worker trigger processes background jobs from a queue:
+
+\\\`\\\`\\\`typescript
+Workflow({ name: "Process Job", version: "1.0.0" })
+  .addTrigger("worker", { queue: "background-jobs" })
+  .addStep({ name: "process", node: "my-processor", type: "module",
+    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" } });
+\\\`\\\`\\\`
+
+Job data: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue/jobId/attempt\\\` = metadata.
+Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev).
+
+## Testing
+
+\\\`\\\`\\\`typescript
+import { NodeTestHarness, WorkflowTestRunner } from "@blokjs/runner";
+
+// Unit test a node
+const harness = new NodeTestHarness(myNode);
+const result = await harness.execute({ input: "data" });
+harness.assertSuccess(result);
+
+// Integration test a workflow
+const runner = new WorkflowTestRunner({ mockAllNodes: true });
+runner.loadWorkflow(definition);
+const wfResult = await runner.execute({ input: "data" });
+\\\`\\\`\\\`
+
 ## Blok Studio Help
 
 - Launch: \\\`blokctl trace\\\` or navigate to \\\`/__blok\\\`
 - "No output" → Node not returning data or Zod output validation failed
 - "Step error" → Expand error — check if 400 (validation) or 500 (runtime)
 - "Vars not passing" → Source step needs \\\`set_var: true\\\`, target needs \\\`js/ctx.vars['name']\\\`
+
+## Debugging Workers
+
+- NATS not reachable → Check \\\`NATS_SERVERS\\\` env var, ensure NATS is running
+- Job timeout → Increase \\\`timeout\\\` in trigger config or optimize node
+- Max retries exceeded → Check node errors, job moves to DLQ
 
 ## Do NOT
 
@@ -967,7 +1067,7 @@ export default defineNode({
 - Do NOT edit files in \\\`.blok/runtimes/\\\`
 `;
 
-const function_first_node_file = `import { defineNode } from "@blok/runner";
+const function_first_node_file = `import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 /**

@@ -197,6 +197,111 @@ export class PostgresRunStore implements RunStore {
 						`);
 					},
 				},
+				{
+					// Tier 2 follow-up · durable schema for Tier 1 idempotency
+					// cache, Tier 2 #6 concurrency locks, and Tier 2 #5+#7
+					// scheduled dispatches. Previously these all delegated to
+					// the in-memory mirror only, so a process restart lost the
+					// state. The hybrid pattern (sync memory + async PG mirror)
+					// matches the existing workflow_runs/node_runs flow.
+					version: 3,
+					up: async () => {
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS idempotency_cache (
+								workflow_name TEXT NOT NULL,
+								step_id TEXT NOT NULL,
+								idempotency_key TEXT NOT NULL,
+								data_json JSONB NOT NULL,
+								cached_at BIGINT NOT NULL,
+								expires_at BIGINT,
+								source_run_id TEXT NOT NULL,
+								source_node_run_id TEXT NOT NULL,
+								PRIMARY KEY (workflow_name, step_id, idempotency_key)
+							)
+						`);
+						await client.query("CREATE INDEX IF NOT EXISTS idx_idem_cache_expires ON idempotency_cache(expires_at)");
+
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS concurrency_locks (
+								workflow_name TEXT NOT NULL,
+								concurrency_key TEXT NOT NULL,
+								run_id TEXT NOT NULL,
+								acquired_at BIGINT NOT NULL,
+								expires_at BIGINT NOT NULL,
+								PRIMARY KEY (workflow_name, concurrency_key, run_id)
+							)
+						`);
+						await client.query("CREATE INDEX IF NOT EXISTS idx_locks_expires ON concurrency_locks(expires_at)");
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key)",
+						);
+
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS scheduled_dispatches (
+								run_id TEXT PRIMARY KEY,
+								workflow_name TEXT NOT NULL,
+								trigger_type TEXT NOT NULL,
+								scheduled_at BIGINT NOT NULL,
+								expires_at BIGINT,
+								dispatch_status TEXT NOT NULL,
+								payload_json JSONB NOT NULL,
+								created_at BIGINT NOT NULL
+							)
+						`);
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_at ON scheduled_dispatches(scheduled_at)",
+						);
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name)",
+						);
+					},
+				},
+				{
+					// PR 4 — wait.for / wait.until step primitive needs a
+					// resume cursor so dispatchDeferred re-entry skips
+					// already-completed pre-wait steps. Mirror sqlite v10.
+					version: 4,
+					up: async () => {
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS last_completed_step_index INTEGER");
+					},
+				},
+				{
+					// PR 1-5 polish · catch up to sqlite's workflow_runs columns.
+					// PG migrations historically lagged: v3 added the cache /
+					// locks / dispatches tables and v4 added
+					// `last_completed_step_index`, but the columns sqlite added
+					// across migrations 3 / 5 / 6 / 8 (`environment`,
+					// `replay_of`, `parent_run_id`, `parent_node_run_id`,
+					// `scheduled_at`, `expires_at`, `debounce_key`,
+					// `debounce_mode`, `ping_count`) were never mirrored.
+					// `saveRun`/`updateRun`/`rowToRun` silently dropped them
+					// across restarts, so PG-backed deployments lost replay
+					// lineage, sub-workflow lineage, and ALL Tier 2 #5+#7
+					// scheduling state on every restart. This migration adds
+					// the columns + indexes so PG matches sqlite. Pre-existing
+					// rows get NULL on every new column (backward-compat;
+					// `rowToRun` reads NULL `environment` as "production" to
+					// match sqlite's legacy default).
+					version: 5,
+					up: async () => {
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS environment TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS replay_of TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS parent_run_id TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS parent_node_run_id TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS scheduled_at BIGINT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS expires_at BIGINT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS debounce_key TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS debounce_mode TEXT");
+						await client.query("ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS ping_count INTEGER");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_environment ON workflow_runs(environment)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id)");
+						await client.query("CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at)");
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key)",
+						);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -215,6 +320,20 @@ export class PostgresRunStore implements RunStore {
 		} finally {
 			client.release();
 		}
+	}
+
+	/**
+	 * Review fix-up · CONCERN-2. Per-table cap on `loadRecent`'s rehydration
+	 * queries. Without it, a deployment with 1M+ idempotency cache entries
+	 * spends seconds + memory on every boot loading rows it'll never read
+	 * before the Janitor sweeps them. Default 100K rows per table — well
+	 * above any reasonable hot-set size yet bounded for boot latency.
+	 */
+	private getLoadRecentLimit(): number {
+		const raw = process.env.BLOK_PG_LOADRECENT_LIMIT;
+		if (!raw || !/^\d+$/.test(raw)) return 100_000;
+		const n = Number(raw);
+		return n > 0 ? n : 100_000;
 	}
 
 	private async loadRecent(): Promise<void> {
@@ -262,6 +381,99 @@ export class PostgresRunStore implements RunStore {
 			for (const row of dashRows) {
 				this.memory.saveDashboard(this.rowToDashboard(row));
 			}
+
+			// Tier 2 follow-up · rehydrate idempotency cache (un-expired entries only).
+			//
+			// Review fix-up · CONCERN-2. Add `ORDER BY cached_at DESC LIMIT N`.
+			// Newest cache entries are most likely to be re-hit by the next
+			// idempotent step; older ones the Janitor will sweep on its next
+			// pass. Without this LIMIT, deployments with 1M+ rows OOM at boot.
+			const now = Date.now();
+			const loadRecentLimit = this.getLoadRecentLimit();
+			try {
+				const { rows: idemRows } = await client.query(
+					`SELECT * FROM idempotency_cache
+					 WHERE expires_at IS NULL OR expires_at > $1
+					 ORDER BY cached_at DESC
+					 LIMIT $2`,
+					[now, loadRecentLimit],
+				);
+				for (const row of idemRows) {
+					this.memory.setIdempotencyCache(row.workflow_name, row.step_id, row.idempotency_key, {
+						data: typeof row.data_json === "string" ? JSON.parse(row.data_json) : row.data_json,
+						cachedAt: Number(row.cached_at),
+						expiresAt: row.expires_at !== null ? Number(row.expires_at) : null,
+						sourceRunId: row.source_run_id,
+						sourceNodeRunId: row.source_node_run_id,
+					});
+				}
+			} catch (err) {
+				// Pre-v3 PG schema may not have the table yet — fall through quietly.
+				if (!String((err as Error).message).match(/relation .* does not exist/i)) {
+					console.error("[PostgresRunStore] idempotency_cache load failed:", (err as Error).message);
+				}
+			}
+
+			// Tier 2 follow-up · rehydrate concurrency leases (un-expired only).
+			//
+			// Review fix-up · CONCERN-2. Add `ORDER BY expires_at DESC LIMIT N`.
+			// Locks with the longest remaining lease are most likely still
+			// active and worth restoring; expired ones are filtered already.
+			try {
+				const { rows: lockRows } = await client.query(
+					`SELECT * FROM concurrency_locks
+					 WHERE expires_at > $1
+					 ORDER BY expires_at DESC
+					 LIMIT $2`,
+					[now, loadRecentLimit],
+				);
+				for (const row of lockRows) {
+					this.memory.acquireConcurrencySlot(
+						row.workflow_name,
+						row.concurrency_key,
+						Number.MAX_SAFE_INTEGER, // skip the limit check — we're restoring, not granting
+						row.run_id,
+						Number(row.expires_at),
+					);
+				}
+			} catch (err) {
+				if (!String((err as Error).message).match(/relation .* does not exist/i)) {
+					console.error("[PostgresRunStore] concurrency_locks load failed:", (err as Error).message);
+				}
+			}
+
+			// Tier 2 follow-up · rehydrate scheduled dispatches.
+			// PR 2 A5 — ORDER BY scheduled_at ASC so past-due dispatches
+			// hydrate first. recoverDispatches's past-due → fire-immediately
+			// path benefits from the ordering.
+			//
+			// Review fix-up · CONCERN-2. Add LIMIT for defense-in-depth.
+			// Even with the 1MB payload cap (PR 2 A4), 100K dispatches × 1MB
+			// = 100GB of JSON-decode work at boot. Past-due first means the
+			// LIMIT caps how many recover per boot; the rest surface on the
+			// Janitor's next sweep or a subsequent boot.
+			try {
+				const { rows: dispatchRows } = await client.query(
+					"SELECT * FROM scheduled_dispatches ORDER BY scheduled_at ASC LIMIT $1",
+					[loadRecentLimit],
+				);
+				for (const row of dispatchRows) {
+					this.memory.upsertScheduledDispatch({
+						runId: row.run_id,
+						workflowName: row.workflow_name,
+						triggerType: row.trigger_type,
+						scheduledAt: Number(row.scheduled_at),
+						expiresAt: row.expires_at !== null ? Number(row.expires_at) : undefined,
+						dispatchStatus: row.dispatch_status,
+						payload: typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json,
+						createdAt: Number(row.created_at),
+					});
+				}
+			} catch (err) {
+				if (!String((err as Error).message).match(/relation .* does not exist/i)) {
+					console.error("[PostgresRunStore] scheduled_dispatches load failed:", (err as Error).message);
+				}
+			}
 		} finally {
 			client.release();
 		}
@@ -271,14 +483,24 @@ export class PostgresRunStore implements RunStore {
 
 	saveRun(run: WorkflowRun): void {
 		this.memory.saveRun(run);
+		// PR 1-5 polish · column set mirrors sqlite saveRun (24 columns).
+		// PG migration v5 added the trailing 9 (environment / replay_of /
+		// parent_run_id / parent_node_run_id / scheduled_at / expires_at /
+		// debounce_key / debounce_mode / ping_count); PG migration v4 added
+		// last_completed_step_index. Without these the PG mirror silently
+		// dropped scheduling + lineage + resume-cursor state across restart.
 		this.enqueueWrite(() =>
 			this.pool
 				.query(
 					`INSERT INTO workflow_runs
 				(id, workflow_name, workflow_path, trigger_type, trigger_summary,
 				 status, started_at, finished_at, duration_ms, error_json,
-				 tags_json, metadata_json, node_count, completed_nodes)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+				 tags_json, metadata_json, node_count, completed_nodes,
+				 environment, replay_of, parent_run_id, parent_node_run_id,
+				 scheduled_at, expires_at, debounce_key, debounce_mode,
+				 ping_count, last_completed_step_index)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+				        $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
 				ON CONFLICT (id) DO UPDATE SET
 				 status = EXCLUDED.status,
 				 finished_at = EXCLUDED.finished_at,
@@ -286,7 +508,17 @@ export class PostgresRunStore implements RunStore {
 				 error_json = EXCLUDED.error_json,
 				 tags_json = EXCLUDED.tags_json,
 				 metadata_json = EXCLUDED.metadata_json,
-				 completed_nodes = EXCLUDED.completed_nodes`,
+				 completed_nodes = EXCLUDED.completed_nodes,
+				 environment = EXCLUDED.environment,
+				 replay_of = EXCLUDED.replay_of,
+				 parent_run_id = EXCLUDED.parent_run_id,
+				 parent_node_run_id = EXCLUDED.parent_node_run_id,
+				 scheduled_at = EXCLUDED.scheduled_at,
+				 expires_at = EXCLUDED.expires_at,
+				 debounce_key = EXCLUDED.debounce_key,
+				 debounce_mode = EXCLUDED.debounce_mode,
+				 ping_count = EXCLUDED.ping_count,
+				 last_completed_step_index = EXCLUDED.last_completed_step_index`,
 					[
 						run.id,
 						run.workflowName,
@@ -302,6 +534,16 @@ export class PostgresRunStore implements RunStore {
 						run.metadata ? JSON.stringify(run.metadata) : null,
 						run.nodeCount,
 						run.completedNodes,
+						run.environment ?? null,
+						run.replayOf ?? null,
+						run.parentRunId ?? null,
+						run.parentNodeRunId ?? null,
+						run.scheduledAt ?? null,
+						run.expiresAt ?? null,
+						run.debounceKey ?? null,
+						run.debounceMode ?? null,
+						run.pingCount ?? null,
+						run.lastCompletedStepIndex ?? null,
 					],
 				)
 				.then(() => {}),
@@ -342,6 +584,55 @@ export class PostgresRunStore implements RunStore {
 		if (updates.metadata !== undefined) {
 			setClauses.push(`metadata_json = $${paramIdx++}`);
 			values.push(JSON.stringify(updates.metadata));
+		}
+		// PR 1-5 polish · scheduling, lineage, and resume-cursor fields
+		// updateRun must mirror sqlite. Each marker tracker method
+		// (markRunDelayed / markRunQueued / markRunDebounced / markRunExpired
+		// / recordDebouncePing / transitionRunToRunning / RunnerSteps wait
+		// branch) updates one or more of these. Without these clauses the
+		// in-memory mirror has the value but PG keeps the original (or
+		// NULL).
+		if (updates.replayOf !== undefined) {
+			setClauses.push(`replay_of = $${paramIdx++}`);
+			values.push(updates.replayOf);
+		}
+		if (updates.parentRunId !== undefined) {
+			setClauses.push(`parent_run_id = $${paramIdx++}`);
+			values.push(updates.parentRunId);
+		}
+		if (updates.parentNodeRunId !== undefined) {
+			setClauses.push(`parent_node_run_id = $${paramIdx++}`);
+			values.push(updates.parentNodeRunId);
+		}
+		if (updates.scheduledAt !== undefined) {
+			setClauses.push(`scheduled_at = $${paramIdx++}`);
+			values.push(updates.scheduledAt);
+		}
+		if (updates.expiresAt !== undefined) {
+			setClauses.push(`expires_at = $${paramIdx++}`);
+			values.push(updates.expiresAt);
+		}
+		if (updates.debounceKey !== undefined) {
+			setClauses.push(`debounce_key = $${paramIdx++}`);
+			values.push(updates.debounceKey);
+		}
+		if (updates.debounceMode !== undefined) {
+			setClauses.push(`debounce_mode = $${paramIdx++}`);
+			values.push(updates.debounceMode);
+		}
+		if (updates.pingCount !== undefined) {
+			setClauses.push(`ping_count = $${paramIdx++}`);
+			values.push(updates.pingCount);
+		}
+		if (updates.lastCompletedStepIndex !== undefined) {
+			setClauses.push(`last_completed_step_index = $${paramIdx++}`);
+			values.push(updates.lastCompletedStepIndex);
+		}
+		// `transitionRunToRunning` (Tier 2 #5+#7) preserves the original
+		// startedAt by updating it. Mirror sqlite, which also accepts it.
+		if (updates.startedAt !== undefined) {
+			setClauses.push(`started_at = $${paramIdx++}`);
+			values.push(updates.startedAt);
 		}
 
 		if (setClauses.length === 0) return;
@@ -499,6 +790,13 @@ export class PostgresRunStore implements RunStore {
 		return this.memory.getNodeRun(nodeRunId);
 	}
 
+	getRunsByParent(parentRunId: string): WorkflowRun[] {
+		// Tier 2 sub-workflow lineage. Same in-memory delegation strategy
+		// as the idempotency cache — durable PG schema for parent_run_id
+		// is deferred to a follow-up.
+		return this.memory.getRunsByParent(parentRunId);
+	}
+
 	getEvents(runId: string, since?: number): RunEvent[] {
 		return this.memory.getEvents(runId, since);
 	}
@@ -610,6 +908,22 @@ export class PostgresRunStore implements RunStore {
 			await this.pool.query("DELETE FROM node_runs");
 			await this.pool.query("DELETE FROM workflow_runs");
 			await this.pool.query("DELETE FROM dashboards");
+			// Tier 2 follow-up — wipe durable tables too. Wrapped in
+			// individual try blocks so a missing table (pre-v3 schema) on
+			// one doesn't abort the others.
+			for (const sql of [
+				"DELETE FROM idempotency_cache",
+				"DELETE FROM concurrency_locks",
+				"DELETE FROM scheduled_dispatches",
+			]) {
+				try {
+					await this.pool.query(sql);
+				} catch (err) {
+					if (!String((err as Error).message).match(/relation .* does not exist/i)) {
+						console.error(`[PostgresRunStore] ${sql} failed:`, (err as Error).message);
+					}
+				}
+			}
 		});
 		return count;
 	}
@@ -638,6 +952,189 @@ export class PostgresRunStore implements RunStore {
 			this.pool.end().catch(() => {});
 		});
 		this.closed = true;
+	}
+
+	// === Idempotency cache (Tier 1) ===
+	//
+	// PG durable cache is out of scope for this PR — delegate to the
+	// in-memory layer this store already uses for hot reads. Same-process
+	// hits work exactly like the SQLite store; cross-process / cross-restart
+	// hits are deferred to a follow-up PG schema migration. Operators
+	// running PG today retain pre-Phase-3 behaviour (no caching) on a fresh
+	// process and gain in-memory caching within a single process lifetime.
+	//
+	// Tier 2 follow-up (migration v3) — sync reads stay on the in-memory
+	// mirror; writes async-persist to PG. On boot, `loadRecent()` rehydrates
+	// the in-memory cache from PG so deferred dispatches + idempotency
+	// entries + concurrency leases survive restarts.
+
+	getIdempotencyCache(workflowName: string, stepId: string, key: string) {
+		return this.memory.getIdempotencyCache(workflowName, stepId, key);
+	}
+
+	setIdempotencyCache(
+		workflowName: string,
+		stepId: string,
+		key: string,
+		entry: Parameters<typeof this.memory.setIdempotencyCache>[3],
+	): void {
+		this.memory.setIdempotencyCache(workflowName, stepId, key, entry);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					`INSERT INTO idempotency_cache
+					(workflow_name, step_id, idempotency_key, data_json,
+					 cached_at, expires_at, source_run_id, source_node_run_id)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					ON CONFLICT (workflow_name, step_id, idempotency_key) DO UPDATE SET
+					 data_json = EXCLUDED.data_json,
+					 cached_at = EXCLUDED.cached_at,
+					 expires_at = EXCLUDED.expires_at,
+					 source_run_id = EXCLUDED.source_run_id,
+					 source_node_run_id = EXCLUDED.source_node_run_id`,
+					[
+						workflowName,
+						stepId,
+						key,
+						JSON.stringify(entry.data),
+						entry.cachedAt,
+						entry.expiresAt,
+						entry.sourceRunId,
+						entry.sourceNodeRunId,
+					],
+				)
+				.then(() => {}),
+		);
+	}
+
+	purgeExpiredIdempotencyCache(now: number): number {
+		const removed = this.memory.purgeExpiredIdempotencyCache(now);
+		this.enqueueWrite(() =>
+			this.pool
+				.query("DELETE FROM idempotency_cache WHERE expires_at IS NOT NULL AND expires_at <= $1", [now])
+				.then(() => {}),
+		);
+		return removed;
+	}
+
+	// === Concurrency gating (Tier 2 #6) ===
+	// Sync grants happen on the in-memory mirror; PG mirror is async-only.
+	// Cross-process coordination via the gate itself requires the dedicated
+	// `BLOK_CONCURRENCY_BACKEND=nats-kv` backend (Tier 2 #6 follow-up).
+	// PG persistence here is purely for crash-recovery — boot loads active
+	// (un-expired) leases back into memory so a process restart doesn't
+	// over-grant.
+
+	acquireConcurrencySlot(
+		workflowName: string,
+		concurrencyKey: string,
+		concurrencyLimit: number,
+		runId: string,
+		leaseExpiresAt: number,
+	) {
+		const result = this.memory.acquireConcurrencySlot(
+			workflowName,
+			concurrencyKey,
+			concurrencyLimit,
+			runId,
+			leaseExpiresAt,
+		);
+		if (result.acquired) {
+			this.enqueueWrite(() =>
+				this.pool
+					.query(
+						`INSERT INTO concurrency_locks
+						(workflow_name, concurrency_key, run_id, acquired_at, expires_at)
+						VALUES ($1, $2, $3, $4, $5)
+						ON CONFLICT (workflow_name, concurrency_key, run_id) DO UPDATE SET
+						 expires_at = EXCLUDED.expires_at`,
+						[workflowName, concurrencyKey, runId, Date.now(), leaseExpiresAt],
+					)
+					.then(() => {}),
+			);
+		}
+		return result;
+	}
+
+	releaseConcurrencySlot(workflowName: string, concurrencyKey: string, runId: string): void {
+		this.memory.releaseConcurrencySlot(workflowName, concurrencyKey, runId);
+		this.enqueueWrite(() =>
+			this.pool
+				.query("DELETE FROM concurrency_locks WHERE workflow_name = $1 AND concurrency_key = $2 AND run_id = $3", [
+					workflowName,
+					concurrencyKey,
+					runId,
+				])
+				.then(() => {}),
+		);
+	}
+
+	purgeExpiredConcurrencySlots(now: number): number {
+		const removed = this.memory.purgeExpiredConcurrencySlots(now);
+		this.enqueueWrite(() =>
+			this.pool.query("DELETE FROM concurrency_locks WHERE expires_at <= $1", [now]).then(() => {}),
+		);
+		return removed;
+	}
+
+	getConcurrencySnapshot(now: number) {
+		return this.memory.getConcurrencySnapshot(now);
+	}
+
+	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
+	// Tier 2 follow-up (migration v3) — PG mirror is now real durable
+	// storage. Boot recovery (`HttpTrigger.recoverDispatches`) reads the
+	// in-memory mirror, which is rehydrated from PG on init.
+
+	upsertScheduledDispatch(row: Parameters<typeof this.memory.upsertScheduledDispatch>[0]): void {
+		this.memory.upsertScheduledDispatch(row);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					`INSERT INTO scheduled_dispatches
+					(run_id, workflow_name, trigger_type, scheduled_at, expires_at,
+					 dispatch_status, payload_json, created_at)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					ON CONFLICT (run_id) DO UPDATE SET
+					 scheduled_at = EXCLUDED.scheduled_at,
+					 expires_at = EXCLUDED.expires_at,
+					 dispatch_status = EXCLUDED.dispatch_status,
+					 payload_json = EXCLUDED.payload_json`,
+					[
+						row.runId,
+						row.workflowName,
+						row.triggerType,
+						row.scheduledAt,
+						row.expiresAt ?? null,
+						row.dispatchStatus,
+						JSON.stringify(row.payload ?? null),
+						row.createdAt,
+					],
+				)
+				.then(() => {}),
+		);
+	}
+
+	deleteScheduledDispatch(runId: string): boolean {
+		const removed = this.memory.deleteScheduledDispatch(runId);
+		this.enqueueWrite(() =>
+			this.pool.query("DELETE FROM scheduled_dispatches WHERE run_id = $1", [runId]).then(() => {}),
+		);
+		return removed;
+	}
+
+	getScheduledDispatches(opts?: { triggerType?: string; status?: string }) {
+		return this.memory.getScheduledDispatches(opts);
+	}
+
+	purgeExpiredScheduledDispatches(now: number): number {
+		const removed = this.memory.purgeExpiredScheduledDispatches(now);
+		this.enqueueWrite(() =>
+			this.pool
+				.query("DELETE FROM scheduled_dispatches WHERE expires_at IS NOT NULL AND expires_at < $1", [now])
+				.then(() => {}),
+		);
+		return removed;
 	}
 
 	// === Write Queue ===
@@ -701,6 +1198,21 @@ export class PostgresRunStore implements RunStore {
 			metadata: row.metadata_json ? (parseJson(row.metadata_json) as Record<string, unknown>) : undefined,
 			nodeCount: Number(row.node_count),
 			completedNodes: Number(row.completed_nodes),
+			// PR 1-5 polish · pre-v5 PG rows have NULL on the columns added
+			// by migration v5. Mirror sqlite's `rowToRun`: NULL `environment`
+			// reads as "production" (the legacy default scope) so historical
+			// data still surfaces under the EnvChip default. Every other new
+			// column maps NULL → undefined.
+			environment: ((row.environment as string | null) ?? "production") as string,
+			replayOf: (row.replay_of as string | null) ?? undefined,
+			parentRunId: (row.parent_run_id as string | null) ?? undefined,
+			parentNodeRunId: (row.parent_node_run_id as string | null) ?? undefined,
+			scheduledAt: row.scheduled_at != null ? Number(row.scheduled_at) : undefined,
+			expiresAt: row.expires_at != null ? Number(row.expires_at) : undefined,
+			debounceKey: (row.debounce_key as string | null) ?? undefined,
+			debounceMode: ((row.debounce_mode as string | null) ?? undefined) as "leading" | "trailing" | undefined,
+			pingCount: row.ping_count != null ? Number(row.ping_count) : undefined,
+			lastCompletedStepIndex: row.last_completed_step_index != null ? Number(row.last_completed_step_index) : undefined,
 		};
 	}
 

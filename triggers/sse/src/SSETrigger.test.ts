@@ -1,5 +1,5 @@
-import type { HelperResponse } from "@blok/helper";
-import type { BlokService } from "@blok/runner";
+import type { HelperResponse } from "@blokjs/helper";
+import type { BlokService } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type SSEClient, type SSEConnectionEvent, type SSEEvent, SSETrigger } from "./SSETrigger";
 
@@ -507,7 +507,7 @@ describe("SSETrigger", () => {
 
 describe("SSETriggerOpts Schema", () => {
 	it("should validate with default values", async () => {
-		const { SSETriggerOptsSchema } = await import("@blok/helper");
+		const { SSETriggerOptsSchema } = await import("@blokjs/helper");
 
 		const opts = SSETriggerOptsSchema.parse({});
 
@@ -518,7 +518,7 @@ describe("SSETriggerOpts Schema", () => {
 	});
 
 	it("should validate custom configuration", async () => {
-		const { SSETriggerOptsSchema } = await import("@blok/helper");
+		const { SSETriggerOptsSchema } = await import("@blokjs/helper");
 
 		const opts = SSETriggerOptsSchema.parse({
 			events: ["connect", "disconnect", "subscribe.*"],

@@ -1,7 +1,7 @@
 # Blok Workflow LSP - Helix Editor Configuration
 #
 # Add this to your Helix config: ~/.config/helix/languages.toml
-# Requires: npm install -g @blok/lsp-server
+# Requires: npm install -g @blokjs/lsp-server
 
 [[language]]
 name = "json"

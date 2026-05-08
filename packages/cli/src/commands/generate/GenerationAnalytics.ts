@@ -218,7 +218,11 @@ export class GenerationAnalytics {
 			filtered = filtered.filter((e) => e.success === filter.success);
 		}
 		if (filter?.since) {
-			filtered = filtered.filter((e) => e.timestamp >= filter.since!);
+			// Pull `since` into a local so it narrows from `Date | undefined`
+			// to `Date` after the truthy check above (the field-on-object
+			// access doesn't narrow inside the inner predicate).
+			const since = filter.since;
+			filtered = filtered.filter((e) => e.timestamp >= since);
 		}
 
 		return filtered;

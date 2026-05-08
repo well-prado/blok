@@ -1,6 +1,6 @@
 # Module Reference: Workflow Helper
 
-> **Package:** `@blok/helper`
+> **Package:** `@blokjs/helper`
 > **Path:** `core/workflow-helper/`
 > **Purpose:** Programmatic workflow builder DSL (TypeScript API for composing workflows)
 
@@ -33,7 +33,7 @@ core/workflow-helper/src/
 
 ### Workflow Builder
 ```typescript
-import { Workflow } from "@blok/helper";
+import { Workflow } from "@blokjs/helper";
 
 const workflow = new Workflow()
   .trigger("http", { method: "POST", path: "/api/users" })

@@ -1,12 +1,21 @@
-# @blok/react
+# @blokjs/react
+
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @blokjs/shared@0.2.0
+  - @blokjs/helper@0.2.0
+  - @blokjs/runner@0.2.0
 
 ## 0.0.3
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.19
-  - @blok/shared@0.0.9
+  - @blokjs/runner@0.1.19
+  - @blokjs/shared@0.0.9
 
 ## 0.0.2
 
@@ -14,15 +23,15 @@
 
 - Added examples and create project' command to include examples and 'create node' command with options for type ('module' or 'class') and template ('class' or 'ui')
 - Updated dependencies
-  - @blok/runner@0.1.18
-  - @blok/shared@0.0.8
+  - @blokjs/runner@0.1.18
+  - @blokjs/shared@0.0.8
 
 ## 0.0.8
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.17
+  - @blokjs/runner@0.1.17
 
 ## 0.0.7
 
@@ -30,9 +39,9 @@
 
 - Added support for YAML, XML and TOML in the workflow file. Upgraded package version recommended by Dependabot.
 - Updated dependencies
-  - @blok/helper@0.1.4
-  - @blok/runner@0.1.16
-  - @blok/shared@0.0.7
+  - @blokjs/helper@0.1.4
+  - @blokjs/runner@0.1.16
+  - @blokjs/shared@0.0.7
 
 ## 0.0.6
 
@@ -40,7 +49,7 @@
 
 - Improved the BlokService base class to accept a InputType. This force developer to always create a type to define the Node handle input. Added unit test for pending projects like if-else and api-call.
 - Updated dependencies
-  - @blok/runner@0.1.15
+  - @blokjs/runner@0.1.15
 
 ## 0.0.5
 
@@ -53,8 +62,8 @@
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/shared@0.0.6
-  - @blok/runner@0.1.14
+  - @blokjs/shared@0.0.6
+  - @blokjs/runner@0.1.14
 
 ## 0.0.3
 
@@ -74,5 +83,5 @@
 
 - Implemented a react node and the chatbot demo page
 - Updated dependencies
-  - @blok/runner@0.1.13
-  - @blok/shared@0.0.5
+  - @blokjs/runner@0.1.13
+  - @blokjs/shared@0.0.5

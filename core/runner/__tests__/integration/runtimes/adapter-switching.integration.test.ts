@@ -14,8 +14,8 @@
  * 10. ✅ Concurrent registry access
  */
 
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import BlokService from "../../../src/Blok";
 import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
@@ -686,7 +686,7 @@ describe("Adapter Switching & Backward Compatibility", () => {
 			const duration = performance.now() - startTime;
 			const avgPerExec = duration / 1000;
 
-			console.log(`\n📊 Registry Load Test (1000 executions):`);
+			console.log("\n📊 Registry Load Test (1000 executions):");
 			console.log(`   Total: ${duration.toFixed(2)}ms`);
 			console.log(`   Average: ${avgPerExec.toFixed(3)}ms`);
 
@@ -714,7 +714,7 @@ describe("Adapter Switching & Backward Compatibility", () => {
 				expect(result.success).toBe(true);
 			}
 
-			console.log(`\n📊 Registry Burst Test (100 concurrent):`);
+			console.log("\n📊 Registry Burst Test (100 concurrent):");
 			console.log(`   Total: ${duration.toFixed(2)}ms`);
 
 			expect(duration).toBeLessThan(1000); // Should complete in < 1s

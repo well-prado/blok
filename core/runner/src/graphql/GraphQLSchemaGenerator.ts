@@ -275,7 +275,7 @@ export class GraphQLSchemaGenerator {
 				type: resolved.outputTypeName,
 				description: resolved.description,
 				args: resolved.inputTypeName
-					? [{ name: "input", type: resolved.inputTypeName + "!" }]
+					? [{ name: "input", type: `${resolved.inputTypeName}!` }]
 					: resolved.pathParams.map((p) => ({ name: p, type: "String!" })),
 			};
 

@@ -150,7 +150,7 @@ docker build -t blok-go-runtime:latest .
 ### Configure the runtime adapter
 
 ```typescript
-import { RuntimeRegistry, DockerRuntimeAdapter } from "@blok/runner";
+import { RuntimeRegistry, DockerRuntimeAdapter } from "@blokjs/runner";
 
 const registry = RuntimeRegistry.getInstance();
 registry.register(

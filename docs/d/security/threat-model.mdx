@@ -1,0 +1,391 @@
+---
+title: "Threat model"
+description: "What Blok protects automatically and what you protect in your own workflow code — the framework-vs-user split."
+icon: "shield-check"
+---
+
+Blok ships as npm packages. You scaffold a project with `blokctl create
+project`, embed `@blokjs/trigger-http` (or another trigger), and author
+workflows alongside the runner. We don't host you — we're a framework,
+not a service. That means the security responsibilities split cleanly
+along framework code vs. your code, and this page is the canonical
+statement of which is which.
+
+The closest precedent for the surfaces Blok mounts itself
+(`/__blok/*`, the trace API, the persistence layer) is **Laravel
+Horizon**: open in development, gated in production until the operator
+defines a hook. The closest precedent for routes you author yourself
+(`POST /api/users` etc.) is **any HTTP framework** — Express, Hono,
+Next.js, Django, Laravel — none auto-protect user routes; the user
+adds middleware.
+
+## The split
+
+| Surface | Owner | Why |
+|---|---|---|
+| `/__blok/*` (Studio + trace API) | **Blok** | Mounted automatically by `HttpTrigger.listen()`; you never write the route code. |
+| User-authored HTTP routes | **You** | You write the workflow + trigger config; auth is your call. |
+| Trace persistence layer (sqlite, Postgres, sanitization) | **Blok** | We own the storage shape and the redaction defaults. |
+| Step business logic (the node's `execute()` body) | **You** | Your domain code. |
+| `js/...` Mapper expressions in workflows | **Both** — Blok provides the eval scope, you author the expressions | Workflow code is trusted code, deployed alongside the runner. Treat it as such. |
+| NATS KV defaults, default sanitize field list, scheduler payload denylist | **Blok** | Framework defaults must be safe out of the box. |
+
+Anything in the **Blok** row is our job to fix in code. Anything in the
+**You** row is your job — we provide tools and patterns; the
+[security cookbook](/d/security/cookbook) walks through them recipe by
+recipe.
+
+## What Blok protects automatically
+
+### Framework-mounted endpoints (`/__blok/*`)
+
+`HttpTrigger.listen()` registers ~38 routes under `/__blok/*` for Blok
+Studio and trace data — runs, events, replays, cancellation, search,
+dashboards, webhooks, queue inspection, deployment metadata. Source:
+[`core/runner/src/tracing/TraceRouter.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/TraceRouter.ts).
+
+The route table at a glance:
+
+| Group | Examples | Read or mutate? |
+|---|---|---|
+| Run inspection | `GET /runs`, `GET /runs/:runId`, `GET /runs/:runId/events`, `GET /runs/:runId/subruns` | read |
+| Run mutation | `POST /runs/:runId/replay`, `POST /runs/:runId/cancel`, `DELETE /runs`, `POST /runs/:runId/tags` | mutate |
+| Workflow metadata | `GET /workflows`, `GET /workflows/:name`, `GET /workflows/:name/runs` | read |
+| Operations | `GET /concurrency/health`, `GET /concurrency/state`, `GET /metrics`, `GET /logs` | read |
+| Studio dashboards | `GET/POST/PUT/DELETE /dashboards`, `POST /dashboards/:id/duplicate` | mutate |
+| SSE streaming | `GET /runs/:runId/stream`, `GET /stream` | read |
+
+In production these endpoints are gated. Set `BLOK_ENV=production` (or
+`NODE_ENV=production`) and Blok refuses to serve `/__blok/*` until you
+register an authorize hook:
+
+```ts
+import HttpTrigger from "@blokjs/trigger-http";
+
+const trigger = new HttpTrigger({ ... });
+
+trigger.setTraceAuth(async (req) => {
+  // Return true to allow; false (or throw) to reject.
+  const token = req.headers.authorization?.replace(/^Bearer /, "");
+  return token === process.env.BLOK_TRACE_TOKEN;
+});
+
+await trigger.listen();
+```
+
+Without `setTraceAuth(...)`, requests to `/__blok/*` return `503` with
+a pointer to this page. With the hook registered, requests that fail
+authorization return `401`. In development (`BLOK_ENV !== "production"`)
+the gate is open and behavior matches earlier versions.
+
+Kill-switch: set `BLOK_TRACE_AUTH_DISABLED=1` if you've isolated
+`/__blok/*` behind a reverse proxy or private network and don't want
+the framework gate. The [cookbook](/d/security/cookbook#secure-the-trace-api-and-studio)
+walks through both paths.
+
+CORS on these endpoints defaults to a single allow-listed origin via
+`BLOK_TRACE_CORS_ORIGIN` (set to `*` only when auth is also disabled
+and you understand the cross-origin trade-off).
+
+### Trace data sanitization
+
+Every payload that flows into trace storage — step inputs, step
+outputs, request bodies, log entries, idempotency cache writes,
+deferred dispatch payloads — passes through
+[`core/runner/src/tracing/sanitize.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/sanitize.ts).
+Fields whose key (lower-cased) matches the sensitive list are replaced
+with `"[REDACTED]"`:
+
+```text
+password, secret, token, key, api_key, apikey, api-key,
+authorization, auth, credential, credentials, private_key,
+privatekey, access_token, refresh_token, client_secret,
+session, cookie, bearer, jwt, csrf, oauth_token
+```
+
+Extend the list per-deployment via `BLOK_TRACE_SANITIZE_FIELDS` —
+comma-separated, merged with the defaults. The
+[cookbook recipe](/d/security/cookbook#extend-trace-data-sanitization)
+shows the pattern.
+
+What's sanitized:
+
+- Step inputs and outputs (via `sanitize(ctx.response.data)` before
+  persistence in [`RunnerSteps`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/RunnerSteps.ts))
+- Log entries written via `ctx.logger.*` (via `sanitize(entry.data)`
+  before `saveLog` in [`RunTracker`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/RunTracker.ts))
+- Idempotency cache writes (sanitized result is the value cached, not
+  the raw step output)
+- HTTP dispatch payloads on delayed / queued / debounced runs
+  (`extractDispatchPayload` in
+  [`HttpTrigger`](https://github.com/deskree-inc/blok/blob/main/triggers/http/src/runner/HttpTrigger.ts) —
+  body is sanitized; sensitive headers are dropped before persistence
+  via the denylist `authorization, cookie, x-api-key, ...`)
+
+What's **not** sanitized:
+
+- `WorkflowRun.metadata` and `WorkflowRun.tags` — these are
+  framework-controlled fields you set deliberately; treat them as
+  observable.
+- The HTTP trigger's `Authorization` header on a live request — the
+  request itself is not persisted; the dispatch row only captures
+  delayed/queued/debounced reruns and applies the header denylist.
+- Arbitrary domain data you store in `ctx.state.*` whose field name
+  doesn't match the sensitive list (e.g. `ctx.state.userProfile.ssn`).
+  You either rename the field, add it to `BLOK_TRACE_SANITIZE_FIELDS`,
+  or encrypt the value before it reaches the runner.
+
+Payloads that exceed `BLOK_TRACE_PAYLOAD_MAX_KB` (default 10KB) are
+truncated with a structured `{_truncated: true, _originalSize, _maxSize,
+_preview}` envelope rather than persisted in full. See
+[`sanitize.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/sanitize.ts).
+
+### Default secure configuration
+
+Several defaults exist specifically to keep first-deploy environments
+safe:
+
+- **NATS KV bucket** — `BLOK_CONCURRENCY_BACKEND=nats-kv` won't start
+  in production with the default bucket name (`blok-concurrency`).
+  Two deployments sharing a NATS server with the default name would
+  contend on the same `(workflow, key)` buckets. Set
+  `BLOK_CONCURRENCY_NATS_KV_BUCKET=<your-deployment-name>` per
+  deployment. Source:
+  [`NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
+- **Local node path traversal** — `localResolver` in
+  [`Configuration.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/Configuration.ts)
+  canonicalizes node paths against `NODES_PATH` and refuses paths that
+  escape the directory. A `node.node = "../../malicious"` value throws
+  rather than walking the filesystem.
+- **Replay header injection** — the replay endpoint at
+  `POST /__blok/runs/:runId/replay` only accepts the captured original
+  request; attacker-supplied `overrides.headers` no longer override
+  the captured `Authorization`. Combined with the trace-auth gate
+  above, this blocks the replay-as-auth-bypass attack.
+- **Dispatch payload size cap** — `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`
+  (default 1MB) caps the JSON-serialized request body that's persisted
+  for delayed/queued/debounced reruns. Overflow throws
+  `PayloadTooLargeError` → HTTP 413 rather than writing an unbounded
+  blob to the scheduler table.
+
+### Recursion and resource bounds
+
+Several limits exist to bound blast radius from a misconfigured
+workflow:
+
+| Bound | Default | Tunable via |
+|---|---|---|
+| Sub-workflow recursion depth | 10 | `BLOK_MAX_SUBWORKFLOW_DEPTH` |
+| Concurrency lease timeout | 1h | `BLOK_CONCURRENCY_LEASE_MS` or per-trigger `concurrencyLeaseMs` |
+| Janitor sweep interval | 5min | `BLOK_JANITOR_INTERVAL_MS` |
+| Orphan recovery threshold | 2min | `BLOK_ORPHAN_THRESHOLD_MS` |
+| PG `loadRecent` row cap | 100K | `BLOK_PG_LOADRECENT_LIMIT` |
+| Backoff exponent | 30 | hardcoded (≈12 days at factor=2) |
+
+Together these prevent a runaway workflow from consuming unbounded
+storage, holding stale leases forever, or blowing up boot recovery on
+a database with millions of rows.
+
+## What you protect in your workflows
+
+These are framework-shaped patterns — Blok provides the hooks; you
+write the policy.
+
+### Authentication on user-authored HTTP routes
+
+You author workflows that mount routes like `POST /api/users`. Blok's
+HTTP trigger uses [Hono](https://hono.dev) under the hood and serves
+your routes alongside `/__blok/*`. **No auth is applied to your
+routes by default.** Pick a strategy and wire it — JWT, API keys,
+session cookies, mTLS, whatever your domain calls for. The
+[cookbook](/d/security/cookbook#add-authentication-to-your-http-trigger-workflows)
+shows the pattern as a workflow-level first-step gate (the most
+portable approach) and as a Hono middleware (when you control the
+trigger setup directly).
+
+### Authorization (RBAC / ABAC)
+
+Once a request is authenticated, who's allowed to run it? Blok
+provides the building blocks at
+[`core/runner/src/security/`](https://github.com/deskree-inc/blok/tree/main/core/runner/src/security)
+(`RBAC.ts`, `ABAC.ts`, `OAuthProvider.ts`, `SecretManager.ts`,
+`AuditLogger.ts`) — but wiring them is your call. The simplest pattern
+uses a `branch` step that consults `ctx.request.headers` or
+`ctx.state.identity` against role claims and short-circuits the
+workflow when authorization fails. See the
+[cookbook](/d/security/cookbook#add-rbac-to-workflow-steps).
+
+### Field-level encryption
+
+Blok sanitizes trace storage. We do **not** encrypt arbitrary domain
+data. SSNs, credit cards, medical records — encrypt those at the
+boundary (before they reach the runner) or use a database with
+encryption-at-rest like Postgres with `pgcrypto` or SQLCipher. Blok
+ships [`EncryptionAtRest.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/EncryptionAtRest.ts)
+as a starting point if you want field-level encryption inside a node.
+
+### Environment variables and node trust
+
+`ctx.env` is populated with `process.env` and threaded through to every
+node and runtime adapter — TS nodes read `ctx.env.API_KEY`, gRPC /
+Docker / HTTP runtime adapters serialize the env into the request
+payload that crosses the SDK boundary. By default **every loaded node
+sees every environment variable in the runner process**. Source:
+[`TriggerBase.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/TriggerBase.ts)
+(search `Object.defineProperty(ctx, "env"`).
+
+This is the same trust model as Express middleware or Django apps —
+your code shares one process and reads one `process.env`. The
+implication: a malicious or sloppy third-party node can read secrets
+unrelated to its declared purpose. Defenses, in order of strength:
+
+- **Allowlist what nodes can see** (recommended). Set
+  `BLOK_NODE_ENV_ALLOW=DATABASE_URL,STRIPE_KEY` (exact names) and/or
+  `BLOK_NODE_ENV_ALLOW_PREFIX=PUBLIC_,SAFE_` (prefix matches). When
+  either is set, `ctx.env` becomes a Proxy that hides every key not
+  in the allowlist — reads return `undefined`, `Object.keys` excludes
+  them, `key in env` is `false`. Default behaviour (neither set) is
+  allow-all, preserving backwards compatibility. Set
+  `BLOK_ENV=production` to get a boot warning when no allowlist is
+  configured (suppress with `BLOK_SUPPRESS_ENV_ALLOW_WARNING=1`).
+- **Vet third-party nodes** before loading them. Treat npm-installed
+  nodes the same way you treat npm-installed Express middleware.
+- **Deploy separate Blok processes for separate trust domains.**
+  Per-tenant or per-product-line process boundaries are also env-var
+  boundaries.
+- **Don't store secrets the runner doesn't need.** If a secret is
+  only consumed by an external service, plumb it through a secret
+  manager rather than `process.env`.
+
+The allowlist is operator-controlled (single env var pair, set at
+deploy time) rather than per-node. That's a deliberate trade — the
+operator decides the env-var contract once for the whole process,
+which composes cleanly with separate-process deployment for stronger
+trust domains. A per-node declarative allowlist is plausible follow-up
+work but not on the immediate roadmap.
+
+### Sub-workflow access control
+
+`SubworkflowNode` looks up the child workflow by name in
+`WorkflowRegistry` — anyone with workflow-authoring rights can compose
+any registered child. There's no built-in authorization on the
+composition step. Two patterns work:
+
+1. **Filter the registry at boot** — your trigger setup code only
+   registers the sub-workflows the parent process is allowed to
+   invoke.
+2. **Deploy separate Blok processes per tenant** — strongest
+   isolation; sub-workflow boundaries become process boundaries.
+
+The [cookbook](/d/security/cookbook#sub-workflow-access-control) walks
+through option 1.
+
+### `js/...` Mapper expressions
+
+The Blueprint Mapper evaluates `js/...` expressions in step inputs
+against the live `ctx`. The eval scope is intentionally narrow —
+`new Function("ctx", "data", "func", "vars", ...)` — so there's no
+`require`, `process`, `child_process`, or `globalThis` reachable from
+a workflow expression. Data exfiltration through `ctx` is possible
+within the workflow itself, but RCE is not.
+
+That said: **workflow definitions are trusted code, not user input**.
+A workflow's JSON or TypeScript file lives alongside your runner code
+and is deployed through the same release pipeline as the rest of your
+service. If you let untrusted users author workflows directly (e.g. a
+no-code builder that lets end-users write `js/...` expressions), you
+must build a high-level DSL on top of Blok and translate to vetted
+workflow JSON in server code — never load workflow definitions from
+end-user payloads.
+
+`BLOK_MAPPER_MODE=strict` (recommended for production) makes
+expression resolution failures throw rather than silently passing the
+literal string through. See [debugging workflows](/d/introduction/workflows#debugging).
+
+## Deployment modes
+
+Blok runs in a few different shapes; the threat model shifts with each.
+
+### Single-tenant operator-deployed
+
+The operator (you) authors all workflows and runs the runner. Trust
+boundary is "anything in the repo is trusted; anything off the wire
+is not." This is the default and the easiest model — wire auth on
+your user routes, gate `/__blok/*` with `setTraceAuth`, and you're
+done.
+
+### Multi-tenant operator-deployed
+
+The operator authors workflows, but the runner serves multiple
+tenants behind a single set of routes. The concurrency gate's
+`concurrencyKey: $.req.body.tenantId` is the right tool for
+isolation, paired with a registry filter for sub-workflows so a
+tenant can't compose another tenant's workflow.
+
+### Multi-tenant user-authored (advanced)
+
+Users author their own workflow definitions, and your service
+deploys them onto a shared runner. **This is the highest-risk
+deployment and Blok does not currently ship purpose-built isolation
+for it.** Recommendations: deploy a separate Blok process per tenant;
+build a server-side DSL that compiles to vetted workflow JSON rather
+than letting tenants write `js/...` directly; rate-limit per-tenant
+with `concurrencyKey` + `onLimit: "queue"`; and treat the
+`/__blok/*` surface as fully internal (auth gate + private network).
+
+## Production deployment checklist
+
+Set or confirm each of these before exposing a Blok process to public
+traffic:
+
+| Step | Setting | Reason |
+|---|---|---|
+| 1 | `BLOK_ENV=production` (or `NODE_ENV=production`) | Activates the trace-auth gate, NATS KV bucket check, and other production-only refusals. |
+| 2 | `trigger.setTraceAuth(...)` registered | Required to serve `/__blok/*` in production. Alternative: `BLOK_TRACE_AUTH_DISABLED=1` if you've firewalled `/__blok/*` separately. |
+| 3 | `BLOK_TRACE_CORS_ORIGIN=<your-studio-origin>` | Restricts cross-origin access to the trace API. |
+| 4 | `BLOK_MAPPER_MODE=strict` | Fail-fast on workflow expression errors instead of silent miscompiles. |
+| 5 | `BLOK_TRACE_STORE=postgres` (recommended) | Sqlite is fine for single-process; Postgres for durability + cross-process. |
+| 6 | `BLOK_TRACE_PG_*` use TLS | Don't ship a Blok process with a plaintext Postgres URL unless the network is fully private. |
+| 7 | `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` if `BLOK_CONCURRENCY_BACKEND=nats-kv` | Default bucket is rejected in production to prevent cross-deployment collision. |
+| 8 | `BLOK_TRACE_SANITIZE_FIELDS` extended for app-specific fields | The default list is not exhaustive for your domain. Add `ssn`, `dob`, `creditcard`, etc. |
+| 9 | `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` tuned | Default 1MB. Raise for media-upload workflows; lower if you only do small JSON dispatches. |
+| 10 | Auth on user-authored HTTP routes | Wire it. Blok doesn't auto-apply. |
+| 11 | Pre-commit / CI lint blocks `console.log(secret)` patterns | Sanitize covers trace storage, not application logs. |
+
+The [env vars page](/d/operations/env-vars) is the per-variable
+reference; this checklist is the deploy-day shape.
+
+## What's not in scope
+
+Blok deliberately does not address:
+
+- **Workflow code-eval RCE**. Workflows are trusted code, deployed
+  alongside the runner. If you let untrusted users author workflow
+  definitions verbatim, RCE is on the table — see the `js/...`
+  Mapper section above.
+- **Third-party node module review**. If you `npm install` a node
+  package that misbehaves, that's a supply-chain concern outside the
+  framework's reach. Vet your dependencies.
+- **At-rest encryption of arbitrary domain data**. Use Postgres with
+  encryption-at-rest, SQLCipher, or field-level encryption inside
+  your node. Blok sanitizes trace storage, not your business data.
+- **Rate limiting on `/__blok/*`**. The trace-auth gate is binary
+  (allow/deny). If you need request-rate caps on Studio's API,
+  enforce them at your reverse proxy.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Security cookbook" icon="book-open" href="/d/security/cookbook">
+    Recipes for the things on your side of the line — auth, RBAC,
+    sanitization, sub-workflow filtering.
+  </Card>
+  <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
+    Every supported environment variable with defaults and
+    kill-switches.
+  </Card>
+  <Card title="Cancellation" icon="x-circle" href="/d/reliability/cancellation">
+    `POST /__blok/runs/:id/cancel` and the cooperative `ctx.signal`
+    pattern.
+  </Card>
+</Columns>

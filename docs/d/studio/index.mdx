@@ -1,0 +1,261 @@
+---
+title: "Blok Studio"
+description: "The trace, replay, and observability UI shipped with every Blok runtime. Status badges, saved filters, sub-runs, and the in-flight concurrency tile."
+icon: "layout-dashboard"
+---
+
+import {
+  StudioRunHeader,
+  StudioStepRail,
+  StudioEventTimeline,
+  StudioConcurrencyTile,
+  StudioSavedFilters,
+  StudioEventBadge,
+} from "/snippets/studio-mocks.jsx";
+
+Blok Studio is the trace, replay, and observability UI bundled with
+every running trigger. It reads from the same
+[`/__blok/*` REST API](/d/reference/trace-storage#http-api) that
+external tooling can consume — Studio is a thin client over a stable
+contract.
+
+## Launch
+
+```bash
+blokctl trace
+# Or visit /__blok on the running trigger:
+open http://localhost:4000/__blok
+```
+
+The path `/__blok` mounts on every HTTP trigger by default. Worker-only
+deployments expose Studio through `blokctl trace` which spawns a thin
+HTTP server on top of the existing run store.
+
+## Pages at a glance
+
+<Columns cols={2}>
+  <Card title="All runs" icon="list">
+    Recent runs across all workflows. Filter by status, tags, and
+    metadata. Saved filter presets persist per browser. The in-flight
+    concurrency tile surfaces live slot usage.
+  </Card>
+  <Card title="Run detail" icon="search">
+    Per-run drill-down: header, step rail, event timeline, log viewer,
+    sub-runs strip, and per-step inspector with cache lineage and
+    retry attempts.
+  </Card>
+</Columns>
+
+## Status badges
+
+The runs list and run header surface every value of
+[`WorkflowRunStatus`](/d/reference/trace-storage#run-states) with a
+distinct color so operators can scan status at a glance.
+
+| Status | Color | When |
+|---|---|---|
+| `pending` | zinc | Run started, no node has reached `running` yet. |
+| `running` | blue | At least one node executing. |
+| `completed` | green | All steps finished successfully. |
+| `failed` | red | A step failed terminally. |
+| `cancelled` | purple | Operator-initiated via [`/cancel`](/d/reliability/cancellation). |
+| `throttled` | amber | [Concurrency gate](/d/reliability/concurrency-keys) denied with `onLimit: "throw"`. |
+| `delayed` | yellow | [Scheduled](/d/scheduling/delay-and-ttl) for future dispatch. |
+| `expired` | zinc | TTL exceeded before dispatch. |
+| `debounced` | cyan | Coalesced via [debounce](/d/scheduling/debounce). |
+| `queued` | lime | Concurrency gate denied with [`onLimit: "queue"`](/d/reliability/concurrency-keys#queue-mode-onlimit-queue). |
+| `crashed` | red (deeper) | Runner crashed (uncaught exception, OOM, signal). See [crash auto-flip](/d/reliability/cancellation#crash-auto-flip). |
+| `timedOut` | orange | Step's final retry exceeded `maxDuration`. |
+
+The status filter dropdown carries every value. Combined with tags
+and metadata filters, you can scope the list to any production
+investigation:
+
+```
+status=failed AND tags=user-123 AND metadata.tier=premium
+```
+
+## Run header
+
+The run header shows the workflow name, status badge, run id, duration,
+trigger summary, and contextual breadcrumbs:
+
+<StudioRunHeader
+  workflowName="ai-content-pipeline"
+  runId="run_4f3a2c1b9e"
+  status="completed"
+  durationMs={2143}
+  triggerSummary="POST /generate"
+  startedAt="2026-05-04 10:42:15"
+  nodeCount={4}
+  completedNodes={4}
+  showReplayButton={true}
+/>
+
+When applicable, breadcrumbs appear inline:
+
+- **`replay of #...`** when `WorkflowRun.replayOf` is set — links to
+  the source run. See [replay](/d/reliability/replay).
+- **`called from #...`** when `WorkflowRun.parentRunId` is set —
+  links to the invoking parent run. See
+  [sub-workflows](/d/composition/sub-workflows).
+- **Replay button** on completed, failed, cancelled, or crashed runs
+  — kicks off a fresh run with the captured payload through current
+  code.
+
+## Step rail
+
+The step rail (left pane on the run detail page) shows each step with
+status dot, name, contextual badges, and duration. Inline badges:
+
+| Badge | Meaning |
+|---|---|
+| `cached` (green) | Step short-circuited via the [idempotency cache](/d/reliability/idempotency). Click the step for the cache lineage banner. |
+| `↳ sub` (zinc) | Synchronous sub-workflow invocation (`wait: true`). The actual child run is in the Sub-runs strip. |
+| `↳ async` (orange) | Fire-and-forget sub-workflow invocation (`wait: false`). The parent step returned with dispatch metadata; the child runs independently. See [wait modes](/d/composition/sub-workflows#wait-modes). |
+| `↻N` (amber) | The step had N failed attempts before its outcome (success or terminal failure). Open the step inspector for the per-attempt error history. |
+
+Example with mixed indicators:
+
+<StudioStepRail
+  activeIndex={2}
+  steps={[
+    { id: "1", name: "fetch", status: "completed", cached: true, durationMs: 2 },
+    { id: "2", name: "transform", status: "completed", attempts: 1, durationMs: 412 },
+    { id: "3", name: "send-receipt", status: "completed", subworkflow: true, durationMs: 3480 },
+    { id: "4", name: "queue-email", status: "completed", subworkflow: true, wait: false, durationMs: 4 },
+  ]}
+/>
+
+## Event timeline
+
+The event timeline renders every `RunEventType` emitted during the run.
+Studio tags each event with a label and color matched to the run-state
+palette. See the
+[full event vocabulary](/d/reference/trace-storage#event-vocabulary)
+on the trace storage page.
+
+<StudioEventTimeline
+  events={[
+    { timestamp: "10:42:15.001", type: "RUN_STARTED",    summary: "ai-content-pipeline · POST /generate" },
+    { timestamp: "10:42:15.012", type: "NODE_STARTED",   summary: "draft" },
+    { timestamp: "10:42:16.342", type: "NODE_CACHED",    summary: "draft · cache hit from run_8a92c4" },
+    { timestamp: "10:42:16.355", type: "NODE_STARTED",   summary: "review" },
+    { timestamp: "10:42:16.504", type: "NODE_ATTEMPT_FAILED", summary: "review · attempt 1: ECONNRESET" },
+    { timestamp: "10:42:17.512", type: "NODE_COMPLETED", summary: "review · 1.16s after 1 attempt" },
+    { timestamp: "10:42:17.524", type: "RUN_COMPLETED",  summary: "ai-content-pipeline · 2.52s" },
+  ]}
+/>
+
+## Saved filters
+
+Operators can save the current `(status, tags, metadata)` filter
+combination as a named preset and recall it later. Presets persist in
+`localStorage` under `blok.studio.savedFilters` — per-browser, no
+server-side state.
+
+<StudioSavedFilters
+  presets={[
+    { name: "Failures last hour", active: false },
+    { name: "Tenant A premium", active: true },
+    { name: "Throttled today", active: false },
+  ]}
+/>
+
+The dropdown lives next to the standard filter inputs in
+`RunFilters`. Click a preset to apply; click **+ save** to capture
+the current filter state under a new name. Presets are scoped to the
+browser session — no cross-device sync, no team-shared filters in v1.
+
+Source:
+[`apps/studio/src/lib/savedFilters.ts`](https://github.com/deskree-inc/blok/blob/main/apps/studio/src/lib/savedFilters.ts) ·
+[`apps/studio/src/components/runs/RunFilters.tsx`](https://github.com/deskree-inc/blok/blob/main/apps/studio/src/components/runs/RunFilters.tsx).
+
+## In-flight concurrency tile
+
+When at least one concurrency slot is in flight, the All Runs page
+header shows live `(workflow, key)` buckets sorted by lease count.
+The tile is hidden when no slots are in flight — uncluttered at idle.
+
+<StudioConcurrencyTile
+  backendName="nats-kv"
+  totalLeases={7}
+  totalBuckets={2}
+  buckets={[
+    { workflowName: "render-pdf", concurrencyKey: "tenant-a", inFlight: 5 },
+    { workflowName: "checkout", concurrencyKey: "cart-42", inFlight: 2 },
+  ]}
+/>
+
+When a non-default concurrency backend is configured (e.g. NATS KV),
+the backend name appears as a green badge. The tile polls
+[`/__blok/concurrency/state`](/d/reliability/concurrency-keys#observability-endpoints)
+every 5 seconds — reads from the same data the OpenTelemetry counters
+expose. See [observability](/d/operations/observability) for the full
+counter list.
+
+Source:
+[`apps/studio/src/components/runs/ConcurrencyTile.tsx`](https://github.com/deskree-inc/blok/blob/main/apps/studio/src/components/runs/ConcurrencyTile.tsx).
+
+## Sub-runs strip
+
+When a run invokes [sub-workflows](/d/composition/sub-workflows), each
+child appears in a clickable strip on the parent's run header — the
+status dot reflects the child's current state, the workflow name is
+the child's `name:` field, and the short id links to the child's full
+detail page.
+
+For the parent → child navigation pattern and the
+`called from #...` reverse breadcrumb, see
+[sub-workflows · Studio surface](/d/composition/sub-workflows#studio-surface).
+
+## Per-step inspector
+
+Click any step in the rail to open the inspector. Notable affordances:
+
+- **Cache lineage banner** — when the step short-circuited via cache,
+  shows the source run + cached-Xs-ago timestamp with click-through.
+  See [idempotent caching · Studio surface](/d/reliability/idempotency#studio-surface).
+- **Attempts disclosure** — when the step had failed attempts before
+  outcome, expands to per-attempt timestamp + error message. See
+  [retry · Studio surface](/d/reliability/retry).
+- **Step io** — input and output JSON for the step.
+- **Logs** — log entries scoped to this step's wall-clock window.
+
+## Live updates via SSE
+
+The runs list and run detail subscribe to
+`GET /__blok/runs/:runId/events` (Server-Sent Events) for real-time
+updates. New events render incrementally without polling. The
+connection auto-reconnects on transient network failures.
+
+## What Studio is NOT (yet)
+
+- **A workflow editor.** Studio is read-only — viewing, replaying,
+  and cancelling. Authoring workflows still happens in TypeScript or
+  JSON files. A visual workflow editor (React Flow, like n8n) is on
+  the roadmap.
+- **A team-shared dashboard.** Saved filters live in `localStorage` —
+  per-browser. There's no server-side preset library or
+  cross-operator sharing yet.
+- **A scheduled-runs view.** `delayed` and `queued` runs surface in
+  the All Runs list with their badges, but a dedicated view sorted by
+  `scheduledAt` is on the roadmap.
+- **A multi-region console.** Studio binds to a single Blok process /
+  run store. For multi-region observability, point external tooling at
+  the [`/__blok/*` REST API](/d/reference/trace-storage#http-api) on
+  each region.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The data model behind every Studio surface — run states, events, and the SQLite schema.
+  </Card>
+  <Card title="Cancellation" icon="x-circle" href="/d/reliability/cancellation">
+    `POST /__blok/runs/:id/cancel` from the UI or your own tooling.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/d/operations/observability">
+    OpenTelemetry counters and concurrency endpoints powering Studio's tiles.
+  </Card>
+</Columns>

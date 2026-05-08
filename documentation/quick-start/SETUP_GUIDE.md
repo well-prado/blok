@@ -451,7 +451,7 @@ docker compose -f infra/docker-compose.production.yml --profile monitoring up -d
 **File:** `src/nodes/greet/index.ts`
 ```typescript
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
   name: "greet",

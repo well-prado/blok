@@ -147,6 +147,27 @@ describe("RunTracker", () => {
 		it("should return empty array for unknown run ID", () => {
 			expect(tracker.getNodeRuns("nonexistent")).toEqual([]);
 		});
+
+		it("redacts cached node outputs before persistence (security review FW-10)", () => {
+			const run = tracker.startRun(makeRunOpts());
+			const node = tracker.startNode(run.id, makeNodeOpts());
+
+			// Simulate a cache hit replay — `RunnerSteps` passes the
+			// raw cached `hit.data` to markNodeCached. The trace storage
+			// outputs row must be redacted, mirroring the live-run path.
+			tracker.markNodeCached(
+				node.id,
+				{ sourceRunId: "run_orig", sourceNodeRunId: "node_orig", cachedAt: Date.now() - 1000 },
+				{ user: "u1", password: "secret", apiKey: "k_xyz" },
+			);
+
+			const fetched = tracker.getNodeRun(node.id);
+			expect(fetched?.status).toBe("completed");
+			const outputs = fetched?.outputs as Record<string, unknown>;
+			expect(outputs.user).toBe("u1");
+			expect(outputs.password).toBe("[REDACTED]");
+			expect(outputs.apiKey).toBe("[REDACTED]");
+		});
 	});
 
 	// === Events ===
@@ -221,6 +242,51 @@ describe("RunTracker", () => {
 			const filtered = tracker.getLogs(run.id, "n1");
 			expect(filtered).toHaveLength(1);
 			expect(filtered[0].message).toBe("a");
+		});
+
+		it("redacts sensitive fields in log entry data (security review FW-6)", () => {
+			const run = tracker.startRun(makeRunOpts());
+			tracker.addLog({
+				runId: run.id,
+				level: "info",
+				message: "auth attempt",
+				data: { user: "u1", password: "secret123", token: "abc" },
+			});
+
+			const logs = tracker.getLogs(run.id);
+			expect(logs).toHaveLength(1);
+			const stored = logs[0].data as Record<string, unknown>;
+			expect(stored.user).toBe("u1");
+			expect(stored.password).toBe("[REDACTED]");
+			expect(stored.token).toBe("[REDACTED]");
+		});
+
+		it("emits sanitized data on the LOG_ENTRY event (security review FW-6)", () => {
+			const captured: RunEvent[] = [];
+			tracker.on("event", (e: RunEvent) => captured.push(e));
+
+			const run = tracker.startRun(makeRunOpts());
+			tracker.addLog({
+				runId: run.id,
+				level: "warn",
+				message: "leaked token",
+				data: { jwt: "eyJ...", apiKey: "k_xyz" },
+			});
+
+			const logEvt = captured.find((e) => e.type === "LOG_ENTRY");
+			expect(logEvt).toBeDefined();
+			const payload = logEvt?.payload as { data: Record<string, unknown> };
+			expect(payload.data.jwt).toBe("[REDACTED]");
+			expect(payload.data.apiKey).toBe("[REDACTED]");
+		});
+
+		it("leaves entries with no `data` field untouched (security review FW-6)", () => {
+			const run = tracker.startRun(makeRunOpts());
+			tracker.addLog({ runId: run.id, level: "info", message: "no data here" });
+
+			const logs = tracker.getLogs(run.id);
+			expect(logs).toHaveLength(1);
+			expect(logs[0].data).toBeUndefined();
 		});
 	});
 

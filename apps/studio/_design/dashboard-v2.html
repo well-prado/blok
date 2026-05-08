@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blok Studio · Direction A · Dashboard Hi-Fi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,wght@1,400;1,500;1,600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --blok-green-500: #2bcd71;
+        --blok-green-600: #22a85b;
+        --blok-green-100: rgba(43, 205, 113, 0.12);
+        --bg-canvas: #0b0b0d;
+        --bg-raised: #111113;
+        --bg-overlay: #18181b;
+        --bg-hover: #1f1f23;
+        --ink-1: #f4f4f5;
+        --ink-2: #a1a1aa;
+        --ink-3: #52525b;
+        --hairline: rgba(244, 244, 245, 0.06);
+        --hairline-2: rgba(244, 244, 245, 0.1);
+        --status-running: #3b82f6;
+        --status-failed: #ef4444;
+        --status-completed: var(--blok-green-500);
+        --selected-bg: rgba(43, 205, 113, 0.08);
+        --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace,
+          monospace;
+        --font-display: "Newsreader", Georgia, serif;
+        --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: var(--bg-canvas);
+        color: var(--ink-1); font-family: var(--font-ui); font-size: 13px;
+        line-height: 1.5; -webkit-font-smoothing: antialiased; }
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+
+      .junior-banner { background: var(--bg-overlay);
+        border-bottom: 1px solid var(--hairline-2); padding: 14px 24px;
+        font-size: 12px; color: var(--ink-2); }
+      .junior-pill { display: inline-block; font-size: 10px;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        background: var(--blok-green-100); color: var(--blok-green-500);
+        padding: 2px 8px; border-radius: 999px; margin-right: 12px;
+        border: 1px solid rgba(43, 205, 113, 0.2); }
+
+      /* Shell shared with run-detail-v2 */
+      .shell { display: grid;
+        grid-template-columns: 220px 1fr;
+        grid-template-rows: 48px 1fr;
+        height: calc(100vh - 64px); min-height: 740px;
+        max-width: 1600px; margin: 0 auto; }
+      .top { grid-column: 1 / -1; background: var(--bg-canvas);
+        border-bottom: 1px solid var(--hairline-2);
+        display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+      .brand { display: flex; align-items: center; gap: 8px; margin-right: 4px; }
+      .brand svg { height: 18px; }
+      .brand .wordmark { font-weight: 600; font-size: 13px; letter-spacing: 0.03em; }
+      .env-chip { display: flex; align-items: center; gap: 6px;
+        background: var(--bg-raised); border: 1px solid var(--hairline-2);
+        padding: 4px 10px 4px 8px; border-radius: 6px; font-size: 12px;
+        cursor: pointer; }
+      .env-chip:hover { background: var(--bg-hover); }
+      .env-chip .dot { width: 6px; height: 6px; border-radius: 50%;
+        background: var(--blok-green-500);
+        box-shadow: 0 0 0 3px rgba(43, 205, 113, 0.18); }
+      .env-chip .label { color: var(--ink-1); font-weight: 500; }
+      .env-chip .caret { color: var(--ink-3); font-size: 10px; }
+      .top .spacer { flex: 1; }
+      .top .ticker { display: flex; align-items: center; gap: 12px;
+        font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
+      .live-pulse { display: inline-flex; align-items: center; gap: 6px;
+        color: var(--blok-green-500); font-weight: 500; }
+      .live-dot { width: 6px; height: 6px; border-radius: 50%;
+        background: var(--blok-green-500);
+        animation: brand-pulse 2s ease-in-out infinite; }
+      @keyframes brand-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(43, 205, 113, 0.5); }
+        50% { box-shadow: 0 0 0 4px rgba(43, 205, 113, 0); } }
+      .kbd { font-family: var(--font-mono); font-size: 10px;
+        background: var(--bg-raised); border: 1px solid var(--hairline-2);
+        padding: 1px 5px; border-radius: 3px; color: var(--ink-2); }
+
+      .sidebar { background: var(--bg-canvas);
+        border-right: 1px solid var(--hairline);
+        padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+      .nav-section { font-size: 10px; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--ink-3);
+        padding: 12px 12px 6px; }
+      .nav-link { display: flex; align-items: center; gap: 10px;
+        padding: 6px 12px; font-size: 13px; color: var(--ink-2);
+        border-radius: 5px; cursor: pointer; position: relative; }
+      .nav-link:hover { background: var(--bg-hover); color: var(--ink-1); }
+      .nav-link.active { background: var(--selected-bg); color: var(--ink-1); }
+      .nav-link.active::before { content: ""; position: absolute;
+        left: 0; top: 8px; bottom: 8px; width: 2px;
+        background: var(--blok-green-500); border-radius: 0 2px 2px 0; }
+      .nav-link svg { width: 14px; height: 14px; opacity: 0.7; }
+      .nav-link.active svg { opacity: 1; }
+      .nav-link .count { margin-left: auto; font-family: var(--font-mono);
+        font-size: 11px; color: var(--ink-3); }
+      .nav-link.active .count { color: var(--blok-green-500); }
+
+      /* DASHBOARD-SPECIFIC */
+      .body { display: flex; flex-direction: column; overflow: hidden; }
+
+      .dash-head {
+        padding: 22px 28px 16px;
+        display: flex; align-items: baseline; gap: 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .dash-head h1 {
+        font-size: 22px; font-weight: 600; margin: 0;
+        font-family: var(--font-display); font-style: italic;
+        color: var(--ink-1); letter-spacing: -0.01em;
+      }
+      .dash-head .breadcrumb { color: var(--ink-3); font-size: 12px;
+        font-family: var(--font-mono); }
+      .dash-head .spacer { flex: 1; }
+      .dash-head .last-fetch { font-size: 11px; color: var(--ink-3);
+        font-family: var(--font-mono); }
+
+      .dash-body { flex: 1; overflow-y: auto; padding: 24px 28px 40px;
+        display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; }
+
+      /* Stats grid */
+      .stats { display: grid;
+        grid-template-columns: repeat(4, 1fr); gap: 12px;
+        margin-bottom: 24px; }
+      .stat-card { background: var(--bg-raised);
+        border: 1px solid var(--hairline-2); border-radius: 8px;
+        padding: 16px 18px; }
+      .stat-card .label { font-size: 10px; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--ink-3); margin-bottom: 8px; }
+      .stat-card .num { font-family: var(--font-display); font-style: italic;
+        font-weight: 500; font-size: 32px; color: var(--ink-1);
+        line-height: 1.1; letter-spacing: -0.01em; }
+      .stat-card .num .unit { font-size: 14px; color: var(--ink-3);
+        margin-left: 4px; }
+      .stat-card .delta { font-size: 11px; color: var(--ink-2);
+        font-family: var(--font-mono); margin-top: 4px;
+        display: flex; align-items: center; gap: 4px; }
+      .stat-card .delta.up { color: var(--blok-green-500); }
+      .stat-card .delta.down { color: var(--status-failed); }
+      .stat-card .sparkline { margin-top: 12px; height: 28px;
+        display: flex; align-items: flex-end; gap: 2px; }
+      .stat-card .sparkline .bar { flex: 1; background: var(--blok-green-500);
+        opacity: 0.45; border-radius: 1px; }
+      .stat-card .sparkline .bar.dim { opacity: 0.18; }
+      .stat-card .sparkline .bar.fail { background: var(--status-failed);
+        opacity: 0.6; }
+
+      /* Workflow grid */
+      .section-h { font-size: 11px; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--ink-2); font-weight: 600;
+        margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+      .section-h .extra { margin-left: auto; font-weight: 400;
+        text-transform: none; letter-spacing: 0; color: var(--ink-3);
+        font-family: var(--font-mono); font-size: 11px; }
+
+      .wf-grid { display: grid; grid-template-columns: repeat(2, 1fr);
+        gap: 12px; }
+      .wf-card { background: var(--bg-raised);
+        border: 1px solid var(--hairline-2); border-radius: 8px;
+        padding: 16px 18px; cursor: pointer; transition: background 120ms; }
+      .wf-card:hover { background: var(--bg-overlay); }
+      .wf-row { display: flex; align-items: center; gap: 10px; }
+      .wf-name { font-weight: 600; color: var(--ink-1); font-size: 13.5px; }
+      .wf-name .ver { font-family: var(--font-mono); font-size: 11px;
+        color: var(--ink-3); margin-left: 6px; font-weight: 400; }
+      .wf-meta { font-size: 11px; color: var(--ink-3);
+        margin-top: 2px; font-family: var(--font-mono); }
+      .wf-stripe { display: flex; gap: 2px; margin-top: 12px; }
+      .wf-stripe span { flex: 1; height: 18px; border-radius: 2px;
+        background: var(--blok-green-500); opacity: 0.6; }
+      .wf-stripe span.run { background: var(--status-running);
+        animation: brand-pulse 1.5s infinite; }
+      .wf-stripe span.fail { background: var(--status-failed); }
+      .wf-stripe span.dim { background: var(--bg-hover); opacity: 1; }
+
+      .wf-stats { display: flex; gap: 16px; margin-top: 10px;
+        font-size: 11px; color: var(--ink-2); font-family: var(--font-mono); }
+      .wf-stats b { color: var(--ink-1); font-weight: 500; }
+      .wf-stats .ok { color: var(--blok-green-500); }
+      .wf-stats .err { color: var(--status-failed); }
+
+      /* Live feed */
+      .live-feed { background: var(--bg-overlay);
+        border: 1px solid var(--hairline-2); border-radius: 10px;
+        display: flex; flex-direction: column; min-height: 0;
+        align-self: start; position: sticky; top: 24px;
+        max-height: calc(100vh - 200px); }
+      .lf-head { padding: 14px 18px;
+        border-bottom: 1px solid var(--hairline-2);
+        display: flex; align-items: center; gap: 10px;
+        font-size: 11px; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--ink-2); font-weight: 600; }
+      .lf-head .pill { background: var(--blok-green-100);
+        color: var(--blok-green-500); border-radius: 999px;
+        padding: 2px 8px; font-size: 10px;
+        display: inline-flex; align-items: center; gap: 5px;
+        font-weight: 500; letter-spacing: 0.06em;
+        text-transform: none; }
+      .lf-body { flex: 1; overflow-y: auto;
+        font-family: var(--font-mono); font-size: 11.5px;
+        padding: 6px 0; }
+      .lf-line { padding: 6px 18px;
+        display: grid; grid-template-columns: 50px 60px 1fr;
+        gap: 10px; align-items: center;
+        border-bottom: 1px solid var(--hairline);
+        line-height: 1.4; }
+      .lf-line:last-child { border-bottom: 0; }
+      .lf-line:hover { background: var(--bg-hover); }
+      .lf-line .ts { color: var(--ink-3); font-size: 10.5px; }
+      .lf-line .badge { font-size: 9.5px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        padding: 1px 6px; border-radius: 3px;
+        display: inline-block; text-align: center; width: 100%; }
+      .lf-line .badge.ok { background: var(--blok-green-100);
+        color: var(--blok-green-500); }
+      .lf-line .badge.run { background: rgba(59, 130, 246, 0.14);
+        color: var(--status-running); }
+      .lf-line .badge.fail { background: rgba(239, 68, 68, 0.14);
+        color: var(--status-failed); }
+      .lf-line .msg { color: var(--ink-1); font-size: 11.5px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .lf-line .msg .arrow { color: var(--ink-3); margin: 0 6px; }
+      .lf-foot { padding: 8px 18px;
+        border-top: 1px solid var(--hairline-2);
+        font-size: 10.5px; color: var(--ink-3);
+        display: flex; align-items: center; gap: 6px;
+        font-family: var(--font-mono); }
+
+      /* Empty-state mini-component (system shows in 2 places) */
+      .empty-mini { text-align: center; padding: 24px 16px; }
+      .empty-mini .icon { width: 28px; height: 28px;
+        margin: 0 auto 8px; opacity: 0.45; }
+      .empty-mini .title { font-size: 13px; color: var(--ink-1);
+        font-weight: 600; margin-bottom: 4px; }
+      .empty-mini .sub { font-size: 12px; color: var(--ink-3); }
+    </style>
+  </head>
+  <body>
+    <div class="junior-banner">
+      <span class="junior-pill">Junior · v0.1 · Dashboard</span>
+      <span><b>What this validates:</b> the design system holds when the
+      screen layout is grid-of-cards instead of 3-pane operator. Newsreader
+      italic stays only on hero numerals (24h success% and stat values).
+      Brand green pulses on the Live feed and the env chip — nowhere else.
+      Status palette unchanged: running blue, completed brand-green,
+      failed red.</span>
+    </div>
+
+    <div class="shell">
+      <div class="top">
+        <div class="brand">
+          <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+            <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+          </svg>
+          <span class="wordmark">blok</span>
+        </div>
+        <div class="env-chip">
+          <span class="dot"></span><span class="label">production</span>
+          <span class="caret">▾</span>
+        </div>
+        <div class="spacer"></div>
+        <div class="ticker">
+          <span class="live-pulse"><span class="live-dot"></span>Live · 3 active</span>
+          <span>·</span><span>blok-prod</span><span>·</span>
+          <span>14:55:57 GMT</span>
+        </div>
+        <span class="kbd">⌘K</span>
+      </div>
+
+      <aside class="sidebar">
+        <div class="nav-section">Operate</div>
+        <a class="nav-link active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zm0 10h16v6H4z"/></svg>
+          Overview
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/></svg>
+          Runs<span class="count">2</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/></svg>
+          Logs<span class="count">live</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          Queues<span class="count">12</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l5-5 4 4 7-7"/><path d="M14 9h6v6"/></svg>
+          Metrics
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>
+          Deployments
+        </a>
+
+        <div class="nav-section">Configure</div>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16v12H4z"/><path d="M4 10h16"/></svg>
+          Workflows<span class="count">14</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>
+          Alerts
+        </a>
+      </aside>
+
+      <div class="body">
+        <header class="dash-head">
+          <div>
+            <h1>Overview</h1>
+            <div class="breadcrumb">production · last 24 h</div>
+          </div>
+          <div class="spacer"></div>
+          <span class="last-fetch">refreshed 0.4 s ago via SSE</span>
+        </header>
+
+        <div class="dash-body">
+          <main>
+            <!-- Stats row -->
+            <div class="stats">
+              <div class="stat-card">
+                <div class="label">Success rate</div>
+                <div class="num">99.4<span class="unit">%</span></div>
+                <div class="delta up">▲ 0.3 vs yesterday</div>
+                <div class="sparkline">
+                  <span class="bar dim" style="height: 35%"></span>
+                  <span class="bar dim" style="height: 50%"></span>
+                  <span class="bar dim" style="height: 60%"></span>
+                  <span class="bar dim" style="height: 80%"></span>
+                  <span class="bar dim" style="height: 70%"></span>
+                  <span class="bar dim" style="height: 90%"></span>
+                  <span class="bar" style="height: 75%"></span>
+                  <span class="bar" style="height: 95%"></span>
+                  <span class="bar" style="height: 100%"></span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="label">Runs · 24 h</div>
+                <div class="num">8,412</div>
+                <div class="delta up">▲ 612 vs yesterday</div>
+                <div class="sparkline">
+                  <span class="bar dim" style="height: 40%"></span>
+                  <span class="bar dim" style="height: 55%"></span>
+                  <span class="bar" style="height: 70%"></span>
+                  <span class="bar" style="height: 65%"></span>
+                  <span class="bar" style="height: 88%"></span>
+                  <span class="bar" style="height: 92%"></span>
+                  <span class="bar" style="height: 78%"></span>
+                  <span class="bar" style="height: 100%"></span>
+                  <span class="bar" style="height: 86%"></span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="label">p50 / p95 duration</div>
+                <div class="num">42<span class="unit"> / 184 ms</span></div>
+                <div class="delta">flat ↔</div>
+                <div class="sparkline">
+                  <span class="bar dim" style="height: 60%"></span>
+                  <span class="bar dim" style="height: 55%"></span>
+                  <span class="bar dim" style="height: 50%"></span>
+                  <span class="bar dim" style="height: 60%"></span>
+                  <span class="bar dim" style="height: 58%"></span>
+                  <span class="bar" style="height: 62%"></span>
+                  <span class="bar" style="height: 60%"></span>
+                  <span class="bar" style="height: 64%"></span>
+                  <span class="bar" style="height: 60%"></span>
+                </div>
+              </div>
+              <div class="stat-card">
+                <div class="label">Failed runs</div>
+                <div class="num">52</div>
+                <div class="delta down">▲ 8 vs yesterday</div>
+                <div class="sparkline">
+                  <span class="bar fail" style="height: 22%"></span>
+                  <span class="bar fail" style="height: 12%"></span>
+                  <span class="bar fail" style="height: 18%"></span>
+                  <span class="bar fail" style="height: 22%"></span>
+                  <span class="bar fail" style="height: 28%"></span>
+                  <span class="bar fail" style="height: 22%"></span>
+                  <span class="bar fail" style="height: 35%"></span>
+                  <span class="bar fail" style="height: 42%"></span>
+                  <span class="bar fail" style="height: 38%"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Workflow grid -->
+            <h2 class="section-h">
+              Active workflows
+              <span class="extra">14 in production · click to drill</span>
+            </h2>
+            <div class="wf-grid">
+              <div class="wf-card">
+                <div class="wf-row">
+                  <div>
+                    <div class="wf-name">cross-runtime-chain<span class="ver">v1.2.0</span></div>
+                    <div class="wf-meta">POST /cross-runtime-chain · 9 steps · 7 SDKs</div>
+                  </div>
+                </div>
+                <div class="wf-stripe">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <div class="wf-stats">
+                  <span><b>312</b> runs</span>
+                  <span class="ok"><b>312</b> ok</span>
+                  <span><b>83</b> ms p50</span>
+                </div>
+              </div>
+
+              <div class="wf-card">
+                <div class="wf-row">
+                  <div>
+                    <div class="wf-name">order-process<span class="ver">v3.1.4</span></div>
+                    <div class="wf-meta">POST /orders · 6 steps · stripe + nats</div>
+                  </div>
+                </div>
+                <div class="wf-stripe">
+                  <span></span><span></span><span></span><span class="fail"></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span class="fail"></span><span></span><span></span><span></span>
+                  <span></span><span></span><span class="run"></span><span></span><span></span>
+                </div>
+                <div class="wf-stats">
+                  <span><b>1,902</b> runs</span>
+                  <span class="ok"><b>1,879</b> ok</span>
+                  <span class="err"><b>23</b> failed</span>
+                  <span><b>184</b> ms p95</span>
+                </div>
+              </div>
+
+              <div class="wf-card">
+                <div class="wf-row">
+                  <div>
+                    <div class="wf-name">webhook-fanout<span class="ver">v1.0.7</span></div>
+                    <div class="wf-meta">POST /webhooks/* · 4 steps · NATS</div>
+                  </div>
+                </div>
+                <div class="wf-stripe">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span class="run"></span><span></span>
+                </div>
+                <div class="wf-stats">
+                  <span><b>4,012</b> runs</span>
+                  <span class="ok"><b>4,012</b> ok</span>
+                  <span><b>11</b> ms p50</span>
+                </div>
+              </div>
+
+              <div class="wf-card">
+                <div class="wf-row">
+                  <div>
+                    <div class="wf-name">user-onboard<span class="ver">v2.0.1</span></div>
+                    <div class="wf-meta">cron · daily 09:00 · 12 steps</div>
+                  </div>
+                </div>
+                <div class="wf-stripe">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span class="run"></span>
+                </div>
+                <div class="wf-stats">
+                  <span><b>186</b> runs</span>
+                  <span class="ok"><b>186</b> ok</span>
+                  <span><b>2.4</b> s p50</span>
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <!-- LIVE FEED column -->
+          <aside class="live-feed">
+            <div class="lf-head">
+              <span>Live feed</span>
+              <span class="pill"><span class="live-dot"></span>SSE</span>
+              <span style="margin-left: auto; color: var(--ink-3); font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px;">last 50</span>
+            </div>
+            <div class="lf-body">
+              <div class="lf-line">
+                <span class="ts">14:55:57</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">cross-runtime-chain<span class="arrow">→</span>83 ms · 9/9</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:54</span>
+                <span class="badge run">run</span>
+                <span class="msg">order-process<span class="arrow">→</span>step 4 / 6 · stripe</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:52</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">webhook-fanout<span class="arrow">→</span>11 ms · 4/4</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:48</span>
+                <span class="badge fail">fail</span>
+                <span class="msg">order-process<span class="arrow">→</span>DEPENDENCY · csharp</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:41</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">cross-runtime-chain<span class="arrow">→</span>79 ms · 9/9</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:38</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">webhook-fanout<span class="arrow">→</span>9 ms · 4/4</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:35</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">order-process<span class="arrow">→</span>164 ms · 6/6</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:32</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">webhook-fanout<span class="arrow">→</span>13 ms · 4/4</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:28</span>
+                <span class="badge run">run</span>
+                <span class="msg">user-onboard<span class="arrow">→</span>step 2 / 12 · scheduled</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:24</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">webhook-fanout<span class="arrow">→</span>10 ms · 4/4</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:18</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">order-process<span class="arrow">→</span>196 ms · 6/6</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:14</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">webhook-fanout<span class="arrow">→</span>14 ms · 4/4</span>
+              </div>
+              <div class="lf-line">
+                <span class="ts">14:55:09</span>
+                <span class="badge ok">pass</span>
+                <span class="msg">cross-runtime-chain<span class="arrow">→</span>91 ms · 9/9</span>
+              </div>
+            </div>
+            <div class="lf-foot">
+              <span class="live-dot"></span>
+              <span>connected · 0 reconnects · 50/min throughput</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::blok_error::BlokError;
 use crate::middleware::Middleware;
 use crate::node::NodeHandler;
 use crate::types::{ExecutionMetrics, ExecutionRequest, ExecutionResult, HealthStatus};
@@ -81,7 +82,13 @@ impl NodeRegistry {
             }
             Err(err) => {
                 let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-                let mut result = ExecutionResult::error(&err.to_string());
+                // Structured BlokError path (master plan §17): preserve the
+                // typed instance verbatim so the gRPC servicer can serialize
+                // every field. Box::downcast consumes the box on success.
+                let mut result = match err.downcast::<BlokError>() {
+                    Ok(boxed) => ExecutionResult::from_blok_error(*boxed),
+                    Err(other) => ExecutionResult::error(&other.to_string()),
+                };
                 result.metrics = Some(ExecutionMetrics {
                     duration_ms: Some(duration_ms),
                     ..Default::default()

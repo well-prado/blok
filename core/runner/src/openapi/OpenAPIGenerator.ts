@@ -289,7 +289,12 @@ export class OpenAPIGenerator {
 	}
 
 	private buildOperation(workflow: WorkflowDefinition): OpenAPIOperation {
-		const httpTrigger = workflow.trigger.http!;
+		// Caller (`generate()`) only invokes `buildOperation` for workflows
+		// that have an http trigger; defensive check keeps the type exact.
+		const httpTrigger = workflow.trigger.http;
+		if (!httpTrigger) {
+			throw new Error(`[OpenAPIGenerator] workflow "${workflow.name}" has no http trigger — cannot build operation`);
+		}
 		const method = (httpTrigger.method || "GET").toUpperCase();
 		const tag = this.inferTag(workflow);
 
@@ -330,7 +335,7 @@ export class OpenAPIGenerator {
 		// Extract path parameters
 		const pathParams = this.extractPathParams(httpTrigger.path);
 		for (const param of pathParams) {
-			operation.parameters!.push({
+			operation.parameters?.push({
 				name: param,
 				in: "path",
 				required: true,
@@ -351,7 +356,7 @@ export class OpenAPIGenerator {
 		}
 
 		// Add requestId query parameter
-		operation.parameters!.push({
+		operation.parameters?.push({
 			name: "requestId",
 			in: "query",
 			required: false,

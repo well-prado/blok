@@ -51,7 +51,7 @@ const client = new NanoSDK().createHttpClient("https://your-atomic-app.com", "yo
 ### Execute a Node.js Blok (as module)
 
 ```js
-await client.nodejs("@blok/api-call", {
+await client.nodejs("@blokjs/api-call", {
   url: "https://catfact.ninja/fact",
   method: "GET",
   responseType: "application/json"

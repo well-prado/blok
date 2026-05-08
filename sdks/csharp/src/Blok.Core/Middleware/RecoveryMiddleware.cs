@@ -1,10 +1,15 @@
 using System.Text.Json;
+using Blok.Core.Errors;
 using Blok.Core.Node;
 
 namespace Blok.Core.Middleware;
 
 /// <summary>
 /// RecoveryMiddleware catches exceptions and returns them as error JSON.
+///
+/// <para>Structured exceptions (<see cref="BlokError"/>, <see cref="NodeException"/>)
+/// pass through verbatim so the registry / gRPC servicer can serialize them
+/// losslessly. All other exceptions are wrapped in a recovered JSON shape.</para>
 /// </summary>
 public class RecoveryMiddleware : IMiddleware
 {
@@ -27,6 +32,18 @@ public class RecoveryMiddleware : IMiddleware
             try
             {
                 return await _inner.ExecuteAsync(ctx, config);
+            }
+            catch (BlokError)
+            {
+                // Master plan §17 BlokError passes through verbatim — the
+                // registry catches it directly and stashes the typed instance
+                // on `ExecutionResult.Errors` for the gRPC servicer.
+                throw;
+            }
+            catch (NodeException)
+            {
+                // Legacy structured exceptions pass through as-is too.
+                throw;
             }
             catch (Exception ex)
             {

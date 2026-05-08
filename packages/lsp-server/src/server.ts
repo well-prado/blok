@@ -51,8 +51,8 @@ const documentSettings = new Map<string, BlokLspSettings>();
 connection.onInitialize((params: InitializeParams): InitializeResult => {
 	const capabilities = params.capabilities;
 
-	hasConfigurationCapability = !!(capabilities.workspace && capabilities.workspace.configuration);
-	hasWorkspaceFolderCapability = !!(capabilities.workspace && capabilities.workspace.workspaceFolders);
+	hasConfigurationCapability = !!capabilities.workspace?.configuration;
+	hasWorkspaceFolderCapability = !!capabilities.workspace?.workspaceFolders;
 
 	const result: InitializeResult = {
 		capabilities: {

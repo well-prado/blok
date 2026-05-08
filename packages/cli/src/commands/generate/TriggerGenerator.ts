@@ -152,8 +152,8 @@ export default class TriggerGenerator {
 		}
 
 		// Check for TriggerBase import
-		if (!code.includes("TriggerBase") && !code.includes("@blok/runner")) {
-			errors.push("Missing TriggerBase import from @blok/runner");
+		if (!code.includes("TriggerBase") && !code.includes("@blokjs/runner")) {
+			errors.push("Missing TriggerBase import from @blokjs/runner");
 		}
 
 		// Check for loadNodes method
@@ -267,7 +267,7 @@ export default class TriggerGenerator {
 			"",
 			"Please fix ALL the errors listed above and regenerate the complete trigger code.",
 			"Make sure to:",
-			"- Extend TriggerBase from @blok/runner",
+			"- Extend TriggerBase from @blokjs/runner",
 			"- Include loadNodes() and loadWorkflows() methods",
 			"- Use this.createContext() to create Context objects",
 			"- Call super() in the constructor",
@@ -286,7 +286,7 @@ export default class TriggerGenerator {
 		const errorLower = error.toLowerCase();
 
 		if (errorLower.includes("triggerbase") && (errorLower.includes("extend") || errorLower.includes("missing"))) {
-			return "import { TriggerBase } from '@blok/runner'; class MyTrigger extends TriggerBase { ... }";
+			return "import { TriggerBase } from '@blokjs/runner'; class MyTrigger extends TriggerBase { ... }";
 		}
 		if (errorLower.includes("loadnodes") && errorLower.includes("missing")) {
 			return "Add: private loadNodes(): void { this.nodeMap.nodes = new NodeMap(); ... }";
@@ -304,7 +304,7 @@ export default class TriggerGenerator {
 			return "Set ctx.request = { body: messageData, headers: {}, query: {}, params: {} } before executing workflow";
 		}
 		if (errorLower.includes("cannot find module") || errorLower.includes("module not found")) {
-			return "Use '@blok/runner' for TriggerBase, Runner, NodeMap and '@blok/shared' for Context, DefaultLogger";
+			return "Use '@blokjs/runner' for TriggerBase, Runner, NodeMap and '@blokjs/shared' for Context, DefaultLogger";
 		}
 		if (errorLower.includes("export") && errorLower.includes("default")) {
 			return "Use: export default class <Name>Trigger extends TriggerBase { ... }";

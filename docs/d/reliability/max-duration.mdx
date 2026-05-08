@@ -1,0 +1,337 @@
+---
+title: "Step timeouts (`maxDuration`)"
+description: "Cap the wall-clock time of a step's `step.process()`. On timeout, the attempt fails with `StepTimeoutError`; the run flips to `timedOut` after the final retry."
+icon: "timer"
+---
+
+import { StudioRunHeader, StudioStepRail, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `maxDuration` on a v2 step and the runner caps the wall-clock time
+of each `step.process()` invocation. On final-attempt timeout, the run
+flips to `timedOut` status — distinct from `failed` so SLA dashboards
+can separate timeout-driven failures (network, capacity) from logic
+failures (bugs).
+
+## Quickstart
+
+A scrape workflow that retries a slow upstream three times, with each
+attempt capped at 10s:
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "scrape-page",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/scrape" } },
+  steps: [
+    {
+      id: "fetch",
+      use: "@blokjs/api-call",
+      inputs: { url: $.req.body.url },
+      maxDuration: "10s",
+      retry: { maxAttempts: 3 },
+    },
+    {
+      id: "parse",
+      use: "@blokjs/parse-html",
+      inputs: { html: $.state.fetch },
+    },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "scrape-page",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "POST", "path": "/scrape" } },
+  "steps": [
+    {
+      "id": "fetch",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "$.req.body.url" },
+      "maxDuration": "10s",
+      "retry": { "maxAttempts": 3 }
+    },
+    {
+      "id": "parse",
+      "use": "@blokjs/parse-html",
+      "inputs": { "html": "$.state.fetch" }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+If `fetch`'s `step.process()` takes longer than 10s, the attempt
+rejects with `StepTimeoutError`. The retry loop catches the timeout
+and retries with backoff. After three timed-out attempts the run flips
+to `timedOut`.
+
+## Field reference
+
+Defined on both [`V2RegularStepSchema`](core/workflow-helper/src/types/StepOpts.ts#L281-L289)
+and [`V2SubworkflowStepSchema`](core/workflow-helper/src/types/StepOpts.ts#L473-L479).
+
+<ParamField path="maxDuration" type="number ms or duration string">
+  Per-attempt execution timeout. Number (ms) or
+  [duration string](/d/scheduling/overview#duration-grammar) (`"30s"`,
+  `"5m"`, `"500ms"`). When `step.process()` exceeds this duration, the
+  attempt fails with `StepTimeoutError`. On final-attempt timeout, the
+  run auto-flips to `"timedOut"` (distinct from `"failed"` so SLA
+  dashboards separate timeouts from logic failures).
+</ParamField>
+
+The schema reuses `DurationSchema` from
+[scheduling](/d/scheduling/overview#duration-grammar). Single-unit
+strings only — `"1h30m"` is rejected.
+
+## Per-attempt vs total budget
+
+`maxDuration` is the cap on **each retry attempt**, not the total
+budget. Composes naturally with [retry](/d/reliability/retry):
+
+```ts
+{ retry: { maxAttempts: 3 }, maxDuration: "10s" }
+// First attempt: 10s timeout. If timed out → backoff → retry.
+// Second attempt: fresh 10s timeout. If timed out → backoff → retry.
+// Third attempt: fresh 10s timeout. If timed out → run flips to "timedOut".
+// Total budget: 3 × 10s = 30s of `step.process()` time, plus inter-attempt backoff.
+```
+
+This matches the natural mental model: "give the upstream 10s before
+declaring it slow, and try three times before giving up." Without
+`retry`, `maxDuration` is the single-attempt budget.
+
+## How the wrap works
+
+`RunnerSteps` wraps `step.process(ctx, step)` in a `Promise.race`
+between the step's promise and a `setTimeout`-rejected promise:
+
+```
+Promise.race([
+  step.process(ctx, step),
+  new Promise((_, reject) =>
+    setTimeout(
+      () => reject(new StepTimeoutError(stepName, maxDurationMs)),
+      maxDurationMs
+    )
+  ),
+])
+```
+
+The retry loop catches `StepTimeoutError` like any other exception and
+proceeds to the next attempt. On final-attempt failure, `RunnerSteps`
+calls `tracker.markRunTimedOut(runId, {stepId, maxDurationMs,
+attemptsExhausted})` which flips status to `timedOut` and emits
+<StudioEventBadge type="RUN_TIMED_OUT" />.
+
+The retry-loop integration lives at
+[core/runner/src/RunnerSteps.ts](core/runner/src/RunnerSteps.ts).
+
+## Cancellation caveat
+
+`setTimeout` rejects the wrapper promise but **does not actually abort
+the underlying step**. The `step.process()` call keeps running until
+it naturally completes — its eventual return value is discarded. For
+steps backed by network requests, this means the upstream connection
+stays open until the underlying client times out independently.
+
+This is a per-step trade-off, not a global one. Every `Context` now
+carries `ctx.signal: AbortSignal`, and operator-initiated cancellation
+via `POST /__blok/runs/:id/cancel` fires that signal cooperatively.
+Nodes that want true-abort semantics under `maxDuration` should
+consult `ctx.signal.aborted` periodically or pass it to fetch:
+
+```ts
+async execute(ctx, input) {
+  // Pass to abort-aware APIs:
+  return await fetch(input.url, { signal: ctx.signal });
+}
+```
+
+See [cancellation](/d/reliability/cancellation) for the full
+cooperative pattern. `maxDuration` itself stays setTimeout-based — it
+rejects the wrapper, declares the attempt failed, and lets the retry
+loop continue. Whether the underlying work also aborts depends on
+whether the node consults `ctx.signal`.
+
+<Note>
+For network-backed steps, set the underlying client's request timeout
+slightly **below** `maxDuration` so the wrapper rejection is the more
+informative path. Otherwise the client will time out first and the
+step will throw a less specific error.
+</Note>
+
+## `StepTimeoutError`
+
+Exported from `@blokjs/runner` for `instanceof` checks:
+
+```ts
+import { StepTimeoutError, isStepTimeoutError } from "@blokjs/runner";
+
+try {
+  await someStep.process(ctx, step);
+} catch (err) {
+  if (isStepTimeoutError(err)) {
+    // err.stepName, err.maxDurationMs are populated
+  }
+}
+```
+
+Useful when you're authoring custom triggers or nodes that want to
+react specifically to step timeouts (e.g. emit a metric vs handle as
+generic failure).
+
+## Composition with prior tiers
+
+| Feature | Interaction |
+|---|---|
+| [Retry](/d/reliability/retry) | `maxDuration` caps each attempt independently. Total budget = `maxDuration × maxAttempts`. The retry loop catches `StepTimeoutError` like any other exception. |
+| [Idempotency cache](/d/reliability/idempotency) | Cache check happens before `step.process()`. A cache hit skips the wrap entirely — no timeout fires on cache hits. |
+| [Sub-workflows](/d/composition/sub-workflows) | `maxDuration` on a sub-workflow step caps the synchronous wait for `wait: true`. No-op for `wait: false` (the parent returns immediately; the child's max-duration is the child's concern). |
+| [Concurrency keys](/d/reliability/concurrency-keys) | The concurrency slot is held for the full retry budget plus backoff. A run that times out releases its slot in the `finally` block. |
+
+## Run lifecycle
+
+The `timedOut` status is added to the [run state vocabulary](/d/reference/trace-storage#run-states):
+
+| Path | Resulting status |
+|---|---|
+| `step.process()` returns successfully on attempt N (within `maxDuration`) | `completed` |
+| `step.process()` throws non-timeout on every attempt | `failed` |
+| `step.process()` times out on every attempt | `timedOut` |
+| Mixed: timeouts on attempts 1-2, success on attempt 3 | `completed` |
+| Mixed: timeout on attempt 1, throw on attempts 2-3 | `failed` (the final attempt was the one that determined status) |
+
+The distinction between `failed` and `timedOut` is **what failed the
+final attempt**, not the run as a whole. SLA dashboards filter on
+`timedOut` to surface capacity problems separately from logic bugs.
+
+## Studio surface
+
+A timed-out run appears with an orange **Timed Out** badge:
+
+<StudioRunHeader
+  workflowName="scrape-page"
+  runId="run_timedout_a91"
+  status="timedOut"
+  durationMs={31420}
+  triggerSummary="POST /scrape"
+  startedAt="2026-05-03 11:14:02"
+  nodeCount={2}
+  completedNodes={0}
+  showReplayButton={true}
+/>
+
+The events timeline carries one <StudioEventBadge type="NODE_ATTEMPT_FAILED" />
+per failed attempt (with the `StepTimeoutError` message), then a
+terminal <StudioEventBadge type="RUN_TIMED_OUT" /> with payload
+`{durationMs, stepId, maxDurationMs, attemptsExhausted}`.
+
+The step rail shows the failed step with a `↻N` retry indicator:
+
+<StudioStepRail
+  activeIndex={0}
+  steps={[
+    { id: "1", name: "fetch", status: "failed", attempts: 3, durationMs: 30420 },
+    { id: "2", name: "parse", status: "pending", durationMs: 0 },
+  ]}
+/>
+
+## Recipes
+
+<AccordionGroup>
+  <Accordion title="Slow upstream with retry">
+    `maxDuration: "10s"` plus `retry: { maxAttempts: 3 }`. Each attempt
+    has 10s; the run times out after three timed-out attempts (~30s of
+    `step.process()` time plus backoff).
+  </Accordion>
+
+  <Accordion title="Strict SLA on a single attempt">
+    `maxDuration: "500ms"` with no retry. Steps that exceed 500ms fail
+    fast. SLA dashboards filter on `timedOut` to surface capacity
+    issues.
+  </Accordion>
+
+  <Accordion title="Long-running ML inference with generous cap">
+    `maxDuration: "5m"` with `retry: { maxAttempts: 1 }`. Five-minute
+    cap on a single attempt; no retry because the work is too
+    expensive to repeat. A genuinely stuck inference times out cleanly
+    instead of holding the request handler open indefinitely.
+  </Accordion>
+
+  <Accordion title="Sub-workflow with synchronous wait cap">
+    On a sub-workflow step with `wait: true`, `maxDuration: "30s"` caps
+    the sync wait. If the child workflow takes longer, the parent step
+    times out. The child keeps running independently — its outcome
+    lands on the child's run record, not the parent's.
+  </Accordion>
+
+  <Accordion title="Per-attempt timeout with worker retry budget">
+    Worker queues already retry with their own back-off. Pair
+    `maxDuration: "30s"` with `retry: { maxAttempts: 1 }` to fail fast
+    inside the workflow and let the worker queue handle redelivery
+    via its native retry policy.
+  </Accordion>
+</AccordionGroup>
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Setting maxDuration shorter than the upstream client timeout">
+    The wrapper rejects but the step keeps running. If the upstream
+    client has its own timeout (typically the framework default — 30s
+    or so), it fires later and produces a less informative error.
+    Tune the client to time out at or below `maxDuration` so the
+    wrapper is the reporting path.
+  </Accordion>
+
+  <Accordion title="Expecting maxDuration to abort the underlying work">
+    `maxDuration` rejects the wrapper promise but doesn't abort the
+    underlying work on its own. For true-abort semantics, the node
+    must consult `ctx.signal.aborted` periodically or pass `ctx.signal`
+    to fetch / abort-aware APIs. See
+    [cancellation](/d/reliability/cancellation) for the cooperative
+    pattern.
+  </Accordion>
+
+  <Accordion title="Treating timedOut as a synonym of failed">
+    Don't. Capacity / network failures (timeouts) and logic failures
+    (thrown errors) have different ops responses. Filter dashboards
+    on status to separate them.
+  </Accordion>
+
+  <Accordion title="Confusing maxDuration with retry budget">
+    `maxDuration` is per-attempt. With `maxAttempts: 3` and
+    `maxDuration: "10s"`, the total `step.process()` budget is 30s.
+    Add inter-attempt backoff and the wall-clock budget grows further.
+  </Accordion>
+</AccordionGroup>
+
+## Not yet shipped
+
+- **Cross-runtime `ctx.signal` propagation** — `Context.signal` is
+  available in TypeScript nodes today. Propagation through gRPC and
+  Docker runtime adapters (so non-TS nodes can also abort
+  cooperatively) is on the roadmap.
+- **`maxDuration` auto-firing `ctx.signal.abort()`** — today the
+  wrapper rejection and the abort signal are independent. Wiring the
+  timeout to fire the signal automatically would let nodes inherit
+  abort semantics for free, without operator-initiated cancellation.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    Pair `maxDuration` with `retry` for fail-fast-and-retry semantics.
+  </Card>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Cache hits skip the wrap entirely.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The `timedOut` and `crashed` run states.
+  </Card>
+</Columns>

@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: proto
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - STANDARD
+  except:
+    # Field/enum casing matches Blok wire conventions (snake_case fields,
+    # SCREAMING_SNAKE enum values). Disabled rules are noisy when the proto
+    # is consumed by JS/TS, Go, Rust, Python, etc. simultaneously.
+    - PACKAGE_VERSION_SUFFIX

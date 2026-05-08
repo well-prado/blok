@@ -15,22 +15,24 @@ impl NodeHandler for ChainTestNode {
     async fn execute(
         &self,
         ctx: &mut Context,
-        _config: &HashMap<String, Value>,
+        config: &HashMap<String, Value>,
     ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        // Read existing chain from request body
-        let mut chain: Vec<Value> = ctx
-            .request
-            .body
+        // Read existing chain — gRPC inputs first (carried on
+        // `node.config`), HTTP body fallback (legacy wire shape where
+        // the runner mapped resolvedInputs → request.body). Dual-read
+        // keeps the cross-runtime-chain demo working over both
+        // transports during the §11 deprecation window.
+        let mut chain: Vec<Value> = config
             .get("chain")
             .and_then(|v| v.as_array().cloned())
+            .or_else(|| ctx.request.body.get("chain").and_then(|v| v.as_array().cloned()))
             .unwrap_or_default();
 
-        // Read origin
-        let origin = ctx
-            .request
-            .body
+        // Read origin — same dual-read.
+        let origin = config
             .get("origin")
             .and_then(|v| v.as_str())
+            .or_else(|| ctx.request.body.get("origin").and_then(|v| v.as_str()))
             .unwrap_or("unknown")
             .to_string();
 

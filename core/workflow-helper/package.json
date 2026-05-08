@@ -1,6 +1,6 @@
 {
-	"name": "@blok/helper",
-	"version": "0.1.0",
+	"name": "@blokjs/helper",
+	"version": "0.4.0",
 	"description": "",
 	"engines": {
 		"node": ">=18.0.0"
@@ -12,8 +12,9 @@
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {
-		"build": "rm -rf dist && bun run tsc",
+		"build": "rm -rf dist && bun run tsc && bun run build:schema",
 		"build:dev": "tsc --watch",
+		"build:schema": "bun run scripts/build-schema.ts",
 		"test:dev": "vitest",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit --incremental"
@@ -21,10 +22,14 @@
 	"devDependencies": {
 		"@types/node": "^22.15.21",
 		"typescript": "^5.8.3",
-		"vitest": "^4.0.18"
+		"vitest": "^4.0.18",
+		"zod-to-json-schema": "^3.25.2"
 	},
 	"dependencies": {
 		"zod": "^3.24.2"
 	},
-	"private": false
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }

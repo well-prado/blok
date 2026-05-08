@@ -1,12 +1,12 @@
 import fs from "node:fs";
-import type { VisualizerWorkflowDef } from "@blok/runner";
+import type { VisualizerWorkflowDef } from "@blokjs/runner";
 import * as p from "@clack/prompts";
 import { type OptionValues, program, trackCommandExecution } from "../../services/commander.js";
 import { loadWorkflows } from "../../services/workflow-loader.js";
 
 // NodeDependencyGraph is imported dynamically to avoid circular dependency issues at CLI startup
 async function getNodeDependencyGraph() {
-	const { NodeDependencyGraph } = await import("@blok/runner");
+	const { NodeDependencyGraph } = await import("@blokjs/runner");
 	return NodeDependencyGraph;
 }
 

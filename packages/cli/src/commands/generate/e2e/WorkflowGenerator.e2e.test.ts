@@ -40,7 +40,7 @@ const VALID_HTTP_WORKFLOW = JSON.stringify(
 		steps: [
 			{
 				name: "fetch-user",
-				node: "@blok/api-call",
+				node: "@blokjs/api-call",
 				type: "module",
 			},
 		],
@@ -291,7 +291,7 @@ describe("WorkflowGenerator E2E", () => {
 
 	describe("markdown fence cleanup", () => {
 		it("should strip markdown JSON fences from LLM response", async () => {
-			const wrappedJson = "```json\n" + VALID_HTTP_WORKFLOW + "\n```";
+			const wrappedJson = `\`\`\`json\n${VALID_HTTP_WORKFLOW}\n\`\`\``;
 
 			mockedGenerateText.mockResolvedValueOnce({
 				text: wrappedJson,
@@ -442,7 +442,7 @@ describe("WorkflowGenerator E2E", () => {
 					steps: [
 						{
 							name: "route-request",
-							node: "@blok/if-else",
+							node: "@blokjs/if-else",
 							type: "module",
 						},
 					],

@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { generateText } from "ai";
 import { z } from "zod";
 import InMemory from "./InMemory";

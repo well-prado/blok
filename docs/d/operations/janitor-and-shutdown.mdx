@@ -1,0 +1,231 @@
+---
+title: "Janitor & graceful shutdown"
+description: "The periodic storage janitor that bounds growth, and the SIGTERM/SIGINT handlers that drain in-flight work cleanly."
+icon: "broom"
+---
+
+Two background services run in every trigger process: a janitor that
+sweeps stale rows from the cache / locks / dispatches tables, and a
+shutdown handler that drains in-flight work on SIGTERM/SIGINT. Both
+are idempotent, both opt-out via env var, and both wire in
+automatically when you call `HttpTrigger.listen()` or
+`WorkerTrigger.listen()`.
+
+## Janitor
+
+The janitor is a periodic sweep that removes expired rows from the
+three Tier 2 ancillary tables:
+
+| Table | What's swept |
+|---|---|
+| `idempotency_cache` | Rows where `expires_at < now`. |
+| `concurrency_locks` | Rows where `expires_at < now` (lease leaks from crashed processes). |
+| `scheduled_dispatches` | Rows where `expires_at < now` (past-TTL deferred dispatches that were never recovered). |
+
+`workflow_runs` itself is bounded by `evictOldRuns()` driven by
+`BLOK_TRACE_RETENTION_DAYS` — the janitor handles the **ancillary
+tables** that the lazy-purge paths touch only when the bucket is read.
+Without the janitor, an idempotency cache key that's never re-fetched
+or a concurrency lock from a crashed process could sit in storage
+indefinitely.
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_JANITOR_DISABLED` | unset | Set to `1` to skip the periodic sweep entirely. |
+| `BLOK_JANITOR_INTERVAL_MS` | `300000` (5 min) | Interval between sweeps. Defaults are tuned for production; low-volume deployments can stretch to hourly. |
+
+### Behavior
+
+- **Idempotent singleton.** `Janitor.getInstance()` — calling
+  `start()` twice is a no-op.
+- **`unref()`-ed timer.** The janitor doesn't keep the event loop
+  alive on its own. If everything else is idle, the process can still
+  exit cleanly.
+- **Per-purge errors don't abort siblings.** Each of the three sweeps
+  is wrapped in `try/catch` — one failing purge logs and the others
+  continue.
+- **Concurrent `runOnce()` calls serialize.** A long-running sweep
+  prevents a second sweep from starting until the first finishes.
+
+Source:
+[`core/runner/src/tracing/Janitor.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/Janitor.ts).
+
+### Tuning the interval
+
+The janitor is a background cleanup task — it doesn't affect hot-path
+behavior. Tuning targets storage growth rate vs sweep cost:
+
+| Workload | Suggested interval |
+|---|---|
+| Heavy idempotency cache turnover (many distinct keys per minute) | 60s — `BLOK_JANITOR_INTERVAL_MS=60000` |
+| Default production | 5 min (default) |
+| Low-volume / staging | 1 hr — `BLOK_JANITOR_INTERVAL_MS=3600000` |
+| Tests | disabled — `BLOK_JANITOR_DISABLED=1` |
+
+Each sweep runs three indexed `DELETE` queries; cost is proportional
+to the number of expired rows, not the table size. Keeping the sweep
+frequent is safe even on large tables.
+
+### Manual run
+
+For ops scripts or one-off cleanup:
+
+```ts
+import { Janitor } from "@blokjs/runner";
+
+await Janitor.getInstance().runOnce();
+// Returns counts: { idempotencyCache, concurrencyLocks, scheduledDispatches }
+```
+
+## Graceful shutdown
+
+The shutdown handler drains in-flight work and disconnects external
+backends cleanly when the process receives SIGTERM or SIGINT. Without
+it, in-flight runs would be marked `crashed` by
+[orphan recovery](/d/reliability/cancellation#orphan-recovery) on the
+next boot — workable, but noisier than a clean drain.
+
+### Drain order
+
+When SIGTERM (or SIGINT) arrives, `installShutdownHandlers(trigger)`
+executes the drain sequence:
+
+<Steps>
+  <Step title="Trigger.stop()">
+    Stop accepting new work. For HTTP triggers, this stops the server
+    from accepting new connections (in-flight requests still
+    complete). For worker triggers, this unsubscribes from the queue.
+  </Step>
+  <Step title="Drain in-flight runs">
+    Wait for currently-executing workflows to finish. The handler
+    polls `inFlightRequests` until it reaches zero.
+  </Step>
+  <Step title="Janitor.stop()">
+    Cancel the janitor's interval timer.
+  </Step>
+  <Step title="DeferredRunScheduler.clear()">
+    Clear in-memory timers. **Persisted dispatches survive** — they're
+    in `scheduled_dispatches` and will be recovered on next boot via
+    `recoverDispatches()`.
+  </Step>
+  <Step title="ConcurrencyBackend.disconnect()">
+    Close NATS KV connections (if `BLOK_CONCURRENCY_BACKEND=nats-kv`).
+    No-op for the in-process backend.
+  </Step>
+</Steps>
+
+The handler then exits the process. Total drain time is bounded by
+the longest in-flight run — there's no hard timeout in v1, so a
+long-running step that doesn't consult `ctx.signal` will hold up
+shutdown until it naturally completes.
+
+<Note>
+For runtimes orchestrated by Kubernetes or a process supervisor, set
+`terminationGracePeriodSeconds` (or the equivalent) above your
+longest realistic workflow runtime so the supervisor doesn't
+SIGKILL the process mid-drain. SIGKILL bypasses the handler — those
+runs end up in [orphan recovery](/d/reliability/cancellation#orphan-recovery).
+</Note>
+
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_GRACEFUL_SHUTDOWN_DISABLED` | unset | Set to `1` to skip handler installation. SIGTERM/SIGINT exit immediately, leaving in-flight runs to be picked up by orphan recovery on next boot. |
+
+### Best-effort errors
+
+If any drain step throws, the error is logged and the next step still
+runs — graceful shutdown is best-effort, not transactional. The
+process always exits at the end of the sequence.
+
+Source:
+[`core/runner/src/TriggerBase.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/TriggerBase.ts)
+(`installShutdownHandlers`).
+
+### When SIGKILL hits anyway
+
+SIGKILL can't be caught — the process dies immediately. In-flight
+runs end up in `running` status with no further activity. The next
+process boot's
+[orphan recovery scan](/d/reliability/cancellation#orphan-recovery)
+flips them to `crashed` after `BLOK_ORPHAN_THRESHOLD_MS` (default
+2 min). Persisted scheduled dispatches survive (sqlite + boot
+recovery).
+
+The graceful path is strictly better than the SIGKILL path
+(`cancelled`/`completed` vs `crashed`), but the runtime degrades
+gracefully — no permanent state corruption either way.
+
+## How they interact
+
+The two services are independent but complementary:
+
+| Scenario | Janitor role | Shutdown role |
+|---|---|---|
+| Long-running process under steady traffic | Sweep expired rows every 5 min. | Idle. |
+| Graceful restart (SIGTERM) | Stops on shutdown step 3. | Drains in-flight + closes backends. |
+| Hard kill (SIGKILL) | Stopped abruptly. | Bypassed entirely. |
+| Restart after crash | Cleans up rows that should have been deleted by the dying process. | Boots fresh; `recoverOrphanedRuns` flips stale `running` runs. |
+
+For the full crash story (auto-flip + orphan recovery), see
+[cancellation & crash recovery](/d/reliability/cancellation#crash-auto-flip).
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Disabling the janitor in production">
+    `BLOK_JANITOR_DISABLED=1` is fine for tests and dev. In
+    production, ancillary tables can grow unbounded — concurrency
+    locks from crashed runs and idempotency cache entries that are
+    never re-fetched persist until the table is manually pruned.
+  </Accordion>
+
+  <Accordion title="Not bounding terminationGracePeriodSeconds">
+    Kubernetes / your process supervisor needs `terminationGracePeriodSeconds`
+    above your longest realistic workflow runtime, or it will SIGKILL
+    mid-drain. Calculate from the worst-case `maxDuration ×
+    maxAttempts` plus inter-attempt backoff and add headroom.
+  </Accordion>
+
+  <Accordion title="Expecting the scheduler timers to survive a clean shutdown">
+    They don't — `DeferredRunScheduler.clear()` cancels in-memory
+    timers as part of the drain. **Persisted dispatches survive**
+    (the row stays in `scheduled_dispatches`), and `recoverDispatches()`
+    re-registers them on next boot. Debounce silence-window state
+    DOESN'T persist — recovered debounce timers fire immediately.
+    See [debounce · durability](/d/scheduling/debounce#durability).
+  </Accordion>
+
+  <Accordion title="Janitor sweeping data you wanted to keep">
+    The janitor only deletes rows where `expires_at < now`. Cache
+    entries whose TTL hasn't elapsed are untouched. If you're seeing
+    cache entries disappear unexpectedly, check
+    `idempotencyKeyTTL` on the affected steps — the default is
+    24 hours.
+  </Accordion>
+
+  <Accordion title="Graceful shutdown hanging on a stuck step">
+    The drain waits for in-flight runs to finish; a step that doesn't
+    consult `ctx.signal` will hold up shutdown until it naturally
+    completes. For shutdown latency targets, ensure long-running nodes
+    are abort-aware. See
+    [cancellation · cooperative pattern](/d/reliability/cancellation#cooperative-cancellation-for-running-runs).
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Cancellation & crash recovery" icon="x-circle" href="/d/reliability/cancellation">
+    Crash auto-flip and orphan recovery — what happens when shutdown DOESN'T run cleanly.
+  </Card>
+  <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
+    All `BLOK_JANITOR_*` and `BLOK_GRACEFUL_SHUTDOWN_*` settings.
+  </Card>
+  <Card title="Trace storage" icon="database" href="/d/reference/trace-storage">
+    The tables the janitor sweeps and the migration history.
+  </Card>
+</Columns>

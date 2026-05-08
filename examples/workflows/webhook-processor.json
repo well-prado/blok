@@ -17,7 +17,7 @@
 		},
 		{
 			"name": "route-signature-check",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],
@@ -44,7 +44,7 @@
 						},
 						{
 							"name": "route-event-type",
-							"node": "@blok/if-else",
+							"node": "@blokjs/if-else",
 							"type": "module"
 						}
 					]
@@ -86,12 +86,12 @@
 						},
 						{
 							"name": "notify-push",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
 							"name": "trigger-ci-pipeline",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
@@ -113,7 +113,7 @@
 						},
 						{
 							"name": "notify-pull-request",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
@@ -135,7 +135,7 @@
 						},
 						{
 							"name": "notify-issue",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
@@ -150,7 +150,7 @@
 					"steps": [
 						{
 							"name": "log-unhandled-event",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{

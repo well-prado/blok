@@ -10,6 +10,9 @@ use Blok\Blok\Types\ExecutionRequest;
 use Psr\Http\Message\ServerRequestInterface;
 use React\Http\HttpServer;
 use React\Http\Message\Response as HttpResponse;
+use React\Http\Middleware\RequestBodyBufferMiddleware;
+use React\Http\Middleware\RequestBodyParserMiddleware;
+use React\Http\Middleware\StreamingRequestMiddleware;
 use React\Socket\SocketServer;
 
 /**
@@ -32,9 +35,17 @@ final class Server
      */
     public function start(): void
     {
-        $server = new HttpServer(function (ServerRequestInterface $request): HttpResponse {
-            return $this->handleRequest($request);
-        });
+        // Explicit middleware chain with 16 MB body buffer.
+        // Without this, ReactPHP's default 64 KB socket buffer silently truncates
+        // large request bodies (common when ctx.vars accumulates data across steps).
+        $server = new HttpServer(
+            new StreamingRequestMiddleware(),
+            new RequestBodyBufferMiddleware(16 * 1024 * 1024), // 16 MB
+            new RequestBodyParserMiddleware(),
+            function (ServerRequestInterface $request): HttpResponse {
+                return $this->handleRequest($request);
+            }
+        );
 
         $address = sprintf('%s:%d', $this->config->host, $this->config->port);
         $socket = new SocketServer($address);
@@ -88,6 +99,24 @@ final class Server
         }
 
         $body = (string) $request->getBody();
+        $expectedLength = (int) $request->getHeaderLine('Content-Length');
+        $actualLength = strlen($body);
+
+        // Detect Content-Length vs actual body mismatch (e.g. body truncated by buffer limit)
+        if ($actualLength === 0 && $expectedLength > 0) {
+            return $this->jsonResponse(400, [
+                'success' => false,
+                'data' => null,
+                'errors' => [
+                    'message' => sprintf(
+                        'Empty body received (Content-Length: %d, actual: 0). '
+                        . 'This usually means the request exceeded the body buffer limit.',
+                        $expectedLength,
+                    ),
+                ],
+            ], $headers);
+        }
+
         $data = json_decode($body, true);
 
         if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {

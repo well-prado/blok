@@ -102,9 +102,12 @@ async function main() {
 			.description("Create a new Project")
 			.option("-n, --name <value>", "Create a default Project")
 			.option("-l, --local <path>", "Use a local repo path instead of cloning from remote")
-			.option("-t, --trigger <value>", "Trigger type to install (default: http)")
+			.option("-t, --trigger <value>", "Single trigger type (backwards compat, default: http)")
+			.option("-T, --triggers <value>", "Comma-separated trigger list: http,sse,pubsub,queue (default: http)")
 			.option("-r, --runtimes <value>", "Comma-separated runtime list (default: node)")
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
+			.option("--pubsub-provider <value>", "Pub/Sub provider: gcp, aws, azure (default: gcp)")
+			.option("--queue-provider <value>", "Queue provider: kafka, rabbitmq, sqs, redis (default: kafka)")
 			.option("--examples", "Install example workflows and nodes")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
@@ -214,6 +217,10 @@ async function main() {
 			.command("dev")
 			.description("Start the development server")
 			.option("--skip-version-check", "Skip runtime version validation")
+			.option(
+				"--with-http-fallback",
+				"Spawn SDKs on HTTP transport instead of gRPC. Use only when one of your SDKs lacks a working gRPC listener (e.g. PHP without RoadRunner). Removed in v0.4.0.",
+			)
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "dev",

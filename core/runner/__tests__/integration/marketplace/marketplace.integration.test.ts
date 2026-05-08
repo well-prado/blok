@@ -293,8 +293,8 @@ describe("RuntimeCatalog", () => {
 		const stats = catalog.getStats();
 		expect(stats.totalPackages).toBe(2);
 		expect(stats.totalVersions).toBe(3);
-		expect(stats.packagesByRuntime["nodejs"]).toBe(1);
-		expect(stats.packagesByRuntime["python3"]).toBe(1);
+		expect(stats.packagesByRuntime.nodejs).toBe(1);
+		expect(stats.packagesByRuntime.python3).toBe(1);
 		// Latest of stats-a is 2.0.0 with 200 downloads, stats-b has 50
 		expect(stats.totalDownloads).toBe(250);
 		expect(stats.verifiedCount).toBe(1);

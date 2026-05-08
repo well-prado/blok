@@ -100,10 +100,10 @@ describe("TriggerBase HMR", () => {
 		await trigger.destroyHmr();
 		// Restore environment
 		process.env.NODE_ENV = originalEnv.NODE_ENV;
-		delete process.env.BLOK_HMR;
-		delete process.env.WORKFLOWS_PATH;
-		delete process.env.NODES_PATH;
-		delete process.env.BLOK_HMR_VERBOSE;
+		process.env.BLOK_HMR = undefined;
+		process.env.WORKFLOWS_PATH = undefined;
+		process.env.NODES_PATH = undefined;
+		process.env.BLOK_HMR_VERBOSE = undefined;
 	});
 
 	it("should create HotReloadManager when not in production", async () => {
@@ -118,7 +118,7 @@ describe("TriggerBase HMR", () => {
 
 	it("should not create HotReloadManager in production without BLOK_HMR", async () => {
 		process.env.NODE_ENV = "production";
-		delete process.env.BLOK_HMR;
+		process.env.BLOK_HMR = undefined;
 
 		await trigger.enableHotReload();
 

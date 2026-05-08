@@ -10,7 +10,8 @@
  * - PUBSUB_EMULATOR_HOST: Pub/Sub emulator host for local development (optional)
  */
 
-import type { PubSubTriggerOpts } from "@blok/helper";
+import type { PubSubTriggerOpts } from "@blokjs/helper";
+import type { Message, PubSub, Subscription } from "@google-cloud/pubsub";
 import { v4 as uuid } from "uuid";
 import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 
@@ -31,10 +32,21 @@ export interface GCPPubSubConfig {
 export class GCPPubSubAdapter implements PubSubAdapter {
 	readonly provider = "gcp" as const;
 
-	private client: any;
-	private subscriptions: Map<string, any> = new Map();
+	private client: PubSub | undefined;
+	private subscriptions: Map<string, Subscription> = new Map();
 	private connected = false;
 	private config: GCPPubSubConfig;
+
+	/**
+	 * Type-narrowing accessor for `this.client`. Field is undefined until
+	 * `connect()` runs.
+	 */
+	private requireClient(): PubSub {
+		if (!this.client) {
+			throw new Error("[GCPPubSubAdapter] client is not initialised — call connect() first");
+		}
+		return this.client;
+	}
 
 	constructor(config?: GCPPubSubConfig) {
 		this.config = {
@@ -62,8 +74,7 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			console.log(`[GCPPubSubAdapter] Connected to GCP Pub/Sub: ${this.config.projectId}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to GCP Pub/Sub: ${(error as Error).message}. ` +
-					`Make sure @google-cloud/pubsub is installed: npm install @google-cloud/pubsub`,
+				`Failed to connect to GCP Pub/Sub: ${(error as Error).message}. Make sure @google-cloud/pubsub is installed: npm install @google-cloud/pubsub`,
 			);
 		}
 	}
@@ -81,7 +92,7 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			}
 			this.subscriptions.clear();
 
-			await this.client.close();
+			await this.requireClient().close();
 			this.connected = false;
 			console.log("[GCPPubSubAdapter] Disconnected from GCP Pub/Sub");
 		} catch (error) {
@@ -99,16 +110,21 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 
 		const subscriptionName = config.subscription;
 
-		// Get the subscription
-		const subscription = this.client.subscription(subscriptionName, {
+		// Get the subscription. The GCP SDK calls the per-subscription
+		// deadline `maxAckDeadline` (a `Duration`); our author-facing
+		// field is `ackDeadline` (seconds) for parity with other
+		// providers. `Duration` is the GCP SDK's tc39-Temporal-shaped
+		// shim — construct via `Duration.from({seconds})`.
+		const { Duration } = await import("@google-cloud/pubsub");
+		const subscription = this.requireClient().subscription(subscriptionName, {
 			flowControl: {
 				maxMessages: config.maxMessages || 10,
 			},
-			ackDeadline: config.ackDeadline || 30,
+			maxAckDeadline: Duration.from({ seconds: config.ackDeadline || 30 }),
 		});
 
 		// Message handler
-		const messageHandler = async (gcpMessage: any) => {
+		const messageHandler = async (gcpMessage: Message) => {
 			// Parse message data
 			let body: unknown;
 			try {
@@ -185,7 +201,7 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 
 		try {
 			// List subscriptions as a health check
-			const [subscriptions] = await this.client.getSubscriptions({ pageSize: 1 });
+			const [subscriptions] = await this.requireClient().getSubscriptions({ pageSize: 1 });
 			return true;
 		} catch {
 			return false;

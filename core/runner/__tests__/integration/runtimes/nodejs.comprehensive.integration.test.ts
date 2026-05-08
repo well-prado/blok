@@ -10,8 +10,8 @@
  * 6. ✅ Performance (< 1ms overhead)
  */
 
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import BlokService from "../../../src/Blok";
 import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
@@ -236,12 +236,13 @@ class MathNode extends BlokService<{ a: number; b: number; operation: string }> 
 				}
 				result = inputs.a / inputs.b;
 				break;
-			default:
+			default: {
 				const error = new GlobalError(`Unknown operation: ${inputs.operation}`);
 				error.setCode(400);
 				error.setName("MathNode");
 				response.setError(error);
 				return response;
+			}
 		}
 
 		response.setSuccess({ result });
@@ -420,7 +421,7 @@ describe("NodeJS Runtime Adapter - Comprehensive Tests", () => {
 			const ctx = createTestContext("env-node", { inputs: {} });
 
 			// Remove test env var
-			delete process.env.TEST_INTEGRATION_VAR;
+			process.env.TEST_INTEGRATION_VAR = undefined;
 
 			const result = await adapter.execute(node as any, ctx);
 
@@ -546,12 +547,12 @@ describe("NodeJS Runtime Adapter - Comprehensive Tests", () => {
 
 			// Store in context
 			if (ctx.vars) {
-				ctx.vars["step1_result"] = (result1.data as any).data.result;
+				ctx.vars.step1_result = (result1.data as any).data.result;
 			}
 
 			// Step 2: Multiply 15 * 2 = 30
 			ctx.config["math-node"] = {
-				inputs: { a: ctx.vars?.["step1_result"], b: 2, operation: "multiply" },
+				inputs: { a: ctx.vars?.step1_result, b: 2, operation: "multiply" },
 			};
 
 			const result2 = await adapter.execute(mathNode as any, ctx);
@@ -620,7 +621,7 @@ describe("NodeJS Runtime Adapter - Comprehensive Tests", () => {
 			const p99 = sorted[Math.floor(durations.length * 0.99)];
 
 			// Log performance report
-			console.log("\n" + "=".repeat(80));
+			console.log(`\n${"=".repeat(80)}`);
 			console.log("NodeJS Runtime Adapter - Performance Report");
 			console.log("=".repeat(80));
 			console.log(`Average:  ${average.toFixed(3)}ms`);
@@ -629,7 +630,7 @@ describe("NodeJS Runtime Adapter - Comprehensive Tests", () => {
 			console.log(`P99:      ${p99.toFixed(3)}ms`);
 			console.log(`Min:      ${sorted[0].toFixed(3)}ms`);
 			console.log(`Max:      ${sorted[sorted.length - 1].toFixed(3)}ms`);
-			console.log("=".repeat(80) + "\n");
+			console.log(`${"=".repeat(80)}\n`);
 
 			// Assertions - generous thresholds to avoid flakiness on loaded CI systems
 			expect(average).toBeLessThan(50);

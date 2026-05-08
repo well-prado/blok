@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
 
@@ -16,6 +16,7 @@ import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
  */
 export class BunRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "bun" as const;
+	public readonly transport = "module" as const;
 	private isBunRuntime: boolean;
 
 	constructor() {

@@ -10,7 +10,7 @@
 - **Repository:** https://github.com/deskree-inc/blok
 - **Documentation:** https://blok.build/
 - **CLI:** blokctl (npm package)
-- **Package Scope:** @blok/*
+- **Package Scope:** @blokjs/*
 
 ## Quick Answers
 
@@ -23,7 +23,7 @@ npx blokctl@latest create project
 ```typescript
 // File: src/nodes/my-node/index.ts
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
   name: "my-node",
@@ -73,16 +73,16 @@ docker compose -f infra/docker-compose.production.yml up -d
 ### Core APIs
 | Concept | File | Package |
 |---------|------|---------|
-| defineNode | `core/runner/src/defineNode.ts` | @blok/runner |
-| BlokService (class-based node) | `core/runner/src/BlokService.ts` | @blok/runner |
-| Context type | `core/shared/src/types/Context.ts` | @blok/shared |
-| GlobalError | `core/shared/src/GlobalError.ts` | @blok/shared |
-| Runner | `core/runner/src/Runner.ts` | @blok/runner |
-| TriggerBase | `core/runner/src/TriggerBase.ts` | @blok/runner |
-| Workflow builder | `core/workflow-helper/src/index.ts` | @blok/helper |
-| Configuration | `core/runner/src/Configuration.ts` | @blok/runner |
-| NodeBase | `core/shared/src/NodeBase.ts` | @blok/shared |
-| Mapper | `core/shared/src/utils/Mapper.ts` | @blok/shared |
+| defineNode | `core/runner/src/defineNode.ts` | @blokjs/runner |
+| BlokService (class-based node) | `core/runner/src/BlokService.ts` | @blokjs/runner |
+| Context type | `core/shared/src/types/Context.ts` | @blokjs/shared |
+| GlobalError | `core/shared/src/GlobalError.ts` | @blokjs/shared |
+| Runner | `core/runner/src/Runner.ts` | @blokjs/runner |
+| TriggerBase | `core/runner/src/TriggerBase.ts` | @blokjs/runner |
+| Workflow builder | `core/workflow-helper/src/index.ts` | @blokjs/helper |
+| Configuration | `core/runner/src/Configuration.ts` | @blokjs/runner |
+| NodeBase | `core/shared/src/NodeBase.ts` | @blokjs/shared |
+| Mapper | `core/shared/src/utils/Mapper.ts` | @blokjs/shared |
 
 ### Runtime Adapters
 | Adapter | File | Protocol |

@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockContext, createMockRunnerNode } from "../../../test/helpers/test-utils";
@@ -274,7 +274,7 @@ describe("HttpRuntimeAdapter", () => {
 			});
 		});
 
-		it("should include node config in ExecutionRequest", async () => {
+		it("should include unwrapped node config in ExecutionRequest", async () => {
 			const ctx = createMockContext();
 			(ctx as any).config = {
 				go: {
@@ -288,9 +288,10 @@ describe("HttpRuntimeAdapter", () => {
 			const fetchCall = vi.mocked(fetch).mock.calls[0];
 			const body = JSON.parse(fetchCall[1]?.body as string);
 
+			// Config should be unwrapped: inputs are sent directly, not wrapped in {inputs: {...}}
 			expect(body.node.config).toEqual({
-				inputs: { chain: [], origin: "test" },
-				timeout: 5000,
+				chain: [],
+				origin: "test",
 			});
 		});
 
@@ -338,6 +339,132 @@ describe("HttpRuntimeAdapter", () => {
 			expect(body.context.response.data).toBeNull();
 			expect(body.context.response.success).toBe(true);
 			expect(body.context.response.error).toBeNull();
+		});
+	});
+
+	describe("execute() - New canonical wire shape (mirrors gRPC proto v1)", () => {
+		it("ships a top-level `inputs` field carrying the resolved (unwrapped) node config", async () => {
+			const ctx = createMockContext();
+			(ctx as any).config = {
+				go: { inputs: { table: "tutorials", title: "T" } },
+			};
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.inputs).toEqual({ table: "tutorials", title: "T" });
+		});
+
+		it("ships a top-level `step` field with name/index/total/depth populated from ctx._stepInfo", async () => {
+			const ctx = createMockContext();
+			(ctx as any)._stepInfo = { name: "store-tutorial", index: 3, total: 7, depth: 1 };
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.step).toEqual({
+				name: "store-tutorial",
+				index: 3,
+				total: 7,
+				depth: 1,
+			});
+		});
+
+		it("defaults `step` to (node.name, 0, 1, 0) when ctx._stepInfo is absent", async () => {
+			await adapter.execute(mockNode, mockContext);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.step).toEqual({
+				name: "go",
+				index: 0,
+				total: 1,
+				depth: 0,
+			});
+		});
+
+		it("ships `trigger.body` from the actual ctx.request.body, separate from `inputs`", async () => {
+			const ctx = createMockContext();
+			(ctx.request as any) = {
+				body: { name: "Blok" },
+				headers: { "content-type": "application/json" },
+				params: { id: "42" },
+				query: { foo: "bar" },
+				cookies: {},
+				method: "POST",
+				url: "/wf",
+				baseUrl: "",
+			};
+			(ctx as any).config = { go: { inputs: { prefix: "Hi" } } };
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			// `inputs` and `trigger.body` are intentionally separate at the
+			// new wire layer — the FIXES.md #3 confusion is gone.
+			expect(body.inputs).toEqual({ prefix: "Hi" });
+			expect(body.trigger.body).toEqual({ name: "Blok" });
+			expect(body.trigger.headers["content-type"]).toBe("application/json");
+			expect(body.trigger.params.id).toBe("42");
+			expect(body.trigger.query.foo).toBe("bar");
+			expect(body.trigger.method).toBe("POST");
+		});
+
+		it("ships `state.previousOutput` from ctx.response.data and `state.vars` from ctx.vars", async () => {
+			const ctx = createMockContext();
+			(ctx.response as any) = { data: { previous: 1 }, success: true, error: null };
+			(ctx as any).vars = { fetched: "user" };
+			(ctx as any).env = { NODE_ENV: "test" };
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.state.previousOutput).toEqual({ previous: 1 });
+			expect(body.state.vars).toEqual({ fetched: "user" });
+			expect(body.state.env).toEqual({ NODE_ENV: "test" });
+		});
+
+		it("ships `workflow` info (runId, name, path, version)", async () => {
+			const ctx = createMockContext();
+			(ctx as any).id = "run_abc123";
+			(ctx as any).workflow_name = "my-workflow";
+			(ctx as any).workflow_path = "/wf";
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.workflow.runId).toBe("run_abc123");
+			expect(body.workflow.name).toBe("my-workflow");
+			expect(body.workflow.path).toBe("/wf");
+			expect(body.workflow.version).toBe("");
+		});
+
+		it("ships BOTH legacy AND new keys in the same envelope (one-minor compat window)", async () => {
+			const ctx = createMockContext();
+			(ctx as any).config = { go: { inputs: { foo: "bar" } } };
+
+			await adapter.execute(mockNode, ctx);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+
+			// Legacy keys still present so existing SDK HTTP servers keep working.
+			expect(body.node.config).toEqual({ foo: "bar" });
+			expect(body.context).toBeDefined();
+			expect(body.context.request).toBeDefined();
+			expect(body.context.vars).toEqual({});
+
+			// New canonical keys present so SDKs that adopt the new shape benefit.
+			expect(body.inputs).toEqual({ foo: "bar" });
+			expect(body.step).toBeDefined();
+			expect(body.trigger).toBeDefined();
+			expect(body.state).toBeDefined();
+			expect(body.workflow).toBeDefined();
+		});
+
+		it("`node.version` is exposed in both legacy and new shapes (empty string by default)", async () => {
+			await adapter.execute(mockNode, mockContext);
+
+			const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+			expect(body.node.version).toBe("");
 		});
 	});
 

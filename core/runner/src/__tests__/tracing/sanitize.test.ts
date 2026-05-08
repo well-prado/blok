@@ -99,4 +99,32 @@ describe("sanitize", () => {
 		const result = sanitize(obj);
 		expect(result).toBeDefined();
 	});
+
+	it("should redact OAuth/JWT/CSRF field names (security review FW-8)", () => {
+		const input = {
+			bearer: "abc",
+			bearer_token: "abc",
+			jwt: "eyJ...",
+			csrf: "tok",
+			csrftoken: "tok",
+			csrf_token: "tok",
+			oauth: "tok",
+			oauth_token: "tok",
+			tokenizer_config: "kept",
+		};
+
+		const result = sanitize(input) as Record<string, unknown>;
+		expect(result.bearer).toBe("[REDACTED]");
+		expect(result.bearer_token).toBe("[REDACTED]");
+		expect(result.jwt).toBe("[REDACTED]");
+		expect(result.csrf).toBe("[REDACTED]");
+		expect(result.csrftoken).toBe("[REDACTED]");
+		expect(result.csrf_token).toBe("[REDACTED]");
+		expect(result.oauth).toBe("[REDACTED]");
+		expect(result.oauth_token).toBe("[REDACTED]");
+		// Substring matching is intentionally NOT applied — fields whose
+		// name happens to contain a sensitive substring (tokenizer_config,
+		// password_strength) are kept as-is to avoid false positives.
+		expect(result.tokenizer_config).toBe("kept");
+	});
 });

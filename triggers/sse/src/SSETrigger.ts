@@ -15,16 +15,16 @@
  * - Message history replay (via Last-Event-ID)
  */
 
-import type { HelperResponse, SSETriggerOpts } from "@blok/helper";
+import type { HelperResponse, SSETriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -358,7 +358,8 @@ export abstract class SSETrigger extends TriggerBase {
 			});
 		}
 
-		const channel = this.channels.get(channelName)!;
+		const channel = this.channels.get(channelName);
+		if (!channel) return;
 		channel.clients.add(clientId);
 		client.channels.add(channelName);
 
@@ -565,7 +566,7 @@ export abstract class SSETrigger extends TriggerBase {
 		}
 
 		// Events must end with double newline
-		return lines.join("\n") + "\n\n";
+		return `${lines.join("\n")}\n\n`;
 	}
 
 	/**
@@ -576,7 +577,8 @@ export abstract class SSETrigger extends TriggerBase {
 			this.eventHistory.set(channel, []);
 		}
 
-		const history = this.eventHistory.get(channel)!;
+		const history = this.eventHistory.get(channel);
+		if (!history) return;
 		history.push({ event, channel, timestamp: new Date() });
 
 		// Trim history if too large

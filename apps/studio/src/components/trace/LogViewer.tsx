@@ -90,9 +90,7 @@ export function LogViewer({ logs, nodeNames }: LogViewerProps) {
 							<span className="text-[10px] text-zinc-600 shrink-0 pt-0.5 w-20">
 								{formatTimestamp(log.timestamp).split(", ")[1]}
 							</span>
-							<span
-								className={cn("text-[10px] uppercase font-bold shrink-0 w-10 pt-0.5", LOG_LEVEL_COLORS[log.level])}
-							>
+							<span className={cn("text-[10px] uppercase font-bold shrink-0 w-10 pt-0.5", LOG_LEVEL_COLORS[log.level])}>
 								{log.level}
 							</span>
 							{log.nodeName && (

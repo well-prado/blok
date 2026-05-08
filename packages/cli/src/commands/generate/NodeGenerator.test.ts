@@ -17,7 +17,7 @@ describe("NodeGenerator", () => {
 			const guidance = getGuidance("Missing defineNode import");
 			expect(guidance).not.toBeNull();
 			expect(guidance).toContain("defineNode");
-			expect(guidance).toContain("@blok/runner");
+			expect(guidance).toContain("@blokjs/runner");
 		});
 
 		it("should provide guidance for missing Zod import", () => {
@@ -75,7 +75,7 @@ describe("NodeGenerator", () => {
 		});
 
 		it("should provide guidance for module not found", () => {
-			const guidance = getGuidance("Cannot find module '@blok/core'");
+			const guidance = getGuidance("Cannot find module '@blokjs/core'");
 			expect(guidance).not.toBeNull();
 			expect(guidance).toContain("import paths");
 		});

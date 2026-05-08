@@ -1,0 +1,57 @@
+{
+	"name": "auth-check",
+	"version": "1.0.0",
+	"description": "Reusable middleware workflow. Verifies a JWT bearer token from the Authorization header, validates exp/iss/aud, and stashes the parsed claims at ctx.state.identity for downstream steps to consume. On invalid token, short-circuits with 401 and `stop: true` — the request never reaches the main workflow. Apply via `trigger.http.middleware: [\"auth-check\"]` or `workflow.middleware: [\"auth-check\"]`. The `middleware: true` flag at the workflow level marks this as a middleware-only workflow with no trigger of its own.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "extract-token",
+			"use": "expr",
+			"type": "module",
+			"inputs": {
+				"expression": "($.req.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
+			}
+		},
+		{
+			"id": "verify-jwt",
+			"use": "verify-jwt-node",
+			"type": "module",
+			"inputs": {
+				"token": "$.state['extract-token']",
+				"secret": "$.env.JWT_SECRET",
+				"issuer": "$.env.JWT_ISSUER",
+				"audience": "$.env.JWT_AUDIENCE"
+			}
+		},
+		{
+			"id": "deny-if-invalid",
+			"branch": {
+				"when": "!$.state['verify-jwt'].valid",
+				"then": [
+					{
+						"id": "respond-401",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 401,
+							"body": {
+								"error": "Unauthorized",
+								"reason": "$.state['verify-jwt'].reason"
+							}
+						},
+						"stop": true
+					}
+				]
+			}
+		},
+		{
+			"id": "stash-identity",
+			"use": "ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "identity",
+				"value": "$.state['verify-jwt'].claims"
+			}
+		}
+	]
+}

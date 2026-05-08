@@ -12,7 +12,7 @@
 	"steps": [
 		{
 			"name": "validate-cart",
-			"node": "@blok/json-validator",
+			"node": "@blokjs/json-validator",
 			"type": "module"
 		},
 		{
@@ -23,13 +23,13 @@
 		},
 		{
 			"name": "check-inventory",
-			"node": "@blok/api-call",
+			"node": "@blokjs/api-call",
 			"type": "module",
 			"set_var": true
 		},
 		{
 			"name": "route-inventory-check",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],
@@ -116,13 +116,13 @@
 					"steps": [
 						{
 							"name": "process-payment",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-payment-result",
-							"node": "@blok/if-else",
+							"node": "@blokjs/if-else",
 							"type": "module"
 						}
 					]
@@ -173,18 +173,18 @@
 					"steps": [
 						{
 							"name": "reserve-inventory",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{
 							"name": "create-order",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "send-confirmation-email",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module"
 						},
 						{

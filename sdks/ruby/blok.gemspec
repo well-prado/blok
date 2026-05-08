@@ -31,7 +31,13 @@ Gem::Specification.new do |spec|
   spec.add_dependency "puma",     "~> 6.4"
   spec.add_dependency "rackup",   "~> 2.1"
 
+  # gRPC transport — loaded lazily by Server::GrpcServer so HTTP-only
+  # deployments don't pay the load-time cost.
+  spec.add_dependency "grpc", "~> 1.69"
+  spec.add_dependency "google-protobuf", "~> 4.0"
+
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake",     "~> 13.0"
   spec.add_development_dependency "rack-test", "~> 2.1"
+  spec.add_development_dependency "grpc-tools", "~> 1.69"
 end

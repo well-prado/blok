@@ -211,3 +211,11 @@ pnpm-lock.yaml
 
 # Blok Studio local trace database
 .blok/
+
+# Migration backups (e.g. blokctl migrate workflows writes <name>.json.bak)
+*.bak
+
+# Claude Code agent + skill state (user-local tooling, not project code)
+.agents/
+.claude/skills/mintlify*
+skills-lock.json

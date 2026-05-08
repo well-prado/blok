@@ -1,4 +1,4 @@
-import type { NodeBase } from "@blok/shared";
+import type { NodeBase } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type Node from "./Node";
 import type Trigger from "./Trigger";

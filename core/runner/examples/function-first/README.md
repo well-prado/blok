@@ -41,7 +41,7 @@ Demonstrates:
 - Type-safe inputs and outputs
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -86,7 +86,7 @@ Demonstrates:
 Function-first nodes work seamlessly with existing workflows:
 
 ```typescript
-import { WorkflowConfig } from "@blok/helper";
+import { WorkflowConfig } from "@blokjs/helper";
 import FetchUser from "./nodes/fetch-user-node";
 import ApiCall from "./nodes/api-call-node";
 
@@ -321,7 +321,7 @@ const UpdateUserInput = UserSchema.partial();
 Testing function-first nodes is simple:
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 const MyNode = defineNode({

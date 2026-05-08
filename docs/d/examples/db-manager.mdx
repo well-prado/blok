@@ -118,178 +118,175 @@ The DB Manager workflow is defined in `workflows/json/db-manager.json`:
 ```json
 {
   "name": "Database Manager",
-  "description": "This workflow is used to query a database using an AI Prompt UI",
+  "description": "Queries a database using an AI prompt UI",
   "version": "1.0.0",
   "trigger": {
-    "http": {
-      "method": "*",
-      "path": "/:function?",
-      "accept": "application/json"
-    }
+    "http": { "method": "ANY", "path": "/db-manager/:function?" }
   },
   "steps": [
     {
-      "name": "filter-request",
-      "node": "@blok/if-else",
-      "type": "module"
-    }
-  ],
-  "nodes": {
-    "filter-request": {
-      "conditions": [
-        {
-          "type": "if",
-          "steps": [
-            {
-              "name": "database-ui",
-              "node": "database-ui",
-              "type": "module"
+      "id": "route",
+      "branch": {
+        "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === undefined",
+        "then": [
+          {
+            "id": "database-ui",
+            "use": "database-ui",
+            "inputs": {}
+          }
+        ],
+        "else": [
+          {
+            "id": "route-tables",
+            "branch": {
+              "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === 'tables'",
+              "then": [
+                {
+                  "id": "get-tables",
+                  "use": "postgres-query",
+                  "inputs": {
+                    "host": "localhost",
+                    "port": 5432,
+                    "database": "dvdrental",
+                    "user": "postgres",
+                    "password": "example",
+                    "query": "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+                  }
+                }
+              ],
+              "else": [
+                {
+                  "id": "route-prompt",
+                  "branch": {
+                    "when": "$.req.method.toLowerCase() === 'post' && $.req.params.function === 'execute-prompt'",
+                    "then": [
+                      {
+                        "id": "get-table-columns",
+                        "use": "postgres-query",
+                        "inputs": {
+                          "host": "localhost",
+                          "port": 5432,
+                          "database": "dvdrental",
+                          "user": "postgres",
+                          "password": "example",
+                          "query": "SELECT column_name, udt_name AS data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $.req.body.table_name"
+                        }
+                      },
+                      {
+                        "id": "query-generator",
+                        "use": "query-generator",
+                        "inputs": {
+                          "table_name": "$.req.body.table_name",
+                          "columns": "$.state.get-table-columns.data",
+                          "prompt": "$.req.body.prompt"
+                        }
+                      },
+                      {
+                        "id": "execute-query",
+                        "use": "postgres-query",
+                        "inputs": {
+                          "host": "localhost",
+                          "port": 5432,
+                          "database": "dvdrental",
+                          "user": "postgres",
+                          "password": "example",
+                          "query": "$.state.query-generator.query"
+                        }
+                      },
+                      {
+                        "id": "respond",
+                        "use": "@blokjs/mapper",
+                        "inputs": {
+                          "mapper": {
+                            "total": "$.state.execute-query.total",
+                            "results": "$.state.execute-query.data",
+                            "query": "$.state.query-generator.query"
+                          }
+                        }
+                      }
+                    ],
+                    "else": [
+                      {
+                        "id": "method-not-allowed",
+                        "use": "error",
+                        "inputs": {}
+                      }
+                    ]
+                  }
+                }
+              ]
             }
-          ],
-          "condition": "ctx.request.method.toLowerCase() === \"get\" && ctx.request.params.function === undefined"
-        },
-        {
-          "type": "if",
-          "steps": [
-            {
-              "name": "get-tables",
-              "node": "postgres-query",
-              "type": "module"
-            }
-          ],
-          "condition": "ctx.request.method.toLowerCase() === \"get\" && ctx.request.params.function === \"tables\""
-        },
-        {
-          "type": "if",
-          "steps": [
-            {
-              "name": "get-table-columns",
-              "node": "postgres-query",
-              "type": "module"
-            },
-            {
-              "name": "query-generator",
-              "node": "query-generator",
-              "type": "module"
-            },
-            {
-              "name": "execute-query",
-              "node": "postgres-query",
-              "type": "module"
-            },
-            {
-              "name": "create-response",
-              "node": "mapper",
-              "type": "module"
-            }
-          ],
-          "condition": "ctx.request.method.toLowerCase() === \"post\" && ctx.request.params.function === \"execute-prompt\""
-        },
-        {
-          "type": "else",
-          "steps": [
-            {
-              "name": "method-not-allowed",
-              "node": "error",
-              "type": "module"
-            }
-          ]
-        }
-      ]
-    },
-    "database-ui": {
-      "inputs": {}
-    },
-    "get-tables": {
-      "inputs": {
-        "host": "localhost",
-        "port": 5432,
-        "database": "dvdrental",
-        "user": "postgres",
-        "password": "example",
-        "query": "select table_name from information_schema.tables where table_schema = 'public'"
-      }
-    },
-    "get-table-columns": {
-      "inputs": {
-        "host": "localhost",
-        "port": 5432,
-        "database": "dvdrental",
-        "user": "postgres",
-        "password": "example",
-        "query": "SELECT t1.column_name, COALESCE(t2.attname, '_') as primary_key, udt_name as data_type FROM information_schema.columns as t1 LEFT JOIN (SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE  i.indrelid = '${ctx.request.body.table_name}'::regclass AND i.indisprimary) as t2 ON t1.column_name = t2.attname WHERE table_schema = 'public' AND table_name = '${ctx.request.body.table_name}';"
-      }
-    },
-    "query-generator": {
-      "inputs": {
-        "table_name": "${ctx.request.body.table_name}",
-        "columns": "js/ctx.response.data.data",
-        "prompt": "${ctx.request.body.prompt}"
-      }
-    },
-    "execute-query": {
-      "inputs": {
-        "host": "localhost",
-        "port": 5432,
-        "database": "dvdrental",
-        "user": "postgres",
-        "password": "example",
-        "query": "${ctx.response.data.query}"
-      }
-    },
-    "create-response": {
-      "inputs": {
-        "model": {
-          "total": "${ctx.response.data.total}",
-          "results": "js/ctx.response.data.data",
-          "query": "${ctx.vars?.query}"
-        }
+          }
+        ]
       }
     }
-  }
-}
-```
-
-## UI Rendering with If-Else Node
-
-One of the most powerful features of Blok  is the ability to serve different content based on request conditions. The DB Manager example demonstrates this by using the `@blok/if-else` node to render the UI and handle API requests within a single workflow.
-
-### How UI Rendering Works in Blok 
-
-In traditional web applications, you might have separate routes for serving HTML and handling API requests. In Blok , you can use conditional logic to handle both in a unified workflow:
-
-1. **Request Routing**: The `if-else` node evaluates conditions based on the request method, path, and parameters.
-2. **Content Type Detection**: The workflow determines whether to serve HTML (UI) or JSON (API response).
-3. **Node Selection**: Based on the conditions, the appropriate node is executed.
-4. **Response Generation**: The selected node generates the appropriate response (HTML or JSON).
-
-### The If-Else Node Structure
-
-The `if-else` node in the DB Manager workflow is configured with multiple conditions:
-
-```json
-"filter-request": {
-  "conditions": [
-    {
-      "type": "if",
-      "steps": [
-        {
-          "name": "database-ui",
-          "node": "database-ui",
-          "type": "module"
-        }
-      ],
-      "condition": "ctx.request.method.toLowerCase() === \"get\" && ctx.request.params.function === undefined"
-    },
-    // Other conditions...
   ]
 }
 ```
 
-Each condition:
-1. Has a `type` ("if" or "else")
-2. Contains a JavaScript expression in the `condition` field
-3. Defines `steps` to execute when the condition is true
+A few v2 things to notice:
+
+- **One `branch` step instead of `@blokjs/if-else` + `conditions[]`.**
+  Each condition is a `when` expression with `then` and `else`
+  branches. Nested branches handle multi-way routing.
+- **Cross-step references use `$.state.<id>`.** Each previous step's
+  output is at `$.state.get-table-columns`, `$.state.query-generator`,
+  etc.
+- **Method `"ANY"` (not `"*"`).** v2 uses the explicit string for the
+  wildcard.
+
+## UI rendering with branch steps
+
+A single workflow can serve both an HTML UI and JSON API responses by
+routing on `(method, path)`. The DB Manager example uses nested
+v2 `branch` steps to do exactly that.
+
+### How UI rendering works
+
+In traditional web apps you'd have separate routes for HTML and JSON.
+In Blok, one workflow handles both:
+
+<Steps>
+  <Step title="Request routing">
+    The `branch` step evaluates a `when` expression against the
+    request method, path, and params.
+  </Step>
+  <Step title="Branch dispatch">
+    The matching arm runs its `then` (or `else`) sub-pipeline.
+  </Step>
+  <Step title="Response">
+    The leaf step generates the response (HTML for UI, JSON for API).
+  </Step>
+</Steps>
+
+### Branch step structure
+
+In v2, conditional routing uses one `branch` step per decision:
+
+```json
+{
+  "id": "route",
+  "branch": {
+    "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === undefined",
+    "then": [
+      { "id": "database-ui", "use": "database-ui", "inputs": {} }
+    ],
+    "else": [
+      // … further branching, or a fallback step
+    ]
+  }
+}
+```
+
+Each branch has:
+
+1. A JavaScript expression in `when` (truthy → `then`, falsy → `else`).
+2. A `then` array of steps to run when the condition matches.
+3. An optional `else` array — usually another `branch` for multi-way
+   routing, or a fallback step.
+
+For deeper structure, see the
+[v2 branch step reference](/d/reference/v2-step-shapes#branch-step).
 
 ### The Database-UI Node
 
@@ -309,8 +306,8 @@ import {
   type IBlokResponse,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import fs from 'fs';
 import path from 'path';
 
@@ -410,8 +407,8 @@ import {
   type JsonLikeObject,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import pg from "pg";
 
 type PostgresQueryInputs = {
@@ -495,8 +492,8 @@ import {
   BlokService,
   BlokResponse,
   type ParamsDictionary,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 import { generateText } from "ai";
 
 type InputType = {
@@ -597,8 +594,8 @@ import {
   type JsonLikeObject,
   BlokService,
   BlokResponse,
-} from "@blok/runner";
-import { type Context, GlobalError } from "@blok/shared";
+} from "@blokjs/runner";
+import { type Context, GlobalError } from "@blokjs/shared";
 
 type InputType = {
   model: object;

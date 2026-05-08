@@ -1,0 +1,99 @@
+{
+	"name": "Async Job Poller",
+	"version": "1.0.0",
+	"description": "Submits a long-running job to an external API and polls every 2 seconds until the status flips to 'done' or 'failed'. Caps polling at 60 iterations (~2 minutes). When the loop exits, switch routes the response based on terminal status — done returns the result, failed returns 502, anything else means the timeout cap was hit and we return 504. Demonstrates: loop with maxIterations safety cap, wait with literal duration, switch with default for the timeout case.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/jobs",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "submit-job",
+			"use": "@blokjs/api-call",
+			"type": "module",
+			"inputs": {
+				"url": "https://api.example.com/jobs",
+				"method": "POST",
+				"body": "$.req.body"
+			}
+		},
+		{
+			"id": "poll-until-terminal",
+			"loop": {
+				"while": "$.state['check-status'] === undefined || $.state['check-status'].status === 'pending' || $.state['check-status'].status === 'running'",
+				"maxIterations": 60,
+				"do": [
+					{
+						"id": "wait-tick",
+						"wait": { "for": "2s" }
+					},
+					{
+						"id": "check-status",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://api.example.com/jobs/$.state['submit-job'].id",
+							"method": "GET"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond-by-status",
+			"switch": {
+				"on": "$.state['check-status'].status",
+				"cases": [
+					{
+						"when": "done",
+						"do": [
+							{
+								"id": "respond-ok",
+								"use": "@blokjs/respond",
+								"type": "module",
+								"inputs": {
+									"status": 200,
+									"body": "$.state['check-status'].result"
+								}
+							}
+						]
+					},
+					{
+						"when": "failed",
+						"do": [
+							{
+								"id": "respond-failed",
+								"use": "@blokjs/respond",
+								"type": "module",
+								"inputs": {
+									"status": 502,
+									"body": {
+										"error": "Job failed",
+										"reason": "$.state['check-status'].error"
+									}
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "respond-timeout",
+						"use": "@blokjs/respond",
+						"type": "module",
+						"inputs": {
+							"status": 504,
+							"body": {
+								"error": "Job poll timeout",
+								"jobId": "$.state['submit-job'].id"
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

@@ -160,7 +160,7 @@ function createHttpMethodCompletions(): CompletionItem[] {
 
 function createStepTypeCompletions(): CompletionItem[] {
 	const types = [
-		{ label: "module", docs: "Node from npm package (e.g., @blok/api-call)", priority: "1" },
+		{ label: "module", docs: "Node from npm package (e.g., @blokjs/api-call)", priority: "1" },
 		{ label: "local", docs: "Node defined locally in the project (e.g., ./nodes/my-node)", priority: "2" },
 		{ label: "runtime.nodejs", docs: "Execute using Node.js runtime adapter", priority: "3" },
 		{ label: "runtime.python3", docs: "Execute using Python 3 runtime adapter (via gRPC)", priority: "4" },

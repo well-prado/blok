@@ -1,0 +1,182 @@
+---
+title: "Environment variables"
+description: "Every supported Blok environment variable, grouped by feature, with defaults and kill-switches."
+icon: "settings"
+---
+
+The runtime is configured through environment variables. This page is
+the single canonical reference — defaults, valid values, and the
+feature each variable controls.
+
+For the per-feature explanation of *why* you'd set each variable, see
+the linked feature page in the rightmost column.
+
+## Tracing & storage
+
+Controls the run store backing every other feature on this page —
+disabling tracing also disables the idempotency cache, the
+concurrency gate, and the deferred scheduler (they all share the
+store).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_TRACE_ENABLED` | `true` | Master kill-switch. `false` disables tracing AND every store-backed feature (cache, gate, scheduler). |
+| `BLOK_TRACE_STORE` | `sqlite` | Run store backend: `sqlite`, `inmemory`, or `postgres`. |
+| `BLOK_TRACE_SQLITE_PATH` | `.blok/runs.db` | SQLite database path when `BLOK_TRACE_STORE=sqlite`. |
+| `BLOK_TRACE_PG_*` | unset | Postgres connection params (host, port, user, password, database). See [trace storage · Postgres](/d/reference/trace-storage#postgres-store). |
+| `BLOK_TRACE_RETENTION_DAYS` | `30` | Older runs evicted by `evictOldRuns()`. The [janitor](/d/operations/janitor-and-shutdown#janitor) handles ancillary tables (cache, locks, dispatches). |
+
+## Workflow loading
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_FILE_BASED_ROUTING` | `true` | Auto-discover JSON workflows under `workflows/json/` and derive URLs from file paths. |
+| `BLOK_HMR` | `true` (dev) | Hot-reload workflows on file change. Triggers re-scan and `WorkflowRegistry.clear()` + `registerAll()`. |
+| `BLOK_MAPPER_MODE` | `warn` | Input expression resolution failure mode. `warn` logs + passes through (v1 default), `strict` throws `MapperResolutionError`, `silent` suppresses (pre-v0.3.x behavior). **Production should set `strict`.** See [debugging workflows](/d/introduction/workflows#debugging). |
+
+## Sub-workflows
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_MAX_SUBWORKFLOW_DEPTH` | `10` | Recursion cap for sub-workflow steps. Throws `Sub-workflow recursion limit exceeded` when exceeded. See [sub-workflows · recursion guard](/d/composition/sub-workflows#recursion-guard). |
+
+## Node env-var allowlist
+
+Operator-controlled gate on which environment variables nodes can read
+through `ctx.env`. Default behaviour (neither set) is allow-all —
+preserves backwards compatibility. Setting either makes `ctx.env` a
+filtering Proxy. See [threat model · environment variables and node trust](/d/security/threat-model#environment-variables-and-node-trust).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_NODE_ENV_ALLOW` | unset | Comma-separated exact names. Example: `DATABASE_URL,STRIPE_KEY`. |
+| `BLOK_NODE_ENV_ALLOW_PREFIX` | unset | Comma-separated prefixes. Example: `PUBLIC_,SAFE_`. |
+| `BLOK_SUPPRESS_ENV_ALLOW_WARNING` | unset | Set to `1` to silence the boot warning when `BLOK_ENV=production` and no allowlist is configured. |
+
+## Concurrency gate
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_CONCURRENCY_DISABLED` | unset | Set to `1` to short-circuit the [concurrency gate](/d/reliability/concurrency-keys) entirely. Runs proceed regardless of in-flight count. |
+| `BLOK_CONCURRENCY_LEASE_MS` | `3600000` | Process-wide override for `concurrencyLeaseMs`. Per-trigger override takes precedence. |
+| `BLOK_CONCURRENCY_BACKEND` | unset / `memory` | Cross-process backend: `nats-kv` switches the gate to NATS KV. Unset preserves single-process behavior. See [cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv). |
+
+### Concurrency backend — NATS KV
+
+Required only when `BLOK_CONCURRENCY_BACKEND=nats-kv`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_CONCURRENCY_NATS_SERVERS` | `nats://localhost:4222` | Comma-separated NATS server URLs. |
+| `BLOK_CONCURRENCY_NATS_TOKEN` | unset | NATS auth token (mutually exclusive with user/pass). |
+| `BLOK_CONCURRENCY_NATS_USER` | unset | NATS username. |
+| `BLOK_CONCURRENCY_NATS_PASS` | unset | NATS password. |
+| `BLOK_CONCURRENCY_NATS_KV_BUCKET` | `blok-concurrency` | KV bucket name. Must exist on the NATS server (auto-created if the connection has KV bucket-create permission). |
+
+Source:
+[`core/runner/src/concurrency/createConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/createConcurrencyBackend.ts)
++ [`NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
+
+## Scheduling gates
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_SCHEDULING_DISABLED` | unset | Set to `1` to short-circuit `delay`, `ttl`, AND `debounce` gates. Runs proceed synchronously. See [scheduling overview](/d/scheduling/overview). |
+
+## Crash recovery
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_CRASH_AUTOFLIP_DISABLED` | unset | Set to `1` to skip `installCrashHandlers()` (no auto-flip on `uncaughtException` / `unhandledRejection`). Useful if you have your own crash handling. See [crash auto-flip](/d/reliability/cancellation#crash-auto-flip). |
+| `BLOK_ORPHAN_THRESHOLD_MS` | `120000` | Threshold for [orphan recovery](/d/reliability/cancellation#orphan-recovery) at boot. Runs in `running` status with `startedAt` older than this are flipped to `crashed`. |
+
+## Janitor
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_JANITOR_DISABLED` | unset | Set to `1` to skip the periodic storage [janitor](/d/operations/janitor-and-shutdown#janitor). |
+| `BLOK_JANITOR_INTERVAL_MS` | `300000` | Sweep interval. Sweeps `idempotency_cache`, `concurrency_locks`, and `scheduled_dispatches` for expired rows. |
+
+## Graceful shutdown
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_GRACEFUL_SHUTDOWN_DISABLED` | unset | Set to `1` to skip `installShutdownHandlers()` (no SIGTERM/SIGINT drain). The process exits immediately on signal, leaving in-flight work to be picked up by [orphan recovery](/d/reliability/cancellation#orphan-recovery) on the next boot. See [graceful shutdown](/d/operations/janitor-and-shutdown#graceful-shutdown). |
+
+## Logging
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_STREAM_LOGS` | unset | Enable live log streaming for all steps. Per-step opt-in via `stream_logs: true` overrides. |
+
+## Runtime adapters
+
+Connecting non-TypeScript nodes (Python, Go, Rust, etc.) to the runner.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RUNTIME_TRANSPORT` | `grpc` | Default transport for runtime adapters. `http` is supported but emits a deprecation warning (removed in v0.4.0). |
+| `RUNTIME_<KIND>_TRANSPORT` | `grpc` | Per-kind transport override (`RUNTIME_PYTHON3_TRANSPORT=http`, etc.). |
+| `RUNTIME_<KIND>_HOST` | `localhost` | Hostname for the SDK container per language. |
+| `RUNTIME_<KIND>_PORT` | varies | gRPC port per language. Defaults: Go `9001`, Rust `9002`, Java `9003`, C# `9004`, PHP `9005`, Ruby `9006`, Python3 `9007`. |
+
+For C# specifically, env keys preserve dots (e.g.
+`RUNTIME_CSHARP_HOST` becomes `Runtime.Csharp.Host` in the .NET
+config). For Java, `NettyServerBuilder` keepalive tuning matters under
+heavy concurrent load.
+
+## Worker triggers
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WORKER_QUEUES` | unset | Comma-separated list of queues this worker process consumes. Required for standalone worker triggers. |
+| `NATS_SERVERS` | `localhost:4222` | NATS connection URL for the NATS worker adapter. |
+
+## Kill-switches
+
+The full set of `*_DISABLED` variables, in one place. Each can be
+toggled without redeploying code:
+
+| Variable | Disables |
+|---|---|
+| `BLOK_TRACE_ENABLED=false` | Tracing AND every store-backed feature (cache, gate, scheduler). |
+| `BLOK_CONCURRENCY_DISABLED=1` | The concurrency gate. Runs proceed regardless of in-flight count. |
+| `BLOK_SCHEDULING_DISABLED=1` | The `delay` / `ttl` / `debounce` gates. Runs proceed synchronously. |
+| `BLOK_CRASH_AUTOFLIP_DISABLED=1` | `uncaughtException` / `unhandledRejection` auto-flip to `crashed`. |
+| `BLOK_JANITOR_DISABLED=1` | The periodic storage cleanup sweep. |
+| `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1` | The SIGTERM/SIGINT drain handler. |
+
+Use these for emergency operational recovery, not as long-term
+configuration. The defaults are tuned for production correctness;
+disabling them shifts work to operator vigilance.
+
+## Migration & durability scope
+
+A summary of which feature persists where, by store. See the linked
+feature pages for full mechanics.
+
+| Feature | SQLite (default) | InMemory | Postgres |
+|---|---|---|---|
+| Run + node trace | yes (durable) | process-local | yes (durable) |
+| [Idempotency cache](/d/reliability/idempotency) | yes (migration v4) | process-local | yes (migration v3 — hybrid mirror) |
+| [Concurrency locks](/d/reliability/concurrency-keys) | yes (migration v7) | process-local | yes (migration v3 — hybrid mirror) |
+| [Scheduled dispatches](/d/scheduling/delay-and-ttl#durability) | yes (migration v9) | process-local | yes (migration v3 — hybrid mirror) |
+| Cross-process concurrency coordination | no — single process | no | no — set `BLOK_CONCURRENCY_BACKEND=nats-kv` |
+
+Within-process gating works across all backends. Cross-restart
+durability requires SQLite or Postgres. Cross-process gating requires
+the NATS KV backend.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Operations overview" icon="wrench" href="/d/operations/overview">
+    The why behind these settings.
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/d/operations/observability">
+    OTel counters and concurrency endpoints.
+  </Card>
+  <Card title="Janitor & shutdown" icon="broom" href="/d/operations/janitor-and-shutdown">
+    Storage cleanup and SIGTERM drain.
+  </Card>
+</Columns>

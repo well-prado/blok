@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
 
@@ -31,6 +31,7 @@ interface CachedModule {
  */
 export class WasmRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "wasm" as const;
+	public readonly transport = "module" as const;
 
 	private moduleCache = new Map<string, CachedModule>();
 	private maxCacheSize: number;

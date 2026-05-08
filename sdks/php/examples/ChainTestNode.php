@@ -18,15 +18,23 @@ final class ChainTestNode implements NodeHandler
     {
         $body = $ctx->request->body;
 
-        // Read existing chain (default to empty array)
+        // Read existing chain — gRPC inputs first (carried on
+        // `node.config`), HTTP body fallback (legacy wire shape where
+        // the runner mapped resolvedInputs → request.body). Dual-read
+        // keeps the cross-runtime-chain demo working over both
+        // transports during the §11 deprecation window.
         $chain = [];
-        if (is_array($body) && isset($body['chain']) && is_array($body['chain'])) {
+        if (isset($config['chain']) && is_array($config['chain'])) {
+            $chain = $config['chain'];
+        } elseif (is_array($body) && isset($body['chain']) && is_array($body['chain'])) {
             $chain = $body['chain'];
         }
 
-        // Read origin
+        // Read origin — same dual-read.
         $origin = 'unknown';
-        if (is_array($body) && isset($body['origin']) && is_string($body['origin'])) {
+        if (isset($config['origin']) && is_string($config['origin']) && $config['origin'] !== '') {
+            $origin = $config['origin'];
+        } elseif (is_array($body) && isset($body['origin']) && is_string($body['origin'])) {
             $origin = $body['origin'];
         }
 

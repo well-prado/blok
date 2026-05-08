@@ -97,7 +97,7 @@ export class PerformanceMeasure {
 		const sum = durations.reduce((acc, d) => acc + d, 0);
 		const mean = sum / durations.length;
 
-		const variance = durations.reduce((acc, d) => acc + Math.pow(d - mean, 2), 0) / durations.length;
+		const variance = durations.reduce((acc, d) => acc + (d - mean) ** 2, 0) / durations.length;
 		const stdDev = Math.sqrt(variance);
 
 		return {

@@ -1,4 +1,4 @@
-import type { JsonLikeObject } from "@blok/runner";
+import type { JsonLikeObject } from "@blokjs/runner";
 
 export const runApiCall = async (
 	url: string,

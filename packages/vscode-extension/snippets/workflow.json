@@ -16,7 +16,7 @@
 			"\t\"steps\": [",
 			"\t\t{",
 			"\t\t\t\"name\": \"${5:first-step}\",",
-			"\t\t\t\"node\": \"${6:@blok/api-call}\",",
+			"\t\t\t\"node\": \"${6:@blokjs/api-call}\",",
 			"\t\t\t\"type\": \"${7|module,local|}\"",
 			"\t\t}",
 			"\t],",
@@ -131,7 +131,7 @@
 		"body": [
 			"{",
 			"\t\"name\": \"${1:filter-step}\",",
-			"\t\"node\": \"@blok/if-else\",",
+			"\t\"node\": \"@blokjs/if-else\",",
 			"\t\"type\": \"module\"",
 			"}",
 			"",
@@ -169,7 +169,7 @@
 		"body": [
 			"{",
 			"\t\"name\": \"${1:step-name}\",",
-			"\t\"node\": \"${2:@blok/api-call}\",",
+			"\t\"node\": \"${2:@blokjs/api-call}\",",
 			"\t\"type\": \"${3|module,local,runtime.nodejs,runtime.python3,runtime.go,runtime.java,runtime.rust|}\"",
 			"}"
 		],

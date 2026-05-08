@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { OpenAPIGenerator } from "@blok/runner";
+ * import { OpenAPIGenerator } from "@blokjs/runner";
  *
  * const generator = new OpenAPIGenerator({
  *   title: "My API",

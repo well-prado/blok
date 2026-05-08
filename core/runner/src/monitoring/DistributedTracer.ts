@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * import { DistributedTracer } from "@blok/runner";
+ * import { DistributedTracer } from "@blokjs/runner";
  *
  * const tracer = new DistributedTracer({ serviceName: "blok-http" });
  *

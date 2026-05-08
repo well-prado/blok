@@ -1,6 +1,5 @@
-import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blok/shared";
-import type ParamsDictionary from "@blok/shared/dist/types/ParamsDictionary";
-import type VarsContext from "@blok/shared/dist/types/VarsContext";
+import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
+import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
 import { metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";
@@ -8,6 +7,7 @@ import type { IBlokResponse } from "./BlokResponse";
 import type RunnerNode from "./RunnerNode";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
+import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 export default abstract class BlokService<T> extends NodeBase {
 	public inputSchema: Schema;
@@ -118,16 +118,17 @@ export default abstract class BlokService<T> extends NodeBase {
 
 		ctx.logger.log(`Executed node: ${this.name} in ${(end - start).toFixed(2)}ms`);
 
-		if (this.set_var) {
-			const vars = {
-				[this.name]: (result as unknown as JsonLikeObject).data,
-			};
-			this.setVar(ctx, vars as unknown as VarsContext);
-			response.data = ctx.response || {};
-		} else {
-			response.data = result;
-			(response.data as unknown as BlokService<T>).contentType = this.contentType;
-		}
+		// V2 persistence — runner-owned, declarative.
+		// `ephemeral` skips, `spread` merges, `as` renames, default stores
+		// at state[name]. Legacy `set_var: false` maps to ephemeral; legacy
+		// `set_var: true` is a no-op (default already persists).
+		applyStepOutput(ctx, this, result as { data?: unknown });
+
+		// Hand the raw result back to the runner. RunnerSteps mirrors
+		// response.data into ctx.response so adjacent-step access via
+		// `ctx.prev` / `$.prev` keeps working.
+		response.data = result;
+		(response.data as unknown as BlokService<T>).contentType = this.contentType;
 
 		globalMetrics.retry();
 		globalMetrics.stop();

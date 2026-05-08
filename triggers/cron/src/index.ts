@@ -1,5 +1,5 @@
 /**
- * @blok/trigger-cron
+ * @blokjs/trigger-cron
  *
  * Cron/scheduled trigger for Blok workflows.
  * Execute workflows on a schedule using cron expressions.
@@ -13,7 +13,7 @@
  *
  * @example
  * ```typescript
- * import { CronTrigger } from "@blok/trigger-cron";
+ * import { CronTrigger } from "@blokjs/trigger-cron";
  *
  * class MyCronTrigger extends CronTrigger {
  *   protected nodes = myNodes;
@@ -69,4 +69,4 @@ export {
 } from "./CronTrigger";
 
 // Re-export types from helper for convenience
-export type { CronTriggerOpts } from "@blok/helper";
+export type { CronTriggerOpts } from "@blokjs/helper";

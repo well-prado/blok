@@ -1,0 +1,197 @@
+---
+title: "Scheduling"
+description: "Defer, expire, or coalesce trigger dispatches with `delay`, `ttl`, and `debounce` on the trigger config."
+icon: "clock"
+---
+
+import { StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Three new fields on the trigger config defer the dispatch of a run.
+They share an in-process scheduler and a small set of new run states.
+
+<Columns cols={3}>
+  <Card title="Delay & TTL" icon="hourglass" href="/d/scheduling/delay-and-ttl">
+    `delay: "1h"` schedules the run for later. `ttl: "30m"` expires it
+    if not started in time. HTTP returns `202 Accepted` with a
+    `Location` header pointing at the run.
+  </Card>
+  <Card title="Debounce" icon="filter" href="/d/scheduling/debounce">
+    `debounce: { key, mode, delay, maxDelay? }` collapses rapid
+    same-key triggers into one run. Trailing for autosave; leading for
+    click suppression.
+  </Card>
+  <Card title="Reference" icon="braces" href="/d/reference/v2-step-shapes">
+    All scheduling fields with their Zod constraints.
+  </Card>
+</Columns>
+
+## The mental model
+
+Without scheduling, a trigger immediately runs `runner.run(ctx)`. With
+scheduling, the trigger queues the dispatch on the in-process
+scheduler and returns immediately. The actual workflow runs when the
+timer fires.
+
+```
+trigger fires
+  ├── debounce gate         → coalesce same-key pings
+  ├── delay gate            → schedule for `now + delayMs`
+  └── concurrency gate      → acquire per-key slot
+       └── runner.run(ctx)   → execute steps
+```
+
+The three new gates run BEFORE the [concurrency gate](/d/reliability/concurrency-keys),
+in this order: **debounce → delay → concurrency**. A run that defers
+through any earlier gate skips the later ones until the deferred
+timer fires and re-enters the runner.
+
+## New run states
+
+Four lifecycle states surface on `WorkflowRun.status` from the
+scheduling and queue gates (full enum on the
+[trace storage page](/d/reference/trace-storage#run-states)):
+
+| Status | Meaning |
+|---|---|
+| `delayed` | Scheduled via `delay`. The run record exists; the dispatch is pending. Transitions to `running` when the timer fires. |
+| `expired` | TTL exceeded before dispatch. Auto-cancelled without execution. Distinct from `cancelled` (operator-initiated) and `failed` (a step ran). |
+| `debounced` | Coalesced into another run via the `debounce.key` mechanism. In leading mode this is terminal (execution went to a sibling); in trailing mode it's transient until the window closes. |
+| `queued` | Concurrency gate denied with `onLimit: "queue"`. Re-attempts acquisition every second until a slot frees, then transitions to `running`. See [concurrency keys](/d/reliability/concurrency-keys#queue-mode-onlimit-queue). |
+
+And four matching event types:
+
+| Event | Payload |
+|---|---|
+| <StudioEventBadge type="RUN_DELAYED" /> | `{scheduledAt, delayMs, expiresAt?}` |
+| <StudioEventBadge type="RUN_EXPIRED" /> | `{expiresAt, expiredAt, lateBy}` |
+| <StudioEventBadge type="RUN_DEBOUNCED" /> | `{debounceKey, mode, intoRunId?, pingCount?}` |
+| <StudioEventBadge type="RUN_QUEUED" /> | `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}` |
+
+All four states are cancellable while waiting — see
+[cancellation](/d/reliability/cancellation).
+
+## Duration grammar
+
+`delay`, `ttl`, `debounce.delay`, and `debounce.maxDelay` all accept
+either a non-negative integer (interpreted as milliseconds) or a
+single-unit string. The grammar is strict — multi-unit strings
+(`"1h30m"`) and fractional values (`"1.5h"`) are rejected at workflow
+load.
+
+| Form | Example | Meaning |
+|---|---|---|
+| Number | `60_000` | 60 000 ms |
+| Number | `0` | Immediate (no delay) |
+| String — `ms` | `"500ms"` | 500 ms |
+| String — `s` | `"30s"` | 30 seconds |
+| String — `m` | `"5m"` | 5 minutes |
+| String — `h` | `"2h"` | 2 hours |
+| String — `d` | `"1d"` | 1 day |
+
+The schema lives in [core/workflow-helper/src/types/TriggerOpts.ts:102-110](core/workflow-helper/src/types/TriggerOpts.ts#L102-L110).
+The runtime parser is in [core/workflow-helper/src/utils/parseDuration.ts](core/workflow-helper/src/utils/parseDuration.ts).
+
+## HTTP transport — `202 Accepted`
+
+A deferred HTTP request returns immediately with a 202 and a
+`Location` header pointing at the run's detail endpoint:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /__blok/runs/run_abc123
+Content-Type: application/json
+
+{
+  "runId": "run_abc123",
+  "workflowName": "send-welcome-email",
+  "status": "delayed",
+  "scheduledAt": 1735741200000,
+  "expiresAt": 1735744800000,
+  "debounced": false,
+  "pingCount": 1,
+  "intoRunId": null
+}
+```
+
+Callers poll `GET /__blok/runs/<runId>` (or subscribe to the SSE
+stream) to track dispatch. For coalesce pings, `Location` points at
+the active run via `intoRunId` so callers can poll the actually-running
+run.
+
+## Worker transport — ACK without retry
+
+Worker triggers ACK deferred jobs without requeueing. The in-process
+scheduler owns the eventual dispatch — re-queueing would create a
+duplicate.
+
+## Durability
+
+The scheduler is in-memory `setTimeout`-based for the hot path, with
+optional sqlite-backed persistence for crash recovery. The
+[delay & TTL](/d/scheduling/delay-and-ttl#durability) and
+[debounce](/d/scheduling/debounce#durability) pages cover the
+mechanics in detail; here's the summary:
+
+| Trigger | Hot path | Persistence | Crash recovery |
+|---|---|---|---|
+| HTTP `delay` / `onLimit: "queue"` | `setTimeout` | sqlite `scheduled_dispatches` table (migration v9) | `recoverDispatches()` re-registers timers on boot; past-TTL rows flip to `expired` |
+| HTTP `debounce` | `DebounceCoordinator` (in-memory) | optional via `extractDispatchPayload` | recovered timers fire immediately (silence-window state lost) |
+| Worker `delay` / `ttl` | broker (BullMQ delay, NATS x-delay) | broker-managed | broker handles redelivery |
+
+Single-process limitations:
+
+- **Long delays (>24h)** — `setTimeout` survives a restart via the
+  persisted row, but the underlying timer max is implementation-
+  defined. For day-scale schedules, consider a cron trigger plus an
+  external scheduler.
+- **Cross-process debounce** — pings handled by different processes
+  don't coalesce. Pin a debounce route to a single process for strict
+  coalescing under horizontal scale.
+
+## Composition with prior tiers
+
+The scheduling gates layer above the rest of the run-level machinery:
+
+| Feature | Interaction |
+|---|---|
+| [Idempotency cache](/d/reliability/idempotency) | Cache check happens INSIDE step execution, AFTER the timer fires and re-enters the runner. Cache hits short-circuit the steps but still hold a concurrency slot briefly. |
+| [Per-step retry](/d/reliability/retry) | Retry is a per-step concept; scheduling is per-run. They don't interact — the retry loop runs after the timer fires. |
+| [Replay](/d/reliability/replay) | Replays go through the scheduling gates on the new run. A replay of a delayed run with `delay` still configured will defer again. |
+| [Concurrency keys](/d/reliability/concurrency-keys) | Run AFTER the scheduling gates. A delayed run that becomes throttled at dispatch flips `delayed → throttled` cleanly. |
+| [Sub-workflows](/d/composition/sub-workflows) | Sub-workflow steps invoke directly via `SubworkflowNode`, NOT through `TriggerBase.run()`. Children DO NOT inherit the parent's `delay` / `ttl` / `debounce`. |
+
+## Kill-switch
+
+Disable the scheduling gates process-wide without redeploying:
+
+```bash
+BLOK_SCHEDULING_DISABLED=1 bun run dev
+```
+
+When set, `delay` / `ttl` / `debounce` config is ignored — runs proceed
+synchronously through the rest of the pipeline.
+
+## Storage
+
+SQLite migration v8 adds five nullable columns to `workflow_runs`:
+`scheduled_at`, `expires_at`, `debounce_key`, `debounce_mode`,
+`ping_count` plus indexes on `scheduled_at` and `(workflow_name,
+debounce_key)`. The schema is documented on the
+[trace storage page](/d/reference/trace-storage#scheduling-columns-migration-v8).
+
+The migration is additive — pre-Tier-2 databases are upgraded in place
+on first run.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Delay & TTL" icon="hourglass" href="/d/scheduling/delay-and-ttl">
+    Defer dispatch and bound staleness.
+  </Card>
+  <Card title="Debounce" icon="filter" href="/d/scheduling/debounce">
+    Coalesce rapid same-key triggers.
+  </Card>
+  <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
+    Per-key rate limiting that runs after scheduling.
+  </Card>
+</Columns>

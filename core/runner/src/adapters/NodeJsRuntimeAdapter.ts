@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import type RunnerNode from "../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
 
@@ -13,6 +13,7 @@ import type { ExecutionResult, RuntimeAdapter } from "./RuntimeAdapter";
  */
 export class NodeJsRuntimeAdapter implements RuntimeAdapter {
 	public readonly kind = "nodejs";
+	public readonly transport = "module" as const;
 
 	/**
 	 * Execute a Node.js node in-process

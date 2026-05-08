@@ -1,4 +1,4 @@
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 /**
  * Cross-Language Integration Tests (Phase 5G)
  *
@@ -187,31 +187,31 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 			const step1 = createRunnerNode("fetch-user", "nodejs");
 			const result1 = await adapters.nodejs.execute(step1, ctx);
 			expect(result1.success).toBe(true);
-			expect(ctx.vars["nodejs_processed"]).toBe(true);
+			expect(ctx.vars.nodejs_processed).toBe(true);
 
 			// Step 2: Go
 			const step2 = createRunnerNode("process-data", "go");
 			const result2 = await adapters.go.execute(step2, ctx);
 			expect(result2.success).toBe(true);
-			expect(ctx.vars["go_processed"]).toBe(true);
+			expect(ctx.vars.go_processed).toBe(true);
 
 			// Step 3: Rust
 			const step3 = createRunnerNode("validate-result", "rust");
 			const result3 = await adapters.rust.execute(step3, ctx);
 			expect(result3.success).toBe(true);
-			expect(ctx.vars["rust_processed"]).toBe(true);
+			expect(ctx.vars.rust_processed).toBe(true);
 
 			// Step 4: Ruby
 			const step4 = createRunnerNode("send-notification", "ruby");
 			const result4 = await adapters.ruby.execute(step4, ctx);
 			expect(result4.success).toBe(true);
-			expect(ctx.vars["ruby_processed"]).toBe(true);
+			expect(ctx.vars.ruby_processed).toBe(true);
 
 			// Verify full pipeline context
-			expect(ctx.vars["nodejs_node"]).toBe("fetch-user");
-			expect(ctx.vars["go_node"]).toBe("process-data");
-			expect(ctx.vars["rust_node"]).toBe("validate-result");
-			expect(ctx.vars["ruby_node"]).toBe("send-notification");
+			expect(ctx.vars.nodejs_node).toBe("fetch-user");
+			expect(ctx.vars.go_node).toBe("process-data");
+			expect(ctx.vars.rust_node).toBe("validate-result");
+			expect(ctx.vars.ruby_node).toBe("send-notification");
 		});
 
 		it("should execute a 7-language polyglot workflow", async () => {
@@ -269,7 +269,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 			}
 
 			// Initial value should still be present
-			expect(ctx.vars["initial"]).toBe("value");
+			expect(ctx.vars.initial).toBe("value");
 
 			// All runtimes should have added their markers
 			for (const kind of runtimes) {
@@ -468,7 +468,7 @@ describe("Cross-Language Integration Tests (Phase 5G)", () => {
 			const totalMs = performance.now() - start;
 			const avgMs = totalMs / 1000;
 
-			console.log(`\n📊 Cross-Language Routing Performance:`);
+			console.log("\n📊 Cross-Language Routing Performance:");
 			console.log(`   Total: ${totalMs.toFixed(2)}ms for 1000 executions`);
 			console.log(`   Average: ${avgMs.toFixed(2)}ms per execution`);
 

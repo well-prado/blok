@@ -26,13 +26,13 @@ This guide walks you through migrating existing class-based `BlokService` nodes 
 
 ```typescript
 // nodes/fetch-user/index.ts
-import BlokService from "@blok/runner/BlokService";
-import BlokResponse from "@blok/runner/BlokResponse";
-import type { IBlokResponse } from "@blok/runner/BlokResponse";
-import type { Context } from "@blok/shared";
-import { GlobalError } from "@blok/shared";
-import type JsonLikeObject from "@blok/runner/types/JsonLikeObject";
-import type Condition from "@blok/runner/types/Condition";
+import BlokService from "@blokjs/runner/BlokService";
+import BlokResponse from "@blokjs/runner/BlokResponse";
+import type { IBlokResponse } from "@blokjs/runner/BlokResponse";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
+import type JsonLikeObject from "@blokjs/runner/types/JsonLikeObject";
+import type Condition from "@blokjs/runner/types/Condition";
 
 interface FetchUserInput {
   userId: string;
@@ -103,7 +103,7 @@ export default class FetchUser extends BlokService<FetchUserInput> {
 
 ```typescript
 // nodes/fetch-user/index.ts
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -217,7 +217,7 @@ async execute(ctx, input) {
 ### Step 5: Write the defineNode Call
 
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
@@ -243,17 +243,17 @@ export default defineNode({
 
 Replace:
 ```typescript
-import BlokService from "@blok/runner/BlokService";
-import BlokResponse from "@blok/runner/BlokResponse";
-import type { IBlokResponse } from "@blok/runner/BlokResponse";
-import { GlobalError } from "@blok/shared";
-import type JsonLikeObject from "@blok/runner/types/JsonLikeObject";
-import type Condition from "@blok/runner/types/Condition";
+import BlokService from "@blokjs/runner/BlokService";
+import BlokResponse from "@blokjs/runner/BlokResponse";
+import type { IBlokResponse } from "@blokjs/runner/BlokResponse";
+import { GlobalError } from "@blokjs/shared";
+import type JsonLikeObject from "@blokjs/runner/types/JsonLikeObject";
+import type Condition from "@blokjs/runner/types/Condition";
 ```
 
 With:
 ```typescript
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 ```
 

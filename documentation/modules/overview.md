@@ -137,13 +137,13 @@ blok/
 ## Package Dependencies
 
 ```
-@blok/shared       ← Base types (Context, NodeBase, GlobalError)
+@blokjs/shared       ← Base types (Context, NodeBase, GlobalError)
        ↑
-@blok/runner       ← Core execution engine (depends on shared + helper)
+@blokjs/runner       ← Core execution engine (depends on shared + helper)
        ↑
-@blok/helper       ← Workflow builder DSL (depends on shared)
+@blokjs/helper       ← Workflow builder DSL (depends on shared)
        ↑
-@blok/trigger-http ← HTTP trigger (depends on runner + shared + helper)
+@blokjs/trigger-http ← HTTP trigger (depends on runner + shared + helper)
        ↑
 blokctl (CLI)                ← CLI tooling (depends on runner)
 ```

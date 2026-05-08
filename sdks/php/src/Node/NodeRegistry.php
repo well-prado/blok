@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Blok\Blok\Node;
 
+use Blok\Blok\Errors\BlokError;
 use Blok\Blok\Server\Middleware;
 use Blok\Blok\Server\MiddlewarePipeline;
 use Blok\Blok\Types\ExecutionMetrics;
@@ -115,11 +116,39 @@ final class NodeRegistry
             }
 
             return $result;
-        } catch (\Throwable $e) {
+        } catch (BlokError $e) {
+            // Structured BlokError path (master plan §17): pass the instance
+            // through verbatim so the gRPC servicer can serialize every field
+            // (category, severity, remediation, retryable hints, cause chain,
+            // context snapshot, etc.) into the proto NodeError.
             $durationMs = (hrtime(true) - $startTime) / 1_000_000;
             $memoryBytes = memory_get_peak_usage(true);
 
-            $result = ExecutionResult::error($e->getMessage());
+            $result = new ExecutionResult(
+                success: false,
+                data: null,
+                errors: $e,
+            );
+            $result->withMetrics(new ExecutionMetrics(
+                durationMs: round($durationMs, 3),
+                memoryBytes: $memoryBytes,
+            ));
+
+            return $result;
+        } catch (\Throwable $e) {
+            // Preserve the typed Throwable on `errors` so the gRPC servicer's
+            // `internalErrorToProto` can derive `UNCAUGHT_<TYPE>` from the
+            // exception class via `BlokError::fromUnknown` per §17.7.
+            // (PHP's `mixed` type lets us store the instance directly,
+            // mirroring Rust's typed-error preservation.)
+            $durationMs = (hrtime(true) - $startTime) / 1_000_000;
+            $memoryBytes = memory_get_peak_usage(true);
+
+            $result = new ExecutionResult(
+                success: false,
+                data: null,
+                errors: $e,
+            );
             $result->withMetrics(new ExecutionMetrics(
                 durationMs: round($durationMs, 3),
                 memoryBytes: $memoryBytes,

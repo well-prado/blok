@@ -1,33 +1,37 @@
 /**
  * Authentication Middleware for Blok Triggers
  *
- * Provides pluggable authentication for all trigger types:
- * - JWT Bearer token verification (RS256, HS256)
- * - API Key verification (header, query param)
- * - Custom auth provider support
- *
- * Integrates with TriggerBase via composition.
+ * @deprecated Since v0.4.1. Will be removed in v0.5. This class ships as
+ * example-grade code (HS256-only JWT verification, no JWKS, no key
+ * rotation, non-constant-time API-key lookup) and is not wired into any
+ * trigger. Production deployments should compose auth from a hardened
+ * library (`jose`, `hono/jwt`, `node-jsonwebtoken`) at the trigger or
+ * workflow layer instead. See `docs/d/security/cookbook.mdx` for the
+ * recommended patterns.
  *
  * @example
  * ```typescript
- * const auth = new AuthMiddleware({
- *   providers: [
- *     new JWTAuthProvider({ secret: process.env.JWT_SECRET! }),
- *     new APIKeyAuthProvider({
- *       keys: new Map([["my-api-key", { name: "service-a", roles: ["admin"] }]]),
- *     }),
- *   ],
- * });
- *
- * // In Express middleware
- * app.use(auth.expressMiddleware());
- *
- * // Or manually
- * const identity = await auth.authenticate(request);
+ * // Recommended (jose):
+ * import { jwtVerify } from "jose";
+ * const { payload } = await jwtVerify(token, secret, { issuer, audience });
  * ```
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+
+let authMiddlewareWarningEmitted = false;
+function emitAuthMiddlewareDeprecationWarning(): void {
+	if (authMiddlewareWarningEmitted) return;
+	authMiddlewareWarningEmitted = true;
+	if (process.env.BLOK_SUPPRESS_AUTHMIDDLEWARE_WARNING === "1") return;
+	console.warn(
+		"[blok] AuthMiddleware (and JWTAuthProvider, APIKeyAuthProvider) is deprecated and will be removed in v0.5. " +
+			"It ships as example-grade code, not production auth. " +
+			"Use `jose`, `hono/jwt`, or `node-jsonwebtoken` at the trigger or workflow layer instead. " +
+			"See docs/d/security/cookbook.mdx. " +
+			"Set BLOK_SUPPRESS_AUTHMIDDLEWARE_WARNING=1 to silence.",
+	);
+}
 
 export interface AuthIdentity {
 	/** Unique identifier for the authenticated entity */
@@ -83,6 +87,9 @@ export interface AuthMiddlewareConfig {
 	onAuthFailure?: (result: AuthResult, request: AuthRequest) => void;
 }
 
+/**
+ * @deprecated Since v0.4.1. See file-level JSDoc; will be removed in v0.5.
+ */
 export class AuthMiddleware {
 	private config: AuthMiddlewareConfig;
 
@@ -92,6 +99,7 @@ export class AuthMiddleware {
 			required: true,
 			...config,
 		};
+		emitAuthMiddlewareDeprecationWarning();
 	}
 
 	/**
@@ -207,6 +215,9 @@ export interface JWTAuthProviderConfig {
 	rolesClaim?: string;
 }
 
+/**
+ * @deprecated Since v0.4.1. See file-level JSDoc; will be removed in v0.5.
+ */
 export class JWTAuthProvider implements AuthProvider {
 	readonly name = "jwt";
 	private config: JWTAuthProviderConfig;
@@ -218,6 +229,7 @@ export class JWTAuthProvider implements AuthProvider {
 			rolesClaim: "roles",
 			...config,
 		};
+		emitAuthMiddlewareDeprecationWarning();
 	}
 
 	async authenticate(request: AuthRequest): Promise<AuthResult> {
@@ -354,6 +366,9 @@ export interface APIKeyAuthProviderConfig {
 	validate?: (key: string) => Promise<APIKeyInfo | null>;
 }
 
+/**
+ * @deprecated Since v0.4.1. See file-level JSDoc; will be removed in v0.5.
+ */
 export class APIKeyAuthProvider implements AuthProvider {
 	readonly name = "api-key";
 	private config: APIKeyAuthProviderConfig;
@@ -364,6 +379,7 @@ export class APIKeyAuthProvider implements AuthProvider {
 			queryParam: "api_key",
 			...config,
 		};
+		emitAuthMiddlewareDeprecationWarning();
 	}
 
 	async authenticate(request: AuthRequest): Promise<AuthResult> {

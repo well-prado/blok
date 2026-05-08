@@ -9,7 +9,13 @@
  * - AZURE_SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE: Fully qualified namespace (if using DefaultAzureCredential)
  */
 
-import type { PubSubTriggerOpts } from "@blok/helper";
+import type {
+	ProcessErrorArgs,
+	ServiceBusClient,
+	ServiceBusReceivedMessage,
+	ServiceBusReceiver,
+} from "@azure/service-bus";
+import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
 import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
 
@@ -27,10 +33,21 @@ export interface AzureServiceBusConfig {
 export class AzureServiceBusAdapter implements PubSubAdapter {
 	readonly provider = "azure" as const;
 
-	private client: any;
-	private receivers: Map<string, any> = new Map();
+	private client: ServiceBusClient | undefined;
+	private receivers: Map<string, ServiceBusReceiver> = new Map();
 	private connected = false;
 	private config: AzureServiceBusConfig;
+
+	/**
+	 * Type-narrowing accessor for `this.client`. Field is undefined until
+	 * `connect()` runs.
+	 */
+	private requireClient(): ServiceBusClient {
+		if (!this.client) {
+			throw new Error("[AzureServiceBusAdapter] client is not initialised — call connect() first");
+		}
+		return this.client;
+	}
 
 	constructor(config?: AzureServiceBusConfig) {
 		this.config = {
@@ -63,8 +80,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			console.log("[AzureServiceBusAdapter] Connected to Azure Service Bus");
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to Azure Service Bus: ${(error as Error).message}. ` +
-					`Make sure @azure/service-bus is installed: npm install @azure/service-bus`,
+				`Failed to connect to Azure Service Bus: ${(error as Error).message}. Make sure @azure/service-bus is installed: npm install @azure/service-bus`,
 			);
 		}
 	}
@@ -82,7 +98,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			}
 			this.receivers.clear();
 
-			await this.client.close();
+			await this.requireClient().close();
 			this.connected = false;
 			console.log("[AzureServiceBusAdapter] Disconnected from Azure Service Bus");
 		} catch (error) {
@@ -98,17 +114,18 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			throw new Error("Not connected to Azure Service Bus. Call connect() first.");
 		}
 
-		let receiver: any;
+		const client = this.requireClient();
+		let receiver: ServiceBusReceiver;
 
 		// Determine if this is a topic subscription or a queue
 		if (config.subscription && config.topic) {
 			// Topic with subscription
-			receiver = this.client.createReceiver(config.topic, config.subscription, {
+			receiver = client.createReceiver(config.topic, config.subscription, {
 				receiveMode: config.ack !== false ? "peekLock" : "receiveAndDelete",
 			});
 		} else {
 			// Queue
-			receiver = this.client.createReceiver(config.subscription || config.topic, {
+			receiver = client.createReceiver(config.subscription || config.topic, {
 				receiveMode: config.ack !== false ? "peekLock" : "receiveAndDelete",
 			});
 		}
@@ -116,7 +133,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 		const subscriptionKey = `${config.topic}/${config.subscription}`;
 
 		// Message handler
-		const processMessage = async (sbMessage: any) => {
+		const processMessage = async (sbMessage: ServiceBusReceivedMessage) => {
 			// Parse message body
 			let body: unknown;
 			try {
@@ -139,7 +156,8 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 
 			// Create pub/sub message
 			const pubsubMessage: PubSubMessage = {
-				id: sbMessage.messageId || uuid(),
+				// `messageId` may be string | number | Buffer per Azure SDK; coerce to string.
+				id: sbMessage.messageId !== undefined ? String(sbMessage.messageId) : uuid(),
 				body,
 				attributes,
 				raw: sbMessage,
@@ -162,9 +180,10 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			}
 		};
 
-		// Error handler
-		const processError = async (error: Error) => {
-			console.error(`[AzureServiceBusAdapter] Error: ${error.message}`);
+		// Error handler — Azure SDK passes a `ProcessErrorArgs` with the
+		// underlying error inside `args.error` plus contextual fields.
+		const processError = async (args: ProcessErrorArgs) => {
+			console.error(`[AzureServiceBusAdapter] Error: ${args.error.message}`);
 		};
 
 		// Subscribe to messages
@@ -205,7 +224,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 
 		try {
 			// Create a temporary receiver to test connectivity
-			const testReceiver = this.client.createReceiver("$default", {
+			const testReceiver = this.requireClient().createReceiver("$default", {
 				receiveMode: "peekLock",
 			});
 			await testReceiver.close();

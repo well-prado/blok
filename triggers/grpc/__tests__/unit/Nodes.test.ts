@@ -6,11 +6,11 @@ describe("Nodes", () => {
 		expect(typeof nodes).toBe("object");
 	});
 
-	it("should have @blok/api-call key", () => {
-		expect(nodes["@blok/api-call"]).toBeDefined();
+	it("should have @blokjs/api-call key", () => {
+		expect(nodes["@blokjs/api-call"]).toBeDefined();
 	});
 
-	it("should have @blok/if-else key", () => {
-		expect(nodes["@blok/if-else"]).toBeDefined();
+	it("should have @blokjs/if-else key", () => {
+		expect(nodes["@blokjs/if-else"]).toBeDefined();
 	});
 });

@@ -395,7 +395,7 @@ export class FileAuditSink implements AuditSink {
 			this.initialized = true;
 		}
 
-		const data = this.buffer.join("\n") + "\n";
+		const data = `${this.buffer.join("\n")}\n`;
 		this.buffer = [];
 		await appendFile(this.filePath, data, "utf-8");
 	}

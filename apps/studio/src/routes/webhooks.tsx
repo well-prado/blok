@@ -91,13 +91,13 @@ function WebhooksPage() {
 		<div className="p-6 max-w-4xl mx-auto space-y-6">
 			<div className="flex items-center justify-between">
 				<div>
-					<h1 className="text-lg font-semibold text-zinc-100">Webhooks</h1>
-					<p className="text-sm text-zinc-500">Get notified when workflow runs complete or fail.</p>
+					<h1 className="text-2xl font-medium font-display italic tracking-tight text-zinc-100">Webhooks</h1>
+					<p className="text-sm text-zinc-500 mt-1">Get notified when workflow runs complete or fail.</p>
 				</div>
 				<button
 					type="button"
 					onClick={() => setShowForm(!showForm)}
-					className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+					className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors"
 				>
 					<Plus className="w-4 h-4" />
 					Add Webhook
@@ -106,7 +106,7 @@ function WebhooksPage() {
 
 			{/* Create form */}
 			{showForm && (
-				<form onSubmit={handleSubmit} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 space-y-4">
+				<form onSubmit={handleSubmit} className="rounded-lg border border-zinc-800 bg-overlay p-4 space-y-4">
 					<div>
 						<label htmlFor="webhook-url" className="block text-xs font-medium text-zinc-400 mb-1">
 							Endpoint URL
@@ -117,7 +117,7 @@ function WebhooksPage() {
 							value={url}
 							onChange={(e) => setUrl(e.target.value)}
 							placeholder="https://example.com/webhook"
-							className="w-full px-3 py-2 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+							className="w-full px-3 py-2 rounded-md bg-raised border border-zinc-800 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blok-green-500"
 						/>
 					</div>
 
@@ -131,7 +131,7 @@ function WebhooksPage() {
 							value={secret}
 							onChange={(e) => setSecret(e.target.value)}
 							placeholder="Used for HMAC-SHA256 signature verification"
-							className="w-full px-3 py-2 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+							className="w-full px-3 py-2 rounded-md bg-raised border border-zinc-800 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blok-green-500"
 						/>
 						<p className="text-[11px] text-zinc-600 mt-1">If set, requests include an X-Blok-Signature header.</p>
 					</div>
@@ -147,8 +147,8 @@ function WebhooksPage() {
 									className={cn(
 										"px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
 										selectedEvents.includes(evt.value)
-											? "border-blue-500 bg-blue-500/10 text-blue-400"
-											: "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600",
+											? "border-blok-green-500 bg-blok-green-500/10 text-blok-green-500"
+											: "border-zinc-800 bg-raised text-zinc-400 hover:border-zinc-700",
 									)}
 								>
 									{evt.label}
@@ -163,7 +163,7 @@ function WebhooksPage() {
 						<button
 							type="submit"
 							disabled={addMutation.isPending}
-							className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors disabled:opacity-50"
 						>
 							{addMutation.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
 							Create Webhook
@@ -190,16 +190,33 @@ function WebhooksPage() {
 			) : webhooks.length === 0 ? (
 				<EmptyState
 					icon={<Webhook className="w-10 h-10" />}
-					title="No webhooks"
-					description="Add a webhook to get notified about workflow run events."
+					title="No webhooks yet"
+					description={
+						<>
+							Webhooks fire when a run completes, fails, or is cancelled. Each request is signed with HMAC-SHA256 if you
+							set a secret — the receiver verifies via the
+							<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+								X-Blok-Signature
+							</code>
+							header.
+						</>
+					}
+					action={
+						<button
+							type="button"
+							onClick={() => setShowForm(true)}
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors"
+						>
+							<Plus className="w-3.5 h-3.5" />
+							Add webhook
+						</button>
+					}
+					docLink={{ href: "https://docs.blok.io/studio/webhooks", label: "docs.blok.io/studio/webhooks" }}
 				/>
 			) : (
 				<div className="space-y-2">
 					{webhooks.map((wh) => (
-						<div
-							key={wh.id}
-							className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3"
-						>
+						<div key={wh.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-overlay px-4 py-3">
 							<div className={cn("w-2 h-2 rounded-full shrink-0", wh.active ? "bg-green-500" : "bg-red-500")} />
 							<div className="flex-1 min-w-0">
 								<div className="text-sm text-zinc-200 font-mono truncate">{wh.url}</div>

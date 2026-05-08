@@ -1,11 +1,11 @@
-import ApiCall from "@blok/api-call";
-import IfElse from "@blok/if-else";
-import type { BlokService } from "@blok/runner";
+import ApiCall from "@blokjs/api-call";
+import IfElse from "@blokjs/if-else";
+import type { BlokService } from "@blokjs/runner";
 import WelcomeMessage from "./nodes/welcome-message/index";
 
 const nodes: Record<string, BlokService<unknown>> = {
-	"@blok/api-call": ApiCall,
-	"@blok/if-else": IfElse,
+	"@blokjs/api-call": ApiCall,
+	"@blokjs/if-else": IfElse,
 	"welcome-message": WelcomeMessage,
 };
 

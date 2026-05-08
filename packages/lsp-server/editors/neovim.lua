@@ -4,7 +4,7 @@
 -- Requires: nvim-lspconfig (https://github.com/neovim/nvim-lspconfig)
 --
 -- Option 1: Install globally
---   npm install -g @blok/lsp-server
+--   npm install -g @blokjs/lsp-server
 --
 -- Option 2: Use from project
 --   npx blok-lsp (runs from node_modules)

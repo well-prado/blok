@@ -38,7 +38,7 @@ Using packer.nvim: >lua
 <
 
 Prerequisites:
-- `blok-lsp` binary on your PATH: `npm install -g @blok/lsp-server`
+- `blok-lsp` binary on your PATH: `npm install -g @blokjs/lsp-server`
 - Optional: `nvim-lspconfig` for managed LSP setup
 
 ==============================================================================

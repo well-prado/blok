@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { JsonLikeObject } from "@blok/runner";
+import type { JsonLikeObject } from "@blokjs/runner";
 import GrpcClient, { type RpcOptions, type WorkflowRequest, HttpVersionEnum, TransportEnum } from "./GrpcClient";
 import MessageDecode from "./MessageDecode";
 

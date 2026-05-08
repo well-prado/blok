@@ -1,12 +1,21 @@
 # node-name
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @blokjs/shared@0.2.0
+  - @blokjs/helper@0.2.0
+  - @blokjs/runner@0.2.0
+
 ## 0.0.17
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.19
-  - @blok/shared@0.0.9
+  - @blokjs/runner@0.1.19
+  - @blokjs/shared@0.0.9
 
 ## 0.0.16
 
@@ -14,8 +23,8 @@
 
 - Added examples and create project' command to include examples and 'create node' command with options for type ('module' or 'class') and template ('class' or 'ui')
 - Updated dependencies
-  - @blok/runner@0.1.18
-  - @blok/shared@0.0.8
+  - @blokjs/runner@0.1.18
+  - @blokjs/shared@0.0.8
 
 ## 0.0.15
 
@@ -28,9 +37,9 @@
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/helper@0.1.4
-  - @blok/runner@0.1.16
-  - @blok/shared@0.0.7
+  - @blokjs/helper@0.1.4
+  - @blokjs/runner@0.1.16
+  - @blokjs/shared@0.0.7
 
 ## 0.0.13
 
@@ -38,31 +47,31 @@
 
 - Improved the BlokService base class to accept a InputType. This force developer to always create a type to define the Node handle input. Added unit test for pending projects like if-else and api-call.
 - Updated dependencies
-  - @blok/runner@0.1.15
+  - @blokjs/runner@0.1.15
 
 ## 0.0.12
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/shared@0.0.6
-  - @blok/runner@0.1.14
+  - @blokjs/shared@0.0.6
+  - @blokjs/runner@0.1.14
 
 ## 0.0.11
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.13
-  - @blok/shared@0.0.5
+  - @blokjs/runner@0.1.13
+  - @blokjs/shared@0.0.5
 
 ## 0.0.10
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.12
-  - @blok/shared@0.0.4
+  - @blokjs/runner@0.1.12
+  - @blokjs/shared@0.0.4
 
 ## 0.0.9
 
@@ -70,8 +79,8 @@
 
 - Improved and extended the open telemetry feature
 - Updated dependencies
-  - @blok/runner@0.1.9
-  - @blok/shared@0.0.3
+  - @blokjs/runner@0.1.9
+  - @blokjs/shared@0.0.3
 
 ## 0.0.8
 
@@ -79,8 +88,8 @@
 
 - Fixed open telemetry issues and types
 - Updated dependencies
-  - @blok/runner@0.1.8
-  - @blok/shared@0.0.2
+  - @blokjs/runner@0.1.8
+  - @blokjs/shared@0.0.2
 
 ## 0.0.7
 
@@ -88,8 +97,8 @@
 
 - Fixed issue with the cli node creation test
 - Updated dependencies
-  - @blok/runner@0.1.7
-  - @blok/shared@0.0.1
+  - @blokjs/runner@0.1.7
+  - @blokjs/shared@0.0.1
 
 ## 0.0.6
 
@@ -97,43 +106,43 @@
 
 - Migrated and refactored shared library
 - Updated dependencies
-  - @blok/runner@0.1.6
+  - @blokjs/runner@0.1.6
 
 ## 0.0.5
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/helper@0.1.3
-  - @blok/runner@0.1.4
+  - @blokjs/helper@0.1.3
+  - @blokjs/runner@0.1.4
 
 ## 0.0.4
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/helper@0.1.2
-  - @blok/runner@0.1.3
+  - @blokjs/helper@0.1.2
+  - @blokjs/runner@0.1.3
 
 ## 0.0.3
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/helper@0.1.1
-  - @blok/runner@0.1.2
+  - @blokjs/helper@0.1.1
+  - @blokjs/runner@0.1.2
 
 ## 0.0.2
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/runner@0.1.1
+  - @blokjs/runner@0.1.1
 
 ## 0.0.1
 
 ### Patch Changes
 
 - Updated dependencies
-  - @blok/helper@0.1.0
-  - @blok/runner@0.1.0
+  - @blokjs/helper@0.1.0
+  - @blokjs/runner@0.1.0

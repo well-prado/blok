@@ -18,7 +18,7 @@
         <h3>Requirements</h3>
         <ul>
             <li>The <code>blok-lsp</code> binary must be available on your PATH</li>
-            <li>Install via: <code>npm install -g @blok/lsp-server</code></li>
+            <li>Install via: <code>npm install -g @blokjs/lsp-server</code></li>
         </ul>
     ]]></description>
 

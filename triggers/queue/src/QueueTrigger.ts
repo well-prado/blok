@@ -20,16 +20,16 @@
  *    - Ack/nack based on response
  */
 
-import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@blok/helper";
+import type { HelperResponse, QueueProvider, QueueTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -117,12 +117,6 @@ export abstract class QueueTrigger extends TriggerBase {
 	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
-	constructor() {
-		super();
-		this.loadNodes();
-		this.loadWorkflows();
-	}
-
 	/**
 	 * Load nodes into the node map
 	 */
@@ -146,6 +140,11 @@ export abstract class QueueTrigger extends TriggerBase {
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
+
+		// Initialize nodes and workflows (called here because subclass properties
+		// aren't available in parent constructor)
+		this.loadNodes();
+		this.loadWorkflows();
 
 		try {
 			// Connect to queue system
@@ -268,7 +267,7 @@ export abstract class QueueTrigger extends TriggerBase {
 
 				// Store raw message in context for advanced use cases
 				if (!ctx.vars) ctx.vars = {};
-				ctx.vars["_queue_message"] = {
+				ctx.vars._queue_message = {
 					topic: message.topic,
 					partition: String(message.partition ?? ""),
 					offset: message.offset ?? "",

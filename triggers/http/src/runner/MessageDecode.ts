@@ -1,5 +1,5 @@
-import type { JsonLikeObject } from "@blok/runner";
-import type { Context } from "@blok/shared";
+import type { JsonLikeObject } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
 import type WorkflowRequest from "./types/WorkflowRequest";
 import type WorkflowResponse from "./types/WorkflowResponse";
 

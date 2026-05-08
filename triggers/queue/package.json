@@ -1,6 +1,6 @@
 {
-	"name": "@blok/trigger-queue",
-	"version": "0.1.0",
+	"name": "@blokjs/trigger-queue",
+	"version": "0.2.3",
 	"description": "Queue-based trigger for Blok workflows - supports Kafka, RabbitMQ, SQS, and Redis",
 	"type": "module",
 	"main": "dist/index.js",
@@ -14,9 +14,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blok/helper": "workspace:*",
-		"@blok/runner": "workspace:*",
-		"@blok/shared": "workspace:*",
+		"@blokjs/helper": "^0.4.0",
+		"@blokjs/runner": "^0.4.0",
+		"@blokjs/shared": "^0.4.0",
 		"@opentelemetry/api": "^1.9.0",
 		"uuid": "^11.1.0"
 	},
@@ -28,11 +28,12 @@
 		"vitest": "^4.0.18"
 	},
 	"peerDependencies": {
-		"kafkajs": "^2.2.4",
-		"amqplib": "^0.10.9",
-		"@aws-sdk/client-sqs": "^3.980.0",
-		"ioredis": "^5.9.2",
-		"bullmq": "^5.67.2"
+		"kafkajs": "",
+		"amqplib": "",
+		"@aws-sdk/client-sqs": "",
+		"ioredis": "",
+		"bullmq": "",
+		"nats": ""
 	},
 	"peerDependenciesMeta": {
 		"kafkajs": {
@@ -49,6 +50,13 @@
 		},
 		"bullmq": {
 			"optional": true
+		},
+		"nats": {
+			"optional": true
 		}
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
 	}
 }

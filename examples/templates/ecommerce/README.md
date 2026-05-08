@@ -131,7 +131,7 @@ FROM_EMAIL, INTERNAL_API_KEY
 2. Set the required environment variables for each workflow in your `.env` file.
 3. Install the required blok modules:
    ```bash
-   npx blok install @blok/api-call @blok/if-else @blok/json-validator
+   npx blok install @blokjs/api-call @blokjs/if-else @blokjs/json-validator
    ```
 4. Start the Blok runtime:
    ```bash

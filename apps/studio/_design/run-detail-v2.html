@@ -1,0 +1,1461 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blok Studio · Direction A · Run Detail Hi-Fi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,wght@1,400;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* Brand */
+        --blok-green-500: #2bcd71;
+        --blok-green-600: #22a85b;
+        --blok-green-100: rgba(43, 205, 113, 0.12);
+
+        /* Surfaces */
+        --bg-canvas: #0b0b0d;
+        --bg-raised: #111113;
+        --bg-overlay: #18181b;
+        --bg-hover: #1f1f23;
+
+        /* Ink */
+        --ink-1: #f4f4f5;
+        --ink-2: #a1a1aa;
+        --ink-3: #52525b;
+
+        /* Borders */
+        --hairline: rgba(244, 244, 245, 0.06);
+        --hairline-2: rgba(244, 244, 245, 0.1);
+
+        /* Status (preserved from current Studio) */
+        --status-pending: #71717a;
+        --status-running: #3b82f6;
+        --status-completed: var(--blok-green-500); /* tightened to brand */
+        --status-failed: #ef4444;
+        --status-cancelled: #a855f7;
+        --status-skipped: #6b7280;
+
+        --log-debug: #71717a;
+        --log-info: #3b82f6;
+        --log-warn: #f59e0b;
+        --log-error: #ef4444;
+
+        --focus-ring: rgba(43, 205, 113, 0.45);
+        --selected-bg: rgba(43, 205, 113, 0.08);
+
+        --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", ui-monospace,
+          monospace;
+        --font-display: "Newsreader", Georgia, "Times New Roman", serif;
+        --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg-canvas);
+        color: var(--ink-1);
+        font-family: var(--font-ui);
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #3f3f46;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #52525b;
+      }
+
+      /* ── Junior-pass banner ────────────────────────────────────── */
+      .junior-banner {
+        background: var(--bg-overlay);
+        border-bottom: 1px solid var(--hairline-2);
+        padding: 16px 24px;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .junior-banner .row {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+      .junior-banner h3 {
+        margin: 0 0 4px;
+        color: var(--ink-1);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .junior-banner ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+      .junior-banner li {
+        margin: 1px 0;
+      }
+      .junior-banner code {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        background: var(--bg-canvas);
+        border: 1px solid var(--hairline);
+        padding: 0 4px;
+        border-radius: 3px;
+      }
+      .junior-banner .col {
+        flex: 1;
+      }
+      .junior-pill {
+        display: inline-block;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: var(--blok-green-100);
+        color: var(--blok-green-500);
+        padding: 2px 8px;
+        border-radius: 999px;
+        margin-bottom: 8px;
+        border: 1px solid rgba(43, 205, 113, 0.2);
+      }
+
+      /* ── Top shell (header) ────────────────────────────────────── */
+      .shell {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        grid-template-rows: 48px 1fr;
+        height: calc(100vh - 184px);
+        min-height: 720px;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+      .top {
+        grid-column: 1 / -1;
+        background: var(--bg-canvas);
+        border-bottom: 1px solid var(--hairline-2);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 16px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 4px;
+      }
+      .brand svg {
+        height: 18px;
+        width: auto;
+      }
+      .brand .wordmark {
+        font-weight: 600;
+        font-size: 13px;
+        letter-spacing: 0.03em;
+      }
+      .env-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline-2);
+        padding: 4px 10px 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 120ms;
+      }
+      .env-chip:hover {
+        background: var(--bg-hover);
+      }
+      .env-chip .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--blok-green-500);
+        box-shadow: 0 0 0 3px rgba(43, 205, 113, 0.18);
+      }
+      .env-chip .label {
+        color: var(--ink-1);
+        font-weight: 500;
+      }
+      .env-chip .caret {
+        color: var(--ink-3);
+        font-size: 10px;
+      }
+      .top .spacer {
+        flex: 1;
+      }
+      .top .ticker {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 11px;
+        color: var(--ink-2);
+        font-family: var(--font-mono);
+      }
+      .ticker .live-pulse {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--blok-green-500);
+        font-weight: 500;
+      }
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--blok-green-500);
+        animation: brand-pulse 2s ease-in-out infinite;
+      }
+      @keyframes brand-pulse {
+        0%,
+        100% {
+          background: var(--blok-green-500);
+          box-shadow: 0 0 0 0 rgba(43, 205, 113, 0.5);
+        }
+        50% {
+          background: var(--blok-green-600);
+          box-shadow: 0 0 0 4px rgba(43, 205, 113, 0);
+        }
+      }
+      .kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline-2);
+        padding: 1px 5px;
+        border-radius: 3px;
+        color: var(--ink-2);
+      }
+
+      /* ── Sidebar ───────────────────────────────────────────────── */
+      .sidebar {
+        background: var(--bg-canvas);
+        border-right: 1px solid var(--hairline);
+        padding: 12px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .nav-section {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+        padding: 12px 12px 6px;
+      }
+      .nav-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 12px;
+        font-size: 13px;
+        color: var(--ink-2);
+        border-radius: 5px;
+        text-decoration: none;
+        cursor: pointer;
+        position: relative;
+      }
+      .nav-link:hover {
+        background: var(--bg-hover);
+        color: var(--ink-1);
+      }
+      .nav-link.active {
+        background: var(--selected-bg);
+        color: var(--ink-1);
+      }
+      .nav-link.active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: var(--blok-green-500);
+        border-radius: 0 2px 2px 0;
+      }
+      .nav-link svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.7;
+      }
+      .nav-link.active svg {
+        opacity: 1;
+      }
+      .nav-link .count {
+        margin-left: auto;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-3);
+      }
+      .nav-link.active .count {
+        color: var(--blok-green-500);
+      }
+
+      /* ── Run-detail page header ────────────────────────────────── */
+      .body {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-canvas);
+        overflow: hidden;
+      }
+      .run-header {
+        padding: 14px 20px 14px 20px;
+        border-bottom: 1px solid var(--hairline-2);
+        background: var(--bg-canvas);
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .run-header .back {
+        color: var(--ink-3);
+        cursor: pointer;
+        margin-top: 6px;
+      }
+      .run-header .meta {
+        flex: 1;
+        min-width: 0;
+      }
+      .run-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--ink-1);
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-family: var(--font-mono);
+      }
+      .status-badge .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+      }
+      .status-badge.completed {
+        background: var(--blok-green-100);
+        color: var(--blok-green-500);
+      }
+      .status-badge.completed .dot {
+        background: var(--blok-green-500);
+      }
+      .status-badge.running {
+        background: rgba(59, 130, 246, 0.12);
+        color: var(--status-running);
+      }
+      .status-badge.running .dot {
+        background: var(--status-running);
+        animation: brand-pulse 1.5s ease-in-out infinite;
+      }
+      .status-badge.failed {
+        background: rgba(239, 68, 68, 0.12);
+        color: var(--status-failed);
+      }
+      .status-badge.failed .dot {
+        background: var(--status-failed);
+      }
+      .duration-display {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 500;
+        font-size: 28px;
+        color: var(--ink-1);
+        line-height: 1;
+        letter-spacing: -0.01em;
+      }
+      .duration-display .unit {
+        font-size: 14px;
+        color: var(--ink-3);
+        margin-left: 2px;
+      }
+      .run-submeta {
+        display: flex;
+        gap: 14px;
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--ink-2);
+        font-family: var(--font-mono);
+        flex-wrap: wrap;
+      }
+      .run-submeta .sep {
+        color: var(--ink-3);
+      }
+      .run-submeta .chip-version {
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline-2);
+        padding: 1px 6px;
+        border-radius: 3px;
+        color: var(--ink-1);
+      }
+      .run-actions {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        margin-top: 4px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 6px 11px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: var(--font-ui);
+        border: 1px solid transparent;
+        transition: all 120ms;
+      }
+      .btn-primary {
+        background: var(--blok-green-500);
+        color: #00231b;
+        font-weight: 600;
+      }
+      .btn-primary:hover {
+        background: var(--blok-green-600);
+      }
+      .btn-secondary {
+        background: var(--bg-raised);
+        color: var(--ink-1);
+        border-color: var(--hairline-2);
+      }
+      .btn-secondary:hover {
+        background: var(--bg-hover);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--ink-2);
+      }
+      .btn-ghost:hover {
+        background: var(--bg-hover);
+        color: var(--ink-1);
+      }
+      .btn .kbd {
+        margin-left: 4px;
+      }
+
+      /* ── 3-pane shell ──────────────────────────────────────────── */
+      .panes {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 240px 1fr 320px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* ── Left rail: steps ──────────────────────────────────────── */
+      .step-rail {
+        background: var(--bg-canvas);
+        border-right: 1px solid var(--hairline);
+        overflow-y: auto;
+        padding: 8px 0;
+      }
+      .rail-header {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+        padding: 8px 16px 4px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .step-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 16px 7px 14px;
+        cursor: pointer;
+        position: relative;
+        font-size: 12.5px;
+        color: var(--ink-2);
+      }
+      .step-row:hover {
+        background: var(--bg-hover);
+      }
+      .step-row.active {
+        background: var(--selected-bg);
+        color: var(--ink-1);
+      }
+      .step-row.active::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 2px;
+        background: var(--blok-green-500);
+      }
+      .step-row .idx {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--ink-3);
+        width: 12px;
+      }
+      .step-row .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .step-row .dot.completed {
+        background: var(--blok-green-500);
+      }
+      .step-row .dot.running {
+        background: var(--status-running);
+        animation: brand-pulse 1.5s infinite;
+      }
+      .step-row .name {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .step-row .dur {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        color: var(--ink-3);
+      }
+      .step-row.active .dur {
+        color: var(--ink-2);
+      }
+
+      .rail-filter {
+        margin-top: 8px;
+        padding: 8px 16px;
+        border-top: 1px solid var(--hairline);
+        font-size: 11px;
+        color: var(--ink-3);
+      }
+      .rail-filter select {
+        width: 100%;
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline-2);
+        color: var(--ink-1);
+        font-family: var(--font-ui);
+        font-size: 11px;
+        padding: 4px 6px;
+        border-radius: 4px;
+        margin-top: 4px;
+      }
+
+      /* ── Center pane: active step ──────────────────────────────── */
+      .center-pane {
+        background: var(--bg-canvas);
+        overflow-y: auto;
+      }
+      .mode-tabs {
+        display: flex;
+        gap: 0;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--bg-canvas);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .mode-tab {
+        font-size: 12px;
+        font-weight: 500;
+        padding: 10px 12px;
+        color: var(--ink-2);
+        cursor: pointer;
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mode-tab:hover {
+        color: var(--ink-1);
+      }
+      .mode-tab.active {
+        color: var(--ink-1);
+      }
+      .mode-tab.active::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: -1px;
+        height: 2px;
+        background: var(--blok-green-500);
+      }
+      .mode-tab .kbd {
+        font-size: 9.5px;
+        opacity: 0.75;
+      }
+
+      .step-page {
+        padding: 20px 24px 32px;
+      }
+      .step-headline {
+        display: flex;
+        gap: 14px;
+        align-items: baseline;
+        margin-bottom: 4px;
+      }
+      .step-name {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--ink-1);
+        margin: 0;
+        font-family: var(--font-display);
+        font-style: italic;
+        letter-spacing: -0.01em;
+      }
+      .step-name-mono {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--ink-1);
+        margin: 0;
+        font-family: var(--font-mono);
+      }
+      .step-position {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-3);
+      }
+      .step-meta-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+      .meta-pill {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline-2);
+        padding: 3px 9px;
+        border-radius: 999px;
+        color: var(--ink-2);
+      }
+      .meta-pill.transport {
+        background: var(--blok-green-100);
+        color: var(--blok-green-500);
+        border-color: rgba(43, 205, 113, 0.2);
+      }
+
+      .section {
+        margin-bottom: 20px;
+      }
+      .section-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+        padding: 8px 0;
+        cursor: pointer;
+        user-select: none;
+      }
+      .section-head:hover {
+        color: var(--ink-2);
+      }
+      .section-head .caret {
+        font-size: 9px;
+        transition: transform 150ms;
+      }
+      .section.collapsed .caret {
+        transform: rotate(-90deg);
+      }
+      .section.collapsed .section-body {
+        display: none;
+      }
+      .section-head .extra {
+        margin-left: auto;
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 11px;
+      }
+
+      .json-block {
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        padding: 12px 14px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-1);
+        overflow-x: auto;
+        line-height: 1.55;
+      }
+      .json-block .key {
+        color: var(--blok-green-500);
+      }
+      .json-block .str {
+        color: #f4c280;
+      }
+      .json-block .num {
+        color: #b3aaff;
+      }
+      .json-block .punct {
+        color: var(--ink-3);
+      }
+
+      /* Logs in center pane (compact mode) */
+      .logs-block {
+        background: var(--bg-raised);
+        border: 1px solid var(--hairline);
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        max-height: 240px;
+        overflow-y: auto;
+      }
+      .log-line {
+        display: grid;
+        grid-template-columns: 88px 56px 1fr;
+        gap: 12px;
+        padding: 4px 14px;
+        border-bottom: 1px solid var(--hairline);
+        line-height: 1.45;
+      }
+      .log-line:last-child {
+        border-bottom: 0;
+      }
+      .log-line .ts {
+        color: var(--ink-3);
+      }
+      .log-line .lvl {
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .log-line .lvl.info {
+        color: var(--log-info);
+      }
+      .log-line .lvl.warn {
+        color: var(--log-warn);
+      }
+      .log-line .lvl.error {
+        color: var(--log-error);
+      }
+      .log-line .lvl.debug {
+        color: var(--log-debug);
+      }
+      .log-line .msg {
+        color: var(--ink-1);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .logs-toolbar {
+        padding: 8px 14px;
+        background: var(--bg-overlay);
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 11px;
+        color: var(--ink-2);
+      }
+      .toolbar-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        border: 1px solid var(--hairline-2);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .toolbar-toggle.active {
+        background: var(--blok-green-100);
+        color: var(--blok-green-500);
+        border-color: rgba(43, 205, 113, 0.3);
+      }
+      .toolbar-toggle .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .toolbar-toggle.active .dot {
+        animation: brand-pulse 2s infinite;
+      }
+
+      /* ── Right pane: inspector ─────────────────────────────────── */
+      .inspector {
+        background: var(--bg-overlay);
+        border-left: 1px solid var(--hairline);
+        overflow-y: auto;
+        padding: 18px 20px 32px;
+      }
+      .inspector h4 {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+        margin: 0 0 8px;
+        font-weight: 600;
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+        margin-bottom: 22px;
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .metric {
+        padding: 12px 14px;
+        border-right: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--hairline);
+      }
+      .metric:nth-child(2n) {
+        border-right: 0;
+      }
+      .metric:nth-last-child(-n + 2) {
+        border-bottom: 0;
+      }
+      .metric .label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--ink-3);
+        margin-bottom: 4px;
+      }
+      .metric .value {
+        font-family: var(--font-mono);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--ink-1);
+      }
+      .metric .value .unit {
+        color: var(--ink-3);
+        font-size: 11px;
+        margin-left: 2px;
+      }
+      .metric.dim .value {
+        color: var(--ink-3);
+      }
+
+      .live-tail {
+        background: var(--bg-canvas);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        margin-top: 12px;
+      }
+      .live-tail-head {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--ink-2);
+      }
+      .live-tail-head .live-dot {
+        width: 6px;
+        height: 6px;
+      }
+      .live-tail-body {
+        padding: 8px 12px;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .tail-line {
+        padding: 2px 0;
+        line-height: 1.4;
+        color: var(--ink-1);
+      }
+      .tail-line .ts {
+        color: var(--ink-3);
+        margin-right: 8px;
+      }
+
+      .footer-keys {
+        margin-top: 24px;
+        padding-top: 14px;
+        border-top: 1px solid var(--hairline);
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        font-size: 11px;
+        color: var(--ink-3);
+      }
+      .footer-keys span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      /* ── Side-by-side comparison strip ─────────────────────────── */
+      .compare-strip {
+        background: var(--bg-overlay);
+        border-top: 1px solid var(--hairline-2);
+        padding: 14px 24px 22px;
+      }
+      .compare-strip h2 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--ink-3);
+        font-weight: 600;
+        margin: 0 0 12px;
+      }
+      .compare-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .compare-card {
+        background: var(--bg-canvas);
+        border: 1px solid var(--hairline-2);
+        border-radius: 8px;
+        padding: 16px 18px;
+      }
+      .compare-card h3 {
+        margin: 0 0 4px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink-2);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .compare-card .summary {
+        font-size: 12px;
+        color: var(--ink-2);
+        line-height: 1.55;
+        margin-top: 6px;
+      }
+      .compare-card.now {
+        border-color: rgba(244, 244, 245, 0.06);
+      }
+      .compare-card.next {
+        border-color: rgba(43, 205, 113, 0.25);
+      }
+      .compare-card.next h3 {
+        color: var(--blok-green-500);
+      }
+      .ascii-frame {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        line-height: 1.5;
+        color: var(--ink-2);
+        margin-top: 10px;
+        white-space: pre;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ────────────────────────────────────────────────────────────
+         JUNIOR-PASS BANNER · what I assumed, what to push back on
+         ──────────────────────────────────────────────────────────── -->
+    <div class="junior-banner">
+      <div class="row">
+        <div class="col">
+          <span class="junior-pill">Junior Pass · v0.1</span>
+          <h3>What this prototype is</h3>
+          <ul>
+            <li>
+              The new <b>run-detail</b> screen for Direction A · Linear-grade
+              Operator. Real Blok green <code>#2BCD71</code>, real run shape
+              from <code>run_23f1aa6581f5</code> (cross-runtime-chain), real
+              logo path embedded.
+            </li>
+            <li>
+              Layout: 3-pane CSS grid (240 / fluid / 320). Mode tabs
+              <code>⌥1–⌥5</code> swap the center pane; left rail and right
+              inspector stay stable.
+            </li>
+            <li>
+              Static prototype — no live data, no SSE, no React. Aim is
+              <i>can we look at this and agree?</i> not <i>does it run</i>.
+            </li>
+          </ul>
+        </div>
+        <div class="col">
+          <h3>Things I'd like you to react to</h3>
+          <ul>
+            <li>
+              Newsreader italic on duration <code>83 ms</code> — one concession
+              to Direction C. Pure Direction A would be JetBrains Mono. <b>Keep
+                or strip?</b>
+            </li>
+            <li>
+              Brand-green progress bar on the active step row in the rail —
+              <b>too loud or just right?</b>
+            </li>
+            <li>
+              Inspector grid is 2×N square cells — would you rather a single
+              column of label/value pairs?
+            </li>
+            <li>
+              At the bottom: a <b>now-vs-next</b> ASCII strip comparing today's
+              tab-bar layout against this one. Sanity check, not final.
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────────────────────
+         APP SHELL
+         ──────────────────────────────────────────────────────────── -->
+    <div class="shell">
+      <div class="top">
+        <!-- Real Blok mark, sliced from docs/assets/logo/dark.svg paths 1-3 -->
+        <div class="brand">
+          <svg viewBox="0 0 40 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <path d="M4.58288 11.1045C4.86346 10.823 5.31836 10.823 5.59894 11.1045L9.97138 15.4904C10.252 15.7718 10.252 16.2282 9.97139 16.5096L5.59894 20.8955C5.31836 21.177 4.86346 21.177 4.58288 20.8955L0.210434 16.5096C-0.0701446 16.2282 -0.0701449 15.7718 0.210434 15.4904L4.58288 11.1045Z" fill="#2BCD71"/>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M20.7107 11.1972C20.2692 10.9492 19.7308 10.9492 19.2893 11.1972L15.9966 13.0468C15.5373 13.3048 15.2528 13.7917 15.2528 14.3198V17.6802C15.2528 18.2083 15.5373 18.6952 15.9966 18.9532L19.2893 20.8028C19.7308 21.0508 20.2692 21.0508 20.7107 20.8028L24.0034 18.9532C24.4627 18.6952 24.7472 18.2083 24.7472 17.6802V14.3198C24.7472 13.7917 24.4627 13.3048 24.0034 13.0468L20.7107 11.1972ZM29.0909 11.7486C29.0909 11.2205 28.8064 10.7336 28.3471 10.4756L20.7107 6.18602C20.2692 5.93799 19.7308 5.93799 19.2893 6.18602L11.6529 10.4756C11.1936 10.7336 10.9091 11.2205 10.9091 11.7486V20.2514C10.9091 20.7795 11.1936 21.2664 11.6529 21.5244L19.2893 25.814C19.7308 26.062 20.2692 26.062 20.7107 25.814L28.3471 21.5244C28.8064 21.2664 29.0909 20.7795 29.0909 20.2514V11.7486Z" fill="#2BCD71"/>
+            <path d="M34.4011 11.1045C34.6816 10.823 35.1365 10.823 35.4171 11.1045L39.7896 15.4904C40.0701 15.7718 40.0701 16.2282 39.7896 16.5096L35.4171 20.8955C35.1365 21.177 34.6816 21.177 34.4011 20.8955L30.0286 16.5096C29.748 16.2282 29.748 15.7718 30.0286 15.4904L34.4011 11.1045Z" fill="#2BCD71"/>
+          </svg>
+          <span class="wordmark">blok</span>
+        </div>
+
+        <div class="env-chip" title="environment scope (e in keymap)">
+          <span class="dot"></span>
+          <span class="label">production</span>
+          <span class="caret">▾</span>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div class="ticker">
+          <span class="live-pulse"><span class="live-dot"></span>Live · 3 active</span>
+          <span>·</span>
+          <span>blok-prod · v1.2.0</span>
+          <span>·</span>
+          <span>14:55:57 GMT</span>
+        </div>
+
+        <span class="kbd">⌘K</span>
+      </div>
+
+      <!-- ── SIDEBAR ──────────────────────────────────────────── -->
+      <aside class="sidebar">
+        <div class="nav-section">Operate</div>
+        <a class="nav-link active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 4h18M3 12h18M3 20h18" stroke-linecap="round"/>
+          </svg>
+          Runs<span class="count">2</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16M4 12h12M4 18h8" stroke-linecap="round"/>
+          </svg>
+          Logs<span class="count">live</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
+          </svg>
+          Queues<span class="count">12</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 17l5-5 4 4 7-7"/><path d="M14 9h6v6"/>
+          </svg>
+          Metrics
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3v18M3 12h18"/>
+          </svg>
+          Deployments
+        </a>
+
+        <div class="nav-section">Configure</div>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h16v12H4z"/><path d="M4 10h16"/>
+          </svg>
+          Workflows<span class="count">14</span>
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 9l6 6M15 9l-6 6"/><circle cx="12" cy="12" r="9"/>
+          </svg>
+          Alerts
+        </a>
+        <a class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          Settings
+        </a>
+      </aside>
+
+      <!-- ── BODY: run-detail page ────────────────────────────── -->
+      <div class="body">
+        <header class="run-header">
+          <span class="back" title="back · [">←</span>
+          <div class="meta">
+            <h1 class="run-title">
+              Cross-Runtime Chain Test
+              <span class="status-badge completed"><span class="dot"></span>passed</span>
+            </h1>
+            <div class="run-submeta">
+              <span style="color: var(--ink-1); font-weight: 500">run_23f1aa6</span>
+              <span class="sep">·</span>
+              <span class="chip-version">v1.2.0</span>
+              <span class="sep">·</span>
+              <span>POST /cross-runtime-chain</span>
+              <span class="sep">·</span>
+              <span>started 14:55:57.641</span>
+              <span class="sep">·</span>
+              <span>9/9 steps</span>
+              <span class="sep">·</span>
+              <span>7 SDKs</span>
+            </div>
+          </div>
+          <div class="duration-display">83<span class="unit"> ms</span></div>
+          <div class="run-actions">
+            <button class="btn btn-secondary">⏎ Replay <span class="kbd">r</span></button>
+            <button class="btn btn-ghost">⋯</button>
+          </div>
+        </header>
+
+        <div class="panes">
+          <!-- LEFT RAIL · steps -->
+          <aside class="step-rail">
+            <div class="rail-header">
+              <span>Steps</span>
+              <span style="color: var(--ink-2)">9 / 9</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">1</span>
+              <span class="dot completed"></span>
+              <span class="name">init</span>
+              <span class="dur">0.8 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">2</span>
+              <span class="dot completed"></span>
+              <span class="name">go</span>
+              <span class="dur">1.5 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">3</span>
+              <span class="dot completed"></span>
+              <span class="name">rust</span>
+              <span class="dur">1.2 ms</span>
+            </div>
+            <div class="step-row active">
+              <span class="idx">4</span>
+              <span class="dot completed"></span>
+              <span class="name">java</span>
+              <span class="dur">11.0 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">5</span>
+              <span class="dot completed"></span>
+              <span class="name">csharp</span>
+              <span class="dur">8.2 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">6</span>
+              <span class="dot completed"></span>
+              <span class="name">php</span>
+              <span class="dur">14.0 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">7</span>
+              <span class="dot completed"></span>
+              <span class="name">ruby</span>
+              <span class="dur">15.0 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">8</span>
+              <span class="dot completed"></span>
+              <span class="name">python</span>
+              <span class="dur">7.0 ms</span>
+            </div>
+            <div class="step-row">
+              <span class="idx">9</span>
+              <span class="dot completed"></span>
+              <span class="name">verify</span>
+              <span class="dur">3.0 ms</span>
+            </div>
+            <div class="rail-filter">
+              level filter
+              <select><option>all</option><option>info+</option><option>warn+</option></select>
+            </div>
+          </aside>
+
+          <!-- CENTER · active step -->
+          <main class="center-pane">
+            <div class="mode-tabs">
+              <div class="mode-tab active">
+                Active step <span class="kbd">⌥1</span>
+              </div>
+              <div class="mode-tab">Trace graph <span class="kbd">⌥2</span></div>
+              <div class="mode-tab">Logs <span class="kbd">⌥3</span></div>
+              <div class="mode-tab">Events <span class="kbd">⌥4</span></div>
+              <div class="mode-tab">Replay <span class="kbd">⌥5</span></div>
+            </div>
+
+            <div class="step-page">
+              <div class="step-headline">
+                <h2 class="step-name-mono">java</h2>
+                <span class="step-position">step 4 / 9 · depth 0</span>
+              </div>
+              <div class="step-meta-row">
+                <span class="meta-pill">runtime.java</span>
+                <span class="meta-pill transport">grpc</span>
+                <span class="meta-pill">port 10003</span>
+                <span class="meta-pill">attempt 1</span>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <span class="caret">▾</span>
+                  <span>Inputs</span>
+                  <span class="extra" style="color: var(--ink-3)">2 keys</span>
+                </div>
+                <div class="section-body">
+                  <pre class="json-block">{
+  <span class="key">"chain"</span><span class="punct">:</span> <span class="punct">[</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"nodejs"</span><span class="punct">,</span>  <span class="key">"order"</span><span class="punct">:</span> <span class="num">1</span> <span class="punct">},</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"go"</span><span class="punct">,</span>      <span class="key">"order"</span><span class="punct">:</span> <span class="num">2</span> <span class="punct">},</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"rust"</span><span class="punct">,</span>    <span class="key">"order"</span><span class="punct">:</span> <span class="num">3</span> <span class="punct">}</span>
+  <span class="punct">],</span>
+  <span class="key">"origin"</span><span class="punct">:</span> <span class="str">"cross-runtime-chain"</span>
+<span class="punct">}</span></pre>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <span class="caret">▾</span>
+                  <span>Outputs</span>
+                  <span class="extra" style="color: var(--ink-3)">+1 chain entry</span>
+                </div>
+                <div class="section-body">
+                  <pre class="json-block">{
+  <span class="key">"chain"</span><span class="punct">:</span> <span class="punct">[</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"nodejs"</span><span class="punct">,</span> <span class="key">"order"</span><span class="punct">:</span> <span class="num">1</span> <span class="punct">},</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"go"</span><span class="punct">,</span>     <span class="key">"order"</span><span class="punct">:</span> <span class="num">2</span> <span class="punct">},</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"rust"</span><span class="punct">,</span>   <span class="key">"order"</span><span class="punct">:</span> <span class="num">3</span> <span class="punct">},</span>
+    <span class="punct">{</span> <span class="key">"language"</span><span class="punct">:</span> <span class="str">"java"</span><span class="punct">,</span>   <span class="key">"order"</span><span class="punct">:</span> <span class="num">4</span><span class="punct">,</span>  <span class="key">"timestamp"</span><span class="punct">:</span> <span class="str">"14:55:57.671090Z"</span> <span class="punct">}</span>
+  <span class="punct">],</span>
+  <span class="key">"origin"</span><span class="punct">:</span> <span class="str">"cross-runtime-chain"</span>
+<span class="punct">}</span></pre>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <span class="caret">▾</span>
+                  <span>Logs</span>
+                  <span class="extra" style="color: var(--ink-3)">4 lines · live</span>
+                </div>
+                <div class="section-body">
+                  <div class="logs-block">
+                    <div class="logs-toolbar">
+                      <span class="toolbar-toggle active"
+                        ><span class="dot"></span> tail</span
+                      >
+                      <span class="toolbar-toggle">timestamps</span>
+                      <span class="toolbar-toggle">show structured</span>
+                      <span style="margin-left: auto"
+                        >0 errors · 0 warns</span
+                      >
+                    </div>
+                    <div class="log-line">
+                      <span class="ts">14:55:57.041</span>
+                      <span class="lvl info">info</span>
+                      <span class="msg">jvm warmup 2ms · 5 nodes registered</span>
+                    </div>
+                    <div class="log-line">
+                      <span class="ts">14:55:57.052</span>
+                      <span class="lvl info">info</span>
+                      <span class="msg">chain.append { language: java, order: 4 }</span>
+                    </div>
+                    <div class="log-line">
+                      <span class="ts">14:55:57.063</span>
+                      <span class="lvl debug">debug</span>
+                      <span class="msg">grpc.execute returned 84 bytes (encode 0.4ms)</span>
+                    </div>
+                    <div class="log-line">
+                      <span class="ts">14:55:57.671</span>
+                      <span class="lvl info">info</span>
+                      <span class="msg">step completed (11.0ms wall)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+
+          <!-- RIGHT · inspector -->
+          <aside class="inspector">
+            <h4>Metrics</h4>
+            <div class="metric-grid">
+              <div class="metric">
+                <div class="label">Duration</div>
+                <div class="value">11.0<span class="unit">ms</span></div>
+              </div>
+              <div class="metric">
+                <div class="label">Wire</div>
+                <div class="value">412 → 84<span class="unit">B</span></div>
+              </div>
+              <div class="metric">
+                <div class="label">CPU</div>
+                <div class="value">7<span class="unit">ms</span></div>
+              </div>
+              <div class="metric dim">
+                <div class="label">Memory</div>
+                <div class="value">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Retries</div>
+                <div class="value">0</div>
+              </div>
+              <div class="metric">
+                <div class="label">Depth</div>
+                <div class="value">0</div>
+              </div>
+            </div>
+
+            <h4>Live tail · this step</h4>
+            <div class="live-tail">
+              <div class="live-tail-head">
+                <span class="live-dot"></span>
+                <span>tailing</span>
+                <span style="margin-left: auto; color: var(--ink-3)"
+                  >SSE</span
+                >
+              </div>
+              <div class="live-tail-body">
+                <div class="tail-line">
+                  <span class="ts">.041</span>jvm warmup 2ms
+                </div>
+                <div class="tail-line">
+                  <span class="ts">.052</span>chain.append {…}
+                </div>
+                <div class="tail-line">
+                  <span class="ts">.063</span>grpc.execute 84B
+                </div>
+                <div class="tail-line">
+                  <span class="ts">.671</span>step completed 11.0ms
+                </div>
+              </div>
+            </div>
+
+            <div class="footer-keys">
+              <span><span class="kbd">j</span><span class="kbd">k</span> step</span>
+              <span><span class="kbd">⌥1–5</span> mode</span>
+              <span><span class="kbd">[</span><span class="kbd">]</span> run</span>
+              <span><span class="kbd">r</span> replay</span>
+              <span><span class="kbd">y</span> copy id</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <!-- ────────────────────────────────────────────────────────────
+         NOW vs NEXT · sanity-check ASCII strip at bottom
+         ──────────────────────────────────────────────────────────── -->
+    <section class="compare-strip">
+      <h2>Now vs Next · run-detail layout</h2>
+      <div class="compare-grid">
+        <div class="compare-card now">
+          <h3>Today · 5-tab horizontal</h3>
+          <p class="summary">
+            One column wide, 5 tabs across the top (Timeline / Graph / Logs /
+            Events / Builder). Switching tabs replaces the entire body. Right
+            drawer opens when a node is clicked. Spatial frame keeps shifting.
+          </p>
+<pre class="ascii-frame">┌──────────────────────────────────────────────┐
+│  ←  Cross-Runtime Chain Test  ·  PASS · 83 ms │
+├──────────────────────────────────────────────┤
+│ [Timeline] [Graph] [Logs] [Events] [Builder] │
+├──────────────────────────────────────────────┤
+│                                              │
+│         (one of the five at a time,          │
+│           with no persistent rail)           │
+│                                              │
+└──────────────────────────────────────────────┘</pre>
+        </div>
+        <div class="compare-card next">
+          <h3>Direction A · 3-pane operator</h3>
+          <p class="summary">
+            Step rail (240px) always shows where you are. Center is the active
+            step or one of 5 modes via ⌥1–⌥5. Right inspector (320px) shows
+            dense numbers + live tail. Esc returns to default mode. Spatial
+            frame stays put.
+          </p>
+<pre class="ascii-frame">┌────────────┬──────────────────────┬─────────┐
+│ rail (j/k) │ ⌥1 active step       │ metrics │
+│  1 init  ✓ │ ⌥2 graph             │ 11ms    │
+│  2 go    ✓ │ ⌥3 logs              │ 412→84B │
+│ ▶4 java  ✓ │ ⌥4 events            │ live    │
+│  5 csharp✓ │ ⌥5 replay            │ tail    │
+│  ⋯         │                      │         │
+└────────────┴──────────────────────┴─────────┘</pre>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      // Trivial section collapse (so the Junior pass HTML is interactive
+      // enough to feel real, not a screenshot).
+      document.querySelectorAll(".section-head").forEach((h) => {
+        h.addEventListener("click", () => {
+          h.parentElement.classList.toggle("collapsed");
+        });
+      });
+      // Mode tab visual switch (no actual mode swap — this is a static demo).
+      document.querySelectorAll(".mode-tab").forEach((t) => {
+        t.addEventListener("click", () => {
+          document
+            .querySelectorAll(".mode-tab")
+            .forEach((x) => x.classList.remove("active"));
+          t.classList.add("active");
+        });
+      });
+      // Step rail click → move active row.
+      document.querySelectorAll(".step-row").forEach((r) => {
+        r.addEventListener("click", () => {
+          document
+            .querySelectorAll(".step-row")
+            .forEach((x) => x.classList.remove("active"));
+          r.classList.add("active");
+        });
+      });
+    </script>
+  </body>
+</html>

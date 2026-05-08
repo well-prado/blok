@@ -241,7 +241,7 @@ export class WorkflowVisualizer {
 				if (!adjacency.has(edge.from)) {
 					adjacency.set(edge.from, []);
 				}
-				adjacency.get(edge.from)!.push(edge.to);
+				adjacency.get(edge.from)?.push(edge.to);
 			}
 
 			// Walk graph from first node
@@ -257,14 +257,14 @@ export class WorkflowVisualizer {
 				if (!node) continue;
 
 				const icon = this.asciiIcon(node.type);
-				const label = node.label.length > 44 ? node.label.substring(0, 41) + "..." : node.label;
+				const label = node.label.length > 44 ? `${node.label.substring(0, 41)}...` : node.label;
 				result.push(`║  ${icon} ${this.padRight(label, 46)}║`);
 
 				const targets = adjacency.get(nodeId) || [];
 				if (targets.length > 0) {
 					if (targets.length === 1) {
-						result.push(`║  │                                               ║`);
-						result.push(`║  ▼                                               ║`);
+						result.push("║  │                                               ║");
+						result.push("║  ▼                                               ║");
 					} else {
 						result.push(`║  ├──┬──${this.padRight("", 42)}║`);
 						for (let i = 0; i < targets.length; i++) {

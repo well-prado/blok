@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { HotReloadManager } from "@blok/runner";
+ * import { HotReloadManager } from "@blokjs/runner";
  *
  * const hmr = new HotReloadManager({
  *   nodePaths: ["./src/nodes"],

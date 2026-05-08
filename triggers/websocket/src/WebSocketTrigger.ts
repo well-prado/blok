@@ -16,16 +16,16 @@
  * - Binary message support
  */
 
-import type { HelperResponse, WebSocketTriggerOpts } from "@blok/helper";
+import type { HelperResponse, WebSocketTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -496,7 +496,8 @@ export abstract class WebSocketTrigger extends TriggerBase {
 			});
 		}
 
-		const room = this.rooms.get(roomName)!;
+		const room = this.rooms.get(roomName);
+		if (!room) return;
 		room.clients.add(clientId);
 		client.rooms.add(roomName);
 

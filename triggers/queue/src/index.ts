@@ -1,5 +1,5 @@
 /**
- * @blok/trigger-queue
+ * @blokjs/trigger-queue
  *
  * Queue-based trigger for Blok workflows.
  * Supports multiple queue providers:
@@ -10,7 +10,7 @@
  *
  * @example
  * ```typescript
- * import { QueueTrigger, KafkaAdapter } from "@blok/trigger-queue";
+ * import { QueueTrigger, KafkaAdapter } from "@blokjs/trigger-queue";
  *
  * class MyQueueTrigger extends QueueTrigger {
  *   protected adapter = new KafkaAdapter({
@@ -28,7 +28,7 @@
  *
  * @example RabbitMQ
  * ```typescript
- * import { QueueTrigger, RabbitMQAdapter } from "@blok/trigger-queue";
+ * import { QueueTrigger, RabbitMQAdapter } from "@blokjs/trigger-queue";
  *
  * class MyQueueTrigger extends QueueTrigger {
  *   protected adapter = new RabbitMQAdapter({
@@ -40,7 +40,7 @@
  *
  * @example AWS SQS
  * ```typescript
- * import { QueueTrigger, SQSAdapter } from "@blok/trigger-queue";
+ * import { QueueTrigger, SQSAdapter } from "@blokjs/trigger-queue";
  *
  * class MyQueueTrigger extends QueueTrigger {
  *   protected adapter = new SQSAdapter({
@@ -52,7 +52,7 @@
  *
  * @example Redis/BullMQ
  * ```typescript
- * import { QueueTrigger, RedisAdapter } from "@blok/trigger-queue";
+ * import { QueueTrigger, RedisAdapter } from "@blokjs/trigger-queue";
  *
  * class MyQueueTrigger extends QueueTrigger {
  *   protected adapter = new RedisAdapter({
@@ -76,9 +76,10 @@ export { KafkaAdapter, type KafkaConfig } from "./adapters/KafkaAdapter";
 export { RabbitMQAdapter, type RabbitMQConfig } from "./adapters/RabbitMQAdapter";
 export { SQSAdapter, type SQSConfig } from "./adapters/SQSAdapter";
 export { RedisAdapter, type RedisConfig } from "./adapters/RedisAdapter";
+export { NATSAdapter, type NATSConfig } from "./adapters/NATSAdapter";
 
 // Re-export types from helper for convenience
 export type {
 	QueueProvider,
 	QueueTriggerOpts,
-} from "@blok/helper";
+} from "@blokjs/helper";

@@ -9,8 +9,8 @@
  * - Metrics collection (connections, messages, latency)
  */
 
-import type { HelperResponse } from "@blok/helper";
-import type { BlokService } from "@blok/runner";
+import type { HelperResponse } from "@blokjs/helper";
+import type { BlokService } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type WebSocketEvent, WebSocketTrigger } from "./WebSocketTrigger";
 

@@ -28,6 +28,7 @@
 //! }
 //! ```
 
+pub mod blok_error;
 pub mod config;
 pub mod errors;
 #[cfg(feature = "grpc")]
@@ -40,10 +41,17 @@ pub mod registry;
 #[cfg(feature = "http")]
 pub mod server;
 pub mod testing;
+#[cfg(feature = "worker")]
+pub mod worker;
 pub mod types;
 pub mod validation;
 
 // Re-export core types
+pub use blok_error::{
+    build_context_snapshot, build_context_snapshot_with_opts, BlokError, BlokErrorBuilder,
+    BlokErrorCategory, BlokErrorSeverity, Origin, CONTEXT_SNAPSHOT_MAX_BYTES,
+    DEFAULT_RUNTIME_KIND, DEFAULT_SDK_NAME,
+};
 pub use config::ServerConfig;
 pub use errors::{ErrorCategory, NodeError};
 pub use logging::{LogEntry, LogLevel, Logger};

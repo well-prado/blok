@@ -1,0 +1,352 @@
+---
+title: "Trace storage"
+description: "How Blok records workflow runs, the event vocabulary, and the SQLite schema used by Blok Studio."
+icon: "database"
+---
+
+import { StudioEventTimeline, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Every workflow execution produces a trace. Blok records it through the
+`RunTracker` in `@blokjs/runner`, which writes to one of three stores:
+
+| Store | When | Durability |
+|---|---|---|
+| `SqliteRunStore` | default | persists to `.blok/runs.db` |
+| `InMemoryRunStore` | dev / tests | process-local |
+| `PostgresRunStore` | when configured | partial — see notes below |
+
+The same store backs the [idempotency cache](/d/reliability/idempotency)
+and the run lineage records used by
+[sub-workflows](/d/composition/sub-workflows) and
+[replay](/d/reliability/replay). Setting `BLOK_TRACE_ENABLED=false`
+disables the tracker — and as a side effect, the cache.
+
+## Run states
+
+The `WorkflowRunStatus` enum has twelve values — the original five
+plus seven added across Tier 2 and its follow-ups.
+
+| Status | Meaning |
+|---|---|
+| `pending` | Run started but no node has reached `running` yet. |
+| `running` | At least one node is executing. |
+| `completed` | All steps finished successfully. |
+| `failed` | A step failed terminally (after retry exhaustion, if configured). |
+| `cancelled` | Run was explicitly cancelled by an operator via `POST /__blok/runs/:id/cancel`. Cancellable from `delayed`, `debounced`, `queued`, AND `running` states. See [cancellation](/d/reliability/cancellation). |
+| `throttled` | Concurrency-gate denial at run-entry under `onLimit: "throw"`. No step ran. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `delayed` | Scheduled for future dispatch via `trigger.delay`. Transitions to `running` when the timer fires. See [delay & TTL](/d/scheduling/delay-and-ttl). |
+| `expired` | TTL exceeded before dispatch. Auto-cancelled without execution. |
+| `debounced` | Coalesced into another run via `debounce.key`. Terminal in leading mode (execution went to a sibling); transient in trailing mode. See [debounce](/d/scheduling/debounce). |
+| `queued` | Concurrency-gate denial at run-entry under `onLimit: "queue"`. Re-attempts acquisition every second until a slot frees. See [queue mode](/d/reliability/concurrency-keys#queue-mode-onlimit-queue). |
+| `crashed` | Runner crashed (uncaught exception, `unhandledRejection`, OOM, signal). Auto-flipped by `installCrashHandlers()` on `uncaughtException`; on boot, `recoverOrphanedRuns()` flips runs that were `running` for longer than `BLOK_ORPHAN_THRESHOLD_MS` (default 2 min). See [cancellation](/d/reliability/cancellation#crash-auto-flip). |
+| `timedOut` | A step's final retry attempt exceeded its `maxDuration` cap. Distinct from `failed` for SLA reporting. See [step timeouts](/d/reliability/max-duration). |
+
+## Event vocabulary
+
+`RunEventType` is the full list of events a run can emit. Studio
+renders each with a label and color:
+
+<StudioEventTimeline
+  events={[
+    { timestamp: "10:42:15.001", type: "RUN_STARTED",    summary: "ai-content-pipeline · POST /generate" },
+    { timestamp: "10:42:15.012", type: "NODE_STARTED",   summary: "draft" },
+    { timestamp: "10:42:16.342", type: "NODE_COMPLETED", summary: "draft · 1.33s" },
+    { timestamp: "10:42:16.355", type: "NODE_STARTED",   summary: "review" },
+    { timestamp: "10:42:16.362", type: "NODE_CACHED",   summary: "review · cache hit from run_8a92c4" },
+    { timestamp: "10:42:16.401", type: "NODE_STARTED",   summary: "store" },
+    { timestamp: "10:42:16.504", type: "NODE_ATTEMPT_FAILED", summary: "store · attempt 1: ECONNRESET" },
+    { timestamp: "10:42:17.512", type: "NODE_COMPLETED", summary: "store · 1.11s after 1 attempt" },
+    { timestamp: "10:42:17.524", type: "RUN_COMPLETED",  summary: "ai-content-pipeline · 2.52s" },
+  ]}
+/>
+
+| Event | Fires when | Studio surface |
+|---|---|---|
+| <StudioEventBadge type="RUN_STARTED" /> | `tracker.startRun()` | run row appears |
+| <StudioEventBadge type="RUN_COMPLETED" /> | `tracker.completeRun()` | row turns green |
+| <StudioEventBadge type="RUN_FAILED" /> | `tracker.failRun()` | row turns red |
+| <StudioEventBadge type="NODE_STARTED" /> | `tracker.startNode()` | step appears in rail |
+| <StudioEventBadge type="NODE_COMPLETED" /> | `tracker.completeNode()` | step turns green |
+| <StudioEventBadge type="NODE_FAILED" /> | `tracker.failNode()` | step turns red |
+| <StudioEventBadge type="NODE_SKIPPED" /> | `tracker.skipNode()` | step shown skipped |
+| <StudioEventBadge type="NODE_PROGRESS" /> | streaming Progress frame | progress bar |
+| <StudioEventBadge type="NODE_PARTIAL_RESULT" /> | streaming PartialResult frame | live snapshot |
+| <StudioEventBadge type="NODE_CACHED" /> | `tracker.markNodeCached()` | CACHED badge + lineage banner |
+| <StudioEventBadge type="NODE_ATTEMPT_FAILED" /> | `tracker.recordNodeAttemptFailed()` | `↻N` indicator + attempts disclosure |
+| <StudioEventBadge type="VARS_UPDATED" /> | `tracker.updateVars()` | inspector update |
+| <StudioEventBadge type="LOG_ENTRY" /> | `tracker.addLog()` | log viewer line |
+| <StudioEventBadge type="RUN_THROTTLED" /> | `tracker.markRunThrottled()` (Tier 2 #6) | amber Throttled badge |
+| <StudioEventBadge type="RUN_DELAYED" /> | `tracker.markRunDelayed()` (Tier 2 #5) | yellow Delayed badge |
+| <StudioEventBadge type="RUN_EXPIRED" /> | `tracker.markRunExpired()` (Tier 2 #5) | zinc Expired badge |
+| <StudioEventBadge type="RUN_DEBOUNCED" /> | `tracker.markRunDebounced()` | cyan Debounced badge |
+| <StudioEventBadge type="RUN_QUEUED" /> | `tracker.markRunQueued()` (concurrency `onLimit: "queue"`) | lime Queued badge |
+| <StudioEventBadge type="RUN_CANCELLED" /> | `tracker.cancelRun()` via `POST /__blok/runs/:id/cancel` | purple Cancelled badge |
+| <StudioEventBadge type="RUN_CRASHED" /> | `tracker.markAllRunningRunsAsCrashed()` from `installCrashHandlers` or `recoverOrphanedRuns` | red Crashed badge |
+| <StudioEventBadge type="RUN_TIMED_OUT" /> | `RunnerSteps` on final-attempt `StepTimeoutError` | orange Timed Out badge |
+
+Event payloads:
+
+| Event | Payload |
+|---|---|
+| `RUN_THROTTLED` | `{durationMs, concurrencyKey, concurrencyLimit, currentInFlight}` |
+| `RUN_DELAYED` | `{scheduledAt, delayMs, expiresAt?}` |
+| `RUN_EXPIRED` | `{expiresAt, expiredAt, lateBy}` |
+| `RUN_DEBOUNCED` | `{debounceKey, mode, intoRunId?, pingCount?}` |
+| `RUN_QUEUED` | `{concurrencyKey, concurrencyLimit, currentInFlight, scheduledAt}` |
+| `RUN_CANCELLED` | `{durationMs, previousStatus}` |
+| `RUN_CRASHED` | `{durationMs, error}` |
+| `RUN_TIMED_OUT` | `{durationMs, stepId, maxDurationMs, attemptsExhausted}` |
+
+## WorkflowRun fields
+
+Every run record carries:
+
+| Field | Description |
+|---|---|
+| `id` | Run id. |
+| `workflowName` | The workflow's `name:` field. |
+| `workflowPath` | Source file path. |
+| `triggerType` | `"http"`, `"worker"`, `"subworkflow"`, etc. |
+| `triggerSummary` | Human-readable summary (`"GET /users/:id"`, `"<parent> → <child>"`). |
+| `status` | One of the run states above. |
+| `startedAt` / `finishedAt` / `durationMs` | Timestamps. |
+| `tags` | String array. Filter via `?tags=a,b,c` on `GET /__blok/runs`. |
+| `metadata` | Free-form `Record<string, unknown>`. Filter via `?metadata.<key>=<value>` (Tier 2 quick-wins). |
+| `replayOf` | Source run id when this run was created via [replay](/d/reliability/replay). |
+| `parentRunId` | Parent run id when this run was started by a [sub-workflow step](/d/composition/sub-workflows). |
+| `parentNodeRunId` | The specific NodeRun (sub-workflow step) inside the parent. |
+| `scheduledAt` | Tier 2 #5 — scheduled dispatch time (ms since epoch) for `delay` / `debounce`. |
+| `expiresAt` | Tier 2 #5 — TTL deadline (ms since epoch). |
+| `debounceKey` | Tier 2 #7 — resolved debounce key. |
+| `debounceMode` | Tier 2 #7 — `"leading"` or `"trailing"`. |
+| `pingCount` | Tier 2 #7 — pings absorbed by this run. Surfaces in Studio as **Pings: N**. |
+
+## NodeRun fields
+
+Each step within a run produces a `NodeRun`:
+
+| Field | Description |
+|---|---|
+| `id` | NodeRun id. |
+| `runId` | Parent WorkflowRun id. |
+| `nodeName` | Step `id`. |
+| `nodeType` | Step `type` (`"module"`, `"runtime.python3"`, `"subworkflow"`, etc.). |
+| `status` | `pending` / `running` / `completed` / `failed` / `skipped` / `cached`. |
+| `cached` | When set: `{ sourceRunId, sourceNodeRunId, cachedAt }` — points back at the run that produced the cached value. |
+| `attempts` | Per-attempt failures: `{ attempt, error, timestamp }[]`. Capped at the most-recent 10 entries. |
+
+## HTTP API
+
+Blok Studio reads from these. They're stable; agents and tooling can
+consume them directly.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /__blok/runs` | List of recent runs. Filters: `?status=<status>`, `?tags=a,b,c` (AND), `?metadata.<key>=<value>` (AND across keys). |
+| `GET /__blok/runs/:runId` | Single run with its node runs. |
+| `GET /__blok/runs/:runId/events` | Event stream (SSE). |
+| `GET /__blok/runs/:runId/subruns` | Child runs from sub-workflow invocations, sorted oldest-first. Empty array on miss; 404 if the parent doesn't exist. |
+| `POST /__blok/runs/:runId/replay` | Re-fire the captured trigger payload. Optional body: `{ method?, path?, headers?, body? }`. Returns `{ newRunId, originalRunId, workflowName, replayOf }`. |
+| `POST /__blok/runs/:runId/cancel` | Cancel a run in `delayed`, `debounced`, `queued`, or `running` state. Returns `{cancelled, runId, previousStatus, newStatus, note?}`. `400` for non-cancellable states; `404` for unknown runId. See [cancellation](/d/reliability/cancellation). |
+| `GET /__blok/concurrency/health` | Concurrency-gate liveness: `{backend, disabled, leaseMs}`. See [concurrency observability endpoints](/d/reliability/concurrency-keys#observability-endpoints). |
+| `GET /__blok/concurrency/state` | In-flight slot snapshot: `{totalBuckets, totalLeases, buckets[]}` with un-expired leases per `(workflow, key)` bucket. |
+
+### Filtering runs
+
+`GET /__blok/runs` accepts these filter parameters:
+
+- **`status=<status>`** — match a single run state (any of the eleven
+  values listed above).
+- **`tags=a,b,c`** — runs whose `tags` array contains ALL of the
+  listed values (AND semantics).
+- **`metadata.<key>=<value>`** — runs whose `metadata.<key>` equals
+  the given value (string-compared). Multiple `metadata.*=*` pairs
+  combine with AND across keys.
+
+```bash
+# All "completed" runs tagged user-123 AND with metadata tier=premium
+curl 'http://localhost:4000/__blok/runs?status=completed&tags=user-123&metadata.tier=premium'
+
+# Multiple metadata pairs (AND across keys)
+curl 'http://localhost:4000/__blok/runs?metadata.tier=premium&metadata.region=us'
+```
+
+Studio's runs list exposes the same filters through the **Tags** and
+**Metadata** inputs in `RunFilters`. Metadata filters use `json_extract`
+on SQLite (sequential scan; acceptable given the `evictOldRuns` cap on
+the runs table) and object lookup on InMemory.
+
+## SQLite schema
+
+The default store keeps everything in `.blok/runs.db`. Migrations are
+additive — old databases are upgraded in place on first run after each
+release. Pre-existing rows get NULL on new columns, and the runner
+maps those back to `undefined` in the parsed types.
+
+| Version | Era | Adds |
+|---|---|---|
+| 1 | base | `workflow_runs`, `node_runs`, `run_events`, `log_entries` tables + indexes |
+| 2 | base | `dashboards` |
+| 3 | Phase 2.1 | `workflow_runs.environment` + index |
+| 4 | Tier 1 | `node_runs.cached_json`; new `idempotency_cache` table + `idx_idem_expires` |
+| 5 | Tier 1 | `node_runs.attempts_json`; `workflow_runs.replay_of` + index |
+| 6 | Tier 2 #4 | `workflow_runs.parent_run_id`; `workflow_runs.parent_node_run_id`; `idx_runs_parent_run` |
+| 7 | Tier 2 #6 | new `concurrency_locks` table + `idx_locks_expires` + `idx_locks_workflow_key` |
+| 8 | Tier 2 #5+#7 | `workflow_runs.scheduled_at`, `expires_at`, `debounce_key`, `debounce_mode`, `ping_count` + indexes |
+| 9 | Tier 2 #5+#7 follow-up | new `scheduled_dispatches` table + `idx_scheduled_dispatches_at` + `idx_scheduled_dispatches_trigger` |
+
+### `idempotency_cache` (migration v4)
+
+```sql
+CREATE TABLE IF NOT EXISTS idempotency_cache (
+  workflow_name TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  cached_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  source_run_id TEXT NOT NULL,
+  source_node_run_id TEXT NOT NULL,
+  PRIMARY KEY (workflow_name, step_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_idem_expires ON idempotency_cache(expires_at);
+```
+
+Expired entries are lazy-purged on read. The runner also exposes
+`purgeExpiredIdempotencyCache(now)` for periodic external cleanup if
+you want eager eviction.
+
+### Replay lineage (migration v5)
+
+```sql
+ALTER TABLE node_runs ADD COLUMN attempts_json TEXT;
+ALTER TABLE workflow_runs ADD COLUMN replay_of TEXT;
+CREATE INDEX IF NOT EXISTS idx_runs_replay_of ON workflow_runs(replay_of);
+```
+
+### Sub-workflow lineage (migration v6)
+
+```sql
+ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT;
+ALTER TABLE workflow_runs ADD COLUMN parent_node_run_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_runs_parent_run ON workflow_runs(parent_run_id);
+```
+
+### `concurrency_locks` (migration v7)
+
+```sql
+CREATE TABLE IF NOT EXISTS concurrency_locks (
+  workflow_name TEXT NOT NULL,
+  concurrency_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (workflow_name, concurrency_key, run_id)
+);
+CREATE INDEX IF NOT EXISTS idx_locks_expires ON concurrency_locks(expires_at);
+CREATE INDEX IF NOT EXISTS idx_locks_workflow_key ON concurrency_locks(workflow_name, concurrency_key);
+```
+
+The PK on `(workflow_name, concurrency_key, run_id)` lets a single run
+hold at most one slot per bucket while still permitting up to
+`concurrencyLimit` runs to coexist within a bucket. `expires_at` is
+the lease upper bound for crash safety. See
+[concurrency keys](/d/reliability/concurrency-keys).
+
+### Scheduling columns (migration v8)
+
+```sql
+ALTER TABLE workflow_runs ADD COLUMN scheduled_at INTEGER;
+ALTER TABLE workflow_runs ADD COLUMN expires_at INTEGER;
+ALTER TABLE workflow_runs ADD COLUMN debounce_key TEXT;
+ALTER TABLE workflow_runs ADD COLUMN debounce_mode TEXT;
+ALTER TABLE workflow_runs ADD COLUMN ping_count INTEGER;
+CREATE INDEX IF NOT EXISTS idx_runs_scheduled_at ON workflow_runs(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_runs_debounce_key ON workflow_runs(workflow_name, debounce_key);
+```
+
+All five columns are nullable; pre-Tier-2-#5+#7 rows get NULL on the
+new fields. The indexes support the future "list scheduled runs"
+Studio view and the debounce coordinator's restart-recovery lookup.
+
+### `scheduled_dispatches` (migration v9)
+
+```sql
+CREATE TABLE IF NOT EXISTS scheduled_dispatches (
+  run_id TEXT PRIMARY KEY,
+  workflow_name TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  scheduled_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  dispatch_status TEXT NOT NULL,    -- 'delayed' | 'queued' | 'debounced'
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_at ON scheduled_dispatches(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_trigger ON scheduled_dispatches(trigger_type, workflow_name);
+```
+
+The HTTP trigger persists `delay`, `onLimit: "queue"`, and (when
+opted in) `debounce` dispatches here. On boot, `recoverDispatches()`
+re-registers timers and flips past-TTL rows to `expired`. See
+[delay & TTL durability](/d/scheduling/delay-and-ttl#durability).
+
+The [periodic janitor](/d/operations/janitor-and-shutdown#janitor)
+sweeps expired rows alongside `idempotency_cache` and
+`concurrency_locks` to bound storage growth.
+
+## Postgres store
+
+The `PostgresRunStore` runs a hybrid model: synchronous reads against
+an in-memory mirror for hot-path performance, with asynchronous
+writes to PG via the existing write queue. The mirror is rehydrated
+from PG on `loadRecent()` at boot.
+
+PG migration v3 adds the three Tier 2 cache / lock / dispatch tables:
+
+- `idempotency_cache` (Tier 1)
+- `concurrency_locks` (Tier 2 #6)
+- `scheduled_dispatches` (Tier 2 #5+#7)
+
+This means:
+
+- **Within-process hits work.** Both reads and writes go through the
+  in-memory mirror.
+- **Cross-restart hits work.** The mirror rehydrates from PG on boot.
+  Idempotency caches, concurrency leases, and scheduled dispatches
+  survive restart.
+- **Cross-process gating still requires NATS KV.** PG persistence
+  here is for crash-recovery within a single PG-backed process. For
+  multi-process concurrency coordination, set
+  `BLOK_CONCURRENCY_BACKEND=nats-kv` — see
+  [concurrency keys](/d/reliability/concurrency-keys#cross-process-backend-nats-kv).
+
+The migration is forward-compatible: it silently ignores `relation
+does not exist` errors during the first migration window so a pre-v3
+PG schema doesn't crash the loader.
+
+## InMemory store
+
+Process-local `Map` for runs, node runs, events, idempotency cache,
+and log entries. Cleared on `clearAll()` and on process exit. Suitable
+for unit tests and dev.
+
+## Studio
+
+Open via `blokctl trace` or visit `/__blok` on the running trigger.
+The runs list and run-detail pages are the main consumers of the
+events and fields above.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    What produces these traces.
+  </Card>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Produces `NODE_CACHED` events.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Uses `parentRunId` and the `/subruns` endpoint.
+  </Card>
+</Columns>

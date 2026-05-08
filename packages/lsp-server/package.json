@@ -1,6 +1,6 @@
 {
-	"name": "@blok/lsp-server",
-	"version": "0.1.0",
+	"name": "@blokjs/lsp-server",
+	"version": "0.2.1",
 	"description": "Language Server Protocol server for Blok workflow files - provides diagnostics, completion, and hover documentation for any LSP-compatible editor",
 	"license": "Apache-2.0",
 	"main": "./dist/server.js",
@@ -25,5 +25,9 @@
 	"engines": {
 		"node": ">=18.0.0"
 	},
-	"keywords": ["blok", "lsp", "language-server", "workflow", "json", "blok"]
+	"keywords": ["blok", "lsp", "language-server", "workflow", "json", "blok"],
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }

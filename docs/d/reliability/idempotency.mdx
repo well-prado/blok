@@ -1,0 +1,226 @@
+---
+title: "Idempotent step caching"
+description: "Cache a step's result against a key so reruns don't repeat expensive or non-idempotent work."
+icon: "database"
+---
+
+import { StudioStepRail, StudioCacheBanner, StudioCacheFlow, StudioEventBadge } from "/snippets/studio-mocks.jsx";
+
+Set `idempotencyKey` on any v2 step and the runner caches its result.
+On a later run that resolves to the same key, the step's `process()` is
+**never called** — the cached output replays through the same persistence
+rules (`as`, `spread`, `ephemeral`) a fresh result would, and execution
+continues.
+
+Pair it with [`retry`](/d/reliability/retry) (failed attempts never
+cache) and [`replay`](/d/reliability/replay) (the new run reuses cached
+results from the original).
+
+## Quickstart
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "AI content pipeline",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/generate" } },
+  steps: [
+    {
+      id: "draft",
+      use: "@blokjs/openai",
+      inputs: { prompt: $.req.body.prompt, model: "gpt-4o" },
+      idempotencyKey: $.req.body.requestId,
+    },
+    {
+      id: "respond",
+      use: "@blokjs/respond",
+      inputs: { body: $.state.draft },
+    },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "AI content pipeline",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "POST", "path": "/generate" } },
+  "steps": [
+    {
+      "id": "draft",
+      "use": "@blokjs/openai",
+      "inputs": { "prompt": "$.req.body.prompt", "model": "gpt-4o" },
+      "idempotencyKey": "$.req.body.requestId"
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/respond",
+      "inputs": { "body": "$.state.draft" }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+POST twice with the same `requestId`. The first request runs the LLM
+call and caches the response. The second request short-circuits the
+`draft` step entirely:
+
+<StudioCacheFlow />
+
+## Field reference
+
+<ParamField path="idempotencyKey" type="string">
+  Cache key — literal string or `$`-proxy expression. The runner caches
+  the step's result against the triple `(workflowName, step.id, resolvedKey)`.
+  On a subsequent run with the same triple, execution is skipped and the
+  cached result populates state through the same persistence rules
+  (`ephemeral`, `spread`, `as`).
+</ParamField>
+
+<ParamField path="idempotencyKeyTTL" type="number" default="86400000">
+  Cache lifetime in milliseconds. Default is 24 hours. Pass `0` to write
+  a row that's already expired — useful as a kill-switch when you want
+  to keep the field present but not cache.
+</ParamField>
+
+The key can be a literal string (`"daily-summary"`) or a proxy
+expression (`$.req.body.requestId`) that compiles to a `js/ctx.…`
+lookup evaluated at run time. Returning `null`, `undefined`, or
+throwing during evaluation is a cache miss — the step runs as if the
+key had not been set.
+
+## How the namespace works
+
+Cache rows are keyed on the triple `(workflowName, step.id, resolvedKey)`.
+That prevents:
+
+- **Cross-workflow collisions** — two workflows can both have a step
+  named `fetch` with the same key without interfering.
+- **Cross-step collisions inside one workflow** — `fetchA` and `fetchB`
+  are isolated even with the same key.
+- **Cross-deployment collisions of the same workflow** — only when
+  `name:` matches do entries collide. Renaming a workflow effectively
+  invalidates its cache.
+
+## Composition with persistence
+
+Caching layers above the persistence rules — never inside them. A cache
+hit replays the cached `data` through `applyStepOutput` exactly as a
+fresh result would. So the persistence knobs you already use keep
+working:
+
+| Step config | Cache miss | Cache hit |
+|---|---|---|
+| (default) | runs, stores at `state[id]` | returns cached, stores at `state[id]` |
+| `as: "name"` | runs, stores at `state[name]` | returns cached, stores at `state[name]` |
+| `spread: true` | runs, merges `result.data` keys into `state` | returns cached, merges cached keys into `state` |
+| `ephemeral: true` | runs, only `ctx.prev` carries result | returns cached, only `ctx.prev` carries result |
+
+This is the property that makes idempotency caching safe in any v2 step.
+
+## Composition with retry
+
+`retry` only runs on cache miss — a hit short-circuits before the
+retry loop. Failed attempts never cache. The cache is written only
+after a successful attempt, so a step that recovers on its third
+attempt caches the success and skips on the next run.
+
+## Composition with replay
+
+When you replay a run via [Studio](/d/reliability/replay), the new run
+starts fresh and re-evaluates each step. Steps with `idempotencyKey` set
+hit the original run's cache (assuming the key resolves to the same
+value and the TTL hasn't expired), so cost-heavy work is reused while
+code changes everywhere else.
+
+## Studio surface
+
+A cache hit appears as a **CACHED** badge in the step rail next to the
+step name:
+
+<StudioStepRail
+  activeIndex={0}
+  steps={[
+    { id: "1", name: "draft", status: "completed", cached: true, durationMs: 2 },
+    { id: "2", name: "respond", status: "completed", durationMs: 7 },
+  ]}
+/>
+
+Open the step's detail panel to see the cache lineage banner — a
+click-through to the run that originally produced the cached value, and
+a relative timestamp:
+
+<StudioCacheBanner sourceRunId="run_8a92c4f01b" cachedAgoSec={142} />
+
+The events timeline emits a distinct <StudioEventBadge type="NODE_CACHED" /> entry
+so SSE consumers can filter cleanly.
+
+## When not to cache
+
+The headline footgun: a cache hit means `step.process()` is not called,
+so any side effects in the step do not fire. This is exactly what you
+want for pure-compute work (LLM calls, fetches, expensive transforms)
+and exactly what you do not want for steps that send emails, charge
+cards, or write rows you intend to be unique-per-request.
+
+<Warning>
+**Don't cache side-effect-only steps.** If a step exists to send an
+email, charge a payment method, or post to Slack, omitting the cache is
+the safe default. Cache the upstream compute (the LLM that decided what
+to send) and let the side-effect step run every time.
+</Warning>
+
+For cases where you want the side-effect to fire-but-not-double, use
+the target system's idempotency primitives: Stripe's `Idempotency-Key`
+header, SendGrid's deduplication, or your own DB unique constraints.
+
+## Cache backends
+
+| Backend | Behavior |
+|---|---|
+| **SQLite** (default) | Durable. Migration v4 adds the `idempotency_cache` table. Lazy-purges expired rows on read. |
+| **InMemory** (dev) | Process-local `Map`. Cleared on restart. |
+| **Postgres** | Hybrid: sync reads from an in-memory mirror, writes async-persist to PG via `idempotency_cache` (migration v3). On boot, `loadRecent()` rehydrates the mirror so cached results survive restarts within a single PG-backed process. Cross-process gating still requires `BLOK_CONCURRENCY_BACKEND=nats-kv` for coordination above the cache layer. |
+
+Disabled when `BLOK_TRACE_ENABLED=false` — caching lives behind the run
+store, so turning tracing off turns the cache off too.
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Forgetting the request id">
+    `idempotencyKey: $.req.body.requestId` works only if the upstream
+    client actually sends a stable id across retries. Validate early or
+    fall back to a meaningful surrogate (e.g. a hash of the inputs).
+  </Accordion>
+  <Accordion title="TTL too long for changing data">
+    The default is 24 hours. If cached data can go stale faster than
+    that — pricing, inventory, anything time-sensitive — lower
+    `idempotencyKeyTTL`.
+  </Accordion>
+  <Accordion title="Keying on a value that always changes">
+    `idempotencyKey: $.req.headers["x-request-id"]` works only if the
+    upstream client sends a stable value across retries. If each retry
+    generates a fresh id, the cache never hits.
+  </Accordion>
+  <Accordion title="Caching `respond` or other side-effect steps">
+    Don't. See the warning above.
+  </Accordion>
+</AccordionGroup>
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    The natural pair when you want safe rerun on transient failure.
+  </Card>
+  <Card title="Replay" icon="history" href="/d/reliability/replay">
+    Re-fire a run; cached steps short-circuit on the new run.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    Every field on the regular step.
+  </Card>
+</Columns>

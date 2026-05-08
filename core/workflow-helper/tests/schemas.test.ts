@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { NodeTypeSchema, RuntimeKindSchema, StepConditionSchema, StepOptsSchema } from "../src/types/StepOpts";
 import {
+	NodeTypeSchema,
+	RetryConfigSchema,
+	RuntimeKindSchema,
+	StepConditionSchema,
+	StepOptsSchema,
+	V2RegularStepSchema,
+	V2SubworkflowStepSchema,
+	V2WaitStepSchema,
+	isWaitStep,
+} from "../src/types/StepOpts";
+import {
+	ConcurrencyOptsSchema,
 	CronTriggerOptsSchema,
+	DebounceOptsSchema,
 	HttpTriggerOptsSchema,
 	QueueTriggerOptsSchema,
+	SchedulingOptsSchema,
+	TRIGGER_SCHEMAS,
 	TriggersSchema,
 	WebhookTriggerOptsSchema,
+	WorkerTriggerOptsSchema,
+	validateTriggerConfig,
 } from "../src/types/TriggerOpts";
 import { WorkflowOptsSchema } from "../src/types/WorkflowOpts";
 
@@ -52,6 +68,239 @@ describe("StepOptsSchema", () => {
 	it("should allow optional runtime", () => {
 		const result = StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "runtime.go", runtime: "go" });
 		expect(result.runtime).toBe("go");
+	});
+
+	it("should allow optional set_var, active, stop", () => {
+		const result = StepOptsSchema.parse({
+			name: "step",
+			node: "my-node-name",
+			type: "module",
+			set_var: true,
+			active: false,
+			stop: true,
+		});
+		expect(result.set_var).toBe(true);
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+	});
+
+	it("should reject non-boolean set_var", () => {
+		expect(() =>
+			StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "module", set_var: "yes" }),
+		).toThrow();
+	});
+});
+
+describe("V2RegularStepSchema — idempotencyKey + retry", () => {
+	const baseStep = { id: "fetch", use: "@blokjs/api-call" };
+
+	it("accepts a non-empty idempotencyKey string", () => {
+		const result = V2RegularStepSchema.parse({ ...baseStep, idempotencyKey: "user-123" });
+		expect(result.idempotencyKey).toBe("user-123");
+	});
+
+	it("accepts a js-expression-style idempotencyKey (string compiled from $ proxy)", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "js/ctx.req.body.requestId",
+		});
+		expect(result.idempotencyKey).toBe("js/ctx.req.body.requestId");
+	});
+
+	it("rejects an empty idempotencyKey string", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, idempotencyKey: "" })).toThrow();
+	});
+
+	it("rejects a non-string idempotencyKey", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: 42 as unknown as string,
+			}),
+		).toThrow();
+	});
+
+	it("accepts an integer idempotencyKeyTTL in milliseconds", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "k",
+			idempotencyKeyTTL: 60_000,
+		});
+		expect(result.idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("accepts idempotencyKeyTTL of 0 (immediately expired)", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "k",
+			idempotencyKeyTTL: 0,
+		});
+		expect(result.idempotencyKeyTTL).toBe(0);
+	});
+
+	it("rejects negative idempotencyKeyTTL", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: "k",
+				idempotencyKeyTTL: -1,
+			}),
+		).toThrow();
+	});
+
+	it("rejects non-integer idempotencyKeyTTL", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				idempotencyKey: "k",
+				idempotencyKeyTTL: 1.5,
+			}),
+		).toThrow();
+	});
+
+	it("accepts a minimal retry config (maxAttempts only)", () => {
+		const result = V2RegularStepSchema.parse({ ...baseStep, retry: { maxAttempts: 3 } });
+		expect(result.retry?.maxAttempts).toBe(3);
+		expect(result.retry?.minTimeoutInMs).toBeUndefined();
+		expect(result.retry?.factor).toBeUndefined();
+	});
+
+	it("accepts a full retry config", () => {
+		const result = V2RegularStepSchema.parse({
+			...baseStep,
+			retry: { maxAttempts: 5, minTimeoutInMs: 500, maxTimeoutInMs: 10_000, factor: 2 },
+		});
+		expect(result.retry?.maxAttempts).toBe(5);
+		expect(result.retry?.minTimeoutInMs).toBe(500);
+		expect(result.retry?.maxTimeoutInMs).toBe(10_000);
+		expect(result.retry?.factor).toBe(2);
+	});
+});
+
+describe("RetryConfigSchema", () => {
+	it("requires maxAttempts", () => {
+		expect(() => RetryConfigSchema.parse({} as unknown as { maxAttempts: number })).toThrow();
+	});
+
+	it("rejects maxAttempts < 1", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 0 })).toThrow();
+	});
+
+	it("rejects maxAttempts > 20", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 21 })).toThrow();
+	});
+
+	it("rejects non-integer maxAttempts", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 1.5 })).toThrow();
+	});
+
+	it("rejects factor < 1", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, factor: 0.5 })).toThrow();
+	});
+
+	it("accepts factor === 1 (constant backoff)", () => {
+		const result = RetryConfigSchema.parse({ maxAttempts: 3, factor: 1 });
+		expect(result.factor).toBe(1);
+	});
+
+	it("rejects negative timeouts", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: -1 })).toThrow();
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, maxTimeoutInMs: -1 })).toThrow();
+	});
+
+	it("rejects minTimeoutInMs > maxTimeoutInMs", () => {
+		expect(() => RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: 5000, maxTimeoutInMs: 1000 })).toThrow(
+			/maxTimeoutInMs/,
+		);
+	});
+
+	it("accepts minTimeoutInMs === maxTimeoutInMs (capped at first delay)", () => {
+		const result = RetryConfigSchema.parse({ maxAttempts: 3, minTimeoutInMs: 1000, maxTimeoutInMs: 1000 });
+		expect(result.minTimeoutInMs).toBe(1000);
+		expect(result.maxTimeoutInMs).toBe(1000);
+	});
+});
+
+describe("V2SubworkflowStepSchema", () => {
+	const baseStep = { id: "call-child", subworkflow: "send-receipt" };
+
+	it("accepts the minimal shape (id + subworkflow)", () => {
+		const result = V2SubworkflowStepSchema.parse(baseStep);
+		expect(result.id).toBe("call-child");
+		expect(result.subworkflow).toBe("send-receipt");
+	});
+
+	it("requires a non-empty id", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ subworkflow: "x" })).toThrow();
+		expect(() => V2SubworkflowStepSchema.parse({ id: "", subworkflow: "x" })).toThrow();
+	});
+
+	it("requires a non-empty subworkflow name", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ id: "x" })).toThrow();
+		expect(() => V2SubworkflowStepSchema.parse({ id: "x", subworkflow: "" })).toThrow();
+	});
+
+	it("accepts inputs as an arbitrary record", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			inputs: { user: { id: 1 }, total: 99.99 },
+		});
+		expect(result.inputs).toEqual({ user: { id: 1 }, total: 99.99 });
+	});
+
+	it("accepts wait: true explicitly", () => {
+		const result = V2SubworkflowStepSchema.parse({ ...baseStep, wait: true });
+		expect(result.wait).toBe(true);
+	});
+
+	it("accepts wait: false (fire-and-forget — Tier 2 #4 follow-up)", () => {
+		const result = V2SubworkflowStepSchema.parse({ ...baseStep, wait: false });
+		expect(result.wait).toBe(false);
+	});
+
+	it("accepts wait: false combined with idempotencyKey (at-most-once dispatch)", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			wait: false,
+			idempotencyKey: "request-123",
+		}) as { wait: boolean; idempotencyKey: string };
+		expect(result.wait).toBe(false);
+		expect(result.idempotencyKey).toBe("request-123");
+	});
+
+	it("rejects as + spread combo (mutually exclusive)", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ ...baseStep, as: "out", spread: true })).toThrow(/mutually exclusive/);
+	});
+
+	it("threads idempotencyKey + idempotencyKeyTTL", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			idempotencyKey: "req-123",
+			idempotencyKeyTTL: 60_000,
+		});
+		expect(result.idempotencyKey).toBe("req-123");
+		expect(result.idempotencyKeyTTL).toBe(60_000);
+	});
+
+	it("threads a retry config", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			retry: { maxAttempts: 3, minTimeoutInMs: 500, factor: 2 },
+		});
+		expect(result.retry?.maxAttempts).toBe(3);
+		expect(result.retry?.minTimeoutInMs).toBe(500);
+	});
+
+	it("accepts active/stop/ephemeral/as flags", () => {
+		const result = V2SubworkflowStepSchema.parse({
+			...baseStep,
+			active: false,
+			stop: true,
+			ephemeral: true,
+		});
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+		expect(result.ephemeral).toBe(true);
 	});
 });
 
@@ -124,6 +373,361 @@ describe("HttpTriggerOptsSchema", () => {
 	it("should require valid method", () => {
 		expect(() => HttpTriggerOptsSchema.parse({ method: "INVALID" })).toThrow();
 	});
+
+	it("accepts concurrencyKey + concurrencyLimit (Tier 2 #6)", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "tenant-abc",
+				concurrencyLimit: 5,
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts concurrencyKey alone (limit defaults at runtime to 1)", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-abc",
+		}) as { concurrencyKey: string; concurrencyLimit?: number };
+		expect(result.concurrencyKey).toBe("tenant-abc");
+		expect(result.concurrencyLimit).toBeUndefined();
+	});
+
+	it("accepts a $-proxy compiled string for concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "js/ctx.request.body.userId",
+				concurrencyLimit: 3,
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects empty-string concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "",
+			}),
+		).toThrow();
+	});
+
+	it("rejects concurrencyLimit < 1", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLimit: 0,
+			}),
+		).toThrow();
+	});
+
+	it("rejects non-integer concurrencyLimit", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLimit: 2.5,
+			}),
+		).toThrow();
+	});
+
+	it("rejects concurrencyLimit set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyLimit: 5,
+			}),
+		).toThrow(/concurrencyLimit.+requires.+concurrencyKey/i);
+	});
+
+	it("rejects concurrencyLeaseMs set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyLeaseMs: 60_000,
+			}),
+		).toThrow(/concurrencyLeaseMs.+requires.+concurrencyKey/i);
+	});
+
+	it("rejects concurrencyLeaseMs below 1s", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLeaseMs: 500,
+			}),
+		).toThrow();
+	});
+
+	it("accepts concurrencyLeaseMs >= 1s", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				concurrencyKey: "x",
+				concurrencyLeaseMs: 1_000,
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts onLimit: 'queue' with concurrencyKey", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-q",
+			onLimit: "queue",
+		}) as { onLimit?: "throw" | "queue" };
+		expect(result.onLimit).toBe("queue");
+	});
+
+	it("accepts onLimit: 'throw' explicitly", () => {
+		const result = HttpTriggerOptsSchema.parse({
+			method: "POST",
+			concurrencyKey: "tenant-t",
+			onLimit: "throw",
+		}) as { onLimit?: "throw" | "queue" };
+		expect(result.onLimit).toBe("throw");
+	});
+
+	it("rejects onLimit set without concurrencyKey", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				onLimit: "queue",
+			}),
+		).toThrow(/onLimit.+requires.+concurrencyKey/i);
+	});
+});
+
+describe("WorkerTriggerOptsSchema concurrency keys", () => {
+	it("accepts concurrencyKey + concurrencyLimit alongside legacy concurrency", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "renders",
+			concurrency: 10,
+			concurrencyKey: "$.req.body.tenantId",
+			concurrencyLimit: 2,
+		}) as {
+			queue: string;
+			concurrency: number;
+			concurrencyKey?: string;
+			concurrencyLimit?: number;
+		};
+		expect(result.concurrency).toBe(10);
+		expect(result.concurrencyKey).toBe("$.req.body.tenantId");
+		expect(result.concurrencyLimit).toBe(2);
+	});
+
+	it("rejects concurrencyLimit without concurrencyKey on worker triggers too", () => {
+		expect(() =>
+			WorkerTriggerOptsSchema.parse({
+				queue: "renders",
+				concurrencyLimit: 2,
+			}),
+		).toThrow(/concurrencyLimit.+requires.+concurrencyKey/i);
+	});
+
+	it("default consumer concurrency stays 1 when only concurrencyKey provided", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "renders",
+			concurrencyKey: "x",
+		}) as { concurrency: number };
+		expect(result.concurrency).toBe(1);
+	});
+});
+
+describe("ConcurrencyOptsSchema (standalone)", () => {
+	it("accepts an empty object (all fields optional)", () => {
+		expect(() => ConcurrencyOptsSchema.parse({})).not.toThrow();
+	});
+
+	it("accepts a key alone", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyKey: "k" })).not.toThrow();
+	});
+
+	it("rejects limit without key", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyLimit: 5 })).toThrow();
+	});
+
+	it("rejects leaseMs without key", () => {
+		expect(() => ConcurrencyOptsSchema.parse({ concurrencyLeaseMs: 60_000 })).toThrow();
+	});
+});
+
+// =============================================================================
+// Tier 2 #5 + #7 — Scheduling: delay / TTL / debounce
+// =============================================================================
+
+describe("DebounceOptsSchema", () => {
+	it("accepts the minimal shape with defaults", () => {
+		const result = DebounceOptsSchema.parse({ key: "doc-1", delay: "500ms" });
+		expect(result.key).toBe("doc-1");
+		expect(result.mode).toBe("trailing");
+		expect(result.delay).toBe("500ms");
+	});
+
+	it("accepts numeric delay", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 500 })).not.toThrow();
+	});
+
+	it('accepts mode "leading"', () => {
+		const result = DebounceOptsSchema.parse({ key: "k", mode: "leading", delay: 100 });
+		expect(result.mode).toBe("leading");
+	});
+
+	it("accepts maxDelay >= delay (numbers)", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 500, maxDelay: 5000 })).not.toThrow();
+	});
+
+	it("rejects maxDelay < delay (numbers)", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: 5000, maxDelay: 500 })).toThrow(/maxDelay.+>=.+delay/i);
+	});
+
+	it("does not enforce maxDelay/delay relationship at the schema layer when string units differ", () => {
+		// Schema-layer relaxation — runtime parseDuration normalizes.
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "5s", maxDelay: "1m" })).not.toThrow();
+	});
+
+	it("rejects empty key", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "", delay: 500 })).toThrow();
+	});
+
+	it("rejects bad mode", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", mode: "throttle" as never, delay: 500 })).toThrow();
+	});
+
+	it("rejects malformed delay strings", () => {
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "1h30m" })).toThrow();
+		expect(() => DebounceOptsSchema.parse({ key: "k", delay: "garbage" })).toThrow();
+	});
+});
+
+describe("SchedulingOptsSchema (standalone)", () => {
+	it("accepts an empty object (all fields optional)", () => {
+		expect(() => SchedulingOptsSchema.parse({})).not.toThrow();
+	});
+
+	it("accepts delay as number or duration string", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: 1000 })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1h" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "30m" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "500ms" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1d" })).not.toThrow();
+	});
+
+	it("rejects malformed duration strings", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: "1h30m" })).toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "1.5h" })).toThrow();
+		expect(() => SchedulingOptsSchema.parse({ delay: "abc" })).toThrow();
+	});
+
+	it("rejects negative numeric delay", () => {
+		expect(() => SchedulingOptsSchema.parse({ delay: -1 })).toThrow();
+	});
+
+	it("accepts ttl with same surface as delay", () => {
+		expect(() => SchedulingOptsSchema.parse({ ttl: "2h" })).not.toThrow();
+		expect(() => SchedulingOptsSchema.parse({ ttl: 60_000 })).not.toThrow();
+	});
+
+	it("accepts debounce nested under scheduling", () => {
+		expect(() =>
+			SchedulingOptsSchema.parse({
+				debounce: { key: "doc-1", delay: "500ms", maxDelay: "5s" },
+			}),
+		).not.toThrow();
+	});
+
+	it("does NOT enforce HTTP-specific ttl-without-delay rule (that's per-trigger)", () => {
+		// Standalone schema permissive; per-trigger refinement enforces the rule.
+		expect(() => SchedulingOptsSchema.parse({ ttl: "2h" })).not.toThrow();
+	});
+});
+
+describe("HttpTriggerOptsSchema scheduling fields", () => {
+	it("accepts delay (number)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: 5000 })).not.toThrow();
+	});
+
+	it("accepts delay (duration string)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: "1h" })).not.toThrow();
+	});
+
+	it("accepts delay + ttl together", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", delay: "1h", ttl: "2h" })).not.toThrow();
+	});
+
+	it("rejects ttl WITHOUT delay (HTTP-only rule)", () => {
+		expect(() => HttpTriggerOptsSchema.parse({ method: "POST", ttl: "2h" })).toThrow(/HTTP.+ttl.+requires.+delay/i);
+	});
+
+	it("accepts debounce alone", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "$.req.body.docId", delay: "500ms", maxDelay: "5s" },
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts debounce + concurrency together", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "doc", delay: 500 },
+				concurrencyKey: "tenant-x",
+				concurrencyLimit: 3,
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts a $-proxy compiled string for debounce.key", () => {
+		expect(() =>
+			HttpTriggerOptsSchema.parse({
+				method: "POST",
+				debounce: { key: "js/ctx.request.body.userId", delay: 1000 },
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("WorkerTriggerOptsSchema scheduling fields", () => {
+	it("accepts delay as a number (back-compat)", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "q",
+			delay: 60_000,
+		}) as { delay: number | string };
+		expect(result.delay).toBe(60_000);
+	});
+
+	it("accepts delay as a duration string (Tier 2 #5)", () => {
+		const result = WorkerTriggerOptsSchema.parse({
+			queue: "q",
+			delay: "1h",
+		}) as { delay: number | string };
+		expect(result.delay).toBe("1h");
+	});
+
+	it("accepts ttl WITHOUT delay (worker-specific rule)", () => {
+		// Worker queue-time TTL is independent of delay.
+		expect(() => WorkerTriggerOptsSchema.parse({ queue: "q", ttl: "1h" })).not.toThrow();
+	});
+
+	it("accepts debounce + concurrency stacked (orthogonal gates)", () => {
+		expect(() =>
+			WorkerTriggerOptsSchema.parse({
+				queue: "q",
+				concurrency: 10,
+				concurrencyKey: "tenant",
+				concurrencyLimit: 2,
+				debounce: { key: "$.req.body.docId", delay: 500, maxDelay: 5000 },
+				delay: "5s",
+				ttl: "30m",
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects malformed delay strings", () => {
+		expect(() => WorkerTriggerOptsSchema.parse({ queue: "q", delay: "1.5h" })).toThrow();
+	});
 });
 
 describe("QueueTriggerOptsSchema", () => {
@@ -157,5 +761,157 @@ describe("StepConditionSchema", () => {
 			node: { name: "cond-node", node: "control-flow/if-else@1.0.0", type: "local" },
 		});
 		expect(result.node.name).toBe("cond-node");
+	});
+});
+
+describe("TRIGGER_SCHEMAS", () => {
+	it("has an entry for every trigger name", () => {
+		for (const name of TriggersSchema.options) {
+			expect(TRIGGER_SCHEMAS).toHaveProperty(name);
+		}
+	});
+
+	it("returns null for schemaless triggers", () => {
+		expect(TRIGGER_SCHEMAS.grpc).toBeNull();
+		expect(TRIGGER_SCHEMAS.manual).toBeNull();
+	});
+
+	it("returns a schema for typed triggers", () => {
+		expect(TRIGGER_SCHEMAS.http).not.toBeNull();
+		expect(TRIGGER_SCHEMAS.cron).not.toBeNull();
+		expect(TRIGGER_SCHEMAS.queue).not.toBeNull();
+	});
+});
+
+// PR 4 P1 — wait step schema.
+describe("V2WaitStepSchema (PR 4 wait.for / wait.until)", () => {
+	it("accepts { id, wait: { for } } with a duration string", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-3d", wait: { for: "3d" } });
+		expect(result.id).toBe("wait-3d");
+		expect(result.wait.for).toBe("3d");
+	});
+
+	it("accepts { id, wait: { for } } with a numeric millisecond value", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-ms", wait: { for: 60_000 } });
+		expect(result.wait.for).toBe(60_000);
+	});
+
+	it("accepts { id, wait: { until } } with a numeric ms-since-epoch", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-deadline", wait: { until: 1735741200000 } });
+		expect(result.wait.until).toBe(1735741200000);
+	});
+
+	it("accepts { id, wait: { until } } with a string (ISO date or $-proxy expression)", () => {
+		const result = V2WaitStepSchema.parse({ id: "wait-iso", wait: { until: "2026-12-31T00:00:00Z" } });
+		expect(result.wait.until).toBe("2026-12-31T00:00:00Z");
+	});
+
+	it("rejects when both `for` and `until` are set", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: { for: "1h", until: 0 } })).toThrow(/mutually exclusive/i);
+	});
+
+	it("rejects when neither `for` nor `until` is set", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: {} })).toThrow();
+	});
+
+	it("requires a non-empty id", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "", wait: { for: "1h" } })).toThrow();
+		expect(() => V2WaitStepSchema.parse({ wait: { for: "1h" } })).toThrow();
+	});
+
+	it("accepts optional as / ephemeral / active / stop", () => {
+		const result = V2WaitStepSchema.parse({
+			id: "x",
+			wait: { for: "30s" },
+			as: "waitMarker",
+			ephemeral: true,
+			active: false,
+			stop: true,
+		});
+		expect(result.as).toBe("waitMarker");
+		expect(result.ephemeral).toBe(true);
+		expect(result.active).toBe(false);
+		expect(result.stop).toBe(true);
+	});
+
+	it("isWaitStep returns true for wait shapes and false for others", () => {
+		const wait = { id: "x", wait: { for: "1h" } };
+		expect(isWaitStep(wait as never)).toBe(true);
+		expect(isWaitStep({ id: "x", use: "node-x" } as never)).toBe(false);
+		expect(isWaitStep({ id: "x", subworkflow: "y" } as never)).toBe(false);
+		expect(isWaitStep({ id: "x", branch: { when: "true", then: [] } } as never)).toBe(false);
+	});
+
+	// PR 1-5 polish — explicit refinements for idempotencyKey + retry produce
+	// helpful error messages rather than the generic "Unrecognized key(s) in
+	// object" that .strict() emits on its own. Authors should know WHY the
+	// field was rejected, not just that it's unknown.
+	it("rejects `idempotencyKey` with a helpful message about checkpoint semantics", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, idempotencyKey: "k" } as unknown as never),
+		).toThrow(/wait IS the checkpoint|idempotencyKey.*not supported on wait/i);
+	});
+
+	it("rejects `retry` with a helpful message about non-retryable waits", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({
+				id: "x",
+				wait: { for: "1h" },
+				retry: { maxAttempts: 3 },
+			} as unknown as never),
+		).toThrow(/retryable way|retry.*not supported on wait/i);
+	});
+
+	// Review fix-up — three more rejections that the original polish PR
+	// missed. Each has a feature-specific helpful message instead of the
+	// generic "Unrecognized key in object" that .strict() emits.
+	it("rejects `maxDuration` with a helpful message", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, maxDuration: "30s" } as unknown as never),
+		).toThrow(/wait IS the duration|maxDuration.*not supported on wait/i);
+	});
+
+	it("rejects `concurrencyKey` with a helpful message about trigger-config scope", () => {
+		expect(() =>
+			V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, concurrencyKey: "k" } as unknown as never),
+		).toThrow(/trigger config|concurrencyKey.*not supported on wait/i);
+	});
+
+	it("rejects `spread` with a helpful message about no-data-to-spread", () => {
+		expect(() => V2WaitStepSchema.parse({ id: "x", wait: { for: "1h" }, spread: true } as unknown as never)).toThrow(
+			/no data to spread|spread.*not supported on wait/i,
+		);
+	});
+});
+
+describe("validateTriggerConfig", () => {
+	it("returns an empty object for grpc/manual when given undefined", () => {
+		expect(validateTriggerConfig("grpc", undefined)).toEqual({});
+		expect(validateTriggerConfig("manual", undefined)).toEqual({});
+	});
+
+	it("returns the provided config for grpc/manual when given an object", () => {
+		const cfg = { service: "UserService" };
+		expect(validateTriggerConfig("grpc", cfg)).toEqual(cfg);
+	});
+
+	it("throws when a typed trigger is missing its config", () => {
+		expect(() => validateTriggerConfig("cron", undefined)).toThrow(/requires a configuration object/);
+		expect(() => validateTriggerConfig("queue", undefined)).toThrow(/requires a configuration object/);
+		expect(() => validateTriggerConfig("worker", undefined)).toThrow(/requires a configuration object/);
+	});
+
+	it("applies defaults from the schema", () => {
+		const result = validateTriggerConfig("cron", { schedule: "0 * * * *" }) as {
+			timezone: string;
+			overlap: boolean;
+		};
+		expect(result.timezone).toBe("UTC");
+		expect(result.overlap).toBe(false);
+	});
+
+	it("rejects invalid configs", () => {
+		expect(() => validateTriggerConfig("cron", { schedule: 123 })).toThrow();
+		expect(() => validateTriggerConfig("queue", { provider: "unknown", topic: "x" })).toThrow();
 	});
 });

@@ -35,25 +35,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::Arc;
         use tokio::sync::Mutex;
 
-        let shared = Arc::new(Mutex::new(registry));
-
-        // For simplicity, create a separate registry for gRPC
+        // Build a separate registry per transport. `serve()` takes ownership;
+        // `serve_grpc()` takes a shared `Arc<Mutex<…>>`. Both are populated
+        // via `nodes::register_all` so they expose the same node set.
         let mut grpc_registry = NodeRegistry::new(&config.version);
         nodes::register_all(&mut grpc_registry);
         let grpc_shared = Arc::new(Mutex::new(grpc_registry));
 
-        // Need another registry for HTTP since serve() takes ownership
         let mut http_registry = NodeRegistry::new(&config.version);
         nodes::register_all(&mut http_registry);
+
+        let version = config.version.clone();
 
         tokio::select! {
             result = blok::server::serve(http_registry, config.port) => {
                 result?;
             }
-            result = blok::grpc_server::serve_grpc(grpc_shared, config.grpc_port) => {
-                result?;
+            result = blok::grpc_server::serve_grpc(grpc_shared, config.grpc_port, version) => {
+                result.map_err(|e| -> Box<dyn std::error::Error> { e })?;
             }
         }
+
+        // Suppress dead-code warning when `grpc` is built but `enable_grpc=false`.
+        let _ = registry;
     } else {
         blok::server::serve(registry, config.port).await?;
     }

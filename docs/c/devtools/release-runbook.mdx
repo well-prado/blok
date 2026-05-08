@@ -1,0 +1,150 @@
+---
+title: "Release Runbook"
+description: "How to publish @blokjs/* and blokctl to npm — normal flow, catch-up flow, and the release script."
+icon: "rocket"
+---
+
+This page documents how to ship a new Blok release end-to-end. Every release publishes 8 packages to npm in a coordinated bump and validates the published surface against a real `npx blokctl create project` smoke test.
+
+The release script at [scripts/release.ts](scripts/release.ts) automates the publish step and runs pre-flight checks for the most common drift modes. The surrounding context — when to bump, what to tag, how to validate — is documented here.
+
+## The 8 publishable packages
+
+Pre-1.0 Blok publishes 8 packages to npm. Every other package in the monorepo (most `triggers/*`, the `templates/*` SDKs, the scaffold private packages) is `private: true` and stays off npm.
+
+| npm name | Path on disk |
+|---|---|
+| `@blokjs/shared` | `core/shared/` |
+| `@blokjs/helper` | `core/workflow-helper/` |
+| `@blokjs/runner` | `core/runner/` |
+| `@blokjs/trigger-worker` | `triggers/worker/` |
+| `@blokjs/api-call` | `nodes/web/api-call@1.0.0/` |
+| `@blokjs/if-else` | `nodes/control-flow/if-else@1.0.0/` |
+| `@blokjs/react` | `nodes/web/react@1.0.0/` |
+| `blokctl` | `packages/cli/` |
+
+The npm name does not always match the directory name — `@blokjs/helper` lives at `core/workflow-helper/`, and the public node packages live under directory names that include the version (e.g. `nodes/web/api-call@1.0.0/`). Always identify packages by `package.json:name`, never by directory.
+
+## Lockstep versioning
+
+Pre-1.0 Blok bumps all 8 packages **in lockstep**. There is one Blok version — `v0.4.0` means every public package is at `0.4.0`. We do not ship `@blokjs/runner@0.5.0` while `@blokjs/helper` stays at `0.4.0`.
+
+Why: lockstep keeps the surface coherent for users (one tag, one mental model) and avoids the cross-package-dep-range trap that bit the v0.4 release. When `@blokjs/runner` moves from `0.2.2` to `0.4.0`, every dep range across the monorepo also has to move from `^0.2.0` to `^0.4.0` — otherwise bun resolves cross-package deps to the npm registry's stale version instead of the workspace, and `nx run-many -t test` starts failing with extensionless-import errors.
+
+The release script enforces this — it refuses to publish if any cross-package `@blokjs/*` dep range across the workspace doesn't include the target version.
+
+## Normal flow — per-PR changesets
+
+Most releases follow the changesets workflow:
+
+1. **Per PR**, run `bunx changeset` from any PR that touches a public package. Authors classify as `patch` / `minor` / `major` per package.
+2. **At release time**, on a release branch, run `bunx changeset version`. This consumes the `.changeset/*.md` entries, applies the version bumps, and updates cross-package dep ranges automatically.
+3. **Bump the CLI scaffold constants** in [packages/cli/src/commands/create/project.ts](packages/cli/src/commands/create/project.ts):
+   - `GITHUB_REPO_RELEASE_TAG` — the git tag `blokctl create project` clones from
+   - `BLOKJS_DEP_RANGE` — the dep range hardcoded into scaffolded `package.json`s
+4. **Tag**: `git tag -a v<version> -m "<release notes>"`.
+5. **Validate**: see "Local-pack validation" below.
+6. **Publish**: `bun run release --otp <code> --yes`.
+7. **Push**: `git push && git push --tags`.
+
+Per-PR changesets are the discipline that keeps the registry in sync with `main`. The v0.4 release accumulated ~80 commits without any changesets — the catch-up bump below was the price.
+
+## Catch-up flow — when changesets math doesn't apply
+
+If the registry has fallen far behind `main` (e.g. `@blokjs/helper@0.2.1` on npm but the workspace is at the API surface for `0.4.0`), `bunx changeset version` won't bridge the gap cleanly. Skip it and bump manually:
+
+1. **Manual lockstep bump**: edit each of the 8 public `package.json`s to the target version directly.
+2. **Cross-package dep alignment**: every `@blokjs/<published-package>` dep range across the monorepo (including private trigger packages) must include the new version. If `@blokjs/runner` was at `0.2.2` and the workspace bumps to `0.4.0`, every `"@blokjs/runner": "^0.2.0"` becomes `"^0.4.0"`. Without this, bun resolves cross-package deps to the npm registry's stale version instead of the workspace.
+3. **CLI scaffold constants**: bump both `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in [packages/cli/src/commands/create/project.ts](packages/cli/src/commands/create/project.ts).
+4. **Delete consumed changesets**: any `.changeset/*.md` accumulated during the gap is now redundant — the manual bump replaces them. Delete to avoid double-bumping on the next changesets run.
+5. **Lockfile**: `bun install` regenerates `bun.lock` with the new ranges.
+6. **Tag**: `git tag -a v<version> -m "<release notes>"`.
+7. **Pre-flight**: `bun run release --dry-run` verifies lockstep, cross-dep ranges, CLI constants, git tag, and a clean tree.
+8. **Publish**: `bun run release --otp <code> --yes`.
+
+## Local-pack validation
+
+Before invoking `npm publish` (which is irreversible after 72h), validate the publish surface against a fresh scaffold:
+
+```bash
+mkdir -p /tmp/blok-tgz
+for dir in core/shared core/workflow-helper core/runner triggers/worker \
+           nodes/web/api-call@1.0.0 nodes/control-flow/if-else@1.0.0 \
+           nodes/web/react@1.0.0 packages/cli; do
+  (cd "$dir" && npm pack --pack-destination /tmp/blok-tgz)
+done
+```
+
+Then scaffold a project via the local CLI build, override the scaffold's `@blokjs/*` deps to point at the `.tgz` files via `package.json` `overrides`, and `npm install && npm run dev`. If the trigger boots and `GET /__blok/health` returns structured JSON, the publish surface is valid.
+
+This catches missing files in `package.json:files`, missing exports in `package.json:exports`, broken type declarations, and stale dep ranges — without committing irreversible npm publishes.
+
+## Running the release script
+
+```bash
+bun run release --dry-run              # pre-flight + plan, no publish
+bun run release --otp 123456 --yes     # publish all 8 with OTP
+bun run release --otp 123456 --yes --skip-tests --skip-build  # if validated separately
+```
+
+What it does:
+
+- Reads all 8 publishable `package.json`s and asserts versions match (lockstep).
+- Walks every `package.json` in the workspace and asserts each `@blokjs/<published-package>` dep range includes the workspace version.
+- Reads `packages/cli/src/commands/create/project.ts` and asserts `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` match the workspace version.
+- Asserts the local git tag `v<version>` exists.
+- Asserts the working tree is clean.
+- Optionally runs `bun run build` and `bunx nx run-many -t test` (skip with flags).
+- Publishes the 8 in dependency order using a single OTP.
+
+What it does **not** do:
+
+- It does not bump versions, push tags, or commit. Those are deliberate human steps — the script's role is to turn an already-bumped, already-tagged repository into a published release with a single command.
+- It does not publish under a non-default dist-tag (e.g. `next`). Edit the script if you need that.
+- It does not publish private packages.
+
+## OTP batching
+
+`npm publish` requires a TOTP code per call. The TOTP window is ~30 seconds, which is enough to publish all 8 packages in a single batch with one OTP. Pass the same code via `--otp` and the script runs all 8 publishes within the window.
+
+If a publish fails mid-batch (expired OTP, network blip), the script reports which packages succeeded. Re-run with a fresh OTP — already-published versions fail with `EPUBLISHCONFLICT` which is benign and the script will continue past them.
+
+## Post-publish smoke test
+
+After the script reports all 8 published, validate against real npm from a cold environment:
+
+```bash
+mkdir /tmp/blok-real && cd /tmp/blok-real
+npx blokctl@latest create project --name myapp \
+  --triggers http --runtimes node --package-manager npm
+cd myapp && npm run dev
+```
+
+Expected: `blokctl@<new-version>` installs from real npm, scaffold clones the new tag, `npm install` resolves all `@blokjs/*` to the new version, and the trigger boots without `SyntaxError: Export named 'workflow' not found in module '@blokjs/helper'` or similar.
+
+If the smoke test fails, the most common cause is a cross-package dep range still pointing at an older version — check the scaffolded project's `package.json` and the `BLOKJS_DEP_RANGE` constant in `project.ts`.
+
+## Pre-publish checklist
+
+The release script verifies the first four automatically:
+
+- [ ] All 8 `package.json` files have the target version.
+- [ ] Every `@blokjs/<published-package>` dep range across the monorepo includes the target version.
+- [ ] `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in `packages/cli/src/commands/create/project.ts` match.
+- [ ] The git tag `v<version>` exists locally.
+- [ ] `bunx nx run-many -t test` is green across all projects.
+- [ ] `bun run build` produces a clean dist for every public package.
+- [ ] A local-pack scaffold smoke test passes.
+
+## Versioning conventions
+
+- Pre-1.0: lockstep bumps across all 8 packages. `0.X.0` for breaking changes; `0.X.Y` for additive changes and bug fixes.
+- Tags are annotated (`git tag -a`) with the full release notes embedded in the tag message. `git show v<version>` should produce a complete changelog.
+- Tags are pushed manually — `git push --tags` after the post-publish smoke test confirms a successful release.
+
+## When a release goes wrong
+
+- **Wrong content published**: npm allows unpublishing within 72 hours via `npm unpublish <pkg>@<version>`. After 72h, deprecate (`npm deprecate`) and ship a fix in the next patch.
+- **One package failed mid-batch**: re-run the script with a fresh OTP — succeeded packages fail benignly with `EPUBLISHCONFLICT`.
+- **Tag points at the wrong commit**: delete locally (`git tag -d v<version>`), retag, force-push the tag (`git push --tags --force`). This is one of the few cases where force-push on tags is acceptable.
+- **Workspace and registry diverge after partial publish**: bump the patch version, retag, run the script again. Don't try to "patch over" a partial publish by re-publishing the same version — npm refuses.

@@ -20,8 +20,8 @@ describe("TriggerGenerator", () => {
 
 		it("should pass for valid trigger code", () => {
 			const validCode = `
-import TriggerBase from "@blok/runner/TriggerBase";
-import { NodeMap } from "@blok/runner";
+import TriggerBase from "@blokjs/runner/TriggerBase";
+import { NodeMap } from "@blokjs/runner";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {
@@ -74,7 +74,7 @@ export default class MyTrigger {
 
 		it("should fail for trigger missing loadNodes", () => {
 			const code = `
-import TriggerBase from "@blok/runner/TriggerBase";
+import TriggerBase from "@blokjs/runner/TriggerBase";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {
@@ -97,7 +97,7 @@ export default class MyTrigger extends TriggerBase {
 
 		it("should fail for trigger missing loadWorkflows", () => {
 			const code = `
-import TriggerBase from "@blok/runner/TriggerBase";
+import TriggerBase from "@blokjs/runner/TriggerBase";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {
@@ -120,7 +120,7 @@ export default class MyTrigger extends TriggerBase {
 
 		it("should fail for trigger missing createContext", () => {
 			const code = `
-import TriggerBase from "@blok/runner/TriggerBase";
+import TriggerBase from "@blokjs/runner/TriggerBase";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {
@@ -145,7 +145,7 @@ export default class MyTrigger extends TriggerBase {
 
 		it("should fail for constructor without super()", () => {
 			const code = `
-import TriggerBase from "@blok/runner/TriggerBase";
+import TriggerBase from "@blokjs/runner/TriggerBase";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {
@@ -169,7 +169,7 @@ export default class MyTrigger extends TriggerBase {
 
 		it("should warn when request data is not populated on context", () => {
 			const code = `
-import TriggerBase from "@blok/runner/TriggerBase";
+import TriggerBase from "@blokjs/runner/TriggerBase";
 
 export default class MyTrigger extends TriggerBase {
   constructor() {

@@ -101,13 +101,13 @@ This workflow **stores an API response in a variable** and **uses it in a later 
     "steps": [
         {
             "name": "fetch-data",
-            "node": "@blok/api-call",
+            "node": "@blokjs/api-call",
             "type": "module",
             "set_var": true
         },
         {
             "name": "process-data",
-            "node": "@blok/mapper",
+            "node": "@blokjs/mapper",
             "type": "module"
         }
     ],

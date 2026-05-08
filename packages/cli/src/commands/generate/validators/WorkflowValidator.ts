@@ -29,7 +29,7 @@ const VALID_TRIGGER_TYPES = [
 ];
 const VALID_STEP_TYPES = ["module", "local", "runtime.python3", "runtime.go", "runtime.java"];
 const VALID_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "ANY", "*"];
-const VALID_QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk"];
+const VALID_QUEUE_PROVIDERS = ["kafka", "rabbitmq", "sqs", "redis", "beanstalk", "nats"];
 const VALID_PUBSUB_PROVIDERS = ["gcp", "aws", "azure"];
 const VALID_WEBHOOK_SOURCES = ["github", "stripe", "shopify", "custom"];
 

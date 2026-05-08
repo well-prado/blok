@@ -71,22 +71,22 @@ export function getHover(text: string, line: number, character: number): Hover |
 		}
 
 		// Common node packages
-		if (word === "@blok/api-call") {
+		if (word === "@blokjs/api-call") {
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
 					value:
-						"**@blok/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
+						"**@blokjs/api-call**\n\nMakes HTTP API calls to external services.\n\n**Inputs:** `url`, `method`, `headers`, `body`, `responseType`",
 				},
 				range,
 			};
 		}
-		if (word === "@blok/if-else") {
+		if (word === "@blokjs/if-else") {
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
 					value:
-						"**@blok/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
+						"**@blokjs/if-else**\n\nConditional branching node. Evaluates JavaScript conditions against the workflow context.\n\nConfigure conditions in the `nodes` section using the `conditions` array.",
 				},
 				range,
 			};
@@ -122,7 +122,7 @@ function findQuotedWordAt(
 function createDocHover(doc: HoverDoc, range: Range): Hover {
 	let value = `**${doc.title}**\n\n${doc.description}\n\n`;
 	if (doc.example) {
-		value += "```json\n" + doc.example + "\n```";
+		value += `\`\`\`json\n${doc.example}\n\`\`\``;
 	}
 
 	return {

@@ -27,23 +27,18 @@ Use the fan-out pattern when a single step needs to trigger multiple independent
 {
   "steps": [
     {
-      "name": "fan-out-notifications",
-      "node": "parallel-executor",
-      "type": "module"
-    }
-  ],
-  "nodes": {
-    "fan-out-notifications": {
+      "id": "fan-out-notifications",
+      "use": "parallel-executor",
       "inputs": {
         "branches": [
-          { "stepName": "send-email", "node": "@blok/api-call" },
-          { "stepName": "send-sms", "node": "@blok/api-call" },
-          { "stepName": "send-push", "node": "@blok/api-call" }
+          { "stepId": "send-email", "use": "@blokjs/api-call" },
+          { "stepId": "send-sms", "use": "@blokjs/api-call" },
+          { "stepId": "send-push", "use": "@blokjs/api-call" }
         ],
         "waitForAll": true
       }
     }
-  }
+  ]
 }
 ```
 
@@ -62,30 +57,25 @@ Use the fan-in pattern to collect and aggregate results from multiple parallel o
 {
   "steps": [
     {
-      "name": "aggregate-results",
-      "node": "data-transformer",
-      "type": "module"
-    }
-  ],
-  "nodes": {
-    "aggregate-results": {
+      "id": "aggregate-results",
+      "use": "data-transformer",
       "inputs": {
         "sources": {
-          "emailResult": "js/ctx.vars['send-email']",
-          "smsResult": "js/ctx.vars['send-sms']",
-          "pushResult": "js/ctx.vars['send-push']"
+          "emailResult": "$.state.send-email",
+          "smsResult": "$.state.send-sms",
+          "pushResult": "$.state.send-push"
         },
         "aggregation": "merge"
       }
     }
-  }
+  ]
 }
 ```
 
 **When to use:** After a fan-out when downstream logic depends on combined results.
 
 **Recommendations:**
-- Use `set_var: true` on fan-out steps so their results are accessible via `ctx.vars`.
+- v2 default-stores every step's output to `ctx.state[id]`; reference them as `$.state.<id>`. No `set_var: true` needed.
 - Define fallback values for branches that may fail to prevent the aggregation step from breaking.
 
 ### Saga Pattern
@@ -96,21 +86,19 @@ The saga pattern manages distributed transactions by defining compensating actio
 {
   "steps": [
     {
-      "name": "charge-payment",
-      "node": "@blok/api-call",
-      "type": "module",
-      "set_var": true
+      "id": "charge-payment",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://billing.example.com/charge", "method": "POST" }
     },
     {
-      "name": "create-order",
-      "node": "@blok/api-call",
-      "type": "module",
-      "set_var": true
+      "id": "create-order",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://orders.example.com/create", "method": "POST" }
     },
     {
-      "name": "reserve-inventory",
-      "node": "@blok/api-call",
-      "type": "module"
+      "id": "reserve-inventory",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://inventory.example.com/reserve", "method": "POST" }
     }
   ]
 }
@@ -123,8 +111,8 @@ If `reserve-inventory` fails, the compensating actions would be:
 **When to use:** Multi-step transactions spanning multiple services where atomicity is required.
 
 **Recommendations:**
-- Store each step's result using `set_var: true` so compensating actions have the data they need (e.g., the payment intent ID for refunding).
-- Use the `@blok/if-else` node to detect failures and route to compensating steps.
+- v2 default-stores every step's output at `ctx.state[<id>]`, so compensating actions can read prior results via `$.state.charge-payment.id`, `$.state.create-order.id`, etc.
+- Use a v2 `branch` step after each critical write to detect failures and route to compensating steps.
 - Log every step and compensation for audit purposes.
 - Design compensating actions to be idempotent -- they may be executed more than once in retry scenarios.
 
@@ -136,59 +124,44 @@ Implement retries for transient failures (network timeouts, rate limits, tempora
 {
   "steps": [
     {
-      "name": "call-external-api",
-      "node": "@blok/api-call",
-      "type": "module",
+      "id": "call-external-api",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://api.example.com/data", "method": "GET" },
       "retry": {
         "maxAttempts": 3,
-        "backoff": "exponential",
-        "initialDelay": 1000,
-        "maxDelay": 30000,
-        "retryOn": [429, 500, 502, 503, 504]
+        "minTimeoutInMs": 1000,
+        "maxTimeoutInMs": 30000,
+        "factor": 2
       }
     }
   ]
 }
 ```
+
+This is the real v2 retry shape — see [Per-step retry](/d/reliability/retry).
 
 **When to use:** Any external API call or I/O operation that may experience transient failures.
 
 **Recommendations:**
 - Set a `maxAttempts` limit (3 is a reasonable default) to prevent infinite retry loops.
-- Use exponential backoff with jitter to spread out retries and avoid thundering herd.
-- Only retry on transient error codes (429, 5xx). Do not retry on 4xx client errors (except 429).
-- Log every retry attempt with the error that triggered it.
-- Set a circuit breaker (see below) for persistent failures.
+- Tune `minTimeoutInMs`, `maxTimeoutInMs`, and `factor` for the specific upstream's behavior.
+- Filter non-transient errors inside the node before they reach the retry loop. v2 retry runs on every thrown or soft error.
+- Log every retry attempt with the error that triggered it. Studio surfaces these as `NODE_ATTEMPT_FAILED` events automatically.
+- Pair retry with [idempotent caching](/d/reliability/idempotency) so successful attempts are cached and a client retry hits the cache rather than re-running.
 
-### Circuit Breaker Pattern
+### Circuit Breaker Pattern (conceptual)
 
 The circuit breaker prevents cascading failures by stopping calls to a failing service after a threshold of consecutive failures. After a cooldown period, it allows a limited number of probe requests to test recovery.
 
-```json
-{
-  "steps": [
-    {
-      "name": "call-payment-service",
-      "node": "@blok/api-call",
-      "type": "module",
-      "circuitBreaker": {
-        "failureThreshold": 5,
-        "cooldownPeriod": 60000,
-        "probeRequests": 1,
-        "fallbackStep": "payment-service-unavailable"
-      }
-    }
-  ]
-}
-```
+> **Not a built-in v2 primitive.** Circuit breaking is not part of the v2 step schema today. To approximate it, wrap the upstream in a custom node that tracks failure state in an external store (Redis, NATS KV) and short-circuits when the threshold is exceeded. Pair with the existing [`retry`](/d/reliability/retry) for transient failures and [`idempotencyKey`](/d/reliability/idempotency) for stable fallback responses on cache hit.
 
 **When to use:** Critical external dependencies where continued retries during an outage would degrade overall system performance.
 
 **Recommendations:**
-- Define a meaningful fallback step that returns an appropriate error or uses a cached result.
+- Wrap the upstream call in a custom node that consults shared state before dispatching.
 - Set the failure threshold based on the service's typical error rate. Five consecutive failures is a common starting point.
-- Monitor circuit breaker state changes (open, half-open, closed) as a key operational metric.
-- Alert when circuits open -- this indicates a dependency is unhealthy.
+- Monitor circuit state changes (open, half-open, closed) as a key operational metric.
+- Alert when circuits open — this indicates a dependency is unhealthy.
 
 ---
 
@@ -228,7 +201,7 @@ Every node should handle errors explicitly rather than allowing unhandled except
     "details": { "field": "email", "value": "not-an-email" }
   }
   ```
-- Use the `@blok/if-else` node after critical steps to check for errors and route accordingly.
+- Use the `@blokjs/if-else` node after critical steps to check for errors and route accordingly.
 - Distinguish between retryable errors (network timeout, rate limit) and permanent errors (validation failure, not found).
 - Log errors with sufficient context (step name, inputs, error code) for debugging.
 - Never expose internal error details (stack traces, database queries) in API responses.
@@ -238,7 +211,7 @@ Every node should handle errors explicitly rather than allowing unhandled except
 Define explicit schemas for node inputs and outputs. This makes workflows self-documenting and enables validation.
 
 **Recommendations:**
-- Use `@blok/json-validator` at the start of workflows and before critical steps.
+- Use `@blokjs/json-validator` at the start of workflows and before critical steps.
 - Document the expected input shape and output shape in the node description.
 - Use TypeScript interfaces for custom nodes to enforce type safety during development.
 - Validate early, fail fast -- reject invalid inputs at the workflow boundary rather than deep in the pipeline.
@@ -311,7 +284,7 @@ Reduce the amount of data flowing between steps to improve performance and reduc
 Validate all external inputs at the workflow boundary to prevent injection attacks, data corruption, and unexpected behavior.
 
 **Recommendations:**
-- Use `@blok/json-validator` as the first step in every HTTP-triggered workflow.
+- Use `@blokjs/json-validator` as the first step in every HTTP-triggered workflow.
 - Validate:
   - Data types and formats (email, URL, date).
   - String lengths (minimum and maximum).
@@ -586,7 +559,7 @@ Error handling semantics vary across runtimes.
   }
   ```
 - Do not rely on language-specific exception types. Convert exceptions to the standard error format at the node boundary.
-- Test error propagation from non-primary runtimes to ensure the workflow's `@blok/if-else` routing handles them correctly.
+- Test error propagation from non-primary runtimes to ensure the workflow's `@blokjs/if-else` routing handles them correctly.
 
 ### Dependency Management
 

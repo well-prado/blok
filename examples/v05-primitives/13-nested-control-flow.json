@@ -1,0 +1,152 @@
+{
+	"name": "Order Processing With Per-Item Routing",
+	"version": "1.0.0",
+	"description": "Worst-case nesting demo. For each line item in an order, we wrap the per-item processing in tryCatch, route by item type via switch, then inside the switch each case is a sub-pipeline of regular steps. The catch arm uses a branch to decide whether one bad item should fail the whole order (required items) or be silently skipped (optional). Shows that the four flow primitives (forEach, tryCatch, switch, branch) all nest cleanly without ceremony — the JSON stays readable because each nesting level adds exactly one layer of indentation. Demonstrates: forEach > tryCatch > switch > regular steps, plus tryCatch.catch > branch in the catch arm.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/orders/process",
+			"middleware": ["auth-check"]
+		}
+	},
+	"steps": [
+		{
+			"id": "per-item-pipeline",
+			"forEach": {
+				"in": "$.req.body.items",
+				"as": "item",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "item-tryCatch",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "by-type",
+									"switch": {
+										"on": "$.state.item.type",
+										"cases": [
+											{
+												"when": "physical",
+												"do": [
+													{
+														"id": "reserve",
+														"use": "inventory-reserve",
+														"type": "module",
+														"inputs": {
+															"sku": "$.state.item.sku",
+															"qty": "$.state.item.qty"
+														}
+													},
+													{
+														"id": "schedule-ship",
+														"use": "shipping-schedule",
+														"type": "module",
+														"inputs": {
+															"address": "$.req.body.shipTo",
+															"sku": "$.state.item.sku"
+														}
+													}
+												]
+											},
+											{
+												"when": "digital",
+												"do": [
+													{
+														"id": "generate-license",
+														"use": "license-create",
+														"type": "module",
+														"inputs": {
+															"productId": "$.state.item.productId",
+															"userId": "$.state.identity.sub"
+														}
+													}
+												]
+											},
+											{
+												"when": "service",
+												"do": [
+													{
+														"id": "schedule-service",
+														"use": "service-schedule",
+														"type": "module",
+														"inputs": {
+															"kind": "$.state.item.serviceKind",
+															"date": "$.state.item.scheduledFor",
+															"customerId": "$.state.identity.sub"
+														}
+													}
+												]
+											}
+										],
+										"default": [
+											{
+												"id": "throw-unknown",
+												"use": "throw",
+												"type": "module",
+												"inputs": {
+													"message": "Unknown item type: $.state.item.type"
+												}
+											}
+										]
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "audit-item-failure",
+									"use": "audit-log",
+									"type": "module",
+									"inputs": {
+										"event": "item-process-failure",
+										"item": "$.state.item",
+										"error": "$.error.message"
+									}
+								},
+								{
+									"id": "decide-on-failure",
+									"branch": {
+										"when": "$.state.item.required === true",
+										"then": [
+											{
+												"id": "rethrow",
+												"use": "throw",
+												"type": "module",
+												"inputs": {
+													"message": "Required item $.state.item.sku failed: $.error.message"
+												}
+											}
+										],
+										"else": [
+											{
+												"id": "skip-and-log",
+												"use": "log",
+												"type": "module",
+												"inputs": {
+													"level": "warn",
+													"message": "Optional item $.state.item.sku skipped due to: $.error.message"
+												}
+											}
+										]
+									}
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"status": 200,
+				"body": {
+					"orderId": "$.req.body.id",
+					"itemsProcessed": "$.state['per-item-pipeline'].length"
+				}
+			}
+		}
+	]
+}

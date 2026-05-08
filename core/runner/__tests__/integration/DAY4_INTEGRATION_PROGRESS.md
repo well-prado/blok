@@ -102,7 +102,7 @@ const result = await adapter.execute(node, ctx);
 
 ```typescript
 import { describe, it, expect, beforeAll } from "vitest";
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import BlokService from "../../../src/BlokService";
 import BlokResponse, { type IBlokResponse } from "../../../src/BlokResponse";
 import { RuntimeRegistry } from "../../../src/RuntimeRegistry";

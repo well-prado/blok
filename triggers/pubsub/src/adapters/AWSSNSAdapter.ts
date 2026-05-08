@@ -14,9 +14,26 @@
  * - SQS_MAX_MESSAGES: Max messages per receive (default: 10)
  */
 
-import type { PubSubTriggerOpts } from "@blok/helper";
+import type { MessageAttributeValue, SQSClient } from "@aws-sdk/client-sqs";
+import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
 import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
+
+/**
+ * Shape of an SNS notification when delivered to an SQS subscription.
+ * SNS-to-SQS subscriptions wrap the publisher's payload inside a JSON
+ * envelope; the receiver parses `msg.Body` as this envelope and reads
+ * `Message` (the actual payload) plus the SNS-side attributes.
+ */
+interface SNSNotificationEnvelope {
+	Type?: string;
+	MessageId?: string;
+	TopicArn?: string;
+	Message?: string;
+	Subject?: string;
+	Timestamp?: string;
+	MessageAttributes?: Record<string, { Type?: string; Value?: string }>;
+}
 
 /**
  * AWS SNS/SQS configuration
@@ -33,11 +50,22 @@ export interface AWSSNSConfig {
 export class AWSSNSAdapter implements PubSubAdapter {
 	readonly provider = "aws" as const;
 
-	private sqsClient: any;
+	private sqsClient: SQSClient | undefined;
 	private connected = false;
 	private config: AWSSNSConfig;
 	private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
 	private shouldStop = false;
+
+	/**
+	 * Type-narrowing accessor for `this.sqsClient`. Field is undefined
+	 * until `connect()` runs.
+	 */
+	private requireSqsClient(): SQSClient {
+		if (!this.sqsClient) {
+			throw new Error("[AWSSNSAdapter] SQS client is not initialised — call connect() first");
+		}
+		return this.sqsClient;
+	}
 
 	constructor(config?: Partial<AWSSNSConfig>) {
 		this.config = {
@@ -66,8 +94,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 			console.log(`[AWSSNSAdapter] Connected to AWS SNS/SQS: ${this.config.region}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to AWS: ${(error as Error).message}. ` +
-					`Make sure @aws-sdk/client-sqs is installed: npm install @aws-sdk/client-sqs`,
+				`Failed to connect to AWS: ${(error as Error).message}. Make sure @aws-sdk/client-sqs is installed: npm install @aws-sdk/client-sqs`,
 			);
 		}
 	}
@@ -129,16 +156,16 @@ export class AWSSNSAdapter implements PubSubAdapter {
 				AttributeNames: ["All"],
 			});
 
-			const response = await this.sqsClient.send(command);
+			const response = await this.requireSqsClient().send(command);
 
 			if (response.Messages && response.Messages.length > 0) {
 				for (const msg of response.Messages) {
 					// Parse SNS message wrapper
-					let snsMessage: any;
+					let snsMessage: SNSNotificationEnvelope;
 					let body: unknown;
 
 					try {
-						snsMessage = JSON.parse(msg.Body || "{}");
+						snsMessage = JSON.parse(msg.Body || "{}") as SNSNotificationEnvelope;
 						// SNS wraps the actual message in a "Message" field
 						if (snsMessage.Type === "Notification" && snsMessage.Message) {
 							try {
@@ -160,14 +187,15 @@ export class AWSSNSAdapter implements PubSubAdapter {
 					// SQS message attributes
 					if (msg.MessageAttributes) {
 						for (const [key, attr] of Object.entries(msg.MessageAttributes)) {
-							attributes[key] = (attr as any).StringValue || "";
+							const sqsAttr = attr as MessageAttributeValue;
+							attributes[key] = sqsAttr.StringValue || "";
 						}
 					}
 
 					// SNS message attributes (if present)
 					if (snsMessage.MessageAttributes) {
 						for (const [key, attr] of Object.entries(snsMessage.MessageAttributes)) {
-							attributes[`sns_${key}`] = (attr as any).Value || "";
+							attributes[`sns_${key}`] = attr.Value || "";
 						}
 					}
 
@@ -185,7 +213,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 								QueueUrl: queueUrl,
 								ReceiptHandle: msg.ReceiptHandle,
 							});
-							await this.sqsClient.send(deleteCommand);
+							await this.requireSqsClient().send(deleteCommand);
 						},
 						nack: async () => {
 							// Let the visibility timeout expire to return the message
@@ -196,7 +224,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 								ReceiptHandle: msg.ReceiptHandle,
 								VisibilityTimeout: 0,
 							});
-							await this.sqsClient.send(changeCommand);
+							await this.requireSqsClient().send(changeCommand);
 						},
 					};
 
@@ -247,7 +275,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 		try {
 			const { ListQueuesCommand } = await import("@aws-sdk/client-sqs");
 			const command = new ListQueuesCommand({ MaxResults: 1 });
-			await this.sqsClient.send(command);
+			await this.requireSqsClient().send(command);
 			return true;
 		} catch {
 			return false;

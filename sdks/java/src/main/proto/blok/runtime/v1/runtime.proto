@@ -1,0 +1,302 @@
+// Blok Runtime v1 — the wire contract between the TypeScript runner and SDK
+// servers (Python, Go, Rust, Java, C#, PHP, Ruby).
+//
+// Single source of truth for cross-language interop. Generated stubs in each
+// SDK are derived from this file via `make proto`.
+//
+// Stability: `blok.runtime.v1` is additive-only. CI runs `buf breaking` to
+// reject backward-incompatible changes. Breaking changes go to `v2`, served
+// alongside `v1` during migration.
+
+syntax = "proto3";
+
+package blok.runtime.v1;
+
+option go_package          = "github.com/nickincloud/blok-go/genpb/blok/runtime/v1;runtimev1";
+option java_package        = "com.blok.runtime.v1";
+option java_multiple_files = true;
+option csharp_namespace    = "Blok.Runtime.V1";
+option php_namespace       = "Blok\\Runtime\\V1";
+option ruby_package        = "Blok::Runtime::V1";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Service
+// =============================================================================
+
+// NodeRuntime is the contract every Blok SDK exposes. One service handles
+// three responsibilities:
+//   1. Run a node (Execute / ExecuteStream)
+//   2. Tell the runner which nodes it can run (ListNodes)
+//   3. Tell the runner if it is alive (Health)
+service NodeRuntime {
+  // Run a node and return its result. Unary, deadline-driven.
+  rpc Execute       (ExecuteRequest)   returns (ExecuteResponse);
+
+  // Run a node and stream events back as it executes (logs, progress, partial
+  // results, then a final ExecuteResponse). Optional capability — SDKs that
+  // don't implement it should return UNIMPLEMENTED.
+  rpc ExecuteStream (ExecuteRequest)   returns (stream ExecuteEvent);
+
+  // Health check (wire-compatible with grpc.health.v1.Health/Check).
+  rpc Health        (HealthRequest)    returns (HealthResponse);
+
+  // Discover registered nodes and their schemas (drives Studio + OpenAPI gen).
+  rpc ListNodes     (ListNodesRequest) returns (ListNodesResponse);
+}
+
+// =============================================================================
+// Execute envelope (the "what we send to a node")
+// =============================================================================
+
+message ExecuteRequest {
+  // Identification: which node, what type, what version.
+  NodeRef        node     = 1;
+
+  // The node's own resolved inputs. Already mapped (js/, ${...} resolved).
+  // Bytes-encoded JSON: SDKs JSON-decode lazily. NEVER wrapped in {inputs:...}.
+  bytes          inputs   = 2;
+
+  // Where in the workflow this node sits.
+  StepInfo       step     = 3;
+
+  // The originating workflow trigger (read-only context for nodes).
+  TriggerInfo    trigger  = 4;
+
+  // Mutable state: previous step output, persistent vars, env mirror.
+  RuntimeState   state    = 5;
+
+  // Identity of the parent workflow run.
+  WorkflowInfo   workflow = 6;
+
+  // Per-call options (deadline, streaming opt-in).
+  ExecuteOptions options  = 7;
+}
+
+message NodeRef {
+  string name    = 1;   // e.g. "tutorial-store"
+  string type    = 2;   // "runtime.python3"
+  string version = 3;   // optional pin, e.g. "1.0.0"
+}
+
+message StepInfo {
+  string name  = 1;     // step name in workflow
+  int32  index = 2;     // 0-based index in current branch
+  int32  total = 3;     // total steps in current branch
+  int32  depth = 4;     // 0 = top-level; 1+ = nested in flow node (if-else)
+}
+
+message TriggerInfo {
+  // Snapshot of the trigger that started the workflow. Read-only for nodes.
+  bytes  body          = 1;            // raw bytes; encoding signaled in headers
+  map<string, string> headers = 2;
+  map<string, string> params  = 3;
+  map<string, string> query   = 4;
+  map<string, string> cookies = 5;
+  string method        = 6;
+  string url           = 7;
+  string base_url      = 8;
+  string trigger_kind  = 9;            // "http" | "worker" | "cron" | ...
+}
+
+message RuntimeState {
+  // Output of the previous step. Named explicitly so LLM-authored nodes stop
+  // confusing it with vars. Bytes-encoded JSON.
+  bytes  previous_output = 1;
+
+  // Workflow-scoped persistent storage (set_var: true on prior steps).
+  // Bytes-encoded JSON map<string, any>.
+  bytes  vars            = 2;
+
+  // String→string env mirror.
+  map<string, string> env = 3;
+}
+
+message WorkflowInfo {
+  string run_id   = 1;
+  string name     = 2;
+  string path     = 3;
+  string version  = 4;
+  google.protobuf.Timestamp started_at = 5;
+}
+
+message ExecuteOptions {
+  int64 deadline_ms     = 1;       // hard cutoff (also enforced via gRPC deadline)
+  bool  stream_logs     = 2;       // hint: caller wants ExecuteStream events
+  bool  capture_metrics = 3;
+  // Reserved for future routing/affinity hints without bumping schema.
+  map<string, string> hints = 15;
+}
+
+// =============================================================================
+// Execute response
+// =============================================================================
+
+message ExecuteResponse {
+  bool      success      = 1;
+
+  // The node's primary return value. Bytes-encoded JSON.
+  bytes     data         = 2;
+
+  // Optional content-type override (default "application/json").
+  string    content_type = 3;
+
+  // Set iff !success. Always populated on failure (see NodeError).
+  NodeError error        = 4;
+
+  // Vars the node wants persisted (merged into ctx.vars on the runner side).
+  // Optional — most nodes leave this empty and rely on workflow-level set_var.
+  // Bytes-encoded JSON map<string, any>.
+  bytes     vars_delta   = 5;
+
+  // Tail of logs captured during execution.
+  repeated  LogLine logs = 6;
+
+  // Resource usage during this call. Populated when capture_metrics=true.
+  Metrics   metrics      = 7;
+}
+
+// =============================================================================
+// Streaming variant (Phase 5 — opt-in)
+// =============================================================================
+
+message ExecuteEvent {
+  oneof event {
+    NodeStarted     started  = 1;
+    LogLine         log      = 2;
+    Progress        progress = 3;
+    PartialResult   partial  = 4;
+    ExecuteResponse final    = 5;   // last frame; closes the stream
+  }
+}
+
+message NodeStarted   { google.protobuf.Timestamp at = 1; }
+message Progress      { double percent = 1; string phase = 2; }
+message PartialResult { bytes snapshot_json = 1; }
+
+message LogLine {
+  google.protobuf.Timestamp timestamp = 1;
+  string level    = 2;            // "debug" | "info" | "warn" | "error"
+  string message  = 3;
+  map<string, string> attributes = 4;
+}
+
+// =============================================================================
+// NodeError — the structured-errors contract
+// =============================================================================
+//
+// Every node in every SDK populates a NodeError the same way. Seven required
+// fields (code, category, severity, node, at, message, http_status) plus
+// strongly-encouraged fields for richer debugging:
+// - description: multi-paragraph context (what was tried, why it failed)
+// - remediation: suggested next step (actionable)
+// - context_snapshot_json: bounded slice of inputs/state at error time
+// - causes: nested wrapped errors (e.g. an HTTP error wrapping a timeout)
+//
+// SDKs auto-fill `node`, `sdk`, `sdk_version`, `runtime_kind`, `at`, and
+// `stack` from environmental context — authors never set these manually.
+//
+// See `docs/error-codes.md` for the canonical code registry.
+
+message NodeError {
+  // === Identity ===
+  string        code        = 1;       // STABLE machine identifier (e.g. "POSTGRES_CONNECT_TIMEOUT")
+  ErrorCategory category    = 2;
+  ErrorSeverity severity    = 3;
+
+  // === Origin (auto-filled by SDK) ===
+  string        node          = 4;
+  string        sdk           = 5;     // "blok-python3"
+  string        sdk_version   = 6;
+  string        runtime_kind  = 7;     // "runtime.python3"
+  google.protobuf.Timestamp at = 8;
+
+  // === Human-readable ===
+  string        message     = 9;       // one-sentence summary
+  string        description = 10;      // multi-paragraph context
+  string        remediation = 11;      // suggested next step
+  string        doc_url     = 12;
+
+  // === Causality ===
+  repeated NodeError causes = 13;
+  string             stack  = 14;
+  bytes              context_snapshot_json = 15;
+
+  // === Compatibility / retry hints ===
+  int32  http_status     = 16;
+  bool   retryable       = 17;
+  int64  retry_after_ms  = 18;
+
+  // === Category-specific structured details ===
+  // Bytes-encoded JSON. Surfaces to GlobalError.json on the runner side.
+  bytes  details_json = 19;
+}
+
+enum ErrorCategory {
+  CATEGORY_UNSPECIFIED = 0;
+  VALIDATION    = 1;   // input/output schema mismatch
+  CONFIGURATION = 2;   // node misconfigured
+  DEPENDENCY    = 3;   // external service failed (DB, HTTP, queue)
+  TIMEOUT       = 4;
+  PERMISSION    = 5;   // auth/authz
+  RATE_LIMIT    = 6;
+  NOT_FOUND     = 7;
+  CONFLICT      = 8;
+  CANCELLED     = 9;
+  INTERNAL      = 10;  // unexpected SDK-side bug
+  PROTOCOL      = 11;  // proto/transport issue
+  DATA          = 12;  // user data malformed (not schema validation)
+}
+
+enum ErrorSeverity {
+  SEVERITY_UNSPECIFIED = 0;
+  INFO  = 1;   // expected, recoverable
+  WARN  = 2;   // anomalous but workflow continues
+  ERROR = 3;   // node failed; default
+  FATAL = 4;   // workflow should abort regardless of try/catch
+}
+
+// =============================================================================
+// Discovery
+// =============================================================================
+
+message ListNodesRequest {}
+message ListNodesResponse {
+  repeated NodeDescriptor nodes = 1;
+  string sdk_name      = 2;          // "blok-python3"
+  string sdk_version   = 3;
+  string proto_version = 4;          // "1.0.0"
+}
+
+message NodeDescriptor {
+  string name        = 1;
+  string description = 2;
+  bytes  input_schema_json  = 3;     // JSON Schema (drives OpenAPI/Studio/LLMs)
+  bytes  output_schema_json = 4;
+  repeated string tags = 5;
+}
+
+// =============================================================================
+// Health (wire-compatible with grpc.health.v1)
+// =============================================================================
+
+message HealthRequest  { string service = 1; }
+message HealthResponse {
+  enum Status { UNKNOWN = 0; SERVING = 1; NOT_SERVING = 2; }
+  Status status      = 1;
+  string sdk_version = 2;
+  repeated string registered_nodes = 3;
+}
+
+// =============================================================================
+// Metrics
+// =============================================================================
+
+message Metrics {
+  double duration_ms    = 1;
+  double cpu_ms         = 2;
+  int64  memory_bytes   = 3;
+  int64  request_bytes  = 4;
+  int64  response_bytes = 5;
+}

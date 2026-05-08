@@ -15,6 +15,24 @@ import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
+import { DEFAULT_HEALTH_SERVICE_CONFIG, buildChannelOptions } from "./adapters/grpc/GrpcChannelOptions";
+import { GrpcClientPool, buildCredentials } from "./adapters/grpc/GrpcClientPool";
+import {
+	NodeRuntimeService,
+	bufferToJson,
+	decodeExecuteResponse,
+	encodeExecuteRequest,
+	jsonToBuffer,
+} from "./adapters/grpc/GrpcCodec";
+import {
+	GRPC_STATUS_MAP,
+	categoryToGrpcStatus,
+	toBlokError as grpcToBlokError,
+	isServiceError,
+} from "./adapters/grpc/GrpcErrors";
+import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
+import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS } from "./adapters/grpc/types";
+import { resolveTransportForKind } from "./adapters/transport";
 
 // Function-first node API
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
@@ -68,10 +86,68 @@ import { WorkflowVisualizer } from "./visualization/WorkflowVisualizer";
 import { PerformanceProfiler } from "./monitoring/PerformanceProfiler";
 
 // Tracing (Blok Studio)
+import { Janitor } from "./tracing/Janitor";
 import { RunTracker } from "./tracing/RunTracker";
 import { registerTraceRoutes } from "./tracing/TraceRouter";
 import { TracingLogger } from "./tracing/TracingLogger";
-import { sanitize as traceSanitize } from "./tracing/sanitize";
+import { redactSensitive as traceRedactSensitive, sanitize as traceSanitize } from "./tracing/sanitize";
+
+// Workflow registry (Tier 2 sub-workflow primitive)
+import { type RegisteredWorkflow, type WorkflowAuthorizeFn, WorkflowRegistry } from "./workflow/WorkflowRegistry";
+
+// Concurrency gate (Tier 2 #6)
+import {
+	ConcurrencyLimitError,
+	type ConcurrencyLimitInfo,
+	isConcurrencyLimitError,
+} from "./concurrency/ConcurrencyLimitError";
+// Queue-mode TTL expiry (PR 1-5 polish · 410 Gone vs 429)
+import { QueueExpiredError, type QueueExpiredInfo, isQueueExpiredError } from "./concurrency/QueueExpiredError";
+
+// Cross-process concurrency backend (Tier 2 #6 follow-up)
+import type { ConcurrencyBackend } from "./concurrency/ConcurrencyBackend";
+import {
+	NatsKvConcurrencyBackend,
+	type NatsKvConcurrencyConfig,
+	readNatsKvConfigFromEnv,
+} from "./concurrency/NatsKvConcurrencyBackend";
+import { createConcurrencyBackend } from "./concurrency/createConcurrencyBackend";
+import {
+	CONCURRENCY_DEFAULTS,
+	type NormalizedConcurrencyConfig,
+	readConcurrencyConfig,
+} from "./concurrency/readConcurrencyConfig";
+// Per-step timeout (Tier 2 quick-wins)
+import { StepTimeoutError, isStepTimeoutError } from "./timeouts/StepTimeoutError";
+
+// Cooperative cancellation (Tier 2 follow-up)
+import { RunCancelledError, isRunCancelledError } from "./RunCancelledError";
+
+// Durable-scheduler payload size cap (PR 2 A4)
+import { PayloadTooLargeError, isPayloadTooLargeError } from "./PayloadTooLargeError";
+
+// Wait step primitive (PR 4)
+import { WaitDispatchRequest, isWaitDispatchRequest } from "./WaitDispatchRequest";
+
+// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
+import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
+// Janitor sweep OTel metrics (PR 3 D3)
+import { JanitorMetrics } from "./monitoring/JanitorMetrics";
+
+// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
+import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
+import {
+	type DeferredDispatchInfo,
+	DeferredDispatchSignal,
+	isDeferredDispatchSignal,
+} from "./scheduling/DeferredDispatchSignal";
+import { DeferredRunScheduler, type DeferredScheduleOptions } from "./scheduling/DeferredRunScheduler";
+import {
+	type NormalizedDebounceConfig,
+	type NormalizedSchedulingConfig,
+	SCHEDULING_DEFAULTS,
+	readSchedulingConfig,
+} from "./scheduling/readSchedulingConfig";
 
 // Cost Estimation
 import { CostEstimator } from "./cost/CostEstimator";
@@ -127,6 +203,24 @@ export {
 	HttpRuntimeAdapter,
 	BunRuntimeAdapter,
 	WasmRuntimeAdapter,
+	// gRPC runtime adapter
+	GrpcRuntimeAdapter,
+	GrpcClientPool,
+	buildCredentials,
+	buildChannelOptions,
+	NodeRuntimeService,
+	encodeExecuteRequest,
+	decodeExecuteResponse,
+	jsonToBuffer,
+	bufferToJson,
+	GRPC_STATUS_MAP,
+	GRPC_DEFAULTS,
+	DEFAULT_GRPC_PORTS,
+	DEFAULT_HEALTH_SERVICE_CONFIG,
+	categoryToGrpcStatus,
+	isServiceError,
+	grpcToBlokError,
+	resolveTransportForKind,
 	// Function-first API
 	defineNode,
 	FunctionNode,
@@ -182,9 +276,58 @@ export {
 	PerformanceProfiler,
 	// Tracing (Blok Studio)
 	RunTracker,
+	Janitor,
 	registerTraceRoutes,
+	WorkflowRegistry,
+	type RegisteredWorkflow,
+	type WorkflowAuthorizeFn,
+	// Concurrency gate (Tier 2 #6)
+	ConcurrencyLimitError,
+	type ConcurrencyLimitInfo,
+	isConcurrencyLimitError,
+	// Queue-mode TTL expiry (PR 1-5 polish)
+	QueueExpiredError,
+	type QueueExpiredInfo,
+	isQueueExpiredError,
+	readConcurrencyConfig,
+	type NormalizedConcurrencyConfig,
+	CONCURRENCY_DEFAULTS,
+	// Cross-process concurrency backend (Tier 2 #6 follow-up)
+	type ConcurrencyBackend,
+	createConcurrencyBackend,
+	NatsKvConcurrencyBackend,
+	type NatsKvConcurrencyConfig,
+	readNatsKvConfigFromEnv,
+	// Per-step timeout (Tier 2 quick-wins)
+	StepTimeoutError,
+	isStepTimeoutError,
+	// Cooperative cancellation (Tier 2 follow-up)
+	RunCancelledError,
+	isRunCancelledError,
+	// Durable-scheduler payload size cap (PR 2 A4)
+	PayloadTooLargeError,
+	isPayloadTooLargeError,
+	// Wait step primitive (PR 4)
+	WaitDispatchRequest,
+	isWaitDispatchRequest,
+	// Concurrency / scheduling OTel metrics (Tier 2 follow-up)
+	ConcurrencyMetrics,
+	// Janitor sweep OTel metrics (PR 3 D3)
+	JanitorMetrics,
+	// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
+	DeferredDispatchSignal,
+	type DeferredDispatchInfo,
+	isDeferredDispatchSignal,
+	DeferredRunScheduler,
+	type DeferredScheduleOptions,
+	DebounceCoordinator,
+	readSchedulingConfig,
+	type NormalizedDebounceConfig,
+	type NormalizedSchedulingConfig,
+	SCHEDULING_DEFAULTS,
 	TracingLogger,
 	traceSanitize,
+	traceRedactSensitive,
 	// Cost Estimation
 	CostEstimator,
 	PRICING,
@@ -227,6 +370,35 @@ export {
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type { HttpRuntimeAdapterOptions } from "./adapters/HttpRuntimeAdapter";
+
+// Security review FW-1 · trace API authorize hook signature
+export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
+
+// gRPC adapter types
+export type {
+	GrpcAdapterConfig,
+	KeepaliveConfig,
+	TlsConfig,
+	Transport,
+} from "./adapters/grpc/types";
+export type {
+	DecodedExecuteResponse,
+	DecodedLogLine,
+	DecodedMetrics,
+	DecodedNodeError,
+	ExecuteRequestProto,
+	ExecuteResponseProto,
+	LogLineProto,
+	MetricsProto,
+	NodeErrorProto,
+	NodeRefProto,
+	RuntimeStateProto,
+	StepInfoProto,
+	TriggerInfoProto,
+	WorkflowInfoProto,
+	ExecuteOptionsProto,
+} from "./adapters/grpc/GrpcCodec";
+export type { GrpcErrorContext } from "./adapters/grpc/GrpcErrors";
 export type {
 	HealthStatus,
 	HealthCheckResult,
@@ -467,4 +639,13 @@ export type {
 	PaginatedResult,
 	StartRunOptions,
 	StartNodeOptions,
+	ScheduledDispatchRow,
 } from "./tracing/types";
+export type { JanitorStats } from "./tracing/Janitor";
+
+// Tracing store factory + concrete stores — exposed so the CLI's
+// standalone `blokctl studio` mode can spin up its own SQLite-backed
+// tracker without proxying to a live trigger. See
+// `packages/cli/src/commands/trace/startStudio.ts` for the call site.
+export { createStore, InMemoryRunStore, SqliteRunStore } from "./tracing";
+export type { CreateStoreOptions, StoreType } from "./tracing";

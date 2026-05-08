@@ -1,5 +1,5 @@
-import type { ParamsDictionary } from "@blok/runner";
-import type { Context } from "@blok/shared";
+import type { ParamsDictionary } from "@blokjs/runner";
+import type { Context } from "@blokjs/shared";
 
 export default function ctx(): Context {
 	const ctx: Context = {

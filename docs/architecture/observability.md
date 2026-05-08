@@ -263,7 +263,7 @@ blokctl monitor dashboards import --path ./infra/grafana/dashboards/
 The `SentryIntegration` provides error tracking with full workflow context:
 
 ```typescript
-import { SentryIntegration } from "@blok/runner";
+import { SentryIntegration } from "@blokjs/runner";
 
 const sentry = new SentryIntegration({
   dsn: process.env.SENTRY_DSN!,

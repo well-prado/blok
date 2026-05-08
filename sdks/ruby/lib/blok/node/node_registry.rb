@@ -74,6 +74,14 @@ module Blok
           result.with_vars(ctx_vars) if ctx_vars && !ctx_vars.empty?
 
           result
+        rescue Errors::BlokError => e
+          # Structured BlokError path (master plan §17): pass the instance
+          # through verbatim so the gRPC servicer can serialize every field
+          # (category, severity, remediation, retryable hints, cause chain,
+          # context snapshot, etc.) into the proto NodeError.
+          duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000.0
+          result = Types::ExecutionResult.new(success: false, data: nil, errors: e)
+          result.with_metrics(Types::ExecutionMetrics.new(duration_ms: duration_ms))
         rescue Errors::NodeError => e
           duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000.0
           result = Types::ExecutionResult.error_with_details(e.message, e.to_hash)

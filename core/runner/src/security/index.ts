@@ -2,7 +2,9 @@
  * Security Module for Blok Framework
  *
  * Provides authentication, authorization, audit logging, and secret management:
- * - AuthMiddleware: Pluggable auth with JWT and API Key providers
+ * - AuthMiddleware: **Deprecated as of v0.4.1; removed in v0.5.** Use
+ *   `jose`, `hono/jwt`, or `node-jsonwebtoken` at the workflow layer
+ *   instead. See `docs/d/security/cookbook.mdx`.
  * - OAuthOIDCProvider: OAuth 2.0 / OIDC authentication with JWKS verification
  * - RBAC: Role-based access control with hierarchical roles
  * - ABAC: Attribute-based access control with policy engine
@@ -26,7 +28,7 @@
  *   FileAuditSink,
  *   SecretManager,
  *   EnvironmentSecretProvider,
- * } from "@blok/runner";
+ * } from "@blokjs/runner";
  *
  * // Set up auth
  * const auth = new AuthMiddleware({

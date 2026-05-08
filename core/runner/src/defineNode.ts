@@ -1,7 +1,7 @@
 import type { ZodError, z } from "zod";
 
-import type { Context } from "@blok/shared";
-import { GlobalError, NodeBase } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
 import type { IBlokResponse } from "./BlokResponse";
@@ -142,10 +142,16 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			// Step 2: Execute user's function
 			const result = await this.definition.execute(ctx, validatedInput);
 
-			// Step 3: If execute() returns an array of NodeBase instances (flow nodes
-			// like if-else), return them directly. The runner's processFlow() expects
-			// handle() to return BlokService[] for flow nodes, not a wrapped response.
-			if (Array.isArray(result) && result.length > 0 && result[0] instanceof NodeBase) {
+			// Step 3: Flow control nodes (`definition.flow === true`) return their
+			// sub-steps as an array directly. An EMPTY array is a valid "no
+			// sub-steps to run" signal (e.g. branch arms that are both empty, or
+			// a branch where neither arm matched). Bypassing BlokResponse wrap is
+			// what makes the runner's processFlow read `flow_steps as NodeBase[]`
+			// correctly downstream.
+			if (this.flow) {
+				if (!Array.isArray(result)) {
+					throw new Error(`Flow node "${this.definition.name}" must return an array of steps, got ${typeof result}.`);
+				}
 				return result as BlokService<z.infer<TInput>>[];
 			}
 
@@ -184,6 +190,15 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 			(error as { name: unknown }).name === "ZodError"
 		) {
 			return this.zodErrorToGlobalError(error as ZodError);
+		}
+
+		// Preserve an already-typed GlobalError verbatim — authors throwing
+		// a GlobalError with custom `code` (e.g. `@blokjs/throw` setting 401
+		// for an auth-check middleware) AND `json` body must reach the HTTP
+		// trigger's response handler with those fields intact. Reconstructing
+		// would clobber them and force a 500.
+		if (error instanceof GlobalError) {
+			return error;
 		}
 
 		if (error instanceof Error) {
@@ -263,7 +278,7 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
  *
  * @example
  * ```typescript
- * import { defineNode } from "@blok/runner";
+ * import { defineNode } from "@blokjs/runner";
  * import { z } from "zod";
  *
  * export default defineNode({

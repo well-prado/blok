@@ -40,11 +40,23 @@ function WorkflowDetailPage() {
 
 	if (!detail) {
 		return (
-			<div className="p-6">
+			<div className="p-8">
 				<EmptyState
-					icon={<Workflow className="w-12 h-12" />}
+					icon={<Workflow className="w-10 h-10" />}
 					title="Workflow not found"
-					description={`No workflow named "${name}" was found.`}
+					description={
+						<>
+							No workflow named
+							<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+								{name}
+							</code>
+							is registered. Workflows live in
+							<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+								triggers/http/src/workflows/
+							</code>
+							and are discovered on trigger startup. Did you commit the file but forget to restart the dev orchestrator?
+						</>
+					}
 				/>
 			</div>
 		);
@@ -82,7 +94,7 @@ function WorkflowDetailPage() {
 						className={cn(
 							"px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px",
 							activeTab === tab.key
-								? "border-blue-500 text-zinc-100"
+								? "border-blok-green-500 text-zinc-100"
 								: "border-transparent text-zinc-500 hover:text-zinc-300",
 						)}
 					>
@@ -117,18 +129,49 @@ function WorkflowDetailPage() {
 							onPageChange={setPage}
 							enableCompare
 						/>
+					) : statusFilter ? (
+						<EmptyState
+							icon={<Workflow className="w-10 h-10" />}
+							title={`No ${statusFilter} runs match`}
+							description={`Across the loaded window, none of ${detail.name}'s runs have status "${statusFilter}". Either it's been quiet or the filter is too tight.`}
+							action={
+								<button
+									type="button"
+									onClick={() => setStatusFilter("")}
+									className="px-3 py-1.5 rounded-md text-xs font-semibold bg-blok-green-500 text-[#00231b] hover:bg-blok-green-600 transition-colors"
+								>
+									Clear filter
+								</button>
+							}
+						/>
 					) : (
 						<EmptyState
 							icon={<Workflow className="w-10 h-10" />}
-							title="No runs"
-							description={statusFilter ? `No ${statusFilter} runs found.` : "This workflow hasn't been executed yet."}
+							title="No runs yet"
+							description={
+								<>
+									This workflow exists but hasn't been triggered. Try the curl below — it'll exercise the
+									<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+										{detail.name}
+									</code>
+									path end-to-end.
+								</>
+							}
+							snippets={[
+								{
+									lang: "curl · http",
+									code: `curl -X POST http://localhost:4000/${detail.name} \\
+  -H 'content-type: application/json' \\
+  -d '{}'`,
+								},
+							]}
 						/>
 					)}
 				</div>
 			)}
 
 			{activeTab === "definition" && (
-				<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+				<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 					<JsonViewer data={detail.definition || { nodeNames: detail.nodeNames, runtimes: detail.runtimes }} />
 				</div>
 			)}
@@ -151,7 +194,7 @@ function WorkflowDetailPage() {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+		<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 			<div className="text-xs text-zinc-500 mb-1">{label}</div>
 			<div className="text-lg font-semibold text-zinc-100 font-mono">{value}</div>
 		</div>

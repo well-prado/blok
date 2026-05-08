@@ -1,5 +1,5 @@
-import type { HelperResponse } from "@blok/helper";
-import type { BlokService } from "@blok/runner";
+import type { HelperResponse } from "@blokjs/helper";
+import type { BlokService } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AuthResult,
@@ -460,7 +460,7 @@ describe("WebSocketTrigger", () => {
 
 describe("WebSocketTriggerOpts Schema", () => {
 	it("should validate with default values", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@blok/helper");
+		const { WebSocketTriggerOptsSchema } = await import("@blokjs/helper");
 
 		const opts = WebSocketTriggerOptsSchema.parse({});
 
@@ -471,7 +471,7 @@ describe("WebSocketTriggerOpts Schema", () => {
 	});
 
 	it("should validate custom configuration", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@blok/helper");
+		const { WebSocketTriggerOptsSchema } = await import("@blokjs/helper");
 
 		const opts = WebSocketTriggerOptsSchema.parse({
 			events: ["chat.*", "notification"],

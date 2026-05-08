@@ -18,7 +18,7 @@ Language support for Blok workflow JSON files in IntelliJ IDEA, WebStorm, and ot
 ### Installing the LSP server
 
 ```bash
-npm install -g @blok/lsp-server
+npm install -g @blokjs/lsp-server
 ```
 
 ## Development

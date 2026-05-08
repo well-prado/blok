@@ -1,0 +1,3 @@
+# Build artifacts — produced by `mvn package`.
+# Reproducible from source; not committed.
+target/

@@ -157,7 +157,7 @@ DATA_RETENTION_DAYS, INTERNAL_API_KEY
 2. Set the required environment variables in your `.env` file. Pay special attention to encryption keys and API credentials.
 3. Install the required blok modules:
    ```bash
-   npx blok install @blok/api-call @blok/if-else @blok/json-validator
+   npx blok install @blokjs/api-call @blokjs/if-else @blokjs/json-validator
    ```
 4. Start the Blok runtime:
    ```bash

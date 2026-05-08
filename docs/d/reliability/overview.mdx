@@ -1,0 +1,130 @@
+---
+title: "Reliability"
+description: "How idempotent caching, retry, replay, step timeouts, and concurrency keys compose into a safe-rerun story for Blok workflows."
+icon: "shield-check"
+---
+
+Blok ships six opt-in reliability primitives. Three live on every v2
+step (caching, retry, replay), one caps per-attempt wall-clock
+(`maxDuration`), one gates inbound dispatches at the trigger
+(concurrency keys), and one ends runs gracefully (cancellation +
+crash recovery).
+
+<Columns cols={3}>
+  <Card title="Idempotent step caching" icon="database" href="/d/reliability/idempotency">
+    Cache a step's result against a key. Same key → cached result. Step
+    never runs again until TTL expires. For LLM calls, paid APIs,
+    anything you don't want billed twice.
+  </Card>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    Wrap `step.process()` in a retry loop with capped exponential
+    backoff. For transient failures: flaky upstreams, rate-limited APIs,
+    jittery network.
+  </Card>
+  <Card title="Replay" icon="history" href="/d/reliability/replay">
+    Re-trigger any past run with its captured payload. Click in Studio
+    or POST to `/__blok/runs/:id/replay`. For debugging — fix a node
+    and run against the original input.
+  </Card>
+</Columns>
+
+<Columns cols={3}>
+  <Card title="Step timeouts" icon="timer" href="/d/reliability/max-duration">
+    Cap each `step.process()` attempt with `maxDuration: "30s"`. Final-
+    attempt timeout flips the run to `timedOut` (distinct from
+    `failed`). Composes with `retry` per-attempt.
+  </Card>
+  <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
+    Per-tenant rate limiting on triggers. `concurrencyKey:
+    $.req.body.tenantId` plus a `concurrencyLimit`. Over-limit HTTP
+    returns `429 Retry-After`; worker NACKs. `onLimit: "queue"` defers
+    instead of rejecting.
+  </Card>
+  <Card title="Cancellation & crash recovery" icon="x-circle" href="/d/reliability/cancellation">
+    `POST /__blok/runs/:id/cancel` aborts a run cleanly. Crash auto-
+    flip + orphan recovery handle uncaught exceptions, OOM, and
+    signals.
+  </Card>
+</Columns>
+
+All six are independent and zero-overhead when omitted. They also
+compose: caching layers above persistence, retry wraps execution,
+`maxDuration` caps each attempt, replay re-fires the trigger so caches
+and code changes both apply, concurrency keys gate dispatches before
+any of the above, and cancellation cleanly ends a run at any
+lifecycle stage.
+
+For deferred dispatch (delay, TTL, debounce) see the dedicated
+[scheduling section](/d/scheduling/overview) — those gates run BEFORE
+the concurrency gate.
+
+## The mental model
+
+Workflow steps already auto-persist their output to `ctx.state[id]`
+(the v2 default-store rule). The reliability primitives bolt on around
+that — some at the run level (before any step runs), some at the step
+level:
+
+```
+trigger fires
+  ├── debounce / delay gates    (per /d/scheduling/overview)
+  ├── concurrency gate          (per /d/reliability/concurrency-keys)
+  │     └── over-limit → throttled → 429 / NACK
+  │
+  ├── for each step:
+  │     ├── cache check (idempotencyKey?)
+  │     │     └── HIT → replay cached data through persistence rules → next step
+  │     │     └── MISS → fall through
+  │     │
+  │     ├── retry loop (1..maxAttempts)
+  │     │     ├── wrap with maxDuration timeout (Promise.race + setTimeout)
+  │     │     ├── step.process(ctx, step)
+  │     │     │     ├── success → cache write → persist → next step
+  │     │     │     ├── error → backoff and try again
+  │     │     │     └── timeout → backoff and try again
+  │     │     └── final attempt fails → NODE_FAILED, run flips failed | timedOut
+```
+
+Each layer is a separate decision the author makes. A workflow with
+none of these fields runs through the same code path as before — the
+extra fields cost nothing when absent.
+
+## Pairing the primitives
+
+<Tip>
+**Cost-sensitive AI pipeline.** Cache the LLM step on `requestId`; let
+the storage step retry on transient DB errors. A client retry of the
+parent HTTP call hits the cache on the LLM step and only re-runs the
+storage write.
+</Tip>
+
+<Tip>
+**Debugging a production failure.** Hit replay from Studio. The
+original payload re-fires through the current code. Cached steps
+short-circuit; the broken step runs fresh against the new code.
+</Tip>
+
+<Tip>
+**Multi-step pipeline with one fragile dependency.** Add `retry` to
+just the fragile step. The rest of the workflow stays simple.
+</Tip>
+
+## What's not here
+
+- **A built-in `wait.for("3 days")` step primitive.** Trigger.dev v3+
+  ships this as a step type. Blok doesn't yet — but every load-bearing
+  primitive is in place: the durable scheduler with sqlite-backed
+  persistence (`scheduled_dispatches`, migration v9), the
+  `dispatchDeferred` re-entry pattern, idempotency caching as a
+  per-step checkpoint, and cooperative cancellation via `ctx.signal`.
+  A `wait.for(duration)` step is a feature-add (~2-3 days), not an
+  architectural prerequisite. Until then, compose the same effect
+  with a delayed sub-workflow:
+  `{ id: "wait", subworkflow: "post-wait-half", wait: false }` paired
+  with `delay: "3d"` on the child trigger. See
+  [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md)
+  for the implementation sketch.
+- **Cross-process replay.** The replay endpoint dispatches in-process;
+  a multi-region replay needs an external trigger.
+
+See each feature page for the full author surface and the field reference.

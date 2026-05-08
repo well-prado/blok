@@ -8,14 +8,20 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Port != 8080 {
-		t.Errorf("expected port 8080, got %d", cfg.Port)
+	if cfg.Port != 9001 {
+		t.Errorf("expected port 9001, got %d", cfg.Port)
 	}
 	if cfg.Host != "0.0.0.0" {
 		t.Errorf("expected host '0.0.0.0', got %q", cfg.Host)
 	}
 	if cfg.Version != "1.0.0" {
 		t.Errorf("expected version '1.0.0', got %q", cfg.Version)
+	}
+	if cfg.GRPCPort != 10001 {
+		t.Errorf("expected gRPC port 10001, got %d", cfg.GRPCPort)
+	}
+	if cfg.Transport != TransportHTTP {
+		t.Errorf("expected default transport http, got %q", cfg.Transport)
 	}
 	if cfg.ReadTimeoutSec != 30 {
 		t.Errorf("expected read timeout 30, got %d", cfg.ReadTimeoutSec)
@@ -25,6 +31,34 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.EnableCORS {
 		t.Error("expected CORS disabled by default")
+	}
+}
+
+func TestLoadConfigFromEnvGRPCFields(t *testing.T) {
+	os.Setenv("GRPC_PORT", "10500")
+	os.Setenv("BLOK_TRANSPORT", "both")
+	defer func() {
+		os.Unsetenv("GRPC_PORT")
+		os.Unsetenv("BLOK_TRANSPORT")
+	}()
+
+	cfg := LoadConfigFromEnv()
+
+	if cfg.GRPCPort != 10500 {
+		t.Errorf("expected gRPC port 10500, got %d", cfg.GRPCPort)
+	}
+	if cfg.Transport != TransportBoth {
+		t.Errorf("expected transport both, got %q", cfg.Transport)
+	}
+}
+
+func TestLoadConfigFromEnvIgnoresInvalidTransport(t *testing.T) {
+	os.Setenv("BLOK_TRANSPORT", "telepathy")
+	defer os.Unsetenv("BLOK_TRANSPORT")
+
+	cfg := LoadConfigFromEnv()
+	if cfg.Transport != TransportHTTP {
+		t.Errorf("expected fallback to http, got %q", cfg.Transport)
 	}
 }
 
@@ -78,8 +112,8 @@ func TestLoadConfigFromEnvInvalidValues(t *testing.T) {
 	cfg := LoadConfigFromEnv()
 
 	// Should fall back to defaults
-	if cfg.Port != 8080 {
-		t.Errorf("expected default port 8080, got %d", cfg.Port)
+	if cfg.Port != 9001 {
+		t.Errorf("expected default port 9001, got %d", cfg.Port)
 	}
 	// Negative timeout should be ignored
 	if cfg.ReadTimeoutSec != 30 {
@@ -88,8 +122,8 @@ func TestLoadConfigFromEnvInvalidValues(t *testing.T) {
 }
 
 func TestServerConfigAddress(t *testing.T) {
-	cfg := ServerConfig{Host: "0.0.0.0", Port: 8080}
-	if cfg.Address() != "0.0.0.0:8080" {
-		t.Errorf("expected '0.0.0.0:8080', got %q", cfg.Address())
+	cfg := ServerConfig{Host: "0.0.0.0", Port: 9001}
+	if cfg.Address() != "0.0.0.0:9001" {
+		t.Errorf("expected '0.0.0.0:9001', got %q", cfg.Address())
 	}
 }

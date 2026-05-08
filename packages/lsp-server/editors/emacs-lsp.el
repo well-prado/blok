@@ -2,7 +2,7 @@
 ;;
 ;; Add this to your Emacs config (init.el or .emacs)
 ;; Requires: lsp-mode (https://emacs-lsp.github.io/lsp-mode/)
-;; Install: npm install -g @blok/lsp-server
+;; Install: npm install -g @blokjs/lsp-server
 
 (with-eval-after-load 'lsp-mode
   ;; Register the Blok LSP server

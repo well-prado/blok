@@ -20,8 +20,28 @@ type SpinnerHandler = {
 };
 
 export interface RuntimeConfig {
+	/**
+	 * HTTP listener port. Kept for back-compat — the SDK still binds it for
+	 * users who flip `--with-http-fallback` or `RUNTIME_TRANSPORT=http`. The
+	 * CLI's gRPC-only spawn does not health-probe this port.
+	 */
 	port: number;
+	/**
+	 * gRPC listener port. The CLI spawns the SDK with `BLOK_TRANSPORT=grpc`
+	 * and `GRPC_PORT=<grpcPort>`, then waits on a TCP-connect probe to this
+	 * port before starting triggers.
+	 *
+	 * Optional in the type for back-compat reading of pre-Phase-7
+	 * `.blok/config.json`. New writes always populate it.
+	 */
+	grpcPort?: number;
 	startCmd: string;
+	/**
+	 * Optional gRPC-only boot command — used when the SDK's gRPC server is
+	 * a different binary entirely (PHP uses RoadRunner). When unset, the
+	 * CLI uses `startCmd` with `BLOK_TRANSPORT=grpc` env override.
+	 */
+	grpcStartCmd?: string;
 	cwd: string;
 	kind: string;
 	label: string;
@@ -29,11 +49,29 @@ export interface RuntimeConfig {
 	version?: string;
 	/** Semver constraint for this runtime (e.g. ">=3.12.0") */
 	requiredVersion?: string;
+	/**
+	 * Transport the CLI uses when spawning this runtime. Defaults to
+	 * `"grpc"` for new projects (Phase 7); `"http"` is honored on existing
+	 * projects but emits a deprecation warning at boot.
+	 */
+	transport?: "grpc" | "http";
 }
 
-export interface ProjectRuntimeConfig {
-	runtimes: Record<string, RuntimeConfig>;
+export interface TriggerConfig {
+	kind: string;
+	label: string;
+	port: number;
+	entryPoint: string;
+	startCmd: string;
 }
+
+export interface ProjectConfig {
+	triggers?: Record<string, TriggerConfig>;
+	runtimes?: Record<string, RuntimeConfig>;
+}
+
+// Backwards compatibility alias
+export type ProjectRuntimeConfig = ProjectConfig;
 
 /**
  * Setup a single runtime SDK in the project directory.
@@ -102,12 +140,15 @@ export async function setupRuntime(
 
 	return {
 		port: runtime.defaultPort,
+		grpcPort: runtime.defaultGrpcPort,
 		startCmd: startCmdOverride || runtime.startCmd,
+		grpcStartCmd: runtime.grpcStartCmd,
 		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,
 		label: runtime.label,
 		version: runtime.version,
 		requiredVersion: runtime.version ? computeDefaultConstraint(runtime.version) : undefined,
+		transport: "grpc",
 	};
 }
 
@@ -243,15 +284,27 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number):
 }
 
 /**
- * Write the .blok/config.json file with runtime configuration.
+ * Write the .blok/config.json file with runtime and trigger configuration.
  */
-export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeConfig[]): void {
-	const config: ProjectRuntimeConfig = {
-		runtimes: {},
-	};
+export function writeProjectConfig(
+	projectDir: string,
+	runtimeConfigs: RuntimeConfig[],
+	triggerConfigs?: TriggerConfig[],
+): void {
+	const config: ProjectConfig = {};
 
-	for (const rc of runtimeConfigs) {
-		config.runtimes[rc.kind] = rc;
+	if (runtimeConfigs.length > 0) {
+		config.runtimes = {};
+		for (const rc of runtimeConfigs) {
+			config.runtimes[rc.kind] = rc;
+		}
+	}
+
+	if (triggerConfigs && triggerConfigs.length > 0) {
+		config.triggers = {};
+		for (const tc of triggerConfigs) {
+			config.triggers[tc.kind] = tc;
+		}
 	}
 
 	const configPath = path.join(projectDir, ".blok", "config.json");
@@ -263,7 +316,7 @@ export function writeProjectConfig(projectDir: string, runtimeConfigs: RuntimeCo
  * Read the .blok/config.json file.
  * Returns null if file doesn't exist.
  */
-export function readProjectConfig(projectDir: string): ProjectRuntimeConfig | null {
+export function readProjectConfig(projectDir: string): ProjectConfig | null {
 	const configPath = path.join(projectDir, ".blok", "config.json");
 	if (!fsExtra.existsSync(configPath)) {
 		return null;
@@ -273,6 +326,10 @@ export function readProjectConfig(projectDir: string): ProjectRuntimeConfig | nu
 
 /**
  * Generate environment variable entries for selected runtimes.
+ *
+ * Emits BOTH `RUNTIME_<K>_PORT` (HTTP, kept for back-compat) and
+ * `RUNTIME_<K>_GRPC_PORT` (gRPC, what the runner actually probes when
+ * `BLOK_TRANSPORT=grpc`). The trigger-http reads both at boot.
  */
 export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string {
 	if (runtimeConfigs.length === 0) return "";
@@ -283,23 +340,36 @@ export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string 
 		const envKey = rc.kind === "csharp" ? "CSHARP" : rc.kind.toUpperCase();
 		lines.push(`RUNTIME_${envKey}_HOST=localhost`);
 		lines.push(`RUNTIME_${envKey}_PORT=${rc.port}`);
+		if (rc.grpcPort !== undefined) {
+			lines.push(`RUNTIME_${envKey}_GRPC_PORT=${rc.grpcPort}`);
+		}
 	}
+
+	// Default transport — picked up by core/runner/src/adapters/transport.ts
+	// via `RUNTIME_TRANSPORT`. Leaving this unset would still default to
+	// grpc (Phase 6), but writing it explicitly makes the intent visible
+	// in the generated `.env` so users grepping `BLOK_TRANSPORT` find it.
+	lines.push("BLOK_TRANSPORT=grpc");
 
 	return lines.join("\n");
 }
 
 /**
- * Generate supervisord config entries for selected runtimes.
+ * Generate supervisord config entries for selected runtimes. Each program
+ * boots with `BLOK_TRANSPORT=grpc` and a `GRPC_PORT` matching the
+ * runtime's gRPC listener so the trigger and CLI can reach it.
  */
 export function generateSupervisordConfig(runtimeConfigs: RuntimeConfig[]): string {
 	let config = "";
 
 	for (const rc of runtimeConfigs) {
+		const cmd = rc.grpcStartCmd ?? rc.startCmd;
+		const grpcPortLine = rc.grpcPort !== undefined ? `,GRPC_PORT="${rc.grpcPort}"` : "";
 		config += `
 [program:${rc.kind}_runtime]
-command=${rc.startCmd}
+command=${cmd}
 directory=/app/${rc.cwd}
-environment=PORT="${rc.port}",HOST="0.0.0.0"
+environment=PORT="${rc.port}"${grpcPortLine},HOST="0.0.0.0",BLOK_TRANSPORT="grpc"
 autostart=true
 autorestart=true
 stderr_logfile=/var/log/${rc.kind}.err.log
@@ -359,4 +429,99 @@ export async function validateProjectRuntimes(projectDir: string): Promise<Runti
 	}
 
 	return results;
+}
+
+// ============================================================================
+// Trigger Configuration Helpers
+// ============================================================================
+
+/** Default port mapping for each trigger type */
+const TRIGGER_PORTS: Record<string, number> = {
+	http: 4000,
+	sse: 4001,
+	websocket: 4002,
+	grpc: 4003,
+	cron: 4004,
+	queue: 4005,
+	pubsub: 4006,
+	webhook: 4007,
+	worker: 4008,
+};
+
+/** Human-readable labels for each trigger type */
+const TRIGGER_LABELS: Record<string, string> = {
+	http: "HTTP Trigger",
+	sse: "SSE Trigger",
+	websocket: "WebSocket Trigger",
+	grpc: "gRPC Trigger",
+	cron: "Cron Trigger",
+	queue: "Queue Trigger",
+	pubsub: "PubSub Trigger",
+	webhook: "Webhook Trigger",
+	worker: "Worker Trigger",
+};
+
+/**
+ * Get the default port for a trigger type.
+ */
+export function getTriggerPort(triggerKind: string): number {
+	return TRIGGER_PORTS[triggerKind] ?? 4000;
+}
+
+/**
+ * Get the human-readable label for a trigger type.
+ */
+export function getTriggerLabel(triggerKind: string): string {
+	return TRIGGER_LABELS[triggerKind] ?? `${triggerKind.toUpperCase()} Trigger`;
+}
+
+/**
+ * Create a TriggerConfig object for a given trigger type.
+ */
+export function createTriggerConfig(triggerKind: string): TriggerConfig {
+	const port = getTriggerPort(triggerKind);
+	return {
+		kind: triggerKind,
+		label: getTriggerLabel(triggerKind),
+		port,
+		entryPoint: `src/triggers/${triggerKind}/index.ts`,
+		startCmd: `bun run src/triggers/${triggerKind}/index.ts`,
+	};
+}
+
+/**
+ * Generate environment variable entries for selected triggers.
+ */
+export function generateTriggerEnvVars(triggerConfigs: TriggerConfig[]): string {
+	if (triggerConfigs.length === 0) return "";
+
+	const lines = ["\n# Triggers (auto-configured by blokctl)"];
+
+	for (const tc of triggerConfigs) {
+		lines.push(`TRIGGER_${tc.kind.toUpperCase()}_PORT=${tc.port}`);
+	}
+
+	return lines.join("\n");
+}
+
+/**
+ * Generate supervisord config entries for selected triggers.
+ */
+export function generateTriggerSupervisordConfig(triggerConfigs: TriggerConfig[]): string {
+	let config = "";
+
+	for (const tc of triggerConfigs) {
+		config += `
+[program:${tc.kind}_trigger]
+command=${tc.startCmd}
+directory=/app
+environment=PORT="${tc.port}",HOST="0.0.0.0"
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/${tc.kind}_trigger.err.log
+stdout_logfile=/var/log/${tc.kind}_trigger.out.log
+`;
+	}
+
+	return config;
 }

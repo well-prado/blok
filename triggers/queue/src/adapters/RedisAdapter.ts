@@ -12,7 +12,9 @@
  * - REDIS_TLS: Enable TLS (default: false)
  */
 
-import type { QueueTriggerOpts } from "@blok/helper";
+import type { QueueTriggerOpts } from "@blokjs/helper";
+import type { Job, Worker } from "bullmq";
+import type { Redis } from "ioredis";
 import { v4 as uuid } from "uuid";
 import type { QueueAdapter, QueueMessage } from "../QueueTrigger";
 
@@ -33,8 +35,20 @@ export interface RedisConfig {
 export class RedisAdapter implements QueueAdapter {
 	readonly provider = "redis" as const;
 
-	private connection: any;
-	private workers: Map<string, any> = new Map();
+	private connection: Redis | undefined;
+	private workers: Map<string, Worker> = new Map();
+
+	/**
+	 * Type-narrowing accessor for `this.connection`. Field is undefined
+	 * until `connect()` runs; methods that use the connection should call
+	 * this so the compiler enforces the precondition.
+	 */
+	private requireConnection(): Redis {
+		if (!this.connection) {
+			throw new Error("[RedisAdapter] connection is not initialised — call connect() first");
+		}
+		return this.connection;
+	}
 	private connected = false;
 	private config: RedisConfig;
 
@@ -74,8 +88,7 @@ export class RedisAdapter implements QueueAdapter {
 			console.log(`[RedisAdapter] Connected to Redis: ${this.config.host}:${this.config.port}`);
 		} catch (error) {
 			throw new Error(
-				`Failed to connect to Redis: ${(error as Error).message}. ` +
-					`Make sure ioredis and bullmq are installed: npm install ioredis bullmq`,
+				`Failed to connect to Redis: ${(error as Error).message}. Make sure ioredis and bullmq are installed: npm install ioredis bullmq`,
 			);
 		}
 	}
@@ -94,7 +107,7 @@ export class RedisAdapter implements QueueAdapter {
 			this.workers.clear();
 
 			// Close Redis connection
-			await this.connection.quit();
+			await this.requireConnection().quit();
 			this.connected = false;
 			console.log("[RedisAdapter] Disconnected from Redis");
 		} catch (error) {
@@ -119,12 +132,21 @@ export class RedisAdapter implements QueueAdapter {
 			// Create worker for this queue
 			const worker = new Worker(
 				queueName,
-				async (job: any) => {
-					// Create queue message from BullMQ job
+				async (job: Job) => {
+					// BullMQ's `JobsOptions` doesn't carry `headers`; authors
+					// who want to surface custom metadata embed it inside
+					// `job.data`. Default to an empty record here.
+					const headers: Record<string, string> = {};
+					// `job.token` is `string | undefined`; `moveToFailed`
+					// requires a string. The token is only present when the
+					// job is currently being processed by a worker, which IS
+					// our case here, but TS doesn't narrow that — coerce
+					// with a runtime fallback.
+					const token = job.token ?? "";
 					const queueMessage: QueueMessage = {
 						id: job.id || uuid(),
 						body: job.data,
-						headers: job.opts?.headers || {},
+						headers,
 						raw: job,
 						topic: queueName,
 						timestamp: job.timestamp ? new Date(job.timestamp) : new Date(),
@@ -135,10 +157,10 @@ export class RedisAdapter implements QueueAdapter {
 						nack: async (requeue = true) => {
 							if (requeue) {
 								// Move job back to waiting state
-								await job.moveToFailed(new Error("Message rejected"), job.token, true);
+								await job.moveToFailed(new Error("Message rejected"), token, true);
 							} else {
 								// Mark as failed without retry
-								await job.moveToFailed(new Error("Message rejected"), job.token, false);
+								await job.moveToFailed(new Error("Message rejected"), token, false);
 							}
 						},
 					};
@@ -147,17 +169,17 @@ export class RedisAdapter implements QueueAdapter {
 					await handler(queueMessage);
 				},
 				{
-					connection: this.connection.duplicate(),
+					connection: this.requireConnection().duplicate(),
 					concurrency: config.concurrency || 1,
 				},
 			);
 
 			// Handle worker events
-			worker.on("completed", (job: any) => {
+			worker.on("completed", (job: Job) => {
 				console.log(`[RedisAdapter] Job ${job.id} completed`);
 			});
 
-			worker.on("failed", (job: any, err: Error) => {
+			worker.on("failed", (job: Job | undefined, err: Error) => {
 				console.error(`[RedisAdapter] Job ${job?.id} failed: ${err.message}`);
 			});
 
@@ -198,7 +220,7 @@ export class RedisAdapter implements QueueAdapter {
 		if (!this.connected) return false;
 
 		try {
-			const pong = await this.connection.ping();
+			const pong = await this.requireConnection().ping();
 			return pong === "PONG";
 		} catch {
 			return false;

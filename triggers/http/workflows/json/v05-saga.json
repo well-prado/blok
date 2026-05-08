@@ -1,0 +1,115 @@
+{
+	"name": "v05-saga",
+	"version": "1.0.0",
+	"description": "v0.5 tryCatch primitive — multi-step saga with rollback. The caller controls the middle step's URL so the same workflow exercises both the success and failure paths: pass `https://httpbin.org/post` for all-success, or `https://httpbin.org/status/500` to force a failure mid-flight. Catch arm reads `$.error.message` to record what blew up. Finally arm always runs, capturing the outcome metric. Demonstrates: tryCatch with all three arms, $.error proxy resolution inside catch, finally executing on both success and error paths.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "saga",
+			"tryCatch": {
+				"try": [
+					{
+						"id": "create",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "create"
+							},
+							"body": { "step": "create", "user": "js/ctx.request.body.user" },
+							"responseType": "application/json"
+						}
+					},
+					{
+						"id": "risky-op",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "js/ctx.request.body.middleUrl",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "risky-op"
+							},
+							"body": { "step": "risky-op" },
+							"responseType": "application/json"
+						}
+					},
+					{
+						"id": "finalize",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "finalize"
+							},
+							"body": { "step": "finalize" },
+							"responseType": "application/json"
+						}
+					}
+				],
+				"catch": [
+					{
+						"id": "rollback",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "rollback"
+							},
+							"body": {
+								"step": "rollback",
+								"reason": "js/ctx.error.message",
+								"errorName": "js/ctx.error.name"
+							},
+							"responseType": "application/json"
+						}
+					}
+				],
+				"finally": [
+					{
+						"id": "metric",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "metric"
+							},
+							"body": {
+								"step": "metric",
+								"outcome": "js/ctx.state.rollback ? 'failed' : 'success'"
+							},
+							"responseType": "application/json"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "summary",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ outcome: ctx.state.rollback ? 'failed' : 'success', createRan: !!ctx.state.create, finalizeRan: !!ctx.state.finalize, rollbackRan: !!ctx.state.rollback, metricRan: !!ctx.state.metric, rollbackReason: ctx.state.rollback && ctx.state.rollback.json && ctx.state.rollback.json.reason })"
+			}
+		}
+	]
+}

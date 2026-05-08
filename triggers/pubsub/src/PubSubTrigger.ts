@@ -18,16 +18,16 @@
  *    - Ack/nack based on response
  */
 
-import type { HelperResponse, PubSubProvider, PubSubTriggerOpts } from "@blok/helper";
+import type { HelperResponse, PubSubProvider, PubSubTriggerOpts } from "@blokjs/helper";
 import {
+	type BlokService,
 	DefaultLogger,
 	type GlobalOptions,
-	type BlokService,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
-} from "@blok/runner";
-import type { Context, RequestContext } from "@blok/shared";
+} from "@blokjs/runner";
+import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -113,12 +113,6 @@ export abstract class PubSubTrigger extends TriggerBase {
 	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
-	constructor() {
-		super();
-		this.loadNodes();
-		this.loadWorkflows();
-	}
-
 	/**
 	 * Load nodes into the node map
 	 */
@@ -142,6 +136,11 @@ export abstract class PubSubTrigger extends TriggerBase {
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
+
+		// Initialize nodes and workflows (called here because subclass properties
+		// aren't available in parent constructor)
+		this.loadNodes();
+		this.loadWorkflows();
 
 		try {
 			// Connect to pub/sub system
@@ -264,7 +263,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 
 				// Store message metadata in context
 				if (!ctx.vars) ctx.vars = {};
-				ctx.vars["_pubsub_message"] = {
+				ctx.vars._pubsub_message = {
 					topic: message.topic,
 					subscription: message.subscription || "",
 					publishTime: message.publishTime?.toISOString() ?? "",

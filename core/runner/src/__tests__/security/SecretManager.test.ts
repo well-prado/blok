@@ -72,7 +72,7 @@ describe("EnvironmentSecretProvider", () => {
 			envKeysToClean.push("SM_SET_TEST");
 
 			await provider.set("SM_SET_TEST", "my-value");
-			expect(process.env["SM_SET_TEST"]).toBe("my-value");
+			expect(process.env.SM_SET_TEST).toBe("my-value");
 		});
 
 		it("should set an environment variable with prefix", async () => {
@@ -88,7 +88,7 @@ describe("EnvironmentSecretProvider", () => {
 			const provider = new EnvironmentSecretProvider();
 
 			await provider.set("SM_OVERWRITE_TEST", "new-value");
-			expect(process.env["SM_OVERWRITE_TEST"]).toBe("new-value");
+			expect(process.env.SM_OVERWRITE_TEST).toBe("new-value");
 		});
 	});
 
@@ -98,7 +98,7 @@ describe("EnvironmentSecretProvider", () => {
 			const provider = new EnvironmentSecretProvider();
 
 			await provider.delete("SM_DEL_TEST");
-			expect(process.env["SM_DEL_TEST"]).toBeUndefined();
+			expect(process.env.SM_DEL_TEST).toBeUndefined();
 		});
 
 		it("should remove an environment variable with prefix", async () => {
@@ -232,7 +232,7 @@ describe("EnvironmentSecretProvider", () => {
 			const provider = new EnvironmentSecretProvider({ caseSensitive: false });
 
 			await provider.delete("sm_ci_delete_key");
-			expect(process.env["SM_CI_DELETE_KEY"]).toBeUndefined();
+			expect(process.env.SM_CI_DELETE_KEY).toBeUndefined();
 		});
 	});
 
@@ -698,7 +698,7 @@ describe("SecretManager", () => {
 			// Should be removed from memory provider
 			expect(await memProvider.get("SM_DEL_MULTI")).toBeNull();
 			// Should be removed from env
-			expect(process.env["SM_DEL_MULTI"]).toBeUndefined();
+			expect(process.env.SM_DEL_MULTI).toBeUndefined();
 		});
 
 		it("should invalidate the cache entry", async () => {

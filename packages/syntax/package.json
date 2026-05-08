@@ -1,10 +1,11 @@
 {
-	"name": "@blok/syntax",
-	"version": "0.1.0",
+	"name": "@blokjs/syntax",
+	"version": "0.2.1",
 	"description": "TextMate grammar for Blok workflow JSON files",
 	"license": "MIT",
-	"files": [
-		"syntaxes/",
-		"language-configuration.json"
-	]
+	"files": ["syntaxes/", "language-configuration.json"],
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }

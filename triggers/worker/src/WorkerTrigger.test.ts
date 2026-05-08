@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "./WorkerTrigger";
 import { InMemoryAdapter } from "./adapters/InMemoryAdapter";
+import { computeXDelayHoldMs } from "./adapters/NATSAdapter";
 
 // ============================================================================
 // WorkerJob Interface Tests
@@ -407,23 +408,22 @@ describe("BullMQAdapter", () => {
 	});
 
 	it("should use default values when env vars not set", () => {
-		const originalHost = process.env.REDIS_HOST;
-		const originalPort = process.env.REDIS_PORT;
-
-		delete process.env.REDIS_HOST;
-		delete process.env.REDIS_PORT;
+		// Pure: don't mutate process.env (races with other parallel workers
+		// when running via `nx run-many -t test` and pollutes other tests).
+		// Simulate "env unset" by reading from an explicit snapshot rather
+		// than the live process.env.
+		const fakeEnv: Record<string, string | undefined> = {
+			REDIS_HOST: undefined,
+			REDIS_PORT: undefined,
+		};
 
 		const config = {
-			host: process.env.REDIS_HOST || "localhost",
-			port: Number.parseInt(process.env.REDIS_PORT || "6379", 10),
+			host: fakeEnv.REDIS_HOST || "localhost",
+			port: Number.parseInt(fakeEnv.REDIS_PORT || "6379", 10),
 		};
 
 		expect(config.host).toBe("localhost");
 		expect(config.port).toBe(6379);
-
-		// Restore
-		process.env.REDIS_HOST = originalHost;
-		process.env.REDIS_PORT = originalPort;
 	});
 });
 
@@ -482,7 +482,7 @@ describe("Exponential Backoff", () => {
 		const maxDelay = 30000;
 
 		const delays = [0, 1, 2, 3, 4, 5].map((attempt) => {
-			const exponential = Math.min(base * Math.pow(2, attempt), maxDelay);
+			const exponential = Math.min(base * 2 ** attempt, maxDelay);
 			return exponential;
 		});
 
@@ -498,13 +498,43 @@ describe("Exponential Backoff", () => {
 		const base = 1000;
 		const maxDelay = 30000;
 
-		const delay = Math.min(base * Math.pow(2, 10), maxDelay);
+		const delay = Math.min(base * 2 ** 10, maxDelay);
 		expect(delay).toBe(30000);
 	});
 
 	it("should support custom base delay", () => {
 		const base = 500;
-		const exponential = base * Math.pow(2, 2);
+		const exponential = base * 2 ** 2;
 		expect(exponential).toBe(2000);
+	});
+});
+
+// ============================================================================
+// NATSAdapter — computeXDelayHoldMs (Tier 2 polish: x-delay enforcement)
+// ============================================================================
+
+describe("NATSAdapter — computeXDelayHoldMs", () => {
+	it("returns 0 when no delay was set", () => {
+		expect(computeXDelayHoldMs(0, 1_000_000, 1_000_000)).toBe(0);
+		expect(computeXDelayHoldMs(-50, 1_000_000, 1_000_000)).toBe(0);
+	});
+
+	it("returns the full delay when the message just arrived", () => {
+		// createdMs == nowMs (just published), delay 5s → wait 5s.
+		expect(computeXDelayHoldMs(5000, 2_000_000, 2_000_000)).toBe(5000);
+	});
+
+	it("returns the remaining delay when partially elapsed", () => {
+		// Published 2s ago, delay 5s → wait 3s remaining.
+		expect(computeXDelayHoldMs(5000, 1_000_000, 1_002_000)).toBe(3000);
+	});
+
+	it("returns 0 when the delay has already elapsed", () => {
+		// Published 10s ago, delay 5s → fire immediately.
+		expect(computeXDelayHoldMs(5000, 1_000_000, 1_010_000)).toBe(0);
+	});
+
+	it("clamps to 0 when nowMs is far in the future", () => {
+		expect(computeXDelayHoldMs(5000, 1_000_000, 9_999_999)).toBe(0);
 	});
 });

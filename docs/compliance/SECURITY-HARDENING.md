@@ -73,7 +73,7 @@ service-account.json
 ### Use SecretManager for All Secrets
 
 ```typescript
-import { SecretManager } from "@blok/runner";
+import { SecretManager } from "@blokjs/runner";
 
 // WRONG: Secrets in environment variables or code
 // const dbPassword = process.env.DB_PASSWORD;
@@ -469,7 +469,7 @@ process.on("SIGTERM", async () => {
 ### Rotate JWT Secrets
 
 ```typescript
-import { JWTAuthProvider, SecretManager } from "@blok/runner";
+import { JWTAuthProvider, SecretManager } from "@blokjs/runner";
 
 // Retrieve JWT secret from SecretManager (never hardcode)
 const secrets = new SecretManager({
@@ -500,7 +500,7 @@ const jwtAuth = new JWTAuthProvider({
 ### Enforce Strong API Keys
 
 ```typescript
-import { APIKeyAuthProvider, SecretManager } from "@blok/runner";
+import { APIKeyAuthProvider, SecretManager } from "@blokjs/runner";
 import { randomBytes } from "node:crypto";
 
 // Generate cryptographically secure API keys
@@ -545,7 +545,7 @@ const apiKeyAuth = new APIKeyAuthProvider({
 ### Enable OIDC with MFA
 
 ```typescript
-import { OAuthOIDCProvider } from "@blok/runner";
+import { OAuthOIDCProvider } from "@blokjs/runner";
 
 // Configure OIDC with a provider that supports MFA
 const oidcAuth = new OAuthOIDCProvider({
@@ -626,7 +626,7 @@ app.use((req, res, next) => {
 ### Principle of Least Privilege
 
 ```typescript
-import { RBAC } from "@blok/runner";
+import { RBAC } from "@blokjs/runner";
 
 const rbac = new RBAC();
 
@@ -650,7 +650,7 @@ rbac.addRole({
 ### RBAC Configuration for Production
 
 ```typescript
-import { RBAC } from "@blok/runner";
+import { RBAC } from "@blokjs/runner";
 
 const rbac = new RBAC();
 
@@ -753,7 +753,7 @@ import {
   AuditLogger,
   ConsoleAuditSink,
   FileAuditSink,
-} from "@blok/runner";
+} from "@blokjs/runner";
 
 // Production audit logging configuration
 const audit = new AuditLogger({
@@ -780,7 +780,7 @@ const audit = new AuditLogger({
 ### Configure Sentry
 
 ```typescript
-import { SentryIntegration } from "@blok/runner";
+import { SentryIntegration } from "@blokjs/runner";
 
 const sentry = new SentryIntegration({
   dsn: process.env.SENTRY_DSN!,
@@ -800,7 +800,7 @@ await sentry.init();
 ### Configure Structured Logging
 
 ```typescript
-import { StructuredLogger } from "@blok/runner";
+import { StructuredLogger } from "@blokjs/runner";
 
 const logger = new StructuredLogger({
   service: "blok-api",
@@ -958,7 +958,7 @@ npx license-checker --production --json > license-report.json
 ### Vault Integration
 
 ```typescript
-import { SecretManager, VaultSecretProvider } from "@blok/runner";
+import { SecretManager, VaultSecretProvider } from "@blokjs/runner";
 
 // Production Vault configuration
 const secrets = new SecretManager({
@@ -1012,7 +1012,7 @@ secrets.on("secretAccess", (event) => {
 ### Encryption at Rest for Secrets
 
 ```typescript
-import { EncryptionAtRest, SecretManager } from "@blok/runner";
+import { EncryptionAtRest, SecretManager } from "@blokjs/runner";
 
 const encryption = new EncryptionAtRest({
   algorithm: "aes-256-gcm",
@@ -1071,7 +1071,7 @@ app.use((req, res, next) => {
 ### Data Masking in Logs
 
 ```typescript
-import { StructuredLogger } from "@blok/runner";
+import { StructuredLogger } from "@blokjs/runner";
 
 const logger = new StructuredLogger({
   service: "blok-api",
@@ -1100,7 +1100,7 @@ function maskValue(value: string): string {
 ### Encryption for Sensitive Data
 
 ```typescript
-import { EncryptionAtRest } from "@blok/runner";
+import { EncryptionAtRest } from "@blokjs/runner";
 
 const encryption = new EncryptionAtRest({
   algorithm: "aes-256-gcm",

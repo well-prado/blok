@@ -5,10 +5,10 @@
  * Migrated from class-based to function-first pattern using defineNode.
  */
 
-import type { ConditionOpts } from "@blok/helper";
-import { type Condition, type BlokService, defineNode } from "@blok/runner";
-import type { Context, NodeBase } from "@blok/shared";
-import type ParamsDictionary from "@blok/shared/dist/types/ParamsDictionary";
+import type { ConditionOpts } from "@blokjs/helper";
+import { type BlokService, type Condition, defineNode } from "@blokjs/runner";
+import type { Context, NodeBase } from "@blokjs/shared";
+import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
 import { z } from "zod";
 
 /**

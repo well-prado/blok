@@ -22,7 +22,7 @@
 
 import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
 
-import type { WorkerTriggerOpts } from "@blok/helper";
+import type { WorkerTriggerOpts } from "@blokjs/helper";
 
 /**
  * BullMQ adapter configuration

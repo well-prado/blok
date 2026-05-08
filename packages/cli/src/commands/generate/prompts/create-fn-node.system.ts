@@ -8,8 +8,8 @@ What to return:
 
   1. Proper imports:
      * \`z\` from \`zod\`
-     * \`Context\` from \`@blok/shared\`
-     * \`defineNode\` from \`@blok/runner\`
+     * \`Context\` from \`@blokjs/shared\`
+     * \`defineNode\` from \`@blokjs/runner\`
   2. A clear and structured \`input\` schema using Zod (z.object with proper types).
   3. A matching \`output\` schema using Zod.
   4. A single exported node instance created via \`defineNode\` with:
@@ -50,9 +50,9 @@ Real-World Examples to Guide You:
 **Example 1: API Call Node**
 
 \`\`\`typescript
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
 	name: "api-call",
@@ -120,9 +120,9 @@ export default defineNode({
 **Example 2: Fetch User Node**
 
 \`\`\`typescript
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 export default defineNode({
 	name: "fetch-user",
@@ -174,9 +174,9 @@ async function fetchUserFromDatabase(userId: string, includeMetadata: boolean) {
 
 Template to follow (adapt and fill based on the user's request):
 
-import type { Context } from "@blok/shared";
+import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blok/runner";
+import { defineNode } from "@blokjs/runner";
 
 /**
  * [Brief description of what this node does]

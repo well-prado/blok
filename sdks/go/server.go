@@ -120,13 +120,36 @@ func (s *Server) corsHandler(next http.Handler) http.Handler {
 	})
 }
 
-// ListenAndServe is a convenience function that creates a server with default
-// config, registers nodes, and starts serving.
+// ListenAndServe is a convenience function that creates the configured
+// server(s) and serves until shutdown.
+//
+// Honors `cfg.Transport`:
+//   - TransportHTTP (default): HTTP only.
+//   - TransportGRPC: gRPC only on cfg.GRPCPort.
+//   - TransportBoth: HTTP + gRPC in the same process.
 func ListenAndServe(registry *NodeRegistry) error {
 	config := LoadConfigFromEnv()
+	return ListenAndServeWithConfig(registry, config)
+}
+
+// ListenAndServeWithConfig is the same as ListenAndServe but uses the
+// provided config. Useful for tests that want to inject a fixed config.
+func ListenAndServeWithConfig(registry *NodeRegistry, config ServerConfig) error {
+	switch config.Transport {
+	case TransportGRPC:
+		return runGrpcOnly(registry, config)
+	case TransportBoth:
+		return runBoth(registry, config)
+	case TransportHTTP, "":
+		return runHTTPOnly(registry, config)
+	default:
+		return fmt.Errorf("unknown BLOK_TRANSPORT %q (expected http | grpc | both)", config.Transport)
+	}
+}
+
+func runHTTPOnly(registry *NodeRegistry, config ServerConfig) error {
 	server := NewServer(registry, config)
 
-	// Set up graceful shutdown
 	shutdownCh := SetupGracefulShutdown(func() {
 		if err := server.Shutdown(); err != nil {
 			log.Printf("Error during shutdown: %v", err)
@@ -139,4 +162,46 @@ func ListenAndServe(registry *NodeRegistry) error {
 		return nil
 	}
 	return err
+}
+
+func runGrpcOnly(registry *NodeRegistry, config ServerConfig) error {
+	grpcServer, _, err := StartGrpc(registry, config.Host, config.GRPCPort, GrpcServerOptions{
+		SdkVersion: config.Version,
+	})
+	if err != nil {
+		return err
+	}
+
+	shutdownCh := SetupGracefulShutdown(func() {
+		log.Println("Shutting down gRPC server…")
+		grpcServer.GracefulStop()
+	})
+	<-shutdownCh
+	return nil
+}
+
+func runBoth(registry *NodeRegistry, config ServerConfig) error {
+	grpcServer, _, err := StartGrpc(registry, config.Host, config.GRPCPort, GrpcServerOptions{
+		SdkVersion: config.Version,
+	})
+	if err != nil {
+		return err
+	}
+
+	httpServer := NewServer(registry, config)
+
+	shutdownCh := SetupGracefulShutdown(func() {
+		log.Println("Shutting down gRPC server…")
+		grpcServer.GracefulStop()
+		if shutErr := httpServer.Shutdown(); shutErr != nil {
+			log.Printf("Error during HTTP shutdown: %v", shutErr)
+		}
+	})
+
+	startErr := httpServer.Start()
+	if startErr == http.ErrServerClosed {
+		<-shutdownCh
+		return nil
+	}
+	return startErr
 }

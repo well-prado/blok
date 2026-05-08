@@ -14,6 +14,7 @@ services:
       - ./:/var/lib/postgresql/bump
     networks:
       - shared-network
+
   adminer:
     image: adminer
     container_name: adminer
@@ -23,8 +24,84 @@ services:
     networks:
       - shared-network
 
+  # Redis for Queue trigger (BullMQ)
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - shared-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Commander - Web UI for Redis (optional, useful for debugging)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    restart: always
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - 8081:8081
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - shared-network
+
+  # NATS JetStream for Queue/Worker triggers
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats
+    restart: always
+    ports:
+      - 4222:4222   # Client connections
+      - 8222:8222   # HTTP monitoring
+    command: ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    volumes:
+      - nats-data:/data
+    networks:
+      - shared-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   shared-network:
     external: true
 
-# docker network create shared-network
+volumes:
+  redis-data:
+  nats-data:
+
+# Setup:
+# 1. Create the network: docker network create shared-network
+# 2. Start all services: docker compose up -d
+# 3. Start only specific services: docker compose up -d redis redis-commander
+# 4. Start NATS only: docker compose up -d nats
+#
+# Services:
+# - PostgreSQL: localhost:5432 (user: postgres, password: example)
+# - Adminer (DB UI): http://localhost:8080
+# - Redis: localhost:6379 (no password)
+# - Redis Commander (Redis UI): http://localhost:8081
+# - NATS: localhost:4222 (no auth)
+# - NATS Monitoring: http://localhost:8222
+#
+# Queue trigger env vars (already defaults):
+# - REDIS_HOST=localhost
+# - REDIS_PORT=6379
+#
+# NATS trigger env vars (already defaults):
+# - NATS_SERVERS=localhost:4222
+# - NATS_STREAM_NAME=blok-queue (or blok-worker)

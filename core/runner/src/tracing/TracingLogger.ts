@@ -1,4 +1,4 @@
-import type { LoggerContext } from "@blok/shared";
+import type { LoggerContext } from "@blokjs/shared";
 import { RunTracker } from "./RunTracker";
 
 /**

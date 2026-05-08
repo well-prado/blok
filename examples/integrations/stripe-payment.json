@@ -12,18 +12,18 @@
 	"steps": [
 		{
 			"name": "validate-payment-request",
-			"node": "@blok/json-validator",
+			"node": "@blokjs/json-validator",
 			"type": "module"
 		},
 		{
 			"name": "resolve-customer",
-			"node": "@blok/api-call",
+			"node": "@blokjs/api-call",
 			"type": "module",
 			"set_var": true
 		},
 		{
 			"name": "route-customer-lookup",
-			"node": "@blok/if-else",
+			"node": "@blokjs/if-else",
 			"type": "module"
 		}
 	],
@@ -85,13 +85,13 @@
 						},
 						{
 							"name": "create-payment-intent-existing",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-payment-result-existing",
-							"node": "@blok/if-else",
+							"node": "@blokjs/if-else",
 							"type": "module"
 						}
 					]
@@ -101,19 +101,19 @@
 					"steps": [
 						{
 							"name": "create-stripe-customer",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "create-payment-intent-new",
-							"node": "@blok/api-call",
+							"node": "@blokjs/api-call",
 							"type": "module",
 							"set_var": true
 						},
 						{
 							"name": "route-payment-result-new",
-							"node": "@blok/if-else",
+							"node": "@blokjs/if-else",
 							"type": "module"
 						}
 					]

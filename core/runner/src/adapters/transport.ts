@@ -1,0 +1,207 @@
+import type { RuntimeKind } from "./RuntimeAdapter";
+import type { TlsConfig, Transport } from "./grpc/types";
+
+/**
+ * Resolve the transport to use for a given runtime kind from the environment.
+ *
+ * Precedence (most specific wins):
+ *   1. `RUNTIME_<KIND>_TRANSPORT` — per-kind override
+ *      e.g. `RUNTIME_PYTHON3_TRANSPORT=http` to opt one SDK out of gRPC.
+ *   2. `RUNTIME_TRANSPORT` — global override
+ *      e.g. `RUNTIME_TRANSPORT=http` to roll back the whole runner.
+ *   3. The hard-coded default — **`grpc`** as of Phase 6 (master plan §11).
+ *      Flipped from `http` to `grpc` after the cross-language parity matrix
+ *      (`bun run test:parity`, 33 tests across 6 SDKs × 5 workflows) and
+ *      the per-SDK §17 BlokError E2E suites stayed green for the full
+ *      Phase 5 observation window.
+ *
+ * Pure function — reads `process.env` once per call so tests can override.
+ *
+ * # Why the default flip is safe
+ *
+ * - HTTP transport remains available behind `RUNTIME_TRANSPORT=http` for at
+ *   least two minor versions (master plan §11 commitment).
+ * - PHP without RoadRunner (Path B from §16) sets
+ *   `RUNTIME_PHP_TRANSPORT=http` per host. The forever-supported escape
+ *   hatch is unaffected.
+ * - SDKs that fail to bind their gRPC listener fall through the
+ *   {@link GrpcHealthChecker} circuit-breaker and surface a typed
+ *   `BlokError(category=DEPENDENCY)` per §9 — no silent failure.
+ *
+ * @param kind The runtime kind (e.g. "python3").
+ * @param env Optional env source (defaults to `process.env`). Tests can
+ *            pass a stub map.
+ * @returns Either `"http"` or `"grpc"`. Invalid values fall back to the
+ *          Phase 6 default (`grpc`).
+ */
+export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEnv = process.env): Transport {
+	const perKindKey = `RUNTIME_${kind.toUpperCase()}_TRANSPORT`;
+	const perKind = env[perKindKey];
+	if (perKind === "grpc" || perKind === "http") {
+		if (perKind === "http") warnDeprecatedHttpTransport(perKindKey);
+		return perKind;
+	}
+
+	const global = env.RUNTIME_TRANSPORT;
+	if (global === "grpc" || global === "http") {
+		if (global === "http") warnDeprecatedHttpTransport("RUNTIME_TRANSPORT");
+		return global;
+	}
+
+	// Phase 6 default: gRPC. The flip from HTTP landed once the parity
+	// matrix had been green for the observation window.
+	return "grpc";
+}
+
+/**
+ * Set of env-var names that have already triggered the deprecation warning
+ * in this process. Prevents log spam when many runtime kinds resolve through
+ * the same global override on each request.
+ *
+ * Exported as a reset hook for tests — production code never touches it.
+ */
+const _httpDeprecationWarned = new Set<string>();
+
+function warnDeprecatedHttpTransport(envKey: string): void {
+	if (_httpDeprecationWarned.has(envKey)) return;
+	_httpDeprecationWarned.add(envKey);
+	console.warn(
+		`[blok] ${envKey}=http is deprecated and will be removed in v0.4.0. Migrate to gRPC by dropping the env var (gRPC is the default since Phase 6) and ensuring your SDK process boots with BLOK_TRANSPORT=grpc.`,
+	);
+}
+
+/**
+ * Test-only — reset the per-process HTTP-transport deprecation cache so a
+ * test that flips `RUNTIME_TRANSPORT=http` can re-assert the warning fires.
+ *
+ * @internal
+ */
+export function _resetHttpDeprecationCache(): void {
+	_httpDeprecationWarned.clear();
+}
+
+/**
+ * Whether log streaming is enabled for runtime nodes. When true, the runner
+ * routes runtime nodes through `GrpcRuntimeAdapter.executeStream` instead of
+ * the unary `execute`, and `LogLine` frames flow into `RunTracker.addLog`
+ * — surfacing live in Studio's `/__blok/runs/:id/stream` SSE endpoint.
+ *
+ * Streaming is a pure additive capability: when the env var is unset, the
+ * legacy unary path runs unchanged. When enabled but the adapter doesn't
+ * support streaming (e.g. HttpRuntimeAdapter), `RuntimeAdapterNode` falls
+ * back to unary so misconfiguration never blocks execution.
+ *
+ * Recognized as truthy: `1`, `true`, `yes`, `on` (case-insensitive). Anything
+ * else (including unset, empty, `0`, `false`) returns false.
+ */
+export function isStreamLogsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	return isTruthyFlag(env.BLOK_STREAM_LOGS);
+}
+
+/**
+ * Resolve the gRPC background health-check interval from the environment.
+ *
+ * `BLOK_GRPC_HEALTH_INTERVAL_MS` is the global override:
+ *   - any positive integer → use that interval
+ *   - `0` → disable the loop entirely (useful in tests)
+ *   - unset / non-numeric → return undefined; adapter uses
+ *     {@link GRPC_DEFAULTS.HEALTH_INTERVAL_MS}.
+ */
+export function resolveHealthCheckIntervalMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = env.BLOK_GRPC_HEALTH_INTERVAL_MS;
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed < 0) return undefined;
+	return parsed;
+}
+
+/**
+ * Resolve the consecutive-failure threshold for the gRPC circuit breaker.
+ *
+ * `BLOK_GRPC_HEALTH_FAILURE_THRESHOLD` overrides the default
+ * ({@link GRPC_DEFAULTS.HEALTH_FAILURE_THRESHOLD}). Values < 1 are ignored
+ * (the checker requires ≥ 1 failure to trip).
+ */
+export function resolveHealthCheckFailureThreshold(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = env.BLOK_GRPC_HEALTH_FAILURE_THRESHOLD;
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed < 1) return undefined;
+	return parsed;
+}
+
+/**
+ * Build a {@link TlsConfig} for a given runtime kind from environment
+ * variables. Returns `undefined` when nothing is configured (channel stays
+ * plaintext — appropriate for loopback dev).
+ *
+ * Per-kind env vars (taking precedence):
+ *   - `RUNTIME_<KIND>_TLS_CA`              CA cert path (PEM)
+ *   - `RUNTIME_<KIND>_TLS_CLIENT_CERT`     client cert path (PEM, mTLS)
+ *   - `RUNTIME_<KIND>_TLS_CLIENT_KEY`      client key path (PEM, mTLS)
+ *   - `RUNTIME_<KIND>_TLS_SERVER_NAME`     SNI override
+ *   - `RUNTIME_<KIND>_TLS_INSECURE_SKIP_VERIFY=true`  dev-only
+ *
+ * Global fallbacks (apply when the per-kind var is unset):
+ *   - `BLOK_GRPC_TLS_CA`, `BLOK_GRPC_TLS_CLIENT_CERT`, `BLOK_GRPC_TLS_CLIENT_KEY`,
+ *     `BLOK_GRPC_TLS_SERVER_NAME`, `BLOK_GRPC_TLS_INSECURE_SKIP_VERIFY`.
+ *
+ * If none of the relevant env vars are set, returns `undefined`.
+ */
+export function loadTlsConfigForKind(kind: RuntimeKind, env: NodeJS.ProcessEnv = process.env): TlsConfig | undefined {
+	const upperKind = kind.toUpperCase();
+	const pick = (suffix: string): string | undefined =>
+		env[`RUNTIME_${upperKind}_TLS_${suffix}`] ?? env[`BLOK_GRPC_TLS_${suffix}`];
+
+	const caCertPath = pick("CA");
+	const clientCertPath = pick("CLIENT_CERT");
+	const clientKeyPath = pick("CLIENT_KEY");
+	const serverNameOverride = pick("SERVER_NAME");
+	const insecureSkipVerifyRaw = pick("INSECURE_SKIP_VERIFY");
+	const insecureSkipVerify = isTruthyFlag(insecureSkipVerifyRaw);
+
+	const anySet =
+		caCertPath !== undefined ||
+		clientCertPath !== undefined ||
+		clientKeyPath !== undefined ||
+		serverNameOverride !== undefined ||
+		insecureSkipVerify;
+
+	if (!anySet) return undefined;
+
+	return {
+		caCertPath,
+		clientCertPath,
+		clientKeyPath,
+		serverNameOverride,
+		insecureSkipVerify,
+	};
+}
+
+/**
+ * Whether `BLOK_GRPC_REQUIRE_TLS=true` enforces TLS on non-loopback hosts.
+ * When true, building a gRPC adapter with no TLS config against a non-loopback
+ * host throws at startup. Loopback (localhost, 127.0.0.0/8, ::1) is exempted.
+ */
+export function isStrictTlsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+	return isTruthyFlag(env.BLOK_GRPC_REQUIRE_TLS);
+}
+
+/**
+ * Returns true when the host is a loopback address that doesn't require
+ * TLS even under strict mode. Match is intentionally generous — covers
+ * `localhost`, the 127.x range, IPv6 loopback, and the wildcard 0.0.0.0
+ * (which dev SDKs commonly bind to).
+ */
+export function isLoopbackHost(host: string): boolean {
+	const normalized = host.trim().toLowerCase();
+	if (normalized === "localhost" || normalized === "::1" || normalized === "0.0.0.0") return true;
+	if (normalized.startsWith("127.")) return true;
+	return false;
+}
+
+function isTruthyFlag(value: string | undefined): boolean {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase();
+	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}

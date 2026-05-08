@@ -1,5 +1,5 @@
-import type { ParamsDictionary } from "@blok/runner";
-import type { NodeBase, Step } from "@blok/shared";
+import type { ParamsDictionary } from "@blokjs/runner";
+import type { NodeBase, Step } from "@blokjs/shared";
 
 export function validateRoute(dynamicRoute: string, actualRoute: string) {
 	if (!dynamicRoute || !actualRoute) return false;

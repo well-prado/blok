@@ -10,8 +10,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { WorkflowModel } from "@blok/helper";
-import type { Context } from "@blok/shared";
+import type { WorkflowModel } from "@blokjs/helper";
+import type { Context } from "@blokjs/shared";
 import Configuration from "../../../src/Configuration";
 import { DefaultLogger } from "../../../src/DefaultLogger";
 import Runner from "../../../src/Runner";
