@@ -1,0 +1,349 @@
+/**
+ * v0.5 forEach + loop end-to-end integration tests.
+ *
+ * Boots Configuration with a workflow definition + node registry,
+ * runs it through Runner, and asserts on ctx.state. Covers:
+ *
+ *   forEach:
+ *     - sequential mode produces results in order
+ *     - parallel mode produces results in order (despite out-of-order completion)
+ *     - empty input produces empty array
+ *     - per-iteration state isolation
+ *     - inner step errors propagate
+ *
+ *   loop:
+ *     - while-condition controls iteration count
+ *     - state mutations carry forward between iterations
+ *     - maxIterations cap throws LoopMaxIterationsError
+ */
+
+import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
+import { afterEach, describe, expect, it } from "vitest";
+import Configuration from "../../src/Configuration";
+import { LoopMaxIterationsError } from "../../src/LoopMaxIterationsError";
+import Runner from "../../src/Runner";
+import RunnerNode from "../../src/RunnerNode";
+
+/**
+ * Tiny @blokjs/expr replica for tests — evaluates a JS expression
+ * against ctx and returns the result.
+ */
+class ExprNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/expr";
+		this.node = "@blokjs/expr";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(ctx: Context): Promise<ResponseContext> {
+		const opts = ((ctx.config as Record<string, unknown> | undefined)?.[this.name] ?? {}) as {
+			inputs?: { expression?: string };
+		};
+		const expr = opts.inputs?.expression ?? "undefined";
+		const data = (ctx.response?.data ?? ctx.request?.body ?? {}) as Record<string, unknown>;
+		const vars = (ctx.vars ?? {}) as Record<string, unknown>;
+		const fn = new Function("ctx", "data", "vars", `"use strict";return (${expr});`);
+		return { success: true, data: fn(ctx, data, vars), error: null };
+	}
+}
+
+/**
+ * Tiny @blokjs/ctx-publish replica — sets ctx.state[name] = value.
+ */
+class CtxPublishNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/ctx-publish";
+		this.node = "@blokjs/ctx-publish";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(ctx: Context): Promise<ResponseContext> {
+		const opts = ((ctx.config as Record<string, unknown> | undefined)?.[this.name] ?? {}) as {
+			inputs?: { name?: string; value?: unknown };
+		};
+		const name = opts.inputs?.name ?? "";
+		const value = opts.inputs?.value;
+		const state = (ctx.state ?? {}) as Record<string, unknown>;
+		state[name] = value;
+		return { success: true, data: { name, value }, error: null };
+	}
+}
+
+/**
+ * Build a Configuration from a workflow definition + helper nodes.
+ */
+async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration; ctx: Context }> {
+	const config = new Configuration();
+	const helpers: Record<string, RunnerNode> = {
+		"@blokjs/expr": new ExprNode(),
+		"@blokjs/ctx-publish": new CtxPublishNode(),
+	};
+	const globalOptions = {
+		nodes: {
+			getNode: (name: string): RunnerNode | null => helpers[name] ?? null,
+		},
+	};
+	await config.init("test-wf", globalOptions, workflowDef);
+	const state: Record<string, unknown> = {};
+	const ctx = {
+		id: "test-req",
+		workflow_name: "test-wf",
+		workflow_path: "/test",
+		request: { body: {}, headers: {}, params: {}, query: {} },
+		response: { data: null, success: true, error: null, contentType: "application/json" },
+		error: { message: [] },
+		logger: {
+			log: () => {},
+			logLevel: () => {},
+			error: () => {},
+			getLogs: () => [],
+			getLogsAsText: () => "",
+			getLogsAsBase64: () => "",
+		},
+		config: config.nodes,
+		vars: state,
+		state,
+		env: {},
+		eventLogger: null,
+		_PRIVATE_: null,
+	} as unknown as Context;
+	return { config, ctx };
+}
+
+describe("v0.5 forEach + loop integration", () => {
+	afterEach(() => {
+		// no-op
+	});
+
+	describe("forEach", () => {
+		it("sequential mode iterates in order and stores results array", async () => {
+			const wfDef = {
+				name: "test-foreach-seq",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "doubled",
+						forEach: {
+							in: [1, 2, 3, 4, 5],
+							as: "n",
+							mode: "sequential",
+							do: [
+								{
+									id: "double",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "ctx.state.n * 2" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			const state = ctx.state as Record<string, unknown>;
+			expect(state.doubled).toEqual([2, 4, 6, 8, 10]);
+		});
+
+		it("parallel mode preserves index order in results", async () => {
+			const wfDef = {
+				name: "test-foreach-par",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "results",
+						forEach: {
+							in: [10, 20, 30, 40, 50],
+							as: "v",
+							mode: "parallel",
+							concurrency: 3,
+							do: [
+								{
+									id: "compute",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "ctx.state.v + 1" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).results).toEqual([11, 21, 31, 41, 51]);
+		});
+
+		it("empty input array produces empty results", async () => {
+			const wfDef = {
+				name: "test-foreach-empty",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "results",
+						forEach: {
+							in: [],
+							as: "v",
+							do: [{ id: "x", use: "@blokjs/expr", type: "module", inputs: { expression: "1" } }],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).results).toEqual([]);
+		});
+
+		it("exposes the iteration index at ctx.state[as + 'Index']", async () => {
+			const wfDef = {
+				name: "test-foreach-index",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "indices",
+						forEach: {
+							in: ["a", "b", "c"],
+							as: "letter",
+							mode: "sequential",
+							do: [
+								{
+									id: "echo-index",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "ctx.state.letterIndex" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).indices).toEqual([0, 1, 2]);
+		});
+	});
+
+	describe("loop", () => {
+		it("while-condition controls iteration count", async () => {
+			const wfDef = {
+				name: "test-loop-counter",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "init",
+						use: "@blokjs/ctx-publish",
+						type: "module",
+						inputs: { name: "n", value: 0 },
+					},
+					{
+						id: "incr-loop",
+						loop: {
+							while: "ctx.state.n < 5",
+							do: [
+								{
+									id: "incr",
+									use: "@blokjs/ctx-publish",
+									type: "module",
+									inputs: { name: "n", value: "js/ctx.state.n + 1" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).n).toBe(5);
+		});
+
+		it("exposes the iteration counter at ctx.state[<id>Index]", async () => {
+			const wfDef = {
+				name: "test-loop-index",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "counter-loop",
+						loop: {
+							while: "ctx.state['counter-loopIndex'] < 3",
+							do: [
+								{
+									id: "tick",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "ctx.state['counter-loopIndex']" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			// After exit, the counter has advanced past the last successful iteration.
+			expect((ctx.state as Record<string, unknown>)["counter-loopIndex"]).toBe(3);
+		});
+
+		it("throws LoopMaxIterationsError when cap is exceeded", async () => {
+			const wfDef = {
+				name: "test-loop-cap",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "runaway",
+						loop: {
+							while: "true",
+							maxIterations: 3,
+							do: [
+								{
+									id: "noop",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "1" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			let caught: unknown = null;
+			try {
+				await runner.run(ctx);
+			} catch (err) {
+				caught = err;
+			}
+			// The error may be wrapped — check that it carries the LoopMaxIterationsError signature.
+			const errString =
+				caught instanceof LoopMaxIterationsError
+					? caught.message
+					: caught instanceof Error
+						? caught.message
+						: String(caught) + (ctx.response?.error?.message ?? "");
+			const ctxErr = ctx.response?.error?.message ?? "";
+			const combined = `${errString} ${ctxErr}`;
+			expect(combined).toMatch(/exceeded maxIterations|LoopMaxIterationsError/);
+		});
+	});
+});

@@ -1,0 +1,23 @@
+{
+	"name": "v05-protected",
+	"version": "1.0.0",
+	"description": "v0.5 middleware demo — a protected endpoint guarded by two trigger-level middleware: `auth-check` (rejects requests without a matching bearer token) then `rate-limit` (5 requests per 60s window per identity). Middleware run in declared order and share the same ctx; auth-check stashes `ctx.state.identity.token` so rate-limit's per-user bucket key is keyed on the authenticated user. The main step just echoes back `{ ok: true, identity, ts }` once both middleware pass.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json",
+			"middleware": ["auth-check", "rate-limit"]
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, identity: ctx.state.identity, ts: Date.now() })"
+			}
+		}
+	]
+}

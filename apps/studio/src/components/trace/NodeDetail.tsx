@@ -63,6 +63,14 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 					)}
 				</div>
 
+				{/* v0.5 control-flow primitives — surface per-primitive
+				    metadata above input/output so operators can tell what
+				    the step actually did at a glance. */}
+				{(node.nodeType === "forEach" ||
+					node.nodeType === "loop" ||
+					node.nodeType === "switch" ||
+					node.nodeType === "tryCatch") && <PrimitiveBanner node={node} />}
+
 				{/* Live progress (master plan §17 Phase 5 follow-up) —
 				    SDKs that emit `Progress` frames during ExecuteStream
 				    drive this bar forward. Always renders the latest
@@ -171,6 +179,90 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * Width is the percent value clamped 0–100 to absorb out-of-range
  * frames without breaking the layout.
  */
+/**
+ * v0.5 — banner that surfaces primitive-specific metadata for forEach /
+ * loop / switch / tryCatch nodes. Lives above input/output so operators
+ * can read the "what did this step actually do" answer at a glance,
+ * without expanding the JSON viewer.
+ *
+ * Each primitive draws a colour matching its StepRail badge so the eye
+ * carries information across the two panels. Information surfaced:
+ *
+ *   forEach  — iteration count (length of the output array) + concurrency
+ *              hint when parallel mode produced fewer iterations than the
+ *              cap allows
+ *   loop     — descriptive hint (the iteration counter lives on
+ *              ctx.state[<id>Index] which Studio can't read directly post-
+ *              run, so we link the operator to the inner step rail)
+ *   switch   — descriptive hint about first-match-wins semantics
+ *   tryCatch — whether `error` field is set on the node (the catch arm
+ *              fired) vs successful completion
+ */
+function PrimitiveBanner({ node }: { node: NodeRun }) {
+	const cls = "rounded-md border px-3 py-2 text-xs space-y-1";
+	if (node.nodeType === "forEach") {
+		const count = Array.isArray(node.outputs) ? node.outputs.length : null;
+		return (
+			<div className={cn(cls, "border-purple-900/50 bg-purple-950/20 text-purple-200")}>
+				<div className="flex items-center gap-2">
+					<span className="font-mono text-[10px] uppercase tracking-wide text-purple-300">forEach</span>
+					{count !== null && (
+						<span className="font-mono text-purple-200/80">
+							{count} iteration{count === 1 ? "" : "s"}
+						</span>
+					)}
+				</div>
+				<p className="text-purple-200/70 leading-snug">
+					Each iteration ran the inner pipeline on a per-item ctx clone — see depth-1 child rows in the rail for the
+					per-iteration step traces.
+				</p>
+			</div>
+		);
+	}
+	if (node.nodeType === "loop") {
+		return (
+			<div className={cn(cls, "border-blue-900/50 bg-blue-950/20 text-blue-200")}>
+				<div className="font-mono text-[10px] uppercase tracking-wide text-blue-300">loop · while-condition</div>
+				<p className="text-blue-200/70 leading-snug">
+					Ran the inner pipeline while the `while` expression stayed truthy. State mutations carry forward across
+					iterations; counter exposed at <code className="font-mono">ctx.state[&lt;id&gt;Index]</code>. Hard
+					maxIterations cap throws <code className="font-mono">LoopMaxIterationsError</code>.
+				</p>
+			</div>
+		);
+	}
+	if (node.nodeType === "switch") {
+		return (
+			<div className={cn(cls, "border-amber-900/50 bg-amber-950/20 text-amber-200")}>
+				<div className="font-mono text-[10px] uppercase tracking-wide text-amber-300">switch · first-match-wins</div>
+				<p className="text-amber-200/70 leading-snug">
+					Compared <code className="font-mono">on</code> against each <code className="font-mono">when</code> in order;
+					first match's inner steps ran (visible as depth-1 children below in the rail). On no match, the optional{" "}
+					<code className="font-mono">default</code> block runs instead.
+				</p>
+			</div>
+		);
+	}
+	if (node.nodeType === "tryCatch") {
+		// `node.status` reflects the OUTER tryCatch step's outcome. Completed
+		// = either try succeeded or catch handled. Failed = uncaught throw
+		// (from catch or finally) propagated past this step.
+		const summaryLabel = node.status === "completed" ? "completed" : "propagated";
+		return (
+			<div className={cn(cls, "border-rose-900/50 bg-rose-950/20 text-rose-200")}>
+				<div className="font-mono text-[10px] uppercase tracking-wide text-rose-300">tryCatch · {summaryLabel}</div>
+				<p className="text-rose-200/70 leading-snug">
+					Try arm ran first; on throw, ctx.error was populated and the catch arm ran. Finally arm runs unconditionally
+					(after success, after caught error, AND after an uncaught throw from catch).{" "}
+					<code className="font-mono">$.error.message</code> resolves the underlying author-thrown text inside the catch
+					arm.
+				</p>
+			</div>
+		);
+	}
+	return null;
+}
+
 function ProgressBar({ percent, phase }: { percent: number; phase: string }) {
 	const clamped = Math.max(0, Math.min(100, percent));
 	return (

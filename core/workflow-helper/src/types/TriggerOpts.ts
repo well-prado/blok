@@ -363,6 +363,19 @@ export const HttpTriggerOptsSchema = z
 					"When true, the workflow is also reachable at the legacy filename-prefixed URL. " +
 					"Off (undefined / false) by default. Will be removed after one minor version.",
 			),
+		middleware: z
+			.array(z.string().min(1))
+			.optional()
+			.describe(
+				"v0.5 — ordered list of middleware workflow names. Each entry is the `name` of a " +
+					"workflow with `middleware: true` registered in the same WORKFLOWS_PATH. Middleware " +
+					"runs in declared order BEFORE the main workflow's steps, on the SAME ctx so " +
+					"state mutations (e.g. `ctx.state.identity` from auth-check) carry forward. " +
+					"A middleware can short-circuit by setting `ctx.response` and using a step with " +
+					"`stop: true` — the rest of the chain AND the main workflow are skipped, and the " +
+					"current ctx.response is returned to the caller. Errors thrown inside middleware " +
+					"propagate to the trigger's normal error handler.",
+			),
 		...ConcurrencyOptsFields,
 		...SchedulingOptsFields,
 	})

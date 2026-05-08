@@ -53,6 +53,14 @@ export interface RegisteredWorkflow {
 	 * runs it through `normalizeWorkflow` → resolved nodes.
 	 */
 	readonly workflow: unknown;
+	/**
+	 * v0.5 — true when the workflow is registered as middleware (has
+	 * `middleware: true` set at the workflow root). Middleware workflows
+	 * are not exposed as public routes; they're invoked from another
+	 * workflow's `trigger.http.middleware: [...]` array. Looked up via
+	 * `getMiddleware(name)`.
+	 */
+	readonly isMiddleware?: boolean;
 }
 
 export class WorkflowRegistry {
@@ -133,6 +141,18 @@ export class WorkflowRegistry {
 	/** Fetch the registered workflow by name, or undefined on miss. */
 	get(name: string): RegisteredWorkflow | undefined {
 		return this.workflows.get(name);
+	}
+
+	/**
+	 * v0.5 — fetch a registered MIDDLEWARE workflow by name (must have
+	 * been registered with `isMiddleware: true`). Returns undefined when
+	 * the name is unknown OR the entry isn't a middleware. Used by
+	 * `HttpTrigger` to dispatch the trigger-level `middleware: [...]` chain.
+	 */
+	getMiddleware(name: string): RegisteredWorkflow | undefined {
+		const entry = this.workflows.get(name);
+		if (!entry || !entry.isMiddleware) return undefined;
+		return entry;
 	}
 
 	/** Cheap existence check (avoids the `?: undefined` dance). */
