@@ -126,7 +126,11 @@
 					},
 					{
 						"group": "DevTools",
-						"pages": ["c/devtools/index", "c/devtools/release-runbook"]
+						"pages": [
+							"c/devtools/index",
+							"c/devtools/release-runbook",
+							"c/devtools/workflow-primitives-roadmap"
+						]
 					},
 					{
 						"group": "Migration Guides",
