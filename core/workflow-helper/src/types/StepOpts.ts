@@ -680,7 +680,63 @@ export const V2LoopStepSchema = z.lazy(() =>
 export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
 
 /**
- * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, or loop.
+ * V2 switch step — N-way branch keyed on a value. First matching case wins.
+ *
+ * `on` resolves to a value at run time (literal, `$` proxy expression, or
+ * `js/...` string). Each case carries a `when` and a `do` sub-pipeline:
+ * - `when` is a literal → match if `on === when`.
+ * - `when` is an array  → match if `array.includes(on)` (group related cases).
+ * - `default` runs when no case matches. Optional.
+ *
+ * @example
+ *   switchOn({
+ *     id: "route-by-tenant",
+ *     on: $.req.headers["x-tenant-id"],
+ *     cases: [
+ *       { when: "acme",   do: [{ id: "x", subworkflow: "acme-process" }] },
+ *       { when: ["a","b"], do: [{ id: "y", subworkflow: "shared" }] },
+ *     ],
+ *     default: [{ id: "respond-403", use: "@blokjs/respond", stop: true,
+ *                 inputs: { status: 403, body: { error: "Unknown tenant" } } }],
+ *   })
+ */
+export const V2SwitchStepSchema = z.lazy(() =>
+	z.object({
+		id: z.string().min(1).describe("Stable identifier for the switch step. Visible in traces."),
+		switch: z
+			.object({
+				on: z
+					.unknown()
+					.describe(
+						"Value to match against. Literal, `$` proxy expression, or `js/...` string. " +
+							"Resolved by the blueprint mapper before matching.",
+					),
+				cases: z
+					.array(
+						z.object({
+							when: z
+								.unknown()
+								.describe(
+									"Match value. Literal scalar (number/string/boolean) for `on === when` " +
+										"matching, or an array for `array.includes(on)` matching.",
+								),
+							do: z.array(z.unknown()).min(1).describe("Sub-pipeline run when this case matches."),
+						}),
+					)
+					.min(1)
+					.describe("Ordered list of cases. First match wins."),
+				default: z.array(z.unknown()).optional().describe("Fallback sub-pipeline when no case matches. Optional."),
+			})
+			.describe("switch configuration."),
+		active: z.boolean().optional(),
+		stop: z.boolean().optional(),
+	}),
+);
+
+export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
+
+/**
+ * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, loop, or switch.
  *
  * Discriminators (no `kind` field needed):
  * - presence of `branch` → branch step
@@ -688,10 +744,11 @@ export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
  * - presence of `wait` (object) → wait step
  * - presence of `forEach` → forEach step (v0.5)
  * - presence of `loop` → loop step (v0.5)
+ * - presence of `switch` → switch step (v0.5)
  * - otherwise → regular step
  */
 export const V2StepSchema: z.ZodType<
-	V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep
+	V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep | V2SwitchStep
 > = z.lazy(() =>
 	z.union([
 		V2BranchStepSchema,
@@ -699,11 +756,19 @@ export const V2StepSchema: z.ZodType<
 		V2WaitStepSchema,
 		V2ForEachStepSchema,
 		V2LoopStepSchema,
+		V2SwitchStepSchema,
 		V2RegularStepSchema,
 	]),
 );
 
-export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep;
+export type V2Step =
+	| V2RegularStep
+	| V2BranchStep
+	| V2SubworkflowStep
+	| V2WaitStep
+	| V2ForEachStep
+	| V2LoopStep
+	| V2SwitchStep;
 
 /**
  * Type guard — true when the step is a branch.
@@ -762,5 +827,18 @@ export function isLoopStep(step: V2Step): step is V2LoopStep {
 		"loop" in step &&
 		typeof (step as { loop?: unknown }).loop === "object" &&
 		(step as { loop?: unknown }).loop !== null
+	);
+}
+
+/**
+ * Type guard — true when the step is an N-way switch (v0.5).
+ */
+export function isSwitchStep(step: V2Step): step is V2SwitchStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"switch" in step &&
+		typeof (step as { switch?: unknown }).switch === "object" &&
+		(step as { switch?: unknown }).switch !== null
 	);
 }

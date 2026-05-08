@@ -206,6 +206,15 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 			continue;
 		}
 
+		// v0.5 switch — { id, switch: { on, cases: [{when, do}], default? } }
+		if (isPlainObject(step.switch)) {
+			const { internalStep, nodeConfig, innerNodes } = normalizeSwitchStep(step, i);
+			internalSteps.push(internalStep);
+			internalNodes[internalStep.name] = nodeConfig;
+			Object.assign(internalNodes, innerNodes);
+			continue;
+		}
+
 		// v2 regular — { id, use, inputs?, as?, spread?, ephemeral?, ... }
 		// or v1 regular — { name, node, type } + nodes[name].inputs
 		const { internalStep, nodeConfig } = normalizeRegularStep(step, nodesInput, i);
@@ -584,6 +593,7 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 // v0.5 forEach reference for the internal step's `node` field.
 const FOR_EACH_NODE_REF = "@blokjs/forEach";
 const LOOP_NODE_REF = "@blokjs/loop";
+const SWITCH_NODE_REF = "@blokjs/switch";
 
 /**
  * Normalize a v0.5 forEach step into the internal shape. Inner steps
@@ -612,52 +622,7 @@ function normalizeForEachStep(
 	const concurrency = typeof fe.concurrency === "number" && fe.concurrency > 0 ? fe.concurrency : 10;
 	const doSteps = Array.isArray(fe.do) ? (fe.do as unknown[]) : [];
 
-	const innerInternal: InternalStep[] = [];
-	const innerNodes: Record<string, InternalNodeConfig> = {};
-
-	for (let i = 0; i < doSteps.length; i++) {
-		const s = doSteps[i];
-		if (!isPlainObject(s)) continue;
-		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const {
-				internalStep: nestedStep,
-				nodeConfig: nestedConfig,
-				innerNodes: nestedInner,
-			} = normalizeBranchStep(s as Record<string, unknown>, i);
-			innerInternal.push(nestedStep);
-			innerNodes[nestedStep.name] = nestedConfig;
-			Object.assign(innerNodes, nestedInner);
-			continue;
-		}
-		if (isPlainObject((s as Record<string, unknown>).forEach)) {
-			const {
-				internalStep: nestedStep,
-				nodeConfig: nestedConfig,
-				innerNodes: nestedInner,
-			} = normalizeForEachStep(s as Record<string, unknown>, i);
-			innerInternal.push(nestedStep);
-			innerNodes[nestedStep.name] = nestedConfig;
-			Object.assign(innerNodes, nestedInner);
-			continue;
-		}
-		if (isPlainObject((s as Record<string, unknown>).loop)) {
-			const {
-				internalStep: nestedStep,
-				nodeConfig: nestedConfig,
-				innerNodes: nestedInner,
-			} = normalizeLoopStep(s as Record<string, unknown>, i);
-			innerInternal.push(nestedStep);
-			innerNodes[nestedStep.name] = nestedConfig;
-			Object.assign(innerNodes, nestedInner);
-			continue;
-		}
-		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
-		if (nodeConfig?.inputs) {
-			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
-		}
-		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
-		innerInternal.push(regularStep);
-	}
+	const { innerInternal, innerNodes } = normalizeStepBlock(doSteps);
 
 	const internalStep: InternalStep = {
 		name: id,
@@ -699,11 +664,40 @@ function normalizeLoopStep(
 	const maxIterations = typeof lp.maxIterations === "number" && lp.maxIterations > 0 ? lp.maxIterations : 1000;
 	const doSteps = Array.isArray(lp.do) ? (lp.do as unknown[]) : [];
 
+	const { innerInternal, innerNodes } = normalizeStepBlock(doSteps);
+
+	const internalStep: InternalStep = {
+		name: id,
+		node: LOOP_NODE_REF,
+		type: "loop",
+		active: step.active === undefined ? true : Boolean(step.active),
+		stop: step.stop === true,
+	};
+	const nodeConfig: InternalNodeConfig = {
+		while: whileExpr,
+		maxIterations,
+		steps: innerInternal,
+	} as InternalNodeConfig;
+
+	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * Helper used by `normalizeSwitchStep` — converts an array of authored
+ * step shapes (the `do` block of a case or the `default` block) into
+ * resolved InternalSteps + a merged innerNodes map. Mirrors the inner
+ * loop in `normalizeForEachStep` / `normalizeLoopStep`, recursing into
+ * nested branch / forEach / loop / switch as needed.
+ */
+function normalizeStepBlock(rawSteps: unknown[]): {
+	innerInternal: InternalStep[];
+	innerNodes: Record<string, InternalNodeConfig>;
+} {
 	const innerInternal: InternalStep[] = [];
 	const innerNodes: Record<string, InternalNodeConfig> = {};
 
-	for (let i = 0; i < doSteps.length; i++) {
-		const s = doSteps[i];
+	for (let i = 0; i < rawSteps.length; i++) {
+		const s = rawSteps[i];
 		if (!isPlainObject(s)) continue;
 		if (isPlainObject((s as Record<string, unknown>).branch)) {
 			const {
@@ -743,6 +737,26 @@ function normalizeLoopStep(
 			Object.assign(innerNodes, nestedInner);
 			continue;
 		}
+		if (isPlainObject((s as Record<string, unknown>).switch)) {
+			const {
+				internalStep: nestedStep,
+				nodeConfig: nestedConfig,
+				innerNodes: nestedInner,
+			} = normalizeSwitchStep(s as Record<string, unknown>, i);
+			innerInternal.push(nestedStep);
+			innerNodes[nestedStep.name] = nestedConfig;
+			Object.assign(innerNodes, nestedInner);
+			continue;
+		}
+		if (typeof (s as Record<string, unknown>).subworkflow === "string") {
+			const { internalStep: nestedStep, nodeConfig: nestedConfig } = normalizeSubworkflowStep(
+				s as Record<string, unknown>,
+				i,
+			);
+			innerInternal.push(nestedStep);
+			if (nestedConfig) innerNodes[nestedStep.name] = nestedConfig;
+			continue;
+		}
 		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
 		if (nodeConfig?.inputs) {
 			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
@@ -751,17 +765,72 @@ function normalizeLoopStep(
 		innerInternal.push(regularStep);
 	}
 
+	return { innerInternal, innerNodes };
+}
+
+/**
+ * Normalize a v0.5 switch step into the internal shape. The cases and
+ * optional default each carry their own inner-step list — Configuration
+ * resolves them via a dedicated branch in `getNodes()` (mirrors the
+ * tryCatch path: each sub-block becomes its own resolved Flow).
+ *
+ * SwitchNode at run time reads the resolved nodeConfig:
+ *   { on, cases: [{when, steps: NodeBase[]}], default?: NodeBase[] }
+ * and runs the matched case (or default) through a child Runner.
+ */
+function normalizeSwitchStep(
+	step: Record<string, unknown>,
+	index: number,
+): { internalStep: InternalStep; nodeConfig: InternalNodeConfig; innerNodes: Record<string, InternalNodeConfig> } {
+	const id = pickString(step.id);
+	if (!id) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step at index ${index} is missing \`id\`.`);
+	}
+	const sw = step.switch as Record<string, unknown>;
+	if (sw.on === undefined) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" is missing \`on\` (the value to match against).`);
+	}
+	const rawCases = Array.isArray(sw.cases) ? (sw.cases as unknown[]) : [];
+	if (rawCases.length === 0) {
+		throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" has no \`cases\` (need at least one).`);
+	}
+
+	const cases: Array<{ when: unknown; steps: InternalStep[] }> = [];
+	const innerNodes: Record<string, InternalNodeConfig> = {};
+
+	for (let ci = 0; ci < rawCases.length; ci++) {
+		const c = rawCases[ci];
+		if (!isPlainObject(c)) {
+			throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" cases[${ci}] is not an object.`);
+		}
+		const cobj = c as Record<string, unknown>;
+		if (cobj.when === undefined) {
+			throw new Error(`[blok] WorkflowNormalizer: switch step "${id}" cases[${ci}] is missing \`when\`.`);
+		}
+		const doSteps = Array.isArray(cobj.do) ? (cobj.do as unknown[]) : [];
+		const { innerInternal, innerNodes: caseInner } = normalizeStepBlock(doSteps);
+		Object.assign(innerNodes, caseInner);
+		cases.push({ when: cobj.when, steps: innerInternal });
+	}
+
+	let defaultSteps: InternalStep[] | undefined;
+	if (Array.isArray(sw.default)) {
+		const { innerInternal, innerNodes: defaultInner } = normalizeStepBlock(sw.default as unknown[]);
+		Object.assign(innerNodes, defaultInner);
+		defaultSteps = innerInternal;
+	}
+
 	const internalStep: InternalStep = {
 		name: id,
-		node: LOOP_NODE_REF,
-		type: "loop",
+		node: SWITCH_NODE_REF,
+		type: "switch",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
 	};
 	const nodeConfig: InternalNodeConfig = {
-		while: whileExpr,
-		maxIterations,
-		steps: innerInternal,
+		on: sw.on,
+		cases,
+		...(defaultSteps !== undefined ? { default: defaultSteps } : {}),
 	} as InternalNodeConfig;
 
 	return { internalStep, nodeConfig, innerNodes };

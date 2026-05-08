@@ -340,6 +340,33 @@ export default class Configuration implements Config {
 						try: await this.getFlow((currentNode.try as unknown as Flow).steps),
 						catch: await this.getFlow((currentNode.catch as unknown as Flow).steps),
 					};
+				} else if (
+					typeof workflow_nodes[key] === "object" &&
+					(currentNode as unknown as { cases?: unknown }).cases !== undefined &&
+					Array.isArray((currentNode as unknown as { cases?: unknown }).cases)
+				) {
+					// v0.5 · switch step. Each case carries its own inner-step
+					// list at `case.steps` (set by `normalizeSwitchStep`); resolve
+					// each independently via getFlow. Optional `default` is its
+					// own resolved Flow. The merged config preserves the `on`
+					// expression so the blueprint mapper can rewrite it before
+					// SwitchNode.run() reads ctx.config[name].on at run time.
+					const raw = workflow_nodes[key] as Record<string, unknown>;
+					const rawCases = raw.cases as Array<{ when: unknown; steps: unknown }>;
+					const resolvedCases = await Promise.all(
+						rawCases.map(async (c) => ({
+							when: c.when,
+							steps: (await this.getFlow(c.steps as RunnerNode[])).steps,
+						})),
+					);
+					const merged: Record<string, unknown> = {
+						on: raw.on,
+						cases: resolvedCases,
+					};
+					if (Array.isArray(raw.default)) {
+						merged.default = (await this.getFlow(raw.default as RunnerNode[])).steps;
+					}
+					nodes[key] = merged as unknown as Node[string];
 				} else {
 					nodes[key] = { ...workflow_nodes[key] };
 				}
@@ -470,6 +497,10 @@ export default class Configuration implements Config {
 			// v0.5 · `loop({...})` step — while-loop with maxIterations cap.
 			loop: {
 				resolver: async (node: RunnerNode) => await this.loopResolver(node),
+			},
+			// v0.5 · `switchOn({...})` step — N-way branch; first matching case wins.
+			switch: {
+				resolver: async (node: RunnerNode) => await this.switchResolver(node),
 			},
 		};
 	}
@@ -651,6 +682,23 @@ export default class Configuration implements Config {
 	protected async loopResolver(node: RunnerNode): Promise<RunnerNode> {
 		const { LoopNode } = await import("./LoopNode");
 		const n = new LoopNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `switch` step. The N-way match logic lives in
+	 * `SwitchNode.run()`. Cases + default each carry their own resolved
+	 * inner-step list — see the dedicated `cases` branch in `getNodes()`.
+	 */
+	protected async switchResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { SwitchNode } = await import("./SwitchNode");
+		const n = new SwitchNode();
 		n.node = node.node;
 		n.name = node.name;
 		n.type = node.type;
