@@ -305,11 +305,17 @@ export default class Configuration implements Config {
 
 				if (isFlowWithProperties) {
 					const steps = currentNode.steps as unknown as RunnerNode[];
-					nodes[key] = await this.getFlow(steps);
-					const copyBlueprintNode = { ...workflow_nodes[key] } as RunnerNodeBase;
-					(copyBlueprintNode as unknown as Flow).steps = [];
-
-					nodes[key] = { ...nodes[key], ...copyBlueprintNode };
+					const flow = await this.getFlow(steps);
+					// Spread the metadata FIRST, then the resolved flow — this
+					// keeps the resolved NodeBase[] in `flow.steps` and lets
+					// the metadata (e.g. forEach's in/as/mode/concurrency,
+					// loop's while/maxIterations) survive on the merged config.
+					// The earlier code spread metadata AFTER flow with a
+					// `copyBlueprintNode.steps = []` reset, which clobbered
+					// the resolved steps array — broken for any node config
+					// that needed both inner steps AND sibling fields.
+					const { steps: _drop, ...metadata } = workflow_nodes[key] as Record<string, unknown>;
+					nodes[key] = { ...metadata, ...flow };
 				} else if (isFlow) {
 					const steps = currentNode.steps as unknown as RunnerNode[];
 					nodes[key] = await this.getFlow(steps);
@@ -455,6 +461,15 @@ export default class Configuration implements Config {
 			// at workflow load.
 			wait: {
 				resolver: async (node: RunnerNode) => await this.waitResolver(node),
+			},
+			// v0.5 · `forEach({...})` step — iterate a collection running
+			// inner steps per item. Sequential or parallel-bounded.
+			forEach: {
+				resolver: async (node: RunnerNode) => await this.forEachResolver(node),
+			},
+			// v0.5 · `loop({...})` step — while-loop with maxIterations cap.
+			loop: {
+				resolver: async (node: RunnerNode) => await this.loopResolver(node),
 			},
 		};
 	}
@@ -610,6 +625,39 @@ export default class Configuration implements Config {
 		if (v2.waitForMs !== undefined) stub.waitForMs = v2.waitForMs;
 		if (v2.waitUntil !== undefined) stub.waitUntil = v2.waitUntil;
 		return stub;
+	}
+
+	/**
+	 * v0.5 · resolve a `forEach` step. The actual iteration logic lives
+	 * in `ForEachNode.run()`; the inner `steps` array is pre-resolved by
+	 * the existing isFlowWithProperties path in `getNodes()`.
+	 */
+	protected async forEachResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { ForEachNode } = await import("./ForEachNode");
+		const n = new ForEachNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
+	}
+
+	/**
+	 * v0.5 · resolve a `loop` step. While-loop semantics live in
+	 * `LoopNode.run()`. Inner `steps` resolved by isFlowWithProperties.
+	 */
+	protected async loopResolver(node: RunnerNode): Promise<RunnerNode> {
+		const { LoopNode } = await import("./LoopNode");
+		const n = new LoopNode();
+		n.node = node.node;
+		n.name = node.name;
+		n.type = node.type;
+		n.active = node.active !== undefined ? node.active : true;
+		n.stop = node.stop !== undefined ? node.stop : false;
+		if (node.set_var !== undefined) n.set_var = node.set_var;
+		return n;
 	}
 
 	protected async localResolver(node: RunnerNode): Promise<RunnerNode> {

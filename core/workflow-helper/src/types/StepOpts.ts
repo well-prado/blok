@@ -584,19 +584,126 @@ export const V2WaitStepSchema = z
 export type V2WaitStep = z.infer<typeof V2WaitStepSchema>;
 
 /**
- * Discriminated v2 step — regular, branch, sub-workflow, or wait.
+ * V2 forEach step — iterate over a collection running a sub-pipeline
+ * per item. Sequential (default) or parallel with bounded concurrency.
+ *
+ * @example
+ *   forEach({
+ *     id: "process-orders",
+ *     in: $.state.orders,
+ *     as: "order",
+ *     mode: "parallel",
+ *     concurrency: 5,
+ *     do: [
+ *       { id: "charge", use: "stripe-charge", inputs: { amount: $.state.order.total } },
+ *     ],
+ *   })
+ */
+export const V2ForEachStepSchema = z.lazy(() =>
+	z.object({
+		id: z.string().min(1).describe("Stable identifier for the forEach step. Visible in traces."),
+		forEach: z
+			.object({
+				in: z
+					.unknown()
+					.describe("Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."),
+				as: z
+					.string()
+					.min(1)
+					.regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "as must be a valid identifier (letters, digits, underscore)")
+					.describe(
+						"Per-iteration variable name. Each iteration sets ctx.state[as] = item and ctx.state[as+'Index'] = i.",
+					),
+				mode: z
+					.enum(["sequential", "parallel"])
+					.optional()
+					.describe(
+						"Execution mode. `sequential` (default) awaits each iteration; `parallel` runs with bounded concurrency.",
+					),
+				concurrency: z
+					.number()
+					.int()
+					.min(1)
+					.max(1000)
+					.optional()
+					.describe("Max concurrent inner pipelines when `mode: 'parallel'`. Default 10."),
+				do: z.array(z.unknown()).min(1).describe("Sub-pipeline run for each item."),
+			})
+			.describe("forEach configuration."),
+		active: z.boolean().optional(),
+		stop: z.boolean().optional(),
+	}),
+);
+
+export type V2ForEachStep = z.infer<typeof V2ForEachStepSchema>;
+
+/**
+ * V2 loop step — while-loop with hard maxIterations safety cap.
+ *
+ * @example
+ *   loop({
+ *     id: "poll",
+ *     while: '$.state["check-status"].status !== "done"',
+ *     maxIterations: 60,
+ *     do: [
+ *       { id: "wait-tick", wait: { for: "2s" } },
+ *       { id: "check-status", use: "@blokjs/api-call", inputs: { url: $.state.url } },
+ *     ],
+ *   })
+ */
+export const V2LoopStepSchema = z.lazy(() =>
+	z.object({
+		id: z.string().min(1).describe("Stable identifier for the loop step. Visible in traces."),
+		loop: z
+			.object({
+				while: z
+					.string()
+					.min(1)
+					.describe("JS expression evaluated against ctx before each iteration. Loop continues while truthy."),
+				maxIterations: z
+					.number()
+					.int()
+					.min(1)
+					.optional()
+					.describe(
+						"Hard safety cap on iterations. Default 1000 (override via env BLOK_LOOP_MAX_ITERATIONS). " +
+							"Hitting the cap throws LoopMaxIterationsError.",
+					),
+				do: z.array(z.unknown()).min(1).describe("Sub-pipeline run each iteration."),
+			})
+			.describe("loop configuration."),
+		active: z.boolean().optional(),
+		stop: z.boolean().optional(),
+	}),
+);
+
+export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
+
+/**
+ * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, or loop.
  *
  * Discriminators (no `kind` field needed):
  * - presence of `branch` → branch step
  * - presence of `subworkflow` → sub-workflow step
  * - presence of `wait` (object) → wait step
+ * - presence of `forEach` → forEach step (v0.5)
+ * - presence of `loop` → loop step (v0.5)
  * - otherwise → regular step
  */
-export const V2StepSchema: z.ZodType<V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep> = z.lazy(() =>
-	z.union([V2BranchStepSchema, V2SubworkflowStepSchema, V2WaitStepSchema, V2RegularStepSchema]),
+export const V2StepSchema: z.ZodType<
+	V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep
+> = z.lazy(() =>
+	z.union([
+		V2BranchStepSchema,
+		V2SubworkflowStepSchema,
+		V2WaitStepSchema,
+		V2ForEachStepSchema,
+		V2LoopStepSchema,
+		V2RegularStepSchema,
+	]),
 );
 
-export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep;
+export type V2Step = V2RegularStep | V2BranchStep | V2SubworkflowStep | V2WaitStep | V2ForEachStep | V2LoopStep;
 
 /**
  * Type guard — true when the step is a branch.
@@ -629,5 +736,31 @@ export function isSubworkflowStep(step: V2Step): step is V2SubworkflowStep {
 		step !== null &&
 		"subworkflow" in step &&
 		typeof (step as { subworkflow?: unknown }).subworkflow === "string"
+	);
+}
+
+/**
+ * Type guard — true when the step is a forEach iteration (v0.5).
+ */
+export function isForEachStep(step: V2Step): step is V2ForEachStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"forEach" in step &&
+		typeof (step as { forEach?: unknown }).forEach === "object" &&
+		(step as { forEach?: unknown }).forEach !== null
+	);
+}
+
+/**
+ * Type guard — true when the step is a while-loop (v0.5).
+ */
+export function isLoopStep(step: V2Step): step is V2LoopStep {
+	return (
+		typeof step === "object" &&
+		step !== null &&
+		"loop" in step &&
+		typeof (step as { loop?: unknown }).loop === "object" &&
+		(step as { loop?: unknown }).loop !== null
 	);
 }

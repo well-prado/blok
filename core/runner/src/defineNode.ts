@@ -1,7 +1,7 @@
 import type { ZodError, z } from "zod";
 
 import type { Context } from "@blokjs/shared";
-import { GlobalError, NodeBase } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
 import type { IBlokResponse } from "./BlokResponse";

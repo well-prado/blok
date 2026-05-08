@@ -114,7 +114,7 @@ export class SubworkflowNode extends RunnerNode {
 		// step's retry loop (if any) will retry — author should pin
 		// `retry: undefined` on sub-workflow steps where denial is
 		// permanent.
-		const allowed = await registry.authorize(ctx.workflow_name, this.subworkflow, ctx);
+		const allowed = await registry.authorize(ctx.workflow_name ?? "<unknown>", this.subworkflow, ctx);
 		if (!allowed) {
 			throw new Error(
 				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${this.subworkflow}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
