@@ -1,0 +1,23 @@
+{
+	"name": "v05-jwt-protected",
+	"version": "1.0.0",
+	"description": "v0.5 production-grade middleware demo — guarded by `jwt-auth` which verifies a JWT via @blokjs/jwt-verify (HS256 against JWT_SECRET in dev / RS256 against JWT_JWKS_URI in prod), validates iss + aud + exp, and stashes the decoded claims at ctx.state.identity. The main step echoes a small slice of the identity (sub, iss, aud, exp) so end-to-end tests can assert that auth ran AND that downstream steps see the verified claims. Set JWT_SECRET=<shared-secret> and JWT_AUDIENCE=<expected-aud> in your env to exercise the HS256 path; the smoke gate sets these for you.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json",
+			"middleware": ["jwt-auth"]
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, identity: { sub: ctx.state.identity.sub, iss: ctx.state.identity.iss, aud: ctx.state.identity.aud, exp: ctx.state.identity.exp }, customClaims: Object.fromEntries(Object.entries(ctx.state.identity.claims).filter(([k]) => !['iss','aud','exp','iat','sub','nbf'].includes(k))) })"
+			}
+		}
+	]
+}

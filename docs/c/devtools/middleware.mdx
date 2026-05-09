@@ -27,57 +27,78 @@ Middleware workflows go in `triggers/http/workflows/json/middleware/`. They look
 1. The top-level `"middleware": true` flag marks them as middleware-only (they don't get their own HTTP route).
 2. They typically end either by throwing (short-circuit) or by publishing context for the main workflow to read (`@blokjs/ctx-publish`).
 
-### Auth check (skeleton)
+### JWT auth (production)
+
+The shipped [`jwt-auth.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/jwt-auth.json) middleware uses `@blokjs/jwt-verify` (powered by [`jose`](https://github.com/panva/jose)) to verify the bearer token's signature, issuer, audience, and expiry, then stashes the decoded claims at `ctx.state.identity`. Configuration comes from environment variables, so deploy-time secrets never live in workflow JSON:
+
+| Env var | Purpose |
+|---|---|
+| `JWT_SECRET` | HMAC shared secret for HS256/HS384/HS512 (dev/test) |
+| `JWT_JWKS_URI` | Remote JWKS endpoint URL for RS256/ES256/EdDSA (production case — Auth0 / Okta / Cognito / Clerk all publish one). Takes precedence over `JWT_SECRET`. |
+| `JWT_ISSUER` | Expected `iss` claim — strongly recommended |
+| `JWT_AUDIENCE` | Expected `aud` claim — strongly recommended |
+| `JWT_ALGORITHMS` | Comma-separated allowlist (default: `["HS256"]` symmetric / `["RS256"]` asymmetric). The `none` algorithm is never accepted regardless of allowlist. |
+| `JWT_CLOCK_TOLERANCE_SECONDS` | Seconds of clock skew to tolerate when checking `exp`/`nbf`. Default 0. |
+
+Use it on any trigger:
 
 ```json
-{
-  "name": "auth-check",
-  "version": "1.0.0",
-  "middleware": true,
-  "steps": [
-    {
-      "id": "extract-token",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "(ctx.request.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
-      }
-    },
-    {
-      "id": "deny-if-missing",
-      "branch": {
-        "when": "ctx.state['extract-token'] === ''",
-        "then": [
-          {
-            "id": "respond-401",
-            "use": "@blokjs/throw",
-            "inputs": {
-              "message": "Unauthorized",
-              "code": 401,
-              "body": { "error": "Unauthorized", "reason": "missing bearer token" }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "stash-identity",
-      "use": "@blokjs/ctx-publish",
-      "inputs": {
-        "name": "identity",
-        "value": { "token": "js/ctx.state['extract-token']", "via": "auth-check" }
-      }
-    }
-  ]
+"trigger": {
+  "http": {
+    "method": "POST",
+    "path": "/orders",
+    "middleware": ["jwt-auth"]
+  }
 }
 ```
 
-The `stash-identity` step writes `ctx.state.identity` so any downstream middleware (or the main workflow) can read who's making the request.
+After `jwt-auth` runs, downstream steps read the identity from `ctx.state.identity`:
 
-### Rate limit (skeleton)
+```json
+{
+  "expression": "({ greeting: `hello, ${ctx.state.identity.sub}`, role: ctx.state.identity.claims.role })"
+}
+```
 
-The shipped `rate-limit.json` middleware uses `@blokjs/in-memory-kv` to track per-identity buckets. The bucket key falls back to `X-Forwarded-For` when no `identity.token` is present, so it works whether or not auth-check ran first.
+The `identity` shape is:
 
-See [`triggers/http/workflows/json/middleware/rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/rate-limit.json) for the full implementation.
+```ts
+{
+  sub: string | undefined,         // claims.sub
+  iss: string | undefined,         // claims.iss
+  aud: string | string[] | undefined,  // claims.aud
+  exp: number | undefined,         // claims.exp (UNIX seconds)
+  claims: Record<string, unknown>, // full decoded payload — read custom claims here
+  via: "jwt-auth"                  // origin tag, useful in logs
+}
+```
+
+#### Verification failures
+
+Every failure mode produces a structured `401` response with a stable `reason` discriminator authors can branch on (or just emit verbatim):
+
+| `reason` | Meaning |
+|---|---|
+| `missing_token` | No `Authorization: Bearer <…>` header |
+| `malformed_token` | Token isn't a parseable JWT |
+| `invalid_signature` | Signature verification failed |
+| `token_expired` | `exp` is in the past (modulo clock tolerance) |
+| `token_not_yet_valid` | `nbf` is in the future |
+| `issuer_mismatch` | `iss` doesn't match `JWT_ISSUER` |
+| `audience_mismatch` | `aud` doesn't match `JWT_AUDIENCE` |
+| `algorithm_not_allowed` | Token uses an algorithm not in `JWT_ALGORITHMS` |
+| `claim_validation_failed` | Generic claim validation failure (other than the specific cases above) |
+| `verification_failed` | Catch-all for unrecognized failures |
+
+The HTTP response body always carries `{ error: "Unauthorized", reason: "<reason>", message: "<human readable>" }`. A `tryCatch.catch` arm wrapping a downstream step can also read these via `$.error.code === 401` and `$.error.message`.
+
+### Auth check (header-token equality, demo only)
+
+The shipped [`auth-check.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/auth-check.json) is a tiny demo for end-to-end testing the middleware machinery — it just compares the `Authorization` token to an `X-Expected-Token` header. **Don't ship this to production** — copy `jwt-auth` instead.
+
+### Rate limit
+
+The shipped [`rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/rate-limit.json) middleware uses `@blokjs/in-memory-kv` to track per-identity buckets. The bucket key falls back to `X-Forwarded-For` when no `identity.token` is present, so it works whether or not an auth middleware ran first.
 
 ---
 
@@ -91,19 +112,22 @@ See [`triggers/http/workflows/json/middleware/rate-limit.json`](https://github.c
 
 ---
 
-## Real-world example
+## Real-world examples
 
-[`triggers/http/workflows/json/v05-protected.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-protected.json) is the minimal demo — a single-step main workflow guarded by `auth-check` then `rate-limit`. Curl with no Authorization header → 401. Curl with a matching `Authorization: Bearer <token>` and `X-Expected-Token: <token>` → 200 once, then 429 after 5 requests in a 60-second window.
+[`triggers/http/workflows/json/v05-jwt-protected.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-jwt-protected.json) is the production-grade demo — a single-step main workflow guarded by `jwt-auth`. The smoke gate exercises seven cases against it (missing token, malformed, bad signature, expired, wrong issuer, wrong audience, valid) and asserts the structured `reason` field on each failure.
 
-[`triggers/http/workflows/json/v05-order-fulfillment.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) shows the same chain on a real workflow — auth-check + rate-limit run before a switchOn that branches to per-order-type pipelines, with the rate-limit bucket keyed off `ctx.state.identity.token` written by auth-check.
+[`triggers/http/workflows/json/v05-protected.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-protected.json) is the simpler demo — `auth-check` (header-token equality) + `rate-limit`. Curl with `Authorization: Bearer <token>` matching `X-Expected-Token: <token>` → 200; sixth request inside 60s → 429.
 
-Both are curl-validated by `bun run v05:smoke`.
+[`triggers/http/workflows/json/v05-order-fulfillment.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) shows a multi-middleware chain on a real workflow — `auth-check` + `rate-limit` run before a `switchOn` that branches to per-order-type pipelines, with the rate-limit bucket keyed off `ctx.state.identity.token` written by auth-check.
+
+All three are curl-validated by `bun run v05:smoke`.
 
 ---
 
 ## Caveats
 
-- **The shipped `auth-check` is a demo, not a JWT verifier.** It does header-token equality against an `X-Expected-Token` header — useful for end-to-end testing the chain, but not production-shippable. Real JWT verification (with audience/issuer/expiry checks) is on the roadmap as a follow-up; today, copy the demo and replace the `extract-token`/`deny-if-mismatch` steps with your verification logic.
+- **`jwt-auth` is production-shippable; `auth-check` is not.** Use `jwt-auth` in real deployments. `auth-check` is a header-token-equality demo retained for tutorials and the rate-limit interop test — it has no signature, no expiry, no issuer/audience checks, and is trivially bypassed by anyone who can guess the value of `X-Expected-Token`.
+- **JWKS keys are cached per process, not per request.** The first request to a JWKS-backed endpoint triggers a fetch; subsequent requests reuse the cached JWKS. `jose` handles rotation automatically by refetching when a token's `kid` isn't in the cache. Cold-start latency on the first request after process boot is one round-trip to the JWKS endpoint.
 - **The shipped `rate-limit` is in-memory and single-process.** `@blokjs/in-memory-kv` is a process-local map; counters reset on restart and don't sync across replicas. For production, swap the in-memory-kv steps for a Redis-backed equivalent. Tracked in the v0.5 backlog.
 - **Middleware are declared on the trigger, not the workflow body.** There's no per-step middleware today, and no workflow-level middleware (declared at the workflow's top level instead of on each trigger). The latter is a small follow-up; track its arrival in the v0.5 backlog.
-- **Middleware participate in trace origin tagging, not in concurrency-key resolution.** A trigger's `concurrencyKey` is resolved from ctx **before** middleware run, so an `identity.userId` written by `auth-check` cannot be used as the concurrency key. Resolve concurrency keys from `ctx.request.headers` or `ctx.request.body` instead, or hold off on middleware-driven concurrency until that resolution order is reworked.
+- **Middleware participate in trace origin tagging, not in concurrency-key resolution.** A trigger's `concurrencyKey` is resolved from ctx **before** middleware run, so an `identity.sub` written by `jwt-auth` cannot be used as the concurrency key. Resolve concurrency keys from `ctx.request.headers` or `ctx.request.body` instead, or hold off on middleware-driven concurrency until that resolution order is reworked.
