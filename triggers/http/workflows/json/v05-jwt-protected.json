@@ -1,13 +1,13 @@
 {
 	"name": "v05-jwt-protected",
 	"version": "1.0.0",
-	"description": "v0.5 production-grade middleware demo — guarded by `jwt-auth` which verifies a JWT via @blokjs/jwt-verify (HS256 against JWT_SECRET in dev / RS256 against JWT_JWKS_URI in prod), validates iss + aud + exp, and stashes the decoded claims at ctx.state.identity. The main step echoes a small slice of the identity (sub, iss, aud, exp) so end-to-end tests can assert that auth ran AND that downstream steps see the verified claims. Set JWT_SECRET=<shared-secret> and JWT_AUDIENCE=<expected-aud> in your env to exercise the HS256 path; the smoke gate sets these for you.",
+	"description": "v0.5 production-grade middleware demo — guarded by `jwt-auth` which verifies a JWT via @blokjs/jwt-verify (HS256 against JWT_SECRET in dev / RS256 against JWT_JWKS_URI in prod), validates iss + aud + exp, and stashes the decoded claims at ctx.state.identity. Demonstrates v0.5.2 workflow-level middleware: the chain is declared once at the top of the workflow (`middleware: [...]` field, sibling to `trigger`) instead of being repeated inside the trigger config. Useful when a workflow has multiple triggers (HTTP + worker) that should all share the same auth chain. Set JWT_SECRET=<shared-secret> and JWT_AUDIENCE=<expected-aud> in your env to exercise the HS256 path; the smoke gate sets these for you.",
+	"middleware": ["jwt-auth"],
 	"trigger": {
 		"http": {
 			"method": "POST",
 			"path": "/",
-			"accept": "application/json",
-			"middleware": ["jwt-auth"]
+			"accept": "application/json"
 		}
 	},
 	"steps": [

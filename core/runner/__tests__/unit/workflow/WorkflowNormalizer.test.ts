@@ -407,3 +407,74 @@ describe("WorkflowNormalizer — error paths", () => {
 		expect(() => normalizeWorkflow(wf)).toThrow(/id|name/);
 	});
 });
+
+// v0.5.2 — workflow-level middleware. The `middleware` field at the
+// workflow root is overloaded: `true` is the marker bit ("I am a
+// middleware"), an array is the workflow-level chain ("apply these
+// middleware to my runs"). The two semantics must remain mutually
+// exclusive — author confusion here would lead to surprising behaviour.
+describe("WorkflowNormalizer — workflow-level middleware (v0.5.2)", () => {
+	it("treats `middleware: true` as the marker bit (existing v0.5 behaviour)", () => {
+		const wf = {
+			name: "auth-check",
+			version: "1.0.0",
+			middleware: true,
+			steps: [{ id: "noop", use: "@blokjs/expr", inputs: { expression: "true" } }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.middleware).toBe(true);
+		expect(out.appliedMiddleware).toBeUndefined();
+	});
+
+	it("routes `middleware: string[]` into appliedMiddleware (workflow-level chain)", () => {
+		const wf = {
+			name: "Protected",
+			version: "1.0.0",
+			middleware: ["jwt-auth", "rate-limit"],
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "ok", use: "@blokjs/expr", inputs: { expression: "true" } }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.middleware).toBeUndefined();
+		expect(out.appliedMiddleware).toEqual(["jwt-auth", "rate-limit"]);
+	});
+
+	it("filters non-string entries from the middleware array", () => {
+		const wf = {
+			name: "Sloppy",
+			version: "1.0.0",
+			middleware: ["good", 42, null, "", "also-good"] as unknown as string[],
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "ok", use: "@blokjs/expr", inputs: { expression: "true" } }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.appliedMiddleware).toEqual(["good", "also-good"]);
+	});
+
+	it("treats an empty middleware array as undefined (no workflow-level chain)", () => {
+		const wf = {
+			name: "Empty",
+			version: "1.0.0",
+			middleware: [] as string[],
+			trigger: { http: { method: "POST" } },
+			steps: [{ id: "ok", use: "@blokjs/expr", inputs: { expression: "true" } }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.middleware).toBeUndefined();
+		expect(out.appliedMiddleware).toBeUndefined();
+	});
+
+	it("preserves the marker for middleware-only workflows (no appliedMiddleware leaks in)", () => {
+		// Regression — a middleware-only workflow shouldn't accidentally
+		// route the marker through the array path.
+		const wf = {
+			name: "auth-check",
+			version: "1.0.0",
+			middleware: true,
+			steps: [{ id: "noop", use: "@blokjs/expr", inputs: { expression: "true" } }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.middleware).toBe(true);
+		expect("appliedMiddleware" in out).toBe(false);
+	});
+});
