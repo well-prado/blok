@@ -1,5 +1,6 @@
 import type { Context } from "@blokjs/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { SignJWT, exportSPKI, generateKeyPair } from "jose";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AuditLogNode,
 	CtxPublishManyNode,
@@ -8,11 +9,13 @@ import {
 	HELPER_NODES,
 	InMemoryKvNode,
 	JsonSchemaNode,
+	JwtVerifyNode,
 	LogNode,
 	MetricsEmitNode,
 	ThrowNode,
 	_resetAuditEventsForTests,
 	_resetInMemoryKvForTests,
+	_resetJwksCacheForTests,
 	getAuditEvents,
 } from "../src/index";
 
@@ -52,6 +55,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/expr",
 				"@blokjs/in-memory-kv",
 				"@blokjs/json-schema",
+				"@blokjs/jwt-verify",
 				"@blokjs/log",
 				"@blokjs/metrics-emit",
 				"@blokjs/throw",
@@ -248,6 +252,246 @@ describe("@blokjs/helpers", () => {
 			});
 			expect((r as { success: boolean }).success).toBe(false);
 			expect((r as { error: { message: string } }).error.message).toContain("validation failed");
+		});
+	});
+
+	// ====================================================================
+	// @blokjs/jwt-verify — production JWT auth helper
+	// ====================================================================
+	//
+	// Tokens are minted in-process via jose's `SignJWT` so the success path
+	// exercises the same library being verified — that's intentional, since
+	// any divergence between sign and verify would be a jose internal bug
+	// that affects production users equally. The failure paths use
+	// hand-crafted invalid tokens or tokens signed with a different secret
+	// to exercise each `unauthorized()` reason.
+	describe("@blokjs/jwt-verify", () => {
+		const SECRET = "super-secret-not-for-prod-use";
+		const ISSUER = "https://test.example.com";
+		const AUDIENCE = "test-api";
+
+		beforeEach(() => {
+			_resetJwksCacheForTests();
+		});
+
+		async function signHs256(claims: Record<string, unknown>, opts: { exp?: string } = {}): Promise<string> {
+			const key = new TextEncoder().encode(SECRET);
+			let token = new SignJWT(claims).setProtectedHeader({ alg: "HS256" }).setIssuedAt();
+			if (claims.iss === undefined) token = token.setIssuer(ISSUER);
+			if (claims.aud === undefined) token = token.setAudience(AUDIENCE);
+			token = token.setExpirationTime(opts.exp ?? "1h");
+			return token.sign(key);
+		}
+
+		// ---- success paths --------------------------------------------------
+
+		it("verifies a valid HS256 token + surfaces decoded claims", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "user-42", role: "admin" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			const data = (r as { data: { claims: Record<string, unknown>; subject?: string; issuer?: string } }).data;
+			expect(data.claims.sub).toBe("user-42");
+			expect(data.claims.role).toBe("admin");
+			expect(data.subject).toBe("user-42");
+			expect(data.issuer).toBe(ISSUER);
+		});
+
+		it("accepts an array of allowed audiences", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "u1", aud: "internal-tools" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				audience: ["test-api", "internal-tools"],
+				issuer: ISSUER,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+		});
+
+		it("accepts an array of allowed issuers", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "u1", iss: "https://other.example.com" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				issuer: ["https://test.example.com", "https://other.example.com"],
+				audience: AUDIENCE,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+		});
+
+		it("respects a custom algorithm allowlist", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "u1" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				algorithms: ["HS256", "HS384"],
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+		});
+
+		it("verifies an RS256 token signed with a generated keypair via publicKey", async () => {
+			const ctx = ctxFor();
+			const { publicKey, privateKey } = await generateKeyPair("RS256");
+			const token = await new SignJWT({ sub: "user-rsa" })
+				.setProtectedHeader({ alg: "RS256" })
+				.setIssuedAt()
+				.setIssuer(ISSUER)
+				.setAudience(AUDIENCE)
+				.setExpirationTime("1h")
+				.sign(privateKey);
+			const pkPem = await exportSPKI(publicKey);
+
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				publicKey: pkPem,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			const data = (r as { data: { subject?: string } }).data;
+			expect(data.subject).toBe("user-rsa");
+		});
+
+		// ---- failure modes (each → 401 with structured reason) ---------------
+
+		async function expectUnauthorized(
+			args: Parameters<typeof JwtVerifyNode.handle>[1],
+			expectedReason: string,
+		): Promise<void> {
+			const ctx = ctxFor();
+			const r = await JwtVerifyNode.handle(ctx, args);
+			expect((r as { success: boolean }).success).toBe(false);
+			const errAny = (r as { error: unknown }).error as {
+				context?: { code?: number; json?: { reason?: string } };
+			};
+			expect(errAny?.context?.code).toBe(401);
+			expect(errAny?.context?.json?.reason).toBe(expectedReason);
+		}
+
+		it("rejects an empty token with reason=missing_token", async () => {
+			await expectUnauthorized({ token: "", secret: SECRET }, "missing_token");
+		});
+
+		it("rejects a malformed token with reason=malformed_token", async () => {
+			await expectUnauthorized({ token: "not.a.real.jwt", secret: SECRET }, "malformed_token");
+		});
+
+		it("rejects a token signed with a different secret with reason=invalid_signature", async () => {
+			const tokenSignedWithOther = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256" })
+				.setIssuedAt()
+				.setIssuer(ISSUER)
+				.setAudience(AUDIENCE)
+				.setExpirationTime("1h")
+				.sign(new TextEncoder().encode("a-different-secret"));
+			await expectUnauthorized(
+				{ token: tokenSignedWithOther, secret: SECRET, issuer: ISSUER, audience: AUDIENCE },
+				"invalid_signature",
+			);
+		});
+
+		it("rejects an expired token with reason=token_expired", async () => {
+			const ctx = ctxFor();
+			const expired = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256" })
+				.setIssuedAt(Math.floor(Date.now() / 1000) - 3600)
+				.setIssuer(ISSUER)
+				.setAudience(AUDIENCE)
+				.setExpirationTime(Math.floor(Date.now() / 1000) - 60)
+				.sign(new TextEncoder().encode(SECRET));
+			const r = await JwtVerifyNode.handle(ctx, {
+				token: expired,
+				secret: SECRET,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			});
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { context?: { json?: { reason?: string } } } }).error.context?.json?.reason).toBe(
+				"token_expired",
+			);
+		});
+
+		it("rejects an issuer mismatch with reason=issuer_mismatch", async () => {
+			const token = await signHs256({ sub: "u1", iss: "https://wrong.example.com" });
+			await expectUnauthorized({ token, secret: SECRET, issuer: ISSUER, audience: AUDIENCE }, "issuer_mismatch");
+		});
+
+		it("rejects an audience mismatch with reason=audience_mismatch", async () => {
+			const token = await signHs256({ sub: "u1", aud: "wrong-audience" });
+			await expectUnauthorized({ token, secret: SECRET, issuer: ISSUER, audience: AUDIENCE }, "audience_mismatch");
+		});
+
+		it("rejects when no key source is configured", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "u1" });
+			const r = await JwtVerifyNode.handle(ctx, { token });
+			expect((r as { success: boolean }).success).toBe(false);
+			// Zod refine fires before the node runs, so this surfaces as a
+			// validation error message rather than the structured 401. Either
+			// way the call FAILS — the contract is "exactly one key source".
+			expect((r as { error: { message: string } }).error.message).toContain("Exactly one of");
+		});
+
+		it("rejects when multiple key sources are configured (refine)", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "u1" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				publicKey: "irrelevant",
+			});
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("Exactly one of");
+		});
+
+		it("rejects an HS256 token when the allowlist requires RS256", async () => {
+			const token = await signHs256({ sub: "u1" });
+			await expectUnauthorized(
+				{
+					token,
+					secret: SECRET,
+					algorithms: ["RS256"],
+					issuer: ISSUER,
+					audience: AUDIENCE,
+				},
+				"algorithm_not_allowed",
+			);
+		});
+
+		it("populates convenience aliases (subject/issuer/audience/expiresAt) from the verified payload", async () => {
+			const ctx = ctxFor();
+			const token = await signHs256({ sub: "alice", role: "ops" });
+			const r = await JwtVerifyNode.handle(ctx, {
+				token,
+				secret: SECRET,
+				issuer: ISSUER,
+				audience: AUDIENCE,
+			});
+			const data = (
+				r as {
+					data: {
+						subject?: string;
+						issuer?: string;
+						audience?: string | string[];
+						expiresAt?: number;
+					};
+				}
+			).data;
+			expect(data.subject).toBe("alice");
+			expect(data.issuer).toBe(ISSUER);
+			expect(data.audience).toBe(AUDIENCE);
+			expect(typeof data.expiresAt).toBe("number");
+			expect(data.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
 		});
 	});
 });

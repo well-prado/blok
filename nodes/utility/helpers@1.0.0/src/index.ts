@@ -26,6 +26,7 @@ import CtxPublishManyNode from "./ctxPublishMany";
 import ExprNode from "./expr";
 import InMemoryKvNode, { _resetInMemoryKvForTests } from "./inMemoryKv";
 import JsonSchemaNode from "./jsonSchema";
+import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
 import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
 import ThrowNode from "./throw";
@@ -37,13 +38,14 @@ export {
 	ExprNode,
 	InMemoryKvNode,
 	JsonSchemaNode,
+	JwtVerifyNode,
 	LogNode,
 	MetricsEmitNode,
 	ThrowNode,
 };
 
 // Test-only utilities — exported but tagged with leading underscore
-export { _resetAuditEventsForTests, _resetInMemoryKvForTests, getAuditEvents };
+export { _resetAuditEventsForTests, _resetInMemoryKvForTests, _resetJwksCacheForTests, getAuditEvents };
 
 /**
  * Pre-built node map suitable for `GlobalOptions.nodes` registration.
@@ -62,6 +64,7 @@ export const HELPER_NODES = {
 	"@blokjs/expr": ExprNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
 	"@blokjs/json-schema": JsonSchemaNode,
+	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/log": LogNode,
 	"@blokjs/metrics-emit": MetricsEmitNode,
 	"@blokjs/throw": ThrowNode,
