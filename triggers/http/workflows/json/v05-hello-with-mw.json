@@ -1,0 +1,23 @@
+{
+	"name": "v05-hello-with-mw",
+	"version": "1.0.0",
+	"description": "Minimal demo of v0.5.2 workflow-level middleware. The workflow body is one expr step; the cross-cutting concerns (auth, audit) are factored out to middleware declared once at the top of the workflow definition. Demonstrates that the workflow-level chain runs uniformly across every request to this workflow without per-trigger duplication. Real deployments would chain `jwt-auth` + `audit-log` (or similar ops middleware); this demo uses `auth-check` to keep the example dependency-free (no JWT_SECRET / JWT_AUDIENCE required to exercise it).",
+	"middleware": ["auth-check"],
+	"trigger": {
+		"http": {
+			"method": "GET",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ greeting: 'hello, world', via: ctx.state.identity.via, ts: Date.now() })"
+			}
+		}
+	]
+}

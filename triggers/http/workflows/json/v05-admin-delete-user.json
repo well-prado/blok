@@ -1,0 +1,42 @@
+{
+	"name": "v05-admin-delete-user",
+	"version": "1.0.0",
+	"description": "Admin-only endpoint demonstrating a full authn+authz middleware chain at the workflow level. `jwt-auth` verifies the bearer token and stashes identity at ctx.state.identity; `admin-only` then asserts the JWT's `role` claim equals `admin` (else 403); only then does the handler step run. The handler simulates a destructive operation (DELETE user) by POSTing to httpbin so end-to-end tests can curl the failure-response shape without persistence. The same chain composes onto any sensitive endpoint with one line — that's the v0.5.2 win. Replace `jwt-auth` with your provider's JWKS in production by setting JWT_JWKS_URI; the `role` check stays unchanged.",
+	"middleware": ["jwt-auth", "admin-only"],
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "delete-user",
+			"use": "@blokjs/api-call",
+			"type": "module",
+			"inputs": {
+				"url": "https://httpbin.org/post",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"X-Op": "delete-user"
+				},
+				"body": {
+					"action": "delete-user",
+					"targetUserId": "js/ctx.request.body.userId",
+					"deletedBy": "js/ctx.state.identity.sub"
+				},
+				"responseType": "application/json"
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, action: 'delete-user', targetUserId: ctx.request.body.userId, deletedBy: ctx.state.identity.sub })"
+			}
+		}
+	]
+}

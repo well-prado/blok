@@ -1,0 +1,22 @@
+{
+	"name": "v05-tenant-gamma",
+	"version": "1.0.0",
+	"description": "Tenant-specific sub-workflow used by `v05-multi-tenant-router`. See v05-tenant-acme.json for the pattern.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ tenant: 'gamma', processedBy: 'v05-tenant-gamma', body: ctx.request.body })"
+			}
+		}
+	]
+}

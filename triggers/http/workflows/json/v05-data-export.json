@@ -1,0 +1,101 @@
+{
+	"name": "v05-data-export",
+	"version": "1.0.0",
+	"description": "Paginated data export pipeline with per-page resilience. Receives a page list, fetches each page sequentially (rate-limit friendly), and falls back to a DLQ entry when a page fetch fails after retries. Each page fetch carries `retry: { maxAttempts: 3 }` and a `maxDuration: 5s` cap so transient failures self-heal but pathological hangs don't stall the whole export. Successful pages contribute to a final assemble step that summarizes total rows + DLQ count. Demonstrates: forEach + tryCatch nested with per-step retry + maxDuration, resilient ETL pattern that surfaces failed pages without aborting the run.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-body",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["pages"],
+					"properties": {
+						"pages": { "type": "array" }
+					}
+				},
+				"data": "js/ctx.request.body"
+			}
+		},
+		{
+			"id": "fetch-pages",
+			"forEach": {
+				"in": "js/ctx.request.body.pages",
+				"as": "page",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "page-tryCatch",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "fetch-page",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"retry": {
+										"maxAttempts": 3,
+										"minTimeoutInMs": 100,
+										"factor": 2
+									},
+									"maxDuration": "5s",
+									"inputs": {
+										"url": "js/ctx.state.page.url",
+										"method": "GET",
+										"headers": { "Accept": "application/json" },
+										"responseType": "application/json"
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "audit-page-failure",
+									"use": "@blokjs/audit-log",
+									"type": "module",
+									"inputs": {
+										"event": "data-export-page-failure",
+										"page": "js/ctx.state.page.number",
+										"url": "js/ctx.state.page.url",
+										"reason": "js/ctx.error.message"
+									}
+								},
+								{
+									"id": "capture-page-error",
+									"use": "@blokjs/ctx-publish",
+									"type": "module",
+									"inputs": {
+										"name": "pageError",
+										"value": "js/ctx.error.message"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "page-summary",
+						"use": "@blokjs/expr",
+						"type": "module",
+						"inputs": {
+							"expression": "({ page: ctx.state.page.number, ok: ctx.state['fetch-page'] !== undefined, rowCount: ctx.state['fetch-page'] && ctx.state['fetch-page'].args ? Object.keys(ctx.state['fetch-page'].args).length : 0, error: ctx.state.pageError || null })"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "assemble",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((arr) => { const summaries = arr.map(r => (r && r.data && typeof r.data === 'object') ? r.data : r); const ok = summaries.filter(s => s && s.ok === true); const failed = summaries.filter(s => s && s.ok === false); return { exported: true, totalPages: summaries.length, successfulPages: ok.length, totalRows: ok.reduce((sum, s) => sum + (s.rowCount || 0), 0), dlqPages: failed.map(f => ({ page: f.page, error: f.error })) }; })(ctx.state['fetch-pages'] || [])"
+			}
+		}
+	]
+}

@@ -1,0 +1,22 @@
+{
+	"name": "v05-tenant-acme",
+	"version": "1.0.0",
+	"description": "Tenant-specific sub-workflow used by `v05-multi-tenant-router`. Real deployments would have its own auth, business rules, rate limits — keeping each tenant's processing properly isolated. This minimal version just echoes the request payload tagged with the tenant id, enough for the smoke gate to assert correct dispatch.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ tenant: 'acme', processedBy: 'v05-tenant-acme', body: ctx.request.body })"
+			}
+		}
+	]
+}
