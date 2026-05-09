@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import type { Context } from "@blokjs/shared";
 import { SignJWT, exportSPKI, generateKeyPair } from "jose";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import {
 	CtxPublishNode,
 	ExprNode,
 	HELPER_NODES,
+	HmacVerifyNode,
 	InMemoryKvNode,
 	JsonSchemaNode,
 	JwtVerifyNode,
@@ -55,6 +57,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/ctx-publish",
 				"@blokjs/ctx-publish-many",
 				"@blokjs/expr",
+				"@blokjs/hmac-verify",
 				"@blokjs/in-memory-kv",
 				"@blokjs/json-schema",
 				"@blokjs/jwt-verify",
@@ -581,6 +584,134 @@ describe("@blokjs/helpers", () => {
 			const keys = entries.map((e) => e.key).sort();
 			expect(keys).toContain(`${KEY_PREFIX}a`);
 			expect(keys).toContain(`${KEY_PREFIX}b`);
+		});
+	});
+
+	// ====================================================================
+	// @blokjs/hmac-verify — webhook signature verification
+	// ====================================================================
+	describe("@blokjs/hmac-verify", () => {
+		const SECRET = "webhook-secret-for-tests";
+
+		// Helper — sign a payload the same way the verifier expects
+		// supplies us. Mirrors how a real webhook provider signs the
+		// outgoing payload before sending; the helper just verifies what
+		// they computed using the same algo + key.
+		function sign(payload: string, secret = SECRET, algorithm = "sha256"): string {
+			return createHmac(algorithm, secret).update(payload).digest("hex");
+		}
+
+		// ---- success path ---------------------------------------------------
+
+		it("verifies a valid HMAC-SHA256 signature with no prefix", async () => {
+			const ctx = ctxFor();
+			const payload = '{"event":"push","repo":"acme/widgets"}';
+			const signature = sign(payload);
+			const r = await HmacVerifyNode.handle(ctx, { signature, payload, secret: SECRET });
+			expect((r as { success: boolean }).success).toBe(true);
+			const data = (r as { data: { verified: boolean; algorithm: string; signatureLength: number } }).data;
+			expect(data.verified).toBe(true);
+			expect(data.algorithm).toBe("sha256");
+			expect(data.signatureLength).toBe(64); // sha256 hex = 64 chars
+		});
+
+		it("verifies with a prefix (GitHub X-Hub-Signature-256 shape)", async () => {
+			const ctx = ctxFor();
+			const payload = '{"hello":"world"}';
+			const signature = `sha256=${sign(payload)}`;
+			const r = await HmacVerifyNode.handle(ctx, {
+				signature,
+				payload,
+				secret: SECRET,
+				prefix: "sha256=",
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+		});
+
+		it("verifies with sha512 when explicitly chosen", async () => {
+			const ctx = ctxFor();
+			const payload = "high-security-payload";
+			const signature = sign(payload, SECRET, "sha512");
+			const r = await HmacVerifyNode.handle(ctx, {
+				signature,
+				payload,
+				secret: SECRET,
+				algorithm: "sha512",
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { algorithm: string; signatureLength: number } }).data.algorithm).toBe("sha512");
+			expect((r as { data: { signatureLength: number } }).data.signatureLength).toBe(128); // sha512 hex = 128
+		});
+
+		// ---- failure modes (each → 401 with structured reason) -------------
+
+		async function expectUnauthorized(
+			args: Parameters<typeof HmacVerifyNode.handle>[1],
+			expectedReason: string,
+		): Promise<void> {
+			const ctx = ctxFor();
+			const r = await HmacVerifyNode.handle(ctx, args);
+			expect((r as { success: boolean }).success).toBe(false);
+			const errAny = (r as { error: unknown }).error as {
+				context?: { code?: number; json?: { reason?: string } };
+			};
+			expect(errAny?.context?.code).toBe(401);
+			expect(errAny?.context?.json?.reason).toBe(expectedReason);
+		}
+
+		it("rejects empty signature with reason=missing_signature", async () => {
+			await expectUnauthorized({ signature: "", payload: "{}", secret: SECRET }, "missing_signature");
+		});
+
+		it("rejects empty secret with reason=misconfigured", async () => {
+			await expectUnauthorized({ signature: "deadbeef", payload: "{}", secret: "" }, "misconfigured");
+		});
+
+		it("rejects signature missing the configured prefix with reason=malformed_signature", async () => {
+			const payload = "{}";
+			const sigWithoutPrefix = sign(payload); // no 'sha256=' prefix
+			await expectUnauthorized(
+				{ signature: sigWithoutPrefix, payload, secret: SECRET, prefix: "sha256=" },
+				"malformed_signature",
+			);
+		});
+
+		it("rejects signature with wrong length (e.g. sha1 supplied when sha256 expected)", async () => {
+			const payload = "{}";
+			const sha1 = sign(payload, SECRET, "sha1"); // 40 hex chars
+			// Default algorithm is sha256 → 64 hex; length mismatch fires first.
+			await expectUnauthorized({ signature: sha1, payload, secret: SECRET }, "invalid_signature");
+		});
+
+		it("rejects non-hex signature with reason=invalid_signature", async () => {
+			const payload = "{}";
+			// 64 chars but contains 'g' (not a hex digit)
+			const garbage = "g".repeat(64);
+			await expectUnauthorized({ signature: garbage, payload, secret: SECRET }, "invalid_signature");
+		});
+
+		it("rejects when payload was tampered (signature was for different content)", async () => {
+			const ctx = ctxFor();
+			const originalPayload = '{"action":"push"}';
+			const signature = sign(originalPayload);
+			const tamperedPayload = '{"action":"delete-everything"}';
+			const r = await HmacVerifyNode.handle(ctx, {
+				signature,
+				payload: tamperedPayload,
+				secret: SECRET,
+			});
+			expect((r as { success: boolean }).success).toBe(false);
+			const errAny = (r as { error: { context?: { json?: { reason?: string } } } }).error;
+			expect(errAny.context?.json?.reason).toBe("invalid_signature");
+		});
+
+		it("rejects when secret is wrong (attacker doesn't have the shared secret)", async () => {
+			const payload = '{"event":"push"}';
+			const signatureWithAttackerSecret = sign(payload, "attacker-guessed-secret");
+			await expectUnauthorized(
+				{ signature: signatureWithAttackerSecret, payload, secret: SECRET },
+				"invalid_signature",
+			);
 		});
 	});
 });
