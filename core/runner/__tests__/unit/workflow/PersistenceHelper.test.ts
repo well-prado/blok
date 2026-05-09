@@ -113,4 +113,71 @@ describe("PersistenceHelper.applyStepOutput", () => {
 			expect(c.state).toEqual({ step: 1 });
 		});
 	});
+
+	// Rule 0 — error guard. Errored steps must NOT write state. This is what
+	// makes `ctx.state[<step.id>] !== undefined` a truthful "did this step
+	// succeed?" check inside a tryCatch.catch arm. Three distinct error
+	// indicators are accepted: `success: false`, a non-null `error`
+	// (ResponseContext / BlokResponse shape), and a non-null `errors`
+	// (ExecutionResult shape from runtime adapters). All three must skip
+	// persistence equally.
+	describe("error guard (Rule 0)", () => {
+		it("skips when result.success === false", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step" }, { data: { kept: false }, success: false });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("skips when result.error is set (BlokResponse shape)", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step" }, { data: {}, error: new Error("kaboom") });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("skips when result.errors is set (ExecutionResult shape)", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step" }, { data: { partial: true }, errors: "runtime fail" });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("skips even when ephemeral was about to skip too (defense in depth)", () => {
+			// Belt-and-braces: error guard must precede ephemeral check so
+			// callers can't accidentally rely on ephemeral to mask a state
+			// pollution bug.
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step", ephemeral: true }, { data: {}, error: new Error("kaboom") });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("skips with `as` alias on errored step (no spurious state[as] write)", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "raw", as: "renamed" }, { data: { kept: false }, success: false });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("skips with `spread: true` on errored step (no spurious key merge)", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step", spread: true }, { data: { foo: 1, bar: 2 }, error: new Error("kaboom") });
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+
+		it("treats null error as success (errored only when error is non-null)", () => {
+			const c = ctx();
+			applyStepOutput(c, { name: "step" }, { data: { ok: true }, error: null });
+			expect(c.state).toEqual({ step: { ok: true } });
+		});
+
+		it("treats null errors as success (ExecutionResult success path)", () => {
+			const c = ctx();
+			applyStepOutput(c, { name: "step" }, { data: { ok: true }, errors: null });
+			expect(c.state).toEqual({ step: { ok: true } });
+		});
+
+		it("treats success: true with empty data as success (no-op via Rule 4)", () => {
+			const c = ctx({ existing: "keep" });
+			applyStepOutput(c, { name: "step" }, { success: true });
+			// No write — data was undefined, but state is preserved.
+			expect(c.state).toEqual({ existing: "keep" });
+		});
+	});
 });
