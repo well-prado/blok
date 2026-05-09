@@ -1,0 +1,22 @@
+{
+	"name": "v05-hello-global-mw",
+	"version": "1.0.0",
+	"description": "Demo of v0.5.4 process-global middleware. The workflow itself declares NO middleware — neither at the workflow root nor on the trigger. Yet every request to this endpoint runs through whatever middleware the operator registered globally via WorkflowRegistry.setGlobalMiddleware([...]) at boot, or via the BLOK_GLOBAL_MIDDLEWARE env var (comma-separated names) when that fallback path is used. Demonstrates that ops middleware (request-id, audit-log, OpenTelemetry spans) can wrap every workflow uniformly without touching individual workflow files. To exercise: BLOK_GLOBAL_MIDDLEWARE=auth-check bun run http:dev, then POST without auth → 401, POST with matching Authorization + X-Expected-Token → 200.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ greeting: 'hello, world', identity: ctx.state.identity || null, ts: Date.now() })"
+			}
+		}
+	]
+}

@@ -67,6 +67,29 @@ export class WorkflowRegistry {
 	private static instance: WorkflowRegistry | null = null;
 	private workflows = new Map<string, RegisteredWorkflow>();
 	private authorizeFn: WorkflowAuthorizeFn | null = null;
+	/**
+	 * v0.5.4 — process-global middleware chain. When set, EVERY workflow
+	 * run in this process prepends these middleware to its own chain
+	 * (workflow-level `middleware: [...]` and trigger-level
+	 * `trigger.http.middleware: [...]` if present). Use this for ops
+	 * concerns that must apply uniformly: request-id correlation, audit
+	 * logging, OpenTelemetry spans. Unlike workflow- or trigger-level
+	 * middleware, global middleware doesn't require touching individual
+	 * workflow files.
+	 *
+	 * **Resolution order** at request time, outer to inner:
+	 *   1. Process-global  (this list)
+	 *   2. Workflow-level   (`workflow.middleware: [...]`, v0.5.2)
+	 *   3. Trigger-level    (`trigger.<kind>.middleware: [...]`, v0.5)
+	 *   4. Workflow body    (regular steps)
+	 *
+	 * **Lifecycle**: write-once-per-process is the typical pattern, but
+	 * the setter accepts repeated calls and the LAST call wins. Empty
+	 * array clears the global chain. The list itself is stored as a
+	 * frozen snapshot so callers reading via `getGlobalMiddleware()`
+	 * can't mutate it accidentally.
+	 */
+	private globalMiddleware: readonly string[] = [];
 
 	static getInstance(): WorkflowRegistry {
 		if (!WorkflowRegistry.instance) {
@@ -110,6 +133,51 @@ export class WorkflowRegistry {
 	async authorize(parentName: string, childName: string, ctx: Context): Promise<boolean> {
 		if (!this.authorizeFn) return true;
 		return await this.authorizeFn(parentName, childName, ctx);
+	}
+
+	/**
+	 * Register a process-global middleware chain. Every workflow run in
+	 * this process will prepend these middleware to its own chain BEFORE
+	 * any workflow- or trigger-level middleware execute. Use for ops
+	 * concerns that should apply uniformly across the fleet: request-id
+	 * correlation, audit logging, OpenTelemetry spans, etc.
+	 *
+	 * **Lifecycle**: write-once-per-process is the typical pattern (call
+	 * once at boot, before `trigger.listen()`), but repeated calls are
+	 * allowed and the last call wins. Pass `[]` to clear the global
+	 * chain. The list is frozen on store so the snapshot returned by
+	 * `getGlobalMiddleware()` is safe to expose without copying.
+	 *
+	 * Names that don't resolve to a registered middleware workflow are
+	 * accepted at registration time but will throw at request time when
+	 * `runMiddlewareChain` tries to look them up — mirrors trigger- and
+	 * workflow-level middleware semantics. The trigger logs the
+	 * resolved global chain at boot so operators can verify the names
+	 * were spelled correctly without a request.
+	 *
+	 * @example
+	 * ```ts
+	 * // Boot-time setup before trigger.listen()
+	 * WorkflowRegistry.getInstance().setGlobalMiddleware([
+	 *   "request-id",
+	 *   "audit-log",
+	 * ]);
+	 * ```
+	 */
+	setGlobalMiddleware(names: readonly string[]): void {
+		const filtered = names.filter((n): n is string => typeof n === "string" && n.length > 0).slice();
+		this.globalMiddleware = Object.freeze(filtered);
+	}
+
+	/**
+	 * Snapshot of the process-global middleware chain. Returns the
+	 * frozen list set by `setGlobalMiddleware`, or an empty list when
+	 * unset. Triggers consume this in `runMiddlewareChain` to prepend
+	 * to the per-request chain. Always returns the same reference until
+	 * the next setter call.
+	 */
+	getGlobalMiddleware(): readonly string[] {
+		return this.globalMiddleware;
 	}
 
 	/**
@@ -168,8 +236,10 @@ export class WorkflowRegistry {
 	/**
 	 * Drop every registered workflow. Triggers call this before
 	 * re-scanning on HMR so stale entries don't survive a file rename.
-	 * Does NOT reset the authorize hook — operator-installed hooks
-	 * persist across HMR. Use `setAuthorizeFn(null)` explicitly to clear.
+	 * Does NOT reset the authorize hook OR the global middleware chain
+	 * — both are operator-installed and should persist across HMR.
+	 * Use `setAuthorizeFn(null)` / `setGlobalMiddleware([])` explicitly
+	 * to clear.
 	 */
 	clear(): void {
 		this.workflows.clear();

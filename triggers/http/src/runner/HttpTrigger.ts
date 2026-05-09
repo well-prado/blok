@@ -409,6 +409,29 @@ export default class HttpTrigger extends TriggerBase {
 			this.logger.error(`[blok] middleware scan failed: ${(err as Error).message}`);
 		}
 
+		// v0.5.4 · process-global middleware. Read the BLOK_GLOBAL_MIDDLEWARE
+		// env var as a fallback registration path — useful when the operator
+		// wants to add ops middleware (request-id, audit-log) without
+		// rebuilding the trigger image. The programmatic API
+		// (`WorkflowRegistry.setGlobalMiddleware([...])`) takes precedence:
+		// if the registry already has a global chain set, the env var is
+		// ignored. This lets a programmatic boot-time setup override an
+		// operator's CI-injected env without surprising overrides.
+		const registry = WorkflowRegistry.getInstance();
+		if (registry.getGlobalMiddleware().length === 0 && process.env.BLOK_GLOBAL_MIDDLEWARE) {
+			const fromEnv = process.env.BLOK_GLOBAL_MIDDLEWARE.split(",")
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+			if (fromEnv.length > 0) {
+				registry.setGlobalMiddleware(fromEnv);
+				this.logger.log(`[blok] global middleware registered from BLOK_GLOBAL_MIDDLEWARE env: ${fromEnv.join(", ")}`);
+			}
+		}
+		const globalChain = registry.getGlobalMiddleware();
+		if (globalChain.length > 0) {
+			this.logger.log(`[blok] process-global middleware chain (applies to every workflow): ${globalChain.join(" → ")}`);
+		}
+
 		return new Promise((done) => {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
@@ -842,19 +865,27 @@ export default class HttpTrigger extends TriggerBase {
 				// propagate to the outer catch — `@blokjs/throw` with `code:
 				// 401` produces a 401 HTTP response naturally.
 				//
-				// v0.5.2 · two declaration sites combined into one chain:
-				//   1. Workflow-level (`middleware: [...]` at the workflow root)
-				//      runs FIRST. Applies to every trigger of the workflow —
-				//      use this when a chain (auth, rate-limit) is uniform.
-				//   2. Trigger-level (`trigger.http.middleware: [...]`) runs
-				//      SECOND. Use this when the chain varies by trigger
+				// v0.5.4 · three declaration sites combined into one chain:
+				//   1. Process-global (`WorkflowRegistry.setGlobalMiddleware`
+				//      or BLOK_GLOBAL_MIDDLEWARE env) runs FIRST. Applies to
+				//      EVERY workflow run — operator-driven ops concerns
+				//      (request-id, audit-log, OpenTelemetry tracing).
+				//   2. Workflow-level (`middleware: [...]` at the workflow
+				//      root) runs SECOND. Applies to every trigger of the
+				//      workflow — use this when a chain (auth, rate-limit)
+				//      is uniform.
+				//   3. Trigger-level (`trigger.http.middleware: [...]`) runs
+				//      THIRD. Use this when the chain varies by trigger
 				//      (e.g. only the public endpoint needs CAPTCHA).
+				// Resolution order outer→inner:
+				//   process-global → workflow-level → trigger-level → main body.
 				const httpTriggerCfg = (this.configuration.trigger as { http?: { middleware?: unknown } } | undefined)?.http;
 				const triggerLevel = Array.isArray(httpTriggerCfg?.middleware)
 					? (httpTriggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
 					: [];
 				const workflowLevel = this.configuration.appliedMiddleware ?? [];
-				const middlewareNames: string[] = [...workflowLevel, ...triggerLevel];
+				const globalLevel = WorkflowRegistry.getInstance().getGlobalMiddleware();
+				const middlewareNames: string[] = [...globalLevel, ...workflowLevel, ...triggerLevel];
 				if (middlewareNames.length > 0) {
 					await this.runMiddlewareChain(ctx, middlewareNames);
 				}
