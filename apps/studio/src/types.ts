@@ -198,6 +198,18 @@ export interface NodeRun {
 	 * on the main workflow's own steps.
 	 */
 	middleware?: string;
+	/**
+	 * v0.5.3 — iteration index for inner steps of a `forEach` or `loop`
+	 * primitive. ForEachNode + LoopNode set this per iteration on the
+	 * cloned child ctx; RunnerSteps propagates it onto each NodeRun.
+	 * StepRail uses it to group consecutive sibling rows under
+	 * "iteration N" headers — instead of rendering a 5-iteration forEach
+	 * with 3 inner steps as 15 flat rows with duplicate names, we render
+	 * 5 collapsible groups. Undefined for top-level steps, for steps
+	 * inside non-iteration primitives (`tryCatch`, `switch`), and for
+	 * legacy traces written before v0.5.3.
+	 */
+	iterationIndex?: number;
 }
 
 export type RunEventType =
