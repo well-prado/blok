@@ -51,15 +51,6 @@
 						}
 					},
 					{
-						"id": "mark-account-created",
-						"use": "@blokjs/ctx-publish",
-						"type": "module",
-						"inputs": {
-							"name": "accountCreated",
-							"value": true
-						}
-					},
-					{
 						"id": "send-welcome",
 						"use": "@blokjs/api-call",
 						"type": "module",
@@ -100,7 +91,7 @@
 					{
 						"id": "decide-rollback",
 						"branch": {
-							"when": "ctx.state.accountCreated === true",
+							"when": "ctx.state['create-account'] !== undefined",
 							"then": [
 								{
 									"id": "rollback-account",
@@ -155,7 +146,9 @@
 								"outcome": "failed",
 								"rolledBack": "js/ctx.state.rolledBack === true",
 								"reason": "js/ctx.error.message",
-								"errorName": "js/ctx.error.name"
+								"errorName": "js/ctx.error.name",
+								"failedAt": "js/ctx.error.stepId",
+								"upstreamCode": "js/ctx.error.code || null"
 							}
 						}
 					}

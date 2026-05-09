@@ -20,7 +20,7 @@ blokctl trace                      # Open Blok Studio
 
 ## Context Rules (Memorize These) — Workflow v2
 
-1. **Every step's output is auto-persisted to `ctx.state[id]`.** No `set_var` flag needed — it's the default. Other steps reference it via `$.state.<id>` in their inputs.
+1. **Every step's output is auto-persisted to `ctx.state[id]`** — *on success only*. A step that throws does NOT write state. `ctx.state[<step-id>] === undefined` is a truthful "did this step actually succeed?" check inside a `tryCatch.catch` arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; centralized fix in `core/runner/src/workflow/PersistenceHelper.ts:applyStepOutput`.) No `set_var` flag needed for success persistence — it's the default. Other steps reference it via `$.state.<id>` in their inputs.
 2. **`ctx.prev` is the immediately previous step's output.** Overwritten on every step. Use for adjacent reads only; for cross-step access use `ctx.state[<id>]`.
 3. **Blueprint Mapper resolves `$.<path>` and `js/...` expressions BEFORE node execution.** Authors write `$.state.users` (typed in TS, plain string in JSON); the runner resolves it.
 4. **Opt out of persistence with `ephemeral: true`** on the step. Side-effect-only steps (logging, audit) typically do this.
