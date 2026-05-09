@@ -769,6 +769,7 @@ export class RunTracker extends EventEmitter {
 			wait: opts.wait,
 			subworkflowDepth: opts.subworkflowDepth,
 			middleware: opts.middleware,
+			iterationIndex: opts.iterationIndex,
 		};
 
 		this.store.saveNodeRun(nodeRun);
