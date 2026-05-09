@@ -28,7 +28,9 @@
 
 import type { Context, ResponseContext } from "@blokjs/shared";
 import { GlobalError } from "@blokjs/shared";
+import { RunCancelledError } from "./RunCancelledError";
 import RunnerNode from "./RunnerNode";
+import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 interface TryCatchOpts {
@@ -161,6 +163,38 @@ export class TryCatchNode extends RunnerNode {
 				await tryRunner.run(ctx, { deep: true, stepName: this.name });
 			}
 		} catch (err) {
+			// v0.5.3 — Phase 1 of wait-inside-primitives. Two control-flow
+			// signals masquerade as Error subclasses but MUST NOT be caught
+			// by the application-level catch arm:
+			//
+			//   - WaitDispatchRequest: the runner's "defer this run" signal
+			//     thrown by `wait.for` / `wait.until` steps. Treating it as
+			//     a caught exception would fire the catch arm + finally and
+			//     return success — the wait would silently no-op and the
+			//     downstream effect (chargeback timeout, payment delay,
+			//     audit window) would never happen.
+			//
+			//   - RunCancelledError: the cooperative-cancellation signal
+			//     fired by `POST /__blok/runs/:id/cancel`. Treating it as a
+			//     caught exception would let the run continue past
+			//     cancellation, defeating the whole contract.
+			//
+			// Re-throw past finally — the wait/cancel hasn't COMPLETED, and
+			// finally semantically fires on completion. On wait re-entry the
+			// whole tryCatch step re-executes from the top (Phase 1 limit:
+			// no mid-arm resume), so finally fires when that re-run reaches
+			// terminal state.
+			//
+			// IMPORTANT — Phase 1 author contract: every step in a `try`
+			// arm that contains a wait MUST be idempotent. The first pass
+			// runs steps 1..N-1, defers at the wait, and the resumed run
+			// re-runs steps 1..N-1 from scratch before hitting the wait's
+			// re-entry detection. Use `idempotencyKey` on each pre-wait
+			// step (or rely on natural idempotency — read-only fetches,
+			// stateless transforms) to make re-execution free.
+			if (err instanceof WaitDispatchRequest || err instanceof RunCancelledError) {
+				throw err;
+			}
 			caught = toErrorEnvelope(err);
 			// Make `$.error.message` etc. resolvable by the blueprint mapper
 			// inside the catch block. Mapper reads ctx.error directly.
@@ -171,6 +205,14 @@ export class TryCatchNode extends RunnerNode {
 					await catchRunner.run(ctx, { deep: true, stepName: this.name });
 				}
 			} catch (catchErr) {
+				// Same pass-through contract for waits / cancellations
+				// thrown from inside the catch arm. (Phase 1 doesn't
+				// formally support waits in catch arms — re-entry semantics
+				// differ from the try-arm path — but at least don't lose
+				// the signal here. Document as a Phase 4 follow-up.)
+				if (catchErr instanceof WaitDispatchRequest || catchErr instanceof RunCancelledError) {
+					throw catchErr;
+				}
 				// `catch` itself threw. Hold onto it so `finally` still runs,
 				// then propagate after.
 				pendingError = catchErr;
