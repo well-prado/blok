@@ -1,0 +1,529 @@
+/**
+ * v0.5 smoke gate — boots `bun run http:dev`, waits for /health-check, then
+ * curls every `triggers/http/workflows/json/v05-*.json` workflow with a
+ * representative request and asserts the response shape (status code +
+ * structural predicate over the JSON body). Exits non-zero on any failure.
+ *
+ * Wired in package.json as `bun run v05:smoke`. Designed as the merge gate
+ * for any future v0.5 work — must stay <60s and green on a clean checkout.
+ *
+ * Usage:
+ *   bun run v05:smoke              # default port 4000, 60s server boot budget
+ *   BLOK_SMOKE_PORT=4100 bun run v05:smoke
+ *   BLOK_SMOKE_BOOT_MS=120000 bun run v05:smoke   # bump if cold starts are slow
+ *
+ * External fixtures used by the workflows themselves: httpbin.org (echo +
+ * status codes). No auth keys, no rate-limited endpoints. If httpbin.org is
+ * down the smoke fails — that is the correct behaviour, since the example
+ * workflows shipped in `triggers/http/workflows/json/` rely on it too.
+ */
+
+import { type ChildProcess, spawn } from "node:child_process";
+import path from "node:path";
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+const PORT = Number(process.env.BLOK_SMOKE_PORT ?? "4000");
+const BASE = `http://localhost:${PORT}`;
+const BOOT_TIMEOUT_MS = Number(process.env.BLOK_SMOKE_BOOT_MS ?? "60000");
+const REQUEST_TIMEOUT_MS = Number(process.env.BLOK_SMOKE_REQ_MS ?? "20000");
+const REPO_ROOT = path.resolve(import.meta.dir, "..");
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
+
+interface SmokeCase {
+	name: string;
+	method: string;
+	pathname: string;
+	headers?: Record<string, string>;
+	body?: JsonValue;
+	expectStatus: number;
+	assert?: (body: JsonValue) => void;
+}
+
+// =============================================================================
+// Test matrix — every v05-* workflow gets at least one row. Multi-path
+// workflows (success + failure) get one row per path so the predicates
+// stay simple and the failure point is obvious.
+// =============================================================================
+
+const cases: SmokeCase[] = [
+	// --- v05-webhook-fanout: forEach parallel ----------------------------------
+	{
+		name: "v05-webhook-fanout — 3 subscribers fan out in parallel",
+		method: "POST",
+		pathname: "/v05-webhook-fanout",
+		body: {
+			event: { id: "evt-smoke-1", type: "test" },
+			subscribers: [
+				{ id: "s1", url: "https://httpbin.org/status/200" },
+				{ id: "s2", url: "https://httpbin.org/status/200" },
+				{ id: "s3", url: "https://httpbin.org/status/200" },
+			],
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			expect(body, "object", "fanout response is not an object");
+			const obj = body as Record<string, JsonValue>;
+			if (obj.eventId !== "evt-smoke-1") throw fail("eventId mismatch", obj);
+			if (obj.dispatched !== 3) throw fail("dispatched should be 3", obj);
+			if (!Array.isArray(obj.subscriberIds) || obj.subscriberIds.length !== 3)
+				throw fail("subscriberIds shape wrong", obj);
+		},
+	},
+	{
+		name: "v05-webhook-fanout — empty subscriber list is a no-op",
+		method: "POST",
+		pathname: "/v05-webhook-fanout",
+		body: { event: { id: "evt-smoke-empty" }, subscribers: [] },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.dispatched !== 0) throw fail("dispatched should be 0", obj);
+		},
+	},
+
+	// --- v05-event-router: switchOn -------------------------------------------
+	{
+		name: "v05-event-router — literal case (ping)",
+		method: "POST",
+		pathname: "/v05-event-router",
+		body: { event: "ping", payload: { hello: "world" } },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.routedAs !== "ping") throw fail("routedAs should be 'ping'", obj);
+		},
+	},
+	{
+		name: "v05-event-router — array case (order.created)",
+		method: "POST",
+		pathname: "/v05-event-router",
+		body: { event: "order.created", payload: { orderId: "o-1" } },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.routedAs !== "order-family") throw fail("routedAs should be 'order-family'", obj);
+		},
+	},
+	{
+		name: "v05-event-router — default fallback",
+		method: "POST",
+		pathname: "/v05-event-router",
+		body: { event: "totally.unknown", payload: {} },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.routedAs !== "unknown") throw fail("routedAs should be 'unknown'", obj);
+		},
+	},
+
+	// --- v05-saga: tryCatch with all three arms -------------------------------
+	{
+		name: "v05-saga — happy path (try → finally, catch skipped)",
+		method: "POST",
+		pathname: "/v05-saga",
+		body: { user: "alice", middleUrl: "https://httpbin.org/post" },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "success") throw fail("outcome should be 'success'", obj);
+			if (obj.rollbackRan !== false) throw fail("rollbackRan should be false", obj);
+			if (obj.metricRan !== true) throw fail("metricRan should be true", obj);
+		},
+	},
+	{
+		name: "v05-saga — failure path (try fails → catch fires → finally still runs)",
+		method: "POST",
+		pathname: "/v05-saga",
+		body: { user: "alice", middleUrl: "https://httpbin.org/status/500" },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "failed") throw fail("outcome should be 'failed'", obj);
+			if (obj.rollbackRan !== true) throw fail("rollbackRan should be true", obj);
+			if (obj.metricRan !== true) throw fail("metricRan should be true", obj);
+		},
+	},
+
+	// --- v05-protected: middleware chain (auth + rate-limit) ------------------
+	{
+		name: "v05-protected — missing auth → 401",
+		method: "POST",
+		pathname: "/v05-protected",
+		body: { hello: "world" },
+		expectStatus: 401,
+	},
+	{
+		name: "v05-protected — matching auth → 200",
+		method: "POST",
+		pathname: "/v05-protected",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: { hello: "world" },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.ok !== true) throw fail("ok should be true", obj);
+			if (typeof obj.identity !== "object" || obj.identity === null) throw fail("identity should be an object", obj);
+		},
+	},
+
+	// --- v05-order-fulfillment: switch + forEach + tryCatch + middleware ------
+	{
+		name: "v05-order-fulfillment — physical order, all items succeed",
+		method: "POST",
+		pathname: "/v05-order-fulfillment",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: {
+			id: "ord-smoke-1",
+			type: "physical",
+			currency: "USD",
+			total: 4200,
+			items: [
+				{ sku: "sku-a", quantity: 1 },
+				{ sku: "sku-b", quantity: 2 },
+			],
+			paymentUrl: "https://httpbin.org/post",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "success") throw fail("outcome should be 'success'", obj);
+			if (obj.itemsProcessed !== 2) throw fail("itemsProcessed should be 2", obj);
+		},
+	},
+	{
+		name: "v05-order-fulfillment — digital order skips inventory",
+		method: "POST",
+		pathname: "/v05-order-fulfillment",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: {
+			id: "ord-smoke-2",
+			type: "digital",
+			currency: "USD",
+			total: 999,
+			items: [{ sku: "license-pro", quantity: 1 }],
+			paymentUrl: "https://httpbin.org/post",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "success") throw fail("outcome should be 'success'", obj);
+			if (obj.licensed !== true) throw fail("licensed should be true", obj);
+		},
+	},
+	{
+		name: "v05-order-fulfillment — payment fails → rollback path → 200 with failed outcome",
+		method: "POST",
+		pathname: "/v05-order-fulfillment",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: {
+			id: "ord-smoke-3",
+			type: "physical",
+			currency: "USD",
+			total: 4200,
+			items: [{ sku: "sku-a", quantity: 1 }],
+			paymentUrl: "https://httpbin.org/status/500",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "failed") throw fail("outcome should be 'failed'", obj);
+			if (typeof obj.failureReason !== "string") throw fail("failureReason should be string", obj);
+		},
+	},
+	{
+		name: "v05-order-fulfillment — missing auth → 401 from middleware",
+		method: "POST",
+		pathname: "/v05-order-fulfillment",
+		body: {
+			id: "ord-smoke-4",
+			type: "physical",
+			currency: "USD",
+			total: 1,
+			items: [],
+			paymentUrl: "https://httpbin.org/post",
+		},
+		expectStatus: 401,
+	},
+
+	// --- v05-user-signup-saga: tryCatch with conditional rollback inside catch
+	{
+		name: "v05-user-signup-saga — happy path → 200 with userId",
+		method: "POST",
+		pathname: "/v05-user-signup-saga",
+		body: {
+			email: `smoke+${Date.now()}@example.com`,
+			password: "hunter2",
+			displayName: "Smoke Test",
+			signupUrl: "https://httpbin.org/post",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (typeof obj.userId !== "string") throw fail("userId should be string", obj);
+			if (obj.outcome !== "success") throw fail("outcome should be 'success'", obj);
+		},
+	},
+	{
+		name: "v05-user-signup-saga — account-create fails → no rollback (account never created), 500",
+		method: "POST",
+		pathname: "/v05-user-signup-saga",
+		body: {
+			email: `smoke+${Date.now()}@example.com`,
+			password: "hunter2",
+			displayName: "Smoke Test",
+			signupUrl: "https://httpbin.org/status/500",
+		},
+		expectStatus: 500,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "failed") throw fail("outcome should be 'failed'", obj);
+			if (obj.rolledBack !== false) throw fail("rolledBack should be false (account never created)", obj);
+		},
+	},
+	{
+		name: "v05-user-signup-saga — profile-create fails after account-create → rollback fires, 500",
+		method: "POST",
+		pathname: "/v05-user-signup-saga",
+		body: {
+			email: `smoke+${Date.now()}@example.com`,
+			password: "hunter2",
+			displayName: "Smoke Test",
+			signupUrl: "https://httpbin.org/post",
+			profileUrl: "https://httpbin.org/status/500",
+		},
+		expectStatus: 500,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "failed") throw fail("outcome should be 'failed'", obj);
+			if (obj.rolledBack !== true) throw fail("rolledBack should be true (account WAS created)", obj);
+		},
+	},
+
+	// --- v05-nested-control-flow: forEach > tryCatch > switch > branch -------
+	{
+		name: "v05-nested-control-flow — mixed item types succeed",
+		method: "POST",
+		pathname: "/v05-nested-control-flow",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: {
+			id: "ord-nested-1",
+			items: [
+				{
+					sku: "phys-1",
+					type: "physical",
+					required: true,
+					handlerUrl: "https://httpbin.org/post",
+				},
+				{
+					sku: "dig-1",
+					type: "digital",
+					required: true,
+					handlerUrl: "https://httpbin.org/post",
+				},
+			],
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.itemsProcessed !== 2) throw fail("itemsProcessed should be 2", obj);
+			if (obj.failedItems !== 0) throw fail("failedItems should be 0", obj);
+		},
+	},
+	{
+		name: "v05-nested-control-flow — optional item fails → swallowed, others succeed",
+		method: "POST",
+		pathname: "/v05-nested-control-flow",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		body: {
+			id: "ord-nested-2",
+			items: [
+				{
+					sku: "phys-good",
+					type: "physical",
+					required: true,
+					handlerUrl: "https://httpbin.org/post",
+				},
+				{
+					sku: "phys-bad-optional",
+					type: "physical",
+					required: false,
+					handlerUrl: "https://httpbin.org/status/500",
+				},
+			],
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.itemsProcessed !== 2) throw fail("itemsProcessed should be 2", obj);
+			if (obj.failedItems !== 1) throw fail("failedItems should be 1 (optional swallowed)", obj);
+		},
+	},
+];
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function fail(why: string, ctx: unknown): Error {
+	const e = new Error(`${why} — got: ${JSON.stringify(ctx)}`);
+	return e;
+}
+
+function expect(value: unknown, kind: "object" | "array", why: string): void {
+	if (kind === "object") {
+		if (typeof value !== "object" || value === null || Array.isArray(value))
+			throw new Error(`${why} — got: ${JSON.stringify(value)}`);
+		return;
+	}
+	if (!Array.isArray(value)) throw new Error(`${why} — got: ${JSON.stringify(value)}`);
+}
+
+async function waitForReady(deadlineAt: number): Promise<void> {
+	while (Date.now() < deadlineAt) {
+		try {
+			const res = await fetch(`${BASE}/health-check`, {
+				signal: AbortSignal.timeout(1500),
+			});
+			if (res.ok) return;
+		} catch {
+			// not yet
+		}
+		await new Promise((r) => setTimeout(r, 500));
+	}
+	throw new Error(`http:dev did not respond on ${BASE}/health-check within ${BOOT_TIMEOUT_MS}ms`);
+}
+
+async function runCase(c: SmokeCase): Promise<void> {
+	const res = await fetch(`${BASE}${c.pathname}`, {
+		method: c.method,
+		headers: {
+			"Content-Type": "application/json",
+			...(c.headers ?? {}),
+		},
+		body: c.body === undefined ? undefined : JSON.stringify(c.body),
+		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+	});
+
+	if (res.status !== c.expectStatus) {
+		const txt = await res.text().catch(() => "<no body>");
+		throw new Error(`expected status ${c.expectStatus}, got ${res.status}. body: ${txt.slice(0, 600)}`);
+	}
+
+	if (c.assert) {
+		const txt = await res.text();
+		let parsed: JsonValue;
+		try {
+			parsed = JSON.parse(txt) as JsonValue;
+		} catch {
+			throw new Error(`response was not valid JSON. status=${res.status} body=${txt.slice(0, 400)}`);
+		}
+		c.assert(parsed);
+	}
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+async function main(): Promise<number> {
+	const startedAt = Date.now();
+	console.log(`[v05-smoke] booting bun run http:dev (PORT=${PORT}) ...`);
+
+	const child: ChildProcess = spawn("bun", ["run", "http:dev"], {
+		cwd: REPO_ROOT,
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, PORT: String(PORT) },
+		detached: true,
+	});
+
+	let serverOut = "";
+	child.stdout?.on("data", (chunk: Buffer) => {
+		serverOut += chunk.toString();
+	});
+	child.stderr?.on("data", (chunk: Buffer) => {
+		serverOut += chunk.toString();
+	});
+
+	const cleanup = (): void => {
+		try {
+			if (child.pid !== undefined) {
+				process.kill(-child.pid, "SIGTERM");
+			}
+		} catch {
+			// already gone
+		}
+	};
+	process.on("exit", cleanup);
+	process.on("SIGINT", () => {
+		cleanup();
+		process.exit(130);
+	});
+
+	let pass = 0;
+	let fail = 0;
+	const failures: { name: string; reason: string }[] = [];
+
+	try {
+		await waitForReady(Date.now() + BOOT_TIMEOUT_MS);
+		console.log(`[v05-smoke] server is ready (${Date.now() - startedAt}ms) — running ${cases.length} cases\n`);
+
+		for (const c of cases) {
+			const t0 = Date.now();
+			try {
+				await runCase(c);
+				const dur = Date.now() - t0;
+				console.log(`  PASS  ${c.name} (${dur}ms)`);
+				pass++;
+			} catch (err) {
+				const reason = err instanceof Error ? err.message : JSON.stringify(err);
+				console.log(`  FAIL  ${c.name}\n        ${reason}`);
+				failures.push({ name: c.name, reason });
+				fail++;
+			}
+		}
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : JSON.stringify(err);
+		console.error(`[v05-smoke] fatal: ${reason}`);
+		console.error(`[v05-smoke] last 800 bytes of server output:\n${serverOut.slice(-800)}`);
+		cleanup();
+		return 1;
+	}
+
+	const totalMs = Date.now() - startedAt;
+	console.log(`\n[v05-smoke] done in ${totalMs}ms — ${pass} passed, ${fail} failed`);
+	if (fail > 0) {
+		console.log("[v05-smoke] FAILURES:");
+		for (const f of failures) console.log(`  - ${f.name}: ${f.reason}`);
+	}
+
+	cleanup();
+	return fail === 0 ? 0 : 1;
+}
+
+const code = await main();
+// Give the SIGTERM a tick to propagate before we exit; otherwise bun's --watch
+// child can leak a stray runtime process on rare CI environments.
+await new Promise((r) => setTimeout(r, 250));
+process.exit(code);
