@@ -131,7 +131,11 @@
 							"c/devtools/release-runbook",
 							"c/devtools/post-v04-roadmap",
 							"c/devtools/workflow-primitives-roadmap",
-							"c/devtools/workflow-primitives-implementation"
+							"c/devtools/workflow-primitives-implementation",
+							"c/devtools/forEach-and-loop",
+							"c/devtools/switchOn",
+							"c/devtools/tryCatch",
+							"c/devtools/middleware"
 						]
 					},
 					{

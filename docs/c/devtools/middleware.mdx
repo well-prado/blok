@@ -1,0 +1,109 @@
+---
+title: "Middleware"
+description: "Workflows-as-middleware — declare a chain of pre-flight workflows on a trigger to handle auth, rate-limiting, request validation, and other cross-cutting concerns. Reuses the workflow primitive — no separate framework."
+icon: "shield"
+---
+
+In v0.5, **middleware is just a workflow**. You declare a workflow with `"middleware": true` in its definition, and any other workflow can opt into it by listing its name on the trigger:
+
+```json
+"trigger": {
+  "http": {
+    "method": "POST",
+    "path": "/orders",
+    "middleware": ["auth-check", "rate-limit"]
+  }
+}
+```
+
+Middleware run **before** the main workflow, in the order declared, sharing the same `ctx`. A middleware can stash data on `ctx.state` for downstream middleware/steps (`identity`, `rateLimitBucket`, etc.). A middleware can short-circuit by throwing — typically via `@blokjs/throw` with an HTTP status code (`401` for auth, `429` for rate-limit).
+
+---
+
+## Authoring a middleware
+
+Middleware workflows go in `triggers/http/workflows/json/middleware/`. They look like normal workflows, except:
+
+1. The top-level `"middleware": true` flag marks them as middleware-only (they don't get their own HTTP route).
+2. They typically end either by throwing (short-circuit) or by publishing context for the main workflow to read (`@blokjs/ctx-publish`).
+
+### Auth check (skeleton)
+
+```json
+{
+  "name": "auth-check",
+  "version": "1.0.0",
+  "middleware": true,
+  "steps": [
+    {
+      "id": "extract-token",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "(ctx.request.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
+      }
+    },
+    {
+      "id": "deny-if-missing",
+      "branch": {
+        "when": "ctx.state['extract-token'] === ''",
+        "then": [
+          {
+            "id": "respond-401",
+            "use": "@blokjs/throw",
+            "inputs": {
+              "message": "Unauthorized",
+              "code": 401,
+              "body": { "error": "Unauthorized", "reason": "missing bearer token" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "stash-identity",
+      "use": "@blokjs/ctx-publish",
+      "inputs": {
+        "name": "identity",
+        "value": { "token": "js/ctx.state['extract-token']", "via": "auth-check" }
+      }
+    }
+  ]
+}
+```
+
+The `stash-identity` step writes `ctx.state.identity` so any downstream middleware (or the main workflow) can read who's making the request.
+
+### Rate limit (skeleton)
+
+The shipped `rate-limit.json` middleware uses `@blokjs/in-memory-kv` to track per-identity buckets. The bucket key falls back to `X-Forwarded-For` when no `identity.token` is present, so it works whether or not auth-check ran first.
+
+See [`triggers/http/workflows/json/middleware/rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/rate-limit.json) for the full implementation.
+
+---
+
+## Runtime contract
+
+- **Order matters.** Middleware run in the order declared on the trigger. Earlier middleware can publish state that later middleware read.
+- **Single ctx.** All middleware share the same `ctx` as the main workflow — there's no per-middleware isolation. A `ctx.state.identity` written by `auth-check` is read by `rate-limit` and the main workflow alike.
+- **Short-circuit by throwing.** A middleware that throws aborts the chain. The main workflow does **not** run. The error's `code` and `body` (when set via `@blokjs/throw`) become the HTTP response.
+- **Pass-through is implicit.** A middleware that runs to completion without throwing passes control to the next middleware. There is no explicit `next()` call.
+- **Middleware are tagged in traces.** Steps that ran as part of a middleware chain are tagged with origin `mw:<middleware-name>` in Blok Studio's StepRail, so you can tell at a glance which steps came from auth, rate-limit, vs the main workflow body.
+
+---
+
+## Real-world example
+
+[`triggers/http/workflows/json/v05-protected.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-protected.json) is the minimal demo — a single-step main workflow guarded by `auth-check` then `rate-limit`. Curl with no Authorization header → 401. Curl with a matching `Authorization: Bearer <token>` and `X-Expected-Token: <token>` → 200 once, then 429 after 5 requests in a 60-second window.
+
+[`triggers/http/workflows/json/v05-order-fulfillment.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) shows the same chain on a real workflow — auth-check + rate-limit run before a switchOn that branches to per-order-type pipelines, with the rate-limit bucket keyed off `ctx.state.identity.token` written by auth-check.
+
+Both are curl-validated by `bun run v05:smoke`.
+
+---
+
+## Caveats
+
+- **The shipped `auth-check` is a demo, not a JWT verifier.** It does header-token equality against an `X-Expected-Token` header — useful for end-to-end testing the chain, but not production-shippable. Real JWT verification (with audience/issuer/expiry checks) is on the roadmap as a follow-up; today, copy the demo and replace the `extract-token`/`deny-if-mismatch` steps with your verification logic.
+- **The shipped `rate-limit` is in-memory and single-process.** `@blokjs/in-memory-kv` is a process-local map; counters reset on restart and don't sync across replicas. For production, swap the in-memory-kv steps for a Redis-backed equivalent. Tracked in the v0.5 backlog.
+- **Middleware are declared on the trigger, not the workflow body.** There's no per-step middleware today, and no workflow-level middleware (declared at the workflow's top level instead of on each trigger). The latter is a small follow-up; track its arrival in the v0.5 backlog.
+- **Middleware participate in trace origin tagging, not in concurrency-key resolution.** A trigger's `concurrencyKey` is resolved from ctx **before** middleware run, so an `identity.userId` written by `auth-check` cannot be used as the concurrency key. Resolve concurrency keys from `ctx.request.headers` or `ctx.request.body` instead, or hold off on middleware-driven concurrency until that resolution order is reworked.

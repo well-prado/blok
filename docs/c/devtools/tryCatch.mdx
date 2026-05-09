@@ -1,0 +1,140 @@
+---
+title: "tryCatch"
+description: "JS-like exception handling for sub-pipelines — try/catch/finally with an `$.error` proxy in the catch arm and finally semantics that match JavaScript exactly."
+icon: "shield-halved"
+---
+
+`tryCatch` wraps a sub-pipeline in JavaScript-style exception handling. If any step inside `try` throws, control jumps to `catch`. The optional `finally` arm runs unconditionally — on success, on caught error, and even on an uncaught throw from inside `catch`.
+
+Use it for:
+- **Sagas** — multi-step work where you need to roll back on failure.
+- **Best-effort steps** — non-critical work you'd rather log than crash on.
+- **Always-run cleanup** — audit logs, metrics, lock release that must fire whether the work succeeded or not.
+
+---
+
+## Authoring (TS DSL)
+
+```ts
+import { workflow, tryCatch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "saga",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    tryCatch({
+      id: "transactional-write",
+      try: [
+        { id: "create",   use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
+        { id: "risky",    use: "@blokjs/api-call", inputs: { url: $.req.body.url, method: "POST" } },
+        { id: "finalize", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
+      ],
+      catch: [
+        {
+          id: "rollback",
+          use: "@blokjs/api-call",
+          inputs: {
+            url: "...",
+            method: "POST",
+            body: { reason: $.error.message, errorName: $.error.name },
+          },
+        },
+      ],
+      finally: [
+        { id: "metric", use: "@blokjs/audit-log", inputs: { event: "saga-completed" } },
+      ],
+    }),
+  ],
+});
+```
+
+## Authoring (JSON)
+
+```json
+{
+  "id": "transactional-write",
+  "tryCatch": {
+    "try": [/* happy-path steps */],
+    "catch": [
+      {
+        "id": "rollback",
+        "use": "@blokjs/api-call",
+        "inputs": {
+          "body": { "reason": "js/ctx.error.message", "errorName": "js/ctx.error.name" }
+        }
+      }
+    ],
+    "finally": [
+      { "id": "metric", "use": "@blokjs/audit-log", "inputs": { "event": "saga-completed" } }
+    ]
+  }
+}
+```
+
+---
+
+## Runtime contract
+
+- **`try` runs first.** If every step succeeds, `catch` is skipped and `finally` runs.
+- **On any throw**, `ctx.error` is populated and `catch` runs. The captured error's `message`, `name`, and `stack` are available via the `$.error` proxy (TS) or `js/ctx.error.<field>` (JSON). `$.error` is **only** defined inside `catch` — it's `undefined` in `try` and `finally`.
+- **`finally` always runs**, even when `catch` itself throws. JavaScript-style: a throw from `finally` supersedes a pending throw from `catch`.
+- **State mutations from any block** — try, catch, or finally — are visible to subsequent top-level steps. That's how saga rollback flags propagate.
+- **Catch can swallow OR rethrow.** A catch that runs to completion without throwing makes the tryCatch step "succeed" — execution continues with the next top-level step. To fail the workflow on a caught error, throw explicitly via `@blokjs/throw` (lets you set the HTTP status code and response body).
+
+---
+
+## The "errored step state" footgun
+
+When a step inside `try` throws, the runner still writes a placeholder envelope (`{}` for the step's `data`) into `ctx.state[<step.id>]`. That means a naive existence check from the catch arm — `ctx.state['create-account'] !== undefined` — is always true after the step has been **attempted**, regardless of whether it succeeded.
+
+The reliable pattern is to publish a positive marker right after the step you care about:
+
+```json
+"try": [
+  { "id": "create-account", "use": "@blokjs/api-call", "inputs": { /* ... */ } },
+  {
+    "id": "mark-account-created",
+    "use": "@blokjs/ctx-publish",
+    "inputs": { "name": "accountCreated", "value": true }
+  },
+  /* more steps... */
+]
+```
+
+Then the catch arm branches on the marker:
+
+```json
+"catch": [
+  {
+    "id": "decide-rollback",
+    "branch": {
+      "when": "ctx.state.accountCreated === true",
+      "then": [/* roll back the account */],
+      "else": [/* nothing to roll back */]
+    }
+  }
+]
+```
+
+The `mark-account-created` step only runs after `create-account` returns successfully, so the marker is a true success witness.
+
+---
+
+## Real-world examples
+
+[`triggers/http/workflows/json/v05-saga.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-saga.json) is the minimal demo — a three-step transaction with a rollback in catch and a metric emit in finally. Pass `middleUrl: https://httpbin.org/status/500` to force the failure path.
+
+[`triggers/http/workflows/json/v05-user-signup-saga.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-user-signup-saga.json) shows the conditional-rollback pattern — a `branch` inside `catch` that only rolls back the account if it actually got created. Uses the `accountCreated` marker described above.
+
+[`triggers/http/workflows/json/v05-nested-control-flow.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-nested-control-flow.json) wraps a per-item pipeline in tryCatch inside a `forEach`, using a branch in catch to decide whether to rethrow (required item) or swallow (optional item).
+
+All three are curl-validated by `bun run v05:smoke`.
+
+---
+
+## Caveats
+
+- **Errors thrown inside `catch` are not re-caught.** They propagate after `finally` runs, just like JavaScript. Don't nest a tryCatch inside a catch arm if you only want to retry — use `retry: { maxAttempts }` on the inner step instead.
+- **Errors thrown inside `finally` supersede everything.** If `try` succeeded but `finally` throws, the workflow sees the `finally` error. If `catch` is currently propagating an error and `finally` also throws, the `finally` error wins.
+- **Use `@blokjs/throw` for HTTP-status-shaping.** Plain `throw new Error(...)` from a `defineNode` step surfaces as HTTP 500 by default. `@blokjs/throw` with `{ code: 401, body: {...} }` lets you control both the status code and the JSON response — important when the catch arm is the user-facing failure path.
+- **No mid-step durable checkpoint.** A `wait` step inside `try` will not resume the catch arm correctly across process restarts. Tracked in the v0.5 backlog as an open architectural gap.
