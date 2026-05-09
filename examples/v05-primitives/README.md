@@ -53,6 +53,33 @@ For first read I'd suggest:
 
 If those read cleanly, the rest mostly fall out of the same patterns.
 
+## Status: shipped vs deferred
+
+Of the 15 mocks here, **12 have real curl-validated counterparts** in `triggers/http/workflows/json/`. They are exercised by `bun run v05:smoke` (38 cases / ~12s). The mapping:
+
+| Mock | Real workflow | Notes |
+|---|---|---|
+| `01-order-fulfillment` | `v05-order-fulfillment.json` | All five primitives in one workflow |
+| `03-webhook-fanout` | `v05-webhook-fanout.json` | Original Phase F real example |
+| `04-multi-tenant-router` | `v05-multi-tenant-router.json` + `v05-tenant-{acme,beta,gamma}.json` | Switch + sub-workflow dispatch |
+| `05-csv-import-pipeline` | `v05-csv-import.json` | forEach + tryCatch + DLQ |
+| `06-admin-delete-user` | `v05-admin-delete-user.json` + `middleware/admin-only.json` | jwt-auth + admin-only chain |
+| `07-middleware-auth-check` | `middleware/jwt-auth.json` (production) + `middleware/auth-check.json` (demo) | Two flavors |
+| `08-middleware-rate-limit` | `middleware/rate-limit.json` (in-memory) + `middleware/redis-rate-limit.json` (production) | Two flavors |
+| `11-user-signup-saga` | `v05-user-signup-saga.json` | tryCatch with conditional rollback |
+| `12-data-export-pipeline` | `v05-data-export.json` | forEach + tryCatch + per-step retry |
+| `13-nested-control-flow` | `v05-nested-control-flow.json` | 4-deep primitive nesting |
+| `14-travel-booking-saga` | `v05-travel-booking.json` | tryCatch + manual compensation chain |
+| `15-hello-with-global-middleware` | `v05-hello-with-mw.json` | Workflow-level middleware (closest analog to global) |
+
+**Three deferred** (referenced from BACKLOG.md, not yet promoted):
+
+- `02-async-job-poller` — needs `wait` step inside `loop`. Wait-inside-primitives is in the design phase (see [`wait-inside-primitives-design.mdx`](../../docs/c/devtools/wait-inside-primitives-design.mdx)); the runtime work is a v0.6 / Phase 2+ deliverable.
+- `09-polling-with-backoff` — same blocker (wait inside loop).
+- `10-github-webhook-router` — needs an HMAC-signature-verify middleware. That's a small follow-up that adds `@blokjs/hmac-verify` as a helper node. Replacing the signature check with `jwt-auth` would work today but loses the demo's webhook-specific identity.
+
+The shipped real workflows are **smoke-validated** end-to-end. The remaining mocks stay here as design proposals; they'll get their real counterparts as the underlying primitives + helpers ship.
+
 ## How to give feedback
 
 For each example, evaluate:
