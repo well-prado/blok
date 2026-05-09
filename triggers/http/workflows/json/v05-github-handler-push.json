@@ -1,0 +1,22 @@
+{
+	"name": "v05-github-handler-push",
+	"version": "1.0.0",
+	"description": "Per-event GitHub webhook sub-workflow: handles `push`. Real deployments would update a build queue, kick off CI, post to Slack — this minimal version just summarizes the push for the smoke gate. Invoked from v05-github-webhook-router via the `subworkflow:` step shape.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ handler: 'push', repo: ctx.request.body.repo || null, ref: ctx.request.body.ref || null, commits: Array.isArray(ctx.request.body.commits) ? ctx.request.body.commits.length : 0 })"
+			}
+		}
+	]
+}

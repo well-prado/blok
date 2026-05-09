@@ -1,0 +1,22 @@
+{
+	"name": "v05-github-handler-pr",
+	"version": "1.0.0",
+	"description": "Per-event GitHub webhook sub-workflow: handles the pull-request family (pull_request, pull_request_review, pull_request_review_comment). Real deployments would update review state, post status checks, run lint/preview pipelines. The router groups this whole family via switch-case `when: [...]` so all PR-adjacent events flow through the same sub-workflow.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ handler: 'pr-family', action: ctx.request.body.action || null, prNumber: (ctx.request.body.pull_request && ctx.request.body.pull_request.number) || null, eventType: ctx.request.body._eventType || null })"
+			}
+		}
+	]
+}
