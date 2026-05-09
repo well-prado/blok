@@ -117,9 +117,44 @@ The HTTP response body always carries `{ error: "Unauthorized", reason: "<reason
 
 The shipped [`auth-check.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/auth-check.json) is a tiny demo for end-to-end testing the middleware machinery — it just compares the `Authorization` token to an `X-Expected-Token` header. **Don't ship this to production** — copy `jwt-auth` instead.
 
-### Rate limit
+### Rate limit (in-memory, single-process)
 
-The shipped [`rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/rate-limit.json) middleware uses `@blokjs/in-memory-kv` to track per-identity buckets. The bucket key falls back to `X-Forwarded-For` when no `identity.token` is present, so it works whether or not an auth middleware ran first.
+The shipped [`rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/rate-limit.json) middleware uses `@blokjs/in-memory-kv` to track per-identity buckets. Fixed-window, 5 req/60s default. The bucket key falls back to `X-Forwarded-For` when no `identity.token` is present, so it works whether or not an auth middleware ran first.
+
+**Use this for:** local dev, single-process deployments, internal tools where rate-limit precision across replicas doesn't matter.
+
+**Don't use this for:** production behind a load balancer (counters are per-process, so 3 replicas effectively triple the limit), long-running services (counters reset on restart).
+
+### Rate limit (Redis-backed, production)
+
+The shipped [`redis-rate-limit.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/middleware/redis-rate-limit.json) middleware mirrors `rate-limit.json` step-for-step but swaps `@blokjs/in-memory-kv` for `@blokjs/redis-kv`. Same algorithm, same defaults, durable storage:
+
+- Counters survive process restarts.
+- Multiple replicas share state — the limit holds across the fleet.
+- Per-key TTL set via Redis `SET ... PX <windowMs>`, so expired buckets evict automatically (no background reaper).
+- Keys are namespaced `blok:rate-limit:<identity>` so cleanup / inspection is grep-friendly (`KEYS blok:rate-limit:*` from redis-cli).
+
+Configuration:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `REDIS_URL` | `redis://127.0.0.1:6379` | Where the `ioredis` client connects |
+
+Use it on any trigger:
+
+```json
+"trigger": {
+  "http": {
+    "method": "POST",
+    "path": "/api",
+    "middleware": ["jwt-auth", "redis-rate-limit"]
+  }
+}
+```
+
+The full demo workflow [`v05-redis-protected.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-redis-protected.json) chains both `jwt-auth` and `redis-rate-limit` at the workflow level (v0.5.2 declaration), and is exercised end-to-end by the smoke gate (skipped when `REDIS_URL` is unset). The smoke run validates the bucket increments correctly across requests and that the 6th request inside the window returns `429` with a `retryAfterSec` header value.
+
+The underlying `@blokjs/redis-kv` helper is general-purpose — `set` / `get` / `delete` / `list` actions, JSON-encoded values, optional per-key `ttlMs`. Use it directly anywhere your workflow needs durable KV (idempotency keys, distributed locks, session storage). The `ioredis` dependency is loaded dynamically on first invocation, so workflows that don't use the helper pay nothing at boot.
 
 ---
 
@@ -149,6 +184,6 @@ All three are curl-validated by `bun run v05:smoke`.
 
 - **`jwt-auth` is production-shippable; `auth-check` is not.** Use `jwt-auth` in real deployments. `auth-check` is a header-token-equality demo retained for tutorials and the rate-limit interop test — it has no signature, no expiry, no issuer/audience checks, and is trivially bypassed by anyone who can guess the value of `X-Expected-Token`.
 - **JWKS keys are cached per process, not per request.** The first request to a JWKS-backed endpoint triggers a fetch; subsequent requests reuse the cached JWKS. `jose` handles rotation automatically by refetching when a token's `kid` isn't in the cache. Cold-start latency on the first request after process boot is one round-trip to the JWKS endpoint.
-- **The shipped `rate-limit` is in-memory and single-process.** `@blokjs/in-memory-kv` is a process-local map; counters reset on restart and don't sync across replicas. For production, swap the in-memory-kv steps for a Redis-backed equivalent. Tracked in the v0.5 backlog.
+- **`rate-limit` and `redis-rate-limit` ship side-by-side.** Pick `rate-limit` for local dev / single-process; pick `redis-rate-limit` for any production deployment behind a load balancer. They have identical configuration knobs and identical 429 response shape, so swapping is a one-line change in the trigger's `middleware: [...]` list.
 - **No per-step middleware.** Today middleware applies at the workflow or trigger level only — there's no way to declare middleware on a single step. If you need step-scoped logic, wrap the step in a `tryCatch` or sub-workflow.
 - **Middleware participate in trace origin tagging, not in concurrency-key resolution.** A trigger's `concurrencyKey` is resolved from ctx **before** middleware run, so an `identity.sub` written by `jwt-auth` cannot be used as the concurrency key. Resolve concurrency keys from `ctx.request.headers` or `ctx.request.body` instead, or hold off on middleware-driven concurrency until that resolution order is reworked.
