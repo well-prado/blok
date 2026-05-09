@@ -458,10 +458,18 @@ export default abstract class RunnerSteps {
 							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
 							ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms${attemptSuffix})`);
 
-							// Enrich error with step context so developers know which step failed
+							// Enrich error with step context so developers know which step failed.
+							// Attach `_blokStepId` directly on the wrap so TryCatchNode's
+							// envelope construction can surface `$.error.stepId` to authors
+							// without parsing the prefix back out of the message string.
 							const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
 							const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
-							(enrichedError as Error & { cause?: unknown }).cause = nodeErr;
+							const enrichedAny = enrichedError as Error & {
+								cause?: unknown;
+								_blokStepId?: string;
+							};
+							enrichedAny.cause = nodeErr;
+							enrichedAny._blokStepId = step.name;
 							throw enrichedError;
 						}
 					}
@@ -500,12 +508,22 @@ export default abstract class RunnerSteps {
 				throw e;
 			}
 
+			// Capture the step-enrichment wrap's `_blokStepId` BEFORE we
+			// unwrap past it. The wrap is the outermost layer (set inside
+			// the inner-try retry loop above); after unwrapping to the inner
+			// GlobalError this metadata would otherwise be lost. Surfaces to
+			// authors as `$.error.stepId` inside tryCatch.catch arms.
+			const wrapStepId =
+				typeof e === "object" && e !== null && "_blokStepId" in e
+					? (e as { _blokStepId?: unknown })._blokStepId
+					: undefined;
+
 			let error_context = <Error>{};
 			if (e instanceof GlobalError) {
 				error_context = e as GlobalError;
 			} else {
 				// Walk the `.cause` chain looking for a GlobalError. The
-				// step-enrichment wrap at line ~455 sets `cause = nodeErr`,
+				// step-enrichment wrap at line ~465 sets `cause = nodeErr`,
 				// and `nodeErr` may itself be a GlobalError thrown from
 				// `defineNode`-built nodes (e.g. `@blokjs/throw` setting
 				// `code: 401` for an auth-check middleware). Without this
@@ -538,6 +556,14 @@ export default abstract class RunnerSteps {
 					// `[step N/M] <name> failed: ...` enriched prefix.
 					(error_context as Error & { cause?: unknown }).cause = e;
 				}
+			}
+
+			// Stamp the wrap's stepId on the unwrapped error so TryCatchNode's
+			// `toErrorEnvelope` walk can surface it as `$.error.stepId`. The
+			// inner-try wrap layer is gone by this point; this is the only
+			// place where the runner can identify which sub-step failed.
+			if (typeof wrapStepId === "string" && wrapStepId.length > 0) {
+				(error_context as Error & { _blokStepId?: string })._blokStepId = wrapStepId;
 			}
 
 			throw error_context;
