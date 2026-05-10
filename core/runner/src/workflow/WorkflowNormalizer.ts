@@ -112,11 +112,24 @@ export interface InternalWorkflow {
 	steps: InternalStep[];
 	nodes: Record<string, InternalNodeConfig>;
 	/**
-	 * v0.5 — when true, this workflow is registered as middleware and is
+	 * v0.5 — when `true`, this workflow is registered as middleware and is
 	 * NOT exposed as a public HTTP route. Invoked from another workflow's
-	 * `trigger.http.middleware: [...]` array.
+	 * `trigger.http.middleware: [...]` array (or `appliedMiddleware` below).
 	 */
 	middleware?: true;
+	/**
+	 * v0.5.2 — workflow-level middleware chain. Authors write `middleware:
+	 * [...]` at the top level of the workflow definition; the normalizer
+	 * routes the array form here while keeping `middleware: true` as the
+	 * marker bit. Applies to ALL triggers of this workflow, runs BEFORE
+	 * any trigger-level middleware. Use this when a chain (auth, rate-limit)
+	 * applies uniformly across every trigger of a workflow — saves
+	 * repeating the same list on every trigger config.
+	 *
+	 * Mutually exclusive with `middleware: true` — a workflow cannot
+	 * simultaneously be a middleware AND apply other middleware to itself.
+	 */
+	appliedMiddleware?: readonly string[];
 }
 
 /**
@@ -147,7 +160,25 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
+	// `middleware` is overloaded:
+	//   - `true`            → marker bit, this workflow IS a middleware
+	//   - `string[]`        → workflow-level middleware chain (these run on
+	//                         every request to this workflow, before any
+	//                         trigger-level middleware)
+	// The two are mutually exclusive — refuse the conflict at load time
+	// rather than letting one silently win.
 	const middleware = wf.middleware === true ? (true as const) : undefined;
+	let appliedMiddleware: readonly string[] | undefined;
+	if (Array.isArray(wf.middleware)) {
+		const list = (wf.middleware as unknown[]).filter((s): s is string => typeof s === "string" && s.length > 0);
+		appliedMiddleware = list.length > 0 ? list : undefined;
+	}
+	if (middleware === true && appliedMiddleware !== undefined) {
+		const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
+		throw new Error(
+			`[blok] WorkflowNormalizer: workflow "${name}" sets both \`middleware: true\` (marker) and \`middleware: [...]\` (chain). These are mutually exclusive — pick one.${suffix}`,
+		);
+	}
 
 	// --- Trigger normalization (method "*" → "ANY") ---
 	const trigger = normalizeTrigger(wf.trigger, sourcePath);
@@ -263,6 +294,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		steps: internalSteps,
 		nodes: internalNodes,
 		...(middleware ? { middleware } : {}),
+		...(appliedMiddleware ? { appliedMiddleware } : {}),
 	};
 }
 

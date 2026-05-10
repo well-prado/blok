@@ -797,17 +797,27 @@ export default class HttpTrigger extends TriggerBase {
 					url: c.req.url,
 				} as unknown as RequestContext;
 
-				// v0.5 · trigger-level middleware chain. Each named middleware
-				// is a workflow with `middleware: true`; we materialize a
-				// fresh Configuration per middleware and run its steps on the
-				// SAME parent ctx so state mutations (e.g. ctx.state.identity
-				// from auth-check) carry forward to the main workflow.
-				// Middleware errors propagate to the outer catch — `@blokjs/throw`
-				// with `code: 401` produces a 401 HTTP response naturally.
+				// v0.5 · middleware chain. Each named middleware is a workflow
+				// with `middleware: true`; we materialize a fresh Configuration
+				// per middleware and run its steps on the SAME parent ctx so
+				// state mutations (e.g. ctx.state.identity from auth-check)
+				// carry forward to the main workflow. Middleware errors
+				// propagate to the outer catch — `@blokjs/throw` with `code:
+				// 401` produces a 401 HTTP response naturally.
+				//
+				// v0.5.2 · two declaration sites combined into one chain:
+				//   1. Workflow-level (`middleware: [...]` at the workflow root)
+				//      runs FIRST. Applies to every trigger of the workflow —
+				//      use this when a chain (auth, rate-limit) is uniform.
+				//   2. Trigger-level (`trigger.http.middleware: [...]`) runs
+				//      SECOND. Use this when the chain varies by trigger
+				//      (e.g. only the public endpoint needs CAPTCHA).
 				const httpTriggerCfg = (this.configuration.trigger as { http?: { middleware?: unknown } } | undefined)?.http;
-				const middlewareNames = Array.isArray(httpTriggerCfg?.middleware)
+				const triggerLevel = Array.isArray(httpTriggerCfg?.middleware)
 					? (httpTriggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
 					: [];
+				const workflowLevel = this.configuration.appliedMiddleware ?? [];
+				const middlewareNames: string[] = [...workflowLevel, ...triggerLevel];
 				if (middlewareNames.length > 0) {
 					await this.runMiddlewareChain(ctx, middlewareNames);
 				}

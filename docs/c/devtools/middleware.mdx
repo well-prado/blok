@@ -4,19 +4,40 @@ description: "Workflows-as-middleware — declare a chain of pre-flight workflow
 icon: "shield"
 ---
 
-In v0.5, **middleware is just a workflow**. You declare a workflow with `"middleware": true` in its definition, and any other workflow can opt into it by listing its name on the trigger:
+In v0.5, **middleware is just a workflow**. You declare a workflow with `"middleware": true` in its definition, and any other workflow can opt into it by listing its name in one of two places.
+
+## Two declaration sites — workflow-level vs trigger-level
+
+**Workflow-level** (v0.5.2+) — declare once at the top of the workflow body. Applies to **every** trigger of the workflow. Use this when the chain (auth, rate-limit) is uniform regardless of which trigger fired:
+
+```json
+{
+  "name": "v05-jwt-protected",
+  "middleware": ["jwt-auth"],
+  "trigger": {
+    "http": { "method": "POST", "path": "/" }
+  },
+  "steps": [/* ... */]
+}
+```
+
+**Trigger-level** — declare on a specific trigger config. Applies only when that particular trigger fires. Use this when the chain varies by trigger (e.g. only the public HTTP endpoint needs CAPTCHA, the worker queue doesn't):
 
 ```json
 "trigger": {
   "http": {
     "method": "POST",
     "path": "/orders",
-    "middleware": ["auth-check", "rate-limit"]
+    "middleware": ["captcha", "rate-limit"]
   }
 }
 ```
 
+When **both** are set, workflow-level runs **first**, then trigger-level — so a workflow-level `auth` chain stashes `ctx.state.identity` before a trigger-level `rate-limit` consumes it.
+
 Middleware run **before** the main workflow, in the order declared, sharing the same `ctx`. A middleware can stash data on `ctx.state` for downstream middleware/steps (`identity`, `rateLimitBucket`, etc.). A middleware can short-circuit by throwing — typically via `@blokjs/throw` with an HTTP status code (`401` for auth, `429` for rate-limit).
+
+> **Don't put `middleware: true` AND `middleware: [...]` on the same workflow.** The two are mutually exclusive (one means "I AM a middleware", the other means "I USE these middleware"). The normalizer rejects the conflict at load time.
 
 ---
 
@@ -129,5 +150,5 @@ All three are curl-validated by `bun run v05:smoke`.
 - **`jwt-auth` is production-shippable; `auth-check` is not.** Use `jwt-auth` in real deployments. `auth-check` is a header-token-equality demo retained for tutorials and the rate-limit interop test — it has no signature, no expiry, no issuer/audience checks, and is trivially bypassed by anyone who can guess the value of `X-Expected-Token`.
 - **JWKS keys are cached per process, not per request.** The first request to a JWKS-backed endpoint triggers a fetch; subsequent requests reuse the cached JWKS. `jose` handles rotation automatically by refetching when a token's `kid` isn't in the cache. Cold-start latency on the first request after process boot is one round-trip to the JWKS endpoint.
 - **The shipped `rate-limit` is in-memory and single-process.** `@blokjs/in-memory-kv` is a process-local map; counters reset on restart and don't sync across replicas. For production, swap the in-memory-kv steps for a Redis-backed equivalent. Tracked in the v0.5 backlog.
-- **Middleware are declared on the trigger, not the workflow body.** There's no per-step middleware today, and no workflow-level middleware (declared at the workflow's top level instead of on each trigger). The latter is a small follow-up; track its arrival in the v0.5 backlog.
+- **No per-step middleware.** Today middleware applies at the workflow or trigger level only — there's no way to declare middleware on a single step. If you need step-scoped logic, wrap the step in a `tryCatch` or sub-workflow.
 - **Middleware participate in trace origin tagging, not in concurrency-key resolution.** A trigger's `concurrencyKey` is resolved from ctx **before** middleware run, so an `identity.sub` written by `jwt-auth` cannot be used as the concurrency key. Resolve concurrency keys from `ctx.request.headers` or `ctx.request.body` instead, or hold off on middleware-driven concurrency until that resolution order is reworked.

@@ -39,6 +39,14 @@ export default class Configuration implements Config {
 	public steps: NodeBase[];
 	public nodes: Node;
 	public trigger: Trigger;
+	/**
+	 * v0.5.2 — workflow-level middleware chain. Populated from the
+	 * normalized workflow's `appliedMiddleware` field. HTTP and Worker
+	 * triggers prepend this list to their own `trigger.<kind>.middleware`
+	 * before invoking the chain, so workflow-level entries run BEFORE
+	 * trigger-level entries on every request.
+	 */
+	public appliedMiddleware: readonly string[];
 	public static loaded_nodes: Node = <Node>{};
 	public globalOptions: GlobalOptions | undefined;
 
@@ -48,6 +56,7 @@ export default class Configuration implements Config {
 		this.version = "";
 		this.name = "";
 		this.trigger = {};
+		this.appliedMiddleware = [];
 		this.initializeRuntimeRegistry();
 	}
 
@@ -226,6 +235,11 @@ export default class Configuration implements Config {
 		this.version = this.workflow.version;
 		this.name = this.workflow.name;
 		this.trigger = this.workflow.trigger;
+		// Workflow-level middleware list (v0.5.2). Lives on the normalized
+		// workflow as `appliedMiddleware` — see WorkflowNormalizer for the
+		// schema overload (`middleware: string[]` at the top level).
+		const wfWithApplied = this.workflow as unknown as { appliedMiddleware?: readonly string[] };
+		this.appliedMiddleware = Array.isArray(wfWithApplied.appliedMiddleware) ? wfWithApplied.appliedMiddleware : [];
 	}
 
 	protected async getSteps(blueprint_steps: RunnerNode[]): Promise<NodeBase[]> {
