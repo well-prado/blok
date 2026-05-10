@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { CircuitBreaker } from "../CircuitBreaker";
 import { PrometheusMetricsBridge } from "../PrometheusMetricsBridge";
 import { RateLimiter } from "../RateLimiter";

@@ -1,4 +1,4 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, ResponseContext } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
@@ -37,7 +37,7 @@ class AlwaysThrowNode extends RunnerNode {
 		this.type = "module";
 		this.active = true;
 	}
-	async run() {
+	async run(_ctx: Context): Promise<ResponseContext> {
 		this.attempts += 1;
 		throw new Error("always-fails");
 	}

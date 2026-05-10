@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
+import type GlobalOptions from "../../src/types/GlobalOptions";
 
 class ExprNode extends RunnerNode {
 	constructor() {
@@ -67,7 +68,7 @@ async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration
 		nodes: {
 			getNode: (name: string): RunnerNode | null => helpers[name] ?? null,
 		},
-	};
+	} as unknown as GlobalOptions;
 	await config.init("test-wf", globalOptions, workflowDef);
 	const state: Record<string, unknown> = {};
 	const ctx = {

@@ -1046,7 +1046,7 @@ describe("TraceRouter", () => {
 
 			// Emit a new event for this run
 			const nodesBefore = res.writtenChunks.length;
-			const nodeRun = tracker.startNode(runs.run3.id, {
+			tracker.startNode(runs.run3.id, {
 				nodeName: "process-data",
 				nodeType: "module",
 				runtimeKind: "nodejs",

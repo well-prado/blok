@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { APMIntegration } from "../APMIntegration";
 
 // Reset tracing bootstrap between tests

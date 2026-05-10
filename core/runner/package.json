@@ -18,11 +18,6 @@
 		"sync:proto:fromroot": "mkdir -p src/adapters/grpc/proto/blok/runtime/v1 && cp ../../proto/blok/runtime/v1/runtime.proto src/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
 		"test:dev": "vitest",
 		"test": "vitest run",
-		"test:integration": "vitest run --config vitest.integration.config.ts",
-		"test:integration:dev": "vitest --config vitest.integration.config.ts",
-		"test:integration:coverage": "vitest run --config vitest.integration.config.ts --coverage",
-		"test:parity": "vitest run --config vitest.integration.config.ts __tests__/integration/parity",
-		"test:all": "vitest run && vitest run --config vitest.integration.config.ts",
 		"typecheck": "tsc --noEmit --incremental"
 	},
 	"devDependencies": {

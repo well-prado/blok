@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	type AuditEntry,
-	AuditLogger,
-	type AuditSink,
-	ConsoleAuditSink,
-	InMemoryAuditSink,
-} from "../../security/AuditLogger";
+import { AuditLogger, type AuditSink, ConsoleAuditSink, InMemoryAuditSink } from "../../security/AuditLogger";
 
 describe("AuditLogger", () => {
 	let logger: AuditLogger;

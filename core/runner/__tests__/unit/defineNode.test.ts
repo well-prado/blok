@@ -12,9 +12,10 @@
 
 import type { Context } from "@blokjs/shared";
 import { GlobalError } from "@blokjs/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { type FnNodeDefinition, FunctionNode, defineNode } from "../../src/defineNode";
+import type { IBlokResponse } from "../../src/BlokResponse";
+import { FunctionNode, defineNode } from "../../src/defineNode";
 
 // Test helper to create a minimal Context
 function createTestContext(): Context {
@@ -38,10 +39,11 @@ function createTestContext(): Context {
 		},
 		logger: {
 			log: vi.fn(),
+			logLevel: vi.fn(),
 			error: vi.fn(),
-			warn: vi.fn(),
-			info: vi.fn(),
-			debug: vi.fn(),
+			getLogs: vi.fn(() => []),
+			getLogsAsText: vi.fn(() => ""),
+			getLogsAsBase64: vi.fn(() => ""),
 		},
 		config: {},
 		vars: {},
@@ -157,7 +159,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(result.data).toEqual({ result: 10 });
@@ -177,7 +179,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { delay: 10 });
+			const result = (await node.handle(ctx, { delay: 10 })) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(result.data).toEqual({ completed: true });
@@ -199,7 +201,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: "test" });
+			const result = (await node.handle(ctx, { value: "test" })) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(ctx.vars?.["my-value"]).toBe("test");
@@ -232,7 +234,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, {
+			const result = (await node.handle(ctx, {
 				user: {
 					id: "123",
 					profile: {
@@ -240,7 +242,7 @@ describe("defineNode", () => {
 						age: 30,
 					},
 				},
-			});
+			})) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(result.data).toEqual({
@@ -266,10 +268,10 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, {
+			const result = (await node.handle(ctx, {
 				email: "not-an-email",
 				age: -5,
-			});
+			})) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error).toBeInstanceOf(GlobalError);
@@ -292,7 +294,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { optional: "test" });
+			const result = (await node.handle(ctx, { optional: "test" })) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error?.context.message).toContain("required");
@@ -316,35 +318,35 @@ describe("defineNode", () => {
 			const ctx = createTestContext();
 
 			// Invalid email
-			const emailResult = await node.handle(ctx, {
+			const emailResult = (await node.handle(ctx, {
 				email: "invalid",
 				id: "550e8400-e29b-41d4-a716-446655440000",
 				website: "https://example.com",
-			});
+			})) as IBlokResponse;
 			expect(emailResult.success).toBe(false);
 
 			// Invalid UUID
-			const uuidResult = await node.handle(ctx, {
+			const uuidResult = (await node.handle(ctx, {
 				email: "test@example.com",
 				id: "not-a-uuid",
 				website: "https://example.com",
-			});
+			})) as IBlokResponse;
 			expect(uuidResult.success).toBe(false);
 
 			// Invalid URL
-			const urlResult = await node.handle(ctx, {
+			const urlResult = (await node.handle(ctx, {
 				email: "test@example.com",
 				id: "550e8400-e29b-41d4-a716-446655440000",
 				website: "not-a-url",
-			});
+			})) as IBlokResponse;
 			expect(urlResult.success).toBe(false);
 
 			// Valid input
-			const validResult = await node.handle(ctx, {
+			const validResult = (await node.handle(ctx, {
 				email: "test@example.com",
 				id: "550e8400-e29b-41d4-a716-446655440000",
 				website: "https://example.com",
-			});
+			})) as IBlokResponse;
 			expect(validResult.success).toBe(true);
 		});
 
@@ -365,31 +367,31 @@ describe("defineNode", () => {
 			const ctx = createTestContext();
 
 			// Negative age
-			const negativeResult = await node.handle(ctx, {
+			const negativeResult = (await node.handle(ctx, {
 				age: -5,
 				score: 50,
-			});
+			})) as IBlokResponse;
 			expect(negativeResult.success).toBe(false);
 
 			// Age too high
-			const tooHighResult = await node.handle(ctx, {
+			const tooHighResult = (await node.handle(ctx, {
 				age: 150,
 				score: 50,
-			});
+			})) as IBlokResponse;
 			expect(tooHighResult.success).toBe(false);
 
 			// Score out of range
-			const scoreResult = await node.handle(ctx, {
+			const scoreResult = (await node.handle(ctx, {
 				age: 30,
 				score: 150,
-			});
+			})) as IBlokResponse;
 			expect(scoreResult.success).toBe(false);
 
 			// Valid
-			const validResult = await node.handle(ctx, {
+			const validResult = (await node.handle(ctx, {
 				age: 30,
 				score: 85,
-			});
+			})) as IBlokResponse;
 			expect(validResult.success).toBe(true);
 		});
 
@@ -409,17 +411,17 @@ describe("defineNode", () => {
 			const ctx = createTestContext();
 
 			// Empty array
-			const emptyResult = await node.handle(ctx, { tags: [] });
+			const emptyResult = (await node.handle(ctx, { tags: [] })) as IBlokResponse;
 			expect(emptyResult.success).toBe(false);
 
 			// Too many items
-			const tooManyResult = await node.handle(ctx, {
+			const tooManyResult = (await node.handle(ctx, {
 				tags: ["a", "b", "c", "d", "e", "f"],
-			});
+			})) as IBlokResponse;
 			expect(tooManyResult.success).toBe(false);
 
 			// Valid
-			const validResult = await node.handle(ctx, { tags: ["a", "b"] });
+			const validResult = (await node.handle(ctx, { tags: ["a", "b"] })) as IBlokResponse;
 			expect(validResult.success).toBe(true);
 			expect(validResult.data).toEqual({ count: 2 });
 		});
@@ -440,12 +442,12 @@ describe("defineNode", () => {
 			const ctx = createTestContext();
 
 			// Invalid enum value
-			const invalidResult = await node.handle(ctx, { status: "unknown" });
+			const invalidResult = (await node.handle(ctx, { status: "unknown" })) as IBlokResponse;
 			expect(invalidResult.success).toBe(false);
 
 			// Valid enum values
 			for (const status of ["active", "inactive", "pending"]) {
-				const result = await node.handle(ctx, { status });
+				const result = (await node.handle(ctx, { status })) as IBlokResponse;
 				expect(result.success).toBe(true);
 				expect(result.data).toEqual({ status });
 			}
@@ -467,7 +469,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { required: "test" });
+			const result = (await node.handle(ctx, { required: "test" })) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(result.data).toEqual({ value: 42 });
@@ -491,7 +493,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error).toBeInstanceOf(GlobalError);
@@ -513,7 +515,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error?.context.message).toContain("Validation failed");
@@ -537,7 +539,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 			expect(result.data).toEqual({
@@ -560,7 +562,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error).toBeInstanceOf(GlobalError);
@@ -581,7 +583,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.error?.context.stack).toBeDefined();
 			expect(result.error?.context.stack).toContain("Error: Test error");
@@ -599,7 +601,7 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result.success).toBe(false);
 			expect(result.error?.context.message).toBe("String error");
@@ -620,15 +622,15 @@ describe("defineNode", () => {
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, {
+			const result = (await node.handle(ctx, {
 				email: "invalid",
 				age: -5,
-			});
+			})) as IBlokResponse;
 
 			expect(result.error?.context.code).toBe(400);
 			expect(result.error?.hasJson()).toBe(true);
 			expect(result.error?.context.json).toHaveProperty("validation_errors");
-			const errors = result.error?.context.json?.validation_errors as any[];
+			const errors = result.error?.context.json?.validation_errors as unknown as unknown[];
 			expect(Array.isArray(errors)).toBe(true);
 			expect(errors.length).toBeGreaterThan(0);
 		});
@@ -649,17 +651,19 @@ describe("defineNode", () => {
 					// TypeScript should know the exact types here
 					const userId: string = input.userId;
 					const count: number = input.count;
-					const optional: string | undefined = input.optional;
+					// Type assertion only — confirms TypeScript inferred `optional` correctly.
+					const _optional: string | undefined = input.optional;
+					void _optional;
 
 					return { result: `${userId}-${count}` };
 				},
 			});
 
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, {
+			const result = (await node.handle(ctx, {
 				userId: "550e8400-e29b-41d4-a716-446655440000",
 				count: 42,
-			});
+			})) as IBlokResponse;
 
 			expect(result.success).toBe(true);
 		});
@@ -697,7 +701,7 @@ describe("defineNode", () => {
 
 			// The node should have the handle() method that Runner expects
 			const ctx = createTestContext();
-			const result = await node.handle(ctx, { value: 5 });
+			const result = (await node.handle(ctx, { value: 5 })) as IBlokResponse;
 
 			expect(result).toHaveProperty("success");
 			expect(result).toHaveProperty("data");

@@ -225,6 +225,7 @@ describe("RuntimeRegistry", () => {
 		it("should accept adapter with valid structure", () => {
 			const validAdapter: RuntimeAdapter = {
 				kind: "nodejs",
+				transport: "module",
 				execute: vi.fn().mockResolvedValue({
 					success: true,
 					data: {},
@@ -239,6 +240,7 @@ describe("RuntimeRegistry", () => {
 		it("should work with adapters that have additional methods", () => {
 			const extendedAdapter = {
 				kind: "nodejs" as RuntimeKind,
+				transport: "module" as const,
 				execute: vi.fn().mockResolvedValue({ success: true, data: {}, errors: null }),
 				initialize: vi.fn(),
 				cleanup: vi.fn(),

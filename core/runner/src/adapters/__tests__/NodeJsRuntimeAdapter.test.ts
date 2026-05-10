@@ -11,7 +11,7 @@ import {
 	createMockContext,
 	measureExecutionTime,
 } from "../../../test/helpers/test-utils";
-import type { RunnerNode } from "../../RunnerNode";
+import type RunnerNode from "../../RunnerNode";
 import { NodeJsRuntimeAdapter } from "../NodeJsRuntimeAdapter";
 
 describe("NodeJsRuntimeAdapter", () => {
@@ -82,7 +82,7 @@ describe("NodeJsRuntimeAdapter", () => {
 
 			expect(mockNode.run).toHaveBeenCalledWith(mockContext);
 			expect(capturedContext).toBe(mockContext);
-			expect(capturedContext?.id).toBe("custom-id");
+			expect((capturedContext as { id?: string } | null)?.id).toBe("custom-id");
 		});
 	});
 

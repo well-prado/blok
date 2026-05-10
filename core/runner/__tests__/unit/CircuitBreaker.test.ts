@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CircuitBreaker, CircuitOpenError } from "../../src/monitoring/CircuitBreaker";
 import type { CircuitBreakerEvent } from "../../src/monitoring/CircuitBreaker";
 

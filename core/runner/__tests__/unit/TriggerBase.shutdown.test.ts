@@ -6,7 +6,7 @@
  * Default 10s; configurable via BLOK_BACKEND_DISCONNECT_TIMEOUT_MS.
  */
 
-import type { ConcurrencyBackend, ConcurrencySlotResult } from "@blokjs/runner";
+import type { ConcurrencyBackend } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TriggerBase from "../../src/TriggerBase";
 import { RunTracker } from "../../src/tracing/RunTracker";
@@ -15,7 +15,7 @@ class TestTrigger extends TriggerBase {
 	async listen(): Promise<number> {
 		return 0;
 	}
-	override async stop(): Promise<void> {
+	async stop(): Promise<void> {
 		// no-op
 	}
 }
@@ -47,7 +47,7 @@ class SlowBackend implements ConcurrencyBackend {
 		});
 	}
 
-	async acquireSlot(): Promise<ConcurrencySlotResult> {
+	async acquireSlot(): Promise<{ acquired: boolean; currentInFlight: number }> {
 		return { acquired: false, currentInFlight: 0 };
 	}
 
@@ -66,7 +66,6 @@ class SlowBackend implements ConcurrencyBackend {
 
 describe("PR 3 D5 — backend disconnect timeout", () => {
 	const originalExit = process.exit;
-	const originalSetTimeout = setTimeout;
 
 	beforeEach(() => {
 		RunTracker.resetInstance();

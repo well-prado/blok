@@ -14,7 +14,10 @@ class TestNode extends NodeBase {
 	}
 }
 
-function createTestContext(overrides: Partial<Context> = {}): Context {
+// Loose `Record<string, unknown>` overrides so tests can pass shapes that
+// don't strictly match `Partial<Context>` (e.g. `config: { "<node>": ... }`,
+// which is the runtime layout but isn't reflected in the typed `ConfigContext`).
+function createTestContext(overrides: Record<string, unknown> = {}): Context {
 	return {
 		id: "test-ctx",
 		request: { body: {}, headers: {}, query: {}, params: {} },
@@ -27,7 +30,7 @@ function createTestContext(overrides: Partial<Context> = {}): Context {
 		eventLogger: null,
 		_PRIVATE_: null,
 		...overrides,
-	} as Context;
+	} as unknown as Context;
 }
 
 describe("NodeBase", () => {
@@ -162,7 +165,7 @@ describe("NodeBase", () => {
 
 		it("should access data parameter", () => {
 			const ctx = createTestContext();
-			const result = node.runJs("data.x", ctx, { x: 42 });
+			const result = node.runJs("data.x", ctx, { x: 42 } as unknown as Record<string, string>);
 			expect(result).toBe(42);
 		});
 
@@ -215,7 +218,7 @@ describe("NodeBase", () => {
 	describe("blueprintMapper()", () => {
 		it("should handle string input", () => {
 			const ctx = createTestContext();
-			const result = node.blueprintMapper("plain text", ctx);
+			const result = node.blueprintMapper("plain text" as unknown as Record<string, string>, ctx);
 			expect(result).toBe("plain text");
 		});
 
@@ -230,7 +233,7 @@ describe("NodeBase", () => {
 			const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 			const ctx = createTestContext();
 			// null will cause mapper to fail
-			const result = node.blueprintMapper(null as unknown as Record<string, unknown>, ctx);
+			const result = node.blueprintMapper(null as unknown as Record<string, string>, ctx);
 			// Should not throw
 			expect(result).toBeNull();
 			consoleSpy.mockRestore();

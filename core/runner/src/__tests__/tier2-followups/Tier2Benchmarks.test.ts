@@ -590,8 +590,6 @@ describe("Tier 2 #4 follow-up · sub-workflow listener cascade", () => {
 			});
 		}
 		const elapsed = performance.now() - start;
-
-		const listenerCount = parentController.signal.eventNames?.().length ?? 0;
 		// AbortSignal extends EventTarget, not EventEmitter; eventNames may
 		// not exist. Probe via getEventListeners isn't standard either.
 		// Use Node's process.getMaxListeners-style heuristic — when we hit

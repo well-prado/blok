@@ -1,12 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import {
-	APIKeyAuthProvider,
-	type APIKeyInfo,
-	AuthMiddleware,
-	type AuthRequest,
-	JWTAuthProvider,
-} from "../../security/AuthMiddleware";
+import { APIKeyAuthProvider, type APIKeyInfo, AuthMiddleware, JWTAuthProvider } from "../../security/AuthMiddleware";
 
 // Helper: create a valid JWT token
 function createJWT(payload: Record<string, unknown>, secret: string): string {

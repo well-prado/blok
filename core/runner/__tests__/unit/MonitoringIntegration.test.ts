@@ -5,10 +5,10 @@
  * work correctly together as integrated into TriggerBase.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CircuitBreaker, CircuitOpenError } from "../../src/monitoring/CircuitBreaker";
 import { HealthCheck } from "../../src/monitoring/HealthCheck";
-import type { DependencyHealth } from "../../src/monitoring/HealthCheck";
+import type {} from "../../src/monitoring/HealthCheck";
 import { RateLimiter } from "../../src/monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "../../src/monitoring/TriggerMetricsCollector";
 
@@ -502,7 +502,7 @@ describe("Monitoring Infrastructure Integration", () => {
 					}
 				} else {
 					// First 15 succeed
-					const result = await circuitBreaker.execute(async () => {
+					await circuitBreaker.execute(async () => {
 						await new Promise((resolve) => setTimeout(resolve, 1));
 						return { processed: true };
 					});

@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type CacheEntry,
-	type CacheProvider,
-	type CacheSetOptions,
-	type CacheStats,
-	InMemoryCache,
-	NodeResultCache,
-} from "../../cache/NodeResultCache";
+import { InMemoryCache, NodeResultCache } from "../../cache/NodeResultCache";
 
 // ---------------------------------------------------------------------------
 // InMemoryCache

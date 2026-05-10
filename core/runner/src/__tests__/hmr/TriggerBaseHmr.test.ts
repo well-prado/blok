@@ -198,10 +198,10 @@ describe("TriggerBase HMR", () => {
 		const invalidateSpy = vi.spyOn(trigger.hmr!, "invalidateModule");
 
 		const event: HMREvent = {
-			type: "node:changed",
+			type: "node:change",
 			filePath: "/some/node/path.ts",
 			relativePath: "path.ts",
-			category: "node",
+			timestamp: Date.now(),
 		};
 
 		await trigger.onHmrNodeChange(event);

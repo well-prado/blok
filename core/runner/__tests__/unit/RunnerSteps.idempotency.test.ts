@@ -1,4 +1,5 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, ResponseContext } from "@blokjs/shared";
+import type { GlobalError } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
@@ -195,9 +196,9 @@ describe("RunnerSteps — idempotency cache integration", () => {
 				this.active = true;
 				this.idempotencyKey = "should-not-cache";
 			}
-			async run() {
+			async run(_ctx: Context): Promise<ResponseContext> {
 				this.attempts += 1;
-				return { success: false, data: null, error: { message: "boom" } as unknown as Error };
+				return { success: false, data: null, error: { message: "boom" } as unknown as GlobalError };
 			}
 		}
 		const node = new ThrowingNode();

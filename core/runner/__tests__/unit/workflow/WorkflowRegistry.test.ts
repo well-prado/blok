@@ -148,7 +148,7 @@ describe("WorkflowRegistry", () => {
 			const registry = WorkflowRegistry.getInstance();
 			const calls: Array<[string, string, string]> = [];
 			registry.setAuthorizeFn((parent, child, ctx) => {
-				calls.push([parent, child, ctx.workflow_name]);
+				calls.push([parent, child, ctx.workflow_name ?? ""]);
 				return true;
 			});
 			await registry.authorize("orders", "send-receipt", stubCtx({ workflow_name: "orders" }));
