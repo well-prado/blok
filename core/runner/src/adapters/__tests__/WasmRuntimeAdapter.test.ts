@@ -5,7 +5,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertValidExecutionResult, createMockContext } from "../../../test/helpers/test-utils";
 import type RunnerNode from "../../RunnerNode";
 import { WasmRuntimeAdapter } from "../WasmRuntimeAdapter";
@@ -245,7 +245,7 @@ describe("WasmRuntimeAdapter", () => {
 	describe("execute() - Context Handling", () => {
 		it("should include node config from context", async () => {
 			const mockContext = createMockContext({
-				config: { "test-node": { key: "value" } },
+				config: { "test-node": { key: "value" } } as unknown as Record<string, unknown>,
 			});
 
 			const mockNode = {

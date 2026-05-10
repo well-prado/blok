@@ -45,8 +45,8 @@ const loggingNode = defineNode({
 	input: z.object({}),
 	output: z.object({ done: z.boolean() }),
 	async execute(ctx) {
-		ctx.logger.info("info message from node");
-		ctx.logger.warn("warn message from node");
+		ctx.logger.logLevel("info", "info message from node");
+		ctx.logger.logLevel("warn", "warn message from node");
 		return { done: true };
 	},
 });

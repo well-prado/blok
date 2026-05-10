@@ -288,13 +288,11 @@ describe("RunStore Performance Benchmarks", () => {
 	// === SqliteRunStore ===
 	describe("SqliteRunStore", () => {
 		let tmpDir: string;
-		let store: SqliteRunStore;
 
 		beforeEach(() => {
 			// Only create once for the suite
 			if (!tmpDir) {
 				tmpDir = mkdtempSync(join(tmpdir(), "blok-bench-"));
-				store = new SqliteRunStore(join(tmpDir, "bench.db"));
 			}
 		});
 

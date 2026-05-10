@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HMREvent } from "../../hmr/FileWatcher";
-import { HotReloadManager, type HotReloadStats } from "../../hmr/HotReloadManager";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {} from "../../hmr/FileWatcher";
+import { HotReloadManager } from "../../hmr/HotReloadManager";
 
 describe("HotReloadManager", () => {
 	let manager: HotReloadManager;

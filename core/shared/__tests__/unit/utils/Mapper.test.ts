@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Context from "../../../src/types/Context";
+import type ParamsDictionary from "../../../src/types/ParamsDictionary";
 import mapper from "../../../src/utils/Mapper";
 import { MapperResolutionError } from "../../../src/utils/MapperResolutionError";
 
@@ -66,7 +67,7 @@ describe("Mapper", () => {
 		it("handles nested data access via lodash.get", () => {
 			const ctx = createMockContext();
 			const data = { user: { name: "Alice" } };
-			const result = mapper.replaceString("Hi ${user.name}", ctx, data);
+			const result = mapper.replaceString("Hi ${user.name}", ctx, data as unknown as ParamsDictionary);
 			expect(result).toBe("Hi Alice");
 		});
 
@@ -100,22 +101,22 @@ describe("Mapper", () => {
 			// returned 0, the `||` fell through to runJs (which would throw
 			// for "count" not being in scope). Now `=== undefined` check
 			// preserves the 0.
-			expect(mapper.replaceString("${count}", ctx, { count: 0 })).toBe("0");
-			expect(mapper.replaceString("${flag}", ctx, { flag: false })).toBe("false");
-			expect(mapper.replaceString("${empty}", ctx, { empty: "" })).toBe("");
+			expect(mapper.replaceString("${count}", ctx, { count: 0 } as unknown as ParamsDictionary)).toBe("0");
+			expect(mapper.replaceString("${flag}", ctx, { flag: false } as unknown as ParamsDictionary)).toBe("false");
+			expect(mapper.replaceString("${empty}", ctx, { empty: "" } as unknown as ParamsDictionary)).toBe("");
 		});
 
 		it("JSON-encodes object values in interpolation (was: '[object Object]')", () => {
 			const ctx = createMockContext();
 			const data = { user: { id: 1, name: "Alice" } };
-			const result = mapper.replaceString("payload=${user}", ctx, data);
+			const result = mapper.replaceString("payload=${user}", ctx, data as unknown as ParamsDictionary);
 			// Pre-v0.3.x: `value as string` → "[object Object]". Now JSON.
 			expect(result).toBe('payload={"id":1,"name":"Alice"}');
 		});
 
 		it("renders null/undefined interpolation values as empty string", () => {
 			const ctx = createMockContext();
-			const result = mapper.replaceString("v=${x}", ctx, { x: null });
+			const result = mapper.replaceString("v=${x}", ctx, { x: null } as unknown as ParamsDictionary);
 			expect(result).toBe("v=");
 		});
 
@@ -220,7 +221,7 @@ describe("Mapper", () => {
 			setMode("strict");
 			const ctx = createMockContext();
 			expect(mapper.replaceString("js/1 + 2", ctx, {})).toBe(3);
-			expect(mapper.replaceString("${name}", ctx, { name: "ok" })).toBe("ok");
+			expect(mapper.replaceString("${name}", ctx, { name: "ok" } as unknown as ParamsDictionary)).toBe("ok");
 		});
 	});
 

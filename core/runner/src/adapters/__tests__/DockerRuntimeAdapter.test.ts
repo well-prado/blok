@@ -492,7 +492,7 @@ describe("DockerRuntimeAdapter", () => {
 				query: { page: "1" } as any,
 				method: "POST",
 				url: "/test",
-			};
+			} as unknown as typeof mockContext.request;
 
 			let capturedBody: any = null;
 

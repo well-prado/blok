@@ -92,7 +92,7 @@ describe("BunRuntimeAdapter", () => {
 
 			expect(mockNode.run).toHaveBeenCalledWith(mockContext);
 			expect(capturedContext).toBe(mockContext);
-			expect(capturedContext?.id).toBe("bun-test-id");
+			expect((capturedContext as { id?: string } | null)?.id).toBe("bun-test-id");
 		});
 
 		it("should handle node execution errors", async () => {

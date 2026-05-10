@@ -8,7 +8,7 @@
  * New function-first version: ~40 lines
  */
 
-import type { Context } from "@blokjs/shared";
+import type {} from "@blokjs/shared";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
 

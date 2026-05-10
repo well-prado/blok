@@ -4,8 +4,9 @@
  */
 
 import type { Context, LoggerContext } from "@blokjs/shared";
+import { expect, vi } from "vitest";
 import DefaultLogger from "../../src/DefaultLogger";
-import type { RunnerNode } from "../../src/RunnerNode";
+import type RunnerNode from "../../src/RunnerNode";
 import type { ExecutionResult, RuntimeKind } from "../../src/adapters/RuntimeAdapter";
 
 /**
@@ -90,6 +91,7 @@ export function createMockExecutionResult(overrides: Partial<ExecutionResult> = 
 export function createMockRuntimeAdapter(kind: RuntimeKind) {
 	return {
 		kind,
+		transport: "module" as const,
 		execute: vi.fn().mockResolvedValue(createMockExecutionResult()),
 	};
 }

@@ -20,7 +20,7 @@
 
 import type { Context } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RunCancelledError, isRunCancelledError } from "../../src/RunCancelledError";
+import { isRunCancelledError } from "../../src/RunCancelledError";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import TriggerBase from "../../src/TriggerBase";
@@ -105,26 +105,6 @@ class LoopingStepNode extends RunnerNode {
 		}
 		return { success: true, data: { ok: true }, error: null };
 	}
-}
-
-function makeCtx(): Context {
-	const ctx = {
-		id: "req-1",
-		workflow_name: "test-wf",
-		workflow_path: "/test.ts",
-		request: { body: {}, headers: {}, params: {}, query: {}, method: "POST", path: "/test" },
-		response: { data: null, contentType: "application/json", success: true, error: null },
-		error: { message: [] },
-		logger: { log: () => {}, error: () => {} },
-		config: {},
-		vars: {},
-		env: {},
-		eventLogger: null,
-		_PRIVATE_: null,
-	} as unknown as Context;
-	Object.defineProperty(ctx, "req", { get: () => ctx.request, enumerable: true, configurable: true });
-	Object.defineProperty(ctx, "prev", { get: () => ctx.response, enumerable: true, configurable: true });
-	return ctx;
 }
 
 describe("PR 1 H1 — HTTP cancel mid-step (integration)", () => {

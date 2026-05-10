@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import TriggerBase from "../../src/TriggerBase";
-import { WaitDispatchRequest } from "../../src/WaitDispatchRequest";
+
 import { DeferredDispatchSignal } from "../../src/scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler } from "../../src/scheduling/DeferredRunScheduler";
 import { RunTracker } from "../../src/tracing/RunTracker";

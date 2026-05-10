@@ -238,7 +238,7 @@ describe("SubworkflowNode — dispatch", () => {
 		});
 		const calls: Array<[string, string, string]> = [];
 		WorkflowRegistry.getInstance().setAuthorizeFn((parent, child, ctx) => {
-			calls.push([parent, child, ctx.workflow_name]);
+			calls.push([parent, child, ctx.workflow_name ?? ""]);
 			return true;
 		});
 		const node = makeSubworkflowNode({ stepName: "call", subworkflowName: "child-tenant-a" });
@@ -326,7 +326,7 @@ describe("SubworkflowNode — dispatch", () => {
 				this.type = "module";
 				this.active = true;
 			}
-			async run() {
+			async run(_ctx: Context): Promise<ResponseContext> {
 				throw new Error("child kaboom");
 			}
 		}

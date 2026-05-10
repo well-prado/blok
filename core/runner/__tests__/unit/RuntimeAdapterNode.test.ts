@@ -70,7 +70,6 @@ function makeStreamingAdapter(events: DecodedExecuteEvent[], result: ExecutionRe
 		kind: "python3",
 		transport: "grpc",
 		execute: vi.fn().mockResolvedValue(result),
-		checkHealth: vi.fn().mockResolvedValue(true),
 		executeStream: vi.fn(() => {
 			const iter: AsyncIterable<DecodedExecuteEvent> = {
 				[Symbol.asyncIterator]: async function* () {
@@ -87,7 +86,6 @@ function makeUnaryOnlyAdapter(result: ExecutionResult): RuntimeAdapter {
 		kind: "python3",
 		transport: "http",
 		execute: vi.fn().mockResolvedValue(result),
-		checkHealth: vi.fn().mockResolvedValue(true),
 	};
 }
 
@@ -135,11 +133,11 @@ describe("RuntimeAdapterNode", () => {
 			tracker = RunTracker.getInstance();
 			// Seed a workflow run + node run so addLog has somewhere to attach logs.
 			tracker.startRun({
-				id: traceRunId,
 				workflowName: "wf",
 				workflowPath: "/wf",
 				triggerType: "http",
-				input: {},
+				triggerSummary: "test",
+				nodeCount: 0,
 			});
 			vi.spyOn(tracker, "addLog");
 			vi.spyOn(tracker, "getNodeRun").mockReturnValue({

@@ -116,7 +116,7 @@ describe("RunnerSteps — maxDuration (Tier 2 quick-wins)", () => {
 		const runner = new Runner([node]);
 		await runner.run(ctx);
 
-		expect((ctx.response as { ok: boolean }).ok).toBe(true);
+		expect((ctx.response as unknown as { ok: boolean }).ok).toBe(true);
 	});
 
 	it("step that exceeds maxDuration throws StepTimeoutError", async () => {
@@ -140,7 +140,7 @@ describe("RunnerSteps — maxDuration (Tier 2 quick-wins)", () => {
 
 		// Second attempt is fast (no slow delay) — succeeds.
 		expect(node.attempts).toBe(2);
-		expect((ctx.response as { attempt: number }).attempt).toBe(2);
+		expect((ctx.response as unknown as { attempt: number }).attempt).toBe(2);
 	});
 
 	it("final-attempt timeout flips run status to 'timedOut'", async () => {
@@ -189,7 +189,7 @@ describe("RunnerSteps — maxDuration (Tier 2 quick-wins)", () => {
 		const runner = new Runner([node]);
 		await runner.run(ctx);
 
-		expect((ctx.response as { ok: boolean }).ok).toBe(true);
+		expect((ctx.response as unknown as { ok: boolean }).ok).toBe(true);
 	});
 
 	it("undefined maxDurationMs is the default (no cap)", async () => {
@@ -200,7 +200,7 @@ describe("RunnerSteps — maxDuration (Tier 2 quick-wins)", () => {
 		const runner = new Runner([node]);
 		await runner.run(ctx);
 
-		expect((ctx.response as { ok: boolean }).ok).toBe(true);
+		expect((ctx.response as unknown as { ok: boolean }).ok).toBe(true);
 	});
 
 	it("each retry attempt gets its own timeout (NOT a shared budget)", async () => {

@@ -19,6 +19,7 @@ import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import { defineNode } from "../../src/defineNode";
+import type GlobalOptions from "../../src/types/GlobalOptions";
 
 class ExprNode extends RunnerNode {
 	constructor() {
@@ -88,6 +89,7 @@ class ThrowNode extends RunnerNode {
 function makeFailingDefineNode(name: string, opts: { code?: number } = {}): RunnerNode {
 	const node = defineNode({
 		name,
+		description: name,
 		input: z.unknown(),
 		output: z.unknown(),
 		async execute(_ctx, _input) {
@@ -119,6 +121,7 @@ function makeFailingDefineNode(name: string, opts: { code?: number } = {}): Runn
 function makeSucceedingDefineNode(name: string): RunnerNode {
 	const node = defineNode({
 		name,
+		description: name,
 		input: z.unknown(),
 		output: z.unknown(),
 		async execute(_ctx, input) {
@@ -147,7 +150,7 @@ async function bootConfig(
 		nodes: {
 			getNode: (name: string): RunnerNode | null => helpers[name] ?? null,
 		},
-	};
+	} as unknown as GlobalOptions;
 	await config.init("test-wf", globalOptions, workflowDef);
 	const state: Record<string, unknown> = {};
 	const ctx = {
