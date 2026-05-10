@@ -512,6 +512,79 @@ async function buildJwtCases(): Promise<SmokeCase[]> {
 	];
 }
 
+/**
+ * Redis-backed cases for v05-redis-protected. Skipped when REDIS_URL is
+ * unset — the smoke gate prints a one-line skip notice and moves on. The
+ * spawned http:dev inherits the same REDIS_URL so the redis-rate-limit
+ * middleware connects to the same instance the smoke gate is using.
+ *
+ * Bucket isolation: each smoke run uses a unique JWT `sub` claim
+ * (`smoke-redis-<timestamp>`) so consecutive runs against a long-lived
+ * Redis don't see stale state from prior runs.
+ */
+async function buildRedisCases(): Promise<SmokeCase[]> {
+	if (process.env.REDIS_URL === undefined) return [];
+	const subject = `smoke-redis-${Date.now()}`;
+	const token = await mintJwt({ sub: subject });
+
+	// First five requests should each report count=1..5 with remaining=4..0.
+	// We generate them programmatically so the assertion matches the
+	// per-request expected count without copy-paste drift.
+	const underLimitCases: SmokeCase[] = [];
+	for (let i = 1; i <= 5; i++) {
+		const expectedCount = i;
+		const expectedRemaining = 5 - i;
+		underLimitCases.push({
+			name: `v05-redis-protected — request ${i}/5 under the limit (count=${expectedCount})`,
+			method: "POST",
+			pathname: "/v05-redis-protected",
+			headers: { Authorization: `Bearer ${token}` },
+			body: {},
+			expectStatus: 200,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				const rl = obj.rateLimit as Record<string, JsonValue> | undefined;
+				if (!rl || rl.count !== expectedCount) {
+					throw fail(`rateLimit.count should be ${expectedCount}`, obj);
+				}
+				if (rl.remaining !== expectedRemaining) {
+					throw fail(`rateLimit.remaining should be ${expectedRemaining}`, obj);
+				}
+			},
+		});
+	}
+
+	return [
+		{
+			name: "v05-redis-protected — missing auth → 401 from jwt-auth (rate-limit never runs)",
+			method: "POST",
+			pathname: "/v05-redis-protected",
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "missing_token") throw fail("reason should be 'missing_token'", obj);
+			},
+		},
+		...underLimitCases,
+		{
+			name: "v05-redis-protected — 6th request hits the limit → 429 with retryAfterSec",
+			method: "POST",
+			pathname: "/v05-redis-protected",
+			headers: { Authorization: `Bearer ${token}` },
+			body: {},
+			expectStatus: 429,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.error !== "Rate limit exceeded") throw fail("error should be 'Rate limit exceeded'", obj);
+				if (typeof obj.retryAfterSec !== "number" || obj.retryAfterSec <= 0) {
+					throw fail("retryAfterSec should be a positive number", obj);
+				}
+			},
+		},
+	];
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -633,6 +706,16 @@ async function main(): Promise<number> {
 		// output instead of crashing module init.
 		const jwtCases = await buildJwtCases();
 		cases.push(...jwtCases);
+
+		// Redis cases are gated on REDIS_URL — if a Redis isn't reachable,
+		// we silently skip rather than fail the whole smoke run. Operators
+		// opt in by exporting REDIS_URL before invoking the smoke script.
+		const redisCases = await buildRedisCases();
+		if (redisCases.length === 0 && process.env.REDIS_URL === undefined) {
+			console.log("[v05-smoke] note: REDIS_URL unset — skipping v05-redis-protected cases");
+		} else {
+			cases.push(...redisCases);
+		}
 		console.log(`[v05-smoke] server is ready (${Date.now() - startedAt}ms) — running ${cases.length} cases\n`);
 
 		for (const c of cases) {

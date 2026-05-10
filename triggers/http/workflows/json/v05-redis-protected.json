@@ -1,0 +1,23 @@
+{
+	"name": "v05-redis-protected",
+	"version": "1.0.0",
+	"description": "v0.5.2 demo — production middleware stack with workflow-level declaration. Chain runs in order: jwt-auth (verify token, stash claims at ctx.state.identity) → redis-rate-limit (enforce 5/60s per-identity, backed by Redis so the limit holds across restarts and replicas). Both middleware are declared at the workflow level via the v0.5.2 `middleware: [...]` field — applies to every trigger of this workflow without per-trigger duplication. Requires REDIS_URL pointing at a reachable Redis instance (default redis://127.0.0.1:6379). Smoke tests for this workflow are skipped when REDIS_URL is unset; opt in by exporting it before `bun run v05:smoke`.",
+	"middleware": ["jwt-auth", "redis-rate-limit"],
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, identity: { sub: ctx.state.identity.sub, iss: ctx.state.identity.iss }, rateLimit: { count: ctx.state['next-state'].count, remaining: 5 - ctx.state['next-state'].count } })"
+			}
+		}
+	]
+}

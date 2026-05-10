@@ -1,6 +1,6 @@
 import type { Context } from "@blokjs/shared";
 import { SignJWT, exportSPKI, generateKeyPair } from "jose";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AuditLogNode,
 	CtxPublishManyNode,
@@ -12,10 +12,12 @@ import {
 	JwtVerifyNode,
 	LogNode,
 	MetricsEmitNode,
+	RedisKvNode,
 	ThrowNode,
 	_resetAuditEventsForTests,
 	_resetInMemoryKvForTests,
 	_resetJwksCacheForTests,
+	_teardownRedisForTests,
 	getAuditEvents,
 } from "../src/index";
 
@@ -58,6 +60,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/jwt-verify",
 				"@blokjs/log",
 				"@blokjs/metrics-emit",
+				"@blokjs/redis-kv",
 				"@blokjs/throw",
 			]);
 		});
@@ -492,6 +495,92 @@ describe("@blokjs/helpers", () => {
 			expect(data.audience).toBe(AUDIENCE);
 			expect(typeof data.expiresAt).toBe("number");
 			expect(data.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+		});
+	});
+
+	// ====================================================================
+	// @blokjs/redis-kv — production KV helper backed by ioredis
+	// ====================================================================
+	//
+	// Tests are gated on REDIS_URL because they hit a real Redis. Local
+	// dev: `docker run -p 6379:6379 redis:7` then `REDIS_URL=redis://
+	// localhost:6379 bun run --filter @blokjs/helpers test`. CI runners
+	// without Redis simply skip — no fake-server dance, no mocks. The
+	// node's own protection lives at the boundary (dynamic ioredis
+	// import, REDIS_URL default), so the skip just means we don't
+	// exercise the round-trip; the unit-shape tests below run
+	// regardless to keep schema regressions detectable.
+	const REDIS_URL = process.env.REDIS_URL;
+	const redisDescribe = REDIS_URL !== undefined ? describe : describe.skip;
+
+	redisDescribe("@blokjs/redis-kv (live, REDIS_URL set)", () => {
+		const KEY_PREFIX = `blok:test:${process.pid}:`;
+
+		afterEach(async () => {
+			// Clean up any keys this test wrote so subsequent runs against
+			// a long-lived Redis don't see stale state.
+			const ctx = ctxFor();
+			const r = await RedisKvNode.handle(ctx, { action: "list", prefix: KEY_PREFIX });
+			const data = (r as { data?: { entries?: { key: string }[] } }).data;
+			const entries = data?.entries ?? [];
+			for (const { key } of entries) {
+				await RedisKvNode.handle(ctx, { action: "delete", key });
+			}
+		});
+
+		afterAll(async () => {
+			await _teardownRedisForTests();
+		});
+
+		it("set then get round-trips a JSON-encoded value", async () => {
+			const ctx = ctxFor();
+			const key = `${KEY_PREFIX}round-trip`;
+			await RedisKvNode.handle(ctx, { action: "set", key, value: { name: "Alice", count: 7 } });
+			const got = await RedisKvNode.handle(ctx, { action: "get", key });
+			const data = (got as { data: { exists: boolean; value: unknown } }).data;
+			expect(data.exists).toBe(true);
+			expect(data.value).toEqual({ name: "Alice", count: 7 });
+		});
+
+		it("get on a missing key reports exists=false", async () => {
+			const ctx = ctxFor();
+			const r = await RedisKvNode.handle(ctx, { action: "get", key: `${KEY_PREFIX}nope` });
+			const data = (r as { data: { exists: boolean; value?: unknown } }).data;
+			expect(data.exists).toBe(false);
+			expect(data.value).toBeUndefined();
+		});
+
+		it("delete removes the entry", async () => {
+			const ctx = ctxFor();
+			const key = `${KEY_PREFIX}to-delete`;
+			await RedisKvNode.handle(ctx, { action: "set", key, value: 1 });
+			const del = await RedisKvNode.handle(ctx, { action: "delete", key });
+			expect((del as { data: { deleted: boolean } }).data.deleted).toBe(true);
+			const get = await RedisKvNode.handle(ctx, { action: "get", key });
+			expect((get as { data: { exists: boolean } }).data.exists).toBe(false);
+		});
+
+		it("ttlMs causes the key to expire", async () => {
+			const ctx = ctxFor();
+			const key = `${KEY_PREFIX}ttl`;
+			await RedisKvNode.handle(ctx, { action: "set", key, value: { x: 1 }, ttlMs: 50 });
+			const before = await RedisKvNode.handle(ctx, { action: "get", key });
+			expect((before as { data: { exists: boolean } }).data.exists).toBe(true);
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			const after = await RedisKvNode.handle(ctx, { action: "get", key });
+			expect((after as { data: { exists: boolean } }).data.exists).toBe(false);
+		});
+
+		it("list with prefix filters via SCAN MATCH", async () => {
+			const ctx = ctxFor();
+			await RedisKvNode.handle(ctx, { action: "set", key: `${KEY_PREFIX}a`, value: 1 });
+			await RedisKvNode.handle(ctx, { action: "set", key: `${KEY_PREFIX}b`, value: 2 });
+			const r = await RedisKvNode.handle(ctx, { action: "list", prefix: KEY_PREFIX });
+			const entries = (r as { data: { entries: { key: string; value: unknown }[] } }).data.entries;
+			expect(entries.length).toBeGreaterThanOrEqual(2);
+			const keys = entries.map((e) => e.key).sort();
+			expect(keys).toContain(`${KEY_PREFIX}a`);
+			expect(keys).toContain(`${KEY_PREFIX}b`);
 		});
 	});
 });

@@ -29,6 +29,7 @@ import JsonSchemaNode from "./jsonSchema";
 import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
 import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
+import RedisKvNode, { _teardownRedisForTests } from "./redisKv";
 import ThrowNode from "./throw";
 
 export {
@@ -41,11 +42,18 @@ export {
 	JwtVerifyNode,
 	LogNode,
 	MetricsEmitNode,
+	RedisKvNode,
 	ThrowNode,
 };
 
 // Test-only utilities — exported but tagged with leading underscore
-export { _resetAuditEventsForTests, _resetInMemoryKvForTests, _resetJwksCacheForTests, getAuditEvents };
+export {
+	_resetAuditEventsForTests,
+	_resetInMemoryKvForTests,
+	_resetJwksCacheForTests,
+	_teardownRedisForTests,
+	getAuditEvents,
+};
 
 /**
  * Pre-built node map suitable for `GlobalOptions.nodes` registration.
@@ -67,6 +75,7 @@ export const HELPER_NODES = {
 	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/log": LogNode,
 	"@blokjs/metrics-emit": MetricsEmitNode,
+	"@blokjs/redis-kv": RedisKvNode,
 	"@blokjs/throw": ThrowNode,
 } as const;
 
