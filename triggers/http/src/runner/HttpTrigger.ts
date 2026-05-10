@@ -227,16 +227,25 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	/**
-	 * v0.5 · scan WORKFLOWS_PATH/json/ for middleware-only workflows
-	 * (`middleware: true`) and register them in WorkflowRegistry. Runs
-	 * even when file-based routing is OFF — the catch-all dispatch path
-	 * also honours `trigger.http.middleware: [...]` references and needs
-	 * the middleware registry populated.
+	 * v0.5 · scan WORKFLOWS_PATH/json/ for ALL workflows and register them
+	 * in WorkflowRegistry. Runs even when file-based routing is OFF — the
+	 * catch-all dispatch path also honours `trigger.http.middleware: [...]`
+	 * references AND `subworkflow:` step lookups, both of which need the
+	 * registry populated.
+	 *
+	 * Two passes by purpose:
+	 *   1. Middleware-only workflows (`middleware: true`) registered with
+	 *      `isMiddleware: true` — fed to the trigger-level / workflow-level
+	 *      middleware chain dispatcher in `runMiddlewareChain`.
+	 *   2. Non-middleware workflows registered without the marker — fed to
+	 *      `SubworkflowNode` so authors can compose workflows via the
+	 *      `subworkflow: "<name>"` step shape regardless of whether the
+	 *      route table was built (file-based-routing on) or not.
 	 *
 	 * Idempotent: if `buildFileBasedRoutes` already ran (file-based
-	 * routing enabled) and registered these entries, this skips re-adding
-	 * the same `(name, source)` pairs. Non-middleware workflows that
-	 * already claim a name win (no overwrite).
+	 * routing enabled) and registered these entries, the same `(name,
+	 * source)` pairs skip re-adding. Name collisions across files surface
+	 * as registration errors per `WorkflowRegistry.register`.
 	 */
 	private async scanAndRegisterMiddleware(): Promise<void> {
 		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
@@ -256,25 +265,53 @@ export default class HttpTrigger extends TriggerBase {
 		);
 
 		const registry = WorkflowRegistry.getInstance();
-		let count = 0;
+		let middlewareCount = 0;
+		let subworkflowCount = 0;
 		for (const sw of scanned) {
 			const wfObj = sw.workflow as { name?: unknown; middleware?: unknown } | undefined;
-			if (!wfObj || wfObj.middleware !== true) continue;
+			if (!wfObj) continue;
 			const wfName = typeof wfObj.name === "string" ? wfObj.name : sw.name;
 			if (!wfName) continue;
+
+			// Skip workflows already registered from the same source —
+			// usually means buildFileBasedRoutes already grabbed them.
 			const existing = registry.get(wfName);
-			if (existing && !existing.isMiddleware) continue;
 			if (existing && existing.source === sw.source) continue;
-			registry.register({
-				name: wfName,
-				source: sw.source,
-				workflow: sw.workflow,
-				isMiddleware: true,
-			});
-			count++;
+
+			if (wfObj.middleware === true) {
+				// Middleware-only workflow — only re-register if no entry
+				// exists or the existing entry is also a middleware (keep
+				// non-middleware route-table entries intact).
+				if (existing && !existing.isMiddleware) continue;
+				registry.register({
+					name: wfName,
+					source: sw.source,
+					workflow: sw.workflow,
+					isMiddleware: true,
+				});
+				middlewareCount++;
+			} else {
+				// Non-middleware workflow — register for sub-workflow
+				// lookup. Skip if anything is already registered under
+				// this name (route table or middleware re-claim).
+				if (existing) continue;
+				registry.register({
+					name: wfName,
+					source: sw.source,
+					workflow: sw.workflow,
+				});
+				subworkflowCount++;
+			}
 		}
-		if (count > 0) {
-			this.logger.log(`[blok] middleware registry — ${count} middleware workflow(s) registered (catch-all path)`);
+		if (middlewareCount > 0) {
+			this.logger.log(
+				`[blok] middleware registry — ${middlewareCount} middleware workflow(s) registered (catch-all path)`,
+			);
+		}
+		if (subworkflowCount > 0) {
+			this.logger.log(
+				`[blok] workflow registry — ${subworkflowCount} workflow(s) registered for sub-workflow lookup (catch-all path)`,
+			);
 		}
 	}
 

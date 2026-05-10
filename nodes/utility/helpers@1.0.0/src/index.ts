@@ -24,6 +24,7 @@ import AuditLogNode, { _resetAuditEventsForTests, getAuditEvents } from "./audit
 import CtxPublishNode from "./ctxPublish";
 import CtxPublishManyNode from "./ctxPublishMany";
 import ExprNode from "./expr";
+import HmacVerifyNode from "./hmacVerify";
 import InMemoryKvNode, { _resetInMemoryKvForTests } from "./inMemoryKv";
 import JsonSchemaNode from "./jsonSchema";
 import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
@@ -37,6 +38,7 @@ export {
 	CtxPublishNode,
 	CtxPublishManyNode,
 	ExprNode,
+	HmacVerifyNode,
 	InMemoryKvNode,
 	JsonSchemaNode,
 	JwtVerifyNode,
@@ -70,6 +72,7 @@ export const HELPER_NODES = {
 	"@blokjs/ctx-publish": CtxPublishNode,
 	"@blokjs/ctx-publish-many": CtxPublishManyNode,
 	"@blokjs/expr": ExprNode,
+	"@blokjs/hmac-verify": HmacVerifyNode,
 	"@blokjs/in-memory-kv": InMemoryKvNode,
 	"@blokjs/json-schema": JsonSchemaNode,
 	"@blokjs/jwt-verify": JwtVerifyNode,

@@ -1,0 +1,22 @@
+{
+	"name": "v05-github-handler-issues",
+	"version": "1.0.0",
+	"description": "Per-event GitHub webhook sub-workflow: handles the issue family (issues, issue_comment). Same grouping pattern as the pull-request handler.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ handler: 'issues-family', action: ctx.request.body.action || null, issueNumber: (ctx.request.body.issue && ctx.request.body.issue.number) || null, eventType: ctx.request.body._eventType || null })"
+			}
+		}
+	]
+}
