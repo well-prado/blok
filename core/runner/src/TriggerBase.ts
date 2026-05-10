@@ -499,6 +499,47 @@ export default abstract class TriggerBase extends Trigger {
 				if (privateSlot?.abortController) {
 					tracker.registerAbortController(traceRunId, privateSlot.abortController);
 				}
+
+				// v0.6 prerequisite for wait-inside-primitives Phase 2 —
+				// rehydrate `ctx.state` from the persisted snapshot the
+				// runner took at the wait throw site. Two re-entry paths
+				// converge here:
+				//   1. In-process timer fire — same `ctx`, state already
+				//      populated. Rehydrate is a no-op (the parsed
+				//      snapshot equals current state); we still apply it
+				//      for uniformity and to forgive any micro-drift
+				//      between snapshot and current state if a malicious
+				//      caller re-enters with a tampered ctx.
+				//   2. Cross-process recovery (`recoverDispatches` →
+				//      `restoreDispatch` → `dispatchDeferred` with a
+				//      fresh ctx). Without rehydrate, state is empty and
+				//      forEach iteration index / loop accumulator / saga
+				//      progress are all lost.
+				//
+				// Mutates `ctx.state` IN PLACE rather than reassigning so
+				// the `vars: state` alias set up in `createContext` keeps
+				// pointing at the same object. Authors writing
+				// `ctx.vars[k] = v` continue to mutate the canonical
+				// store; otherwise we'd silently fork the two views.
+				const persistedRun = tracker.getStore().getRun(traceRunId);
+				if (persistedRun?.stateSnapshot) {
+					try {
+						const parsed = JSON.parse(persistedRun.stateSnapshot) as unknown;
+						if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+							const stateObj = ctx.state as Record<string, unknown>;
+							for (const k of Object.keys(stateObj)) {
+								delete stateObj[k];
+							}
+							Object.assign(stateObj, parsed as Record<string, unknown>);
+						}
+					} catch (err) {
+						const msg = err instanceof Error ? err.message : String(err);
+						ctx.logger.logLevel(
+							"warn",
+							`[blok][wait] failed to rehydrate ctx.state from snapshot: ${msg}. Proceeding with the ctx the runner was given.`,
+						);
+					}
+				}
 			}
 		} else if (tracker.active) {
 			const runner = this.getRunner();

@@ -177,6 +177,39 @@ export interface WorkflowRun {
 	 * encountered a wait step (preserves existing semantics).
 	 */
 	lastCompletedStepIndex?: number;
+	/**
+	 * v0.6 prerequisite for wait-inside-primitives Phase 2.
+	 *
+	 * JSON-serialized snapshot of `ctx.state` taken immediately before
+	 * `RunnerSteps` throws `WaitDispatchRequest`. On `dispatchDeferred`
+	 * re-entry — including the cross-process recovery path where the
+	 * scheduler re-builds a fresh ctx from the persisted dispatch row —
+	 * `TriggerBase.run` rehydrates `ctx.state` (and its `ctx.vars`
+	 * alias) from this column so subsequent steps see the same
+	 * pre-wait state regardless of process restart.
+	 *
+	 * Without this column, only the in-process timer-fire path would
+	 * preserve state (state still lives on the original ctx). The
+	 * cross-process path would resume with empty `ctx.state`, breaking
+	 * Phase 2's iteration-state-persistence promise (a forEach
+	 * iteration whose body fired the wait would lose its index, the
+	 * loop's accumulator, etc.).
+	 *
+	 * Capped by `BLOK_STATE_SNAPSHOT_MAX_BYTES` (default 1MB,
+	 * matching `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`) — when the
+	 * serialized state exceeds the cap, the runner logs a warning and
+	 * skips the snapshot (the wait still defers; resumption is
+	 * best-effort). Authors can opt out entirely via
+	 * `BLOK_STATE_SNAPSHOT_DISABLED=1`. Sensitive keys aren't filtered
+	 * here — the snapshot only persists what the workflow has already
+	 * computed into `state`, so apply your own redaction in nodes that
+	 * write secrets there.
+	 *
+	 * Undefined for runs that never threw `WaitDispatchRequest`, which
+	 * is the vast majority. Persisted column is `state_snapshot`
+	 * (sqlite migration v11).
+	 */
+	stateSnapshot?: string;
 }
 
 // === Node Lifecycle ===
