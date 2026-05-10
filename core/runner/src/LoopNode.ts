@@ -75,6 +75,13 @@ export class LoopNode extends RunnerNode {
 			}
 
 			const childCtx = this.cloneCtxForIteration(ctx);
+			// v0.5.3 — stash iteration index on the per-iteration child ctx
+			// so RunnerSteps can propagate it to NodeRun.iterationIndex.
+			// Studio's StepRail uses this to group inner steps under
+			// "iteration N" headers instead of rendering them flat. Set
+			// here (not in cloneCtxForIteration) so the helper signature
+			// stays parameter-free.
+			(childCtx as Record<string, unknown>)._blokIterationIndex = iteration;
 			const runner = new Runner(steps);
 			// `deep: true` — inner pipelines must not inherit the outer
 			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume).

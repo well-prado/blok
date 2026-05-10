@@ -113,12 +113,21 @@ export class ForEachNode extends RunnerNode {
 		// don't bleed across iterations (same hazard the v0.4 Configuration
 		// deep-clone fix addressed at the workflow level).
 		const config = _.cloneDeep(ctx.config);
-		return {
+		const childCtx = {
 			...ctx,
 			state,
 			vars: state,
 			config,
 			response: { data: null, success: true, error: null, contentType: "application/json" },
 		} as Context;
+		// v0.5.3 — stash the iteration index on the child ctx so RunnerSteps
+		// can propagate it to NodeRun.iterationIndex when starting each
+		// inner step. Studio reads this to group sibling rows by iteration
+		// (5 iterations × 3 inner steps render as 5 collapsible sections,
+		// not 15 flat rows with duplicate names). Overrides any sentinel
+		// inherited from a parent iteration scope — the inner-most forEach
+		// owns the index its inner steps see.
+		(childCtx as Record<string, unknown>)._blokIterationIndex = index;
+		return childCtx;
 	}
 }

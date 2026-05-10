@@ -293,6 +293,19 @@ export interface NodeRun {
 	 * depth-1 nested steps).
 	 */
 	middleware?: string;
+	/**
+	 * v0.5.3 — iteration index for steps inside a `forEach` or `loop`
+	 * primitive. Set per-iteration by ForEachNode / LoopNode on the
+	 * cloned child ctx (`_blokIterationIndex` sentinel); RunnerSteps
+	 * reads it and propagates here. Studio's StepRail groups consecutive
+	 * sibling rows that share an iterationIndex into a collapsible
+	 * "iteration N" header so a 5-iteration forEach with 3 inner steps
+	 * renders as 5 grouped sections instead of 15 flat rows with
+	 * duplicate names. Undefined for top-level steps, for steps inside
+	 * non-iteration primitives (`tryCatch`, `switch`), and for legacy
+	 * traces written before v0.5.3.
+	 */
+	iterationIndex?: number;
 }
 
 /**
@@ -583,6 +596,16 @@ export interface StartNodeOptions {
 	 * surface a `mw:<name>` badge.
 	 */
 	middleware?: string;
+	/**
+	 * v0.5.3 — iteration index for steps inside a `forEach` or `loop`
+	 * primitive. Set when the parent ctx carries `_blokIterationIndex`
+	 * (ForEachNode + LoopNode stash on each per-iteration child ctx).
+	 * Studio's StepRail uses this to group consecutive sibling rows
+	 * into "iteration N" sections instead of showing them flat with
+	 * duplicated step names. Undefined for top-level steps and for
+	 * inner steps of non-iteration primitives (`tryCatch`, `switch`).
+	 */
+	iterationIndex?: number;
 }
 
 // === Custom Dashboards ===

@@ -184,6 +184,16 @@ export default abstract class RunnerSteps {
 						// Studio's StepRail can render a `mw:<name>` origin
 						// badge on every inner step the middleware produced.
 						const middleware = (ctx as Record<string, unknown>)._blokMiddlewareName as string | undefined;
+						// v0.5.3 — read the iteration sentinel set by ForEachNode +
+						// LoopNode on per-iteration child ctxs. Lets Studio group
+						// inner steps under "iteration N" headers in StepRail.
+						// Inherited by nested runners (tryCatch, switch) inside
+						// the same iteration — which is correct: their inner steps
+						// belong to that iteration. A nested forEach inside an
+						// outer iteration overrides the sentinel on its own child
+						// ctx, so the inner-most iteration wins for its descendants.
+						const iterationIndexRaw = (ctx as Record<string, unknown>)._blokIterationIndex;
+						const iterationIndex = typeof iterationIndexRaw === "number" ? iterationIndexRaw : undefined;
 						const nodeRun = tracker.startNode(traceRunId, {
 							nodeName: step.name,
 							nodeType: stepType,
@@ -194,6 +204,7 @@ export default abstract class RunnerSteps {
 							wait: subworkflowWait,
 							subworkflowDepth,
 							middleware,
+							iterationIndex,
 						});
 						nodeRunId = nodeRun.id;
 						(ctx as Record<string, unknown>)._traceNodeId = nodeRunId;

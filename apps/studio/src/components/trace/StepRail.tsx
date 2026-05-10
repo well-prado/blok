@@ -31,17 +31,96 @@ type Props = {
 const VIRTUALIZE_THRESHOLD = 50;
 const ROW_HEIGHT = 30;
 
+/**
+ * v0.5.3 — virtual "iteration N" header row inserted between consecutive
+ * sibling NodeRuns that share an iterationIndex. Lets a 5-iteration forEach
+ * with 3 inner steps render as 5 collapsible groups instead of 15 flat
+ * rows with duplicate names. Same fixed row height as a NodeRun row so
+ * virtualization math stays simple.
+ */
+type IterationHeaderItem = {
+	kind: "iteration-header";
+	key: string;
+	iterIndex: number;
+	depth: number;
+};
+
+type NodeRowItem = {
+	kind: "node";
+	node: NodeRun;
+};
+
+export type RailItem = IterationHeaderItem | NodeRowItem;
+
+/**
+ * Walk the sorted node list and synthesize iteration headers wherever
+ * `iterationIndex` transitions between consecutive sibling rows.
+ *
+ * Algorithm: maintain a per-depth memo of the most recent iterationIndex
+ * seen at that depth. When we hit a row at depth D whose iterationIndex
+ * differs from the memo[D], emit a header. When we transition to a
+ * shallower depth, invalidate memo entries for deeper depths so a
+ * subsequent same-depth row is treated as a fresh iteration scope.
+ *
+ * Handles nested forEach: each inner forEach overrides _blokIterationIndex
+ * on its child ctx, so its inner steps carry their OWN iterationIndex
+ * (not the outer's). The depth-aware memo correctly attributes those
+ * indices to the inner scope.
+ */
+export function buildRailItems(sorted: NodeRun[]): RailItem[] {
+	const items: RailItem[] = [];
+	const memoByDepth: number[] = [];
+	let prevDepth = -1;
+	for (const node of sorted) {
+		// Leaving a deeper scope — clear deeper memo entries so a fresh
+		// iteration scope at the same shallower depth re-fires a header.
+		if (node.depth < prevDepth) {
+			memoByDepth.length = node.depth + 1;
+		}
+		const iter = node.iterationIndex;
+		if (typeof iter === "number" && memoByDepth[node.depth] !== iter) {
+			items.push({
+				kind: "iteration-header",
+				key: `iter-${node.depth}-${iter}-${node.id}`,
+				iterIndex: iter,
+				depth: node.depth,
+			});
+			memoByDepth[node.depth] = iter;
+		}
+		items.push({ kind: "node", node });
+		prevDepth = node.depth;
+	}
+	return items;
+}
+
+function IterationHeader({ iterIndex, depth }: { iterIndex: number; depth: number }) {
+	return (
+		<div
+			// Inline padding for nested-flow alignment — Tailwind can't
+			// generate dynamic `pl-${expr}` at build time.
+			style={{ paddingLeft: `${16 + depth * 12}px` }}
+			className="w-full flex items-center gap-2 pl-4 pr-3 py-1.5 text-[11px] uppercase tracking-wide text-zinc-500 select-none"
+			aria-hidden="true"
+		>
+			<span className="font-mono text-[9px] text-zinc-700 w-3 shrink-0">↳</span>
+			<span className="font-mono text-[10px] text-purple-300/80 shrink-0">iteration {iterIndex + 1}</span>
+			<span className="flex-1 border-t border-zinc-800/60 ml-1" />
+		</div>
+	);
+}
+
 export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 	const sorted = useMemo(() => nodes.slice().sort((a, b) => a.stepIndex - b.stepIndex), [nodes]);
+	const railItems = useMemo(() => buildRailItems(sorted), [sorted]);
 	const completed = nodes.filter((n) => n.status === "completed").length;
 	const failed = nodes.filter((n) => n.status === "failed").length;
 	const running = nodes.filter((n) => n.status === "running").length;
 
 	const scrollRef = useRef<HTMLDivElement | null>(null);
-	const useVirtual = sorted.length >= VIRTUALIZE_THRESHOLD;
+	const useVirtual = railItems.length >= VIRTUALIZE_THRESHOLD;
 
 	const virtualizer = useVirtualizer({
-		count: useVirtual ? sorted.length : 0,
+		count: useVirtual ? railItems.length : 0,
 		getScrollElement: () => scrollRef.current,
 		estimateSize: () => ROW_HEIGHT,
 		overscan: 8,
@@ -203,29 +282,42 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 				</span>
 			</div>
 
-			{/* Rows: non-virtualized for short runs, virtualized for long. */}
+			{/* Rows: non-virtualized for short runs, virtualized for long.
+			    Headers (iteration N dividers) are interleaved with NodeRun
+			    rows — both are 30px tall so virtualization math is uniform. */}
 			{!useVirtual ? (
 				<ul className="mt-1">
-					{sorted.map((n) => (
-						<li key={n.id}>{renderRow(n, n.id === activeStepId)}</li>
-					))}
+					{railItems.map((item) =>
+						item.kind === "iteration-header" ? (
+							<li key={item.key}>
+								<IterationHeader iterIndex={item.iterIndex} depth={item.depth} />
+							</li>
+						) : (
+							<li key={item.node.id}>{renderRow(item.node, item.node.id === activeStepId)}</li>
+						),
+					)}
 				</ul>
 			) : (
 				<ul
 					className="relative mt-1 list-none p-0 m-0"
 					style={{ height: `${virtualizer.getTotalSize()}px` }}
-					aria-label={`${sorted.length} steps`}
+					aria-label={`${railItems.length} steps`}
 				>
 					{virtualizer.getVirtualItems().map((vi) => {
-						const n = sorted[vi.index];
-						if (!n) return null;
+						const item = railItems[vi.index];
+						if (!item) return null;
+						const key = item.kind === "iteration-header" ? item.key : item.node.id;
 						return (
 							<li
-								key={n.id}
+								key={key}
 								className="absolute left-0 right-0"
 								style={{ top: 0, transform: `translateY(${vi.start}px)`, height: `${vi.size}px` }}
 							>
-								{renderRow(n, n.id === activeStepId)}
+								{item.kind === "iteration-header" ? (
+									<IterationHeader iterIndex={item.iterIndex} depth={item.depth} />
+								) : (
+									renderRow(item.node, item.node.id === activeStepId)
+								)}
 							</li>
 						);
 					})}
