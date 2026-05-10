@@ -38,7 +38,7 @@ describe("forEach()", () => {
 			id: "x",
 			in: "$.state.items",
 			as: "item",
-			do: [{ id: "x" }],
+			do: [{ id: "x", use: "noop" }],
 		});
 		expect(step.forEach.mode).toBeUndefined();
 		expect(step.forEach.concurrency).toBeUndefined();
@@ -50,7 +50,7 @@ describe("forEach()", () => {
 			in: "$.state.items",
 			as: "item",
 			active: false,
-			do: [{ id: "x" }],
+			do: [{ id: "x", use: "noop" }],
 		});
 		expect(step.active).toBe(false);
 	});
@@ -61,7 +61,7 @@ describe("forEach()", () => {
 			in: "$.state.items",
 			as: "item",
 			stop: true,
-			do: [{ id: "x" }],
+			do: [{ id: "x", use: "noop" }],
 		});
 		expect(step.stop).toBe(true);
 	});
@@ -82,8 +82,12 @@ describe("forEach()", () => {
 	});
 
 	it("rejects invalid as identifier", () => {
-		expect(() => forEach({ id: "x", in: "$.x", as: "1bad", do: [{ id: "x" }] })).toThrow(/valid JS identifier/);
-		expect(() => forEach({ id: "x", in: "$.x", as: "bad-name", do: [{ id: "x" }] })).toThrow(/valid JS identifier/);
+		expect(() => forEach({ id: "x", in: "$.x", as: "1bad", do: [{ id: "x", use: "noop" }] })).toThrow(
+			/valid JS identifier/,
+		);
+		expect(() => forEach({ id: "x", in: "$.x", as: "bad-name", do: [{ id: "x", use: "noop" }] })).toThrow(
+			/valid JS identifier/,
+		);
 	});
 
 	it("rejects empty do", () => {
@@ -91,7 +95,7 @@ describe("forEach()", () => {
 	});
 
 	it("rejects non-integer concurrency", () => {
-		expect(() => forEach({ id: "x", in: "$.x", as: "item", concurrency: 2.5, do: [{ id: "x" }] })).toThrow(
+		expect(() => forEach({ id: "x", in: "$.x", as: "item", concurrency: 2.5, do: [{ id: "x", use: "noop" }] })).toThrow(
 			/positive integer/,
 		);
 	});

@@ -26,7 +26,7 @@ describe("loop()", () => {
 			id: "x",
 			while: "$.state.x < 5",
 			maxIterations: 5,
-			do: [{ id: "step1" }],
+			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.loop.maxIterations).toBe(5);
 	});
@@ -35,7 +35,7 @@ describe("loop()", () => {
 		const step = loop({
 			id: "x",
 			while: "true",
-			do: [{ id: "step1" }],
+			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.loop.maxIterations).toBeUndefined();
 	});
@@ -46,7 +46,7 @@ describe("loop()", () => {
 			while: "true",
 			active: false,
 			stop: true,
-			do: [{ id: "step1" }],
+			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.active).toBe(false);
 		expect(step.stop).toBe(true);
@@ -63,7 +63,7 @@ describe("loop()", () => {
 	});
 
 	it("rejects empty while string", () => {
-		expect(() => loop({ id: "x", while: "", do: [{ id: "x" }] })).toThrow(/non-empty/);
+		expect(() => loop({ id: "x", while: "", do: [{ id: "x", use: "noop" }] })).toThrow(/non-empty/);
 	});
 
 	it("rejects empty do", () => {
@@ -71,6 +71,8 @@ describe("loop()", () => {
 	});
 
 	it("rejects non-integer maxIterations", () => {
-		expect(() => loop({ id: "x", while: "true", maxIterations: 1.5, do: [{ id: "x" }] })).toThrow(/positive integer/);
+		expect(() => loop({ id: "x", while: "true", maxIterations: 1.5, do: [{ id: "x", use: "noop" }] })).toThrow(
+			/positive integer/,
+		);
 	});
 });

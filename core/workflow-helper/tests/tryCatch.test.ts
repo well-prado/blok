@@ -55,19 +55,19 @@ describe("tryCatch()", () => {
 	});
 
 	it("rejects empty try", () => {
-		expect(() => tryCatch({ id: "x", try: [], catch: [{ id: "b" }] })).toThrow(/`try`/);
+		expect(() => tryCatch({ id: "x", try: [], catch: [{ id: "b", use: "noop" }] })).toThrow(/`try`/);
 	});
 
 	it("rejects empty catch", () => {
-		expect(() => tryCatch({ id: "x", try: [{ id: "a" }], catch: [] })).toThrow(/`catch`/);
+		expect(() => tryCatch({ id: "x", try: [{ id: "a", use: "noop" }], catch: [] })).toThrow(/`catch`/);
 	});
 
 	it("rejects non-array finally when set", () => {
 		expect(() =>
 			tryCatch({
 				id: "x",
-				try: [{ id: "a" }],
-				catch: [{ id: "b" }],
+				try: [{ id: "a", use: "noop" }],
+				catch: [{ id: "b", use: "noop" }],
 				// @ts-expect-error — finally must be array
 				finally: "oops",
 			}),
@@ -75,8 +75,13 @@ describe("tryCatch()", () => {
 	});
 
 	it("rejects empty finally array when set", () => {
-		expect(() => tryCatch({ id: "x", try: [{ id: "a" }], catch: [{ id: "b" }], finally: [] })).toThrow(
-			/non-empty array/,
-		);
+		expect(() =>
+			tryCatch({
+				id: "x",
+				try: [{ id: "a", use: "noop" }],
+				catch: [{ id: "b", use: "noop" }],
+				finally: [],
+			}),
+		).toThrow(/non-empty array/);
 	});
 });

@@ -52,7 +52,7 @@ describe("switchOn()", () => {
 		const step = switchOn({
 			id: "x",
 			on: "$.req.body.kind",
-			cases: [{ when: "a", do: [{ id: "y" }] }],
+			cases: [{ when: "a", do: [{ id: "y", use: "noop" }] }],
 		});
 		expect(step.switch.default).toBeUndefined();
 	});
@@ -61,7 +61,7 @@ describe("switchOn()", () => {
 		const step = switchOn({
 			id: "x",
 			on: "$.req.body.kind",
-			cases: [{ when: "a", do: [{ id: "y" }] }],
+			cases: [{ when: "a", do: [{ id: "y", use: "noop" }] }],
 			active: false,
 			stop: true,
 		});
@@ -97,7 +97,7 @@ describe("switchOn()", () => {
 			switchOn({
 				id: "x",
 				on: "v",
-				cases: [{ when: "a", do: [{ id: "y" }] }],
+				cases: [{ when: "a", do: [{ id: "y", use: "noop" }] }],
 				// @ts-expect-error — default must be array
 				default: "oops",
 			}),
