@@ -1,0 +1,155 @@
+---
+title: "forEach and loop"
+description: "Iteration primitives — fan out a sub-pipeline over a collection (forEach) or repeat a sub-pipeline while a condition holds (loop)."
+icon: "repeat"
+---
+
+`forEach` and `loop` are the two iteration primitives shipped with v0.5. Both run a sub-pipeline of steps repeatedly; the difference is **what drives the repetition**:
+
+- **`forEach`** drives off a collection. One iteration per item. Sequential or parallel with a concurrency cap.
+- **`loop`** drives off a JS condition evaluated against `ctx`. Stops when the condition goes falsy or a hard `maxIterations` cap fires.
+
+Use `forEach` when you have N items to process. Use `loop` when you don't know how many iterations you'll need (poll-until, retry-until-OK).
+
+---
+
+## forEach
+
+### Authoring (TS DSL)
+
+```ts
+import { workflow, forEach, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "webhook-fanout",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    forEach({
+      id: "dispatch-to-each",
+      in: $.req.body.subscribers,
+      as: "subscriber",
+      mode: "parallel",
+      concurrency: 5,
+      do: [
+        {
+          id: "post",
+          use: "@blokjs/api-call",
+          inputs: {
+            url: $.state.subscriber.url,
+            method: "POST",
+            body: $.req.body.event,
+          },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+### Authoring (JSON)
+
+```json
+{
+  "id": "dispatch-to-each",
+  "forEach": {
+    "in": "js/ctx.request.body.subscribers",
+    "as": "subscriber",
+    "mode": "parallel",
+    "concurrency": 5,
+    "do": [
+      {
+        "id": "post",
+        "use": "@blokjs/api-call",
+        "inputs": {
+          "url": "js/ctx.state.subscriber.url",
+          "method": "POST",
+          "body": "js/ctx.request.body.event"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Runtime contract
+
+- **Per-iteration scope.** Each iteration runs in a cloned context where `ctx.state[as]` is the current item and `ctx.state[as + "Index"]` is the 0-based position. Mutations inside one iteration do **not** bleed into the next iteration's scope.
+- **Output.** The forEach step's output is an array of per-iteration responses, stored at `ctx.state[<id>]`. Each entry is the iteration's `ctx.response` envelope (`{ data, success, error, contentType, ... }`) — read inner data via `ctx.state[<id>][i].data`.
+- **`mode: "sequential"` (default).** Awaits each iteration in turn. A throw from any iteration aborts the whole forEach and surfaces upstream.
+- **`mode: "parallel"`.** Worker-pool with bounded `concurrency` (default `10`). All iterations run, even if some throw — the **first** error wins and propagates after `Promise.all`. Iteration order is preserved in the output array regardless of completion order.
+- **Empty collection.** Output is `[]`; downstream steps still run.
+
+### Real-world example
+
+[`triggers/http/workflows/json/v05-webhook-fanout.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-webhook-fanout.json) fans out an event to up to N subscribers in parallel, capped at 5 concurrent requests, with one inner `@blokjs/api-call` per subscriber. Curl-validated by `bun run v05:smoke`.
+
+[`triggers/http/workflows/json/v05-order-fulfillment.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) nests forEach inside a `switch` arm — the parallel inventory check only runs for physical/subscription orders, not for digital licenses.
+
+### Caveats
+
+- **The output is envelopes, not bare data.** Reading `ctx.state[<id>][i].field` gives you `undefined`; you need `ctx.state[<id>][i].data.field`. The downstream summary step typically maps over the array to flatten before counting.
+- **`as` must be a valid JS identifier.** No spaces, no leading digits. Avoid colliding with sibling step ids in the surrounding workflow.
+- **Failure semantics differ from `Promise.allSettled`.** A single failing iteration aborts the whole forEach. To swallow per-item failures, wrap the inner `do` body in a [`tryCatch`](/c/devtools/tryCatch).
+- **No mid-iteration durable checkpoint.** A `wait` step inside a forEach iteration will not resume cleanly across process restarts. Tracked in the v0.5 backlog as an open architectural gap.
+
+---
+
+## loop
+
+### Authoring (TS DSL)
+
+```ts
+import { workflow, loop, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "poll-until-ready",
+  trigger: { http: { method: "GET" } },
+  steps: [
+    loop({
+      id: "poll",
+      while: '$.state["check-status"]?.data?.status !== "done"',
+      maxIterations: 60,
+      do: [
+        {
+          id: "check-status",
+          use: "@blokjs/api-call",
+          inputs: { url: "https://api.example.com/job/abc", method: "GET" },
+        },
+      ],
+    }),
+  ],
+});
+```
+
+### Authoring (JSON)
+
+```json
+{
+  "id": "poll",
+  "loop": {
+    "while": "ctx.state['check-status']?.data?.status !== 'done'",
+    "maxIterations": 60,
+    "do": [
+      {
+        "id": "check-status",
+        "use": "@blokjs/api-call",
+        "inputs": { "url": "https://api.example.com/job/abc", "method": "GET" }
+      }
+    ]
+  }
+}
+```
+
+### Runtime contract
+
+- **Condition is JS, not a path.** `while` is evaluated as a JS expression against the live ctx **before** each iteration. Truthy → run another iteration; falsy → exit.
+- **Counter.** The current iteration index (0-based) is at `ctx.state[<id>Index]`. Reference it from the condition (`$.state.pollIndex < 5`) or from inner steps for backoff math.
+- **Hard cap.** `maxIterations` is a safety net — hitting it throws `LoopMaxIterationsError`. Default `1000`. Override via env `BLOK_LOOP_MAX_ITERATIONS` for the whole process.
+- **State mutations carry forward.** Unlike forEach, loop iterations share the **same** ctx — writes from one iteration are visible to the next iteration's condition check and inner steps. That's how poll-until-OK works.
+- **Output.** `ctx.state[<id>]` holds the LAST iteration's response (the one that made the condition go falsy). Earlier iterations are not retained as an array — use a manual accumulator inside the loop body if you need history.
+
+### Caveats
+
+- **You must drive the exit condition forward.** The classic mistake is checking `$.state.foo === "done"` when the inner steps don't write to `foo`. The loop hits `maxIterations` and throws.
+- **No back-off built in.** If you're polling, add the wait yourself — typically with a `@blokjs/expr` step that computes the next sleep, or a wait-for primitive in a future release.
+- **Errors abort.** A throw inside the loop body aborts the loop. Wrap the body in a `tryCatch` if you want retry-until-OK semantics.

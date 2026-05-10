@@ -1,0 +1,93 @@
+---
+title: "switchOn"
+description: "N-way branch primitive — match a value against a list of cases (literal or array) and run the matched arm. First match wins; an optional default arm fires when nothing matches."
+icon: "split"
+---
+
+`switchOn` is the N-way branching primitive. Use it when you want to dispatch on a value with three or more possible outcomes — at two outcomes, the simpler `branch({when, then, else})` is usually cleaner.
+
+It mirrors JavaScript's `switch` semantics: cases are matched **in order**, the first match wins, and only that case's sub-pipeline runs. There is no fall-through.
+
+---
+
+## Authoring (TS DSL)
+
+```ts
+import { workflow, switchOn, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "event-router",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    switchOn({
+      id: "route",
+      on: $.req.body.event,
+      cases: [
+        {
+          when: "ping",
+          do: [
+            { id: "ping-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
+          ],
+        },
+        {
+          when: ["order.created", "order.paid", "order.refunded"],
+          do: [
+            { id: "order-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
+          ],
+        },
+      ],
+      default: [
+        { id: "unknown-handler", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
+      ],
+    }),
+  ],
+});
+```
+
+## Authoring (JSON)
+
+```json
+{
+  "id": "route",
+  "switch": {
+    "on": "js/ctx.request.body.event",
+    "cases": [
+      { "when": "ping", "do": [/* steps */] },
+      { "when": ["order.created", "order.paid", "order.refunded"], "do": [/* steps */] }
+    ],
+    "default": [/* steps */]
+  }
+}
+```
+
+> The JSON key is `switch` (not `switchOn`). The TS helper is named `switchOn` because `switch` is a reserved word.
+
+---
+
+## Runtime contract
+
+- **`on` is resolved before matching.** A `$.req.body.event` proxy or `"js/ctx.request.body.event"` string evaluates against the live ctx; the resulting value is then compared against each case's `when`.
+- **Match rules:**
+  - `when` is a scalar (string/number/boolean) → match if `on === when`.
+  - `when` is an array → match if `when.includes(on)` (any-of, useful for grouping related events).
+- **First match wins.** Subsequent cases are not evaluated. There is no fall-through.
+- **Default.** If no case matches and `default` is provided, those steps run. If no case matches and there's no default, the switch step is a no-op (the workflow continues to the next top-level step).
+- **State mutations carry forward.** Anything the matched case publishes to `ctx.state` is visible to subsequent top-level steps in the workflow.
+
+---
+
+## Real-world example
+
+[`triggers/http/workflows/json/v05-event-router.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-event-router.json) routes incoming `{ event, payload }` requests to per-event handlers. Demonstrates literal `when` (a single string), array `when` (a family of related events), and the `default` fallback. Curl-validated by `bun run v05:smoke`.
+
+[`triggers/http/workflows/json/v05-order-fulfillment.json`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) shows switchOn at the top level dispatching to per-order-type sub-pipelines, with the `physical` arm itself nesting a `forEach`.
+
+---
+
+## Caveats
+
+- **Equality is strict.** `on === when` — `1` does not match `"1"`. If your value comes in as a string from a JSON body, your case `when` should be a string too.
+- **The match is value-based, not type-based.** There's no `instanceof` or shape-matching. Compare a discriminator string instead.
+- **No mutability between cases.** Each case is independent — there's no syntax for shared setup steps before the cases. Put shared work in steps **before** the switch.
+- **Use `branch` for two-outcome dispatch.** A switch with one case + default is the same as a `branch({when, then, else})`, but `branch` reads more naturally for boolean-style routing.
+- **`default` is optional.** If you want every value to be handled, add a `default` arm that throws via `@blokjs/throw` with `code: 400` to fail explicitly on unknown inputs. The [order-fulfillment](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-order-fulfillment.json) workflow uses this pattern.
