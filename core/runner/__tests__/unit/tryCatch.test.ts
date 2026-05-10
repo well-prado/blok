@@ -12,10 +12,13 @@
  */
 
 import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
+import { defineNode } from "../../src/defineNode";
 
 class ExprNode extends RunnerNode {
 	constructor() {
@@ -74,12 +77,71 @@ class ThrowNode extends RunnerNode {
 	}
 }
 
-async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration; ctx: Context }> {
+/**
+ * Build a defineNode-built test step that throws on execute. This goes
+ * through the SAME error-handling pipeline as a real production node
+ * (defineNode.handle catches → returns BlokResponse with .error set →
+ * Blok.run flips response.success → applyStepOutput's error guard skips
+ * state writes). Use this — not the raw `ThrowNode` above — when a test
+ * needs to validate the post-error state contract.
+ */
+function makeFailingDefineNode(name: string, opts: { code?: number } = {}): RunnerNode {
+	const node = defineNode({
+		name,
+		input: z.unknown(),
+		output: z.unknown(),
+		async execute(_ctx, _input) {
+			if (opts.code !== undefined) {
+				const err = new GlobalError(`${name} failed with code ${opts.code}`);
+				err.setCode(opts.code);
+				err.setName(`${name}Error`);
+				// Mirror @blokjs/throw — set the literal Error.name so the
+				// `toErrorEnvelope` walk surfaces it as `$.error.name`.
+				// GlobalError.setName only writes to its internal `context.name`.
+				(err as Error).name = `${name}Error`;
+				throw err;
+			}
+			throw new Error(`${name} failed`);
+		},
+	}) as unknown as RunnerNode;
+	(node as unknown as { name: string }).name = name;
+	(node as unknown as { node: string }).node = name;
+	(node as unknown as { type: string }).type = "module";
+	(node as unknown as { active: boolean }).active = true;
+	return node;
+}
+
+/**
+ * Build a defineNode-built test step that succeeds, capturing whatever
+ * the inputs evaluate to into ctx.state[<name>]. Pairs with
+ * `makeFailingDefineNode` for end-to-end error-path tests.
+ */
+function makeSucceedingDefineNode(name: string): RunnerNode {
+	const node = defineNode({
+		name,
+		input: z.unknown(),
+		output: z.unknown(),
+		async execute(_ctx, input) {
+			return { received: input };
+		},
+	}) as unknown as RunnerNode;
+	(node as unknown as { name: string }).name = name;
+	(node as unknown as { node: string }).node = name;
+	(node as unknown as { type: string }).type = "module";
+	(node as unknown as { active: boolean }).active = true;
+	return node;
+}
+
+async function bootConfig(
+	workflowDef: unknown,
+	extraNodes: Record<string, RunnerNode> = {},
+): Promise<{ config: Configuration; ctx: Context }> {
 	const config = new Configuration();
 	const helpers: Record<string, RunnerNode> = {
 		"@blokjs/expr": new ExprNode(),
 		"@blokjs/ctx-publish": new CtxPublishNode(),
 		"@blokjs/throw": new ThrowNode(),
+		...extraNodes,
 	};
 	const globalOptions = {
 		nodes: {
@@ -366,5 +428,244 @@ describe("v0.5 tryCatch integration", () => {
 		const errMsg = caught instanceof Error ? caught.message : String(caught);
 		expect(errMsg).toMatch(/from-catch/);
 		expect((ctx.state as Record<string, unknown>).finallySet).toBe(true);
+	});
+});
+
+/**
+ * Error-path state contract — the v0.5.1 fix surface.
+ *
+ * Before the fix, a defineNode-built step that threw still wrote
+ * `ctx.state[<step.id>] = {}` because Blok.run unconditionally called
+ * `applyStepOutput` and `BlokResponse.setError()` set `data = {}`. That
+ * empty-but-defined object made the natural saga rollback check
+ * (`ctx.state['create-account'] !== undefined`) silently lie — it
+ * always returned true after an attempt, regardless of whether the
+ * attempt succeeded.
+ *
+ * The centralized fix in PersistenceHelper.applyStepOutput skips
+ * persistence when the result envelope carries any error indicator
+ * (`success: false`, non-null `error`, or non-null `errors`). These
+ * tests pin that contract so it can't regress.
+ */
+describe("v0.5 tryCatch — error-path state contract (post-fix)", () => {
+	it("an errored try-arm step does NOT write ctx.state[<step.id>]", async () => {
+		const failingFetch = makeFailingDefineNode("fetch-user");
+		const wfDef = {
+			name: "test-trycatch-no-state-on-error",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "fetch-user", use: "fetch-user", type: "module", inputs: {} }],
+						catch: [
+							// Read state['fetch-user'] inside catch — must be undefined
+							// since the step threw. Pre-fix, this was an empty object.
+							{
+								id: "record",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: {
+									name: "fetchUserStateAtCatch",
+									value: "js/typeof ctx.state['fetch-user']",
+								},
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef, { "fetch-user": failingFetch });
+		const runner = new Runner(config.steps as NodeBase[]);
+		await runner.run(ctx);
+
+		const state = ctx.state as Record<string, unknown>;
+		expect(state.fetchUserStateAtCatch).toBe("undefined");
+		expect(state["fetch-user"]).toBeUndefined();
+	});
+
+	it("a saga using `state['<step>'] !== undefined` correctly distinguishes did-not-run from did-run", async () => {
+		// This is the exact contract the v05-user-signup-saga relies on
+		// post-fix. Pre-fix this test would have failed both paths because
+		// `state['create-account']` was {} after a throw, making `!==
+		// undefined` always true. Post-fix, the existence check tells the
+		// truth: undefined when the step never succeeded, defined when it
+		// did. Captured as a string snapshot inside the catch arm so we
+		// don't depend on the `branch` flow node (separate package).
+		const okAccount = makeSucceedingDefineNode("create-account");
+		const okProfile = makeSucceedingDefineNode("create-profile");
+		const failingAccount = makeFailingDefineNode("create-account");
+		const failingProfile = makeFailingDefineNode("create-profile");
+
+		const buildWf = (variant: string) => ({
+			name: `test-trycatch-existence-truth-${variant}`,
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [
+							{ id: "create-account", use: "create-account", type: "module", inputs: {} },
+							{ id: "create-profile", use: "create-profile", type: "module", inputs: {} },
+						],
+						catch: [
+							{
+								id: "rollback-decision",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: {
+									name: "rolledBack",
+									value: "js/ctx.state['create-account'] !== undefined",
+								},
+							},
+						],
+					},
+				},
+			],
+		});
+
+		// Path A — account-create itself fails. Pre-fix this returned true
+		// (the bug). Post-fix it returns false: the step never wrote state.
+		{
+			const { config, ctx } = await bootConfig(buildWf("acct-fail"), {
+				"create-account": failingAccount,
+				"create-profile": okProfile, // unused on this path
+			});
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+			expect((ctx.state as Record<string, unknown>).rolledBack).toBe(false);
+		}
+
+		// Path B — account-create succeeds, profile-create fails after.
+		// Both pre- and post-fix this returns true, but for different
+		// reasons: pre-fix because state was always {}; post-fix because
+		// the step actually produced a real {received: ...} payload.
+		{
+			const { config, ctx } = await bootConfig(buildWf("profile-fail"), {
+				"create-account": okAccount,
+				"create-profile": failingProfile,
+			});
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+			expect((ctx.state as Record<string, unknown>).rolledBack).toBe(true);
+		}
+	});
+
+	it("$.error.code resolves to GlobalError.code inside the catch arm", async () => {
+		const failing401 = makeFailingDefineNode("auth", { code: 401 });
+		const wfDef = {
+			name: "test-trycatch-error-code",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "auth", use: "auth", type: "module", inputs: {} }],
+						catch: [
+							{
+								id: "capture-code",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "errCode", value: "js/ctx.error.code" },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef, { auth: failing401 });
+		const runner = new Runner(config.steps as NodeBase[]);
+		await runner.run(ctx);
+
+		expect((ctx.state as Record<string, unknown>).errCode).toBe(401);
+	});
+
+	it("$.error.stepId resolves to the failing try-step's id inside the catch arm", async () => {
+		const failingMid = makeFailingDefineNode("middle-step");
+		const wfDef = {
+			name: "test-trycatch-error-stepid",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [
+							{
+								id: "first-ok",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "firstRan", value: true },
+							},
+							{ id: "middle-step", use: "middle-step", type: "module", inputs: {} },
+							{
+								id: "after-never",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "afterRan", value: true },
+							},
+						],
+						catch: [
+							{
+								id: "capture-stepid",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "failedAt", value: "js/ctx.error.stepId" },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef, { "middle-step": failingMid });
+		const runner = new Runner(config.steps as NodeBase[]);
+		await runner.run(ctx);
+
+		const state = ctx.state as Record<string, unknown>;
+		expect(state.firstRan).toBe(true);
+		expect(state.afterRan).toBeUndefined(); // throw aborted the try arm
+		expect(state.failedAt).toBe("middle-step");
+	});
+
+	it("ctx.error envelope still carries message + name + stack alongside new fields", async () => {
+		const failing = makeFailingDefineNode("payment", { code: 402 });
+		const wfDef = {
+			name: "test-trycatch-error-full-envelope",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "payment", use: "payment", type: "module", inputs: {} }],
+						catch: [
+							{
+								id: "snapshot",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: {
+									name: "errSnap",
+									value:
+										"js/({message: ctx.error.message, name: ctx.error.name, code: ctx.error.code, stepId: ctx.error.stepId, hasStack: typeof ctx.error.stack === 'string'})",
+								},
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef, { payment: failing });
+		const runner = new Runner(config.steps as NodeBase[]);
+		await runner.run(ctx);
+
+		const snap = (ctx.state as Record<string, unknown>).errSnap as Record<string, unknown>;
+		expect(snap.message).toMatch(/payment failed with code 402/);
+		expect(snap.name).toBe("paymentError");
+		expect(snap.code).toBe(402);
+		expect(snap.stepId).toBe("payment");
+		expect(snap.hasStack).toBe(true);
 	});
 });

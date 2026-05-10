@@ -58,8 +58,17 @@ they emit a once-per-process stderr warning on resolve.
 ## Persistence model (v2)
 
 Step output flows through `src/workflow/PersistenceHelper.ts:applyStepOutput`.
-Rules in order:
+Rules evaluated in order:
 
+0. **Errored result → no-op (v0.5.1 fix).** A step whose result envelope
+   carries any error indicator — `success: false`, a non-null `error`
+   (ResponseContext / `BlokResponse` shape), or a non-null `errors`
+   (`ExecutionResult` shape from runtime adapters) — does NOT write state.
+   That makes `ctx.state[<step-id>] === undefined` a truthful "did this
+   step actually succeed?" check inside a `tryCatch.catch` arm. The guard
+   is centralized so all three call sites (`Blok.run`,
+   `RuntimeAdapterNode.run`, `SubworkflowNode.dispatchSync`) inherit
+   identical behaviour without each re-implementing the check.
 1. `step.ephemeral === true` → no-op. Available only via `ctx.prev`.
 2. Legacy `step.set_var === false` → also no-op (back-compat).
 3. `step.spread === true` AND data is a plain object → shallow-merge into `ctx.state`.
@@ -73,6 +82,39 @@ disable persistence for every step that didn't explicitly set the field
 (which is every v2 step) — that exact regression broke
 cross-runtime-chain in Phase 6 and is now covered by
 `__tests__/unit/RuntimeAdapterNode.test.ts`.
+
+### Why Rule 0 had to be centralized
+
+Pre-fix: `Blok.run` always called `applyStepOutput` after `defineNode.handle()`,
+even on the failure path. `BlokResponse.setError()` resets `data` to `{}`,
+so the helper persisted that empty object as the step's state slot. Authors
+relying on `state['<step>'] !== undefined` got false positives — every
+attempted step looked successful in retrospect. `RuntimeAdapterNode` and
+`SubworkflowNode` had the same shape. Putting the guard inside
+`applyStepOutput` rather than at each caller means future call sites
+(replay, sub-workflow async dispatch follow-ups, etc.) inherit the
+contract automatically. See `__tests__/unit/workflow/PersistenceHelper.test.ts`
+"error guard (Rule 0)" for the regression coverage.
+
+## Error envelope (`$.error`) inside tryCatch.catch
+
+`TryCatchNode.toErrorEnvelope` walks the `.cause` chain at the moment of
+catch entry to construct what authors see as `$.error`. Fields:
+
+| Field | Source |
+|---|---|
+| `message` | The deepest error in the cause chain — strips the framework's `[step N/M] X failed: …` wrap. |
+| `name` | `Error.name` of the deepest error. |
+| `stack` | `Error.stack` when present. |
+| `code` | `GlobalError.context.code` (the first `GlobalError` encountered while walking — handles both `@blokjs/throw inputs.code` and `defineNode.mapErrorToGlobalError`'s ZodError-→-400 mapping). |
+| `stepId` | `_blokStepId` attached to the wrap layer in `RunnerSteps.ts:463`. The wrap is the *outer* error, so the envelope captures it before unwrapping past it. The id is preserved across the outer unwrap-to-GlobalError step in `RunnerSteps.ts:551` so it survives back to `TryCatchNode`. |
+
+Authors use `$.error.stepId` for failure-routing logic ("payment failed →
+notify billing", "inventory failed → notify warehouse") and `$.error.code`
+to re-throw with the upstream HTTP status or to branch on 4xx vs 5xx. Both
+fields are optional — non-`GlobalError` throws yield `code: undefined`,
+and pre-v0.5.1 throws (or thrown values that bypass `RunnerSteps`'
+inner-try wrap) yield `stepId: undefined`.
 
 ## Idempotency caching (Tier 1)
 

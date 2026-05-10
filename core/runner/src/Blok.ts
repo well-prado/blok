@@ -100,6 +100,16 @@ export default abstract class BlokService<T> extends NodeBase {
 		this.v.validate(result, this.outputSchema);
 		const end = performance.now();
 
+		// Truthful failure indicator. `defineNode.handle()` catches every
+		// throw and stuffs it onto `BlokResponse.error` — so the previous
+		// "Executed node" log line and the `response.success === false`
+		// metrics counter at the bottom of run() were both wrong on the
+		// error path (one always said success, the other never fired).
+		// Read the BlokResponse's error field once and let the rest of the
+		// method use it consistently.
+		const blokResponse = result as IBlokResponse;
+		const errored = blokResponse.error !== undefined && blokResponse.error !== null;
+
 		node_execution.add(1, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
@@ -116,18 +126,38 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		ctx.logger.log(`Executed node: ${this.name} in ${(end - start).toFixed(2)}ms`);
+		// Surface failures clearly on the per-node log so operators don't
+		// see a misleading "Executed node" line followed by a contradictory
+		// "FAILED" line from RunnerSteps. The structured per-step log
+		// emitted by RunnerSteps remains the canonical "step N/M" entry;
+		// this one is the inner-node companion.
+		if (errored) {
+			const errMsg = blokResponse.error instanceof Error ? blokResponse.error.message : String(blokResponse.error);
+			ctx.logger.log(`Node ${this.name} failed in ${(end - start).toFixed(2)}ms: ${errMsg}`);
+		} else {
+			ctx.logger.log(`Executed node: ${this.name} in ${(end - start).toFixed(2)}ms`);
+		}
 
 		// V2 persistence — runner-owned, declarative.
 		// `ephemeral` skips, `spread` merges, `as` renames, default stores
 		// at state[name]. Legacy `set_var: false` maps to ephemeral; legacy
 		// `set_var: true` is a no-op (default already persists).
-		applyStepOutput(ctx, this, result as { data?: unknown });
+		// Pass through the full IBlokResponse so the helper's error guard
+		// (`success: false` / non-null `error`) skips state persistence on
+		// the failure path — see PersistenceHelper.isErroredResult.
+		applyStepOutput(ctx, this, result as IBlokResponse);
 
 		// Hand the raw result back to the runner. RunnerSteps mirrors
 		// response.data into ctx.response so adjacent-step access via
 		// `ctx.prev` / `$.prev` keeps working.
 		response.data = result;
+		// Mirror the inner BlokResponse error state onto the outer envelope
+		// the metrics block at the bottom of run() reads. Without this flip
+		// the `if (response.success === false)` guard never matched, so
+		// the `node_errors` OTel counter has been silently broken for every
+		// defineNode-built step since v0.3.x.
+		response.success = !errored;
+		response.error = errored ? blokResponse.error : null;
 		(response.data as unknown as BlokService<T>).contentType = this.contentType;
 
 		globalMetrics.retry();

@@ -27,6 +27,7 @@
  */
 
 import type { Context, ResponseContext } from "@blokjs/shared";
+import { GlobalError } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
@@ -37,9 +38,28 @@ interface TryCatchOpts {
 }
 
 interface ErrorEnvelope {
+	/** The original (unwrapped) error message. */
 	message: string;
+	/** Error class name — e.g. "Error", "UnauthorizedError", "ZodError". */
 	name: string;
+	/** Stack trace string when present on the error. */
 	stack?: string;
+	/**
+	 * HTTP-style status code carried by `GlobalError` (set via
+	 * `@blokjs/throw` inputs.code, or by ZodError → 400 mapping in
+	 * `defineNode.mapErrorToGlobalError`). Surfaces as `$.error.code` so
+	 * a catch arm can re-throw with the same status, branch on it
+	 * (4xx vs 5xx), or include it in an audit-log payload.
+	 */
+	code?: number;
+	/**
+	 * The id of the try-arm step that threw, extracted from the wrap
+	 * `RunnerSteps` attaches at line ~465. Surfaces as `$.error.stepId`
+	 * so a catch arm can route by failure point ("payment failed → notify
+	 * billing", "inventory failed → notify warehouse") without having to
+	 * regex the framework-decorated message.
+	 */
+	stepId?: string;
 }
 
 function toErrorEnvelope(err: unknown): ErrorEnvelope {
@@ -48,7 +68,35 @@ function toErrorEnvelope(err: unknown): ErrorEnvelope {
 	// level error on `.cause`. Walk the chain to bottom so author-facing
 	// `$.error.message` is the original `throw new Error("kaboom")` text,
 	// not the framework's `[step N/M] <name> failed: ...` enriched prefix.
-	let unwrapped = err;
+	//
+	// While walking, harvest two cross-layer fields:
+	//   - `code`  — only carried by GlobalError (the framework's typed
+	//     error class). The first GlobalError encountered wins; this lets
+	//     `@blokjs/throw` inputs.code propagate to the catch arm even if
+	//     RunnerSteps re-wraps the throw in a generic Error.
+	//   - `stepId` — set by RunnerSteps' enrichment as `_blokStepId` on
+	//     the wrap layer. The wrap is the OUTER error, so we capture it
+	//     before unwrapping past it.
+	let unwrapped: unknown = err;
+	let code: number | undefined;
+	let stepId: string | undefined;
+
+	const captureMeta = (candidate: unknown): void => {
+		if (typeof candidate !== "object" || candidate === null) return;
+		const c = candidate as { _blokStepId?: unknown };
+		if (stepId === undefined && typeof c._blokStepId === "string") {
+			stepId = c._blokStepId;
+		}
+		if (code === undefined && candidate instanceof GlobalError) {
+			// GlobalError stores HTTP status on `context.code`, not directly
+			// on the error instance — see GlobalError.setCode() at
+			// core/shared/src/GlobalError.ts:14.
+			const ctxCode = candidate.context?.code;
+			if (typeof ctxCode === "number") code = ctxCode;
+		}
+	};
+
+	captureMeta(unwrapped);
 	while (
 		typeof unwrapped === "object" &&
 		unwrapped !== null &&
@@ -57,12 +105,17 @@ function toErrorEnvelope(err: unknown): ErrorEnvelope {
 		(unwrapped as { cause?: unknown }).cause !== unwrapped
 	) {
 		unwrapped = (unwrapped as { cause: unknown }).cause;
+		captureMeta(unwrapped);
 	}
+
+	const meta = { ...(code !== undefined ? { code } : {}), ...(stepId !== undefined ? { stepId } : {}) };
+
 	if (unwrapped instanceof Error) {
 		return {
 			message: unwrapped.message,
 			name: unwrapped.name,
 			stack: unwrapped.stack,
+			...meta,
 		};
 	}
 	if (typeof unwrapped === "object" && unwrapped !== null) {
@@ -71,9 +124,10 @@ function toErrorEnvelope(err: unknown): ErrorEnvelope {
 			message: typeof e.message === "string" ? e.message : String(unwrapped),
 			name: typeof e.name === "string" ? e.name : "Error",
 			stack: typeof e.stack === "string" ? e.stack : undefined,
+			...meta,
 		};
 	}
-	return { message: String(unwrapped), name: "Error" };
+	return { message: String(unwrapped), name: "Error", ...meta };
 }
 
 export class TryCatchNode extends RunnerNode {

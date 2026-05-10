@@ -76,47 +76,69 @@ export default workflow({
 ## Runtime contract
 
 - **`try` runs first.** If every step succeeds, `catch` is skipped and `finally` runs.
-- **On any throw**, `ctx.error` is populated and `catch` runs. The captured error's `message`, `name`, and `stack` are available via the `$.error` proxy (TS) or `js/ctx.error.<field>` (JSON). `$.error` is **only** defined inside `catch` — it's `undefined` in `try` and `finally`.
+- **On any throw**, `ctx.error` is populated and `catch` runs. `$.error` is **only** defined inside `catch` — it's `undefined` in `try` and `finally`.
 - **`finally` always runs**, even when `catch` itself throws. JavaScript-style: a throw from `finally` supersedes a pending throw from `catch`.
 - **State mutations from any block** — try, catch, or finally — are visible to subsequent top-level steps. That's how saga rollback flags propagate.
 - **Catch can swallow OR rethrow.** A catch that runs to completion without throwing makes the tryCatch step "succeed" — execution continues with the next top-level step. To fail the workflow on a caught error, throw explicitly via `@blokjs/throw` (lets you set the HTTP status code and response body).
+- **An errored step does NOT write `ctx.state`.** When a step inside `try` throws, `ctx.state[<step.id>]` is left **`undefined`** — not an empty object, not a placeholder. That means `ctx.state['create-account'] !== undefined` is a truthful "did this step actually succeed?" check inside the catch arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; that was a bug, since fixed.)
+
+### The `$.error` envelope
+
+| Field | Type | Source |
+|---|---|---|
+| `$.error.message` | `string` | The original error message — unwrapped through the `.cause` chain so framework wrap text doesn't leak |
+| `$.error.name` | `string` | Error class name (e.g. `"Error"`, `"UnauthorizedError"`, `"ZodError"`) |
+| `$.error.stack` | `string \| undefined` | Stack trace when the error carries one |
+| `$.error.code` | `number \| undefined` | HTTP-style status carried by `GlobalError` — set via `@blokjs/throw inputs.code`, or by the framework's ZodError → 400 mapping. Lets a catch arm re-throw with the same status, branch on 4xx vs 5xx, or include it in audit-log payloads |
+| `$.error.stepId` | `string \| undefined` | The id of the try-arm step that threw. Lets a catch arm route by failure point ("payment failed → notify billing", "inventory failed → notify warehouse") without regex-parsing the message |
 
 ---
 
-## The "errored step state" footgun
+## Conditional rollback — the canonical saga pattern
 
-When a step inside `try` throws, the runner still writes a placeholder envelope (`{}` for the step's `data`) into `ctx.state[<step.id>]`. That means a naive existence check from the catch arm — `ctx.state['create-account'] !== undefined` — is always true after the step has been **attempted**, regardless of whether it succeeded.
-
-The reliable pattern is to publish a positive marker right after the step you care about:
+A common saga pattern: only roll back work that actually completed. Pre-v0.5.1 this required a workaround marker step; post-v0.5.1 the natural existence check works directly.
 
 ```json
-"try": [
-  { "id": "create-account", "use": "@blokjs/api-call", "inputs": { /* ... */ } },
-  {
-    "id": "mark-account-created",
-    "use": "@blokjs/ctx-publish",
-    "inputs": { "name": "accountCreated", "value": true }
-  },
-  /* more steps... */
-]
-```
-
-Then the catch arm branches on the marker:
-
-```json
-"catch": [
-  {
-    "id": "decide-rollback",
-    "branch": {
-      "when": "ctx.state.accountCreated === true",
-      "then": [/* roll back the account */],
-      "else": [/* nothing to roll back */]
-    }
+{
+  "id": "signup-saga",
+  "tryCatch": {
+    "try": [
+      { "id": "create-account", "use": "@blokjs/api-call", "inputs": { /* ... */ } },
+      { "id": "send-welcome",   "use": "@blokjs/api-call", "inputs": { /* ... */ } },
+      { "id": "create-profile", "use": "@blokjs/api-call", "inputs": { /* ... */ } }
+    ],
+    "catch": [
+      {
+        "id": "decide-rollback",
+        "branch": {
+          "when": "ctx.state['create-account'] !== undefined",
+          "then": [
+            { "id": "rollback-account", "use": "@blokjs/api-call", "inputs": { /* ... */ } }
+          ]
+        }
+      },
+      {
+        "id": "respond-failed",
+        "use": "@blokjs/throw",
+        "inputs": {
+          "message": "Signup failed",
+          "code": 500,
+          "body": {
+            "outcome": "failed",
+            "failedAt": "js/ctx.error.stepId",
+            "reason": "js/ctx.error.message",
+            "upstreamCode": "js/ctx.error.code || null"
+          }
+        }
+      }
+    ]
   }
-]
+}
 ```
 
-The `mark-account-created` step only runs after `create-account` returns successfully, so the marker is a true success witness.
+If `create-account` itself fails: `ctx.state['create-account']` is `undefined`, the branch's `then` doesn't fire, no rollback is needed. The throw step still runs and emits the structured 500.
+
+If a later step (`send-welcome` or `create-profile`) fails: `ctx.state['create-account']` is set to the actual response, the branch's `then` fires, the rollback request goes out. `$.error.stepId` tells the response handler exactly which step blew up.
 
 ---
 
