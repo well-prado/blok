@@ -135,7 +135,8 @@
 							"c/devtools/forEach-and-loop",
 							"c/devtools/switchOn",
 							"c/devtools/tryCatch",
-							"c/devtools/middleware"
+							"c/devtools/middleware",
+							"c/devtools/wait-inside-primitives-design"
 						]
 					},
 					{

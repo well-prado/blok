@@ -404,6 +404,202 @@ const cases: SmokeCase[] = [
 			if (obj.failedItems !== 1) throw fail("failedItems should be 1 (optional swallowed)", obj);
 		},
 	},
+
+	// --- v05-hello-with-mw: minimal workflow-level middleware demo -----------
+	{
+		name: "v05-hello-with-mw — missing auth → 401 (workflow-level middleware fires)",
+		method: "GET",
+		pathname: "/v05-hello-with-mw",
+		expectStatus: 401,
+	},
+	{
+		name: "v05-hello-with-mw — auth-check passes → 200 with greeting",
+		method: "GET",
+		pathname: "/v05-hello-with-mw",
+		headers: {
+			Authorization: "Bearer smoke-token",
+			"X-Expected-Token": "smoke-token",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.greeting !== "hello, world") throw fail("greeting mismatch", obj);
+			if (obj.via !== "auth-check") throw fail("via should be 'auth-check'", obj);
+		},
+	},
+
+	// --- v05-multi-tenant-router: switch + sub-workflow dispatch -------------
+	{
+		name: "v05-multi-tenant-router — tenant=acme dispatches to v05-tenant-acme",
+		method: "POST",
+		pathname: "/v05-multi-tenant-router",
+		headers: { "X-Tenant-Id": "acme" },
+		body: { order: "ord-acme-1", customer: "alice" },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.dispatchedTo !== "dispatch-acme") throw fail("dispatchedTo should be 'dispatch-acme'", obj);
+			const child = obj.child as Record<string, JsonValue> | undefined;
+			if (!child || child.tenant !== "acme") throw fail("child.tenant should be 'acme'", obj);
+			if (child.processedBy !== "v05-tenant-acme") throw fail("processedBy mismatch", obj);
+		},
+	},
+	{
+		name: "v05-multi-tenant-router — tenant=BETA case-insensitive routes to beta",
+		method: "POST",
+		pathname: "/v05-multi-tenant-router",
+		headers: { "X-Tenant-Id": "BETA" },
+		body: { order: "ord-beta-1" },
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			const child = obj.child as Record<string, JsonValue> | undefined;
+			if (!child || child.tenant !== "beta") throw fail("child.tenant should be 'beta'", obj);
+		},
+	},
+	{
+		name: "v05-multi-tenant-router — unknown tenant → 400 with structured reason",
+		method: "POST",
+		pathname: "/v05-multi-tenant-router",
+		headers: { "X-Tenant-Id": "unknown-corp" },
+		body: {},
+		expectStatus: 400,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.reason !== "tenant_not_registered") {
+				throw fail("reason should be 'tenant_not_registered'", obj);
+			}
+		},
+	},
+
+	// --- v05-csv-import: forEach + tryCatch + DLQ ----------------------------
+	{
+		name: "v05-csv-import — 3 rows, 1 invalid → 2 inserted + DLQ for the bad row",
+		method: "POST",
+		pathname: "/v05-csv-import",
+		body: {
+			rows: [
+				{ id: "r1", value: 100 },
+				{ id: "r2", value: "not-a-number" },
+				{ id: "r3", value: 200 },
+			],
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.totalRows !== 3) throw fail("totalRows should be 3", obj);
+			if (obj.inserted !== 2) throw fail("inserted should be 2", obj);
+			const dlq = obj.dlq as Array<Record<string, JsonValue>> | undefined;
+			if (!Array.isArray(dlq) || dlq.length !== 1 || dlq[0].rowId !== "r2") {
+				throw fail("dlq should contain exactly r2", obj);
+			}
+			if (typeof dlq[0].error !== "string" || !dlq[0].error.includes("validation failed")) {
+				throw fail("dlq[0].error should describe validation failure", obj);
+			}
+		},
+	},
+
+	// --- v05-data-export: forEach + tryCatch + retry -------------------------
+	{
+		name: "v05-data-export — 3 pages, 1 fails → 2 exported + 1 DLQ page",
+		method: "POST",
+		pathname: "/v05-data-export",
+		body: {
+			pages: [
+				{ number: 1, url: "https://httpbin.org/get?page=1" },
+				{ number: 2, url: "https://httpbin.org/get?page=2" },
+				{ number: 3, url: "https://httpbin.org/status/500" },
+			],
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.exported !== true) throw fail("exported should be true", obj);
+			if (obj.successfulPages !== 2) throw fail("successfulPages should be 2", obj);
+			const dlq = obj.dlqPages as Array<Record<string, JsonValue>> | undefined;
+			if (!Array.isArray(dlq) || dlq.length !== 1 || dlq[0].page !== 3) {
+				throw fail("dlqPages should contain exactly page 3", obj);
+			}
+		},
+	},
+
+	// --- v05-travel-booking: tryCatch with manual compensation chain ---------
+	{
+		name: "v05-travel-booking — happy path → all three booked",
+		method: "POST",
+		pathname: "/v05-travel-booking",
+		body: {
+			flightUrl: "https://httpbin.org/post",
+			hotelUrl: "https://httpbin.org/post",
+			carUrl: "https://httpbin.org/post",
+			passenger: "alice",
+		},
+		expectStatus: 200,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "booked") throw fail("outcome should be 'booked'", obj);
+			if (obj.flight !== true || obj.hotel !== true || obj.car !== true) {
+				throw fail("flight + hotel + car should all be true", obj);
+			}
+		},
+	},
+	{
+		name: "v05-travel-booking — car fails → flight + hotel compensated, 500",
+		method: "POST",
+		pathname: "/v05-travel-booking",
+		body: {
+			flightUrl: "https://httpbin.org/post",
+			hotelUrl: "https://httpbin.org/post",
+			carUrl: "https://httpbin.org/status/500",
+			passenger: "alice",
+		},
+		expectStatus: 500,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.outcome !== "failed") throw fail("outcome should be 'failed'", obj);
+			if (obj.failedAt !== "book-car") throw fail("failedAt should be 'book-car'", obj);
+			const comp = obj.compensated as Record<string, JsonValue> | undefined;
+			if (!comp || comp.flight !== true || comp.hotel !== true || comp.car !== false) {
+				throw fail("compensated should be {flight:true, hotel:true, car:false}", obj);
+			}
+		},
+	},
+	{
+		name: "v05-travel-booking — flight fails first → no compensation needed, 500",
+		method: "POST",
+		pathname: "/v05-travel-booking",
+		body: {
+			flightUrl: "https://httpbin.org/status/500",
+			hotelUrl: "https://httpbin.org/post",
+			carUrl: "https://httpbin.org/post",
+		},
+		expectStatus: 500,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.failedAt !== "book-flight") throw fail("failedAt should be 'book-flight'", obj);
+			const comp = obj.compensated as Record<string, JsonValue> | undefined;
+			if (!comp || comp.flight !== false || comp.hotel !== false || comp.car !== false) {
+				throw fail("no compensations should fire when flight fails first", obj);
+			}
+		},
+	},
+
+	// --- v05-admin-delete-user: jwt-auth + admin-only chain ------------------
+	// Note: the HAPPY-PATH case (admin-role token → 200) is covered in the
+	// JWT-cases builder below since it needs a freshly minted JWT with role
+	// claim. The unauth + non-admin cases live here because they don't
+	// require token signing.
+	{
+		name: "v05-admin-delete-user — missing auth → 401 (jwt-auth fires first)",
+		method: "POST",
+		pathname: "/v05-admin-delete-user",
+		body: { userId: "u-123" },
+		expectStatus: 401,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (obj.reason !== "missing_token") throw fail("reason should be 'missing_token'", obj);
+		},
+	},
 ];
 
 // JWT cases live in their own builder because each case mints a token via
@@ -506,6 +702,37 @@ async function buildJwtCases(): Promise<SmokeCase[]> {
 				const custom = obj.customClaims as Record<string, JsonValue> | undefined;
 				if (!custom || custom.role !== "admin" || custom.org !== "acme") {
 					throw fail("customClaims should carry role + org", obj);
+				}
+			},
+		},
+
+		// --- v05-admin-delete-user: needs JWT with role claim, lives here
+		// because token minting is async.
+		{
+			name: "v05-admin-delete-user — admin role → 200 (chain: jwt-auth + admin-only both pass)",
+			method: "POST",
+			pathname: "/v05-admin-delete-user",
+			headers: { Authorization: `Bearer ${await mintJwt({ sub: "admin-user", role: "admin" })}` },
+			body: { userId: "u-target-1" },
+			expectStatus: 200,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.ok !== true) throw fail("ok should be true", obj);
+				if (obj.targetUserId !== "u-target-1") throw fail("targetUserId mismatch", obj);
+				if (obj.deletedBy !== "admin-user") throw fail("deletedBy should be 'admin-user'", obj);
+			},
+		},
+		{
+			name: "v05-admin-delete-user — non-admin role → 403 from admin-only middleware",
+			method: "POST",
+			pathname: "/v05-admin-delete-user",
+			headers: { Authorization: `Bearer ${await mintJwt({ sub: "regular-user", role: "user" })}` },
+			body: { userId: "u-target-2" },
+			expectStatus: 403,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "admin_role_required") {
+					throw fail("reason should be 'admin_role_required'", obj);
 				}
 			},
 		},
@@ -650,8 +877,45 @@ async function runCase(c: SmokeCase): Promise<void> {
 // Main
 // =============================================================================
 
+/**
+ * Pre-flight: kill any process already holding our PORT. A leftover http:dev
+ * from a previous interrupted smoke run, a manual `bun run http:dev`, or
+ * a half-killed dev session would otherwise look "ready" to the boot
+ * detection below — and run the test cases against the wrong env (stale
+ * JWT_ISSUER, missing JWT_SECRET, etc.). This was a real footgun until
+ * v0.5.3 hardened it. Use lsof + kill -9 because a graceful SIGTERM gives
+ * the orphan time to drop new connections but not to release the port.
+ */
+async function killPortHolder(port: number): Promise<void> {
+	const lsof = spawn("lsof", ["-ti", `:${port}`], { stdio: ["ignore", "pipe", "pipe"] });
+	let pidsRaw = "";
+	lsof.stdout?.on("data", (chunk: Buffer) => {
+		pidsRaw += chunk.toString();
+	});
+	await new Promise<void>((resolve) => {
+		lsof.on("close", () => resolve());
+	});
+	const pids = pidsRaw
+		.split(/\s+/)
+		.map((s) => Number.parseInt(s, 10))
+		.filter((n) => Number.isInteger(n) && n > 0);
+	if (pids.length === 0) return;
+	console.log(`[v05-smoke] WARN: killing ${pids.length} orphan process(es) on port ${port}: ${pids.join(", ")}`);
+	for (const pid of pids) {
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch {
+			// already dead
+		}
+	}
+	// Tiny grace period so the kernel reclaims the socket before the spawn
+	// below tries to bind.
+	await new Promise((resolve) => setTimeout(resolve, 500));
+}
+
 async function main(): Promise<number> {
 	const startedAt = Date.now();
+	await killPortHolder(PORT);
 	console.log(`[v05-smoke] booting bun run http:dev (PORT=${PORT}) ...`);
 
 	const child: ChildProcess = spawn("bun", ["run", "http:dev"], {

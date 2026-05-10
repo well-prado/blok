@@ -1,0 +1,90 @@
+{
+	"name": "v05-multi-tenant-router",
+	"version": "1.0.0",
+	"description": "Routes incoming requests to the right tenant-specific sub-workflow based on the X-Tenant-Id header. Each tenant has its own workflow registered separately (v05-tenant-acme, v05-tenant-beta, v05-tenant-gamma) — real deployments would give each its own auth, business rules, rate limits to keep them properly isolated. This top-level workflow is just the dispatch layer. Demonstrates: switch + sub-workflow combination with per-tenant routing, default arm rejecting unknown tenants with a structured 400.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "route",
+			"switch": {
+				"on": "js/(ctx.request.headers['x-tenant-id'] || '').toLowerCase()",
+				"cases": [
+					{
+						"when": "acme",
+						"do": [
+							{
+								"id": "dispatch-acme",
+								"subworkflow": "v05-tenant-acme",
+								"inputs": {
+									"order": "js/ctx.request.body.order",
+									"customer": "js/ctx.request.body.customer",
+									"originalBody": "js/ctx.request.body"
+								}
+							}
+						]
+					},
+					{
+						"when": "beta",
+						"do": [
+							{
+								"id": "dispatch-beta",
+								"subworkflow": "v05-tenant-beta",
+								"inputs": {
+									"order": "js/ctx.request.body.order",
+									"customer": "js/ctx.request.body.customer",
+									"originalBody": "js/ctx.request.body"
+								}
+							}
+						]
+					},
+					{
+						"when": "gamma",
+						"do": [
+							{
+								"id": "dispatch-gamma",
+								"subworkflow": "v05-tenant-gamma",
+								"inputs": {
+									"order": "js/ctx.request.body.order",
+									"customer": "js/ctx.request.body.customer",
+									"originalBody": "js/ctx.request.body"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "reject-unknown-tenant",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Unknown tenant",
+							"code": 400,
+							"name": "UnknownTenantError",
+							"body": {
+								"error": "Unknown tenant",
+								"reason": "tenant_not_registered",
+								"hint": "Set X-Tenant-Id header to one of: acme, beta, gamma",
+								"received": "js/ctx.request.headers['x-tenant-id'] || null"
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((dispatchKey) => { const childResp = ctx.state[dispatchKey]; const childData = childResp && childResp.data ? childResp.data : childResp; return { routed: true, dispatchedTo: dispatchKey, child: childData }; })(['dispatch-acme','dispatch-beta','dispatch-gamma'].find(k => ctx.state[k] !== undefined))"
+			}
+		}
+	]
+}

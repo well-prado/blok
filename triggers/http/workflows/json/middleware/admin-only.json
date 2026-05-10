@@ -1,0 +1,31 @@
+{
+	"name": "admin-only",
+	"version": "1.0.0",
+	"description": "Authorization middleware that gates access on the JWT claim `role === 'admin'`. Expects a prior auth middleware (typically `jwt-auth`) to have populated `ctx.state.identity.claims`. On match, falls through; on mismatch (or missing identity), throws GlobalError(403) with a structured body. Pair with `jwt-auth` to build a complete authn+authz chain — the trigger declares both, in order, and downstream steps see the verified admin identity at ctx.state.identity.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "check-role",
+			"branch": {
+				"when": "!ctx.state.identity || !ctx.state.identity.claims || ctx.state.identity.claims.role !== 'admin'",
+				"then": [
+					{
+						"id": "respond-403",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Forbidden — admin role required",
+							"code": 403,
+							"name": "ForbiddenError",
+							"body": {
+								"error": "Forbidden",
+								"reason": "admin_role_required",
+								"hint": "JWT must carry `role: 'admin'` claim. Current role: see ctx.state.identity.claims.role"
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

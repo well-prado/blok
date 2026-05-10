@@ -1,0 +1,415 @@
+---
+title: "Wait inside primitives — design"
+description: "Architectural design for supporting `wait.for(...)` / `wait.until(...)` steps inside forEach, loop, switch, and tryCatch primitives. Documents the failure modes of the current single-cursor model, surveys four implementation options, and recommends Option B (step-tree cursor + iteration-state persistence) with a phased rollout."
+icon: "compass"
+---
+
+## Status
+
+**Design only.** No code shipped from this document. The goal is to lay out the trade-offs so a future implementation can start from informed premises rather than re-deriving them under deadline pressure.
+
+This is the largest remaining v0.5 architectural gap. The primitives (`forEach`, `loop`, `switch`, `tryCatch`) and `wait.for` / `wait.until` ship today as independent features. They compose at the surface — the JSON shape lets you nest a `wait` step inside a `forEach.do` body — but the **runtime contract breaks** when you actually do that. This document explains why and outlines the path to fixing it.
+
+---
+
+## Problem statement
+
+Today the following workflow is **accepted at load time**:
+
+```json
+{
+  "name": "process-orders",
+  "steps": [
+    {
+      "id": "per-order",
+      "forEach": {
+        "in": "$.req.body.orders",
+        "as": "order",
+        "mode": "sequential",
+        "do": [
+          { "id": "charge", "use": "@blokjs/api-call", "inputs": { /* ... */ } },
+          { "id": "wait-3d", "wait": { "for": "3d" } },
+          { "id": "ship",   "use": "@blokjs/api-call", "inputs": { /* ... */ } }
+        ]
+      }
+    }
+  ]
+}
+```
+
+The intent is clear: charge each order, wait 3 days (the chargeback window), ship if not refunded — per item. None of these primitives are exotic; they all work in isolation.
+
+**At runtime today, this workflow corrupts state in any of three ways:**
+
+1. **Cursor poisoning.** The wait step inside the iteration writes the run's `lastCompletedStepIndex` to its inner index (e.g. `1` — the second step of the iteration body). On re-entry, the **outer** runner reads that cursor and skips the first 2 outer steps, even though only one outer step (`per-order`) ever existed. The iteration is never resumed — the runner falls off the end and the workflow returns whatever happens to be on `ctx.response`.
+
+2. **Lost iteration state.** `ForEachNode.cloneCtxForIteration` builds a per-iteration child `ctx` with its own `state[as]`, deep-cloned config, and a fresh response slot. None of that is persisted to durable storage. When the wait fires and the inner runner throws `WaitDispatchRequest`, the iteration's child ctx is garbage-collected. Re-entry gets back a different process with no record that `order = items[2]` was the active iteration.
+
+3. **`tryCatch` steals the wait.** Inside a `tryCatch.try`, `WaitDispatchRequest` is just an exception. The current `try { ... } catch (err) { ctxAny.error = toErrorEnvelope(err); ... }` block treats it as a regular failure, fires the catch arm with `$.error.name === "WaitDispatchRequest"`, and the workflow runs to completion via the catch path — never deferring at all.
+
+These aren't subtle edge cases. They're the **default behaviour** of every primitive-+-wait composition, and there's no warning at load time.
+
+The current shipped guidance (in [core/runner/CLAUDE.md](https://github.com/deskree-inc/blok/blob/main/core/runner/CLAUDE.md)) is to manually split the workflow at the wait boundary using sub-workflows:
+
+```ts
+// Workflow A — pre-wait
+{ id: "queue-continuation", subworkflow: "post-wait-half",
+  inputs: { state: $.state }, wait: false }
+
+// Workflow B — has delay on its trigger
+{ name: "post-wait-half",
+  trigger: { http: { method: "POST", path: "/internal/...", delay: "3d" } },
+  steps: [/* the post-wait steps */] }
+```
+
+This works (it's durable + crash-safe), but it's authoring debt: the primitives' value is that they let you express a multi-step shape as one workflow. Forcing the author to fragment that shape every time a wait is involved cancels half the benefit.
+
+---
+
+## Current architecture (where waits work)
+
+`wait.for` / `wait.until` are functional **at the top level** of a workflow's `steps[]`. Five things conspire to make that work:
+
+### 1. Single-cursor resume (`lastCompletedStepIndex`)
+
+The `WorkflowRun` record carries a single integer field, `lastCompletedStepIndex`. Before throwing `WaitDispatchRequest`, the runner sets it to `i - 1` (the last non-wait step that completed). On re-entry, `runSteps` reads the cursor and skips indices `0..lastCompletedStepIndex`, resuming at the wait step itself, which detects re-entry via `_blokDispatchReentry === true` and advances past.
+
+This is fine when the workflow is a flat list. It does **not** scale to a tree of nested runners — there's only one cursor for the whole run.
+
+### 2. Top-level-only updates
+
+The cursor write is gated on `!deep`:
+
+```ts
+if (!deep && traceRunId) {
+  tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
+}
+```
+
+Inner runners (everything spawned by `ForEachNode`, `LoopNode`, `SwitchNode`, `TryCatchNode`) call `runner.run(ctx, { deep: true, stepName: this.name })`, so their step indices never touch the cursor. Without that gate, the order-fulfillment example's inner forEach steps would clobber the parent run's cursor every iteration.
+
+The wait throw inside an inner runner DOES still write `lastCompletedStepIndex: i - 1` (it's not gated), which is the cursor-poisoning bug from the problem statement.
+
+### 3. State-is-implicit
+
+`ctx.state` lives in process memory. The runner doesn't snapshot it before a wait — there's no need at the top level, because the same JS process handles dispatch + the deferred re-entry **in the happy path**. ioredis cache, in-memory KV, computed values — all reused.
+
+For waits longer than a process lifetime (deploys, OOM kills, scaling events), the state is lost. The smoke gate doesn't currently exercise this; it's a known limitation.
+
+### 4. Persisted dispatch payload (request only)
+
+`scheduled_dispatches` (sqlite migration v9) persists exactly the request shape: `{method, path, headers (sanitized), body, params, query, scheduledAt, expiresAt, dispatchStatus}`. **No `ctx.state`, no per-iteration item, no nested cursor.** On boot recovery, the trigger rebuilds a minimal context from this payload and re-enters `dispatchDeferred(...)`.
+
+This means even the **top-level** wait pattern is not actually durable across crashes — it's durable across **timer firings** (the in-process scheduler restarts cleanly), but not across operator-induced process restarts that take longer than the wait duration. The smoke gate's recovery test only exercises the in-process timer path.
+
+### 5. Wait detection happens BEFORE `step.process`
+
+`RunnerSteps` checks `stepType === "wait"` and short-circuits the process invocation. The WaitNode itself is a stub whose `run()` is unreachable in the happy path — it exists only so the node resolver doesn't throw at load time. Nothing in `step.process()` is involved in the wait protocol.
+
+This is a clean design at the top level. It collapses inside primitives because the wait's "scope" — what it pauses, what gets resumed — is no longer the run, but a sub-pipeline.
+
+---
+
+## Why naive extension fails
+
+Three concrete failures, each preventing the simplest "just let waits work everywhere" patch from being correct.
+
+### Failure A — Single cursor cannot represent a tree
+
+```
+top-level steps:    [outer-1, forEach-step, outer-3]
+forEach.do:                  [iter-1, iter-2(wait), iter-3]
+```
+
+`lastCompletedStepIndex = 1` is ambiguous: does it mean "outer-1 done, resume at forEach-step" (the iteration restarts from scratch) or "iter-1 done, resume at iter-2 inside the forEach" (mid-iteration resume)? The current schema can encode either, not both.
+
+Multiplied by `forEach.mode === "parallel"`, where multiple iterations could be mid-flight when the first wait fires — the cursor would need to record N iteration-positions simultaneously.
+
+A tree resume cursor needs structure roughly:
+```ts
+type ResumeCursor = {
+  outerStepIndex: number;
+  innerCursor?: ResumeCursor;
+  iteration?: { index: number; itemHash: string };
+};
+```
+
+Or equivalently, a stack/path encoding (`"outer:1/forEach:item-3/inner:1"`).
+
+### Failure B — No durable iteration state
+
+The forEach iteration's `ctx.state[as]` (the current item), the iteration index, intermediate state mutations from earlier steps in the iteration body — none of it is in `node_runs` or any other persisted table. On process restart, even with a perfect cursor, the resumed iteration would see an empty `ctx.state.order` and a `ctx.state[<earlier-step.id>]` that was never replayed.
+
+The only durable state per step today is the trace's `node_runs.outputJson`. That's enough at the top level (state is rehydrated by replaying outputs in order). It's **not** enough inside an iteration, because the iteration's `ctx` is a CLONE — the parent ctx's state isn't updated by inner step outputs (`applyStepOutput` writes happen on the child ctx, which is then discarded).
+
+### Failure C — TryCatch swallows WaitDispatchRequest
+
+`TryCatchNode.run`:
+
+```ts
+try {
+  await tryRunner.run(ctx, { deep: true, stepName: this.name });
+} catch (err) {
+  caught = toErrorEnvelope(err);
+  // ... runs the catch block
+}
+```
+
+`WaitDispatchRequest` is an Error subclass. The catch block here matches it. The wait is converted into an "exception" that fires the catch arm — opposite of the intended behaviour.
+
+The `RunnerSteps` outer catch already special-cases `WaitDispatchRequest` and `RunCancelledError` to pass them through untouched:
+
+```ts
+if (e instanceof RunCancelledError) throw e;
+if (e instanceof WaitDispatchRequest) throw e;
+```
+
+`TryCatchNode` would need the same special-cases — a small change in isolation, but **only correct if** the eventual re-entry can re-construct the try-arm at the same point it left off. If the wait completes and the runner resumes inside the try arm via cursor walk, `tryCatch`'s state machine (`pendingError`, `priorError` snapshots, `caught` flag) needs to rebuild from scratch. Currently it doesn't — the outer node's `run()` method runs from the top every time.
+
+---
+
+## Design space — four options
+
+### Option A — Generator/coroutine rewrite
+
+Convert workflow execution to a single async generator (or AsyncIterator-driven state machine). Every primitive yields control back to the runner; `wait` yields a `{kind: "wait", deadline}` value the runner serializes. Resume reconstructs the iterator from the persisted yield log.
+
+**Pros**
+- Cleanest model — matches Trigger.dev v3, Temporal, Durable Objects.
+- Handles nesting naturally (generators compose).
+- No special cases per primitive.
+
+**Cons**
+- Total rewrite of `RunnerSteps`, every primitive's `run()`, the inner-runner protocol.
+- Yield log replay requires every step output to be **deterministic** or the replay needs a cache (idempotency cache covers most, not all).
+- Massive blast radius — every existing test, every Studio assumption, every adapter touchpoint.
+- Estimated 4-6 weeks for a credible attempt.
+
+**Verdict**: right answer eventually, wrong answer now. This is what Blok 1.0 should look like; it's not a v0.5.x patch.
+
+### Option B — Step-tree cursor + iteration state persistence
+
+Augment the single `lastCompletedStepIndex` cursor with a hierarchical resume path. Add a new `node_runs.iterationContext` JSON column persisting per-iteration state (`item`, `index`, `intermediate ctx.state delta`). Special-case `WaitDispatchRequest` in every primitive's run() (3 lines each — re-throw past the catch).
+
+On wait throw inside a primitive:
+1. The primitive serializes its own state (current iteration index, item, intermediate child-ctx delta) into `iterationContext`.
+2. Records the cursor as a path: `"<outer-step>/<primitive>:<iteration-id>/<inner-step>"`.
+3. Re-throws `WaitDispatchRequest` past its own catch.
+
+On re-entry:
+1. Runner reads the path cursor.
+2. Walks down the tree: top-level runner skips to the matching outer step, calls primitive.run(), which reads its `iterationContext`, reconstructs the child ctx, skips iterations < N, resumes iteration N at inner-step M.
+3. Inside iteration N, the runner sees the resume cursor matches the wait step → satisfies + advances.
+
+**Pros**
+- Localized changes — one cursor schema, one persistence column, three primitive patches. Existing top-level wait logic unchanged.
+- Backwards compatible — workflows with no waits inside primitives don't touch the new code.
+- Implementable incrementally: ship sequential `forEach` first (simplest cursor), parallel `forEach` second (cursor needs an iteration set), `loop` third (cursor counts iterations, doesn't need item hashing), `switch` fourth (only needs to know which case ran), `tryCatch` last (needs `pendingError` + arm tracking persisted).
+
+**Cons**
+- Still doesn't fix the underlying "ctx.state isn't durable across restart" issue at the top level — that's a separate bug, but Option B doesn't make it worse.
+- Parallel forEach is the worst case: when the first iteration in a 5-wide pool fires a wait, what happens to the 4 other in-flight iterations? Three sub-options (covered below).
+- Cursor encoding is delicate — a path string needs escape rules, max-depth bounds, validation.
+
+**Verdict**: best balance of correctness and effort. Recommended.
+
+### Option C — Lift waits OUT of primitives (today's pattern, made explicit)
+
+Reject waits inside primitives at load time. Document the sub-workflow split pattern as the canonical approach. Maybe ship a lint rule.
+
+**Pros**
+- Zero implementation cost.
+- Forces authors to think about the durability boundary explicitly.
+
+**Cons**
+- Concedes the v0.5 promise — primitives are supposed to compose.
+- Sub-workflow splitting is verbose: every "charge then wait then ship" workflow becomes three workflows.
+- Doesn't solve the parallel-fanout case: "send a notification 1h after each subscriber acknowledges" still wants to wait per-subscriber.
+
+**Verdict**: too much regression on the authoring promise. Reject.
+
+### Option D — Eager unrolling (forEach becomes N sequential top-level sub-workflows)
+
+At workflow load time, unroll a `forEach` into N top-level sub-workflow steps (one per item) when it contains a wait. Each sub-workflow handles one item, can wait freely, returns its result.
+
+**Pros**
+- Re-uses the sub-workflow durability that already works.
+- No new cursor schema needed.
+
+**Cons**
+- Unrolling at load time conflicts with the **dynamic** nature of forEach inputs (the input array isn't known at load time — it comes from `ctx.req.body.orders` at runtime).
+- Would need to unroll at *first iteration* time, which means the workflow definition is mutable mid-run — defeats the whole "workflow as a static blueprint" model.
+- Doesn't extend to `loop` (inherently dynamic iteration count) or `tryCatch` (no inputs to unroll over).
+
+**Verdict**: only works for forEach, only for compile-time inputs. Reject.
+
+---
+
+## Recommendation: Option B, phased
+
+Ship Option B in four PRs, each independently mergeable:
+
+### Phase 1 — TryCatch passes through wait (~2 days)
+
+Smallest fix. Add `if (err instanceof WaitDispatchRequest) throw err` to `TryCatchNode.run`'s catch block. Wait inside `tryCatch.try` now defers the run correctly. On re-entry, the try arm restarts from the top — for try-arms where every step is idempotent (the common case for sagas), this Just Works. Document the idempotency requirement explicitly.
+
+**Out of phase 1**: re-entry mid-try-arm. Author's responsibility to make every try step idempotent.
+
+### Phase 2 — Sequential forEach iteration cursor (~1 week)
+
+Persist `iterationContext` for sequential `forEach`. Cursor path encoding: `"forEach:<iterationIndex>/<innerStepIndex>"`. Re-entry walks down to that iteration, replays its state, resumes at the inner step.
+
+**Concrete schema additions:**
+
+```sql
+ALTER TABLE node_runs ADD COLUMN iteration_context TEXT; -- JSON
+ALTER TABLE workflow_runs MODIFY COLUMN last_completed_step_index TEXT; -- was INTEGER, now path string
+-- migration: existing integer values become "<n>" path strings
+```
+
+**Out of phase 2**: parallel forEach (next phase), nested primitives (deferred).
+
+### Phase 3 — Parallel forEach + loop iteration cursor (~1 week)
+
+Parallel forEach: when ANY iteration fires a wait, **cancel the other in-flight iterations**, snapshot their `iterationContext` as "incomplete" entries, and serialize the whole iteration set. On re-entry, re-launch the incomplete iterations from scratch (treating the cancellation as a soft retry) AND resume the wait-firing iteration.
+
+The cancellation is a deliberate trade-off: holding 4 iterations open in memory across a 3-day wait is unacceptable. The author gets a warning at load time: "parallel forEach with embedded wait — non-firing iterations will be cancelled and retried on resume; ensure inner steps are idempotent". `idempotencyKey` on the inner step makes the retry cheap.
+
+`loop`: cursor records `iterationCount + intermediate state`. Re-entry resumes at iteration N+1 with the persisted `ctx.state.<id>Index` value.
+
+**Out of phase 3**: nested primitives (forEach > tryCatch > wait), `switch` (next phase).
+
+### Phase 4 — Switch cursor + nested primitives (~1 week)
+
+`switch`: cursor records `caseIndex` (which arm matched). Re-entry walks into that arm's sub-pipeline.
+
+Nested primitives: cursor path becomes recursive (`"forEach:0/tryCatch:try/3/loop:5/inner:2"`). Path parser handles arbitrary depth. Re-entry walks the whole path step by step.
+
+**Out of phase 4**: durable ctx.state across restart (separate concern, see [Open Questions](#open-questions)).
+
+---
+
+## Prerequisites and dependencies
+
+1. **State durability across restart** is a *prerequisite for ALL phases*. If the only thing keeping `ctx.state` alive is the JS process, the iteration-state-persistence work in Phase 2 is wasted on the restart case. Two options:
+
+   **(a)** Snapshot `ctx.state` to `workflow_runs.state_snapshot` before every `WaitDispatchRequest` throw. Compact (the throwing scope is well-defined). Re-entry rehydrates from the snapshot.
+
+   **(b)** Accept that ctx.state across restart is a known limitation of all wait paths (top-level included), document it, defer fix. Authors using long waits accept this.
+
+   **Recommendation: (a) before phase 2 starts.** Without it, phase 2 makes promises it can't keep.
+
+2. **Idempotency story for inner steps**. Phase 3's parallel-forEach cancellation, and any naive top-level retry, depends on inner steps being idempotent. The existing `idempotencyKey` field on steps is enough — but the docs need a strong "if you put a wait inside a primitive, every step in the iteration body MUST set idempotencyKey or be naturally idempotent" callout.
+
+3. **Cursor path encoding spec**. Phase 1+ doesn't need this; phase 2 does. Open question: JSON path-of-objects vs string with escape rules. Lean toward JSON — easier to migrate, easier to extend with new fields per primitive.
+
+4. **Studio rendering**. A wait inside a forEach iteration needs to render distinctly in the trace timeline:
+   - The iteration shows `delayed` status (existing `RUN_DELAYED` event reuse?)
+   - The iteration's parent forEach step shows `(2/5 iterations waiting)` instead of `complete`
+   - The trace's overall run status shows `delayed` (current behaviour for top-level waits)
+
+   This is non-trivial UI work; can lag implementation by a release.
+
+---
+
+## Open questions
+
+These need decisions before implementation, not in this document.
+
+### Q1: What about parallel forEach iterations that completed BEFORE the wait fired?
+
+Example: 5-wide parallel pool, iteration 3 fires wait, iterations 1+2 already completed, iterations 4+5 are in-flight.
+
+- Iterations 1+2: their `ctx.response` was rolled into `state["forEach"]`. Should be safe to keep — but the forEach hasn't completed, so when does that result get written?
+- Iterations 4+5: cancelled per phase 3. Their partial state is discarded.
+- Iteration 3: persisted via iterationContext, resumed.
+
+The interaction with `applyStepOutput` is subtle: the forEach step's persistence runs when the forEach completes. If we resume mid-flight, do iterations 1+2's results stay valid (their `idempotencyKey` cache is hit on retry, since they completed) or do we re-run them from scratch?
+
+Lean toward: **persist completed iteration results, retry incomplete ones**. Hairy invariants — needs a dedicated micro-spec.
+
+### Q2: Should `tryCatch.finally` see the wait?
+
+JS semantics: `finally` runs after `try`/`catch` regardless. If `try` is mid-wait, has it "completed" enough for `finally` to fire? Realistically: NO — the wait should defer the whole tryCatch step, finally included. But this is a behaviour author's may not expect.
+
+Document explicitly. Lean toward "wait pauses everything in the tryCatch including the finally".
+
+### Q3: Cursor representation — JSON object or path string?
+
+Two viable encodings:
+
+```json
+// Object form
+{ "outer": 1, "forEach": { "iteration": 3, "inner": 2 } }
+
+// Path string
+"1/forEach:3/2"
+```
+
+Object wins on extensibility (new fields per primitive don't break the parser). Path string wins on size (a 6-deep nest is 30 bytes vs ~150). Lean toward object — extensibility matters more than 120 bytes.
+
+### Q4: Maximum nesting depth for the cursor
+
+Today the runner allows arbitrary nesting (`forEach > forEach > tryCatch > switch > loop > ...`). With cursor-walking re-entry, deeply nested cases multiply the bug surface. Cap at depth 5? 10?
+
+Existing `BLOK_MAX_SUBWORKFLOW_DEPTH=10` is a precedent. Lean toward **same cap, same env var name, applied to primitive nesting**. Reject workflows that exceed it at load time, NOT at run time.
+
+### Q5: What about waits inside SWITCH default?
+
+`switch.default` is a sub-pipeline. A wait inside it means the cursor needs to record "default arm matched, resume at inner step N". Same shape as a regular case, just a discriminator.
+
+Probably fits cleanly into phase 4. Worth verifying once the schema is concrete.
+
+### Q6: Backwards compatibility
+
+Existing workflows with waits at the top level today. The cursor schema changes (integer → path-string-or-object). Migration:
+
+- Pre-existing `lastCompletedStepIndex: 5` integer values stay readable. New writes use the path encoding.
+- Migration runs once at boot, transforms integer cursor → `{outer: 5}`.
+- Documented in the v0.5.X release notes.
+
+### Q7: Partial-failure during iteration-state persistence
+
+What happens if the dispatch row writes succeed but the iterationContext write fails (sqlite transaction edge case)? The wait throw fires anyway, but on re-entry there's no iteration state.
+
+Lean toward: **transaction wraps both writes, atomic**. If either fails, the whole wait fails — request returns 500, dispatch row is rolled back. Author retries.
+
+---
+
+## Out of scope for this design
+
+These are intentionally NOT addressed:
+
+- **Top-level state durability across restart.** Pre-existing limitation; covered by prerequisite (a) above. If we fix it for phase 2, we get top-level fix for free; if we accept the limitation, top-level waits >process-lifetime continue to be best-effort.
+- **`wait.until($.req.body.scheduledAt)` resolution at re-entry.** When the deadline is computed from a workflow input that may have changed, do we re-resolve on re-entry or use the persisted deadline? Persisted is the safer default; re-resolve is a future feature.
+- **Cancellable waits.** The `POST /__blok/runs/:runId/cancel` endpoint should cancel a delayed run. It does today (cooperative cancellation via AbortSignal). Inside-primitives waits should respect the same path.
+- **Dispatch backoff.** When a wait deadline fires but the run can't acquire its concurrency slot, the dispatch reschedules. Inside-primitives waits should behave the same way; nothing primitive-specific.
+- **Studio UI for nested wait visualization.** Mentioned as a prerequisite-adjacent concern; ship it after the core machinery works.
+
+---
+
+## Estimated total effort
+
+| Phase | Scope | Effort | Risk |
+|---|---|---|---|
+| Prerequisite (a) | Snapshot ctx.state on wait throw | 2-3 days | Medium — invariants around what counts as "state" |
+| Phase 1 | TryCatch pass-through | 2 days | Low — additive, isolated |
+| Phase 2 | Sequential forEach + loop | 5-7 days | Medium — first cursor path encoding |
+| Phase 3 | Parallel forEach cancellation | 5-7 days | High — concurrency reasoning, easy to break |
+| Phase 4 | Switch + nested + studio polish | 5-7 days | Medium — touches Studio + adds depth cap |
+| **Total** | | **3-4 weeks** | |
+
+For comparison: Option A (full generator rewrite) is 4-6 weeks of higher-risk work. Option B delivers value incrementally; if phase 1 ships and phase 2+ slips, the codebase is still better than today.
+
+---
+
+## Decision needed
+
+This document doesn't decide anything. It articulates the trade-off space so a roadmap PM (or the user) can.
+
+The actual decisions:
+
+1. **Approve Option B?** Or start an Option A spike to compare? (Recommendation: Option B; revisit Option A at v0.6 / v1.0 planning.)
+2. **Phase 1 (`tryCatch` pass-through) — schedule it now?** It's a 2-day fix with measurable user value (Sagas with wait can be expressed in one workflow instead of three). Recommendation: yes, ship in v0.5.3.
+3. **Phase 2-4 — schedule for v0.6?** Recommendation: yes. The full machinery is too disruptive for a patch release; v0.6 is the right slot.
+4. **Prerequisite (a) — schedule alongside phase 2?** Recommendation: yes. Avoid making phase 2 promises that get clawed back later.
