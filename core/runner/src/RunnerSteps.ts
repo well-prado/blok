@@ -420,6 +420,19 @@ export default abstract class RunnerSteps {
 							ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms${attemptSuffix})`);
 							break;
 						} catch (nodeErr) {
+							// v0.5.3 — control-flow signals from a step's run()
+							// must NOT be retried OR wrapped as enriched errors.
+							// In the production wait path, RunnerSteps throws
+							// WaitDispatchRequest from outside this retry loop, so
+							// this branch is normally inert. But if a custom node
+							// ever throws a wait/cancel signal from inside its
+							// process()/run(), preserve the type so the outer
+							// catch + TryCatchNode pass-through still recognise
+							// it. Same rationale as the outer-catch instanceof
+							// guards at line ~498.
+							if (nodeErr instanceof WaitDispatchRequest || nodeErr instanceof RunCancelledError) {
+								throw nodeErr;
+							}
 							if (attempt < maxAttempts && retryConfig) {
 								// More attempts remain — record this as a soft
 								// failure and back off before retrying. The node

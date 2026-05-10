@@ -16,8 +16,10 @@ import { GlobalError } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import Configuration from "../../src/Configuration";
+import { RunCancelledError } from "../../src/RunCancelledError";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
+import { WaitDispatchRequest } from "../../src/WaitDispatchRequest";
 import { defineNode } from "../../src/defineNode";
 import type GlobalOptions from "../../src/types/GlobalOptions";
 
@@ -75,6 +77,48 @@ class ThrowNode extends RunnerNode {
 		};
 		const msg = opts.inputs?.message ?? "test failure";
 		throw new Error(msg);
+	}
+}
+
+/**
+ * Test-only node that throws WaitDispatchRequest. Lets us verify that
+ * TryCatchNode correctly passes the wait signal through its catch arm
+ * (Phase 1 of wait-inside-primitives) without the cost of materializing
+ * a real wait step + dispatch + re-entry round trip.
+ */
+class ThrowWaitNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/test-throw-wait";
+		this.node = "@blokjs/test-throw-wait";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		throw new WaitDispatchRequest({
+			scheduledAt: Date.now() + 1000,
+			stepIndex: 0,
+			stepId: "test-wait",
+			lastCompletedStepIndex: -1,
+		});
+	}
+}
+
+/**
+ * Test-only node that throws RunCancelledError. Same rationale as
+ * ThrowWaitNode — verify pass-through without an actual cancel
+ * AbortController round trip.
+ */
+class ThrowCancelNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/test-throw-cancel";
+		this.node = "@blokjs/test-throw-cancel";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		throw new RunCancelledError("test-run-id");
 	}
 }
 
@@ -144,6 +188,8 @@ async function bootConfig(
 		"@blokjs/expr": new ExprNode(),
 		"@blokjs/ctx-publish": new CtxPublishNode(),
 		"@blokjs/throw": new ThrowNode(),
+		"@blokjs/test-throw-wait": new ThrowWaitNode(),
+		"@blokjs/test-throw-cancel": new ThrowCancelNode(),
 		...extraNodes,
 	};
 	const globalOptions = {
@@ -670,5 +716,186 @@ describe("v0.5 tryCatch — error-path state contract (post-fix)", () => {
 		expect(snap.code).toBe(402);
 		expect(snap.stepId).toBe("payment");
 		expect(snap.hasStack).toBe(true);
+	});
+});
+
+/**
+ * v0.5.3 Phase 1 — wait-inside-primitives partial fix.
+ *
+ * `WaitDispatchRequest` (the runner's "defer this run" signal) and
+ * `RunCancelledError` (cooperative cancellation signal) used to be
+ * caught by `TryCatchNode`'s catch arm and fall through to
+ * `toErrorEnvelope`, which silently broke both contracts: the wait
+ * effectively no-op'd (the run never deferred, the catch + finally
+ * arms ran, the workflow returned success); the cancel was treated as
+ * an exception and the workflow continued past cancellation.
+ *
+ * The fix is a pair of `instanceof` re-throws in TryCatchNode.run
+ * before either signal can reach `toErrorEnvelope`. Finally is also
+ * skipped on this path — the wait/cancel hasn't completed, and finally
+ * semantically fires on completion. On wait re-entry the entire
+ * tryCatch step re-executes (Phase 1 limit: no mid-arm resume), so
+ * finally fires when that re-run reaches a terminal state.
+ *
+ * Phase 1 author contract: every step in a `try` arm that contains a
+ * wait MUST be idempotent.
+ */
+describe("v0.5.3 Phase 1 — wait + cancel pass-through (TryCatchNode)", () => {
+	it("WaitDispatchRequest thrown inside try arm is RE-THROWN, not caught", async () => {
+		// Arrange a tryCatch whose try arm throws WaitDispatchRequest.
+		// Catch arm sets a state marker; if it ran we'd see the marker
+		// after the run failed/threw. Pre-fix the catch arm fired and
+		// finally ran; post-fix neither runs and the wait propagates.
+		const wfDef = {
+			name: "test-wait-passthrough-try",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "wait-step", use: "@blokjs/test-throw-wait", type: "module", inputs: {} }],
+						catch: [
+							{
+								id: "should-not-fire",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "catchFired", value: true },
+							},
+						],
+						finally: [
+							{
+								id: "should-not-fire-finally",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "finallyFired", value: true },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		const runner = new Runner(config.steps as NodeBase[]);
+		let thrown: unknown = null;
+		try {
+			await runner.run(ctx);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(WaitDispatchRequest);
+		// Neither catch nor finally fired — the run is deferring, not
+		// completing.
+		const state = ctx.state as Record<string, unknown>;
+		expect(state.catchFired).toBeUndefined();
+		expect(state.finallyFired).toBeUndefined();
+	});
+
+	it("RunCancelledError thrown inside try arm is RE-THROWN, not caught", async () => {
+		const wfDef = {
+			name: "test-cancel-passthrough-try",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "cancel-step", use: "@blokjs/test-throw-cancel", type: "module", inputs: {} }],
+						catch: [
+							{
+								id: "should-not-fire",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "catchFired", value: true },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		const runner = new Runner(config.steps as NodeBase[]);
+		let thrown: unknown = null;
+		try {
+			await runner.run(ctx);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(RunCancelledError);
+		expect((ctx.state as Record<string, unknown>).catchFired).toBeUndefined();
+	});
+
+	it("WaitDispatchRequest thrown inside catch arm is RE-THROWN (Phase 1 best-effort)", async () => {
+		// catch-arm waits aren't formally supported in Phase 1 (re-entry
+		// semantics differ — the resumed run re-runs the WHOLE tryCatch
+		// from the top, including try, which may not throw the same way).
+		// But we still pass the signal through here so it's not silently
+		// swallowed by the inner pendingError catch.
+		const wfDef = {
+			name: "test-wait-passthrough-catch",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "trigger-catch", use: "@blokjs/throw", type: "module", inputs: { message: "fail" } }],
+						catch: [{ id: "wait-in-catch", use: "@blokjs/test-throw-wait", type: "module", inputs: {} }],
+						finally: [
+							{
+								id: "should-not-fire",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "finallyFired", value: true },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		const runner = new Runner(config.steps as NodeBase[]);
+		let thrown: unknown = null;
+		try {
+			await runner.run(ctx);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(WaitDispatchRequest);
+		// Finally also skipped on this path — the wait hasn't completed;
+		// finally fires on the resumed run.
+		expect((ctx.state as Record<string, unknown>).finallyFired).toBeUndefined();
+	});
+
+	it("regular Errors STILL flow through catch (regression — pass-through must not affect normal exception handling)", async () => {
+		// Make sure the new instanceof guards don't also catch generic
+		// Error subclasses by accident. A normal throw should still be
+		// converted to ctx.error and trigger the catch arm.
+		const wfDef = {
+			name: "test-regular-error-still-caught",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [{ id: "boom", use: "@blokjs/throw", type: "module", inputs: { message: "kaboom" } }],
+						catch: [
+							{
+								id: "captured",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "caught", value: "js/ctx.error.message" },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		const runner = new Runner(config.steps as NodeBase[]);
+		await runner.run(ctx);
+		// Regular Error → catch ran with $.error.message = "kaboom"
+		expect((ctx.state as Record<string, unknown>).caught).toBe("kaboom");
 	});
 });
