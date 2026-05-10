@@ -106,6 +106,15 @@ interface RunRow {
 	 * after a wait dispatchDeferred re-entry. Added in migration v10.
 	 */
 	last_completed_step_index: number | null;
+	/**
+	 * v0.6 · JSON-serialized snapshot of `ctx.state` taken before the
+	 * runner throws `WaitDispatchRequest`. Read on dispatchDeferred
+	 * re-entry to rehydrate `ctx.state` so cross-process recovery
+	 * (where ctx is rebuilt fresh) sees the same pre-wait state.
+	 * NULL = no wait encountered, OR the snapshot exceeded the size
+	 * cap and was skipped. Added in migration v11.
+	 */
+	state_snapshot: string | null;
 	// Aggregate fields used in some queries
 	trigger_types?: string;
 	total_runs?: number;
@@ -529,6 +538,25 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE workflow_runs ADD COLUMN last_completed_step_index INTEGER;
 				`,
 			},
+			{
+				// v0.6 prerequisite for wait-inside-primitives Phase 2.
+				//
+				// state_snapshot is a JSON blob of `ctx.state` taken
+				// immediately before RunnerSteps throws WaitDispatchRequest.
+				// On dispatchDeferred re-entry — especially the cross-process
+				// recovery path where a fresh ctx is rebuilt from the
+				// persisted scheduled_dispatches row — TriggerBase.run reads
+				// this column and rehydrates ctx.state so subsequent steps
+				// see the same pre-wait state regardless of restart.
+				//
+				// Default NULL (= no snapshot; runner doesn't rehydrate,
+				// preserving exact pre-v0.6 behaviour for runs that never
+				// hit a wait).
+				version: 11,
+				sql: `
+					ALTER TABLE workflow_runs ADD COLUMN state_snapshot TEXT;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -564,8 +592,8 @@ export class SqliteRunStore implements RunStore {
 			 tags_json, metadata_json, node_count, completed_nodes, environment, replay_of,
 			 parent_run_id, parent_node_run_id,
 			 scheduled_at, expires_at, debounce_key, debounce_mode, ping_count,
-			 last_completed_step_index)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 last_completed_step_index, state_snapshot)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			run.id,
@@ -592,6 +620,7 @@ export class SqliteRunStore implements RunStore {
 			run.debounceMode ?? null,
 			run.pingCount ?? null,
 			run.lastCompletedStepIndex ?? null,
+			run.stateSnapshot ?? null,
 		);
 	}
 
@@ -662,6 +691,10 @@ export class SqliteRunStore implements RunStore {
 		if (updates.lastCompletedStepIndex !== undefined) {
 			setClauses.push("last_completed_step_index = ?");
 			values.push(updates.lastCompletedStepIndex);
+		}
+		if (updates.stateSnapshot !== undefined) {
+			setClauses.push("state_snapshot = ?");
+			values.push(updates.stateSnapshot);
 		}
 		if (updates.startedAt !== undefined) {
 			setClauses.push("started_at = ?");
@@ -1556,6 +1589,7 @@ export class SqliteRunStore implements RunStore {
 			debounceMode: (row.debounce_mode ?? undefined) as "leading" | "trailing" | undefined,
 			pingCount: row.ping_count ?? undefined,
 			lastCompletedStepIndex: row.last_completed_step_index ?? undefined,
+			stateSnapshot: row.state_snapshot ?? undefined,
 		};
 	}
 

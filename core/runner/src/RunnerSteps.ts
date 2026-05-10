@@ -34,6 +34,68 @@ function computeBackoff(
 	return Math.min(max, Math.floor(raw));
 }
 
+/**
+ * Default cap on the JSON-serialized `ctx.state` snapshot taken before
+ * a `WaitDispatchRequest` throw. 1 MB matches the existing
+ * `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` cap used by the durable scheduler
+ * for trigger payloads. Override per-deployment via the env var of the
+ * same name.
+ */
+const DEFAULT_STATE_SNAPSHOT_MAX_BYTES = 1_048_576;
+
+/**
+ * Serialize `ctx.state` for persistence in `workflow_runs.state_snapshot`
+ * (sqlite migration v11). Called immediately before the runner throws
+ * `WaitDispatchRequest`, so the snapshot reflects the canonical pre-wait
+ * state. Honors two ops env vars:
+ *
+ *  - `BLOK_STATE_SNAPSHOT_DISABLED=1` — kill-switch. Returns `undefined`
+ *    and the runner does NOT update the column. The wait still defers;
+ *    cross-process recovery just resumes with empty `ctx.state`. Use
+ *    this when state contains values that JSON.stringify can't round-
+ *    trip safely (Date, Map, BigInt, circular refs) and the author
+ *    accepts the limitation.
+ *  - `BLOK_STATE_SNAPSHOT_MAX_BYTES=<n>` — cap on the serialized blob
+ *    (default 1 MB). Above the cap, the helper logs a warning and
+ *    returns `undefined`. Same effect as the kill-switch for that one
+ *    run; subsequent runs with smaller state still snapshot.
+ *
+ * On JSON serialization failure (typed errors that bubble out of
+ * `JSON.stringify` — circular refs, BigInt, etc.), the helper logs a
+ * warning and returns `undefined`. The wait still defers — resumption
+ * for that specific run becomes best-effort, matching pre-v0.6
+ * behaviour for top-level waits across process restart.
+ */
+function serializeStateSnapshot(
+	state: unknown,
+	logger: { logLevel: (level: string, message: string) => void },
+): string | undefined {
+	if (process.env.BLOK_STATE_SNAPSHOT_DISABLED === "1") return undefined;
+	const capRaw = process.env.BLOK_STATE_SNAPSHOT_MAX_BYTES;
+	const cap = capRaw ? Number(capRaw) : DEFAULT_STATE_SNAPSHOT_MAX_BYTES;
+	const effectiveCap = Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_STATE_SNAPSHOT_MAX_BYTES;
+	let serialized: string;
+	try {
+		serialized = JSON.stringify(state ?? {});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		logger.logLevel(
+			"warn",
+			`[blok][wait] ctx.state snapshot failed to serialize: ${msg}. Wait will still defer; resumption is best-effort across process restart.`,
+		);
+		return undefined;
+	}
+	const size = Buffer.byteLength(serialized, "utf8");
+	if (size > effectiveCap) {
+		logger.logLevel(
+			"warn",
+			`[blok][wait] ctx.state snapshot exceeds ${effectiveCap} bytes (got ${size}); skipping snapshot. Wait will still defer; resumption is best-effort. Reduce state size or raise BLOK_STATE_SNAPSHOT_MAX_BYTES.`,
+		);
+		return undefined;
+	}
+	return serialized;
+}
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => {
 		setTimeout(resolve, ms);
@@ -288,9 +350,25 @@ export default abstract class RunnerSteps {
 						// Set resume cursor BEFORE throwing so re-entry knows
 						// where to pick up. Cursor = i - 1 (the last non-wait
 						// step that completed).
+						//
+						// v0.6 prerequisite for wait-inside-primitives Phase 2
+						// — also snapshot `ctx.state` to the run record. Two
+						// re-entry paths consume this snapshot:
+						//   1. In-process timer fire (DeferredRunScheduler):
+						//      same `ctx` is reused, state is already there;
+						//      rehydrate at TriggerBase.run is a no-op.
+						//   2. Cross-process recovery (recoverDispatches →
+						//      restoreDispatch on boot): a fresh `ctx` is
+						//      built from the persisted scheduled_dispatches
+						//      row with empty `state`. Without the snapshot,
+						//      Phase 2's iteration-state-persistence promise
+						//      breaks across restart — a forEach iteration
+						//      whose body fired the wait would lose its index
+						//      and accumulator.
 						if (tracker && traceRunId) {
 							tracker.getStore().updateRun(traceRunId, {
 								lastCompletedStepIndex: i - 1,
+								stateSnapshot: serializeStateSnapshot(ctx.state, ctx.logger),
 							});
 						}
 						ctx.logger.log(
