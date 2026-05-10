@@ -189,4 +189,59 @@ describe("WorkflowRegistry", () => {
 			expect(registry.get("hot")?.source).toBe("/new.json");
 		});
 	});
+
+	// v0.5.4 — process-global middleware. The registry holds a single
+	// frozen list that triggers prepend to every workflow run's chain.
+	// Tests pin: getter returns empty when unset, setter replaces,
+	// repeated calls last-wins, empty array clears, non-string entries
+	// are filtered, snapshot is frozen, clear() preserves the list.
+	describe("global middleware (v0.5.4)", () => {
+		it("returns an empty list when no global middleware has been set", () => {
+			const registry = WorkflowRegistry.getInstance();
+			expect(registry.getGlobalMiddleware()).toEqual([]);
+		});
+
+		it("setGlobalMiddleware replaces the chain; getter returns the latest", () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setGlobalMiddleware(["request-id", "audit-log"]);
+			expect(registry.getGlobalMiddleware()).toEqual(["request-id", "audit-log"]);
+			registry.setGlobalMiddleware(["other-only"]);
+			expect(registry.getGlobalMiddleware()).toEqual(["other-only"]);
+		});
+
+		it("empty array clears the global chain", () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setGlobalMiddleware(["request-id"]);
+			expect(registry.getGlobalMiddleware()).toHaveLength(1);
+			registry.setGlobalMiddleware([]);
+			expect(registry.getGlobalMiddleware()).toEqual([]);
+		});
+
+		it("filters non-string and empty-string entries", () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setGlobalMiddleware(["good", "", "also-good"] as unknown as string[]);
+			expect(registry.getGlobalMiddleware()).toEqual(["good", "also-good"]);
+		});
+
+		it("snapshot is frozen — callers cannot mutate the stored list", () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setGlobalMiddleware(["request-id"]);
+			const snapshot = registry.getGlobalMiddleware();
+			expect(Object.isFrozen(snapshot)).toBe(true);
+			// Attempting to push a runtime addition into the frozen array
+			// throws in strict mode (Vitest defaults to strict).
+			expect(() => (snapshot as string[]).push("audit-log")).toThrow();
+			expect(registry.getGlobalMiddleware()).toEqual(["request-id"]);
+		});
+
+		it("clear() does NOT reset the global middleware (operator state survives HMR)", () => {
+			const registry = WorkflowRegistry.getInstance();
+			registry.setGlobalMiddleware(["request-id", "audit-log"]);
+			registry.register(sampleWorkflow("a", "/a.json"));
+			registry.clear();
+			// Workflow registrations dropped, global chain preserved.
+			expect(registry.list()).toHaveLength(0);
+			expect(registry.getGlobalMiddleware()).toEqual(["request-id", "audit-log"]);
+		});
+	});
 });
