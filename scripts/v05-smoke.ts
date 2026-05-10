@@ -20,6 +20,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import path from "node:path";
+import { SignJWT } from "jose";
 
 // =============================================================================
 // Configuration
@@ -30,6 +31,29 @@ const BASE = `http://localhost:${PORT}`;
 const BOOT_TIMEOUT_MS = Number(process.env.BLOK_SMOKE_BOOT_MS ?? "60000");
 const REQUEST_TIMEOUT_MS = Number(process.env.BLOK_SMOKE_REQ_MS ?? "20000");
 const REPO_ROOT = path.resolve(import.meta.dir, "..");
+
+// JWT smoke-test config — these env vars get propagated to the spawned
+// http:dev so jwt-auth resolves them at request time. Production deployments
+// never set these in the shell — they come from a secret manager.
+const JWT_SECRET = "smoke-test-secret-12345";
+const JWT_ISSUER = "https://smoke.test.example.com";
+const JWT_AUDIENCE = "v05-smoke-api";
+
+async function mintJwt(
+	claims: Record<string, unknown>,
+	overrides: { issuer?: string; audience?: string; expSeconds?: number; secret?: string } = {},
+): Promise<string> {
+	const key = new TextEncoder().encode(overrides.secret ?? JWT_SECRET);
+	let token = new SignJWT(claims).setProtectedHeader({ alg: "HS256" }).setIssuedAt();
+	token = token.setIssuer(overrides.issuer ?? JWT_ISSUER);
+	token = token.setAudience(overrides.audience ?? JWT_AUDIENCE);
+	if (overrides.expSeconds !== undefined) {
+		token = token.setExpirationTime(overrides.expSeconds);
+	} else {
+		token = token.setExpirationTime("1h");
+	}
+	return token.sign(key);
+}
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
@@ -382,6 +406,112 @@ const cases: SmokeCase[] = [
 	},
 ];
 
+// JWT cases live in their own builder because each case mints a token via
+// jose's SignJWT (async). Appended to `cases` at runtime in main() once
+// the server is ready. Keeps the static array readable and avoids a
+// top-level await in this script.
+async function buildJwtCases(): Promise<SmokeCase[]> {
+	const validToken = await mintJwt({ sub: "alice", role: "admin", org: "acme" });
+	const wrongIssuerToken = await mintJwt({ sub: "alice" }, { issuer: "https://impostor.example.com" });
+	const wrongAudienceToken = await mintJwt({ sub: "alice" }, { audience: "wrong-audience" });
+	const wrongSecretToken = await mintJwt({ sub: "alice" }, { secret: "wrong-secret" });
+	const expiredToken = await mintJwt({ sub: "alice" }, { expSeconds: Math.floor(Date.now() / 1000) - 60 });
+
+	return [
+		{
+			name: "v05-jwt-protected — missing Authorization header → 401 (missing_token)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			body: { hello: "world" },
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "missing_token") throw fail("reason should be 'missing_token'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — malformed token → 401 (malformed_token)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: "Bearer not-a-real-jwt" },
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "malformed_token") throw fail("reason should be 'malformed_token'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — bad signature → 401 (invalid_signature)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: `Bearer ${wrongSecretToken}` },
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "invalid_signature") throw fail("reason should be 'invalid_signature'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — expired token → 401 (token_expired)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: `Bearer ${expiredToken}` },
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "token_expired") throw fail("reason should be 'token_expired'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — wrong issuer → 401 (issuer_mismatch)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: `Bearer ${wrongIssuerToken}` },
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "issuer_mismatch") throw fail("reason should be 'issuer_mismatch'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — wrong audience → 401 (audience_mismatch)",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: `Bearer ${wrongAudienceToken}` },
+			body: {},
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "audience_mismatch") throw fail("reason should be 'audience_mismatch'", obj);
+			},
+		},
+		{
+			name: "v05-jwt-protected — valid token → 200 with verified claims at ctx.state.identity",
+			method: "POST",
+			pathname: "/v05-jwt-protected",
+			headers: { Authorization: `Bearer ${validToken}` },
+			body: { hello: "world" },
+			expectStatus: 200,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.ok !== true) throw fail("ok should be true", obj);
+				const id = obj.identity as Record<string, JsonValue> | undefined;
+				if (!id || id.sub !== "alice") throw fail("identity.sub should be 'alice'", obj);
+				if (id.iss !== JWT_ISSUER) throw fail(`identity.iss should be ${JWT_ISSUER}`, obj);
+				if (id.aud !== JWT_AUDIENCE) throw fail(`identity.aud should be ${JWT_AUDIENCE}`, obj);
+				const custom = obj.customClaims as Record<string, JsonValue> | undefined;
+				if (!custom || custom.role !== "admin" || custom.org !== "acme") {
+					throw fail("customClaims should carry role + org", obj);
+				}
+			},
+		},
+	];
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -454,7 +584,16 @@ async function main(): Promise<number> {
 	const child: ChildProcess = spawn("bun", ["run", "http:dev"], {
 		cwd: REPO_ROOT,
 		stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, PORT: String(PORT) },
+		env: {
+			...process.env,
+			PORT: String(PORT),
+			// JWT config picked up by the jwt-auth middleware.
+			// Production uses real KMS / secret-manager-sourced values; this
+			// is the smoke-test equivalent.
+			JWT_SECRET,
+			JWT_ISSUER,
+			JWT_AUDIENCE,
+		},
 		detached: true,
 	});
 
@@ -487,6 +626,13 @@ async function main(): Promise<number> {
 
 	try {
 		await waitForReady(Date.now() + BOOT_TIMEOUT_MS);
+		// Mint JWT-bearing cases now that the server is ready. Tokens are
+		// short-lived (1h default) so signing here vs at module load
+		// doesn't matter — but doing it after the boot wait keeps any
+		// signing failure visible right next to the rest of the smoke
+		// output instead of crashing module init.
+		const jwtCases = await buildJwtCases();
+		cases.push(...jwtCases);
 		console.log(`[v05-smoke] server is ready (${Date.now() - startedAt}ms) — running ${cases.length} cases\n`);
 
 		for (const c of cases) {

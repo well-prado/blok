@@ -1,0 +1,46 @@
+{
+	"name": "jwt-auth",
+	"version": "1.0.0",
+	"description": "Production JWT verification middleware. Reads `Authorization: Bearer <token>`, verifies the token with `@blokjs/jwt-verify` against an HMAC secret (HS256 default) or a JWKS endpoint (asymmetric, production case). On success, stashes the decoded JWT claims at `ctx.state.identity` for downstream middleware/steps to read. On failure, throws GlobalError(401) with a structured body — the trigger emits an actual 401 response. Configuration is sourced from env vars at run time so deploy-time secrets never live in workflow JSON: set JWT_SECRET (HS256, dev/test), JWT_JWKS_URI (RS256/ES256, production), JWT_ISSUER (expected `iss`, recommended), JWT_AUDIENCE (expected `aud`, recommended). When JWT_JWKS_URI is set, it takes precedence over JWT_SECRET. Replace this with `auth-check` only if you need the simpler header-token-equality demo for tests.",
+	"middleware": true,
+	"steps": [
+		{
+			"id": "extract-token",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "(ctx.request.headers.authorization || '').replace(/^Bearer\\s+/i, '')"
+			}
+		},
+		{
+			"id": "verify",
+			"use": "@blokjs/jwt-verify",
+			"type": "module",
+			"inputs": {
+				"token": "js/ctx.state['extract-token']",
+				"secret": "js/ctx.env.JWT_JWKS_URI ? undefined : ctx.env.JWT_SECRET",
+				"jwksUri": "js/ctx.env.JWT_JWKS_URI || undefined",
+				"issuer": "js/ctx.env.JWT_ISSUER || undefined",
+				"audience": "js/ctx.env.JWT_AUDIENCE || undefined",
+				"algorithms": "js/ctx.env.JWT_ALGORITHMS ? ctx.env.JWT_ALGORITHMS.split(',').map(s => s.trim()).filter(Boolean) : undefined",
+				"clockToleranceSeconds": "js/ctx.env.JWT_CLOCK_TOLERANCE_SECONDS ? Number(ctx.env.JWT_CLOCK_TOLERANCE_SECONDS) : undefined"
+			}
+		},
+		{
+			"id": "stash-identity",
+			"use": "@blokjs/ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "identity",
+				"value": {
+					"sub": "js/ctx.state.verify.subject",
+					"iss": "js/ctx.state.verify.issuer",
+					"aud": "js/ctx.state.verify.audience",
+					"exp": "js/ctx.state.verify.expiresAt",
+					"claims": "js/ctx.state.verify.claims",
+					"via": "jwt-auth"
+				}
+			}
+		}
+	]
+}
