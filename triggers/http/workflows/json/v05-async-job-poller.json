@@ -1,0 +1,43 @@
+{
+	"name": "v05-async-job-poller",
+	"version": "1.0.0",
+	"description": "v0.6 wait-inside-primitives Phase 2 demo — sequential forEach with a wait inside the iteration body. The handler iterates over a list of job IDs from `req.body.jobs`, simulates polling each job (recording a result), then waits 100ms before the next iteration so an external service isn't hammered. The wait inside the iteration body is the load-bearing test of v0.6 Phase 2: each iteration's wait fires `WaitDispatchRequest` from inside the forEach iteration scope, the runner persists the iteration cursor to `node_runs.iteration_context`, defers the run, then on `dispatchDeferred` re-entry the forEach skips iterations [0..N-1] (using the cached `completedResults`) and resumes iteration N at innerStepIndex 1 (the wait), which flips to satisfied because the timer has fired. Real-world analogue: bulk-notify with a per-recipient throttle, async-job poller cycling through multiple jobs, batch reconciliation with rate-limited inner steps. Each iteration round-trips via dispatchDeferred so 3 jobs ≈ 300ms wall-clock; smoke validates the first 202 + Location header (full round-trip is verified in the vitest integration suite).",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "process-jobs",
+			"forEach": {
+				"in": "js/ctx.request.body.jobs",
+				"as": "job",
+				"do": [
+					{
+						"id": "record-job",
+						"use": "@blokjs/expr",
+						"type": "module",
+						"inputs": {
+							"expression": "({ jobId: ctx.state.job, processedAt: Date.now(), status: 'completed' })"
+						}
+					},
+					{
+						"id": "throttle",
+						"wait": { "for": "100ms" }
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, totalJobs: ctx.state['process-jobs'].length, results: ctx.state['process-jobs'] })"
+			}
+		}
+	]
+}

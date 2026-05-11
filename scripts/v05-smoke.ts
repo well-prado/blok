@@ -600,6 +600,34 @@ const cases: SmokeCase[] = [
 			if (obj.reason !== "missing_token") throw fail("reason should be 'missing_token'", obj);
 		},
 	},
+
+	// --- v05-async-job-poller: v0.6 Phase 2 — wait inside forEach iteration --
+	// Sequential forEach over a list of jobs; each iteration's body has a
+	// `wait.for(100ms)` after the record step. When the FIRST iteration's
+	// wait fires, the runner throws WaitDispatchRequest → DeferredDispatch-
+	// Signal → HTTP 202 + Location header. This is the headline contract of
+	// v0.6 Phase 2: a wait inside an iteration body correctly defers
+	// (rather than silently no-op'ing as it did pre-Phase 2). The full
+	// round-trip across all 3 iterations (each defer + re-entry advancing
+	// the cursor through `node_runs.iteration_context`) is exercised by
+	// `core/runner/__tests__/unit/wait-inside-foreach.test.ts` since
+	// poll-until-completed is beyond smoke's scope.
+	{
+		name: "v05-async-job-poller — forEach with wait inside iteration → 202 deferred",
+		method: "POST",
+		pathname: "/v05-async-job-poller",
+		body: { jobs: ["job-A", "job-B", "job-C"] },
+		expectStatus: 202,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (typeof obj.runId !== "string" || obj.runId.length === 0) {
+				throw fail("runId should be a non-empty string", obj);
+			}
+			if (obj.status !== "delayed") {
+				throw fail("status should be 'delayed' (deferred dispatch from wait inside forEach)", obj);
+			}
+		},
+	},
 ];
 
 // JWT cases live in their own builder because each case mints a token via

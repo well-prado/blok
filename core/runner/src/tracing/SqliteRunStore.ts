@@ -151,6 +151,16 @@ interface NodeRunRow {
 	 * succeeded on first try (`maxAttempts: 1` default). Added in migration v5.
 	 */
 	attempts_json: string | null;
+	/**
+	 * v0.6 wait-inside-primitives Phase 2 — sequential forEach iteration
+	 * cursor. JSON of `{iteration, innerStepIndex, completedResults}`.
+	 * NULL on regular NodeRuns and on primitives that completed without
+	 * ever throwing a wait. Set by RunnerSteps when an inner step throws
+	 * `WaitDispatchRequest` mid-iteration; read on `dispatchDeferred`
+	 * re-entry so ForEachNode can resume at the right iteration + inner
+	 * step. Added in migration v12.
+	 */
+	iteration_context: string | null;
 }
 
 interface IdempotencyCacheRow {
@@ -557,6 +567,34 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE workflow_runs ADD COLUMN state_snapshot TEXT;
 				`,
 			},
+			{
+				// v0.6 wait-inside-primitives Phase 2 — sequential forEach
+				// iteration cursor.
+				//
+				// iteration_context is a JSON blob written to the FOREACH'S
+				// NodeRun (not the inner-step NodeRun) when an inner step
+				// throws WaitDispatchRequest mid-iteration. Records:
+				//   - `iteration`: which iteration of the forEach was in flight
+				//   - `innerStepIndex`: which inner step within that iteration
+				//     fired the wait
+				//   - `completedResults`: the partial accumulator for
+				//     iterations [0..iteration-1], so the post-resume final
+				//     result array covers EVERY iteration
+				//
+				// Read on dispatchDeferred re-entry by TriggerBase.run, which
+				// rehydrates the column onto ctx as `_blokIterationResume`;
+				// ForEachNode picks it up to resume at the right iteration +
+				// inner step. Default NULL preserves pre-v0.6 behaviour for
+				// NodeRuns that never threw a wait (the vast majority).
+				//
+				// Phase 2 wires this for SEQUENTIAL forEach only. Future
+				// phases reuse the column with primitive-specific shapes
+				// (parallel forEach, loop, switch).
+				version: 12,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN iteration_context TEXT;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -715,8 +753,9 @@ export class SqliteRunStore implements RunStore {
 			(id, run_id, node_name, node_type, runtime_kind,
 			 status, started_at, finished_at, duration_ms,
 			 inputs_json, outputs_json, error_json,
-			 parent_node_id, depth, step_index, metrics_json, cached_json, attempts_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 parent_node_id, depth, step_index, metrics_json, cached_json, attempts_json,
+			 iteration_context)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			nodeRun.id,
@@ -737,6 +776,7 @@ export class SqliteRunStore implements RunStore {
 			nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
 			nodeRun.cached ? JSON.stringify(nodeRun.cached) : null,
 			nodeRun.attempts ? JSON.stringify(nodeRun.attempts) : null,
+			nodeRun.iterationContext ? JSON.stringify(nodeRun.iterationContext) : null,
 		);
 	}
 
@@ -775,6 +815,10 @@ export class SqliteRunStore implements RunStore {
 		if (updates.attempts !== undefined) {
 			setClauses.push("attempts_json = ?");
 			values.push(JSON.stringify(updates.attempts));
+		}
+		if (updates.iterationContext !== undefined) {
+			setClauses.push("iteration_context = ?");
+			values.push(JSON.stringify(updates.iterationContext));
 		}
 
 		if (setClauses.length === 0) return;
@@ -1613,6 +1657,9 @@ export class SqliteRunStore implements RunStore {
 			metrics: row.metrics_json ? JSON.parse(row.metrics_json) : undefined,
 			cached: row.cached_json ? (JSON.parse(row.cached_json) as NodeRun["cached"]) : undefined,
 			attempts: row.attempts_json ? (JSON.parse(row.attempts_json) as NodeRun["attempts"]) : undefined,
+			iterationContext: row.iteration_context
+				? (JSON.parse(row.iteration_context) as NodeRun["iterationContext"])
+				: undefined,
 		};
 	}
 

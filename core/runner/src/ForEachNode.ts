@@ -34,7 +34,39 @@ interface ForEachOpts {
 	steps?: RunnerNode[];
 }
 
+/**
+ * v0.6 wait-inside-primitives Phase 2 — resume hint set on ctx by
+ * `TriggerBase.run` after rehydrating the forEach NodeRun's
+ * `iteration_context` column. ForEachNode reads it on entry and:
+ *
+ *   - Skips iterations [0..iteration-1] (their work is captured in
+ *     `completedResults`, no idempotencyKey lookups required).
+ *   - Resumes iteration `iteration` from the inner step at
+ *     `innerStepIndex` (the step that was about to throw the wait
+ *     when the previous pass deferred). The inner runner picks up
+ *     this hint from `_blokInnerResumeIndex` on the child ctx.
+ *   - Iterations [iteration+1..end] run from scratch.
+ *
+ * Phase 2 wires this for SEQUENTIAL mode only. Parallel forEach
+ * resume lands in Phase 3 with cancellation semantics.
+ */
+interface IterationResume {
+	iteration: number;
+	innerStepIndex: number;
+	completedResults: unknown[];
+}
+
 export class ForEachNode extends RunnerNode {
+	/**
+	 * v0.6 marker — RunnerSteps stamps `_blokActivePrimitiveNodeRunId`
+	 * on ctx around `step.process()` calls when this flag is true so a
+	 * nested wait fired inside an iteration body knows which NodeRun to
+	 * write its `iteration_context` cursor to. Static `true` (vs an
+	 * instance method) avoids importing ForEachNode inside RunnerSteps,
+	 * which would create a circular dependency.
+	 */
+	public readonly isPrimitiveIterator = true;
+
 	async run(ctx: Context): Promise<ResponseContext> {
 		this.contentType = "application/json";
 		const response: ResponseContext = { success: true, data: [], error: null };
@@ -52,11 +84,39 @@ export class ForEachNode extends RunnerNode {
 			return response;
 		}
 
+		// v0.6 Phase 2 — read the resume hint that TriggerBase rehydrated
+		// from the persisted `iteration_context` column. Cleared after
+		// reading so a sibling forEach later in the workflow doesn't
+		// accidentally pick it up.
+		const ctxAny = ctx as Record<string, unknown>;
+		const resume = ctxAny._blokIterationResume as IterationResume | undefined;
+		if (resume !== undefined) {
+			ctxAny._blokIterationResume = undefined;
+		}
+
 		// Lazy import to avoid circular dep (Runner pulls in Configuration).
 		const { default: Runner } = await import("./Runner");
 
-		const runIteration = async (item: unknown, index: number): Promise<unknown> => {
+		// Pre-populate results[] with cached iteration outputs (Phase 2 —
+		// resume case). On a fresh first pass `resume` is undefined and
+		// results starts empty.
+		const results: unknown[] = new Array(items.length);
+		if (resume?.completedResults) {
+			const cap = Math.min(resume.completedResults.length, items.length);
+			for (let k = 0; k < cap; k++) {
+				results[k] = resume.completedResults[k];
+			}
+		}
+
+		const runIteration = async (item: unknown, index: number, innerResumeIndex?: number): Promise<unknown> => {
 			const childCtx = this.cloneCtxForIteration(ctx, as, item, index);
+			// v0.6 Phase 2 — pass the inner-step resume cursor on the
+			// child ctx. The nested runner reads `_blokInnerResumeIndex`
+			// to skip pre-wait inner steps that already completed in the
+			// previous pass.
+			if (innerResumeIndex !== undefined && innerResumeIndex > 0) {
+				(childCtx as Record<string, unknown>)._blokInnerResumeIndex = innerResumeIndex;
+			}
 			const runner = new Runner(steps);
 			// `deep: true` — inner pipelines must not inherit the outer
 			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume logic)
@@ -70,14 +130,34 @@ export class ForEachNode extends RunnerNode {
 			return childCtx.response;
 		};
 
-		const results: unknown[] = new Array(items.length);
-
 		if (mode === "sequential") {
-			for (let i = 0; i < items.length; i++) {
-				results[i] = await runIteration(items[i], i);
+			// v0.6 Phase 2 — start at the resume iteration if present,
+			// else 0. Iterations before the resume index are not re-run;
+			// their results were rehydrated above.
+			const startIndex = resume?.iteration ?? 0;
+			for (let i = startIndex; i < items.length; i++) {
+				// v0.6 Phase 2 — stamp the iteration sentinels on the
+				// PARENT ctx so RunnerSteps' nested wait throw can read
+				// them via the child-ctx spread. Rewritten each iteration
+				// so `completedResults` reflects results-so-far — when a
+				// wait fires mid-iteration, the persisted context
+				// contains exactly the iterations [0..i-1] that completed
+				// before this one.
+				ctxAny._blokForEachCurrentIteration = i;
+				ctxAny._blokForEachPartialResults = results.slice(0, i);
+				const innerResumeIndex = i === startIndex && resume !== undefined ? resume.innerStepIndex : undefined;
+				results[i] = await runIteration(items[i], i, innerResumeIndex);
 			}
+			// Cleanup sentinels — sibling forEach later in the workflow
+			// shouldn't see this one's pointers.
+			ctxAny._blokForEachCurrentIteration = undefined;
+			ctxAny._blokForEachPartialResults = undefined;
 		} else {
 			// Parallel with bounded concurrency — simple worker-pool pattern.
+			// Phase 3 will add resume support; for now a parallel forEach
+			// with a wait inside throws as before (no iteration_context
+			// written, no resume hint consumed). Authors get the same
+			// pre-v0.6 behaviour.
 			let nextIndex = 0;
 			const workers: Promise<void>[] = [];
 			const workerCount = Math.min(concurrency, items.length);
