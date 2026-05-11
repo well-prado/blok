@@ -1,0 +1,1194 @@
+---
+title: "Additional triggers — WebSocket, SSE, Webhook, Queue, Pub/Sub plan"
+description: "Comprehensive plan to finish the 5 scaffolded-but-not-bootable triggers (WebSocket, SSE, Webhook, Queue, Pub/Sub) following Blok's existing config-driven authoring style. Surveys Laravel, Rails, NestJS, Adonis, Hono, Trigger.dev, Inngest, Cloudflare Workers, and tRPC. Picks the right abstraction per trigger, the right library per protocol, and sequences the implementation into 5-6 reviewable PRs."
+icon: "telescope"
+---
+
+## Status
+
+**Design only.** v0.7 plan — implementation in 5-6 sequenced PRs after this design is approved. The core v0.6 wait-inside-primitives work (PR #71-#79) is complete; v0.6 still needs Phase 4 (switch + wait, nested primitives, Studio polish). This doc plans the OTHER big v0.7 work: shipping the 5 scaffolded triggers (WebSocket, SSE, Webhook, Queue, Pub/Sub) as production-ready, "just add it to your workflow" authoring surfaces.
+
+This is a long document because it tries to do for trigger surfaces what [parallel-foreach-wait-spec.mdx](./parallel-foreach-wait-spec.mdx) did for one specific composition: pin down the contract before any code lands.
+
+---
+
+## The problem
+
+Blok ships nine trigger packages under `triggers/`. Today their state is uneven:
+
+| Trigger | State | What works |
+|---|---|---|
+| `http` | Production-ready | Full HTTP server via Hono. Middleware, concurrency, scheduling, raw body, sub-workflows, all of it. |
+| `worker` | Production-ready | Background jobs via NATS JetStream / BullMQ / InMemory adapters. Pluggable adapter pattern is correct. |
+| `cron` | Production-ready | Scheduled execution via the `cron` npm package. Single-process. |
+| `grpc` | Production-ready | But as a **transport** for cross-language nodes (Python/Go/Rust/etc.), not a workflow entry trigger. |
+| `websocket` | Abstract class only | `WebSocketTrigger extends TriggerBase` exists, but no concrete subclass, no WS library wired in, no `bun run ws:dev`. The schema validates `trigger: { websocket: {...} }` but nothing picks it up. |
+| `sse` | Abstract class only | Same shape. SSE is HTTP streaming so this should be trivially mountable on the existing Hono server — but isn't. |
+| `webhook` | Abstract class only | Today, authors implement webhook intake by writing an HTTP workflow with a signature-verify middleware (e.g. `github-webhook-verify.json` shipped in v0.6). Works but lacks the "first-class trigger" ergonomics. |
+| `queue` | Adapter scaffolds exist | Files at `triggers/queue/src/adapters/{Kafka,RabbitMQ,SQS,Redis,NATS}Adapter.ts` but no `QueueTrigger.listen()` boot path. |
+| `pubsub` | Adapter scaffolds exist | GCP / AWS / Azure provider scaffolds but no integrated dev experience. |
+
+The authoring surface (workflow JSON / TS DSL) accepts every trigger type today — the schema in [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) is comprehensive. The integration gap is at the trigger boot layer: nothing scans workflows with `trigger: { websocket: {...} }` and brings up a WebSocket server.
+
+**The goal of this plan:** close the gap so authors can write the JSON line and have the workflow respond. No need to subclass anything, write infrastructure code, or run a separate dev server per trigger.
+
+---
+
+## What I learned from other frameworks
+
+Before designing the Blok surface, three parallel research passes surveyed the existing ecosystem. The relevant takeaways:
+
+### Established frameworks: Laravel, Rails, NestJS, AdonisJS
+
+The strongest patterns:
+
+**Laravel Broadcasting + Reverb (WebSocket).** Split between three artifacts: an event class declaring `broadcastOn(): Channel[]`, a `routes/channels.php` file holding `Broadcast::channel($pattern, $authClosure)` for authorization, and the Reverb server that handles the WS protocol. The author never writes WS handshake code — they `dispatch($event)` and the broadcaster fans out to authorized subscribers. Pattern strings (`orders.{orderId}`) use route-style placeholders with route-model-binding-equivalent semantics.
+
+**Spatie WebhookClient (Laravel).** The cleanest webhook-as-config surface across all the frameworks I surveyed:
+```php
+'configs' => [[
+    'name'                  => 'stripe',
+    'signing_secret'        => env('STRIPE_WEBHOOK_SECRET'),
+    'signature_header_name' => 'Stripe-Signature',
+    'signature_validator'   => DefaultSignatureValidator::class,
+    'webhook_profile'       => ProcessEverythingWebhookProfile::class,
+    'process_webhook_job'   => ProcessStripeWebhookJob::class,
+]]
+```
+Every step is a swappable class. Adding a new webhook source = one config entry + (if signature scheme differs) one `SignatureValidator` implementation.
+
+**Rails ActionCable / Solid Cable.** Channels are classes under `app/channels/` with `subscribed`, `unsubscribed`, `received` callbacks. **Turbo Streams** layers an even higher-level declarative pattern on top: `broadcasts_to :room` on the model installs three lifecycle callbacks that auto-broadcast partials to a stream key. Rails 8's Solid stack runs the whole thing in-process (no separate worker).
+
+**NestJS WebSocket Gateways + `@Sse()` decorator.** Pure decorator-driven authoring. A `@WebSocketGateway()` class collects `@SubscribeMessage('chat')` handler methods. The `@Sse('notifications')` decorator on a controller method returns `Observable<MessageEvent>` — *the same controller class mixes `@Get`, `@Post`, AND `@Sse`*, the SSE response is "just another route." This is the cleanest "SSE = HTTP streaming, don't reinvent it" model I saw.
+
+**NestJS Microservices (Queue + Pub/Sub).** One abstraction (`@MessagePattern` for RPC, `@EventPattern` for fan-out) drives every transport — Redis, NATS, Kafka, MQTT, RabbitMQ, gRPC. Transport is selected at bootstrap. Routing patterns use wildcards (`'time.us.*'` for NATS, etc.). The pattern split is meaningful: **request-reply** (one consumer wins) vs **pub-sub** (all subscribers receive).
+
+### Modern TS-first frameworks: Hono, Trigger.dev, Inngest, CF Workers, Vercel, tRPC
+
+The strongest patterns:
+
+**Hono's `upgradeWebSocket()`.** WebSocket routes look like HTTP routes:
+```ts
+app.get('/ws/:room', upgradeWebSocket((c) => ({
+  onOpen:    (_, ws) => ws.send('hi'),
+  onMessage: (e, ws) => ws.send(`echo: ${e.data}`),
+  onClose:   ()      => console.log('bye'),
+})))
+```
+Same `app`, same middleware chain (jwt-auth applies to the upgrade request), same path-routing tree. `@hono/node-ws` provides `injectWebSocket(server)` to hook into the existing `http.Server` from `@hono/node-server`'s `serve()`.
+
+**Hono's `streamSSE()`.** Long-lived GET handler with structured event writes:
+```ts
+app.get('/events', (c) => streamSSE(c, async (stream) => {
+  stream.onAbort(() => sub.close());
+  for await (const evt of upstream) {
+    await stream.writeSSE({ id: String(evt.seq), event: evt.type, data: JSON.stringify(evt) });
+  }
+}))
+```
+Zero extra deps. Honors `Last-Event-Id` for reconnect.
+
+**Inngest's event-first model.** Function declares its triggers inline; ONE function can wake on MULTIPLE triggers (events + crons mixed):
+```ts
+export const onboard = inngest.createFunction(
+  {
+    id: 'onboard-user',
+    triggers: [
+      { event: 'user.signup' },
+      { event: 'user.reinvited' },
+      { cron: 'TZ=Europe/Paris 0 12 * * 5' },
+    ],
+    throttle: { limit: 3, period: '1min' },
+  },
+  async ({ event, step }) => { ... },
+)
+```
+
+**Inngest's webhook intake.** Author writes a small transform function (`(evt, headers) => ({name, data, id})`) in the Inngest dashboard. The transform runs in Inngest's cloud, normalizes the webhook payload into an event, and downstream functions trigger on the event name. Author never touches HTTP routing OR signature verification (Inngest handles signing for known providers).
+
+**Cloudflare Workers Hibernation API.** Decouples connection identity from handler runtime:
+```ts
+this.state.acceptWebSocket(pair[1]);          // hibernation-mode WS
+pair[1].serializeAttachment({ userId });      // 2KB per-conn scratchpad survives hibernation
+
+async webSocketMessage(ws, msg) {             // invoked per-message, not per-connection
+  const { userId } = ws.deserializeAttachment();
+  // ...
+}
+```
+Per-connection state survives without keeping the process hot. Billable duration stops between messages. The cleanest "stateless WS triggers" abstraction in production today.
+
+**Cloudflare Workers default-export handler keys.** Single module with named keys for each trigger surface:
+```ts
+export default {
+  async fetch(req, env, ctx)     { /* HTTP */ },
+  async scheduled(c, env, ctx)   { /* Cron */ },
+  async queue(batch, env, ctx)   { /* Queue */ },
+  async email(message, env, ctx) { /* Email Workers */ },
+};
+```
+The runtime dispatches based on what triggered. One module, multiple trigger surfaces, single source of typed bindings.
+
+**tRPC `subscription()`.** Typed async-generator subscriptions over SSE or WebSocket transport. `tracked(id, data)` + the `Last-Event-Id` header give at-least-once resume from disconnect:
+```ts
+export const appRouter = router({
+  onPostAdd: t.procedure
+    .input(z.object({ topic: z.string() }))
+    .subscription(async function* (opts) {
+      for await (const [post] of on(ee, 'post:add', { signal: opts.signal })) {
+        yield tracked(post.id, post);
+      }
+    }),
+});
+```
+
+### Cross-cutting insights
+
+Three observations recur across all the frameworks worth stealing:
+
+1. **Pattern-matched channel/topic/queue strings are universal.** `orders.{orderId}` (Laravel), `time.us.*` (NestJS NATS), `users/:id` (Adonis Transmit), `chats/{roomId}/messages` (Reverb). Wildcards (`*`, `>`, `:name`) and brace placeholders are the lingua franca. Authors think in patterns, not concrete names.
+
+2. **Authorization co-locates with the channel definition, not the transport.** Laravel's `Broadcast::channel($pattern, $authClosure)`, Adonis's `transmit.authorize($pattern, $cb)`, Rails's per-channel `subscribed` method. Auth is a CHANNEL property, not a SERVER property.
+
+3. **Events, queues, and webhooks are distinct concepts, but normalize to "an event" once they're inside the runtime.** Inngest's webhook transform is the cleanest example — a Stripe POST becomes `stripe/invoice.paid` event, downstream functions trigger on the event name. The wire-level intake (signature verify, HMAC check, queue ack) is separated from the workflow's logical trigger.
+
+---
+
+## Design principles for Blok
+
+These principles guide every per-trigger choice below:
+
+### P1 — Workflow JSON / TS DSL is the source of truth
+
+Authors should NEVER need to write a class subclass, register middleware imperatively, or boot a separate dev server. The workflow JSON line `trigger: { websocket: { path: "/ws/chat" } }` makes the workflow live as a WebSocket route. Period.
+
+### P2 — Share the Hono port whenever possible
+
+Same TCP port, same Hono app, same middleware chain, same Studio trace router. The HTTP trigger already owns port 4000 in dev. Triggers that CAN coexist on Hono should mount on the same `Hono` instance: WebSocket (via `@hono/node-ws`), SSE (via `hono/streaming`), and Webhook (just a POST route).
+
+Triggers that CAN'T (Queue consumers, Pub/Sub subscribers — they hold long-lived broker connections, not HTTP) run as worker processes via the existing `WorkerTrigger` pattern. Producers (publishing to a queue or topic) CAN be Hono routes.
+
+### P3 — Per-provider plugins, not one-size-fits-all
+
+Webhooks have provider-specific signature schemes (Stripe `t=ts,v1=sig`, GitHub `sha256=hex`, Slack `v0:ts:body`, Shopify `base64(hmac)`). Don't try to unify these — provide a registry of named providers (`provider: "stripe"`), let each be a small plugin implementing a `WebhookVerifier` interface, fall back to Standard Webhooks ([standardwebhooks.com](https://www.standardwebhooks.com/)) for unknown providers.
+
+Same pattern for queues / pubsub: ONE adapter interface (`subscribe`, `publish`, `disconnect`), MANY backend plugins (BullMQ, NATS, Kafka, Redis Streams, SQS, GCP Pub/Sub).
+
+### P4 — Authentication via existing middleware chain
+
+The middleware chain shipped in v0.5/v0.6 (process-global → workflow-level → trigger-level — see [middleware.mdx](./middleware.mdx)) applies UNIFORMLY across trigger kinds:
+
+- **WebSocket upgrade**: Hono middleware sees the upgrade request (headers, cookies) — `jwt-auth` rejects unauthorized upgrades with 401.
+- **SSE open**: middleware runs once at stream open.
+- **Webhook POST**: signature-verify middleware reads `ctx.request.rawBody`, runs HMAC, sets `ctx.state.verifiedEvent` or returns 401.
+- **Queue/Pub-Sub**: middleware can't be HTTP-shaped (no request); auth enforced at the broker level (NATS NKeys, Redis AUTH, Kafka SASL) AND/OR per-message via a workflow-level middleware that validates the message payload.
+
+The JSON authoring surface is identical: `trigger.{kind}.middleware: ["jwt-auth"]` works the same for HTTP, WebSocket, SSE, Webhook.
+
+### P5 — JS Web Standards (Hono philosophy)
+
+Hono picked Fetch API + Web Streams as its foundation. Triggers built on Hono should follow the same philosophy: `Request`/`Response`, `ReadableStream`, `AbortSignal`. This keeps the framework portable to non-Node runtimes (Bun, Deno, Cloudflare Workers) over time.
+
+For triggers that DON'T inherit from Hono (Queue, Pub/Sub consumers), use Node-native primitives but match the same conceptual shape — async iterators for streams, `AbortSignal` for cancellation, `Promise` for unit-of-work.
+
+### P6 — Observability is non-optional
+
+Every trigger emits OTel spans, NodeRun records, and Studio-visible traces. The existing `RunTracker.startRun` / `startNode` / `completeRun` flow already handles this for HTTP/Worker/Cron. New triggers extend the same pattern.
+
+### P7 — Operational primitives (concurrency, scheduling, retries) are uniform
+
+The existing v0.5/v0.6 ops primitives (`concurrencyKey`, `delay`, `ttl`, `debounce`, `retry`, `idempotencyKey`, `maxDuration`) should work on ALL triggers, not just HTTP. The `ConcurrencyOptsFields` / `SchedulingOptsFields` in [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) are designed for cross-trigger reuse.
+
+---
+
+## The unified workflow trigger model
+
+Every Blok trigger fits one mental model, regardless of transport:
+
+```
+Inbound event → [Trigger Auth] → [Trigger Validation] → Workflow Run → [Outbound Response]
+```
+
+**Inbound event** is transport-specific:
+- HTTP: HTTP request
+- WebSocket: connect handshake OR a message on an open socket
+- SSE: HTTP GET on the stream URL
+- Webhook: signed HTTP POST from a foreign system
+- Queue: a delivered message (BullMQ job / NATS message)
+- Pub/Sub: a published message on a subscribed topic
+- Cron: a timer firing
+
+**Trigger Auth** is uniform — middleware chain runs against whatever request-shaped object the trigger built. For non-HTTP triggers, the trigger constructs a synthetic `ctx.request` from the incoming event.
+
+**Trigger Validation** — schema validation, raw-body capture for webhooks, idempotency cache lookup, concurrency gate, scheduling gate. All shared via `TriggerBase`.
+
+**Workflow Run** — the runner runs the steps as it always has. `ctx.request.body` is the inbound payload (regardless of source); `ctx.state` accumulates step outputs.
+
+**Outbound Response** — transport-specific again:
+- HTTP / Webhook: HTTP response from `ctx.response.data`
+- WebSocket: zero or more messages written via `ctx.connection.send(...)` (new primitive)
+- SSE: zero or more events yielded via `ctx.stream.writeSSE(...)` (new primitive)
+- Queue / Pub/Sub: optional follow-up publish via `@blokjs/queue-publish` step (existing pattern)
+- Cron: no response (run is logged for ops)
+
+This is the picture an author should have. The differences between triggers are entirely in inbound event shape and outbound response capabilities. Authoring is uniform — same `steps: [...]` body, same middleware chain, same primitives (forEach, tryCatch, wait, etc.).
+
+---
+
+## Trigger-by-trigger detailed design
+
+### WebSocket trigger
+
+**Authoring surface (JSON):**
+
+```json
+{
+  "name": "chat-message-handler",
+  "trigger": {
+    "websocket": {
+      "path": "/ws/chat/:roomId",
+      "middleware": ["jwt-auth"],
+      "events": ["message", "typing", "leave"],
+      "concurrencyKey": "$.req.params.roomId",
+      "concurrencyLimit": 100,
+      "heartbeatInterval": 30000,
+      "maxConnections": 10000,
+      "messageRateLimit": 100
+    }
+  },
+  "steps": [
+    {
+      "id": "validate",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "ctx.request.body.event === 'message' ? { valid: true } : { valid: false }"
+      }
+    },
+    {
+      "id": "broadcast",
+      "use": "@blokjs/ws-broadcast",
+      "inputs": {
+        "channel": "$.req.params.roomId",
+        "event": "message",
+        "payload": { "from": "$.state.identity.userId", "text": "$.req.body.text" }
+      }
+    }
+  ]
+}
+```
+
+**Authoring surface (TS DSL):**
+
+```ts
+export default workflow({
+  name: "chat-message-handler",
+  trigger: {
+    websocket: {
+      path: "/ws/chat/:roomId",
+      middleware: ["jwt-auth"],
+      events: ["message", "typing", "leave"],
+      concurrencyKey: $.req.params.roomId,
+    },
+  },
+  steps: [
+    { id: "validate", use: "@blokjs/expr", inputs: { expression: "..." } },
+    { id: "broadcast", use: "@blokjs/ws-broadcast", inputs: { ... } },
+  ],
+});
+```
+
+**Library choice:** [`@hono/node-ws`](https://github.com/honojs/middleware/tree/main/packages/node-ws) (depends on `ws`). Mounts on the same `http.Server` as HTTP. Path-routed via the same Hono app.
+
+**Lifecycle hooks (`ctx.connection.on(...)` shape):**
+
+The workflow runs at three lifecycle points, distinguished by `ctx.request.body.event` (Blok-synthetic field):
+
+- `event: "connect"` — fires once on WS upgrade. `ctx.request.headers` has the upgrade request headers. Workflow can return data that gets sent as the first message (or throw to reject the upgrade).
+- `event: "message"` — fires per incoming message. `ctx.request.body.data` is the message payload (parsed JSON if `Content-Type` negotiation indicated JSON, otherwise raw string/buffer). Workflow can broadcast / reply via `@blokjs/ws-broadcast` and `@blokjs/ws-reply` helpers.
+- `event: "disconnect"` — fires once on WS close. Workflow can do cleanup (publish "user-left" event, free per-room state).
+
+The `events: ["message", "typing", "leave"]` field on the trigger config is an **allowlist** — only matching `event` fields in incoming messages dispatch the workflow. Unmatched messages are dropped silently (or logged at trace level). This matches the Inngest event-matching pattern.
+
+**Per-connection state (`ctx.connection.attachment`):**
+
+WebSocket connections need a small scratchpad — userId derived from the JWT, the room the user joined, etc. — that's available to every workflow run on that connection. The pattern (inspired by Cloudflare's `serializeAttachment`):
+
+```ts
+// First workflow run (on "connect"): set the attachment
+ctx.connection.setAttachment({ userId: ctx.state.identity.userId, joinedAt: Date.now() });
+
+// Later runs (on "message" or "disconnect"): read it
+const { userId, joinedAt } = ctx.connection.attachment;
+```
+
+Implementation: an in-memory `WeakMap<WebSocket, unknown>` keyed by the `ws` instance, set/get via `ctx.connection.setAttachment` / `ctx.connection.attachment`. Persistent across the connection's lifetime, GC'd on close.
+
+**Helpers (new nodes to ship):**
+
+- `@blokjs/ws-broadcast` — `inputs: { channel: string, event: string, payload: unknown, exceptSelf?: boolean }`. Sends to all connections matching the channel (room) name. The `exceptSelf` flag is the canonical "send to everyone except the sender" pattern.
+- `@blokjs/ws-reply` — `inputs: { event: string, payload: unknown }`. Sends back to the connection that sent the message. Shorthand for `ws-broadcast` with `channel: $.connection.id`.
+- `@blokjs/ws-close` — `inputs: { code?: number, reason?: string }`. Closes the connection cleanly. Useful in `connect` workflows for auth failures.
+
+**Heartbeat:** built into the trigger, not the author's concern. Configured via `heartbeatInterval` (default 30s). The trigger sends WS ping frames on the interval; on missed pong (2 × interval), the trigger closes the connection with code 1011 and fires the `disconnect` workflow.
+
+**Rate limiting:** `messageRateLimit` (default 100/sec per connection). Implemented as a per-connection token bucket. Excess messages dropped with a `error: rate_limit` reply.
+
+**Auth at upgrade:** the middleware chain (`jwt-auth`) runs on the HTTP upgrade request. Standard 401 response refuses the upgrade.
+
+**Cross-process broadcast (`@blokjs/ws-broadcast` across instances):**
+
+In-process broadcast is straightforward — a `Map<roomId, Set<WebSocket>>` indexed at upgrade time. For multi-instance deployments, the broadcast helper publishes to a Pub/Sub backplane (NATS subject `blok.ws.broadcast.{roomId}`) which other instances forward to their local connections. Same pattern Adonis Transmit and Laravel Reverb use.
+
+This requires a `BLOK_WS_BACKPLANE` env var pointing at a NATS / Redis instance. Single-instance dev: unset, broadcast stays in-process.
+
+**Observability:**
+
+- One `WorkflowRun` per workflow invocation (per message processed). Multiple workflows = multiple runs.
+- Connect / disconnect runs are tagged with `triggerType: "websocket.connect"` / `"websocket.disconnect"` for trace filtering.
+- New OTel counters:
+  - `blok_websocket_connections_active` (gauge)
+  - `blok_websocket_messages_received_total{workflow}`
+  - `blok_websocket_messages_dropped_total{workflow, reason}` (`reason ∈ {rate_limit, no_handler, auth_failed}`)
+- Studio's run list filter learns a `triggerType: "websocket.*"` shortcut.
+
+**Connection cap:** `maxConnections` (default 10000) is a hard cap on concurrent open WS connections per instance. Exceeded → upgrade refused with `503 Service Unavailable`.
+
+---
+
+### SSE trigger
+
+**Authoring surface (JSON):**
+
+```json
+{
+  "name": "live-order-updates",
+  "trigger": {
+    "sse": {
+      "path": "/events/orders/:orderId",
+      "middleware": ["jwt-auth"],
+      "channels": ["order:{orderId}", "user:{userId}"],
+      "heartbeatInterval": 15000,
+      "retryInterval": 3000
+    }
+  },
+  "steps": [
+    {
+      "id": "subscribe",
+      "use": "@blokjs/sse-subscribe",
+      "inputs": {
+        "channels": "$.trigger.channels",
+        "lastEventId": "$.req.headers['last-event-id']"
+      }
+    },
+    {
+      "id": "stream",
+      "use": "@blokjs/sse-stream",
+      "inputs": {
+        "source": "$.state.subscribe",
+        "eventName": "order-update",
+        "retryMs": 3000
+      }
+    }
+  ]
+}
+```
+
+The shape is interesting because SSE is fundamentally "open a connection, then emit events for as long as the connection's alive." It doesn't fit the "request → response" model of HTTP. Two patterns are viable:
+
+**Pattern A — Workflow returns an event source.** The workflow runs once at stream open, returns a stream / async iterator, and the trigger pumps events from it until the connection closes. This is the simpler model — most workflows just dispatch to an existing event bus.
+
+**Pattern B — Workflow re-runs per event.** The trigger subscribes to a source (per `channels` config), and every event on the source triggers a fresh workflow run that decides what to do with the event (filter, transform, send). More flexible but heavier.
+
+**Recommendation: Pattern A as the default, with Pattern B as opt-in.** Pattern A maps cleanly onto Hono's `streamSSE` and async iterators. Author writes a workflow that yields events via `@blokjs/sse-stream` (helper below), the trigger pumps them. Pattern B (per-event workflow runs) is more powerful but should be opt-in via `mode: "per-event"` on the trigger config — out of scope for the initial PR.
+
+**Library choice:** Hono's built-in [`streamSSE`](https://hono.dev/docs/helpers/streaming#streamsse) from `hono/streaming`. Zero extra deps. Honors `Last-Event-Id` for reconnect.
+
+**Helpers (new nodes):**
+
+- `@blokjs/sse-subscribe` — subscribes to one or more channels on the in-process event bus (or NATS / Redis Streams backplane). Returns an async iterator of events. The channels config supports pattern interpolation: `"order:{orderId}"` with the trigger's path params substituted.
+- `@blokjs/sse-stream` — consumes the iterator from `@blokjs/sse-subscribe` and writes SSE-framed events via `c.writeSSE(...)`. Each event has `event:`, `data:`, `id:`, and `retry:` fields per the SSE spec.
+- `@blokjs/sse-publish` — counterpart of `@blokjs/ws-broadcast`. Publishes an event to a channel that SSE subscribers consume.
+
+**Reconnect handling:** `Last-Event-Id` HTTP header on the inbound request indicates the last event the client received. `@blokjs/sse-subscribe`'s `since: lastEventId` option replays from that point forward (or from the start if the buffer doesn't have it). For long histories, back the event bus with a Redis Stream or NATS JetStream.
+
+**Heartbeat:** `heartbeatInterval` (default 15s) sends an SSE comment line (`:keep-alive\n\n`) on the interval. Prevents proxy idle timeouts (nginx default 60s, ALB 60s).
+
+**Backpressure:** Hono's `streamSSE` awaits `node:stream`'s `drain` event automatically. Slow clients slow the producer naturally.
+
+**Observability:**
+
+- One `WorkflowRun` per stream open (Pattern A). The run lives as long as the stream — status `running` until the connection closes, then `completed`.
+- `blok_sse_connections_active{workflow}` gauge.
+- `blok_sse_events_sent_total{workflow, channel}` counter.
+- Studio's run detail shows the connection's age + events-sent count.
+
+**Auth:** identical to HTTP — `middleware: ["jwt-auth"]` runs on the GET request at stream open. Per-event reauthorization (token expires mid-stream) is out of scope for v1; document.
+
+---
+
+### Webhook trigger
+
+**Authoring surface (JSON):**
+
+```json
+{
+  "name": "stripe-invoice-paid",
+  "trigger": {
+    "webhook": {
+      "provider": "stripe",
+      "path": "/webhooks/stripe",
+      "events": ["invoice.paid", "invoice.payment_failed"],
+      "secretEnv": "STRIPE_WEBHOOK_SECRET",
+      "tolerance": 300,
+      "idempotencyKey": "$.req.headers['stripe-signature']"
+    }
+  },
+  "steps": [
+    {
+      "id": "log",
+      "use": "@blokjs/audit-log",
+      "inputs": {
+        "event": "$.req.body.type",
+        "id": "$.req.body.id"
+      }
+    },
+    {
+      "id": "dispatch",
+      "subworkflow": "$.req.body.type",
+      "inputs": { "stripeEvent": "$.req.body" }
+    }
+  ]
+}
+```
+
+**Authoring surface — custom signature scheme (workflow whose provider isn't a built-in):**
+
+```json
+{
+  "trigger": {
+    "webhook": {
+      "path": "/webhooks/my-saas",
+      "signature": {
+        "scheme": "hmac-sha256",
+        "header": "X-Acme-Signature",
+        "format": "sha256={hex}",
+        "secretEnv": "ACME_WEBHOOK_SECRET",
+        "tolerance": 600,
+        "timestampHeader": "X-Acme-Timestamp"
+      }
+    }
+  }
+}
+```
+
+For unknown providers, fall back to Standard Webhooks ([standardwebhooks.com](https://www.standardwebhooks.com/)) — uniform HMAC-SHA256 with `webhook-id` / `webhook-timestamp` / `webhook-signature` headers.
+
+**Library choice for built-in providers:**
+
+- Stripe: [`stripe@^17`](https://www.npmjs.com/package/stripe) — `stripe.webhooks.constructEvent(rawBody, sig, secret, tolerance)`.
+- GitHub: [`@octokit/webhooks@^13`](https://www.npmjs.com/package/@octokit/webhooks) — `Webhooks#verifyAndReceive({ id, name, signature, payload })`.
+- Slack: DIY HMAC SHA-256 of `v0:{ts}:{rawBody}` against `X-Slack-Signature`. No SDK needed.
+- Shopify: DIY HMAC SHA-256 base64 against `X-Shopify-Hmac-Sha256`.
+- Generic: [`svix@^1`](https://www.npmjs.com/package/svix) for Standard Webhooks.
+
+**Built-in `events: [...]` allowlist:** like WebSocket's events allowlist, this filters which webhook event types reach the workflow. Stripe sends ~150 event types; the workflow only cares about a few. Unmatched events are stored in the audit log (for replay) but don't trigger workflow runs.
+
+**Replay protection:** webhook verifier caches the `eventId` (Stripe's `id`, GitHub's `X-GitHub-Delivery`, Svix's `webhook-id`) in the existing `idempotency_cache` table for a TTL matching the signature tolerance window (default 5 min). On hit: return 200 with `{ status: "duplicate", eventId }` and don't run the workflow.
+
+**Sub-workflow dispatch pattern (the canonical pattern):**
+
+Webhooks usually carry an event type that dispatches to one of many handlers. The cleanest authoring shape:
+
+```json
+{
+  "trigger": { "webhook": { "provider": "stripe", "path": "/webhooks/stripe" } },
+  "steps": [
+    {
+      "id": "route",
+      "subworkflow": "$.req.body.type",
+      "inputs": { "stripeEvent": "$.req.body" }
+    }
+  ]
+}
+```
+
+The `subworkflow: "$.req.body.type"` field is **polymorphic** — the destination workflow name is resolved at runtime from the event type. This requires `WorkflowRegistry` to support polymorphic name resolution; today it only does static names. Adding this is in scope for the webhook trigger PR.
+
+Each event type gets its own workflow: `invoice.paid`, `customer.subscription.created`, etc. Each handles ONE event type, no switch statement needed. The flagship demo of "this is what Blok is for" — declarative routing all the way down.
+
+**Migration from existing v0.6 pattern:** The shipped `v05-github-webhook-router.json` uses HTTP + middleware for HMAC verify. After the webhook trigger lands, that workflow simplifies to:
+
+```json
+// before (v0.6)
+{
+  "trigger": { "http": { "method": "POST", "middleware": ["github-webhook-verify"] } },
+  "steps": [...]
+}
+
+// after (v0.7)
+{
+  "trigger": { "webhook": { "provider": "github", "secretEnv": "GITHUB_WEBHOOK_SECRET" } },
+  "steps": [...]
+}
+```
+
+The verify middleware becomes built-in for the named provider. Same security guarantees (byte-exact `rawBody` HMAC, replay protection, timestamp window).
+
+---
+
+### Queue trigger
+
+The existing `WorkerTrigger` already handles queue-style triggers (NATS / BullMQ / InMemory). The "queue" trigger is the same pattern with provider-specific adapters for Kafka, RabbitMQ, SQS, Redis. The reason we have BOTH is naming: `worker` is "background jobs" (worker pattern, Trigger.dev / Sidekiq mental model), `queue` is "consume from a named queue" (broker-centric, BullMQ-style worker per queue + adapter per backend).
+
+**Recommendation: merge `worker` and `queue` into one trigger.** They're the same thing. The author writes `trigger: { queue: { provider: "bullmq" | "kafka" | "nats" | "sqs" | "redis" | "beanstalk", queue: "name", ... } }` and the adapter handles the rest. The `worker` trigger today is essentially `provider: "bullmq" | "nats" | "in-memory"` — generalize it.
+
+This is a **breaking change** if we ship it as-is. Migration path:
+
+1. Add `queue` trigger as the new canonical name, supporting all 5 providers PLUS the existing 3 from `worker`.
+2. Deprecate the `worker` trigger name; keep it accepting `trigger.worker` for back-compat by aliasing internally to `trigger.queue` with `provider: <worker's adapter>`.
+3. Remove the `worker` trigger name in v0.8.
+
+**Authoring surface (JSON, NATS example):**
+
+```json
+{
+  "name": "send-welcome-email",
+  "trigger": {
+    "queue": {
+      "provider": "nats",
+      "queue": "email-jobs",
+      "consumerGroup": "email-workers",
+      "concurrency": 5,
+      "retries": 3,
+      "timeout": 30000,
+      "ack": true,
+      "deadLetterQueue": "email-jobs.dlq"
+    }
+  },
+  "steps": [
+    { "id": "send", "use": "@blokjs/sendgrid-send", "inputs": { "to": "$.req.body.email" } }
+  ]
+}
+```
+
+**BullMQ example:**
+
+```json
+{
+  "trigger": {
+    "queue": {
+      "provider": "bullmq",
+      "queue": "high-priority",
+      "concurrency": 10,
+      "removeOnComplete": 1000,
+      "removeOnFail": 5000
+    }
+  }
+}
+```
+
+**Kafka example:**
+
+```json
+{
+  "trigger": {
+    "queue": {
+      "provider": "kafka",
+      "topic": "user-events",
+      "consumerGroup": "blok-prod",
+      "fromBeginning": false,
+      "concurrency": 3
+    }
+  }
+}
+```
+
+**Library picks per provider:**
+
+| Provider | Library | Version | Notes |
+|---|---|---|---|
+| bullmq | `bullmq` | `^5` | Redis-backed; default for ops-style queues |
+| nats | `nats` (JetStream) | `^2.29` | Already used by worker trigger |
+| kafka | `kafkajs` | `^2.2` | High-throughput streaming |
+| rabbitmq | `amqplib` | `^0.10` | Reliable enterprise queues |
+| sqs | `@aws-sdk/client-sqs` | `^3` | Cloud-native; FIFO support for ordered |
+| redis | `ioredis` (Streams) | `^5` | When Redis is already in stack, no extra infra |
+| pg-boss | `pg-boss` | `^10` | "No extra infra" mode for Postgres users |
+
+**Producer side (publishing to a queue from a workflow):**
+
+`@blokjs/queue-publish` step:
+
+```json
+{
+  "id": "enqueue",
+  "use": "@blokjs/queue-publish",
+  "inputs": {
+    "provider": "bullmq",
+    "queue": "email-jobs",
+    "payload": { "to": "$.req.body.email", "template": "welcome" },
+    "delayMs": 5000,
+    "priority": 10
+  }
+}
+```
+
+This is reusable from ANY trigger — HTTP, Webhook, WebSocket workflows all use the same helper to enqueue jobs. The provider config is per-workflow (or process-global via env vars).
+
+**Adapter interface (refining the existing one):**
+
+```ts
+interface QueueAdapter {
+  readonly name: string;
+  readonly provider: string;
+
+  connect(opts: ConnectOpts): Promise<void>;
+  disconnect(): Promise<void>;
+  healthCheck(): Promise<boolean>;
+
+  // Consumer side
+  subscribe(opts: SubscribeOpts, handler: (msg: QueueMessage) => Promise<void>): Promise<Subscription>;
+  stopProcessing(queue: string): Promise<void>;
+
+  // Producer side
+  publish(opts: PublishOpts, payload: unknown): Promise<{ messageId: string }>;
+  publishBatch?(opts: PublishOpts, payloads: unknown[]): Promise<{ messageIds: string[] }>;
+}
+
+interface SubscribeOpts {
+  queue: string;
+  consumerGroup?: string;
+  concurrency?: number;
+  prefetch?: number;
+  fromBeginning?: boolean;
+}
+
+interface PublishOpts {
+  queue: string;
+  delayMs?: number;
+  priority?: number;
+  dedupId?: string;        // BullMQ jobId; NATS Nats-Msg-Id; SQS FIFO MessageDeduplicationId
+  ttlMs?: number;
+}
+```
+
+This matches the existing `triggers/worker/src/adapters/{NATSAdapter,BullMQAdapter,InMemoryAdapter}.ts` shape. The `queue` trigger's adapter files (`KafkaAdapter`, `RabbitMQAdapter`, etc.) fill in the rest.
+
+**Operational:**
+
+- Concurrency: per-adapter (BullMQ's `concurrency` option, NATS's `max_ack_pending`).
+- Retries: per-adapter (BullMQ's `attempts` + exponential backoff, NATS's redelivery).
+- Dead-letter: per-adapter (BullMQ's `removeOnFail` + DLQ, RabbitMQ's `x-dead-letter-exchange`).
+- Idempotency: per-message via the provider's `dedupId` mechanism. Falls back to `idempotencyKey` on the workflow's first step if the adapter doesn't support broker-level dedup.
+
+---
+
+### Pub/Sub trigger
+
+Pub/Sub is distinct from Queue: pub/sub is **1:N fan-out by default** (every subscriber sees every message), and topic patterns use wildcards (`orders.*.created`). Queue is **1:1 within consumer group** (competing consumers).
+
+The provider matrix is intentionally different from Queue (although some providers — NATS, Kafka, Redis — appear in both because they support both semantics).
+
+**Authoring surface (JSON, NATS subject hierarchy):**
+
+```json
+{
+  "name": "audit-all-order-events",
+  "trigger": {
+    "pubsub": {
+      "provider": "nats",
+      "topic": "orders.>",
+      "durable": true,
+      "startFrom": "earliest"
+    }
+  },
+  "steps": [
+    {
+      "id": "log",
+      "use": "@blokjs/audit-log",
+      "inputs": { "event": "$.trigger.topic", "data": "$.req.body" }
+    }
+  ]
+}
+```
+
+**GCP Pub/Sub:**
+
+```json
+{
+  "trigger": {
+    "pubsub": {
+      "provider": "gcp",
+      "topic": "projects/my-project/topics/orders",
+      "subscription": "projects/my-project/subscriptions/blok-orders-audit",
+      "ack": true,
+      "maxMessages": 10
+    }
+  }
+}
+```
+
+**Redis Streams:**
+
+```json
+{
+  "trigger": {
+    "pubsub": {
+      "provider": "redis-streams",
+      "topic": "events:orders",
+      "consumerGroup": "blok-audit",
+      "startFrom": "$"
+    }
+  }
+}
+```
+
+**Library picks per provider:**
+
+| Provider | Library | Notes |
+|---|---|---|
+| nats | `nats` (Core + JetStream) | Default. Cheapest infra. Subject wildcards. |
+| redis-streams | `ioredis` | Durable Redis streams (vs transient Redis pub/sub). |
+| kafka | `kafkajs` | High-throughput. Consumer groups. |
+| gcp | `@google-cloud/pubsub` | Cloud-locked. |
+| aws | `@aws-sdk/client-sns` + `@aws-sdk/client-sqs` | SNS for fan-out, SQS for queueing. |
+| azure | `@azure/service-bus` | Azure Service Bus. |
+
+**Adapter interface:**
+
+```ts
+interface PubSubAdapter {
+  readonly provider: string;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+
+  publish(topic: string, payload: unknown, opts?: { partitionKey?: string; orderingKey?: string }): Promise<void>;
+
+  subscribe(
+    topicPattern: string,
+    handler: (msg: PubSubMessage) => Promise<void>,
+    opts?: {
+      durable?: boolean;
+      consumerGroup?: string;     // present → competing-consumer; absent → fan-out
+      startFrom?: "earliest" | "latest" | { seq: number } | { timestamp: number };
+    },
+  ): Promise<Subscription>;
+}
+```
+
+Note: omitting `consumerGroup` is fan-out (every subscriber sees every message); providing one is competing-consumer (1 of N within group). This single field disambiguates the two semantics — matches NestJS's `@MessagePattern` vs `@EventPattern` distinction.
+
+**Producer (publishing from a workflow):**
+
+`@blokjs/pubsub-publish` step:
+
+```json
+{
+  "id": "broadcast",
+  "use": "@blokjs/pubsub-publish",
+  "inputs": {
+    "provider": "nats",
+    "topic": "orders.created.us-east",
+    "payload": { "orderId": "$.state.created.id" }
+  }
+}
+```
+
+---
+
+## Server architecture
+
+**Same Hono port (the HTTP server):**
+
+The HTTP trigger's existing `serve({ fetch: app.fetch, port })` call hosts:
+
+- HTTP routes (the main trigger today)
+- WebSocket routes via `@hono/node-ws`'s `injectWebSocket(server)`
+- SSE routes via Hono's `streamSSE` helper (just GET handlers)
+- Webhook routes (POST handlers with provider-specific verifier middleware)
+- Studio trace router (`/__blok/*`)
+- Cron jobs (in-process timers — no port)
+- Queue/Pub-Sub **producers** (workflow steps that publish — no separate port)
+
+**Separate worker processes:**
+
+- Queue **consumers** — long-lived broker connections, decoupled from HTTP lifecycle. Started via `bun run queue:dev` (renamed from `worker:dev`).
+- Pub/Sub **subscribers** — same shape.
+
+The orchestrator (a new `bun run dev` that boots everything, or the existing `blokctl dev` from CLAUDE.md) constructs ONE Hono app, threads it through every "same-port" trigger via constructor injection, then calls `serve(...)`. Worker-process triggers are started in parallel child processes. All share the same `WorkflowRegistry` (workflow name → workflow definition) which is loaded from `WORKFLOWS_PATH`.
+
+```
+┌─ HTTP server process (port 4000) ─────────────────────┐
+│  Hono app                                              │
+│    ├─ HTTP trigger routes                              │
+│    ├─ WebSocket trigger routes (via @hono/node-ws)     │
+│    ├─ SSE trigger routes (via hono/streaming)          │
+│    ├─ Webhook trigger routes (provider-specific verify)│
+│    ├─ Studio /__blok/* trace router                    │
+│    └─ Queue / Pub-Sub PRODUCERS (workflow steps)       │
+│  Cron trigger (in-process timers)                      │
+└────────────────────────────────────────────────────────┘
+
+┌─ Queue worker process ────────────────────────────────┐
+│  Adapter (BullMQ / NATS / Kafka / RabbitMQ / SQS)      │
+│  WorkflowRegistry (shared via filesystem scan)         │
+│  RunTracker → same sqlite as HTTP process              │
+└────────────────────────────────────────────────────────┘
+
+┌─ Pub/Sub worker process ──────────────────────────────┐
+│  Adapter (NATS / Redis Streams / Kafka / GCP / AWS)    │
+│  Same WorkflowRegistry / RunTracker                    │
+└────────────────────────────────────────────────────────┘
+```
+
+The HTTP process is the most complex — it serves 5 trigger types on one port. Each trigger registers its Hono routes during boot, then `serve()` starts the server. The trigger's `listen()` method (already defined on `TriggerBase`) takes the shared Hono app as a constructor argument:
+
+```ts
+const app = new Hono<AppBindings>();
+const http = new HttpTrigger(app);
+const ws = new WebSocketTrigger(app);
+const sse = new SSETrigger(app);
+const webhook = new WebhookTrigger(app);
+
+await Promise.all([http.listen(), ws.listen(), sse.listen(), webhook.listen()]);
+// `listen()` now means "register my routes on the shared app", not "start a server".
+// The one server-starter is `serve(app)` at the end of HttpTrigger.listen().
+```
+
+This refactor of `TriggerBase.listen()` semantics is one of the implementation PRs.
+
+---
+
+## Authentication / middleware integration
+
+The existing 3-tier middleware chain (process-global → workflow-level → trigger-level) from v0.5/v0.6 extends UNIFORMLY:
+
+```json
+// Same workflow, different trigger — same middleware chain works.
+
+// As an HTTP trigger
+{
+  "trigger": {
+    "http": { "method": "POST", "middleware": ["jwt-auth", "rate-limit"] }
+  }
+}
+
+// As a WebSocket trigger
+{
+  "trigger": {
+    "websocket": { "path": "/ws/chat", "middleware": ["jwt-auth", "rate-limit"] }
+  }
+}
+
+// As an SSE trigger
+{
+  "trigger": {
+    "sse": { "path": "/events", "middleware": ["jwt-auth"] }
+  }
+}
+
+// As a Webhook trigger
+{
+  "trigger": {
+    "webhook": { "provider": "stripe", "middleware": ["audit-log"] }
+  }
+}
+```
+
+The middleware definition (`middleware/jwt-auth.json`) is identical across all four — it reads `ctx.request.headers.authorization`, verifies the JWT, sets `ctx.state.identity`. The trigger's `applyMiddlewareChain` method (shipped in v0.6 PR #75) runs the chain before the main workflow regardless of trigger kind.
+
+**Queue / Pub-Sub middleware** runs against the synthesized `ctx.request` the trigger builds from the inbound message. Most production use cases will skip middleware on queue triggers (broker-level auth via NATS NKeys / Redis ACL / Kafka SASL is the right layer), but the chain is available if needed for per-message validation.
+
+---
+
+## Observability
+
+Every new trigger participates in the existing tracing infrastructure:
+
+**`WorkflowRun` records:**
+
+- HTTP / Webhook: one run per request (existing behavior).
+- WebSocket: one run per workflow invocation per message. `connect`, `disconnect`, and `message` events each create their own runs.
+- SSE: one run per stream open (the run lives as long as the connection in Pattern A).
+- Queue: one run per delivered message (existing `WorkerTrigger` behavior).
+- Pub/Sub: one run per subscribed message.
+
+**Trigger type tagging:**
+
+`WorkflowRun.triggerType` gets new values:
+
+- `"websocket.connect"`, `"websocket.message"`, `"websocket.disconnect"`
+- `"sse.open"` (and `"sse.event"` if Pattern B opt-in)
+- `"webhook"`
+- `"queue"` (existing `"worker"` aliases to this)
+- `"pubsub"`
+
+Studio's run list filter learns these new values.
+
+**OTel counters (added across all new triggers):**
+
+```
+blok_websocket_connections_active{workflow} (gauge)
+blok_websocket_messages_received_total{workflow}
+blok_websocket_messages_dropped_total{workflow, reason}
+blok_sse_connections_active{workflow} (gauge)
+blok_sse_events_sent_total{workflow, channel}
+blok_webhook_received_total{provider, event_type}
+blok_webhook_rejected_total{provider, reason}  // reasons: invalid_signature, replay, timestamp_outside_window
+blok_queue_messages_consumed_total{provider, queue}
+blok_queue_messages_failed_total{provider, queue}
+blok_pubsub_messages_received_total{provider, topic}
+```
+
+**Studio rendering:**
+
+- Run list shows trigger icon per type (existing pattern).
+- WebSocket run detail shows the connection age, message count, and a link to peer messages on the same connection.
+- SSE run detail shows events-sent timeline.
+- Webhook run detail shows the verified signature, event type, and replay-cache lookup outcome.
+
+---
+
+## Implementation phasing
+
+5 sequenced PRs. Each independently mergeable; each ships a usable trigger end-to-end (workflow + smoke + tests + docs).
+
+### PR 1 — Hono server architecture refactor (~3 days, LOW risk)
+
+**Why first:** all the same-port triggers depend on the Hono app being injectable rather than constructed inside `HttpTrigger`. Today `HttpTrigger` owns the `Hono` instance. Refactor so:
+
+- `TriggerBase` accepts an optional `app: Hono` constructor argument.
+- `HttpTrigger.listen()` becomes "register HTTP routes on the shared app and call `serve()` if no other trigger has started the server".
+- New top-level orchestrator (e.g. `blokctl dev` or a `bun run dev`) constructs the Hono app, instantiates every same-port trigger, awaits all `listen()`s.
+
+Backward-compatible: `new HttpTrigger()` without an arg keeps working (constructs its own Hono).
+
+No new triggers in this PR. Just the plumbing.
+
+### PR 2 — WebSocket trigger (~5-6 days, MEDIUM risk)
+
+**Scope:**
+
+- Concrete `WebSocketTrigger` extending the abstract class, wired to `@hono/node-ws`.
+- Per-connection `ctx.connection` API with `setAttachment` / `attachment` / `send` / `close`.
+- `@blokjs/ws-broadcast`, `@blokjs/ws-reply`, `@blokjs/ws-close` helper nodes.
+- Channel/room registry (in-process `Map<roomId, Set<WebSocket>>`).
+- Heartbeat + rate limiting + connection cap.
+- OTel counters.
+- Workflow normalizer warning: WebSocket trigger with no `middleware` or signature-style auth (warn that the workflow is publicly accessible).
+- 8-10 unit tests + 1 smoke workflow + 1 smoke case (using a WS client to connect, send a message, assert response).
+
+**Out of scope:** cross-process broadcast backplane (defer to PR 6 or v0.7 follow-up). Single-instance only.
+
+### PR 3 — SSE trigger (~3-4 days, LOW risk)
+
+**Scope:**
+
+- Concrete `SSETrigger` mounting on the Hono app via path-based GET handlers.
+- Pattern A only (workflow yields events; trigger pumps them).
+- `@blokjs/sse-subscribe`, `@blokjs/sse-stream`, `@blokjs/sse-publish` helpers.
+- In-process event bus for `subscribe` / `publish`.
+- Heartbeat (`:keep-alive\n\n` comments).
+- `Last-Event-Id` reconnect support against the in-process bus.
+- OTel counters.
+- 5-6 unit tests + 1 smoke workflow + 1 smoke case (curl with `Accept: text/event-stream`, assert events).
+
+**Out of scope:** Pattern B (per-event workflow runs). Cross-process backplane.
+
+### PR 4 — Webhook trigger (~5-6 days, MEDIUM risk)
+
+**Scope:**
+
+- Concrete `WebhookTrigger` mounting POST routes on the Hono app.
+- Built-in providers: Stripe, GitHub, Slack, Shopify, Standard Webhooks (Svix).
+- Custom signature config (`signature: { scheme, header, format, secretEnv, tolerance, timestampHeader }`).
+- Replay protection via existing `idempotency_cache` table.
+- Polymorphic sub-workflow dispatch (`subworkflow: "$.req.body.type"`).
+- Migration: `v05-github-webhook-router.json` → uses new webhook trigger.
+- OTel counters.
+- 10-12 unit tests + 2 smoke workflows (one Stripe-like, one GitHub) + 2 smoke cases.
+
+**Out of scope:** webhook event archival (storing the verified event in a "received events" log for retrospective replay). Defer to v0.7 polish.
+
+### PR 5 — Queue trigger (~4-5 days, MEDIUM risk)
+
+**Scope:**
+
+- Merge `worker` into `queue` (or keep both with `worker` aliasing internally — decision below in [Open Questions](#open-questions)).
+- Adapter implementations: BullMQ, NATS JetStream (already exists), Kafka, RabbitMQ, SQS, Redis Streams.
+- `@blokjs/queue-publish` producer helper.
+- Worker-process boot via `bun run queue:dev`.
+- OTel counters.
+- 10+ unit tests (per adapter) + 1 integration test per provider + 1 smoke workflow + 1 smoke case (publish + consume).
+
+**Out of scope:** ordered queues (FIFO SQS, partition keys). Defer to follow-up if needed.
+
+### PR 6 — Pub/Sub trigger (~4-5 days, MEDIUM risk)
+
+**Scope:**
+
+- Adapter implementations: NATS (Core + JetStream), Redis Streams, Kafka, GCP Pub/Sub, AWS SNS+SQS, Azure Service Bus.
+- `@blokjs/pubsub-publish` producer helper.
+- Worker-process boot via `bun run pubsub:dev`.
+- OTel counters.
+- 10+ unit tests + 1 integration per provider + 1 smoke workflow + 1 smoke case.
+- Cross-process WS broadcast backplane (optional, see PR 2 out-of-scope) — uses pubsub publishers/subscribers under the hood.
+
+**Out of scope:** topic schema enforcement (Kafka Schema Registry, GCP Pub/Sub schemas). Defer.
+
+---
+
+## Total effort estimate
+
+| PR | Effort | Risk | Cumulative |
+|---|---|---|---|
+| 1 — Server architecture refactor | 3 days | Low | 3 days |
+| 2 — WebSocket | 5-6 days | Medium | 8-9 days |
+| 3 — SSE | 3-4 days | Low | 11-13 days |
+| 4 — Webhook | 5-6 days | Medium | 16-19 days |
+| 5 — Queue | 4-5 days | Medium | 20-24 days |
+| 6 — Pub/Sub | 4-5 days | Medium | 24-29 days |
+| **Total** | **24-29 days** | | **~5-6 weeks** |
+
+Risk profile is dominated by Queue and Pub/Sub adapter integrations — each provider needs its own connection / error / retry / cleanup wiring. Mitigation: the existing `WorkerTrigger` already shipped BullMQ, NATS, InMemory — the adapter interface is proven.
+
+---
+
+## Library picks summary
+
+| Concern | Library | Version | Why |
+|---|---|---|---|
+| WebSocket | `@hono/node-ws` + `ws` | `^1.2.0` + `^8.19.0` | Shares Hono port, integrates with existing middleware |
+| SSE | Hono built-in `streamSSE` | n/a (Hono 4.11) | Zero extra deps, JS Web Standards |
+| Webhook (Stripe) | `stripe` | `^17` | Production-grade signature verify with v1/v0 versions |
+| Webhook (GitHub) | `@octokit/webhooks` | `^13` | Verify + typed event handlers |
+| Webhook (generic) | `svix` | `^1` | Standard Webhooks fallback for unknown providers |
+| Queue (BullMQ) | `bullmq` | `^5` | Default queue; built-in delays, priority, dedup |
+| Queue (Kafka) | `kafkajs` | `^2.2` | High-throughput streaming |
+| Queue (NATS) | `nats` (JetStream) | `^2.29` | Already used by worker trigger |
+| Queue (RabbitMQ) | `amqplib` | `^0.10` | Reliable enterprise queues |
+| Queue (SQS) | `@aws-sdk/client-sqs` | `^3` | Cloud-native with FIFO support |
+| Queue (Redis) | `ioredis` (Streams) | `^5` | When Redis already in stack |
+| Queue (Postgres) | `pg-boss` | `^10` | "No extra infra" mode |
+| Pub/Sub (NATS) | `nats` (Core + JS) | `^2.29` | Default; subject wildcards |
+| Pub/Sub (Redis) | `ioredis` (Streams) | `^5` | Durable; consumer groups |
+| Pub/Sub (Kafka) | `kafkajs` | `^2.2` | Heavyweight streaming |
+| Pub/Sub (GCP) | `@google-cloud/pubsub` | latest | Cloud-locked |
+| Pub/Sub (AWS) | `@aws-sdk/client-sns` + `@aws-sdk/client-sqs` | `^3` | Fan-out + queue combo |
+| Pub/Sub (Azure) | `@azure/service-bus` | latest | Azure-native |
+
+---
+
+## Author-facing migration impact
+
+**Net new workflows.** Authors writing WebSocket / SSE / Webhook / Queue / Pub-Sub workflows for the first time get a clean declarative shape — no impact.
+
+**Existing v0.6 webhook handlers.** Workflows using `trigger.http.middleware: ["github-webhook-verify"]` (or similar) can OPTIONALLY migrate to the dedicated webhook trigger. Both approaches keep working — the webhook trigger is additive, not replacing the middleware-based pattern. Documentation should encourage the migration but not break existing workflows.
+
+**Existing v0.6 worker workflows.** If we MERGE worker into queue (open question Q1 below), existing `trigger.worker` JSON keeps working via alias. v0.7 → v0.8 timeframe deprecates the alias.
+
+---
+
+## Out of scope
+
+Explicitly NOT in this plan:
+
+- **Cross-process WebSocket broadcast backplane** — Pattern works in-process for v0.7. Multi-instance broadcast (NATS-backed pubsub) is a v0.7 follow-up or v0.8.
+- **SSE Pattern B (per-event workflow runs)** — opt-in to be added later when there's demonstrated demand.
+- **gRPC as a workflow trigger** — gRPC remains a transport for cross-language nodes. If we want to expose Blok workflows as gRPC services (which would make sense for some users), that's a separate v0.7 ask.
+- **Email Workers (inbound email triggers)** — Cloudflare-specific pattern. Not on the roadmap.
+- **GraphQL subscriptions** — would naturally layer on the SSE trigger if implemented. v0.7 follow-up.
+- **WebSocket protocol negotiation (MQTT-over-WS, GraphQL-over-WS)** — keep WebSocket as raw text/binary. Higher-level protocols are application concerns.
+- **Webhook event archival / retrospective replay UI** — store verified events in a `webhook_events` table for replay via Studio. Useful but separate concern.
+- **Queue ordering / partition keys** — FIFO SQS, Kafka partition keys, NATS subjects with ordering — defer to demonstrated demand.
+
+---
+
+## Open questions
+
+Decisions needed before implementation begins:
+
+### Q1: Merge `worker` into `queue`, or keep both?
+
+**Position taken: merge.** They're the same concept (consume from a named queue with retry semantics). Keep `trigger.worker` as a deprecated alias for `trigger.queue` for one minor version, then remove. Provider key normalizes (`worker.nats` → `queue.nats`).
+
+**Counter:** "worker" is the more familiar mental model from Sidekiq / Trigger.dev / etc. The "queue" name is technically accurate but pedagogically worse. Compromise: keep BOTH names indefinitely with `worker` as the documented alias.
+
+### Q2: WebSocket per-message workflow runs — one workflow per message, or per-connection?
+
+**Position taken: per-message.** Each WebSocket message creates its own `WorkflowRun`. Connect and disconnect each create their own runs too. Maps cleanly onto the existing runtime model where one workflow = one run. Studio's traces stay coherent.
+
+**Counter:** per-connection model (one long-lived run for the whole connection) better matches the natural "this is a chat session" mental model, and the state_snapshot mechanism could carry session state. But it complicates Studio (a 1-hour chat session = a 1-hour-running NodeRun?), conflicts with `concurrencyKey` (per-message slot vs per-connection slot?), and breaks `idempotencyKey` cache semantics.
+
+### Q3: SSE Pattern A vs Pattern B as default?
+
+**Position taken: Pattern A** (workflow runs once at stream open, yields events for the connection's lifetime). Simpler model, maps onto async iterators. Pattern B (per-event workflow runs) is overpowered for the common "subscribe to topic, forward events" use case.
+
+**Counter:** Pattern B is more flexible — every event passes through the workflow's full step chain (validation, transform, filter, branch). Pattern A's "yield events from a step" is limited. Adopt Pattern B as default for parity with WebSocket's per-message runs?
+
+### Q4: Webhook trigger — polymorphic sub-workflow dispatch IS the canonical pattern, or is it optional?
+
+**Position taken: polymorphic sub-workflow dispatch is the recommended canonical pattern.** Document loudly. But allow workflows to handle ALL event types in one workflow (switch on `$.req.body.type`) if they prefer.
+
+The polymorphic feature requires `WorkflowRegistry` to support resolving `subworkflow: "$.req.body.type"` at runtime — today only static names work. Adding this is in the webhook PR's scope.
+
+### Q5: Per-trigger `concurrencyKey` semantics — should it apply differently?
+
+For HTTP: `concurrencyKey: "$.req.body.tenantId"` means "max N concurrent HTTP requests per tenant."
+
+For WebSocket: does it mean "max N concurrent MESSAGES per connection" (per-key = connectionId) or "max N concurrent CONNECTIONS per tenant" (per-key = tenantId)?
+
+**Position taken: same as HTTP — max N concurrent workflow runs per resolved key.** A workflow run is one message processing, so `concurrencyKey: "$.req.params.roomId"` means "max N concurrent workflow runs per room", which naturally throttles per-room throughput. Document this explicitly.
+
+### Q6: WebSocket binary frames — first-class or escape hatch?
+
+WS supports text and binary frames. Most app-level protocols use text (JSON). But media streaming and IoT use binary.
+
+**Position taken: text by default, binary opt-in via `mode: "binary"` on the trigger.** In binary mode, `ctx.request.body` is a `Buffer`. Document the trade-offs (no JSON parsing, custom protocol design).
+
+### Q7: Queue + Pub/Sub adapter discovery — config-driven or convention-driven?
+
+The existing worker trigger uses `BLOK_WORKER_ADAPTER=bullmq|nats|in-memory` env var to pick the adapter. The new queue/pubsub triggers could either:
+
+- (a) Follow the same env-var pattern — one default adapter per process.
+- (b) Per-workflow `provider: "bullmq"` field in the trigger config — each workflow picks its own backend.
+
+**Position taken: per-workflow `provider` field.** Supports heterogeneous deployments (one workflow on BullMQ, another on Kafka) without spinning up two worker processes. The adapter pool is keyed by provider config — one BullMQ connection shared across all bullmq-using workflows, etc.
+
+---
+
+## Decision needed before implementation
+
+The reviewer should sign off on:
+
+1. **The 7 open questions above** — particularly Q1 (worker/queue merge) and Q2 (WS per-message vs per-connection).
+2. **The library picks** in the [summary table](#library-picks-summary). Some are obvious (`@hono/node-ws`), others might have ecosystem-specific reasons to swap (e.g., if you have a strong preference for `kafka-node` over `kafkajs`).
+3. **PR sequencing** — Server refactor → WebSocket → SSE → Webhook → Queue → Pub/Sub. Reasonable to swap SSE and Webhook order (SSE is simpler, Webhook is higher author demand).
+4. **Out-of-scope items** — particularly whether cross-process WS broadcast backplane should be in PR 2's scope or deferred.
+5. **The fundamental shape** — am I right that "config-driven, per-provider plugins, share Hono port when possible" is the correct direction? Or should some triggers (notably Pub/Sub) take a more code-driven approach with TS-only registration?
+
+Once approved, PR 1 (Hono server architecture refactor) starts the implementation chain — each subsequent PR is independently reviewable. 5-6 weeks total to ship all 5 triggers production-ready.
+
+---
+
+## References
+
+### Codebase
+- [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) — schema definitions for all 9 trigger kinds
+- [HttpTrigger.ts](../../../triggers/http/src/runner/HttpTrigger.ts) — Hono integration to mirror
+- [WorkerTrigger.ts](../../../triggers/worker/src/WorkerTrigger.ts) + adapter pattern to extend
+- [middleware.mdx](./middleware.mdx) — 3-tier middleware chain that applies uniformly across triggers
+- [wait-inside-primitives-design.mdx](./wait-inside-primitives-design.mdx) — design doc precedent for spec-first approach
+
+### External docs
+- [Hono WebSocket](https://hono.dev/docs/helpers/websocket) — `upgradeWebSocket` API
+- [Hono Streaming Helper](https://hono.dev/docs/helpers/streaming) — `streamSSE` API
+- [@hono/node-ws on npm](https://www.npmjs.com/package/@hono/node-ws) — Node WebSocket adapter
+- [Laravel Broadcasting](https://laravel.com/docs/12.x/broadcasting) — Reverb + Echo + Pusher protocol
+- [Spatie laravel-webhook-client](https://github.com/spatie/laravel-webhook-client) — declarative webhook pipeline
+- [NestJS Microservices](https://docs.nestjs.com/microservices/basics) — `@MessagePattern` / `@EventPattern`
+- [Inngest Triggers](https://www.inngest.com/docs/features/inngest-functions/triggers) — multi-trigger array
+- [Trigger.dev v3 scheduled.task](https://trigger.dev/docs/v3/tasks-scheduled) — declarative cron tasks
+- [Cloudflare WebSocket Hibernation](https://developers.cloudflare.com/durable-objects/api/websockets/) — stateless WS pattern
+- [Standard Webhooks](https://www.standardwebhooks.com/) — unified webhook signing spec
+- [Svix](https://docs.svix.com/) — Standard Webhooks reference implementation
