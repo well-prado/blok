@@ -271,11 +271,9 @@ ALTER TABLE workflow_runs MODIFY COLUMN last_completed_step_index TEXT; -- was I
 
 ### Phase 3 — Parallel forEach + loop iteration cursor (~1 week)
 
-Parallel forEach: when ANY iteration fires a wait, **cancel the other in-flight iterations**, snapshot their `iterationContext` as "incomplete" entries, and serialize the whole iteration set. On re-entry, re-launch the incomplete iterations from scratch (treating the cancellation as a soft retry) AND resume the wait-firing iteration.
+**Loop + wait shipped in PR #77** (merged on main). LoopNode reads `iteration_context` on entry, skips iterations `[0..N-1]`, resumes iteration N at the inner-step cursor, and crucially skips the while-condition re-evaluation on the first iteration after resume (it was true when the wait fired and state has since advanced — re-evaluating could falsely terminate the loop).
 
-The cancellation is a deliberate trade-off: holding 4 iterations open in memory across a 3-day wait is unacceptable. The author gets a warning at load time: "parallel forEach with embedded wait — non-firing iterations will be cancelled and retried on resume; ensure inner steps are idempotent". `idempotencyKey` on the inner step makes the retry cheap.
-
-`loop`: cursor records `iterationCount + intermediate state`. Re-entry resumes at iteration N+1 with the persisted `ctx.state.<id>Index` value.
+**Parallel forEach + wait remains in design.** Full micro-spec: [parallel-foreach-wait-spec.mdx](./parallel-foreach-wait-spec.mdx). Headline contract: when one iteration fires a wait, completed peer iterations have their results persisted in the cursor (no re-run on resume); in-flight peer iterations are cancelled via a pool AbortController and re-launched fresh on resume. Authors are expected to put `idempotencyKey` on side-effecting inner steps so cancellation-retry is safe (the normalizer WARNs but doesn't block at load time).
 
 **Out of phase 3**: nested primitives (forEach > tryCatch > wait), `switch` (next phase).
 
@@ -316,17 +314,13 @@ Nested primitives: cursor path becomes recursive (`"forEach:0/tryCatch:try/3/loo
 
 These need decisions before implementation, not in this document.
 
-### Q1: What about parallel forEach iterations that completed BEFORE the wait fired?
+### Q1: What about parallel forEach iterations that completed BEFORE the wait fired? — RESOLVED
 
-Example: 5-wide parallel pool, iteration 3 fires wait, iterations 1+2 already completed, iterations 4+5 are in-flight.
+**Decision**: persist completed iteration results in the cursor; retry incomplete ones on resume.
 
-- Iterations 1+2: their `ctx.response` was rolled into `state["forEach"]`. Should be safe to keep — but the forEach hasn't completed, so when does that result get written?
-- Iterations 4+5: cancelled per phase 3. Their partial state is discarded.
-- Iteration 3: persisted via iterationContext, resumed.
+Completed iterations are stored in the cursor's `completedResults[i]` sparse array, NOT re-run on resume — their side effects are committed exactly once. In-flight iterations are cancelled via a pool AbortController, their partial state discarded, indices stored in `cancelledIterations`. On resume, the wait-firing iteration resumes at its inner-step cursor; cancelled iterations re-launch fresh (with `idempotencyKey` providing the safety net for side-effecting inner steps).
 
-The interaction with `applyStepOutput` is subtle: the forEach step's persistence runs when the forEach completes. If we resume mid-flight, do iterations 1+2's results stay valid (their `idempotencyKey` cache is hit on retry, since they completed) or do we re-run them from scratch?
-
-Lean toward: **persist completed iteration results, retry incomplete ones**. Hairy invariants — needs a dedicated micro-spec.
+Full implementation spec: [Parallel forEach + wait — implementation spec](./parallel-foreach-wait-spec.mdx). The spec resolves the cursor schema (discriminated union with `mode: "parallel"`), the pool AbortController + per-iter signal chain, first-wait-wins disambiguation, and the author contract (idempotency requirement on side-effecting inner steps). Sign-off needed before implementation lands.
 
 ### Q2: Should `tryCatch.finally` see the wait?
 

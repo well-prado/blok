@@ -139,7 +139,8 @@
 									"c/devtools/switchOn",
 									"c/devtools/tryCatch",
 									"c/devtools/middleware",
-									"c/devtools/wait-inside-primitives-design"
+									"c/devtools/wait-inside-primitives-design",
+									"c/devtools/parallel-foreach-wait-spec"
 								]
 							}
 						]

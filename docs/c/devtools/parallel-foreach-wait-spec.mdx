@@ -1,0 +1,700 @@
+---
+title: "Parallel forEach + wait — implementation spec"
+description: "Detailed micro-spec for the second half of v0.6 Phase 3 — when a `wait.for` / `wait.until` step fires inside a parallel forEach iteration, what happens to peer iterations, how the cursor is encoded, and how resume re-launches the right subset."
+icon: "git-pull-request-arrow"
+---
+
+## Status
+
+**Design only.** Resolves Q1 from the [wait-inside-primitives design doc](./wait-inside-primitives-design.mdx) and pins down the implementation contract before code lands. Targets v0.6 Phase 3 (second half). The sequential `forEach` + wait case shipped in PR #73; loop + wait shipped in PR #77. Parallel `forEach` + wait is the last Phase 3 item.
+
+This spec is independent of Phase 4 (nested primitives, switch + wait, Studio rendering polish). It assumes the Phase 2 cursor machinery (`node_runs.iteration_context`, `_blokIterationResume`, `state_snapshot` rehydrate) is already in place — which it is, as of main.
+
+---
+
+## Why this case is the hard one
+
+Sequential forEach + wait was tractable because the cursor is a single number — "we got to iteration N, resume there." Iterations execute one at a time; nothing else is in flight when the wait fires.
+
+Parallel forEach is structurally different:
+
+- **N iterations run concurrently** (bounded by `concurrency`, default 10).
+- When **one** iteration's inner step throws `WaitDispatchRequest`, the runtime has a heterogeneous set:
+  - Some iterations have **completed** before the wait fired — their `results[i]` is populated.
+  - Some iterations are **in-flight** — at various points inside their per-iteration body.
+  - Some iterations are **not yet started** — still in the worker pool's queue.
+- The forEach step itself has **not** completed — `applyStepOutput` hasn't run, so `state["<forEach.id>"]` is undefined.
+
+The runtime must decide, for each iteration, whether to:
+1. Persist its result (it ran, it succeeded, redoing it would be wasted work AND potentially unsafe).
+2. Cancel it and re-run it from scratch on resume (it was in flight; its partial state is incomplete).
+3. Defer its launch (it was queued; just start it on resume).
+
+And on resume, ForEachNode must reconstruct the right execution plan: replay the completed set as cached results, re-launch the cancelled+queued set fresh, and resume the wait-firing iteration at its inner-step cursor.
+
+The Q1 decision below pins this down.
+
+---
+
+## The Q1 decision
+
+**Persist completed iteration results in the cursor; retry incomplete ones on resume.**
+
+That single-line decision unpacks into a contract:
+
+| At wait-throw moment | At resume |
+|---|---|
+| Iterations that **completed** (their `runIteration(item, i)` returned a result before the wait fired): their result is captured in the cursor's `completedResults[i]` slot. NOT re-run on resume — ForEachNode pre-populates `results[i]` from the cursor. | Pre-populated; not re-executed. The side effects of these iterations are committed exactly once across the whole defer/resume cycle. |
+| The **wait-firing iteration** (the one whose inner step threw `WaitDispatchRequest`): cursor records `{iteration: N, innerStepIndex: M}`, plus the rehydrated `ctx.state` snapshot (Phase 1 mechanism). NOT marked cancelled — it's waiting. | Resumed at iteration N, inner step M. The wait satisfies, post-wait inner steps run, iteration completes. |
+| **In-flight iterations** (started but not yet returned): cancelled via a per-pool AbortController. Their partial state is discarded. Indices stored in `cancelledIterations: number[]`. | Re-launched from scratch (inner step 0) as part of the post-resume forEach run. |
+| **Not-yet-started iterations** (queued in the worker pool but never picked up): treated identically to in-flight from the cursor's perspective — indices stored in `cancelledIterations`. | Launched fresh on resume (the post-resume forEach run reuses the standard worker pool dispatch path). |
+
+### Why "persist completed, retry incomplete" over the alternatives
+
+We considered three other strategies:
+
+1. **Cancel and re-run everything.** Simplest cursor (no `completedResults`), simplest re-launch logic. Rejected because it doubles all side effects — committed work would re-fire, including charges, emails, audit logs. The whole point of `idempotencyKey` is to make redundant re-execution cheap, but authors who didn't opt in (the majority) would silently re-charge.
+
+2. **Wait for in-flight to drain, then defer.** Don't cancel anything — let in-flight iterations finish naturally, then write the cursor with the full set of completed + the one waiting. Rejected for two reasons: (a) drain time is unbounded — a 30-minute inner step would block the wait dispatch for 30 minutes, defeating the whole point of deferring; (b) if multiple in-flight iterations ALSO fire wait while draining, the cursor becomes ambiguous about which to resume.
+
+3. **Hash completed results and rely on idempotencyKey cache.** Don't persist results in the cursor at all — re-run completed iterations on resume but their inner steps are idempotency-cached, so the cache hit makes re-execution cheap. Rejected because it (a) requires `idempotencyKey` on every inner step (we can't make idempotency mandatory — it's an opt-in feature), and (b) the inner step that returned a value would still need to re-resolve its inputs, which is wasted CPU per iteration.
+
+The chosen approach is the only one that's **correct without requiring author-side configuration** (idempotencyKey remains opt-in for in-flight iterations, where retry is the only safe answer) AND **bounded latency** at wait-throw (cancel is sub-millisecond, drain is unbounded).
+
+---
+
+## Author contract
+
+Authors who put a wait inside a **parallel** forEach must accept two requirements that don't apply to sequential forEach:
+
+### 1. In-flight iteration retry on resume
+
+In-flight iterations are cancelled at the wait-throw moment and re-launched from scratch on resume. If those iterations have side-effecting inner steps WITHOUT `idempotencyKey`, the re-launch will execute the side effects a second time.
+
+The author has two options:
+
+**Opt-in to idempotency on side-effecting inner steps.** Most production workflows that need parallel + wait already use `idempotencyKey` for crash recovery; the same key suffices here. Cache hits on resume make the re-launch a no-op for the inner step.
+
+```json
+{
+  "id": "charge",
+  "use": "@blokjs/api-call",
+  "idempotencyKey": "js/ctx.state.item.id",
+  "inputs": { /* ... */ }
+}
+```
+
+**Or write side-effect-free inner steps.** Pure transforms, read-only fetches, and stateless computations are naturally idempotent — re-execution produces the same result with no observable side effects.
+
+**The runtime cannot detect violations of this contract.** If an author runs a parallel forEach with a wait and side-effecting inner steps without `idempotencyKey`, double-execution happens silently. The workflow `load`-time validator will WARN (see [Implementation outline](#implementation-outline) below) but cannot block.
+
+### 2. Per-iteration state isolation
+
+Iterations communicate **only** through their `ctx.state[as]` slot and their `ctx.response.data` return value. Mutating cross-iteration state (e.g., `ctx.state.globalCounter++` from inside an iteration) is unsafe under any forEach mode and dangerous specifically under parallel + wait:
+
+- Completed iterations' mutations to cross-iteration state are NOT in the cursor (the cursor stores `results[i]`, not arbitrary state writes).
+- Cancelled iterations' partial mutations to cross-iteration state are discarded.
+- On resume, only the wait-firing iteration's state survives (via the `state_snapshot` rehydrate from Phase 1).
+
+This restriction is documented at the [forEach primitive level](./forEach-and-loop.mdx) — it's not new. The parallel + wait composition just makes the cost of violation higher (silent data loss vs. just a race condition).
+
+---
+
+## Cursor schema
+
+The existing `node_runs.iteration_context` column (sqlite migration v12, JSON-encoded) carries the Phase 2 sequential cursor today:
+
+```typescript
+{
+  iteration: number;
+  innerStepIndex: number;
+  completedResults: unknown[];
+}
+```
+
+Parallel + wait extends this with a `mode` discriminator and three new fields. The full type:
+
+```typescript
+type IterationContext =
+  | {
+      mode?: "sequential";  // omitted = "sequential" for back-compat
+      iteration: number;
+      innerStepIndex: number;
+      completedResults: unknown[];
+    }
+  | {
+      mode: "parallel";
+      /** Index of the iteration whose inner step threw the wait. */
+      waitFiringIteration: number;
+      /** Inner step index within the wait-firing iteration's body. */
+      innerStepIndex: number;
+      /**
+       * Sparse array indexed by iteration number. Indices that completed
+       * before the wait fired are populated with their result; all other
+       * slots are `undefined` (in-flight, cancelled, queued, or the
+       * wait-firing iteration itself).
+       *
+       * Stored as a true Array<unknown | undefined> — JSON encodes `null`
+       * for undefined holes; the decoder treats `null` and `undefined`
+       * symmetrically.
+       */
+      completedResults: (unknown | null)[];
+      /**
+       * Iteration indices that were in-flight or queued at wait-throw
+       * moment. ForEachNode re-launches these from inner step 0 on
+       * resume.
+       *
+       * Stored sorted ascending for diff-readability in trace dumps. The
+       * wait-firing iteration is NOT in this list — it's the one being
+       * resumed via `innerStepIndex`.
+       */
+      cancelledIterations: number[];
+    };
+```
+
+### Schema decisions
+
+**Discriminator field is optional and defaults to `"sequential"`.** Phase 2 cursors written before this PR don't have a `mode` field; we treat their absence as `"sequential"` so existing forEach+wait workflows continue to work without re-encoding.
+
+**Sparse array for `completedResults` in parallel mode.** The natural representation: array index = iteration index, slot value = result. Compact for the common case where most iterations completed (`completedResults: [resultA, resultB, null, null, resultE]` with index 2 = wait-firing, index 3 = cancelled). Sparse JSON arrays serialize `undefined` holes as `null` automatically; the decoder reads `null` as "not present."
+
+**`cancelledIterations` is an explicit list, not derived.** The alternative — "compute cancelled set as `{0..items.length-1}` minus completed minus waitFiring" — works but loses the distinction between "this index never existed" (e.g., items.length changed) and "this index was deliberately cancelled." Explicit list is cheaper to reason about during code review.
+
+**`completedResults.length` may be less than `items.length`.** Trailing iterations that were queued but never picked up have no `completedResults` slot. The wait-firing iteration's slot is `null` (not its in-progress return value). The full iteration count is preserved in the parent forEach's `items.length` at re-launch time (which reads from `ctx.config[step.name].in` — same input array, since the snapshot rehydrate restored `ctx.state` to its pre-wait shape).
+
+### Why not `Map<iteration, result>` instead of a sparse array
+
+JSON doesn't encode `Map`. We'd lose type safety. Sparse array is one less translation layer.
+
+### Size cap
+
+The same `BLOK_STATE_SNAPSHOT_MAX_BYTES` cap (default 1 MB) governs the cursor write. If `JSON.stringify(iterationContext)` exceeds the cap:
+
+1. Log a warning naming the forEach step + the cursor size.
+2. Skip the cursor write (write `null` to `iteration_context`).
+3. Still throw `WaitDispatchRequest` — the wait defers normally.
+
+Resume from a missing cursor behaves like "no resume hint present" — ForEachNode starts at iteration 0 with no pre-populated results, re-running EVERY iteration from scratch. That's effectively `idempotencyKey`-cached author retry, which is the safety net we already require.
+
+This is identical to the Phase 2 / Phase 3 behavior for state snapshot oversize: best-effort, fall back to fresh execution, document the cap.
+
+---
+
+## Lifecycle: happy path (no wait)
+
+For grounding before the wait-fires case. This is the existing parallel forEach behavior, unchanged:
+
+1. `ForEachNode.run(ctx)` reads `items[]` and `concurrency` from `ctx.config[step.name]`.
+2. Allocates `results: unknown[] = new Array(items.length)`.
+3. Spawns `min(concurrency, items.length)` workers, each running:
+   ```typescript
+   while (true) {
+     const i = nextIndex++;
+     if (i >= items.length) return;
+     results[i] = await runIteration(items[i], i);
+   }
+   ```
+4. `Promise.all(workers)` awaits all to complete.
+5. `response.data = results` and `applyStepOutput(ctx, step, { data: results })` writes to `ctx.state[step.id]`.
+6. Returns.
+
+No cursor, no state snapshot, no AbortController. The new spec adds machinery only on the wait-throw path.
+
+---
+
+## Lifecycle: wait fires in one iteration
+
+The headline case. Walk through it step by step.
+
+### Step 0 — pool setup at ForEachNode.run entry
+
+Before spawning workers, ForEachNode creates the **pool AbortController** — distinct from `ctx.signal`. It's used to cancel peer iterations when one fires a wait, WITHOUT cascading to the parent run.
+
+```typescript
+const poolController = new AbortController();
+const poolSignal = poolController.signal;
+```
+
+The pool signal does NOT replace `ctx.signal` on the child ctx. Each iteration's child ctx gets a per-iteration AbortController that:
+- Aborts when **either** the parent `ctx.signal` aborts (user cancel cascade) OR the `poolSignal` aborts (wait-fire cascade).
+- Is the `signal` field on the child ctx — so `RunnerSteps`' between-step abort check (`ctx.signal?.aborted`) fires correctly.
+
+The two-signal chain is built once per iteration in a helper. The implementation mirrors `createChildContext`'s parent-signal chain (already proven safe — see [PR 1 follow-up A3](./post-v04-roadmap.mdx) for the listener-leak fix).
+
+### Step 1 — workers run
+
+Each iteration's `runIteration(items[i], i)` is wrapped with a try/catch that distinguishes:
+
+- **`WaitDispatchRequest`**: this iteration fired a wait. Record `{waitFiringIteration: i, innerStepIndex}` from the request object (the throw carries `stepIndex`). Then trip the pool AbortController to signal peers.
+- **`RunCancelledError` where `poolSignal.aborted`**: this iteration was cancelled because a peer fired a wait. Mark its index as cancelled.
+- **`RunCancelledError` where `ctx.signal.aborted` (and NOT poolSignal)**: the parent run was user-cancelled. Re-throw — the whole forEach should propagate as cancelled.
+- **Any other error**: a real failure. Re-throw. This trips the pool AbortController too (so peers don't keep running uselessly), but the forEach step's NodeRun ends up `failed`, not `delayed`.
+- **Successful return**: store `results[i] = returnedValue`. Move on.
+
+The worker loop continues even after one worker hits a wait, because:
+- Other workers might still be running their current iteration body.
+- The orderly drain is: all workers exit (each through one of the three terminal paths), THEN ForEachNode decides what to persist.
+
+### Step 2 — Promise.all settles
+
+After all workers exit:
+
+```typescript
+const settled = await Promise.allSettled(workers);
+```
+
+We use `allSettled` instead of `all` because we want EVERY worker's outcome — `all` would short-circuit on the first rejection and lose information about peers.
+
+Three classifications of settled outcomes are bookkept across all iterations:
+
+| Outcome | Action |
+|---|---|
+| Resolved (iteration completed normally) | Index → `completedResults`. |
+| Rejected with `WaitDispatchRequest` | Index → `waitFiringIteration`. Inner step index → `innerStepIndex`. |
+| Rejected with `RunCancelledError` (pool-triggered) | Index → `cancelledIterations`. |
+| Rejected with `RunCancelledError` (user-triggered) | Re-throw immediately — abort the whole forEach step. |
+| Rejected with anything else | First-error-wins. Re-throw immediately. |
+
+### Step 3 — first-wait-wins
+
+If MULTIPLE iterations threw `WaitDispatchRequest` (rare but possible if two iterations were at their wait step almost simultaneously when the pool was tripped), pick the one with the LOWEST index as the wait-firing iteration. The others get reclassified as `cancelledIterations`.
+
+Rationale: iteration index is the only stable, deterministic property. The "first throw observed" might race differently across replays.
+
+### Step 4 — cursor write
+
+If a wait fired, ForEachNode:
+
+1. Builds the `IterationContext` object per the schema above.
+2. Reads `_blokActivePrimitiveNodeRunId` from ctx (stamped by `RunnerSteps` around the primitive's `step.process()` call).
+3. Calls `tracker.getStore().updateNodeRun(primitiveNodeRunId, { iterationContext })`.
+4. Writes the size-capped state snapshot via the existing `serializeStateSnapshot(ctx.state)` helper.
+
+### Step 5 — re-throw
+
+ForEachNode re-throws `WaitDispatchRequest` with the **wait-firing iteration's original** `WaitDispatchRequest` payload. That payload carries `scheduledAt`, `stepIndex`, `stepId`, etc. — exactly what `TriggerBase.run` needs to schedule the deferred dispatch.
+
+The outer `RunnerSteps` does NOT write `lastCompletedStepIndex` for this throw (the wait was inside a primitive — same rule as Phase 2 sequential).
+
+`TriggerBase.run` catches the wait, transitions the run to `delayed`, and returns `202 Accepted` + `Location` header to the HTTP transport.
+
+---
+
+## Lifecycle: resume after dispatch
+
+When the deferred timer fires (or a `recoverDispatches()` boot scan re-fires a persisted dispatch), `TriggerBase.run` is re-entered with `_blokDispatchReentry = true`.
+
+### Step 1 — rehydrate
+
+`TriggerBase.run`'s re-entry branch:
+
+1. Rehydrates `ctx.state` from `workflow_runs.state_snapshot` (Phase 1 mechanism, unchanged).
+2. Reads the latest NodeRun with `iterationContext !== undefined` (using the stable startedAt + insertion-order tiebreak shipped in PR #77).
+3. Stamps the cursor on `ctx._blokIterationResume`.
+
+### Step 2 — ForEachNode reads the cursor
+
+On entry, ForEachNode reads `_blokIterationResume` (and clears it to prevent inheritance):
+
+```typescript
+const resume = ctxAny._blokIterationResume as IterationContext | undefined;
+ctxAny._blokIterationResume = undefined;
+```
+
+If `resume?.mode === "parallel"`, dispatch to the parallel-resume code path. Otherwise (sequential or undefined), keep the existing Phase 2 logic.
+
+### Step 3 — parallel resume
+
+Initialize:
+
+```typescript
+const results: (unknown | undefined)[] = new Array(items.length);
+// Pre-populate completed iterations
+if (resume.mode === "parallel") {
+  for (let k = 0; k < resume.completedResults.length; k++) {
+    if (resume.completedResults[k] !== null && resume.completedResults[k] !== undefined) {
+      results[k] = resume.completedResults[k];
+    }
+  }
+}
+```
+
+Then build the **work queue** for re-execution — the indices that still need to run:
+
+```typescript
+const toRun = new Set<number>();
+for (let i = 0; i < items.length; i++) {
+  if (results[i] === undefined) toRun.add(i);  // either cancelled, never-started, or wait-firing
+}
+```
+
+Note: `toRun` includes the wait-firing iteration. The wait-firing iteration runs with a special hint (see Step 4); cancelled and never-started iterations run from inner step 0 normally.
+
+Spawn workers the same way as the happy path, but iterate over `toRun` rather than `0..items.length-1`:
+
+```typescript
+const queue = Array.from(toRun).sort((a, b) => a - b);
+let nextQueueIdx = 0;
+const workers: Promise<void>[] = [];
+const workerCount = Math.min(concurrency, queue.length);
+for (let w = 0; w < workerCount; w++) {
+  workers.push(/* same shape as the happy-path worker, but pulling from `queue` */);
+}
+```
+
+### Step 4 — wait-firing iteration's inner resume
+
+When the worker picks up the wait-firing iteration's index, it stamps `_blokInnerResumeIndex = resume.innerStepIndex` on that iteration's child ctx — just like Phase 2 sequential does:
+
+```typescript
+async function runIteration(item: unknown, index: number): Promise<unknown> {
+  const childCtx = this.cloneCtxForIteration(ctx, as, item, index);
+  if (index === resume?.waitFiringIteration && resume.innerStepIndex > 0) {
+    (childCtx as Record<string, unknown>)._blokInnerResumeIndex = resume.innerStepIndex;
+  }
+  // ... pool signal chain, run inner steps, ...
+}
+```
+
+The inner runner reads `_blokInnerResumeIndex`, skips inner steps `[0..M-1]`, lands on the wait step (index M), detects re-entry (via `_blokDispatchReentry`), satisfies the wait, runs post-wait inner steps, iteration completes.
+
+Cancelled iterations get NO inner resume index — they re-run from inner step 0. Their inner steps' `idempotencyKey` cache (if configured) provides the dedup safety net.
+
+### Step 5 — second-wait handling
+
+If a SECOND wait fires during resume (e.g., the wait-firing iteration's post-wait steps have another wait, or a cancelled iteration's first inner step is a wait), the cycle repeats: persist a new cursor (with `mode: parallel` again, potentially with a different `waitFiringIteration`), re-throw `WaitDispatchRequest`, dispatch defers, resume eventually.
+
+Each defer cycle reuses the same outer `workflow_runs` row (same `traceRunId` via `_blokDispatchReentry`). Each cycle creates a NEW forEach NodeRun with its own `iterationContext` snapshot — older cursors stay in the store but are ignored on the next resume because the rehydrate picks LATEST by startedAt + insertion-order.
+
+---
+
+## Cancellation mechanics — pool AbortController in depth
+
+The pool AbortController is the operational center of the wait-fires-in-one-iteration case. Three properties matter:
+
+### Property 1 — each iteration's child ctx.signal aborts on EITHER trigger
+
+For the parent run's `ctx.signal.aborted` check inside `RunnerSteps` (line ~204) to fire when the pool trips, each iteration's child ctx.signal must be chained off both the parent signal AND the pool signal.
+
+The implementation pattern (one per iteration, executed inside `cloneCtxForIteration`):
+
+```typescript
+const iterController = new AbortController();
+const listenerCleanup = new AbortController();
+
+// Chain from parent (user cancel cascades)
+if (ctx.signal) {
+  if (ctx.signal.aborted) iterController.abort();
+  else ctx.signal.addEventListener(
+    "abort",
+    () => { if (!iterController.signal.aborted) iterController.abort(); },
+    { once: true, signal: listenerCleanup.signal },
+  );
+}
+
+// Chain from pool (peer wait cascades)
+if (poolSignal.aborted) iterController.abort();
+else poolSignal.addEventListener(
+  "abort",
+  () => { if (!iterController.signal.aborted) iterController.abort(); },
+  { once: true, signal: listenerCleanup.signal },
+);
+
+childCtx.signal = iterController.signal;
+// Stash listenerCleanup so runIteration can fire it on iteration exit
+// (success, wait throw, OR cancel) — prevents listener leaks on long-
+// lived parent signals that outlive many parallel forEach calls.
+(childCtx as Record<string, unknown>)._blokIterListenerCleanup = listenerCleanup;
+```
+
+The `listenerCleanup` AbortController mirrors the same pattern `createChildContext` already uses (PR 1 follow-up A3 — sub-workflow listener-leak fix). Without it, a long-lived parent ctx running 1000 parallel forEach invocations would accumulate 2000 listeners (parent + pool) on its signal, tripping Node's `MaxListenersExceededWarning` at the 11th invocation.
+
+### Property 2 — wait-throw trips the pool, then re-throws
+
+Inside `runIteration`, the try/catch:
+
+```typescript
+try {
+  const result = /* run inner steps */;
+  return result;
+} catch (err) {
+  if (err instanceof WaitDispatchRequest) {
+    // Trip the pool — peer iterations see their ctx.signal.aborted next step
+    poolController.abort();
+    // Re-throw so the wait-firing iteration's outcome is "wait fired"
+    throw err;
+  }
+  throw err;
+}
+finally {
+  // Always clean up the per-iter abort listener
+  const cleanup = (childCtx as Record<string, unknown>)._blokIterListenerCleanup as AbortController | undefined;
+  cleanup?.abort();
+}
+```
+
+### Property 3 — distinguishing pool-cancel from user-cancel
+
+After Promise.allSettled, ForEachNode walks the results and asks for each `RunCancelledError`:
+
+```typescript
+// Was this rejection caused by a pool abort (wait fired) or a user abort?
+const isPoolCancel = poolSignal.aborted && (!ctx.signal || !ctx.signal.aborted);
+```
+
+If `poolSignal.aborted && ctx.signal.aborted` (both fired) — user cancel wins. The wait was racing with the cancel; the cancel takes priority because it's a terminal user intent.
+
+If `poolSignal.aborted && !ctx.signal.aborted` — wait wins. Standard wait-fired flow.
+
+If `!poolSignal.aborted && ctx.signal.aborted` — pure user cancel. Re-throw `RunCancelledError`.
+
+---
+
+## Edge cases — comprehensive table
+
+Each row is a scenario the implementation must handle correctly. The "expected behavior" column is the contract; the "implementation note" column points to which mechanism enforces it.
+
+| Scenario | Expected behavior | Implementation note |
+|---|---|---|
+| `items.length === 0` | forEach completes immediately with `data: []`. No cursor, no AbortController. | Existing happy-path code already short-circuits — no change. |
+| `items.length === 1` | Degenerates to sequential-equivalent semantics. One worker spawned. | Worker pool with `min(concurrency, 1) = 1` worker. Pool AbortController is created but never tripped (no peers). Cursor write uses `mode: "parallel"` for consistency. |
+| `concurrency === 1` | One worker at a time, effectively sequential but using parallel code path. | Same as `items.length === 1` — code path is identical, just one worker instead of multiple. |
+| Two iterations throw `WaitDispatchRequest` near-simultaneously | Lowest iteration index wins as `waitFiringIteration`. Others get reclassified as `cancelledIterations`. | First-wait-wins logic in Step 3 of the wait lifecycle. |
+| Wait fires AFTER one iteration's already-thrown a real error | Real error wins. Cursor is NOT written; forEach NodeRun status is `failed`, run status flips to `failed`. | After Promise.allSettled, scan for non-wait, non-cancel errors first; if any, re-throw before considering wait. |
+| User cancels run mid-parallel-forEach | `ctx.signal.aborted` cascades to all iteration signals. All iterations exit via `RunCancelledError`. forEach re-throws `RunCancelledError`. Run flips to `cancelled`. | Existing `ctx.signal` propagation through the per-iter signal chain. The pool AbortController doesn't fire (cancel won't trip it). |
+| User cancels run AND wait fires racily | User-cancel wins. `RunCancelledError` propagates; cursor is NOT written; run status is `cancelled` (not `delayed`). | Property 3 of cancellation mechanics: both signals aborted → user wins. |
+| Inner step is an idempotency cache hit | Cache hit happens BEFORE the wait detection check in `RunnerSteps` (existing order). Cancelled iterations re-running on resume: cache hit short-circuits the side effect. | No change — existing idempotency cache flow handles this. The author contract requires inner-step `idempotencyKey` for safe retry. |
+| Inner step has `retry: { maxAttempts: N }` and is mid-retry when pool trips | `RunCancelledError` thrown from between-step check (line ~204). Retry loop exits via the outer catch. | Existing retry composition with `ctx.signal.aborted` check between attempts. |
+| Inner step has `maxDuration: "30s"` and is mid-execution when pool trips | The timeout's setTimeout doesn't know about the signal. The step runs to its natural finish or timeout. The CONTAINING iteration's worker, on next-step boundary, sees the abort and exits. | Inner steps can opt into signal-aware behavior by reading `ctx.signal.aborted` themselves — documented. For most fetch-based steps, passing `signal: ctx.signal` to `fetch` makes it cooperatively abortable. |
+| Wait-firing iteration's post-wait steps include ANOTHER wait | Standard sequential resume within the iteration: the inner runner persists a new cursor on the SAME iteration (`waitFiringIteration` stays the same, `innerStepIndex` advances), throws `WaitDispatchRequest`. Outer forEach catches via Promise.allSettled and re-persists the parallel cursor. | The cursor written for the second wait OVERWRITES the first (same NodeRun, updated `iterationContext`). |
+| Cancelled iteration on resume hits a wait at inner step 0 | Same iteration becomes the `waitFiringIteration` for the SECOND defer cycle. `innerStepIndex: 0`. | No special case — the parallel-resume code path treats cancelled-re-run iterations the same as a fresh first-pass; if their first step is a wait, the wait fires immediately on resume. |
+| Cancelled iteration on resume fails with a real error | Real error wins. forEach step fails, run status `failed`. | Same as the "real error during first pass" case — Promise.allSettled scans for non-wait errors first. |
+| `items.length` changes between defer and resume | `items.length` at resume time wins. Cursor's `completedResults` covers indices `0..completedResults.length-1`; if `items.length` shrunk below that, trailing completed results are discarded; if `items.length` grew, new trailing indices are launched fresh. | ForEachNode reads `ctx.config[step.name].in` on resume — if rehydrate restored state to its pre-wait shape (which it does), the array reads identically. Authors who mutate the input array between defer and resume are violating the [author contract](#author-contract). |
+| `concurrency` changes between defer and resume | Resume-time `concurrency` wins. Doesn't affect correctness — the cursor records iteration indices, not workers. | No special handling needed. |
+| State_snapshot exceeds cap | Snapshot skipped, warning logged. Cursor still written. On resume, ctx.state is whatever the rehydrate produces (empty for cross-process, populated for in-process). | Existing Phase 1 behavior — same as sequential forEach + wait. The wait-firing iteration's child ctx will have empty state on resume, which may break its post-wait inner steps. Authors with large state should either reduce state or raise `BLOK_STATE_SNAPSHOT_MAX_BYTES`. |
+| Cursor JSON serialization throws (BigInt, circular ref, etc.) inside `completedResults` | Cursor skipped, warning logged. On resume, ForEachNode starts at iteration 0 with no pre-populated results — every iteration re-runs. | The Phase 1 `serializeStateSnapshot` helper's pattern is reused for cursor serialization. |
+| Inner step is a sub-workflow with `wait: false` (fire-and-forget) | Sub-workflow dispatches asynchronously; the iteration's `runIteration` returns the dispatch metadata (`{runId, scheduledAt}`) AND completes. The async child runs independently — wait fires inside it would NOT propagate to the parent forEach. | Existing sub-workflow async semantics — out of scope for this PR. |
+| Inner step is a sub-workflow with `wait: true` (sync) that ITSELF contains a wait | Nested primitives — Phase 4 territory. Not supported by this spec. | At workflow load time, the validator throws if a parallel forEach iteration's body contains a sub-workflow whose child workflow has a wait step. (See [out of scope](#out-of-scope).) |
+
+---
+
+## State management subtleties
+
+The Phase 1 state snapshot mechanism captures `ctx.state` at the wait-throw moment. For parallel forEach, this raises a question: WHICH ctx?
+
+**Answer: the wait-firing iteration's child ctx.**
+
+The wait-throw site in `RunnerSteps` is inside the inner runner, which is invoked with the iteration's child ctx (`await runner.run(childCtx, ...)`). When the wait step's logic calls `serializeStateSnapshot(ctx.state)`, it's serializing the **child** ctx's state — which has:
+
+- The parent ctx's state slot for THIS forEach (cloned via spread at `cloneCtxForIteration` time, then mutated per-iteration).
+- The iteration's per-item slot (`state[as] = item`).
+- The iteration's pre-wait inner-step outputs (`state[innerStepId] = ...`).
+
+It does NOT include:
+
+- Peer iterations' partial state (they each have their own isolated child ctx).
+- Completed iterations' results (those are in the parent forEach's local `results[]` array, not in any ctx.state slot until `applyStepOutput` runs at forEach completion).
+
+On resume, `TriggerBase.run` rehydrates this snapshot into the **outer** ctx (the one TriggerBase.createContext built). When ForEachNode runs again post-resume, it creates fresh child ctxs via `cloneCtxForIteration` — each child gets a spread of the rehydrated outer state. The wait-firing iteration's pre-wait state mutations come along for the ride; cancelled iterations' partial state does NOT (it was never captured).
+
+This is intentional. Cancelled iterations on resume re-run from inner step 0 with FRESH state. If they had side-effecting partial mutations, those mutations are lost — which is exactly why the [author contract](#author-contract) requires `idempotencyKey` for cancellation-safe inner steps.
+
+### Edge case: completed iterations' results never landed on ctx.state
+
+Sequential forEach's `applyStepOutput` runs only when the forEach step completes. Same for parallel. When wait fires mid-forEach, `applyStepOutput` has NOT run — `state["<forEach.id>"]` is undefined.
+
+The cursor's `completedResults` is the only durable record of which iterations finished. On resume, ForEachNode reads them, pre-populates `results[]`, runs the remaining iterations, eventually completes, and only THEN does `applyStepOutput` write `state["<forEach.id>"] = results`.
+
+Downstream steps that depend on `state["<forEach.id>"]` see it as undefined across the defer window. This is correct — they don't run during the defer; they only run after the forEach step completes (which only happens post-resume, after all iterations finish).
+
+---
+
+## Failure modes
+
+| Failure | Detection | Recovery |
+|---|---|---|
+| **Cursor write fails** (sqlite IO error, JSON serialization error, size cap) | `serializeStateSnapshot` returns undefined OR `tracker.getStore().updateNodeRun` throws | Log warning. Skip the cursor write but STILL throw `WaitDispatchRequest`. On resume, ForEachNode runs from iteration 0 with no pre-populated results — every iteration re-runs, idempotencyKey cache provides the safety net for previously-completed work. |
+| **State snapshot write fails** (separate from cursor) | Existing Phase 1 mechanism — warning logged | Resume runs with empty ctx.state. Authors who rely on rehydrated state see broken behavior; reduce state or raise cap. |
+| **Pool AbortController fires but a worker doesn't respond** (e.g., synchronous inner step blocking the event loop) | The worker's promise hangs. `Promise.allSettled` waits indefinitely. | Workers should consult `ctx.signal.aborted` in their inner logic OR pass `ctx.signal` to async APIs (fetch, file I/O). Pure CPU-bound synchronous inner steps are an authoring anti-pattern and not specifically handled — they'd block sequential forEach too. Document in author guide. |
+| **Re-launch of cancelled iteration fails with a non-wait error** | Inner step throws a regular error during resume | Forwards to `RunnerSteps`' outer catch, propagates up through ForEachNode, fails the whole forEach step on resume. Run status flips to `failed`. |
+| **Multiple waits fire across cancelled-iteration re-launches** | Different cancelled iterations both hit waits at inner step 0 on resume | First-wait-wins by iteration index. The cursor's `cancelledIterations` set on the next defer cycle becomes potentially-different from the previous cycle. This is fine — each defer/resume cycle is independent. |
+| **Resume happens but state_snapshot is missing** | `persistedRun.stateSnapshot` is undefined | Existing Phase 2 behavior — ctx.state has whatever the trigger's createContext built (typically empty). Wait-firing iteration's child ctx will inherit empty state via spread — its post-wait inner steps may break. Best-effort. |
+| **Resume happens but iterationContext is missing** | No NodeRun with `iterationContext !== undefined` | ForEachNode runs from iteration 0 fresh, idempotencyKey cache provides safety. Edge case: a wait that fired without a cursor write (cursor failed) on a workflow with no inner-step idempotency keys will re-execute every iteration's side effects. Authors who care about this are required to set keys. |
+| **Pool AbortController fires but a worker had ALREADY decided to complete** (race: worker N just returned `results[i] = ...`, then the abort fires before the result is captured) | Worker exits normally; result IS captured in `results[]` | This is the desired behavior — completed work counts as completed, regardless of pool state at completion moment. The cursor includes this iteration's result as `completedResults[i]`. |
+
+---
+
+## Observability
+
+### NodeRun status — no new enum value needed
+
+Cancelled iterations' NodeRuns end up with status `failed` because `RunCancelledError` propagates through `RunnerSteps`' outer catch via the standard error path. **This is a documented compromise**, not ideal:
+
+- Conceptually they're "cancelled due to a peer's wait" — neither `failed` (logic error) nor `cancelled` (whole-run cancel).
+- Studio renders them as failed with the `RunCancelledError` message — visually distinguishable but not semantically distinct.
+- A new `NodeRunStatus = "..."` enum value (`"cancelled"` or `"superseded"`) would be cleaner but is **out of scope for this PR** to keep the change minimal. Tracking as a follow-up.
+
+The forEach step's parent NodeRun has status `delayed` (since the run as a whole is delayed) — Studio's parent rollup shows `(N completed, 1 waiting, M cancelled)`.
+
+### Events
+
+The existing event taxonomy covers parallel forEach + wait without new events:
+
+- `NODE_STARTED` — each iteration's inner NodeRuns.
+- `NODE_COMPLETED` — completed iterations.
+- `NODE_FAILED` — cancelled iterations (carrying `RunCancelledError` as the failure).
+- `RUN_DELAYED` — the outer run on wait throw.
+- `RUN_RUNNING` — on resume re-entry.
+
+Studio's UI can derive the "(N completed, 1 waiting, M cancelled)" rollup by filtering NodeRuns by parent step ID and bucketing on status + error class. Adding a dedicated `NODE_SUPERSEDED` event would make the derivation cheaper but isn't required for correctness.
+
+### OTel counters
+
+One new counter for parallel + wait observability:
+
+```typescript
+blok_foreach_wait_cancelled_total{workflow}
+```
+
+Incremented at cursor-write time with the count of `cancelledIterations`. Lets ops dashboards spot workflows that frequently cancel large peer sets — a signal that the author should switch to sequential forEach OR add idempotency keys.
+
+---
+
+## Tracing model
+
+The parent forEach step's NodeRun (id `P`) is created at outer-step entry by `RunnerSteps.startNode` (existing flow). Each iteration's inner NodeRuns are created when their inner runner starts each inner step (existing per-iteration trace flow). All inner NodeRuns have `parentRunId = P` (via existing iteration-index tagging).
+
+The wait-throw cursor write targets `P` (`_blokActivePrimitiveNodeRunId = P`). On resume, the rehydrate finds `P` via "latest NodeRun with iterationContext, sorted by startedAt + insertion-order" — the SAME selection logic Phase 2 + Phase 3 use.
+
+After the defer/resume cycle:
+
+- `P` (the original forEach NodeRun) keeps its `iterationContext` set to the cursor at defer moment. Status remains `running` until forEach completes on resume (or `failed` if a non-wait error fires).
+- On resume, a NEW forEach NodeRun `P'` is created (RunnerSteps re-enters the same outer step, calls `startNode` afresh). `P'` may or may not have its own `iterationContext` set, depending on whether the resumed run fires another wait.
+- The rehydrate's "latest by startedAt + insertion-order" tiebreak picks `P'` over `P` on the SECOND resume.
+
+Studio's run detail view shows BOTH `P` and `P'` as separate forEach NodeRuns under the same run, in chronological order. The first one shows the initial wait-throw cursor; the second shows either completion or the next wait-throw cursor.
+
+---
+
+## Implementation outline
+
+### Files touched
+
+| File | Change |
+|---|---|
+| `core/runner/src/ForEachNode.ts` | Add parallel-resume path. Build the pool AbortController + per-iter signal chain. Add Promise.allSettled classification logic + cursor write. Add the parallel resume code path (pre-populate completedResults, build re-run queue, special-case wait-firing iteration's inner resume). |
+| `core/runner/src/RunnerSteps.ts` | No change — the wait-throw cursor write path already uses `_blokActivePrimitiveNodeRunId` + `_blokForEachCurrentIteration`. ForEachNode stamps these on the wait-firing iteration's child ctx before its inner runner starts. |
+| `core/runner/src/tracing/types.ts` | Extend `NodeRun.iterationContext` type to the discriminated union from the [cursor schema](#cursor-schema) section. Add `mode: "sequential" \| "parallel"` discriminator. |
+| `core/runner/src/TriggerBase.ts` | No change — the rehydrate path reads whatever shape is in the column and stamps it on `_blokIterationResume`. ForEachNode dispatches to sequential vs parallel resume based on `mode`. |
+| `core/runner/src/monitoring/ConcurrencyMetrics.ts` (or a new metrics location) | Add `blok_foreach_wait_cancelled_total` counter. |
+| `core/runner/src/workflow/WorkflowNormalizer.ts` | At load time, walk the workflow. For each parallel forEach with a wait somewhere in its body, emit a WARN-level diagnostic listing inner steps WITHOUT `idempotencyKey`. Non-blocking. |
+
+### Test plan
+
+#### Unit tests (`core/runner/__tests__/unit/wait-inside-foreach-parallel.test.ts`)
+
+1. **First defer writes parallel iterationContext** — items=[A,B,C], concurrency=2, wait at innerStepIndex 1. Assert `iterationContext.mode === "parallel"`, `waitFiringIteration` is one of {0, 1, 2}, `completedResults` length matches the completion count, `cancelledIterations` matches the non-wait-non-completed indices.
+2. **First-wait-wins** — fixture forces two iterations to throw `WaitDispatchRequest` near-simultaneously. Assert `waitFiringIteration` is the LOWEST index.
+3. **Real error during parallel beats wait** — fixture has one iteration throw a non-wait error while another fires wait. Assert forEach step fails (status `failed`), no cursor written.
+4. **User cancel beats pool cancel** — fixture aborts `ctx.signal` while the wait is mid-fire. Assert run status `cancelled`, not `delayed`.
+5. **Resume rehydrates correctly** — 3-iteration parallel forEach, wait fires in iter 1, completedResults has iter 0 + iter 2's results, cancelledIterations is empty. Resume → iter 1 satisfies wait, no other iterations re-run. Final state has all 3 iteration results.
+6. **Cancelled iterations re-run on resume** — 5-iteration parallel forEach concurrency=3. Wait fires in iter 1, completed=[0], cancelled=[2], waitFiring=1, queued=[3,4]. Resume re-launches 2,3,4 (and resumes iter 1). Final state has all 5 results.
+7. **Cancelled iteration re-launch hits another wait** — fixture has cancelled iter 2 fire a wait at inner step 0 on resume. Assert SECOND cursor cycle with `waitFiringIteration: 2`.
+8. **idempotencyKey cache hit on resume short-circuits cancelled iter re-run** — fixture has cancelled iter with `idempotencyKey` and a cache entry from a prior unrelated run. Resume reads cache, skips step.process. Cancellation+retry is free.
+9. **Empty completedResults on missing cursor** — simulate cursor write failure (set `BLOK_STATE_SNAPSHOT_MAX_BYTES=10`). Wait still defers; resume re-runs every iteration from scratch.
+
+#### Integration test (extends `wait-inside-foreach.test.ts`)
+
+10. **Round-trip 5-iteration parallel** — mimics the Phase 2 round-trip but for parallel mode. Verify each defer/resume cycle's cursor correctly identifies the waiting iteration and cancellable set.
+
+#### Smoke case (extend `scripts/v05-smoke.ts`)
+
+11. **POST /v05-parallel-foreach-with-wait** — body `{ jobs: ["a", "b", "c"] }`. Assert 202 + Location + `status: "delayed"`. The workflow itself goes in `triggers/http/workflows/json/v05-parallel-foreach-with-wait.json` — parallel forEach over `req.body.jobs`, each iteration has a `wait.for(100ms)`. Mirrors v05-async-job-poller (Phase 2 sequential demo) but with `mode: "parallel"`.
+
+### Phasing
+
+This PR ships as ONE atomic change — there's no incremental delivery for parallel + wait (the cursor schema change is breaking enough that half-shipped state is worse than fully-shipped). Estimated effort: **3-5 days** of focused implementation + testing.
+
+---
+
+## Out of scope
+
+Explicitly NOT in this PR (tracking as follow-ups):
+
+- **Nested primitives** (parallel forEach > tryCatch > wait, etc.) — Phase 4. Cursor path becomes recursive.
+- **switch + wait** — Phase 4.
+- **Studio UI rendering polish** — the rollup badges and cancelled-iteration visual treatment. Tracking separately because it's UI work that depends on the runtime emitting the right events (which this PR does).
+- **`NodeRunStatus = "superseded"` or `"cancelled"` enum value** — for cancelled iterations. Adding it requires touching every store backend (SqliteRunStore, InMemoryRunStore, Postgres mirror) plus migration coordination. Defer to a Phase 4 cleanup.
+- **Workflow-level normalizer block on dangerous compositions** — currently the normalizer WARNS for parallel forEach + wait + non-idempotent inner steps. Promoting that to a load-time error would force authors to opt out via `unsafeAllowDangerousCompositions: true` or similar. Decision needed: do we want to be that opinionated?
+- **Cross-process pool coordination** — the pool AbortController lives in process memory. If the deferred dispatch resumes in a DIFFERENT process (cross-process recovery via `recoverDispatches`), there's no pool to abort — but there's also no in-flight peer iterations to abort, because the original process died. Cancelled-iteration re-launch on resume works the same way regardless. This is by design but worth a sentence in the docs.
+
+---
+
+## Open questions (for review)
+
+Smaller items that need a sign-off before code:
+
+### Q-a: Should `cancelledIterations` include the `not-yet-started` set?
+
+**Position taken: yes** — the cursor records cancelled-OR-queued indices as one combined list. Rationale: from the cursor reader's perspective (ForEachNode on resume), they're equivalent: "run this iteration from inner step 0 on resume." Distinguishing them costs cursor size + decoder complexity.
+
+**Counter:** a separate field (`queuedIterations: number[]`) might help Studio's rendering ("these never even started"). But Studio can derive it: `queued = [0..items.length-1] - completed - cancelled - waitFiring - successful`. Stick with one list.
+
+### Q-b: Cursor encoding for `completedResults` — sparse array vs. dictionary `{idx: value}`?
+
+**Position taken: sparse array** — natural JSON encoding, automatic null padding, no decoder logic. Trade-off: a parallel forEach over 1000 items where only iteration 999 completed before wait fires writes `completedResults: [null × 999, value999]` — 999 nulls of overhead.
+
+**Counter:** dictionary `{ "999": value }` is more compact for sparse sets but requires the decoder to know `items.length` (which it does — read at resume time). Switching is easy if benchmarks show the sparse case is common.
+
+**Decision deferred**: ship with sparse array; revisit if cursor size becomes a pain.
+
+### Q-c: Should resume preserve the original worker count, or re-derive from current `concurrency`?
+
+**Position taken: re-derive from current `concurrency`** — read the config fresh on resume. Trade-off: an operator who lowers concurrency between defer and resume sees fewer workers running the post-resume iterations. Trade-off: an operator who raises concurrency sees more.
+
+**Both directions are safe**: cursor records iteration INDICES, not worker assignments. The pool's parallelism is orthogonal.
+
+### Q-d: What about iterations whose `runIteration` resolved BUT whose result is `undefined`?
+
+Currently `results[i] = undefined` is indistinguishable from "iteration never ran." The cursor write would not include them in `completedResults`, and they'd be re-launched on resume.
+
+**Position taken: an explicit sentinel.** Use `null` in the sparse array to mean "iteration ran but returned undefined" vs. JSON-undefined for "iteration didn't run." Implementation: when writing the cursor, transform `results[i] === undefined ? null : results[i]`. When reading, treat `null` as "iteration ran" and skip re-launch; `undefined` (a hole in the parsed array) means "not present."
+
+This is a small encoding asymmetry but covers the edge case correctly. Tested in unit test #11.
+
+### Q-e: Should the parallel-wait spec apply to `mode: "sequential"` too in some future version?
+
+No — sequential forEach + wait works as-is (Phase 2). The `mode: "parallel"` discriminator is purely additive. Sequential workflows continue to write `mode` field omitted, which the decoder reads as "sequential" via the default branch.
+
+If we EVER want to unify, we'd add `mode: "sequential"` as an explicit value (write side) while keeping the absence interpretation for backward compat (read side). No urgency.
+
+---
+
+## Effort and risk estimate
+
+| Component | Effort | Risk | Notes |
+|---|---|---|---|
+| Type schema extension | 0.5d | Low | Discriminated union, additive to existing type. |
+| Pool AbortController + per-iter signal chain | 1d | Medium | Listener accumulation hazard already covered by createChildContext's pattern. Need careful unit test for cleanup on every exit path. |
+| Promise.allSettled classification + cursor write | 1d | Medium | First-wait-wins logic, distinguishing pool cancel from user cancel. Easy to get wrong; tests #2 and #4 cover. |
+| Parallel resume path in ForEachNode | 1d | Medium | Re-launch queue construction, special-case wait-firing iteration's `_blokInnerResumeIndex`, idempotencyKey integration. |
+| Test suite (11 unit + 1 integration + 1 smoke case) | 1d | Low | Mirrors Phase 2 + Phase 3 test patterns. |
+| WorkflowNormalizer warning for non-idempotent inner steps | 0.5d | Low | Walk the workflow tree, check for parallel forEach + wait + missing idempotencyKey, emit structured warning. |
+| Promoting a new mock workflow + smoke case | 0.5d | Low | Same shape as v05-async-job-poller but `mode: "parallel"`. |
+| **Total** | **5-6 days** | **Medium-high** | The medium-risk pieces (signal chaining, classification, re-launch) are isolated and unit-testable. |
+
+For comparison: Phase 2 (sequential forEach + wait) was estimated 5-7 days and shipped in 4. Phase 3 (loop + wait) was estimated 3-5 days and shipped in 2. The parallel case is genuinely harder because of the concurrency reasoning, hence the wider range.
+
+---
+
+## Decision needed before implementation
+
+The reviewer should sign off on:
+
+1. **The Q1 decision** — "persist completed iteration results, retry incomplete ones." This is the load-bearing call; everything else flows from it.
+2. **The cursor schema** — discriminated union, `mode: "parallel"`, sparse `completedResults`. Specifically, Q-b's sparse-vs-dictionary choice can flip with low effort if benchmarks demand.
+3. **The author contract** — `idempotencyKey` requirement on side-effecting inner steps. The normalizer's WARN-not-block stance.
+4. **Out-of-scope items** — particularly the new NodeRunStatus value (Q-c). Deferring is the safe call but worth surfacing.
+5. **Q-d on the sparse `null` vs `undefined` distinction** — small but load-bearing for round-trip correctness.
+
+Once these are approved, implementation is a sized chunk of work with clear test coverage.
