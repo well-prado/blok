@@ -1,7 +1,7 @@
 {
 	"name": "github-webhook-verify",
 	"version": "1.0.0",
-	"description": "Verify a GitHub webhook signature. Reads the X-Hub-Signature-256 header and HMAC-verifies it against the request body using the GITHUB_WEBHOOK_SECRET env var. On match, falls through; on mismatch (or missing signature), throws GlobalError(401) with a structured reason that the catch arm / Studio can branch on. Demonstrates the @blokjs/hmac-verify helper in its canonical webhook-auth role. Production note: the helper signs the JSON-stringified ctx.request.body — fine when GitHub's signature was computed over the same JSON shape, which it is by default for application/json payloads. If the trigger ever serves application/x-www-form-urlencoded webhook bodies, byte-exact verification needs a raw-body capture upstream of the JSON parser.",
+	"description": "Verify a GitHub webhook signature. Reads the X-Hub-Signature-256 header and HMAC-verifies it against `ctx.request.rawBody` using the GITHUB_WEBHOOK_SECRET env var. v0.6 — verifies against the BYTES GitHub signed (`ctx.request.rawBody` is captured by HttpTrigger before JSON parsing). Pre-v0.6 used `JSON.stringify(ctx.request.body)` — a fragile round-trip that broke on whitespace + key-order differences; worked for GitHub's canonical JSON encoding but failed Stripe / Slack / any provider that signs the wire bytes. Same middleware shape now handles all three: point `payload` at `ctx.request.rawBody`. On match, falls through; on mismatch (or missing signature), throws GlobalError(401) with a structured `reason` discriminator that the catch arm / Studio can branch on.",
 	"middleware": true,
 	"steps": [
 		{
@@ -10,7 +10,7 @@
 			"type": "module",
 			"inputs": {
 				"signature": "js/ctx.request.headers['x-hub-signature-256'] || ''",
-				"payload": "js/JSON.stringify(ctx.request.body)",
+				"payload": "js/ctx.request.rawBody || ''",
 				"secret": "js/ctx.env.GITHUB_WEBHOOK_SECRET || ''",
 				"algorithm": "sha256",
 				"prefix": "sha256="
