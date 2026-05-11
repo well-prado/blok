@@ -1,47 +1,35 @@
 {
 	"name": "@blokjs/trigger-sse",
-	"version": "0.1.1",
-	"description": "Server-Sent Events (SSE) trigger for Blok workflows - real-time server push",
+	"version": "0.2.0",
+	"description": "Server-Sent Events (SSE) trigger for Blok workflows — real-time server push on the shared Hono port.",
 	"type": "module",
-	"engines": {
-		"node": ">=18.0.0"
-	},
-	"main": "dist/lib.js",
-	"types": "dist/lib.d.ts",
-	"author": "Deskree Technologies Inc.",
-	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
 	"scripts": {
-		"dev": "bun --watch run src/index.ts",
-		"start": "bun run dist/index.js",
-		"build": "rimraf ./dist && tsc",
+		"build": "rm -rf dist && bun run tsc",
+		"build:dev": "tsc --watch",
 		"test": "vitest run",
 		"test:dev": "vitest"
 	},
+	"author": "Deskree Technologies Inc.",
+	"license": "Apache-2.0",
+	"dependencies": {
+		"@blokjs/helper": "^0.4.0",
+		"@blokjs/runner": "^0.4.0",
+		"@blokjs/shared": "^0.4.0",
+		"@opentelemetry/api": "^1.9.0",
+		"hono": "^4.11.7",
+		"uuid": "^11.1.0"
+	},
 	"devDependencies": {
+		"@hono/node-server": "^1.19.9",
 		"@types/node": "^22.15.21",
 		"@types/uuid": "^11.0.0",
-		"copyfiles": "^2.4.1",
-		"rimraf": "^6.1.2",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"
 	},
-	"dependencies": {
-		"@blokjs/api-call": "^0.4.0",
-		"@blokjs/helper": "^0.4.0",
-		"@blokjs/if-else": "^0.4.0",
-		"@blokjs/runner": "^0.4.0",
-		"@blokjs/shared": "^0.4.0",
-		"@hono/node-server": "^1.19.9",
-		"@opentelemetry/api": "^1.9.0",
-		"@opentelemetry/exporter-prometheus": "^0.57.2",
-		"@opentelemetry/resources": "^1.30.1",
-		"@opentelemetry/sdk-metrics": "^1.30.1",
-		"@opentelemetry/sdk-trace-base": "^1.30.1",
-		"@opentelemetry/sdk-trace-web": "^1.30.1",
-		"@opentelemetry/semantic-conventions": "^1.39.0",
-		"hono": "^4.11.7",
-		"uuid": "^11.1.0",
-		"zod": "^3.24.2"
-	},
-	"private": true
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
 }

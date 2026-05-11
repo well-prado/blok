@@ -1,0 +1,24 @@
+{
+	"name": "v07-sse-publish",
+	"version": "1.0.0",
+	"description": "v0.7 PR 3 demo — companion to v07-sse-stream. POST `{event, data}` to /v07-sse-publish (legacy dispatch URL) and every SSE client connected to /sse/demo receives the event in real time via @blokjs/sse-publish. Demonstrates the in-process pub/sub model: publishers (HTTP, Cron, Worker, WS) and subscribers (SSE) decouple through the bus.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "publish",
+			"use": "@blokjs/sse-publish",
+			"type": "module",
+			"inputs": {
+				"channel": "sse-demo",
+				"event": "js/ctx.request.body.event",
+				"data": "js/ctx.request.body.data"
+			}
+		}
+	]
+}

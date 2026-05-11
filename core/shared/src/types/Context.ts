@@ -8,6 +8,7 @@ import type LoggerContext from "./LoggerContext";
 import type RequestContext from "./RequestContext";
 import type ResponseContext from "./ResponseContext";
 import type StateContext from "./StateContext";
+import type StreamContext from "./StreamContext";
 import type VarsContext from "./VarsContext";
 
 /**
@@ -141,6 +142,22 @@ type Context = {
 	 * step inputs.
 	 */
 	connection?: ConnectionContext;
+
+	/**
+	 * v0.7 — per-stream API for server-push HTTP triggers (SSE).
+	 * Present on contexts dispatched by `SSETrigger` once per stream
+	 * open; absent on HTTP / WebSocket / Worker / Cron contexts.
+	 *
+	 * Authors call `ctx.stream.writeSSE({ event, data, id, retry })`
+	 * to emit frames, `ctx.stream.close()` to end the stream, and
+	 * read `ctx.stream.signal.aborted` to detect client disconnects
+	 * inside long-running loops.
+	 *
+	 * Helper nodes (`@blokjs/sse-stream`) read this field so workflow
+	 * authors don't have to thread the stream handle through step
+	 * inputs.
+	 */
+	stream?: StreamContext;
 
 	_PRIVATE_: unknown;
 };

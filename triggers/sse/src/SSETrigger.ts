@@ -1,861 +1,489 @@
 /**
- * SSETrigger - Server-Sent Events trigger for real-time server push
+ * SSETrigger — v0.7 PR 3 — Server-Sent Events trigger that mounts on
+ * the shared Hono app via `streamSSE` from `hono/streaming`. Pattern A
+ * (per the plan's Q3 resolution): one workflow run per stream open.
+ * The workflow body holds the stream as long as the connection is
+ * alive, emitting events through `ctx.stream.writeSSE(...)` (typically
+ * via `@blokjs/sse-stream`).
  *
- * Extends TriggerBase to handle SSE connections for:
- * - Real-time notifications
- * - Live data updates
- * - Activity streams
- * - Dashboard updates
+ * **Authoring surface:**
  *
- * Features:
- * - Channel/topic subscriptions
- * - Automatic reconnection support (via retry)
- * - Event type filtering
- * - Connection health monitoring
- * - Message history replay (via Last-Event-ID)
+ * ```json
+ * {
+ *   "name": "live-order-updates",
+ *   "trigger": {
+ *     "sse": {
+ *       "path": "/sse/orders/:orderId",
+ *       "heartbeatInterval": 15000,
+ *       "retryInterval": 3000,
+ *       "channels": ["order:{orderId}"]
+ *     }
+ *   },
+ *   "steps": [
+ *     { "id": "sub",    "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["order:{orderId}"] } },
+ *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "$.state.sub" } }
+ *   ]
+ * }
+ * ```
+ *
+ * **Lifecycle:**
+ *
+ *   1. GET request on `path` triggers `streamSSE`. The trigger opens
+ *      the response, binds `ctx.stream`, runs the workflow once.
+ *   2. The workflow yields events (usually by pumping an async iterator
+ *      from `@blokjs/sse-subscribe`) until it returns OR the client
+ *      disconnects (`ctx.stream.signal.aborted` flips).
+ *   3. Trigger flushes the close frame, marks the run completed,
+ *      releases per-stream state.
+ *
+ * **Hono integration:** identical to the WebSocket trigger — accepts
+ * the shared `Hono<any, any, any>` app and an optional `HttpTriggerLike`
+ * exposing `addPreCatchAllHook` so SSE routes are registered AFTER the
+ * workflow registry is populated but BEFORE the legacy
+ * `/:workflow{.+}` catch-all. Same first-match-wins fix as WS.
+ *
+ * See [additional-triggers-plan.mdx](../../../docs/c/devtools/additional-triggers-plan.mdx#sse-trigger)
+ * for the full design.
  */
 
-import type { HelperResponse, SSETriggerOpts } from "@blokjs/helper";
 import {
-	type BlokService,
 	DefaultLogger,
-	type GlobalOptions,
-	NodeMap,
+	type GlobalOptions as RunnerGlobalOptions,
 	TriggerBase,
-	type TriggerResponse,
+	WorkflowRegistry,
 } from "@blokjs/runner";
-import type { Context, RequestContext } from "@blokjs/shared";
+import type { Context, RequestContext, StreamContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
+import type { Hono } from "hono";
+import type { Context as HonoContext } from "hono";
+import { streamSSE } from "hono/streaming";
+import type { SSEStreamingApi } from "hono/streaming";
 import { v4 as uuid } from "uuid";
+import { getBus } from "./bus";
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 /**
- * SSE event structure
+ * v0.7 SSE trigger config — mirrors `SSETriggerOptsSchema` in
+ * `core/workflow-helper/src/types/TriggerOpts.ts`. Read loosely here
+ * since Configuration validated the schema at workflow load.
  */
-export interface SSEEvent {
-	/** Unique event ID */
-	id: string;
-	/** Event type/name */
-	event: string;
-	/** Event data (will be JSON stringified if object) */
-	data: unknown;
-	/** Retry interval hint for client (in ms) */
-	retry?: number;
-}
-
-/**
- * SSE connection state
- */
-export type SSEState = "connected" | "disconnecting" | "disconnected";
-
-/**
- * SSE client connection
- */
-export interface SSEClient {
-	/** Unique client ID */
-	id: string;
-	/** Connection state */
-	state: SSEState;
-	/** Channels the client is subscribed to */
-	channels: Set<string>;
-	/** Client metadata */
-	metadata: Record<string, unknown>;
-	/** Connection timestamp */
-	connectedAt: Date;
-	/** Last activity timestamp */
-	lastActivity: Date;
-	/** Last event ID sent to this client */
-	lastEventId: string | null;
-	/** Write function to send SSE data */
-	write: (data: string) => boolean;
-	/** Close the connection */
-	close: () => void;
-}
-
-/**
- * SSE channel for organizing events
- */
-export interface SSEChannel {
-	/** Channel name */
-	name: string;
-	/** Clients subscribed to this channel */
-	clients: Set<string>;
-	/** Channel metadata */
-	metadata: Record<string, unknown>;
-	/** Created timestamp */
-	createdAt: Date;
-	/** Last event timestamp */
-	lastEventAt: Date | null;
-}
-
-/**
- * SSE connection event types
- */
-export type SSEEventType = "connect" | "disconnect" | "subscribe" | "unsubscribe";
-
-/**
- * SSE connection event (for workflow triggering)
- */
-export interface SSEConnectionEvent {
-	/** Event type */
-	type: SSEEventType;
-	/** Client ID */
-	clientId: string;
-	/** Channel name (for subscribe/unsubscribe) */
-	channel?: string;
-	/** Last Event ID (for reconnection) */
-	lastEventId?: string;
-}
-
-/**
- * Workflow model with SSE trigger configuration
- */
-interface SSEWorkflowModel {
+interface SSETriggerConfig {
 	path: string;
-	config: {
-		name: string;
-		version: string;
-		trigger?: {
-			sse?: SSETriggerOpts;
-			[key: string]: unknown;
-		};
-		[key: string]: unknown;
-	};
+	heartbeatInterval?: number; // ms; default 15000
+	retryInterval?: number; // ms; emitted as SSE retry: field; default 3000
+	maxConnections?: number; // hard cap on concurrent streams per process; default 10000
+	channels?: string[]; // descriptive only — helper nodes do the actual subscribe
+	middleware?: string[]; // trigger-level middleware chain
 }
 
-/**
- * SSETrigger - Handle Server-Sent Events connections
- */
-export abstract class SSETrigger extends TriggerBase {
-	protected nodeMap: GlobalOptions = {} as GlobalOptions;
+interface HttpTriggerLike {
+	addPreCatchAllHook(cb: () => void | Promise<void>): void;
+}
+
+/** Internal per-stream state. */
+interface StreamState {
+	id: string;
+	stream: SSEStreamingApi;
+	workflowName: string;
+	path: string;
+	pathParams: Record<string, string>;
+	openedAt: number;
+	eventsSent: number;
+	lastEventId: string | null;
+	closed: boolean;
+	heartbeatTimer: NodeJS.Timeout | null;
+	abortController: AbortController;
+}
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const DEFAULT_RETRY_INTERVAL_MS = 3_000;
+const DEFAULT_MAX_CONNECTIONS = 10_000;
+
+// -----------------------------------------------------------------------------
+// Trigger class
+// -----------------------------------------------------------------------------
+
+export default class SSETrigger extends TriggerBase {
+	protected nodeMap: RunnerGlobalOptions = {} as RunnerGlobalOptions;
+
+	protected readonly logger = new DefaultLogger();
+
 	protected readonly tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-sse-workflow",
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
-	protected readonly logger = new DefaultLogger();
-	protected sseWorkflows: SSEWorkflowModel[] = [];
 
-	// Connection management
-	protected clients: Map<string, SSEClient> = new Map();
-	protected channels: Map<string, SSEChannel> = new Map();
+	private readonly meter = metrics.getMeter("blok");
+	private readonly counterStreamsOpened = this.meter.createCounter("blok_sse_streams_opened_total", {
+		description: "SSE streams opened (cumulative).",
+		unit: "1",
+	});
+	private readonly counterEventsSent = this.meter.createCounter("blok_sse_events_sent_total", {
+		description: "SSE events written to clients per workflow.",
+		unit: "1",
+	});
+	private readonly counterStreamsRejected = this.meter.createCounter("blok_sse_streams_rejected_total", {
+		description: "SSE upgrade refusals (capacity, no handler).",
+		unit: "1",
+	});
 
-	// Event history for replay on reconnection
-	protected eventHistory: Map<string, { event: SSEEvent; channel: string; timestamp: Date }[]> = new Map();
-	protected maxHistorySize = 100;
-	protected historyRetentionMs = 60000; // 1 minute
+	// Hono's strict-types generic propagation through middleware chains
+	// doesn't compose with `streamSSE`'s loose `Context` parameter. We
+	// type the trigger's `app` field the same `<any, any, any>` shape
+	// used by WebSocketTrigger to stay tolerant of any concrete Hono.
+	// biome-ignore lint/suspicious/noExplicitAny: Hono's generic propagation
+	private readonly app: Hono<any, any, any>;
+	private readonly httpTrigger: HttpTriggerLike | null;
 
-	// Metrics
-	protected activeConnections = 0;
-	protected totalEventsSent = 0;
+	private streams: Map<string, StreamState> = new Map();
 
-	// Configuration
-	protected heartbeatInterval: NodeJS.Timeout | null = null;
-	protected heartbeatIntervalMs = 30000; // 30 seconds
-	protected maxClients = 10000;
-	protected defaultRetryInterval = 3000; // 3 seconds
+	private wired = false;
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
-
-	constructor() {
+	/**
+	 * @param app          Shared Hono app (typically from HttpTrigger).
+	 *                     SSE routes mount on the same instance so HTTP +
+	 *                     WS + SSE multiplex on one TCP port.
+	 * @param httpTrigger  Optional HttpTrigger-like object exposing
+	 *                     `addPreCatchAllHook`. When provided, SSE routes
+	 *                     register inside the pre-catch-all hook so they
+	 *                     win Hono's first-match dispatch over the
+	 *                     legacy workflow-name catch-all.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: matches `app` field's any generic
+	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike) {
 		super();
-		this.loadNodes();
-		this.loadWorkflows();
+		this.app = app;
+		this.httpTrigger = httpTrigger ?? null;
+		_setActiveSSETrigger(this);
 	}
 
 	/**
-	 * Load nodes into the node map
+	 * Inject the runner's GlobalOptions (nodes + workflows). Called by
+	 * the orchestrator AFTER constructing the trigger but BEFORE
+	 * `listen()`. Shares HttpTrigger's nodeMap so per-stream workflow
+	 * runs resolve helper nodes (`@blokjs/sse-subscribe`,
+	 * `@blokjs/sse-stream`, `branch`, etc.).
 	 */
-	loadNodes(): void {
-		this.nodeMap.nodes = new NodeMap();
-		if (this.nodes) {
-			const nodeKeys = Object.keys(this.nodes);
-			for (const key of nodeKeys) {
-				this.nodeMap.nodes.addNode(key, this.nodes[key]);
-			}
-		}
+	setNodeMap(nodeMap: RunnerGlobalOptions): void {
+		this.nodeMap = nodeMap;
 	}
 
-	/**
-	 * Load workflows into the workflow map
-	 */
-	loadWorkflows(): void {
-		this.nodeMap.workflows = this.workflows || {};
-	}
-
-	/**
-	 * Initialize SSE trigger
-	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
 
-		// Find all workflows with SSE triggers
-		this.sseWorkflows = this.getSSEWorkflows();
-
-		if (this.sseWorkflows.length === 0) {
-			this.logger.log("No workflows with SSE triggers found");
-		} else {
-			this.logger.log(`SSE trigger initialized. ${this.sseWorkflows.length} workflow(s) registered`);
+		if (this.wired) {
+			this.logger.log("[blok][sse] listen() called twice; ignoring");
+			return this.endCounter(startTime);
 		}
+		this.wired = true;
 
-		// Start heartbeat monitoring
-		this.startHeartbeat();
-
-		// Start history cleanup
-		this.startHistoryCleanup();
-
-		// Enable HMR in development mode
-		if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
-			await this.enableHotReload();
+		// Defer route registration to HttpTrigger's pre-catch-all hook so
+		// the WorkflowRegistry is fully populated AND our routes are
+		// mounted BEFORE the `/:workflow{.+}` catch-all that would
+		// otherwise swallow `/sse/<path>` requests as workflow names.
+		// When no httpTrigger is provided (tests), register inline —
+		// the caller is responsible for ensuring registry is populated
+		// before they fetch().
+		if (this.httpTrigger) {
+			this.httpTrigger.addPreCatchAllHook(() => {
+				this.registerRoutesFromRegistry();
+			});
+		} else {
+			this.registerRoutesFromRegistry();
 		}
 
 		return this.endCounter(startTime);
 	}
 
-	/**
-	 * Stop the SSE trigger
-	 */
 	async stop(): Promise<void> {
-		// Stop heartbeat
-		this.stopHeartbeat();
-
-		// Close all client connections
-		for (const client of this.clients.values()) {
-			client.close();
+		// Close every open stream cleanly.
+		for (const state of this.streams.values()) {
+			this.closeStream(state, /* viaServer */ true);
 		}
-
-		// Clear state
-		this.clients.clear();
-		this.channels.clear();
-		this.eventHistory.clear();
-		this.sseWorkflows = [];
-		this.activeConnections = 0;
-
-		this.logger.log("SSE trigger stopped");
+		this.streams.clear();
+		this.wired = false;
+		if (_getActiveSSETrigger() === this) _setActiveSSETrigger(null);
+		this.destroyMonitoring();
+		this.logger.log("[blok][sse] stopped");
 	}
 
-	protected override async onHmrWorkflowChange(): Promise<void> {
-		// Lightweight: refresh workflow list without disconnecting clients
-		this.loadWorkflows();
-		this.sseWorkflows = this.getSSEWorkflows();
-		this.logger.log(`[HMR] SSE workflows reloaded. ${this.sseWorkflows.length} workflow(s) registered`);
+	// ---------------------------------------------------------------------------
+	// Route registration
+	// ---------------------------------------------------------------------------
+
+	private registerRoutesFromRegistry(): void {
+		const workflows = this.getSSEWorkflows();
+		if (workflows.length === 0) {
+			this.logger.log("[blok][sse] no workflows with trigger.sse found");
+			return;
+		}
+		this.logger.log(`[blok][sse] registering ${workflows.length} SSE route(s):`);
+		for (const entry of workflows) {
+			this.registerSSERoute(entry);
+		}
 	}
 
-	/**
-	 * Handle new SSE connection
-	 * Call this from your HTTP endpoint handler
-	 */
-	async handleConnection(
-		write: (data: string) => boolean,
-		close: () => void,
-		headers: Record<string, string> = {},
-		metadata: Record<string, unknown> = {},
-	): Promise<SSEClient | null> {
-		// Check max connections
-		if (this.clients.size >= this.maxClients) {
-			this.logger.error("Max connections reached, rejecting new connection");
-			close();
-			return null;
-		}
+	private registerSSERoute(entry: { workflowName: string; config: SSETriggerConfig }): void {
+		const { workflowName, config } = entry;
+		this.logger.log(`[blok][sse]   GET     ${config.path}  ←  ${workflowName}`);
 
-		const clientId = uuid();
-		const lastEventId = headers["last-event-id"] || null;
-
-		// Create client object
-		const client: SSEClient = {
-			id: clientId,
-			state: "connected",
-			channels: new Set(),
-			metadata,
-			connectedAt: new Date(),
-			lastActivity: new Date(),
-			lastEventId,
-			write: (data: string) => {
-				if (client.state === "connected") {
-					return write(data);
-				}
-				return false;
-			},
-			close: () => {
-				client.state = "disconnecting";
-				close();
-			},
-		};
-
-		// Register client
-		this.clients.set(clientId, client);
-		this.activeConnections++;
-
-		// Send initial retry interval
-		this.sendRetry(client, this.defaultRetryInterval);
-
-		// Trigger connect event
-		await this.triggerConnectionEvent({
-			type: "connect",
-			clientId,
-			lastEventId: lastEventId || undefined,
-		});
-
-		this.logger.log(`SSE client connected: ${clientId} (${this.activeConnections} active)`);
-
-		// If client is reconnecting with Last-Event-ID, replay missed events
-		if (lastEventId) {
-			this.replayEvents(client, lastEventId);
-		}
-
-		return client;
-	}
-
-	/**
-	 * Handle SSE connection close
-	 */
-	async handleDisconnect(clientId: string): Promise<void> {
-		const client = this.clients.get(clientId);
-		if (!client) return;
-
-		client.state = "disconnected";
-
-		// Remove from all channels
-		for (const channelName of client.channels) {
-			const channel = this.channels.get(channelName);
-			if (channel) {
-				channel.clients.delete(clientId);
-				// Clean up empty channels
-				if (channel.clients.size === 0) {
-					this.channels.delete(channelName);
-				}
+		this.app.get(config.path, (c: HonoContext) => {
+			const cap = typeof config.maxConnections === "number" ? config.maxConnections : DEFAULT_MAX_CONNECTIONS;
+			if (this.streams.size >= cap) {
+				this.counterStreamsRejected.add(1, { workflow_name: workflowName, reason: "max_connections" });
+				return c.text("SSE capacity exceeded", 503);
 			}
-		}
 
-		// Unregister client
-		this.clients.delete(clientId);
-		this.activeConnections--;
+			const lastEventId = c.req.header("Last-Event-ID") || c.req.header("last-event-id") || null;
+			const pathParams = c.req.param() as Record<string, string>;
+			const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
+			const headers = Object.fromEntries(c.req.raw.headers);
 
-		// Trigger disconnect event
-		await this.triggerConnectionEvent({
-			type: "disconnect",
-			clientId,
-		});
+			return streamSSE(c, async (honoStream) => {
+				const streamId = uuid();
+				const abortController = new AbortController();
+				const state: StreamState = {
+					id: streamId,
+					stream: honoStream,
+					workflowName,
+					path: config.path,
+					pathParams,
+					openedAt: Date.now(),
+					eventsSent: 0,
+					lastEventId,
+					closed: false,
+					heartbeatTimer: null,
+					abortController,
+				};
+				this.streams.set(streamId, state);
+				this.counterStreamsOpened.add(1, { workflow_name: workflowName });
 
-		this.logger.log(`SSE client disconnected: ${clientId}`);
-	}
-
-	/**
-	 * Subscribe client to a channel
-	 */
-	async subscribe(clientId: string, channelName: string): Promise<boolean> {
-		const client = this.clients.get(clientId);
-		if (!client) return false;
-
-		// Create channel if it doesn't exist
-		if (!this.channels.has(channelName)) {
-			this.channels.set(channelName, {
-				name: channelName,
-				clients: new Set(),
-				metadata: {},
-				createdAt: new Date(),
-				lastEventAt: null,
-			});
-		}
-
-		const channel = this.channels.get(channelName);
-		if (!channel) return;
-		channel.clients.add(clientId);
-		client.channels.add(channelName);
-
-		// Trigger subscribe event
-		await this.triggerConnectionEvent({
-			type: "subscribe",
-			clientId,
-			channel: channelName,
-		});
-
-		this.logger.log(`Client ${clientId} subscribed to channel: ${channelName}`);
-		return true;
-	}
-
-	/**
-	 * Unsubscribe client from a channel
-	 */
-	async unsubscribe(clientId: string, channelName: string): Promise<boolean> {
-		const client = this.clients.get(clientId);
-		if (!client) return false;
-
-		const channel = this.channels.get(channelName);
-		if (!channel) return false;
-
-		channel.clients.delete(clientId);
-		client.channels.delete(channelName);
-
-		// Clean up empty channels
-		if (channel.clients.size === 0) {
-			this.channels.delete(channelName);
-		}
-
-		// Trigger unsubscribe event
-		await this.triggerConnectionEvent({
-			type: "unsubscribe",
-			clientId,
-			channel: channelName,
-		});
-
-		this.logger.log(`Client ${clientId} unsubscribed from channel: ${channelName}`);
-		return true;
-	}
-
-	/**
-	 * Send event to a specific client
-	 */
-	sendToClient(clientId: string, event: SSEEvent): boolean {
-		const client = this.clients.get(clientId);
-		if (!client || client.state !== "connected") return false;
-
-		const formatted = this.formatEvent(event);
-		const success = client.write(formatted);
-
-		if (success) {
-			client.lastActivity = new Date();
-			client.lastEventId = event.id;
-			this.totalEventsSent++;
-		}
-
-		return success;
-	}
-
-	/**
-	 * Broadcast event to a channel
-	 */
-	broadcastToChannel(channelName: string, event: SSEEvent): number {
-		const channel = this.channels.get(channelName);
-		if (!channel) return 0;
-
-		const formatted = this.formatEvent(event);
-		let sent = 0;
-
-		for (const clientId of channel.clients) {
-			const client = this.clients.get(clientId);
-			if (client && client.state === "connected") {
-				const success = client.write(formatted);
-				if (success) {
-					client.lastActivity = new Date();
-					client.lastEventId = event.id;
-					sent++;
-				}
-			}
-		}
-
-		// Update channel stats
-		channel.lastEventAt = new Date();
-
-		// Store in history for replay
-		this.storeEvent(channelName, event);
-
-		this.totalEventsSent += sent;
-		return sent;
-	}
-
-	/**
-	 * Broadcast event to all connected clients
-	 */
-	broadcastToAll(event: SSEEvent): number {
-		const formatted = this.formatEvent(event);
-		let sent = 0;
-
-		for (const client of this.clients.values()) {
-			if (client.state === "connected") {
-				const success = client.write(formatted);
-				if (success) {
-					client.lastActivity = new Date();
-					client.lastEventId = event.id;
-					sent++;
-				}
-			}
-		}
-
-		this.totalEventsSent += sent;
-		return sent;
-	}
-
-	/**
-	 * Send a comment (heartbeat) to keep connection alive
-	 */
-	sendHeartbeat(clientId: string): boolean {
-		const client = this.clients.get(clientId);
-		if (!client || client.state !== "connected") return false;
-
-		// SSE comment format
-		return client.write(": heartbeat\n\n");
-	}
-
-	/**
-	 * Send retry interval to client
-	 */
-	sendRetry(client: SSEClient, retryMs: number): boolean {
-		return client.write(`retry: ${retryMs}\n\n`);
-	}
-
-	/**
-	 * Get client by ID
-	 */
-	getClient(clientId: string): SSEClient | undefined {
-		return this.clients.get(clientId);
-	}
-
-	/**
-	 * Get all clients in a channel
-	 */
-	getClientsInChannel(channelName: string): SSEClient[] {
-		const channel = this.channels.get(channelName);
-		if (!channel) return [];
-
-		const clients: SSEClient[] = [];
-		for (const clientId of channel.clients) {
-			const client = this.clients.get(clientId);
-			if (client) {
-				clients.push(client);
-			}
-		}
-		return clients;
-	}
-
-	/**
-	 * Get connection stats
-	 */
-	getStats(): {
-		activeConnections: number;
-		totalEventsSent: number;
-		channelCount: number;
-		clientsByChannel: Record<string, number>;
-	} {
-		const clientsByChannel: Record<string, number> = {};
-		for (const [name, channel] of this.channels) {
-			clientsByChannel[name] = channel.clients.size;
-		}
-
-		return {
-			activeConnections: this.activeConnections,
-			totalEventsSent: this.totalEventsSent,
-			channelCount: this.channels.size,
-			clientsByChannel,
-		};
-	}
-
-	/**
-	 * Format SSE event for transmission
-	 */
-	protected formatEvent(event: SSEEvent): string {
-		const lines: string[] = [];
-
-		if (event.id) {
-			lines.push(`id: ${event.id}`);
-		}
-
-		if (event.event && event.event !== "message") {
-			lines.push(`event: ${event.event}`);
-		}
-
-		if (event.retry !== undefined) {
-			lines.push(`retry: ${event.retry}`);
-		}
-
-		// Format data - each line must be prefixed with "data: "
-		const dataStr = typeof event.data === "string" ? event.data : JSON.stringify(event.data);
-		const dataLines = dataStr.split("\n");
-		for (const line of dataLines) {
-			lines.push(`data: ${line}`);
-		}
-
-		// Events must end with double newline
-		return `${lines.join("\n")}\n\n`;
-	}
-
-	/**
-	 * Store event in history for replay
-	 */
-	protected storeEvent(channel: string, event: SSEEvent): void {
-		if (!this.eventHistory.has(channel)) {
-			this.eventHistory.set(channel, []);
-		}
-
-		const history = this.eventHistory.get(channel);
-		if (!history) return;
-		history.push({ event, channel, timestamp: new Date() });
-
-		// Trim history if too large
-		while (history.length > this.maxHistorySize) {
-			history.shift();
-		}
-	}
-
-	/**
-	 * Replay missed events to reconnecting client
-	 */
-	protected replayEvents(client: SSEClient, lastEventId: string): void {
-		let foundLastEvent = false;
-		const eventsToReplay: SSEEvent[] = [];
-
-		// Collect events from all channels the client might be interested in
-		for (const history of this.eventHistory.values()) {
-			for (const entry of history) {
-				if (!foundLastEvent) {
-					if (entry.event.id === lastEventId) {
-						foundLastEvent = true;
-					}
-					continue;
-				}
-				eventsToReplay.push(entry.event);
-			}
-		}
-
-		// Send missed events
-		for (const event of eventsToReplay) {
-			this.sendToClient(client.id, event);
-		}
-
-		if (eventsToReplay.length > 0) {
-			this.logger.log(`Replayed ${eventsToReplay.length} events to client ${client.id}`);
-		}
-	}
-
-	/**
-	 * Get all workflows that have SSE triggers
-	 */
-	protected getSSEWorkflows(): SSEWorkflowModel[] {
-		const workflows: SSEWorkflowModel[] = [];
-
-		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			const workflowConfig = (workflow as unknown as { _config: SSEWorkflowModel["config"] })._config;
-
-			if (workflowConfig?.trigger) {
-				const triggerType = Object.keys(workflowConfig.trigger)[0];
-
-				if (triggerType === "sse" && workflowConfig.trigger.sse) {
-					workflows.push({
-						path,
-						config: workflowConfig,
-					});
-				}
-			}
-		}
-
-		return workflows;
-	}
-
-	/**
-	 * Trigger a workflow based on SSE connection event
-	 */
-	protected async triggerConnectionEvent(event: SSEConnectionEvent): Promise<TriggerResponse | null> {
-		// Find matching workflow
-		const workflow = this.findMatchingWorkflow(event);
-		if (!workflow) {
-			return null;
-		}
-
-		const config = workflow.config.trigger?.sse as SSETriggerOpts;
-		return this.executeWorkflow(event, workflow, config);
-	}
-
-	/**
-	 * Find workflow matching the SSE event
-	 */
-	protected findMatchingWorkflow(event: SSEConnectionEvent): SSEWorkflowModel | null {
-		for (const workflow of this.sseWorkflows) {
-			const config = workflow.config.trigger?.sse;
-			if (!config) continue;
-
-			// Check event type match
-			if (config.events && config.events.length > 0) {
-				const matches = config.events.some((pattern) => {
-					if (pattern === "*") return true;
-					if (pattern.endsWith(".*")) {
-						const prefix = pattern.slice(0, -2);
-						return event.type.startsWith(prefix);
-					}
-					return pattern === event.type;
+				// Bridge Hono's onAbort → our AbortController so workflow
+				// authors can `if (ctx.stream.signal.aborted) break` in
+				// long iterators without depending on the Hono API.
+				honoStream.onAbort(() => {
+					state.closed = true;
+					abortController.abort();
+					this.stopHeartbeat(state);
 				});
-				if (!matches) continue;
-			}
 
-			// Check channel filter
-			if (config.channels && config.channels.length > 0 && event.channel) {
-				if (!config.channels.includes(event.channel)) continue;
-			}
+				// Initial retry hint — clients honor it on reconnect.
+				if (typeof config.retryInterval === "number" && config.retryInterval > 0) {
+					await honoStream.writeSSE({ data: "", retry: config.retryInterval }).catch(() => {});
+				} else {
+					await honoStream.writeSSE({ data: "", retry: DEFAULT_RETRY_INTERVAL_MS }).catch(() => {});
+				}
 
-			return workflow;
-		}
+				this.startHeartbeat(state, config);
 
-		return null;
-	}
-
-	/**
-	 * Execute a workflow for an SSE event
-	 */
-	protected async executeWorkflow(
-		event: SSEConnectionEvent,
-		workflow: SSEWorkflowModel,
-		_config: SSETriggerOpts,
-	): Promise<TriggerResponse> {
-		const executionId = uuid();
-
-		const defaultMeter = metrics.getMeter("default");
-		const sseExecutions = defaultMeter.createCounter("sse_executions", {
-			description: "SSE workflow executions",
-		});
-		const sseErrors = defaultMeter.createCounter("sse_errors", {
-			description: "SSE execution errors",
-		});
-
-		return new Promise((resolve) => {
-			this.tracer.startActiveSpan(`sse:${event.type}`, async (span: Span) => {
 				try {
-					const start = performance.now();
-
-					// Initialize configuration for this workflow
-					await this.configuration.init(workflow.path, this.nodeMap);
-
-					// Create context
-					const ctx: Context = this.createContext(undefined, workflow.path, executionId);
-
-					// Get client info
-					const client = this.clients.get(event.clientId);
-
-					// Populate request with SSE event
-					ctx.request = {
-						body: event,
-						headers: {},
-						query: {},
-						params: {
-							clientId: event.clientId,
-							eventType: event.type,
-							channel: event.channel,
-						},
-					} as unknown as RequestContext;
-
-					// Store SSE context in vars (use type assertion for flexibility)
-					if (!ctx.vars) ctx.vars = {};
-					(ctx.vars as Record<string, unknown>)._sse = {
-						clientId: event.clientId,
-						eventType: event.type,
-						channel: event.channel,
-						lastEventId: event.lastEventId,
-						clientChannels: client ? Array.from(client.channels) : [],
-						clientMetadata: client?.metadata || {},
-						timestamp: new Date().toISOString(),
-					};
-
-					// Add helper functions to context for sending events
-					(ctx.vars as Record<string, unknown>)._sse_send = (eventName: string, data: unknown) => {
-						this.sendToClient(event.clientId, {
-							id: uuid(),
-							event: eventName,
-							data,
-						});
-					};
-					(ctx.vars as Record<string, unknown>)._sse_broadcast = (
-						channel: string,
-						eventName: string,
-						data: unknown,
-					) => {
-						this.broadcastToChannel(channel, {
-							id: uuid(),
-							event: eventName,
-							data,
-						});
-					};
-
-					ctx.logger.log(`Processing SSE event: ${event.type} for ${event.clientId}`);
-
-					// Execute workflow
-					const response: TriggerResponse = await this.run(ctx);
-					const end = performance.now();
-
-					// Set span attributes
-					span.setAttribute("success", true);
-					span.setAttribute("client_id", event.clientId);
-					span.setAttribute("event_type", event.type);
-					span.setAttribute("workflow_path", workflow.path);
-					span.setAttribute("elapsed_ms", end - start);
-					span.setStatus({ code: SpanStatusCode.OK });
-
-					// Record metrics
-					sseExecutions.add(1, {
-						env: process.env.NODE_ENV,
-						event_type: event.type,
-						workflow_name: this.configuration.name,
-						success: "true",
+					await this.dispatchStream({
+						state,
+						config,
+						headers,
+						queryParams,
 					});
-
-					ctx.logger.log(`SSE event processed in ${(end - start).toFixed(2)}ms`);
-
-					resolve(response);
-				} catch (error) {
-					const errorMessage = (error as Error).message;
-
-					// Set span error
-					span.setAttribute("success", false);
-					span.recordException(error as Error);
-					span.setStatus({ code: SpanStatusCode.ERROR, message: errorMessage });
-
-					// Record error metrics
-					sseErrors.add(1, {
-						env: process.env.NODE_ENV,
-						event_type: event.type,
-						workflow_name: this.configuration?.name || "unknown",
-					});
-
-					this.logger.error(`SSE workflow failed: ${errorMessage}`, (error as Error).stack);
-
-					throw error;
 				} finally {
-					span.end();
+					this.closeStream(state, /* viaServer */ false);
 				}
 			});
 		});
 	}
 
-	/**
-	 * Start heartbeat monitoring
-	 */
-	protected startHeartbeat(): void {
-		this.heartbeatInterval = setInterval(() => {
-			for (const [clientId, client] of this.clients) {
-				if (client.state === "connected") {
-					const success = this.sendHeartbeat(clientId);
-					if (!success) {
-						this.logger.log(`Heartbeat failed for client ${clientId}, closing connection`);
-						this.handleDisconnect(clientId);
-					}
+	// ---------------------------------------------------------------------------
+	// Workflow dispatch (one run per stream open — Pattern A)
+	// ---------------------------------------------------------------------------
+
+	private async dispatchStream(opts: {
+		state: StreamState;
+		config: SSETriggerConfig;
+		headers: Record<string, string>;
+		queryParams: Record<string, string>;
+	}): Promise<void> {
+		const { state, config: _config, headers, queryParams } = opts;
+		const { workflowName, id: streamId, pathParams } = state;
+		const requestId = uuid();
+
+		await this.tracer.startActiveSpan(`sse:${workflowName}:open`, async (span: Span) => {
+			try {
+				const registry = WorkflowRegistry.getInstance();
+				const entry = registry.get(workflowName);
+				if (!entry) {
+					throw new Error(`[blok][sse] workflow "${workflowName}" not found in registry`);
 				}
+				await this.configuration.init(workflowName, this.nodeMap, entry.workflow);
+
+				const ctx: Context = this.createContext(undefined, workflowName, requestId);
+				ctx.request = {
+					body: {},
+					headers,
+					params: pathParams,
+					query: queryParams,
+				} as unknown as RequestContext;
+
+				ctx.stream = this.buildStreamContext(state);
+
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
+				await this.run(ctx);
+
+				span.setAttribute("workflow_name", workflowName);
+				span.setAttribute("stream_id", streamId);
+				span.setAttribute("events_sent", state.eventsSent);
+				span.setStatus({ code: SpanStatusCode.OK });
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				span.recordException(err as Error);
+				span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
+				this.logger.error(`[blok][sse] sse:open workflow ${workflowName} failed: ${msg}`);
+			} finally {
+				span.end();
 			}
-		}, this.heartbeatIntervalMs);
+		});
 	}
 
-	/**
-	 * Stop heartbeat monitoring
-	 */
-	protected stopHeartbeat(): void {
-		if (this.heartbeatInterval) {
-			clearInterval(this.heartbeatInterval);
-			this.heartbeatInterval = null;
+	private buildStreamContext(state: StreamState): StreamContext {
+		const trigger = this;
+		const streamId = state.id;
+		return {
+			get id() {
+				return streamId;
+			},
+			get lastEventId() {
+				return state.lastEventId;
+			},
+			get closed() {
+				return state.closed;
+			},
+			get signal() {
+				return state.abortController.signal;
+			},
+			async writeSSE({ event, data, id, retry }) {
+				if (state.closed) return;
+				const payload = typeof data === "string" ? data : JSON.stringify(data);
+				try {
+					await state.stream.writeSSE({
+						data: payload,
+						...(event ? { event } : {}),
+						...(id ? { id } : {}),
+						...(typeof retry === "number" ? { retry } : {}),
+					});
+					state.eventsSent += 1;
+					trigger.counterEventsSent.add(1, { workflow_name: state.workflowName });
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					trigger.logger.error(`[blok][sse] writeSSE failed on ${streamId}: ${msg}`);
+				}
+			},
+			async writeComment(text) {
+				if (state.closed) return;
+				try {
+					// SSE comment frame: starts with `:` and ends with `\n\n`.
+					await state.stream.write(`: ${text}\n\n`);
+				} catch {
+					/* connection closed — swallow */
+				}
+			},
+			close() {
+				trigger.closeStream(state, /* viaServer */ false);
+			},
+			subscribe(channels, lastEventId) {
+				// Resolve `{paramName}` placeholders in channel names
+				// against the trigger's path params — `"order:{orderId}"`
+				// becomes `"order:42"` when the GET path was `/sse/orders/42`.
+				const resolved = channels.map((channel) =>
+					channel.replace(/\{(\w+)\}/g, (_, key) => state.pathParams[key] ?? `{${key}}`),
+				);
+				const since = lastEventId ?? state.lastEventId ?? undefined;
+				return getBus().subscribe(resolved, since);
+			},
+		};
+	}
+
+	private closeStream(state: StreamState, viaServer: boolean): void {
+		if (state.closed && !viaServer) return;
+		state.closed = true;
+		this.stopHeartbeat(state);
+		state.abortController.abort();
+		if (viaServer) {
+			try {
+				void state.stream.close();
+			} catch {
+				/* ignore */
+			}
+		}
+		this.streams.delete(state.id);
+	}
+
+	// ---------------------------------------------------------------------------
+	// Heartbeat (`: keep-alive` comment frames)
+	// ---------------------------------------------------------------------------
+
+	private startHeartbeat(state: StreamState, config: SSETriggerConfig): void {
+		const intervalMs =
+			typeof config.heartbeatInterval === "number" && config.heartbeatInterval > 0
+				? config.heartbeatInterval
+				: DEFAULT_HEARTBEAT_INTERVAL_MS;
+		state.heartbeatTimer = setInterval(() => {
+			if (state.closed) {
+				this.stopHeartbeat(state);
+				return;
+			}
+			void state.stream.write(": keep-alive\n\n").catch(() => {});
+		}, intervalMs);
+		if (typeof state.heartbeatTimer.unref === "function") state.heartbeatTimer.unref();
+	}
+
+	private stopHeartbeat(state: StreamState): void {
+		if (state.heartbeatTimer) {
+			clearInterval(state.heartbeatTimer);
+			state.heartbeatTimer = null;
 		}
 	}
 
-	/**
-	 * Start history cleanup
-	 */
-	protected startHistoryCleanup(): void {
-		setInterval(() => {
-			const now = Date.now();
-			for (const [channel, history] of this.eventHistory) {
-				const filtered = history.filter((entry) => now - entry.timestamp.getTime() < this.historyRetentionMs);
-				if (filtered.length === 0) {
-					this.eventHistory.delete(channel);
-				} else {
-					this.eventHistory.set(channel, filtered);
-				}
-			}
-		}, this.historyRetentionMs);
+	// ---------------------------------------------------------------------------
+	// Read-only stats / introspection
+	// ---------------------------------------------------------------------------
+
+	getStats(): { streams: number; workflows: number } {
+		const workflowSet = new Set<string>();
+		for (const s of this.streams.values()) workflowSet.add(s.workflowName);
+		return { streams: this.streams.size, workflows: workflowSet.size };
+	}
+
+	private getSSEWorkflows(): Array<{ workflowName: string; config: SSETriggerConfig }> {
+		const registry = WorkflowRegistry.getInstance();
+		const out: Array<{ workflowName: string; config: SSETriggerConfig }> = [];
+		for (const entry of registry.list()) {
+			const wf = entry.workflow as { trigger?: { sse?: SSETriggerConfig } } | undefined;
+			const sseCfg = wf?.trigger?.sse;
+			if (!sseCfg || typeof sseCfg.path !== "string") continue;
+			out.push({ workflowName: entry.name, config: sseCfg });
+		}
+		return out;
 	}
 }
 
-export default SSETrigger;
+// -----------------------------------------------------------------------------
+// Singleton accessor for helper nodes
+// -----------------------------------------------------------------------------
+
+/**
+ * Singleton handle — helper nodes (`@blokjs/sse-publish`) look up the
+ * active SSE trigger to publish into the in-process bus through the
+ * same code path as the trigger's internal subscribers. Not used by
+ * the per-stream `ctx.stream` API — that's bound directly per run.
+ */
+let activeTrigger: SSETrigger | null = null;
+
+export function _setActiveSSETrigger(trigger: SSETrigger | null): void {
+	activeTrigger = trigger;
+}
+
+export function _getActiveSSETrigger(): SSETrigger | null {
+	return activeTrigger;
+}
+
+export type { SSETriggerConfig };

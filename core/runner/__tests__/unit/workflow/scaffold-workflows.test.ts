@@ -45,16 +45,10 @@ const TS_WORKFLOWS: ScaffoldWorkflow[] = [
 		relPath: "triggers/http/src/workflows/empty.ts",
 		expectedTrigger: "http",
 	},
-	{
-		label: "SSE / on-connect",
-		relPath: "triggers/sse/src/workflows/notifications/on-connect.ts",
-		expectedTrigger: "sse",
-	},
-	{
-		label: "SSE / on-subscribe",
-		relPath: "triggers/sse/src/workflows/notifications/on-subscribe.ts",
-		expectedTrigger: "sse",
-	},
+	// SSE scaffold workflows removed in v0.7 PR 3 — the standalone SSE
+	// server template is gone (the trigger now mounts on the shared
+	// Hono port via SSETrigger). SSE workflows live alongside HTTP and
+	// WebSocket workflows in `triggers/http/workflows/json/`.
 	{
 		label: "Worker / process-job",
 		relPath: "triggers/worker/template/src/workflows/jobs/process-job.ts",

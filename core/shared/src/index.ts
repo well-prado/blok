@@ -23,6 +23,7 @@ import RequestContext from "./types/RequestContext";
 import ResponseContext from "./types/ResponseContext";
 import StateContext from "./types/StateContext";
 import Step from "./types/Step";
+import type StreamContext from "./types/StreamContext";
 import VarsContext from "./types/VarsContext";
 import MemoryUsage from "./utils/MemoryUsage";
 
@@ -36,6 +37,7 @@ export {
 	LoggerContext,
 	ConfigContext,
 	type ConnectionContext,
+	type StreamContext,
 	Trigger,
 	NodeConfigContext,
 	FunctionContext,
