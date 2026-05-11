@@ -61,6 +61,31 @@ export default class HttpTrigger extends TriggerBase {
 	private initializer = 0;
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
 	private server: Server | null = null;
+
+	/**
+	 * v0.7 — callbacks registered by sibling same-port triggers (e.g.
+	 * `WebSocketTrigger`) that need access to the `http.Server` instance
+	 * AFTER `serve()` resolves. Run in registration order inside the
+	 * `serve()` ready callback. Errors caught + logged (don't bring the
+	 * server down on a hook failure). See
+	 * [additional-triggers-plan.mdx](../../../../docs/c/devtools/additional-triggers-plan.mdx#server-architecture)
+	 * for why this hook exists.
+	 */
+	private serverHooks: Array<(server: Server) => void | Promise<void>> = [];
+
+	/**
+	 * v0.7 — callbacks that run during `listen()` AFTER the workflow
+	 * registry is populated but BEFORE the legacy catch-all route is
+	 * registered on the Hono app. Sibling triggers (`WebSocketTrigger`,
+	 * the upcoming `SSETrigger`) that mount path-specific routes on the
+	 * shared app use this hook so their routes are matched FIRST — if we
+	 * registered them after the catch-all, Hono would dispatch
+	 * `/ws/<path>` requests through the workflow lookup path instead of
+	 * the upgrade handler.
+	 *
+	 * Hooks are async-friendly; errors are caught + logged.
+	 */
+	private preCatchAllHooks: Array<() => void | Promise<void>> = [];
 	protected tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-http-workflow",
 		process.env.PROJECT_VERSION || "0.0.1",
@@ -91,6 +116,38 @@ export default class HttpTrigger extends TriggerBase {
 	 */
 	public setTraceAuth(authorize: TraceAuthorizeFn): void {
 		this.traceAuthFn = authorize;
+	}
+
+	/**
+	 * v0.7 — register a callback to run after the HTTP server is ready
+	 * (after `serve()` resolves). The callback receives the underlying
+	 * `http.Server` instance.
+	 *
+	 * Used by sibling same-port triggers — most notably `WebSocketTrigger`
+	 * which calls `@hono/node-ws`'s `injectWebSocket(server)` to attach
+	 * its `upgrade` event listener to the same server.
+	 *
+	 * Hooks run in registration order. Errors are caught and logged so a
+	 * misbehaving hook doesn't bring the server down. Call BEFORE
+	 * `listen()`.
+	 *
+	 * @param cb  Receives the bound `http.Server`. Sync or async.
+	 */
+	public addServerHook(cb: (server: Server) => void | Promise<void>): void {
+		this.serverHooks.push(cb);
+	}
+
+	/**
+	 * v0.7 — register a callback that fires during `listen()` AFTER the
+	 * workflow registry is populated but BEFORE the catch-all workflow
+	 * route is mounted. Sibling triggers that mount explicit Hono routes
+	 * on the shared app (WebSocketTrigger's upgrade endpoints, the
+	 * upcoming SSETrigger's stream endpoints) call this so their routes
+	 * win over the catch-all `/:workflow{.+}` matcher. Call BEFORE
+	 * `listen()`.
+	 */
+	public addPreCatchAllHook(cb: () => void | Promise<void>): void {
+		this.preCatchAllHooks.push(cb);
 	}
 
 	/**
@@ -153,6 +210,17 @@ export default class HttpTrigger extends TriggerBase {
 
 	getApp(): Hono<AppBindings> {
 		return this.app;
+	}
+
+	/**
+	 * v0.7 — expose the runner's `GlobalOptions` (nodes + workflows) so
+	 * sibling triggers on the shared app (WebSocketTrigger, SSETrigger)
+	 * dispatch through the same node registry instead of maintaining
+	 * their own. Read AFTER the constructor — `loadNodes()` +
+	 * `loadWorkflows()` have populated the map by then.
+	 */
+	getNodeMap(): GlobalOptions {
+		return this.nodeMap;
 	}
 
 	/**
@@ -514,6 +582,26 @@ export default class HttpTrigger extends TriggerBase {
 			this.logger.log(`[blok] process-global middleware chain (applies to every workflow): ${globalChain.join(" → ")}`);
 		}
 
+		// v0.7 — fire pre-catch-all hooks. Sibling triggers (WebSocketTrigger,
+		// SSETrigger) registered routes on the shared Hono app here so they
+		// match BEFORE the legacy `/:workflow{.+}` catch-all below. The
+		// workflow registry is fully populated by this point, so hooks can
+		// walk it to discover the routes they need to mount.
+		for (const hook of this.preCatchAllHooks) {
+			try {
+				const result = hook();
+				if (result instanceof Promise) {
+					await result.catch((err: unknown) => {
+						const msg = err instanceof Error ? err.message : String(err);
+						this.logger.error(`[blok] pre-catch-all hook failed: ${msg}`);
+					});
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				this.logger.error(`[blok] pre-catch-all hook failed: ${msg}`);
+			}
+		}
+
 		return new Promise((done) => {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
@@ -608,6 +696,29 @@ export default class HttpTrigger extends TriggerBase {
 
 			this.server = serve({ fetch: this.app.fetch, port: Number(this.port) }, () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
+
+				// v0.7 — run server hooks (sibling triggers like
+				// WebSocketTrigger call `injectWebSocket(server)` here to
+				// attach their `upgrade` listener to the http.Server). Errors
+				// caught + logged so a misbehaving hook doesn't bring the
+				// server down. The cast is safe — `serve()` returns a Server
+				// instance per @hono/node-server's types.
+				if (this.server && this.serverHooks.length > 0) {
+					for (const hook of this.serverHooks) {
+						try {
+							const result = hook(this.server);
+							if (result instanceof Promise) {
+								result.catch((err: unknown) => {
+									const msg = err instanceof Error ? err.message : String(err);
+									this.logger.error(`[blok] server hook failed: ${msg}`);
+								});
+							}
+						} catch (err) {
+							const msg = err instanceof Error ? err.message : String(err);
+							this.logger.error(`[blok] server hook failed: ${msg}`);
+						}
+					}
+				}
 
 				// Enable HMR in development mode
 				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {

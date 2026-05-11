@@ -1,0 +1,38 @@
+{
+	"name": "v07-ws-echo",
+	"version": "1.0.0",
+	"description": "v0.7 PR 2 demo — WebSocket trigger echo handler. Mounted on the same Hono server as HTTP routes via the shared-app multiplex pattern (PR 1 foundation + PR 2 trigger). On `connect` the workflow sends a greeting; on each `message` it replies with the same payload wrapped in `{event: 'echo', original: <payload>}`. Smoke validates the end-to-end flow: open WS to /ws/echo, send `{event: 'hello', data: {hi: 'there'}}`, expect a 'connected' greeting + an 'echo' response. The trigger handles the upgrade, parses the JSON envelope, and dispatches the workflow once per message via the same runner pipeline as HTTP triggers — middleware chain, ctx.connection API, full Studio tracing.",
+	"trigger": {
+		"websocket": {
+			"path": "/ws/echo",
+			"events": ["hello", "ping"]
+		}
+	},
+	"steps": [
+		{
+			"id": "route",
+			"branch": {
+				"when": "ctx.request.body.event === 'connect'",
+				"then": [
+					{
+						"id": "greet",
+						"use": "@blokjs/ws-reply",
+						"type": "module",
+						"inputs": { "event": "connected", "payload": { "ok": true } }
+					}
+				],
+				"else": [
+					{
+						"id": "echo",
+						"use": "@blokjs/ws-reply",
+						"type": "module",
+						"inputs": {
+							"event": "echo",
+							"payload": { "original": "js/ctx.request.body" }
+						}
+					}
+				]
+			}
+		}
+	]
+}

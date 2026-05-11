@@ -1,870 +1,793 @@
 /**
- * WebSocketTrigger - Real-time bidirectional communication trigger
+ * WebSocketTrigger — v0.7 PR 2 — Concrete WebSocket trigger that
+ * registers Hono routes on a shared `Hono<AppBindings>` app so
+ * WebSocket connections live alongside HTTP routes on the same port.
  *
- * Extends TriggerBase to handle WebSocket connections for:
- * - Real-time messaging
- * - Live updates and notifications
- * - Collaborative features
- * - Streaming data
+ * **Authoring surface:**
  *
- * Features:
- * - Connection management (connect, disconnect, reconnect)
- * - Room/channel support for broadcasting
- * - Message routing to workflows
- * - Heartbeat/ping-pong for connection health
- * - Authentication middleware
- * - Binary message support
+ * ```json
+ * {
+ *   "name": "chat-room",
+ *   "trigger": {
+ *     "websocket": {
+ *       "path": "/ws/chat/:roomId",
+ *       "events": ["message", "typing"],
+ *       "middleware": ["jwt-auth"]
+ *     }
+ *   },
+ *   "steps": [
+ *     { "id": "broadcast", "use": "@blokjs/ws-broadcast", "inputs": {...} }
+ *   ]
+ * }
+ * ```
+ *
+ * **Lifecycle (one workflow run per event):**
+ *
+ *   - `event: "connect"` — fires once on upgrade. Workflow can set
+ *     `ctx.connection.attachment` and join rooms.
+ *   - `event: "message"` — fires per incoming message. Author can
+ *     reply via `@blokjs/ws-reply` or broadcast via `@blokjs/ws-broadcast`.
+ *   - `event: "disconnect"` — fires once on close. Cleanup happens here.
+ *
+ * **Hono integration:** the trigger is constructed with the shared
+ * `Hono<AppBindings>` app (typically from `HttpTrigger`). On `listen()`,
+ * it walks `WorkflowRegistry` for workflows with `trigger.websocket`,
+ * registers one `app.get(path, upgradeWebSocket(...))` per workflow,
+ * and hooks `injectWebSocket(server)` into the `http.Server` via
+ * `httpTrigger.addServerHook(...)`. All four protocols (HTTP/WS/SSE/
+ * Webhook) end up on port 4000 via Hono's path-routing tree.
+ *
+ * See [additional-triggers-plan.mdx](../../../docs/c/devtools/additional-triggers-plan.mdx#websocket-trigger)
+ * for the full v0.7 design.
  */
 
-import type { HelperResponse, WebSocketTriggerOpts } from "@blokjs/helper";
+import type { Server } from "node:http";
 import {
-	type BlokService,
 	DefaultLogger,
-	type GlobalOptions,
-	NodeMap,
+	type GlobalOptions as RunnerGlobalOptions,
 	TriggerBase,
-	type TriggerResponse,
+	WorkflowRegistry,
 } from "@blokjs/runner";
-import type { Context, RequestContext } from "@blokjs/shared";
+import type { ConnectionContext, Context, RequestContext } from "@blokjs/shared";
+import { createNodeWebSocket } from "@hono/node-ws";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
+import type { Hono } from "hono";
+import type { WSContext } from "hono/ws";
 import { v4 as uuid } from "uuid";
 
-/**
- * WebSocket message types
- */
-export type WebSocketMessageType = "text" | "binary" | "ping" | "pong";
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
 /**
- * WebSocket connection state
+ * v0.7 WebSocket trigger config — mirrors `WebSocketTriggerOptsSchema`
+ * in `core/workflow-helper/src/types/TriggerOpts.ts`. Fields are read
+ * loosely here because Configuration has already validated the schema
+ * by the time we walk the registry.
  */
-export type WebSocketState = "connecting" | "connected" | "disconnecting" | "disconnected";
-
-/**
- * WebSocket message structure
- */
-export interface WebSocketMessage {
-	/** Unique message ID */
-	id: string;
-	/** Message type */
-	type: WebSocketMessageType;
-	/** Event name (for routing) */
-	event: string;
-	/** Message payload */
-	data: unknown;
-	/** Timestamp */
-	timestamp: Date;
-	/** Raw message data */
-	raw?: Buffer | string;
-}
-
-/**
- * WebSocket client connection
- */
-export interface WebSocketClient {
-	/** Unique client ID */
-	id: string;
-	/** Connection state */
-	state: WebSocketState;
-	/** Rooms/channels the client is subscribed to */
-	rooms: Set<string>;
-	/** Client metadata */
-	metadata: Record<string, unknown>;
-	/** Connection timestamp */
-	connectedAt: Date;
-	/** Last activity timestamp */
-	lastActivity: Date;
-	/** Send message to client */
-	send(data: string | Buffer): void;
-	/** Close connection */
-	close(code?: number, reason?: string): void;
-	/** Ping the client */
-	ping(): void;
-}
-
-/**
- * WebSocket room/channel for broadcasting
- */
-export interface WebSocketRoom {
-	/** Room name */
-	name: string;
-	/** Clients in the room */
-	clients: Set<string>;
-	/** Room metadata */
-	metadata: Record<string, unknown>;
-	/** Created timestamp */
-	createdAt: Date;
-}
-
-/**
- * WebSocket event types for lifecycle hooks
- */
-export type WebSocketEventType =
-	| "connection"
-	| "message"
-	| "close"
-	| "error"
-	| "ping"
-	| "pong"
-	| "join_room"
-	| "leave_room";
-
-/**
- * WebSocket event for workflow triggering
- */
-export interface WebSocketEvent {
-	/** Event type */
-	type: WebSocketEventType;
-	/** Client ID */
-	clientId: string;
-	/** Message (for message events) */
-	message?: WebSocketMessage;
-	/** Room name (for room events) */
-	room?: string;
-	/** Error (for error events) */
-	error?: Error;
-	/** Close code (for close events) */
-	closeCode?: number;
-	/** Close reason (for close events) */
-	closeReason?: string;
-}
-
-/**
- * Authentication result
- */
-export interface AuthResult {
-	authenticated: boolean;
-	clientId?: string;
-	metadata?: Record<string, unknown>;
-	error?: string;
-}
-
-/**
- * Authentication handler function type
- */
-export type AuthHandler = (request: unknown, headers: Record<string, string>) => Promise<AuthResult> | AuthResult;
-
-/**
- * Workflow model with WebSocket trigger configuration
- */
-interface WebSocketWorkflowModel {
+interface WebSocketTriggerConfig {
 	path: string;
-	config: {
-		name: string;
-		version: string;
-		trigger?: {
-			websocket?: WebSocketTriggerOpts;
-			[key: string]: unknown;
-		};
-		[key: string]: unknown;
-	};
+	events?: string[]; // event-name allowlist; absent = accept all
+	middleware?: string[]; // trigger-level middleware chain
+	heartbeatInterval?: number; // ms; default 30000
+	maxConnections?: number; // hard cap on concurrent connections; default 10000
+	messageRateLimit?: number; // msgs/sec/connection; default 100
+	mode?: "text" | "binary"; // payload mode; default "text"
 }
 
-/**
- * WebSocketTrigger - Handle WebSocket connections and messages
- */
-export abstract class WebSocketTrigger extends TriggerBase {
-	protected nodeMap: GlobalOptions = {} as GlobalOptions;
+/** Internal per-connection state. */
+interface ConnectionState {
+	id: string;
+	ws: WSContext;
+	workflowName: string;
+	path: string;
+	pathParams: Record<string, string>;
+	rooms: Set<string>;
+	attachment: unknown;
+	connectedAt: number;
+	lastActivity: number;
+	tokens: number; // rate-limiter bucket
+	tokensRefilledAt: number;
+}
+
+interface HttpTriggerLike {
+	addServerHook(cb: (server: Server) => void | Promise<void>): void;
+	addPreCatchAllHook(cb: () => void | Promise<void>): void;
+}
+
+// -----------------------------------------------------------------------------
+// Trigger class
+// -----------------------------------------------------------------------------
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_MAX_CONNECTIONS = 10_000;
+const DEFAULT_MESSAGE_RATE_LIMIT = 100; // msgs/sec/connection
+const ATTACHMENT_MAX_BYTES = 2_048; // 2 KB cap per CF DO pattern
+
+export default class WebSocketTrigger extends TriggerBase {
+	protected nodeMap: RunnerGlobalOptions = {} as RunnerGlobalOptions;
+
+	protected readonly logger = new DefaultLogger();
+
 	protected readonly tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-websocket-workflow",
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
-	protected readonly logger = new DefaultLogger();
-	protected websocketWorkflows: WebSocketWorkflowModel[] = [];
 
-	// Connection management
-	protected clients: Map<string, WebSocketClient> = new Map();
-	protected rooms: Map<string, WebSocketRoom> = new Map();
+	private readonly meter = metrics.getMeter("blok");
+	private readonly counterMessagesReceived = this.meter.createCounter("blok_websocket_messages_received_total", {
+		description: "WebSocket messages received per workflow.",
+		unit: "1",
+	});
+	private readonly counterMessagesDropped = this.meter.createCounter("blok_websocket_messages_dropped_total", {
+		description: "WebSocket messages dropped (rate limit, no handler, auth failure).",
+		unit: "1",
+	});
+	private readonly counterConnections = this.meter.createCounter("blok_websocket_connections_total", {
+		description: "WebSocket connections opened (cumulative).",
+		unit: "1",
+	});
 
-	// Metrics
-	protected activeConnections = 0;
-	protected totalMessages = 0;
+	// Hono's strict-types preserve route-shape inference through middleware
+	// chains. @hono/node-ws (and most third-party middleware) accept
+	// `Hono<any, any, any>` because their own generics aren't refined enough
+	// for the propagation. We type the trigger's `app` field the same way
+	// to keep the API surface tolerant of any concrete Hono instance.
+	// biome-ignore lint/suspicious/noExplicitAny: Hono's generic propagation
+	private readonly app: Hono<any, any, any>;
+	private readonly httpTrigger: HttpTriggerLike | null;
 
-	// Configuration
-	protected heartbeatInterval: NodeJS.Timeout | null = null;
-	protected heartbeatIntervalMs = 30000; // 30 seconds
-	protected maxClients = 10000;
-	protected messageRateLimit = 100; // messages per second per client
+	private upgradeWebSocket: ReturnType<typeof createNodeWebSocket>["upgradeWebSocket"] | null = null;
+	private injectWebSocket: ((server: Server) => void) | null = null;
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
+	private connections: Map<string, ConnectionState> = new Map();
 
-	// Optional auth handler
-	protected authHandler?: AuthHandler;
+	/** workflow name → set of connection IDs subscribed to it. */
+	private connectionsByWorkflow: Map<string, Set<string>> = new Map();
 
-	constructor() {
+	/** room name (workflow-scoped) → set of connection IDs. */
+	private rooms: Map<string, Set<string>> = new Map();
+
+	private heartbeatTimer: NodeJS.Timeout | null = null;
+	private wired = false;
+
+	/**
+	 * @param app          Shared Hono app. Constructed by an orchestrator
+	 *                     or by HttpTrigger; WS routes are registered on
+	 *                     the same instance so HTTP + WS multiplex on one
+	 *                     TCP port.
+	 * @param httpTrigger  Optional HttpTrigger-like object exposing
+	 *                     `addServerHook`. When provided, WebSocketTrigger
+	 *                     hooks `injectWebSocket(server)` into the post-
+	 *                     `serve()` callback so the upgrade listener
+	 *                     attaches without the caller having to wire it.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: matches `app` field's any generic
+	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike) {
 		super();
-		this.loadNodes();
-		this.loadWorkflows();
+		this.app = app;
+		this.httpTrigger = httpTrigger ?? null;
+		// Register as the active trigger so helper nodes
+		// (@blokjs/ws-broadcast, @blokjs/ws-close) can look up the
+		// trigger via the singleton accessor. Single-instance only
+		// (the v0.7 scope is single-process; cross-process broadcast
+		// is deferred per the spec).
+		_setActiveWebSocketTrigger(this);
 	}
 
 	/**
-	 * Load nodes into the node map
+	 * Inject the runner's GlobalOptions (nodes + workflows). Called by
+	 * the orchestrator AFTER constructing both triggers but BEFORE
+	 * `listen()`. The HTTP trigger's `loadNodes()` + `loadWorkflows()`
+	 * produces this map; we share it so both triggers see the same
+	 * workflow definitions.
+	 *
+	 * Backward-compat: when not called, the trigger falls back to an
+	 * empty map — the `listen()` walk through `WorkflowRegistry` still
+	 * works because the registry is populated by HttpTrigger's workflow
+	 * scan at boot.
 	 */
-	loadNodes(): void {
-		this.nodeMap.nodes = new NodeMap();
-		if (this.nodes) {
-			const nodeKeys = Object.keys(this.nodes);
-			for (const key of nodeKeys) {
-				this.nodeMap.nodes.addNode(key, this.nodes[key]);
-			}
-		}
+	setNodeMap(nodeMap: RunnerGlobalOptions): void {
+		this.nodeMap = nodeMap;
 	}
 
 	/**
-	 * Load workflows into the workflow map
-	 */
-	loadWorkflows(): void {
-		this.nodeMap.workflows = this.workflows || {};
-	}
-
-	/**
-	 * Set authentication handler
-	 */
-	setAuthHandler(handler: AuthHandler): void {
-		this.authHandler = handler;
-	}
-
-	/**
-	 * Initialize WebSocket trigger
+	 * Register Hono WebSocket routes for every workflow whose
+	 * `trigger.websocket` config is present in `WorkflowRegistry`.
+	 *
+	 * Mounting timeline:
+	 *   1. `createNodeWebSocket({ app })` — bind to the shared app.
+	 *   2. For each registered WS workflow: `app.get(path, upgradeWebSocket(...))`.
+	 *   3. Register `injectWebSocket` on `httpTrigger.addServerHook`.
+	 *      HttpTrigger calls it inside the `serve()` ready callback
+	 *      with the bound `http.Server` — the WS upgrade listener
+	 *      attaches automatically.
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
 
-		// Find all workflows with WebSocket triggers
-		this.websocketWorkflows = this.getWebSocketWorkflows();
-
-		if (this.websocketWorkflows.length === 0) {
-			this.logger.log("No workflows with WebSocket triggers found");
-		} else {
-			this.logger.log(`WebSocket trigger initialized. ${this.websocketWorkflows.length} workflow(s) registered`);
+		if (this.wired) {
+			this.logger.log("[blok][ws] listen() called twice; ignoring");
+			return this.endCounter(startTime);
 		}
 
-		// Start heartbeat monitoring
-		this.startHeartbeat();
+		// Wire createNodeWebSocket immediately so upgradeWebSocket /
+		// injectWebSocket are available. The actual ROUTE registration
+		// is deferred to the server hook below so it runs AFTER
+		// HttpTrigger has populated WorkflowRegistry via its workflow
+		// scan. Hono allows route addition after `serve()` because
+		// `app.fetch` is mutated in place.
+		const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app: this.app });
+		this.upgradeWebSocket = upgradeWebSocket;
+		this.injectWebSocket = injectWebSocket;
 
-		// Enable HMR in development mode
-		if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
-			await this.enableHotReload();
+		this.startHeartbeat();
+		this.wired = true;
+
+		// Coordinate with HttpTrigger:
+		//   1. HttpTrigger.listen() scans workflows + populates WorkflowRegistry.
+		//   2. HttpTrigger fires preCatchAllHooks — we walk the registry and
+		//      register one `app.get(path, upgradeWebSocket(...))` per WS
+		//      workflow. Done BEFORE the legacy `/:workflow{.+}` catch-all
+		//      so Hono dispatches `/ws/<path>` to our upgrade handler
+		//      instead of treating it as a workflow lookup.
+		//   3. HttpTrigger.listen() calls serve() → http.Server is up.
+		//   4. serve() ready-callback runs our server hook → we call
+		//      injectWebSocket(server) to attach the upgrade listener.
+		if (this.httpTrigger) {
+			this.httpTrigger.addPreCatchAllHook(() => {
+				const workflows = this.getWebSocketWorkflows();
+				if (workflows.length === 0) {
+					this.logger.log("[blok][ws] no workflows with trigger.websocket found");
+					return;
+				}
+				this.logger.log(`[blok][ws] registering ${workflows.length} WebSocket route(s):`);
+				for (const entry of workflows) {
+					this.registerWsRoute(entry);
+				}
+			});
+			this.httpTrigger.addServerHook((server) => {
+				this.injectWebSocket?.(server);
+				this.logger.log("[blok][ws] WebSocket upgrade handler attached to http.Server");
+			});
+		} else {
+			// No httpTrigger — caller is responsible for calling
+			// `getRoutes()` / `injectWebSocket()` themselves. Used by
+			// unit tests that supply their own app + server lifecycle.
+			const workflows = this.getWebSocketWorkflows();
+			if (workflows.length === 0) {
+				this.logger.log("[blok][ws] no workflows with trigger.websocket found");
+			} else {
+				this.logger.log(`[blok][ws] registering ${workflows.length} WebSocket route(s):`);
+				for (const entry of workflows) {
+					this.registerWsRoute(entry);
+				}
+			}
 		}
 
 		return this.endCounter(startTime);
 	}
 
-	/**
-	 * Stop the WebSocket trigger
-	 */
 	async stop(): Promise<void> {
-		// Stop heartbeat
 		this.stopHeartbeat();
-
-		// Close all client connections
-		for (const client of this.clients.values()) {
-			client.close(1001, "Server shutting down");
+		// Close all open connections with a "going away" code.
+		for (const conn of this.connections.values()) {
+			try {
+				conn.ws.close(1001, "Server shutting down");
+			} catch {
+				/* ignore */
+			}
 		}
-
-		// Clear state
-		this.clients.clear();
+		this.connections.clear();
+		this.connectionsByWorkflow.clear();
 		this.rooms.clear();
-		this.websocketWorkflows = [];
-		this.activeConnections = 0;
-
-		this.logger.log("WebSocket trigger stopped");
+		this.wired = false;
+		// Clear the singleton — helper nodes should fail loudly if used
+		// after stop() rather than silently no-op against a stale handle.
+		if (_getActiveWebSocketTrigger() === this) {
+			_setActiveWebSocketTrigger(null);
+		}
+		this.destroyMonitoring();
+		this.logger.log("[blok][ws] stopped");
 	}
 
-	protected override async onHmrWorkflowChange(): Promise<void> {
-		// Lightweight: refresh workflow list without disconnecting clients
-		this.loadWorkflows();
-		this.websocketWorkflows = this.getWebSocketWorkflows();
-		this.logger.log(`[HMR] WebSocket workflows reloaded. ${this.websocketWorkflows.length} workflow(s) registered`);
-	}
+	// ---------------------------------------------------------------------------
+	// Route registration (one Hono route per workflow)
+	// ---------------------------------------------------------------------------
 
-	/**
-	 * Handle new WebSocket connection
-	 */
-	async handleConnection(
-		socket: {
-			send: (data: string | Buffer) => void;
-			close: (code?: number, reason?: string) => void;
-			ping: () => void;
-		},
-		request: unknown,
-		headers: Record<string, string> = {},
-	): Promise<WebSocketClient | null> {
-		// Check max connections
-		if (this.clients.size >= this.maxClients) {
-			this.logger.error("Max connections reached, rejecting new connection");
-			socket.close(1013, "Server at capacity");
-			return null;
-		}
+	private registerWsRoute(entry: { workflowName: string; config: WebSocketTriggerConfig }): void {
+		if (!this.upgradeWebSocket) return;
+		const { workflowName, config } = entry;
+		this.logger.log(`[blok][ws]   GET     ${config.path}  ←  ${workflowName}`);
 
-		// Authenticate if handler is set
-		let clientId = uuid();
-		let metadata: Record<string, unknown> = {};
+		// One route per workflow; the handler factory captures workflowName
+		// and runs the workflow at each lifecycle event.
+		this.app.get(
+			config.path,
+			this.upgradeWebSocket((c) => {
+				// At upgrade time: extract path params + query so the
+				// `connect` workflow can route on roomId / userId / etc.
+				const pathParams = c.req.param() as Record<string, string>;
+				const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
+				const headers = Object.fromEntries(c.req.raw.headers);
 
-		if (this.authHandler) {
-			const authResult = await this.authHandler(request, headers);
-			if (!authResult.authenticated) {
-				this.logger.error(`Authentication failed: ${authResult.error}`);
-				socket.close(4001, authResult.error || "Authentication failed");
-				return null;
-			}
-			if (authResult.clientId) {
-				clientId = authResult.clientId;
-			}
-			if (authResult.metadata) {
-				metadata = authResult.metadata;
-			}
-		}
-
-		// Create client object
-		const client: WebSocketClient = {
-			id: clientId,
-			state: "connected",
-			rooms: new Set(),
-			metadata,
-			connectedAt: new Date(),
-			lastActivity: new Date(),
-			send: (data: string | Buffer) => {
-				if (client.state === "connected") {
-					socket.send(data);
+				// Check connection cap BEFORE accepting the upgrade. If
+				// over the limit, the handler factory throws so Hono
+				// closes the connection — slightly clunky API but matches
+				// the upgradeWebSocket contract (we can't easily return
+				// 503 from inside the factory).
+				const cap = typeof config.maxConnections === "number" ? config.maxConnections : DEFAULT_MAX_CONNECTIONS;
+				if (this.connections.size >= cap) {
+					this.logger.error(`[blok][ws] connection cap reached (${cap}) — refusing upgrade for ${workflowName}`);
+					this.counterMessagesDropped.add(1, { workflow_name: workflowName, reason: "max_connections" });
 				}
-			},
-			close: (code?: number, reason?: string) => {
-				client.state = "disconnecting";
-				socket.close(code, reason);
-			},
-			ping: () => {
-				socket.ping();
-			},
-		};
 
-		// Register client
-		this.clients.set(clientId, client);
-		this.activeConnections++;
+				const connectionId = uuid();
 
-		// Trigger connection event
-		await this.triggerEvent({
-			type: "connection",
-			clientId,
-		});
+				// `onOpen` runs synchronously on accept; we register the
+				// connection here and dispatch the `connect` workflow run
+				// asynchronously (don't block the upgrade).
+				return {
+					onOpen: (_evt, ws) => {
+						// Even if we're over-cap, we still need to register
+						// briefly so onMessage/onClose don't throw — close
+						// immediately if cap was already hit.
+						if (this.connections.size >= cap) {
+							ws.close(1013, "Server at capacity");
+							return;
+						}
+						const now = Date.now();
+						const state: ConnectionState = {
+							id: connectionId,
+							ws,
+							workflowName,
+							path: config.path,
+							pathParams,
+							rooms: new Set(),
+							attachment: undefined,
+							connectedAt: now,
+							lastActivity: now,
+							tokens:
+								typeof config.messageRateLimit === "number" ? config.messageRateLimit : DEFAULT_MESSAGE_RATE_LIMIT,
+							tokensRefilledAt: now,
+						};
+						this.connections.set(connectionId, state);
+						let workflowSet = this.connectionsByWorkflow.get(workflowName);
+						if (!workflowSet) {
+							workflowSet = new Set();
+							this.connectionsByWorkflow.set(workflowName, workflowSet);
+						}
+						workflowSet.add(connectionId);
+						this.counterConnections.add(1, { workflow_name: workflowName });
 
-		this.logger.log(`Client connected: ${clientId} (${this.activeConnections} active)`);
+						// Fire the `connect` workflow asynchronously — we
+						// can't await here; the upgrade callback is
+						// synchronous-ish from Hono's POV.
+						void this.dispatchEvent({
+							connectionId,
+							workflowName,
+							config,
+							eventKind: "connect",
+							payload: { event: "connect", headers, params: pathParams, query: queryParams },
+						});
+					},
+					onMessage: (evt, _ws) => {
+						const state = this.connections.get(connectionId);
+						if (!state) return;
+						state.lastActivity = Date.now();
+						this.counterMessagesReceived.add(1, { workflow_name: workflowName });
 
-		return client;
-	}
+						// Rate limit (per-connection token bucket).
+						if (!this.consumeRateToken(state, config)) {
+							this.counterMessagesDropped.add(1, {
+								workflow_name: workflowName,
+								reason: "rate_limit",
+							});
+							return;
+						}
 
-	/**
-	 * Handle WebSocket message
-	 */
-	async handleMessage(clientId: string, data: string | Buffer, isBinary: boolean): Promise<TriggerResponse | null> {
-		const client = this.clients.get(clientId);
-		if (!client) {
-			this.logger.error(`Message from unknown client: ${clientId}`);
-			return null;
-		}
+						// Parse payload. Default mode "text" assumes JSON
+						// frames with `{event, data}` envelope; falls back
+						// to `{event: "message", data: <text>}` on parse
+						// failure. Binary mode skips JSON entirely and
+						// hands the buffer through unchanged.
+						let event = "message";
+						let payload: unknown = evt.data;
+						const mode = config.mode === "binary" ? "binary" : "text";
+						if (mode === "text" && typeof evt.data === "string") {
+							try {
+								const parsed = JSON.parse(evt.data) as { event?: unknown; data?: unknown };
+								if (typeof parsed.event === "string") event = parsed.event;
+								payload = parsed.data ?? parsed;
+							} catch {
+								/* not JSON — leave event as "message", payload as raw string */
+							}
+						}
 
-		// Update activity timestamp
-		client.lastActivity = new Date();
-		this.totalMessages++;
+						// Allowlist check — if the trigger declares an
+						// `events` array, drop messages whose event name
+						// isn't in the list. Absent allowlist = accept all.
+						if (Array.isArray(config.events) && config.events.length > 0 && !config.events.includes(event)) {
+							this.counterMessagesDropped.add(1, {
+								workflow_name: workflowName,
+								reason: "event_not_allowed",
+							});
+							return;
+						}
 
-		// Parse message
-		let message: WebSocketMessage;
-		try {
-			if (isBinary) {
-				message = {
-					id: uuid(),
-					type: "binary",
-					event: "binary",
-					data: data,
-					timestamp: new Date(),
-					raw: data as Buffer,
+						void this.dispatchEvent({
+							connectionId,
+							workflowName,
+							config,
+							eventKind: "message",
+							payload: { event, data: payload },
+						});
+					},
+					onClose: (evt, _ws) => {
+						void this.dispatchEvent({
+							connectionId,
+							workflowName,
+							config,
+							eventKind: "disconnect",
+							payload: { event: "disconnect", code: evt.code, reason: evt.reason },
+						}).finally(() => {
+							// Even if the disconnect workflow throws, free
+							// the connection record AFTER it finishes so
+							// `ctx.connection` is valid throughout the
+							// disconnect run.
+							this.removeConnection(connectionId);
+						});
+					},
+					onError: (_evt, _ws) => {
+						this.logger.error(`[blok][ws] connection error on ${workflowName} (id=${connectionId})`);
+					},
 				};
-			} else {
-				const text = data.toString();
-				let parsed: { event?: string; data?: unknown } = {};
-				try {
-					parsed = JSON.parse(text);
-				} catch {
-					parsed = { event: "message", data: text };
+			}),
+		);
+	}
+
+	// ---------------------------------------------------------------------------
+	// Workflow dispatch
+	// ---------------------------------------------------------------------------
+
+	/**
+	 * Build a synthetic Context, attach `ctx.connection`, run the
+	 * trigger's middleware chain + workflow body. One run per event.
+	 *
+	 * Uses TriggerBase's existing `createContext` + `applyMiddlewareChain`
+	 * + `run` pipeline so all the standard primitives (concurrency,
+	 * retries, idempotency, tracing, etc.) apply uniformly.
+	 */
+	private async dispatchEvent(opts: {
+		connectionId: string;
+		workflowName: string;
+		config: WebSocketTriggerConfig;
+		eventKind: "connect" | "message" | "disconnect";
+		payload: Record<string, unknown>;
+	}): Promise<void> {
+		const { connectionId, workflowName, eventKind, payload } = opts;
+		const state = this.connections.get(connectionId);
+		if (!state) return;
+
+		const requestId = uuid();
+		const triggerLabel = `websocket.${eventKind}`;
+
+		await this.tracer.startActiveSpan(`ws:${workflowName}:${eventKind}`, async (span: Span) => {
+			try {
+				// Initialize Configuration for the workflow (loads the
+				// step graph, applies the v2 normalizer, resolves nodes).
+				// Pass the workflow as the third `preloaded` argument so
+				// Configuration uses the in-registry definition directly
+				// instead of trying to load from disk — same pattern
+				// HttpTrigger uses for its file-based routing path.
+				const registry = WorkflowRegistry.getInstance();
+				const entry = registry.get(workflowName);
+				if (!entry) {
+					throw new Error(`[blok][ws] workflow "${workflowName}" not found in registry`);
 				}
-				message = {
-					id: uuid(),
-					type: "text",
-					event: parsed.event || "message",
-					data: parsed.data ?? parsed,
-					timestamp: new Date(),
-					raw: text,
-				};
-			}
-		} catch (error) {
-			this.logger.error(`Failed to parse message: ${(error as Error).message}`);
-			return null;
-		}
+				await this.configuration.init(workflowName, this.nodeMap, entry.workflow);
 
-		// Trigger message event
-		return this.triggerEvent({
-			type: "message",
-			clientId,
-			message,
+				const ctx: Context = this.createContext(undefined, workflowName, requestId);
+				ctx.request = {
+					body: payload,
+					headers: {} as RequestContext["headers"],
+					params: state.pathParams,
+					query: {},
+				} as unknown as RequestContext;
+
+				// Bind ctx.connection — the per-connection API. Helper
+				// nodes (@blokjs/ws-reply, @blokjs/ws-broadcast, @blokjs/ws-close)
+				// read this field directly to interact with the WS.
+				ctx.connection = this.buildConnectionContext(state);
+
+				// Run middleware chain (process-global → workflow-level →
+				// trigger-level). Identical to HttpTrigger/WorkerTrigger.
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
+
+				await this.run(ctx);
+
+				span.setAttribute("workflow_name", workflowName);
+				span.setAttribute("event", eventKind);
+				span.setAttribute("connection_id", connectionId);
+				span.setStatus({ code: SpanStatusCode.OK });
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				span.recordException(err as Error);
+				span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
+				this.logger.error(`[blok][ws] ${triggerLabel} workflow ${workflowName} failed: ${msg}`);
+			} finally {
+				span.end();
+			}
 		});
 	}
 
-	/**
-	 * Handle WebSocket close
-	 */
-	async handleClose(clientId: string, code: number, reason: string): Promise<void> {
-		const client = this.clients.get(clientId);
-		if (!client) return;
-
-		client.state = "disconnected";
-
-		// Remove from all rooms
-		for (const roomName of client.rooms) {
-			const room = this.rooms.get(roomName);
-			if (room) {
-				room.clients.delete(clientId);
-				// Clean up empty rooms
-				if (room.clients.size === 0) {
-					this.rooms.delete(roomName);
-				}
-			}
-		}
-
-		// Unregister client
-		this.clients.delete(clientId);
-		this.activeConnections--;
-
-		// Trigger close event
-		await this.triggerEvent({
-			type: "close",
-			clientId,
-			closeCode: code,
-			closeReason: reason,
-		});
-
-		this.logger.log(`Client disconnected: ${clientId} (code: ${code}, reason: ${reason})`);
-	}
-
-	/**
-	 * Handle WebSocket error
-	 */
-	async handleError(clientId: string, error: Error): Promise<void> {
-		this.logger.error(`WebSocket error for client ${clientId}: ${error.message}`);
-
-		await this.triggerEvent({
-			type: "error",
-			clientId,
-			error,
-		});
-	}
-
-	/**
-	 * Handle ping from client
-	 */
-	handlePing(clientId: string): void {
-		const client = this.clients.get(clientId);
-		if (client) {
-			client.lastActivity = new Date();
-		}
-	}
-
-	/**
-	 * Handle pong from client
-	 */
-	handlePong(clientId: string): void {
-		const client = this.clients.get(clientId);
-		if (client) {
-			client.lastActivity = new Date();
-		}
-	}
-
-	/**
-	 * Join a room/channel
-	 */
-	async joinRoom(clientId: string, roomName: string): Promise<boolean> {
-		const client = this.clients.get(clientId);
-		if (!client) return false;
-
-		// Create room if it doesn't exist
-		if (!this.rooms.has(roomName)) {
-			this.rooms.set(roomName, {
-				name: roomName,
-				clients: new Set(),
-				metadata: {},
-				createdAt: new Date(),
-			});
-		}
-
-		const room = this.rooms.get(roomName);
-		if (!room) return;
-		room.clients.add(clientId);
-		client.rooms.add(roomName);
-
-		// Trigger join event
-		await this.triggerEvent({
-			type: "join_room",
-			clientId,
-			room: roomName,
-		});
-
-		this.logger.log(`Client ${clientId} joined room: ${roomName}`);
-		return true;
-	}
-
-	/**
-	 * Leave a room/channel
-	 */
-	async leaveRoom(clientId: string, roomName: string): Promise<boolean> {
-		const client = this.clients.get(clientId);
-		if (!client) return false;
-
-		const room = this.rooms.get(roomName);
-		if (!room) return false;
-
-		room.clients.delete(clientId);
-		client.rooms.delete(roomName);
-
-		// Clean up empty rooms
-		if (room.clients.size === 0) {
-			this.rooms.delete(roomName);
-		}
-
-		// Trigger leave event
-		await this.triggerEvent({
-			type: "leave_room",
-			clientId,
-			room: roomName,
-		});
-
-		this.logger.log(`Client ${clientId} left room: ${roomName}`);
-		return true;
-	}
-
-	/**
-	 * Send message to a specific client
-	 */
-	sendToClient(clientId: string, event: string, data: unknown): boolean {
-		const client = this.clients.get(clientId);
-		if (!client || client.state !== "connected") return false;
-
-		const message = JSON.stringify({ event, data });
-		client.send(message);
-		return true;
-	}
-
-	/**
-	 * Broadcast message to all clients in a room
-	 */
-	broadcastToRoom(roomName: string, event: string, data: unknown, excludeClient?: string): number {
-		const room = this.rooms.get(roomName);
-		if (!room) return 0;
-
-		const message = JSON.stringify({ event, data });
-		let sent = 0;
-
-		for (const clientId of room.clients) {
-			if (excludeClient && clientId === excludeClient) continue;
-
-			const client = this.clients.get(clientId);
-			if (client && client.state === "connected") {
-				client.send(message);
-				sent++;
-			}
-		}
-
-		return sent;
-	}
-
-	/**
-	 * Broadcast message to all connected clients
-	 */
-	broadcastToAll(event: string, data: unknown, excludeClient?: string): number {
-		const message = JSON.stringify({ event, data });
-		let sent = 0;
-
-		for (const [clientId, client] of this.clients) {
-			if (excludeClient && clientId === excludeClient) continue;
-
-			if (client.state === "connected") {
-				client.send(message);
-				sent++;
-			}
-		}
-
-		return sent;
-	}
-
-	/**
-	 * Get client by ID
-	 */
-	getClient(clientId: string): WebSocketClient | undefined {
-		return this.clients.get(clientId);
-	}
-
-	/**
-	 * Get all clients in a room
-	 */
-	getClientsInRoom(roomName: string): WebSocketClient[] {
-		const room = this.rooms.get(roomName);
-		if (!room) return [];
-
-		const clients: WebSocketClient[] = [];
-		for (const clientId of room.clients) {
-			const client = this.clients.get(clientId);
-			if (client) {
-				clients.push(client);
-			}
-		}
-		return clients;
-	}
-
-	/**
-	 * Get connection stats
-	 */
-	getStats(): {
-		activeConnections: number;
-		totalMessages: number;
-		roomCount: number;
-		clientsByRoom: Record<string, number>;
-	} {
-		const clientsByRoom: Record<string, number> = {};
-		for (const [name, room] of this.rooms) {
-			clientsByRoom[name] = room.clients.size;
-		}
-
+	private buildConnectionContext(state: ConnectionState): ConnectionContext {
+		const id = state.id;
+		const trigger = this;
 		return {
-			activeConnections: this.activeConnections,
-			totalMessages: this.totalMessages,
-			roomCount: this.rooms.size,
-			clientsByRoom,
+			get id() {
+				return id;
+			},
+			send(data) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return;
+				try {
+					// WSContext.send's strict type is Uint8Array<ArrayBuffer>;
+					// our interface uses the wider Uint8Array<ArrayBufferLike>
+					// (which TypeScript splits into ArrayBuffer | SharedArrayBuffer).
+					// SharedArrayBuffer can't legally cross WS frames anyway, so
+					// the cast is safe — we accept the strict subset at runtime.
+					conn.ws.send(data as Parameters<typeof conn.ws.send>[0]);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					trigger.logger.error(`[blok][ws] send failed on ${id}: ${msg}`);
+				}
+			},
+			close(code, reason) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return;
+				try {
+					conn.ws.close(code, reason);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					trigger.logger.error(`[blok][ws] close failed on ${id}: ${msg}`);
+				}
+			},
+			setAttachment(value) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return;
+				// Cap serialized size — per the spec's 2 KB Cloudflare-DO
+				// parity rule. Reject + warn on overflow rather than
+				// truncate (truncation produces malformed JSON on next read).
+				try {
+					const serialized = JSON.stringify(value);
+					if (serialized && Buffer.byteLength(serialized, "utf8") > ATTACHMENT_MAX_BYTES) {
+						trigger.logger.logLevel(
+							"warn",
+							`[blok][ws] attachment exceeds ${ATTACHMENT_MAX_BYTES} bytes on ${id}; rejected. Reduce attachment size.`,
+						);
+						return;
+					}
+				} catch {
+					trigger.logger.logLevel("warn", `[blok][ws] attachment is not JSON-serializable on ${id}; rejected.`);
+					return;
+				}
+				conn.attachment = value;
+			},
+			get attachment() {
+				const conn = trigger.connections.get(id);
+				return conn?.attachment;
+			},
+			joinRoom(name) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return;
+				const fullName = `${conn.workflowName}:${name}`;
+				let set = trigger.rooms.get(fullName);
+				if (!set) {
+					set = new Set();
+					trigger.rooms.set(fullName, set);
+				}
+				set.add(id);
+				conn.rooms.add(fullName);
+			},
+			leaveRoom(name) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return;
+				const fullName = `${conn.workflowName}:${name}`;
+				const set = trigger.rooms.get(fullName);
+				if (set) {
+					set.delete(id);
+					if (set.size === 0) trigger.rooms.delete(fullName);
+				}
+				conn.rooms.delete(fullName);
+			},
+			get rooms() {
+				const conn = trigger.connections.get(id);
+				// Return short-name view (strip `workflowName:` prefix) so
+				// authors see what they joined.
+				const view = new Set<string>();
+				if (conn) {
+					const prefix = `${conn.workflowName}:`;
+					for (const r of conn.rooms) {
+						if (r.startsWith(prefix)) view.add(r.slice(prefix.length));
+					}
+				}
+				return view;
+			},
+			broadcast(room, data, opts) {
+				const conn = trigger.connections.get(id);
+				if (!conn) return 0;
+				return trigger.broadcastToRoom({
+					workflowName: conn.workflowName,
+					room,
+					data,
+					exceptConnectionId: opts?.exceptSelf === true ? id : undefined,
+				});
+			},
 		};
 	}
 
-	/**
-	 * Get all workflows that have WebSocket triggers
-	 */
-	protected getWebSocketWorkflows(): WebSocketWorkflowModel[] {
-		const workflows: WebSocketWorkflowModel[] = [];
-
-		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			const workflowConfig = (workflow as unknown as { _config: WebSocketWorkflowModel["config"] })._config;
-
-			if (workflowConfig?.trigger) {
-				const triggerType = Object.keys(workflowConfig.trigger)[0];
-
-				if (triggerType === "websocket" && workflowConfig.trigger.websocket) {
-					workflows.push({
-						path,
-						config: workflowConfig,
-					});
-				}
+	private removeConnection(connectionId: string): void {
+		const state = this.connections.get(connectionId);
+		if (!state) return;
+		// Drain rooms.
+		for (const room of state.rooms) {
+			const set = this.rooms.get(room);
+			if (set) {
+				set.delete(connectionId);
+				if (set.size === 0) this.rooms.delete(room);
 			}
 		}
-
-		return workflows;
-	}
-
-	/**
-	 * Find workflow matching the WebSocket event
-	 */
-	protected findMatchingWorkflow(event: WebSocketEvent): WebSocketWorkflowModel | null {
-		for (const workflow of this.websocketWorkflows) {
-			const config = workflow.config.trigger?.websocket;
-			if (!config) continue;
-
-			// Check event type match
-			if (config.events && config.events.length > 0) {
-				const eventName = event.type === "message" ? event.message?.event || "message" : event.type;
-
-				const matches = config.events.some((pattern) => {
-					if (pattern === "*") return true;
-					if (pattern.endsWith(".*")) {
-						const prefix = pattern.slice(0, -2);
-						return eventName.startsWith(prefix);
-					}
-					return pattern === eventName;
-				});
-				if (!matches) continue;
-			}
-
-			// Check room filter
-			if (config.rooms && config.rooms.length > 0 && event.room) {
-				if (!config.rooms.includes(event.room)) continue;
-			}
-
-			return workflow;
+		// Drain workflow membership.
+		const wfSet = this.connectionsByWorkflow.get(state.workflowName);
+		if (wfSet) {
+			wfSet.delete(connectionId);
+			if (wfSet.size === 0) this.connectionsByWorkflow.delete(state.workflowName);
 		}
-
-		return null;
+		this.connections.delete(connectionId);
 	}
 
+	// ---------------------------------------------------------------------------
+	// Helper-node entry points (used by @blokjs/ws-broadcast et al.)
+	// ---------------------------------------------------------------------------
+
 	/**
-	 * Trigger a workflow based on WebSocket event
+	 * Broadcast to all connections in a workflow-scoped room. Used by
+	 * `@blokjs/ws-broadcast` via the singleton accessor below.
 	 */
-	protected async triggerEvent(event: WebSocketEvent): Promise<TriggerResponse | null> {
-		// Find matching workflow
-		const workflow = this.findMatchingWorkflow(event);
-		if (!workflow) {
-			return null;
+	broadcastToRoom(opts: {
+		workflowName: string;
+		room: string;
+		data: string | ArrayBuffer | Uint8Array;
+		exceptConnectionId?: string;
+	}): number {
+		const fullName = `${opts.workflowName}:${opts.room}`;
+		const set = this.rooms.get(fullName);
+		if (!set) return 0;
+		let count = 0;
+		for (const cid of set) {
+			if (opts.exceptConnectionId && cid === opts.exceptConnectionId) continue;
+			const conn = this.connections.get(cid);
+			if (!conn) continue;
+			try {
+				// Same Uint8Array<ArrayBufferLike> → Uint8Array<ArrayBuffer>
+				// narrowing as the per-connection `send` above. Safe at runtime.
+				conn.ws.send(opts.data as Parameters<typeof conn.ws.send>[0]);
+				count++;
+			} catch {
+				/* skip dead sockets */
+			}
 		}
-
-		const config = workflow.config.trigger?.websocket as WebSocketTriggerOpts;
-		return this.executeWorkflow(event, workflow, config);
+		return count;
 	}
 
-	/**
-	 * Execute a workflow for a WebSocket event
-	 */
-	protected async executeWorkflow(
-		event: WebSocketEvent,
-		workflow: WebSocketWorkflowModel,
-		_config: WebSocketTriggerOpts,
-	): Promise<TriggerResponse> {
-		const executionId = uuid();
-
-		const defaultMeter = metrics.getMeter("default");
-		const wsExecutions = defaultMeter.createCounter("websocket_executions", {
-			description: "WebSocket workflow executions",
-		});
-		const wsErrors = defaultMeter.createCounter("websocket_errors", {
-			description: "WebSocket execution errors",
-		});
-
-		return new Promise((resolve) => {
-			this.tracer.startActiveSpan(`websocket:${event.type}`, async (span: Span) => {
-				try {
-					const start = performance.now();
-
-					// Initialize configuration for this workflow
-					await this.configuration.init(workflow.path, this.nodeMap);
-
-					// Create context
-					const ctx: Context = this.createContext(undefined, workflow.path, executionId);
-
-					// Get client info
-					const client = this.clients.get(event.clientId);
-
-					// Populate request with WebSocket event
-					ctx.request = {
-						body: event.message?.data ?? event,
-						headers: {},
-						query: {},
-						params: {
-							clientId: event.clientId,
-							eventType: event.type,
-							messageEvent: event.message?.event,
-							room: event.room,
-						},
-					} as unknown as RequestContext;
-
-					// Store WebSocket context in vars (use type assertion for flexibility)
-					if (!ctx.vars) ctx.vars = {};
-					(ctx.vars as Record<string, unknown>)._websocket = {
-						clientId: event.clientId,
-						eventType: event.type,
-						messageId: event.message?.id,
-						messageEvent: event.message?.event,
-						room: event.room,
-						clientRooms: client ? Array.from(client.rooms) : [],
-						clientMetadata: client?.metadata || {},
-						timestamp: new Date().toISOString(),
-					};
-
-					// Add helper functions to context for sending responses
-					(ctx.vars as Record<string, unknown>)._websocket_send = (data: unknown) => {
-						this.sendToClient(event.clientId, "response", data);
-					};
-					(ctx.vars as Record<string, unknown>)._websocket_broadcast = (room: string, data: unknown) => {
-						this.broadcastToRoom(room, "broadcast", data, event.clientId);
-					};
-
-					ctx.logger.log(`Processing WebSocket event: ${event.type} from ${event.clientId}`);
-
-					// Execute workflow
-					const response: TriggerResponse = await this.run(ctx);
-					const end = performance.now();
-
-					// Set span attributes
-					span.setAttribute("success", true);
-					span.setAttribute("client_id", event.clientId);
-					span.setAttribute("event_type", event.type);
-					span.setAttribute("workflow_path", workflow.path);
-					span.setAttribute("elapsed_ms", end - start);
-					span.setStatus({ code: SpanStatusCode.OK });
-
-					// Record metrics
-					wsExecutions.add(1, {
-						env: process.env.NODE_ENV,
-						event_type: event.type,
-						workflow_name: this.configuration.name,
-						success: "true",
-					});
-
-					ctx.logger.log(`WebSocket event processed in ${(end - start).toFixed(2)}ms`);
-
-					resolve(response);
-				} catch (error) {
-					const errorMessage = (error as Error).message;
-
-					// Set span error
-					span.setAttribute("success", false);
-					span.recordException(error as Error);
-					span.setStatus({ code: SpanStatusCode.ERROR, message: errorMessage });
-
-					// Record error metrics
-					wsErrors.add(1, {
-						env: process.env.NODE_ENV,
-						event_type: event.type,
-						workflow_name: this.configuration?.name || "unknown",
-					});
-
-					this.logger.error(`WebSocket workflow failed: ${errorMessage}`, (error as Error).stack);
-
-					throw error;
-				} finally {
-					span.end();
-				}
-			});
-		});
+	/** Read-only stats for tests / Studio. */
+	getStats(): {
+		connections: number;
+		workflows: number;
+		rooms: number;
+	} {
+		return {
+			connections: this.connections.size,
+			workflows: this.connectionsByWorkflow.size,
+			rooms: this.rooms.size,
+		};
 	}
 
-	/**
-	 * Start heartbeat monitoring
-	 */
-	protected startHeartbeat(): void {
-		this.heartbeatInterval = setInterval(() => {
+	// ---------------------------------------------------------------------------
+	// Internals
+	// ---------------------------------------------------------------------------
+
+	private getWebSocketWorkflows(): Array<{ workflowName: string; config: WebSocketTriggerConfig }> {
+		const registry = WorkflowRegistry.getInstance();
+		const out: Array<{ workflowName: string; config: WebSocketTriggerConfig }> = [];
+		for (const entry of registry.list()) {
+			const wf = entry.workflow as { trigger?: { websocket?: WebSocketTriggerConfig } } | undefined;
+			const wsCfg = wf?.trigger?.websocket;
+			if (!wsCfg || typeof wsCfg.path !== "string") continue;
+			out.push({ workflowName: entry.name, config: wsCfg });
+		}
+		return out;
+	}
+
+	private consumeRateToken(state: ConnectionState, config: WebSocketTriggerConfig): boolean {
+		const limit =
+			typeof config.messageRateLimit === "number" && config.messageRateLimit > 0
+				? config.messageRateLimit
+				: DEFAULT_MESSAGE_RATE_LIMIT;
+		const now = Date.now();
+		const elapsedMs = now - state.tokensRefilledAt;
+		if (elapsedMs > 0) {
+			const refill = (elapsedMs / 1000) * limit;
+			state.tokens = Math.min(limit, state.tokens + refill);
+			state.tokensRefilledAt = now;
+		}
+		if (state.tokens < 1) return false;
+		state.tokens -= 1;
+		return true;
+	}
+
+	private startHeartbeat(): void {
+		if (this.heartbeatTimer) return;
+		this.heartbeatTimer = setInterval(() => {
 			const now = Date.now();
-			const staleThreshold = this.heartbeatIntervalMs * 2;
-
-			for (const [clientId, client] of this.clients) {
-				const lastActivity = client.lastActivity.getTime();
-
-				// Check for stale connections
-				if (now - lastActivity > staleThreshold) {
-					this.logger.log(`Closing stale connection: ${clientId}`);
-					client.close(1000, "Connection timed out");
-				} else {
-					// Ping active connections
+			for (const [id, state] of this.connections) {
+				const idleMs = now - state.lastActivity;
+				if (idleMs > 2 * DEFAULT_HEARTBEAT_INTERVAL_MS) {
+					// Stale connection — close it.
 					try {
-						client.ping();
-					} catch (error) {
-						this.logger.error(`Ping failed for ${clientId}: ${(error as Error).message}`);
+						state.ws.close(1011, "Heartbeat timeout");
+					} catch {
+						/* ignore */
 					}
+					this.removeConnection(id);
 				}
+				// `ws` library's underlying socket auto-pings via `ws.ping()`
+				// — we just need to track lastActivity which onMessage
+				// updates. No explicit ping needed from the trigger layer.
 			}
-		}, this.heartbeatIntervalMs);
+		}, DEFAULT_HEARTBEAT_INTERVAL_MS);
+		// Don't keep the event loop alive on the heartbeat alone.
+		if (typeof this.heartbeatTimer.unref === "function") this.heartbeatTimer.unref();
 	}
 
-	/**
-	 * Stop heartbeat monitoring
-	 */
-	protected stopHeartbeat(): void {
-		if (this.heartbeatInterval) {
-			clearInterval(this.heartbeatInterval);
-			this.heartbeatInterval = null;
+	private stopHeartbeat(): void {
+		if (this.heartbeatTimer) {
+			clearInterval(this.heartbeatTimer);
+			this.heartbeatTimer = null;
 		}
 	}
 }
 
-export default WebSocketTrigger;
+// -----------------------------------------------------------------------------
+// Singleton accessor for helper nodes
+// -----------------------------------------------------------------------------
+
+/**
+ * Singleton registry — helper nodes (`@blokjs/ws-broadcast` etc.) read
+ * the active trigger via this accessor to call `broadcastToRoom(...)`.
+ * Set once at trigger construction; reset on `stop()`.
+ *
+ * Why not pass through ctx? `ctx.connection` is the per-connection API.
+ * The cross-connection `broadcast` operation needs the trigger
+ * instance, which manages all connections. A singleton is the cheapest
+ * way for helper nodes to find the trigger without threading it
+ * through every step's inputs.
+ */
+let activeTrigger: WebSocketTrigger | null = null;
+
+export function _setActiveWebSocketTrigger(trigger: WebSocketTrigger | null): void {
+	activeTrigger = trigger;
+}
+
+export function _getActiveWebSocketTrigger(): WebSocketTrigger | null {
+	return activeTrigger;
+}
+
+// Re-export types kept stable from prior scaffold so any external
+// references (Studio, docs links) keep resolving. Most are unused by
+// the new implementation but harmless to re-export.
+export type { ConnectionContext } from "@blokjs/shared";
+
+// Unused but exported for backward compatibility with the prior scaffold.
+export type WebSocketMessageType = "text" | "binary";
