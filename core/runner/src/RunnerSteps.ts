@@ -415,30 +415,34 @@ export default abstract class RunnerSteps {
 							}
 							tracker.getStore().updateRun(traceRunId, updates);
 
-							// Phase 2 — write iteration_context to the active
-							// primitive's NodeRun when nested. Reads three
-							// sentinels stamped by ForEachNode on the child
-							// ctx:
+							// Phase 2/3 — write iteration_context to the active
+							// primitive's NodeRun when nested. Reads sentinels
+							// stamped by the primitive (ForEachNode in Phase 2,
+							// LoopNode in Phase 3) on the parent ctx:
 							//   - _blokActivePrimitiveNodeRunId: which NodeRun
 							//     gets the cursor (set by RunnerSteps' outer
 							//     iteration around the primitive's process()).
 							//   - _blokForEachCurrentIteration: iteration index
 							//     of the in-flight iteration.
-							//   - _blokForEachPartialResults: accumulator for
-							//     iterations [0..iteration-1] so the post-
-							//     resume final result array covers all
-							//     iterations.
+							//   - _blokForEachPartialResults (Phase 2 only):
+							//     accumulator for iterations [0..iteration-1]
+							//     so the post-resume final result array covers
+							//     all iterations. LoopNode doesn't aggregate
+							//     results (it returns the last iteration's
+							//     output), so it doesn't stamp this sentinel —
+							//     the cursor stores `completedResults: []` and
+							//     LoopNode ignores the field on resume.
 							if (deep) {
 								const ctxAny = ctx as Record<string, unknown>;
 								const primitiveNodeRunId = ctxAny._blokActivePrimitiveNodeRunId as string | undefined;
 								const currentIteration = ctxAny._blokForEachCurrentIteration as number | undefined;
 								const partialResults = ctxAny._blokForEachPartialResults as unknown[] | undefined;
-								if (primitiveNodeRunId && currentIteration !== undefined && partialResults !== undefined) {
+								if (primitiveNodeRunId && currentIteration !== undefined) {
 									tracker.getStore().updateNodeRun(primitiveNodeRunId, {
 										iterationContext: {
 											iteration: currentIteration,
 											innerStepIndex: i,
-											completedResults: partialResults,
+											completedResults: partialResults ?? [],
 										},
 									});
 								}

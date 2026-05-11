@@ -172,10 +172,17 @@ describe("v0.6 Phase 2 · sequential forEach with wait inside iteration body", (
 		// TriggerBase uses to rehydrate `ctx._blokIterationResume`.
 		type Cursor = { iteration: number; innerStepIndex: number; completedResults: unknown[] };
 		const latestForEachContext = (): Cursor | undefined => {
+			// Mirrors TriggerBase.run's rehydrate selection — sort by
+			// startedAt descending with array insertion order as the
+			// stable secondary key (ms-collision happens when consecutive
+			// defer/resume cycles fire within the same Date.now() tick).
 			const all = tracker.getStore().getNodeRuns(runId);
-			const withCtx = all.filter((n) => n.iterationContext !== undefined);
-			withCtx.sort((a, b) => b.startedAt - a.startedAt);
-			return withCtx[0]?.iterationContext as Cursor | undefined;
+			const withCtx = all.map((n, idx) => ({ n, idx })).filter(({ n }) => n.iterationContext !== undefined);
+			withCtx.sort((a, b) => {
+				const dt = b.n.startedAt - a.n.startedAt;
+				return dt !== 0 ? dt : b.idx - a.idx;
+			});
+			return withCtx[0]?.n.iterationContext as Cursor | undefined;
 		};
 
 		// Re-entry — iteration 0 satisfies + iteration 1 wait fires.

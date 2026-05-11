@@ -30,9 +30,49 @@ interface LoopOpts {
 	steps?: RunnerNode[];
 }
 
+/**
+ * v0.6 wait-inside-primitives Phase 3 — resume hint set on ctx by
+ * `TriggerBase.run` after rehydrating the loop NodeRun's
+ * `iteration_context` column. LoopNode reads it on entry and:
+ *
+ *   - Starts the while-loop at `iteration` instead of 0 so the
+ *     iterations [0..iteration-1] that already completed in a prior
+ *     pass are not re-executed (idempotency is not required because
+ *     they're skipped, not re-run).
+ *   - Resumes iteration `iteration` from the inner step at
+ *     `innerStepIndex` (the step that was about to throw the wait
+ *     when the previous pass deferred). The inner runner picks up
+ *     this hint from `_blokInnerResumeIndex` on the child ctx.
+ *
+ * Unlike ForEach, Loop does NOT aggregate iteration results — it
+ * returns the LAST iteration's output. The cursor's `completedResults`
+ * field is preserved at the schema level for forward-compat but
+ * unused on Loop resume (the rehydrated `ctx.state` already carries
+ * state mutations from completed iterations).
+ */
+interface LoopResume {
+	iteration: number;
+	innerStepIndex: number;
+	// Preserved at the schema layer for forward-compat with ForEach. Loop
+	// ignores it on resume because state-via-shared-reference already
+	// carries iteration mutations forward.
+	completedResults?: unknown[];
+}
+
 const DEFAULT_MAX_ITERATIONS = 1000;
 
 export class LoopNode extends RunnerNode {
+	/**
+	 * v0.6 marker — RunnerSteps stamps `_blokActivePrimitiveNodeRunId`
+	 * on ctx around `step.process()` calls when this flag is true so a
+	 * nested wait fired inside an iteration body knows which NodeRun to
+	 * write its `iteration_context` cursor to. Mirrors ForEachNode's
+	 * marker (Phase 2). Static `true` (vs an instance method) avoids
+	 * importing LoopNode inside RunnerSteps, which would create a
+	 * circular dependency.
+	 */
+	public readonly isPrimitiveIterator = true;
+
 	async run(ctx: Context): Promise<ResponseContext> {
 		this.contentType = "application/json";
 		const response: ResponseContext = { success: true, data: null, error: null };
@@ -54,25 +94,54 @@ export class LoopNode extends RunnerNode {
 			return response;
 		}
 
+		// v0.6 Phase 3 — read the resume hint that TriggerBase rehydrated
+		// from the persisted `iteration_context` column. Cleared after
+		// reading so a sibling loop later in the workflow doesn't
+		// accidentally pick it up.
+		const ctxAny = ctx as Record<string, unknown>;
+		const resume = ctxAny._blokIterationResume as LoopResume | undefined;
+		if (resume !== undefined) {
+			ctxAny._blokIterationResume = undefined;
+		}
+
 		const { default: Runner } = await import("./Runner");
 
 		const counterKey = `${this.name}Index`;
 		const state = (ctx.state ?? {}) as Record<string, unknown>;
-		let iteration = 0;
+		let iteration = resume?.iteration ?? 0;
 		let lastData: unknown = null;
 
 		while (true) {
 			state[counterKey] = iteration;
 
-			// Re-clone config each iteration so mapper-resolved values from
-			// prior iterations don't bleed into the next condition eval.
-			const evalCtx = { ...ctx, config: _.cloneDeep(ctx.config) } as Context;
-			const shouldContinue = this.evaluateCondition(whileExpr, evalCtx);
-			if (!shouldContinue) break;
+			// v0.6 Phase 3 — on the first iteration after a wait-resume,
+			// skip the while-condition check. The condition was already
+			// TRUE when the wait fired (otherwise iter N wouldn't have
+			// started), and we've committed to finishing iter N's body
+			// — re-evaluating now would compare against post-iter-N state
+			// (e.g. a counter advanced by the pre-wait steps) and could
+			// falsely terminate the loop. Subsequent iterations re-check
+			// normally.
+			const isFirstIterationAfterResume = resume !== undefined && iteration === resume.iteration;
+			if (!isFirstIterationAfterResume) {
+				// Re-clone config each iteration so mapper-resolved values from
+				// prior iterations don't bleed into the next condition eval.
+				const evalCtx = { ...ctx, config: _.cloneDeep(ctx.config) } as Context;
+				const shouldContinue = this.evaluateCondition(whileExpr, evalCtx);
+				if (!shouldContinue) break;
+			}
 
 			if (iteration >= maxIterations) {
 				throw new LoopMaxIterationsError(this.name, maxIterations, iteration);
 			}
+
+			// v0.6 Phase 3 — stamp iteration sentinel on the PARENT ctx
+			// so RunnerSteps' nested wait-throw site can read it via the
+			// child-ctx spread. LoopNode does NOT stamp
+			// `_blokForEachPartialResults`: Loop doesn't accumulate a
+			// results array, and the RunnerSteps cursor write defaults
+			// `partialResults` to `[]` when the sentinel is absent.
+			ctxAny._blokForEachCurrentIteration = iteration;
 
 			const childCtx = this.cloneCtxForIteration(ctx);
 			// v0.5.3 — stash iteration index on the per-iteration child ctx
@@ -82,6 +151,12 @@ export class LoopNode extends RunnerNode {
 			// here (not in cloneCtxForIteration) so the helper signature
 			// stays parameter-free.
 			(childCtx as Record<string, unknown>)._blokIterationIndex = iteration;
+			// v0.6 Phase 3 — pass the inner-step resume cursor on the
+			// child ctx for the first iteration after resume. Subsequent
+			// iterations run from step 0 normally.
+			if (isFirstIterationAfterResume && resume.innerStepIndex > 0) {
+				(childCtx as Record<string, unknown>)._blokInnerResumeIndex = resume.innerStepIndex;
+			}
 			const runner = new Runner(steps);
 			// `deep: true` — inner pipelines must not inherit the outer
 			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume).
@@ -98,6 +173,10 @@ export class LoopNode extends RunnerNode {
 			lastData = childCtx.response;
 			iteration++;
 		}
+
+		// Cleanup sentinel — sibling loop later in the workflow shouldn't
+		// see this one's pointer.
+		ctxAny._blokForEachCurrentIteration = undefined;
 
 		response.data = lastData;
 		// Persist to ctx.state[this.name] (see ForEachNode comment).
