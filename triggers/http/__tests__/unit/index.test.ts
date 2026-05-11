@@ -77,6 +77,16 @@ vi.mock("@blokjs/trigger-sse", () => ({
 	},
 }));
 
+vi.mock("@blokjs/trigger-webhook", () => ({
+	default: class MockWebhookTrigger {
+		setNodeMap(_nodeMap: unknown) {}
+		async listen() {
+			return 0;
+		}
+		async stop() {}
+	},
+}));
+
 import App from "../../src/index";
 
 describe("App", () => {

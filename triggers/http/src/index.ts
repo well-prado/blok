@@ -1,5 +1,6 @@
 import { DefaultLogger } from "@blokjs/runner";
 import SSETrigger from "@blokjs/trigger-sse";
+import WebhookTrigger from "@blokjs/trigger-webhook";
 import WebSocketTrigger from "@blokjs/trigger-websocket";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
@@ -9,6 +10,7 @@ export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
 	private wsTrigger: WebSocketTrigger | null = null;
 	private sseTrigger: SSETrigger | null = null;
+	private webhookTrigger: WebhookTrigger | null = null;
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -30,13 +32,15 @@ export default class App {
 		this.httpTrigger = new HttpTrigger(app);
 		this.wsTrigger = new WebSocketTrigger(app, this.httpTrigger);
 		this.sseTrigger = new SSETrigger(app, this.httpTrigger);
+		this.webhookTrigger = new WebhookTrigger(app, this.httpTrigger);
 		// Share the HTTP trigger's node + workflow registry with the
-		// sibling triggers so per-event / per-stream workflow runs
-		// resolve `branch`, helper nodes (`@blokjs/ws-reply`,
-		// `@blokjs/sse-stream`, etc.) through the same NodeMap that
-		// HTTP requests use.
-		this.wsTrigger.setNodeMap(this.httpTrigger.getNodeMap());
-		this.sseTrigger.setNodeMap(this.httpTrigger.getNodeMap());
+		// sibling triggers so per-event / per-stream / per-webhook
+		// workflow runs resolve `branch`, helper nodes, and built-in
+		// helpers through the same NodeMap that HTTP requests use.
+		const nodeMap = this.httpTrigger.getNodeMap();
+		this.wsTrigger.setNodeMap(nodeMap);
+		this.sseTrigger.setNodeMap(nodeMap);
+		this.webhookTrigger.setNodeMap(nodeMap);
 	}
 
 	async run() {
@@ -52,6 +56,7 @@ export default class App {
 			//      WS's serverHook → injectWebSocket attaches.
 			await this.wsTrigger?.listen();
 			await this.sseTrigger?.listen();
+			await this.webhookTrigger?.listen();
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 

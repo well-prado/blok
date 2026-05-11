@@ -1,0 +1,24 @@
+{
+	"name": "v07-stripe-webhook",
+	"version": "1.0.0",
+	"description": "v0.7 PR 4 flagship demo — declarative Stripe webhook routing. The trigger verifies the Stripe-Signature header (t=<ts>,v1=<hex> against STRIPE_WEBHOOK_SECRET, 300s tolerance, raw-body HMAC). Replay protection caches `body.id` for 5 minutes — Stripe retries on the same event return 200 with `{status: 'duplicate'}` and don't re-run the workflow. The single dispatch step uses POLYMORPHIC sub-workflow resolution: `subworkflow: 'js/ctx.request.body.type'` evaluates against the verified body, and the trigger's `namespace: 'stripe'` prefixes the result — so `body.type === 'invoice.paid'` lands at sub-workflow `stripe.invoice.paid`. Each event type gets its own handler workflow, no switch statement needed.",
+	"trigger": {
+		"webhook": {
+			"provider": "stripe",
+			"path": "/webhooks/stripe",
+			"secretEnv": "STRIPE_WEBHOOK_SECRET",
+			"tolerance": 300,
+			"namespace": "stripe",
+			"idempotencyKey": "js/ctx.request.body.id"
+		}
+	},
+	"steps": [
+		{
+			"id": "dispatch",
+			"subworkflow": "js/ctx.request.body.type",
+			"inputs": {
+				"stripeEvent": "js/ctx.request.body"
+			}
+		}
+	]
+}

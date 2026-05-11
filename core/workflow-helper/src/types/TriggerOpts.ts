@@ -490,11 +490,125 @@ export type CronTriggerOpts = z.input<typeof CronTriggerOptsSchema>;
 // Webhook Trigger (external service events)
 // =============================================================================
 
+/**
+ * v0.7 — custom signature scheme for unknown webhook providers.
+ *
+ * Authors who use a webhook source NOT in the built-in `provider`
+ * allowlist (github / stripe / slack / shopify / svix) supply this
+ * config; the trigger does HMAC verification using these fields.
+ *
+ * The `format` template names the layout of the signature payload —
+ * `{hex}` is substituted with the hex digest at verify time. Supports
+ * common shapes:
+ *   - GitHub-style: `sha256={hex}`
+ *   - Plain hex:    `{hex}`
+ *   - Base64:       `{base64}` (encoded variant)
+ *
+ * When `timestampHeader` is set, the verifier mixes the header value
+ * into the signed string as `{timestamp}.{rawBody}` (Stripe pattern)
+ * and rejects deliveries whose timestamp drifted by more than
+ * `tolerance` seconds (default 300s / 5min).
+ */
+export const WebhookCustomSignatureSchema = z.object({
+	scheme: z
+		.enum(["hmac-sha256", "hmac-sha1", "hmac-sha512"])
+		.default("hmac-sha256")
+		.describe("HMAC algorithm. SHA-256 is the de facto standard for webhooks."),
+	header: z.string().describe("Header name carrying the signature value (e.g. 'X-Acme-Signature')."),
+	format: z
+		.string()
+		.default("{hex}")
+		.describe("Layout of the signature payload. `{hex}` and `{base64}` placeholders are substituted with the digest."),
+	secretEnv: z.string().describe("Env-var name holding the shared secret. Never inline the secret value."),
+	tolerance: z
+		.number()
+		.int()
+		.positive()
+		.default(300)
+		.describe("Allowed clock skew between webhook origin and this server, in seconds. Used with timestampHeader."),
+	timestampHeader: z
+		.string()
+		.optional()
+		.describe(
+			"Header name carrying the request timestamp. When set, signature payload becomes `{timestamp}.{rawBody}` and the timestamp is range-checked against `tolerance`.",
+		),
+});
+export type WebhookCustomSignature = z.input<typeof WebhookCustomSignatureSchema>;
+
+/**
+ * v0.7 webhook trigger config. See the v0.7 additional-triggers plan
+ * for the full design.
+ *
+ * **`provider`** selects a built-in verifier (GitHub, Stripe, Slack,
+ * Shopify, Standard Webhooks via Svix). For unknown providers, omit
+ * `provider` and supply `signature` instead.
+ *
+ * **`namespace`** (combined with a polymorphic `subworkflow` step in
+ * the workflow body) lets one trigger workflow dispatch to many
+ * per-event handler workflows by name. Example: webhook fires with
+ * `body.type === "invoice.paid"` and namespace `"stripe"` resolves
+ * to sub-workflow `"stripe.invoice.paid"`.
+ *
+ * **`secretEnv`** is the env var name to read the shared secret from
+ * — the verifier never sees the secret value at config time, and
+ * workflow JSON files never contain it.
+ *
+ * **`events`** (allowlist) skips verifier-validated deliveries that
+ * are NOT in the list — returns 200 with `{status: "ignored"}` so
+ * the sender doesn't retry. Absent allowlist = accept all events.
+ */
 export const WebhookTriggerOptsSchema = z.object({
-	source: z.string().describe("Source service (github, stripe, shopify, etc.)"),
-	events: z.array(z.string()).describe("Event types to listen for"),
-	secret: z.string().optional().describe("Webhook secret for verification"),
-	path: z.string().optional().describe("Custom webhook path"),
+	provider: z
+		.enum(["github", "stripe", "slack", "shopify", "svix"])
+		.optional()
+		.describe(
+			"Built-in webhook provider. When set, the trigger uses the provider's signature scheme + event-id field automatically; `signature` is ignored. For unknown providers, omit this and supply `signature`.",
+		),
+	path: z
+		.string()
+		.optional()
+		.describe(
+			"HTTP path the trigger mounts the POST handler on. Defaults to `/webhooks/{provider}` when `provider` is set.",
+		),
+	events: z
+		.array(z.string())
+		.optional()
+		.describe(
+			"Optional allowlist of event types. Deliveries whose event type isn't in the list return 200 (no retry) but don't run the workflow. Provider-specific event identifiers — GitHub: X-GitHub-Event header; Stripe/Svix: body.type field.",
+		),
+	secretEnv: z
+		.string()
+		.optional()
+		.describe(
+			"Env-var name holding the shared secret. Required for `provider` (built-in) or when `signature.secretEnv` is unset. Never inline the secret value.",
+		),
+	signature: WebhookCustomSignatureSchema.optional().describe(
+		"Custom signature scheme for unknown providers. Ignored when `provider` is set.",
+	),
+	tolerance: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe(
+			"Replay-tolerance window in seconds — Stripe/Svix/custom-with-timestampHeader only. Default 300s. Used to range-check the signed timestamp.",
+		),
+	idempotencyKey: z
+		.string()
+		.optional()
+		.describe(
+			"Replay-protection cache key — typically a mapper expression resolving to the provider's event id (Stripe's `body.id`, GitHub's `X-GitHub-Delivery`, Svix's `webhook-id`). When set, the verified event is recorded in the idempotency cache; subsequent deliveries with the same key return 200 with `{status: 'duplicate', eventId}` and don't run the workflow.",
+		),
+	namespace: z
+		.string()
+		.optional()
+		.describe(
+			"Optional prefix prepended to polymorphic sub-workflow names. Example: `namespace: 'stripe'` + `subworkflow: '$.req.body.type'` resolving to `'invoice.paid'` looks up `'stripe.invoice.paid'`.",
+		),
+	middleware: z
+		.array(z.string())
+		.optional()
+		.describe("Trigger-level middleware chain (runs after workflow-level middleware, before workflow body)."),
 });
 export type WebhookTriggerOpts = z.input<typeof WebhookTriggerOptsSchema>;
 

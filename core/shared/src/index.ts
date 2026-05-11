@@ -25,6 +25,7 @@ import StateContext from "./types/StateContext";
 import Step from "./types/Step";
 import type StreamContext from "./types/StreamContext";
 import VarsContext from "./types/VarsContext";
+import mapper from "./utils/Mapper";
 import MemoryUsage from "./utils/MemoryUsage";
 
 export {
@@ -56,4 +57,5 @@ export {
 	Metrics,
 	MemoryUsage,
 	type MetricsType,
+	mapper,
 };

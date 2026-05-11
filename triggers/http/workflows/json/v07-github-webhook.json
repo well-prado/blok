@@ -1,0 +1,79 @@
+{
+	"name": "v07-github-webhook",
+	"version": "1.0.0",
+	"description": "v0.7 PR 4 demo — replaces v05-github-webhook-router.json's HTTP+middleware shape with a real webhook trigger. The trigger handles X-Hub-Signature-256 HMAC verification automatically (provider: github reads the secret from GITHUB_WEBHOOK_SECRET), then dispatches to per-event sub-workflows via switch on X-GitHub-Event. Migration win: verification middleware (github-webhook-verify) and HMAC helper invocations vanish — the trigger does it for you. Sub-workflows v05-github-handler-{push,pr,issues} carry over unchanged.",
+	"trigger": {
+		"webhook": {
+			"provider": "github",
+			"path": "/webhooks/github",
+			"secretEnv": "GITHUB_WEBHOOK_SECRET"
+		}
+	},
+	"steps": [
+		{
+			"id": "route-by-event",
+			"switch": {
+				"on": "js/(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
+				"cases": [
+					{
+						"when": "push",
+						"do": [
+							{
+								"id": "dispatch-push",
+								"subworkflow": "v05-github-handler-push",
+								"inputs": {
+									"repo": "js/(ctx.request.body.repository && ctx.request.body.repository.full_name) || null",
+									"ref": "js/ctx.request.body.ref || null",
+									"commits": "js/ctx.request.body.commits || []"
+								}
+							}
+						]
+					},
+					{
+						"when": [
+							"pull_request",
+							"pull_request_review",
+							"pull_request_review_comment"
+						],
+						"do": [
+							{
+								"id": "dispatch-pr",
+								"subworkflow": "v05-github-handler-pr",
+								"inputs": {
+									"action": "js/ctx.request.body.action || null",
+									"pull_request": "js/ctx.request.body.pull_request || null",
+									"_eventType": "js/ctx.request.headers['x-github-event']"
+								}
+							}
+						]
+					},
+					{
+						"when": ["issues", "issue_comment"],
+						"do": [
+							{
+								"id": "dispatch-issues",
+								"subworkflow": "v05-github-handler-issues",
+								"inputs": {
+									"action": "js/ctx.request.body.action || null",
+									"issue": "js/ctx.request.body.issue || null",
+									"_eventType": "js/ctx.request.headers['x-github-event']"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "log-unknown-event",
+						"use": "@blokjs/log",
+						"type": "module",
+						"inputs": {
+							"level": "warn",
+							"message": "js/`v07-github-webhook: unknown event type '${ctx.request.headers['x-github-event'] || ''}'`"
+						}
+					}
+				]
+			}
+		}
+	]
+}

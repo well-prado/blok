@@ -63,6 +63,14 @@ export class SubworkflowNode extends RunnerNode {
 	 */
 	public declare subworkflow: string;
 	/**
+	 * v0.7 — optional namespace prefix prepended to the resolved
+	 * polymorphic name. Used by the Webhook trigger:
+	 * `namespace: "stripe"` + `subworkflow: "js/ctx.req.body.type"`
+	 * resolving to `"invoice.paid"` looks up `"stripe.invoice.paid"`.
+	 * Static names are unaffected.
+	 */
+	public namespace?: string;
+	/**
 	 * Wait mode for the sub-workflow dispatch:
 	 *
 	 * - `true` (default) — synchronous: parent step blocks on the child
@@ -95,14 +103,21 @@ export class SubworkflowNode extends RunnerNode {
 			);
 		}
 
-		// === 2. Look up the child workflow ===
+		// === 2. Resolve the child workflow name (polymorphic v0.7) ===
+		// Static names ("send-receipt-email") are looked up directly.
+		// Mapper-expression names ("js/ctx.req.body.type", "$.req.body.type")
+		// are evaluated against the live ctx — the cleanest way to dispatch
+		// many handlers from one webhook / event router workflow without a
+		// big switch statement. Resolved names go through the same registry
+		// lookup as static names.
+		const resolvedName = await this.resolveSubworkflowName(ctx);
 		const registry = WorkflowRegistry.getInstance();
-		const entry = registry.get(this.subworkflow);
+		const entry = registry.get(resolvedName);
 		if (!entry) {
 			const known = registry.list().map((w) => w.name);
 			const knownStr = known.length > 0 ? known.join(", ") : "(none registered yet)";
 			throw new Error(
-				`[blok] Sub-workflow "${this.subworkflow}" not found in WorkflowRegistry. Available: ${knownStr}. Workflows are registered automatically by the HTTP trigger at boot — make sure the child workflow file is in the scanned directory and has \`name: "${this.subworkflow}"\`.`,
+				`[blok] Sub-workflow "${resolvedName}" not found in WorkflowRegistry. Available: ${knownStr}. Workflows are registered automatically by the HTTP trigger at boot — make sure the child workflow file is in the scanned directory and has \`name: "${resolvedName}"\`.`,
 			);
 		}
 
@@ -114,10 +129,10 @@ export class SubworkflowNode extends RunnerNode {
 		// step's retry loop (if any) will retry — author should pin
 		// `retry: undefined` on sub-workflow steps where denial is
 		// permanent.
-		const allowed = await registry.authorize(ctx.workflow_name ?? "<unknown>", this.subworkflow, ctx);
+		const allowed = await registry.authorize(ctx.workflow_name ?? "<unknown>", resolvedName, ctx);
 		if (!allowed) {
 			throw new Error(
-				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${this.subworkflow}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
+				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${resolvedName}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
 			);
 		}
 
@@ -226,6 +241,58 @@ export class SubworkflowNode extends RunnerNode {
 	 * doesn't exist yet). Caller polls `GET /__blok/runs/<runId>` for
 	 * the actual outcome.
 	 */
+	/**
+	 * v0.7 PR 4 — resolve a (possibly polymorphic) sub-workflow name to
+	 * the actual workflow name in the registry.
+	 *
+	 *   - Static names ("send-receipt-email") pass through unchanged.
+	 *   - `js/...` expressions are evaluated against the live ctx —
+	 *     `subworkflow: "js/ctx.req.body.type"` becomes `"invoice.paid"`
+	 *     on a request with that body.
+	 *   - `$.<path>` / `${...}` strings go through the same Mapper code
+	 *     path as step inputs (the TS DSL compiles `$` to `"js/ctx..."`
+	 *     by the time the workflow hits Configuration; this branch
+	 *     handles authors who hand-wrote `$` in JSON).
+	 *   - When `this.namespace` is set (from the parent workflow's
+	 *     `trigger.webhook.namespace`), the resolved name is prefixed
+	 *     as `"<namespace>.<resolvedName>"` — only when polymorphic
+	 *     resolution fired AND the resolved name isn't already prefixed.
+	 *
+	 * Throws if the expression evaluates to anything other than a
+	 * non-empty string — operators should see a clear "polymorphic
+	 * subworkflow name resolved to <T>" error rather than a confusing
+	 * "workflow not found" downstream.
+	 */
+	private async resolveSubworkflowName(ctx: Context): Promise<string> {
+		const raw = this.subworkflow;
+		const isExpression =
+			typeof raw === "string" && (raw.startsWith("js/") || raw.startsWith("$.") || raw.startsWith("${"));
+		if (!isExpression) {
+			return raw;
+		}
+		// Lazy import keeps the static dep graph between runner and
+		// shared minimal — most steps don't dispatch sub-workflows.
+		const { mapper } = await import("@blokjs/shared");
+		// Normalise `$.<path>` → `js/ctx.<path>` so Mapper.replaceString
+		// evaluates it. Authors who wrote `js/...` go straight through.
+		let expr = raw;
+		if (expr.startsWith("$.")) {
+			expr = `js/ctx.${expr.slice(2)}`;
+		} else if (expr.startsWith("$")) {
+			expr = `js/${expr.slice(1)}`;
+		}
+		const resolved = mapper.replaceString(expr, ctx, {});
+		if (typeof resolved !== "string" || resolved.length === 0) {
+			throw new Error(
+				`[blok] Polymorphic sub-workflow name "${raw}" resolved to ${JSON.stringify(resolved)} (expected a non-empty string). Check the expression and the runtime value of ctx.`,
+			);
+		}
+		if (this.namespace && this.namespace.length > 0 && !resolved.startsWith(`${this.namespace}.`)) {
+			return `${this.namespace}.${resolved}`;
+		}
+		return resolved;
+	}
+
 	private dispatchAsync(
 		parentCtx: Context,
 		childRunner: { run: (ctx: Context) => Promise<unknown> },

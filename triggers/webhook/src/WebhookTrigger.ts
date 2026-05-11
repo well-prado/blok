@@ -1,480 +1,459 @@
 /**
- * WebhookTrigger - Handle webhook events from external services
+ * WebhookTrigger — v0.7 PR 4 — Inbound webhook trigger that mounts
+ * verified POST routes on the shared Hono app. One route per workflow
+ * whose `trigger.webhook` config is registered.
  *
- * Extends TriggerBase to process webhook events from:
- * - GitHub (push, pull_request, issues, etc.)
- * - Stripe (payment_intent, checkout.session, etc.)
- * - Shopify (orders, products, customers)
- * - Custom webhooks
+ * **Authoring surface (built-in provider):**
  *
- * Features:
- * - Signature verification for security
- * - Event type filtering
- * - Retry support
- * - Dead letter handling
+ * ```json
+ * {
+ *   "name": "stripe-events",
+ *   "trigger": {
+ *     "webhook": {
+ *       "provider": "stripe",
+ *       "path": "/webhooks/stripe",
+ *       "secretEnv": "STRIPE_WEBHOOK_SECRET",
+ *       "namespace": "stripe",
+ *       "idempotencyKey": "js/ctx.request.body.id"
+ *     }
+ *   },
+ *   "steps": [
+ *     { "id": "dispatch", "subworkflow": "js/ctx.request.body.type", "inputs": { "stripeEvent": "js/ctx.request.body" } }
+ *   ]
+ * }
+ * ```
+ *
+ * **Pipeline (per inbound request):**
+ *
+ *   1. Read raw body — verifiers MUST sign the bytes that crossed
+ *      the wire, not the JSON-re-stringified body (Stripe / GitHub /
+ *      Slack all sign raw bytes).
+ *   2. Verify the signature via the per-provider strategy
+ *      (`verifiers.ts`). On failure, return 401 with structured
+ *      `{ error, reason, message }`.
+ *   3. Replay check: if `idempotencyKey` is configured, look up
+ *      `(workflowName, eventId)` in the idempotency cache (same store
+ *      as Tier 1 step caching). On hit, return 200 with
+ *      `{ status: "duplicate", eventId }` and DON'T run the workflow.
+ *   4. Events allowlist: if `events: [...]` is configured, skip
+ *      workflow runs whose event type isn't in the list — return
+ *      200 with `{ status: "ignored", eventType }` so the sender
+ *      doesn't retry.
+ *   5. Run the workflow through `TriggerBase.run` so middleware,
+ *      tracing, retries, concurrency, etc. apply uniformly.
+ *   6. Cache the eventId so a retry within the TTL window returns
+ *      the duplicate response.
+ *
+ * **Hono integration:** identical to WebSocket and SSE — accepts the
+ * shared `Hono<any, any, any>` app and an optional `HttpTriggerLike`
+ * exposing `addPreCatchAllHook` so webhook routes mount BEFORE the
+ * legacy `/:workflow{.+}` catch-all and win Hono's first-match
+ * dispatch.
+ *
+ * See [additional-triggers-plan.mdx](../../../docs/c/devtools/additional-triggers-plan.mdx#webhook-trigger)
+ * for the full v0.7 design.
  */
 
-import crypto from "node:crypto";
-import type { HelperResponse, WebhookTriggerOpts } from "@blokjs/helper";
 import {
-	type BlokService,
 	DefaultLogger,
-	type GlobalOptions,
-	NodeMap,
+	RunTracker,
+	type GlobalOptions as RunnerGlobalOptions,
 	TriggerBase,
-	type TriggerResponse,
+	WorkflowRegistry,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
+import type { Hono, Context as HonoContext } from "hono";
 import { v4 as uuid } from "uuid";
 
-/**
- * Webhook event structure
- */
-export interface WebhookEvent {
-	/** Unique event ID */
-	id: string;
-	/** Source service (github, stripe, shopify, custom) */
-	source: string;
-	/** Event type (e.g., push, payment_intent.succeeded) */
-	eventType: string;
-	/** Event payload */
-	payload: unknown;
-	/** Request headers */
-	headers: Record<string, string>;
-	/** Signature (if provided) */
-	signature?: string;
-	/** Timestamp */
-	timestamp: Date;
-	/** Raw request body */
-	rawBody: string;
-}
+import { BUILTIN_VERIFIERS, type Verifier, type VerifyResult, buildCustomVerifier } from "./verifiers";
 
-/**
- * Signature verification result
- */
-export interface VerificationResult {
-	valid: boolean;
-	error?: string;
-}
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
 
-/**
- * Webhook source handlers
- */
-export interface WebhookSourceHandler {
-	/** Extract event type from request */
-	getEventType(headers: Record<string, string>, body: unknown): string;
-	/** Get signature from request */
-	getSignature(headers: Record<string, string>): string | undefined;
-	/** Verify signature */
-	verifySignature(rawBody: string, signature: string, secret: string): VerificationResult;
-	/** Get event ID */
-	getEventId(headers: Record<string, string>, body: unknown): string;
-}
-
-/**
- * Workflow model with webhook trigger configuration
- */
-interface WebhookWorkflowModel {
-	path: string;
-	config: {
-		name: string;
-		version: string;
-		trigger?: {
-			webhook?: WebhookTriggerOpts;
-			[key: string]: unknown;
-		};
-		[key: string]: unknown;
+interface WebhookTriggerConfig {
+	provider?: "github" | "stripe" | "slack" | "shopify" | "svix";
+	path?: string;
+	events?: string[];
+	secretEnv?: string;
+	signature?: {
+		scheme?: "hmac-sha256" | "hmac-sha1" | "hmac-sha512";
+		header: string;
+		format?: string;
+		secretEnv: string;
+		tolerance?: number;
+		timestampHeader?: string;
 	};
+	tolerance?: number;
+	idempotencyKey?: string;
+	namespace?: string;
+	middleware?: string[];
 }
 
-/**
- * Built-in source handlers
- */
-const sourceHandlers: Record<string, WebhookSourceHandler> = {
-	github: {
-		getEventType: (headers) => headers["x-github-event"] || "unknown",
-		getSignature: (headers) => headers["x-hub-signature-256"] || headers["x-hub-signature"],
-		verifySignature: (rawBody, signature, secret) => {
-			const hmac = crypto.createHmac("sha256", secret);
-			const digest = `sha256=${hmac.update(rawBody).digest("hex")}`;
-			const sigBuffer = Buffer.from(signature);
-			const digestBuffer = Buffer.from(digest);
-			// Length check first to avoid timing attack on length
-			if (sigBuffer.length !== digestBuffer.length) {
-				return { valid: false, error: "Invalid GitHub signature" };
-			}
-			const valid = crypto.timingSafeEqual(sigBuffer, digestBuffer);
-			return { valid, error: valid ? undefined : "Invalid GitHub signature" };
-		},
-		getEventId: (headers) => headers["x-github-delivery"] || uuid(),
-	},
+interface HttpTriggerLike {
+	addPreCatchAllHook(cb: () => void | Promise<void>): void;
+}
 
-	stripe: {
-		getEventType: (_, body) => (body as { type?: string })?.type || "unknown",
-		getSignature: (headers) => headers["stripe-signature"],
-		verifySignature: (rawBody, signature, secret) => {
-			// Stripe signature format: t=timestamp,v1=signature
-			const parts = signature.split(",").reduce(
-				(acc, part) => {
-					const [key, value] = part.split("=");
-					acc[key] = value;
-					return acc;
-				},
-				{} as Record<string, string>,
-			);
+const DEFAULT_TOLERANCE_SEC = 300;
+const DEFAULT_REPLAY_TTL_MS = 5 * 60 * 1000; // 5 min — match Stripe / Svix default.
+const REPLAY_NAMESPACE = "__webhook__";
 
-			const timestamp = parts.t;
-			const expectedSig = parts.v1;
+// -----------------------------------------------------------------------------
+// Trigger class
+// -----------------------------------------------------------------------------
 
-			if (!timestamp || !expectedSig) {
-				return { valid: false, error: "Invalid Stripe signature format" };
-			}
-
-			const payload = `${timestamp}.${rawBody}`;
-			const hmac = crypto.createHmac("sha256", secret);
-			const computedSig = hmac.update(payload).digest("hex");
-
-			const sigBuffer = Buffer.from(expectedSig);
-			const computedBuffer = Buffer.from(computedSig);
-			if (sigBuffer.length !== computedBuffer.length) {
-				return { valid: false, error: "Invalid Stripe signature" };
-			}
-			const valid = crypto.timingSafeEqual(sigBuffer, computedBuffer);
-			return { valid, error: valid ? undefined : "Invalid Stripe signature" };
-		},
-		getEventId: (_, body) => (body as { id?: string })?.id || uuid(),
-	},
-
-	shopify: {
-		getEventType: (headers) => headers["x-shopify-topic"] || "unknown",
-		getSignature: (headers) => headers["x-shopify-hmac-sha256"],
-		verifySignature: (rawBody, signature, secret) => {
-			const hmac = crypto.createHmac("sha256", secret);
-			const digest = hmac.update(rawBody, "utf8").digest("base64");
-			const sigBuffer = Buffer.from(signature, "base64");
-			const digestBuffer = Buffer.from(digest, "base64");
-			if (sigBuffer.length !== digestBuffer.length) {
-				return { valid: false, error: "Invalid Shopify signature" };
-			}
-			const valid = crypto.timingSafeEqual(sigBuffer, digestBuffer);
-			return { valid, error: valid ? undefined : "Invalid Shopify signature" };
-		},
-		getEventId: (headers) => headers["x-shopify-webhook-id"] || uuid(),
-	},
-
-	custom: {
-		getEventType: (headers, body) => headers["x-event-type"] || (body as { event?: string })?.event || "custom",
-		getSignature: (headers) => headers["x-signature"] || headers["x-webhook-signature"],
-		verifySignature: (rawBody, signature, secret) => {
-			// Default: HMAC-SHA256
-			const hmac = crypto.createHmac("sha256", secret);
-			const digest = hmac.update(rawBody).digest("hex");
-			const valid = signature === digest || signature === `sha256=${digest}`;
-			return { valid, error: valid ? undefined : "Invalid signature" };
-		},
-		getEventId: (headers, body) => headers["x-event-id"] || (body as { id?: string })?.id || uuid(),
-	},
-};
-
-/**
- * WebhookTrigger - Handle webhook events
- */
-export abstract class WebhookTrigger extends TriggerBase {
-	protected nodeMap: GlobalOptions = {} as GlobalOptions;
+export default class WebhookTrigger extends TriggerBase {
+	protected nodeMap: RunnerGlobalOptions = {} as RunnerGlobalOptions;
+	protected readonly logger = new DefaultLogger();
 	protected readonly tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-webhook-workflow",
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
-	protected readonly logger = new DefaultLogger();
-	protected webhookWorkflows: WebhookWorkflowModel[] = [];
 
-	// Subclasses provide these
-	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
+	private readonly meter = metrics.getMeter("blok");
+	private readonly counterReceived = this.meter.createCounter("blok_webhook_received_total", {
+		description: "Webhook deliveries received (cumulative).",
+		unit: "1",
+	});
+	private readonly counterRejected = this.meter.createCounter("blok_webhook_rejected_total", {
+		description: "Webhook deliveries rejected (signature failure, allowlist miss, replay).",
+		unit: "1",
+	});
+	private readonly counterAccepted = this.meter.createCounter("blok_webhook_accepted_total", {
+		description: "Webhook deliveries that triggered a workflow run.",
+		unit: "1",
+	});
 
-	constructor() {
+	// biome-ignore lint/suspicious/noExplicitAny: Hono's generic propagation
+	private readonly app: Hono<any, any, any>;
+	private readonly httpTrigger: HttpTriggerLike | null;
+
+	private wired = false;
+
+	// biome-ignore lint/suspicious/noExplicitAny: matches `app` field's any generic
+	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike) {
 		super();
-		this.loadNodes();
-		this.loadWorkflows();
+		this.app = app;
+		this.httpTrigger = httpTrigger ?? null;
+		_setActiveWebhookTrigger(this);
 	}
 
 	/**
-	 * Load nodes into the node map
+	 * Inject the runner's GlobalOptions (nodes + workflows). Called by
+	 * the orchestrator AFTER constructing the trigger but BEFORE
+	 * `listen()`. Shares HttpTrigger's nodeMap so per-request workflow
+	 * runs resolve helpers + sub-workflows through the same registry.
 	 */
-	loadNodes(): void {
-		this.nodeMap.nodes = new NodeMap();
-		const nodeKeys = Object.keys(this.nodes);
-		for (const key of nodeKeys) {
-			this.nodeMap.nodes.addNode(key, this.nodes[key]);
-		}
+	setNodeMap(nodeMap: RunnerGlobalOptions): void {
+		this.nodeMap = nodeMap;
 	}
 
-	/**
-	 * Load workflows into the workflow map
-	 */
-	loadWorkflows(): void {
-		this.nodeMap.workflows = this.workflows;
-	}
-
-	/**
-	 * Initialize webhook trigger (call after loading workflows)
-	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
-
-		// Find all workflows with webhook triggers
-		this.webhookWorkflows = this.getWebhookWorkflows();
-
-		if (this.webhookWorkflows.length === 0) {
-			this.logger.log("No workflows with webhook triggers found");
-		} else {
-			this.logger.log(`Webhook trigger initialized. ${this.webhookWorkflows.length} workflow(s) registered`);
+		if (this.wired) {
+			this.logger.log("[blok][webhook] listen() called twice; ignoring");
+			return this.endCounter(startTime);
 		}
+		this.wired = true;
 
-		// Enable HMR in development mode
-		if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
-			await this.enableHotReload();
+		if (this.httpTrigger) {
+			this.httpTrigger.addPreCatchAllHook(() => {
+				this.registerRoutesFromRegistry();
+			});
+		} else {
+			this.registerRoutesFromRegistry();
 		}
 
 		return this.endCounter(startTime);
 	}
 
-	/**
-	 * Stop the webhook trigger
-	 */
 	async stop(): Promise<void> {
-		this.webhookWorkflows = [];
-		this.logger.log("Webhook trigger stopped");
+		this.wired = false;
+		if (_getActiveWebhookTrigger() === this) _setActiveWebhookTrigger(null);
+		this.destroyMonitoring();
+		this.logger.log("[blok][webhook] stopped");
 	}
 
-	protected override async onHmrWorkflowChange(): Promise<void> {
-		this.loadWorkflows();
-		this.webhookWorkflows = this.getWebhookWorkflows();
-		this.logger.log(`[HMR] Webhook workflows reloaded. ${this.webhookWorkflows.length} workflow(s) registered`);
+	// ---------------------------------------------------------------------------
+	// Route registration
+	// ---------------------------------------------------------------------------
+
+	private registerRoutesFromRegistry(): void {
+		const workflows = this.getWebhookWorkflows();
+		if (workflows.length === 0) {
+			this.logger.log("[blok][webhook] no workflows with trigger.webhook found");
+			return;
+		}
+		this.logger.log(`[blok][webhook] registering ${workflows.length} webhook route(s):`);
+		for (const entry of workflows) {
+			this.registerWebhookRoute(entry);
+		}
 	}
 
-	/**
-	 * Process an incoming webhook request
-	 * Call this from your HTTP endpoint handler
-	 */
-	async handleWebhook(
-		source: string,
-		rawBody: string,
-		headers: Record<string, string>,
-	): Promise<TriggerResponse | null> {
-		const handler = sourceHandlers[source] || sourceHandlers.custom;
+	private registerWebhookRoute(entry: { workflowName: string; config: WebhookTriggerConfig }): void {
+		const { workflowName, config } = entry;
+		const path = config.path ?? (config.provider ? `/webhooks/${config.provider}` : `/webhooks/${workflowName}`);
+		const label = config.provider ?? "custom";
+		this.logger.log(`[blok][webhook]   POST    ${path}  ←  ${workflowName}  (${label})`);
 
-		// Parse body
-		let body: unknown;
-		try {
-			body = JSON.parse(rawBody);
-		} catch {
-			body = rawBody;
+		this.app.post(path, (c: HonoContext) => this.handleRequest(c, workflowName, path, config));
+	}
+
+	private async handleRequest(
+		c: HonoContext,
+		workflowName: string,
+		path: string,
+		config: WebhookTriggerConfig,
+	): Promise<Response> {
+		this.counterReceived.add(1, { workflow_name: workflowName });
+
+		// 1. Capture raw body BEFORE parsing — verifiers sign the wire bytes.
+		const rawBody = await c.req.text();
+		let parsedBody: unknown = {};
+		if (rawBody.length > 0) {
+			try {
+				parsedBody = JSON.parse(rawBody) as unknown;
+			} catch {
+				// Non-JSON body — leave parsed as the raw text. Slack
+				// challenges & Shopify can post non-JSON occasionally.
+				parsedBody = rawBody;
+			}
 		}
 
-		// Create webhook event
-		const event: WebhookEvent = {
-			id: handler.getEventId(headers, body),
-			source,
-			eventType: handler.getEventType(headers, body),
-			payload: body,
+		const headers = Object.fromEntries(c.req.raw.headers);
+		const pathParams = c.req.param() as Record<string, string>;
+		const queryParams = Object.fromEntries(new URL(c.req.url).searchParams);
+
+		// 2. Pick the verifier.
+		const verifier = this.resolveVerifier(workflowName, config);
+		if (!verifier) {
+			this.counterRejected.add(1, { workflow_name: workflowName, reason: "no_verifier" });
+			return c.json({ error: "Configuration", reason: "no_verifier", message: "No verifier configured" }, 500);
+		}
+
+		// 3. Resolve the secret from the env var.
+		const secretEnv = config.secretEnv ?? config.signature?.secretEnv;
+		const secret = secretEnv ? (process.env[secretEnv] ?? "") : "";
+
+		// 4. Verify.
+		const toleranceSec = config.tolerance ?? config.signature?.tolerance ?? DEFAULT_TOLERANCE_SEC;
+		const result: VerifyResult = verifier.verify({
 			headers,
-			signature: handler.getSignature(headers),
-			timestamp: new Date(),
 			rawBody,
-		};
+			parsedBody,
+			secret,
+			toleranceSec,
+		});
 
-		// Find matching workflow
-		const workflow = this.findMatchingWorkflow(event);
-		if (!workflow) {
-			this.logger.log(`No matching workflow for webhook: ${source}/${event.eventType}`);
-			return null;
+		if (!result.ok) {
+			this.counterRejected.add(1, { workflow_name: workflowName, reason: result.reason });
+			this.logger.error(
+				`[blok][webhook] ${workflowName}: verify failed reason=${result.reason} message="${result.message}"`,
+			);
+			return c.json({ error: "Unauthorized", reason: result.reason, message: result.message }, 401);
 		}
 
-		const config = workflow.config.trigger?.webhook as WebhookTriggerOpts;
+		// 5. Events allowlist — verified-but-out-of-scope returns 200 (no retry).
+		if (Array.isArray(config.events) && config.events.length > 0 && !config.events.includes(result.eventType)) {
+			this.counterRejected.add(1, { workflow_name: workflowName, reason: "event_not_allowed" });
+			return c.json({ status: "ignored", reason: "event_not_allowed", eventType: result.eventType }, 200);
+		}
 
-		// Verify signature if secret is configured
-		if (config.secret && event.signature) {
-			const verification = handler.verifySignature(rawBody, event.signature, config.secret);
-			if (!verification.valid) {
-				this.logger.error(`Webhook signature verification failed: ${verification.error}`);
-				throw new Error(`Signature verification failed: ${verification.error}`);
+		// 6. Replay protection via the idempotency cache.
+		if (config.idempotencyKey && result.eventId) {
+			const tracker = RunTracker.getInstance();
+			const store = tracker.getStore();
+			const cached = store.getIdempotencyCache(REPLAY_NAMESPACE, workflowName, result.eventId);
+			if (cached) {
+				this.counterRejected.add(1, { workflow_name: workflowName, reason: "replay" });
+				return c.json(
+					{
+						status: "duplicate",
+						eventId: result.eventId,
+						eventType: result.eventType,
+						firstSeenRunId: cached.sourceRunId,
+					},
+					200,
+				);
 			}
-		} else if (config.secret && !event.signature) {
-			this.logger.error("Webhook signature missing but secret is configured");
-			throw new Error("Signature missing");
 		}
 
-		return this.executeWorkflow(event, workflow, config);
+		// 7. Verified + new event — dispatch the workflow.
+		this.counterAccepted.add(1, { workflow_name: workflowName });
+		const requestId = uuid();
+		const dispatchOutcome = await this.dispatchWorkflow({
+			workflowName,
+			path,
+			config,
+			requestId,
+			headers,
+			body: parsedBody,
+			rawBody,
+			pathParams,
+			queryParams,
+			eventId: result.eventId,
+			eventType: result.eventType,
+		});
+
+		// 8. Cache event id AFTER successful dispatch so retries on the
+		//    same delivery are deduped. We cache even on workflow failure
+		//    — webhook senders should not retry deliveries they've
+		//    already delivered (the workflow's own retry / DLQ owns that).
+		if (config.idempotencyKey && result.eventId) {
+			const tracker = RunTracker.getInstance();
+			const store = tracker.getStore();
+			store.setIdempotencyCache(REPLAY_NAMESPACE, workflowName, result.eventId, {
+				data: { eventId: result.eventId, eventType: result.eventType },
+				cachedAt: Date.now(),
+				expiresAt: Date.now() + DEFAULT_REPLAY_TTL_MS,
+				sourceRunId: requestId,
+				sourceNodeRunId: requestId,
+			});
+		}
+
+		// 9. Shape the response. Workflow's `ctx.response` lands in the
+		//    body for parity with HTTP triggers.
+		return c.json(
+			{
+				status: "ok",
+				eventId: result.eventId,
+				eventType: result.eventType,
+				runId: requestId,
+				response: dispatchOutcome,
+			},
+			200,
+		);
 	}
 
-	/**
-	 * Get all workflows that have webhook triggers
-	 */
-	protected getWebhookWorkflows(): WebhookWorkflowModel[] {
-		const workflows: WebhookWorkflowModel[] = [];
-
-		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			const workflowConfig = (workflow as unknown as { _config: WebhookWorkflowModel["config"] })._config;
-
-			if (workflowConfig?.trigger) {
-				const triggerType = Object.keys(workflowConfig.trigger)[0];
-
-				if (triggerType === "webhook" && workflowConfig.trigger.webhook) {
-					workflows.push({
-						path,
-						config: workflowConfig,
-					});
-				}
+	private resolveVerifier(workflowName: string, config: WebhookTriggerConfig): Verifier | null {
+		if (config.provider) {
+			const v = BUILTIN_VERIFIERS[config.provider];
+			if (!v) {
+				this.logger.error(`[blok][webhook] ${workflowName}: unknown provider "${config.provider}"`);
+				return null;
 			}
+			return v;
 		}
-
-		return workflows;
-	}
-
-	/**
-	 * Find workflow matching the webhook event
-	 */
-	protected findMatchingWorkflow(event: WebhookEvent): WebhookWorkflowModel | null {
-		for (const workflow of this.webhookWorkflows) {
-			const config = workflow.config.trigger?.webhook;
-			if (!config) continue;
-
-			// Check source match
-			if (config.source !== event.source) continue;
-
-			// Check event type match
-			if (config.events && config.events.length > 0) {
-				const matches = config.events.some((pattern) => {
-					// Support wildcards (e.g., "push", "pull_request.*")
-					if (pattern === "*") return true;
-					if (pattern.endsWith(".*")) {
-						const prefix = pattern.slice(0, -2);
-						return event.eventType.startsWith(prefix);
-					}
-					return pattern === event.eventType;
-				});
-				if (!matches) continue;
-			}
-
-			return workflow;
+		if (config.signature) {
+			return buildCustomVerifier({
+				scheme: config.signature.scheme ?? "hmac-sha256",
+				header: config.signature.header,
+				format: config.signature.format ?? "{hex}",
+				secretEnv: config.signature.secretEnv,
+				tolerance: config.signature.tolerance ?? DEFAULT_TOLERANCE_SEC,
+				timestampHeader: config.signature.timestampHeader,
+			});
 		}
-
 		return null;
 	}
 
-	/**
-	 * Execute a workflow for a webhook event
-	 */
-	protected async executeWorkflow(
-		event: WebhookEvent,
-		workflow: WebhookWorkflowModel,
-		_config: WebhookTriggerOpts,
-	): Promise<TriggerResponse> {
-		const executionId = uuid();
+	// ---------------------------------------------------------------------------
+	// Workflow dispatch
+	// ---------------------------------------------------------------------------
 
-		const defaultMeter = metrics.getMeter("default");
-		const webhookExecutions = defaultMeter.createCounter("webhook_executions", {
-			description: "Webhook executions",
-		});
-		const webhookErrors = defaultMeter.createCounter("webhook_errors", {
-			description: "Webhook execution errors",
-		});
+	private async dispatchWorkflow(opts: {
+		workflowName: string;
+		path: string;
+		config: WebhookTriggerConfig;
+		requestId: string;
+		headers: Record<string, string>;
+		body: unknown;
+		rawBody: string;
+		pathParams: Record<string, string>;
+		queryParams: Record<string, string>;
+		eventId: string;
+		eventType: string;
+	}): Promise<unknown> {
+		const { workflowName, requestId, headers, body, rawBody, pathParams, queryParams, eventId, eventType } = opts;
 
-		return new Promise((resolve) => {
-			this.tracer.startActiveSpan(`webhook:${event.source}/${event.eventType}`, async (span: Span) => {
-				try {
-					const start = performance.now();
-
-					// Initialize configuration for this workflow
-					await this.configuration.init(workflow.path, this.nodeMap);
-
-					// Create context
-					const ctx: Context = this.createContext(undefined, workflow.path, executionId);
-
-					// Populate request with webhook event
-					ctx.request = {
-						body: event.payload,
-						headers: event.headers,
-						query: {},
-						params: {
-							source: event.source,
-							eventType: event.eventType,
-							eventId: event.id,
-						},
-					} as unknown as RequestContext;
-
-					// Store webhook context in vars
-					if (!ctx.vars) ctx.vars = {};
-					ctx.vars._webhook_event = {
-						id: event.id,
-						source: event.source,
-						eventType: event.eventType,
-						timestamp: event.timestamp.toISOString(),
-						hasSignature: String(!!event.signature),
-					};
-
-					ctx.logger.log(`Processing webhook: ${event.source}/${event.eventType} (${event.id})`);
-
-					// Execute workflow
-					const response: TriggerResponse = await this.run(ctx);
-					const end = performance.now();
-
-					// Set span attributes
-					span.setAttribute("success", true);
-					span.setAttribute("event_id", event.id);
-					span.setAttribute("source", event.source);
-					span.setAttribute("event_type", event.eventType);
-					span.setAttribute("workflow_path", workflow.path);
-					span.setAttribute("elapsed_ms", end - start);
-					span.setStatus({ code: SpanStatusCode.OK });
-
-					// Record metrics
-					webhookExecutions.add(1, {
-						env: process.env.NODE_ENV,
-						source: event.source,
-						event_type: event.eventType,
-						workflow_name: this.configuration.name,
-						success: "true",
-					});
-
-					ctx.logger.log(`Webhook processed in ${(end - start).toFixed(2)}ms: ${event.id}`);
-
-					resolve(response);
-				} catch (error) {
-					const errorMessage = (error as Error).message;
-
-					// Set span error
-					span.setAttribute("success", false);
-					span.recordException(error as Error);
-					span.setStatus({ code: SpanStatusCode.ERROR, message: errorMessage });
-
-					// Record error metrics
-					webhookErrors.add(1, {
-						env: process.env.NODE_ENV,
-						source: event.source,
-						event_type: event.eventType,
-						workflow_name: this.configuration?.name || "unknown",
-					});
-
-					this.logger.error(`Webhook failed ${event.id}: ${errorMessage}`, (error as Error).stack);
-
-					throw error;
-				} finally {
-					span.end();
+		return this.tracer.startActiveSpan(`webhook:${workflowName}`, async (span: Span) => {
+			try {
+				const registry = WorkflowRegistry.getInstance();
+				const entry = registry.get(workflowName);
+				if (!entry) {
+					throw new Error(`[blok][webhook] workflow "${workflowName}" not found in registry`);
 				}
-			});
+				await this.configuration.init(workflowName, this.nodeMap, entry.workflow);
+
+				const ctx: Context = this.createContext(undefined, workflowName, requestId);
+				ctx.request = {
+					body,
+					rawBody,
+					headers,
+					params: pathParams,
+					query: queryParams,
+				} as unknown as RequestContext;
+
+				// Stamp webhook metadata onto ctx so polymorphic dispatch
+				// can read namespace + event metadata uniformly.
+				(ctx as Record<string, unknown>)._webhook = {
+					eventId,
+					eventType,
+					namespace: opts.config.namespace,
+				};
+
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
+				await this.run(ctx);
+
+				span.setAttribute("workflow_name", workflowName);
+				span.setAttribute("event_id", eventId);
+				span.setAttribute("event_type", eventType);
+				span.setStatus({ code: SpanStatusCode.OK });
+				return ctx.response;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				span.recordException(err as Error);
+				span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
+				this.logger.error(`[blok][webhook] workflow ${workflowName} failed: ${msg}`);
+				return { error: msg };
+			} finally {
+				span.end();
+			}
 		});
 	}
 
-	/**
-	 * Register a custom source handler
-	 */
-	static registerSourceHandler(source: string, handler: WebhookSourceHandler): void {
-		sourceHandlers[source] = handler;
+	// ---------------------------------------------------------------------------
+	// Introspection
+	// ---------------------------------------------------------------------------
+
+	getStats(): { workflowsRegistered: number } {
+		return { workflowsRegistered: this.getWebhookWorkflows().length };
+	}
+
+	private getWebhookWorkflows(): Array<{ workflowName: string; config: WebhookTriggerConfig }> {
+		const registry = WorkflowRegistry.getInstance();
+		const out: Array<{ workflowName: string; config: WebhookTriggerConfig }> = [];
+		for (const entry of registry.list()) {
+			const wf = entry.workflow as { trigger?: { webhook?: WebhookTriggerConfig } } | undefined;
+			const cfg = wf?.trigger?.webhook;
+			if (!cfg) continue;
+			// Skip configs missing both provider AND signature — they can't
+			// verify anything. Authors get a structured error at boot.
+			if (!cfg.provider && !cfg.signature) {
+				this.logger.error(
+					`[blok][webhook] workflow "${entry.name}" has trigger.webhook with neither \`provider\` nor \`signature\` — skipping. Add one to enable signature verification.`,
+				);
+				continue;
+			}
+			out.push({ workflowName: entry.name, config: cfg });
+		}
+		return out;
 	}
 }
 
-export default WebhookTrigger;
-export { sourceHandlers };
+// -----------------------------------------------------------------------------
+// Singleton accessor (mirrors WS / SSE)
+// -----------------------------------------------------------------------------
+
+let activeTrigger: WebhookTrigger | null = null;
+
+export function _setActiveWebhookTrigger(trigger: WebhookTrigger | null): void {
+	activeTrigger = trigger;
+}
+
+export function _getActiveWebhookTrigger(): WebhookTrigger | null {
+	return activeTrigger;
+}
+
+export type { WebhookTriggerConfig };

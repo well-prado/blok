@@ -1,163 +1,252 @@
 /**
- * WebhookTrigger Tests
+ * WebhookTrigger — v0.7 PR 4 — unit tests for the public surface.
+ *
+ * Covers construction, the pre-catch-all hook coordination contract
+ * with HttpTrigger, route discovery via WorkflowRegistry, idempotent
+ * listen(), and the singleton helper accessor. End-to-end coverage
+ * (real HTTP POST with a signed Stripe-shaped payload + replay
+ * dedup) lives in `WebhookTrigger.integration.test.ts`.
  */
 
-import crypto from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { sourceHandlers } from "./WebhookTrigger";
+import { createHmac } from "node:crypto";
+import { WorkflowRegistry } from "@blokjs/runner";
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("WebhookTrigger", () => {
-	describe("WebhookEvent Interface", () => {
-		it("should accept valid webhook event structure", () => {
-			const event = {
-				id: "event-123",
-				source: "github",
-				eventType: "push",
-				payload: { ref: "refs/heads/main" },
-				headers: { "x-github-event": "push" },
-				signature: "sha256=abc123",
-				timestamp: new Date(),
-				rawBody: '{"ref":"refs/heads/main"}',
-			};
+vi.mock("@opentelemetry/api", () => ({
+	trace: {
+		getTracer: () => ({
+			startActiveSpan: (_name: string, fn: (span: unknown) => unknown) =>
+				fn({ setAttribute: vi.fn(), setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() }),
+		}),
+	},
+	metrics: {
+		getMeter: () => ({
+			createCounter: () => ({ add: vi.fn() }),
+			createHistogram: () => ({ record: vi.fn() }),
+			createGauge: () => ({ record: vi.fn() }),
+			createObservableGauge: () => ({ addCallback: vi.fn() }),
+		}),
+	},
+	SpanStatusCode: { OK: 0, ERROR: 1 },
+}));
 
-			expect(event.id).toBe("event-123");
-			expect(event.source).toBe("github");
-			expect(event.eventType).toBe("push");
-		});
-	});
-});
+import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger";
 
-describe("Source Handlers", () => {
-	describe("GitHub Handler", () => {
-		const handler = sourceHandlers.github;
+const SECRET = "shhh-its-a-secret-1234567890";
 
-		it("should extract event type from headers", () => {
-			const headers = { "x-github-event": "push" };
-			expect(handler.getEventType(headers, {})).toBe("push");
-		});
+function hmacHex(data: string, secret = SECRET): string {
+	return createHmac("sha256", secret).update(data).digest("hex");
+}
 
-		it("should extract signature from headers", () => {
-			const headers = { "x-hub-signature-256": "sha256=abc123" };
-			expect(handler.getSignature(headers)).toBe("sha256=abc123");
-		});
-
-		it("should verify valid signature", () => {
-			const secret = "my-secret";
-			const rawBody = '{"action":"created"}';
-			const hmac = crypto.createHmac("sha256", secret);
-			const signature = `sha256=${hmac.update(rawBody).digest("hex")}`;
-
-			const result = handler.verifySignature(rawBody, signature, secret);
-			expect(result.valid).toBe(true);
-		});
-
-		it("should reject invalid signature", () => {
-			const result = handler.verifySignature('{"action":"created"}', "sha256=invalid", "my-secret");
-			expect(result.valid).toBe(false);
-		});
-
-		it("should extract event ID from headers", () => {
-			const headers = { "x-github-delivery": "delivery-123" };
-			expect(handler.getEventId(headers, {})).toBe("delivery-123");
-		});
+describe("WebhookTrigger — v0.7 PR 4", () => {
+	beforeEach(() => {
+		WorkflowRegistry.resetInstance();
+		_setActiveWebhookTrigger(null);
+		process.env.GH_SECRET = SECRET;
 	});
 
-	describe("Stripe Handler", () => {
-		const handler = sourceHandlers.stripe;
+	afterEach(() => {
+		_setActiveWebhookTrigger(null);
+		process.env.GH_SECRET = undefined;
+	});
 
-		it("should extract event type from body", () => {
-			const body = { type: "payment_intent.succeeded" };
-			expect(handler.getEventType({}, body)).toBe("payment_intent.succeeded");
+	describe("constructor()", () => {
+		it("registers as the active webhook trigger singleton", () => {
+			const app = new Hono();
+			const trigger = new WebhookTrigger(app);
+			expect(trigger).toBeDefined();
+			expect(_getActiveWebhookTrigger()).toBe(trigger);
 		});
 
-		it("should extract signature from headers", () => {
-			const headers = { "stripe-signature": "t=123,v1=abc" };
-			expect(handler.getSignature(headers)).toBe("t=123,v1=abc");
-		});
-
-		it("should verify valid Stripe signature", () => {
-			const secret = "whsec_test";
-			const rawBody = '{"type":"test"}';
-			const timestamp = Math.floor(Date.now() / 1000);
-			const payload = `${timestamp}.${rawBody}`;
-			const hmac = crypto.createHmac("sha256", secret);
-			const sig = hmac.update(payload).digest("hex");
-			const signature = `t=${timestamp},v1=${sig}`;
-
-			const result = handler.verifySignature(rawBody, signature, secret);
-			expect(result.valid).toBe(true);
-		});
-
-		it("should extract event ID from body", () => {
-			const body = { id: "evt_123" };
-			expect(handler.getEventId({}, body)).toBe("evt_123");
+		it("accepts an optional httpTrigger for pre-catch-all coordination", () => {
+			const app = new Hono();
+			const addPreCatchAllHook = vi.fn();
+			const httpTrigger = { addPreCatchAllHook };
+			const trigger = new WebhookTrigger(app, httpTrigger);
+			expect(trigger).toBeDefined();
+			expect(addPreCatchAllHook).not.toHaveBeenCalled();
 		});
 	});
 
-	describe("Shopify Handler", () => {
-		const handler = sourceHandlers.shopify;
+	describe("listen()", () => {
+		it("registers a POST route per webhook workflow in the registry", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "gh-events",
+				source: "/test/gh.json",
+				workflow: {
+					name: "gh-events",
+					version: "1.0.0",
+					trigger: { webhook: { provider: "github", path: "/webhooks/github", secretEnv: "GH_SECRET" } },
+					steps: [],
+				},
+			});
 
-		it("should extract event type from headers", () => {
-			const headers = { "x-shopify-topic": "orders/create" };
-			expect(handler.getEventType(headers, {})).toBe("orders/create");
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
+
+			// Send a valid signed POST — should at least not 404.
+			const body = JSON.stringify({ ref: "refs/heads/main" });
+			const res = await app.fetch(
+				new Request("http://localhost/webhooks/github", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						"x-hub-signature-256": `sha256=${hmacHex(body)}`,
+						"x-github-event": "push",
+						"x-github-delivery": "delivery-1",
+					},
+					body,
+				}),
+			);
+			expect(res.status).not.toBe(404);
 		});
 
-		it("should extract signature from headers", () => {
-			const headers = { "x-shopify-hmac-sha256": "abc123base64==" };
-			expect(handler.getSignature(headers)).toBe("abc123base64==");
+		it("skips workflows without trigger.webhook config", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "http-only",
+				source: "/test/http.json",
+				workflow: {
+					name: "http-only",
+					version: "1.0.0",
+					trigger: { http: { method: "POST", path: "/api/foo" } },
+					steps: [],
+				},
+			});
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
+			// No webhook route mounted — anything not on app returns 404.
+			const res = await app.fetch(new Request("http://localhost/webhooks/anywhere", { method: "POST" }));
+			expect(res.status).toBe(404);
 		});
 
-		it("should extract event ID from headers", () => {
-			const headers = { "x-shopify-webhook-id": "webhook-123" };
-			expect(handler.getEventId(headers, {})).toBe("webhook-123");
+		it("skips workflows with neither `provider` nor `signature`", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "misconfigured",
+				source: "/test/bad.json",
+				workflow: {
+					name: "misconfigured",
+					version: "1.0.0",
+					trigger: { webhook: { path: "/webhooks/bad" } },
+					steps: [],
+				},
+			});
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
+			expect(trigger.getStats().workflowsRegistered).toBe(0);
+		});
+
+		it("registers a pre-catch-all hook on httpTrigger when provided", async () => {
+			const app = new Hono();
+			const addPreCatchAllHook = vi.fn();
+			const httpTrigger = { addPreCatchAllHook };
+			WorkflowRegistry.getInstance().register({
+				name: "gh-events",
+				source: "/test/gh.json",
+				workflow: {
+					name: "gh-events",
+					version: "1.0.0",
+					trigger: { webhook: { provider: "github", path: "/webhooks/github", secretEnv: "GH_SECRET" } },
+					steps: [],
+				},
+			});
+			const trigger = new WebhookTrigger(app, httpTrigger);
+			await trigger.listen();
+			expect(addPreCatchAllHook).toHaveBeenCalledTimes(1);
+			expect(addPreCatchAllHook).toHaveBeenCalledWith(expect.any(Function));
+		});
+
+		it("is idempotent — second listen() call is a no-op", async () => {
+			const app = new Hono();
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
+			await expect(trigger.listen()).resolves.toBeTypeOf("number");
 		});
 	});
 
-	describe("Custom Handler", () => {
-		const handler = sourceHandlers.custom;
+	describe("request handling", () => {
+		it("returns 401 with structured reason when the signature is invalid", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "gh-events",
+				source: "/test/gh.json",
+				workflow: {
+					name: "gh-events",
+					version: "1.0.0",
+					trigger: { webhook: { provider: "github", path: "/webhooks/github", secretEnv: "GH_SECRET" } },
+					steps: [],
+				},
+			});
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
 
-		it("should extract event type from headers or body", () => {
-			expect(handler.getEventType({ "x-event-type": "custom.event" }, {})).toBe("custom.event");
-			expect(handler.getEventType({}, { event: "body.event" })).toBe("body.event");
+			const res = await app.fetch(
+				new Request("http://localhost/webhooks/github", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						"x-hub-signature-256": "sha256=deadbeef",
+						"x-github-event": "push",
+					},
+					body: JSON.stringify({}),
+				}),
+			);
+			expect(res.status).toBe(401);
+			const json = (await res.json()) as { reason?: string };
+			expect(json.reason).toBe("signature_mismatch");
 		});
 
-		it("should extract signature from headers", () => {
-			const headers = { "x-signature": "sig123" };
-			expect(handler.getSignature(headers)).toBe("sig123");
-		});
+		it("returns 200 `ignored` when the event isn't in the allowlist", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "gh-events",
+				source: "/test/gh.json",
+				workflow: {
+					name: "gh-events",
+					version: "1.0.0",
+					trigger: {
+						webhook: {
+							provider: "github",
+							path: "/webhooks/github",
+							secretEnv: "GH_SECRET",
+							events: ["push"],
+						},
+					},
+					steps: [],
+				},
+			});
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
 
-		it("should verify valid custom signature", () => {
-			const secret = "custom-secret";
-			const rawBody = '{"data":"test"}';
-			const hmac = crypto.createHmac("sha256", secret);
-			const signature = hmac.update(rawBody).digest("hex");
-
-			const result = handler.verifySignature(rawBody, signature, secret);
-			expect(result.valid).toBe(true);
+			const body = JSON.stringify({});
+			const res = await app.fetch(
+				new Request("http://localhost/webhooks/github", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						"x-hub-signature-256": `sha256=${hmacHex(body)}`,
+						"x-github-event": "pull_request",
+					},
+					body,
+				}),
+			);
+			expect(res.status).toBe(200);
+			const json = (await res.json()) as { status?: string; reason?: string };
+			expect(json.status).toBe("ignored");
+			expect(json.reason).toBe("event_not_allowed");
 		});
 	});
-});
 
-describe("WebhookTriggerOpts Schema", () => {
-	it("should validate webhook trigger configuration", () => {
-		const validConfig = {
-			source: "github",
-			events: ["push", "pull_request.*"],
-			secret: "my-webhook-secret",
-			path: "/webhooks/github",
-		};
-
-		expect(validConfig.source).toBe("github");
-		expect(validConfig.events).toContain("push");
-		expect(validConfig.secret).toBeDefined();
-	});
-
-	it("should support wildcard events", () => {
-		const config = {
-			source: "stripe",
-			events: ["payment_intent.*", "checkout.session.*"],
-		};
-
-		expect(config.events).toContain("payment_intent.*");
+	describe("stop()", () => {
+		it("clears the singleton", async () => {
+			const app = new Hono();
+			const trigger = new WebhookTrigger(app);
+			await trigger.listen();
+			await trigger.stop();
+			expect(_getActiveWebhookTrigger()).toBeNull();
+		});
 	});
 });
