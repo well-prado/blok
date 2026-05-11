@@ -97,6 +97,8 @@ import {
 	WebhookTriggerOpts,
 	WebhookTriggerOptsSchema,
 	// Worker
+	WorkerProvider,
+	WorkerProviderSchema,
 	WorkerTriggerOpts,
 	WorkerTriggerOptsSchema,
 	concurrencyRefinement,
@@ -207,6 +209,8 @@ export {
 	PubSubProviderSchema,
 	PubSubTriggerOpts,
 	PubSubTriggerOptsSchema,
+	WorkerProvider,
+	WorkerProviderSchema,
 	WorkerTriggerOpts,
 	WorkerTriggerOptsSchema,
 	CronTriggerOpts,

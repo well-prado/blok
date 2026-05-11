@@ -26,7 +26,7 @@ const REPO_ROOT = path.resolve(__dirname, "../../../../..");
 interface ScaffoldWorkflow {
 	label: string;
 	relPath: string;
-	expectedTrigger: "http" | "sse" | "worker" | "queue" | "pubsub";
+	expectedTrigger: "http" | "sse" | "worker" | "pubsub";
 }
 
 const TS_WORKFLOWS: ScaffoldWorkflow[] = [
@@ -54,11 +54,10 @@ const TS_WORKFLOWS: ScaffoldWorkflow[] = [
 		relPath: "triggers/worker/template/src/workflows/jobs/process-job.ts",
 		expectedTrigger: "worker",
 	},
-	{
-		label: "Queue / on-message",
-		relPath: "triggers/queue/template/src/workflows/messages/on-message.ts",
-		expectedTrigger: "queue",
-	},
+	// Queue scaffold workflows removed in v0.7 PR 5 — per Q1 resolution
+	// there's no standalone queue trigger; the existing WorkerTrigger
+	// gained 5 new adapters (kafka/rabbitmq/sqs/redis/pg-boss) instead.
+	// The `queue` trigger scaffold + template is gone too.
 	{
 		label: "Pub-Sub / on-message",
 		relPath: "triggers/pubsub/template/src/workflows/messages/on-message.ts",

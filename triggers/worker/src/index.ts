@@ -10,9 +10,20 @@
  * - Delayed job scheduling
  * - Queue statistics and monitoring
  *
- * Adapters:
- * - BullMQ (Redis-backed, production)
- * - InMemory (development/testing)
+ * Adapters (v0.7+):
+ * - BullMQ        — Redis-backed, ops-style queues (`bullmq` peer dep)
+ * - InMemory      — development / tests (no peer deps)
+ * - NATS          — JetStream durable streams (`nats` peer dep)
+ * - Kafka         — high-throughput streaming (`kafkajs` peer dep)
+ * - RabbitMQ      — reliable enterprise queues (`amqplib` peer dep)
+ * - SQS           — AWS cloud queues (`@aws-sdk/client-sqs` peer dep)
+ * - Redis Streams — when Redis is already in stack (`ioredis` peer dep)
+ * - pg-boss       — no extra infra (`pg-boss` peer dep)
+ *
+ * v0.7+ — pick the adapter per workflow via `trigger.worker.provider`.
+ * `BLOK_WORKER_ADAPTER` env var sets the default. Subclasses can still
+ * set `protected adapter` directly for back-compat with the pre-v0.7
+ * single-adapter pattern.
  *
  * @example BullMQ
  * ```typescript
@@ -62,7 +73,22 @@ export {
 // Adapters
 export { BullMQAdapter, type BullMQConfig } from "./adapters/BullMQAdapter";
 export { InMemoryAdapter } from "./adapters/InMemoryAdapter";
+export { KafkaAdapter, type KafkaConfig } from "./adapters/KafkaAdapter";
 export { NATSWorkerAdapter, type NATSWorkerConfig } from "./adapters/NATSAdapter";
+export { PgBossAdapter, type PgBossConfig } from "./adapters/PgBossAdapter";
+export { RabbitMQAdapter, type RabbitMQConfig } from "./adapters/RabbitMQAdapter";
+export { RedisStreamsAdapter, type RedisStreamsConfig } from "./adapters/RedisStreamsAdapter";
+export { SQSAdapter, type SQSConfig } from "./adapters/SQSAdapter";
+
+// v0.7 PR 5 — factory + pool. Used by WorkerTrigger and exposed for
+// helper nodes (`@blokjs/worker-publish`) that need to enqueue jobs
+// from any workflow without bundling all broker SDKs.
+export {
+	_resetAdapterPoolForTests,
+	createWorkerAdapter,
+	getOrCreateAdapter,
+	resolveProvider,
+} from "./adapters/factory";
 
 // Re-export types from helper for convenience
-export type { WorkerTriggerOpts } from "@blokjs/helper";
+export type { WorkerProvider, WorkerTriggerOpts } from "@blokjs/helper";

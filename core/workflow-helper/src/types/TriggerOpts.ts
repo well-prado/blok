@@ -449,9 +449,34 @@ export type PubSubTriggerOpts = z.input<typeof PubSubTriggerOptsSchema>;
 // Worker Trigger (background jobs)
 // =============================================================================
 
+/**
+ * v0.7 — supported worker adapter providers. `BLOK_WORKER_ADAPTER`
+ * env var sets the default when `provider` is omitted on the workflow
+ * (per Q7 resolution). `in-memory` is the dev/test fallback.
+ *
+ * `nats` and `bullmq` shipped pre-v0.7. The other five (kafka,
+ * rabbitmq, sqs, redis, pg-boss) are new in PR 5 — each ships behind a
+ * peer-dependency so workflows that don't use that provider don't
+ * pay the install cost.
+ */
+export const WorkerProviderSchema = z.enum([
+	"in-memory",
+	"nats",
+	"bullmq",
+	"kafka",
+	"rabbitmq",
+	"sqs",
+	"redis",
+	"pg-boss",
+]);
+export type WorkerProvider = z.infer<typeof WorkerProviderSchema>;
+
 export const WorkerTriggerOptsSchema = z
 	.object({
-		queue: z.string().describe("Worker queue name"),
+		queue: z.string().describe("Worker queue / topic / stream name (provider-specific semantics)."),
+		provider: WorkerProviderSchema.optional().describe(
+			"v0.7 — selects the broker adapter at runtime. Defaults to `BLOK_WORKER_ADAPTER` env var or `in-memory` when neither is set. Each adapter except `in-memory` requires its broker client library as a peer dependency (bullmq / kafkajs / amqplib / @aws-sdk/client-sqs / ioredis / pg-boss / nats).",
+		),
 		concurrency: z
 			.number()
 			.default(1)
@@ -462,6 +487,30 @@ export const WorkerTriggerOptsSchema = z
 		timeout: z.number().optional().describe("Job timeout in milliseconds"),
 		retries: z.number().default(3).describe("Number of retry attempts"),
 		priority: z.number().default(0).describe("Job priority (higher = more priority)"),
+		consumerGroup: z
+			.string()
+			.optional()
+			.describe(
+				"Provider-specific consumer-group / subscriber identifier. Required for Kafka, optional but recommended for NATS JetStream / Redis Streams. Lets multiple processes share the work for a given queue/topic.",
+			),
+		ack: z
+			.boolean()
+			.optional()
+			.describe(
+				"v0.7 — when true (default per provider), the adapter ACKs messages only after successful workflow run. When false, messages are auto-ACKed on receive (at-most-once delivery).",
+			),
+		deadLetterQueue: z
+			.string()
+			.optional()
+			.describe(
+				"v0.7 — destination queue/topic for messages that exhausted retries. Empty disables dead-letter routing.",
+			),
+		fromBeginning: z
+			.boolean()
+			.optional()
+			.describe(
+				"v0.7 — Kafka-specific: when true, consumer starts from earliest offset; false (default) starts from latest committed.",
+			),
 		// `delay` (and `ttl`, `debounce`) live in SchedulingOptsFields below.
 		// The legacy number-only `delay` (pre-Tier-2-#5+#7) is superseded by
 		// the duration-or-number SchedulingOptsFields.delay. Number values

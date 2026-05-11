@@ -27,18 +27,34 @@
 		"vitest": "^4.0.18"
 	},
 	"peerDependencies": {
+		"@aws-sdk/client-sqs": "^3.0.0",
+		"amqplib": "^0.10.0",
 		"bullmq": "^5.67.2",
 		"ioredis": "^5.9.2",
-		"nats": ""
+		"kafkajs": "^2.2.0",
+		"nats": "",
+		"pg-boss": "^10.0.0"
 	},
 	"peerDependenciesMeta": {
+		"@aws-sdk/client-sqs": {
+			"optional": true
+		},
+		"amqplib": {
+			"optional": true
+		},
 		"bullmq": {
 			"optional": true
 		},
 		"ioredis": {
 			"optional": true
 		},
+		"kafkajs": {
+			"optional": true
+		},
 		"nats": {
+			"optional": true
+		},
+		"pg-boss": {
 			"optional": true
 		}
 	},
