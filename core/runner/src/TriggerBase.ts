@@ -540,6 +540,38 @@ export default abstract class TriggerBase extends Trigger {
 						);
 					}
 				}
+
+				// v0.6 wait-inside-primitives Phase 2 — rehydrate the
+				// active primitive iterator's iteration cursor. When a
+				// wait fired from inside a `forEach` iteration, the
+				// persisted NodeRun for that forEach has
+				// `iteration_context` set with `{iteration, innerStepIndex,
+				// completedResults}`. ForEachNode reads this from
+				// `ctx._blokIterationResume` on its next run() to skip
+				// pre-wait iterations + resume mid-iteration at the right
+				// inner step.
+				//
+				// Lookup: scan the run's NodeRuns for any with
+				// `iterationContext` set. Phase 2 only supports ONE active
+				// primitive at a time (sequential forEach, no nested
+				// primitives), so the most-recent match is unambiguous.
+				// Phase 4 (nested primitives) will switch to a path-keyed
+				// lookup tracking the call-stack depth.
+				try {
+					const nodeRuns = tracker.getStore().getNodeRuns(traceRunId);
+					const activeWithCursor = nodeRuns
+						.filter((n) => n.iterationContext !== undefined)
+						.sort((a, b) => b.startedAt - a.startedAt)[0];
+					if (activeWithCursor?.iterationContext) {
+						(ctx as Record<string, unknown>)._blokIterationResume = activeWithCursor.iterationContext;
+					}
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					ctx.logger.logLevel(
+						"warn",
+						`[blok][wait] failed to rehydrate iteration_context: ${msg}. forEach will resume from iteration 0.`,
+					);
+				}
 			}
 		} else if (tracker.active) {
 			const runner = this.getRunner();

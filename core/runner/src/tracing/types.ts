@@ -339,6 +339,43 @@ export interface NodeRun {
 	 * traces written before v0.5.3.
 	 */
 	iterationIndex?: number;
+	/**
+	 * v0.6 wait-inside-primitives Phase 2 — sequential forEach iteration
+	 * cursor. Set on a primitive iterator's NodeRun (e.g. the forEach)
+	 * by RunnerSteps when an INNER step throws `WaitDispatchRequest`
+	 * mid-iteration. Records:
+	 *
+	 *   - `iteration`: the iteration index that was in flight (0-based).
+	 *     On re-entry, the forEach skips iterations `[0..iteration-1]`
+	 *     and resumes at `iteration` from the inner step below.
+	 *   - `innerStepIndex`: the index of the inner step within that
+	 *     iteration's body where the wait fired. The nested runner skips
+	 *     inner steps `[0..innerStepIndex-1]` on resume (they completed
+	 *     in the prior pass).
+	 *   - `completedResults`: the partial accumulator —
+	 *     `results[0..iteration-1]`. ForEachNode pre-populates its result
+	 *     array with these values on resume so the final output covers
+	 *     ALL iterations including the pre-wait ones.
+	 *
+	 * Read by `TriggerBase.run` on dispatchDeferred re-entry: the active
+	 * primitive's iteration_context is rehydrated onto ctx as
+	 * `_blokIterationResume` so ForEachNode can pick it up. Persisted
+	 * column is `iteration_context` (sqlite migration v12).
+	 *
+	 * Undefined on regular NodeRuns and on primitives that completed
+	 * without ever throwing a wait. Phase 2 wires this up for sequential
+	 * forEach only — parallel forEach (Phase 3), loop (Phase 3), and
+	 * switch (Phase 4) use the same column with their own primitive-
+	 * specific shapes.
+	 */
+	iterationContext?: {
+		/** Iteration index (0-based) the wait fired in. */
+		iteration: number;
+		/** Inner step index within iteration's body where the wait fired. */
+		innerStepIndex: number;
+		/** Accumulator for iterations [0..iteration-1] — push completedResults[i] === results[i] on resume. */
+		completedResults: unknown[];
+	};
 }
 
 /**

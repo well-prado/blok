@@ -161,8 +161,26 @@ export default abstract class RunnerSteps {
 			// at runSteps entry. Default `-1` = no resume; runner starts
 			// at i = 0.
 			const persistedRun = !deep && tracker && traceRunId ? tracker.getStore().getRun(traceRunId) : undefined;
-			const resumeFromIndex =
-				persistedRun?.lastCompletedStepIndex !== undefined ? persistedRun.lastCompletedStepIndex + 1 : 0;
+			// Two cursor sources:
+			//   - Top-level (deep === false): workflow_runs.lastCompletedStepIndex.
+			//   - Nested inside a primitive iterator (deep === true, v0.6
+			//     Phase 2): `_blokInnerResumeIndex` stamped on the child ctx
+			//     by ForEachNode.runIteration when resuming at a specific
+			//     inner step. Undefined = start at 0 (fresh iteration body).
+			const innerResumeIndexRaw = (ctx as Record<string, unknown>)._blokInnerResumeIndex;
+			const innerResumeIndex = typeof innerResumeIndexRaw === "number" ? innerResumeIndexRaw : undefined;
+			const resumeFromIndex = !deep
+				? persistedRun?.lastCompletedStepIndex !== undefined
+					? persistedRun.lastCompletedStepIndex + 1
+					: 0
+				: (innerResumeIndex ?? 0);
+			// Clear the sentinel so a re-runner started fresh from this
+			// childCtx (e.g. the nested branch flow path) doesn't inherit
+			// a stale resume hint. ForEachNode set it for THIS one re-entry
+			// only; it should not propagate further.
+			if (deep && innerResumeIndex !== undefined) {
+				(ctx as Record<string, unknown>)._blokInnerResumeIndex = undefined;
+			}
 
 			for (let i = 0; i < steps.length; i++) {
 				const step: NodeBase = steps[i];
@@ -338,9 +356,15 @@ export default abstract class RunnerSteps {
 								tracker.completeNode(nodeRunId, { __waited__: true, deadline });
 							}
 							ctx.logger.log(`[step ${i + 1}/${steps.length}] ${step.name} (wait) → satisfied`);
-							// Advance the resume cursor so a subsequent wait at a
-							// later index can rely on it.
-							if (tracker && traceRunId) {
+							// Advance the resume cursor at TOP-LEVEL only.
+							// Nested satisfies (deep=true, v0.6 Phase 2 — wait
+							// inside a forEach iteration body) must NOT
+							// overwrite the workflow's resume cursor with the
+							// inner step index — that would skip past the
+							// primitive entirely on the next re-entry. The
+							// primitive's own NodeRun.iteration_context tracks
+							// progress for nested resumes.
+							if (!deep && tracker && traceRunId) {
 								tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
 							}
 							continue;
@@ -348,11 +372,30 @@ export default abstract class RunnerSteps {
 
 						// First pass: schedule + throw WaitDispatchRequest.
 						// Set resume cursor BEFORE throwing so re-entry knows
-						// where to pick up. Cursor = i - 1 (the last non-wait
-						// step that completed).
+						// where to pick up.
+						//
+						// Two cases for cursor placement:
+						//   - Top-level wait (deep === false). Cursor = i - 1
+						//     (the last non-wait outer step that completed).
+						//     On re-entry, runSteps reads
+						//     workflow_runs.lastCompletedStepIndex + 1 = i and
+						//     starts the wait step which flips to "satisfied".
+						//   - Nested wait inside a primitive (deep === true,
+						//     v0.6 Phase 2). The wait fired from inside an
+						//     iteration body of a forEach (or analogous future
+						//     primitive). The OUTER runSteps wrote `i - 1` =
+						//     forEach-step-index minus 1 *before* invoking
+						//     forEach.process, so workflow_runs.lastCompleted-
+						//     StepIndex still points at the OUTER cursor we
+						//     want — DON'T overwrite it with the inner-i (that
+						//     would skip the forEach entirely on resume).
+						//     Instead, persist the iteration cursor on the
+						//     forEach's NodeRun's `iteration_context` column.
+						//     ForEachNode reads it on re-entry to resume the
+						//     right iteration + inner step.
 						//
 						// v0.6 prerequisite for wait-inside-primitives Phase 2
-						// — also snapshot `ctx.state` to the run record. Two
+						// — snapshot `ctx.state` regardless of nesting. Two
 						// re-entry paths consume this snapshot:
 						//   1. In-process timer fire (DeferredRunScheduler):
 						//      same `ctx` is reused, state is already there;
@@ -362,14 +405,44 @@ export default abstract class RunnerSteps {
 						//      built from the persisted scheduled_dispatches
 						//      row with empty `state`. Without the snapshot,
 						//      Phase 2's iteration-state-persistence promise
-						//      breaks across restart — a forEach iteration
-						//      whose body fired the wait would lose its index
-						//      and accumulator.
+						//      breaks across restart.
 						if (tracker && traceRunId) {
-							tracker.getStore().updateRun(traceRunId, {
-								lastCompletedStepIndex: i - 1,
+							const updates: Record<string, unknown> = {
 								stateSnapshot: serializeStateSnapshot(ctx.state, ctx.logger),
-							});
+							};
+							if (!deep) {
+								updates.lastCompletedStepIndex = i - 1;
+							}
+							tracker.getStore().updateRun(traceRunId, updates);
+
+							// Phase 2 — write iteration_context to the active
+							// primitive's NodeRun when nested. Reads three
+							// sentinels stamped by ForEachNode on the child
+							// ctx:
+							//   - _blokActivePrimitiveNodeRunId: which NodeRun
+							//     gets the cursor (set by RunnerSteps' outer
+							//     iteration around the primitive's process()).
+							//   - _blokForEachCurrentIteration: iteration index
+							//     of the in-flight iteration.
+							//   - _blokForEachPartialResults: accumulator for
+							//     iterations [0..iteration-1] so the post-
+							//     resume final result array covers all
+							//     iterations.
+							if (deep) {
+								const ctxAny = ctx as Record<string, unknown>;
+								const primitiveNodeRunId = ctxAny._blokActivePrimitiveNodeRunId as string | undefined;
+								const currentIteration = ctxAny._blokForEachCurrentIteration as number | undefined;
+								const partialResults = ctxAny._blokForEachPartialResults as unknown[] | undefined;
+								if (primitiveNodeRunId && currentIteration !== undefined && partialResults !== undefined) {
+									tracker.getStore().updateNodeRun(primitiveNodeRunId, {
+										iterationContext: {
+											iteration: currentIteration,
+											innerStepIndex: i,
+											completedResults: partialResults,
+										},
+									});
+								}
+							}
 						}
 						ctx.logger.log(
 							`[step ${i + 1}/${steps.length}] ${step.name} (wait) → scheduled (deadline=${new Date(deadline).toISOString()})`,
@@ -434,145 +507,174 @@ export default abstract class RunnerSteps {
 					const maxDurationMs = (step as NodeBase).maxDurationMs;
 					let attempt = 0;
 
-					while (true) {
-						attempt += 1;
+					// v0.6 wait-inside-primitives Phase 2 — stamp the active
+					// primitive iterator's NodeRun id on ctx so a nested wait
+					// firing INSIDE this primitive's body can persist its
+					// iteration_context to the right NodeRun (the forEach,
+					// not the inner wait step). Restored in the finally below
+					// so sibling steps don't see a stale pointer.
+					//
+					// Detection: primitive iterators set a static
+					// `isPrimitiveIterator: true` marker. Avoids importing
+					// ForEachNode here (would create a circular dep with the
+					// runner). Currently only ForEachNode sets the flag;
+					// LoopNode + parallel forEach pick it up in Phase 3.
+					const isIteratingPrimitive =
+						(step as unknown as { isPrimitiveIterator?: boolean }).isPrimitiveIterator === true;
+					const previousActivePrimitive = (ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId;
+					if (isIteratingPrimitive && nodeRunId) {
+						(ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId = nodeRunId;
+					}
 
-						try {
-							const processInvocation = (): Promise<{ data: unknown }> => step.process(ctx, step as unknown as Step);
-							const model =
-								typeof maxDurationMs === "number" && maxDurationMs > 0
-									? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
-									: await processInvocation();
-							ctx.response = model.data as BlokResponse;
+					try {
+						while (true) {
+							attempt += 1;
 
-							// Treat soft errors (data carries `.error`) the same as
-							// thrown errors so retry semantics are uniform.
-							if (ctx.response?.error) {
-								throw ctx.response.error;
-							}
+							try {
+								const processInvocation = (): Promise<{ data: unknown }> => step.process(ctx, step as unknown as Step);
+								const model =
+									typeof maxDurationMs === "number" && maxDurationMs > 0
+										? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
+										: await processInvocation();
+								ctx.response = model.data as BlokResponse;
 
-							// === Tier 1: idempotency cache write ===
-							// Cache on the success path only — failed steps are
-							// re-runnable. Honour `idempotencyKeyTTL` per step;
-							// default 24h. A TTL of 0 stores an immediately-
-							// expired entry (useful as a kill-switch).
-							if (cacheStore && resolvedIdemKey && nodeRunId && traceRunId) {
-								const ttlField = (step as NodeBase).idempotencyKeyTTL;
-								const ttlMs = typeof ttlField === "number" ? ttlField : DEFAULT_IDEMPOTENCY_TTL_MS;
-								const now = Date.now();
-								const expiresAt = ttlMs > 0 ? now + ttlMs : now - 1;
-								cacheStore.setIdempotencyCache(workflowName, step.name, resolvedIdemKey, {
-									data: model.data,
-									cachedAt: now,
-									expiresAt,
-									sourceRunId: traceRunId,
-									sourceNodeRunId: nodeRunId,
-								});
-							}
-
-							const stepDuration = (performance.now() - stepStart).toFixed(1);
-
-							// --- Trace: complete node ---
-							if (tracker && nodeRunId) {
-								// `_stepMetrics` is stashed on ctx by RuntimeAdapterNode
-								// when an adapter returns metrics (gRPC wire bytes,
-								// duration, cpu, memory). Threading it through
-								// `completeNode` is what gets the metrics into the
-								// run store + NODE_COMPLETED event payload — Studio's
-								// inspector reads them from there.
-								const ctxAny = ctx as Record<string, unknown>;
-								const stepMetrics = ctxAny._stepMetrics as Parameters<typeof tracker.completeNode>[2];
-								ctxAny._stepMetrics = undefined;
-								tracker.completeNode(nodeRunId, sanitize(ctx.response.data), stepMetrics);
-								// PR 4 — advance the resume cursor after each
-								// successful non-wait step. A subsequent wait step
-								// reads this value to set its own cursor before
-								// throwing WaitDispatchRequest. Only at top-level
-								// (deep=false); nested branch flow doesn't update.
-								if (!deep && traceRunId) {
-									tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
+								// Treat soft errors (data carries `.error`) the same as
+								// thrown errors so retry semantics are uniform.
+								if (ctx.response?.error) {
+									throw ctx.response.error;
 								}
-							}
 
-							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
-							ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms${attemptSuffix})`);
-							break;
-						} catch (nodeErr) {
-							// v0.5.3 — control-flow signals from a step's run()
-							// must NOT be retried OR wrapped as enriched errors.
-							// In the production wait path, RunnerSteps throws
-							// WaitDispatchRequest from outside this retry loop, so
-							// this branch is normally inert. But if a custom node
-							// ever throws a wait/cancel signal from inside its
-							// process()/run(), preserve the type so the outer
-							// catch + TryCatchNode pass-through still recognise
-							// it. Same rationale as the outer-catch instanceof
-							// guards at line ~498.
-							if (nodeErr instanceof WaitDispatchRequest || nodeErr instanceof RunCancelledError) {
-								throw nodeErr;
-							}
-							if (attempt < maxAttempts && retryConfig) {
-								// More attempts remain — record this as a soft
-								// failure and back off before retrying. The node
-								// stays in `running` status; failNode is the
-								// terminal call.
+								// === Tier 1: idempotency cache write ===
+								// Cache on the success path only — failed steps are
+								// re-runnable. Honour `idempotencyKeyTTL` per step;
+								// default 24h. A TTL of 0 stores an immediately-
+								// expired entry (useful as a kill-switch).
+								if (cacheStore && resolvedIdemKey && nodeRunId && traceRunId) {
+									const ttlField = (step as NodeBase).idempotencyKeyTTL;
+									const ttlMs = typeof ttlField === "number" ? ttlField : DEFAULT_IDEMPOTENCY_TTL_MS;
+									const now = Date.now();
+									const expiresAt = ttlMs > 0 ? now + ttlMs : now - 1;
+									cacheStore.setIdempotencyCache(workflowName, step.name, resolvedIdemKey, {
+										data: model.data,
+										cachedAt: now,
+										expiresAt,
+										sourceRunId: traceRunId,
+										sourceNodeRunId: nodeRunId,
+									});
+								}
+
+								const stepDuration = (performance.now() - stepStart).toFixed(1);
+
+								// --- Trace: complete node ---
 								if (tracker && nodeRunId) {
-									tracker.recordNodeAttemptFailed(nodeRunId, { attempt, error: nodeErr });
+									// `_stepMetrics` is stashed on ctx by RuntimeAdapterNode
+									// when an adapter returns metrics (gRPC wire bytes,
+									// duration, cpu, memory). Threading it through
+									// `completeNode` is what gets the metrics into the
+									// run store + NODE_COMPLETED event payload — Studio's
+									// inspector reads them from there.
+									const ctxAny = ctx as Record<string, unknown>;
+									const stepMetrics = ctxAny._stepMetrics as Parameters<typeof tracker.completeNode>[2];
+									ctxAny._stepMetrics = undefined;
+									tracker.completeNode(nodeRunId, sanitize(ctx.response.data), stepMetrics);
+									// PR 4 — advance the resume cursor after each
+									// successful non-wait step. A subsequent wait step
+									// reads this value to set its own cursor before
+									// throwing WaitDispatchRequest. Only at top-level
+									// (deep=false); nested branch flow doesn't update.
+									if (!deep && traceRunId) {
+										tracker.getStore().updateRun(traceRunId, { lastCompletedStepIndex: i });
+									}
 								}
-								const backoffMs = computeBackoff(retryConfig, attempt);
-								const errMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-								ctx.logger.log(
-									`${stepPrefix} → attempt ${attempt}/${maxAttempts} failed (${errMsg}), retrying in ${backoffMs}ms`,
-								);
-								await sleep(backoffMs);
-								continue;
-							}
 
-							// Final attempt — fail the node and propagate the
-							// enriched error so RunnerSteps' outer catch can
-							// wrap it as a GlobalError.
-							if (tracker && nodeRunId) {
-								const existing = tracker.getNodeRun(nodeRunId);
-								if (existing && existing.status === "running") {
-									tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
+								const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
+								ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms${attemptSuffix})`);
+								break;
+							} catch (nodeErr) {
+								// v0.5.3 — control-flow signals from a step's run()
+								// must NOT be retried OR wrapped as enriched errors.
+								// In the production wait path, RunnerSteps throws
+								// WaitDispatchRequest from outside this retry loop, so
+								// this branch is normally inert. But if a custom node
+								// ever throws a wait/cancel signal from inside its
+								// process()/run(), preserve the type so the outer
+								// catch + TryCatchNode pass-through still recognise
+								// it. Same rationale as the outer-catch instanceof
+								// guards at line ~498.
+								if (nodeErr instanceof WaitDispatchRequest || nodeErr instanceof RunCancelledError) {
+									throw nodeErr;
 								}
-							}
-							// Tier 2 quick-wins — final-attempt timeout flips
-							// the run to "timedOut" (distinct from "failed").
-							// Only when the FINAL error was a StepTimeoutError;
-							// mixed failures (some retries timed out, final
-							// retry threw a different error) keep the normal
-							// "failed" status.
-							if (
-								tracker &&
-								traceRunId &&
-								typeof maxDurationMs === "number" &&
-								maxDurationMs > 0 &&
-								nodeErr instanceof StepTimeoutError
-							) {
-								tracker.markRunTimedOut(traceRunId, {
-									stepId: step.name,
-									maxDurationMs,
-									attemptsExhausted: attempt,
-								});
-							}
-							const stepDuration = (performance.now() - stepStart).toFixed(1);
-							const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
-							ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms${attemptSuffix})`);
+								if (attempt < maxAttempts && retryConfig) {
+									// More attempts remain — record this as a soft
+									// failure and back off before retrying. The node
+									// stays in `running` status; failNode is the
+									// terminal call.
+									if (tracker && nodeRunId) {
+										tracker.recordNodeAttemptFailed(nodeRunId, { attempt, error: nodeErr });
+									}
+									const backoffMs = computeBackoff(retryConfig, attempt);
+									const errMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+									ctx.logger.log(
+										`${stepPrefix} → attempt ${attempt}/${maxAttempts} failed (${errMsg}), retrying in ${backoffMs}ms`,
+									);
+									await sleep(backoffMs);
+									continue;
+								}
 
-							// Enrich error with step context so developers know which step failed.
-							// Attach `_blokStepId` directly on the wrap so TryCatchNode's
-							// envelope construction can surface `$.error.stepId` to authors
-							// without parsing the prefix back out of the message string.
-							const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-							const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
-							const enrichedAny = enrichedError as Error & {
-								cause?: unknown;
-								_blokStepId?: string;
-							};
-							enrichedAny.cause = nodeErr;
-							enrichedAny._blokStepId = step.name;
-							throw enrichedError;
+								// Final attempt — fail the node and propagate the
+								// enriched error so RunnerSteps' outer catch can
+								// wrap it as a GlobalError.
+								if (tracker && nodeRunId) {
+									const existing = tracker.getNodeRun(nodeRunId);
+									if (existing && existing.status === "running") {
+										tracker.failNode(nodeRunId, nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
+									}
+								}
+								// Tier 2 quick-wins — final-attempt timeout flips
+								// the run to "timedOut" (distinct from "failed").
+								// Only when the FINAL error was a StepTimeoutError;
+								// mixed failures (some retries timed out, final
+								// retry threw a different error) keep the normal
+								// "failed" status.
+								if (
+									tracker &&
+									traceRunId &&
+									typeof maxDurationMs === "number" &&
+									maxDurationMs > 0 &&
+									nodeErr instanceof StepTimeoutError
+								) {
+									tracker.markRunTimedOut(traceRunId, {
+										stepId: step.name,
+										maxDurationMs,
+										attemptsExhausted: attempt,
+									});
+								}
+								const stepDuration = (performance.now() - stepStart).toFixed(1);
+								const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
+								ctx.logger.log(`${stepPrefix} → FAILED (${stepDuration}ms${attemptSuffix})`);
+
+								// Enrich error with step context so developers know which step failed.
+								// Attach `_blokStepId` directly on the wrap so TryCatchNode's
+								// envelope construction can surface `$.error.stepId` to authors
+								// without parsing the prefix back out of the message string.
+								const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+								const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
+								const enrichedAny = enrichedError as Error & {
+									cause?: unknown;
+									_blokStepId?: string;
+								};
+								enrichedAny.cause = nodeErr;
+								enrichedAny._blokStepId = step.name;
+								throw enrichedError;
+							}
+						}
+					} finally {
+						// Restore the active-primitive sentinel even on throw,
+						// so a sibling step with its own primitive doesn't see
+						// a stale pointer. (Two sequential forEachs in the same
+						// workflow would otherwise cross-contaminate.)
+						if (isIteratingPrimitive) {
+							(ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId = previousActivePrimitive;
 						}
 					}
 				} else {
