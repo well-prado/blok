@@ -1,5 +1,6 @@
 import type GlobalLogger from "../GlobalLogger";
 import type ConfigContext from "./ConfigContext";
+import type ConnectionContext from "./ConnectionContext";
 import type EnvContext from "./EnvContext";
 import type ErrorContext from "./ErrorContext";
 import type FunctionContext from "./FunctionContext";
@@ -122,6 +123,24 @@ type Context = {
 	 * tests.
 	 */
 	signal?: AbortSignal;
+
+	/**
+	 * v0.7 — per-connection API for long-lived bidirectional triggers
+	 * (WebSocket). Present on contexts dispatched by `WebSocketTrigger`;
+	 * absent on HTTP / Worker / Cron contexts.
+	 *
+	 * Authors call `ctx.connection.send(...)` to push to the specific
+	 * connection that fired the event, `ctx.connection.close(...)` to
+	 * terminate it, or `ctx.connection.setAttachment(...)` to store
+	 * per-connection state that survives across the connect → N×message
+	 * → disconnect lifecycle.
+	 *
+	 * Helper nodes (`@blokjs/ws-reply`, `@blokjs/ws-broadcast`,
+	 * `@blokjs/ws-close`) read this field to interact with the
+	 * connection without authors having to thread the ws handle through
+	 * step inputs.
+	 */
+	connection?: ConnectionContext;
 
 	_PRIVATE_: unknown;
 };

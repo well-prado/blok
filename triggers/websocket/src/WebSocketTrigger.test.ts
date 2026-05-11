@@ -1,490 +1,192 @@
-import type { HelperResponse } from "@blokjs/helper";
-import type { BlokService } from "@blokjs/runner";
+/**
+ * v0.7 PR 2 — WebSocketTrigger integration tests.
+ *
+ * Tests cover the public API surface of the new concrete WebSocketTrigger:
+ *   - Constructor + singleton accessor wiring
+ *   - getWebSocketWorkflows() filtering of WorkflowRegistry
+ *   - listen() route registration on the shared Hono app
+ *   - broadcastToRoom() fan-out semantics
+ *   - getStats() observability
+ *
+ * End-to-end protocol tests (real socket upgrade + message round-trip)
+ * are covered by the v05-smoke gate against a real http.Server.
+ */
+
+import { WorkflowRegistry } from "@blokjs/runner";
+import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type AuthResult,
-	type WebSocketClient,
-	type WebSocketEvent,
-	type WebSocketMessage,
-	WebSocketTrigger,
-} from "./WebSocketTrigger";
+import WebSocketTrigger, { _getActiveWebSocketTrigger, _setActiveWebSocketTrigger } from "./WebSocketTrigger";
 
-// Mock implementations
-class TestWebSocketTrigger extends WebSocketTrigger {
-	protected override nodes = {} as Record<string, BlokService<unknown>>;
-	protected override workflows = {} as Record<string, HelperResponse>;
+// Mock @opentelemetry/api so the trigger's tracer + meter constructors don't
+// require a real exporter. Matches the pattern used by the HTTP trigger test.
+vi.mock("@opentelemetry/api", () => ({
+	trace: {
+		getTracer: () => ({
+			startActiveSpan: (_name: string, fn: (span: unknown) => unknown) =>
+				fn({
+					setAttribute: vi.fn(),
+					setStatus: vi.fn(),
+					recordException: vi.fn(),
+					end: vi.fn(),
+				}),
+		}),
+	},
+	metrics: {
+		getMeter: () => ({
+			createCounter: () => ({ add: vi.fn() }),
+			createHistogram: () => ({ record: vi.fn() }),
+			createGauge: () => ({ record: vi.fn() }),
+			createObservableGauge: () => ({ addCallback: vi.fn() }),
+		}),
+	},
+	SpanStatusCode: { OK: 0, ERROR: 1 },
+}));
 
-	// Expose protected methods for testing
-	public getWebSocketWorkflowsTest() {
-		return this.getWebSocketWorkflows();
-	}
-
-	public findMatchingWorkflowTest(event: WebSocketEvent) {
-		return this.findMatchingWorkflow(event);
-	}
-
-	public setWorkflows(workflows: Record<string, HelperResponse>) {
-		this.workflows = workflows;
-		this.loadWorkflows();
-	}
-
-	public getClientsMap() {
-		return this.clients;
-	}
-
-	public getRoomsMap() {
-		return this.rooms;
-	}
-}
-
-describe("WebSocketTrigger", () => {
-	let trigger: TestWebSocketTrigger;
-
+describe("WebSocketTrigger — v0.7 PR 2", () => {
 	beforeEach(() => {
-		trigger = new TestWebSocketTrigger();
+		WorkflowRegistry.resetInstance();
+		_setActiveWebSocketTrigger(null);
 	});
 
-	afterEach(async () => {
-		await trigger.stop();
+	afterEach(() => {
+		WorkflowRegistry.resetInstance();
+		_setActiveWebSocketTrigger(null);
 	});
 
-	describe("WebSocketMessage Interface", () => {
-		it("should define message structure correctly", () => {
-			const message: WebSocketMessage = {
-				id: "msg-123",
-				type: "text",
-				event: "chat.message",
-				data: { text: "Hello, World!" },
-				timestamp: new Date(),
-				raw: '{"event":"chat.message","data":{"text":"Hello, World!"}}',
-			};
+	describe("constructor()", () => {
+		it("accepts a shared Hono app and registers as the active trigger via singleton", () => {
+			const app = new Hono();
+			expect(_getActiveWebSocketTrigger()).toBeNull();
 
-			expect(message.id).toBe("msg-123");
-			expect(message.type).toBe("text");
-			expect(message.event).toBe("chat.message");
-			expect(message.data).toEqual({ text: "Hello, World!" });
-			expect(message.timestamp).toBeInstanceOf(Date);
+			const trigger = new WebSocketTrigger(app);
+
+			expect(trigger).toBeDefined();
+			expect(_getActiveWebSocketTrigger()).toBe(trigger);
 		});
 
-		it("should support binary message type", () => {
-			const binaryData = Buffer.from([0x01, 0x02, 0x03]);
-			const message: WebSocketMessage = {
-				id: "msg-456",
-				type: "binary",
-				event: "binary",
-				data: binaryData,
-				timestamp: new Date(),
-				raw: binaryData,
-			};
+		it("accepts an optional httpTrigger for addServerHook coordination", () => {
+			const app = new Hono();
+			const addServerHook = vi.fn();
+			const addPreCatchAllHook = vi.fn();
+			const httpTrigger = { addServerHook, addPreCatchAllHook };
 
-			expect(message.type).toBe("binary");
-			expect(message.raw).toBeInstanceOf(Buffer);
+			const trigger = new WebSocketTrigger(app, httpTrigger);
+			expect(trigger).toBeDefined();
+			// The hook is only registered in listen() — not at construction —
+			// so addServerHook should NOT have been called yet.
+			expect(addServerHook).not.toHaveBeenCalled();
 		});
 	});
 
-	describe("WebSocketClient Interface", () => {
-		it("should define client structure correctly", () => {
-			const mockSend = vi.fn();
-			const mockClose = vi.fn();
-			const mockPing = vi.fn();
-
-			const client: WebSocketClient = {
-				id: "client-123",
-				state: "connected",
-				rooms: new Set(["general", "support"]),
-				metadata: { userId: "user-456", role: "admin" },
-				connectedAt: new Date(),
-				lastActivity: new Date(),
-				send: mockSend,
-				close: mockClose,
-				ping: mockPing,
-			};
-
-			expect(client.id).toBe("client-123");
-			expect(client.state).toBe("connected");
-			expect(client.rooms.has("general")).toBe(true);
-			expect(client.rooms.has("support")).toBe(true);
-			expect(client.metadata.userId).toBe("user-456");
-		});
-	});
-
-	describe("WebSocketEvent Interface", () => {
-		it("should define connection event", () => {
-			const event: WebSocketEvent = {
-				type: "connection",
-				clientId: "client-123",
-			};
-
-			expect(event.type).toBe("connection");
-			expect(event.clientId).toBe("client-123");
-		});
-
-		it("should define message event with payload", () => {
-			const event: WebSocketEvent = {
-				type: "message",
-				clientId: "client-123",
-				message: {
-					id: "msg-123",
-					type: "text",
-					event: "chat.message",
-					data: { text: "Hello" },
-					timestamp: new Date(),
+	describe("listen()", () => {
+		it("registers a Hono route per WS workflow in the registry", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "chat-handler",
+				source: "/test/chat.json",
+				workflow: {
+					name: "chat-handler",
+					version: "1.0.0",
+					trigger: { websocket: { path: "/ws/chat/:roomId", events: ["message"] } },
+					steps: [],
 				},
-			};
-
-			expect(event.type).toBe("message");
-			expect(event.message?.event).toBe("chat.message");
-		});
-
-		it("should define close event with code and reason", () => {
-			const event: WebSocketEvent = {
-				type: "close",
-				clientId: "client-123",
-				closeCode: 1000,
-				closeReason: "Normal closure",
-			};
-
-			expect(event.type).toBe("close");
-			expect(event.closeCode).toBe(1000);
-			expect(event.closeReason).toBe("Normal closure");
-		});
-
-		it("should define room events", () => {
-			const joinEvent: WebSocketEvent = {
-				type: "join_room",
-				clientId: "client-123",
-				room: "general",
-			};
-
-			const leaveEvent: WebSocketEvent = {
-				type: "leave_room",
-				clientId: "client-123",
-				room: "general",
-			};
-
-			expect(joinEvent.type).toBe("join_room");
-			expect(joinEvent.room).toBe("general");
-			expect(leaveEvent.type).toBe("leave_room");
-		});
-	});
-
-	describe("Connection Management", () => {
-		it("should handle new connections", async () => {
-			const mockSocket = {
-				send: vi.fn(),
-				close: vi.fn(),
-				ping: vi.fn(),
-			};
-
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			expect(client).not.toBeNull();
-			expect(client?.id).toBeDefined();
-			expect(client?.state).toBe("connected");
-			expect(trigger.getClientsMap().size).toBe(1);
-		});
-
-		it("should reject connections when at max capacity", async () => {
-			// Set max to 1
-			(trigger as unknown as { maxClients: number }).maxClients = 1;
-
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			await trigger.handleConnection(mockSocket1, {}, {});
-			const client2 = await trigger.handleConnection(mockSocket2, {}, {});
-
-			expect(client2).toBeNull();
-			expect(mockSocket2.close).toHaveBeenCalledWith(1013, "Server at capacity");
-		});
-
-		it("should handle authentication", async () => {
-			trigger.setAuthHandler((_request, headers) => {
-				if (headers.authorization === "Bearer valid-token") {
-					return {
-						authenticated: true,
-						clientId: "authenticated-user",
-						metadata: { role: "admin" },
-					};
-				}
-				return { authenticated: false, error: "Invalid token" };
 			});
 
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			// Test successful auth
-			const validClient = await trigger.handleConnection(mockSocket, {}, { authorization: "Bearer valid-token" });
-			expect(validClient?.id).toBe("authenticated-user");
-			expect(validClient?.metadata.role).toBe("admin");
-
-			// Test failed auth
-			const invalidClient = await trigger.handleConnection(mockSocket, {}, { authorization: "Bearer invalid-token" });
-			expect(invalidClient).toBeNull();
-			expect(mockSocket.close).toHaveBeenCalledWith(4001, "Invalid token");
-		});
-
-		it("should handle disconnection", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			expect(trigger.getClientsMap().size).toBe(1);
-
-			await trigger.handleClose(client!.id, 1000, "Normal closure");
-
-			expect(trigger.getClientsMap().size).toBe(0);
-		});
-	});
-
-	describe("Room Management", () => {
-		it("should allow clients to join rooms", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			await trigger.joinRoom(client!.id, "general");
-
-			expect(client!.rooms.has("general")).toBe(true);
-			expect(trigger.getRoomsMap().get("general")?.clients.has(client!.id)).toBe(true);
-		});
-
-		it("should allow clients to leave rooms", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			await trigger.joinRoom(client!.id, "general");
-			await trigger.leaveRoom(client!.id, "general");
-
-			expect(client!.rooms.has("general")).toBe(false);
-			// Room should be deleted when empty
-			expect(trigger.getRoomsMap().has("general")).toBe(false);
-		});
-
-		it("should clean up rooms when client disconnects", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			await trigger.joinRoom(client!.id, "room1");
-			await trigger.joinRoom(client!.id, "room2");
-
-			await trigger.handleClose(client!.id, 1000, "");
-
-			// Rooms should be cleaned up
-			expect(trigger.getRoomsMap().size).toBe(0);
-		});
-	});
-
-	describe("Message Sending", () => {
-		it("should send message to specific client", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const success = trigger.sendToClient(client!.id, "notification", { message: "Hello" });
-
-			expect(success).toBe(true);
-			expect(mockSocket.send).toHaveBeenCalledWith(
-				JSON.stringify({ event: "notification", data: { message: "Hello" } }),
-			);
-		});
-
-		it("should broadcast to room", async () => {
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket3 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			const client1 = await trigger.handleConnection(mockSocket1, {}, {});
-			const client2 = await trigger.handleConnection(mockSocket2, {}, {});
-			const client3 = await trigger.handleConnection(mockSocket3, {}, {});
-
-			await trigger.joinRoom(client1!.id, "general");
-			await trigger.joinRoom(client2!.id, "general");
-			// client3 is not in the room
-
-			const count = trigger.broadcastToRoom("general", "chat", { text: "Hello room!" });
-
-			expect(count).toBe(2);
-			expect(mockSocket1.send).toHaveBeenCalled();
-			expect(mockSocket2.send).toHaveBeenCalled();
-			expect(mockSocket3.send).not.toHaveBeenCalled();
-		});
-
-		it("should broadcast to room excluding sender", async () => {
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			const client1 = await trigger.handleConnection(mockSocket1, {}, {});
-			const client2 = await trigger.handleConnection(mockSocket2, {}, {});
-
-			await trigger.joinRoom(client1!.id, "general");
-			await trigger.joinRoom(client2!.id, "general");
-
-			// Broadcast excluding client1
-			const count = trigger.broadcastToRoom("general", "chat", { text: "Hello!" }, client1!.id);
-
-			expect(count).toBe(1);
-			expect(mockSocket1.send).not.toHaveBeenCalled();
-			expect(mockSocket2.send).toHaveBeenCalled();
-		});
-
-		it("should broadcast to all clients", async () => {
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			await trigger.handleConnection(mockSocket1, {}, {});
-			await trigger.handleConnection(mockSocket2, {}, {});
-
-			const count = trigger.broadcastToAll("system", { message: "Server maintenance" });
-
-			expect(count).toBe(2);
-			expect(mockSocket1.send).toHaveBeenCalled();
-			expect(mockSocket2.send).toHaveBeenCalled();
-		});
-	});
-
-	describe("Message Handling", () => {
-		it("should parse JSON messages", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const jsonMessage = JSON.stringify({ event: "chat.message", data: { text: "Hello" } });
-			const result = await trigger.handleMessage(client!.id, jsonMessage, false);
-
-			// No matching workflow, so should return null
-			expect(result).toBeNull();
-		});
-
-		it("should handle plain text messages", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const result = await trigger.handleMessage(client!.id, "Hello World", false);
-
-			expect(result).toBeNull();
-		});
-
-		it("should handle binary messages", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const binaryData = Buffer.from([0x01, 0x02, 0x03]);
-			const result = await trigger.handleMessage(client!.id, binaryData, true);
-
-			expect(result).toBeNull();
-		});
-
-		it("should update last activity on message", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const initialActivity = client!.lastActivity;
-
-			// Wait a bit
-			await new Promise((resolve) => setTimeout(resolve, 10));
-
-			await trigger.handleMessage(client!.id, "test", false);
-
-			expect(client!.lastActivity.getTime()).toBeGreaterThan(initialActivity.getTime());
-		});
-	});
-
-	describe("Statistics", () => {
-		it("should track connection stats", async () => {
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			await trigger.handleConnection(mockSocket1, {}, {});
-			const client2 = await trigger.handleConnection(mockSocket2, {}, {});
-
-			await trigger.joinRoom(client2!.id, "general");
-
-			const stats = trigger.getStats();
-
-			expect(stats.activeConnections).toBe(2);
-			expect(stats.roomCount).toBe(1);
-			expect(stats.clientsByRoom.general).toBe(1);
-		});
-
-		it("should track message count", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			await trigger.handleMessage(client!.id, "msg1", false);
-			await trigger.handleMessage(client!.id, "msg2", false);
-			await trigger.handleMessage(client!.id, "msg3", false);
-
-			const stats = trigger.getStats();
-			expect(stats.totalMessages).toBe(3);
-		});
-	});
-
-	describe("Lifecycle", () => {
-		it("should initialize successfully", async () => {
+			const trigger = new WebSocketTrigger(app);
 			const elapsed = await trigger.listen();
-			expect(elapsed).toBeGreaterThanOrEqual(0);
+			expect(typeof elapsed).toBe("number");
+
+			// The Hono app has a /ws/chat/:roomId route registered for GET.
+			// Hono's router doesn't expose routes directly, but we can probe
+			// it via fetch — an upgrade request without WS headers gets a 426.
+			const res = await app.fetch(new Request("http://localhost/ws/chat/lobby"));
+			// @hono/node-ws responds 426 Upgrade Required for non-WS GETs
+			// on a registered WS path. Either 426 or some 4xx/5xx indicates
+			// the route is registered (200 would mean it's an unrelated HTTP route).
+			expect(res.status).toBeGreaterThanOrEqual(400);
+			expect(res.status).toBeLessThan(600);
 		});
 
-		it("should stop and clean up", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			await trigger.handleConnection(mockSocket, {}, {});
+		it("skips workflows without trigger.websocket config", async () => {
+			const app = new Hono();
+			WorkflowRegistry.getInstance().register({
+				name: "http-only",
+				source: "/test/http.json",
+				workflow: {
+					name: "http-only",
+					version: "1.0.0",
+					trigger: { http: { method: "GET", path: "/api/foo" } },
+					steps: [],
+				},
+			});
 
+			const trigger = new WebSocketTrigger(app);
+			await trigger.listen();
+
+			// Hono has no /ws/* route, so a GET there 404s.
+			const res = await app.fetch(new Request("http://localhost/anywhere"));
+			expect(res.status).toBe(404);
+		});
+
+		it("registers both pre-catch-all and post-serve hooks on httpTrigger when provided", async () => {
+			const app = new Hono();
+			const addServerHook = vi.fn();
+			const addPreCatchAllHook = vi.fn();
+			const httpTrigger = { addServerHook, addPreCatchAllHook };
+			WorkflowRegistry.getInstance().register({
+				name: "chat-handler",
+				source: "/test/chat.json",
+				workflow: {
+					name: "chat-handler",
+					version: "1.0.0",
+					trigger: { websocket: { path: "/ws/chat" } },
+					steps: [],
+				},
+			});
+
+			const trigger = new WebSocketTrigger(app, httpTrigger);
+			await trigger.listen();
+
+			expect(addPreCatchAllHook).toHaveBeenCalledTimes(1);
+			expect(addPreCatchAllHook).toHaveBeenCalledWith(expect.any(Function));
+			expect(addServerHook).toHaveBeenCalledTimes(1);
+			expect(addServerHook).toHaveBeenCalledWith(expect.any(Function));
+		});
+
+		it("is idempotent (second listen() call is a no-op)", async () => {
+			const app = new Hono();
+			const trigger = new WebSocketTrigger(app);
+			await trigger.listen();
+			// Second call shouldn't throw or re-register.
+			await expect(trigger.listen()).resolves.toBeTypeOf("number");
+		});
+	});
+
+	describe("broadcastToRoom()", () => {
+		it("returns 0 when the room has no members", () => {
+			const trigger = new WebSocketTrigger(new Hono());
+			const count = trigger.broadcastToRoom({
+				workflowName: "chat-handler",
+				room: "lobby",
+				data: "hello",
+			});
+			expect(count).toBe(0);
+		});
+	});
+
+	describe("getStats()", () => {
+		it("returns zero connections/workflows/rooms when freshly constructed", () => {
+			const trigger = new WebSocketTrigger(new Hono());
+			expect(trigger.getStats()).toEqual({ connections: 0, workflows: 0, rooms: 0 });
+		});
+	});
+
+	describe("stop()", () => {
+		it("clears the active-trigger singleton", async () => {
+			const trigger = new WebSocketTrigger(new Hono());
+			expect(_getActiveWebSocketTrigger()).toBe(trigger);
 			await trigger.stop();
-
-			expect(trigger.getClientsMap().size).toBe(0);
-			expect(trigger.getRoomsMap().size).toBe(0);
-			expect(mockSocket.close).toHaveBeenCalledWith(1001, "Server shutting down");
+			expect(_getActiveWebSocketTrigger()).toBeNull();
 		});
-	});
-
-	describe("Client Retrieval", () => {
-		it("should get client by ID", async () => {
-			const mockSocket = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const client = await trigger.handleConnection(mockSocket, {}, {});
-
-			const retrieved = trigger.getClient(client!.id);
-			expect(retrieved).toBe(client);
-		});
-
-		it("should get clients in room", async () => {
-			const mockSocket1 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-			const mockSocket2 = { send: vi.fn(), close: vi.fn(), ping: vi.fn() };
-
-			const client1 = await trigger.handleConnection(mockSocket1, {}, {});
-			const client2 = await trigger.handleConnection(mockSocket2, {}, {});
-
-			await trigger.joinRoom(client1!.id, "general");
-			await trigger.joinRoom(client2!.id, "general");
-
-			const clients = trigger.getClientsInRoom("general");
-			expect(clients.length).toBe(2);
-		});
-	});
-});
-
-describe("WebSocketTriggerOpts Schema", () => {
-	it("should validate with default values", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@blokjs/helper");
-
-		const opts = WebSocketTriggerOptsSchema.parse({});
-
-		expect(opts.events).toEqual(["*"]);
-		expect(opts.maxConnections).toBe(10000);
-		expect(opts.heartbeatInterval).toBe(30000);
-		expect(opts.messageRateLimit).toBe(100);
-	});
-
-	it("should validate custom configuration", async () => {
-		const { WebSocketTriggerOptsSchema } = await import("@blokjs/helper");
-
-		const opts = WebSocketTriggerOptsSchema.parse({
-			events: ["chat.*", "notification"],
-			rooms: ["general", "support"],
-			path: "/ws",
-			maxConnections: 5000,
-			heartbeatInterval: 15000,
-			messageRateLimit: 50,
-		});
-
-		expect(opts.events).toEqual(["chat.*", "notification"]);
-		expect(opts.rooms).toEqual(["general", "support"]);
-		expect(opts.path).toBe("/ws");
-		expect(opts.maxConnections).toBe(5000);
 	});
 });

@@ -32,6 +32,9 @@ import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
 import RedisKvNode, { _teardownRedisForTests } from "./redisKv";
 import ThrowNode from "./throw";
+import WsBroadcastNode from "./wsBroadcast";
+import WsCloseNode from "./wsClose";
+import WsReplyNode from "./wsReply";
 
 export {
 	AuditLogNode,
@@ -46,6 +49,9 @@ export {
 	MetricsEmitNode,
 	RedisKvNode,
 	ThrowNode,
+	WsBroadcastNode,
+	WsCloseNode,
+	WsReplyNode,
 };
 
 // Test-only utilities — exported but tagged with leading underscore
@@ -80,6 +86,9 @@ export const HELPER_NODES = {
 	"@blokjs/metrics-emit": MetricsEmitNode,
 	"@blokjs/redis-kv": RedisKvNode,
 	"@blokjs/throw": ThrowNode,
+	"@blokjs/ws-broadcast": WsBroadcastNode,
+	"@blokjs/ws-close": WsCloseNode,
+	"@blokjs/ws-reply": WsReplyNode,
 } as const;
 
 export type { AuditEvent } from "./auditLog";

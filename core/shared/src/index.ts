@@ -12,6 +12,7 @@ import { Metrics, type MetricsType } from "./Metrics";
 import NodeBase from "./NodeBase";
 import Trigger from "./Trigger";
 import ConfigContext from "./types/ConfigContext";
+import type ConnectionContext from "./types/ConnectionContext";
 import Context from "./types/Context";
 import EnvContext from "./types/EnvContext";
 import ErrorContext from "./types/ErrorContext";
@@ -34,6 +35,7 @@ export {
 	ErrorContext,
 	LoggerContext,
 	ConfigContext,
+	type ConnectionContext,
 	Trigger,
 	NodeConfigContext,
 	FunctionContext,

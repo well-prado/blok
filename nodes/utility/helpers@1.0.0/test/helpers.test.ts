@@ -65,6 +65,9 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/metrics-emit",
 				"@blokjs/redis-kv",
 				"@blokjs/throw",
+				"@blokjs/ws-broadcast",
+				"@blokjs/ws-close",
+				"@blokjs/ws-reply",
 			]);
 		});
 	});

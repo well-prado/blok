@@ -54,6 +54,19 @@ vi.mock("@hono/node-server/utils/response", () => ({
 	RESPONSE_ALREADY_SENT: new Response(null),
 }));
 
+// v0.7 PR 2 — App now instantiates WebSocketTrigger alongside HttpTrigger.
+// Mock it so the test doesn't have to wire @hono/node-ws + ws through the
+// HTTP package's test setup.
+vi.mock("@blokjs/trigger-websocket", () => ({
+	default: class MockWebSocketTrigger {
+		setNodeMap(_nodeMap: unknown) {}
+		async listen() {
+			return 0;
+		}
+		async stop() {}
+	},
+}));
+
 import App from "../../src/index";
 
 describe("App", () => {
