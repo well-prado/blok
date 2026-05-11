@@ -452,6 +452,15 @@ export abstract class WorkerTrigger extends TriggerBase {
 					`Processing job ${jobId} from ${config.queue} (attempt ${job.attempts + 1}/${job.maxRetries + 1})`,
 				);
 
+				// v0.6 · apply the merged middleware chain (process-global →
+				// workflow-level → trigger-level) on the same ctx the main
+				// workflow will see. State mutations from middleware
+				// (e.g. ctx.state.identity) carry forward. Middleware that
+				// throws (via `@blokjs/throw`) propagates to the outer
+				// catch and is routed through the worker's retry / DLQ
+				// logic exactly like a main-workflow error.
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
+
 				// Execute workflow with timeout if configured
 				let response: TriggerResponse;
 				if (config.timeout && config.timeout > 0) {

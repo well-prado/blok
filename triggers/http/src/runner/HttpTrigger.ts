@@ -7,7 +7,7 @@ import { TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
-import { Configuration, Runner, WorkflowRegistry } from "@blokjs/runner";
+import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
@@ -637,72 +637,6 @@ export default class HttpTrigger extends TriggerBase {
 	 * @param opts.runtimeWorkflow - legacy catch-all path: workflow synthesised at request
 	 *   time from the remote-node-execution header payload.
 	 */
-	/**
-	 * v0.5 · dispatch a chain of middleware workflows on the same parent ctx.
-	 *
-	 * Each entry in `names` is the `name:` of a workflow registered with
-	 * `middleware: true`. For each:
-	 *
-	 * - Materialize a fresh `Configuration` for the middleware (resolves
-	 *   its inner steps + nodes against the same nodeMap as the main
-	 *   workflow — so `@blokjs/throw` etc. resolve from `@blokjs/helpers`).
-	 * - Save the parent ctx.config; swap in the middleware's resolved
-	 *   nodeConfig (`mwConfig.nodes`) so the blueprint mapper finds the
-	 *   middleware's step inputs.
-	 * - Run via `new Runner(...).run(ctx, { deep: true })` — `deep: true`
-	 *   prevents the inner runSteps from inheriting the outer run's
-	 *   `lastCompletedStepIndex` cursor (PR 4 wait/resume hazard).
-	 * - Restore parent ctx.config in `finally`.
-	 *
-	 * State mutations from middleware (e.g. `ctx.state.identity` from
-	 * auth-check) carry forward to subsequent middleware AND the main
-	 * workflow because they share the same ctx.
-	 *
-	 * Short-circuit: middleware author throws (typically via `@blokjs/throw`
-	 * with a `code:` and `body:`). The throw propagates to the outer catch
-	 * in `runWorkflowExecution`, which uses the GlobalError's structured
-	 * code+body fields to format the HTTP response. The main workflow does
-	 * NOT run when middleware throws.
-	 *
-	 * Missing middleware (name not registered) is a configuration error —
-	 * we throw a clear message naming the unknown middleware.
-	 */
-	private async runMiddlewareChain(ctx: Context, names: readonly string[]): Promise<void> {
-		const registry = WorkflowRegistry.getInstance();
-		for (const mwName of names) {
-			const entry = registry.getMiddleware(mwName);
-			if (!entry) {
-				const known = registry
-					.list()
-					.filter((e) => e.isMiddleware)
-					.map((e) => e.name);
-				const knownStr = known.length > 0 ? known.join(", ") : "(none registered)";
-				throw new Error(
-					`[blok] middleware "${mwName}" not found in WorkflowRegistry. Available middleware: ${knownStr}. Make sure the middleware workflow has \`"middleware": true\` set at the workflow root and is in a scanned WORKFLOWS_PATH directory.`,
-				);
-			}
-
-			const mwConfig = new Configuration();
-			await mwConfig.init(mwName, this.nodeMap, entry.workflow);
-
-			const parentConfig = ctx.config;
-			(ctx as { config: unknown }).config = mwConfig.nodes;
-			// Sentinel so RunnerSteps can tag every NodeRun emitted during
-			// this middleware's execution with `middleware: mwName`. Studio
-			// reads that field to render a `mw:<name>` badge on the inner
-			// step rows so operators can see which middleware in the chain
-			// produced each nested step.
-			(ctx as { _blokMiddlewareName?: string })._blokMiddlewareName = mwName;
-			try {
-				const mwRunner = new Runner(mwConfig.steps as unknown as ConstructorParameters<typeof Runner>[0]);
-				await mwRunner.run(ctx, { deep: true, stepName: `mw:${mwName}` });
-			} finally {
-				(ctx as { config: unknown }).config = parentConfig;
-				(ctx as { _blokMiddlewareName?: string })._blokMiddlewareName = undefined;
-			}
-		}
-	}
-
 	private async runWorkflowExecution(
 		c: HonoContext<AppBindings>,
 		opts: {
@@ -857,38 +791,10 @@ export default class HttpTrigger extends TriggerBase {
 					url: c.req.url,
 				} as unknown as RequestContext;
 
-				// v0.5 · middleware chain. Each named middleware is a workflow
-				// with `middleware: true`; we materialize a fresh Configuration
-				// per middleware and run its steps on the SAME parent ctx so
-				// state mutations (e.g. ctx.state.identity from auth-check)
-				// carry forward to the main workflow. Middleware errors
-				// propagate to the outer catch — `@blokjs/throw` with `code:
-				// 401` produces a 401 HTTP response naturally.
-				//
-				// v0.5.4 · three declaration sites combined into one chain:
-				//   1. Process-global (`WorkflowRegistry.setGlobalMiddleware`
-				//      or BLOK_GLOBAL_MIDDLEWARE env) runs FIRST. Applies to
-				//      EVERY workflow run — operator-driven ops concerns
-				//      (request-id, audit-log, OpenTelemetry tracing).
-				//   2. Workflow-level (`middleware: [...]` at the workflow
-				//      root) runs SECOND. Applies to every trigger of the
-				//      workflow — use this when a chain (auth, rate-limit)
-				//      is uniform.
-				//   3. Trigger-level (`trigger.http.middleware: [...]`) runs
-				//      THIRD. Use this when the chain varies by trigger
-				//      (e.g. only the public endpoint needs CAPTCHA).
-				// Resolution order outer→inner:
-				//   process-global → workflow-level → trigger-level → main body.
-				const httpTriggerCfg = (this.configuration.trigger as { http?: { middleware?: unknown } } | undefined)?.http;
-				const triggerLevel = Array.isArray(httpTriggerCfg?.middleware)
-					? (httpTriggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
-					: [];
-				const workflowLevel = this.configuration.appliedMiddleware ?? [];
-				const globalLevel = WorkflowRegistry.getInstance().getGlobalMiddleware();
-				const middlewareNames: string[] = [...globalLevel, ...workflowLevel, ...triggerLevel];
-				if (middlewareNames.length > 0) {
-					await this.runMiddlewareChain(ctx, middlewareNames);
-				}
+				// v0.6 · merged middleware chain (process-global → workflow-level
+				// → trigger-level). Implementation lives on `TriggerBase`
+				// so worker + cron triggers reuse the same merge logic.
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
 
 				const response: TriggerResponse = await this.run(ctx);
 				ctx = response.ctx;
