@@ -371,6 +371,14 @@ export abstract class CronTrigger extends TriggerBase {
 
 					ctx.logger.log(`Executing cron job: ${jobId} (${manual ? "manual" : "scheduled"})`);
 
+					// v0.6 · apply the merged middleware chain (process-global →
+					// workflow-level → trigger-level) before the main workflow
+					// body. Lets cron workflows compose auth-check + audit-log
+					// chains exactly like HTTP triggers. A throwing middleware
+					// propagates to the outer catch and surfaces as a cron job
+					// failure.
+					await this.applyMiddlewareChain(ctx, this.nodeMap);
+
 					// Execute workflow
 					const response: TriggerResponse = await this.run(ctx);
 					const end = performance.now();
