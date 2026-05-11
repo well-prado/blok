@@ -1,0 +1,26 @@
+{
+	"name": "v07-sse-stream",
+	"version": "1.0.0",
+	"description": "v0.7 PR 3 demo — SSE trigger. Subscribes the open stream to the in-process bus channel `sse-demo` and pumps events out as SSE frames via @blokjs/sse-stream. Pair with v07-sse-publish (HTTP POST) to push events from another workflow run into the same channel: every connected SSE client receives them in real time. Streams indefinitely until the client disconnects or the publisher stops emitting.",
+	"trigger": {
+		"sse": {
+			"path": "/sse/demo",
+			"heartbeatInterval": 15000,
+			"retryInterval": 3000
+		}
+	},
+	"steps": [
+		{
+			"id": "sub",
+			"use": "@blokjs/sse-subscribe",
+			"type": "module",
+			"inputs": { "channels": ["sse-demo"] }
+		},
+		{
+			"id": "stream",
+			"use": "@blokjs/sse-stream",
+			"type": "module",
+			"inputs": { "source": "js/ctx.state.sub", "eventName": "message" }
+		}
+	]
+}

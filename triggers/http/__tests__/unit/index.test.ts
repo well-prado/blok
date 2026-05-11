@@ -67,6 +67,16 @@ vi.mock("@blokjs/trigger-websocket", () => ({
 	},
 }));
 
+vi.mock("@blokjs/trigger-sse", () => ({
+	default: class MockSSETrigger {
+		setNodeMap(_nodeMap: unknown) {}
+		async listen() {
+			return 0;
+		}
+		async stop() {}
+	},
+}));
+
 import App from "../../src/index";
 
 describe("App", () => {

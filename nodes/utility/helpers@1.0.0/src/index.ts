@@ -31,6 +31,9 @@ import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
 import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
 import RedisKvNode, { _teardownRedisForTests } from "./redisKv";
+import SsePublishNode from "./ssePublish";
+import SseStreamNode from "./sseStream";
+import SseSubscribeNode from "./sseSubscribe";
 import ThrowNode from "./throw";
 import WsBroadcastNode from "./wsBroadcast";
 import WsCloseNode from "./wsClose";
@@ -48,6 +51,9 @@ export {
 	LogNode,
 	MetricsEmitNode,
 	RedisKvNode,
+	SsePublishNode,
+	SseStreamNode,
+	SseSubscribeNode,
 	ThrowNode,
 	WsBroadcastNode,
 	WsCloseNode,
@@ -85,6 +91,9 @@ export const HELPER_NODES = {
 	"@blokjs/log": LogNode,
 	"@blokjs/metrics-emit": MetricsEmitNode,
 	"@blokjs/redis-kv": RedisKvNode,
+	"@blokjs/sse-publish": SsePublishNode,
+	"@blokjs/sse-stream": SseStreamNode,
+	"@blokjs/sse-subscribe": SseSubscribeNode,
 	"@blokjs/throw": ThrowNode,
 	"@blokjs/ws-broadcast": WsBroadcastNode,
 	"@blokjs/ws-close": WsCloseNode,

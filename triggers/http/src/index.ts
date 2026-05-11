@@ -1,4 +1,5 @@
 import { DefaultLogger } from "@blokjs/runner";
+import SSETrigger from "@blokjs/trigger-sse";
 import WebSocketTrigger from "@blokjs/trigger-websocket";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
@@ -7,6 +8,7 @@ import HttpTrigger, { type AppBindings } from "./runner/HttpTrigger";
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
 	private wsTrigger: WebSocketTrigger | null = null;
+	private sseTrigger: SSETrigger | null = null;
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -27,22 +29,29 @@ export default class App {
 		const app = new Hono<AppBindings>();
 		this.httpTrigger = new HttpTrigger(app);
 		this.wsTrigger = new WebSocketTrigger(app, this.httpTrigger);
-		// Share the HTTP trigger's node + workflow registry with the WS
-		// trigger so per-message workflow runs resolve `branch`, helper
-		// nodes (`@blokjs/ws-reply`, etc.) through the same NodeMap that
+		this.sseTrigger = new SSETrigger(app, this.httpTrigger);
+		// Share the HTTP trigger's node + workflow registry with the
+		// sibling triggers so per-event / per-stream workflow runs
+		// resolve `branch`, helper nodes (`@blokjs/ws-reply`,
+		// `@blokjs/sse-stream`, etc.) through the same NodeMap that
 		// HTTP requests use.
 		this.wsTrigger.setNodeMap(this.httpTrigger.getNodeMap());
+		this.sseTrigger.setNodeMap(this.httpTrigger.getNodeMap());
 	}
 
 	async run() {
 		await this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			// Wire WS first — it registers an addServerHook on HttpTrigger
-			// that fires after serve() completes. Then call http.listen()
-			// which scans workflows, registers routes, calls serve() →
-			// the WS server hook runs → WS routes are registered against
-			// the running server and injectWebSocket attaches the upgrade
-			// listener.
+			// Wire sibling same-port triggers FIRST — they register pre-
+			// catch-all and server hooks on HttpTrigger that fire during /
+			// after HttpTrigger.listen(). Order:
+			//   1. WS + SSE register their hooks here (no routes mounted yet).
+			//   2. HttpTrigger.listen() scans + registers workflows in
+			//      WorkflowRegistry, fires preCatchAllHooks (WS + SSE
+			//      register their routes), mounts the legacy catch-all,
+			//      then calls serve(). The serve() ready callback fires
+			//      WS's serverHook → injectWebSocket attaches.
 			await this.wsTrigger?.listen();
+			await this.sseTrigger?.listen();
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 

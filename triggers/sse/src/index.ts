@@ -1,46 +1,38 @@
-import { DefaultLogger } from "@blokjs/runner";
-import { type Span, metrics, trace } from "@opentelemetry/api";
-import SSEServer from "./runner/SSEServer";
+/**
+ * @blokjs/trigger-sse
+ *
+ * Server-Sent Events trigger for Blok workflows. Mounts on the shared
+ * Hono server alongside HTTP and WebSocket routes — same port, same
+ * middleware chain, same Studio tracing.
+ *
+ * v0.7+ usage (just add the trigger to your workflow):
+ *
+ * ```json
+ * {
+ *   "name": "live-clock",
+ *   "trigger": {
+ *     "sse": {
+ *       "path": "/sse/clock",
+ *       "heartbeatInterval": 15000,
+ *       "retryInterval": 3000
+ *     }
+ *   },
+ *   "steps": [
+ *     { "id": "sub",    "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["clock-ticks"] } },
+ *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "$.state.sub", "eventName": "tick" } }
+ *   ]
+ * }
+ * ```
+ *
+ * See [additional-triggers-plan.mdx](../../../docs/c/devtools/additional-triggers-plan.mdx#sse-trigger)
+ * for the full design.
+ */
 
-export default class App {
-	private sseServer: SSEServer = <SSEServer>{};
-	protected trigger_initializer = 0;
-	protected initializer = 0;
-	protected tracer = trace.getTracer(
-		process.env.PROJECT_NAME || "trigger-sse-server",
-		process.env.PROJECT_VERSION || "0.0.1",
-	);
-	private logger = new DefaultLogger();
-	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
-		description: "Application cold start",
-	});
+import SSETrigger, { _getActiveSSETrigger, _setActiveSSETrigger } from "./SSETrigger";
 
-	constructor() {
-		this.initializer = performance.now();
-		this.sseServer = new SSEServer();
-	}
-
-	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.sseServer.listen();
-			this.initializer = performance.now() - this.initializer;
-
-			this.logger.log(`Server initialized in ${this.initializer.toFixed(2)}ms`);
-			this.app_cold_start.record(this.initializer, {
-				pid: process.pid,
-				env: process.env.NODE_ENV,
-				app: process.env.APP_NAME,
-			});
-			span.end();
-		});
-	}
-
-	// Expose the Hono app for hosting with serverless functions
-	getApp() {
-		return this.sseServer.getApp();
-	}
-}
-
-if (process.env.DISABLE_TRIGGER_RUN !== "true") {
-	new App().run();
-}
+export default SSETrigger;
+export { SSETrigger, _getActiveSSETrigger, _setActiveSSETrigger };
+export { getBus as _getSSEBus, _resetBusForTests } from "./bus";
+export type { BusEvent } from "./bus";
+export type { StreamContext } from "@blokjs/shared";
+export type { SSETriggerOpts } from "@blokjs/helper";
