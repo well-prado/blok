@@ -19,11 +19,23 @@
  *
  * Errors in any iteration propagate to the caller. The runner's outer
  * step-level catch wraps them into the standard error envelope.
+ *
+ * v0.6 wait-inside-primitives:
+ *   - Phase 2 — sequential + wait shipped via the cursor stamps below.
+ *   - Phase 3 — parallel + wait shipped via the pool AbortController +
+ *     Promise.allSettled classification + cursor write. See
+ *     `docs/c/devtools/parallel-foreach-wait-spec.mdx` for the full
+ *     design.
  */
 
 import type { Context, ResponseContext } from "@blokjs/shared";
 import _ from "lodash";
+import { RunCancelledError } from "./RunCancelledError";
 import RunnerNode from "./RunnerNode";
+import { WaitDispatchRequest } from "./WaitDispatchRequest";
+import { ForEachWaitMetrics } from "./monitoring/ForEachWaitMetrics";
+import { RunTracker } from "./tracing/RunTracker";
+import type { IterationContext, ParallelIterationContext, SequentialIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 interface ForEachOpts {
@@ -32,28 +44,6 @@ interface ForEachOpts {
 	mode?: "sequential" | "parallel";
 	concurrency?: number;
 	steps?: RunnerNode[];
-}
-
-/**
- * v0.6 wait-inside-primitives Phase 2 — resume hint set on ctx by
- * `TriggerBase.run` after rehydrating the forEach NodeRun's
- * `iteration_context` column. ForEachNode reads it on entry and:
- *
- *   - Skips iterations [0..iteration-1] (their work is captured in
- *     `completedResults`, no idempotencyKey lookups required).
- *   - Resumes iteration `iteration` from the inner step at
- *     `innerStepIndex` (the step that was about to throw the wait
- *     when the previous pass deferred). The inner runner picks up
- *     this hint from `_blokInnerResumeIndex` on the child ctx.
- *   - Iterations [iteration+1..end] run from scratch.
- *
- * Phase 2 wires this for SEQUENTIAL mode only. Parallel forEach
- * resume lands in Phase 3 with cancellation semantics.
- */
-interface IterationResume {
-	iteration: number;
-	innerStepIndex: number;
-	completedResults: unknown[];
 }
 
 export class ForEachNode extends RunnerNode {
@@ -84,12 +74,12 @@ export class ForEachNode extends RunnerNode {
 			return response;
 		}
 
-		// v0.6 Phase 2 — read the resume hint that TriggerBase rehydrated
-		// from the persisted `iteration_context` column. Cleared after
-		// reading so a sibling forEach later in the workflow doesn't
-		// accidentally pick it up.
+		// v0.6 — read the resume hint that TriggerBase rehydrated from
+		// the persisted `iteration_context` column. Cleared after reading
+		// so a sibling forEach later in the workflow doesn't accidentally
+		// pick it up.
 		const ctxAny = ctx as Record<string, unknown>;
-		const resume = ctxAny._blokIterationResume as IterationResume | undefined;
+		const resume = ctxAny._blokIterationResume as IterationContext | undefined;
 		if (resume !== undefined) {
 			ctxAny._blokIterationResume = undefined;
 		}
@@ -97,14 +87,41 @@ export class ForEachNode extends RunnerNode {
 		// Lazy import to avoid circular dep (Runner pulls in Configuration).
 		const { default: Runner } = await import("./Runner");
 
-		// Pre-populate results[] with cached iteration outputs (Phase 2 —
-		// resume case). On a fresh first pass `resume` is undefined and
-		// results starts empty.
+		// Discriminate on cursor mode at the read side. Sequential cursors
+		// written before this PR omit the `mode` field — treated as
+		// "sequential" by default. Parallel cursors are written ONLY by
+		// the parallel branch below.
+		const sequentialResume: SequentialIterationContext | undefined =
+			resume && (resume.mode ?? "sequential") === "sequential" ? (resume as SequentialIterationContext) : undefined;
+		const parallelResume: ParallelIterationContext | undefined =
+			resume?.mode === "parallel" ? (resume as ParallelIterationContext) : undefined;
+
+		// Pre-populate results[] from cursor — both sequential and parallel
+		// resume paths use this. Sequential: contiguous slice [0..N-1].
+		// Parallel: sparse — only slots present in `completedResults` get
+		// filled; the rest stay `undefined` and get re-launched.
 		const results: unknown[] = new Array(items.length);
-		if (resume?.completedResults) {
-			const cap = Math.min(resume.completedResults.length, items.length);
+		if (sequentialResume?.completedResults) {
+			const cap = Math.min(sequentialResume.completedResults.length, items.length);
 			for (let k = 0; k < cap; k++) {
-				results[k] = resume.completedResults[k];
+				results[k] = sequentialResume.completedResults[k];
+			}
+		}
+		if (parallelResume?.completedResults) {
+			const cap = Math.min(parallelResume.completedResults.length, items.length);
+			for (let k = 0; k < cap; k++) {
+				const slot = parallelResume.completedResults[k];
+				// `null` distinguishes "ran but returned undefined" (re-use
+				// this value, don't re-launch) from a JSON-undefined hole
+				// (not present — re-launch). Both deserialise to `null` in
+				// some JSON encoders; we normalise sparse holes via
+				// `Object.prototype.hasOwnProperty` against the parsed
+				// array.
+				if (Object.prototype.hasOwnProperty.call(parallelResume.completedResults, k) && slot !== undefined) {
+					// null sentinel survives — readers see `results[k] === null`
+					// meaning "ran, returned undefined" and skip re-launch.
+					results[k] = slot;
+				}
 			}
 		}
 
@@ -134,7 +151,7 @@ export class ForEachNode extends RunnerNode {
 			// v0.6 Phase 2 — start at the resume iteration if present,
 			// else 0. Iterations before the resume index are not re-run;
 			// their results were rehydrated above.
-			const startIndex = resume?.iteration ?? 0;
+			const startIndex = sequentialResume?.iteration ?? 0;
 			for (let i = startIndex; i < items.length; i++) {
 				// v0.6 Phase 2 — stamp the iteration sentinels on the
 				// PARENT ctx so RunnerSteps' nested wait throw can read
@@ -145,7 +162,8 @@ export class ForEachNode extends RunnerNode {
 				// before this one.
 				ctxAny._blokForEachCurrentIteration = i;
 				ctxAny._blokForEachPartialResults = results.slice(0, i);
-				const innerResumeIndex = i === startIndex && resume !== undefined ? resume.innerStepIndex : undefined;
+				const innerResumeIndex =
+					i === startIndex && sequentialResume !== undefined ? sequentialResume.innerStepIndex : undefined;
 				results[i] = await runIteration(items[i], i, innerResumeIndex);
 			}
 			// Cleanup sentinels — sibling forEach later in the workflow
@@ -153,26 +171,287 @@ export class ForEachNode extends RunnerNode {
 			ctxAny._blokForEachCurrentIteration = undefined;
 			ctxAny._blokForEachPartialResults = undefined;
 		} else {
-			// Parallel with bounded concurrency — simple worker-pool pattern.
-			// Phase 3 will add resume support; for now a parallel forEach
-			// with a wait inside throws as before (no iteration_context
-			// written, no resume hint consumed). Authors get the same
-			// pre-v0.6 behaviour.
-			let nextIndex = 0;
-			const workers: Promise<void>[] = [];
-			const workerCount = Math.min(concurrency, items.length);
-			for (let w = 0; w < workerCount; w++) {
-				workers.push(
-					(async () => {
-						while (true) {
-							const i = nextIndex++;
-							if (i >= items.length) return;
-							results[i] = await runIteration(items[i], i);
-						}
-					})(),
-				);
+			// === v0.6 Phase 3 — parallel forEach + wait =====================
+			// See `docs/c/devtools/parallel-foreach-wait-spec.mdx`. Headline
+			// contract: when one iteration's inner step throws
+			// `WaitDispatchRequest`, peer in-flight iterations are
+			// cancelled via a pool AbortController. Completed iterations'
+			// results are persisted in the cursor's `completedResults`
+			// sparse array; cancelled + queued iterations go in
+			// `cancelledIterations` for re-launch on resume.
+			//
+			// The pool AbortController is distinct from `ctx.signal` —
+			// tripping it MUST NOT cascade to the parent run (the parent
+			// is waiting, not cancelled). Each iteration's child ctx gets
+			// a per-iteration signal chained off BOTH the parent's signal
+			// (so user-cancel still cascades) AND the pool signal (so
+			// peer-wait cascades).
+			const poolController = new AbortController();
+			const poolSignal = poolController.signal;
+
+			// On resume in parallel mode, the work queue is the set of
+			// iterations that need to run: the wait-firing iter (with
+			// inner resume hint) + all cancelled/queued iters (from
+			// scratch). On a fresh pass, every iteration runs.
+			const queue: number[] = [];
+			if (parallelResume) {
+				const toRun = new Set<number>();
+				toRun.add(parallelResume.waitFiringIteration);
+				for (const idx of parallelResume.cancelledIterations) {
+					if (idx < items.length) toRun.add(idx);
+				}
+				// Any iterations beyond `completedResults.length` are
+				// trailing-not-started — also need to run.
+				for (let i = parallelResume.completedResults.length; i < items.length; i++) {
+					if (results[i] === undefined) toRun.add(i);
+				}
+				queue.push(...Array.from(toRun).sort((a, b) => a - b));
+			} else {
+				for (let i = 0; i < items.length; i++) queue.push(i);
 			}
-			await Promise.all(workers);
+
+			// Bookkeeping populated as workers settle. Wait-firing index
+			// (lowest index wins on race), the original wait throw object
+			// (for re-throw past Promise.allSettled), and the set of
+			// indices cancelled by the pool. Errors short-circuit
+			// classification — first non-wait error wins.
+			type WorkerOutcome =
+				| { kind: "completed"; index: number; result: unknown }
+				| { kind: "wait"; index: number; throwObj: WaitDispatchRequest }
+				| { kind: "cancelled"; index: number }
+				| { kind: "error"; index: number; err: unknown };
+
+			let queuePos = 0;
+			const workerCount = Math.min(concurrency, queue.length);
+
+			const launchWorker = async (): Promise<WorkerOutcome[]> => {
+				const outcomes: WorkerOutcome[] = [];
+				while (true) {
+					const myQueuePos = queuePos++;
+					if (myQueuePos >= queue.length) return outcomes;
+					const index = queue[myQueuePos];
+					// Skip if pool tripped before this iteration started —
+					// classify as cancelled without doing any work.
+					if (poolSignal.aborted) {
+						outcomes.push({ kind: "cancelled", index });
+						continue;
+					}
+					const innerResumeIndex =
+						parallelResume !== undefined && index === parallelResume.waitFiringIteration
+							? parallelResume.innerStepIndex
+							: undefined;
+					try {
+						const result = await runIterationWithPool(item(items, index), index, innerResumeIndex, poolSignal);
+						outcomes.push({ kind: "completed", index, result });
+					} catch (err) {
+						if (err instanceof WaitDispatchRequest) {
+							// This iteration fired a wait. Trip the pool so
+							// peers stop accepting new iterations and exit
+							// their current ones at the next step boundary.
+							if (!poolSignal.aborted) poolController.abort();
+							outcomes.push({ kind: "wait", index, throwObj: err });
+						} else if (err instanceof RunCancelledError) {
+							// Distinguish pool-cancel from user-cancel. If
+							// poolSignal is aborted AND ctx.signal is NOT,
+							// this is a pool-induced cancellation due to a
+							// peer's wait — re-runnable. Otherwise it's a
+							// user-cancel — re-throw upstream.
+							const userCancel = ctx.signal?.aborted === true && !poolSignal.aborted;
+							if (userCancel) {
+								outcomes.push({ kind: "error", index, err });
+							} else {
+								outcomes.push({ kind: "cancelled", index });
+							}
+						} else {
+							// Real error. Trip the pool so peers stop
+							// (don't waste CPU on a doomed forEach), then
+							// record. Classification later: real errors
+							// beat waits.
+							if (!poolSignal.aborted) poolController.abort();
+							outcomes.push({ kind: "error", index, err });
+						}
+					}
+				}
+			};
+
+			// Helper — same as `runIteration` but threads the pool signal
+			// through to the per-iteration child ctx (so RunnerSteps'
+			// between-step abort check sees pool aborts).
+			const runIterationWithPool = async (
+				item_: unknown,
+				index: number,
+				innerResumeIndex: number | undefined,
+				poolSig: AbortSignal,
+			): Promise<unknown> => {
+				const childCtx = this.cloneCtxForIteration(ctx, as, item_, index);
+				const iterCtl = new AbortController();
+				const listenerCleanup = new AbortController();
+				// Chain from parent ctx.signal (user cancel cascade)
+				if (ctx.signal) {
+					if (ctx.signal.aborted) iterCtl.abort();
+					else
+						ctx.signal.addEventListener(
+							"abort",
+							() => {
+								if (!iterCtl.signal.aborted) iterCtl.abort();
+							},
+							{ once: true, signal: listenerCleanup.signal },
+						);
+				}
+				// Chain from pool signal (peer wait cascade)
+				if (poolSig.aborted) iterCtl.abort();
+				else
+					poolSig.addEventListener(
+						"abort",
+						() => {
+							if (!iterCtl.signal.aborted) iterCtl.abort();
+						},
+						{ once: true, signal: listenerCleanup.signal },
+					);
+				// Replace the inherited signal (which would be parent's)
+				// with the per-iteration signal that cascades both ways.
+				(childCtx as { signal: AbortSignal }).signal = iterCtl.signal;
+				if (innerResumeIndex !== undefined && innerResumeIndex > 0) {
+					(childCtx as Record<string, unknown>)._blokInnerResumeIndex = innerResumeIndex;
+				}
+				try {
+					const runner = new Runner(steps);
+					await runner.run(childCtx, { deep: true, stepName: this.name });
+					return childCtx.response;
+				} finally {
+					// Detach the per-iteration listeners from parent +
+					// pool signals (PR 1 A3 pattern — prevents listener
+					// accumulation on long-lived parents over many
+					// parallel forEach invocations).
+					listenerCleanup.abort();
+				}
+			};
+
+			// Spawn workers. Each returns its set of outcomes (one
+			// outcome per iteration the worker handled). `allSettled`
+			// gives us each worker's final state; we then flatten.
+			const workers: Promise<WorkerOutcome[]>[] = [];
+			for (let w = 0; w < workerCount; w++) {
+				workers.push(launchWorker());
+			}
+			const settled = await Promise.allSettled(workers);
+
+			// Flatten. A worker can't reject (its try/catch handles all
+			// errors and classifies into the outcome list). But guard
+			// defensively — rejection means a bug in launchWorker.
+			const allOutcomes: WorkerOutcome[] = [];
+			for (const s of settled) {
+				if (s.status === "fulfilled") {
+					allOutcomes.push(...s.value);
+				} else {
+					// Defensive — re-throw so the failure isn't lost.
+					throw s.reason;
+				}
+			}
+
+			// Classification step. Walk outcomes:
+			//   1. If ANY non-wait error, re-throw the first one (errors
+			//      beat waits per the spec).
+			//   2. If ANY wait, identify the lowest-index wait as the
+			//      wait-firing iteration; reclassify others as cancelled.
+			//   3. Else, all iterations completed — fall through to
+			//      normal completion below.
+			const errors = allOutcomes.filter((o): o is { kind: "error"; index: number; err: unknown } => o.kind === "error");
+			if (errors.length > 0) {
+				// First error wins (sorted by iteration index for
+				// determinism, even though only one re-throws).
+				errors.sort((a, b) => a.index - b.index);
+				throw errors[0].err;
+			}
+
+			const waits = allOutcomes.filter(
+				(o): o is { kind: "wait"; index: number; throwObj: WaitDispatchRequest } => o.kind === "wait",
+			);
+			if (waits.length > 0) {
+				// First-wait-wins by iteration index.
+				waits.sort((a, b) => a.index - b.index);
+				const waitFiring = waits[0];
+				// Demote other waits to cancelled (they were racing — only
+				// one resumes; the others re-run from scratch).
+				const cancelledFromOtherWaits = waits.slice(1).map((w) => w.index);
+
+				const completed = allOutcomes.filter(
+					(o): o is { kind: "completed"; index: number; result: unknown } => o.kind === "completed",
+				);
+				const cancelled = allOutcomes
+					.filter((o): o is { kind: "cancelled"; index: number } => o.kind === "cancelled")
+					.map((o) => o.index);
+
+				// Build the sparse completedResults array. Slot k =
+				// completed iteration k's return value; null = "ran but
+				// returned undefined"; JSON-undefined hole = "not
+				// present" (cancelled / queued / wait-firing). On resume,
+				// only present-non-undefined slots short-circuit
+				// re-launch.
+				const completedResults: (unknown | null)[] = new Array(items.length);
+				for (const c of completed) {
+					completedResults[c.index] = c.result === undefined ? null : c.result;
+				}
+				// Also stash the rehydrated completed iterations from the
+				// resume cursor — if we're already on a re-entry pass,
+				// those iterations don't appear in `completed` (they
+				// were never launched this pass) but their results are
+				// in `results[]` from the pre-populate above.
+				if (parallelResume) {
+					for (let k = 0; k < parallelResume.completedResults.length; k++) {
+						if (
+							Object.prototype.hasOwnProperty.call(parallelResume.completedResults, k) &&
+							parallelResume.completedResults[k] !== undefined &&
+							completedResults[k] === undefined
+						) {
+							completedResults[k] = parallelResume.completedResults[k];
+						}
+					}
+				}
+
+				const allCancelled = [...new Set([...cancelled, ...cancelledFromOtherWaits])].sort((a, b) => a - b);
+
+				const cursor: ParallelIterationContext = {
+					mode: "parallel",
+					waitFiringIteration: waitFiring.index,
+					// `throwObj.info.stepIndex` carries the inner step index
+					// the wait fired at — exactly what we need.
+					innerStepIndex: waitFiring.throwObj.info.stepIndex,
+					completedResults,
+					cancelledIterations: allCancelled,
+				};
+
+				// Write the cursor BEFORE re-throwing so TriggerBase's
+				// rehydrate (on the next resume) sees the parallel-mode
+				// shape. RunnerSteps may have written a sequential-shape
+				// cursor at the wait-throw moment (Phase 2 path); this
+				// write overwrites it on the same NodeRun id.
+				this.writeCursor(ctx, cursor);
+
+				// OTel — record the cancelled count so dashboards can
+				// spot workflows that frequently waste work on cancel +
+				// re-launch.
+				try {
+					ForEachWaitMetrics.getInstance().recordCancellation({
+						workflowName: (ctx as { workflow_name?: string }).workflow_name ?? "unknown",
+						cancelledCount: allCancelled.length,
+					});
+				} catch {
+					// Metrics never block.
+				}
+
+				// Re-throw the original wait — TriggerBase catches it,
+				// schedules the deferred dispatch, returns 202 to HTTP.
+				throw waitFiring.throwObj;
+			}
+
+			// No waits, no errors — every iteration completed. Populate
+			// `results[]` from the completed outcomes.
+			for (const o of allOutcomes) {
+				if (o.kind === "completed") {
+					results[o.index] = o.result;
+				}
+			}
 		}
 
 		response.data = results;
@@ -182,6 +461,29 @@ export class ForEachNode extends RunnerNode {
 		// its `run()` method, but we own our own run() here).
 		applyStepOutput(ctx, this, { data: results });
 		return response;
+	}
+
+	/**
+	 * Write the cursor to the active forEach NodeRun. Stamped here (vs.
+	 * via RunnerSteps' wait-throw site) because the parallel cursor is
+	 * built post-`Promise.allSettled` — the wait-throw site doesn't know
+	 * which peer iterations got cancelled OR which completed.
+	 */
+	private writeCursor(ctx: Context, cursor: ParallelIterationContext): void {
+		const ctxAny = ctx as Record<string, unknown>;
+		const primitiveNodeRunId = ctxAny._blokActivePrimitiveNodeRunId as string | undefined;
+		if (!primitiveNodeRunId) return;
+		try {
+			RunTracker.getInstance().getStore().updateNodeRun(primitiveNodeRunId, {
+				iterationContext: cursor,
+			});
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.logger.logLevel(
+				"warn",
+				`[blok][wait] forEach parallel cursor write failed: ${msg}. Resume will re-run every iteration from scratch.`,
+			);
+		}
 	}
 
 	private cloneCtxForIteration(ctx: Context, as: string, item: unknown, index: number): Context {
@@ -210,4 +512,10 @@ export class ForEachNode extends RunnerNode {
 		(childCtx as Record<string, unknown>)._blokIterationIndex = index;
 		return childCtx;
 	}
+}
+
+// Local helper to keep the parallel branch readable when reading
+// `items[index]` from inside an async lambda.
+function item(items: unknown[], index: number): unknown {
+	return items[index];
 }

@@ -646,6 +646,36 @@ const cases: SmokeCase[] = [
 		},
 	},
 
+	// --- v05-parallel-foreach-with-wait: v0.6 Phase 3 (second half) ---------
+	// Parallel forEach with `wait.for(100ms)` inside the iteration body.
+	// When the FIRST iteration's wait fires, the runner throws
+	// WaitDispatchRequest → DeferredDispatchSignal → HTTP 202 + Location
+	// header. This is the headline contract of v0.6 Phase 3 (second half):
+	// peer iterations get cancelled via a pool AbortController (distinct
+	// from ctx.signal so user-cancel doesn't conflate with peer-wait
+	// cancel), completed iterations have their results persisted in the
+	// parallel cursor's sparse `completedResults`, and cancelled
+	// iterations are re-launched from scratch on resume (idempotencyKey
+	// cache provides the safety net for side-effecting inner steps). The
+	// full round-trip across all iterations is exercised by
+	// `core/runner/__tests__/unit/wait-inside-foreach-parallel.test.ts`.
+	{
+		name: "v05-parallel-foreach-with-wait — parallel forEach with wait → 202 deferred",
+		method: "POST",
+		pathname: "/v05-parallel-foreach-with-wait",
+		body: { items: ["a", "b", "c"] },
+		expectStatus: 202,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (typeof obj.runId !== "string" || obj.runId.length === 0) {
+				throw fail("runId should be a non-empty string", obj);
+			}
+			if (obj.status !== "delayed") {
+				throw fail("status should be 'delayed' (deferred dispatch from wait inside parallel forEach)", obj);
+			}
+		},
+	},
+
 	// --- v05-polling-with-backoff: v0.6 Phase 3 — wait inside loop iteration --
 	// Loop with `while: ctx.state.attempt < 3` and a `wait.for(100ms)` inside
 	// the iteration body. When the FIRST iteration's wait fires (after the
