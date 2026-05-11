@@ -1,0 +1,45 @@
+{
+	"name": "v05-parallel-foreach-with-wait",
+	"version": "1.0.0",
+	"description": "v0.6 Phase 3 (second half) demo — parallel forEach with a wait inside the iteration body. The handler fans out over `req.body.items` with `mode: parallel` + `concurrency: 5`. Each iteration body records its item then waits 100ms before the next iteration step (the wait simulates per-item throttle or coordination delay). When the FIRST iteration's wait fires, the runner persists a parallel-mode iteration cursor with `waitFiringIteration`, sparse `completedResults`, and explicit `cancelledIterations`. Peer iterations get cancelled via a pool AbortController (distinct from `ctx.signal` so user-cancel doesn't get confused with peer-wait cancel). On dispatchDeferred re-entry, ForEachNode pre-populates `results[]` from `completedResults`, re-launches cancelled iterations from inner step 0, and resumes the wait-firing iteration at its `innerStepIndex`. See `docs/c/devtools/parallel-foreach-wait-spec.mdx` for the full design. Smoke validates the first 202 + Location header; full round-trip in vitest.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "fan-out",
+			"forEach": {
+				"in": "js/ctx.request.body.items",
+				"as": "item",
+				"mode": "parallel",
+				"concurrency": 5,
+				"do": [
+					{
+						"id": "record-item",
+						"use": "@blokjs/expr",
+						"type": "module",
+						"inputs": {
+							"expression": "({ item: ctx.state.item, index: ctx.state.itemIndex, recordedAt: Date.now() })"
+						}
+					},
+					{
+						"id": "throttle",
+						"wait": { "for": "100ms" }
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, totalItems: (ctx.state['fan-out'] || []).length })"
+			}
+		}
+	]
+}

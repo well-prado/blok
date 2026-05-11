@@ -340,42 +340,95 @@ export interface NodeRun {
 	 */
 	iterationIndex?: number;
 	/**
-	 * v0.6 wait-inside-primitives Phase 2 — sequential forEach iteration
-	 * cursor. Set on a primitive iterator's NodeRun (e.g. the forEach)
-	 * by RunnerSteps when an INNER step throws `WaitDispatchRequest`
-	 * mid-iteration. Records:
+	 * v0.6 wait-inside-primitives — iteration cursor. Set on a primitive
+	 * iterator's NodeRun (e.g. forEach, loop) by RunnerSteps when an
+	 * INNER step throws `WaitDispatchRequest` mid-iteration. Read by
+	 * `TriggerBase.run` on dispatchDeferred re-entry and stamped onto
+	 * `ctx._blokIterationResume` so the primitive can pick it up.
+	 * Persisted column is `iteration_context` (sqlite migration v12).
 	 *
-	 *   - `iteration`: the iteration index that was in flight (0-based).
-	 *     On re-entry, the forEach skips iterations `[0..iteration-1]`
-	 *     and resumes at `iteration` from the inner step below.
-	 *   - `innerStepIndex`: the index of the inner step within that
-	 *     iteration's body where the wait fired. The nested runner skips
-	 *     inner steps `[0..innerStepIndex-1]` on resume (they completed
-	 *     in the prior pass).
-	 *   - `completedResults`: the partial accumulator —
-	 *     `results[0..iteration-1]`. ForEachNode pre-populates its result
-	 *     array with these values on resume so the final output covers
-	 *     ALL iterations including the pre-wait ones.
+	 * Two encodings via a `mode` discriminator:
 	 *
-	 * Read by `TriggerBase.run` on dispatchDeferred re-entry: the active
-	 * primitive's iteration_context is rehydrated onto ctx as
-	 * `_blokIterationResume` so ForEachNode can pick it up. Persisted
-	 * column is `iteration_context` (sqlite migration v12).
+	 *   - `mode: "sequential"` (or omitted for back-compat): the Phase 2
+	 *     sequential forEach + wait cursor (also reused by Phase 3 loop).
+	 *     Records the in-flight iteration index, the inner step index
+	 *     where the wait fired, and an in-order `completedResults`
+	 *     accumulator covering iterations `[0..iteration-1]`. ForEachNode
+	 *     and LoopNode read this on resume to skip the completed prefix.
+	 *
+	 *   - `mode: "parallel"` (PR follow-up to Phase 3): the parallel
+	 *     forEach + wait cursor. Records which iteration's wait fired
+	 *     (`waitFiringIteration`), where inside its body
+	 *     (`innerStepIndex`), a SPARSE `completedResults` array (slot `i`
+	 *     populated iff iteration `i` finished before the wait fired —
+	 *     `null` for "ran but returned undefined", JSON-undefined hole
+	 *     for "not present"), and the explicit `cancelledIterations`
+	 *     list (in-flight + queued indices that need re-launch on
+	 *     resume). See `docs/c/devtools/parallel-foreach-wait-spec.mdx`
+	 *     for the full contract.
 	 *
 	 * Undefined on regular NodeRuns and on primitives that completed
-	 * without ever throwing a wait. Phase 2 wires this up for sequential
-	 * forEach only — parallel forEach (Phase 3), loop (Phase 3), and
-	 * switch (Phase 4) use the same column with their own primitive-
-	 * specific shapes.
+	 * without ever throwing a wait.
 	 */
-	iterationContext?: {
-		/** Iteration index (0-based) the wait fired in. */
-		iteration: number;
-		/** Inner step index within iteration's body where the wait fired. */
-		innerStepIndex: number;
-		/** Accumulator for iterations [0..iteration-1] — push completedResults[i] === results[i] on resume. */
-		completedResults: unknown[];
-	};
+	iterationContext?: IterationContext;
+}
+
+/**
+ * Discriminated union for the iteration cursor persisted into
+ * `node_runs.iteration_context`. See `NodeRun.iterationContext` for
+ * field-level semantics. The runtime selection lives in:
+ *
+ *   - Write side: `core/runner/src/RunnerSteps.ts` wait-throw site
+ *     (sequential) and `ForEachNode.run` parallel-branch error handler
+ *     (parallel).
+ *   - Read side: `TriggerBase.run` rehydrate stamps the cursor onto
+ *     `ctx._blokIterationResume`; the primitive itself (ForEachNode,
+ *     LoopNode) dispatches on `mode` to the right resume path.
+ */
+export type IterationContext = SequentialIterationContext | ParallelIterationContext;
+
+/**
+ * Sequential forEach + wait OR loop + wait cursor. The pre-existing
+ * Phase 2/3 shape — `mode` is optional and defaults to "sequential" on
+ * read so cursors written before the discriminator landed (i.e., main
+ * before this PR) keep being interpreted correctly.
+ */
+export interface SequentialIterationContext {
+	mode?: "sequential";
+	/** Iteration index (0-based) the wait fired in. */
+	iteration: number;
+	/** Inner step index within iteration's body where the wait fired. */
+	innerStepIndex: number;
+	/** Accumulator for iterations [0..iteration-1]; pre-populates `results[]` on resume. */
+	completedResults: unknown[];
+}
+
+/**
+ * Parallel forEach + wait cursor. The headline contract: persist
+ * completed iteration results, retry incomplete ones on resume. See
+ * `docs/c/devtools/parallel-foreach-wait-spec.mdx` for the full design.
+ */
+export interface ParallelIterationContext {
+	mode: "parallel";
+	/** Index of the iteration whose inner step threw the wait. */
+	waitFiringIteration: number;
+	/** Inner step index within the wait-firing iteration's body. */
+	innerStepIndex: number;
+	/**
+	 * Sparse array indexed by iteration number. Slot `i` is populated
+	 * iff iteration `i` finished before the wait fired. `null` means
+	 * "ran but returned undefined" (distinct from the JSON-undefined
+	 * hole = "not present in cursor, re-launch on resume").
+	 */
+	completedResults: (unknown | null)[];
+	/**
+	 * Iteration indices that were in-flight OR queued at wait-throw
+	 * moment. ForEachNode re-launches these from inner step 0 on
+	 * resume. The wait-firing iteration is NOT in this list — it
+	 * resumes via `innerStepIndex`. Sorted ascending for trace-dump
+	 * readability.
+	 */
+	cancelledIterations: number[];
 }
 
 /**

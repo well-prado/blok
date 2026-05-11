@@ -678,6 +678,28 @@ function normalizeForEachStep(
 	const concurrency = typeof fe.concurrency === "number" && fe.concurrency > 0 ? fe.concurrency : 10;
 	const doSteps = Array.isArray(fe.do) ? (fe.do as unknown[]) : [];
 
+	// v0.6 Phase 3 — parallel forEach + wait composition warning. When
+	// a wait fires inside a parallel iteration, peer in-flight iterations
+	// are cancelled and re-launched on resume. Re-launches re-execute
+	// side effects unless inner steps have `idempotencyKey` (or are
+	// naturally side-effect-free). This is a per-author-contract gotcha
+	// (see `docs/c/devtools/parallel-foreach-wait-spec.mdx#author-contract`).
+	// Warn at load time so authors notice; don't BLOCK the workflow —
+	// some authors deliberately accept the retry behavior (e.g. pure
+	// fetches) or have their own idempotency layer.
+	if (mode === "parallel" && doStepsContainWait(doSteps)) {
+		const nonIdempotentInnerSteps = doSteps
+			.filter((s): s is Record<string, unknown> => isPlainObject(s))
+			.filter((s) => !isWaitStep(s) && s.idempotencyKey === undefined)
+			.map((s) => pickString(s.id) ?? "(unnamed)");
+		if (nonIdempotentInnerSteps.length > 0) {
+			const stepList = nonIdempotentInnerSteps.map((n) => `"${n}"`).join(", ");
+			console.warn(
+				`[blok][normalizer] forEach "${id}" runs in parallel mode with a wait inside the iteration body. When the wait fires, peer iterations are cancelled and re-launched from scratch on resume. Inner steps without an \`idempotencyKey\` will re-execute their side effects on each re-launch: ${stepList}. Add \`idempotencyKey\` to side-effecting steps, OR confirm the steps are side-effect-free. See docs/c/devtools/parallel-foreach-wait-spec.mdx for the author contract.`,
+			);
+		}
+	}
+
 	const { innerInternal, innerNodes } = normalizeStepBlock(doSteps);
 
 	const internalStep: InternalStep = {
@@ -698,6 +720,31 @@ function normalizeForEachStep(
 	} as InternalNodeConfig;
 
 	return { internalStep, nodeConfig, innerNodes };
+}
+
+/**
+ * v0.6 Phase 3 — recognise a wait step in the raw (pre-normalization)
+ * shape. Two encodings: v0.5 `{ id, wait: {for|until} }` OR legacy
+ * `{ id, type: "wait", waitForMs|waitUntil }`. Used by
+ * `normalizeForEachStep` to emit the parallel + wait warning.
+ */
+function isWaitStep(step: Record<string, unknown>): boolean {
+	if (isPlainObject(step.wait)) return true;
+	if (step.type === "wait") return true;
+	return false;
+}
+
+/**
+ * v0.6 Phase 3 — scan the doSteps array (one level deep) for a wait
+ * step. Doesn't recurse into nested primitives (forEach inside forEach,
+ * tryCatch inside forEach) — those are out of scope for this warning;
+ * Phase 4 nested-primitive work will extend.
+ */
+function doStepsContainWait(doSteps: unknown[]): boolean {
+	for (const s of doSteps) {
+		if (isPlainObject(s) && isWaitStep(s)) return true;
+	}
+	return false;
 }
 
 /**
