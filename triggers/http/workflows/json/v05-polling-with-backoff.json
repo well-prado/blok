@@ -1,0 +1,53 @@
+{
+	"name": "v05-polling-with-backoff",
+	"version": "1.0.0",
+	"description": "v0.6 wait-inside-primitives Phase 3 demo — Loop with wait inside the iteration body. The handler initialises an `attempt` counter, then enters a `loop` that runs while `attempt < 3`. Each iteration bumps the counter and waits 100ms before re-evaluating the condition. The wait inside the iteration body is the load-bearing test of v0.6 Phase 3: each iteration's wait fires `WaitDispatchRequest` from inside the loop iteration scope, the runner persists the iteration cursor to `node_runs.iteration_context`, defers the run, then on `dispatchDeferred` re-entry LoopNode reads the cursor and resumes iteration N at innerStepIndex 1 (the wait), which satisfies because the timer has fired. The while-condition is NOT re-evaluated on the first iteration after resume — the condition was already true when the wait fired and the cursor commits the runner to finishing iteration N's body. Real-world analogue: poll an external job until it's ready with exponential backoff, schedule-then-check loops with bounded retry. Smoke validates the first 202 + Location header (full round-trip is verified in the vitest integration suite).",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "init-attempt",
+			"use": "@blokjs/ctx-publish",
+			"type": "module",
+			"inputs": {
+				"name": "attempt",
+				"value": 0
+			}
+		},
+		{
+			"id": "poll",
+			"loop": {
+				"while": "(ctx.state.attempt ?? 0) < 3",
+				"maxIterations": 5,
+				"do": [
+					{
+						"id": "bump",
+						"use": "@blokjs/ctx-publish",
+						"type": "module",
+						"inputs": {
+							"name": "attempt",
+							"value": "js/(ctx.state.attempt ?? 0) + 1"
+						}
+					},
+					{
+						"id": "throttle",
+						"wait": { "for": "100ms" }
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ ok: true, finalAttempt: ctx.state.attempt })"
+			}
+		}
+	]
+}

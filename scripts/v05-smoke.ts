@@ -645,6 +645,36 @@ const cases: SmokeCase[] = [
 			}
 		},
 	},
+
+	// --- v05-polling-with-backoff: v0.6 Phase 3 — wait inside loop iteration --
+	// Loop with `while: ctx.state.attempt < 3` and a `wait.for(100ms)` inside
+	// the iteration body. When the FIRST iteration's wait fires (after the
+	// counter advances from 0 → 1), the runner throws WaitDispatchRequest →
+	// DeferredDispatchSignal → HTTP 202 + Location header. This is the
+	// headline contract of v0.6 Phase 3: a wait inside a loop iteration body
+	// correctly defers AND the resumed run picks up at the right iteration
+	// (NOT iteration 0) because the cursor's `iteration` field overrides the
+	// fresh `iteration = 0` initialization in LoopNode.run. Crucially, the
+	// while-condition is NOT re-evaluated on the first iteration after
+	// resume — if it were, the post-bump counter (now ahead of the resume
+	// point) could falsely terminate the loop. The full round-trip is
+	// verified in `core/runner/__tests__/unit/wait-inside-loop.test.ts`.
+	{
+		name: "v05-polling-with-backoff — loop with wait inside iteration → 202 deferred",
+		method: "POST",
+		pathname: "/v05-polling-with-backoff",
+		body: {},
+		expectStatus: 202,
+		assert: (body) => {
+			const obj = body as Record<string, JsonValue>;
+			if (typeof obj.runId !== "string" || obj.runId.length === 0) {
+				throw fail("runId should be a non-empty string", obj);
+			}
+			if (obj.status !== "delayed") {
+				throw fail("status should be 'delayed' (deferred dispatch from wait inside loop)", obj);
+			}
+		},
+	},
 ];
 
 // --- v05-github-webhook-router: byte-exact HMAC against ctx.request.rawBody

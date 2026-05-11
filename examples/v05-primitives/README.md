@@ -55,7 +55,7 @@ If those read cleanly, the rest mostly fall out of the same patterns.
 
 ## Status: shipped vs deferred
 
-Of the 15 mocks here, **14 have real curl-validated counterparts** in `triggers/http/workflows/json/`. They are exercised by `bun run v05:smoke`. The mapping:
+Of the 15 mocks here, **15 have real curl-validated counterparts** in `triggers/http/workflows/json/`. They are exercised by `bun run v05:smoke`. The mapping:
 
 | Mock | Real workflow | Notes |
 |---|---|---|
@@ -67,6 +67,7 @@ Of the 15 mocks here, **14 have real curl-validated counterparts** in `triggers/
 | `06-admin-delete-user` | `v05-admin-delete-user.json` + `middleware/admin-only.json` | jwt-auth + admin-only chain |
 | `07-middleware-auth-check` | `middleware/jwt-auth.json` (production) + `middleware/auth-check.json` (demo) | Two flavors |
 | `08-middleware-rate-limit` | `middleware/rate-limit.json` (in-memory) + `middleware/redis-rate-limit.json` (production) | Two flavors |
+| `09-polling-with-backoff` | `v05-polling-with-backoff.json` | **v0.6 Phase 3** — loop with wait inside the iteration body |
 | `10-github-webhook-router` | `v05-github-webhook-router.json` + `middleware/github-webhook-verify.json` | HMAC verify + per-event sub-workflow dispatch |
 | `11-user-signup-saga` | `v05-user-signup-saga.json` | tryCatch with conditional rollback |
 | `12-data-export-pipeline` | `v05-data-export.json` | forEach + tryCatch + per-step retry |
@@ -74,11 +75,7 @@ Of the 15 mocks here, **14 have real curl-validated counterparts** in `triggers/
 | `14-travel-booking-saga` | `v05-travel-booking.json` | tryCatch + manual compensation chain |
 | `15-hello-with-global-middleware` | `v05-hello-with-mw.json` | Workflow-level middleware (closest analog to global) |
 
-**One deferred** (referenced from BACKLOG.md, not yet promoted):
-
-- `09-polling-with-backoff` — needs `wait` step inside `loop`. Phase 2 ships sequential forEach + wait; loop + wait support lands in Phase 3 alongside the parallel-forEach cancellation work.
-
-The shipped real workflows are **smoke-validated** end-to-end. The remaining mocks stay here as design proposals; they'll get their real counterparts as the underlying primitives + helpers ship.
+All 15 mocks now have real curl-validated counterparts. The shipped real workflows are **smoke-validated** end-to-end. Phase 4 of the wait-inside-primitives design (parallel forEach + wait, nested primitives, switch + wait) is the remaining v0.6 work — those compositions don't have dedicated mocks in this directory.
 
 ## How to give feedback
 

@@ -659,10 +659,25 @@ export default abstract class TriggerBase extends Trigger {
 				// Phase 4 (nested primitives) will switch to a path-keyed
 				// lookup tracking the call-stack depth.
 				try {
+					// v0.6 Phase 3 — when consecutive defer/resume cycles
+					// fire within the same millisecond (sub-second wait
+					// deadlines, or test fixtures advancing simulated time),
+					// multiple NodeRuns can share the same `startedAt` value
+					// (`Date.now()` ms resolution). Use array insertion order
+					// as a stable secondary key — `getNodeRuns` returns
+					// records in creation order, and the LATEST cursor write
+					// is from the most-recently-created NodeRun. Without the
+					// secondary key, a tied-`startedAt` sort could pick the
+					// older cursor and the resumed run starts at the wrong
+					// iteration.
 					const nodeRuns = tracker.getStore().getNodeRuns(traceRunId);
 					const activeWithCursor = nodeRuns
-						.filter((n) => n.iterationContext !== undefined)
-						.sort((a, b) => b.startedAt - a.startedAt)[0];
+						.map((n, idx) => ({ n, idx }))
+						.filter(({ n }) => n.iterationContext !== undefined)
+						.sort((a, b) => {
+							const dt = b.n.startedAt - a.n.startedAt;
+							return dt !== 0 ? dt : b.idx - a.idx;
+						})[0]?.n;
 					if (activeWithCursor?.iterationContext) {
 						(ctx as Record<string, unknown>)._blokIterationResume = activeWithCursor.iterationContext;
 					}
