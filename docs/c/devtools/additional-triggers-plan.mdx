@@ -25,7 +25,7 @@ Blok ships nine trigger packages under `triggers/`. Today their state is uneven:
 | `websocket` | Abstract class only | `WebSocketTrigger extends TriggerBase` exists, but no concrete subclass, no WS library wired in, no `bun run ws:dev`. The schema validates `trigger: { websocket: {...} }` but nothing picks it up. |
 | `sse` | Abstract class only | Same shape. SSE is HTTP streaming so this should be trivially mountable on the existing Hono server — but isn't. |
 | `webhook` | Abstract class only | Today, authors implement webhook intake by writing an HTTP workflow with a signature-verify middleware (e.g. `github-webhook-verify.json` shipped in v0.6). Works but lacks the "first-class trigger" ergonomics. |
-| `queue` | Adapter scaffolds exist | Files at `triggers/queue/src/adapters/{Kafka,RabbitMQ,SQS,Redis,NATS}Adapter.ts` but no `QueueTrigger.listen()` boot path. |
+| `queue` | Adapter scaffolds exist, **but → see Q1 resolution** | Files at `triggers/queue/src/adapters/{Kafka,RabbitMQ,SQS,Redis,NATS}Adapter.ts` but no `QueueTrigger.listen()` boot path. **Per Q1 below: this trigger name is dropped; the adapters move into the existing `worker` trigger.** |
 | `pubsub` | Adapter scaffolds exist | GCP / AWS / Azure provider scaffolds but no integrated dev experience. |
 
 The authoring surface (workflow JSON / TS DSL) accepts every trigger type today — the schema in [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) is comprehensive. The integration gap is at the trigger boot layer: nothing scans workflows with `trigger: { websocket: {...} }` and brings up a WebSocket server.
@@ -536,17 +536,11 @@ The verify middleware becomes built-in for the named provider. Same security gua
 
 ---
 
-### Queue trigger
+### Worker trigger (extended) — formerly "Queue trigger" in v0.6
 
-The existing `WorkerTrigger` already handles queue-style triggers (NATS / BullMQ / InMemory). The "queue" trigger is the same pattern with provider-specific adapters for Kafka, RabbitMQ, SQS, Redis. The reason we have BOTH is naming: `worker` is "background jobs" (worker pattern, Trigger.dev / Sidekiq mental model), `queue` is "consume from a named queue" (broker-centric, BullMQ-style worker per queue + adapter per backend).
+Per [Resolution Q1](#q1-—-drop-the-queue-trigger-name-keep-worker-only), there's no separate `queue` trigger. The existing `WorkerTrigger` (already shipping NATS / BullMQ / InMemory) gains 5 new adapters: Kafka, RabbitMQ, SQS, Redis Streams, pg-boss. Backward-compatible — v0.6 worker workflows keep working.
 
-**Recommendation: merge `worker` and `queue` into one trigger.** They're the same thing. The author writes `trigger: { queue: { provider: "bullmq" | "kafka" | "nats" | "sqs" | "redis" | "beanstalk", queue: "name", ... } }` and the adapter handles the rest. The `worker` trigger today is essentially `provider: "bullmq" | "nats" | "in-memory"` — generalize it.
-
-This is a **breaking change** if we ship it as-is. Migration path:
-
-1. Add `queue` trigger as the new canonical name, supporting all 5 providers PLUS the existing 3 from `worker`.
-2. Deprecate the `worker` trigger name; keep it accepting `trigger.worker` for back-compat by aliasing internally to `trigger.queue` with `provider: <worker's adapter>`.
-3. Remove the `worker` trigger name in v0.8.
+The `provider` field on the trigger config picks the adapter. Per [Resolution Q7](#q7-—-per-workflow-provider-field-with-env-var-default), `BLOK_WORKER_ADAPTER` env var sets the default when `provider` is omitted.
 
 **Authoring surface (JSON, NATS example):**
 
@@ -554,7 +548,7 @@ This is a **breaking change** if we ship it as-is. Migration path:
 {
   "name": "send-welcome-email",
   "trigger": {
-    "queue": {
+    "worker": {
       "provider": "nats",
       "queue": "email-jobs",
       "consumerGroup": "email-workers",
@@ -576,7 +570,7 @@ This is a **breaking change** if we ship it as-is. Migration path:
 ```json
 {
   "trigger": {
-    "queue": {
+    "worker": {
       "provider": "bullmq",
       "queue": "high-priority",
       "concurrency": 10,
@@ -592,7 +586,7 @@ This is a **breaking change** if we ship it as-is. Migration path:
 ```json
 {
   "trigger": {
-    "queue": {
+    "worker": {
       "provider": "kafka",
       "topic": "user-events",
       "consumerGroup": "blok-prod",
@@ -615,14 +609,14 @@ This is a **breaking change** if we ship it as-is. Migration path:
 | redis | `ioredis` (Streams) | `^5` | When Redis is already in stack, no extra infra |
 | pg-boss | `pg-boss` | `^10` | "No extra infra" mode for Postgres users |
 
-**Producer side (publishing to a queue from a workflow):**
+**Producer side (publishing to a worker queue from a workflow):**
 
-`@blokjs/queue-publish` step:
+`@blokjs/worker-publish` step:
 
 ```json
 {
   "id": "enqueue",
-  "use": "@blokjs/queue-publish",
+  "use": "@blokjs/worker-publish",
   "inputs": {
     "provider": "bullmq",
     "queue": "email-jobs",
@@ -920,7 +914,7 @@ Every new trigger participates in the existing tracing infrastructure:
 - `"websocket.connect"`, `"websocket.message"`, `"websocket.disconnect"`
 - `"sse.open"` (and `"sse.event"` if Pattern B opt-in)
 - `"webhook"`
-- `"queue"` (existing `"worker"` aliases to this)
+- `"worker"` (existing — gains adapter tag in `triggerSummary`, e.g. `worker[bullmq]/email-jobs`)
 - `"pubsub"`
 
 Studio's run list filter learns these new values.
@@ -935,8 +929,8 @@ blok_sse_connections_active{workflow} (gauge)
 blok_sse_events_sent_total{workflow, channel}
 blok_webhook_received_total{provider, event_type}
 blok_webhook_rejected_total{provider, reason}  // reasons: invalid_signature, replay, timestamp_outside_window
-blok_queue_messages_consumed_total{provider, queue}
-blok_queue_messages_failed_total{provider, queue}
+blok_worker_messages_consumed_total{provider, queue}
+blok_worker_messages_failed_total{provider, queue}
 blok_pubsub_messages_received_total{provider, topic}
 ```
 
@@ -1010,16 +1004,18 @@ No new triggers in this PR. Just the plumbing.
 
 **Out of scope:** webhook event archival (storing the verified event in a "received events" log for retrospective replay). Defer to v0.7 polish.
 
-### PR 5 — Queue trigger (~4-5 days, MEDIUM risk)
+### PR 5 — Worker trigger adapter extension (~3-4 days, MEDIUM risk)
+
+Per the Q1 resolution above — no new `queue` trigger. Instead, extend the existing `WorkerTrigger`'s adapter pool from 3 backends to 8.
 
 **Scope:**
 
-- Merge `worker` into `queue` (or keep both with `worker` aliasing internally — decision below in [Open Questions](#open-questions)).
-- Adapter implementations: BullMQ, NATS JetStream (already exists), Kafka, RabbitMQ, SQS, Redis Streams.
-- `@blokjs/queue-publish` producer helper.
-- Worker-process boot via `bun run queue:dev`.
-- OTel counters.
-- 10+ unit tests (per adapter) + 1 integration test per provider + 1 smoke workflow + 1 smoke case (publish + consume).
+- 5 new adapter implementations under `triggers/worker/src/adapters/`: BullMQ (`bullmq@^5`), Kafka (`kafkajs@^2.2`), RabbitMQ (`amqplib@^0.10`), SQS (`@aws-sdk/client-sqs@^3`), Redis Streams (`ioredis@^5`), pg-boss (`pg-boss@^10`).
+- Per-workflow `provider` field (Q7) with `BLOK_WORKER_ADAPTER` env-var fallback for v0.6 back-compat.
+- `@blokjs/worker-publish` producer helper (works from any trigger to enqueue jobs).
+- OTel counters for queue consumption + failure.
+- 10+ unit tests + 1 integration test per provider (docker-compose for CI brokers) + 1 smoke workflow + 1 smoke case (publish + consume).
+- Delete the `triggers/queue/` package directory (dead scaffold code).
 
 **Out of scope:** ordered queues (FIFO SQS, partition keys). Defer to follow-up if needed.
 
@@ -1085,7 +1081,7 @@ Risk profile is dominated by Queue and Pub/Sub adapter integrations — each pro
 
 **Existing v0.6 webhook handlers.** Workflows using `trigger.http.middleware: ["github-webhook-verify"]` (or similar) can OPTIONALLY migrate to the dedicated webhook trigger. Both approaches keep working — the webhook trigger is additive, not replacing the middleware-based pattern. Documentation should encourage the migration but not break existing workflows.
 
-**Existing v0.6 worker workflows.** If we MERGE worker into queue (open question Q1 below), existing `trigger.worker` JSON keeps working via alias. v0.7 → v0.8 timeframe deprecates the alias.
+**Existing v0.6 worker workflows.** Per [Resolution Q1](#q1-—-drop-the-queue-trigger-name-keep-worker-only), there's no breaking change — existing `trigger.worker` JSON keeps working as-is. The worker trigger gains 5 new adapter options (`provider: "kafka" | "rabbitmq" | "sqs" | "redis-streams" | "pg-boss"`) on top of the existing 3 (`bullmq`, `nats`, `in-memory`). Setting `BLOK_WORKER_ADAPTER` env var continues to pick the default when `provider` is omitted.
 
 ---
 
@@ -1104,70 +1100,233 @@ Explicitly NOT in this plan:
 
 ---
 
-## Open questions
+## Recommended resolutions
 
-Decisions needed before implementation begins:
+The 7 questions raised in the initial design pass, with concrete recommendations + reasoning. Six confirm the initial position; **Q1 flips** to a simpler model after further thought.
 
-### Q1: Merge `worker` into `queue`, or keep both?
+### Resolutions at a glance
 
-**Position taken: merge.** They're the same concept (consume from a named queue with retry semantics). Keep `trigger.worker` as a deprecated alias for `trigger.queue` for one minor version, then remove. Provider key normalizes (`worker.nats` → `queue.nats`).
+| Q | Recommendation | Confidence | Change to spec |
+|---|---|---|---|
+| Q1 — Merge `worker` / `queue`? | **Drop the `queue` trigger name. Keep `worker` only. Fold all queue adapters into the existing worker trigger.** | High | **FLIP** from initial spec |
+| Q2 — WS per-message vs per-connection? | **Per-message workflow runs.** | High | Confirms spec |
+| Q3 — SSE Pattern A vs B default? | **Pattern A default. Pattern B opt-in via `mode: "per-event"`.** | High | Confirms spec |
+| Q4 — Webhook polymorphic dispatch canonical? | **Yes. Document as canonical pattern; ship polymorphic name resolution in PR 4. Authors who prefer single-workflow + `switchOn` still works.** | High | Confirms spec |
+| Q5 — Per-trigger `concurrencyKey` on WS? | **Same as HTTP — max N concurrent workflow runs per resolved key (i.e. per-message slots, since Q2 picks per-message runs). Connection cap and per-conn rate are separate fields.** | High | Confirms spec |
+| Q6 — WS binary frames? | **Text default. Binary opt-in via `mode: "binary"` on the trigger config.** | High | Confirms spec |
+| Q7 — Adapter discovery? | **Per-workflow `provider` field. Env-var (`BLOK_WORKER_ADAPTER`) sets the default when `provider` is omitted (preserves v0.6 behavior).** | High | Confirms spec with clarification |
 
-**Counter:** "worker" is the more familiar mental model from Sidekiq / Trigger.dev / etc. The "queue" name is technically accurate but pedagogically worse. Compromise: keep BOTH names indefinitely with `worker` as the documented alias.
-
-### Q2: WebSocket per-message workflow runs — one workflow per message, or per-connection?
-
-**Position taken: per-message.** Each WebSocket message creates its own `WorkflowRun`. Connect and disconnect each create their own runs too. Maps cleanly onto the existing runtime model where one workflow = one run. Studio's traces stay coherent.
-
-**Counter:** per-connection model (one long-lived run for the whole connection) better matches the natural "this is a chat session" mental model, and the state_snapshot mechanism could carry session state. But it complicates Studio (a 1-hour chat session = a 1-hour-running NodeRun?), conflicts with `concurrencyKey` (per-message slot vs per-connection slot?), and breaks `idempotencyKey` cache semantics.
-
-### Q3: SSE Pattern A vs Pattern B as default?
-
-**Position taken: Pattern A** (workflow runs once at stream open, yields events for the connection's lifetime). Simpler model, maps onto async iterators. Pattern B (per-event workflow runs) is overpowered for the common "subscribe to topic, forward events" use case.
-
-**Counter:** Pattern B is more flexible — every event passes through the workflow's full step chain (validation, transform, filter, branch). Pattern A's "yield events from a step" is limited. Adopt Pattern B as default for parity with WebSocket's per-message runs?
-
-### Q4: Webhook trigger — polymorphic sub-workflow dispatch IS the canonical pattern, or is it optional?
-
-**Position taken: polymorphic sub-workflow dispatch is the recommended canonical pattern.** Document loudly. But allow workflows to handle ALL event types in one workflow (switch on `$.req.body.type`) if they prefer.
-
-The polymorphic feature requires `WorkflowRegistry` to support resolving `subworkflow: "$.req.body.type"` at runtime — today only static names work. Adding this is in the webhook PR's scope.
-
-### Q5: Per-trigger `concurrencyKey` semantics — should it apply differently?
-
-For HTTP: `concurrencyKey: "$.req.body.tenantId"` means "max N concurrent HTTP requests per tenant."
-
-For WebSocket: does it mean "max N concurrent MESSAGES per connection" (per-key = connectionId) or "max N concurrent CONNECTIONS per tenant" (per-key = tenantId)?
-
-**Position taken: same as HTTP — max N concurrent workflow runs per resolved key.** A workflow run is one message processing, so `concurrencyKey: "$.req.params.roomId"` means "max N concurrent workflow runs per room", which naturally throttles per-room throughput. Document this explicitly.
-
-### Q6: WebSocket binary frames — first-class or escape hatch?
-
-WS supports text and binary frames. Most app-level protocols use text (JSON). But media streaming and IoT use binary.
-
-**Position taken: text by default, binary opt-in via `mode: "binary"` on the trigger.** In binary mode, `ctx.request.body` is a `Buffer`. Document the trade-offs (no JSON parsing, custom protocol design).
-
-### Q7: Queue + Pub/Sub adapter discovery — config-driven or convention-driven?
-
-The existing worker trigger uses `BLOK_WORKER_ADAPTER=bullmq|nats|in-memory` env var to pick the adapter. The new queue/pubsub triggers could either:
-
-- (a) Follow the same env-var pattern — one default adapter per process.
-- (b) Per-workflow `provider: "bullmq"` field in the trigger config — each workflow picks its own backend.
-
-**Position taken: per-workflow `provider` field.** Supports heterogeneous deployments (one workflow on BullMQ, another on Kafka) without spinning up two worker processes. The adapter pool is keyed by provider config — one BullMQ connection shared across all bullmq-using workflows, etc.
+The detailed reasoning for each is below.
 
 ---
 
-## Decision needed before implementation
+### Q1 — Drop the `queue` trigger name; keep `worker` only
 
-The reviewer should sign off on:
+**Recommendation:** flip the initial spec's position. Do NOT introduce a `queue` trigger name. Instead, **extend the existing `worker` trigger's adapter pool from 3 backends (BullMQ, NATS JetStream, InMemory) to 7 (add Kafka, RabbitMQ, SQS, Redis Streams, pg-boss).** The `triggers/queue/` package directory becomes dead code that gets deleted; its adapter scaffolds (`KafkaAdapter.ts`, `RabbitMQAdapter.ts`, etc.) move into `triggers/worker/src/adapters/`.
 
-1. **The 7 open questions above** — particularly Q1 (worker/queue merge) and Q2 (WS per-message vs per-connection).
-2. **The library picks** in the [summary table](#library-picks-summary). Some are obvious (`@hono/node-ws`), others might have ecosystem-specific reasons to swap (e.g., if you have a strong preference for `kafka-node` over `kafkajs`).
-3. **PR sequencing** — Server refactor → WebSocket → SSE → Webhook → Queue → Pub/Sub. Reasonable to swap SSE and Webhook order (SSE is simpler, Webhook is higher author demand).
-4. **Out-of-scope items** — particularly whether cross-process WS broadcast backplane should be in PR 2's scope or deferred.
-5. **The fundamental shape** — am I right that "config-driven, per-provider plugins, share Hono port when possible" is the correct direction? Or should some triggers (notably Pub/Sub) take a more code-driven approach with TS-only registration?
+**Reasoning:**
 
-Once approved, PR 1 (Hono server architecture refactor) starts the implementation chain — each subsequent PR is independently reviewable. 5-6 weeks total to ship all 5 triggers production-ready.
+The initial spec proposed merging `worker → queue` because "queue is what's technically happening." Reconsidering: that's the IMPLEMENTATION view, not the AUTHOR view. The Node ecosystem's user-facing primitive is uniformly called "worker" or "task":
+
+- **BullMQ**: `new Worker(queue, handler)` — the workers consume from queues.
+- **Sidekiq** (Ruby, the dominant queue lib): "Sidekiq workers."
+- **Trigger.dev**: `task()` — "tasks" are the unit of work, queues are infrastructure.
+- **Inngest**: `inngest.createFunction()` — "functions" are the unit.
+- **AdonisJS adonis-jobs / adonis-bull-queue**: `Job` classes, dispatched via `queue.dispatch(JobClass)`.
+
+NONE of these expose "queue" as the user-facing trigger name. "Queue" is the infrastructure underneath; "worker" or "task" or "function" is what the author writes. The friendly mental model is: "I'm writing a worker that runs whenever a job arrives" — not "I'm subscribing to a queue."
+
+The provider field handles the "which backend" question without needing two trigger names. `trigger: { worker: { provider: "kafka", topic: "user-events" } }` is just as expressive as `trigger: { queue: { provider: "kafka", topic: "user-events" } }`, and it's 100% backward-compatible with v0.6 worker workflows (which use `provider: "bullmq" | "nats" | "in-memory"` today).
+
+**Trade-offs:** the `worker` name might feel slightly opinionated for cases that are clearly "topic consumer" rather than "background job processor" (e.g., consuming a Kafka analytics stream). But this is a documentation problem, not an API problem — the trigger does the right thing regardless of how authors think about it.
+
+**Implementation impact on PR 5:** smaller, simpler scope. No new `queue` trigger directory, no alias mechanism, no migration path. Just extend the existing `WorkerTrigger`'s adapter list and add the 5 new adapter classes. PR title becomes "feat(v0.7): extend Worker trigger with Kafka/RabbitMQ/SQS/Redis/pg-boss adapters". Estimated effort drops slightly (4-5 days → 3-4 days) because there's no new trigger plumbing to write.
+
+---
+
+### Q2 — Per-message WebSocket workflow runs
+
+**Recommendation:** confirm the initial spec. Each WebSocket message creates its own `WorkflowRun`. The `connect` and `disconnect` events also create their own runs. Connection-level state (auth context, room membership, session counter) lives in `ctx.connection.attachment` — a per-connection scratchpad set during the `connect` workflow and read by subsequent `message` workflows.
+
+**Reasoning:**
+
+The per-message model has clear, decisive advantages on all systems-design dimensions:
+
+- **Trace coherence.** Studio's existing trace UI renders one workflow run as one tracked execution. A 1-hour chat session as ONE workflow run would mean a 1-hour-running NodeRun that pegs the UI's "Running" indicator, breaks duration metrics, and produces no useful trace timeline.
+- **Failure isolation.** A bad message that throws shouldn't kill the connection — per-message runs let the failure bubble up to a single message's response, leaving the connection alive for the next message.
+- **Standard ops primitives apply.** `concurrencyKey`, `idempotencyKey`, `retry`, `maxDuration`, `delay` all assume one-workflow-run = one-unit-of-work. Per-message preserves this. Per-connection would force redefining each primitive's semantics for the WS case (does `retry: 3` mean retry the whole 1-hour connection?).
+- **Run model match.** Blok's whole architecture assumes one trigger event → one run. Per-message keeps that invariant; per-connection breaks it.
+
+The per-connection model's appeal — "matches the chat session mental model" — is served just as well by the `ctx.connection.attachment` API (Cloudflare-style scratchpad). Session-scoped state is a property of the CONNECTION, not the RUN. Each message reads the attachment, processes, optionally mutates the attachment, returns.
+
+**Trade-offs:** an extremely chatty connection (say, 1000 msgs/sec) produces 1000 runs/sec in tracing, which could be expensive at scale. Mitigation: existing `BLOK_TRACE_ENABLED=false` kill-switch shipped in v0.5, or a future per-trigger sampling knob (e.g., trace 1 in 100 messages). Document as a known scaling concern.
+
+**Implementation impact:** none beyond what's already in PR 2's scope. The `ctx.connection.attachment` API is the load-bearing primitive.
+
+---
+
+### Q3 — SSE Pattern A default, Pattern B opt-in
+
+**Recommendation:** confirm the initial spec. Pattern A (workflow runs once at stream open, yields events for the connection's lifetime) is the default. Pattern B (per-event workflow run with full step pipeline) is opt-in via `trigger.sse.mode: "per-event"`.
+
+**Reasoning:**
+
+SSE's overwhelmingly common use case is **"subscribe to an upstream event source and forward filtered/transformed events to the connected client."** Examples: live order updates, dashboard tickers, log tails, AI chat completions streaming character-by-character. In every case, the workflow's job is to OWN the event stream — pull from a source (NATS subject, Redis Stream, in-process bus, AI provider) and yield via `streamSSE`.
+
+Pattern A maps cleanly onto this:
+
+```json
+{
+  "steps": [
+    { "id": "subscribe", "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["order:{orderId}"] } },
+    { "id": "stream", "use": "@blokjs/sse-stream", "inputs": { "source": "$.state.subscribe" } }
+  ]
+}
+```
+
+One run at open. The workflow lives as long as the connection. Subscribe + forward via async iterators. Done.
+
+Pattern B (per-event workflow runs) is overpowered for this. For a 100 events/sec stream, it would produce 100 workflow runs/sec — observability noise, run-storage bloat, and significant overhead relative to the actual work (forwarding bytes).
+
+**When Pattern B is right:** the rare workflow that wants to RUN FULL STEP CHAINS per event — for example, an SSE feed where each event must:
+- Pass through `@blokjs/jwt-verify` (per-event reauthorization)
+- Be transformed by 5 different steps with retry/idempotency semantics
+- Conditionally branch into a sub-workflow
+
+That's a real use case but uncommon enough that opt-in is correct.
+
+**Trade-offs:** Pattern A's "yield from a step" requires a specific step kind (`@blokjs/sse-stream`). Authors who don't use that step get nothing — the workflow just runs to completion at stream open without emitting events. Mitigation: workflow normalizer warns if `trigger: { sse: {...} }` workflow has no `@blokjs/sse-stream` step.
+
+**Implementation impact on PR 3:** Pattern A only. Pattern B deferred to a future PR (or v0.7.x patch release if demand emerges).
+
+---
+
+### Q4 — Webhook polymorphic sub-workflow dispatch as canonical
+
+**Recommendation:** confirm the initial spec. Polymorphic sub-workflow dispatch (`subworkflow: "$.req.body.type"`) is the **recommended canonical pattern**. Document loudly. Authors who prefer single-workflow with `switchOn` for tight-coupling event types are also supported — both shapes work.
+
+**Reasoning:**
+
+Webhook providers fall into two cardinality classes:
+
+- **High cardinality** (Stripe: 150+ events, GitHub: 60+ events, Slack: 40+ events). Polymorphic dispatch wins decisively here. One workflow file per event type (`stripe.invoice.paid.json`, `stripe.customer.subscription.created.json`, etc.) means:
+  - Each event handler is small, focused, easy to test/review.
+  - Adding a new event type = adding a new file (no editing of a giant switch).
+  - Studio shows one trace per event type — clean observability.
+  - Sub-workflow lineage in tracing follows naturally.
+- **Low cardinality** (Slack Slash Commands: 1 event type, Custom webhooks: often 1-3 types). Single-workflow with `switchOn` is fine and avoids file fan-out.
+
+The polymorphic case is the more demanding implementation requirement (today's `subworkflow:` field only supports static string names; we need mapper-evaluated expressions like `$.req.body.type` or `js/ctx.req.body.type`). Ship that feature in PR 4 (webhook trigger).
+
+**Trade-offs:**
+
+- **Polymorphic resolution failure modes need clear errors.** If `$.req.body.type` resolves to a workflow name that doesn't exist, the runner needs a clean "unknown workflow" error with a list of registered workflows in the same provider's namespace.
+- **Workflow naming convention.** For Stripe, conventional names are `stripe.invoice.paid` — but Blok's `WorkflowRegistry` doesn't enforce namespacing today. PR 4 should add a `namespace` field (`trigger.webhook.namespace: "stripe"`) that prefixes the resolved subworkflow name, so `$.req.body.type === "invoice.paid"` resolves to workflow `stripe.invoice.paid` automatically.
+
+**Implementation impact on PR 4:** scope grows slightly — add polymorphic sub-workflow resolution + the namespace field to `WorkflowRegistry`. Estimated effort goes from 5-6 days to 6-7 days. Worth it: polymorphic dispatch is the flagship demo of "Blok-as-declarative-router."
+
+---
+
+### Q5 — Per-trigger `concurrencyKey` matches HTTP semantics
+
+**Recommendation:** confirm the initial spec. `concurrencyKey` on any trigger means "max N concurrent workflow runs per resolved key." Since Q2 picks per-message runs on WebSocket, this naturally becomes per-message slots on WS. Per-connection limits and per-connection rates use separate fields (`maxConnections` and `messageRateLimit` respectively).
+
+**Reasoning:**
+
+Three different concerns each get their own knob:
+
+| Concern | Knob | Semantics |
+|---|---|---|
+| Max concurrent processing per business key | `concurrencyKey: "$.req.params.roomId"` | "max 100 message-processing slots per room" (same key, same slots, just on WS as on HTTP) |
+| Max total open connections (DoS protection) | `maxConnections: 10000` | "trigger refuses upgrade beyond 10K total connections" |
+| Max message rate per connection | `messageRateLimit: 100` | "drop messages above 100/sec per individual connection" |
+
+Overloading `concurrencyKey` to ALSO mean per-connection limits would create ambiguity. The HTTP precedent is correct and uniform.
+
+**Trade-offs:** authors who want "max 100 chatters in a room" need to express it via `maxConnections` + a workflow-level check during the `connect` workflow (count room members, throw if exceeded). That's a tiny bit of boilerplate but separates the connection-count concern from the run-concurrency concern. Future improvement: a `maxConnectionsPerKey` field for first-class connection capping per key.
+
+**Implementation impact:** none — the existing `ConcurrencyOptsFields` from `TriggerOpts.ts` already works on all triggers. Just add `maxConnections` + `messageRateLimit` to the `WebSocketTriggerOptsSchema` per the spec.
+
+---
+
+### Q6 — Text-mode default, binary opt-in
+
+**Recommendation:** confirm the initial spec. WebSocket triggers default to text mode (UTF-8 framing, JSON parse on payload). Binary mode opt-in via `trigger.websocket.mode: "binary"` — in binary mode, `ctx.request.body` is a `Buffer`, no JSON parse.
+
+**Reasoning:**
+
+The 95/5 rule. 95% of WS use cases (chat, notifications, real-time data, dashboards, AI streaming) are JSON over text frames. Defaulting to text:
+- Lets the workflow author use `$.req.body.foo` naturally (mapper expressions assume parsed objects).
+- Matches the HTTP trigger's body handling (which also parses JSON by default).
+- Browser clients send text by default.
+
+Binary mode (the 5%) is for media streaming (audio chunks, video frames), IoT (compact binary protocols), or custom framed protocols. These need:
+- No JSON parse on incoming buffers.
+- The ability to send Buffer responses via `@blokjs/ws-broadcast` / `@blokjs/ws-reply`.
+- Author-managed framing (length prefixes, custom headers).
+
+Opt-in via `mode: "binary"` keeps the common case clean while making the unusual case explicit.
+
+**Trade-offs:** "mixed mode" workflows (some text frames, some binary on the same connection) aren't supported by this flag — the mode is per-trigger. Workarounds: separate WS endpoints per mode, or future enhancement for per-message mode auto-detection. Document as a known limitation for now.
+
+**Implementation impact:** ~30 lines in PR 2 — a branch in the inbound-message handler that skips JSON parse and passes the Buffer through to `ctx.request.body`.
+
+---
+
+### Q7 — Per-workflow `provider` field with env-var default
+
+**Recommendation:** confirm the initial spec with explicit clarification on the env-var fallback. The workflow's `trigger.worker.provider` field picks the adapter (`bullmq` | `nats` | `kafka` | `rabbitmq` | `sqs` | `redis-streams` | `pg-boss` | `in-memory`). When `provider` is omitted, fall back to the `BLOK_WORKER_ADAPTER` env var (preserves v0.6 behavior). When neither is set, error at workflow load time.
+
+**Reasoning:**
+
+Heterogeneous deployments are a real need. Production setups often have:
+- A high-priority queue on BullMQ (Redis-backed, supports priority + delays)
+- An event spine on Kafka (high-throughput, partitioned, replayable)
+- A long-tail notifications queue on SQS (cloud-native, no infra to manage)
+
+A single env-var-per-process model would force operators to run THREE separate worker processes, one per backend, each with its own subset of workflows. That's operational overhead for what's fundamentally a configuration choice.
+
+Per-workflow `provider` solves this with one worker process and one adapter pool — the pool lazily creates a connection per unique provider config (one BullMQ Redis connection for all bullmq workflows, one Kafka client for all kafka workflows, etc.).
+
+The env-var fallback preserves v0.6 backward compatibility: existing `trigger.worker` configs without `provider` continue working under `BLOK_WORKER_ADAPTER=bullmq` (or whatever was set).
+
+**Trade-offs:** the adapter pool layer needs careful connection-lifecycle management (one connection per provider config, reused across workflows, cleaned up on shutdown). Mitigation: this is exactly the pattern the existing `WorkerTrigger` already implements for its 3 adapters — extend the pool's pluggable interface, no new architecture needed.
+
+**Implementation impact on PR 5:** moderate complexity. Each new adapter (Kafka, RabbitMQ, SQS, Redis Streams, pg-boss) lives in `triggers/worker/src/adapters/` alongside the existing 3. The `Configuration` layer resolves `provider` against the registered adapter list at workflow load. Existing tests should be augmented with per-adapter integration tests (one per provider, real broker via docker-compose for CI).
+
+---
+
+## Sign-off summary
+
+Once the 7 recommendations above are approved (default position: confirm all 7 unless reviewer flags a specific concern), implementation begins.
+
+**Approved decisions feed into the implementation:**
+
+1. **PR 5 scope simplification (Q1).** PR 5 becomes "extend Worker trigger with 5 new adapters" instead of "new Queue trigger + merge". Effort drops 4-5d → 3-4d.
+2. **PR 4 scope growth (Q4).** PR 4 adds polymorphic sub-workflow resolution + namespace field. Effort grows 5-6d → 6-7d.
+3. **No other PR scope changes** from the resolutions.
+
+**Updated effort table:**
+
+| PR | Scope | Original | Revised |
+|---|---|---|---|
+| 1 | Hono server architecture refactor | 3d | 3d |
+| 2 | WebSocket trigger | 5-6d | 5-6d |
+| 3 | SSE trigger (Pattern A only) | 3-4d | 3-4d |
+| 4 | Webhook trigger + polymorphic dispatch + namespace | 5-6d | 6-7d |
+| 5 | Worker adapter extension (no queue trigger) | 4-5d | 3-4d |
+| 6 | Pub/Sub trigger | 4-5d | 4-5d |
+| **Total** | | **24-29d** | **24-29d** |
+
+Total roughly unchanged (~5-6 weeks). The Q4 growth offsets the Q1 shrinkage.
+
+**Other items still needing reviewer input:**
+
+1. **Library picks** in the [summary table](#library-picks-summary). Default to ship with the recommended picks unless ecosystem-specific preferences exist (e.g., `kafka-node` over `kafkajs`).
+2. **PR ordering between 3 and 4.** Current order is Server → WebSocket → SSE → Webhook → Worker → Pub/Sub. Reasonable to swap PR 3 (SSE, simpler) and PR 4 (Webhook, higher author demand) — Webhook first delivers more immediate user value. Default: keep current order unless reviewer prefers swap.
+3. **Cross-process WS broadcast in PR 2's scope?** Default: out of scope (in-process only for v1, cross-process in PR 6 via pubsub backplane). Pull into PR 2 only if multi-instance WS is an immediate need.
+
+PR 1 (server architecture refactor) starts the chain after sign-off.
 
 ---
 
