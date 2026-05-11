@@ -330,11 +330,12 @@ export default class HttpTrigger extends TriggerBase {
 		for (const route of routes) {
 			const handler = async (c: HonoContext<AppBindings>): Promise<Response> => {
 				const requestId = c.req.query("requestId") || (uuid() as string);
-				const body = await this.parseBody(c);
+				const { body, rawBody } = await this.parseBody(c);
 				return this.runWorkflowExecution(c, {
 					workflowName: route.workflowKey,
 					subPath: "/",
 					body,
+					rawBody,
 					requestId,
 					explicitRoute: true,
 					preloadedWorkflow: route.workflow,
@@ -370,19 +371,74 @@ export default class HttpTrigger extends TriggerBase {
 	 * Parse the request body using the same content-type rules the
 	 * catch-all handler uses. Extracted so both paths (catch-all and
 	 * explicit routes) parse bodies identically.
+	 *
+	 * Returns BOTH the parsed body (whatever shape the content-type
+	 * dictates) AND the raw body string captured BEFORE parsing.
+	 * `rawBody` is what webhook HMAC verifiers need to match a
+	 * provider's signature byte-exactly (Stripe `Stripe-Signature`,
+	 * Slack `X-Slack-Signature`, GitHub when bodies contain content
+	 * the JSON.stringify round-trip would mangle). For application/json
+	 * payloads we parse the raw text manually instead of calling
+	 * `c.req.json()` because `c.req.text()` and `c.req.json()` both
+	 * consume the body stream — we only get one shot.
+	 *
+	 * `rawBody` is the empty string for GET/HEAD (no body), for
+	 * non-text content-types where capture doesn't apply
+	 * (multipart/form-data — Hono's `parseBody()` reads the stream and
+	 * we can't get the raw bytes back without parsing twice), and
+	 * when the underlying read throws.
 	 */
-	private async parseBody(c: HonoContext<AppBindings>): Promise<unknown> {
-		if (c.req.method === "GET" || c.req.method === "HEAD") return {};
-		try {
-			const contentType = c.req.header("content-type") || "";
-			if (contentType.includes("application/json")) return await c.req.json();
-			if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
-				return await c.req.parseBody();
+	private async parseBody(c: HonoContext<AppBindings>): Promise<{ body: unknown; rawBody: string }> {
+		if (c.req.method === "GET" || c.req.method === "HEAD") return { body: {}, rawBody: "" };
+		const contentType = c.req.header("content-type") || "";
+
+		// multipart needs Hono's stream parser — raw bytes aren't recoverable
+		// after the parse, so rawBody stays empty. Webhook providers that
+		// sign multipart bodies are vanishingly rare; the rest is the
+		// common case.
+		if (contentType.includes("multipart/form-data")) {
+			try {
+				return { body: await c.req.parseBody(), rawBody: "" };
+			} catch {
+				return { body: {}, rawBody: "" };
 			}
-			return await c.req.text();
-		} catch {
-			return {};
 		}
+
+		// For application/json and application/x-www-form-urlencoded we
+		// CAN capture the raw body and still parse — read the text once,
+		// then parse off the captured string ourselves.
+		let rawBody = "";
+		try {
+			rawBody = await c.req.text();
+		} catch {
+			return { body: {}, rawBody: "" };
+		}
+
+		if (contentType.includes("application/json")) {
+			try {
+				return { body: rawBody.length === 0 ? {} : JSON.parse(rawBody), rawBody };
+			} catch {
+				// Malformed JSON — preserve rawBody (a webhook verifier
+				// might still want it for its 4xx error response) and let
+				// downstream handle the empty parsed body. Matches pre-
+				// v0.6 behaviour of returning {} on parse failure.
+				return { body: {}, rawBody };
+			}
+		}
+
+		if (contentType.includes("application/x-www-form-urlencoded")) {
+			try {
+				const parsed: Record<string, string> = {};
+				for (const [k, v] of new URLSearchParams(rawBody)) parsed[k] = v;
+				return { body: parsed, rawBody };
+			} catch {
+				return { body: {}, rawBody };
+			}
+		}
+
+		// Default — text body, parsed body = raw text. Matches pre-v0.6
+		// `c.req.text()` fallback.
+		return { body: rawBody, rawBody };
 	}
 
 	async listen(): Promise<number> {
@@ -497,7 +553,7 @@ export default class HttpTrigger extends TriggerBase {
 				const fullPath = c.req.path;
 				const subPath = workflowNameInPath ? fullPath.slice(1 + workflowNameInPath.length) || "/" : fullPath;
 
-				const body = await this.parseBody(c);
+				const { body, rawBody } = await this.parseBody(c);
 
 				// Remote node execution dispatch (header-based) — only meaningful for
 				// the catch-all path, never for explicit routes.
@@ -514,6 +570,7 @@ export default class HttpTrigger extends TriggerBase {
 					workflowName: workflowNameInPath,
 					subPath,
 					body,
+					rawBody,
 					requestId,
 					remoteNodeExecution,
 					runtimeWorkflow,
@@ -709,6 +766,14 @@ export default class HttpTrigger extends TriggerBase {
 			workflowName: string;
 			subPath: string;
 			body: unknown;
+			/**
+			 * Raw request body string captured BEFORE JSON / form parsing.
+			 * Empty string when the trigger couldn't (or didn't need to)
+			 * capture it. Surfaced as `ctx.request.rawBody` so webhook HMAC
+			 * verifiers (Stripe, Slack, byte-exact GitHub) can sign the
+			 * exact bytes the provider signed.
+			 */
+			rawBody?: string;
 			requestId: string;
 			explicitRoute?: boolean;
 			preloadedWorkflow?: unknown;
@@ -720,6 +785,7 @@ export default class HttpTrigger extends TriggerBase {
 		let workflowNameInPath = opts.workflowName;
 		const subPath = opts.subPath;
 		const body = opts.body;
+		const rawBody = opts.rawBody ?? "";
 		const explicitRoute = opts.explicitRoute === true;
 		let remoteNodeExecution = opts.remoteNodeExecution === true;
 		const runtimeWorkflow = opts.runtimeWorkflow;
@@ -849,6 +915,7 @@ export default class HttpTrigger extends TriggerBase {
 
 				ctx.request = {
 					body,
+					rawBody,
 					headers: Object.fromEntries([...c.req.raw.headers.entries()]),
 					params: resolvedParams,
 					query: queryObj,

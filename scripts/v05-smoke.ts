@@ -19,6 +19,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import path from "node:path";
 import { SignJWT } from "jose";
 
@@ -38,6 +39,15 @@ const REPO_ROOT = path.resolve(import.meta.dir, "..");
 const JWT_SECRET = "smoke-test-secret-12345";
 const JWT_ISSUER = "https://smoke.test.example.com";
 const JWT_AUDIENCE = "v05-smoke-api";
+
+// GitHub webhook smoke config — same propagation, used by the
+// github-webhook-verify middleware in `v05-github-webhook-router`. The
+// byte-exact rawBody-match cases below compute the signature over the
+// EXACT wire bytes a smoke case sends, which proves HttpTrigger is
+// surfacing `ctx.request.rawBody` correctly (pre-v0.6 the helper signed
+// JSON.stringify(parsed_body), which would silently re-serialize and
+// lose any non-canonical whitespace).
+const GITHUB_WEBHOOK_SECRET = "smoke-github-webhook-secret-67890";
 
 async function mintJwt(
 	claims: Record<string, unknown>,
@@ -63,6 +73,13 @@ interface SmokeCase {
 	pathname: string;
 	headers?: Record<string, string>;
 	body?: JsonValue;
+	/**
+	 * Raw string body. When set, overrides `body` — the smoke runner
+	 * sends `rawBody` verbatim instead of `JSON.stringify(body)`. Use
+	 * for byte-exact webhook signature tests (Stripe, byte-exact GitHub)
+	 * where the wire bytes must match what the sender signed.
+	 */
+	rawBody?: string;
 	expectStatus: number;
 	assert?: (body: JsonValue) => void;
 }
@@ -630,6 +647,75 @@ const cases: SmokeCase[] = [
 	},
 ];
 
+// --- v05-github-webhook-router: byte-exact HMAC against ctx.request.rawBody
+// v0.6 — github-webhook-verify now signs `ctx.request.rawBody` instead of
+// `JSON.stringify(ctx.request.body)`. These cases prove the raw-body capture
+// works end-to-end through HttpTrigger.parseBody.
+//
+// 1. Positive — raw body with NON-CANONICAL whitespace (`{ "repo" :  …}` with
+//    spaces JSON.stringify would NEVER produce). The signature is computed
+//    over those exact bytes. New behaviour: matches → 200. Pre-v0.6 would
+//    have signed `JSON.stringify(parsed)` (canonical, no spaces) → mismatch
+//    → 401. So the positive case is the proof that the rawBody path is hot.
+//
+// 2. Negative — same raw body, but signature computed over the canonical
+//    re-serialization. Old code would have accepted this; new code rejects.
+//    Inverts the proof from the opposite direction.
+//
+// Appended at the end (outside the literal array) because the const-IIFE
+// pattern keeps the signature-computation locals out of module scope.
+const githubByteExactCases: SmokeCase[] = (() => {
+	const rawBodyWithSpaces =
+		'{ "ref" :  "refs/heads/main" ,  "repository" : { "full_name" : "acme/widgets" } ,  "commits" : [ { "id" : "abc123" } ] }';
+	const positiveSig = `sha256=${createHmac("sha256", GITHUB_WEBHOOK_SECRET).update(rawBodyWithSpaces).digest("hex")}`;
+	const canonicalSig = `sha256=${createHmac("sha256", GITHUB_WEBHOOK_SECRET)
+		.update(JSON.stringify(JSON.parse(rawBodyWithSpaces)))
+		.digest("hex")}`;
+	return [
+		{
+			name: "v05-github-webhook-router — byte-exact sig over rawBody with non-canonical whitespace → 200",
+			method: "POST",
+			pathname: "/v05-github-webhook-router",
+			headers: {
+				"X-Hub-Signature-256": positiveSig,
+				"X-GitHub-Event": "push",
+				"X-GitHub-Delivery": "smoke-byte-exact-1",
+			},
+			rawBody: rawBodyWithSpaces,
+			expectStatus: 200,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.eventType !== "push") throw fail("eventType should be 'push'", obj);
+				if (obj.dispatchedTo !== "dispatch-push") throw fail("dispatchedTo should be 'dispatch-push'", obj);
+				const child = obj.child as Record<string, JsonValue>;
+				if (!child) throw fail("child should be present (sub-workflow output)", obj);
+				if (child.handler !== "push") throw fail("child.handler should be 'push'", obj);
+				if (child.repo !== "acme/widgets") throw fail("child.repo should be 'acme/widgets'", obj);
+				if (child.ref !== "refs/heads/main") throw fail("child.ref should be 'refs/heads/main'", obj);
+			},
+		},
+		{
+			name: "v05-github-webhook-router — sig over JSON.stringify(parsed) ≠ rawBody bytes → 401 (proves rawBody is load-bearing)",
+			method: "POST",
+			pathname: "/v05-github-webhook-router",
+			headers: {
+				"X-Hub-Signature-256": canonicalSig,
+				"X-GitHub-Event": "push",
+				"X-GitHub-Delivery": "smoke-byte-exact-2",
+			},
+			rawBody: rawBodyWithSpaces,
+			expectStatus: 401,
+			assert: (body) => {
+				const obj = body as Record<string, JsonValue>;
+				if (obj.reason !== "invalid_signature") {
+					throw fail("reason should be 'invalid_signature' (proves we're not signing JSON.stringify any more)", obj);
+				}
+			},
+		},
+	];
+})();
+cases.push(...githubByteExactCases);
+
 // JWT cases live in their own builder because each case mints a token via
 // jose's SignJWT (async). Appended to `cases` at runtime in main() once
 // the server is ready. Keeps the static array readable and avoids a
@@ -874,13 +960,16 @@ async function waitForReady(deadlineAt: number): Promise<void> {
 }
 
 async function runCase(c: SmokeCase): Promise<void> {
+	// `rawBody` overrides `body` so byte-exact webhook signature cases
+	// can send their exact wire bytes (no JSON.stringify re-serialize).
+	const bodyToSend = c.rawBody !== undefined ? c.rawBody : c.body === undefined ? undefined : JSON.stringify(c.body);
 	const res = await fetch(`${BASE}${c.pathname}`, {
 		method: c.method,
 		headers: {
 			"Content-Type": "application/json",
 			...(c.headers ?? {}),
 		},
-		body: c.body === undefined ? undefined : JSON.stringify(c.body),
+		body: bodyToSend,
 		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 	});
 
@@ -958,6 +1047,10 @@ async function main(): Promise<number> {
 			JWT_SECRET,
 			JWT_ISSUER,
 			JWT_AUDIENCE,
+			// GitHub webhook config picked up by github-webhook-verify
+			// middleware. The byte-exact rawBody-match cases below sign
+			// with this secret.
+			GITHUB_WEBHOOK_SECRET,
 		},
 		detached: true,
 	});
