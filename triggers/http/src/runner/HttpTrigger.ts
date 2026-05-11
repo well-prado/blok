@@ -42,10 +42,21 @@ import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 import type WorkflowRequest from "./types/WorkflowRequest";
 
-type AppBindings = { Bindings: HttpBindings };
+/**
+ * v0.7 — exported so sibling triggers (WebSocket / SSE / Webhook) can
+ * construct a `Hono<AppBindings>` instance externally and pass it into
+ * HttpTrigger via the optional constructor argument. The single shared
+ * app then routes HTTP, WS upgrades, SSE streams, and webhook POSTs on
+ * one TCP port via Hono's path-routing tree.
+ *
+ * Kept as a public type rather than an internal so the orchestrator
+ * pattern documented in [additional-triggers-plan.mdx](../../../../docs/c/devtools/additional-triggers-plan.mdx#server-architecture)
+ * remains type-safe end-to-end.
+ */
+export type AppBindings = { Bindings: HttpBindings };
 
 export default class HttpTrigger extends TriggerBase {
-	private app: Hono<AppBindings> = new Hono<AppBindings>();
+	private app: Hono<AppBindings>;
 	private port: string | number = process.env.PORT || 4000;
 	private initializer = 0;
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
@@ -82,9 +93,24 @@ export default class HttpTrigger extends TriggerBase {
 		this.traceAuthFn = authorize;
 	}
 
-	constructor() {
+	/**
+	 * @param app  v0.7 — optional pre-constructed Hono app. When provided,
+	 *             HttpTrigger registers its HTTP routes onto the shared
+	 *             app instead of constructing its own. This is the entry
+	 *             point for the same-port multiplex pattern documented in
+	 *             [additional-triggers-plan.mdx](../../../../docs/c/devtools/additional-triggers-plan.mdx#server-architecture):
+	 *             an orchestrator builds ONE Hono app, threads it into
+	 *             every same-port trigger (HTTP + future WebSocket / SSE /
+	 *             Webhook), and the HTTP trigger's `serve()` call hosts
+	 *             everything on port 4000.
+	 *
+	 *             When omitted, HttpTrigger constructs its own app
+	 *             (existing v0.6 behavior, fully backward-compatible).
+	 */
+	constructor(app?: Hono<AppBindings>) {
 		super();
 
+		this.app = app ?? new Hono<AppBindings>();
 		this.initializer = this.startCounter();
 		this.loadNodes();
 		this.loadWorkflows();
