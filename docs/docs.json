@@ -130,6 +130,7 @@
 							"c/devtools/index",
 							"c/devtools/release-runbook",
 							"c/devtools/post-v04-roadmap",
+							"c/devtools/additional-triggers-plan",
 							{
 								"group": "Workflow Primitives",
 								"pages": [
