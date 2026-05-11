@@ -92,6 +92,35 @@ export default workflow({
 | `$.error.code` | `number \| undefined` | HTTP-style status carried by `GlobalError` — set via `@blokjs/throw inputs.code`, or by the framework's ZodError → 400 mapping. Lets a catch arm re-throw with the same status, branch on 4xx vs 5xx, or include it in audit-log payloads |
 | `$.error.stepId` | `string \| undefined` | The id of the try-arm step that threw. Lets a catch arm route by failure point ("payment failed → notify billing", "inventory failed → notify warehouse") without regex-parsing the message |
 
+### Lifecycle — when `$.error` is in scope
+
+`$.error` (and the underlying `ctx.error`) is scoped to the `catch` arm only. The runner snapshots whatever `ctx.error` held when the tryCatch step entered, populates it with the caught envelope just before `catch` runs, and **restores the snapshot before `finally` runs and before downstream top-level steps execute**. This mirrors JavaScript's binding rules exactly — the catch variable falls out of scope when the catch block exits.
+
+| Location | `$.error` |
+|---|---|
+| Step before the tryCatch | unchanged (typically `undefined`) |
+| Inside `try` | `undefined` (no error yet) |
+| Inside `catch` | populated with the envelope above |
+| Inside `finally` | restored to the pre-tryCatch value (typically `undefined`) |
+| Step after the tryCatch (catch swallowed) | restored to the pre-tryCatch value |
+| Step after the tryCatch (catch rethrew) | downstream steps don't run — the throw propagates |
+
+If you need the caught error visible downstream (audit log, response shaping), copy it into `ctx.state` from inside `catch`:
+
+```json
+{
+  "id": "stash-error",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "({ failedAt: ctx.error.stepId, reason: ctx.error.message, code: ctx.error.code })"
+  }
+}
+```
+
+Downstream steps reference it as `$.state['stash-error'].failedAt` etc. — values stored in `ctx.state` from inside the catch arm survive past the tryCatch boundary even though `ctx.error` does not. This is the same pattern the [conditional rollback example](#conditional-rollback-—-the-canonical-saga-pattern) below uses for its `outcome` / `failedAt` envelope.
+
+Nested tryCatch nests the snapshots correctly: an inner catch sees the inner error, and when the inner tryCatch exits, the outer catch's `$.error` is restored (not clobbered).
+
 ---
 
 ## Conditional rollback — the canonical saga pattern
