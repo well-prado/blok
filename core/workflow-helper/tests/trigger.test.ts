@@ -162,11 +162,29 @@ describe("Trigger.addTrigger()", () => {
 	});
 
 	describe("webhook trigger", () => {
-		it("accepts a valid webhook config", () => {
+		it("accepts a built-in provider config (v0.7)", () => {
 			const trigger = createWorkflow();
 			const step = trigger.addTrigger("webhook", {
-				source: "github",
+				provider: "github",
+				path: "/webhooks/github",
+				secretEnv: "GITHUB_WEBHOOK_SECRET",
 				events: ["push", "pull_request"],
+			});
+			expect(step).toBeInstanceOf(StepNode);
+		});
+
+		it("accepts a custom-signature config (unknown provider)", () => {
+			const trigger = createWorkflow();
+			const step = trigger.addTrigger("webhook", {
+				path: "/webhooks/acme",
+				signature: {
+					scheme: "hmac-sha256",
+					header: "X-Acme-Signature",
+					format: "{hex}",
+					secretEnv: "ACME_SECRET",
+					tolerance: 300,
+					timestampHeader: "X-Acme-Timestamp",
+				},
 			});
 			expect(step).toBeInstanceOf(StepNode);
 		});
@@ -176,12 +194,12 @@ describe("Trigger.addTrigger()", () => {
 			expect(() => trigger.addTrigger("webhook" as unknown as "grpc")).toThrow(/requires a configuration object/);
 		});
 
-		it("rejects webhook missing required events", () => {
+		it("rejects an unknown provider value", () => {
 			const trigger = createWorkflow();
 			expect(() =>
 				trigger.addTrigger("webhook", {
-					source: "github",
-				} as unknown as { source: string; events: string[] }),
+					provider: "not-a-provider",
+				} as unknown as { provider: "github" }),
 			).toThrow();
 		});
 	});

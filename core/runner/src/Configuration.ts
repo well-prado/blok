@@ -645,6 +645,15 @@ export default class Configuration implements Config {
 		// `wait: false` triggers the fire-and-forget branch in SubworkflowNode.run.
 		// Default to `true` (synchronous) when unset.
 		subworkflowNode.wait = v2.wait !== false;
+		// v0.7 PR 4 — polymorphic sub-workflow dispatch carries the
+		// parent workflow's `trigger.webhook.namespace` so a resolved
+		// event-type name (e.g. `"invoice.paid"`) gets prefixed into a
+		// full registry name (e.g. `"stripe.invoice.paid"`). Static
+		// names are unaffected.
+		const triggerCfg = this.workflow?.trigger as { webhook?: { namespace?: string } } | undefined;
+		if (typeof triggerCfg?.webhook?.namespace === "string" && triggerCfg.webhook.namespace.length > 0) {
+			subworkflowNode.namespace = triggerCfg.webhook.namespace;
+		}
 		// `globalOptions` is the runner's node registry — child Configuration.init
 		// needs it for `module:` step resolution.
 		subworkflowNode.globalOptions = this.globalOptions;

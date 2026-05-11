@@ -1,0 +1,22 @@
+{
+	"name": "stripe.invoice.paid",
+	"version": "1.0.0",
+	"description": "v0.7 PR 4 demo handler — receives the verified Stripe `invoice.paid` event from v07-stripe-webhook via polymorphic sub-workflow dispatch (`namespace: 'stripe'` + `subworkflow: 'js/ctx.request.body.type'` resolved to `'invoice.paid'` → `'stripe.invoice.paid'`). The parent passed the event through `inputs.stripeEvent`, which becomes this child's `ctx.request.body.stripeEvent`. Real handlers would record the payment, send a receipt email, etc.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "handled",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ handler: 'stripe.invoice.paid', invoiceId: ctx.request.body.stripeEvent && ctx.request.body.stripeEvent.data && ctx.request.body.stripeEvent.data.object && ctx.request.body.stripeEvent.data.object.id })"
+			}
+		}
+	]
+}

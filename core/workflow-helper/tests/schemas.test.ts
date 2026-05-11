@@ -748,10 +748,30 @@ describe("CronTriggerOptsSchema", () => {
 });
 
 describe("WebhookTriggerOptsSchema", () => {
-	it("should validate webhook trigger options", () => {
-		const result = WebhookTriggerOptsSchema.parse({ source: "github", events: ["push", "pull_request"] });
-		expect(result.source).toBe("github");
+	it("should validate a v0.7 built-in provider config", () => {
+		const result = WebhookTriggerOptsSchema.parse({
+			provider: "github",
+			path: "/webhooks/github",
+			secretEnv: "GITHUB_WEBHOOK_SECRET",
+			events: ["push", "pull_request"],
+		});
+		expect(result.provider).toBe("github");
 		expect(result.events).toEqual(["push", "pull_request"]);
+		expect(result.secretEnv).toBe("GITHUB_WEBHOOK_SECRET");
+	});
+
+	it("should validate a custom signature config (unknown provider)", () => {
+		const result = WebhookTriggerOptsSchema.parse({
+			path: "/webhooks/acme",
+			signature: {
+				header: "X-Acme-Signature",
+				secretEnv: "ACME_SECRET",
+				timestampHeader: "X-Acme-Timestamp",
+			},
+		});
+		expect(result.signature?.header).toBe("X-Acme-Signature");
+		expect(result.signature?.scheme).toBe("hmac-sha256");
+		expect(result.signature?.tolerance).toBe(300);
 	});
 });
 

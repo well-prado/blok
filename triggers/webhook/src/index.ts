@@ -1,80 +1,51 @@
 /**
  * @blokjs/trigger-webhook
  *
- * Webhook trigger for Blok workflows.
- * Handle webhook events from external services.
+ * Inbound webhook trigger for Blok workflows. Mounts verified POST
+ * routes on the shared Hono server alongside HTTP, WebSocket, and
+ * SSE routes — same port, same middleware chain, same Studio
+ * tracing. Verifies provider signatures (GitHub, Stripe, Slack,
+ * Shopify, Svix/Standard Webhooks) or a custom HMAC scheme, applies
+ * replay protection via the idempotency cache, and dispatches the
+ * workflow.
  *
- * Supported Services:
- * - GitHub (push, pull_request, issues, releases, etc.)
- * - Stripe (payment_intent, checkout.session, customer, etc.)
- * - Shopify (orders, products, customers, etc.)
- * - Custom webhooks (any service with signature verification)
+ * v0.7+ usage (just add the trigger to your workflow):
  *
- * Features:
- * - Signature verification (HMAC-SHA256)
- * - Event type filtering
- * - Source-specific handlers
- * - Custom source registration
- *
- * @example
- * ```typescript
- * import { WebhookTrigger } from "@blokjs/trigger-webhook";
- *
- * class MyWebhookTrigger extends WebhookTrigger {
- *   protected nodes = myNodes;
- *   protected workflows = myWorkflows;
- * }
- *
- * const trigger = new MyWebhookTrigger();
- * await trigger.listen();
- *
- * // In your HTTP endpoint handler:
- * app.post("/webhooks/:source", async (req, res) => {
- *   const rawBody = JSON.stringify(req.body);
- *   const result = await trigger.handleWebhook(
- *     req.params.source,
- *     rawBody,
- *     req.headers as Record<string, string>
- *   );
- *   res.status(200).json({ received: true });
- * });
- * ```
- *
- * Workflow Definition:
- * ```typescript
- * Workflow({ name: "github-push", version: "1.0.0" })
- *   .addTrigger("webhook", {
- *     source: "github",
- *     events: ["push", "pull_request.*"],
- *     secret: process.env.GITHUB_WEBHOOK_SECRET,
- *   })
- *   .addStep({ ... });
- * ```
- *
- * Custom Source Handler:
- * ```typescript
- * import { WebhookTrigger } from "@blokjs/trigger-webhook";
- *
- * WebhookTrigger.registerSourceHandler("my-service", {
- *   getEventType: (headers, body) => body.event_type,
- *   getSignature: (headers) => headers["x-my-signature"],
- *   verifySignature: (rawBody, signature, secret) => {
- *     // Your verification logic
- *     return { valid: true };
+ * ```json
+ * {
+ *   "name": "stripe-events",
+ *   "trigger": {
+ *     "webhook": {
+ *       "provider": "stripe",
+ *       "path": "/webhooks/stripe",
+ *       "secretEnv": "STRIPE_WEBHOOK_SECRET",
+ *       "namespace": "stripe",
+ *       "idempotencyKey": "js/ctx.request.body.id"
+ *     }
  *   },
- *   getEventId: (headers, body) => body.id,
- * });
+ *   "steps": [
+ *     { "id": "dispatch", "subworkflow": "js/ctx.request.body.type", "inputs": { "stripeEvent": "js/ctx.request.body" } }
+ *   ]
+ * }
  * ```
+ *
+ * See [additional-triggers-plan.mdx](../../../docs/c/devtools/additional-triggers-plan.mdx#webhook-trigger)
+ * for the full design.
  */
 
-// Core exports
-export {
-	WebhookTrigger,
-	sourceHandlers,
-	type WebhookEvent,
-	type VerificationResult,
-	type WebhookSourceHandler,
-} from "./WebhookTrigger";
+import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger";
 
-// Re-export types from helper for convenience
+export default WebhookTrigger;
+export { WebhookTrigger, _getActiveWebhookTrigger, _setActiveWebhookTrigger };
+export type { WebhookTriggerConfig } from "./WebhookTrigger";
 export type { WebhookTriggerOpts } from "@blokjs/helper";
+export {
+	BUILTIN_VERIFIERS,
+	buildCustomVerifier,
+	githubVerifier,
+	shopifyVerifier,
+	slackVerifier,
+	stripeVerifier,
+	svixVerifier,
+} from "./verifiers";
+export type { CustomSignatureConfig, VerifyError, VerifyInput, VerifyOk, VerifyResult, Verifier } from "./verifiers";
