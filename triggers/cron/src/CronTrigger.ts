@@ -153,7 +153,13 @@ export abstract class CronTrigger extends TriggerBase {
 				const config = workflow.config.trigger?.cron as CronTriggerOpts;
 				const jobId = `cron-${workflow.path}-${uuid().slice(0, 8)}`;
 
-				this.logger.log(`Scheduling workflow: ${workflow.path} with schedule: ${config.schedule} (${config.timezone})`);
+				// `CronTriggerOpts` is `z.input<…>` so `timezone` is `string | undefined`
+				// even though the schema declares `.default("UTC")`. Apply the
+				// default once here so the rest of this method (and the cron lib's
+				// constructor) sees a guaranteed string.
+				const timezone = config.timezone ?? "UTC";
+
+				this.logger.log(`Scheduling workflow: ${workflow.path} with schedule: ${config.schedule} (${timezone})`);
 
 				const job = new CronJob(
 					config.schedule,
@@ -162,14 +168,14 @@ export abstract class CronTrigger extends TriggerBase {
 					},
 					null, // onComplete
 					false, // start
-					config.timezone,
+					timezone,
 				);
 
 				const scheduledJob: ScheduledJob = {
 					id: jobId,
 					workflowPath: workflow.path,
 					schedule: config.schedule,
-					timezone: config.timezone,
+					timezone,
 					overlap: config.overlap ?? false,
 					running: false,
 					nextRun: this.toDate(job.nextDate()),
@@ -311,6 +317,9 @@ export abstract class CronTrigger extends TriggerBase {
 		const scheduledTime = lastDate ? new Date(lastDate as unknown as string | number) : new Date();
 		const executionTime = new Date();
 
+		// Apply the schema default — see explanation in `listen()`.
+		const timezone = config.timezone ?? "UTC";
+
 		const defaultMeter = metrics.getMeter("default");
 		const cronExecutions = defaultMeter.createCounter("cron_executions", {
 			description: "Cron job executions",
@@ -338,7 +347,7 @@ export abstract class CronTrigger extends TriggerBase {
 						scheduledTime,
 						executionTime,
 						schedule: config.schedule,
-						timezone: config.timezone,
+						timezone,
 						manual,
 					};
 
@@ -392,7 +401,7 @@ export abstract class CronTrigger extends TriggerBase {
 					span.setAttribute("job_id", jobId);
 					span.setAttribute("workflow_path", workflow.path);
 					span.setAttribute("schedule", config.schedule);
-					span.setAttribute("timezone", config.timezone);
+					span.setAttribute("timezone", timezone);
 					span.setAttribute("manual", manual);
 					span.setAttribute("elapsed_ms", end - start);
 					span.setStatus({ code: SpanStatusCode.OK });
