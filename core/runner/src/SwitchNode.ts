@@ -21,10 +21,26 @@
  *
  * If no case matches and there's no default, the step is a no-op
  * (success, data: null).
+ *
+ * v0.6 Phase 4 — switch + wait support. The cursor schema
+ * (`SwitchIterationContext`) records `caseIndex` (or -1 for `default`)
+ * plus `innerStepIndex` within that arm. On re-entry after a wait,
+ * SwitchNode reads its cursor from the rehydrated map (keyed by its
+ * own NodeRun id), walks back into the matched arm at the right step,
+ * and ignores the `on` value entirely — we already committed to a
+ * specific arm in the first pass.
  */
 
 import type { Context, ResponseContext } from "@blokjs/shared";
 import RunnerNode from "./RunnerNode";
+import {
+	type PrimitiveStackFrame,
+	consumeRehydratedCursor,
+	popPrimitiveFrame,
+	pushPrimitiveFrame,
+	readRehydratedCursor,
+} from "./runtime/PrimitiveStack";
+import type { SwitchIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 interface SwitchCase {
@@ -37,6 +53,9 @@ interface SwitchOpts {
 	cases?: SwitchCase[];
 	default?: RunnerNode[];
 }
+
+/** Sentinel `caseIndex` value meaning "the `default` arm matched". */
+const DEFAULT_ARM = -1;
 
 function caseMatches(when: unknown, on: unknown): boolean {
 	if (Array.isArray(when)) {
@@ -55,45 +74,107 @@ export class SwitchNode extends RunnerNode {
 		const cases = Array.isArray(opts.cases) ? opts.cases : [];
 		const defaultSteps = Array.isArray(opts.default) ? opts.default : undefined;
 
-		// First-match-wins case selection.
+		// v0.6 Phase 4 — resume cursor lookup. On re-entry from a wait
+		// fired inside a switch case, the persisted NodeRun's
+		// iteration_context carries the matched arm + inner step index.
+		const ctxAny = ctx as Record<string, unknown>;
+		const myNodeRunId = ctxAny._traceNodeId as string | undefined;
+		// Phase 4 — lookup by step NAME (stable across re-entries).
+		const resumeRaw = readRehydratedCursor(ctx, this.name);
+		const resume: SwitchIterationContext | undefined =
+			resumeRaw && resumeRaw.mode === "switch" ? (resumeRaw as SwitchIterationContext) : undefined;
+		if (resume) {
+			consumeRehydratedCursor(ctx, this.name);
+		}
+
+		// Case selection. On resume, skip re-evaluating the `when`
+		// expressions — we've already committed to a specific arm and
+		// `on` could have changed mid-flight (different ctx state after
+		// pre-wait mutations). Walk straight back into the cached arm.
 		let selected: RunnerNode[] | undefined;
-		for (const c of cases) {
-			if (caseMatches(c.when, on)) {
-				selected = c.steps;
-				break;
+		let selectedCaseIndex = DEFAULT_ARM;
+		if (resume !== undefined) {
+			if (resume.caseIndex === DEFAULT_ARM) {
+				selected = defaultSteps;
+			} else if (resume.caseIndex >= 0 && resume.caseIndex < cases.length) {
+				selected = cases[resume.caseIndex].steps;
+				selectedCaseIndex = resume.caseIndex;
+			}
+			// Cursor pointed at an arm that no longer exists (case removed
+			// between deploys, etc.). Fall through to fresh first-match
+			// behaviour — better than crashing the resume.
+		}
+		if (selected === undefined && resume === undefined) {
+			for (let idx = 0; idx < cases.length; idx++) {
+				if (caseMatches(cases[idx].when, on)) {
+					selected = cases[idx].steps;
+					selectedCaseIndex = idx;
+					break;
+				}
+			}
+			if (selected === undefined) {
+				selected = defaultSteps;
+				if (selected !== undefined) selectedCaseIndex = DEFAULT_ARM;
 			}
 		}
-		if (selected === undefined) selected = defaultSteps;
 
 		if (selected === undefined || selected.length === 0) {
-			// No matching case + no default → no-op success. State entry is
-			// `null` so downstream `$.state[<id>]` reads return null (not
-			// undefined) — keeps the persistence model uniform.
+			// No matching case + no default → no-op success. State
+			// entry is `null` so downstream `$.state[<id>]` reads return
+			// null (not undefined) — keeps the persistence model uniform.
 			applyStepOutput(ctx, this, { data: null });
-			// Preserve the previous step's ctx.response so the NEXT top-level
-			// step doesn't dereference null when RunnerSteps assigns
-			// `ctx.response.contentType`. Returning data:null here would let
-			// RunnerSteps unwrap to `ctx.response = null` and break the chain.
+			// Preserve the previous step's ctx.response so the NEXT
+			// top-level step doesn't dereference null when RunnerSteps
+			// assigns `ctx.response.contentType`.
 			response.data = ctx.response;
 			return response;
 		}
 
-		// Lazy import — same circular-dep guard ForEach/Loop use.
-		const { default: Runner } = await import("./Runner");
-		const runner = new Runner(selected);
-		// `deep: true` so the inner runSteps doesn't inherit the outer
-		// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume logic).
-		await runner.run(ctx, { deep: true, stepName: this.name });
+		// v0.6 Phase 4 — push a primitive frame so a nested wait fired
+		// inside this case's sub-pipeline persists the cursor on
+		// THIS switch's NodeRun. `innerStepIndex` is updated at each
+		// step boundary inside the case body by RunnerSteps; we just
+		// keep `caseIndex` pinned for the duration of this run.
+		const initialCursor: SwitchIterationContext = {
+			mode: "switch",
+			caseIndex: selectedCaseIndex,
+			innerStepIndex: resume?.innerStepIndex ?? 0,
+			completedResults: [] as never[],
+		};
+		const frame: PrimitiveStackFrame | undefined = myNodeRunId
+			? { nodeRunId: myNodeRunId, cursor: initialCursor }
+			: undefined;
+		if (frame) pushPrimitiveFrame(ctx, frame);
 
-		// Switch is a passthrough — the matched case ran on the parent ctx,
-		// so state mutations are already visible to downstream steps. The
-		// switch step's own data is the last inner step's response.
-		// (RunnerSteps sets ctx.response = model.data after each step, so
-		// after the inner Runner finishes ctx.response IS the last step's
-		// data — same convention ForEach/Loop rely on.)
-		const data = ctx.response;
-		response.data = data;
-		applyStepOutput(ctx, this, { data });
-		return response;
+		try {
+			// Lazy import — same circular-dep guard ForEach/Loop use.
+			const { default: Runner } = await import("./Runner");
+			const runner = new Runner(selected);
+
+			// On resume, pass the inner-step resume index — INCLUDING
+			// the index-0 case where the wait is the very first step
+			// of the matched arm. The deep runSteps' wait re-entry
+			// detection uses `innerResumeIndex !== undefined` as the
+			// "this primitive resumed here" signal (Phase 4 fix).
+			if (resume) {
+				ctxAny._blokInnerResumeIndex = resume.innerStepIndex;
+			}
+
+			// `deep: true` so the inner runSteps doesn't inherit the
+			// outer run's `lastCompletedStepIndex` cursor (PR 4 wait/
+			// resume logic).
+			await runner.run(ctx, { deep: true, stepName: this.name });
+
+			// Switch is a passthrough — the matched case ran on the
+			// parent ctx, so state mutations are already visible to
+			// downstream steps. The switch step's own data is the last
+			// inner step's response.
+			const data = ctx.response;
+			response.data = data;
+			applyStepOutput(ctx, this, { data });
+			return response;
+		} finally {
+			if (frame) popPrimitiveFrame(ctx);
+		}
 	}
 }

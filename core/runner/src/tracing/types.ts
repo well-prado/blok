@@ -385,7 +385,7 @@ export interface NodeRun {
  *     `ctx._blokIterationResume`; the primitive itself (ForEachNode,
  *     LoopNode) dispatches on `mode` to the right resume path.
  */
-export type IterationContext = SequentialIterationContext | ParallelIterationContext;
+export type IterationContext = SequentialIterationContext | ParallelIterationContext | SwitchIterationContext;
 
 /**
  * Sequential forEach + wait OR loop + wait cursor. The pre-existing
@@ -401,6 +401,29 @@ export interface SequentialIterationContext {
 	innerStepIndex: number;
 	/** Accumulator for iterations [0..iteration-1]; pre-populates `results[]` on resume. */
 	completedResults: unknown[];
+}
+
+/**
+ * v0.6 Phase 4 — switch + wait cursor. Records which case arm matched
+ * (so on re-entry SwitchNode walks back into the same arm) plus the
+ * inner step within that arm where the wait fired.
+ *
+ * `caseIndex` semantics:
+ *   - `>= 0` — index into the workflow's `cases[]` array.
+ *   - `-1`   — the `default` arm matched.
+ *
+ * `completedResults` is unused for switch (it doesn't iterate) but the
+ * field is kept on the IterationContext union for cross-schema parity.
+ * Always `[]` on switch.
+ */
+export interface SwitchIterationContext {
+	mode: "switch";
+	/** Resolved case index; `-1` denotes the `default` arm. */
+	caseIndex: number;
+	/** Inner step index within the matched arm where the wait fired. */
+	innerStepIndex: number;
+	/** Unused for switch; preserved at schema level for parity. Always `[]`. */
+	completedResults: never[];
 }
 
 /**
