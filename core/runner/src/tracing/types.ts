@@ -522,6 +522,26 @@ export interface ScheduledDispatchRow {
 	payload: unknown;
 	/** ms since epoch when the row was first written. */
 	createdAt: number;
+	/**
+	 * Tier C #2 — cross-process scheduler coordination. Set when a
+	 * process claims this dispatch during boot recovery. Unset on
+	 * unclaimed rows.
+	 *
+	 * Multi-process PG deployments use the claim to prevent the same
+	 * dispatch from being fired by two processes that both ran
+	 * `recoverDispatches()` against the shared table. Single-process
+	 * and per-process sqlite deployments see no observable difference
+	 * (the same process always wins the claim).
+	 */
+	claimedBy?: string;
+	/**
+	 * Tier C #2 — last heartbeat timestamp (ms since epoch). The
+	 * holder of `claimedBy` periodically refreshes `claimedAt` while
+	 * the timer is registered. Stale claims (now > claimedAt + leaseMs)
+	 * are eligible for takeover by another process — protects against
+	 * crashed holders blocking recovery indefinitely.
+	 */
+	claimedAt?: number;
 }
 
 // === Events ===

@@ -105,6 +105,9 @@ Source:
 | `BLOK_SCHEDULING_DISABLED` | unset | Set to `1` to short-circuit `delay`, `ttl`, AND `debounce` gates. Runs proceed synchronously. See [scheduling overview](/d/scheduling/overview). |
 | `BLOK_DEBOUNCE_BACKEND` | unset / `memory` | Cross-process debounce backend: `nats-kv` switches the gate to NATS KV, `redis` switches to Redis. Unset preserves single-process behavior (DebounceCoordinator stays in-memory). |
 | `BLOK_DEBOUNCE_OWNER_LEASE_MS` | `60000` | Owner-lease duration for cross-process debounce. When the owning process dies, another process can take over after this elapses. Tune for trade-off between handoff latency and false-takeover risk. |
+| `BLOK_SCHEDULER_CLAIM_DISABLED` | unset | Set to `1` to disable Tier C #2 claim-based recovery — `HttpTrigger.recoverDispatches()` reverts to the legacy `getScheduledDispatches` path. Use only if you've verified your deployment doesn't share a PG store across processes. |
+| `BLOK_SCHEDULER_CLAIM_LEASE_MS` | `60000` | Tier C #2 — cross-process scheduler claim lease. Recovered dispatches are claimed by the recovering process; another process can take over a claim older than this. Tune for trade-off between handoff latency (low) and false-takeover risk (high). |
+| `BLOK_SCHEDULER_HEARTBEAT_INTERVAL_MS` | `20000` | Tier C #2 — how often the `DeferredRunScheduler` refreshes `claimed_at` for active claims. Should be ~3× smaller than the claim lease so a dead process's claims expire before peers spuriously take over. |
 
 ### Debounce backend — NATS KV
 

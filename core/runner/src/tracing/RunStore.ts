@@ -163,6 +163,57 @@ export interface RunStore {
 	getScheduledDispatches(opts?: { triggerType?: string; status?: string }): ScheduledDispatchRow[];
 
 	/**
+	 * Tier C #2 — atomically claim eligible scheduled dispatches for the
+	 * given `processId`. Returns the claimed rows. Used by trigger boot
+	 * recovery (`HttpTrigger.recoverDispatches()`) to prevent multi-
+	 * process deployments sharing a PG store from double-firing the same
+	 * dispatch.
+	 *
+	 * Eligibility: a row is claimable when `claimed_by IS NULL`, OR
+	 * when its lease is stale (`claimed_at < now - leaseMs`). The claim
+	 * is set atomically — once one process claims a row, peers see it
+	 * as claimed and skip it on their next recovery pass.
+	 *
+	 * After claiming, the process registers timers for the returned
+	 * rows. The `DeferredRunScheduler` heartbeats the claim
+	 * periodically; if the process crashes, the lease expires and a
+	 * surviving process can take over on the next recovery.
+	 *
+	 * On single-process / sqlite deployments this resolves trivially —
+	 * one process, no contention. On cross-backend Postgres deployments
+	 * this is the foundation for safe horizontal scaling of the durable
+	 * scheduler.
+	 */
+	claimDispatches(
+		processId: string,
+		leaseMs: number,
+		now: number,
+		opts?: { triggerType?: string },
+	): ScheduledDispatchRow[];
+
+	/**
+	 * Tier C #2 — refresh the `claimed_at` timestamp for every row
+	 * claimed by `processId`. Idempotent; runs as a single UPDATE.
+	 * Called periodically by the `DeferredRunScheduler` heartbeat loop
+	 * while the process has registered timers.
+	 *
+	 * Returns the number of rows refreshed.
+	 */
+	heartbeatClaims(processId: string, now: number): number;
+
+	/**
+	 * Tier C #2 — clear the claim for a single dispatch. Called when the
+	 * dispatch fires or is cancelled, BEFORE deleting the row. (For
+	 * deletes the claim clear is implicit; this method exists for the
+	 * rare case where ownership is released without deleting — e.g.
+	 * graceful shutdown that wants peers to take over immediately.)
+	 *
+	 * Returns true when a row's claim was cleared, false when the row
+	 * doesn't exist OR has no claim.
+	 */
+	releaseClaim(runId: string): boolean;
+
+	/**
 	 * Janitor sweep — delete every `scheduled_dispatches` row whose
 	 * `expires_at` has elapsed (`expires_at IS NOT NULL AND expires_at < now`).
 	 * Rows without a TTL are left alone (their owning runs may legitimately

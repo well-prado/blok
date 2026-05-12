@@ -12,7 +12,7 @@ import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
-import { DeferredRunScheduler } from "@blokjs/runner";
+import { DeferredRunScheduler, getSchedulerClaimLeaseMs } from "@blokjs/runner";
 import { Janitor } from "@blokjs/runner";
 import { PayloadTooLargeError } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
@@ -1342,11 +1342,41 @@ export default class HttpTrigger extends TriggerBase {
 		const tracker = RunTracker.getInstance();
 		if (!tracker.active) return { recovered: 0, expired: 0, skipped: 0 };
 
-		const rows = tracker.getStore().getScheduledDispatches({ triggerType: "http" });
 		const now = Date.now();
 		let recovered = 0;
 		let expired = 0;
 		let skipped = 0;
+
+		// Tier C #2 — atomically claim eligible rows so multi-process PG
+		// deployments don't double-fire. Kill-switch
+		// BLOK_SCHEDULER_CLAIM_DISABLED=1 reverts to the legacy
+		// getScheduledDispatches path (suitable for sqlite-per-process
+		// deployments that want the old behavior).
+		const claimDisabled = process.env.BLOK_SCHEDULER_CLAIM_DISABLED === "1";
+		let rows: ReturnType<typeof tracker.getStore.prototype.getScheduledDispatches>;
+		if (claimDisabled) {
+			rows = tracker.getStore().getScheduledDispatches({ triggerType: "http" });
+		} else {
+			const processId = DeferredRunScheduler.getInstance().getProcessId();
+			const leaseMs = getSchedulerClaimLeaseMs();
+			// PG stores expose a true async claim API; sync wrappers exist
+			// for sqlite/in-memory parity but PG users get the strongest
+			// cross-process guarantee by hitting PG directly.
+			const store = tracker.getStore();
+			const asyncClaim = (
+				store as unknown as {
+					claimDispatchesAsync?: (
+						processId: string,
+						leaseMs: number,
+						now: number,
+						opts?: { triggerType?: string },
+					) => Promise<ReturnType<typeof store.claimDispatches>>;
+				}
+			).claimDispatchesAsync;
+			rows = asyncClaim
+				? await asyncClaim.call(store, processId, leaseMs, now, { triggerType: "http" })
+				: store.claimDispatches(processId, leaseMs, now, { triggerType: "http" });
+		}
 
 		for (const row of rows) {
 			// Skip rows for workflows this trigger doesn't own. The
