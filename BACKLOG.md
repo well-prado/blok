@@ -551,13 +551,16 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ---
 
-### G3 · Polymorphic workflow names
+### G3 · Polymorphic workflow names — ✅ SHIPPED
 
-**Severity**: NICE-TO-HAVE.
-**Effort**: ~1 day.
-**Why**: today `subworkflow: "X"` is static. `subworkflow: $.req.body.kind` would allow dynamic dispatch.
+**Status:** Shipped in v0.5 (the dispatch capability landed under v0.7 PR 4 for the webhook trigger; this iteration promotes it to a first-class `subworkflow:` step feature with an `allowList` safety guard).
 
-**Trade-off**: workflow name resolution becomes a runtime concern (typos surface late). Add behind a strict flag (`workflowName: { kind: "expression", value: "$.req.body.kind", allowList: [...] }`).
+**Implementation**:
+- `V2SubworkflowStepSchema` accepts `subworkflow: "$.req.body.kind"` / `"js/ctx.req.body.kind"` alongside literal names.
+- New optional `allowList: string[]` field rejects dispatches whose **final** resolved name (after any `namespace` prefix) is outside the list. Strongly recommended whenever the expression depends on caller-supplied data.
+- `SubworkflowNode.resolveSubworkflowName` evaluates the expression via `mapper.replaceString`, applies the namespace prefix when relevant, and enforces `allowList` before the registry lookup. Errors are structured ("resolved name X is not in the step's allowList [...]") so operators can audit denials.
+- 9 new unit tests in `__tests__/unit/SubworkflowNode.test.ts` covering literal + polymorphic dispatch, `$.<path>` normalisation, empty-string resolution, `allowList` accept/reject, namespace-prefix interaction, and back-compat (no allowList set = no constraint).
+- Docs: `docs/d/composition/sub-workflows.mdx` and `docs/d/reference/v2-step-shapes.mdx` document the feature; `core/runner/CLAUDE.md` removes the stale "Not yet shipped" entry.
 
 ---
 

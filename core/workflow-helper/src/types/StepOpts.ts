@@ -377,6 +377,7 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 	idempotencyKey?: string;
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
+	allowList?: readonly string[];
 }> = z.lazy(() =>
 	z
 		.object({
@@ -391,8 +392,11 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.min(1)
 				.describe(
 					"Name of the workflow to invoke. Looked up in the WorkflowRegistry " +
-						"at run time — must match the `name:` field of an HTTP-loaded or " +
-						"manually-registered workflow.",
+						'at run time. **Literal names** (`"send-receipt-email"`) are matched ' +
+						'directly. **Polymorphic expressions** (`"$.req.body.kind"`, ' +
+						'`"js/ctx.req.body.kind"`) resolve against the live ctx at dispatch ' +
+						"time — pair with `allowList` to constrain which workflows the " +
+						"expression may resolve to.",
 				),
 			inputs: z
 				.record(z.unknown())
@@ -463,6 +467,17 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 					"(ms) or duration string. On final-attempt timeout, the run auto-flips " +
 					'to `"timedOut"`.',
 			),
+			allowList: z
+				.array(z.string().min(1))
+				.optional()
+				.describe(
+					"Exact-match allow-list for polymorphic dispatch. When the resolved " +
+						"workflow name (after any `namespace` prefix is applied) is not in this " +
+						"array, the dispatch is rejected at run time with a structured error. " +
+						"Strongly recommended when `subworkflow` is an expression (`$.<path>` " +
+						"or `js/...`) so a malicious or buggy ctx value can't dispatch arbitrary " +
+						"workflows. Ignored for literal names (they don't need the guard).",
+				),
 		})
 		.refine((step) => !(step.as && step.spread), {
 			message: "`as` and `spread` are mutually exclusive — pick one.",

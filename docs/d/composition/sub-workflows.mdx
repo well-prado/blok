@@ -534,6 +534,44 @@ registration and HMR notes.
   </Accordion>
 </AccordionGroup>
 
+## Polymorphic dispatch
+
+`subworkflow:` accepts a literal workflow name *or* a runtime expression
+(`$.<path>`, `js/ctx....`). One trigger can fan out to N handlers
+without a `switch` step.
+
+```ts
+{
+  id: "dispatch",
+  subworkflow: $.req.body.kind,
+  inputs: { event: $.req.body },
+  allowList: ["handler.payment", "handler.shipping"],
+}
+```
+
+When `subworkflow` is an expression, the runner evaluates it against the
+live ctx at dispatch time and looks up the resolved name in the workflow
+registry. If a parent trigger sets a namespace (today: webhook
+`namespace: "stripe"`), the resolved name is prefixed before lookup —
+`invoice.paid` becomes `stripe.invoice.paid`.
+
+`allowList` is the safety guard. When set, the **final** resolved name
+(post-namespace) must be in the array — otherwise the dispatch is
+rejected with a structured error. **Strongly recommended** when the
+expression depends on caller-supplied data so a malicious request body
+can't escalate the workflow surface accessible from a route. The
+allow-list also works on literal `subworkflow:` strings for
+defence-in-depth audit.
+
+Resolution failure modes:
+- Expression evaluates to a non-string or empty string → throw with the
+  raw expression and the resolved value, so an operator can debug the
+  ctx shape.
+- Resolved name (post-namespace) not in `allowList` → throw with the
+  resolved name and the full allow-list.
+- Resolved name not registered → standard "Sub-workflow not found"
+  error, listing the registered workflows.
+
 ## What's not yet supported
 
 - **Cross-process dispatch.** The current implementation is in-process
@@ -545,8 +583,6 @@ registration and HMR notes.
   parent step has already returned by the time the child runs). Cancel
   async children directly via their own `runId` —
   [`POST /__blok/runs/:childId/cancel`](/d/reliability/cancellation).
-- **Polymorphic workflow names** (`subworkflow: $.req.body.kind`).
-  Workflow names are static today; runtime resolution is deferred.
 
 <Tip>
 A visual workflow editor (React Flow, like n8n) is on the roadmap for

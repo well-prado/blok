@@ -279,13 +279,38 @@ when exceeded — bounds blast radius of accidental cycles
 `workflow_runs.parent_node_run_id` columns + index on parent_run_id.
 Additive; pre-existing rows get NULL.
 
+**Polymorphic workflow names (G3 — shipped in v0.5)**:
+
+`subworkflow:` accepts a `js/...` or `$.<path>` expression that the
+runner evaluates against the live ctx at dispatch time. Webhook routers
+and other "one trigger → N handlers" patterns can dispatch dynamically
+without a switch step:
+
+```ts
+{
+  id: "dispatch",
+  subworkflow: "$.req.body.kind",
+  inputs: { event: $.req.body },
+  allowList: ["handler.payment", "handler.shipping"],
+}
+```
+
+`allowList` is the safety guard. When set, the **final** resolved name
+(after the polymorphic resolution AND any `namespace` prefix applied by
+the parent's trigger config) must be in the array — otherwise dispatch
+is rejected at run time with a structured error. Strongly recommended
+when the expression depends on caller-supplied data (request body,
+headers, etc.) so a malicious value can't escalate the workflow surface
+accessible to a request. Literal names skip the registry-lookup ambiguity
+but can still set `allowList` for defence-in-depth audit. See
+`SubworkflowNode.resolveSubworkflowName` and the G3 test suite in
+`__tests__/unit/SubworkflowNode.test.ts` for the contract.
+
 **Not yet shipped**:
 - Cross-process sub-workflow dispatch (HTTP self-call) — current
   implementation is in-process only. `wait: false` async dispatch
   is `setImmediate`-based, NOT cross-process. Horizontal-scale
   users with isolation needs may want this in a follow-up.
-- Polymorphic workflow names (`subworkflow: $.req.body.kind`) —
-  workflow names are static today.
 - Studio `↳ async` indicator distinguishing sync vs async sub-
   workflow steps in StepRail. Currently both show `↳ sub`; the
   Sub-runs strip on the parent surfaces the actual status.

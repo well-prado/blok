@@ -581,6 +581,16 @@ export default class Configuration implements Config {
 		if (typeof triggerCfg?.webhook?.namespace === "string" && triggerCfg.webhook.namespace.length > 0) {
 			subworkflowNode.namespace = triggerCfg.webhook.namespace;
 		}
+		// G3 polymorphic dispatch — pass the per-step allowList (cleaned to
+		// non-empty strings by `normalizeSubworkflowStep`) onto the node so
+		// `resolveSubworkflowName` can reject unauthorized lookups at
+		// dispatch time without re-walking the workflow shape.
+		const allowListSource = (node as RunnerNode & { allowList?: unknown }).allowList;
+		if (Array.isArray(allowListSource) && allowListSource.length > 0) {
+			subworkflowNode.allowList = Object.freeze(
+				allowListSource.filter((s): s is string => typeof s === "string" && s.length > 0),
+			);
+		}
 		// `globalOptions` is the runner's node registry — child Configuration.init
 		// needs it for `module:` step resolution.
 		subworkflowNode.globalOptions = this.globalOptions;

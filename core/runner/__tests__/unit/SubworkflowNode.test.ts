@@ -735,3 +735,242 @@ describe("createChildContext", () => {
 		expect(child.prev).toBe(child.response);
 	});
 });
+
+/**
+ * G3 — polymorphic sub-workflow names + `allowList` safety guard.
+ *
+ * The capability shipped under v0.7 PR 4 for the webhook trigger's
+ * namespace-prefixed dispatch (`stripe.invoice.paid` style). G3 promotes
+ * it to a first-class subworkflow-step feature with an opt-in allow-list
+ * for production hardening.
+ */
+describe("SubworkflowNode — polymorphic dispatch (G3)", () => {
+	beforeEach(() => {
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+	});
+
+	afterEach(() => {
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+	});
+
+	it("resolves a `js/` expression against the live ctx and dispatches the named child", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.payment",
+			source: "/handler-payment.ts",
+			workflow: makeChildWorkflowDef("handler.payment"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.kind",
+		});
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "handler.payment" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: { payload: "x" } } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+
+		expect(result.success).toBe(true);
+		// Child workflow received the parent's resolved inputs verbatim.
+		const childResponse = result.data as { echoed: { payload: string } };
+		expect(childResponse.echoed).toEqual({ payload: "x" });
+	});
+
+	it("resolves a `$.<path>` expression by normalising it to `js/ctx....`", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.shipping",
+			source: "/handler-shipping.ts",
+			workflow: makeChildWorkflowDef("handler.shipping"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "$.req.body.kind",
+		});
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "handler.shipping" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
+	it("throws when the expression resolves to an empty string (clearer than 'not found')", async () => {
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.kind",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/Polymorphic sub-workflow name .* resolved to/);
+	});
+
+	it("admits the dispatch when the resolved name is in `allowList`", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.payment",
+			source: "/handler-payment.ts",
+			workflow: makeChildWorkflowDef("handler.payment"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.kind",
+		});
+		node.allowList = Object.freeze(["handler.payment", "handler.shipping"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "handler.payment" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects the dispatch when the resolved name is NOT in `allowList`", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "internal.admin-action",
+			source: "/internal-admin.ts",
+			workflow: makeChildWorkflowDef("internal.admin-action"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.kind",
+		});
+		// Authoring intent: a webhook receiver should only ever dispatch
+		// two handlers — never the internal admin workflow even if a
+		// malicious ctx body asked for it.
+		node.allowList = Object.freeze(["handler.payment", "handler.shipping"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "internal.admin-action" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(
+			/Sub-workflow dispatch blocked: resolved name "internal\.admin-action" is not in the step's `allowList`/,
+		);
+	});
+
+	it("enforces `allowList` against the namespace-prefixed name, not the raw resolution", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "stripe.invoice.paid",
+			source: "/stripe-invoice-paid.ts",
+			workflow: makeChildWorkflowDef("stripe.invoice.paid"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.type",
+		});
+		node.namespace = "stripe";
+		// Authors write the prefixed name in the allow-list — what they
+		// actually want to permit dispatching to.
+		node.allowList = Object.freeze(["stripe.invoice.paid"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { type: "invoice.paid" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects the dispatch when the namespace-prefixed name isn't allow-listed", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "stripe.invoice.payment_failed",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("stripe.invoice.payment_failed"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.type",
+		});
+		node.namespace = "stripe";
+		node.allowList = Object.freeze(["stripe.invoice.paid"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { type: "invoice.payment_failed" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/"stripe\.invoice\.payment_failed" is not in the step's/);
+	});
+
+	it("`allowList` also guards a literal `subworkflow:` name (defence-in-depth audit)", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-restricted-literal",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-restricted-literal"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "call",
+			subworkflowName: "child-restricted-literal",
+		});
+		node.allowList = Object.freeze(["different-workflow-entirely"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { call: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/"child-restricted-literal" is not in the step's/);
+	});
+
+	it("no-op when `allowList` is undefined (back-compat: polymorphic dispatch without a guard still works)", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.anything",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("handler.anything"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.req.body.kind",
+		});
+		// allowList intentionally not set.
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "handler.anything" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+});

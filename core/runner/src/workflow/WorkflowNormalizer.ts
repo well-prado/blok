@@ -570,6 +570,16 @@ function normalizeSubworkflowStep(
 	if (typeof step.maxDuration === "number" || typeof step.maxDuration === "string") {
 		internalStep.maxDuration = step.maxDuration;
 	}
+	// G3 polymorphic-dispatch safety net — narrow the registry lookup to a
+	// fixed set when `subworkflow` is an expression (or just to harden a
+	// literal). Filter to non-empty strings here so SubworkflowNode can
+	// trust the shape and skip a defensive check on the hot path.
+	if (Array.isArray(step.allowList)) {
+		const cleaned = (step.allowList as unknown[]).filter((s): s is string => typeof s === "string" && s.length > 0);
+		if (cleaned.length > 0) {
+			internalStep.allowList = cleaned;
+		}
+	}
 
 	// Inputs land on nodeConfig so the blueprint mapper resolves
 	// $.<path> / js/... refs before SubworkflowNode reads them via
