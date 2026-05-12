@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NatsKvConcurrencyBackend } from "../../../src/concurrency/NatsKvConcurrencyBackend";
+import { RedisConcurrencyBackend } from "../../../src/concurrency/RedisConcurrencyBackend";
 import { createConcurrencyBackend } from "../../../src/concurrency/createConcurrencyBackend";
 
 describe("createConcurrencyBackend (Tier 2 #6 follow-up)", () => {
@@ -39,8 +40,25 @@ describe("createConcurrencyBackend (Tier 2 #6 follow-up)", () => {
 		expect(backend).toBeInstanceOf(NatsKvConcurrencyBackend);
 	});
 
-	it("throws on unknown backend kind with a helpful error", () => {
+	it("returns a RedisConcurrencyBackend instance for 'redis'", () => {
 		vi.stubEnv("BLOK_CONCURRENCY_BACKEND", "redis");
-		expect(() => createConcurrencyBackend()).toThrow(/Unknown BLOK_CONCURRENCY_BACKEND='redis'/);
+		const backend = createConcurrencyBackend();
+		expect(backend).toBeInstanceOf(RedisConcurrencyBackend);
+		expect(backend?.name).toBe("redis");
+	});
+
+	it("normalizes whitespace + casing for 'redis'", () => {
+		vi.stubEnv("BLOK_CONCURRENCY_BACKEND", "  REDIS  ");
+		const backend = createConcurrencyBackend();
+		expect(backend).toBeInstanceOf(RedisConcurrencyBackend);
+	});
+
+	it("throws on unknown backend kind with a helpful error", () => {
+		vi.stubEnv("BLOK_CONCURRENCY_BACKEND", "dynamodb");
+		expect(() => createConcurrencyBackend()).toThrow(/Unknown BLOK_CONCURRENCY_BACKEND='dynamodb'/);
+		// Error message must mention every supported backend so operators
+		// know what their options are.
+		expect(() => createConcurrencyBackend()).toThrow(/nats-kv/);
+		expect(() => createConcurrencyBackend()).toThrow(/redis/);
 	});
 });

@@ -111,6 +111,11 @@ import {
 	type NatsKvConcurrencyConfig,
 	readNatsKvConfigFromEnv,
 } from "./concurrency/NatsKvConcurrencyBackend";
+import {
+	RedisConcurrencyBackend,
+	type RedisConcurrencyConfig,
+	readRedisConfigFromEnv,
+} from "./concurrency/RedisConcurrencyBackend";
 import { createConcurrencyBackend } from "./concurrency/createConcurrencyBackend";
 import {
 	CONCURRENCY_DEFAULTS,
@@ -298,6 +303,9 @@ export {
 	NatsKvConcurrencyBackend,
 	type NatsKvConcurrencyConfig,
 	readNatsKvConfigFromEnv,
+	RedisConcurrencyBackend,
+	type RedisConcurrencyConfig,
+	readRedisConfigFromEnv,
 	// Per-step timeout (Tier 2 quick-wins)
 	StepTimeoutError,
 	isStepTimeoutError,

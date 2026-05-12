@@ -495,6 +495,7 @@ page; the actionable form lives here.
 | Set `BLOK_MAPPER_MODE=strict` | Fail-fast on workflow expression errors. |
 | Use Postgres with TLS | `BLOK_TRACE_STORE=postgres` and `BLOK_TRACE_PG_*` connecting via `sslmode=verify-full`. |
 | Set `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` | Required when `BLOK_CONCURRENCY_BACKEND=nats-kv`. |
+| Set `BLOK_CONCURRENCY_REDIS_KEY_PREFIX=<unique>` | Required when `BLOK_CONCURRENCY_BACKEND=redis`. Same cross-deployment collision risk as the NATS KV bucket. |
 | Extend `BLOK_TRACE_SANITIZE_FIELDS` | Add domain-specific PII / PHI / secret field names. |
 | Tune `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` | Default 1MB; raise for media uploads, lower for small-payload services. |
 | Wire auth on user-authored routes | Pattern A above (workflow-level) or Pattern B (Hono middleware). |

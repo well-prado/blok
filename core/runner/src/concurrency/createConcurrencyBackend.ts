@@ -10,6 +10,7 @@
 
 import type { ConcurrencyBackend } from "./ConcurrencyBackend";
 import { NatsKvConcurrencyBackend } from "./NatsKvConcurrencyBackend";
+import { RedisConcurrencyBackend } from "./RedisConcurrencyBackend";
 
 /**
  * Returns a configured `ConcurrencyBackend` based on
@@ -18,6 +19,7 @@ import { NatsKvConcurrencyBackend } from "./NatsKvConcurrencyBackend";
  * Recognized values:
  * - unset / `""` / `"memory"` — null (use default in-process via RunStore)
  * - `"nats-kv"` — NATS KV backend (requires `nats` package + reachable NATS server)
+ * - `"redis"` — Redis backend (requires `ioredis` package + reachable Redis server)
  *
  * Unknown values throw at startup with a clear error message — silently
  * falling back would be dangerous (operator thinks they configured cross-
@@ -30,7 +32,11 @@ export function createConcurrencyBackend(): ConcurrencyBackend | null {
 	switch (kind) {
 		case "nats-kv":
 			return new NatsKvConcurrencyBackend();
+		case "redis":
+			return new RedisConcurrencyBackend();
 		default:
-			throw new Error(`Unknown BLOK_CONCURRENCY_BACKEND='${kind}'. Expected one of: 'memory' (default), 'nats-kv'.`);
+			throw new Error(
+				`Unknown BLOK_CONCURRENCY_BACKEND='${kind}'. Expected one of: 'memory' (default), 'nats-kv', 'redis'.`,
+			);
 	}
 }

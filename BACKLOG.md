@@ -289,12 +289,48 @@ trigger: {
 ### C1 · Cross-process debounce keys (NATS KV / Redis)
 
 **Severity**: FEATURE (single-process is documented).
-**Effort**: ~1-2 days.
+**Effort**: ~2-3 days (was ~1-2 day estimate; revised after auditing the
+`DebounceCoordinator` surface).
 **Why**: today's `DebounceCoordinator` is in-process. Two processes handling the same key won't coalesce.
 
-**Sketch**: same OCC pattern as `NatsKvConcurrencyBackend`. One JSON document per `(workflow, debounceKey)` bucket holding `{firstPingAt, lastPingAt, pingCount, activeRunId, scheduledAt, mode, delayMs, maxDelayMs}`. CAS-update on each ping. The active process owns the timer; coalesce losers update the doc and ACK.
+**Sketch**: same approach as C4's `RedisConcurrencyBackend` —
+one shared document per `(workflow, debounceKey)` bucket holding
+`{firstPingAt, lastPingAt, pingCount, activeRunId, scheduledAt, mode,
+delayMs, maxDelayMs, ownerLeaseExpiresAt}`. Atomicity via Lua (Redis)
+or revision-based CAS (NATS KV). The owning process holds the local
+timer; coalesce losers atomically bump `pingCount` + `lastPingAt` and
+ACK. Owner death is handled via `ownerLeaseExpiresAt` — subsequent
+pings see the lease expired and take over ownership.
 
-**Trade-off**: cross-process debounce coordination via NATS KV adds a network round-trip per ping. For high-throughput debounce (autosave at 100Hz per doc), this can be the bottleneck.
+**Blueprint (C4 patterns to mirror)**:
+1. Define `DebounceBackend` interface alongside `ConcurrencyBackend`.
+2. Implement `RedisDebounceBackend` + `NatsKvDebounceBackend`. Reuse
+   the Lua / CAS atomicity work + the FW-5 production-prefix refusal.
+3. Pool the Redis client across `RedisConcurrencyBackend` +
+   `RedisDebounceBackend` so operators using both pay one connection.
+4. Refactor `DebounceCoordinator` to be backend-aware: keep the
+   synchronous in-memory fast path for the no-backend default; route
+   through the async backend when one is configured (the call site
+   in `TriggerBase.run` is already async).
+5. Env vars: `BLOK_DEBOUNCE_BACKEND` (independent from the concurrency
+   choice). Per-backend config reuses `BLOK_CONCURRENCY_REDIS_*` /
+   `BLOK_CONCURRENCY_NATS_*` (one connection pool per broker).
+
+**Semantic decision required**: today's in-process debounce stores
+the latest payload via closure (trailing mode — last ping wins).
+Cross-process forces a choice:
+- **Owner-local payload** (simpler, BACKLOG sketch's default): only
+  the owning process's payload fires; non-owners' payloads are
+  dropped. Document the semantic change clearly.
+- **Payload-persisted** (correct but expensive): write each ping's
+  payload to the shared doc so the owner picks up the truly-latest
+  payload on fire. Adds JSON encoding overhead per ping; size cap
+  needed (matches PR 2 A4's `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`).
+
+**Trade-off**: cross-process debounce coordination adds a network
+round-trip per ping. For high-throughput debounce (autosave at 100Hz
+per doc), this can be the bottleneck — Redis Lua keeps it to one
+round-trip; NATS KV's CAS retries can push it higher under contention.
 
 ---
 
@@ -323,13 +359,35 @@ Tracked but waiting for a real workload. Document the 1-50 leases assumption pro
 
 ---
 
-### C4 · Redis backend (alternative to NATS KV)
+### C4 · Redis backend (alternative to NATS KV) — ✅ SHIPPED
 
-**Severity**: FEATURE.
-**Effort**: ~1-2 days (architecture mirrors NATS KV).
-**Why**: some operators run Redis but not NATS. Redis Lua scripts allow single-round-trip atomic acquire (no OCC retries needed).
+**Status**: SHIPPED on `feat/c4-redis-concurrency-backend`.
+**Implementation**:
+[`RedisConcurrencyBackend.ts`](core/runner/src/concurrency/RedisConcurrencyBackend.ts)
++ [unit tests](core/runner/__tests__/unit/concurrency/RedisConcurrencyBackend.test.ts).
 
-Mirror `NatsKvConcurrencyBackend`'s structure with a `RedisConcurrencyBackend` class. Env: `BLOK_CONCURRENCY_BACKEND=redis`, `BLOK_CONCURRENCY_REDIS_URL`. Uses ioredis or node-redis.
+Mirrors `NatsKvConcurrencyBackend` 1:1 modulo atomicity primitive —
+Redis uses server-side **Lua scripts** for acquire / release /
+per-bucket purge, so each operation is a single `EVAL` with no OCC
+retry loop (Lua runs single-threaded against the keyspace). Same
+`{leases:[…]}` JSON-document storage shape per `(workflow, key)`
+bucket, same lazy-purge-on-acquire semantics, same FW-5 production
+refusal for the default key prefix (`blok-concurrency`). Connection
+defaults `connectTimeout: 5s`, `maxRetriesPerRequest: 0`,
+`enableOfflineQueue: false`, `lazyConnect: true` — trigger startup
+never hangs on broker reachability.
+
+Opt in: `BLOK_CONCURRENCY_BACKEND=redis` plus
+`BLOK_CONCURRENCY_REDIS_URL` (or discrete `_HOST`/`_PORT`/`_USERNAME`/
+`_PASSWORD`/`_DB`/`_TLS`), and `BLOK_CONCURRENCY_REDIS_KEY_PREFIX`
+(production refuses the default). Requires `ioredis` peer dep.
+
+**Deferred** (explicit, tracked alongside the broker-adapter
+docker-compose backlog item): real-Redis integration tests. Unit
+tests use a fake ioredis client that mirrors the Lua semantics in
+TypeScript — sufficient for contract coverage but not for catching
+Lua-vs-cjson encoding regressions on real Redis. Same coverage
+deferral as PRs #85, #86, #87, #88.
 
 ---
 

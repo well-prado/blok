@@ -59,7 +59,7 @@ filtering Proxy. See [threat model · environment variables and node trust](/d/s
 |---|---|---|
 | `BLOK_CONCURRENCY_DISABLED` | unset | Set to `1` to short-circuit the [concurrency gate](/d/reliability/concurrency-keys) entirely. Runs proceed regardless of in-flight count. |
 | `BLOK_CONCURRENCY_LEASE_MS` | `3600000` | Process-wide override for `concurrencyLeaseMs`. Per-trigger override takes precedence. |
-| `BLOK_CONCURRENCY_BACKEND` | unset / `memory` | Cross-process backend: `nats-kv` switches the gate to NATS KV. Unset preserves single-process behavior. See [cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv). |
+| `BLOK_CONCURRENCY_BACKEND` | unset / `memory` | Cross-process backend: `nats-kv` switches the gate to NATS KV, `redis` switches to Redis. Unset preserves single-process behavior. See [cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv). |
 
 ### Concurrency backend — NATS KV
 
@@ -76,6 +76,27 @@ Required only when `BLOK_CONCURRENCY_BACKEND=nats-kv`.
 Source:
 [`core/runner/src/concurrency/createConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/createConcurrencyBackend.ts)
 + [`NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
+
+### Concurrency backend — Redis
+
+Required only when `BLOK_CONCURRENCY_BACKEND=redis`. Requires the `ioredis`
+peer dependency. The Redis backend uses server-side Lua scripts for
+single-round-trip atomic acquire/release — no OCC retry loop.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_CONCURRENCY_REDIS_URL` | unset | Full Redis URL (`redis://[user:pass@]host:port[/db]`). Takes precedence over host/port/credentials below. |
+| `BLOK_CONCURRENCY_REDIS_HOST` | `localhost` | Used when URL is unset. |
+| `BLOK_CONCURRENCY_REDIS_PORT` | `6379` | |
+| `BLOK_CONCURRENCY_REDIS_USERNAME` | unset | Redis 6+ ACL username. |
+| `BLOK_CONCURRENCY_REDIS_PASSWORD` | unset | |
+| `BLOK_CONCURRENCY_REDIS_DB` | `0` | |
+| `BLOK_CONCURRENCY_REDIS_TLS` | unset | Set to `1` or `true` to enable TLS. |
+| `BLOK_CONCURRENCY_REDIS_KEY_PREFIX` | `blok-concurrency` | Namespace prefix for every key the backend writes. **Production deployments MUST override** — startup refuses the default prefix when `BLOK_ENV=production` or `NODE_ENV=production` to prevent cross-deployment collision on a shared Redis instance. |
+
+Source:
+[`core/runner/src/concurrency/createConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/createConcurrencyBackend.ts)
++ [`RedisConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/RedisConcurrencyBackend.ts).
 
 ## Scheduling gates
 
