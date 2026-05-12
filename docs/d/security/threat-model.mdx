@@ -152,6 +152,12 @@ safe:
   `BLOK_CONCURRENCY_NATS_KV_BUCKET=<your-deployment-name>` per
   deployment. Source:
   [`NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
+- **Redis key prefix** — `BLOK_CONCURRENCY_BACKEND=redis` won't start
+  in production with the default key prefix (`blok-concurrency`). Same
+  cross-deployment-collision risk as NATS KV. Set
+  `BLOK_CONCURRENCY_REDIS_KEY_PREFIX=<your-deployment-name>` per
+  deployment. Source:
+  [`RedisConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/RedisConcurrencyBackend.ts).
 - **Local node path traversal** — `localResolver` in
   [`Configuration.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/Configuration.ts)
   canonicalizes node paths against `NODES_PATH` and refuses paths that
@@ -346,7 +352,7 @@ traffic:
 | 4 | `BLOK_MAPPER_MODE=strict` | Fail-fast on workflow expression errors instead of silent miscompiles. |
 | 5 | `BLOK_TRACE_STORE=postgres` (recommended) | Sqlite is fine for single-process; Postgres for durability + cross-process. |
 | 6 | `BLOK_TRACE_PG_*` use TLS | Don't ship a Blok process with a plaintext Postgres URL unless the network is fully private. |
-| 7 | `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` if `BLOK_CONCURRENCY_BACKEND=nats-kv` | Default bucket is rejected in production to prevent cross-deployment collision. |
+| 7 | `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` if `BLOK_CONCURRENCY_BACKEND=nats-kv`, or `BLOK_CONCURRENCY_REDIS_KEY_PREFIX=<unique>` if `BLOK_CONCURRENCY_BACKEND=redis` | Default bucket / key prefix is rejected in production to prevent cross-deployment collision. |
 | 8 | `BLOK_TRACE_SANITIZE_FIELDS` extended for app-specific fields | The default list is not exhaustive for your domain. Add `ssn`, `dob`, `creditcard`, etc. |
 | 9 | `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` tuned | Default 1MB. Raise for media-upload workflows; lower if you only do small JSON dispatches. |
 | 10 | Auth on user-authored HTTP routes | Wire it. Blok doesn't auto-apply. |

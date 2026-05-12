@@ -373,15 +373,31 @@ DBs upgrade transparently.
   the dedicated `BLOK_CONCURRENCY_BACKEND=nats-kv` backend (see
   below) — PG persistence here is for crash-recovery only.
 
-**Cross-process backend (Tier 2 #6 follow-up)**:
-- Set `BLOK_CONCURRENCY_BACKEND=nats-kv` to switch the gate from local
-  store to a NATS KV-backed implementation that coordinates across
-  processes. Default unset / `"memory"` preserves single-process
-  semantics with zero overhead.
-- Storage model: one JSON document per `(workflowName, concurrencyKey)`
-  bucket with revision-based compare-and-swap (OCC). Acquire = read +
-  filter expired + check limit + CAS update; bounded retry (10) +
-  fail-closed on retry exhaustion. Per-bucket lazy-purge inside acquire.
+**Cross-process backend (Tier 2 #6 follow-up + Tier C #4)**:
+- Set `BLOK_CONCURRENCY_BACKEND=nats-kv` (or `redis`) to switch the
+  gate from local store to a backend with cross-process semantics.
+  Default unset / `"memory"` preserves single-process behavior with
+  zero overhead.
+- **NATS KV** (default cross-process option since Tier 2 #6) — Storage
+  model: one JSON document per `(workflowName, concurrencyKey)` bucket
+  with revision-based compare-and-swap (OCC). Acquire = read + filter
+  expired + check limit + CAS update; bounded retry (10) + fail-closed
+  on retry exhaustion. Per-bucket lazy-purge inside acquire. Env vars:
+  `BLOK_CONCURRENCY_NATS_SERVERS` (comma-separated URLs),
+  `BLOK_CONCURRENCY_NATS_TOKEN`, `BLOK_CONCURRENCY_NATS_USER`,
+  `BLOK_CONCURRENCY_NATS_PASS`, `BLOK_CONCURRENCY_NATS_KV_BUCKET`
+  (default `"blok-concurrency"`).
+- **Redis** (Tier C #4) — Same storage shape (`{leases:[…]}` per
+  bucket) but atomicity comes from server-side **Lua scripts** —
+  acquire/release/purge each run as a single `EVAL`, so there is no
+  OCC retry loop (Lua runs single-threaded against the keyspace).
+  Connection defaults `connectTimeout: 5s`, `maxRetriesPerRequest: 0`,
+  `enableOfflineQueue: false`, `lazyConnect: true` — fail-fast on
+  broker outage instead of buffering. Env vars:
+  `BLOK_CONCURRENCY_REDIS_URL` (preferred — `redis://...`), or
+  `BLOK_CONCURRENCY_REDIS_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`,
+  `_DB`, `_TLS=1`, and `BLOK_CONCURRENCY_REDIS_KEY_PREFIX` (default
+  `"blok-concurrency"`).
 - `RunTracker.acquireConcurrencySlot` and `releaseConcurrencySlot`
   become async — when a backend is set, calls are awaited; when null
   (default), the existing sync store impl is wrapped in `Promise.resolve`.
@@ -391,15 +407,17 @@ DBs upgrade transparently.
   backend via `createConcurrencyBackend()` and install it via
   `RunTracker.setConcurrencyBackend()` before serving traffic. Connect
   errors log + fall back to the in-process behavior.
-- Env vars: `BLOK_CONCURRENCY_BACKEND` (default unset),
-  `BLOK_CONCURRENCY_NATS_SERVERS` (comma-separated URLs),
-  `BLOK_CONCURRENCY_NATS_TOKEN`, `BLOK_CONCURRENCY_NATS_USER`,
-  `BLOK_CONCURRENCY_NATS_PASS`, `BLOK_CONCURRENCY_NATS_KV_BUCKET`
-  (default `"blok-concurrency"`).
-- Trade-offs: each acquire is a single round-trip (get + update);
-  contention spike on a single hot key triggers OCC retries (capped
-  at 10 then deny). For very high-cardinality buckets (>50 active
-  leases each), consider a per-lease key model in a future iteration.
+- Trade-offs: NATS KV pays an OCC round-trip per acquire and caps
+  retries at 10 under contention; Redis pays one Lua eval per acquire
+  with no retry (atomic on the server). For very high-cardinality
+  buckets (>50 active leases each) both backends will scale better
+  with a per-lease key model — revisit when a real workload demands it.
+- **FW-5 production refusal**: both backends refuse to start in
+  production with the default bucket name / key prefix
+  (`blok-concurrency`). Two deployments sharing one broker would
+  silently corrupt each other's `(workflow, key)` buckets — operators
+  MUST set `BLOK_CONCURRENCY_NATS_KV_BUCKET` /
+  `BLOK_CONCURRENCY_REDIS_KEY_PREFIX` per deployment.
 
 **`onLimit: "queue"` (Tier 2 #6 follow-up)**:
 

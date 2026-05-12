@@ -209,12 +209,15 @@ These add cross-process coordination to existing single-process primitives. None
 
 **Reference:** [BACKLOG.md C3](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c3--per-lease-key-model-for-high-cardinality-nats-kv-buckets)
 
-#### C4 · Redis backend (alternative to NATS KV)
+#### C4 · Redis backend (alternative to NATS KV) — ✅ SHIPPED
 
-**Effort:** ~1-2 days (architecture mirrors NATS KV).
-**Why now or later:** Some operators run Redis but not NATS. Redis Lua scripts allow single-round-trip atomic acquire (no OCC retries needed) — actually simpler than NATS KV.
+**Status:** SHIPPED on `feat/c4-redis-concurrency-backend`. Mirrors `NatsKvConcurrencyBackend` 1:1 modulo atomicity primitive — Redis uses server-side **Lua scripts** for acquire / release / per-bucket purge, so each operation is a single `EVAL` with no OCC retry loop (Lua runs single-threaded against the keyspace). Same `{leases:[…]}` JSON-document storage shape per `(workflow, key)` bucket, same lazy-purge-on-acquire semantics, same FW-5 production refusal for the default key prefix (`blok-concurrency`). Connection defaults `connectTimeout: 5s`, `maxRetriesPerRequest: 0`, `enableOfflineQueue: false`, `lazyConnect: true` — trigger startup never hangs on broker reachability.
 
-**Sketch:** mirror `NatsKvConcurrencyBackend`'s structure with a `RedisConcurrencyBackend` class. Env: `BLOK_CONCURRENCY_BACKEND=redis`, `BLOK_CONCURRENCY_REDIS_URL`. Uses ioredis or node-redis. Atomic acquire via Lua script — single round-trip instead of OCC retry loop.
+**Env vars:** `BLOK_CONCURRENCY_BACKEND=redis` to opt in, plus `BLOK_CONCURRENCY_REDIS_URL` (or discrete `_HOST`/`_PORT`/`_USERNAME`/`_PASSWORD`/`_DB`/`_TLS`), and `BLOK_CONCURRENCY_REDIS_KEY_PREFIX` (production refuses the default). Requires `ioredis` peer dep.
+
+**Source:**
+[`core/runner/src/concurrency/RedisConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/RedisConcurrencyBackend.ts)
++ [`core/runner/__tests__/unit/concurrency/RedisConcurrencyBackend.test.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/__tests__/unit/concurrency/RedisConcurrencyBackend.test.ts).
 
 **Reference:** [BACKLOG.md C4](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c4--redis-backend-alternative-to-nats-kv)
 
