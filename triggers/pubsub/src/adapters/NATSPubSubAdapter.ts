@@ -303,17 +303,16 @@ export class NATSPubSubAdapter implements PubSubAdapter {
 		if (!this.connected || !this.conn) throw new Error("[blok][pubsub-nats] not connected. Call connect() first.");
 		const body = typeof payload === "string" ? payload : JSON.stringify(payload);
 		const data = TEXT_ENCODER.encode(body);
-		// Prefer JetStream publish when available — durable subscribers
-		// require it. Falls back to core publish for fan-out.
-		const js = this.conn.jetstream?.();
-		if (js) {
-			try {
-				await js.publish(topic, data);
-				return;
-			} catch {
-				// Stream not configured for this subject — fall back to core.
-			}
-		}
+		// Use core NATS publish. When a durable subscriber has been
+		// installed for this subject, the subscribe() path created a
+		// JetStream stream with a subject filter that captures any
+		// publish to `topic` — so durable consumers see the message via
+		// the stream while core subscribers see it directly. The earlier
+		// "try js.publish first, fall back to core" logic caused
+		// **double-delivery**: js.publish to a subject covered by a
+		// stream goes to BOTH the stream and core subscribers, then the
+		// fallback would publish AGAIN if js.publish timed out (vs
+		// returning 503 fast). Sticking to core publish avoids the race.
 		this.conn.publish(topic, data);
 	}
 

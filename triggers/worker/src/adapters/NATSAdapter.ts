@@ -232,7 +232,9 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 							priority,
 							attempts,
 							maxRetries,
-							createdAt: new Date(info.timestampNanos ? Number(info.timestampNanos / BigInt(1_000_000)) : Date.now()),
+							createdAt: new Date(
+								info.timestampNanos ? Math.floor(Number(info.timestampNanos) / 1_000_000) : Date.now(),
+							),
 							delay: delay || undefined,
 							timeout: timeout || config.timeout || undefined,
 							raw: msg,
@@ -256,7 +258,7 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 						// holding here. createdMs is the message's first-publish timestamp;
 						// hold until createdMs + delay. Single-process semantics — for
 						// long deferrals, prefer trigger-level `delay` (DeferredRunScheduler).
-						const createdMs = info.timestampNanos ? Number(info.timestampNanos / BigInt(1_000_000)) : Date.now();
+						const createdMs = info.timestampNanos ? Math.floor(Number(info.timestampNanos) / 1_000_000) : Date.now();
 						const waitMs = computeXDelayHoldMs(delay, createdMs, Date.now());
 						if (waitMs > 0) {
 							await new Promise<void>((resolve) => setTimeout(resolve, waitMs));

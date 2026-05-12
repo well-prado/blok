@@ -18,9 +18,13 @@ class LocalTokenManager {
 
 	private ensureStorage() {
 		try {
-			// Create directory if it doesn't exist (with secure permissions)
+			// Create directory if it doesn't exist (with secure permissions).
+			// `recursive: true` creates the parent `~/.blok/` too on clean
+			// machines (CI runners, fresh user accounts, container images).
+			// Without it, the first-ever blokctl invocation throws ENOENT
+			// because the parent doesn't exist yet.
 			if (!fs.existsSync(this.storageDir)) {
-				fs.mkdirSync(this.storageDir, { mode: 0o700 }); // rwx for owner only
+				fs.mkdirSync(this.storageDir, { mode: 0o700, recursive: true });
 			} else {
 				// Fix existing directory permissions if needed
 				fs.chmodSync(this.storageDir, 0o700);

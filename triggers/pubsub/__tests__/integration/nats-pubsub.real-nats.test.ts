@@ -75,8 +75,8 @@ d("NATSPubSubAdapter — real NATS", () => {
 
 			await waitFor(() => receivedA.length === 1 && receivedB.length === 1, TEST_TIMEOUT_MS - 5_000);
 
-			expect(receivedA[0].data).toEqual({ hello: "world", n: 1 });
-			expect(receivedB[0].data).toEqual({ hello: "world", n: 1 });
+			expect(receivedA[0].body).toEqual({ hello: "world", n: 1 });
+			expect(receivedB[0].body).toEqual({ hello: "world", n: 1 });
 		},
 		TEST_TIMEOUT_MS,
 	);
@@ -110,7 +110,7 @@ d("NATSPubSubAdapter — real NATS", () => {
 			// No duplicate keys across both lists.
 			const seenN = new Set<number>();
 			for (const m of [...receivedA, ...receivedB]) {
-				const n = (m.data as { n: number }).n;
+				const n = (m.body as { n: number }).n;
 				expect(seenN.has(n)).toBe(false);
 				seenN.add(n);
 			}

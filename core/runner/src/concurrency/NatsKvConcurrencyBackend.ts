@@ -63,17 +63,28 @@ interface NatsKv {
 	create(key: string, value: Uint8Array | string): Promise<number>;
 	update(key: string, value: Uint8Array | string, revision: number): Promise<number>;
 	delete(key: string): Promise<void>;
-	keys(): AsyncIterable<string>;
+	// nats.js v2.x — `keys()` returns a Promise that resolves to an
+	// async iterable. The unit test fake exposes this as an AsyncIterable
+	// directly for convenience; the production code awaits it.
+	keys(): Promise<AsyncIterable<string>> | AsyncIterable<string>;
+}
+
+interface NatsJetStreamViews {
+	kv(name: string): Promise<NatsKv>;
+}
+
+interface NatsJetStream {
+	views: NatsJetStreamViews;
 }
 
 interface NatsConnection {
-	jetstream(): unknown;
+	jetstream(): NatsJetStream;
 	jetstreamManager(): Promise<unknown>;
 	drain(): Promise<void>;
 }
 
 interface NatsModule {
-	connect(opts: Record<string, unknown>): Promise<NatsConnection & { kv(name: string): Promise<NatsKv> }>;
+	connect(opts: Record<string, unknown>): Promise<NatsConnection>;
 }
 
 /**
@@ -146,11 +157,13 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		if (this.config.user) connectOpts.user = this.config.user;
 		if (this.config.pass) connectOpts.pass = this.config.pass;
 
-		this.nc = (await natsModule.connect(connectOpts)) as NatsConnection & {
-			kv(name: string): Promise<NatsKv>;
-		};
-		// `kv()` auto-creates the bucket on first use (NATS JetStream KV semantics).
-		this.kv = await (this.nc as NatsConnection & { kv(name: string): Promise<NatsKv> }).kv(this.config.bucketName);
+		this.nc = await natsModule.connect(connectOpts);
+		// nats.js v2.x — KV lives at `nc.jetstream().views.kv(name)`. The
+		// returned `KV` auto-creates the bucket on first use given the
+		// connection has KV bucket-create permission. (Earlier versions
+		// exposed `nc.kv(name)` directly; that API was removed.)
+		const js = this.nc.jetstream();
+		this.kv = await js.views.kv(this.config.bucketName);
 		this.connected = true;
 	}
 
@@ -316,8 +329,18 @@ export class NatsKvConcurrencyBackend implements ConcurrencyBackend {
 		const kv = this.requireKv();
 		let purged = 0;
 
-		// Iterate all bucket keys.
-		for await (const key of kv.keys()) {
+		// **DRAIN THE ITERATOR FIRST.** nats.js v2.x `kv.keys()` returns a
+		// `QueuedIterator` backed by a JetStream watch consumer. Calling
+		// `kv.get()` mid-iteration interferes with the iterator's internal
+		// state — observed in practice that subsequent yields silently
+		// drop. Collect every key into an array before doing per-key
+		// reads, then operate on the array.
+		const allKeys: string[] = [];
+		for await (const key of await kv.keys()) {
+			allKeys.push(key);
+		}
+
+		for (const key of allKeys) {
 			const entry = await this.safeGet(kv, key);
 			// Treat both legitimate misses and fetch failures as "skip
 			// this bucket" — purge is a best-effort sweep.
