@@ -8,19 +8,18 @@ import RunnerNode from "./RunnerNode";
 import type RunnerNodeBase from "./RunnerNodeBase";
 import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
-import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
-import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig, type Transport } from "./adapters/grpc/types";
+import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS, type GrpcAdapterConfig } from "./adapters/grpc/types";
 import {
+	assertGrpcOnlyTransport,
 	isLoopbackHost,
 	isStreamLogsEnabled,
 	isStrictTlsEnabled,
 	loadTlsConfigForKind,
 	resolveHealthCheckFailureThreshold,
 	resolveHealthCheckIntervalMs,
-	resolveTransportForKind,
 } from "./adapters/transport";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
@@ -63,12 +62,13 @@ export default class Configuration implements Config {
 	/**
 	 * Initialize the RuntimeRegistry with built-in adapters.
 	 *
-	 * Registers `NodeJsRuntimeAdapter` for in-process JS nodes, then for each
-	 * SDK language picks `HttpRuntimeAdapter` or `GrpcRuntimeAdapter` based on
-	 * {@link resolveTransportForKind} (env-driven). This is the single point
-	 * of transport selection — no other file branches on transport.
+	 * Registers `NodeJsRuntimeAdapter` for in-process JS nodes, then a
+	 * `GrpcRuntimeAdapter` per SDK language. gRPC is the sole transport
+	 * since v0.5 — `assertGrpcOnlyTransport` throws if the operator still
+	 * has `RUNTIME_TRANSPORT=http` set.
 	 */
 	private initializeRuntimeRegistry(): void {
+		assertGrpcOnlyTransport();
 		const registry = RuntimeRegistry.getInstance();
 
 		if (!registry.has("nodejs")) {
@@ -78,76 +78,23 @@ export default class Configuration implements Config {
 		const sdkLanguages: Array<{
 			kind: RuntimeKind;
 			hostEnv: string;
-			httpPortEnv: string;
 			grpcPortEnv: string;
-			defaultHttpPort: number;
 		}> = [
-			{
-				kind: "go",
-				hostEnv: "RUNTIME_GO_HOST",
-				httpPortEnv: "RUNTIME_GO_PORT",
-				grpcPortEnv: "RUNTIME_GO_GRPC_PORT",
-				defaultHttpPort: 9001,
-			},
-			{
-				kind: "rust",
-				hostEnv: "RUNTIME_RUST_HOST",
-				httpPortEnv: "RUNTIME_RUST_PORT",
-				grpcPortEnv: "RUNTIME_RUST_GRPC_PORT",
-				defaultHttpPort: 9002,
-			},
-			{
-				kind: "java",
-				hostEnv: "RUNTIME_JAVA_HOST",
-				httpPortEnv: "RUNTIME_JAVA_PORT",
-				grpcPortEnv: "RUNTIME_JAVA_GRPC_PORT",
-				defaultHttpPort: 9003,
-			},
-			{
-				kind: "csharp",
-				hostEnv: "RUNTIME_CSHARP_HOST",
-				httpPortEnv: "RUNTIME_CSHARP_PORT",
-				grpcPortEnv: "RUNTIME_CSHARP_GRPC_PORT",
-				defaultHttpPort: 9004,
-			},
-			{
-				kind: "php",
-				hostEnv: "RUNTIME_PHP_HOST",
-				httpPortEnv: "RUNTIME_PHP_PORT",
-				grpcPortEnv: "RUNTIME_PHP_GRPC_PORT",
-				defaultHttpPort: 9005,
-			},
-			{
-				kind: "ruby",
-				hostEnv: "RUNTIME_RUBY_HOST",
-				httpPortEnv: "RUNTIME_RUBY_PORT",
-				grpcPortEnv: "RUNTIME_RUBY_GRPC_PORT",
-				defaultHttpPort: 9006,
-			},
-			{
-				kind: "python3",
-				hostEnv: "RUNTIME_PYTHON3_HOST",
-				httpPortEnv: "RUNTIME_PYTHON3_PORT",
-				grpcPortEnv: "RUNTIME_PYTHON3_GRPC_PORT",
-				defaultHttpPort: 9007,
-			},
+			{ kind: "go", hostEnv: "RUNTIME_GO_HOST", grpcPortEnv: "RUNTIME_GO_GRPC_PORT" },
+			{ kind: "rust", hostEnv: "RUNTIME_RUST_HOST", grpcPortEnv: "RUNTIME_RUST_GRPC_PORT" },
+			{ kind: "java", hostEnv: "RUNTIME_JAVA_HOST", grpcPortEnv: "RUNTIME_JAVA_GRPC_PORT" },
+			{ kind: "csharp", hostEnv: "RUNTIME_CSHARP_HOST", grpcPortEnv: "RUNTIME_CSHARP_GRPC_PORT" },
+			{ kind: "php", hostEnv: "RUNTIME_PHP_HOST", grpcPortEnv: "RUNTIME_PHP_GRPC_PORT" },
+			{ kind: "ruby", hostEnv: "RUNTIME_RUBY_HOST", grpcPortEnv: "RUNTIME_RUBY_GRPC_PORT" },
+			{ kind: "python3", hostEnv: "RUNTIME_PYTHON3_HOST", grpcPortEnv: "RUNTIME_PYTHON3_GRPC_PORT" },
 		];
 
 		for (const lang of sdkLanguages) {
 			if (registry.has(lang.kind)) continue;
-			const transport: Transport = resolveTransportForKind(lang.kind);
 			const host = process.env[lang.hostEnv] || "localhost";
-			const adapter: RuntimeAdapter =
-				transport === "grpc"
-					? this.buildGrpcAdapter(lang.kind, host, lang.grpcPortEnv)
-					: this.buildHttpAdapter(lang.kind, host, lang.httpPortEnv, lang.defaultHttpPort);
+			const adapter: RuntimeAdapter = this.buildGrpcAdapter(lang.kind, host, lang.grpcPortEnv);
 			registry.register(adapter);
 		}
-	}
-
-	private buildHttpAdapter(kind: RuntimeKind, host: string, portEnv: string, defaultPort: number): HttpRuntimeAdapter {
-		const port = process.env[portEnv] ? Number.parseInt(process.env[portEnv] as string, 10) : defaultPort;
-		return new HttpRuntimeAdapter(kind, host, port);
 	}
 
 	private buildGrpcAdapter(kind: RuntimeKind, host: string, portEnv: string): GrpcRuntimeAdapter {
@@ -262,12 +209,6 @@ export default class Configuration implements Config {
 			node.name = step.name;
 			node.active = step.active !== undefined ? step.active : true;
 			node.stop = step.stop !== undefined ? step.stop : false;
-			// Pass `set_var` through verbatim — DO NOT default to `false`. The
-			// `false` value short-circuits PersistenceHelper.applyStepOutput
-			// and silently disables v2's default-store rule. Legacy v1
-			// workflows that explicitly set `set_var: false` are normalized
-			// to `ephemeral: true` upstream by WorkflowNormalizer.
-			if (step.set_var !== undefined) node.set_var = step.set_var;
 			// V2 persistence knobs — read by PersistenceHelper.applyStepOutput.
 			// `as` renames the state key; `spread` flattens result.data into
 			// state; `ephemeral: true` skips persistence entirely. Default
@@ -429,12 +370,6 @@ export default class Configuration implements Config {
 			node.name = step.name;
 			node.active = step.active !== undefined ? step.active : true;
 			node.stop = step.stop !== undefined ? step.stop : false;
-			// Pass `set_var` through verbatim — DO NOT default to `false`. The
-			// `false` value short-circuits PersistenceHelper.applyStepOutput
-			// and silently disables v2's default-store rule. Legacy v1
-			// workflows that explicitly set `set_var: false` are normalized
-			// to `ephemeral: true` upstream by WorkflowNormalizer.
-			if (step.set_var !== undefined) node.set_var = step.set_var;
 			// V2 persistence + idempotency + retry knobs flow through nested
 			// flow steps too. Without this, a `branch.then[0]` step with
 			// `idempotencyKey` set would NOT be cached on rerun. Mirrors the
@@ -571,14 +506,6 @@ export default class Configuration implements Config {
 		targetNode.runtime = runtimeKind as RuntimeKind;
 		targetNode.active = node.active !== undefined ? node.active : true;
 		targetNode.stop = node.stop !== undefined ? node.stop : false;
-		// Pass `set_var` through verbatim — DO NOT default to `false`. The v2
-		// default-store rule in PersistenceHelper persists `result.data` at
-		// `state[name]` unless `set_var === false` is explicit. Defaulting to
-		// `false` here silently disabled persistence for every SDK step,
-		// breaking `js/ctx.state['<id>']` reads in v2 workflows
-		// (cross-runtime-chain regressed: `state['go']` was undefined even
-		// though the GO step ran fine).
-		if (node.set_var !== undefined) targetNode.set_var = node.set_var;
 		// V2 persistence knobs — flow through to PersistenceHelper.
 		const v2 = node as RunnerNode & {
 			as?: string;
@@ -682,7 +609,6 @@ export default class Configuration implements Config {
 		(clone as RunnerNode).type = node.type;
 		if (node.active !== undefined) (clone as RunnerNode).active = node.active;
 		if (node.stop !== undefined) (clone as RunnerNode).stop = node.stop;
-		if (node.set_var !== undefined) (clone as RunnerNode).set_var = node.set_var;
 		return clone as RunnerNode;
 	}
 
@@ -720,7 +646,6 @@ export default class Configuration implements Config {
 		n.type = node.type;
 		n.active = node.active !== undefined ? node.active : true;
 		n.stop = node.stop !== undefined ? node.stop : false;
-		if (node.set_var !== undefined) n.set_var = node.set_var;
 		return n;
 	}
 
@@ -736,7 +661,6 @@ export default class Configuration implements Config {
 		n.type = node.type;
 		n.active = node.active !== undefined ? node.active : true;
 		n.stop = node.stop !== undefined ? node.stop : false;
-		if (node.set_var !== undefined) n.set_var = node.set_var;
 		return n;
 	}
 
@@ -753,7 +677,6 @@ export default class Configuration implements Config {
 		n.type = node.type;
 		n.active = node.active !== undefined ? node.active : true;
 		n.stop = node.stop !== undefined ? node.stop : false;
-		if (node.set_var !== undefined) n.set_var = node.set_var;
 		return n;
 	}
 
@@ -771,7 +694,6 @@ export default class Configuration implements Config {
 		n.type = node.type;
 		n.active = node.active !== undefined ? node.active : true;
 		n.stop = node.stop !== undefined ? node.stop : false;
-		if (node.set_var !== undefined) n.set_var = node.set_var;
 		return n;
 	}
 

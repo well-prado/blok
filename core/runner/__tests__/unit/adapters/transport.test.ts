@@ -1,109 +1,57 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	_resetHttpDeprecationCache,
+	assertGrpcOnlyTransport,
 	isLoopbackHost,
 	isStreamLogsEnabled,
 	isStrictTlsEnabled,
 	loadTlsConfigForKind,
 	resolveHealthCheckFailureThreshold,
 	resolveHealthCheckIntervalMs,
-	resolveTransportForKind,
 } from "../../../src/adapters/transport";
 
-describe("resolveTransportForKind", () => {
-	it("returns the Phase 6 default (grpc) when no env vars are set", () => {
-		// Master plan §11/§14 Phase 6 flip: the hard-coded default went
-		// from `http` to `grpc` once the parity matrix had been green
-		// for the observation window. HTTP remains opt-in via env.
-		expect(resolveTransportForKind("python3", {})).toBe("grpc");
+describe("assertGrpcOnlyTransport", () => {
+	it("is a no-op when no transport env vars are set (gRPC is the sole transport since v0.5)", () => {
+		expect(() => assertGrpcOnlyTransport({})).not.toThrow();
 	});
 
-	it("returns the global default when set", () => {
-		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "grpc" })).toBe("grpc");
-		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" })).toBe("http");
+	it("accepts an explicit RUNTIME_TRANSPORT=grpc", () => {
+		expect(() => assertGrpcOnlyTransport({ RUNTIME_TRANSPORT: "grpc" })).not.toThrow();
 	});
 
-	it("per-kind override takes precedence over global", () => {
-		expect(
-			resolveTransportForKind("python3", {
-				RUNTIME_TRANSPORT: "http",
-				RUNTIME_PYTHON3_TRANSPORT: "grpc",
-			}),
-		).toBe("grpc");
-
-		expect(
-			resolveTransportForKind("go", {
-				RUNTIME_TRANSPORT: "grpc",
-				RUNTIME_GO_TRANSPORT: "http",
-			}),
-		).toBe("http");
-	});
-
-	it("falls back to the Phase 6 default (grpc) when env values are invalid", () => {
-		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "weird" })).toBe("grpc");
-		expect(resolveTransportForKind("python3", { RUNTIME_PYTHON3_TRANSPORT: "weird" })).toBe("grpc");
-	});
-
-	it("uppercases the kind correctly for the env var key", () => {
-		expect(
-			resolveTransportForKind("csharp", {
-				RUNTIME_CSHARP_TRANSPORT: "grpc",
-			}),
-		).toBe("grpc");
-	});
-
-	it("supports every standard runtime kind via per-kind override", () => {
+	it("accepts per-kind RUNTIME_<KIND>_TRANSPORT=grpc", () => {
 		const kinds = ["go", "rust", "java", "csharp", "php", "ruby", "python3"] as const;
 		for (const kind of kinds) {
-			const env = { [`RUNTIME_${kind.toUpperCase()}_TRANSPORT`]: "grpc" };
-			expect(resolveTransportForKind(kind, env)).toBe("grpc");
+			const env = { [`RUNTIME_${kind.toUpperCase()}_TRANSPORT`]: "grpc" } as NodeJS.ProcessEnv;
+			expect(() => assertGrpcOnlyTransport(env)).not.toThrow();
 		}
 	});
-});
 
-describe("resolveTransportForKind — HTTP deprecation warning", () => {
-	let warnSpy: ReturnType<typeof vi.spyOn>;
-
-	beforeEach(() => {
-		_resetHttpDeprecationCache();
-		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	it("throws on RUNTIME_TRANSPORT=http with a migration hint", () => {
+		expect(() => assertGrpcOnlyTransport({ RUNTIME_TRANSPORT: "http" })).toThrowError(
+			/RUNTIME_TRANSPORT=http is no longer supported.*v0\.5/,
+		);
 	});
 
-	afterEach(() => {
-		warnSpy.mockRestore();
+	it("throws on per-kind RUNTIME_<KIND>_TRANSPORT=http", () => {
+		expect(() => assertGrpcOnlyTransport({ RUNTIME_GO_TRANSPORT: "http" })).toThrowError(
+			/RUNTIME_GO_TRANSPORT=http is no longer supported/,
+		);
 	});
 
-	it("warns once when RUNTIME_TRANSPORT=http resolves", () => {
-		expect(resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" })).toBe("http");
-		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy.mock.calls[0][0]).toContain("RUNTIME_TRANSPORT=http is deprecated");
-		expect(warnSpy.mock.calls[0][0]).toContain("v0.4.0");
+	it("throws on any non-grpc value (not just 'http')", () => {
+		expect(() => assertGrpcOnlyTransport({ RUNTIME_TRANSPORT: "rest" })).toThrowError(/RUNTIME_TRANSPORT=rest/);
+		expect(() => assertGrpcOnlyTransport({ RUNTIME_PYTHON3_TRANSPORT: "weird" })).toThrowError(
+			/RUNTIME_PYTHON3_TRANSPORT=weird/,
+		);
 	});
 
-	it("warns once when RUNTIME_<KIND>_TRANSPORT=http resolves", () => {
-		expect(resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "http" })).toBe("http");
-		expect(warnSpy).toHaveBeenCalledTimes(1);
-		expect(warnSpy.mock.calls[0][0]).toContain("RUNTIME_GO_TRANSPORT=http");
-	});
-
-	it("dedupes warnings per env var key across multiple resolves", () => {
-		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" });
-		resolveTransportForKind("go", { RUNTIME_TRANSPORT: "http" });
-		resolveTransportForKind("rust", { RUNTIME_TRANSPORT: "http" });
-		expect(warnSpy).toHaveBeenCalledTimes(1);
-	});
-
-	it("warns separately for the global override and a per-kind override", () => {
-		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "http" });
-		resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "http" });
-		expect(warnSpy).toHaveBeenCalledTimes(2);
-	});
-
-	it("does NOT warn when transport resolves to grpc (default or explicit)", () => {
-		resolveTransportForKind("python3", {});
-		resolveTransportForKind("python3", { RUNTIME_TRANSPORT: "grpc" });
-		resolveTransportForKind("go", { RUNTIME_GO_TRANSPORT: "grpc" });
-		expect(warnSpy).not.toHaveBeenCalled();
+	it("surfaces the global env var first when both global and per-kind are set", () => {
+		expect(() =>
+			assertGrpcOnlyTransport({
+				RUNTIME_TRANSPORT: "http",
+				RUNTIME_GO_TRANSPORT: "http",
+			}),
+		).toThrowError(/RUNTIME_TRANSPORT=http/);
 	});
 });
 

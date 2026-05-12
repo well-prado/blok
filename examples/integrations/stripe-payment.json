@@ -18,8 +18,7 @@
 		{
 			"name": "resolve-customer",
 			"node": "@blokjs/api-call",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "route-customer-lookup",
@@ -80,14 +79,12 @@
 						{
 							"name": "use-existing-customer",
 							"node": "mapper",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "create-payment-intent-existing",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-payment-result-existing",
@@ -102,14 +99,12 @@
 						{
 							"name": "create-stripe-customer",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "create-payment-intent-new",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-payment-result-new",

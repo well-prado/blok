@@ -21,9 +21,9 @@ type SpinnerHandler = {
 
 export interface RuntimeConfig {
 	/**
-	 * HTTP listener port. Kept for back-compat — the SDK still binds it for
-	 * users who flip `--with-http-fallback` or `RUNTIME_TRANSPORT=http`. The
-	 * CLI's gRPC-only spawn does not health-probe this port.
+	 * Legacy port field retained for back-compat with `.blok/config.json`
+	 * files written by older CLI versions. The CLI's gRPC-only spawn does
+	 * not health-probe it; gRPC has been the sole transport since v0.5.
 	 */
 	port: number;
 	/**
@@ -50,11 +50,11 @@ export interface RuntimeConfig {
 	/** Semver constraint for this runtime (e.g. ">=3.12.0") */
 	requiredVersion?: string;
 	/**
-	 * Transport the CLI uses when spawning this runtime. Defaults to
-	 * `"grpc"` for new projects (Phase 7); `"http"` is honored on existing
-	 * projects but emits a deprecation warning at boot.
+	 * Transport the CLI uses when spawning this runtime. Always `"grpc"`
+	 * since v0.5 (`HttpRuntimeAdapter` was removed). The field is retained
+	 * for back-compat reads of older `.blok/config.json` files.
 	 */
-	transport?: "grpc" | "http";
+	transport?: "grpc";
 }
 
 export interface TriggerConfig {
@@ -327,9 +327,10 @@ export function readProjectConfig(projectDir: string): ProjectConfig | null {
 /**
  * Generate environment variable entries for selected runtimes.
  *
- * Emits BOTH `RUNTIME_<K>_PORT` (HTTP, kept for back-compat) and
- * `RUNTIME_<K>_GRPC_PORT` (gRPC, what the runner actually probes when
- * `BLOK_TRANSPORT=grpc`). The trigger-http reads both at boot.
+ * Emits both `RUNTIME_<K>_PORT` (retained for back-compat with older
+ * configs) and `RUNTIME_<K>_GRPC_PORT` (what the runner probes — gRPC
+ * has been the sole transport since v0.5). The trigger-http reads both
+ * at boot.
  */
 export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string {
 	if (runtimeConfigs.length === 0) return "";
@@ -345,10 +346,10 @@ export function generateRuntimeEnvVars(runtimeConfigs: RuntimeConfig[]): string 
 		}
 	}
 
-	// Default transport — picked up by core/runner/src/adapters/transport.ts
-	// via `RUNTIME_TRANSPORT`. Leaving this unset would still default to
-	// grpc (Phase 6), but writing it explicitly makes the intent visible
-	// in the generated `.env` so users grepping `BLOK_TRANSPORT` find it.
+	// BLOK_TRANSPORT is purely informational at the runner layer since v0.5
+	// (gRPC is the sole transport; `assertGrpcOnlyTransport` rejects any
+	// `RUNTIME_TRANSPORT=http` config). We still emit it so users grepping
+	// for `BLOK_TRANSPORT` in their `.env` find it.
 	lines.push("BLOK_TRANSPORT=grpc");
 
 	return lines.join("\n");

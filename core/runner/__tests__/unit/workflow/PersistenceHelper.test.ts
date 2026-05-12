@@ -86,20 +86,6 @@ describe("PersistenceHelper.applyStepOutput", () => {
 		});
 	});
 
-	describe("legacy set_var: false (back-compat)", () => {
-		it("treats set_var: false as ephemeral", () => {
-			const c = ctx({ existing: "keep" });
-			applyStepOutput(c, { name: "step", set_var: false }, { data: { ignored: true } });
-			expect(c.state).toEqual({ existing: "keep" });
-		});
-
-		it("set_var: true is a no-op (default already persists)", () => {
-			const c = ctx();
-			applyStepOutput(c, { name: "step", set_var: true }, { data: { kept: true } });
-			expect(c.state).toEqual({ step: { kept: true } });
-		});
-	});
-
 	describe("defensive ctx.state init", () => {
 		it("creates state when missing", () => {
 			const c = { state: undefined } as unknown as Context;

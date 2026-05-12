@@ -122,7 +122,7 @@ docker compose -f infra/docker-compose.production.yml --profile monitoring up -d
 
 ## Running the Multi-Language SDK Runtimes
 
-Blok supports 7 language runtimes as sidecar containers. Each runs an HTTP server that the Blok runner communicates with via `HttpRuntimeAdapter` (`POST /execute`, `GET /health`).
+Blok supports 7 language runtimes as sidecar containers. Each runs a gRPC server (`blok.runtime.v1.NodeRuntime/Execute`) plus a `GET /health` endpoint for orchestrator readiness probes. The runner has spoken gRPC since v0.5; `HttpRuntimeAdapter` is gone.
 
 ### Start All 7 SDK Containers
 
@@ -208,9 +208,9 @@ WORKFLOWS_PATH=./workflows         # Path to workflow JSON files
 NODES_PATH=./src/nodes             # Path to node implementations
 ```
 
-### SDK Runtime Hosts (HTTP)
+### SDK Runtime Hosts (gRPC)
 
-Each runtime uses `HttpRuntimeAdapter`. The runner resolves host and port from environment variables:
+Each runtime is reached via `GrpcRuntimeAdapter` since v0.5. The runner resolves host and gRPC port from environment variables:
 
 ```bash
 # Go SDK

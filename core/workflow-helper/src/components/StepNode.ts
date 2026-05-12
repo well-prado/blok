@@ -29,7 +29,6 @@ export default class StepNode extends HelperResponse {
 			node: config.node,
 			type: config.type,
 			runtime: config.runtime,
-			set_var: config.set_var,
 			active: config.active,
 			stop: config.stop,
 		});

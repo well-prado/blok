@@ -57,7 +57,7 @@ export interface WorkflowV2Builder {
  * - **No chaining.** The full workflow is a single object literal —
  *   exactly what JSON workflows look like.
  * - **No separate `nodes{}` map.** `inputs` lives on each step.
- * - **No `set_var: true`** — every step's output auto-stores in `ctx.state`.
+ * - **Default-store** — every step's output auto-stores in `ctx.state`.
  *   Opt out with `ephemeral: true`. Multi-output: `spread: true`. Rename:
  *   `as: "<name>"`.
  * - **`branch({when, then, else})`** replaces `addCondition + AddIf + AddElse`.

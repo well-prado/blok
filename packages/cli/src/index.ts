@@ -217,10 +217,6 @@ async function main() {
 			.command("dev")
 			.description("Start the development server")
 			.option("--skip-version-check", "Skip runtime version validation")
-			.option(
-				"--with-http-fallback",
-				"Spawn SDKs on HTTP transport instead of gRPC. Use only when one of your SDKs lacks a working gRPC listener (e.g. PHP without RoadRunner). Removed in v0.4.0.",
-			)
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "dev",

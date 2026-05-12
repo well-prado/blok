@@ -75,7 +75,7 @@ Use the fan-in pattern to collect and aggregate results from multiple parallel o
 **When to use:** After a fan-out when downstream logic depends on combined results.
 
 **Recommendations:**
-- v2 default-stores every step's output to `ctx.state[id]`; reference them as `$.state.<id>`. No `set_var: true` needed.
+- v2 default-stores every step's output to `ctx.state[id]`; reference them as `$.state.<id>`. (The legacy `set_var` field was removed in v0.5 — drop it from any old workflows or run `blokctl migrate workflows`.)
 - Define fallback values for branches that may fail to prevent the aggregation step from breaking.
 
 ### Saga Pattern
@@ -543,7 +543,7 @@ Calling between runtimes incurs serialization and process communication overhead
 - Minimize runtime transitions. Group steps that use the same runtime together.
 - For data-intensive pipelines, do the heavy processing in a single runtime and only cross boundaries for specialized operations.
 - Profile the workflow to identify if serialization overhead is a bottleneck. If a Python step takes 5ms but serialization adds 20ms, consider rewriting it in the primary runtime.
-- Use `set_var: true` to store intermediate results and reduce redundant data passing.
+- Reference intermediate results via `$.state.<id>` — every step default-stores its output, so threading data between runtime boundaries doesn't need an explicit opt-in.
 
 ### Error Handling Across Runtimes
 

@@ -234,14 +234,12 @@ describe("RuntimeAdapterNode", () => {
 			expect((tracker.addLog as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
 		});
 
-		it("populates ctx.state[name] with result.data when set_var is not explicitly set (v2 default-store)", async () => {
+		it("populates ctx.state[name] with result.data by default (v2 default-store)", async () => {
 			// Regression for the cross-runtime-chain bug on Phase 6:
-			// `Configuration.runtimeResolver` used to default `targetNode.set_var = false`
-			// when the source step omitted the field. NodeBase also initialized
-			// `set_var = false` by default. Both meant `PersistenceHelper.applyStepOutput`
-			// short-circuited at runtime and silently disabled persistence for every
-			// SDK step — `state['go']` was undefined even though the GO step ran fine.
-			// With the v2 fix, set_var defaults to undefined → default-store fires.
+			// the legacy `set_var: false` default short-circuited
+			// `PersistenceHelper.applyStepOutput` for every SDK step
+			// (`state['go']` was undefined even though the GO step ran fine).
+			// `set_var` was removed in v0.5; this test pins default-store.
 			const adapter = makeStreamingAdapter([], {
 				success: true,
 				data: { chain: [{ language: "go", order: 2 }], origin: "blok-test" },
@@ -284,17 +282,17 @@ describe("RuntimeAdapterNode", () => {
 			expect(target.retry).toEqual({ maxAttempts: 3, minTimeoutInMs: 250, maxTimeoutInMs: 5000, factor: 2 });
 		});
 
-		it("skips ctx.state[name] when set_var is explicitly false (legacy v1 ephemeral semantic)", async () => {
+		it("skips ctx.state[name] when ephemeral is true", async () => {
 			const adapter = makeStreamingAdapter([], successResult);
-			const target = makeTarget("legacy-step");
-			target.set_var = false;
+			const target = makeTarget("ephemeral-step");
+			target.ephemeral = true;
 			const node = new RuntimeAdapterNode(adapter, target);
 			const ctx = makeCtx();
 
 			await node.run(ctx);
 
 			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
-			expect(state["legacy-step"]).toBeUndefined();
+			expect(state["ephemeral-step"]).toBeUndefined();
 		});
 
 		it("stashes adapter metrics on ctx._stepMetrics so RunnerSteps can thread them into completeNode", async () => {

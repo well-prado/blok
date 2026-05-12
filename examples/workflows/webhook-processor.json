@@ -39,8 +39,7 @@
 						{
 							"name": "parse-event",
 							"node": "mapper",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-event-type",
@@ -81,8 +80,7 @@
 						{
 							"name": "process-push",
 							"node": "mapper",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "notify-push",
@@ -108,8 +106,7 @@
 						{
 							"name": "process-pull-request",
 							"node": "mapper",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "notify-pull-request",
@@ -130,8 +127,7 @@
 						{
 							"name": "process-issue",
 							"node": "mapper",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "notify-issue",

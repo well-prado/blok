@@ -49,10 +49,8 @@ describe("NodeBase", () => {
 			expect(n.name).toBe("");
 			expect(n.active).toBe(true);
 			expect(n.stop).toBe(false);
-			// set_var defaults to undefined (NOT false). false short-circuits
-			// PersistenceHelper.applyStepOutput and silently disables v2's
-			// default-store rule for every step that didn't explicitly set it.
-			expect(n.set_var).toBeUndefined();
+			expect(n.ephemeral).toBe(false);
+			expect(n.spread).toBe(false);
 			expect(n.contentType).toBe("");
 		});
 	});

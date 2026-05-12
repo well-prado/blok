@@ -119,12 +119,13 @@ Authoritative source: [`core/workflow-helper/src/types/StepOpts.ts`](https://git
   Per-step opt-in for live log streaming. Inherits `BLOK_STREAM_LOGS`.
 </ParamField>
 
-### Legacy
-
-<ParamField path="set_var" type="boolean">
-  **Deprecated.** v2 default-stores. `true` is a no-op; `false` is
-  normalized to `ephemeral: true`.
-</ParamField>
+<Note>
+The legacy `set_var` field was removed in v0.5. The runner now throws at
+workflow load time with a migration hint if it's still present. Drop
+`set_var: true` (default-store handles it) and replace `set_var: false`
+with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1
+workflows automatically.
+</Note>
 
 ## Branch step
 
@@ -356,8 +357,9 @@ The v2 step union is evaluated in this order:
 A step that includes both `branch` and `subworkflow` keys is parsed as
 a branch and the `subworkflow` field is ignored — don't mix them. The
 schema validators are strict on the keys present, so extraneous fields
-trigger validation errors at workflow load time (except in the few
-legacy aliases like `set_var`).
+trigger validation errors at workflow load time. The legacy `set_var`
+alias was removed in v0.5 and is now rejected at load time with a
+migration hint.
 
 ## Type guards (TypeScript only)
 

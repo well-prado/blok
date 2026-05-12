@@ -167,11 +167,11 @@ export const FIELD_DOCS: Record<string, HoverDoc> = {
 			"Array of if/else conditions for branching logic. Use with @blokjs/if-else node. Each condition has a JavaScript expression and nested steps.",
 		example: `"conditions": [\n  {\n    "type": "if",\n    "condition": "ctx.request.query.type === 'admin'",\n    "steps": [...]\n  },\n  {\n    "type": "else",\n    "steps": [...]\n  }\n]`,
 	},
-	set_var: {
-		title: "Set Context Variable",
+	ephemeral: {
+		title: "Skip Persistence",
 		description:
-			"When true, stores the step's output in ctx.vars['step-name']. This makes the result accessible to downstream steps via ctx.vars.",
-		example: `"my-step": {\n  "set_var": true,\n  "inputs": { ... }\n}\n// Later: ctx.vars['my-step'] contains the result`,
+			"When true, this step's output is NOT stored in ctx.state. Only ctx.prev carries it to the immediately next step. Use for side-effect-only steps (logging, audit, telemetry).",
+		example: `{ "id": "audit", "use": "@blokjs/log", "ephemeral": true, "inputs": { ... } }`,
 	},
 };
 

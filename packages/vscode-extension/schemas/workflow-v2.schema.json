@@ -160,10 +160,6 @@
 							"stream_logs": {
 								"type": "boolean",
 								"description": "Per-step opt-in for live log streaming. Inherits from BLOK_STREAM_LOGS env when unset."
-							},
-							"set_var": {
-								"type": "boolean",
-								"description": "@deprecated v2 default-stores every step's output. `set_var: true` is a no-op; `set_var: false` is normalized to `ephemeral: true`."
 							}
 						},
 						"required": ["id", "use"],

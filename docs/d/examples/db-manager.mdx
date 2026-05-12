@@ -416,7 +416,6 @@ type PostgresQueryInputs = {
   password: string;
   host: string;
   query: string;
-  set_var?: boolean;
 };
 
 export default class PostgresQuery extends BlokService<PostgresQueryInputs> {
@@ -430,7 +429,6 @@ export default class PostgresQuery extends BlokService<PostgresQueryInputs> {
         password: { type: "string" },
         host: { type: "string" },
         query: { type: "string" },
-        set_var: { type: "boolean" },
       },
       required: ["user", "password", "host", "query"],
     };

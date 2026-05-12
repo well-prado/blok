@@ -687,25 +687,26 @@ type Context = {
 
 ### The Two Critical Rules
 
-**Rule 1: \\\`ctx.response.data\\\` is OVERWRITTEN after every step.**
-Each step's output replaces the previous \\\`ctx.response.data\\\`. If you need a step's output later, store it in \\\`ctx.vars\\\`.
+**Rule 1: \\\`ctx.prev\\\` carries the immediately previous step's output.**
+Each step's output replaces \\\`ctx.prev\\\`. Use it for adjacent-step access only.
 
-**Rule 2: \\\`ctx.vars\\\` PERSISTS across the entire workflow.**
-Use \\\`set_var: true\\\` on a step to auto-store its output in \\\`ctx.vars[stepName]\\\`. Downstream steps access it via \\\`ctx.vars['step-name']\\\`.
+**Rule 2: \\\`ctx.state[id]\\\` PERSISTS across the entire workflow.**
+Every step's output is auto-stored at \\\`ctx.state[<step-id>]\\\` (the v2 default-store rule). Downstream steps reference it via \\\`$.state.<id>\\\` (TS DSL) or \\\`"$.state.<id>"\\\` / \\\`"js/ctx.state.<id>"\\\` (JSON). Opt out per step with \\\`ephemeral: true\\\`.
 
 ### Data Flow Example
 
 \`\`\`
-Step 1: "fetch-user"  (set_var: true)
-  → ctx.response.data = { id: "123", name: "Alice" }
-  → ctx.vars["fetch-user"] = { id: "123", name: "Alice" }
+Step 1: id "fetch-user"
+  → ctx.state["fetch-user"] = { id: "123", name: "Alice" }
+  → ctx.prev = { id: "123", name: "Alice" }
 
-Step 2: "transform"
-  → ctx.response.data = { result: "done" }     ← Step 1 output GONE from response
-  → ctx.vars["fetch-user"] still available
+Step 2: id "transform"
+  → ctx.state["transform"] = { result: "done" }
+  → ctx.prev = { result: "done" }              ← Step 1 output GONE from prev
+  → ctx.state["fetch-user"] still available
 
-Step 3: "output"
-  → Can read ctx.vars["fetch-user"].name        ← still "Alice"
+Step 3: id "output"
+  → Can read ctx.state["fetch-user"].name      ← still "Alice"
 \`\`\`
 
 ### Blueprint Mapper — Expression Resolution
@@ -722,7 +723,7 @@ Node inputs support dynamic expressions resolved BEFORE node execution:
 }
 \`\`\`
 
-Available in js/ expressions: \\\`ctx\\\`, \\\`data\\\` (ctx.response.data), \\\`func\\\` (ctx.func), \\\`vars\\\` (ctx.vars)
+Available in js/ expressions: \\\`ctx\\\` (full context), \\\`data\\\` (ctx.prev.data), \\\`func\\\` (ctx.func), \\\`vars\\\` (alias for ctx.state).
 
 ---
 
@@ -777,15 +778,10 @@ export default defineNode({
     "http": { "method": "POST", "path": "/api/process", "accept": "application/json" }
   },
   "steps": [
-    { "name": "fetch",   "node": "@blokjs/api-call", "type": "module" },
-    { "name": "process", "node": "my-node",        "type": "module", "set_var": true },
-    { "name": "go-step", "node": "chain-test",     "type": "runtime.go" }
-  ],
-  "nodes": {
-    "fetch":   { "inputs": { "url": "https://api.example.com", "method": "GET" } },
-    "process": { "inputs": { "data": "js/ctx.response.data" } },
-    "go-step": { "inputs": { "processed": "js/ctx.vars['process']" } }
-  }
+    { "id": "fetch",   "use": "@blokjs/api-call", "inputs": { "url": "https://api.example.com", "method": "GET" } },
+    { "id": "process", "use": "my-node",         "inputs": { "data": "$.state.fetch" } },
+    { "id": "go-step", "use": "chain-test", "type": "runtime.go", "inputs": { "processed": "$.state.process" } }
+  ]
 }
 \`\`\`
 
@@ -942,8 +938,8 @@ Real-time workflow trace visualization UI.
 
 ## Do
 
-- Use \\\`ctx.vars\\\` with \\\`set_var: true\\\` to pass data between non-adjacent steps
-- Use \\\`js/ctx.vars['step-name'].field\\\` in workflow inputs for data flow
+- Use \\\`$.state.<id>\\\` (or \\\`js/ctx.state.<id>\\\`) to pass data between non-adjacent steps — every step default-stores its output there
+- Opt out per step with \\\`ephemeral: true\\\` when the step is a side effect only
 - Use Zod schemas for all input/output validation
 - Use \\\`defineNode()\\\` for all new nodes
 - Handle errors via GlobalError with appropriate HTTP status codes
@@ -967,16 +963,16 @@ npm test                           # Run tests
 
 ## Context Rules (Memorize These)
 
-1. **\\\`ctx.response.data\\\` is OVERWRITTEN every step.** Previous output GONE unless stored in vars.
-2. **\\\`ctx.vars\\\` PERSISTS across the workflow.** Use \\\`set_var: true\\\` or \\\`js/ctx.vars['step']\\\`.
-3. **Blueprint Mapper resolves \\\`js/\\\` expressions BEFORE node execution.**
+1. **\\\`ctx.prev\\\` is the immediately previous step's output.** Overwritten every step.
+2. **\\\`ctx.state[<id>]\\\` PERSISTS across the workflow.** Every step default-stores its output there; reference via \\\`$.state.<id>\\\` or \\\`js/ctx.state.<id>\\\`. Opt out with \\\`ephemeral: true\\\`.
+3. **Blueprint Mapper resolves \\\`$.<path>\\\` and \\\`js/\\\` expressions BEFORE node execution.**
 
 When users have data flow issues, check these three things first.
 
 ## Debugging Workflows
 
-1. **Verify structure**: Every \\\`steps[].name\\\` must match a key in \\\`nodes\\\`
-2. **Trace data flow**: Which steps have \\\`set_var: true\\\`? Do \\\`js/\\\` expressions reference correct step names?
+1. **Verify structure**: Every step has an \\\`id\\\` and a \\\`use\\\` (v2). v1's \\\`name\\\` + \\\`nodes{}\\\` still works but is normalized at load time.
+2. **Trace data flow**: Does the target step reference the correct source id (\\\`$.state.<id>\\\`)? Did the source step have \\\`ephemeral: true\\\` accidentally?
 3. **Check runtimes**: SDK containers running? \\\`GET http://localhost:{port}/health\\\`
 4. **Check Studio traces**: \\\`/__blok/runs/:id\\\` shows step-by-step inputs/outputs/errors
 
@@ -987,7 +983,8 @@ When users have data flow issues, check these three things first.
 | \\\`Node type X not found\\\` | Wrong \\\`type\\\` in step — use module, local, or runtime.* |
 | \\\`Validation failed\\\` | Zod schema mismatch — check input schema vs actual data |
 | \\\`Runtime execution error\\\` | SDK container not running — check health endpoint |
-| \\\`ctx.vars['X'] undefined\\\` | Source step missing \\\`set_var: true\\\` or name mismatch |
+| \\\`ctx.state['X'] undefined\\\` | Source step has \\\`ephemeral: true\\\`, or the id doesn't match what's referenced in \\\`$.state.<id>\\\` |
+| \\\`set_var, which was removed in v0.5\\\` | Drop \\\`set_var: true\\\` (it's the default) or replace \\\`set_var: false\\\` with \\\`ephemeral: true\\\`. Run \\\`blokctl migrate workflows\\\`. |
 
 ## Generating Code
 
@@ -1050,7 +1047,7 @@ const wfResult = await runner.execute({ input: "data" });
 - Launch: \\\`blokctl trace\\\` or navigate to \\\`/__blok\\\`
 - "No output" → Node not returning data or Zod output validation failed
 - "Step error" → Expand error — check if 400 (validation) or 500 (runtime)
-- "Vars not passing" → Source step needs \\\`set_var: true\\\`, target needs \\\`js/ctx.vars['name']\\\`
+- "State not passing" → Source step has \\\`ephemeral: true\\\`, OR target's \\\`$.state.<id>\\\` references a non-existent step id
 
 ## Debugging Workers
 

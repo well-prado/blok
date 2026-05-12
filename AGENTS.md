@@ -121,27 +121,28 @@ type Context = {
 
 ### The Two Critical Rules
 
-**Rule 1: `ctx.response.data` is OVERWRITTEN after every step.**
-Each step's output replaces the previous `ctx.response.data`. If you need a step's output later, you must store it in `ctx.vars`.
+**Rule 1: `ctx.prev` carries the immediately previous step's output.**
+Each step's output replaces `ctx.prev`. Use it for adjacent-step access only.
 
-**Rule 2: `ctx.vars` PERSISTS across the entire workflow.**
-Use `set_var: true` on a step to auto-store its output in `ctx.vars[stepName]`. Downstream steps access it via `ctx.vars['step-name']`.
+**Rule 2: `ctx.state[id]` PERSISTS across the entire workflow.**
+Every step's output is auto-stored at `ctx.state[<step-id>]` (the v2 default-store rule). Downstream steps reference it via `$.state.<id>` (TS DSL) or `"$.state.<id>"` / `"js/ctx.state.<id>"` (JSON). Opt out per step with `ephemeral: true`. The legacy `set_var` field was removed in v0.5 — the runner throws at workflow load if it's still present (run `blokctl migrate workflows` to convert v1 workflows).
 
 ### Data Flow Example
 
 ```
-Step 1: "fetch-user"  (set_var: true)
+Step 1: id "fetch-user"
   → Executes, returns { id: "123", name: "Alice" }
-  → ctx.response.data = { id: "123", name: "Alice" }
-  → ctx.vars["fetch-user"] = { id: "123", name: "Alice" }
+  → ctx.state["fetch-user"] = { id: "123", name: "Alice" }
+  → ctx.prev = { id: "123", name: "Alice" }
 
-Step 2: "transform"
+Step 2: id "transform"
   → Executes, returns { result: "transformed" }
-  → ctx.response.data = { result: "transformed" }    ← Step 1 output GONE from response
-  → ctx.vars["fetch-user"] still = { id: "123", name: "Alice" }
+  → ctx.state["transform"] = { result: "transformed" }
+  → ctx.prev = { result: "transformed" }                ← Step 1 output GONE from prev
+  → ctx.state["fetch-user"] still = { id: "123", name: "Alice" }
 
-Step 3: "output"
-  → Can read ctx.vars["fetch-user"].name  ← still "Alice"
+Step 3: id "output"
+  → Can read ctx.state["fetch-user"].name  ← still "Alice"
   → ctx.response.data is Step 2's output only
 ```
 
@@ -548,7 +549,7 @@ Workflow({ name, version, description? })
   },
   "steps": [
     { "name": "fetch",    "node": "@blokjs/api-call",  "type": "module" },
-    { "name": "process",  "node": "my-node",         "type": "module", "set_var": true },
+    { "name": "process",  "node": "my-node",         "type": "module" },
     { "name": "go-step",  "node": "chain-test",      "type": "runtime.go" },
     { "name": "output",   "node": "format-result",   "type": "local" }
   ],
@@ -585,7 +586,9 @@ Workflow({ name, version, description? })
 | `name` | string | Yes | Step identifier (must match key in `nodes`) |
 | `node` | string | Yes | Node package name or path |
 | `type` | string | Yes | `module`, `local`, or `runtime.*` |
-| `set_var` | boolean | No | Store output in `ctx.vars[name]` (default: false) |
+| `ephemeral` | boolean | No | Skip persisting this step's output to `ctx.state` (default: false — every step default-stores) |
+| `as` | string | No | Alternative state key — store at `state[as]` instead of `state[name]` |
+| `spread` | boolean | No | Shallow-merge `result.data` keys into `state` (mutually exclusive with `as`) |
 | `active` | boolean | No | Skip step if false (default: true) |
 | `stop` | boolean | No | Halt workflow after this step (default: false) |
 
@@ -926,8 +929,8 @@ RUNTIME_PYTHON3_HOST=localhost  RUNTIME_PYTHON3_PORT=9007
 ### RuntimeAdapterNode Behavior
 
 After SDK execution, `RuntimeAdapterNode` automatically:
-1. Merges `result.vars` into `ctx.vars`
-2. Saves `result.data` to `ctx.vars[this.name]` (auto set_var for runtime nodes)
+1. Merges `result.vars` into `ctx.state`
+2. Routes `result.data` through `PersistenceHelper.applyStepOutput` — same `ephemeral` / `spread` / `as` rules as module nodes
 3. Records metrics into RunTracker trace
 
 ---
@@ -1224,8 +1227,8 @@ import { z } from "zod";
 
 ## Do
 
-- Use `ctx.vars` with `set_var: true` to pass data between non-adjacent steps
-- Use `js/ctx.vars['step-name'].field` in workflow node inputs for data flow
+- Use `$.state.<id>` (or `js/ctx.state.<id>`) to pass data between non-adjacent steps — every step default-stores its output there
+- Opt out with `ephemeral: true` when a step is a side effect only
 - Use Zod schemas for all input/output validation in defineNode
 - Use `defineNode()` for all new nodes
 - Use named exports for library code, `export default defineNode(...)` for node files

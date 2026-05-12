@@ -11,7 +11,7 @@ import { parseDuration } from "@blokjs/helper";
  * ```
  * {
  *   name, version, trigger,
- *   steps: [{ name, node, type, active?, stop?, set_var? }],
+ *   steps: [{ name, node, type, active?, stop? }],
  *   nodes: { [stepName]: { inputs?, conditions? } }
  * }
  * ```
@@ -31,7 +31,7 @@ import { parseDuration } from "@blokjs/helper";
  * ```
  * {
  *   name, version, trigger,           // method "*" normalized to "ANY"
- *   steps: [{ name, node, type, active, stop, set_var, as, spread, ephemeral, ... }],
+ *   steps: [{ name, node, type, active, stop, as, spread, ephemeral, ... }],
  *   nodes: { [stepName]: { inputs?, conditions? } }
  * }
  * ```
@@ -59,7 +59,6 @@ interface InternalStep {
 	type: string;
 	active?: boolean;
 	stop?: boolean;
-	set_var?: boolean;
 	as?: string;
 	spread?: boolean;
 	ephemeral?: boolean;
@@ -156,6 +155,14 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	} else if (isPlainObject(wf._config) && wf.name === undefined && wf.steps === undefined) {
 		// Legacy builder shape — same unwrap.
 		wf = wf._config as Record<string, unknown>;
+	}
+
+	// `set_var` removed in v0.5. Reject at load time with a migration hint
+	// — silently dropping the field would produce subtly different runtime
+	// behaviour (every step now default-stores; legacy `set_var: false`
+	// was the only opt-out and is replaced by `ephemeral: true`).
+	if (Array.isArray(wf.steps)) {
+		assertNoSetVar(wf.steps as unknown[], sourcePath);
 	}
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
@@ -330,10 +337,9 @@ function normalizeRegularStep(
 
 	const inputs = inlineInputs ?? v1Inputs;
 
-	// Persistence knobs — v2 first, legacy `set_var` mapped second.
-	const ephemeralExplicit = step.ephemeral === true;
-	const ephemeralFromLegacy = step.set_var === false;
-	const ephemeral = ephemeralExplicit || ephemeralFromLegacy;
+	// Persistence knobs — v2 only. Legacy `set_var` is rejected upstream
+	// in `normalizeWorkflow` via `assertNoSetVar`.
+	const ephemeral = step.ephemeral === true;
 	const as = pickString(step.as);
 	const spread = step.spread === true;
 
@@ -351,7 +357,6 @@ function normalizeRegularStep(
 		type,
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
-		set_var: typeof step.set_var === "boolean" ? step.set_var : undefined,
 		as,
 		spread,
 		ephemeral,
@@ -1063,4 +1068,57 @@ function pickString(value: unknown): string | undefined {
  */
 export function _resetWildcardWarningCache(): void {
 	_wildcardWarnedFiles = new Set<string>();
+}
+
+/**
+ * `set_var` is no longer accepted on workflow steps. Walk the raw step
+ * tree (top-level steps + every nested sub-pipeline) and throw with a
+ * migration hint on the first occurrence. The walk handles branch,
+ * forEach, loop, switch, and tryCatch sub-pipelines so a rejected
+ * field at any depth is caught at load time rather than after the
+ * partial-normalization point.
+ */
+function assertNoSetVar(steps: unknown[], sourcePath?: string): void {
+	for (const raw of steps) {
+		if (!isPlainObject(raw)) continue;
+		const step = raw as Record<string, unknown>;
+		if (Object.prototype.hasOwnProperty.call(step, "set_var")) {
+			const id = pickString(step.id) ?? pickString(step.name) ?? "<unnamed>";
+			const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
+			throw new Error(
+				`[blok] WorkflowNormalizer: step "${id}" uses \`set_var\`, which was removed in v0.5. Replace \`set_var: false\` with \`ephemeral: true\` and drop \`set_var: true\` (v2 default-stores every step's output). Run \`blokctl migrate workflows\` to convert v1 workflows automatically.${suffix}`,
+			);
+		}
+		// Recurse into nested sub-pipelines.
+		if (isPlainObject(step.branch)) {
+			const branch = step.branch as { then?: unknown; else?: unknown };
+			if (Array.isArray(branch.then)) assertNoSetVar(branch.then as unknown[], sourcePath);
+			if (Array.isArray(branch.else)) assertNoSetVar(branch.else as unknown[], sourcePath);
+		}
+		if (isPlainObject(step.forEach)) {
+			const fe = step.forEach as { do?: unknown };
+			if (Array.isArray(fe.do)) assertNoSetVar(fe.do as unknown[], sourcePath);
+		}
+		if (isPlainObject(step.loop)) {
+			const lp = step.loop as { do?: unknown };
+			if (Array.isArray(lp.do)) assertNoSetVar(lp.do as unknown[], sourcePath);
+		}
+		if (isPlainObject(step.switch)) {
+			const sw = step.switch as { cases?: unknown; default?: unknown };
+			if (Array.isArray(sw.cases)) {
+				for (const c of sw.cases as unknown[]) {
+					if (isPlainObject(c) && Array.isArray((c as { do?: unknown }).do)) {
+						assertNoSetVar((c as { do: unknown[] }).do, sourcePath);
+					}
+				}
+			}
+			if (Array.isArray(sw.default)) assertNoSetVar(sw.default as unknown[], sourcePath);
+		}
+		if (isPlainObject(step.tryCatch)) {
+			const tc = step.tryCatch as { try?: unknown; catch?: unknown; finally?: unknown };
+			if (Array.isArray(tc.try)) assertNoSetVar(tc.try as unknown[], sourcePath);
+			if (Array.isArray(tc.catch)) assertNoSetVar(tc.catch as unknown[], sourcePath);
+			if (Array.isArray(tc.finally)) assertNoSetVar(tc.finally as unknown[], sourcePath);
+		}
+	}
 }

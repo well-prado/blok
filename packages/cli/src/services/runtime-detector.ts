@@ -10,10 +10,11 @@ export interface RuntimeInfo {
 	version?: string;
 	installHint: string;
 	/**
-	 * Default HTTP port. Kept for back-compat with `.blok/config.json` files
-	 * scaffolded before the gRPC-only flip; the CLI no longer health-probes
-	 * this port. The trigger and SDK still listen on it for users who opt
-	 * into HTTP via `--with-http-fallback` or `RUNTIME_TRANSPORT=http`.
+	 * Default port retained for back-compat with `.blok/config.json` files
+	 * scaffolded before the gRPC-only flip. The CLI no longer health-probes
+	 * it; gRPC is the sole transport since v0.5 (`HttpRuntimeAdapter` was
+	 * removed). New scaffolds still emit it so older runner versions that
+	 * read the field don't break.
 	 */
 	defaultPort: number;
 	/**
@@ -150,10 +151,10 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		toolchain: "php + composer + rr",
 		installDeps: "composer install",
 		startCmd: "php bin/serve.php",
-		// PHP's gRPC server is RoadRunner, NOT the same binary as the HTTP
-		// boot. The CLI invokes this command verbatim; the rr binary path
-		// is resolved at spawn-time via `detectRr()` and swapped in if the
-		// literal `rr` token isn't on $PATH.
+		// PHP's gRPC server is RoadRunner — a separate binary from
+		// `php bin/serve.php`. The CLI invokes this command verbatim;
+		// the rr binary path is resolved at spawn-time via `detectRr()`
+		// and swapped in if the literal `rr` token isn't on $PATH.
 		grpcStartCmd: "rr serve -c .rr.yaml --override grpc.listen=tcp://127.0.0.1:10005",
 		sdkDir: "php",
 		secondaryTool: {

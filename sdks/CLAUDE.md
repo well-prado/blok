@@ -1,41 +1,26 @@
 # Multi-Language SDKs
 
-All SDKs implement the same HTTP contract. The runner communicates with them via `HttpRuntimeAdapter`.
+Since v0.5, all SDKs reach the runner over **gRPC** — `HttpRuntimeAdapter` and the
+`POST /execute` HTTP path were removed together with the `RUNTIME_TRANSPORT=http`
+opt-in. SDK processes still expose `GET /health` for orchestrator readiness
+probes, but the runner itself only speaks gRPC.
 
-## HTTP Contract
+## gRPC Contract
 
-**POST /execute**
-```json
-{
-  "node": { "name": "step-name", "type": "runtime.go", "config": {} },
-  "context": {
-    "id": "uuid",
-    "workflow_name": "name",
-    "request": { "body": {}, "headers": {}, "params": {}, "query": {} },
-    "response": { "data": {}, "success": true },
-    "vars": {},
-    "env": {}
-  }
-}
-```
+Service: `blok.runtime.v1.NodeRuntime/Execute` (proto schema in
+[`core/grpc-proto/`](../core/grpc-proto)). Each SDK serves a Cap'n Proto–style
+binary `ExecuteRequest` and returns an `ExecuteResponse` carrying the same
+fields as the legacy HTTP `ExecutionResult` (`success`, `data`, `errors`,
+`logs`, `metrics`, `vars`).
 
-**Response (ExecutionResult)**
-```json
-{
-  "success": true,
-  "data": {},
-  "errors": null,
-  "logs": [],
-  "metrics": { "duration_ms": 0, "cpu_ms": 0, "memory_bytes": 0 },
-  "vars": {}
-}
-```
+**GET /health** → `{ "status": "healthy" }` (informational; the CLI uses a
+TCP-connect probe against the gRPC port, not this endpoint).
 
-**GET /health** → `{ "status": "healthy" }`
+## Default gRPC Ports
 
-## Default Ports
+Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3: 10007.
 
-Go: 9001, Rust: 9002, Java: 9003, C#: 9004, PHP: 9005, Ruby: 9006, Python3: 9007
+Convention: gRPC port = legacy HTTP port + 1000.
 
 ## SDK Node Pattern
 
@@ -52,10 +37,9 @@ User nodes live in `runtimes/{lang}/nodes/` within projects.
 
 ## Adding a New SDK Language
 
-1. Implement HTTP server with `POST /execute` and `GET /health`
-2. Parse `ExecutionRequest` from request body
-3. Route to registered node handler by `node.name`
-4. Return `ExecutionResult` JSON
-5. Register `HttpRuntimeAdapter` in `Configuration.ts` with new kind/port
-6. Add `RuntimeKind` value to `core/runner/src/adapters/RuntimeAdapter.ts`
-7. Add `runtime.{lang}` to `NodeTypeSchema` in `core/workflow-helper/src/types/StepOpts.ts`
+1. Implement the `blok.runtime.v1.NodeRuntime/Execute` gRPC service against the proto in `core/grpc-proto/`
+2. Decode the binary `ExecuteRequest`, route to the registered node handler by `node.name`, and return an `ExecuteResponse`
+3. Bind a `GET /health` HTTP endpoint for orchestrator readiness probes (the CLI's primary check is a TCP-connect against the gRPC port)
+4. Register a `GrpcRuntimeAdapter` in `core/runner/src/Configuration.ts` (per-kind block in `initializeRuntimeRegistry`) with the new kind + gRPC port env var
+5. Add the `RuntimeKind` value to `core/runner/src/adapters/RuntimeAdapter.ts`
+6. Add `runtime.{lang}` to `NodeTypeSchema` in `core/workflow-helper/src/types/StepOpts.ts`

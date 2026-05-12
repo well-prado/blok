@@ -291,13 +291,13 @@ The CLI command performs:
 
 ### Pattern: Nodes That Set Variables
 
-**Before:**
+**Before (pre-v0.5):**
 ```typescript
 async handle(ctx, inputs) {
   const response = new BlokResponse();
   const result = await doWork(inputs);
 
-  // set_var is a BlokService property
+  // Legacy set_var on the workflow step routed result.data into ctx.vars
   if (this.set_var) {
     const vars = { [this.name]: result.data };
     this.setVar(ctx, vars);
@@ -315,8 +315,8 @@ async handle(ctx, inputs) {
 export default defineNode({
   // ...
   async execute(ctx, input) {
-    // The FunctionNode wrapper handles set_var automatically
-    // Just return your result
+    // v2 default-stores result.data at ctx.state[<step-id>].
+    // (The legacy `set_var` field was removed in v0.5 — drop it.)
     return await doWork(input);
   },
 });
@@ -404,7 +404,7 @@ For Zod validation errors, the framework automatically returns code `400` (Bad R
 
 ### Gotcha: Accessing Node Properties
 
-In class-based nodes, you could access `this.name`, `this.set_var`, etc. In function-first nodes, these are managed internally by the `FunctionNode` wrapper. Access the node name from the definition itself:
+In class-based nodes, you could access `this.name` and other framework-internal fields. In function-first nodes, these are managed internally by the `FunctionNode` wrapper. Access the node name from the definition itself:
 
 ```typescript
 export default defineNode({

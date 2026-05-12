@@ -42,7 +42,7 @@ describe("WorkflowNormalizer — v1 input", () => {
 		expect(httpTrigger.method).toBe("ANY");
 	});
 
-	it("preserves set_var: false from v1 (PersistenceHelper handles it)", () => {
+	it("rejects set_var with a migration hint (removed in v0.5)", () => {
 		const v1 = {
 			name: "SetVar",
 			version: "1.0.0",
@@ -50,10 +50,25 @@ describe("WorkflowNormalizer — v1 input", () => {
 			steps: [{ name: "step", node: "@blokjs/api-call", type: "module", set_var: false }],
 			nodes: { step: { inputs: {} } },
 		};
-		const out = normalizeWorkflow(v1, "test.json");
-		expect(out.steps[0].set_var).toBe(false);
-		// also surfaces as ephemeral so PersistenceHelper handles either path
-		expect(out.steps[0].ephemeral).toBe(true);
+		expect(() => normalizeWorkflow(v1, "test.json")).toThrow(/`set_var`, which was removed in v0.5/);
+	});
+
+	it("rejects set_var inside a branch sub-pipeline (recursive walk)", () => {
+		const v2 = {
+			name: "NestedSetVar",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [
+				{
+					id: "route",
+					branch: {
+						when: "true",
+						then: [{ id: "inner", use: "@blokjs/respond", set_var: true }],
+					},
+				},
+			],
+		};
+		expect(() => normalizeWorkflow(v2, "nested.json")).toThrow(/`set_var`, which was removed in v0.5/);
 	});
 
 	it("preserves trigger kinds other than http unchanged", () => {

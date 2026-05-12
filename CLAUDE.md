@@ -20,7 +20,7 @@ blokctl trace                      # Open Blok Studio
 
 ## Context Rules (Memorize These) — Workflow v2
 
-1. **Every step's output is auto-persisted to `ctx.state[id]`** — *on success only*. A step that throws does NOT write state. `ctx.state[<step-id>] === undefined` is a truthful "did this step actually succeed?" check inside a `tryCatch.catch` arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; centralized fix in `core/runner/src/workflow/PersistenceHelper.ts:applyStepOutput`.) No `set_var` flag needed for success persistence — it's the default. Other steps reference it via `$.state.<id>` in their inputs.
+1. **Every step's output is auto-persisted to `ctx.state[id]`** — *on success only*. A step that throws does NOT write state. `ctx.state[<step-id>] === undefined` is a truthful "did this step actually succeed?" check inside a `tryCatch.catch` arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; centralized fix in `core/runner/src/workflow/PersistenceHelper.ts:applyStepOutput`.) The legacy `set_var` flag was removed in v0.5 — `WorkflowNormalizer.assertNoSetVar` throws at load time with a migration hint if the field is still present. Other steps reference outputs via `$.state.<id>` in their inputs.
 2. **`ctx.prev` is the immediately previous step's output.** Overwritten on every step. Use for adjacent reads only; for cross-step access use `ctx.state[<id>]`.
 3. **Blueprint Mapper resolves `$.<path>` and `js/...` expressions BEFORE node execution.** Authors write `$.state.users` (typed in TS, plain string in JSON); the runner resolves it.
 4. **Opt out of persistence with `ephemeral: true`** on the step. Side-effect-only steps (logging, audit) typically do this.
@@ -45,8 +45,8 @@ Old (v1) workflows keep working — the runner normalizes them at load time:
 |---|---|---|
 | `steps[].name` + `nodes[name]{inputs}` | `steps[].id` + `steps[].inputs` (inline) | one source of truth for step identity |
 | `steps[].node` | `steps[].use` | clearer intent |
-| `set_var: true` | (default) | every step auto-stores |
-| `set_var: false` | `ephemeral: true` | normalized 1:1 |
+| `set_var: true` | drop the field | every step auto-stores; v0.5 rejects `set_var` at load time |
+| `set_var: false` | `ephemeral: true` | run `blokctl migrate workflows` to convert v1 workflows in bulk |
 | `js/ctx.vars['x']` | `$.state.x` (or `js/ctx.state.x`) | `ctx.vars` aliases `ctx.state` for back-compat |
 | `js/ctx.response.data` | `$.prev.data` (or `js/ctx.prev.data`) | `ctx.response` aliases `ctx.prev` |
 | `js/ctx.request.body` | `$.req.body` | `ctx.req` aliases `ctx.request` |
@@ -88,6 +88,7 @@ Old (v1) workflows keep working — the runner normalizes them at load time:
 | `as and spread are mutually exclusive` | Step has both fields set | Pick one — `as: "name"` to rename, `spread: true` to flatten |
 | `branch step is missing 'when'` | Branch with no condition string | Set `when: "..."` (or pass a `$` proxy expression) |
 | `Two workflows claim GET /path` | Route collision in file-based routing | Set explicit `trigger.http.path` on one to disambiguate |
+| `step "..." uses \`set_var\`, which was removed in v0.5` | Workflow still carries the legacy `set_var` field (removed in v0.5) | Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1 workflows automatically. |
 | `[blok][mapper] Failed to resolve ...` | A `js/...` or `${...}` expression in step inputs threw at run time (typo, undefined access, syntax error). Default mode logs + passes the literal string through (silent miscompile risk). | Read the hint in the warning. Set `BLOK_MAPPER_MODE=strict` to fail fast in production — the `MapperResolutionError` carries workflow + step + expression context. |
 
 ### Production env vars worth setting
@@ -424,7 +425,7 @@ expect(result.trace).toHaveLength(2); // Check execution trace
 Common user questions:
 - "No output on step" → Node's execute() might not be returning data, or Zod output validation failed
 - "Step shows error" → Expand error details, check if it's Zod validation (400) or runtime error (500)
-- "Variables not passing" → Check that source step has `set_var: true` and target input uses `js/ctx.vars['name']`
+- "State not passing" → Source step has `ephemeral: true`, OR target's `$.state.<id>` references a non-existent step id (typo / id mismatch)
 - "Flow node skipping branches" → Check condition expression syntax in workflow JSON
 
 ## Do NOT
@@ -433,7 +434,7 @@ Common user questions:
 - Do NOT generate code with `any` types
 - Do NOT assume `ctx.prev` (or `ctx.response.data`) persists across more than one step — use `ctx.state[<id>]` for cross-step access
 - Do NOT write to `ctx.state` inside a node's `execute()` — return your output and let the runner persist it. If a node truly needs to publish a side-channel value, use `ctx.publish(name, value)`
-- Do NOT use `set_var: true` in new workflows — the runner default-stores every step's output. Use `ephemeral: true` to opt out
+- Do NOT use `set_var` in any workflow — it was removed in v0.5 and the runner now throws at load time. Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`
 - Do NOT use `"*"` for the HTTP wildcard method — use `"ANY"` (the runner accepts both for back-compat but warns)
 - Do NOT skip Zod schemas when creating nodes
 - Do NOT use ESLint/Prettier — this project uses Biome

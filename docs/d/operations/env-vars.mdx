@@ -187,10 +187,11 @@ Connecting non-TypeScript nodes (Python, Go, Rust, etc.) to the runner.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `RUNTIME_TRANSPORT` | `grpc` | Default transport for runtime adapters. `http` is supported but emits a deprecation warning (removed in v0.4.0). |
-| `RUNTIME_<KIND>_TRANSPORT` | `grpc` | Per-kind transport override (`RUNTIME_PYTHON3_TRANSPORT=http`, etc.). |
+| `RUNTIME_TRANSPORT` | `grpc` | gRPC is the sole runtime transport since v0.5. Setting this to `http` (or any other value) throws at trigger boot — drop the env var. |
+| `RUNTIME_<KIND>_TRANSPORT` | `grpc` | Per-kind override. Setting to `http` throws — same removal as above. |
 | `RUNTIME_<KIND>_HOST` | `localhost` | Hostname for the SDK container per language. |
-| `RUNTIME_<KIND>_PORT` | varies | gRPC port per language. Defaults: Go `9001`, Rust `9002`, Java `9003`, C# `9004`, PHP `9005`, Ruby `9006`, Python3 `9007`. |
+| `RUNTIME_<KIND>_GRPC_PORT` | varies | gRPC port per language. Conventionally `<httpPort> + 1000` — Go `10001`, Rust `10002`, Java `10003`, C# `10004`, PHP `10005`, Ruby `10006`, Python3 `10007`. |
+| `RUNTIME_<KIND>_PORT` | varies | Legacy port field retained for back-compat with older configs; not health-probed by the CLI since v0.5. |
 
 For C# specifically, env keys preserve dots (e.g.
 `RUNTIME_CSHARP_HOST` becomes `Runtime.Csharp.Host` in the .NET

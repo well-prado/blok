@@ -18,20 +18,17 @@
 		{
 			"name": "generate-file-key",
 			"node": "mapper",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "generate-presigned-url",
 			"node": "aws-s3-presign",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "create-file-record",
 			"node": "@blokjs/api-call",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "format-upload-response",

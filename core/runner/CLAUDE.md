@@ -12,9 +12,8 @@
 | `src/RuntimeAdapterNode.ts` | Bridge: wraps RuntimeAdapter into RunnerNode interface |
 | `src/TriggerBase.ts` | Base class for triggers — creates Context, runs workflow, handles tracing |
 | `src/adapters/grpc/GrpcRuntimeAdapter.ts` | gRPC adapter for all non-NodeJS SDKs (default since Phase 6) |
-| `src/adapters/HttpRuntimeAdapter.ts` | HTTP adapter — **deprecated**, removed in v0.4.0. Resolves only via `RUNTIME_TRANSPORT=http` opt-in (see `transport.ts:resolveTransportForKind`); emits a once-per-process stderr warning. |
 | `src/adapters/NodeJsRuntimeAdapter.ts` | In-process adapter for NodeJS/TypeScript nodes |
-| `src/adapters/transport.ts` | Resolves which transport a runtime kind uses. Default `grpc`; `RUNTIME_TRANSPORT=http` and per-kind `RUNTIME_<K>_TRANSPORT=http` are honored with a deprecation warning. |
+| `src/adapters/transport.ts` | gRPC has been the sole runtime transport since v0.5. `assertGrpcOnlyTransport()` runs at trigger boot and throws if `RUNTIME_TRANSPORT=http` (or any `RUNTIME_<K>_TRANSPORT=http`) is still set, so stale operator config surfaces loudly. |
 | `src/tracing/RunTracker.ts` | Trace recording (SQLite/Postgres/In-Memory) |
 | `src/tracing/registerTraceRoutes.ts` | `/__blok/*` REST API for Blok Studio |
 
@@ -50,10 +49,11 @@ nodeTypes() returns:
   "runtime.ruby"     → runtimeResolver()
 ```
 
-Transport selection lives in `src/adapters/transport.ts`. The default is `grpc`
-since Phase 6 (master plan §11/§14). `RUNTIME_TRANSPORT=http` and per-kind
-`RUNTIME_<KIND>_TRANSPORT=http` overrides remain functional **until v0.4.0**;
-they emit a once-per-process stderr warning on resolve.
+gRPC has been the sole runtime transport since v0.5 — `HttpRuntimeAdapter`
+and the `RUNTIME_TRANSPORT=http` / `RUNTIME_<KIND>_TRANSPORT=http` env-var
+opt-ins were removed together. `assertGrpcOnlyTransport()` runs from
+`Configuration.initializeRuntimeRegistry` at trigger boot and throws with a
+migration hint if stale operator config is still pointing at HTTP.
 
 ## Persistence model (v2)
 
@@ -70,18 +70,16 @@ Rules evaluated in order:
    `RuntimeAdapterNode.run`, `SubworkflowNode.dispatchSync`) inherit
    identical behaviour without each re-implementing the check.
 1. `step.ephemeral === true` → no-op. Available only via `ctx.prev`.
-2. Legacy `step.set_var === false` → also no-op (back-compat).
-3. `step.spread === true` AND data is a plain object → shallow-merge into `ctx.state`.
-4. Default → `ctx.state[step.as ?? step.name] = result.data`.
+2. `step.spread === true` AND data is a plain object → shallow-merge into `ctx.state`.
+3. Default → `ctx.state[step.as ?? step.name] = result.data`.
 
-`set_var` is **passed through verbatim** by `Configuration.getSteps`,
-`Configuration.getFlow`, and `Configuration.runtimeResolver` — they never
-default it to `false`. NodeBase initializes `set_var` to `undefined` so the
-default-store rule can fire. Defaulting to `false` here would silently
-disable persistence for every step that didn't explicitly set the field
-(which is every v2 step) — that exact regression broke
-cross-runtime-chain in Phase 6 and is now covered by
-`__tests__/unit/RuntimeAdapterNode.test.ts`.
+The legacy `set_var` field was removed in v0.5. `WorkflowNormalizer.assertNoSetVar`
+walks the raw step tree (top-level + every nested sub-pipeline) and throws at
+load time with a migration hint if the field is still present. `blokctl
+migrate workflows` converts v1 workflows in bulk — `set_var: false` becomes
+`ephemeral: true`; `set_var: true` is simply dropped (default-store handles
+it). Coverage: `__tests__/unit/workflow/WorkflowNormalizer.test.ts` and the
+two regression tests in `__tests__/unit/RuntimeAdapterNode.test.ts`.
 
 ### Why Rule 0 had to be centralized
 
@@ -154,7 +152,7 @@ Cache backend: same store as run tracing.
 **Caching layers ABOVE `PersistenceHelper.applyStepOutput`, never
 within it.** A cache hit feeds data through the same persistence rules
 a fresh result would. This is the contract that makes the v2
-`set_var=undefined` default safe to coexist with caching.
+default-store rule safe to coexist with caching.
 
 ## Retry (Tier 1)
 

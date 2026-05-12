@@ -13,8 +13,7 @@
 		{
 			"name": "fetch-source-data",
 			"node": "@blokjs/api-call",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "route-fetch-result",
@@ -43,8 +42,7 @@
 						{
 							"name": "transform-data",
 							"node": "data-transformer",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "validate-transformed-data",
@@ -112,8 +110,7 @@
 						{
 							"name": "store-records",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "send-success-notification",

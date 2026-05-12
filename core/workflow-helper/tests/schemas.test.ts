@@ -70,24 +70,16 @@ describe("StepOptsSchema", () => {
 		expect(result.runtime).toBe("go");
 	});
 
-	it("should allow optional set_var, active, stop", () => {
+	it("should allow optional active, stop", () => {
 		const result = StepOptsSchema.parse({
 			name: "step",
 			node: "my-node-name",
 			type: "module",
-			set_var: true,
 			active: false,
 			stop: true,
 		});
-		expect(result.set_var).toBe(true);
 		expect(result.active).toBe(false);
 		expect(result.stop).toBe(true);
-	});
-
-	it("should reject non-boolean set_var", () => {
-		expect(() =>
-			StepOptsSchema.parse({ name: "step", node: "my-node-name", type: "module", set_var: "yes" }),
-		).toThrow();
 	});
 });
 
