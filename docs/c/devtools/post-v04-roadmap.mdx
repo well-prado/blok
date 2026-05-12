@@ -180,16 +180,23 @@ Status as of 2026-05-07 — every item below is **open**, demand-driven, with fi
 
 These add cross-process coordination to existing single-process primitives. None block production single-process deployments; they unlock horizontal scaling.
 
-#### C1 · Cross-process debounce keys (NATS KV / Redis)
+#### C1 · Cross-process debounce keys (NATS KV / Redis) — ✅ SHIPPED
 
-**Effort:** ~1-2 days.
-**Why now or later:** Currently `DebounceCoordinator` is in-process. Two pods handling the same `(workflow, debounceKey)` won't coalesce — both fire. Affects multi-pod deployments using `debounce: { trailing }` for autosave-style endpoints.
+**Status:** SHIPPED on `feat/c1-cross-process-debounce` (stacked on `feat/c4-redis-concurrency-backend`).
 
-**Sketch:** mirror `NatsKvConcurrencyBackend`'s OCC pattern. One JSON document per `(workflow, debounceKey)` holding `{firstPingAt, lastPingAt, pingCount, activeRunId, scheduledAt, mode, delayMs, maxDelayMs}`. CAS-update on each ping. Active process owns the timer; coalesce losers update the doc and ACK.
+Mirrors C4's backend abstraction for debounce. `DebounceCoordinator.register()` is now async-aware; with `BLOK_DEBOUNCE_BACKEND=nats-kv` or `redis` set, it routes ownership decisions through the configured backend while keeping the local timer + closure on the OWNING process. One shared document per `(workflow, debounceKey)` bucket carries `{mode, delayMs, maxDelayMs?, maxDelayDeadline?, firstPingAt, lastPingAt, pingCount, activeRunId, ownerProcessId, ownerLeaseExpiresAt, scheduledAt}`. Redis uses Lua for single-round-trip atomic registerPing / finalize; NATS KV uses bounded revision-CAS (10 retries then over-coalesce). Owner-lease expiry enables takeover when an owning process dies.
 
-**Trade-off:** cross-process debounce coordination via NATS KV adds a network round-trip per ping. For high-throughput debounce (autosave at 100Hz per doc), this can be the bottleneck. Document the latency and offer a per-key-fanout escape hatch.
+**Semantic shipped:** owner-local payload — only the owning process's captured `onFire` closure fires when the trailing window elapses. Coalesce pings from other processes bump `pingCount` + push `scheduledAt` in the shared doc but their payloads are dropped. Cross-process latest-payload-wins (payload-persisted variant) is a deferred follow-up, tracked in BACKLOG.
 
-**Reference:** [BACKLOG.md C1](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c1--cross-process-debounce-keys-nats-kv--redis), [core/runner/src/scheduling/DebounceCoordinator.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DebounceCoordinator.ts)
+**FW-5 parity:** both `BLOK_DEBOUNCE_NATS_KV_BUCKET` (default `blok-debounce`) and `BLOK_DEBOUNCE_REDIS_KEY_PREFIX` (default `blok-debounce`) refuse to start in production with the defaults — operators must set deployment-unique names to prevent cross-deployment collision on shared brokers.
+
+**Source:**
+[`DebounceBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DebounceBackend.ts)
++ [`NatsKvDebounceBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/NatsKvDebounceBackend.ts)
++ [`RedisDebounceBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/RedisDebounceBackend.ts)
++ [`DebounceCoordinator.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DebounceCoordinator.ts).
+
+**Reference:** [BACKLOG.md C1](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c1--cross-process-debounce-keys-nats-kv--redis--shipped)
 
 #### C2 · Cross-process scheduler coordination
 

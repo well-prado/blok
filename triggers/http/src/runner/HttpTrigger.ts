@@ -19,6 +19,7 @@ import { RunTracker } from "@blokjs/runner";
 import { traceRedactSensitive } from "@blokjs/runner";
 import type { TraceAuthorizeFn } from "@blokjs/runner";
 import { createConcurrencyBackend } from "@blokjs/runner";
+import { DebounceCoordinator, createDebounceBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
@@ -796,6 +797,38 @@ export default class HttpTrigger extends TriggerBase {
 					});
 					this.logger.error(
 						`[concurrency] createConcurrencyBackend failed: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+
+				// Tier C #1 · install the cross-process debounce backend
+				// (NATS KV / Redis) when the operator opted in via
+				// `BLOK_DEBOUNCE_BACKEND`. Default unset = the existing
+				// in-process DebounceCoordinator behavior is preserved
+				// (zero overhead). On connect failure, log + fall back to
+				// in-memory window coordination so the trigger still serves
+				// traffic.
+				try {
+					const debounceBackend = createDebounceBackend();
+					if (debounceBackend) {
+						const leaseRaw = process.env.BLOK_DEBOUNCE_OWNER_LEASE_MS;
+						if (leaseRaw && /^\d+$/.test(leaseRaw)) {
+							DebounceCoordinator.getInstance().setOwnerLeaseMs(Number(leaseRaw));
+						}
+						debounceBackend
+							.connect()
+							.then(() => {
+								DebounceCoordinator.getInstance().setBackend(debounceBackend);
+								this.logger.log(`[debounce] backend installed: ${debounceBackend.name}`);
+							})
+							.catch((err: unknown) => {
+								this.logger.error(
+									`[debounce] backend connect failed (${debounceBackend.name}): ${err instanceof Error ? err.message : String(err)}; falling back to in-memory coordination`,
+								);
+							});
+					}
+				} catch (err) {
+					this.logger.error(
+						`[debounce] createDebounceBackend failed: ${err instanceof Error ? err.message : String(err)}`,
 					);
 				}
 

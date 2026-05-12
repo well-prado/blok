@@ -596,13 +596,60 @@ Additive; pre-Tier-2-#5+#7 DBs upgrade transparently.
   (returns `null` by default — workers don't override since their
   brokers handle delay durably).
 
+**Cross-process debounce backend (Tier C #1)**:
+- Set `BLOK_DEBOUNCE_BACKEND=nats-kv` or `BLOK_DEBOUNCE_BACKEND=redis`
+  to coordinate debounce windows across processes. Default unset / `"memory"`
+  preserves the in-memory `DebounceCoordinator` fast path with zero overhead.
+- Storage model: one shared document per `(workflowName, debounceKey)`
+  bucket holding `{mode, delayMs, maxDelayMs?, maxDelayDeadline?,
+  firstPingAt, lastPingAt, pingCount, activeRunId, ownerProcessId,
+  ownerLeaseExpiresAt, scheduledAt}`. Atomicity via Lua (Redis —
+  single round-trip, no OCC retry loop) or revision-based CAS
+  (NATS KV — bounded 10-retry loop, over-coalesce on exhaustion).
+- Protocol: each ping calls `backend.registerPing()` → one of three
+  outcomes:
+  - **owner-new**: fresh window OR owner-lease expired handoff. Caller
+    is the new owner; starts a local timer to fire at `scheduledAt`.
+  - **owner-extend**: caller IS the existing owner; refresh lease +
+    scheduledAt; replace local timer + closure.
+  - **coalesce**: another process owns the window; this ping just
+    bumps `pingCount` + pushes `scheduledAt`. Caller marks the run
+    `debounced` with `intoRunId = activeRunId`.
+- Owner-death recovery: `ownerLeaseExpiresAt` bounds how long a dead
+  owner blocks ownership. Next ping after the lease expires takes
+  over. Janitor sweep purges expired buckets.
+- Local timer fire: owner calls `backend.finalize()` → atomic
+  `{fire, reschedule, abandoned}`. Coalesce pings from other
+  processes pushing `scheduledAt` forward trigger reschedule;
+  lease-handoff while the timer was pending triggers abandon.
+- **Owner-local payload semantic** (the cross-process trade-off):
+  only the owning process's captured `onFire` closure fires. Coalesce
+  pings on other processes write to the shared doc but their
+  payloads are dropped — cross-process latest-payload-wins is a
+  deferred follow-up that would require persisting each ping's
+  payload to the shared doc (subject to a size cap mirroring
+  `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`).
+- Env vars: `BLOK_DEBOUNCE_BACKEND`, `BLOK_DEBOUNCE_OWNER_LEASE_MS`
+  (default 60s), `BLOK_DEBOUNCE_NATS_*` (servers/token/user/pass + bucket
+  `BLOK_DEBOUNCE_NATS_KV_BUCKET`, FW-5 production refusal on default
+  `"blok-debounce"`), `BLOK_DEBOUNCE_REDIS_*` (URL or discrete host/
+  port/credentials + `BLOK_DEBOUNCE_REDIS_KEY_PREFIX`, FW-5 production
+  refusal on default `"blok-debounce"`).
+- Wired in: `HttpTrigger.listen()` and `WorkerTrigger.listen()` call
+  `createDebounceBackend()` + `DebounceCoordinator.getInstance().setBackend()`
+  on boot. Connect errors log + fall back to in-memory windows.
+- Backend failure mode: `registerPing` errors → fail-open (admit the
+  ping via local-in-memory window) rather than dropping it. Debounce
+  is not a safety gate; over-coalesce is preferable to a missed run.
+
 **Not yet shipped**:
-- Cross-process debounce keys (NATS KV / Redis).
 - Long delays (>24h) — recommend cron trigger + external scheduler
   for those use cases.
 - `mode: "throttle"` (rate-cap, fire every N ms regardless of pings).
 - Dispatch-time payload merging (each ping CONTRIBUTES to the final
   payload, not just OVERWRITES). v1 ships "latest wins".
+- Cross-process latest-payload-wins (payload-persisted variant of
+  Tier C #1 above).
 
 **Kill-switch**: `BLOK_SCHEDULING_DISABLED=1` short-circuits all
 gates → runs proceed synchronously even if configured with delay/
