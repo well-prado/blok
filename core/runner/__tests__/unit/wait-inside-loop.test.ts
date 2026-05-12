@@ -171,6 +171,7 @@ describe("v0.6 Phase 3 · Loop with wait inside iteration body", () => {
 		const loopRun = nodeRuns.find((n) => n.iterationContext !== undefined);
 		expect(loopRun).toBeDefined();
 		expect(loopRun?.iterationContext).toEqual({
+			mode: "sequential",
 			iteration: 0,
 			innerStepIndex: 1, // wait is at index 1; advance is at index 0
 			completedResults: [], // Loop doesn't aggregate results

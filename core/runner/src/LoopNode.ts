@@ -22,6 +22,14 @@ import type { Context, ResponseContext } from "@blokjs/shared";
 import _ from "lodash";
 import { LoopMaxIterationsError } from "./LoopMaxIterationsError";
 import RunnerNode from "./RunnerNode";
+import {
+	type PrimitiveStackFrame,
+	consumeRehydratedCursor,
+	popPrimitiveFrame,
+	pushPrimitiveFrame,
+	readRehydratedCursor,
+} from "./runtime/PrimitiveStack";
+import type { SequentialIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 interface LoopOpts {
@@ -94,14 +102,23 @@ export class LoopNode extends RunnerNode {
 			return response;
 		}
 
-		// v0.6 Phase 3 — read the resume hint that TriggerBase rehydrated
-		// from the persisted `iteration_context` column. Cleared after
-		// reading so a sibling loop later in the workflow doesn't
-		// accidentally pick it up.
+		// v0.6 — read the resume hint. Phase 4 — cursors are keyed by
+		// NodeRun id in the rehydrated map so a loop nested inside
+		// another primitive (or vice versa) finds its OWN cursor.
+		// Falls back to the legacy single-slot field for back-compat.
 		const ctxAny = ctx as Record<string, unknown>;
-		const resume = ctxAny._blokIterationResume as LoopResume | undefined;
-		if (resume !== undefined) {
-			ctxAny._blokIterationResume = undefined;
+		const myNodeRunId = ctxAny._traceNodeId as string | undefined;
+		// Phase 4 — lookup by step NAME (stable across re-entries).
+		let resume: LoopResume | undefined = readRehydratedCursor(ctx, this.name) as LoopResume | undefined;
+		if (resume) {
+			consumeRehydratedCursor(ctx, this.name);
+		}
+		if (resume === undefined) {
+			const legacyResume = ctxAny._blokIterationResume as LoopResume | undefined;
+			if (legacyResume !== undefined) {
+				resume = legacyResume;
+				ctxAny._blokIterationResume = undefined;
+			}
 		}
 
 		const { default: Runner } = await import("./Runner");
@@ -111,77 +128,94 @@ export class LoopNode extends RunnerNode {
 		let iteration = resume?.iteration ?? 0;
 		let lastData: unknown = null;
 
-		while (true) {
-			state[counterKey] = iteration;
+		// v0.6 Phase 4 — push a primitive frame for THIS loop so a
+		// nested wait persists THIS loop's iteration cursor to THIS
+		// loop's NodeRun (and outer primitives' cursors to THEIRS).
+		// Loop returns the LAST iteration's output, so `completedResults`
+		// is always `[]` — preserved at schema level for parity with
+		// forEach.
+		const initialCursor: SequentialIterationContext = {
+			mode: "sequential",
+			iteration: 0,
+			innerStepIndex: 0,
+			completedResults: [],
+		};
+		const frame: PrimitiveStackFrame | undefined = myNodeRunId
+			? { nodeRunId: myNodeRunId, cursor: initialCursor }
+			: undefined;
+		if (frame) pushPrimitiveFrame(ctx, frame);
 
-			// v0.6 Phase 3 — on the first iteration after a wait-resume,
-			// skip the while-condition check. The condition was already
-			// TRUE when the wait fired (otherwise iter N wouldn't have
-			// started), and we've committed to finishing iter N's body
-			// — re-evaluating now would compare against post-iter-N state
-			// (e.g. a counter advanced by the pre-wait steps) and could
-			// falsely terminate the loop. Subsequent iterations re-check
-			// normally.
-			const isFirstIterationAfterResume = resume !== undefined && iteration === resume.iteration;
-			if (!isFirstIterationAfterResume) {
-				// Re-clone config each iteration so mapper-resolved values from
-				// prior iterations don't bleed into the next condition eval.
-				const evalCtx = { ...ctx, config: _.cloneDeep(ctx.config) } as Context;
-				const shouldContinue = this.evaluateCondition(whileExpr, evalCtx);
-				if (!shouldContinue) break;
+		try {
+			while (true) {
+				state[counterKey] = iteration;
+
+				// v0.6 Phase 3 — on the first iteration after a wait-resume,
+				// skip the while-condition check. The condition was already
+				// TRUE when the wait fired (otherwise iter N wouldn't have
+				// started), and we've committed to finishing iter N's body
+				// — re-evaluating now would compare against post-iter-N
+				// state (e.g. a counter advanced by the pre-wait steps) and
+				// could falsely terminate the loop. Subsequent iterations
+				// re-check normally.
+				const isFirstIterationAfterResume = resume !== undefined && iteration === resume.iteration;
+				if (!isFirstIterationAfterResume) {
+					// Re-clone config each iteration so mapper-resolved
+					// values from prior iterations don't bleed into the
+					// next condition eval.
+					const evalCtx = { ...ctx, config: _.cloneDeep(ctx.config) } as Context;
+					const shouldContinue = this.evaluateCondition(whileExpr, evalCtx);
+					if (!shouldContinue) break;
+				}
+
+				if (iteration >= maxIterations) {
+					throw new LoopMaxIterationsError(this.name, maxIterations, iteration);
+				}
+
+				// v0.6 Phase 4 — update the frame cursor before launching
+				// the iteration body. The wait-throw site walks the stack
+				// and writes the cursor; the TOP frame is THIS loop's,
+				// so we need `iteration` to point at the in-flight pass.
+				if (frame) {
+					(frame.cursor as SequentialIterationContext).iteration = iteration;
+				}
+
+				const childCtx = this.cloneCtxForIteration(ctx);
+				// v0.5.3 — stash iteration index on the per-iteration
+				// child ctx so RunnerSteps propagates it to
+				// NodeRun.iterationIndex (Studio groups inner steps under
+				// "iteration N" headers).
+				(childCtx as Record<string, unknown>)._blokIterationIndex = iteration;
+				// v0.6 Phase 3 — pass the inner-step resume cursor on the
+				// child ctx for the first iteration after resume.
+				// Phase 4 — propagate the index-0 case so the deep
+				// runSteps' wait re-entry detection sees innerResumeIndex
+				// defined even when the wait is at body[0].
+				if (isFirstIterationAfterResume && resume !== undefined) {
+					(childCtx as Record<string, unknown>)._blokInnerResumeIndex = resume.innerStepIndex;
+				}
+				const runner = new Runner(steps);
+				// `deep: true` — inner pipelines must not inherit the
+				// outer run's `lastCompletedStepIndex` cursor.
+				await runner.run(childCtx, { deep: true, stepName: this.name });
+				// Carry state forward into the parent ctx so subsequent
+				// iterations see updates.
+				const childState = (childCtx.state ?? {}) as Record<string, unknown>;
+				for (const [k, v] of Object.entries(childState)) {
+					state[k] = v;
+				}
+				lastData = childCtx.response;
+				iteration++;
 			}
 
-			if (iteration >= maxIterations) {
-				throw new LoopMaxIterationsError(this.name, maxIterations, iteration);
-			}
-
-			// v0.6 Phase 3 — stamp iteration sentinel on the PARENT ctx
-			// so RunnerSteps' nested wait-throw site can read it via the
-			// child-ctx spread. LoopNode does NOT stamp
-			// `_blokForEachPartialResults`: Loop doesn't accumulate a
-			// results array, and the RunnerSteps cursor write defaults
-			// `partialResults` to `[]` when the sentinel is absent.
-			ctxAny._blokForEachCurrentIteration = iteration;
-
-			const childCtx = this.cloneCtxForIteration(ctx);
-			// v0.5.3 — stash iteration index on the per-iteration child ctx
-			// so RunnerSteps can propagate it to NodeRun.iterationIndex.
-			// Studio's StepRail uses this to group inner steps under
-			// "iteration N" headers instead of rendering them flat. Set
-			// here (not in cloneCtxForIteration) so the helper signature
-			// stays parameter-free.
-			(childCtx as Record<string, unknown>)._blokIterationIndex = iteration;
-			// v0.6 Phase 3 — pass the inner-step resume cursor on the
-			// child ctx for the first iteration after resume. Subsequent
-			// iterations run from step 0 normally.
-			if (isFirstIterationAfterResume && resume.innerStepIndex > 0) {
-				(childCtx as Record<string, unknown>)._blokInnerResumeIndex = resume.innerStepIndex;
-			}
-			const runner = new Runner(steps);
-			// `deep: true` — inner pipelines must not inherit the outer
-			// run's `lastCompletedStepIndex` cursor (PR 4 wait/resume).
-			await runner.run(childCtx, { deep: true, stepName: this.name });
-			// After Runner.runSteps, childCtx.response is the last step's
-			// resolved data (RunnerSteps line ~349). Use it as the
-			// iteration's output value.
-			// Carry state forward into the parent ctx so subsequent
-			// iterations see updates from this iteration's body.
-			const childState = (childCtx.state ?? {}) as Record<string, unknown>;
-			for (const [k, v] of Object.entries(childState)) {
-				state[k] = v;
-			}
-			lastData = childCtx.response;
-			iteration++;
+			response.data = lastData;
+			// Persist to ctx.state[this.name] (see ForEachNode comment).
+			applyStepOutput(ctx, this, { data: lastData });
+			return response;
+		} finally {
+			// v0.6 Phase 4 — always pop so sibling loops / outer
+			// runSteps see a clean stack, including on wait re-throw.
+			if (frame) popPrimitiveFrame(ctx);
 		}
-
-		// Cleanup sentinel — sibling loop later in the workflow shouldn't
-		// see this one's pointer.
-		ctxAny._blokForEachCurrentIteration = undefined;
-
-		response.data = lastData;
-		// Persist to ctx.state[this.name] (see ForEachNode comment).
-		applyStepOutput(ctx, this, { data: lastData });
-		return response;
 	}
 
 	private evaluateCondition(expr: string, ctx: Context): unknown {

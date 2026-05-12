@@ -54,6 +54,17 @@ import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import type { Hono } from "hono";
 import type { WSContext } from "hono/ws";
 import { v4 as uuid } from "uuid";
+import {
+	type BackplaneAdapter,
+	type BackplaneConfig,
+	type BroadcastEnvelope,
+	DEFAULT_BACKPLANE_TOPIC,
+	createBackplaneAdapter,
+	decodePayload,
+	encodeEnvelope,
+	newSenderId,
+	resolveBackplaneConfig,
+} from "./Backplane";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -152,6 +163,22 @@ export default class WebSocketTrigger extends TriggerBase {
 	private wired = false;
 
 	/**
+	 * v0.7 follow-up — cross-process broadcast backplane. When
+	 * configured (env var `BLOK_WS_BACKPLANE=<provider>` or constructor
+	 * option), `broadcastToRoom` ALSO publishes the message envelope to
+	 * a pub/sub topic. Every WS worker in the cluster subscribes to
+	 * the same topic and re-runs the local fan-out, so a message sent
+	 * from process A reaches connections owned by process B.
+	 *
+	 * Disabled by default — `backplaneAdapter === null` short-circuits
+	 * the publish path and keeps single-process zero-overhead behaviour.
+	 */
+	private backplaneConfig: BackplaneConfig | null = null;
+	private backplaneAdapter: BackplaneAdapter | null = null;
+	/** Stable per-process id; used to skip self-publishes on the subscribe handler. */
+	private readonly senderId: string = newSenderId();
+
+	/**
 	 * @param app          Shared Hono app. Constructed by an orchestrator
 	 *                     or by HttpTrigger; WS routes are registered on
 	 *                     the same instance so HTTP + WS multiplex on one
@@ -163,15 +190,19 @@ export default class WebSocketTrigger extends TriggerBase {
 	 *                     attaches without the caller having to wire it.
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: matches `app` field's any generic
-	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike) {
+	constructor(app: Hono<any, any, any>, httpTrigger?: HttpTriggerLike, backplane?: BackplaneConfig) {
 		super();
 		this.app = app;
 		this.httpTrigger = httpTrigger ?? null;
+		// v0.7 follow-up — resolve the cross-process broadcast backplane
+		// config from constructor arg → `BLOK_WS_BACKPLANE` env var →
+		// disabled. Adapter itself is connected lazily in `listen()` so
+		// construction stays cheap and tests that never call listen()
+		// don't open broker connections.
+		this.backplaneConfig = resolveBackplaneConfig(backplane);
 		// Register as the active trigger so helper nodes
 		// (@blokjs/ws-broadcast, @blokjs/ws-close) can look up the
-		// trigger via the singleton accessor. Single-instance only
-		// (the v0.7 scope is single-process; cross-process broadcast
-		// is deferred per the spec).
+		// trigger via the singleton accessor.
 		_setActiveWebSocketTrigger(this);
 	}
 
@@ -224,6 +255,35 @@ export default class WebSocketTrigger extends TriggerBase {
 		this.startHeartbeat();
 		this.wired = true;
 
+		// v0.7 follow-up — connect the cross-process broadcast backplane
+		// when configured. Lazy-imports the pub/sub trigger so workflows
+		// that don't use the backplane don't pull in broker SDKs. On
+		// connect failure (broker unreachable, missing peer dep), log
+		// but DON'T fail listen() — the trigger still serves single-
+		// process broadcasts; only the cross-process fan-out is lost.
+		if (this.backplaneConfig) {
+			try {
+				this.backplaneAdapter = await createBackplaneAdapter(this.backplaneConfig);
+				await this.backplaneAdapter.connect();
+				const topic = this.backplaneConfig.topic ?? DEFAULT_BACKPLANE_TOPIC;
+				await this.backplaneAdapter.subscribe(
+					{ topic, consumerGroup: this.backplaneConfig.consumerGroup },
+					async (msg) => {
+						this.onBackplaneMessage(msg.body);
+					},
+				);
+				this.logger.log(
+					`[blok][ws] backplane connected (provider=${this.backplaneConfig.provider}, topic=${topic}, senderId=${this.senderId})`,
+				);
+			} catch (err) {
+				const m = err instanceof Error ? err.message : String(err);
+				this.logger.error(
+					`[blok][ws] backplane connect failed: ${m}. Cross-process broadcasts disabled; local fan-out still works.`,
+				);
+				this.backplaneAdapter = null;
+			}
+		}
+
 		// Coordinate with HttpTrigger:
 		//   1. HttpTrigger.listen() scans workflows + populates WorkflowRegistry.
 		//   2. HttpTrigger fires preCatchAllHooks — we walk the registry and
@@ -270,6 +330,17 @@ export default class WebSocketTrigger extends TriggerBase {
 
 	async stop(): Promise<void> {
 		this.stopHeartbeat();
+		// v0.7 follow-up — disconnect the backplane. Best-effort; a
+		// failure here shouldn't block shutdown.
+		if (this.backplaneAdapter) {
+			try {
+				await this.backplaneAdapter.disconnect();
+			} catch (err) {
+				const m = err instanceof Error ? err.message : String(err);
+				this.logger.error(`[blok][ws] backplane disconnect failed: ${m}`);
+			}
+			this.backplaneAdapter = null;
+		}
 		// Close all open connections with a "going away" code.
 		for (const conn of this.connections.values()) {
 			try {
@@ -289,6 +360,35 @@ export default class WebSocketTrigger extends TriggerBase {
 		}
 		this.destroyMonitoring();
 		this.logger.log("[blok][ws] stopped");
+	}
+
+	/**
+	 * v0.7 follow-up — handle an envelope received from the backplane.
+	 * Runs a LOCAL fan-out (skipping the senderId, since that's us).
+	 * Does NOT re-publish — that would echo infinitely. Skips
+	 * gracefully when the envelope shape doesn't validate (best-effort
+	 * cross-version compat).
+	 */
+	private onBackplaneMessage(body: unknown): void {
+		if (!body || typeof body !== "object") return;
+		const env = body as BroadcastEnvelope;
+		if (!env.senderId || !env.roomKey || !env.payload) return;
+		// Skip self-publishes — local fan-out already happened on the
+		// publishing side.
+		if (env.senderId === this.senderId) return;
+		const set = this.rooms.get(env.roomKey);
+		if (!set) return;
+		const data = decodePayload(env);
+		for (const cid of set) {
+			if (env.exceptConnectionId && cid === env.exceptConnectionId) continue;
+			const conn = this.connections.get(cid);
+			if (!conn) continue;
+			try {
+				conn.ws.send(data as Parameters<typeof conn.ws.send>[0]);
+			} catch {
+				/* skip dead sockets */
+			}
+		}
 	}
 
 	// ---------------------------------------------------------------------------
@@ -663,21 +763,38 @@ export default class WebSocketTrigger extends TriggerBase {
 	}): number {
 		const fullName = `${opts.workflowName}:${opts.room}`;
 		const set = this.rooms.get(fullName);
-		if (!set) return 0;
 		let count = 0;
-		for (const cid of set) {
-			if (opts.exceptConnectionId && cid === opts.exceptConnectionId) continue;
-			const conn = this.connections.get(cid);
-			if (!conn) continue;
-			try {
-				// Same Uint8Array<ArrayBufferLike> → Uint8Array<ArrayBuffer>
-				// narrowing as the per-connection `send` above. Safe at runtime.
-				conn.ws.send(opts.data as Parameters<typeof conn.ws.send>[0]);
-				count++;
-			} catch {
-				/* skip dead sockets */
+		if (set) {
+			for (const cid of set) {
+				if (opts.exceptConnectionId && cid === opts.exceptConnectionId) continue;
+				const conn = this.connections.get(cid);
+				if (!conn) continue;
+				try {
+					// Same Uint8Array<ArrayBufferLike> → Uint8Array<ArrayBuffer>
+					// narrowing as the per-connection `send` above. Safe at runtime.
+					conn.ws.send(opts.data as Parameters<typeof conn.ws.send>[0]);
+					count++;
+				} catch {
+					/* skip dead sockets */
+				}
 			}
 		}
+
+		// v0.7 follow-up — also publish to the cross-process backplane
+		// so peer WS workers can fan out to their local connections in
+		// the same room. The publish path runs even when the local set
+		// was empty — there may be remote connections in this room.
+		// Fire-and-forget (broker publishes are async); failures are
+		// logged but don't break the local broadcast count.
+		if (this.backplaneAdapter && this.backplaneConfig) {
+			const envelope = encodeEnvelope(this.senderId, fullName, opts.data, opts.exceptConnectionId);
+			const topic = this.backplaneConfig.topic ?? DEFAULT_BACKPLANE_TOPIC;
+			void this.backplaneAdapter.publish(topic, envelope).catch((err: unknown) => {
+				const m = err instanceof Error ? err.message : String(err);
+				this.logger.error(`[blok][ws] backplane publish failed: ${m}`);
+			});
+		}
+
 		return count;
 	}
 

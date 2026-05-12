@@ -148,6 +148,7 @@ describe("v0.6 Phase 2 · sequential forEach with wait inside iteration body", (
 		const forEachRun = nodeRuns.find((n) => n.iterationContext !== undefined);
 		expect(forEachRun).toBeDefined();
 		expect(forEachRun?.iterationContext).toEqual({
+			mode: "sequential",
 			iteration: 0,
 			innerStepIndex: 1, // wait is at index 1; record is at index 0
 			completedResults: [],

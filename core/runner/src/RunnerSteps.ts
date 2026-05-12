@@ -3,6 +3,7 @@ import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
+import { getPrimitiveStack } from "./runtime/PrimitiveStack";
 import { StepTimeoutError } from "./timeouts/StepTimeoutError";
 import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";
@@ -205,6 +206,20 @@ export default abstract class RunnerSteps {
 					throw new RunCancelledError(traceRunId);
 				}
 
+				// v0.6 Phase 4 — bump the TOP primitive frame's
+				// `innerStepIndex` to the current step. If a wait fires from
+				// inside this step (or anywhere deeper down the call stack),
+				// the wait-throw site walks the stack to persist each frame
+				// and needs the TOP frame's cursor to point at THIS step.
+				// `deep === true` is the only case where this can apply —
+				// the top-level runSteps doesn't have a frame.
+				if (deep) {
+					const stack = getPrimitiveStack(ctx);
+					if (stack.length > 0) {
+						stack[stack.length - 1].cursor.innerStepIndex = i;
+					}
+				}
+
 				if (!step.active) {
 					// Track skipped nodes
 					if (tracker && traceRunId) {
@@ -339,10 +354,22 @@ export default abstract class RunnerSteps {
 						// scheduledAt (or it's from trigger-level delay); on
 						// re-entry from a wait dispatch, the run was marked
 						// `delayed` with scheduledAt set to the wait deadline.
+						//
+						// v0.6 Phase 4 — for deep (nested) runSteps, a primitive
+						// (SwitchNode etc.) sets `_blokInnerResumeIndex` to the
+						// resume target — including `0` when the wait is at the
+						// first step of its sub-pipeline. The original
+						// `resumeFromIndex > 0` guard prevented re-entry from
+						// firing at index 0, but Phase 4 needs the index-0 case
+						// (e.g., switch arm whose first step is the wait). For
+						// deep runs we additionally require `innerResumeIndex`
+						// to be defined — that's how we tell "this primitive
+						// resumed here" vs "we're at index 0 because of a fresh
+						// iteration that doesn't have a resume cursor".
 						const isReentry =
 							(ctx as Record<string, unknown>)._blokDispatchReentry === true &&
-							resumeFromIndex > 0 &&
-							i === resumeFromIndex;
+							i === resumeFromIndex &&
+							(!deep ? resumeFromIndex > 0 : innerResumeIndex !== undefined);
 
 						const deadline = computeDeadline();
 						const now = Date.now();
@@ -432,19 +459,40 @@ export default abstract class RunnerSteps {
 							//     output), so it doesn't stamp this sentinel —
 							//     the cursor stores `completedResults: []` and
 							//     LoopNode ignores the field on resume.
+							// v0.6 Phase 4 — walk the primitive stack and persist
+							// each frame's cursor to its NodeRun. The TOP frame's
+							// `innerStepIndex` is the wait step's position within
+							// the deepest primitive's sub-pipeline; outer frames'
+							// `innerStepIndex` values were set by their enclosing
+							// runSteps' step-boundary write when control passed
+							// into the deeper primitive. This is what lets
+							// `forEach > forEach > wait`,
+							// `switch > forEach > wait`, etc. all resume
+							// correctly on re-entry.
+							//
+							// Each frame's `cursor` is owned by the primitive
+							// (it stamps `iteration`/`caseIndex`/`completedResults`).
+							// The runner's only responsibility here is to refresh
+							// the TOP frame's `innerStepIndex` to `i` and
+							// persist every frame.
 							if (deep) {
-								const ctxAny = ctx as Record<string, unknown>;
-								const primitiveNodeRunId = ctxAny._blokActivePrimitiveNodeRunId as string | undefined;
-								const currentIteration = ctxAny._blokForEachCurrentIteration as number | undefined;
-								const partialResults = ctxAny._blokForEachPartialResults as unknown[] | undefined;
-								if (primitiveNodeRunId && currentIteration !== undefined) {
-									tracker.getStore().updateNodeRun(primitiveNodeRunId, {
-										iterationContext: {
-											iteration: currentIteration,
-											innerStepIndex: i,
-											completedResults: partialResults ?? [],
-										},
-									});
+								const stack = getPrimitiveStack(ctx);
+								if (stack.length > 0) {
+									stack[stack.length - 1].cursor.innerStepIndex = i;
+									for (const frame of stack) {
+										// Skip parallel-forEach frames — the
+										// parallel branch in ForEachNode writes
+										// its own cursor (with cancelled set +
+										// completedResults) post-`Promise.allSettled`.
+										// Writing the placeholder here would let
+										// "error beats wait" classifications leak
+										// a parallel cursor onto the failed
+										// run's NodeRun.
+										if (frame.cursor.mode === "parallel") continue;
+										tracker.getStore().updateNodeRun(frame.nodeRunId, {
+											iterationContext: frame.cursor,
+										});
+									}
 								}
 							}
 						}
@@ -511,24 +559,17 @@ export default abstract class RunnerSteps {
 					const maxDurationMs = (step as NodeBase).maxDurationMs;
 					let attempt = 0;
 
-					// v0.6 wait-inside-primitives Phase 2 — stamp the active
-					// primitive iterator's NodeRun id on ctx so a nested wait
-					// firing INSIDE this primitive's body can persist its
-					// iteration_context to the right NodeRun (the forEach,
-					// not the inner wait step). Restored in the finally below
-					// so sibling steps don't see a stale pointer.
-					//
-					// Detection: primitive iterators set a static
-					// `isPrimitiveIterator: true` marker. Avoids importing
-					// ForEachNode here (would create a circular dep with the
-					// runner). Currently only ForEachNode sets the flag;
-					// LoopNode + parallel forEach pick it up in Phase 3.
+					// v0.6 Phase 4 — the primitive stack on ctx is owned by
+					// ForEachNode/LoopNode/SwitchNode (push on entry, pop in
+					// finally). The Phase 2/3 single-slot
+					// `_blokActivePrimitiveNodeRunId` mechanism is gone —
+					// nested primitives each register their own frame, and
+					// the wait-throw site walks the full stack. We keep
+					// `isIteratingPrimitive` only as a hook for legacy
+					// readers (none in core today) — wait-cursor writes no
+					// longer depend on it.
 					const isIteratingPrimitive =
 						(step as unknown as { isPrimitiveIterator?: boolean }).isPrimitiveIterator === true;
-					const previousActivePrimitive = (ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId;
-					if (isIteratingPrimitive && nodeRunId) {
-						(ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId = nodeRunId;
-					}
 
 					try {
 						while (true) {
@@ -673,13 +714,13 @@ export default abstract class RunnerSteps {
 							}
 						}
 					} finally {
-						// Restore the active-primitive sentinel even on throw,
-						// so a sibling step with its own primitive doesn't see
-						// a stale pointer. (Two sequential forEachs in the same
-						// workflow would otherwise cross-contaminate.)
-						if (isIteratingPrimitive) {
-							(ctx as Record<string, unknown>)._blokActivePrimitiveNodeRunId = previousActivePrimitive;
-						}
+						// v0.6 Phase 4 — primitives own their stack frame
+						// lifecycle now (push on entry, pop in finally), so
+						// there's nothing to restore here. The
+						// `isIteratingPrimitive` flag stays in the type
+						// system for documentation but no longer drives
+						// cursor accounting.
+						void isIteratingPrimitive;
 					}
 				} else {
 					stepName = step.name;

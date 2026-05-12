@@ -466,12 +466,18 @@
         "@aws-sdk/client-sqs": "^3.980.0",
         "@azure/service-bus": "^7.9.5",
         "@google-cloud/pubsub": "^5.0.0",
+        "ioredis": "^5.9.2",
+        "kafkajs": "^2.2.0",
+        "nats": "^2.29.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sns",
         "@aws-sdk/client-sqs",
         "@azure/service-bus",
         "@google-cloud/pubsub",
+        "ioredis",
+        "kafkajs",
+        "nats",
       ],
     },
     "triggers/sse": {
@@ -532,9 +538,11 @@
         "ws": "^8.19.0",
       },
       "peerDependencies": {
+        "@blokjs/trigger-pubsub": "^0.2.3",
         "ws": "^8.19.0",
       },
       "optionalPeers": [
+        "@blokjs/trigger-pubsub",
         "ws",
       ],
     },

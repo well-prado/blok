@@ -27,6 +27,7 @@ import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
 import { type NormalizedSchedulingConfig, readSchedulingConfig } from "./scheduling/readSchedulingConfig";
 import { RunTracker } from "./tracing/RunTracker";
 import { TracingLogger } from "./tracing/TracingLogger";
+import type { IterationContext } from "./tracing/types";
 import type GlobalOptions from "./types/GlobalOptions";
 import type TriggerResponse from "./types/TriggerResponse";
 import { getEnvForCtx } from "./utils/envAllowlist";
@@ -642,50 +643,53 @@ export default abstract class TriggerBase extends Trigger {
 					}
 				}
 
-				// v0.6 wait-inside-primitives Phase 2 — rehydrate the
-				// active primitive iterator's iteration cursor. When a
-				// wait fired from inside a `forEach` iteration, the
-				// persisted NodeRun for that forEach has
-				// `iteration_context` set with `{iteration, innerStepIndex,
-				// completedResults}`. ForEachNode reads this from
-				// `ctx._blokIterationResume` on its next run() to skip
-				// pre-wait iterations + resume mid-iteration at the right
-				// inner step.
-				//
-				// Lookup: scan the run's NodeRuns for any with
-				// `iterationContext` set. Phase 2 only supports ONE active
-				// primitive at a time (sequential forEach, no nested
-				// primitives), so the most-recent match is unambiguous.
-				// Phase 4 (nested primitives) will switch to a path-keyed
-				// lookup tracking the call-stack depth.
+				// v0.6 wait-inside-primitives — rehydrate every NodeRun's
+				// `iteration_context` into a Map keyed by step NAME
+				// (not NodeRun id) so each primitive's run() can look
+				// itself up across defer/resume cycles. NodeRun ids
+				// CHANGE on every dispatchDeferred re-entry (tracker
+				// creates a fresh NodeRun per pass), but step names are
+				// stable across the run. Phase 4 — multiple primitives'
+				// cursors coexist (e.g. forEach > forEach > wait), one
+				// entry per primitive name. When two NodeRuns share a
+				// name (the rare case of two siblings at the same depth
+				// with the same step id), the LATEST wins via the
+				// startedAt-with-insertion-order tiebreak.
 				try {
-					// v0.6 Phase 3 — when consecutive defer/resume cycles
-					// fire within the same millisecond (sub-second wait
-					// deadlines, or test fixtures advancing simulated time),
-					// multiple NodeRuns can share the same `startedAt` value
-					// (`Date.now()` ms resolution). Use array insertion order
-					// as a stable secondary key — `getNodeRuns` returns
-					// records in creation order, and the LATEST cursor write
-					// is from the most-recently-created NodeRun. Without the
-					// secondary key, a tied-`startedAt` sort could pick the
-					// older cursor and the resumed run starts at the wrong
-					// iteration.
 					const nodeRuns = tracker.getStore().getNodeRuns(traceRunId);
-					const activeWithCursor = nodeRuns
+					const sortedDesc = nodeRuns
 						.map((n, idx) => ({ n, idx }))
 						.filter(({ n }) => n.iterationContext !== undefined)
 						.sort((a, b) => {
 							const dt = b.n.startedAt - a.n.startedAt;
 							return dt !== 0 ? dt : b.idx - a.idx;
-						})[0]?.n;
-					if (activeWithCursor?.iterationContext) {
-						(ctx as Record<string, unknown>)._blokIterationResume = activeWithCursor.iterationContext;
+						});
+					const cursorMap = new Map<string, IterationContext>();
+					for (const { n } of sortedDesc) {
+						if (n.iterationContext === undefined) continue;
+						// First write per name wins because sortedDesc is
+						// latest-first; this gives each primitive its most
+						// recent cursor.
+						if (!cursorMap.has(n.nodeName)) {
+							cursorMap.set(n.nodeName, n.iterationContext);
+						}
+					}
+					if (cursorMap.size > 0) {
+						(ctx as Record<string, unknown>)._blokIterationCursors = cursorMap;
+					}
+
+					// Back-compat `_blokIterationResume` (single-slot)
+					// keeps legacy callers working. Populated from the
+					// most recent cursor across the run.
+					const top = sortedDesc[0]?.n.iterationContext;
+					if (top) {
+						(ctx as Record<string, unknown>)._blokIterationResume = top;
 					}
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					ctx.logger.logLevel(
 						"warn",
-						`[blok][wait] failed to rehydrate iteration_context: ${msg}. forEach will resume from iteration 0.`,
+						`[blok][wait] failed to rehydrate iteration_context: ${msg}. primitives will resume from iteration 0.`,
 					);
 				}
 			}

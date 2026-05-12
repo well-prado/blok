@@ -22,9 +22,13 @@
 		"uuid": "^11.1.0"
 	},
 	"peerDependencies": {
+		"@blokjs/trigger-pubsub": "^0.2.3",
 		"ws": "^8.19.0"
 	},
 	"peerDependenciesMeta": {
+		"@blokjs/trigger-pubsub": {
+			"optional": true
+		},
 		"ws": {
 			"optional": true
 		}
