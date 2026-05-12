@@ -92,7 +92,7 @@ describe("LSP Constants", () => {
 			expect(FIELD_DOCS).toHaveProperty("nodes");
 			expect(FIELD_DOCS).toHaveProperty("inputs");
 			expect(FIELD_DOCS).toHaveProperty("conditions");
-			expect(FIELD_DOCS).toHaveProperty("set_var");
+			expect(FIELD_DOCS).toHaveProperty("ephemeral");
 		});
 	});
 

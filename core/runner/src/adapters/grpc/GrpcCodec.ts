@@ -411,8 +411,8 @@ function decodeMetrics(metrics: MetricsProto | null): DecodedMetrics {
  * Pull resolved node inputs from `ctx.config[nodeName].inputs` (the shape
  * established by the Blueprint Mapper) and return them as a plain object.
  *
- * Falls back to `ctx.response.data` when no resolved inputs exist (matches
- * the legacy zero-config-chaining behavior of `HttpRuntimeAdapter`).
+ * Falls back to `ctx.response.data` when no resolved inputs exist
+ * (zero-config-chaining behaviour preserved from earlier runner versions).
  */
 function extractResolvedInputs(ctx: Context, nodeName: string): unknown {
 	const nodeConfig = ctx.config

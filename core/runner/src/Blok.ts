@@ -140,8 +140,7 @@ export default abstract class BlokService<T> extends NodeBase {
 
 		// V2 persistence — runner-owned, declarative.
 		// `ephemeral` skips, `spread` merges, `as` renames, default stores
-		// at state[name]. Legacy `set_var: false` maps to ephemeral; legacy
-		// `set_var: true` is a no-op (default already persists).
+		// at state[name].
 		// Pass through the full IBlokResponse so the helper's error guard
 		// (`success: false` / non-null `error`) skips state persistence on
 		// the failure path — see PersistenceHelper.isErroredResult.

@@ -182,8 +182,8 @@ describe("WorkflowHoverProvider", () => {
 			}
 		});
 
-		it("should show hover for set_var key", () => {
-			const content = '  "set_var": true';
+		it("should show hover for ephemeral key", () => {
+			const content = '  "ephemeral": true';
 			const doc = createMockDocument(content);
 			const pos = new vscode.Position(0, 6);
 			const hover = provider.provideHover(doc, pos, {} as vscode.CancellationToken);
@@ -191,7 +191,7 @@ describe("WorkflowHoverProvider", () => {
 			expect(hover).not.toBeNull();
 			if (hover) {
 				const md = (hover as vscode.Hover).contents as vscode.MarkdownString;
-				expect(md.value).toContain("Set Context Variable");
+				expect(md.value).toContain("Skip Persistence");
 			}
 		});
 	});

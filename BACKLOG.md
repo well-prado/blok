@@ -673,7 +673,7 @@ Total backlog at face value: **~3-4 weeks of work** if shipped sequentially. Mos
 
 Things that aren't in any tier but are worth tracking:
 
-- **`set_var` deprecation timeline.** v2 default-stores; `set_var: false` is normalized to `ephemeral: true`. The legacy field can be removed when no v1 workflows remain.
+- **`set_var` deprecation — ✅ REMOVED in v0.5.** `WorkflowNormalizer.assertNoSetVar` rejects the field at load time with a migration hint. `blokctl migrate workflows` converts v1 workflows in bulk.
 - **`@blokjs/runner` 0.4.0 release.** v0.3.x is the gRPC-default release; v0.4.0 should remove HTTP runtime adapter (already deprecated with warning).
 - **Studio dark/light theme toggle.** Currently dark-only. Low priority.
 - **CLI `blokctl trace` improvements.** Currently opens Studio at `/__blok`. Could ship a TUI mode for headless ops.

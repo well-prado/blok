@@ -13,26 +13,22 @@
 		{
 			"name": "query-sales-data",
 			"node": "postgres-query",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "query-user-metrics",
 			"node": "postgres-query",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "query-support-tickets",
 			"node": "postgres-query",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "aggregate-data",
 			"node": "data-transformer",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "route-data-check",
@@ -94,8 +90,7 @@
 						{
 							"name": "generate-report-html",
 							"node": "template-renderer",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "email-report",

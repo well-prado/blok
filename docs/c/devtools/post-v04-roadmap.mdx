@@ -137,18 +137,9 @@ Note: the rest of `core/runner/src/security/` (OAuthOIDCProvider, RBAC, ABAC, Au
 
 **Pre-conditions:** v0.4.1 has been on npm long enough that any user importing AuthMiddleware has seen the deprecation warning. Same window as the routing legacy drop.
 
-#### 3. Drop legacy `set_var` field (candidate, not committed)
+#### 3. Drop legacy `set_var` field — ✅ SHIPPED in v0.5
 
-**Status:** Open question for v0.5.
-
-The v2 step shape default-stores every step's output to `ctx.state[id]`. The legacy `set_var: false` is normalized to `ephemeral: true` at workflow load. Since v2 was the default surface in v0.3, anyone writing new workflows already uses `ephemeral: true`. The `set_var` shim costs nothing at runtime (load-time normalization only).
-
-**Decision criteria for v0.5:**
-
-- **If** there are still v1 JSON workflows actively maintained by the community, keep the shim through v0.5.
-- **If** the v1 surface is effectively dead (no GitHub issues, no npm telemetry showing legacy-shape workflows), drop in v0.5.
-
-**Recommendation:** keep through v0.5, drop in v1.0. The runtime cost is zero; the migration burden of forcing `set_var` removal on top of routing-legacy removal is high.
+**Status:** Removed. `WorkflowNormalizer.assertNoSetVar` walks every step (top-level + nested sub-pipelines) at workflow load and throws with a migration hint if the field is still present: drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. `blokctl migrate workflows` converts v1 workflows in bulk and keeps the conversion logic for users still bridging from v1 — only the **runtime** rejects the field.
 
 #### 4. Drop legacy `name`/`node` v1 step shape (candidate, not committed)
 
@@ -336,13 +327,9 @@ The `documentation/` folder (lowercase, separate from public Mintlify `docs/`) c
 
 Either is ~half day of carefully-staged work. **Recommendation:** decide before v0.5 to avoid shipping more drift.
 
-### `sdks/CLAUDE.md` describes the HTTP contract; gRPC is now default
+### `sdks/CLAUDE.md` describes the gRPC contract — ✅ DONE in v0.5
 
-[sdks/CLAUDE.md](https://github.com/deskree-inc/blok/blob/main/sdks/CLAUDE.md) opens with "All SDKs implement the same HTTP contract. The runner communicates with them via `HttpRuntimeAdapter`." Phase 6 made gRPC the default, with HTTP as opt-in via `RUNTIME_TRANSPORT=http` (deprecated, removed in v0.4.0 per the file-level comment in [`core/runner/src/adapters/HttpRuntimeAdapter.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/adapters/HttpRuntimeAdapter.ts)).
-
-The doc needs updating to (a) describe gRPC as the primary transport, (b) keep HTTP as legacy reference for SDK contributors, (c) link to the proto file.
-
-**Effort:** ~30 minutes.
+`sdks/CLAUDE.md` now opens with the gRPC contract (`blok.runtime.v1.NodeRuntime/Execute`) and lists gRPC ports as canonical. `HttpRuntimeAdapter` was deleted in v0.5 alongside the doc rewrite.
 
 ### `docs/d/operations/env-vars.mdx` claims sqlite default for `BLOK_TRACE_STORE`
 

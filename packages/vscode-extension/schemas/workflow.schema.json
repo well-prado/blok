@@ -134,10 +134,6 @@
 					"type": "object",
 					"description": "Input values for the node"
 				},
-				"set_var": {
-					"type": "boolean",
-					"description": "Whether to store the result in context variables"
-				},
 				"conditions": {
 					"type": "array",
 					"items": {

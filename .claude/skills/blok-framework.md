@@ -674,65 +674,44 @@ inputs: {
 
 **Non-adjacent steps (Step 3 needs Step 1's output):**
 
-For TypeScript workflows, the current `addStep()` builder does NOT support `set_var`. Instead, use one of these patterns:
+v2 default-stores every step's output at `ctx.state[<step-id>]`. Reference it from any later step's inputs as `$.state.<id>` (TS DSL) or `"$.state.<id>"` / `"js/ctx.state.<id>"` (JSON). The legacy `set_var` field was removed in v0.5 — the runner rejects it at workflow load with a migration hint.
 
-**Pattern A: Return what you need from each step (recommended for TS workflows)**
-
-Design your nodes so that each step returns everything the next step needs. If Step 3 needs data from both Step 1 and Step 2, make Step 2 receive Step 1's data and return a merged result.
+**TS DSL example:**
 
 ```typescript
-// Step 2 node (merge-data) receives both sources and returns combined
-export default defineNode({
-  name: "merge-data",
-  description: "Combines user data with order data",
-  input: z.object({
-    userData: z.object({ id: z.string(), name: z.string() }),
-    orderData: z.object({ items: z.array(z.unknown()) }),
-  }),
-  output: z.object({
-    userId: z.string(),
-    userName: z.string(),
-    items: z.array(z.unknown()),
-  }),
-  async execute(ctx, input) {
-    return {
-      userId: input.userData.id,
-      userName: input.userData.name,
-      items: input.orderData.items,
-    };
-  },
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Multi-step pipeline",
+  version: "1.0.0",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    { id: "step-1", use: "fetch-user",   inputs: { id: $.req.body.userId } },
+    { id: "step-2", use: "fetch-orders", inputs: { userId: $.state["step-1"].id } },
+    { id: "step-3", use: "generate-report",
+      inputs: { user: $.state["step-1"], orders: $.state["step-2"] } },
+  ],
 });
 ```
 
-**Pattern B: Use `ctx.vars` directly inside node execute() (for complex cases)**
-
-Nodes have full access to `ctx` in their execute function. A node can read `ctx.vars` directly if previous steps stored data there. However, note that in TS workflows, automatic `set_var` is not available through the builder. Runtime nodes (Go, Rust, Python, etc.) automatically store their output in `ctx.vars[stepName]` — this is built into RuntimeAdapterNode.
-
-**Pattern C: Use JSON workflows when you need `set_var`**
-
-If you need `set_var: true` to persist step outputs across non-adjacent steps, use JSON workflows:
+**JSON equivalent:**
 
 ```json
 {
   "steps": [
-    { "name": "step-1", "node": "fetch-user", "type": "module", "set_var": true },
-    { "name": "step-2", "node": "fetch-orders", "type": "module", "set_var": true },
-    { "name": "step-3", "node": "generate-report", "type": "module" }
-  ],
-  "nodes": {
-    "step-3": {
-      "inputs": {
-        "user": "js/ctx.vars['step-1']",
-        "orders": "js/ctx.vars['step-2']"
-      }
-    }
-  }
+    { "id": "step-1", "use": "fetch-user",   "inputs": { "id": "$.req.body.userId" } },
+    { "id": "step-2", "use": "fetch-orders", "inputs": { "userId": "$.state.step-1.id" } },
+    { "id": "step-3", "use": "generate-report",
+      "inputs": { "user": "$.state.step-1", "orders": "$.state.step-2" } }
+  ]
 }
 ```
 
-### Runtime Nodes and ctx.vars
+To skip persistence for a side-effect-only step, add `ephemeral: true`. To rename the state key, add `as: "<name>"`. To shallow-merge a multi-output node's keys into state, add `spread: true`.
 
-Important: When using `runtime.*` step types (Go, Rust, Python, etc.), the RuntimeAdapterNode **automatically** stores the step output in `ctx.vars[stepName]`. This means you can always access runtime node outputs via `js/ctx.vars['step-name']` in subsequent steps without needing `set_var`.
+### Runtime Nodes and ctx.state
+
+Important: `runtime.*` step types (Go, Rust, Python, etc.) route through the same `PersistenceHelper.applyStepOutput` as module nodes — `result.data` lands at `ctx.state[<id>]` by default. The `ephemeral` / `as` / `spread` knobs apply uniformly.
 
 ### Available `js/` Expressions
 
@@ -1298,15 +1277,11 @@ Every new workflow → add to `Workflows.ts`
 ### NEVER assume ctx.response.data persists beyond the next step
 
 ```typescript
-// WRONG — Step 3 trying to read Step 1's output from ctx.response.data
-.addStep({ name: "step-1", node: "a", type: "module", inputs: {...} })
-.addStep({ name: "step-2", node: "b", type: "module", inputs: {...} })
-.addStep({ name: "step-3", node: "c", type: "module", inputs: {
-  step1Data: "js/ctx.response.data",  // This is Step 2's data, NOT Step 1's!
-}})
+// WRONG — Step 3 trying to read Step 1's output via ctx.prev (only carries Step 2's)
+{ id: "step-3", use: "c", inputs: { step1Data: "$.prev" } }
 
-// RIGHT — Design Step 2 to pass through what Step 3 needs
-// Or use JSON workflow with set_var: true
+// RIGHT — every step default-stores at ctx.state[<id>]; reference it directly
+{ id: "step-3", use: "c", inputs: { step1Data: "$.state.step-1" } }
 ```
 
 ### NEVER use class-based nodes
@@ -1401,6 +1376,7 @@ Workflow({ name, version, description? })
 2. **"Validation failed"** → Check Zod schema vs actual input data
 3. **"undefined in step input"** → Are you reading `ctx.response.data` from a non-adjacent step? It's overwritten.
 4. **"Runtime execution error"** → Is the runtime process running? Check `GET http://localhost:{port}/health`
-5. **"ctx.vars['X'] is undefined"** → Did you use `set_var: true`? Is this a TS workflow (doesn't support set_var in builder)?
-6. **No data flowing between steps** → Check `js/` expression syntax. Common: missing quotes around step name in `ctx.vars['name']`
+5. **"ctx.state['X'] is undefined"** → Source step has `ephemeral: true`, OR the id doesn't match what's referenced in `$.state.<id>` (typo / id mismatch).
+6. **"set_var, which was removed in v0.5"** → Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1 workflows.
+7. **No data flowing between steps** → Check `$.state.<id>` / `js/` expression syntax. Common: typo in step id, or stale id from a renamed step.
 7. **Condition not matching** → Check condition string syntax. Must be valid JS with access to `ctx`.

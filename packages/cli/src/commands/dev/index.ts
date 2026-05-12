@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import http from "node:http";
 import path from "node:path";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
@@ -61,59 +60,10 @@ function killAllGroups(signal: NodeJS.Signals) {
 	}
 }
 
-/**
- * Poll an HTTP `/health` endpoint until it responds, the process exits, or
- * timeout. Used only on the `--with-http-fallback` path.
- *
- * Resolves false fast when the owning process exits — prevents hanging the
- * full timeout when an SDK crashes during boot.
- */
-function waitForHttpHealth(port: number, timeoutMs: number, proc?: ChildProcess): Promise<boolean> {
-	return new Promise((resolve) => {
-		if (proc && proc.exitCode !== null) {
-			resolve(false);
-			return;
-		}
-
-		const start = Date.now();
-		let done = false;
-
-		function finish(result: boolean) {
-			if (done) return;
-			done = true;
-			clearInterval(interval);
-			resolve(result);
-		}
-
-		proc?.on("exit", () => finish(false));
-
-		const interval = setInterval(() => {
-			if (done) return;
-			if (Date.now() - start > timeoutMs) {
-				finish(false);
-				return;
-			}
-			const req = http.get(`http://localhost:${port}/health`, (res) => {
-				res.resume();
-				if (res.statusCode === 200) finish(true);
-			});
-			req.on("error", () => {
-				// Not ready yet, keep polling
-			});
-			req.setTimeout(1000, () => req.destroy());
-		}, 500);
-	});
-}
-
 export async function devProject(opts: OptionValues) {
 	const currentPath = process.cwd();
-	const useHttpFallback = opts.withHttpFallback === true;
-	const transport = useHttpFallback ? "http" : "grpc";
-	console.log(`Starting the development server (transport=${transport})...`);
+	console.log("Starting the development server (transport=grpc)...");
 	console.log("Current path: ", currentPath);
-	if (useHttpFallback) {
-		console.log("  ⚠ --with-http-fallback is deprecated and will be removed in v0.4.0.");
-	}
 
 	// Read project runtime config
 	const config = readProjectConfig(currentPath);
@@ -153,9 +103,8 @@ export async function devProject(opts: OptionValues) {
 		console.log();
 	}
 
-	// Collect runtime process definitions. `port` here is the port the CLI
-	// health-probes after spawn — gRPC port when transport=grpc, HTTP port
-	// otherwise.
+	// Collect runtime process definitions. `port` here is the gRPC port the
+	// CLI health-probes after spawn (TCP connect check).
 	const runtimeDefs: Array<{
 		cmd: string;
 		args: string[];
@@ -167,18 +116,15 @@ export async function devProject(opts: OptionValues) {
 
 	if (config?.runtimes) {
 		for (const [, rt] of Object.entries(config.runtimes)) {
-			// Pick the boot command. PHP has a separate `grpcStartCmd`
-			// because RoadRunner is its gRPC server (not the same binary
-			// as `php bin/serve.php`). For all other SDKs the regular
-			// `startCmd` boots both transports — `BLOK_TRANSPORT=grpc` in
-			// the env tells the SDK to advertise gRPC as primary.
-			let bootCmd = useHttpFallback ? rt.startCmd : (rt.grpcStartCmd ?? rt.startCmd);
+			// Pick the gRPC boot command. PHP uses a separate `grpcStartCmd`
+			// (RoadRunner) — every other SDK's `startCmd` boots gRPC directly.
+			let bootCmd = rt.grpcStartCmd ?? rt.startCmd;
 
 			// Resolve the literal `rr` token in PHP's grpcStartCmd to a
 			// real path if RoadRunner isn't on $PATH. Mirrors the
 			// detectRr() resolve in scripts/dev-full.ts so PHP detection
 			// stays in lock-step between `bun dev` and `blokctl dev`.
-			if (rt.kind === "php" && !useHttpFallback && bootCmd.startsWith("rr ")) {
+			if (rt.kind === "php" && bootCmd.startsWith("rr ")) {
 				const rrBin = detectRr();
 				if (rrBin && rrBin !== "rr") {
 					bootCmd = `${rrBin}${bootCmd.slice(2)}`;
@@ -196,25 +142,23 @@ export async function devProject(opts: OptionValues) {
 			}
 
 			// gRPC port falls back to (httpPort + 1000) for old config.json
-			// shapes that predate the Phase 7 grpcPort field. Matches the
-			// HTTP+1000 convention everywhere else in the repo.
+			// shapes that predate the Phase 7 grpcPort field.
 			const grpcPort = rt.grpcPort ?? rt.port + 1000;
-			const probePort = useHttpFallback ? rt.port : grpcPort;
 
 			const env: Record<string, string> = {
 				PORT: String(rt.port),
 				GRPC_PORT: String(grpcPort),
 				HOST: "0.0.0.0",
-				BLOK_TRANSPORT: transport,
+				BLOK_TRANSPORT: "grpc",
 			};
 
 			runtimeDefs.push({
 				cmd,
 				args,
-				name: `${rt.label} Runtime (${transport} port ${probePort})`,
+				name: `${rt.label} Runtime (grpc port ${grpcPort})`,
 				cwd: runtimeCwd,
 				env,
-				port: probePort,
+				port: grpcPort,
 			});
 		}
 	} else {
@@ -253,32 +197,23 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// Show runtime listeners. gRPC is not browser-pingable (binary protocol);
-	// HTTP path keeps the curl-able URL for debugging.
+	// Show runtime listeners. gRPC is binary, so the host:port is what
+	// operators wire into client tools.
 	if (config?.runtimes && Object.keys(config.runtimes).length > 0) {
 		console.log("\nRuntime listeners:");
 		for (const [, rt] of Object.entries(config.runtimes)) {
-			if (useHttpFallback) {
-				console.log(`  ${rt.label}: http://localhost:${rt.port}/health`);
-			} else {
-				const grpcPort = rt.grpcPort ?? rt.port + 1000;
-				console.log(`  ${rt.label}: gRPC 127.0.0.1:${grpcPort}`);
-			}
+			const grpcPort = rt.grpcPort ?? rt.port + 1000;
+			console.log(`  ${rt.label}: gRPC 127.0.0.1:${grpcPort}`);
 		}
 	}
 
 	// 2. Wait for all runtimes to be healthy before starting NodeJS runner.
-	// gRPC path uses the IPv4/IPv6 TCP-connect probe lifted from the
-	// in-repo orchestrator (scripts/dev-full.ts). HTTP fallback keeps the
-	// `/health` endpoint poll.
+	// IPv4/IPv6 TCP-connect probe lifted from the in-repo orchestrator
+	// (scripts/dev-full.ts).
 	if (healthChecks.length > 0) {
 		console.log("\nWaiting for runtimes to be ready...");
 		const maxWait = 120_000; // 2 minutes (Rust can take a while to compile)
-		const results = await Promise.all(
-			healthChecks.map((hc) =>
-				useHttpFallback ? waitForHttpHealth(hc.port, maxWait, hc.proc) : waitForGrpcPort(hc.port, maxWait, hc.proc),
-			),
-		);
+		const results = await Promise.all(healthChecks.map((hc) => waitForGrpcPort(hc.port, maxWait, hc.proc)));
 		const allReady = results.every(Boolean);
 		if (allReady) {
 			console.log("All runtimes ready.\n");
@@ -304,14 +239,13 @@ export async function devProject(opts: OptionValues) {
 		traceEnv.BLOK_TRACE_SQLITE_PATH = path.join(".blok", "trace.db");
 	}
 
-	// Trigger env: thread BLOK_TRANSPORT so the trigger's embedded runner
-	// picks the same transport the SDKs are listening on. Without this the
-	// trigger would resolve transport from process.env (which the user may
-	// have set to something else); explicit threading keeps `blokctl dev`
-	// authoritative over the spawn graph.
+	// Trigger env: thread BLOK_TRANSPORT=grpc so the trigger's embedded
+	// runner advertises the same transport the SDKs listen on. Explicit
+	// threading keeps `blokctl dev` authoritative over the spawn graph
+	// even when the operator's shell env has stale values.
 	const triggerEnv: Record<string, string> = {
 		...traceEnv,
-		BLOK_TRANSPORT: transport,
+		BLOK_TRANSPORT: "grpc",
 	};
 
 	// 3. Start triggers from config, or fallback to single runner

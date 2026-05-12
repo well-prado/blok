@@ -19,18 +19,6 @@ export default abstract class NodeBase {
 	public stop = false;
 	public originalConfig: ParamsDictionary = {};
 
-	/**
-	 * @deprecated v2 default-stores every step's output. `set_var: true` is
-	 * a no-op (default behaviour); `set_var: false` is normalized to
-	 * `ephemeral: true` at workflow load time. Reading this field is still
-	 * supported for legacy code paths but new code should rely on `ephemeral`.
-	 *
-	 * Default is `undefined` (NOT `false`) — `false` here would short-circuit
-	 * `PersistenceHelper.applyStepOutput` and disable the v2 default-store
-	 * rule for every step that didn't explicitly set the field.
-	 */
-	public set_var?: boolean;
-
 	// =========================================================================
 	// V2 persistence knobs — populated by Configuration.getSteps from the
 	// step definition. Read by PersistenceHelper.applyStepOutput.

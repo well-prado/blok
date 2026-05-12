@@ -21,11 +21,13 @@ import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "./types";
 
 /**
  * Runtime adapter that executes a node by calling
- * `blok.runtime.v1.NodeRuntime/Execute` over gRPC.
+ * `blok.runtime.v1.NodeRuntime/Execute` over gRPC. The sole runtime
+ * transport since v0.5 (the HTTP adapter was removed alongside the
+ * `RUNTIME_TRANSPORT=http` opt-in).
  *
- * Sibling to {@link HttpRuntimeAdapter}. Implements the same
- * {@link RuntimeAdapter} interface, so {@link Configuration} can swap between
- * transports based on env without any caller change.
+ * Implements the {@link RuntimeAdapter} interface so the registry,
+ * `RuntimeAdapterNode`, and {@link Configuration} treat it identically
+ * to the in-process `NodeJsRuntimeAdapter`.
  *
  * Single Responsibility: orchestrate the unary `Execute` RPC.
  *

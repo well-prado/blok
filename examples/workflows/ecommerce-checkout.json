@@ -18,14 +18,12 @@
 		{
 			"name": "calculate-totals",
 			"node": "cart-calculator",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "check-inventory",
 			"node": "@blokjs/api-call",
-			"type": "module",
-			"set_var": true
+			"type": "module"
 		},
 		{
 			"name": "route-inventory-check",
@@ -117,8 +115,7 @@
 						{
 							"name": "process-payment",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-payment-result",
@@ -179,8 +176,7 @@
 						{
 							"name": "create-order",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "send-confirmation-email",

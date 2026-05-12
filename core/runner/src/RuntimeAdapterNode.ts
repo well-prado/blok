@@ -40,7 +40,6 @@ export class RuntimeAdapterNode extends RunnerNode {
 		this.runtime = targetNode.runtime;
 		this.active = targetNode.active;
 		this.stop = targetNode.stop;
-		this.set_var = targetNode.set_var;
 		// V2 persistence knobs — flow through to PersistenceHelper.
 		this.as = targetNode.as;
 		this.spread = targetNode.spread;
@@ -54,7 +53,8 @@ export class RuntimeAdapterNode extends RunnerNode {
 	 * through the server-streaming path so node-emitted `LogLine` events flow
 	 * into the tracker (and thus into Studio's SSE stream) live. Falls back
 	 * to unary `execute` when streaming isn't enabled or isn't supported by
-	 * this adapter (e.g. HttpRuntimeAdapter has no streaming surface).
+	 * this adapter (the in-process NodeJsRuntimeAdapter has no streaming
+	 * surface, for instance).
 	 */
 	async run(ctx: Context): Promise<ResponseContext> {
 		const traceRunId = (ctx as Record<string, unknown>)._traceRunId as string | undefined;

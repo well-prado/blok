@@ -460,7 +460,7 @@ This is the polish layer; the primitives work without it.
 
 The whole point of this work is ergonomics. A human reading a v2 workflow should grasp the control flow without reading the runner source. Compare:
 
-**Before (v2 today, no loops or switch):** a workflow that POSTs to N webhooks needs an external mapper node that returns a `BlokService[]` array, plus careful handling of `set_var` / `as` to thread results — basically writing a flow node by hand.
+**Before (v2 today, no loops or switch):** a workflow that POSTs to N webhooks needs an external mapper node that returns a `BlokService[]` array, plus careful handling of `as` / `spread` to thread results — basically writing a flow node by hand.
 
 **After (v0.5 with forEach):**
 
@@ -545,7 +545,7 @@ JavaScript `for...of` is the closest analogue but the v2 keyword is reserved. `f
 
 Blueprint-runner workflows imported from old projects might use `if-error`. The current normalizer doesn't recognize it.
 
-**Recommendation:** add a v1→v2 migration shim in the normalizer that recognizes `node: "utility/control-flow/if-error@1.0.0"` and converts to `tryCatch` at workflow-load. Same pattern as `set_var: false → ephemeral: true`. Drop the shim in v1.0.
+**Recommendation:** add a v1→v2 migration shim in the normalizer that recognizes `node: "utility/control-flow/if-error@1.0.0"` and converts to `tryCatch` at workflow-load. Drop the shim in v1.0. (For reference, the older `set_var: false → ephemeral: true` shim followed the same playbook and was retired in v0.5.)
 
 ---
 

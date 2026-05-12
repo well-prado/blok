@@ -122,8 +122,7 @@
 						{
 							"name": "send-template-email",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-template-result",
@@ -138,8 +137,7 @@
 						{
 							"name": "send-custom-email",
 							"node": "@blokjs/api-call",
-							"type": "module",
-							"set_var": true
+							"type": "module"
 						},
 						{
 							"name": "route-custom-result",

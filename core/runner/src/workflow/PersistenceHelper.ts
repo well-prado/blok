@@ -15,11 +15,6 @@ export interface PersistableStep {
 	readonly spread?: boolean;
 	/** When true, skip persistence entirely. */
 	readonly ephemeral?: boolean;
-	/**
-	 * Legacy v1 flag. `false` is interpreted as `ephemeral: true`. `true`
-	 * is a no-op (the new default already persists).
-	 */
-	readonly set_var?: boolean;
 }
 
 /**
@@ -51,10 +46,9 @@ export interface PersistableResult {
  *    persist that empty object — making the natural existence check
  *    meaningless. (See [tryCatch docs](../../../docs/c/devtools/tryCatch.mdx).)
  * 1. `ephemeral: true` → no-op. Output is only available via `ctx.prev`.
- * 2. Legacy `set_var: false` → treated as `ephemeral: true` (back-compat).
- * 3. `spread: true` AND `data` is a plain object → shallow-merge data's
+ * 2. `spread: true` AND `data` is a plain object → shallow-merge data's
  *    top-level keys into `ctx.state`.
- * 4. Default → `ctx.state[as ?? name] = data`.
+ * 3. Default → `ctx.state[as ?? name] = data`.
  *
  * Mutates `ctx.state` in place. Always safe to call (no-op on missing data
  * unless `spread` is set, which is an authoring-time error to combine with
@@ -66,9 +60,8 @@ export function applyStepOutput(ctx: Context, step: PersistableStep, result: Per
 	// same truthful-state contract without each re-implementing the check.
 	if (isErroredResult(result)) return;
 
-	// Rule 1 & 2 — opt-out paths
+	// Rule 1 — opt-out path
 	if (step.ephemeral === true) return;
-	if (step.set_var === false) return;
 
 	// Defensive: ensure state exists (TriggerBase initializes it, but
 	// some legacy code paths construct ctx by hand).
@@ -79,7 +72,7 @@ export function applyStepOutput(ctx: Context, step: PersistableStep, result: Per
 	const state = ctx.state as Record<string, unknown>;
 	const data = result?.data;
 
-	// Rule 3 — spread
+	// Rule 2 — spread
 	if (step.spread === true) {
 		if (isPlainObject(data)) {
 			Object.assign(state, data);
@@ -90,7 +83,7 @@ export function applyStepOutput(ctx: Context, step: PersistableStep, result: Per
 		return;
 	}
 
-	// Rule 4 — default-store
+	// Rule 3 — default-store
 	if (data === undefined) return;
 	const key = step.as ?? step.name;
 	if (!key) return; // defensive: anonymous step (shouldn't happen post-normalizer)

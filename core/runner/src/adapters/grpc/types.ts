@@ -1,12 +1,14 @@
 import type { RuntimeKind } from "../RuntimeAdapter";
 
 /**
- * Selectable transport between the runner and an SDK runtime.
- *
- * - `http` — legacy `HttpRuntimeAdapter` (POST /execute over JSON+HTTP/1).
- * - `grpc` — `GrpcRuntimeAdapter` (NodeRuntime/Execute over HTTP/2 + protobuf).
+ * Wire transport between the runner and an SDK runtime. gRPC has been
+ * the sole option since v0.5 — the legacy `HttpRuntimeAdapter` (POST
+ * `/execute` over JSON + HTTP/1) was removed together with the
+ * `RUNTIME_TRANSPORT=http` env-var opt-in. The type is kept as a single
+ * literal union to preserve compatibility for downstream consumers that
+ * still reference `Transport`.
  */
-export type Transport = "http" | "grpc";
+export type Transport = "grpc";
 
 /**
  * Configuration for a {@link GrpcRuntimeAdapter} instance.

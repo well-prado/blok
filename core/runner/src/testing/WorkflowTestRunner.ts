@@ -85,7 +85,6 @@ interface WorkflowStep {
 	inputs?: Record<string, any>;
 	// biome-ignore lint/suspicious/noExplicitAny: condition shapes are dynamic
 	conditions?: any[];
-	set_var?: boolean;
 }
 
 /**
@@ -459,13 +458,6 @@ export class WorkflowTestRunner {
 				success: true,
 				contentType: response.contentType ?? "application/json",
 			};
-
-			// If step sets a var, store output in vars
-			if (step.set_var) {
-				if (!ctx.vars) ctx.vars = {};
-				// biome-ignore lint/suspicious/noExplicitAny: vars hold arbitrary workflow data
-				(ctx.vars as Record<string, any>)[step.name] = response.data;
-			}
 
 			traceEntry.success = true;
 			traceEntry.output = response.data;

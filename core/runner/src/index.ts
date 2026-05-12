@@ -11,7 +11,6 @@ import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 import { RuntimeRegistry } from "./RuntimeRegistry";
 import { BunRuntimeAdapter } from "./adapters/BunRuntimeAdapter";
 import { DockerRuntimeAdapter } from "./adapters/DockerRuntimeAdapter";
-import { HttpRuntimeAdapter } from "./adapters/HttpRuntimeAdapter";
 import { NodeJsRuntimeAdapter } from "./adapters/NodeJsRuntimeAdapter";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "./adapters/RuntimeAdapter";
 import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
@@ -32,7 +31,7 @@ import {
 } from "./adapters/grpc/GrpcErrors";
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS } from "./adapters/grpc/types";
-import { resolveTransportForKind } from "./adapters/transport";
+import { assertGrpcOnlyTransport } from "./adapters/transport";
 
 // Function-first node API
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
@@ -226,7 +225,6 @@ export {
 	RuntimeAdapterNode,
 	NodeJsRuntimeAdapter,
 	DockerRuntimeAdapter,
-	HttpRuntimeAdapter,
 	BunRuntimeAdapter,
 	WasmRuntimeAdapter,
 	// gRPC runtime adapter
@@ -246,7 +244,7 @@ export {
 	categoryToGrpcStatus,
 	isServiceError,
 	grpcToBlokError,
-	resolveTransportForKind,
+	assertGrpcOnlyTransport,
 	// Function-first API
 	defineNode,
 	FunctionNode,
@@ -411,7 +409,6 @@ export {
 
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
-export type { HttpRuntimeAdapterOptions } from "./adapters/HttpRuntimeAdapter";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";

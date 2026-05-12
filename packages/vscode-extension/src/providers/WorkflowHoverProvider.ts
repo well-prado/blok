@@ -101,11 +101,11 @@ const FIELD_DOCS: Record<string, HoverDoc> = {
 			"Array of if/else conditions for branching logic. Use with @blokjs/if-else node. Each condition has a JavaScript expression and nested steps.",
 		example: `"conditions": [\n  {\n    "type": "if",\n    "condition": "ctx.request.query.type === 'admin'",\n    "steps": [{ "name": "admin-flow", "node": "...", "type": "module" }]\n  },\n  {\n    "type": "else",\n    "steps": [{ "name": "user-flow", "node": "...", "type": "module" }]\n  }\n]`,
 	},
-	set_var: {
-		title: "Set Context Variable",
+	ephemeral: {
+		title: "Skip Persistence",
 		description:
-			"When true, stores the step's output in ctx.vars['step-name']. This makes the result accessible to downstream steps via ctx.vars.",
-		example: `"my-step": {\n  "set_var": true,\n  "inputs": { ... }\n}\n// Later: ctx.vars['my-step'] contains the result`,
+			"When true, this step's output is NOT stored in ctx.state. Only ctx.prev carries it to the immediately next step. Use for side-effect-only steps (logging, audit, telemetry).",
+		example: `{ "id": "audit", "use": "@blokjs/log", "ephemeral": true, "inputs": { ... } }`,
 	},
 };
 
@@ -133,7 +133,7 @@ const STEP_FIELD_DOCS: Record<string, HoverDoc> = {
  * Shows contextual documentation when hovering over:
  * - Trigger type keys (http, grpc, cron, queue, etc.)
  * - Workflow fields (name, version, steps, nodes, etc.)
- * - Node configuration fields (inputs, conditions, set_var)
+ * - Node configuration fields (inputs, conditions, ephemeral)
  * - Step fields (node, type, runtime)
  */
 export class WorkflowHoverProvider implements vscode.HoverProvider {

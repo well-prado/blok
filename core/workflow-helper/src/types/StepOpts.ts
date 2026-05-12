@@ -77,12 +77,6 @@ export const StepOptsSchema = z.object({
 	type: NodeTypeSchema,
 	inputs: z.object({}).optional(),
 	runtime: RuntimeKindSchema.optional(),
-	/**
-	 * @deprecated v2 default-stores every step's output. Set `ephemeral: true`
-	 * to opt out. `set_var: true` is now a no-op (default behaviour);
-	 * `set_var: false` is normalized to `ephemeral: true` at load time.
-	 */
-	set_var: z.boolean().optional(),
 	active: z.boolean().optional(),
 	stop: z.boolean().optional(),
 	stream_logs: z.boolean().optional(),
@@ -287,14 +281,6 @@ export const V2RegularStepSchema = z
 				'run auto-flips to `"timedOut"` status (distinct from `"failed"` ' +
 				"so SLA dashboards can separate timeouts from logic failures).",
 		),
-		// Legacy aliases — accepted for v1 → v2 migration but discouraged.
-		set_var: z
-			.boolean()
-			.optional()
-			.describe(
-				"@deprecated v2 default-stores every step's output. " +
-					"`set_var: true` is a no-op; `set_var: false` is normalized to `ephemeral: true`.",
-			),
 	})
 	.refine((step) => !(step.as && step.spread), {
 		message: "`as` and `spread` are mutually exclusive — pick one.",

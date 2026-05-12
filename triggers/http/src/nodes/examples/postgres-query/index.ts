@@ -16,7 +16,6 @@ export default defineNode({
 		password: z.string(),
 		host: z.string(),
 		query: z.string(),
-		set_var: z.boolean().optional(),
 	}),
 
 	output: z.any(),

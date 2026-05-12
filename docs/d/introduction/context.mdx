@@ -190,8 +190,8 @@ This workflow stores an API response and uses it in a later step:
 ```
 
 How it works:
-- Every step's output is automatically stored at `ctx.state[<id>]`.
-  No `set_var: true` needed — that's the v2 default.
+- Every step's output is automatically stored at `ctx.state[<id>]`. That's
+  the v2 default. (The legacy `set_var` field was removed in v0.5.)
 - `process-data` reads from `$.state.fetch-data.count` and
   `$.state.fetch-data.categories` directly.
 - The `respond` step returns the transformed data.

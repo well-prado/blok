@@ -393,9 +393,7 @@ describe("Tier 2 quick-wins follow-up · recoverOrphanedRuns benchmarks", () => 
 		expect(flipped).toBe(RUN_COUNT);
 		// Soft bound: 10K row-by-row updates + events should be < 30s on a laptop.
 		expect(elapsed).toBeLessThan(30_000);
-	}, // give the assertion a 60s vitest timeout so the test only fails on // observed 10.4s in CI vs 6.0s locally. Default 10s timeout flakes; // GitHub Actions runners are ~2× slower than a M-series laptop —
-	// a TRUE regression (the < 30_000 assert), not on runner skew.
-	60_000);
+	}, 60_000); // a TRUE regression (the < 30_000 assert), not on runner skew. // give the assertion a 60s vitest timeout so the test only fails on // observed 10.4s in CI vs 6.0s locally. Default 10s timeout flakes; // GitHub Actions runners are ~2× slower than a M-series laptop —
 
 	it("benchmark: second markAllRunningRunsAsCrashed call after drain returns 0 — POST PR 1 A1 fix", () => {
 		// After the previous test drains all rows, a second call should

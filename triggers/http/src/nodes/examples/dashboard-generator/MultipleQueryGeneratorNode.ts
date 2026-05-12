@@ -51,7 +51,6 @@ export default defineNode({
 		),
 		relationships: z.array(z.record(z.unknown())),
 		prompt: z.string(),
-		set_var: z.boolean().optional(),
 	}),
 
 	output: z.object({

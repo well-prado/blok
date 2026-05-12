@@ -1,83 +1,35 @@
 import type { RuntimeKind } from "./RuntimeAdapter";
-import type { TlsConfig, Transport } from "./grpc/types";
+import type { TlsConfig } from "./grpc/types";
+
+const SUPPORTED_KINDS: readonly RuntimeKind[] = ["go", "rust", "java", "csharp", "php", "ruby", "python3"];
 
 /**
- * Resolve the transport to use for a given runtime kind from the environment.
+ * Reject any leftover `RUNTIME_TRANSPORT=http` (global) or
+ * `RUNTIME_<KIND>_TRANSPORT=http` (per-kind) at startup. gRPC has been the
+ * sole runtime transport since v0.5; the HTTP adapter and its env-var
+ * escape hatch were removed at the same time. Silent fallback would mask
+ * stale operator config, so we throw with the exact env-var the operator
+ * still has set and a one-line migration hint.
  *
- * Precedence (most specific wins):
- *   1. `RUNTIME_<KIND>_TRANSPORT` — per-kind override
- *      e.g. `RUNTIME_PYTHON3_TRANSPORT=http` to opt one SDK out of gRPC.
- *   2. `RUNTIME_TRANSPORT` — global override
- *      e.g. `RUNTIME_TRANSPORT=http` to roll back the whole runner.
- *   3. The hard-coded default — **`grpc`** as of Phase 6 (master plan §11).
- *      Flipped from `http` to `grpc` after the cross-language parity matrix
- *      (`bun run test:parity`, 33 tests across 6 SDKs × 5 workflows) and
- *      the per-SDK §17 BlokError E2E suites stayed green for the full
- *      Phase 5 observation window.
- *
- * Pure function — reads `process.env` once per call so tests can override.
- *
- * # Why the default flip is safe
- *
- * - HTTP transport remains available behind `RUNTIME_TRANSPORT=http` for at
- *   least two minor versions (master plan §11 commitment).
- * - PHP without RoadRunner (Path B from §16) sets
- *   `RUNTIME_PHP_TRANSPORT=http` per host. The forever-supported escape
- *   hatch is unaffected.
- * - SDKs that fail to bind their gRPC listener fall through the
- *   {@link GrpcHealthChecker} circuit-breaker and surface a typed
- *   `BlokError(category=DEPENDENCY)` per §9 — no silent failure.
- *
- * @param kind The runtime kind (e.g. "python3").
- * @param env Optional env source (defaults to `process.env`). Tests can
- *            pass a stub map.
- * @returns Either `"http"` or `"grpc"`. Invalid values fall back to the
- *          Phase 6 default (`grpc`).
+ * Throws on first offending env var found (the order is global first,
+ * then per-kind so operators see the broadest mistake first).
  */
-export function resolveTransportForKind(kind: RuntimeKind, env: NodeJS.ProcessEnv = process.env): Transport {
-	const perKindKey = `RUNTIME_${kind.toUpperCase()}_TRANSPORT`;
-	const perKind = env[perKindKey];
-	if (perKind === "grpc" || perKind === "http") {
-		if (perKind === "http") warnDeprecatedHttpTransport(perKindKey);
-		return perKind;
-	}
-
+export function assertGrpcOnlyTransport(env: NodeJS.ProcessEnv = process.env): void {
 	const global = env.RUNTIME_TRANSPORT;
-	if (global === "grpc" || global === "http") {
-		if (global === "http") warnDeprecatedHttpTransport("RUNTIME_TRANSPORT");
-		return global;
+	if (global !== undefined && global !== "" && global !== "grpc") {
+		throw new Error(
+			`[blok] RUNTIME_TRANSPORT=${global} is no longer supported (HttpRuntimeAdapter was removed in v0.5). Drop the env var; gRPC is the only runtime transport. SDK processes should boot with BLOK_TRANSPORT=grpc.`,
+		);
 	}
-
-	// Phase 6 default: gRPC. The flip from HTTP landed once the parity
-	// matrix had been green for the observation window.
-	return "grpc";
-}
-
-/**
- * Set of env-var names that have already triggered the deprecation warning
- * in this process. Prevents log spam when many runtime kinds resolve through
- * the same global override on each request.
- *
- * Exported as a reset hook for tests — production code never touches it.
- */
-const _httpDeprecationWarned = new Set<string>();
-
-function warnDeprecatedHttpTransport(envKey: string): void {
-	if (_httpDeprecationWarned.has(envKey)) return;
-	_httpDeprecationWarned.add(envKey);
-	console.warn(
-		`[blok] ${envKey}=http is deprecated and will be removed in v0.4.0. Migrate to gRPC by dropping the env var (gRPC is the default since Phase 6) and ensuring your SDK process boots with BLOK_TRANSPORT=grpc.`,
-	);
-}
-
-/**
- * Test-only — reset the per-process HTTP-transport deprecation cache so a
- * test that flips `RUNTIME_TRANSPORT=http` can re-assert the warning fires.
- *
- * @internal
- */
-export function _resetHttpDeprecationCache(): void {
-	_httpDeprecationWarned.clear();
+	for (const kind of SUPPORTED_KINDS) {
+		const key = `RUNTIME_${kind.toUpperCase()}_TRANSPORT`;
+		const value = env[key];
+		if (value !== undefined && value !== "" && value !== "grpc") {
+			throw new Error(
+				`[blok] ${key}=${value} is no longer supported (HttpRuntimeAdapter was removed in v0.5). Drop the env var; gRPC is the only runtime transport.`,
+			);
+		}
+	}
 }
 
 /**
@@ -88,8 +40,8 @@ export function _resetHttpDeprecationCache(): void {
  *
  * Streaming is a pure additive capability: when the env var is unset, the
  * legacy unary path runs unchanged. When enabled but the adapter doesn't
- * support streaming (e.g. HttpRuntimeAdapter), `RuntimeAdapterNode` falls
- * back to unary so misconfiguration never blocks execution.
+ * support streaming, `RuntimeAdapterNode` falls back to unary so
+ * misconfiguration never blocks execution.
  *
  * Recognized as truthy: `1`, `true`, `yes`, `on` (case-insensitive). Anything
  * else (including unset, empty, `0`, `false`) returns false.
