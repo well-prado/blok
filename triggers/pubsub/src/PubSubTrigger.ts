@@ -74,6 +74,18 @@ export interface PubSubAdapter {
 	/** Unsubscribe from a topic */
 	unsubscribe(subscription: string): Promise<void>;
 
+	/**
+	 * v0.7 PR 6 — publish a single message to a topic. Used by the
+	 * `@blokjs/pubsub-publish` helper and any workflow that fan-outs
+	 * events to subscribers. Provider-portable: each adapter wraps its
+	 * native producer client.
+	 *
+	 * Optional `partitionKey` / `orderingKey` is honored by providers
+	 * that support per-key ordering (Kafka, GCP Pub/Sub ordered
+	 * delivery). Ignored otherwise.
+	 */
+	publish(topic: string, payload: unknown, opts?: { partitionKey?: string; orderingKey?: string }): Promise<void>;
+
 	/** Check if connected */
 	isConnected(): boolean;
 
@@ -107,7 +119,22 @@ export abstract class PubSubTrigger extends TriggerBase {
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
 	protected readonly logger = new DefaultLogger();
-	protected abstract adapter: PubSubAdapter;
+
+	/**
+	 * v0.7 PR 6 — back-compat default adapter. When subclasses set
+	 * `protected adapter = new GCPPubSubAdapter()` (pre-v0.7 pattern),
+	 * ALL workflows route through it regardless of their `provider`
+	 * field. When unset, each workflow's `provider` is resolved via
+	 * the factory.
+	 */
+	protected adapter?: PubSubAdapter;
+
+	/**
+	 * v0.7 PR 6 — adapter pool, keyed by provider. Populated lazily in
+	 * `listen()` as workflows are matched to providers. Drained in
+	 * `stop()`. One adapter (one broker connection) per provider.
+	 */
+	protected adapterPool: Map<string, PubSubAdapter> = new Map();
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
@@ -143,10 +170,6 @@ export abstract class PubSubTrigger extends TriggerBase {
 		this.loadWorkflows();
 
 		try {
-			// Connect to pub/sub system
-			await this.adapter.connect();
-			this.logger.log(`Connected to ${this.adapter.provider} pub/sub system`);
-
 			// Find all workflows with pub/sub triggers
 			const pubsubWorkflows = this.getPubSubWorkflows();
 
@@ -155,14 +178,17 @@ export abstract class PubSubTrigger extends TriggerBase {
 				return this.endCounter(startTime);
 			}
 
-			// Subscribe to each topic/subscription
+			// Subscribe to each topic via the adapter that owns its
+			// provider. Per-workflow `provider` field with subclass-
+			// adapter back-compat (handled in resolveAdapterForWorkflow).
 			for (const workflow of pubsubWorkflows) {
 				const config = workflow.config.trigger?.pubsub as PubSubTriggerOpts;
+				const adapter = await this.resolveAdapterForWorkflow(config);
 				this.logger.log(
-					`Subscribing to topic: ${config.topic}, subscription: ${config.subscription} for workflow: ${workflow.path}`,
+					`Subscribing to topic: ${config.topic} via ${adapter.provider} (subscription: ${config.subscription ?? "<auto>"}, group: ${config.consumerGroup ?? "<fan-out>"})`,
 				);
 
-				await this.adapter.subscribe(config, async (message) => {
+				await adapter.subscribe(config, async (message) => {
 					await this.handleMessage(message, workflow, config);
 				});
 			}
@@ -182,11 +208,51 @@ export abstract class PubSubTrigger extends TriggerBase {
 	}
 
 	/**
-	 * Stop the pub/sub subscriber
+	 * Stop the pub/sub subscriber — drains every adapter in the pool
+	 * plus the subclass-set adapter (if any).
 	 */
 	async stop(): Promise<void> {
-		await this.adapter.disconnect();
+		for (const adapter of this.adapterPool.values()) {
+			try {
+				await adapter.disconnect();
+			} catch (err) {
+				this.logger.error(`[blok][pubsub] disconnect failed: ${(err as Error).message}`);
+			}
+		}
+		this.adapterPool.clear();
 		this.logger.log("Pub/Sub trigger stopped");
+	}
+
+	/**
+	 * v0.7 PR 6 — pick the adapter for a workflow's `provider` field.
+	 *
+	 * Resolution order:
+	 *   1. Subclass-set `this.adapter` (back-compat).
+	 *   2. Per-workflow `provider` field via the factory.
+	 *   3. `BLOK_PUBSUB_ADAPTER` env var.
+	 *   4. `"nats"` fallback.
+	 *
+	 * Adapters are connected on first use and pooled per provider.
+	 */
+	protected async resolveAdapterForWorkflow(config: PubSubTriggerOpts): Promise<PubSubAdapter> {
+		if (this.adapter) {
+			if (!this.adapter.isConnected()) {
+				await this.adapter.connect();
+				this.logger.log(`Connected to ${this.adapter.provider} pub/sub system (subclass adapter)`);
+			}
+			this.adapterPool.set(this.adapter.provider, this.adapter);
+			return this.adapter;
+		}
+		const { resolveProvider, createPubSubAdapter } = await import("./adapters/factory");
+		const provider = resolveProvider(config.provider);
+		let adapter = this.adapterPool.get(provider);
+		if (!adapter) {
+			adapter = createPubSubAdapter(provider);
+			await adapter.connect();
+			this.logger.log(`Connected to ${adapter.provider} pub/sub system`);
+			this.adapterPool.set(provider, adapter);
+		}
+		return adapter;
 	}
 
 	protected override async onHmrWorkflowChange(): Promise<void> {
@@ -280,8 +346,8 @@ export abstract class PubSubTrigger extends TriggerBase {
 				span.setAttribute("success", true);
 				span.setAttribute("message_id", id);
 				span.setAttribute("topic", config.topic);
-				span.setAttribute("subscription", config.subscription);
-				span.setAttribute("provider", config.provider);
+				span.setAttribute("subscription", config.subscription ?? "<auto>");
+				span.setAttribute("provider", config.provider ?? "<default>");
 				span.setAttribute("elapsed_ms", end - start);
 				span.setStatus({ code: SpanStatusCode.OK });
 
@@ -289,8 +355,8 @@ export abstract class PubSubTrigger extends TriggerBase {
 				pubsubMessages.add(1, {
 					env: process.env.NODE_ENV,
 					topic: config.topic,
-					subscription: config.subscription,
-					provider: config.provider,
+					subscription: config.subscription ?? "<auto>",
+					provider: config.provider ?? "<default>",
 					workflow_name: this.configuration.name,
 					success: "true",
 				});
@@ -314,8 +380,8 @@ export abstract class PubSubTrigger extends TriggerBase {
 				pubsubErrors.add(1, {
 					env: process.env.NODE_ENV,
 					topic: config.topic,
-					subscription: config.subscription,
-					provider: config.provider,
+					subscription: config.subscription ?? "<auto>",
+					provider: config.provider ?? "<default>",
 					workflow_name: this.configuration?.name || "unknown",
 				});
 

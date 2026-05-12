@@ -217,6 +217,30 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 	}
 
 	/**
+	 * v0.7 PR 6 — publish to an Azure Service Bus topic.
+	 *
+	 * `partitionKey` maps to Service Bus's `partitionKey`; `orderingKey`
+	 * maps to `sessionId` (for session-enabled topics).
+	 */
+	async publish(
+		topic: string,
+		payload: unknown,
+		opts?: { partitionKey?: string; orderingKey?: string },
+	): Promise<void> {
+		if (!this.connected) throw new Error("[blok][pubsub-azure] not connected. Call connect() first.");
+		const sender = this.requireClient().createSender(topic);
+		try {
+			await sender.sendMessages({
+				body: payload,
+				partitionKey: opts?.partitionKey,
+				sessionId: opts?.orderingKey,
+			});
+		} finally {
+			await sender.close();
+		}
+	}
+
+	/**
 	 * Health check - verify Azure Service Bus connectivity
 	 */
 	async healthCheck(): Promise<boolean> {

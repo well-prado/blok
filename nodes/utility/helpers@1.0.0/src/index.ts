@@ -30,6 +30,7 @@ import JsonSchemaNode from "./jsonSchema";
 import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
 import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
+import PubsubPublishNode from "./pubsubPublish";
 import RedisKvNode, { _teardownRedisForTests } from "./redisKv";
 import SsePublishNode from "./ssePublish";
 import SseStreamNode from "./sseStream";
@@ -51,6 +52,7 @@ export {
 	JwtVerifyNode,
 	LogNode,
 	MetricsEmitNode,
+	PubsubPublishNode,
 	RedisKvNode,
 	SsePublishNode,
 	SseStreamNode,
@@ -92,6 +94,7 @@ export const HELPER_NODES = {
 	"@blokjs/jwt-verify": JwtVerifyNode,
 	"@blokjs/log": LogNode,
 	"@blokjs/metrics-emit": MetricsEmitNode,
+	"@blokjs/pubsub-publish": PubsubPublishNode,
 	"@blokjs/redis-kv": RedisKvNode,
 	"@blokjs/sse-publish": SsePublishNode,
 	"@blokjs/sse-stream": SseStreamNode,

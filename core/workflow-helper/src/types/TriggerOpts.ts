@@ -428,20 +428,69 @@ export type QueueTriggerOpts = z.input<typeof QueueTriggerOptsSchema>;
 // Pub/Sub Trigger (GCP Pub/Sub, AWS SNS/SQS, Azure Service Bus)
 // =============================================================================
 
-export const PubSubProviderSchema = z.enum(["gcp", "aws", "azure"]);
+/**
+ * v0.7 PR 6 — supported pub/sub adapter providers.
+ *
+ * Pub/Sub is distinct from Worker: pub/sub is **1:N fan-out by default**
+ * (every subscriber sees every message). When `consumerGroup` is set,
+ * semantics shift to **competing-consumer** (1 of N within group). This
+ * single field disambiguates the two semantics — matching NestJS's
+ * `@MessagePattern` vs `@EventPattern` distinction.
+ *
+ * `nats` and `redis-streams` and `kafka` appear in both Worker and
+ * Pub/Sub provider lists because the underlying brokers support both
+ * semantics — the same broker connection serves both adapter kinds
+ * via different code paths.
+ *
+ * `BLOK_PUBSUB_ADAPTER` env var sets the default when `provider` is
+ * omitted on the workflow.
+ */
+export const PubSubProviderSchema = z.enum(["nats", "redis-streams", "kafka", "gcp", "aws", "azure"]);
 export type PubSubProvider = z.infer<typeof PubSubProviderSchema>;
 
 export const PubSubTriggerOptsSchema = z.object({
-	provider: PubSubProviderSchema,
-	topic: z.string().describe("Topic name to subscribe to"),
+	provider: PubSubProviderSchema.optional().describe(
+		"v0.7 — selects the broker adapter. Defaults to `BLOK_PUBSUB_ADAPTER` env var. Each adapter except in-memory requires its broker client as a peer dep.",
+	),
+	topic: z
+		.string()
+		.describe(
+			"Topic / subject / stream name. Supports broker-native wildcards (NATS subject hierarchy `orders.*.created`, Redis Streams pattern, etc.).",
+		),
 	subscription: z
 		.string()
-		.describe("Subscription name (GCP) or SQS queue URL (AWS) or Service Bus subscription (Azure)"),
+		.optional()
+		.describe(
+			"Subscription identifier. Required for GCP (subscription name), AWS (SQS queue URL bound to SNS topic), Azure (subscription name). Optional for NATS / Redis Streams / Kafka — derived from `consumerGroup` when absent.",
+		),
+	consumerGroup: z
+		.string()
+		.optional()
+		.describe(
+			"v0.7 — when set, the subscriber joins a competing-consumer group (1 of N gets each message). When unset, the subscriber fans out (every subscriber sees every message). Mirrors NestJS @MessagePattern (group) vs @EventPattern (fan-out).",
+		),
+	durable: z
+		.boolean()
+		.optional()
+		.describe(
+			"v0.7 — when true, the subscription survives broker restarts. Maps to NATS JetStream durable, Kafka committed offsets, Redis Streams persisted groups. Default behavior is provider-specific (NATS Core: false; GCP/AWS/Azure: true).",
+		),
+	startFrom: z
+		.union([
+			z.literal("earliest"),
+			z.literal("latest"),
+			z.object({ seq: z.number().int().nonnegative() }),
+			z.object({ timestamp: z.number().int().nonnegative() }),
+		])
+		.optional()
+		.describe(
+			'v0.7 — replay position for the subscription. `"earliest"` replays the broker\'s entire retained history; `"latest"` (default) only delivers new messages; `{seq}` and `{timestamp}` resume from a specific cursor.',
+		),
 	ack: z.boolean().default(true).describe("Whether to acknowledge messages after processing"),
 	maxMessages: z.number().default(10).describe("Maximum messages to receive at once"),
 	ackDeadline: z.number().default(30).describe("Acknowledgment deadline in seconds"),
 	deadLetterTopic: z.string().optional().describe("Dead letter topic for failed messages"),
-	filter: z.string().optional().describe("Message filter expression"),
+	filter: z.string().optional().describe("Message filter expression (provider-specific)"),
 });
 export type PubSubTriggerOpts = z.input<typeof PubSubTriggerOptsSchema>;
 

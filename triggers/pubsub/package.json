@@ -1,7 +1,7 @@
 {
 	"name": "@blokjs/trigger-pubsub",
 	"version": "0.2.3",
-	"description": "Pub/Sub-based trigger for Blok workflows - supports GCP Pub/Sub, AWS SNS/SQS, and Azure Service Bus",
+	"description": "Pub/Sub trigger for Blok workflows — supports NATS (Core + JetStream), Redis Streams, Kafka, GCP Pub/Sub, AWS SNS+SQS, and Azure Service Bus.",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -27,15 +27,15 @@
 		"vitest": "^4.0.18"
 	},
 	"peerDependencies": {
-		"@google-cloud/pubsub": "^5.0.0",
 		"@aws-sdk/client-sns": "^3.980.0",
 		"@aws-sdk/client-sqs": "^3.980.0",
-		"@azure/service-bus": "^7.9.5"
+		"@azure/service-bus": "^7.9.5",
+		"@google-cloud/pubsub": "^5.0.0",
+		"ioredis": "^5.9.2",
+		"kafkajs": "^2.2.0",
+		"nats": "^2.29.0"
 	},
 	"peerDependenciesMeta": {
-		"@google-cloud/pubsub": {
-			"optional": true
-		},
 		"@aws-sdk/client-sns": {
 			"optional": true
 		},
@@ -43,6 +43,18 @@
 			"optional": true
 		},
 		"@azure/service-bus": {
+			"optional": true
+		},
+		"@google-cloud/pubsub": {
+			"optional": true
+		},
+		"ioredis": {
+			"optional": true
+		},
+		"kafkajs": {
+			"optional": true
+		},
+		"nats": {
 			"optional": true
 		}
 	},

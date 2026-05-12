@@ -126,7 +126,10 @@ export class AWSSNSAdapter implements PubSubAdapter {
 			throw new Error("Not connected to AWS. Call connect() first.");
 		}
 
-		// In AWS, subscription is the SQS queue URL that's subscribed to the SNS topic
+		// In AWS, subscription is the SQS queue URL that's subscribed to the SNS topic.
+		if (!config.subscription) {
+			throw new Error("[AWSSNSAdapter] `subscription` is required — must be the SQS queue URL bound to the SNS topic.");
+		}
 		const queueUrl = config.subscription;
 
 		// Start polling the SQS queue
@@ -264,6 +267,39 @@ export class AWSSNSAdapter implements PubSubAdapter {
 	 */
 	isConnected(): boolean {
 		return this.connected;
+	}
+
+	/**
+	 * v0.7 PR 6 — publish to an SNS topic.
+	 *
+	 * `topic` must be the SNS topic ARN. `partitionKey` /
+	 * `orderingKey` map to the FIFO `MessageGroupId` field for
+	 * `.fifo` topics; ignored otherwise.
+	 */
+	async publish(
+		topic: string,
+		payload: unknown,
+		opts?: { partitionKey?: string; orderingKey?: string },
+	): Promise<void> {
+		if (!this.connected) throw new Error("[blok][pubsub-aws] not connected. Call connect() first.");
+		const moduleName = "@aws-sdk/client-sns";
+		// biome-ignore lint/suspicious/noExplicitAny: SDK loaded at runtime as a peer dep.
+		const sns: any = await import(moduleName);
+		const client = new sns.SNSClient({ region: this.config.region });
+		const isFifo = topic.endsWith(".fifo");
+		const params: Record<string, unknown> = {
+			TopicArn: topic,
+			Message: typeof payload === "string" ? payload : JSON.stringify(payload),
+		};
+		if (isFifo) {
+			params.MessageGroupId = opts?.partitionKey ?? opts?.orderingKey ?? "default";
+			params.MessageDeduplicationId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		}
+		try {
+			await client.send(new sns.PublishCommand(params));
+		} finally {
+			client.destroy?.();
+		}
 	}
 
 	/**
