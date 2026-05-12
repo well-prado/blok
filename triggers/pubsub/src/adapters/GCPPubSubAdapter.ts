@@ -108,6 +108,9 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			throw new Error("Not connected to GCP Pub/Sub. Call connect() first.");
 		}
 
+		if (!config.subscription) {
+			throw new Error("[GCPPubSubAdapter] `subscription` is required — must be the GCP subscription name.");
+		}
 		const subscriptionName = config.subscription;
 
 		// Get the subscription. The GCP SDK calls the per-subscription
@@ -191,6 +194,27 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 	 */
 	isConnected(): boolean {
 		return this.connected;
+	}
+
+	/**
+	 * v0.7 PR 6 — publish to a GCP Pub/Sub topic.
+	 *
+	 * `partitionKey` / `orderingKey` map to GCP's `orderingKey` (the
+	 * topic must have message ordering enabled — otherwise the field
+	 * is ignored by the broker).
+	 */
+	async publish(
+		topic: string,
+		payload: unknown,
+		opts?: { partitionKey?: string; orderingKey?: string },
+	): Promise<void> {
+		if (!this.connected) throw new Error("[blok][pubsub-gcp] not connected. Call connect() first.");
+		const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+		const t = this.requireClient().topic(topic);
+		await t.publishMessage({
+			data: Buffer.from(body),
+			orderingKey: opts?.orderingKey ?? opts?.partitionKey,
+		});
 	}
 
 	/**

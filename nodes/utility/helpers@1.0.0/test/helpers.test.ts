@@ -63,6 +63,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/jwt-verify",
 				"@blokjs/log",
 				"@blokjs/metrics-emit",
+				"@blokjs/pubsub-publish",
 				"@blokjs/redis-kv",
 				"@blokjs/sse-publish",
 				"@blokjs/sse-stream",

@@ -129,13 +129,23 @@ describe("Trigger.addTrigger()", () => {
 			expect(step).toBeInstanceOf(StepNode);
 		});
 
-		it("rejects pubsub missing required subscription", () => {
+		it("accepts a pubsub config without subscription (v0.7 — auto-derived per provider)", () => {
+			const trigger = createWorkflow();
+			const step = trigger.addTrigger("pubsub", {
+				provider: "nats",
+				topic: "orders.>",
+				durable: true,
+			});
+			expect(step).toBeInstanceOf(StepNode);
+		});
+
+		it("rejects an unknown pubsub provider value", () => {
 			const trigger = createWorkflow();
 			expect(() =>
 				trigger.addTrigger("pubsub", {
-					provider: "aws",
-					topic: "updates",
-				} as unknown as { provider: "aws"; topic: string; subscription: string }),
+					provider: "not-a-provider",
+					topic: "x",
+				} as unknown as { provider: "nats"; topic: string }),
 			).toThrow();
 		});
 	});
