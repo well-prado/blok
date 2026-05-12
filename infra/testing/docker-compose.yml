@@ -35,25 +35,35 @@ services:
       - blok-test
 
   # --- Queue Brokers ---
+  # Kafka in KRaft (no ZK) single-node mode. Switched from bitnami/kafka:3.7
+  # to the official `apache/kafka` image after Bitnami pulled the `3.7`
+  # floating tag (manifest unknown errors in CI). The official image uses
+  # `KAFKA_*` env vars (vs Bitnami's `KAFKA_CFG_*`) and ships
+  # `/opt/kafka/bin/kafka-topics.sh` for healthchecks.
   kafka:
-    image: bitnami/kafka:3.7
+    image: apache/kafka:3.8.0
     container_name: blok-test-kafka
     environment:
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Required for single-node KRaft.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     ports:
       - "9094:9094"
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 10s
       timeout: 10s
-      retries: 5
+      retries: 10
     networks:
       - blok-test
 
@@ -75,10 +85,15 @@ services:
       - blok-test
 
   # --- Pub/Sub ---
+  # NATS with JetStream + monitoring on 8222. The `--jetstream` flag
+  # enables the JetStream subsystem (required by NATS KV); `-m 8222`
+  # exposes the HTTP monitoring endpoint that the healthcheck hits.
+  # Without `-m`, /healthz returns 404 and the service stays
+  # `(unhealthy)` forever (CI hit this).
   nats:
     image: nats:2.10-alpine
     container_name: blok-test-nats
-    command: ["--jetstream"]
+    command: ["--jetstream", "-m", "8222"]
     ports:
       - "4223:4222"
       - "8223:8222"
@@ -86,7 +101,54 @@ services:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - blok-test
+
+  # --- Cloud Service Emulators ---
+  # LocalStack — AWS SQS for the @blokjs/trigger-worker SQS adapter.
+  # Use endpoint http://localhost:4566 + region us-east-1 + dummy creds
+  # (`test/test`). Auto-creates queues via aws-cli init scripts.
+  localstack:
+    image: localstack/localstack:3
+    container_name: blok-test-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      LS_LOG: warn
+    ports:
+      - "4567:4566"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"available\\|running\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - blok-test
+
+  # GCP Pub/Sub emulator for the @blokjs/trigger-pubsub GCP adapter.
+  # Use PUBSUB_EMULATOR_HOST=localhost:8086 + a project ID like `blok-test`.
+  gcp-pubsub-emulator:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:latest
+    container_name: blok-test-gcp-pubsub
+    command:
+      [
+        "gcloud",
+        "beta",
+        "emulators",
+        "pubsub",
+        "start",
+        "--host-port=0.0.0.0:8085",
+      ]
+    ports:
+      - "8086:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8085 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - blok-test
 

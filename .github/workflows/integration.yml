@@ -1,0 +1,77 @@
+name: Integration tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Integration tests (real brokers + backends)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Bring up test fixtures
+        run: docker compose -f infra/testing/docker-compose.yml up -d
+          postgres redis nats kafka rabbitmq localstack
+
+      - name: Wait for services to be healthy
+        run: |
+          set -e
+          deadline=$(( $(date +%s) + 120 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            unhealthy=$(docker compose -f infra/testing/docker-compose.yml ps --format json | \
+              grep -E '"Health":\s*"(starting|unhealthy)"' | wc -l | tr -d ' ' || echo "0")
+            if [ "$unhealthy" = "0" ]; then
+              echo "All services healthy."
+              exit 0
+            fi
+            echo "Waiting for $unhealthy service(s)..."
+            sleep 3
+          done
+          echo "Healthcheck timeout — printing status:"
+          docker compose -f infra/testing/docker-compose.yml ps
+          exit 1
+
+      - name: Build all workspace packages
+        # Use nx run-many -t build so every package's dist/ exists before
+        # tests run. Required because trigger-http's index.ts imports
+        # @blokjs/trigger-websocket / @blokjs/trigger-sse / @blokjs/trigger-webhook
+        # (and similar transitive imports across blokctl, nodes, etc.).
+        # Without this each downstream package fails to resolve sibling
+        # entries at test time.
+        run: bunx nx run-many -t build
+
+      - name: Run integration tests
+        env:
+          BLOK_INTEGRATION_REDIS_URL: redis://localhost:6380
+          BLOK_INTEGRATION_NATS_SERVERS: nats://localhost:4223
+          BLOK_INTEGRATION_KAFKA_BROKERS: localhost:9094
+          BLOK_INTEGRATION_RABBITMQ_URL: amqp://blok:blok_test@localhost:5673
+          BLOK_INTEGRATION_POSTGRES_URL: postgres://blok:blok_test@localhost:5433/blok_test
+          BLOK_INTEGRATION_SQS_ENDPOINT: http://localhost:4567
+        run: bun run test
+
+      - name: Print compose logs on failure
+        if: failure()
+        run: docker compose -f infra/testing/docker-compose.yml logs --tail=200
+
+      - name: Tear down test fixtures
+        if: always()
+        run: docker compose -f infra/testing/docker-compose.yml down -v

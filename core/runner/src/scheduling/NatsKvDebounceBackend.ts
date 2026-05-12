@@ -67,17 +67,29 @@ interface NatsKv {
 	create(key: string, value: Uint8Array | string): Promise<number>;
 	update(key: string, value: Uint8Array | string, revision: number): Promise<number>;
 	delete(key: string): Promise<void>;
-	keys(): AsyncIterable<string>;
+	// nats.js v2.x — `keys()` returns Promise<AsyncIterable>; mock-KV
+	// fakes return the AsyncIterable directly. Awaiting a non-thenable
+	// resolves to itself so the consumer call site `for await (const x of
+	// await kv.keys())` works in both modes.
+	keys(): Promise<AsyncIterable<string>> | AsyncIterable<string>;
+}
+
+interface NatsJetStreamViews {
+	kv(name: string): Promise<NatsKv>;
+}
+
+interface NatsJetStream {
+	views: NatsJetStreamViews;
 }
 
 interface NatsConnection {
-	jetstream(): unknown;
+	jetstream(): NatsJetStream;
 	jetstreamManager(): Promise<unknown>;
 	drain(): Promise<void>;
 }
 
 interface NatsModule {
-	connect(opts: Record<string, unknown>): Promise<NatsConnection & { kv(name: string): Promise<NatsKv> }>;
+	connect(opts: Record<string, unknown>): Promise<NatsConnection>;
 }
 
 export function readNatsKvDebounceConfigFromEnv(): NatsKvDebounceConfig {
@@ -143,10 +155,10 @@ export class NatsKvDebounceBackend implements DebounceBackend {
 		if (this.config.user) connectOpts.user = this.config.user;
 		if (this.config.pass) connectOpts.pass = this.config.pass;
 
-		this.nc = (await natsModule.connect(connectOpts)) as NatsConnection & {
-			kv(name: string): Promise<NatsKv>;
-		};
-		this.kv = await (this.nc as NatsConnection & { kv(name: string): Promise<NatsKv> }).kv(this.config.bucketName);
+		this.nc = await natsModule.connect(connectOpts);
+		// nats.js v2.x — KV lives at `nc.jetstream().views.kv(name)`.
+		const js = this.nc.jetstream();
+		this.kv = await js.views.kv(this.config.bucketName);
 		this.connected = true;
 	}
 
@@ -359,7 +371,17 @@ export class NatsKvDebounceBackend implements DebounceBackend {
 	async purgeExpired(now: number): Promise<number> {
 		const kv = this.requireKv();
 		let purged = 0;
-		for await (const key of kv.keys()) {
+
+		// Drain `kv.keys()` to an array BEFORE doing per-key reads.
+		// nats.js v2.x's `QueuedIterator` silently drops yields when
+		// `kv.get()` is interleaved with the iteration (the watch's
+		// internal consumer gets confused). Collect first, then operate.
+		const allKeys: string[] = [];
+		for await (const key of await kv.keys()) {
+			allKeys.push(key);
+		}
+
+		for (const key of allKeys) {
 			const entry = await this.safeGet(kv, key);
 			if (!entry || entry === "fetch-failed") continue;
 			const doc = this.parseDoc(entry);

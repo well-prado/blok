@@ -576,25 +576,33 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ---
 
-### H3 · NatsKvConcurrencyBackend real-NATS integration test
+### H3 · NatsKvConcurrencyBackend real-NATS integration test — ✅ SHIPPED
 
-**Status**: SHIPPED. 11 tests at `__tests__/integration/concurrency/nats-kv-real-broker.integration.test.ts`. Default-skip; run with `BLOK_BENCHMARK_REAL_NATS=1 bun run test:integration` against `docker compose up -d nats`.
-**Severity**: MEDIUM.
-**Effort**: ~half day.
-**Why**: today's tests all use a fake KV mock. Real broker behavior (lazy compaction, key length limits, drain semantics) untested.
+**Status**: SHIPPED on `feat/docker-compose-ci`. Tests at
+[`core/runner/__tests__/integration/NatsKvConcurrencyBackend.real-nats.test.ts`](core/runner/__tests__/integration/NatsKvConcurrencyBackend.real-nats.test.ts).
+Default-skip; run with `BLOK_INTEGRATION_NATS_SERVERS=nats://localhost:4223 bun run test`
+after `bun run test:integration:up`.
 
-Gate behind `BLOK_BENCHMARK_REAL_NATS=1`. Use `docker-compose.yml`'s NATS service. Mirror the existing unit tests but against the real broker.
+Covers the contract end-to-end against the JetStream KV: first acquire,
+limit/deny, idempotent re-acquire, release, two-instance contention,
+lazy-purge, `purgeExpired` count. Bundled into the broader
+docker-compose CI work that also closes #86 + #87 + C1 + C4 deferred
+integration tests.
 
 ---
 
-### H4 · Durable scheduler crash-restart integration test
+### H4 · Durable scheduler crash-restart integration test — ✅ SHIPPED
 
-**Status**: SHIPPED. 6 tests at `triggers/http/__tests__/unit/HttpTrigger.recoverDispatches.test.ts`. Simulates crash-restart in-process by persisting durable rows + dropping in-memory scheduler state + creating a fresh trigger that consumes the survived state — same crossing point a real crash exercises.
-**Severity**: MEDIUM.
-**Effort**: ~half day.
-**Why**: today's tests verify writes are queued + load on init, but no full process-kill/restart test.
+**Status**: SHIPPED on `feat/docker-compose-ci`. New tests at
+[`core/runner/__tests__/integration/durable-scheduler-crash-restart.test.ts`](core/runner/__tests__/integration/durable-scheduler-crash-restart.test.ts)
+complement the existing in-process simulation at
+[`triggers/http/__tests__/unit/HttpTrigger.recoverDispatches.test.ts`](triggers/http/__tests__/unit/HttpTrigger.recoverDispatches.test.ts).
 
-**Sketch**: spawn an HttpTrigger child process. POST 5 delayed runs. Kill -9 the child. Spawn a new child. Verify all 5 dispatches re-fire after their `scheduledAt`.
+The new tests use a **real on-disk sqlite file** that survives a
+simulated process tear-down (close store + reset singletons + reopen
+against the same file). Covers: row survives crash + reopen; past-due
+rows fire immediately on recovery; TTL-expired rows are deleted on the
+recovery sweep.
 
 ---
 
