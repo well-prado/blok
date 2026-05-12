@@ -35,6 +35,7 @@ import SsePublishNode from "./ssePublish";
 import SseStreamNode from "./sseStream";
 import SseSubscribeNode from "./sseSubscribe";
 import ThrowNode from "./throw";
+import WorkerPublishNode from "./workerPublish";
 import WsBroadcastNode from "./wsBroadcast";
 import WsCloseNode from "./wsClose";
 import WsReplyNode from "./wsReply";
@@ -55,6 +56,7 @@ export {
 	SseStreamNode,
 	SseSubscribeNode,
 	ThrowNode,
+	WorkerPublishNode,
 	WsBroadcastNode,
 	WsCloseNode,
 	WsReplyNode,
@@ -95,6 +97,7 @@ export const HELPER_NODES = {
 	"@blokjs/sse-stream": SseStreamNode,
 	"@blokjs/sse-subscribe": SseSubscribeNode,
 	"@blokjs/throw": ThrowNode,
+	"@blokjs/worker-publish": WorkerPublishNode,
 	"@blokjs/ws-broadcast": WsBroadcastNode,
 	"@blokjs/ws-close": WsCloseNode,
 	"@blokjs/ws-reply": WsReplyNode,

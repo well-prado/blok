@@ -172,10 +172,30 @@ export abstract class WorkerTrigger extends TriggerBase {
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
 	protected readonly logger = new DefaultLogger();
-	protected abstract adapter: WorkerAdapter;
+	/**
+	 * v0.7 PR 5 — the "default" adapter, used when a workflow's
+	 * `trigger.worker.provider` field is omitted AND the
+	 * `BLOK_WORKER_ADAPTER` env var is unset. Subclasses MAY set this
+	 * for back-compat with the pre-v0.7 single-adapter pattern
+	 * (`class WorkerServer extends WorkerTrigger { protected adapter = new NATSWorkerAdapter() }`).
+	 *
+	 * When unset AND no per-workflow provider is specified, the factory
+	 * falls back to `in-memory`. The factory pool (`adapters/factory.ts`)
+	 * tracks one connected adapter per provider so multiple workflows
+	 * with the same provider share a single broker connection.
+	 */
+	protected adapter?: WorkerAdapter;
 
 	/** Active queues being processed */
 	protected activeQueues: Set<string> = new Set();
+
+	/**
+	 * v0.7 PR 5 — adapter pool, keyed by provider name. Populated lazily
+	 * inside `listen()` as workflows are matched to providers. Each
+	 * adapter is connected once and reused across workflows that share
+	 * its provider. Drained in `stop()`.
+	 */
+	protected adapterPool: Map<string, WorkerAdapter> = new Map();
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
@@ -269,20 +289,6 @@ export abstract class WorkerTrigger extends TriggerBase {
 				this.logger.error(`[shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 
-			// Connect to job backend
-			await this.adapter.connect();
-			this.logger.log(`Connected to ${this.adapter.provider} worker system`);
-
-			// Register health dependency
-			this.registerHealthDependency(`worker-${this.adapter.provider}`, async () => {
-				const healthy = await this.adapter.healthCheck();
-				return {
-					status: healthy ? ("healthy" as const) : ("unhealthy" as const),
-					lastChecked: Date.now(),
-					message: healthy ? "Connected" : "Connection lost",
-				};
-			});
-
 			// Find all workflows with worker triggers
 			const workerWorkflows = this.getWorkerWorkflows();
 
@@ -291,16 +297,19 @@ export abstract class WorkerTrigger extends TriggerBase {
 				return this.endCounter(startTime);
 			}
 
-			// Start processing each queue
+			// Start processing each queue, dispatching to the right adapter
+			// based on the workflow's `provider` field (with back-compat
+			// fallback to `this.adapter` when subclasses still set it).
 			for (const workflow of workerWorkflows) {
 				const config = workflow.config.trigger?.worker as WorkerTriggerOpts;
+				const adapter = await this.resolveAdapterForWorkflow(config);
 				this.logger.log(
-					`Starting worker for queue: ${config.queue} (concurrency=${config.concurrency}, retries=${config.retries})`,
+					`Starting worker for queue: ${config.queue} via ${adapter.provider} (concurrency=${config.concurrency}, retries=${config.retries})`,
 				);
 
 				this.activeQueues.add(config.queue);
 
-				await this.adapter.process(config, async (job) => {
+				await adapter.process(config, async (job) => {
 					await this.handleJob(job, workflow, config);
 				});
 			}
@@ -323,12 +332,28 @@ export abstract class WorkerTrigger extends TriggerBase {
 	 * Stop all workers and disconnect
 	 */
 	async stop(): Promise<void> {
+		// Stop each queue on its owning adapter — adapters are tracked
+		// in the pool so multi-provider workers all drain cleanly.
 		for (const queue of this.activeQueues) {
-			await this.adapter.stopProcessing(queue);
+			for (const adapter of this.adapterPool.values()) {
+				try {
+					await adapter.stopProcessing(queue);
+				} catch {
+					/* swallow — adapter may not own this queue */
+				}
+			}
 			this.logger.log(`Stopped processing queue: ${queue}`);
 		}
 		this.activeQueues.clear();
-		await this.adapter.disconnect();
+		// Disconnect every adapter we ever connected.
+		for (const adapter of this.adapterPool.values()) {
+			try {
+				await adapter.disconnect();
+			} catch (err) {
+				this.logger.error(`[blok][worker] disconnect failed: ${(err as Error).message}`);
+			}
+		}
+		this.adapterPool.clear();
 		this.destroyMonitoring();
 		this.logger.log("Worker trigger stopped");
 	}
@@ -355,14 +380,33 @@ export abstract class WorkerTrigger extends TriggerBase {
 			jobId?: string;
 		},
 	): Promise<string> {
-		return this.adapter.addJob(queue, data, opts);
+		// Back-compat: when a subclass set `this.adapter`, use it.
+		// Otherwise dispatch via the first pool adapter — typically the
+		// only one when a process owns one trigger workflow.
+		const adapter =
+			this.adapter ??
+			(this.adapterPool.size > 0 ? (this.adapterPool.values().next().value as WorkerAdapter) : undefined);
+		if (!adapter) {
+			throw new Error(
+				"[blok][worker] dispatch() called before any adapter is connected. Call listen() first, or set this.adapter on the subclass.",
+			);
+		}
+		return adapter.addJob(queue, data, opts);
 	}
 
 	/**
 	 * Get statistics for a queue
 	 */
 	async getQueueStats(queue: string): Promise<WorkerQueueStats> {
-		return this.adapter.getQueueStats(queue);
+		const adapter =
+			this.adapter ??
+			(this.adapterPool.size > 0 ? (this.adapterPool.values().next().value as WorkerAdapter) : undefined);
+		if (!adapter) {
+			throw new Error(
+				"[blok][worker] getQueueStats() called before any adapter is connected. Call listen() first, or set this.adapter on the subclass.",
+			);
+		}
+		return adapter.getQueueStats(queue);
 	}
 
 	/**
@@ -370,6 +414,60 @@ export abstract class WorkerTrigger extends TriggerBase {
 	 */
 	getActiveQueues(): string[] {
 		return Array.from(this.activeQueues);
+	}
+
+	/**
+	 * v0.7 PR 5 — pick the adapter for a workflow's `provider` field.
+	 *
+	 * Resolution order:
+	 *   1. Subclass-set `this.adapter` (back-compat: pre-v0.7 pattern
+	 *      where one process binds to one adapter at construction time).
+	 *   2. Per-workflow `provider` field, looked up via the factory.
+	 *   3. `BLOK_WORKER_ADAPTER` env var.
+	 *   4. `in-memory` fallback.
+	 *
+	 * Adapters are connected on first use and pooled per provider so
+	 * multiple workflows sharing a provider share one broker
+	 * connection. Health-dependency registration also happens here so
+	 * each provider is tracked individually in `/health`.
+	 */
+	protected async resolveAdapterForWorkflow(config: WorkerTriggerOpts): Promise<WorkerAdapter> {
+		// Subclass override wins for back-compat.
+		if (this.adapter) {
+			if (!this.adapter.isConnected()) {
+				await this.adapter.connect();
+				this.logger.log(`Connected to ${this.adapter.provider} worker system (subclass adapter)`);
+				this.registerAdapterHealth(this.adapter);
+			}
+			// Pool-track so stop() can drain it.
+			this.adapterPool.set(this.adapter.provider, this.adapter);
+			return this.adapter;
+		}
+
+		// Lazy-import the factory so the worker package doesn't pull in
+		// every adapter on import — only the ones actually exercised.
+		const { resolveProvider, createWorkerAdapter } = await import("./adapters/factory");
+		const provider = resolveProvider(config.provider);
+		let adapter = this.adapterPool.get(provider);
+		if (!adapter) {
+			adapter = createWorkerAdapter(provider);
+			await adapter.connect();
+			this.logger.log(`Connected to ${adapter.provider} worker system`);
+			this.registerAdapterHealth(adapter);
+			this.adapterPool.set(provider, adapter);
+		}
+		return adapter;
+	}
+
+	private registerAdapterHealth(adapter: WorkerAdapter): void {
+		this.registerHealthDependency(`worker-${adapter.provider}`, async () => {
+			const healthy = await adapter.healthCheck();
+			return {
+				status: healthy ? ("healthy" as const) : ("unhealthy" as const),
+				lastChecked: Date.now(),
+				message: healthy ? "Connected" : "Connection lost",
+			};
+		});
 	}
 
 	/**
