@@ -1065,7 +1065,17 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		// Best-effort scheduler cleanup (both methods are idempotent).
 		DeferredRunScheduler.getInstance().cancel(runId);
 		if (run.debounceKey) {
-			DebounceCoordinator.getInstance().cancel(run.workflowName, run.debounceKey);
+			// Tier C #1 — `cancel()` is now async because the coordinator may
+			// route through a cross-process backend. Fire-and-forget: the
+			// HTTP response shouldn't block on broker cleanup, and the
+			// run-status flip below is the source of truth for the caller.
+			void DebounceCoordinator.getInstance()
+				.cancel(run.workflowName, run.debounceKey)
+				.catch((err: unknown) => {
+					console.warn(
+						`[blok][scheduling] debounce cancel failed for ${run.workflowName}:${run.debounceKey}: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				});
 		}
 
 		const cancelled = t.cancelRun(runId);

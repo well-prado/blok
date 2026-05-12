@@ -139,7 +139,13 @@ import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 // Janitor sweep OTel metrics (PR 3 D3)
 import { JanitorMetrics } from "./monitoring/JanitorMetrics";
 
-// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7)
+import type {
+	DebounceBackend,
+	DebounceFinalizeResult,
+	DebounceRegisterBackendOpts,
+	DebounceRegisterBackendResult,
+} from "./scheduling/DebounceBackend";
+// Scheduling — delay / TTL / debounce (Tier 2 #5 + #7) + cross-process debounce (Tier C #1)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import {
 	type DeferredDispatchInfo,
@@ -147,6 +153,17 @@ import {
 	isDeferredDispatchSignal,
 } from "./scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler, type DeferredScheduleOptions } from "./scheduling/DeferredRunScheduler";
+import {
+	NatsKvDebounceBackend,
+	type NatsKvDebounceConfig,
+	readNatsKvDebounceConfigFromEnv,
+} from "./scheduling/NatsKvDebounceBackend";
+import {
+	RedisDebounceBackend,
+	type RedisDebounceConfig,
+	readRedisDebounceConfigFromEnv,
+} from "./scheduling/RedisDebounceBackend";
+import { createDebounceBackend } from "./scheduling/createDebounceBackend";
 import {
 	type NormalizedDebounceConfig,
 	type NormalizedSchedulingConfig,
@@ -333,6 +350,18 @@ export {
 	type NormalizedDebounceConfig,
 	type NormalizedSchedulingConfig,
 	SCHEDULING_DEFAULTS,
+	// Cross-process debounce backend (Tier C #1)
+	type DebounceBackend,
+	type DebounceRegisterBackendOpts,
+	type DebounceRegisterBackendResult,
+	type DebounceFinalizeResult,
+	createDebounceBackend,
+	NatsKvDebounceBackend,
+	type NatsKvDebounceConfig,
+	readNatsKvDebounceConfigFromEnv,
+	RedisDebounceBackend,
+	type RedisDebounceConfig,
+	readRedisDebounceConfigFromEnv,
 	TracingLogger,
 	traceSanitize,
 	traceRedactSensitive,

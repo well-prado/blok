@@ -286,51 +286,49 @@ trigger: {
 
 ## Tier C — Cross-process scaling
 
-### C1 · Cross-process debounce keys (NATS KV / Redis)
+### C1 · Cross-process debounce keys (NATS KV / Redis) — ✅ SHIPPED
 
-**Severity**: FEATURE (single-process is documented).
-**Effort**: ~2-3 days (was ~1-2 day estimate; revised after auditing the
-`DebounceCoordinator` surface).
-**Why**: today's `DebounceCoordinator` is in-process. Two processes handling the same key won't coalesce.
+**Status**: SHIPPED on `feat/c1-cross-process-debounce` (stacked on
+`feat/c4-redis-concurrency-backend`).
 
-**Sketch**: same approach as C4's `RedisConcurrencyBackend` —
-one shared document per `(workflow, debounceKey)` bucket holding
-`{firstPingAt, lastPingAt, pingCount, activeRunId, scheduledAt, mode,
-delayMs, maxDelayMs, ownerLeaseExpiresAt}`. Atomicity via Lua (Redis)
-or revision-based CAS (NATS KV). The owning process holds the local
-timer; coalesce losers atomically bump `pingCount` + `lastPingAt` and
-ACK. Owner death is handled via `ownerLeaseExpiresAt` — subsequent
-pings see the lease expired and take over ownership.
+**Implementation**:
+- [`DebounceBackend.ts`](core/runner/src/scheduling/DebounceBackend.ts) — interface
+- [`NatsKvDebounceBackend.ts`](core/runner/src/scheduling/NatsKvDebounceBackend.ts) — revision-CAS impl
+- [`RedisDebounceBackend.ts`](core/runner/src/scheduling/RedisDebounceBackend.ts) — Lua-scripted impl
+- [`createDebounceBackend.ts`](core/runner/src/scheduling/createDebounceBackend.ts) — factory
+- [`DebounceCoordinator.ts`](core/runner/src/scheduling/DebounceCoordinator.ts) — async-aware coordinator
 
-**Blueprint (C4 patterns to mirror)**:
-1. Define `DebounceBackend` interface alongside `ConcurrencyBackend`.
-2. Implement `RedisDebounceBackend` + `NatsKvDebounceBackend`. Reuse
-   the Lua / CAS atomicity work + the FW-5 production-prefix refusal.
-3. Pool the Redis client across `RedisConcurrencyBackend` +
-   `RedisDebounceBackend` so operators using both pay one connection.
-4. Refactor `DebounceCoordinator` to be backend-aware: keep the
-   synchronous in-memory fast path for the no-backend default; route
-   through the async backend when one is configured (the call site
-   in `TriggerBase.run` is already async).
-5. Env vars: `BLOK_DEBOUNCE_BACKEND` (independent from the concurrency
-   choice). Per-backend config reuses `BLOK_CONCURRENCY_REDIS_*` /
-   `BLOK_CONCURRENCY_NATS_*` (one connection pool per broker).
+Each `(workflow, debounceKey)` has one shared doc per cluster holding
+`{mode, delayMs, maxDelayMs?, maxDelayDeadline?, firstPingAt,
+lastPingAt, pingCount, activeRunId, ownerProcessId,
+ownerLeaseExpiresAt, scheduledAt}`. Three outcomes from `registerPing`:
+**owner-new** (caller starts local timer), **owner-extend** (caller
+refreshes its local timer + closure), **coalesce** (caller's run gets
+`debounced` terminal status pointing at the existing `activeRunId`).
+Owner-lease expiry enables takeover on owner death. Redis uses Lua
+for single-round-trip atomicity; NATS KV uses bounded revision-CAS
+with over-coalesce-on-exhaustion fallback. Both backends ship the
+same FW-5 production-prefix refusal as the concurrency backends.
 
-**Semantic decision required**: today's in-process debounce stores
-the latest payload via closure (trailing mode — last ping wins).
-Cross-process forces a choice:
-- **Owner-local payload** (simpler, BACKLOG sketch's default): only
-  the owning process's payload fires; non-owners' payloads are
-  dropped. Document the semantic change clearly.
-- **Payload-persisted** (correct but expensive): write each ping's
-  payload to the shared doc so the owner picks up the truly-latest
-  payload on fire. Adds JSON encoding overhead per ping; size cap
-  needed (matches PR 2 A4's `BLOK_DISPATCH_PAYLOAD_MAX_BYTES`).
+**Semantic ship**: owner-local payload — only the owning process's
+captured `onFire` closure fires when the trailing window elapses.
+Coalesce pings on other processes bump `pingCount` + push `scheduledAt`
+but their payloads are dropped. Cross-process latest-payload-wins
+remains a deferred follow-up (would require persisting each ping's
+payload to the shared doc, with a size cap mirroring
+`BLOK_DISPATCH_PAYLOAD_MAX_BYTES`).
 
-**Trade-off**: cross-process debounce coordination adds a network
-round-trip per ping. For high-throughput debounce (autosave at 100Hz
-per doc), this can be the bottleneck — Redis Lua keeps it to one
-round-trip; NATS KV's CAS retries can push it higher under contention.
+**Opt in**: `BLOK_DEBOUNCE_BACKEND=nats-kv` or `redis`. Independent of
+`BLOK_CONCURRENCY_BACKEND` — different connection, different prefix.
+Connection pooling between C1 and C4 (when both target the same broker)
+is a follow-up optimization, not shipped here.
+
+**Deferred** (explicit, tracked alongside the broker-adapter
+docker-compose backlog item): real-NATS / real-Redis integration tests.
+Unit tests use fake backends mirroring the Lua / CAS semantics in
+TypeScript — sufficient for contract coverage but not for catching
+broker-version-specific encoding regressions. Same coverage deferral
+as C4 + PRs #85, #86, #87, #88.
 
 ---
 

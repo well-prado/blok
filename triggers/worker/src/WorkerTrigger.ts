@@ -24,6 +24,7 @@ import {
 	type BlokService,
 	ConcurrencyLimitError,
 	ConcurrencyMetrics,
+	DebounceCoordinator,
 	DefaultLogger,
 	DeferredDispatchSignal,
 	type GlobalOptions,
@@ -34,6 +35,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 	createConcurrencyBackend,
+	createDebounceBackend,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -256,6 +258,28 @@ export abstract class WorkerTrigger extends TriggerBase {
 				});
 				this.logger.error(
 					`[concurrency] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
+				);
+			}
+
+			// Tier C #1 · install the cross-process debounce backend
+			// (NATS KV / Redis) when the operator opted in via
+			// `BLOK_DEBOUNCE_BACKEND`. Default unset = the existing
+			// in-process behavior is preserved. On connect failure, log +
+			// fall back to in-memory coordination.
+			try {
+				const debounceBackend = createDebounceBackend();
+				if (debounceBackend) {
+					const leaseRaw = process.env.BLOK_DEBOUNCE_OWNER_LEASE_MS;
+					if (leaseRaw && /^\d+$/.test(leaseRaw)) {
+						DebounceCoordinator.getInstance().setOwnerLeaseMs(Number(leaseRaw));
+					}
+					await debounceBackend.connect();
+					DebounceCoordinator.getInstance().setBackend(debounceBackend);
+					this.logger.log(`[debounce] backend installed: ${debounceBackend.name}`);
+				}
+			} catch (err) {
+				this.logger.error(
+					`[debounce] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-memory coordination`,
 				);
 			}
 

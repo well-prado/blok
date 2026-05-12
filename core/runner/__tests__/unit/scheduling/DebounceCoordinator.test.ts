@@ -12,11 +12,11 @@ describe("DebounceCoordinator — leading mode", () => {
 		DebounceCoordinator.resetInstance();
 	});
 
-	it("first ping returns fire-immediate outcome", () => {
+	it("first ping returns fire-immediate outcome", async () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		const result = co.register({
+		const result = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "leading",
@@ -32,11 +32,11 @@ describe("DebounceCoordinator — leading mode", () => {
 		expect(fire).not.toHaveBeenCalled();
 	});
 
-	it("subsequent pings within the window coalesce", () => {
+	it("subsequent pings within the window coalesce", async () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "leading",
@@ -44,7 +44,7 @@ describe("DebounceCoordinator — leading mode", () => {
 			runId: "run_first",
 			onFire: fire,
 		});
-		const second = co.register({
+		const second = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "leading",
@@ -58,11 +58,11 @@ describe("DebounceCoordinator — leading mode", () => {
 		expect(second.pingCount).toBe(2);
 	});
 
-	it("after delayMs of silence, a new ping fires fresh", () => {
+	it("after delayMs of silence, a new ping fires fresh", async () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "leading",
@@ -72,7 +72,7 @@ describe("DebounceCoordinator — leading mode", () => {
 		});
 		vi.advanceTimersByTime(1100);
 
-		const result = co.register({
+		const result = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "leading",
@@ -100,7 +100,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		const result = co.register({
+		const result = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",
@@ -122,7 +122,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const oldFire = vi.fn(async () => undefined);
 		const newFire = vi.fn(async () => undefined);
 
-		const first = co.register({
+		const first = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",
@@ -133,7 +133,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		expect(first.outcome).toBe("schedule-trailing");
 
 		await vi.advanceTimersByTimeAsync(400);
-		const second = co.register({
+		const second = await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",
@@ -158,7 +158,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",
@@ -170,7 +170,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 
 		for (let i = 0; i < 3; i++) {
 			await vi.advanceTimersByTimeAsync(400);
-			co.register({
+			await co.register({
 				workflowName: "w",
 				debounceKey: "k",
 				mode: "trailing",
@@ -191,7 +191,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const fireA = vi.fn(async () => undefined);
 		const fireB = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "A",
 			mode: "trailing",
@@ -199,7 +199,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 			runId: "run_A",
 			onFire: fireA,
 		});
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "B",
 			mode: "trailing",
@@ -218,7 +218,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const fireW1 = vi.fn(async () => undefined);
 		const fireW2 = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w1",
 			debounceKey: "k",
 			mode: "trailing",
@@ -226,7 +226,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 			runId: "run_w1",
 			onFire: fireW1,
 		});
-		co.register({
+		await co.register({
 			workflowName: "w2",
 			debounceKey: "k",
 			mode: "trailing",
@@ -244,7 +244,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",
@@ -252,22 +252,22 @@ describe("DebounceCoordinator — trailing mode", () => {
 			runId: "run_x",
 			onFire: fire,
 		});
-		expect(co.cancel("w", "k")).toBe(true);
+		expect(await co.cancel("w", "k")).toBe(true);
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(fire).not.toHaveBeenCalled();
 		expect(co.size()).toBe(0);
 	});
 
-	it("cancel returns false on unknown bucket", () => {
+	it("cancel returns false on unknown bucket", async () => {
 		const co = DebounceCoordinator.getInstance();
-		expect(co.cancel("nope", "nope")).toBe(false);
+		expect(await co.cancel("nope", "nope")).toBe(false);
 	});
 
 	it("clear cancels all windows without firing", async () => {
 		const co = DebounceCoordinator.getInstance();
 		const fire = vi.fn(async () => undefined);
 
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "A",
 			mode: "trailing",
@@ -275,7 +275,7 @@ describe("DebounceCoordinator — trailing mode", () => {
 			runId: "run_A",
 			onFire: fire,
 		});
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "B",
 			mode: "trailing",
@@ -290,10 +290,10 @@ describe("DebounceCoordinator — trailing mode", () => {
 		expect(co.size()).toBe(0);
 	});
 
-	it("has() reports active windows", () => {
+	it("has() reports active windows", async () => {
 		const co = DebounceCoordinator.getInstance();
 		expect(co.has("w", "k")).toBe(false);
-		co.register({
+		await co.register({
 			workflowName: "w",
 			debounceKey: "k",
 			mode: "trailing",

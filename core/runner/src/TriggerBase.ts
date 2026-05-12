@@ -748,7 +748,7 @@ export default abstract class TriggerBase extends Trigger {
 			if (!isReentry && traceRunId && process.env.BLOK_SCHEDULING_DISABLED !== "1") {
 				const schedCfg = readSchedulingConfig(this.configuration.trigger as Record<string, unknown> | undefined);
 				if (schedCfg) {
-					const signal = this.maybeDeferRun(ctx, traceRunId, schedCfg);
+					const signal = await this.maybeDeferRun(ctx, traceRunId, schedCfg);
 					if (signal) throw signal;
 				}
 			}
@@ -1190,11 +1190,11 @@ export default abstract class TriggerBase extends Trigger {
 	 * coordinator handles its own scheduling (the `delay` field is
 	 * effectively ignored on debounced triggers).
 	 */
-	private maybeDeferRun(
+	private async maybeDeferRun(
 		ctx: Context,
 		traceRunId: string,
 		schedCfg: NormalizedSchedulingConfig,
-	): DeferredDispatchSignal | null {
+	): Promise<DeferredDispatchSignal | null> {
 		const tracker = RunTracker.getInstance();
 		const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
 
@@ -1233,7 +1233,7 @@ export default abstract class TriggerBase extends Trigger {
 				}
 			};
 
-			const result = DebounceCoordinator.getInstance().register({
+			const result = await DebounceCoordinator.getInstance().register({
 				workflowName,
 				debounceKey: resolvedKey,
 				mode: schedCfg.debounce.mode,
