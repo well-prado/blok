@@ -595,6 +595,29 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE node_runs ADD COLUMN iteration_context TEXT;
 				`,
 			},
+			{
+				// Tier C #2 — cross-process scheduler coordination.
+				//
+				// Multi-process deployments sharing one PG / sqlite file risk
+				// double-firing the same dispatch when each process's
+				// `recoverDispatches()` independently registers timers. The
+				// claim columns let processes atomically take ownership of
+				// rows during recovery; the heartbeat keeps the claim fresh
+				// while the timer is registered; a dead holder's claim
+				// expires after `BLOK_SCHEDULER_CLAIM_LEASE_MS` and a
+				// surviving process can take over on its next recovery.
+				//
+				// Single-process sqlite deployments see no observable
+				// behavior change (the same process always wins the claim).
+				// Additive — pre-existing rows get NULL claim columns and
+				// become claimable on the next recovery.
+				version: 13,
+				sql: `
+					ALTER TABLE scheduled_dispatches ADD COLUMN claimed_by TEXT;
+					ALTER TABLE scheduled_dispatches ADD COLUMN claimed_at INTEGER;
+					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_claim ON scheduled_dispatches(claimed_by, claimed_at);
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -1491,6 +1514,9 @@ export class SqliteRunStore implements RunStore {
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 
 	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
+		// On CONFLICT we deliberately PRESERVE claimed_by + claimed_at —
+		// debounce reset / queue re-defer updates the scheduling fields
+		// but ownership stays with whoever currently holds the claim.
 		this.stmt(
 			"upsertScheduledDispatch",
 			`INSERT INTO scheduled_dispatches
@@ -1542,25 +1568,96 @@ export class SqliteRunStore implements RunStore {
 			dispatch_status: string;
 			payload_json: string;
 			created_at: number;
+			claimed_by: string | null;
+			claimed_at: number | null;
 		}>;
-		return rows.map((r) => {
-			let parsedPayload: unknown = null;
-			try {
-				parsedPayload = JSON.parse(r.payload_json);
-			} catch {
-				parsedPayload = null;
-			}
-			return {
-				runId: r.run_id,
-				workflowName: r.workflow_name,
-				triggerType: r.trigger_type,
-				scheduledAt: r.scheduled_at,
-				expiresAt: r.expires_at ?? undefined,
-				dispatchStatus: r.dispatch_status as ScheduledDispatchRow["dispatchStatus"],
-				payload: parsedPayload,
-				createdAt: r.created_at,
-			};
-		});
+		return rows.map((r) => this.rowToScheduledDispatch(r));
+	}
+
+	// === Tier C #2 — cross-process scheduler coordination ===
+
+	claimDispatches(
+		processId: string,
+		leaseMs: number,
+		now: number,
+		opts?: { triggerType?: string },
+	): ScheduledDispatchRow[] {
+		// Atomic claim: UPDATE rows that are unclaimed OR whose lease has
+		// expired, set the claim, return the affected rows.
+		// SQLite supports `UPDATE ... RETURNING *` since v3.35.0 (2021);
+		// better-sqlite3 ships a modern sqlite so this is safe.
+		const triggerClause = opts?.triggerType ? "AND trigger_type = ?" : "";
+		const sql = `
+			UPDATE scheduled_dispatches
+			SET claimed_by = ?, claimed_at = ?
+			WHERE (claimed_by IS NULL OR claimed_at + ? < ?) ${triggerClause}
+			RETURNING *
+		`;
+		const args: (string | number)[] = [processId, now, leaseMs, now];
+		if (opts?.triggerType) args.push(opts.triggerType);
+		const claimed = this.db.prepare(sql).all(...args) as Array<{
+			run_id: string;
+			workflow_name: string;
+			trigger_type: string;
+			scheduled_at: number;
+			expires_at: number | null;
+			dispatch_status: string;
+			payload_json: string;
+			created_at: number;
+			claimed_by: string | null;
+			claimed_at: number | null;
+		}>;
+		const out = claimed.map((r) => this.rowToScheduledDispatch(r));
+		out.sort((a, b) => a.scheduledAt - b.scheduledAt);
+		return out;
+	}
+
+	heartbeatClaims(processId: string, now: number): number {
+		const result = this.stmt(
+			"heartbeatClaims",
+			"UPDATE scheduled_dispatches SET claimed_at = ? WHERE claimed_by = ?",
+		).run(now, processId);
+		return result.changes;
+	}
+
+	releaseClaim(runId: string): boolean {
+		const result = this.stmt(
+			"releaseClaim",
+			"UPDATE scheduled_dispatches SET claimed_by = NULL, claimed_at = NULL WHERE run_id = ? AND claimed_by IS NOT NULL",
+		).run(runId);
+		return result.changes > 0;
+	}
+
+	private rowToScheduledDispatch(r: {
+		run_id: string;
+		workflow_name: string;
+		trigger_type: string;
+		scheduled_at: number;
+		expires_at: number | null;
+		dispatch_status: string;
+		payload_json: string;
+		created_at: number;
+		claimed_by: string | null;
+		claimed_at: number | null;
+	}): ScheduledDispatchRow {
+		let parsedPayload: unknown = null;
+		try {
+			parsedPayload = JSON.parse(r.payload_json);
+		} catch {
+			parsedPayload = null;
+		}
+		return {
+			runId: r.run_id,
+			workflowName: r.workflow_name,
+			triggerType: r.trigger_type,
+			scheduledAt: r.scheduled_at,
+			expiresAt: r.expires_at ?? undefined,
+			dispatchStatus: r.dispatch_status as ScheduledDispatchRow["dispatchStatus"],
+			payload: parsedPayload,
+			createdAt: r.created_at,
+			claimedBy: r.claimed_by ?? undefined,
+			claimedAt: r.claimed_at ?? undefined,
+		};
 	}
 
 	purgeExpiredScheduledDispatches(now: number): number {

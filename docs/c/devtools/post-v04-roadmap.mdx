@@ -198,14 +198,21 @@ Mirrors C4's backend abstraction for debounce. `DebounceCoordinator.register()` 
 
 **Reference:** [BACKLOG.md C1](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c1--cross-process-debounce-keys-nats-kv--redis--shipped)
 
-#### C2 · Cross-process scheduler coordination
+#### C2 · Cross-process scheduler coordination — ✅ SHIPPED
 
-**Effort:** ~2-3 days.
-**Why now or later:** With separate sqlite files per process (typical setup), each process owns its own dispatches — no double-fire. With PG-backed deployments sharing one DB, two processes both running `recoverDispatches()` could double-fire the same row.
+**Status:** SHIPPED on `feat/c2-cross-process-scheduler`. Multi-process PG deployments no longer risk double-firing the same dispatch during boot recovery.
 
-**Sketch:** add `claimed_by` + `claimed_at` columns to the `scheduled_dispatches` table (PG migration v10). On boot, only claim rows that are unclaimed OR claimed by a stale process (lease expired). Heartbeat the claim while the timer is registered.
+**Implementation:** sqlite migration v13 + PG migration v6 add `claimed_by` + `claimed_at` columns to `scheduled_dispatches`. New `RunStore.claimDispatches(processId, leaseMs, now, opts?)` atomically grants ownership of unclaimed or stale-lease rows. The `DeferredRunScheduler` runs a per-process heartbeat (default every 20s) that refreshes `claimed_at` while ≥1 persisted entry is registered. `HttpTrigger.recoverDispatches()` switches from `getScheduledDispatches` to `claimDispatches` — sqlite-per-process deployments see no observable change (single process always wins).
 
-**Reference:** [BACKLOG.md C2](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c2--cross-process-scheduler-coordination), [core/runner/src/tracing/PostgresRunStore.ts](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/PostgresRunStore.ts)
+**Opt-out:** `BLOK_SCHEDULER_CLAIM_DISABLED=1` reverts to the legacy recovery path. Useful for deployments with very strict additive-only schema constraints.
+
+**Source:**
+[`RunStore.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/RunStore.ts) (interface)
++ [`SqliteRunStore.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/SqliteRunStore.ts) (sqlite v13)
++ [`PostgresRunStore.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/tracing/PostgresRunStore.ts) (PG v6 + `claimDispatchesAsync`)
++ [`DeferredRunScheduler.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/scheduling/DeferredRunScheduler.ts) (processId + heartbeat).
+
+**Reference:** [BACKLOG.md C2](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md#c2--cross-process-scheduler-coordination--shipped)
 
 #### C3 · Per-lease key model for high-cardinality NATS KV buckets
 

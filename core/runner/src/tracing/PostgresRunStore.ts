@@ -9,6 +9,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowSummary,
@@ -302,6 +303,26 @@ export class PostgresRunStore implements RunStore {
 						);
 					},
 				},
+				{
+					// Tier C #2 — cross-process scheduler coordination.
+					//
+					// Multi-process PG deployments risk double-firing the same
+					// dispatch when both processes' `recoverDispatches()`
+					// register timers against the same row. The claim columns
+					// let processes atomically take ownership; the
+					// `DeferredRunScheduler` heartbeats `claimed_at` while a
+					// timer is registered; a dead process's claim expires
+					// after `BLOK_SCHEDULER_CLAIM_LEASE_MS` and a surviving
+					// process can take over on its next recovery.
+					version: 6,
+					up: async () => {
+						await client.query("ALTER TABLE scheduled_dispatches ADD COLUMN IF NOT EXISTS claimed_by TEXT");
+						await client.query("ALTER TABLE scheduled_dispatches ADD COLUMN IF NOT EXISTS claimed_at BIGINT");
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_claim ON scheduled_dispatches(claimed_by, claimed_at)",
+						);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -467,6 +488,12 @@ export class PostgresRunStore implements RunStore {
 						dispatchStatus: row.dispatch_status,
 						payload: typeof row.payload_json === "string" ? JSON.parse(row.payload_json) : row.payload_json,
 						createdAt: Number(row.created_at),
+						// Tier C #2 — surface claim state across restart so
+						// the trigger doesn't re-claim a row another process
+						// already owns. PG columns may not exist on pre-v6
+						// databases — guard with `?? undefined`.
+						claimedBy: row.claimed_by !== null && row.claimed_by !== undefined ? row.claimed_by : undefined,
+						claimedAt: row.claimed_at !== null && row.claimed_at !== undefined ? Number(row.claimed_at) : undefined,
 					});
 				}
 			} catch (err) {
@@ -1088,6 +1115,9 @@ export class PostgresRunStore implements RunStore {
 
 	upsertScheduledDispatch(row: Parameters<typeof this.memory.upsertScheduledDispatch>[0]): void {
 		this.memory.upsertScheduledDispatch(row);
+		// Tier C #2 — preserve claimed_by + claimed_at on conflict, same
+		// invariant as sqlite. Re-upserts (debounce reset, queue re-defer)
+		// MUST NOT release the claim or peers would re-claim the same row.
 		this.enqueueWrite(() =>
 			this.pool
 				.query(
@@ -1113,6 +1143,94 @@ export class PostgresRunStore implements RunStore {
 				)
 				.then(() => {}),
 		);
+	}
+
+	// === Tier C #2 — cross-process scheduler coordination ===
+	//
+	// These methods bypass the in-memory mirror and hit PG directly —
+	// claim atomicity REQUIRES the database to be the single source of
+	// truth. The mirror is refreshed lazily as queries return.
+
+	async claimDispatchesAsync(
+		processId: string,
+		leaseMs: number,
+		now: number,
+		opts?: { triggerType?: string },
+	): Promise<ScheduledDispatchRow[]> {
+		const triggerClause = opts?.triggerType ? "AND trigger_type = $4" : "";
+		const args: (string | number)[] = [processId, now, leaseMs];
+		if (opts?.triggerType) args.push(opts.triggerType);
+		const sql = `
+			UPDATE scheduled_dispatches
+			SET claimed_by = $1, claimed_at = $2
+			WHERE (claimed_by IS NULL OR claimed_at + $3 < $2) ${triggerClause}
+			RETURNING *
+		`;
+		const { rows } = await this.pool.query(sql, args);
+		const out: ScheduledDispatchRow[] = rows.map((r: Record<string, unknown>) => ({
+			runId: r.run_id as string,
+			workflowName: r.workflow_name as string,
+			triggerType: r.trigger_type as string,
+			scheduledAt: Number(r.scheduled_at),
+			expiresAt: r.expires_at !== null && r.expires_at !== undefined ? Number(r.expires_at) : undefined,
+			dispatchStatus: r.dispatch_status as ScheduledDispatchRow["dispatchStatus"],
+			payload: typeof r.payload_json === "string" ? JSON.parse(r.payload_json as string) : r.payload_json,
+			createdAt: Number(r.created_at),
+			claimedBy: r.claimed_by !== null && r.claimed_by !== undefined ? (r.claimed_by as string) : undefined,
+			claimedAt: r.claimed_at !== null && r.claimed_at !== undefined ? Number(r.claimed_at) : undefined,
+		}));
+		// Refresh the mirror so subsequent sync reads see the claim.
+		for (const row of out) this.memory.upsertScheduledDispatch(row);
+		out.sort((a, b) => a.scheduledAt - b.scheduledAt);
+		return out;
+	}
+
+	/**
+	 * Sync wrapper required by the `RunStore` interface. PG's claim API
+	 * is fundamentally async (network round-trip); the sync wrapper
+	 * returns the LAST snapshot from the in-memory mirror.
+	 *
+	 * **For cross-process correctness, callers MUST use
+	 * `claimDispatchesAsync()` directly.** The sync wrapper exists so
+	 * the interface contract is satisfied for sqlite + in-memory
+	 * callers; PG users opt into the async path via the trigger's
+	 * recovery code (`HttpTrigger.recoverDispatches()` calls the
+	 * async version when the store is a `PostgresRunStore`).
+	 */
+	claimDispatches(
+		processId: string,
+		leaseMs: number,
+		now: number,
+		opts?: { triggerType?: string },
+	): ScheduledDispatchRow[] {
+		// Fire the async claim; return whatever the mirror has right now
+		// (won't include rows claimed in this call until the async query
+		// resolves and refreshes the mirror).
+		void this.claimDispatchesAsync(processId, leaseMs, now, opts);
+		return this.memory.claimDispatches(processId, leaseMs, now, opts);
+	}
+
+	heartbeatClaims(processId: string, now: number): number {
+		const count = this.memory.heartbeatClaims(processId, now);
+		this.enqueueWrite(() =>
+			this.pool
+				.query("UPDATE scheduled_dispatches SET claimed_at = $1 WHERE claimed_by = $2", [now, processId])
+				.then(() => {}),
+		);
+		return count;
+	}
+
+	releaseClaim(runId: string): boolean {
+		const removed = this.memory.releaseClaim(runId);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					"UPDATE scheduled_dispatches SET claimed_by = NULL, claimed_at = NULL WHERE run_id = $1 AND claimed_by IS NOT NULL",
+					[runId],
+				)
+				.then(() => {}),
+		);
+		return removed;
 	}
 
 	deleteScheduledDispatch(runId: string): boolean {

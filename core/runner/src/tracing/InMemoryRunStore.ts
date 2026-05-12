@@ -530,8 +530,16 @@ export class InMemoryRunStore implements RunStore {
 	// === Durable scheduling (Tier 2 #5+#7 follow-up) ===
 
 	upsertScheduledDispatch(row: ScheduledDispatchRow): void {
-		// Clone to avoid external mutations bleeding into the store.
-		this.scheduledDispatches.set(row.runId, { ...row });
+		// Preserve any existing claim on an upsert (debounce reset, queue
+		// re-defer). Without this, a re-upsert would clobber the
+		// `claimedBy`/`claimedAt` fields and break cross-process recovery.
+		const existing = this.scheduledDispatches.get(row.runId);
+		const merged: ScheduledDispatchRow = { ...row };
+		if (existing?.claimedBy !== undefined && merged.claimedBy === undefined) {
+			merged.claimedBy = existing.claimedBy;
+			merged.claimedAt = existing.claimedAt;
+		}
+		this.scheduledDispatches.set(row.runId, merged);
 	}
 
 	deleteScheduledDispatch(runId: string): boolean {
@@ -549,6 +557,50 @@ export class InMemoryRunStore implements RunStore {
 		}
 		out.sort((a, b) => a.scheduledAt - b.scheduledAt);
 		return out;
+	}
+
+	// === Tier C #2 — cross-process scheduler coordination ===
+
+	claimDispatches(
+		processId: string,
+		leaseMs: number,
+		now: number,
+		opts?: { triggerType?: string },
+	): ScheduledDispatchRow[] {
+		const triggerType = opts?.triggerType;
+		const claimed: ScheduledDispatchRow[] = [];
+		for (const [runId, row] of this.scheduledDispatches.entries()) {
+			if (triggerType && row.triggerType !== triggerType) continue;
+			const isUnclaimed = row.claimedBy === undefined;
+			const leaseStale = row.claimedAt !== undefined && row.claimedAt + leaseMs < now;
+			if (!isUnclaimed && !leaseStale) continue;
+			// Atomically (in-memory is single-threaded) take ownership.
+			const next: ScheduledDispatchRow = { ...row, claimedBy: processId, claimedAt: now };
+			this.scheduledDispatches.set(runId, next);
+			claimed.push({ ...next });
+		}
+		claimed.sort((a, b) => a.scheduledAt - b.scheduledAt);
+		return claimed;
+	}
+
+	heartbeatClaims(processId: string, now: number): number {
+		let count = 0;
+		for (const [runId, row] of this.scheduledDispatches.entries()) {
+			if (row.claimedBy !== processId) continue;
+			this.scheduledDispatches.set(runId, { ...row, claimedAt: now });
+			count++;
+		}
+		return count;
+	}
+
+	releaseClaim(runId: string): boolean {
+		const row = this.scheduledDispatches.get(runId);
+		if (!row || row.claimedBy === undefined) return false;
+		const { claimedBy: _claimedBy, claimedAt: _claimedAt, ...rest } = row;
+		void _claimedBy;
+		void _claimedAt;
+		this.scheduledDispatches.set(runId, rest);
+		return true;
 	}
 
 	purgeExpiredScheduledDispatches(now: number): number {

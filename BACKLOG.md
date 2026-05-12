@@ -332,18 +332,25 @@ as C4 + PRs #85, #86, #87, #88.
 
 ---
 
-### C2 · Cross-process scheduler coordination
+### C2 · Cross-process scheduler coordination — ✅ SHIPPED
 
-**Severity**: FEATURE.
-**Effort**: ~2-3 days.
-**Why**: today's `DeferredRunScheduler` is per-process. Multiple processes each have their own scheduled_dispatches recovery, which can double-fire if both recover the same row.
+**Status**: SHIPPED on `feat/c2-cross-process-scheduler`.
 
-Actually wait — let me check this. Each `recoverDispatches()` reads from sqlite and re-registers timers. If two processes share the same sqlite file (uncommon — sqlite isn't great at multi-writer), they'd both fire. With separate sqlite files (the typical setup), each process owns its own dispatches.
+**Implementation**:
+- Schema: sqlite migration v13 + PG migration v6 add `claimed_by` (TEXT) + `claimed_at` (INTEGER/BIGINT) columns to `scheduled_dispatches`, plus `idx_scheduled_dispatches_claim` index.
+- `RunStore.claimDispatches(processId, leaseMs, now, opts?)` — atomic claim+return. On sqlite: `UPDATE ... SET claimed_by = ?, claimed_at = ? WHERE (claimed_by IS NULL OR claimed_at + ? < ?) RETURNING *`. On PG: same shape via `claimDispatchesAsync` (the sync wrapper returns the in-memory mirror so the API stays compatible; HttpTrigger uses the async path directly when available).
+- `RunStore.heartbeatClaims(processId, now)` — single UPDATE refreshing `claimed_at` for all rows held by `processId`.
+- `RunStore.releaseClaim(runId)` — clear claim without deleting the row (rare; the row delete on fire/cancel already implicitly clears the claim).
+- `DeferredRunScheduler` now generates a stable `processId` at construction and runs a `setInterval` heartbeat (default 20s, `unref()`'d) while it has ≥1 persisted entry. Lifecycle: starts on first persisted schedule, stops on last unpersist/cancel/fire.
+- `HttpTrigger.recoverDispatches()` switches from `getScheduledDispatches` to `claimDispatches` so multi-process deployments sharing one PG don't double-fire.
 
-For PG-backed deployments (multi-process sharing one DB), this IS a problem. Sketch:
-- Add a `claimed_by` + `claimed_at` column to `scheduled_dispatches`.
-- On boot, only claim rows that are unclaimed OR claimed by a stale process (lease expired).
-- Heartbeat the claim while the timer is registered.
+**Opt out**: `BLOK_SCHEDULER_CLAIM_DISABLED=1` reverts to legacy `getScheduledDispatches` recovery — preserves the original behavior for sqlite-per-process deployments that don't want the additional column writes.
+
+**Env vars**: `BLOK_SCHEDULER_CLAIM_LEASE_MS` (default 60s — how long a dead process holds its claims), `BLOK_SCHEDULER_HEARTBEAT_INTERVAL_MS` (default 20s — should be ~3× smaller than the lease).
+
+**Tests**: 22 unit tests (`__tests__/unit/scheduling/scheduledDispatchClaim.test.ts` — covers in-memory + sqlite) + 5 real-PG integration tests (`__tests__/integration/cross-process-scheduler.real-pg.test.ts` — closes the cross-process invariant against a real PG via the Phase 2 docker-compose CI).
+
+**Trade-off documented**: heartbeat failures are non-fatal — the lease will expire and a peer will take over. PG users running multi-process AND sharing a store get the strongest guarantee via the `claimDispatchesAsync` path; sqlite-per-process users see no observable behavior change (one process, no contention).
 
 ---
 

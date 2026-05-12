@@ -223,7 +223,7 @@ describe("HttpTrigger.recoverDispatches — H4 durable scheduler crash-restart",
 		expect(result.skipped).toBe(1);
 	});
 
-	it("is idempotent — calling recoverDispatches twice doesn't double-register", async () => {
+	it("is idempotent — calling recoverDispatches twice doesn't double-register (Tier C #2)", async () => {
 		registerWorkflow("idem-wf");
 		persistDispatch({
 			runId: "run-idem",
@@ -238,10 +238,13 @@ describe("HttpTrigger.recoverDispatches — H4 durable scheduler crash-restart",
 		const r2 = await trigger.recoverDispatches();
 
 		expect(r1.recovered).toBe(1);
-		expect(r2.recovered).toBe(1); // counted again — but only one timer registered
+		// Tier C #2 claim semantics: the first call atomically claimed the
+		// row, so the second call sees it as already-claimed and skips it.
+		// Result: stronger idempotency than the legacy behavior (which
+		// would have returned 1 again and let the scheduler's
+		// replace-on-same-runId guard de-dup the timer).
+		expect(r2.recovered).toBe(0);
 		expect(DeferredRunScheduler.getInstance().has("run-idem")).toBe(true);
-		// DeferredRunScheduler.schedule() replaces existing timers for the
-		// same runId, so re-recovery is safe (HMR-friendly).
 	});
 
 	it("returns zeros when the store has no scheduled dispatches", async () => {

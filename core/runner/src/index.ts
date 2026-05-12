@@ -152,7 +152,11 @@ import {
 	DeferredDispatchSignal,
 	isDeferredDispatchSignal,
 } from "./scheduling/DeferredDispatchSignal";
-import { DeferredRunScheduler, type DeferredScheduleOptions } from "./scheduling/DeferredRunScheduler";
+import {
+	DeferredRunScheduler,
+	type DeferredScheduleOptions,
+	getSchedulerClaimLeaseMs,
+} from "./scheduling/DeferredRunScheduler";
 import {
 	NatsKvDebounceBackend,
 	type NatsKvDebounceConfig,
@@ -345,6 +349,7 @@ export {
 	isDeferredDispatchSignal,
 	DeferredRunScheduler,
 	type DeferredScheduleOptions,
+	getSchedulerClaimLeaseMs,
 	DebounceCoordinator,
 	readSchedulingConfig,
 	type NormalizedDebounceConfig,
