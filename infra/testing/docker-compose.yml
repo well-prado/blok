@@ -85,10 +85,15 @@ services:
       - blok-test
 
   # --- Pub/Sub ---
+  # NATS with JetStream + monitoring on 8222. The `--jetstream` flag
+  # enables the JetStream subsystem (required by NATS KV); `-m 8222`
+  # exposes the HTTP monitoring endpoint that the healthcheck hits.
+  # Without `-m`, /healthz returns 404 and the service stays
+  # `(unhealthy)` forever (CI hit this).
   nats:
     image: nats:2.10-alpine
     container_name: blok-test-nats
-    command: ["--jetstream"]
+    command: ["--jetstream", "-m", "8222"]
     ports:
       - "4223:4222"
       - "8223:8222"
@@ -96,7 +101,7 @@ services:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - blok-test
 
