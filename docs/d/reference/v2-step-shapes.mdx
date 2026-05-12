@@ -188,8 +188,12 @@ Authoritative source: `V2SubworkflowStepSchema`. See
 </ParamField>
 
 <ParamField path="subworkflow" type="string (min 1)" required>
-  Name of the workflow to invoke. Must match a `name:` field
-  registered in the [Workflow Registry](/d/reference/workflow-registry).
+  Name of the workflow to invoke. **Literal names** (`"send-receipt"`)
+  are looked up directly. **Polymorphic expressions** (`"$.req.body.kind"`,
+  `"js/ctx.req.body.kind"`) resolve against the live ctx at dispatch
+  time — pair with `allowList` to constrain which workflows the
+  expression may resolve to. Must match a `name:` field registered in
+  the [Workflow Registry](/d/reference/workflow-registry).
 </ParamField>
 
 <ParamField path="inputs" type="Record<string, unknown>">
@@ -231,6 +235,18 @@ Authoritative source: `V2SubworkflowStepSchema`. See
   immediately; the child's `maxDuration` is the child's concern). On
   final-attempt timeout the run flips to `"timedOut"`. See
   [step timeouts](/d/reliability/max-duration).
+</ParamField>
+
+<ParamField path="allowList" type="string[]">
+  Exact-match allow-list for polymorphic dispatch. When set, the
+  **final** resolved workflow name (after polymorphic resolution AND
+  any `namespace` prefix from the parent trigger) must be in this
+  array — otherwise the dispatch is rejected at run time with a
+  structured error. Strongly recommended when `subworkflow` is an
+  expression so a malicious or buggy ctx value can't escalate the
+  workflow surface. Also accepted on literal `subworkflow:` strings
+  as a defence-in-depth audit. See
+  [polymorphic dispatch](/d/composition/sub-workflows#polymorphic-dispatch).
 </ParamField>
 
 `as` and `spread` are mutually exclusive (same rule as regular steps).

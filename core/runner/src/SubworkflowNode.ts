@@ -71,6 +71,20 @@ export class SubworkflowNode extends RunnerNode {
 	 */
 	public namespace?: string;
 	/**
+	 * G3 (v0.5) — exact-match allow-list for the workflow name dispatched
+	 * by this step. When set, the **final** resolved name (after any
+	 * polymorphic `js/...` evaluation AND the `namespace` prefix) must be
+	 * in this array; otherwise the dispatch is rejected at run time with
+	 * a structured error. Strongly recommended when `subworkflow` is an
+	 * expression so a malicious or buggy ctx value can't escalate the
+	 * workflow surface accessible to a request.
+	 *
+	 * `undefined` preserves pre-G3 behaviour (no constraint). Authors
+	 * with literal `subworkflow:` strings have no reason to set this —
+	 * the registry lookup already gates dispatch on the literal name.
+	 */
+	public allowList?: readonly string[];
+	/**
 	 * Wait mode for the sub-workflow dispatch:
 	 *
 	 * - `true` (default) — synchronous: parent step blocks on the child
@@ -267,30 +281,50 @@ export class SubworkflowNode extends RunnerNode {
 		const raw = this.subworkflow;
 		const isExpression =
 			typeof raw === "string" && (raw.startsWith("js/") || raw.startsWith("$.") || raw.startsWith("${"));
+
+		let resolvedName: string;
 		if (!isExpression) {
-			return raw;
+			resolvedName = raw;
+		} else {
+			// Lazy import keeps the static dep graph between runner and
+			// shared minimal — most steps don't dispatch sub-workflows.
+			const { mapper } = await import("@blokjs/shared");
+			// Normalise `$.<path>` → `js/ctx.<path>` so Mapper.replaceString
+			// evaluates it. Authors who wrote `js/...` go straight through.
+			let expr = raw;
+			if (expr.startsWith("$.")) {
+				expr = `js/ctx.${expr.slice(2)}`;
+			} else if (expr.startsWith("$")) {
+				expr = `js/${expr.slice(1)}`;
+			}
+			const resolved = mapper.replaceString(expr, ctx, {});
+			if (typeof resolved !== "string" || resolved.length === 0) {
+				throw new Error(
+					`[blok] Polymorphic sub-workflow name "${raw}" resolved to ${JSON.stringify(resolved)} (expected a non-empty string). Check the expression and the runtime value of ctx.`,
+				);
+			}
+			resolvedName = resolved;
 		}
-		// Lazy import keeps the static dep graph between runner and
-		// shared minimal — most steps don't dispatch sub-workflows.
-		const { mapper } = await import("@blokjs/shared");
-		// Normalise `$.<path>` → `js/ctx.<path>` so Mapper.replaceString
-		// evaluates it. Authors who wrote `js/...` go straight through.
-		let expr = raw;
-		if (expr.startsWith("$.")) {
-			expr = `js/ctx.${expr.slice(2)}`;
-		} else if (expr.startsWith("$")) {
-			expr = `js/${expr.slice(1)}`;
+
+		// Namespace prefix — applies to polymorphic resolutions when set on
+		// the parent workflow's trigger (today: webhook namespace). Static
+		// names skip prefixing so they stay routable by their literal name.
+		if (isExpression && this.namespace && this.namespace.length > 0 && !resolvedName.startsWith(`${this.namespace}.`)) {
+			resolvedName = `${this.namespace}.${resolvedName}`;
 		}
-		const resolved = mapper.replaceString(expr, ctx, {});
-		if (typeof resolved !== "string" || resolved.length === 0) {
+
+		// G3 allow-list enforcement. Checked after namespace prefixing so
+		// the value an author writes in the list matches the registry name
+		// they intend to permit. Polymorphic dispatch without an allow-list
+		// is still allowed (matches pre-G3 behaviour); the schema's
+		// describe() recommends pairing them in production.
+		if (this.allowList && this.allowList.length > 0 && !this.allowList.includes(resolvedName)) {
 			throw new Error(
-				`[blok] Polymorphic sub-workflow name "${raw}" resolved to ${JSON.stringify(resolved)} (expected a non-empty string). Check the expression and the runtime value of ctx.`,
+				`[blok] Sub-workflow dispatch blocked: resolved name "${resolvedName}" is not in the step's \`allowList\` [${this.allowList.map((n) => `"${n}"`).join(", ")}]. Add it to the list if the dispatch is intended, or audit the workflow whose ctx produced this name.`,
 			);
 		}
-		if (this.namespace && this.namespace.length > 0 && !resolved.startsWith(`${this.namespace}.`)) {
-			return `${this.namespace}.${resolved}`;
-		}
-		return resolved;
+
+		return resolvedName;
 	}
 
 	private dispatchAsync(
