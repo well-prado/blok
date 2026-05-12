@@ -15,6 +15,11 @@ import { NATSWorkerAdapter } from "../../src/adapters/NATSAdapter";
 const NATS_SERVERS = process.env.BLOK_INTEGRATION_NATS_SERVERS;
 const d = NATS_SERVERS ? describe : describe.skip;
 
+// CI runners are slower than local — JetStream stream + consumer
+// creation + first poll cycle can take several seconds on a cold
+// container. Override the 5s default so CI doesn't flake.
+const TEST_TIMEOUT_MS = 30_000;
+
 d("NATSWorkerAdapter — real NATS JetStream", () => {
 	let adapter: NATSWorkerAdapter;
 	const stream = `blok-test-worker-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -31,57 +36,65 @@ d("NATSWorkerAdapter — real NATS JetStream", () => {
 		await adapter.disconnect();
 	});
 
-	it("publishes a job and the consumer receives it", async () => {
-		const queue = `test-q-publish-${Math.random().toString(36).slice(2)}`;
-		const received: WorkerJob[] = [];
+	it(
+		"publishes a job and the consumer receives it",
+		async () => {
+			const queue = `test-q-publish-${Math.random().toString(36).slice(2)}`;
+			const received: WorkerJob[] = [];
 
-		await adapter.process({ queue }, async (job) => {
-			received.push(job);
-			await job.complete();
-		});
+			await adapter.process({ queue }, async (job) => {
+				received.push(job);
+				await job.complete();
+			});
 
-		const jobId = await adapter.addJob(queue, { hello: "world", n: 1 });
-		expect(typeof jobId).toBe("string");
+			const jobId = await adapter.addJob(queue, { hello: "world", n: 1 });
+			expect(typeof jobId).toBe("string");
 
-		// Wait for delivery — NATS JetStream is durable; consumer pulls within ms.
-		await waitFor(() => received.length === 1, 5_000);
+			// Wait for delivery — NATS JetStream is durable; consumer pulls within ms.
+			await waitFor(() => received.length === 1, TEST_TIMEOUT_MS - 5_000);
 
-		expect(received).toHaveLength(1);
-		expect(received[0].data).toEqual({ hello: "world", n: 1 });
-		expect(received[0].queue).toBe(queue);
-		expect(received[0].id).toBeTruthy();
+			expect(received).toHaveLength(1);
+			expect(received[0].data).toEqual({ hello: "world", n: 1 });
+			expect(received[0].queue).toBe(queue);
+			expect(received[0].id).toBeTruthy();
 
-		await adapter.stopProcessing(queue);
-	});
+			await adapter.stopProcessing(queue);
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("isolates jobs across queues", async () => {
-		const queueA = `test-q-a-${Math.random().toString(36).slice(2)}`;
-		const queueB = `test-q-b-${Math.random().toString(36).slice(2)}`;
-		const receivedA: WorkerJob[] = [];
-		const receivedB: WorkerJob[] = [];
+	it(
+		"isolates jobs across queues",
+		async () => {
+			const queueA = `test-q-a-${Math.random().toString(36).slice(2)}`;
+			const queueB = `test-q-b-${Math.random().toString(36).slice(2)}`;
+			const receivedA: WorkerJob[] = [];
+			const receivedB: WorkerJob[] = [];
 
-		await adapter.process({ queue: queueA }, async (job) => {
-			receivedA.push(job);
-			await job.complete();
-		});
-		await adapter.process({ queue: queueB }, async (job) => {
-			receivedB.push(job);
-			await job.complete();
-		});
+			await adapter.process({ queue: queueA }, async (job) => {
+				receivedA.push(job);
+				await job.complete();
+			});
+			await adapter.process({ queue: queueB }, async (job) => {
+				receivedB.push(job);
+				await job.complete();
+			});
 
-		await adapter.addJob(queueA, { from: "A" });
-		await adapter.addJob(queueB, { from: "B" });
+			await adapter.addJob(queueA, { from: "A" });
+			await adapter.addJob(queueB, { from: "B" });
 
-		await waitFor(() => receivedA.length === 1 && receivedB.length === 1, 5_000);
+			await waitFor(() => receivedA.length === 1 && receivedB.length === 1, TEST_TIMEOUT_MS - 5_000);
 
-		expect(receivedA[0].data).toEqual({ from: "A" });
-		expect(receivedB[0].data).toEqual({ from: "B" });
-		expect(receivedA[0].queue).toBe(queueA);
-		expect(receivedB[0].queue).toBe(queueB);
+			expect(receivedA[0].data).toEqual({ from: "A" });
+			expect(receivedB[0].data).toEqual({ from: "B" });
+			expect(receivedA[0].queue).toBe(queueA);
+			expect(receivedB[0].queue).toBe(queueB);
 
-		await adapter.stopProcessing(queueA);
-		await adapter.stopProcessing(queueB);
-	});
+			await adapter.stopProcessing(queueA);
+			await adapter.stopProcessing(queueB);
+		},
+		TEST_TIMEOUT_MS,
+	);
 
 	it("isConnected reflects state", async () => {
 		expect(adapter.isConnected()).toBe(true);

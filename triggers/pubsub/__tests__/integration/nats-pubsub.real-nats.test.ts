@@ -19,6 +19,12 @@ import { NATSPubSubAdapter } from "../../src/adapters/NATSPubSubAdapter";
 const NATS_SERVERS = process.env.BLOK_INTEGRATION_NATS_SERVERS;
 const d = NATS_SERVERS ? describe : describe.skip;
 
+// CI runners are slower than local — JetStream stream + consumer creation
+// + cross-instance subscription propagation can take several seconds on
+// a cold container. Override the default 5s timeout so CI doesn't flake.
+const TEST_TIMEOUT_MS = 30_000;
+const SUBSCRIPTION_WARMUP_MS = 500;
+
 d("NATSPubSubAdapter — real NATS", () => {
 	let producer: NATSPubSubAdapter;
 	let consumerA: NATSPubSubAdapter;
@@ -47,66 +53,79 @@ d("NATSPubSubAdapter — real NATS", () => {
 		await producer.disconnect();
 	});
 
-	it("fan-out: every subscriber without consumerGroup receives every message", async () => {
-		const topic = `blok-test-pubsub-fanout-${Math.random().toString(36).slice(2)}`;
-		const receivedA: PubSubMessage[] = [];
-		const receivedB: PubSubMessage[] = [];
+	it(
+		"fan-out: every subscriber without consumerGroup receives every message",
+		async () => {
+			const topic = `blok-test-pubsub-fanout-${Math.random().toString(36).slice(2)}`;
+			const receivedA: PubSubMessage[] = [];
+			const receivedB: PubSubMessage[] = [];
 
-		await consumerA.subscribe({ topic, durable: false }, async (msg) => {
-			receivedA.push(msg);
-		});
-		await consumerB.subscribe({ topic, durable: false }, async (msg) => {
-			receivedB.push(msg);
-		});
+			await consumerA.subscribe({ topic, durable: false }, async (msg) => {
+				receivedA.push(msg);
+			});
+			await consumerB.subscribe({ topic, durable: false }, async (msg) => {
+				receivedB.push(msg);
+			});
 
-		// Small grace period for subscriptions to establish.
-		await new Promise((r) => setTimeout(r, 100));
+			// JetStream subscription registration is asynchronous — give the
+			// consumer a moment to install before publishing.
+			await new Promise((r) => setTimeout(r, SUBSCRIPTION_WARMUP_MS));
 
-		await producer.publish(topic, { hello: "world", n: 1 });
+			await producer.publish(topic, { hello: "world", n: 1 });
 
-		await waitFor(() => receivedA.length === 1 && receivedB.length === 1, 5_000);
+			await waitFor(() => receivedA.length === 1 && receivedB.length === 1, TEST_TIMEOUT_MS - 5_000);
 
-		expect(receivedA[0].data).toEqual({ hello: "world", n: 1 });
-		expect(receivedB[0].data).toEqual({ hello: "world", n: 1 });
-	});
+			expect(receivedA[0].data).toEqual({ hello: "world", n: 1 });
+			expect(receivedB[0].data).toEqual({ hello: "world", n: 1 });
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("competing-consumer: consumerGroup means each message goes to one subscriber", async () => {
-		const topic = `blok-test-pubsub-competing-${Math.random().toString(36).slice(2)}`;
-		const group = "workers";
-		const receivedA: PubSubMessage[] = [];
-		const receivedB: PubSubMessage[] = [];
+	it(
+		"competing-consumer: consumerGroup means each message goes to one subscriber",
+		async () => {
+			const topic = `blok-test-pubsub-competing-${Math.random().toString(36).slice(2)}`;
+			const group = "workers";
+			const receivedA: PubSubMessage[] = [];
+			const receivedB: PubSubMessage[] = [];
 
-		await consumerA.subscribe({ topic, consumerGroup: group, durable: false }, async (msg) => {
-			receivedA.push(msg);
-		});
-		await consumerB.subscribe({ topic, consumerGroup: group, durable: false }, async (msg) => {
-			receivedB.push(msg);
-		});
+			await consumerA.subscribe({ topic, consumerGroup: group, durable: false }, async (msg) => {
+				receivedA.push(msg);
+			});
+			await consumerB.subscribe({ topic, consumerGroup: group, durable: false }, async (msg) => {
+				receivedB.push(msg);
+			});
 
-		await new Promise((r) => setTimeout(r, 100));
+			await new Promise((r) => setTimeout(r, SUBSCRIPTION_WARMUP_MS));
 
-		// Publish 10 messages — should split across A + B (not exact 50/50
-		// but each message reaches exactly one).
-		for (let i = 0; i < 10; i++) {
-			await producer.publish(topic, { n: i });
-		}
+			// Publish 10 messages — should split across A + B (not exact 50/50
+			// but each message reaches exactly one).
+			for (let i = 0; i < 10; i++) {
+				await producer.publish(topic, { n: i });
+			}
 
-		await waitFor(() => receivedA.length + receivedB.length === 10, 5_000);
+			await waitFor(() => receivedA.length + receivedB.length === 10, TEST_TIMEOUT_MS - 5_000);
 
-		expect(receivedA.length + receivedB.length).toBe(10);
-		// No duplicate keys across both lists.
-		const seenN = new Set<number>();
-		for (const m of [...receivedA, ...receivedB]) {
-			const n = (m.data as { n: number }).n;
-			expect(seenN.has(n)).toBe(false);
-			seenN.add(n);
-		}
-	});
+			expect(receivedA.length + receivedB.length).toBe(10);
+			// No duplicate keys across both lists.
+			const seenN = new Set<number>();
+			for (const m of [...receivedA, ...receivedB]) {
+				const n = (m.data as { n: number }).n;
+				expect(seenN.has(n)).toBe(false);
+				seenN.add(n);
+			}
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("publish to an unsubscribed topic does not throw", async () => {
-		const topic = `blok-test-pubsub-orphan-${Math.random().toString(36).slice(2)}`;
-		await expect(producer.publish(topic, { dropped: true })).resolves.toBeUndefined();
-	});
+	it(
+		"publish to an unsubscribed topic does not throw",
+		async () => {
+			const topic = `blok-test-pubsub-orphan-${Math.random().toString(36).slice(2)}`;
+			await expect(producer.publish(topic, { dropped: true })).resolves.toBeUndefined();
+		},
+		TEST_TIMEOUT_MS,
+	);
 });
 
 async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {

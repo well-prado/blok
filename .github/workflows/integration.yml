@@ -49,8 +49,14 @@ jobs:
           docker compose -f infra/testing/docker-compose.yml ps
           exit 1
 
-      - name: Build runner package
-        run: bun run --filter @blokjs/shared --filter @blokjs/helper build && bun run --filter @blokjs/runner build
+      - name: Build all workspace packages
+        # Use nx run-many -t build so every package's dist/ exists before
+        # tests run. Required because trigger-http's index.ts imports
+        # @blokjs/trigger-websocket / @blokjs/trigger-sse / @blokjs/trigger-webhook
+        # (and similar transitive imports across blokctl, nodes, etc.).
+        # Without this each downstream package fails to resolve sibling
+        # entries at test time.
+        run: bunx nx run-many -t build
 
       - name: Run integration tests
         env:
