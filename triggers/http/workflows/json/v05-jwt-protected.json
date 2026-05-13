@@ -6,7 +6,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-jwt-protected",
 			"accept": "application/json"
 		}
 	},

@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-polling-with-backoff",
 			"accept": "application/json"
 		}
 	},
@@ -36,7 +36,9 @@
 					},
 					{
 						"id": "throttle",
-						"wait": { "for": "100ms" }
+						"wait": {
+							"for": "100ms"
+						}
 					}
 				]
 			}

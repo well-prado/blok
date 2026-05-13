@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-csv-import",
 			"accept": "application/json"
 		}
 	},
@@ -18,7 +18,11 @@
 				"schema": {
 					"type": "object",
 					"required": ["rows"],
-					"properties": { "rows": { "type": "array" } }
+					"properties": {
+						"rows": {
+							"type": "array"
+						}
+					}
 				},
 				"data": "js/ctx.request.body"
 			}
@@ -43,8 +47,12 @@
 											"type": "object",
 											"required": ["id", "value"],
 											"properties": {
-												"id": { "type": "string" },
-												"value": { "type": "number" }
+												"id": {
+													"type": "string"
+												},
+												"value": {
+													"type": "number"
+												}
 											}
 										},
 										"data": "js/ctx.state.row"

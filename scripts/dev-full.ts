@@ -590,6 +590,16 @@ async function main() {
 		PORT: String(TRIGGER_PORT),
 		BLOK_TRACE_STORE: process.env.BLOK_TRACE_STORE || "sqlite",
 		BLOK_TRACE_SQLITE_PATH: process.env.BLOK_TRACE_SQLITE_PATH || ".blok/trace.db",
+		// v0.4 explicit-path migration (commit b2c2ef46) rewrote every
+		// in-repo workflow's `trigger.http.path` from "/" to the full
+		// URL (e.g. cross-runtime-chain.json → "/cross-runtime-chain").
+		// Those URLs only resolve when file-based routing is on. The
+		// catch-all dispatch path strips the workflow-key prefix from
+		// the URL when computing subPath, so the explicit paths fail
+		// `validateRoute(path, subPath)`. Default to ON for `bun dev`
+		// so the cross-runtime-chain curl in the orchestrator banner
+		// actually works. User can still override.
+		BLOK_FILE_BASED_ROUTING: process.env.BLOK_FILE_BASED_ROUTING || "true",
 	};
 	for (const p of runnable) {
 		triggerEnv[`RUNTIME_${p.envKey}_HOST`] = "127.0.0.1";

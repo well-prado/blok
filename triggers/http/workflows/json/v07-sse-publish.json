@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v07-sse-publish",
 			"accept": "application/json"
 		}
 	},

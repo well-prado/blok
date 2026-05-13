@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-multi-tenant-router",
 			"accept": "application/json"
 		}
 	},

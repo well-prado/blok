@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-travel-booking",
 			"accept": "application/json"
 		}
 	},
@@ -19,9 +19,15 @@
 					"type": "object",
 					"required": ["flightUrl", "hotelUrl", "carUrl"],
 					"properties": {
-						"flightUrl": { "type": "string" },
-						"hotelUrl": { "type": "string" },
-						"carUrl": { "type": "string" }
+						"flightUrl": {
+							"type": "string"
+						},
+						"hotelUrl": {
+							"type": "string"
+						},
+						"carUrl": {
+							"type": "string"
+						}
 					}
 				},
 				"data": "js/ctx.request.body"
@@ -100,7 +106,9 @@
 											"Content-Type": "application/json",
 											"X-Op": "cancel-car"
 										},
-										"body": { "reason": "saga-rollback" },
+										"body": {
+											"reason": "saga-rollback"
+										},
 										"responseType": "application/json"
 									}
 								}
@@ -123,7 +131,9 @@
 											"Content-Type": "application/json",
 											"X-Op": "cancel-hotel"
 										},
-										"body": { "reason": "saga-rollback" },
+										"body": {
+											"reason": "saga-rollback"
+										},
 										"responseType": "application/json"
 									}
 								}
@@ -146,7 +156,9 @@
 											"Content-Type": "application/json",
 											"X-Op": "cancel-flight"
 										},
-										"body": { "reason": "saga-rollback" },
+										"body": {
+											"reason": "saga-rollback"
+										},
 										"responseType": "application/json"
 									}
 								}

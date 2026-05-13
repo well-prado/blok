@@ -7,8 +7,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
+import { RoutingDiagnostics } from "../../tracing/RoutingDiagnostics";
 import { RunTracker } from "../../tracing/RunTracker";
 import { registerTraceRoutes } from "../../tracing/TraceRouter";
+import { WorkflowRegistry } from "../../workflow/WorkflowRegistry";
 
 // --- Mock infrastructure ---
 
@@ -350,6 +352,107 @@ describe("TraceRouter", () => {
 
 			expect(res.statusCode).toBe(404);
 			expect((res.jsonBody as any).error).toContain("not found");
+		});
+
+		// E4 — `definition` field carries the raw workflow JSON when the
+		// WorkflowRegistry has been populated. Studio uses this to render
+		// the static workflow DAG without re-parsing files.
+		describe("definition field (E4)", () => {
+			beforeEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+
+			afterEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+
+			it("includes the registered workflow definition when registered", () => {
+				const sampleDefinition = {
+					name: "countries",
+					version: "1.0.0",
+					trigger: { http: { method: "GET", path: "/countries" } },
+					steps: [
+						{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://example.com" } },
+						{ id: "respond", use: "@blokjs/respond", inputs: { body: "$.state.fetch" } },
+					],
+				};
+				WorkflowRegistry.getInstance().register({
+					name: "countries",
+					source: "<test>",
+					workflow: sampleDefinition,
+				});
+
+				const req = new MockRequest({ params: { name: "countries" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.definition).toEqual(sampleDefinition);
+			});
+
+			it("omits definition when workflow is not in the registry", () => {
+				// Tracker has run data for 'countries' but the registry was
+				// not populated — older deployments or tests-only flows hit
+				// this path. Studio falls back to the JSON viewer with
+				// nodeNames + runtimes.
+				const req = new MockRequest({ params: { name: "countries" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.name).toBe("countries");
+				expect(body.definition).toBeUndefined();
+			});
+		});
+	});
+
+	// E4 follow-up — boot-time route-build problems surfaced for Studio.
+	describe("GET /routing", () => {
+		beforeEach(() => {
+			RoutingDiagnostics.resetInstance();
+		});
+
+		afterEach(() => {
+			RoutingDiagnostics.resetInstance();
+		});
+
+		it("returns an empty list when no diagnostics have been recorded", () => {
+			const req = new MockRequest();
+			const res = new MockResponse();
+			router.findHandler("GET", "/routing")!(req, res);
+			const body = res.jsonBody as any;
+			expect(body.diagnostics).toEqual([]);
+			expect(body.count).toBe(0);
+			expect(typeof body.now).toBe("number");
+		});
+
+		it("returns recorded diagnostics in insertion order", () => {
+			const diag = RoutingDiagnostics.getInstance();
+			diag.record({
+				kind: "duplicate",
+				method: "POST",
+				path: "/api/users",
+				winnerSource: "/wf/a.json",
+				droppedSource: "/wf/b.json",
+				message: "Two workflows claim POST /api/users",
+			});
+			diag.record({
+				kind: "any-shadows-specific",
+				method: "ANY",
+				path: "/api/orders",
+				winnerSource: "/wf/o-get.json",
+				droppedSource: "/wf/o-any.json",
+				message: "ANY /api/orders shadows GET /api/orders",
+			});
+
+			const req = new MockRequest();
+			const res = new MockResponse();
+			router.findHandler("GET", "/routing")!(req, res);
+			const body = res.jsonBody as any;
+			expect(body.count).toBe(2);
+			expect(body.diagnostics).toHaveLength(2);
+			expect(body.diagnostics[0].kind).toBe("duplicate");
+			expect(body.diagnostics[1].kind).toBe("any-shadows-specific");
 		});
 	});
 

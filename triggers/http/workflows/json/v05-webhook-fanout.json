@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-webhook-fanout",
 			"accept": "application/json"
 		}
 	},

@@ -338,6 +338,34 @@ export function fetchScheduledDispatches(params?: {
 	return fetchJson(`/scheduled${qs ? `?${qs}` : ""}`);
 }
 
+// === Routing diagnostics (E4 follow-up) ===
+
+/**
+ * Mirror of `RoutingDiagnostic` from the runner. Surfaces boot-time
+ * route-build problems (collisions, missing explicit paths, scan
+ * errors) so Studio can render a banner on the Workflows page rather
+ * than burying the issue in terminal logs.
+ */
+export interface RoutingDiagnostic {
+	kind: "duplicate" | "any-shadows-specific" | "missing-path" | "scan-error";
+	method?: string;
+	path?: string;
+	winnerSource?: string;
+	droppedSource?: string;
+	message: string;
+	recordedAt: number;
+}
+
+export interface RoutingDiagnosticsResponse {
+	diagnostics: RoutingDiagnostic[];
+	count: number;
+	now: number;
+}
+
+export function fetchRoutingDiagnostics(): Promise<RoutingDiagnosticsResponse> {
+	return fetchJson("/routing");
+}
+
 // === Search ===
 
 export interface SearchResponse {

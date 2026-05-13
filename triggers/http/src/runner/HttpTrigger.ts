@@ -7,6 +7,7 @@ import { TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
+import { RoutingDiagnostics } from "@blokjs/runner";
 import { WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
@@ -36,7 +37,7 @@ import workflows from "../Workflows";
 import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
-import { type RouteEntry, buildRouteTable } from "./WorkflowRouter";
+import { type RouteCollision, type RouteEntry, buildRouteTable } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
 import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
@@ -261,9 +262,35 @@ export default class HttpTrigger extends TriggerBase {
 			workflow: (workflows as Record<string, unknown>)[key],
 		}));
 
+		// Boot is tolerant of route-table collisions: a single bad
+		// workflow pair shouldn't drop the WHOLE route table and force
+		// every URL through the legacy catch-all (which then rejects
+		// every post-v0.4 explicit path → total outage). Collisions are
+		// captured into `RoutingDiagnostics` for Studio to surface, and
+		// the offending workflow is skipped.
+		const diagnostics = RoutingDiagnostics.getInstance();
+		diagnostics.clear();
+		const collisions: RouteCollision[] = [];
 		const table = buildRouteTable(scannedJson, manual, {
 			onWarning: (msg) => this.logger.log(`[blok] route warning: ${msg}`),
+			onCollision: (collision) => {
+				collisions.push(collision);
+				this.logger.error(`[blok] route collision — ${collision.message}`);
+				diagnostics.record({
+					kind: collision.kind,
+					method: collision.method,
+					path: collision.path,
+					winnerSource: collision.winnerSource,
+					droppedSource: collision.droppedSource,
+					message: collision.message,
+				});
+			},
 		});
+		if (collisions.length > 0) {
+			this.logger.error(
+				`[blok] file-based routing — ${collisions.length} workflow(s) dropped due to route collisions; the rest are still registered. See GET /__blok/routing for details.`,
+			);
+		}
 
 		if (table.length > 0) {
 			this.logger.log(`[blok] file-based routing — ${table.length} route(s) registered:`);

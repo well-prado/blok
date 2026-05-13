@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-github-webhook-router",
 			"accept": "application/json",
 			"middleware": ["github-webhook-verify"]
 		}

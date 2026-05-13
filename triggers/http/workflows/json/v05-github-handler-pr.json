@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-github-handler-pr",
 			"accept": "application/json"
 		}
 	},

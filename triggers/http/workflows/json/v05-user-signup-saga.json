@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-user-signup-saga",
 			"accept": "application/json"
 		}
 	},
@@ -19,10 +19,18 @@
 					"type": "object",
 					"required": ["email", "password", "displayName", "signupUrl"],
 					"properties": {
-						"email": { "type": "string" },
-						"password": { "type": "string" },
-						"displayName": { "type": "string" },
-						"signupUrl": { "type": "string" }
+						"email": {
+							"type": "string"
+						},
+						"password": {
+							"type": "string"
+						},
+						"displayName": {
+							"type": "string"
+						},
+						"signupUrl": {
+							"type": "string"
+						}
 					}
 				},
 				"data": "js/ctx.request.body"
