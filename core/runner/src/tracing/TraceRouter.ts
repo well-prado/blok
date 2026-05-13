@@ -5,7 +5,15 @@ import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
 import { RoutingDiagnostics } from "./RoutingDiagnostics";
 import { RunTracker } from "./RunTracker";
 import { METADATA_OPERATORS, isValidMetadataKey } from "./metadataFilter";
-import type { MetadataFilter, MetadataOp, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
+import type {
+	MetadataFilter,
+	MetadataOp,
+	NodeRun,
+	RunEvent,
+	TraceLogEntry,
+	WorkflowRun,
+	WorkflowSummary,
+} from "./types";
 
 /**
  * Security review FW-2 — sensitive headers that are NEVER honored when
@@ -120,6 +128,60 @@ function sanitizeDispatchPayload(payload: unknown): unknown {
 		filtered[k] = v;
 	}
 	return { ...obj, headers: filtered };
+}
+
+/**
+ * Synthesize a zero-stat `WorkflowSummary` from a `WorkflowRegistry`
+ * entry that has never run. Studio's sidebar consumes `/__blok/workflows`,
+ * so without this merge a workflow that's registered + bound to a URL
+ * but hasn't been triggered yet is invisible to the operator — they
+ * have no row to click into, can't open the Graph tab, and (the bug
+ * that motivated this) can't even tell the workflow exists.
+ *
+ * Returns `null` for middleware-only workflows (`isMiddleware: true`)
+ * and for entries without a recognised trigger kind — both are
+ * non-user-facing.
+ */
+function synthesizeRegistryOnlySummary(reg: {
+	readonly name: string;
+	readonly source: string;
+	readonly workflow: unknown;
+	readonly isMiddleware?: boolean;
+}): WorkflowSummary | null {
+	if (reg.isMiddleware) return null;
+	const wf = reg.workflow;
+	if (!wf || typeof wf !== "object") return null;
+	const trigger = (wf as { trigger?: unknown }).trigger;
+	if (!trigger || typeof trigger !== "object") return null;
+
+	const triggerTypes: string[] = [];
+	let primaryPath: string | undefined;
+	for (const [kind, raw] of Object.entries(trigger as Record<string, unknown>)) {
+		if (!raw || typeof raw !== "object") continue;
+		triggerTypes.push(kind);
+		if (primaryPath !== undefined) continue;
+		// Pick the first identifying field that exists. Mirrors the
+		// `workflow_path` column the SQL summaries return — that's the
+		// runtime-set URL, here we approximate with the trigger config.
+		const r = raw as Record<string, unknown>;
+		if (typeof r.path === "string") primaryPath = r.path;
+		else if (typeof r.queue === "string") primaryPath = r.queue;
+		else if (typeof r.schedule === "string") primaryPath = r.schedule;
+		else if (typeof r.topic === "string") primaryPath = r.topic;
+	}
+
+	if (triggerTypes.length === 0) return null;
+
+	return {
+		name: reg.name,
+		path: primaryPath ?? "/",
+		triggerTypes,
+		totalRuns: 0,
+		recentRuns: 0,
+		errorRate: 0,
+		avgDurationMs: 0,
+		p95DurationMs: 0,
+	};
 }
 
 /**
@@ -272,13 +334,42 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 
 	router.get("/workflows", (_req: TraceRequest, res: TraceResponse) => {
 		const summaries = t.getWorkflowSummaries();
+		// E4 follow-up — `getWorkflowSummaries()` derives only from the
+		// `workflow_runs` table, so workflows that have been registered
+		// but never run don't show up. Studio uses this endpoint to power
+		// the sidebar; without merging the registry the user has no way
+		// to navigate to a workflow before it executes, including no way
+		// to see its static DAG. Synthesize a zero-stat summary for
+		// every registered workflow not already present.
+		const seen = new Set(summaries.map((s) => s.name));
+		for (const reg of WorkflowRegistry.getInstance().list()) {
+			if (seen.has(reg.name)) continue;
+			const synthesized = synthesizeRegistryOnlySummary(reg);
+			if (synthesized) summaries.push(synthesized);
+		}
 		res.json(summaries);
 	});
 
 	router.get("/workflows/:name", (req: TraceRequest, res: TraceResponse) => {
 		const { name } = req.params;
 		const summaries = t.getWorkflowSummaries();
-		const summary = summaries.find((s) => s.name === name);
+		let summary = summaries.find((s) => s.name === name);
+
+		// E4 — surface the raw workflow JSON (pre-normalization) from
+		// the registry so Studio can render the static DAG. Triggers
+		// feed the registry at boot; if the workflow was registered
+		// inline (e.g. tests with no source file) it's still here.
+		const registered = WorkflowRegistry.getInstance().get(name);
+
+		// Sidebar follow-up — if the workflow is registered but has
+		// never run, `getWorkflowSummaries()` won't return a row for
+		// it (the SQL aggregation derives from `workflow_runs`). Fall
+		// back to a synthesized zero-stat summary so Studio's detail
+		// page renders + the Graph tab is reachable on first sight.
+		if (!summary && registered) {
+			const synthesized = synthesizeRegistryOnlySummary(registered);
+			if (synthesized) summary = synthesized;
+		}
 
 		if (!summary) {
 			res.status(404).json({ error: `Workflow '${name}' not found` });
@@ -297,12 +388,6 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 				if (node.runtimeKind) runtimes.add(node.runtimeKind);
 			}
 		}
-
-		// E4 — surface the raw workflow JSON (pre-normalization) from
-		// the registry so Studio can render the static DAG. Triggers
-		// feed the registry at boot; if the workflow was registered
-		// inline (e.g. tests with no source file) it's still here.
-		const registered = WorkflowRegistry.getInstance().get(name);
 
 		res.json({
 			...summary,

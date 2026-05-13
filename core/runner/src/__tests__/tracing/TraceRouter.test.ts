@@ -330,6 +330,151 @@ describe("TraceRouter", () => {
 			expect(countries.totalRuns).toBe(2);
 			expect(countries.errorRate).toBeGreaterThan(0); // 1 failed out of 2
 		});
+
+		// E4 sidebar follow-up — workflows in the registry but never run
+		// must still surface so the sidebar can list them + the Graph tab
+		// is reachable on first sight.
+		describe("registry-only workflows", () => {
+			beforeEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+			afterEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+
+			it("synthesizes a zero-stat summary for a registry-only HTTP workflow", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "never-run-http",
+					source: "<test>",
+					workflow: {
+						name: "never-run-http",
+						version: "1.0.0",
+						trigger: { http: { method: "POST", path: "/api/echo" } },
+					},
+				});
+
+				const req = new MockRequest();
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows")!(req, res);
+
+				const body = res.jsonBody as any[];
+				const entry = body.find((s) => s.name === "never-run-http");
+				expect(entry).toBeDefined();
+				expect(entry.totalRuns).toBe(0);
+				expect(entry.recentRuns).toBe(0);
+				expect(entry.errorRate).toBe(0);
+				expect(entry.path).toBe("/api/echo");
+				expect(entry.triggerTypes).toEqual(["http"]);
+			});
+
+			it("does NOT duplicate a workflow that exists in both runs and registry", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "countries",
+					source: "<test>",
+					workflow: {
+						name: "countries",
+						version: "1.0.0",
+						trigger: { http: { method: "GET", path: "/countries" } },
+					},
+				});
+
+				const req = new MockRequest();
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows")!(req, res);
+
+				const body = res.jsonBody as any[];
+				const countries = body.filter((s) => s.name === "countries");
+				expect(countries).toHaveLength(1);
+				// The run-derived summary wins (carries real stats).
+				expect(countries[0].totalRuns).toBe(2);
+			});
+
+			it("excludes middleware-only workflows from the sidebar list", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "audit-log",
+					source: "<test>",
+					workflow: { name: "audit-log", version: "1.0.0", trigger: { http: {} } },
+					isMiddleware: true,
+				});
+
+				const req = new MockRequest();
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows")!(req, res);
+
+				const body = res.jsonBody as any[];
+				expect(body.find((s) => s.name === "audit-log")).toBeUndefined();
+			});
+
+			it("derives `path` from worker.queue / cron.schedule when http.path is absent", () => {
+				WorkflowRegistry.getInstance().registerAll([
+					{
+						name: "bg-job",
+						source: "<test>",
+						workflow: {
+							name: "bg-job",
+							version: "1.0.0",
+							trigger: { worker: { queue: "background-jobs" } },
+						},
+					},
+					{
+						name: "nightly",
+						source: "<test>",
+						workflow: {
+							name: "nightly",
+							version: "1.0.0",
+							trigger: { cron: { schedule: "0 2 * * *" } },
+						},
+					},
+				]);
+
+				const req = new MockRequest();
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows")!(req, res);
+
+				const body = res.jsonBody as any[];
+				expect(body.find((s) => s.name === "bg-job").path).toBe("background-jobs");
+				expect(body.find((s) => s.name === "nightly").path).toBe("0 2 * * *");
+			});
+
+			it("skips workflows with no recognized trigger", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "broken",
+					source: "<test>",
+					workflow: { name: "broken", version: "1.0.0" },
+				});
+
+				const req = new MockRequest();
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows")!(req, res);
+
+				const body = res.jsonBody as any[];
+				expect(body.find((s) => s.name === "broken")).toBeUndefined();
+			});
+
+			it("`/workflows/:name` returns 200 + definition for a registry-only workflow", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "never-run-http",
+					source: "<test>",
+					workflow: {
+						name: "never-run-http",
+						version: "1.0.0",
+						trigger: { http: { method: "POST", path: "/api/echo" } },
+						steps: [{ id: "respond", use: "@blokjs/respond", inputs: {} }],
+					},
+				});
+
+				const req = new MockRequest({ params: { name: "never-run-http" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				expect(res.statusCode).toBe(200);
+				const body = res.jsonBody as any;
+				expect(body.name).toBe("never-run-http");
+				expect(body.totalRuns).toBe(0);
+				expect(body.definition).toBeDefined();
+				expect((body.definition as any).steps).toHaveLength(1);
+			});
+		});
 	});
 
 	describe("GET /workflows/:name", () => {
