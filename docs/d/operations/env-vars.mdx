@@ -31,7 +31,8 @@ store).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BLOK_FILE_BASED_ROUTING` | `true` | Auto-discover JSON workflows under `workflows/json/` and derive URLs from file paths. |
+| `BLOK_FILE_BASED_ROUTING` | `true` | **Default ON since v0.6.** Auto-discover JSON workflows under `workflows/json/` and register each at its `trigger.http.path`. Set to `false` to fall back to the legacy `/<workflow-key>/<sub>` catch-all dispatch (deprecated, will be removed). |
+| `BLOK_ROUTING_LEGACY` | unset | Full legacy escape hatch. When `=1` / `=true`, file-based routing is disabled AND workflows without an explicit `trigger.http.path` get the filename-derived URL instead of throwing `MissingExplicitPathError`. Will be removed in a future release. |
 | `BLOK_HMR` | `true` (dev) | Hot-reload workflows on file change. Triggers re-scan and `WorkflowRegistry.clear()` + `registerAll()`. |
 | `BLOK_MAPPER_MODE` | `warn` | Input expression resolution failure mode. `warn` logs + passes through (v1 default), `strict` throws `MapperResolutionError`, `silent` suppresses (pre-v0.3.x behavior). **Production should set `strict`.** See [debugging workflows](/d/introduction/workflows#debugging). |
 

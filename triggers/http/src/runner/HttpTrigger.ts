@@ -57,6 +57,27 @@ import type WorkflowRequest from "./types/WorkflowRequest";
  */
 export type AppBindings = { Bindings: HttpBindings };
 
+/**
+ * v0.6 — file-based routing is ON by default. Operators opt OUT via
+ * either:
+ *   - `BLOK_FILE_BASED_ROUTING=false` — explicit kill switch.
+ *   - `BLOK_ROUTING_LEGACY=1` / `=true` — full legacy mode (also
+ *     re-enables the filename-derived URL fallback for path-less
+ *     workflows in `WorkflowRouter.buildRouteTable`).
+ *
+ * The `BLOK_ROUTES=v2` opt-in is kept as a no-op for back-compat
+ * (it's the historical alias for "explicit routing on").
+ *
+ * Both opt-outs are deprecated and will be removed in a future
+ * release; the boot log surfaces a loud warning when either is set.
+ */
+export function isFileBasedRoutingEnabled(): boolean {
+	const explicitFalse = process.env.BLOK_FILE_BASED_ROUTING === "false";
+	const legacyFlag = process.env.BLOK_ROUTING_LEGACY === "1" || process.env.BLOK_ROUTING_LEGACY === "true";
+	if (explicitFalse || legacyFlag) return false;
+	return true;
+}
+
 export default class HttpTrigger extends TriggerBase {
 	private app: Hono<AppBindings>;
 	private port: string | number = process.env.PORT || 4000;
@@ -230,13 +251,23 @@ export default class HttpTrigger extends TriggerBase {
 	 * workflows in `Workflows.ts` and return the route table. Called once
 	 * at boot from `listen()` so workflow URLs are decided before serving.
 	 *
-	 * Off by default. Opt-in via `BLOK_FILE_BASED_ROUTING=true` (or the
-	 * shorter `BLOK_ROUTES=v2`). When off, returns an empty table and
-	 * routing falls back to the legacy catch-all `/<key>/<path>` scheme.
+	 * **Default ON since v0.6** (the v0.4 commit that introduced explicit-
+	 * path routing promised this for v0.5; finally lands here). Opt out
+	 * via `BLOK_FILE_BASED_ROUTING=false`, or via the existing
+	 * `BLOK_ROUTING_LEGACY=1` escape hatch (which also enables the
+	 * filename-derived URL fallback for un-migrated workflows). Both
+	 * fall back to the legacy catch-all `/<key>/<path>` scheme — and
+	 * both will be removed in a future release. The boot log warns
+	 * loudly when the legacy path is active so operators notice.
 	 */
 	private async buildFileBasedRoutes(): Promise<RouteEntry[]> {
-		const enabled = process.env.BLOK_FILE_BASED_ROUTING === "true" || process.env.BLOK_ROUTES === "v2";
-		if (!enabled) return [];
+		const enabled = isFileBasedRoutingEnabled();
+		if (!enabled) {
+			this.logger.log(
+				"[blok][routing] file-based routing is DISABLED — every request will go through the legacy catch-all `/<workflow-key>/<sub>` dispatch. Unset `BLOK_FILE_BASED_ROUTING=false` / `BLOK_ROUTING_LEGACY=1` to re-enable. The legacy mode will be removed in a future release.",
+			);
+			return [];
+		}
 
 		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
 
@@ -566,7 +597,8 @@ export default class HttpTrigger extends TriggerBase {
 	async listen(): Promise<number> {
 		// File-based routing — scan workflow folders, build the route table,
 		// and register each entry as an explicit Hono route BEFORE the
-		// catch-all. Off by default; opt-in via BLOK_FILE_BASED_ROUTING=true.
+		// catch-all. **Default ON since v0.6**; opt out via
+		// `BLOK_FILE_BASED_ROUTING=false` or `BLOK_ROUTING_LEGACY=1`.
 		// When off, all requests fall through to the catch-all (legacy
 		// /<workflow-key> URL scheme).
 		let fileBasedRoutes: RouteEntry[] = [];
@@ -677,7 +709,8 @@ export default class HttpTrigger extends TriggerBase {
 			// resolved URL (explicit `trigger.http.path` wins; otherwise the
 			// file-derived path is used). Registered BEFORE the catch-all so
 			// matching requests are routed directly without filename-prefix
-			// dispatch. Empty when BLOK_FILE_BASED_ROUTING is off.
+			// dispatch. Empty when `BLOK_FILE_BASED_ROUTING=false` or
+			// `BLOK_ROUTING_LEGACY=1` is set.
 			if (fileBasedRoutes.length > 0) this.registerExplicitRoutes(fileBasedRoutes);
 
 			// Catch-all workflow handler — legacy /<workflow-key>/<path> dispatch.
