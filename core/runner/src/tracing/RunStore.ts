@@ -10,6 +10,7 @@ import type {
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
+	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
 
@@ -53,6 +54,28 @@ export interface RunStore {
 	listDashboards(): Dashboard[];
 	deleteDashboard(dashboardId: string): boolean;
 	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void;
+
+	// === Sample-body recording (option C follow-up to #100) ===
+	/**
+	 * Record the request body of a successful run as the workflow's
+	 * sample body. ONE row per workflow — re-recording is a no-op if a
+	 * sample already exists (re-recording from a different run would
+	 * change what operators see in the curl example without warning).
+	 * Returns the persisted entry on first record; returns the existing
+	 * entry untouched on every subsequent call.
+	 */
+	recordWorkflowSample(sample: WorkflowSample): WorkflowSample;
+	/**
+	 * Look up the recorded sample for a workflow. Returns `undefined`
+	 * when no sample has been recorded yet.
+	 */
+	getWorkflowSample(workflowName: string): WorkflowSample | undefined;
+	/**
+	 * Drop the recorded sample so the next eligible run can re-record.
+	 * Returns `true` if a row was removed. Operator-facing escape
+	 * hatch — there's no Studio surface for this yet.
+	 */
+	deleteWorkflowSample(workflowName: string): boolean;
 
 	// === Saved filters (E2) ===
 	/**

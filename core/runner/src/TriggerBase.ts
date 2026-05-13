@@ -48,6 +48,22 @@ interface CrashAutoflipLogger {
 	log?: (message: string) => void;
 }
 
+/**
+ * Sample-body recording (option C follow-up to #100). Returns true
+ * when ANY of the workflow's triggers has `recordSample: true`.
+ * Currently the field only exists on the HTTP trigger schema, but the
+ * helper walks every key so a future addition (worker / pubsub /
+ * webhook) can opt in without changing this code.
+ */
+function shouldRecordSample(trigger: unknown): boolean {
+	if (!trigger || typeof trigger !== "object") return false;
+	for (const value of Object.values(trigger as Record<string, unknown>)) {
+		if (!value || typeof value !== "object") continue;
+		if ((value as { recordSample?: unknown }).recordSample === true) return true;
+	}
+	return false;
+}
+
 export default abstract class TriggerBase extends Trigger {
 	public configuration: Configuration;
 
@@ -1054,6 +1070,31 @@ export default abstract class TriggerBase extends Trigger {
 			// --- Trace: complete run ---
 			if (traceRunId) {
 				tracker.completeRun(traceRunId, context.response?.data);
+
+				// Sample-body recording (option C follow-up to #100).
+				// When any of the workflow's triggers opts in via
+				// `recordSample: true`, capture the request body of the
+				// FIRST successful run. The store enforces first-record-
+				// wins so subsequent successes are no-ops; we also early-
+				// return when a sample is already on file to avoid an
+				// unnecessary roundtrip per run.
+				try {
+					if (shouldRecordSample(this.configuration.trigger)) {
+						const workflowName = this.configuration.name || ctx.workflow_name || "";
+						if (workflowName && !tracker.getWorkflowSample(workflowName)) {
+							tracker.recordWorkflowSample({
+								workflowName,
+								body: context.request?.body,
+								sourceRunId: traceRunId,
+								recordedAt: Date.now(),
+							});
+						}
+					}
+				} catch (err) {
+					// Recording is a nice-to-have for operators; never let
+					// it fail the run.
+					console.error("[blok] failed to record workflow sample:", (err as Error).message);
+				}
 			}
 
 			return {

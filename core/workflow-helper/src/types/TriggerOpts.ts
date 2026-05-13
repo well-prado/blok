@@ -376,6 +376,27 @@ export const HttpTriggerOptsSchema = z
 					"current ctx.response is returned to the caller. Errors thrown inside middleware " +
 					"propagate to the trigger's normal error handler.",
 			),
+		examples: z
+			.object({
+				body: z.unknown().describe("Sample request body that Studio uses in the empty-state curl example."),
+			})
+			.partial()
+			.optional()
+			.describe(
+				"OPTIONAL. Author-declared examples for Studio. Today only `body` is consumed " +
+					"(the empty-state curl snippet). Wins over recorded + inferred bodies. Mirror in " +
+					'JSON workflows: `"trigger": { "http": { "examples": { "body": { ... } } } }`.',
+			),
+		recordSample: z
+			.boolean()
+			.optional()
+			.describe(
+				"OPTIONAL. v0.6 — when `true`, the trigger captures the request body of the FIRST " +
+					"successful run and persists it as the sample body Studio shows in the empty-state " +
+					"curl. Subsequent runs are no-ops (one row per workflow). Off by default for " +
+					"privacy reasons — request bodies frequently contain PII or auth payloads. Author- " +
+					"declared `examples.body` always wins over a recorded sample.",
+			),
 		...ConcurrencyOptsFields,
 		...SchedulingOptsFields,
 	})

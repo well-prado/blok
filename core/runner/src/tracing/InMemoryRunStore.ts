@@ -13,6 +13,7 @@ import type {
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
+	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
 
@@ -32,6 +33,9 @@ export class InMemoryRunStore implements RunStore {
 	// store's UNIQUE(name) constraint so upsert-by-name semantics are
 	// preserved across backends.
 	private savedFilters: Map<string, SavedFilter> = new Map();
+	// Sample-body recording (option C follow-up to #100). Keyed by
+	// workflow name; first-record-wins semantics across backends.
+	private workflowSamples: Map<string, WorkflowSample> = new Map();
 	private idempotencyCache: Map<string, CachedStepResult> = new Map();
 	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
 	private scheduledDispatches: Map<string, ScheduledDispatchRow> = new Map();
@@ -403,6 +407,24 @@ export class InMemoryRunStore implements RunStore {
 		return this.savedFilters.delete(name);
 	}
 
+	// === Sample-body recording (option C) ===
+
+	recordWorkflowSample(sample: WorkflowSample): WorkflowSample {
+		// First-record-wins to match the sqlite INSERT OR IGNORE.
+		const existing = this.workflowSamples.get(sample.workflowName);
+		if (existing) return existing;
+		this.workflowSamples.set(sample.workflowName, sample);
+		return sample;
+	}
+
+	getWorkflowSample(workflowName: string): WorkflowSample | undefined {
+		return this.workflowSamples.get(workflowName);
+	}
+
+	deleteWorkflowSample(workflowName: string): boolean {
+		return this.workflowSamples.delete(workflowName);
+	}
+
 	// === Cleanup ===
 
 	clearAll(): number {
@@ -414,6 +436,7 @@ export class InMemoryRunStore implements RunStore {
 		this.logs.clear();
 		this.dashboards.clear();
 		this.savedFilters.clear();
+		this.workflowSamples.clear();
 		this.idempotencyCache.clear();
 		this.concurrencyLocks.clear();
 		return count;

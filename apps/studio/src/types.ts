@@ -318,13 +318,16 @@ export interface WorkflowDetail extends WorkflowSummary {
 	nodeNames: string[];
 	runtimes: string[];
 	/**
-	 * Sample-body inferred (or author-declared) for the empty-state
-	 * curl snippet. `body` is always present when `examples` is set;
-	 * `source` distinguishes author overrides from static inference.
+	 * Sample-body for the empty-state curl snippet. `body` is always
+	 * present when `examples` is set. `source` provenance:
+	 *   - `author` — declared in `trigger.http.examples.body`.
+	 *   - `recorded` — captured from a real successful run (v0.6 option C).
+	 *   - `inferred` — synthesized from static step-input analysis (#100).
+	 *   - `empty` — no body references + no recording + no override.
 	 */
 	examples?: {
 		body: unknown;
-		source: "author" | "inferred" | "empty";
+		source: "author" | "recorded" | "inferred" | "empty";
 	};
 }
 

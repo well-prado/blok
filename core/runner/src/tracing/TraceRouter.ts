@@ -391,23 +391,36 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			}
 		}
 
-		// Sample-body inference (B + A — static analysis with author
-		// override). Powers Studio's empty-state curl so first-time
-		// operators get a payload that actually exercises the workflow
-		// instead of `-d '{}'` that immediately crashes anything
-		// reading `ctx.request.body`. Author-declared
-		// `trigger.http.examples.body` wins over inference. Returns
-		// `null` only for non-object workflow values; otherwise the
-		// detail response includes `examples.body` (which may be `{}`
-		// for workflows with no body references).
+		// Sample-body resolution. Priority (highest first):
+		//   1. Author override: `trigger.http.examples.body` in the
+		//      workflow JSON (#100). Source of truth — never overridden.
+		//   2. Recorded sample: captured from the first successful run
+		//      when `trigger.http.recordSample: true` (option C / v0.6).
+		//      Real-world body that exercised the workflow.
+		//   3. Static inference: walk step references for
+		//      `ctx.request.body.<path>` (#100). Heuristic placeholder.
+		//   4. Empty `{}` — fallback when nothing else exists.
+		// The `inferSampleBody()` helper already handles #1 vs #3; we
+		// slot the recorded sample in between by overriding the `source`
+		// + `body` when one exists AND the helper didn't fall through to
+		// an author override.
 		const inferred = registered?.workflow ? inferSampleBody(registered.workflow) : null;
+		const recorded = t.getWorkflowSample(name);
+		let examples: { body: unknown; source: "author" | "recorded" | "inferred" | "empty" } | undefined;
+		if (inferred?.source === "author") {
+			examples = { body: inferred.body, source: "author" };
+		} else if (recorded) {
+			examples = { body: recorded.body, source: "recorded" };
+		} else if (inferred) {
+			examples = { body: inferred.body, source: inferred.source };
+		}
 
 		res.json({
 			...summary,
 			nodeNames: Array.from(nodeNames),
 			runtimes: Array.from(runtimes),
 			definition: registered?.workflow,
-			examples: inferred ? { body: inferred.body, source: inferred.source } : undefined,
+			examples,
 		});
 	});
 
