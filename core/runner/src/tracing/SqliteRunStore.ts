@@ -164,6 +164,52 @@ interface NodeRunRow {
 	 * step. Added in migration v12.
 	 */
 	iteration_context: string | null;
+	/**
+	 * v0.6 follow-up — opaque JSON bag for the Studio-visible step flags
+	 * that previously rode only on the in-memory NodeRun and silently
+	 * dropped on round-trip: `wait`, `dispatch`, `subworkflowDepth`,
+	 * `middleware`, `iterationIndex`. NULL on rows where none of those
+	 * fields are set (the common case for non-subworkflow / non-middleware
+	 * / non-forEach steps), and on pre-v16 rows. Added in migration v16.
+	 */
+	flags_json: string | null;
+}
+
+/**
+ * Persisted bag for Studio-visible step flags. One row per NodeRun whose
+ * trigger metadata is worth surviving sqlite/PG round-trip; serialized
+ * into `node_runs.flags_json`. All fields optional — only the ones set
+ * on the in-memory NodeRun are written, and the unmarshal mirrors that.
+ */
+interface NodeRunFlags {
+	wait?: boolean;
+	dispatch?: "in-process" | "http-self";
+	subworkflowDepth?: number;
+	middleware?: string;
+	iterationIndex?: number;
+}
+
+function encodeNodeRunFlags(nodeRun: NodeRun): string | null {
+	const flags: NodeRunFlags = {};
+	if (nodeRun.wait !== undefined) flags.wait = nodeRun.wait;
+	if (nodeRun.dispatch !== undefined) flags.dispatch = nodeRun.dispatch;
+	if (nodeRun.subworkflowDepth !== undefined) flags.subworkflowDepth = nodeRun.subworkflowDepth;
+	if (nodeRun.middleware !== undefined) flags.middleware = nodeRun.middleware;
+	if (nodeRun.iterationIndex !== undefined) flags.iterationIndex = nodeRun.iterationIndex;
+	const empty = Object.keys(flags).length === 0;
+	return empty ? null : JSON.stringify(flags);
+}
+
+function decodeNodeRunFlags(raw: string | null): NodeRunFlags {
+	if (!raw) return {};
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		if (parsed && typeof parsed === "object") return parsed as NodeRunFlags;
+	} catch {
+		// Corrupt JSON (concurrent write race, manual edit, etc.) — fall
+		// through to empty flags rather than failing the whole rowToNodeRun.
+	}
+	return {};
 }
 
 interface IdempotencyCacheRow {
@@ -758,6 +804,21 @@ export class SqliteRunStore implements RunStore {
 					);
 				`,
 			},
+			{
+				// v0.6 follow-up — bag column for Studio-visible step flags.
+				// Until now `wait`, `subworkflowDepth`, `middleware`,
+				// `iterationIndex` lived only on the in-memory NodeRun and
+				// silently dropped on sqlite/PG round-trip — the rail badges
+				// vanished on browser refresh or process restart. The new
+				// G2 `dispatch` field would have inherited the same gap.
+				// One opaque JSON column holds whichever of the five fields
+				// are set; pre-v16 rows get NULL (which decodes back to all
+				// fields undefined — matches the previous behaviour exactly).
+				version: 16,
+				sql: `
+					ALTER TABLE node_runs ADD COLUMN flags_json TEXT;
+				`,
+			},
 		];
 
 		const applyMigration = this.db.transaction((m: { version: number; sql: string }) => {
@@ -917,8 +978,8 @@ export class SqliteRunStore implements RunStore {
 			 status, started_at, finished_at, duration_ms,
 			 inputs_json, outputs_json, error_json,
 			 parent_node_id, depth, step_index, metrics_json, cached_json, attempts_json,
-			 iteration_context)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 iteration_context, flags_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		).run(
 			nodeRun.id,
@@ -940,6 +1001,7 @@ export class SqliteRunStore implements RunStore {
 			nodeRun.cached ? JSON.stringify(nodeRun.cached) : null,
 			nodeRun.attempts ? JSON.stringify(nodeRun.attempts) : null,
 			nodeRun.iterationContext ? JSON.stringify(nodeRun.iterationContext) : null,
+			encodeNodeRunFlags(nodeRun),
 		);
 	}
 
@@ -1979,6 +2041,7 @@ export class SqliteRunStore implements RunStore {
 	}
 
 	private rowToNodeRun(row: NodeRunRow): NodeRun {
+		const flags = decodeNodeRunFlags(row.flags_json);
 		return {
 			id: row.id,
 			runId: row.run_id,
@@ -2001,6 +2064,11 @@ export class SqliteRunStore implements RunStore {
 			iterationContext: row.iteration_context
 				? (JSON.parse(row.iteration_context) as NodeRun["iterationContext"])
 				: undefined,
+			wait: flags.wait,
+			dispatch: flags.dispatch,
+			subworkflowDepth: flags.subworkflowDepth,
+			middleware: flags.middleware,
+			iterationIndex: flags.iterationIndex,
 		};
 	}
 

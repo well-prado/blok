@@ -246,6 +246,125 @@ describe("SqliteRunStore: state_snapshot column (migration v11)", () => {
 	});
 });
 
+// G2 follow-up (v0.6) — NodeRun.flags_json column (migration v16).
+// Previously `wait`, `dispatch`, `subworkflowDepth`, `middleware`,
+// `iterationIndex` rode only on the in-memory NodeRun and silently
+// dropped on sqlite round-trip — the Studio rail badges (↳ async,
+// ↳ sub, mw:<name>, iteration headers, http) disappeared after a
+// browser refresh or process restart. The new `flags_json` JSON bag
+// fixes the gap; this test pins the round-trip semantics across a
+// store-close + reopen.
+describe("SqliteRunStore: NodeRun flags_json (migration v16)", () => {
+	it("round-trips every persisted flag across a process restart", () => {
+		if (!existsSync(TEST_DB_DIR)) mkdirSync(TEST_DB_DIR, { recursive: true });
+		const dbPath = join(TEST_DB_DIR, `flags-${Date.now()}.db`);
+
+		const store1 = new SqliteRunStore(dbPath);
+		store1.saveRun({
+			id: "run_flags",
+			workflowName: "wf",
+			workflowPath: "/wf",
+			triggerType: "http",
+			triggerSummary: "POST /wf",
+			status: "completed",
+			startedAt: 1_000,
+			nodeCount: 1,
+			completedNodes: 1,
+		});
+		store1.saveNodeRun({
+			id: "node_async_http",
+			runId: "run_flags",
+			nodeName: "send-receipt",
+			nodeType: "subworkflow",
+			status: "completed",
+			startedAt: 1_000,
+			depth: 0,
+			stepIndex: 0,
+			wait: false,
+			dispatch: "http-self",
+			subworkflowDepth: 2,
+			middleware: "auth-check",
+			iterationIndex: 3,
+		});
+		store1.close();
+
+		const store2 = new SqliteRunStore(dbPath);
+		const got = store2.getNodeRun("node_async_http");
+		expect(got).toBeDefined();
+		expect(got?.wait).toBe(false);
+		expect(got?.dispatch).toBe("http-self");
+		expect(got?.subworkflowDepth).toBe(2);
+		expect(got?.middleware).toBe("auth-check");
+		expect(got?.iterationIndex).toBe(3);
+		store2.close();
+	});
+
+	it("leaves flags_json NULL when no flags are set + returns undefined for each field", () => {
+		const store = createTestStore();
+		store.saveRun({
+			id: "run_no_flags",
+			workflowName: "wf",
+			workflowPath: "/wf",
+			triggerType: "http",
+			triggerSummary: "POST /wf",
+			status: "completed",
+			startedAt: 1_000,
+			nodeCount: 1,
+			completedNodes: 1,
+		});
+		store.saveNodeRun({
+			id: "node_plain",
+			runId: "run_no_flags",
+			nodeName: "do-thing",
+			nodeType: "module",
+			status: "completed",
+			startedAt: 1_000,
+			depth: 0,
+			stepIndex: 0,
+		});
+
+		const got = store.getNodeRun("node_plain");
+		expect(got?.wait).toBeUndefined();
+		expect(got?.dispatch).toBeUndefined();
+		expect(got?.subworkflowDepth).toBeUndefined();
+		expect(got?.middleware).toBeUndefined();
+		expect(got?.iterationIndex).toBeUndefined();
+		store.close();
+	});
+
+	it("partial flag set — `dispatch` only — round-trips without coercing siblings", () => {
+		const store = createTestStore();
+		store.saveRun({
+			id: "run_partial",
+			workflowName: "wf",
+			workflowPath: "/wf",
+			triggerType: "http",
+			triggerSummary: "POST /wf",
+			status: "completed",
+			startedAt: 1_000,
+			nodeCount: 1,
+			completedNodes: 1,
+		});
+		store.saveNodeRun({
+			id: "node_dispatch_only",
+			runId: "run_partial",
+			nodeName: "send-receipt",
+			nodeType: "subworkflow",
+			status: "completed",
+			startedAt: 1_000,
+			depth: 0,
+			stepIndex: 0,
+			dispatch: "in-process",
+		});
+
+		const got = store.getNodeRun("node_dispatch_only");
+		expect(got?.dispatch).toBe("in-process");
+		expect(got?.wait).toBeUndefined();
+		expect(got?.subworkflowDepth).toBeUndefined();
+		store.close();
+	});
+});
+
 // F1 (v0.5) — indexed metadata generated columns + indexes.
 describe("SqliteRunStore: indexed metadata keys (F1)", () => {
 	function makeRun(id: string, metadata: Record<string, unknown>) {

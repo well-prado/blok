@@ -183,6 +183,17 @@ export interface NodeRun {
 	 */
 	wait?: boolean;
 	/**
+	 * G2 (v0.6) sub-workflow dispatch strategy. Only set for
+	 * `nodeType === "subworkflow"`. Drives a small `http` badge alongside
+	 * the existing `↳ async`/`↳ sub` in StepRail so operators can see at
+	 * a glance whether the child ran in-process or via an HTTP self-call.
+	 * - `"in-process"` (default; also `undefined` on pre-v0.6 traces) —
+	 *   child ran in the same Node process.
+	 * - `"http-self"` — child was dispatched as a fresh HTTP request to
+	 *   `BLOK_SELF_BASE_URL`, potentially landing on a different process.
+	 */
+	dispatch?: "in-process" | "http-self";
+	/**
 	 * PR 5 E3 — sub-workflow nesting depth. Top-level workflow's
 	 * sub-workflow step has `subworkflowDepth = 1`; nested sub-workflows
 	 * have higher values. Studio renders `↳ sub (N)` / `↳ async (N)`

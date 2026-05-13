@@ -367,6 +367,19 @@ export class PostgresRunStore implements RunStore {
 						`);
 					},
 				},
+				{
+					// v0.6 follow-up — bag column for Studio-visible step flags
+					// (`wait`, `dispatch`, `subworkflowDepth`, `middleware`,
+					// `iterationIndex`). Mirrors sqlite v16. Previously these
+					// fields lived only on the in-memory NodeRun and vanished
+					// on round-trip — rail badges disappeared after process
+					// restart. JSONB so future flag additions don't need new
+					// migrations.
+					version: 9,
+					up: async () => {
+						await client.query("ALTER TABLE node_runs ADD COLUMN IF NOT EXISTS flags_json JSONB");
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -757,6 +770,7 @@ export class PostgresRunStore implements RunStore {
 
 	saveNodeRun(nodeRun: NodeRun): void {
 		this.memory.saveNodeRun(nodeRun);
+		const flagsJson = encodeNodeRunFlagsForPg(nodeRun);
 		this.enqueueWrite(() =>
 			this.pool
 				.query(
@@ -764,15 +778,16 @@ export class PostgresRunStore implements RunStore {
 				(id, run_id, node_name, node_type, runtime_kind,
 				 status, started_at, finished_at, duration_ms,
 				 inputs_json, outputs_json, error_json,
-				 parent_node_id, depth, step_index, metrics_json)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+				 parent_node_id, depth, step_index, metrics_json, flags_json)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 				ON CONFLICT (id) DO UPDATE SET
 				 status = EXCLUDED.status,
 				 finished_at = EXCLUDED.finished_at,
 				 duration_ms = EXCLUDED.duration_ms,
 				 outputs_json = EXCLUDED.outputs_json,
 				 error_json = EXCLUDED.error_json,
-				 metrics_json = EXCLUDED.metrics_json`,
+				 metrics_json = EXCLUDED.metrics_json,
+				 flags_json = EXCLUDED.flags_json`,
 					[
 						nodeRun.id,
 						nodeRun.runId,
@@ -790,6 +805,7 @@ export class PostgresRunStore implements RunStore {
 						nodeRun.depth,
 						nodeRun.stepIndex,
 						nodeRun.metrics ? JSON.stringify(nodeRun.metrics) : null,
+						flagsJson,
 					],
 				)
 				.then(() => {}),
@@ -1496,6 +1512,15 @@ export class PostgresRunStore implements RunStore {
 	}
 
 	private rowToNodeRun(row: Record<string, unknown>): NodeRun {
+		const flags = (row.flags_json ? parseJson(row.flags_json) : undefined) as
+			| {
+					wait?: boolean;
+					dispatch?: "in-process" | "http-self";
+					subworkflowDepth?: number;
+					middleware?: string;
+					iterationIndex?: number;
+			  }
+			| undefined;
 		return {
 			id: row.id as string,
 			runId: row.run_id as string,
@@ -1513,6 +1538,11 @@ export class PostgresRunStore implements RunStore {
 			depth: Number(row.depth),
 			stepIndex: Number(row.step_index),
 			metrics: row.metrics_json ? (parseJson(row.metrics_json) as NodeRun["metrics"]) : undefined,
+			wait: flags?.wait,
+			dispatch: flags?.dispatch,
+			subworkflowDepth: flags?.subworkflowDepth,
+			middleware: flags?.middleware,
+			iterationIndex: flags?.iterationIndex,
 		};
 	}
 
@@ -1567,4 +1597,20 @@ function parseJson(value: unknown): unknown {
 		}
 	}
 	return value;
+}
+
+/**
+ * Serialize the in-memory NodeRun flag bag for the `flags_json` JSONB
+ * column. Mirrors `encodeNodeRunFlags` in SqliteRunStore. Returns null
+ * when no flags are set so the column stays NULL on the common case.
+ */
+function encodeNodeRunFlagsForPg(nodeRun: NodeRun): string | null {
+	const flags: Record<string, unknown> = {};
+	if (nodeRun.wait !== undefined) flags.wait = nodeRun.wait;
+	if (nodeRun.dispatch !== undefined) flags.dispatch = nodeRun.dispatch;
+	if (nodeRun.subworkflowDepth !== undefined) flags.subworkflowDepth = nodeRun.subworkflowDepth;
+	if (nodeRun.middleware !== undefined) flags.middleware = nodeRun.middleware;
+	if (nodeRun.iterationIndex !== undefined) flags.iterationIndex = nodeRun.iterationIndex;
+	if (Object.keys(flags).length === 0) return null;
+	return JSON.stringify(flags);
 }

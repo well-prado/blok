@@ -263,6 +263,14 @@ export default abstract class RunnerSteps {
 						// (wait:true / default) in StepRail. Only meaningful
 						// for subworkflow steps; undefined elsewhere.
 						const subworkflowWait = stepType === "subworkflow" ? (stepAny.wait as boolean | undefined) : undefined;
+						// G2 (v0.6) — capture the `dispatch` strategy so the
+						// rail can mark http-self invocations with a small
+						// `http` badge alongside the existing `↳ async`/`↳ sub`.
+						// Normalize: unknown values + the default fall through
+						// to `undefined` (rendered as in-process by Studio).
+						const dispatchRaw = stepType === "subworkflow" ? (stepAny.dispatch as unknown) : undefined;
+						const subworkflowDispatch: "in-process" | "http-self" | undefined =
+							dispatchRaw === "http-self" || dispatchRaw === "in-process" ? dispatchRaw : undefined;
 						// PR 5 E3 — surface sub-workflow nesting depth.
 						// `_subworkflowDepth` on ctx is set by SubworkflowNode +
 						// createChildContext; the parent's invocation of a
@@ -297,6 +305,7 @@ export default abstract class RunnerSteps {
 							depth: depthLevel,
 							stepIndex: i,
 							wait: subworkflowWait,
+							dispatch: subworkflowDispatch,
 							subworkflowDepth,
 							middleware,
 							iterationIndex,

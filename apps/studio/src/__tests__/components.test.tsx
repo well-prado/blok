@@ -9,6 +9,8 @@ import { RunFilters } from "@/components/runs/RunFilters";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { JsonViewer } from "@/components/shared/JsonViewer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { StepRail } from "@/components/trace/StepRail";
+import type { NodeRun } from "@/types";
 
 /**
  * RunFilters now reads saved filters via React Query (E2). Wrap it
@@ -192,5 +194,86 @@ describe("ErrorBoundary", () => {
 		expect(screen.getByText("Custom fallback")).toBeInTheDocument();
 
 		consoleSpy.mockRestore();
+	});
+});
+
+/**
+ * StepRail sub-workflow badge rendering. The depth/iteration grouping is
+ * pinned in `stepRailGrouping.test.ts` via the pure `buildRailItems`; this
+ * suite covers what the renderer paints alongside the row — specifically
+ * the `↳ sub` / `↳ async` and the G2 `http` sibling badge.
+ */
+function makeSubworkflowNode(overrides: Partial<NodeRun>): NodeRun {
+	return {
+		id: overrides.id ?? "node-1",
+		runId: "run-1",
+		nodeName: overrides.nodeName ?? "send-receipt",
+		nodeType: "subworkflow",
+		status: "completed",
+		startedAt: 0,
+		depth: 0,
+		stepIndex: 0,
+		...overrides,
+	} as unknown as NodeRun;
+}
+
+describe("StepRail — sub-workflow dispatch badge (G2)", () => {
+	it("renders the existing ↳ sub badge for a synchronous in-process invocation", () => {
+		render(<StepRail nodes={[makeSubworkflowNode({})]} activeStepId={null} onSelect={() => {}} />);
+		expect(screen.getByText("↳ sub")).toBeInTheDocument();
+		expect(screen.queryByText("http")).not.toBeInTheDocument();
+	});
+
+	it("renders the existing ↳ async badge for a fire-and-forget in-process dispatch", () => {
+		render(<StepRail nodes={[makeSubworkflowNode({ wait: false })]} activeStepId={null} onSelect={() => {}} />);
+		expect(screen.getByText("↳ async")).toBeInTheDocument();
+		expect(screen.queryByText("http")).not.toBeInTheDocument();
+	});
+
+	it("adds a sibling `http` badge when dispatch is http-self (async)", () => {
+		render(
+			<StepRail
+				nodes={[makeSubworkflowNode({ wait: false, dispatch: "http-self" })]}
+				activeStepId={null}
+				onSelect={() => {}}
+			/>,
+		);
+		expect(screen.getByText("↳ async")).toBeInTheDocument();
+		expect(screen.getByText("http")).toBeInTheDocument();
+	});
+
+	it("adds a sibling `http` badge when dispatch is http-self (sync)", () => {
+		render(
+			<StepRail
+				nodes={[makeSubworkflowNode({ wait: true, dispatch: "http-self" })]}
+				activeStepId={null}
+				onSelect={() => {}}
+			/>,
+		);
+		expect(screen.getByText("↳ sub")).toBeInTheDocument();
+		expect(screen.getByText("http")).toBeInTheDocument();
+	});
+
+	it("does NOT render the http badge for the explicit `in-process` dispatch", () => {
+		render(
+			<StepRail
+				nodes={[makeSubworkflowNode({ wait: false, dispatch: "in-process" })]}
+				activeStepId={null}
+				onSelect={() => {}}
+			/>,
+		);
+		expect(screen.getByText("↳ async")).toBeInTheDocument();
+		expect(screen.queryByText("http")).not.toBeInTheDocument();
+	});
+
+	it("does NOT render the http badge for non-subworkflow steps even if a dispatch field leaks through", () => {
+		const moduleStep = {
+			...makeSubworkflowNode({}),
+			nodeType: "module",
+			dispatch: "http-self" as const,
+		};
+		render(<StepRail nodes={[moduleStep]} activeStepId={null} onSelect={() => {}} />);
+		expect(screen.queryByText("↳ sub")).not.toBeInTheDocument();
+		expect(screen.queryByText("http")).not.toBeInTheDocument();
 	});
 });
