@@ -55,6 +55,24 @@ interface CrashAutoflipLogger {
  * helper walks every key so a future addition (worker / pubsub /
  * webhook) can opt in without changing this code.
  */
+/**
+ * G2 — pull a single string value from an incoming request's headers
+ * map. Handles the three shapes Node / Hono / Express can produce:
+ * `undefined`, a literal string, or an array (first element wins).
+ * Case-folded lookup (Hono normalises header names; Express/Node
+ * sometimes preserve case).
+ */
+function pickHeader(headers: Record<string, string | string[] | undefined>, name: string): string | undefined {
+	const lower = name.toLowerCase();
+	for (const key of Object.keys(headers)) {
+		if (key.toLowerCase() !== lower) continue;
+		const value = headers[key];
+		if (Array.isArray(value)) return value[0];
+		if (typeof value === "string") return value;
+	}
+	return undefined;
+}
+
 function shouldRecordSample(trigger: unknown): boolean {
 	if (!trigger || typeof trigger !== "object") return false;
 	for (const value of Object.values(trigger as Record<string, unknown>)) {
@@ -724,6 +742,13 @@ export default abstract class TriggerBase extends Trigger {
 				: typeof replayOfHeader === "string"
 					? replayOfHeader
 					: undefined;
+			// G2 (v0.6) · sub-workflow lineage across the HTTP boundary.
+			// `SubworkflowNode.dispatchHttpSelf` sets these headers on the
+			// outbound self-call so the receiver's run record carries the
+			// parent ids. Without this, an http-self child would appear
+			// as a fresh top-level run with no Studio breadcrumb.
+			const parentRunId = pickHeader(reqHeaders, "x-blok-parent-run-id");
+			const parentNodeRunId = pickHeader(reqHeaders, "x-blok-parent-node-run-id");
 			const run = tracker.startRun({
 				workflowName: this.configuration.name || ctx.workflow_name || "unknown",
 				workflowPath: ctx.workflow_path || "",
@@ -731,9 +756,19 @@ export default abstract class TriggerBase extends Trigger {
 				triggerSummary: this.buildTraceTriggerSummary(ctx),
 				nodeCount: stepCount,
 				replayOf,
+				parentRunId,
+				parentNodeRunId,
 			});
 			traceRunId = run.id;
 			ctxRecord._traceRunId = run.id;
+
+			// Carry the sub-workflow depth across the HTTP hop so the
+			// recursion guard in nested children still fires.
+			const depthHeader = pickHeader(reqHeaders, "x-blok-subworkflow-depth");
+			const parsedDepth = depthHeader ? Number.parseInt(depthHeader, 10) : Number.NaN;
+			if (Number.isFinite(parsedDepth) && parsedDepth > 0) {
+				ctxRecord._subworkflowDepth = parsedDepth;
+			}
 
 			// Tier 2 follow-up · register the ctx's AbortController so the
 			// cancel API can fire it for `running` runs. Stashed on

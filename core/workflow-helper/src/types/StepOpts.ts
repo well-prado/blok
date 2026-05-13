@@ -378,6 +378,14 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 	idempotencyKeyTTL?: number;
 	retry?: RetryConfig;
 	allowList?: readonly string[];
+	/**
+	 * G2 (v0.6) — dispatch strategy. `in-process` (default) runs the
+	 * child workflow in the same Node process; `http-self` makes an
+	 * HTTP self-call to the deployment so multi-process deployments
+	 * can isolate child execution. Requires the child to have an HTTP
+	 * trigger (`trigger.http.path` set).
+	 */
+	dispatch?: "in-process" | "http-self";
 }> = z.lazy(() =>
 	z
 		.object({
@@ -477,6 +485,22 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 						"Strongly recommended when `subworkflow` is an expression (`$.<path>` " +
 						"or `js/...`) so a malicious or buggy ctx value can't dispatch arbitrary " +
 						"workflows. Ignored for literal names (they don't need the guard).",
+				),
+			dispatch: z
+				.enum(["in-process", "http-self"])
+				.optional()
+				.describe(
+					"G2 (v0.6) — dispatch strategy. `in-process` (default) invokes the " +
+						"child workflow in the same Node process — synchronous when `wait: true`, " +
+						"`setImmediate`-based when `wait: false`. `http-self` makes an HTTP " +
+						"request to the deployment's own base URL (`BLOK_SELF_BASE_URL` env " +
+						"var, defaults to `http://localhost:${PORT || 4000}`). Use `http-self` " +
+						"when you want each child run to land on a different process in a " +
+						"horizontally-scaled deployment, or to fully isolate child execution " +
+						"from the parent's call stack. The child must have an HTTP trigger; " +
+						"a runtime error is thrown otherwise. Lineage (parentRunId / " +
+						"parentNodeRunId) is preserved across the HTTP hop via " +
+						"`X-Blok-Parent-Run-Id` / `X-Blok-Parent-Node-Run-Id` headers.",
 				),
 		})
 		.refine((step) => !(step.as && step.spread), {

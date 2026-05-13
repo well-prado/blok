@@ -580,6 +580,13 @@ function normalizeSubworkflowStep(
 			internalStep.allowList = cleaned;
 		}
 	}
+	// G2 (v0.6) — dispatch strategy. Unknown / missing values fall
+	// through as "in-process" inside SubworkflowNode.run, but pass the
+	// raw string so the resolver can validate + threading bugs surface
+	// at config load instead of at run time.
+	if (step.dispatch === "in-process" || step.dispatch === "http-self") {
+		internalStep.dispatch = step.dispatch;
+	}
 
 	// Inputs land on nodeConfig so the blueprint mapper resolves
 	// $.<path> / js/... refs before SubworkflowNode reads them via

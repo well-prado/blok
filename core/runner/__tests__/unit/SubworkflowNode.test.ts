@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
-import { SubworkflowNode } from "../../src/SubworkflowNode";
+import { SubworkflowNode, getSelfBaseUrl } from "../../src/SubworkflowNode";
 import { RunTracker } from "../../src/tracing/RunTracker";
 import { createChildContext } from "../../src/utils/createChildContext";
 import { WorkflowRegistry } from "../../src/workflow/WorkflowRegistry";
@@ -115,6 +115,7 @@ function makeSubworkflowNode(opts: {
 	stepName: string;
 	subworkflowName: string;
 	wait?: boolean;
+	dispatch?: "in-process" | "http-self";
 }): SubworkflowNode {
 	const node = new SubworkflowNode();
 	node.name = opts.stepName;
@@ -122,6 +123,7 @@ function makeSubworkflowNode(opts: {
 	node.type = "subworkflow";
 	node.subworkflow = opts.subworkflowName;
 	node.wait = opts.wait !== false;
+	if (opts.dispatch) node.dispatch = opts.dispatch;
 	// globalOptions provides the `nodes` registry so child Configuration
 	// can resolve `module:` step references (the EchoBodyNode handler).
 	node.globalOptions = {
@@ -972,5 +974,260 @@ describe("SubworkflowNode — polymorphic dispatch (G3)", () => {
 
 		const result = await node.run(parentCtx);
 		expect(result.success).toBe(true);
+	});
+});
+
+// =============================================================================
+// G2 — cross-process sub-workflow dispatch (`dispatch: "http-self"`)
+// =============================================================================
+//
+// Tests the new strategy by stubbing `globalThis.fetch`. We don't spin up a
+// real HTTP server here — the receiving-side header threading is covered by
+// the TriggerBase tests + the wider integration suite. These tests pin:
+// the strategy selector, URL composition, lineage headers, body shape,
+// wait: true vs false, error propagation.
+
+describe("getSelfBaseUrl (G2)", () => {
+	const savedBase = process.env.BLOK_SELF_BASE_URL;
+	const savedPort = process.env.PORT;
+
+	beforeEach(() => {
+		// biome-ignore lint/performance/noDelete: tests need actual env absence, not the string "undefined"
+		delete process.env.BLOK_SELF_BASE_URL;
+		// biome-ignore lint/performance/noDelete: same
+		delete process.env.PORT;
+	});
+
+	afterEach(() => {
+		if (savedBase === undefined) {
+			// biome-ignore lint/performance/noDelete: restore literal absence
+			delete process.env.BLOK_SELF_BASE_URL;
+		} else {
+			process.env.BLOK_SELF_BASE_URL = savedBase;
+		}
+		if (savedPort === undefined) {
+			// biome-ignore lint/performance/noDelete: restore literal absence
+			delete process.env.PORT;
+		} else {
+			process.env.PORT = savedPort;
+		}
+	});
+
+	it("defaults to `http://localhost:4000` when neither env var is set", () => {
+		expect(getSelfBaseUrl()).toBe("http://localhost:4000");
+	});
+
+	it("uses `http://localhost:${PORT}` when only PORT is set", () => {
+		process.env.PORT = "8080";
+		expect(getSelfBaseUrl()).toBe("http://localhost:8080");
+	});
+
+	it("BLOK_SELF_BASE_URL overrides PORT", () => {
+		process.env.PORT = "8080";
+		process.env.BLOK_SELF_BASE_URL = "https://blok.example.com";
+		expect(getSelfBaseUrl()).toBe("https://blok.example.com");
+	});
+
+	it("strips trailing slash from BLOK_SELF_BASE_URL", () => {
+		process.env.BLOK_SELF_BASE_URL = "https://blok.example.com/";
+		expect(getSelfBaseUrl()).toBe("https://blok.example.com");
+	});
+});
+
+describe("SubworkflowNode — http-self dispatch (G2)", () => {
+	let fetchSpy: ReturnType<typeof vi.spyOn>;
+	const savedBaseUrl = process.env.BLOK_SELF_BASE_URL;
+
+	beforeEach(() => {
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+		process.env.BLOK_SELF_BASE_URL = "http://test-self:1234";
+		// Default mock: 200 OK with { ok: true }. Each test overrides
+		// as needed.
+		fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+	});
+
+	afterEach(() => {
+		fetchSpy.mockRestore();
+		WorkflowRegistry.resetInstance();
+		RunTracker.resetInstance();
+		if (savedBaseUrl === undefined) {
+			// biome-ignore lint/performance/noDelete: restore literal absence
+			delete process.env.BLOK_SELF_BASE_URL;
+		} else {
+			process.env.BLOK_SELF_BASE_URL = savedBaseUrl;
+		}
+	});
+
+	function makeChildWithHttpTrigger(name: string, method = "POST", path?: string) {
+		return {
+			name,
+			version: "1.0.0",
+			trigger: { http: { method, path: path ?? `/${name}` } },
+			steps: [{ id: "respond", use: "@blokjs/respond", type: "module", inputs: {} }],
+		};
+	}
+
+	it("POSTs to `${BLOK_SELF_BASE_URL}${child.trigger.http.path}` for wait: true", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-http",
+			source: "/c.ts",
+			workflow: makeChildWithHttpTrigger("child-http", "POST", "/api/child"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-http",
+			dispatch: "http-self",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: { hello: "world" } } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		const [calledUrl, init] = fetchSpy.mock.calls[0] ?? [];
+		expect(calledUrl).toBe("http://test-self:1234/api/child");
+		expect(init?.method).toBe("POST");
+		expect(JSON.parse(init?.body as string)).toEqual({ hello: "world" });
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ ok: true });
+	});
+
+	it("threads parent lineage headers (run id, node run id, depth)", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-http",
+			source: "/c.ts",
+			workflow: makeChildWithHttpTrigger("child-http"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-http",
+			dispatch: "http-self",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+		// makeParentCtx already sets _traceRunId; add a node id.
+		(parentCtx as Record<string, unknown>)._traceNodeId = "parent-node-id-42";
+
+		await node.run(parentCtx);
+
+		const headers = (fetchSpy.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers;
+		expect(headers["content-type"]).toBe("application/json");
+		expect(headers["X-Blok-Parent-Run-Id"]).toBe((parentCtx as Record<string, unknown>)._traceRunId);
+		expect(headers["X-Blok-Parent-Node-Run-Id"]).toBe("parent-node-id-42");
+		expect(headers["X-Blok-Subworkflow-Depth"]).toBe("1");
+	});
+
+	it("throws when the child has no HTTP trigger", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-worker",
+			source: "/c.ts",
+			workflow: { name: "child-worker", version: "1.0.0", trigger: { worker: { queue: "jobs" } }, steps: [] },
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-worker",
+			dispatch: "http-self",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/requires the child workflow .* to have an HTTP trigger/);
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	it("propagates a non-2xx response as a thrown error (wait: true)", async () => {
+		fetchSpy.mockResolvedValueOnce(
+			new Response(JSON.stringify({ error: "boom" }), {
+				status: 500,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		WorkflowRegistry.getInstance().register({
+			name: "child-http",
+			source: "/c.ts",
+			workflow: makeChildWithHttpTrigger("child-http"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-http",
+			dispatch: "http-self",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/returned 500 /);
+	});
+
+	it("network-level fetch failures throw a helpful error pointing at BLOK_SELF_BASE_URL", async () => {
+		fetchSpy.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+		WorkflowRegistry.getInstance().register({
+			name: "child-http",
+			source: "/c.ts",
+			workflow: makeChildWithHttpTrigger("child-http"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-http",
+			dispatch: "http-self",
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/http-self dispatch.*failed.*ECONNREFUSED/);
+	});
+
+	it("wait: false fires-and-forgets the request + returns dispatch metadata immediately", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-http",
+			source: "/c.ts",
+			workflow: makeChildWithHttpTrigger("child-http", "POST", "/async-child"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-http",
+			dispatch: "http-self",
+			wait: false,
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		const dispatchData = result.data as Record<string, unknown>;
+		expect(dispatchData.workflowName).toBe("child-http");
+		expect(dispatchData.dispatch).toBe("http-self");
+		expect(dispatchData.url).toBe("http://test-self:1234/async-child");
+		expect(typeof dispatchData.scheduledAt).toBe("number");
+		// The runId is unknown on the parent side (the receiver creates
+		// its own run record when the request lands).
+		expect(dispatchData.runId).toBeNull();
+		// fetch was called but we did not await it.
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("default dispatch (`undefined`) still routes through the in-process path", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "child-inproc",
+			source: "/c.ts",
+			workflow: makeChildWorkflowDef("child-inproc"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "child-inproc",
+			// dispatch left unset → default in-process
+		});
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { dispatch: { inputs: { from: "parent" } } } as unknown as Context["config"];
+
+		await node.run(parentCtx);
+
+		// Critical regression guard: a missing `dispatch` field MUST NOT
+		// reach into the HTTP path.
+		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 });
