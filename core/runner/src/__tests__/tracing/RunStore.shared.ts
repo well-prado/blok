@@ -852,5 +852,86 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(httpRows[1].runId).toBe("h_q");
 			});
 		});
+
+		// E2 · saved filters. UNIQUE(name) constraint → upsert semantics
+		// must preserve id + createdAt on overwrite, bump updatedAt, and
+		// match exactly across all backends so the cross-browser behaviour
+		// is identical regardless of which store backs the deployment.
+		describe("saved filters (E2)", () => {
+			function sampleFilter(
+				name: string,
+				status = "running",
+			): {
+				id: string;
+				name: string;
+				status: string;
+				tagsInput: string;
+				metadataInput: string;
+				createdAt: number;
+				updatedAt: number;
+			} {
+				const now = Date.now();
+				return {
+					id: `sf_${now}_${name}`,
+					name,
+					status,
+					tagsInput: "",
+					metadataInput: "",
+					createdAt: now,
+					updatedAt: now,
+				};
+			}
+
+			it("listSavedFilters returns an empty array on a fresh store", () => {
+				expect(store.listSavedFilters()).toEqual([]);
+			});
+
+			it("upsertSavedFilter persists and the listing surfaces the row", () => {
+				const filter = sampleFilter("premium");
+				const persisted = store.upsertSavedFilter(filter);
+				expect(persisted.name).toBe("premium");
+				const list = store.listSavedFilters();
+				expect(list).toHaveLength(1);
+				expect(list[0]?.name).toBe("premium");
+			});
+
+			it("re-upserting an existing name OVERWRITES the row in place (preserves id + createdAt)", () => {
+				const original = sampleFilter("premium", "running");
+				const first = store.upsertSavedFilter(original);
+				const updated = {
+					...original,
+					id: "sf_NEW_THROWAWAY_ID", // server-side should ignore this on conflict
+					status: "failed",
+					updatedAt: original.updatedAt + 1000,
+				};
+				const second = store.upsertSavedFilter(updated);
+				expect(second.id).toBe(first.id);
+				expect(second.createdAt).toBe(first.createdAt);
+				expect(second.updatedAt).toBe(original.updatedAt + 1000);
+				expect(second.status).toBe("failed");
+				const list = store.listSavedFilters();
+				expect(list).toHaveLength(1);
+				expect(list[0]?.status).toBe("failed");
+			});
+
+			it("listSavedFilters sorts by updatedAt DESC (most recently changed first)", () => {
+				const base = Date.now();
+				store.upsertSavedFilter({ ...sampleFilter("a"), updatedAt: base });
+				store.upsertSavedFilter({ ...sampleFilter("b"), updatedAt: base + 1000 });
+				store.upsertSavedFilter({ ...sampleFilter("c"), updatedAt: base + 500 });
+				const list = store.listSavedFilters();
+				expect(list.map((f) => f.name)).toEqual(["b", "c", "a"]);
+			});
+
+			it("deleteSavedFilter by name removes the row and returns true", () => {
+				store.upsertSavedFilter(sampleFilter("premium"));
+				expect(store.deleteSavedFilter("premium")).toBe(true);
+				expect(store.listSavedFilters()).toHaveLength(0);
+			});
+
+			it("deleteSavedFilter returns false when the name doesn't exist", () => {
+				expect(store.deleteSavedFilter("nonexistent")).toBe(false);
+			});
+		});
 	});
 }

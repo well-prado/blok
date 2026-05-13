@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type React from "react";
@@ -8,6 +9,17 @@ import { RunFilters } from "@/components/runs/RunFilters";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { JsonViewer } from "@/components/shared/JsonViewer";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+
+/**
+ * RunFilters now reads saved filters via React Query (E2). Wrap it
+ * in a fresh client per test so the saved-filters query mounts
+ * without hitting the network — `fetchSavedFilters()` will throw in
+ * jsdom which the hook treats as "no data yet" (returns `[]`).
+ */
+function renderWithQuery(ui: React.ReactElement) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 describe("StatusBadge", () => {
 	it("renders completed status", () => {
@@ -39,7 +51,7 @@ describe("StatusBadge", () => {
 
 describe("RunFilters", () => {
 	it("renders all status options including new Tier 2 statuses", () => {
-		render(<RunFilters status="" onStatusChange={() => {}} />);
+		renderWithQuery(<RunFilters status="" onStatusChange={() => {}} />);
 		// Status select renders option text; getAllByText handles dupes if any.
 		expect(screen.getByText("All")).toBeInTheDocument();
 		expect(screen.getByText("Running")).toBeInTheDocument();
@@ -54,7 +66,7 @@ describe("RunFilters", () => {
 	it("calls onStatusChange when selecting a status (Tier 2 quick-wins)", async () => {
 		const user = userEvent.setup();
 		const handleChange = vi.fn();
-		render(<RunFilters status="" onStatusChange={handleChange} />);
+		renderWithQuery(<RunFilters status="" onStatusChange={handleChange} />);
 
 		// Status select is the first combobox; the second is the Saved Filters
 		// dropdown added in Bundle B. Identify by its current value (empty
@@ -70,7 +82,7 @@ describe("RunFilters", () => {
 	});
 
 	it("renders tags and metadata text inputs", () => {
-		render(<RunFilters status="" onStatusChange={() => {}} />);
+		renderWithQuery(<RunFilters status="" onStatusChange={() => {}} />);
 		expect(screen.getByPlaceholderText("user-123, premium")).toBeInTheDocument();
 		expect(screen.getByPlaceholderText("tier=premium, plan=pro")).toBeInTheDocument();
 	});

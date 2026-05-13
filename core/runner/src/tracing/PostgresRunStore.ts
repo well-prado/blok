@@ -9,6 +9,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
@@ -323,6 +324,30 @@ export class PostgresRunStore implements RunStore {
 						);
 					},
 				},
+				{
+					// E2 · server-side saved filters for the runs list.
+					// Matches the sqlite store's v14 schema. Hybrid pattern:
+					// rehydrated into the in-memory mirror on boot via
+					// `loadRecent`, mutated through the same `enqueueWrite`
+					// fan-out used by dashboards.
+					version: 7,
+					up: async () => {
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS trace_saved_filters (
+								id TEXT PRIMARY KEY,
+								name TEXT NOT NULL UNIQUE,
+								status TEXT NOT NULL DEFAULT '',
+								tags_input TEXT NOT NULL DEFAULT '',
+								metadata_input TEXT NOT NULL DEFAULT '',
+								created_at BIGINT NOT NULL,
+								updated_at BIGINT NOT NULL
+							)
+						`);
+						await client.query(
+							"CREATE INDEX IF NOT EXISTS idx_saved_filters_updated_at ON trace_saved_filters(updated_at)",
+						);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -401,6 +426,28 @@ export class PostgresRunStore implements RunStore {
 			const { rows: dashRows } = await client.query("SELECT * FROM dashboards ORDER BY updated_at DESC");
 			for (const row of dashRows) {
 				this.memory.saveDashboard(this.rowToDashboard(row));
+			}
+
+			// E2 · rehydrate saved filters. Unbounded (operator-curated
+			// set, not a per-run table — typical fleet has < 100 entries).
+			try {
+				const { rows: filterRows } = await client.query("SELECT * FROM trace_saved_filters ORDER BY updated_at DESC");
+				for (const row of filterRows) {
+					this.memory.upsertSavedFilter({
+						id: row.id,
+						name: row.name,
+						status: row.status,
+						tagsInput: row.tags_input,
+						metadataInput: row.metadata_input,
+						createdAt: Number(row.created_at),
+						updatedAt: Number(row.updated_at),
+					});
+				}
+			} catch (err) {
+				// First-time deployments may not have run the v7 migration
+				// when this loadRecent fires (the migration is at boot;
+				// this should follow). Log + continue.
+				console.warn("[blok][pg] failed to load saved filters:", (err as Error).message);
 			}
 
 			// Tier 2 follow-up · rehydrate idempotency cache (un-expired entries only).
@@ -923,6 +970,50 @@ export class PostgresRunStore implements RunStore {
 		this.enqueueWrite(() =>
 			this.pool.query(`UPDATE dashboards SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`, values).then(() => {}),
 		);
+	}
+
+	// === Saved filters (E2) ===
+
+	upsertSavedFilter(filter: SavedFilter): SavedFilter {
+		const persisted = this.memory.upsertSavedFilter(filter);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					`INSERT INTO trace_saved_filters
+						(id, name, status, tags_input, metadata_input, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7)
+					 ON CONFLICT (name) DO UPDATE SET
+						status = EXCLUDED.status,
+						tags_input = EXCLUDED.tags_input,
+						metadata_input = EXCLUDED.metadata_input,
+						updated_at = EXCLUDED.updated_at`,
+					[
+						persisted.id,
+						persisted.name,
+						persisted.status,
+						persisted.tagsInput,
+						persisted.metadataInput,
+						persisted.createdAt,
+						persisted.updatedAt,
+					],
+				)
+				.then(() => {}),
+		);
+		return persisted;
+	}
+
+	listSavedFilters(): SavedFilter[] {
+		return this.memory.listSavedFilters();
+	}
+
+	deleteSavedFilter(name: string): boolean {
+		const removed = this.memory.deleteSavedFilter(name);
+		if (removed) {
+			this.enqueueWrite(() =>
+				this.pool.query("DELETE FROM trace_saved_filters WHERE name = $1", [name]).then(() => {}),
+			);
+		}
+		return removed;
 	}
 
 	// === Cleanup ===

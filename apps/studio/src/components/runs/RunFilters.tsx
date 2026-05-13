@@ -1,6 +1,7 @@
-import { type SavedFilter, deleteSavedFilter, loadSavedFilters, saveFilter } from "@/lib/savedFilters";
+import { useDeleteSavedFilter, useSavedFilters, useUpsertSavedFilter } from "@/hooks/useSavedFilters";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import type { SavedFilter } from "@/types";
+import { useState } from "react";
 
 interface RunFiltersProps {
 	status: string;
@@ -51,14 +52,12 @@ export function RunFilters({
 	const setTags = onTagsChange ?? setInternalTags;
 	const setMetadata = onMetadataChange ?? setInternalMetadata;
 
-	// Tier 2 follow-up · Saved Filters. Loaded from localStorage on mount;
-	// re-loaded when the dropdown opens so a Save in another tab is picked up.
-	const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(() => loadSavedFilters());
+	// E2 · Saved filters now live server-side. The hook polls every
+	// 15s so cross-browser / cross-tab Saves surface automatically.
+	const savedFilters: SavedFilter[] = useSavedFilters();
+	const upsertSavedFilter = useUpsertSavedFilter();
+	const deleteSavedFilterMutation = useDeleteSavedFilter();
 	const [savedSelected, setSavedSelected] = useState<string>("");
-
-	useEffect(() => {
-		setSavedFilters(loadSavedFilters());
-	}, []);
 
 	const handleApplySaved = (name: string) => {
 		setSavedSelected(name);
@@ -73,23 +72,20 @@ export function RunFilters({
 	const handleSaveCurrent = () => {
 		const name = (typeof window !== "undefined" ? window.prompt("Name this filter:", "My filter") : null)?.trim();
 		if (!name) return;
-		const filter: SavedFilter = {
-			name,
-			status,
-			tagsInput: tagsValue,
-			metadataInput: metadataValue,
-		};
-		const next = saveFilter(filter);
-		setSavedFilters(next);
-		setSavedSelected(name);
+		upsertSavedFilter.mutate(
+			{ name, status, tagsInput: tagsValue, metadataInput: metadataValue },
+			{
+				onSuccess: () => setSavedSelected(name),
+			},
+		);
 	};
 
 	const handleDeleteSelected = () => {
 		if (!savedSelected) return;
 		if (typeof window !== "undefined" && !window.confirm(`Delete saved filter "${savedSelected}"?`)) return;
-		const next = deleteSavedFilter(savedSelected);
-		setSavedFilters(next);
-		setSavedSelected("");
+		deleteSavedFilterMutation.mutate(savedSelected, {
+			onSuccess: () => setSavedSelected(""),
+		});
 	};
 
 	return (

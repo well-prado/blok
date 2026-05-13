@@ -366,6 +366,35 @@ export function fetchRoutingDiagnostics(): Promise<RoutingDiagnosticsResponse> {
 	return fetchJson("/routing");
 }
 
+// === Saved filters (E2) ===
+
+export interface SavedFiltersResponse {
+	filters: import("@/types").SavedFilter[];
+}
+
+export interface SaveFilterInput {
+	name: string;
+	status: string;
+	tagsInput: string;
+	metadataInput: string;
+}
+
+export function fetchSavedFilters(): Promise<SavedFiltersResponse> {
+	return fetchJson("/saved-filters");
+}
+
+export function upsertSavedFilter(filter: SaveFilterInput): Promise<import("@/types").SavedFilter> {
+	return fetchJson("/saved-filters", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(filter),
+	});
+}
+
+export function deleteSavedFilter(name: string): Promise<{ deleted: true }> {
+	return fetchJson(`/saved-filters/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
 // === Search ===
 
 export interface SearchResponse {

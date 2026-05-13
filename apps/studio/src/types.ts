@@ -297,6 +297,22 @@ export interface WorkflowSummary {
 	p95DurationMs: number;
 }
 
+/**
+ * E2 — server-side saved filter (mirrors `SavedFilter` in
+ * `core/runner/src/tracing/types.ts`). Replaces the prior
+ * localStorage-only shape; Studio now reads/writes through
+ * `/__blok/saved-filters` so presets survive across browsers + devs.
+ */
+export interface SavedFilter {
+	id: string;
+	name: string;
+	status: string;
+	tagsInput: string;
+	metadataInput: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
 export interface WorkflowDetail extends WorkflowSummary {
 	definition?: unknown;
 	nodeNames: string[];
