@@ -28,8 +28,42 @@ interface SchedulingAttributes {
 	dispatch_status?: string;
 }
 
+/**
+ * D6 (v0.6) — read the per-key opt-in env var. `concurrency_key` is
+ * potentially high-cardinality (per-user, per-tenant, …); emitting it as
+ * a metric label by default risks a cardinality explosion in any
+ * non-trivial deployment. Default OFF: strip the key before emission so
+ * counters stay bucketed by `workflow_name` alone. Opt in to per-key
+ * granularity with `BLOK_METRICS_PER_KEY=1` (or `=true`).
+ *
+ * Exported for test reuse (the strip helper below).
+ */
+export function isPerKeyMetricsEnabled(): boolean {
+	const raw = process.env.BLOK_METRICS_PER_KEY;
+	return raw === "1" || raw === "true";
+}
+
+/**
+ * Pure helper — strips `concurrency_key` from a copy of `attrs` when
+ * per-key emission is disabled. Returns the original reference when
+ * enabled (no allocation on the hot path).
+ */
+export function filterPerKeyAttrs<T extends { concurrency_key?: string }>(attrs: T, enabled: boolean): T {
+	if (enabled || attrs.concurrency_key === undefined) return attrs;
+	const { concurrency_key: _omitted, ...rest } = attrs;
+	return rest as T;
+}
+
 export class ConcurrencyMetrics {
 	private static instance: ConcurrencyMetrics | null = null;
+
+	/**
+	 * Captured at construction time — the constructor is private + the
+	 * singleton is only reset in tests, so this stays stable for the
+	 * lifetime of a process. Tests that toggle the env var call
+	 * `resetInstance()` before re-`getInstance()` to pick up the flip.
+	 */
+	private readonly perKeyEnabled: boolean = isPerKeyMetricsEnabled();
 
 	private readonly acquiredCounter = metrics.getMeter("blok").createCounter("blok_concurrency_acquired_total", {
 		description: "Total concurrency slots acquired (per workflow + key).",
@@ -103,15 +137,15 @@ export class ConcurrencyMetrics {
 	}
 
 	recordAcquired(attrs: ConcurrencyAttributes): void {
-		this.acquiredCounter.add(1, attrs as unknown as Record<string, string>);
+		this.acquiredCounter.add(1, filterPerKeyAttrs(attrs, this.perKeyEnabled) as unknown as Record<string, string>);
 	}
 
 	recordDenied(attrs: ConcurrencyAttributes & { mode: "throw" | "queue" }): void {
-		this.deniedCounter.add(1, attrs as unknown as Record<string, string>);
+		this.deniedCounter.add(1, filterPerKeyAttrs(attrs, this.perKeyEnabled) as unknown as Record<string, string>);
 	}
 
 	recordReleased(attrs: ConcurrencyAttributes): void {
-		this.releasedCounter.add(1, attrs as unknown as Record<string, string>);
+		this.releasedCounter.add(1, filterPerKeyAttrs(attrs, this.perKeyEnabled) as unknown as Record<string, string>);
 	}
 
 	recordDispatchRecovered(attrs: SchedulingAttributes): void {
@@ -136,6 +170,9 @@ export class ConcurrencyMetrics {
 		attrs: ConcurrencyAttributes & { outcome: "success" | "denied" | "fail-closed" },
 		attempts: number,
 	): void {
-		this.occRetriesHistogram.record(attempts, attrs as unknown as Record<string, string>);
+		this.occRetriesHistogram.record(
+			attempts,
+			filterPerKeyAttrs(attrs, this.perKeyEnabled) as unknown as Record<string, string>,
+		);
 	}
 }
