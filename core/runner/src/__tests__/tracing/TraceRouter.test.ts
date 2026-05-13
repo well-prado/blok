@@ -535,6 +535,60 @@ describe("TraceRouter", () => {
 				expect(body.definition).toEqual(sampleDefinition);
 			});
 
+			// Sample-body inference — surfaces the inferred / author-declared
+			// curl payload via `examples.body`. Detailed shape coverage
+			// lives in `__tests__/unit/workflow/sampleBody.test.ts`; these
+			// integration tests just confirm the field threads through.
+			it("includes `examples.body` synthesized from step body references", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "echo",
+					source: "<test>",
+					workflow: {
+						name: "echo",
+						trigger: { http: { method: "POST", path: "/echo" } },
+						steps: [
+							{
+								id: "respond",
+								use: "@blokjs/respond",
+								inputs: { body: "js/ctx.request.body.user.id" },
+							},
+						],
+					},
+				});
+
+				const req = new MockRequest({ params: { name: "echo" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.examples).toBeDefined();
+				expect(body.examples.source).toBe("inferred");
+				expect(body.examples.body).toEqual({ user: { id: "string" } });
+			});
+
+			it("returns the author-declared `examples.body` verbatim when present", () => {
+				const authorBody = { event: { id: "evt_demo", type: "order.created" }, subscribers: [] };
+				WorkflowRegistry.getInstance().register({
+					name: "with-examples",
+					source: "<test>",
+					workflow: {
+						name: "with-examples",
+						trigger: {
+							http: { method: "POST", path: "/x", examples: { body: authorBody } },
+						},
+						steps: [{ id: "noop", use: "n", inputs: { x: "js/ctx.request.body.something_else" } }],
+					},
+				});
+
+				const req = new MockRequest({ params: { name: "with-examples" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.examples.source).toBe("author");
+				expect(body.examples.body).toEqual(authorBody);
+			});
+
 			it("omits definition when workflow is not in the registry", () => {
 				// Tracker has run data for 'countries' but the registry was
 				// not populated — older deployments or tests-only flows hit

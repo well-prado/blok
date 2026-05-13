@@ -677,6 +677,17 @@ export interface WorkflowDetail extends WorkflowSummary {
 	definition?: unknown;
 	nodeNames: string[];
 	runtimes: string[];
+	/**
+	 * Sample-body for the Studio empty-state curl. `source` lets the
+	 * UI optionally distinguish author-declared examples from the
+	 * synthesized ones (it doesn't today, but could in the future).
+	 * Always populated for object-shaped workflows; `body` is `{}`
+	 * when no body references were detected.
+	 */
+	examples?: {
+		body: unknown;
+		source: "author" | "inferred" | "empty";
+	};
 }
 
 export interface PaginatedResult<T> {
