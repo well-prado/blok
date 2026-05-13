@@ -147,6 +147,15 @@ export class RabbitMQAdapter implements WorkerAdapter {
 					const headers: Record<string, string> = {};
 					for (const [k, v] of Object.entries(msg.properties.headers ?? {})) headers[k] = String(v);
 					const attempts = Number.parseInt(String(msg.properties.headers?.["x-blok-attempt"] ?? 0), 10);
+					// Tracks whether the message has already been ack/nack'd via
+					// the WorkerJob API (`complete` / `fail`). The wrapping
+					// try/catch below also wants to ack on handler success and
+					// nack on handler throw — without this flag we'd
+					// double-ack the same delivery tag and Rabbit closes the
+					// channel with PRECONDITION_FAILED (caught by the
+					// real-broker integration test in
+					// `__tests__/integration/rabbitmq-adapter.real-rabbitmq.test.ts`).
+					let settled = false;
 					const job: WorkerJob = {
 						id: msg.properties.messageId ?? `${config.queue}:${msg.fields.deliveryTag}`,
 						data,
@@ -159,24 +168,34 @@ export class RabbitMQAdapter implements WorkerAdapter {
 						timeout: config.timeout,
 						raw: msg,
 						complete: async () => {
+							if (settled) return;
 							channel.ack(msg);
 							stats.completed += 1;
+							settled = true;
 						},
 						fail: async (err: Error, requeue?: boolean) => {
+							if (settled) return;
 							stats.failed += 1;
 							const exceeded = attempts + 1 >= maxAttempts;
 							channel.nack(msg, false, !exceeded && requeue !== false);
+							settled = true;
 						},
 					};
 					stats.active += 1;
 					try {
 						await handler(job);
-						if (config.ack !== false) channel.ack(msg);
-						stats.completed += 1;
+						if (!settled && config.ack !== false) {
+							channel.ack(msg);
+							stats.completed += 1;
+							settled = true;
+						}
 					} catch {
-						stats.failed += 1;
-						const exceeded = attempts + 1 >= maxAttempts;
-						channel.nack(msg, false, !exceeded);
+						if (!settled) {
+							stats.failed += 1;
+							const exceeded = attempts + 1 >= maxAttempts;
+							channel.nack(msg, false, !exceeded);
+							settled = true;
+						}
 					} finally {
 						stats.active = Math.max(0, stats.active - 1);
 					}

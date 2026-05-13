@@ -156,6 +156,16 @@ export class SQSAdapter implements WorkerAdapter {
 				for (const m of messages) {
 					if (runner.stop) break;
 					stats.active += 1;
+					// Tracks whether the message has already been settled via
+					// the WorkerJob API (`complete` / `fail`). Declared OUTSIDE
+					// the try so the catch arm can read it and skip its own
+					// nack/fail bookkeeping when the handler explicitly
+					// settled. Without this flag we'd double-delete the
+					// receipt handle AND a `fail()` call would be silently
+					// overruled by the wrapper deleting the message anyway.
+					// Caught by the real-broker integration test in
+					// `__tests__/integration/sqs-adapter.real-sqs.test.ts`.
+					let settled = false;
 					try {
 						const payloadString = m.Body ?? "";
 						let data: unknown;
@@ -180,6 +190,7 @@ export class SQSAdapter implements WorkerAdapter {
 							timeout: config.timeout,
 							raw: m,
 							complete: async () => {
+								if (settled) return;
 								if (m.ReceiptHandle) {
 									await this.client.send(
 										new this.commands.DeleteMessageCommand({
@@ -189,22 +200,32 @@ export class SQSAdapter implements WorkerAdapter {
 									);
 								}
 								stats.completed += 1;
+								settled = true;
 							},
 							fail: async (_err: Error) => {
+								if (settled) return;
 								stats.failed += 1;
+								// No DeleteMessage call — visibility timeout
+								// expires and SQS returns the message to the
+								// queue automatically. DLQ takeover happens via
+								// the queue's RedrivePolicy + MaxReceiveCount.
+								settled = true;
 							},
 						};
 						await handler(job);
-						if (config.ack !== false && m.ReceiptHandle) {
+						if (!settled && config.ack !== false && m.ReceiptHandle) {
 							await this.client.send(
 								new this.commands.DeleteMessageCommand({ QueueUrl: config.queue, ReceiptHandle: m.ReceiptHandle }),
 							);
+							stats.completed += 1;
+							settled = true;
 						}
-						stats.completed += 1;
 					} catch {
-						stats.failed += 1;
-						// Leave the message in flight — SQS visibility timeout
-						// expiry returns it to the queue automatically.
+						if (!settled) {
+							stats.failed += 1;
+							// Leave the message in flight — SQS visibility
+							// timeout expiry returns it to the queue.
+						}
 					} finally {
 						stats.active = Math.max(0, stats.active - 1);
 					}

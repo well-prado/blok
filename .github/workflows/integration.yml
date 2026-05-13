@@ -29,7 +29,7 @@ jobs:
 
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
-          postgres redis nats kafka rabbitmq localstack
+          postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator
 
       - name: Wait for services to be healthy
         run: |
@@ -65,7 +65,16 @@ jobs:
           BLOK_INTEGRATION_KAFKA_BROKERS: localhost:9094
           BLOK_INTEGRATION_RABBITMQ_URL: amqp://blok:blok_test@localhost:5673
           BLOK_INTEGRATION_POSTGRES_URL: postgres://blok:blok_test@localhost:5433/blok_test
+          # LocalStack credentials — any value satisfies the SDK's signer.
           BLOK_INTEGRATION_SQS_ENDPOINT: http://localhost:4567
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          # GCP Pub/Sub emulator (Phase 2.1 #5).
+          BLOK_INTEGRATION_GCP_PUBSUB_ENDPOINT: localhost:8086
+          PUBSUB_EMULATOR_HOST: localhost:8086
+          PUBSUB_PROJECT_ID: blok-test
+          GOOGLE_CLOUD_PROJECT: blok-test
         run: bun run test
 
       - name: Print compose logs on failure
