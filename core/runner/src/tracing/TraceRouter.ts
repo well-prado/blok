@@ -2,6 +2,7 @@ import http from "node:http";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
+import { RoutingDiagnostics } from "./RoutingDiagnostics";
 import { RunTracker } from "./RunTracker";
 import { METADATA_OPERATORS, isValidMetadataKey } from "./metadataFilter";
 import type { MetadataFilter, MetadataOp, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
@@ -308,6 +309,20 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			nodeNames: Array.from(nodeNames),
 			runtimes: Array.from(runtimes),
 			definition: registered?.workflow,
+		});
+	});
+
+	// E4 follow-up — surface boot-time route-build errors (collisions,
+	// missing paths) so Studio can render a banner on the Workflows page
+	// rather than burying the issue in terminal logs. The trigger
+	// populates `RoutingDiagnostics` at boot via `buildRouteTable` in
+	// tolerant mode.
+	router.get("/routing", (_req: TraceRequest, res: TraceResponse) => {
+		const diagnostics = RoutingDiagnostics.getInstance();
+		res.json({
+			diagnostics: diagnostics.list(),
+			count: diagnostics.count(),
+			now: Date.now(),
 		});
 	});
 

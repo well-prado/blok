@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-tenant-gamma",
 			"accept": "application/json"
 		}
 	},

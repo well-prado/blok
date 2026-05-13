@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	MissingExplicitPathError,
+	type RouteCollision,
 	RouteCollisionError,
 	buildRouteTable,
 	scorePathSpecificity,
@@ -369,6 +370,93 @@ describe("buildRouteTable", () => {
 			expect(scorePathSpecificity("/users/list")).toBeGreaterThan(scorePathSpecificity("/users/:id"));
 			expect(scorePathSpecificity("/users/:id")).toBeGreaterThan(scorePathSpecificity("/users/:id?"));
 			expect(scorePathSpecificity("/a/b/c")).toBeGreaterThan(scorePathSpecificity("/a/b"));
+		});
+	});
+
+	// =========================================================================
+	// Tolerant-mode collision handling (E4 follow-up)
+	// =========================================================================
+	//
+	// Without `onCollision`, the function throws on the first conflict — that
+	// preserves the v0.4 strict-mode behavior the test suite above relies on.
+	// With `onCollision`, conflicts are reported through the callback and the
+	// offending entry is SKIPPED so the rest of the route table still builds.
+	// Used by HttpTrigger at boot so one bad workflow doesn't drop the whole
+	// table (which then falls back to the legacy catch-all and breaks every
+	// URL — exactly the regression a user hit on the cross-runtime-chain demo).
+
+	describe("tolerant mode (onCollision)", () => {
+		it("does not throw on exact (method, path) duplicate when onCollision is set", () => {
+			const collisions: RouteCollision[] = [];
+			const out = buildRouteTable(
+				[
+					scanned({ source: "/a.json", defaultPath: "/users", name: "A" }),
+					scanned({ source: "/b.json", defaultPath: "/users", name: "B" }),
+				],
+				[],
+				{ onCollision: (c) => collisions.push(c) },
+			);
+			// First workflow wins, second is dropped.
+			expect(out).toHaveLength(1);
+			expect(out[0].source).toBe("/a.json");
+			expect(collisions).toHaveLength(1);
+			expect(collisions[0].kind).toBe("duplicate");
+			expect(collisions[0].method).toBe("GET");
+			expect(collisions[0].path).toBe("/users");
+			expect(collisions[0].winnerSource).toBe("/a.json");
+			expect(collisions[0].droppedSource).toBe("/b.json");
+		});
+
+		it("does not throw on ANY-shadows-specific when onCollision is set", () => {
+			const collisions: RouteCollision[] = [];
+			const out = buildRouteTable(
+				[
+					scanned({ source: "/get.json", defaultPath: "/x", method: "GET", name: "G" }),
+					scanned({ source: "/any.json", defaultPath: "/x", method: "ANY", name: "A" }),
+				],
+				[],
+				{ onCollision: (c) => collisions.push(c) },
+			);
+			expect(out).toHaveLength(1);
+			expect(out[0].source).toBe("/get.json");
+			expect(collisions).toHaveLength(1);
+			expect(collisions[0].kind).toBe("any-shadows-specific");
+		});
+
+		it("collects ALL collisions, not just the first one", () => {
+			const collisions: RouteCollision[] = [];
+			const out = buildRouteTable(
+				[
+					scanned({ source: "/a.json", defaultPath: "/users", name: "A" }),
+					scanned({ source: "/b.json", defaultPath: "/users", name: "B" }),
+					scanned({ source: "/c.json", defaultPath: "/orders", name: "C" }),
+					scanned({ source: "/d.json", defaultPath: "/orders", name: "D" }),
+				],
+				[],
+				{ onCollision: (c) => collisions.push(c) },
+			);
+			expect(out).toHaveLength(2); // /users from A, /orders from C
+			expect(collisions).toHaveLength(2); // B + D dropped
+			expect(collisions.map((c) => c.droppedSource).sort()).toEqual(["/b.json", "/d.json"]);
+		});
+
+		it("non-colliding workflows still register when one pair collides — single bad workflow does not break the whole table", () => {
+			const collisions: RouteCollision[] = [];
+			const out = buildRouteTable(
+				[
+					scanned({ source: "/users.json", defaultPath: "/users", name: "U" }),
+					scanned({ source: "/orders.json", defaultPath: "/orders", name: "O" }),
+					scanned({ source: "/dup1.json", defaultPath: "/dup", name: "D1" }),
+					scanned({ source: "/dup2.json", defaultPath: "/dup", name: "D2" }),
+					scanned({ source: "/items.json", defaultPath: "/items", name: "I" }),
+				],
+				[],
+				{ onCollision: (c) => collisions.push(c) },
+			);
+			// 4 non-colliding routes survive: /users, /orders, /dup (first wins), /items.
+			expect(out).toHaveLength(4);
+			expect(out.map((r) => r.path).sort()).toEqual(["/dup", "/items", "/orders", "/users"]);
+			expect(collisions).toHaveLength(1);
 		});
 	});
 });

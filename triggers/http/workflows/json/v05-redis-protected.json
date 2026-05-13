@@ -6,7 +6,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-redis-protected",
 			"accept": "application/json"
 		}
 	},

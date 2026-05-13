@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-data-export",
 			"accept": "application/json"
 		}
 	},
@@ -19,7 +19,9 @@
 					"type": "object",
 					"required": ["pages"],
 					"properties": {
-						"pages": { "type": "array" }
+						"pages": {
+							"type": "array"
+						}
 					}
 				},
 				"data": "js/ctx.request.body"
@@ -49,7 +51,9 @@
 									"inputs": {
 										"url": "js/ctx.state.page.url",
 										"method": "GET",
-										"headers": { "Accept": "application/json" },
+										"headers": {
+											"Accept": "application/json"
+										},
 										"responseType": "application/json"
 									}
 								}

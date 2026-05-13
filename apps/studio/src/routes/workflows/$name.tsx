@@ -3,6 +3,7 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
 import { JsonViewer } from "@/components/shared/JsonViewer";
+import { RoutingDiagnosticsBanner } from "@/components/shared/RoutingDiagnosticsBanner";
 import { WorkflowGraph } from "@/components/trace/WorkflowGraph";
 import { useWorkflowRuns } from "@/hooks/useRuns";
 import { useWorkflowDetail } from "@/hooks/useWorkflows";
@@ -85,6 +86,11 @@ function WorkflowDetailPage() {
 					</p>
 				</div>
 			</div>
+
+			{/* Routing diagnostics — boot-time route-build problems
+			    surfaced from `/__blok/routing`. Stays out of the way
+			    when there's nothing to report. */}
+			<RoutingDiagnosticsBanner />
 
 			{/* Tabs */}
 			<div className="flex gap-0 border-b border-zinc-800">

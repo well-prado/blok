@@ -86,6 +86,7 @@ import { PerformanceProfiler } from "./monitoring/PerformanceProfiler";
 
 // Tracing (Blok Studio)
 import { Janitor } from "./tracing/Janitor";
+import { type RoutingDiagnostic, RoutingDiagnostics } from "./tracing/RoutingDiagnostics";
 import { RunTracker } from "./tracing/RunTracker";
 import { registerTraceRoutes } from "./tracing/TraceRouter";
 import { TracingLogger } from "./tracing/TracingLogger";
@@ -301,6 +302,8 @@ export {
 	// Tracing (Blok Studio)
 	RunTracker,
 	Janitor,
+	RoutingDiagnostics,
+	type RoutingDiagnostic,
 	registerTraceRoutes,
 	WorkflowRegistry,
 	type RegisteredWorkflow,

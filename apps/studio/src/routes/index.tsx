@@ -2,6 +2,7 @@ import { LiveFeed } from "@/components/dashboard/LiveFeed";
 import { StatsOverview } from "@/components/dashboard/StatsOverview";
 import { WorkflowCard } from "@/components/dashboard/WorkflowCard";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { RoutingDiagnosticsBanner } from "@/components/shared/RoutingDiagnosticsBanner";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, Workflow } from "lucide-react";
@@ -37,7 +38,11 @@ function DashboardPage() {
 
 	if (!workflows || workflows.length === 0) {
 		return (
-			<div className="p-8">
+			<div className="p-8 space-y-4">
+				{/* Surface routing diagnostics even on the empty-state —
+				    if the trigger dropped every workflow due to collisions,
+				    the user needs to see WHY the list is empty. */}
+				<RoutingDiagnosticsBanner />
 				<EmptyState
 					icon={<Workflow className="w-10 h-10" />}
 					title="No workflows yet · production"
@@ -79,6 +84,10 @@ await blok.run("cross-runtime-chain", {
 				<h1 className="text-2xl font-medium font-display italic tracking-tight text-zinc-100">Overview</h1>
 				<p className="text-sm text-zinc-500 mt-1">Live trace of every workflow execution.</p>
 			</div>
+
+			{/* Routing diagnostics — only renders when the trigger
+			    reported a problem. */}
+			<RoutingDiagnosticsBanner />
 
 			{/* Stats */}
 			<StatsOverview workflows={workflows} />

@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-hello-global-mw",
 			"accept": "application/json"
 		}
 	},

@@ -6,7 +6,7 @@
 	"trigger": {
 		"http": {
 			"method": "GET",
-			"path": "/",
+			"path": "/v05-hello-with-mw",
 			"accept": "application/json"
 		}
 	},

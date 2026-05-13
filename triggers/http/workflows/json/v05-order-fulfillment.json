@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-order-fulfillment",
 			"accept": "application/json",
 			"middleware": ["auth-check", "rate-limit"]
 		}
@@ -27,12 +27,24 @@
 						"paymentUrl"
 					],
 					"properties": {
-						"id": { "type": "string" },
-						"type": { "type": "string" },
-						"items": { "type": "array" },
-						"total": { "type": "number" },
-						"currency": { "type": "string" },
-						"paymentUrl": { "type": "string" }
+						"id": {
+							"type": "string"
+						},
+						"type": {
+							"type": "string"
+						},
+						"items": {
+							"type": "array"
+						},
+						"total": {
+							"type": "number"
+						},
+						"currency": {
+							"type": "string"
+						},
+						"paymentUrl": {
+							"type": "string"
+						}
 					}
 				},
 				"data": "js/ctx.request.body"

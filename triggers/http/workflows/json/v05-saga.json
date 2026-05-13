@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-saga",
 			"accept": "application/json"
 		}
 	},
@@ -25,7 +25,10 @@
 								"Content-Type": "application/json",
 								"X-Step": "create"
 							},
-							"body": { "step": "create", "user": "js/ctx.request.body.user" },
+							"body": {
+								"step": "create",
+								"user": "js/ctx.request.body.user"
+							},
 							"responseType": "application/json"
 						}
 					},
@@ -40,7 +43,9 @@
 								"Content-Type": "application/json",
 								"X-Step": "risky-op"
 							},
-							"body": { "step": "risky-op" },
+							"body": {
+								"step": "risky-op"
+							},
 							"responseType": "application/json"
 						}
 					},
@@ -55,7 +60,9 @@
 								"Content-Type": "application/json",
 								"X-Step": "finalize"
 							},
-							"body": { "step": "finalize" },
+							"body": {
+								"step": "finalize"
+							},
 							"responseType": "application/json"
 						}
 					}

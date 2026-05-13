@@ -6,7 +6,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-admin-delete-user",
 			"accept": "application/json"
 		}
 	},

@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-protected",
 			"accept": "application/json",
 			"middleware": ["auth-check", "rate-limit"]
 		}

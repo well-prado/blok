@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/v05-nested-control-flow",
 			"accept": "application/json",
 			"middleware": ["auth-check"]
 		}
@@ -20,8 +20,12 @@
 					"type": "object",
 					"required": ["id", "items"],
 					"properties": {
-						"id": { "type": "string" },
-						"items": { "type": "array" }
+						"id": {
+							"type": "string"
+						},
+						"items": {
+							"type": "array"
+						}
 					}
 				},
 				"data": "js/ctx.request.body"

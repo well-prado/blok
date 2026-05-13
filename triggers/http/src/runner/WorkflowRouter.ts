@@ -59,6 +59,32 @@ export class RouteCollisionError extends Error {
 }
 
 /**
+ * Structured collision report emitted via the `onCollision` callback
+ * when `buildRouteTable` is invoked in tolerant mode. Keyed by the
+ * `(method, path)` pair that two or more workflows claim.
+ *
+ * - `kind: "duplicate"` — exact same method+path collision.
+ * - `kind: "any-shadows-specific"` — an `ANY` route was registered after
+ *   a more-specific method on the same path (or vice versa).
+ *
+ * Tolerant mode (callback passed): the SECOND-and-later offending
+ * workflow is dropped, the first stays. Strict mode (no callback,
+ * back-compat): the function throws on the first collision, just like
+ * before.
+ */
+export interface RouteCollision {
+	readonly kind: "duplicate" | "any-shadows-specific";
+	readonly method: string;
+	readonly path: string;
+	/** The workflow source that "wins" (already in the table). */
+	readonly winnerSource: string;
+	/** The workflow source that was dropped on this collision. */
+	readonly droppedSource: string;
+	/** Human-readable explanation suitable for logging + UI surfacing. */
+	readonly message: string;
+}
+
+/**
  * Thrown when a workflow is missing an explicit `trigger.http.path`
  * and the legacy escape hatch (`BLOK_ROUTING_LEGACY=1`) is not set.
  *
@@ -85,11 +111,23 @@ export class MissingExplicitPathError extends Error {
 export function buildRouteTable(
 	scanned: readonly ScannedWorkflow[],
 	manual: readonly ManualRegistration[] = [],
-	options: { onWarning?: (msg: string) => void } = {},
+	options: {
+		onWarning?: (msg: string) => void;
+		/**
+		 * When provided, route collisions are reported via this callback
+		 * and the offending entry is SKIPPED instead of throwing. Tolerant
+		 * mode — used by the HTTP trigger at boot so a single bad workflow
+		 * doesn't drop the entire route table (which then falls back to the
+		 * legacy catch-all and breaks every URL). Without this callback,
+		 * collisions throw `RouteCollisionError` exactly like before.
+		 */
+		onCollision?: (collision: RouteCollision) => void;
+	} = {},
 ): RouteEntry[] {
 	const out: RouteEntry[] = [];
 	const seen = new Map<string, RouteEntry>();
 	const legacyMode = isLegacyRoutingEnabled();
+	const tolerant = typeof options.onCollision === "function";
 
 	for (const sw of scanned) {
 		const triggerCfg = extractHttpTrigger(sw.workflow);
@@ -122,7 +160,8 @@ export function buildRouteTable(
 			kind: sw.kind,
 			workflow: sw.workflow,
 		};
-		assertNoCollision(seen, entry);
+		const collision = detectCollision(seen, entry);
+		if (handleCollision(collision, tolerant, options.onCollision)) continue;
 		out.push(entry);
 		seen.set(routeKey(entry), entry);
 	}
@@ -159,7 +198,8 @@ export function buildRouteTable(
 			kind: "ts",
 			workflow: mr.workflow,
 		};
-		assertNoCollision(seen, entry);
+		const collision = detectCollision(seen, entry);
+		if (handleCollision(collision, tolerant, options.onCollision)) continue;
 		out.push(entry);
 		seen.set(routeKey(entry), entry);
 	}
@@ -240,34 +280,68 @@ function routeKey(entry: RouteEntry): string {
 	return `${entry.method} ${entry.path}`;
 }
 
-function assertNoCollision(seen: Map<string, RouteEntry>, entry: RouteEntry): void {
+function detectCollision(seen: Map<string, RouteEntry>, entry: RouteEntry): RouteCollision | null {
 	// Exact duplicate.
 	const exact = seen.get(routeKey(entry));
 	if (exact) {
-		throw new RouteCollisionError(
-			`Two workflows claim ${entry.method} ${entry.path}:\n  - ${exact.source}\n  - ${entry.source}\nSet an explicit \`trigger.http.path\` on one to disambiguate, or remove the duplicate.`,
-		);
+		return {
+			kind: "duplicate",
+			method: entry.method,
+			path: entry.path,
+			winnerSource: exact.source,
+			droppedSource: entry.source,
+			message: `Two workflows claim ${entry.method} ${entry.path}:\n  - ${exact.source}\n  - ${entry.source}\nSet an explicit \`trigger.http.path\` on one to disambiguate, or remove the duplicate.`,
+		};
 	}
 
 	// `ANY` shadowing more-specific methods on the same path, or vice versa.
 	if (entry.method === "ANY") {
-		for (const [k, e] of seen) {
+		for (const [, e] of seen) {
 			if (e.path === entry.path && e.method !== "ANY") {
-				throw new RouteCollisionError(
-					`ANY ${entry.path} (${entry.source}) shadows the existing route ${e.method} ${e.path} (${e.source}). Either narrow the ANY workflow's method or remove the more-specific one.`,
-				);
+				return {
+					kind: "any-shadows-specific",
+					method: entry.method,
+					path: entry.path,
+					winnerSource: e.source,
+					droppedSource: entry.source,
+					message: `ANY ${entry.path} (${entry.source}) shadows the existing route ${e.method} ${e.path} (${e.source}). Either narrow the ANY workflow's method or remove the more-specific one.`,
+				};
 			}
-			void k;
 		}
 	} else {
 		const anyKey = `ANY ${entry.path}`;
 		const anyExisting = seen.get(anyKey);
 		if (anyExisting) {
-			throw new RouteCollisionError(
-				`${entry.method} ${entry.path} (${entry.source}) is shadowed by an existing ANY route (${anyExisting.source}). Either narrow the ANY workflow's method or remove this one.`,
-			);
+			return {
+				kind: "any-shadows-specific",
+				method: entry.method,
+				path: entry.path,
+				winnerSource: anyExisting.source,
+				droppedSource: entry.source,
+				message: `${entry.method} ${entry.path} (${entry.source}) is shadowed by an existing ANY route (${anyExisting.source}). Either narrow the ANY workflow's method or remove this one.`,
+			};
 		}
 	}
+
+	return null;
+}
+
+/**
+ * Strict-mode helper used by both loop arms in `buildRouteTable`.
+ * In tolerant mode, the caller reports + skips; in strict mode this
+ * throws to preserve the v0.4 behaviour (and the test suite).
+ */
+function handleCollision(
+	collision: RouteCollision | null,
+	tolerant: boolean,
+	onCollision: ((c: RouteCollision) => void) | undefined,
+): boolean {
+	if (!collision) return false;
+	if (tolerant) {
+		onCollision?.(collision);
+		return true;
+	}
+	throw new RouteCollisionError(collision.message);
 }
 
 function warnAmbiguousLiterals(routes: readonly RouteEntry[], onWarning: ((msg: string) => void) | undefined): void {

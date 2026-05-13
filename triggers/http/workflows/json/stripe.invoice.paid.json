@@ -5,7 +5,7 @@
 	"trigger": {
 		"http": {
 			"method": "POST",
-			"path": "/",
+			"path": "/stripe.invoice.paid",
 			"accept": "application/json"
 		}
 	},

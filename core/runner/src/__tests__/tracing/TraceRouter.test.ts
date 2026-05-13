@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
+import { RoutingDiagnostics } from "../../tracing/RoutingDiagnostics";
 import { RunTracker } from "../../tracing/RunTracker";
 import { registerTraceRoutes } from "../../tracing/TraceRouter";
 import { WorkflowRegistry } from "../../workflow/WorkflowRegistry";
@@ -402,6 +403,56 @@ describe("TraceRouter", () => {
 				expect(body.name).toBe("countries");
 				expect(body.definition).toBeUndefined();
 			});
+		});
+	});
+
+	// E4 follow-up — boot-time route-build problems surfaced for Studio.
+	describe("GET /routing", () => {
+		beforeEach(() => {
+			RoutingDiagnostics.resetInstance();
+		});
+
+		afterEach(() => {
+			RoutingDiagnostics.resetInstance();
+		});
+
+		it("returns an empty list when no diagnostics have been recorded", () => {
+			const req = new MockRequest();
+			const res = new MockResponse();
+			router.findHandler("GET", "/routing")!(req, res);
+			const body = res.jsonBody as any;
+			expect(body.diagnostics).toEqual([]);
+			expect(body.count).toBe(0);
+			expect(typeof body.now).toBe("number");
+		});
+
+		it("returns recorded diagnostics in insertion order", () => {
+			const diag = RoutingDiagnostics.getInstance();
+			diag.record({
+				kind: "duplicate",
+				method: "POST",
+				path: "/api/users",
+				winnerSource: "/wf/a.json",
+				droppedSource: "/wf/b.json",
+				message: "Two workflows claim POST /api/users",
+			});
+			diag.record({
+				kind: "any-shadows-specific",
+				method: "ANY",
+				path: "/api/orders",
+				winnerSource: "/wf/o-get.json",
+				droppedSource: "/wf/o-any.json",
+				message: "ANY /api/orders shadows GET /api/orders",
+			});
+
+			const req = new MockRequest();
+			const res = new MockResponse();
+			router.findHandler("GET", "/routing")!(req, res);
+			const body = res.jsonBody as any;
+			expect(body.count).toBe(2);
+			expect(body.diagnostics).toHaveLength(2);
+			expect(body.diagnostics[0].kind).toBe("duplicate");
+			expect(body.diagnostics[1].kind).toBe("any-shadows-specific");
 		});
 	});
 
