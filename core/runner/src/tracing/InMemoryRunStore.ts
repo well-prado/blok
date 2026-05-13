@@ -1,4 +1,5 @@
 import type { RunStore } from "./RunStore";
+import { evaluateFilter, normaliseMetadataFilters } from "./metadataFilter";
 import type {
 	CachedStepResult,
 	ConcurrencySlotResult,
@@ -97,13 +98,9 @@ export class InMemoryRunStore implements RunStore {
 			runs = runs.filter((r) => r.tags && filterTags.every((tag) => r.tags?.includes(tag)));
 		}
 		if (opts?.metadata) {
-			const entries = Object.entries(opts.metadata);
-			if (entries.length > 0) {
-				runs = runs.filter(
-					(r) =>
-						r.metadata != null &&
-						entries.every(([k, v]) => r.metadata?.[k] !== undefined && String(r.metadata[k]) === v),
-				);
+			const filters = normaliseMetadataFilters(opts.metadata);
+			if (filters.length > 0) {
+				runs = runs.filter((r) => filters.every((f) => evaluateFilter(f, r.metadata)));
 			}
 		}
 

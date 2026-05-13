@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import type { RunStore } from "./RunStore";
+import { isValidMetadataKey, normaliseMetadataFilters, translateFilterToSql } from "./metadataFilter";
 
 const esmRequire = createRequire(import.meta.url);
 import type {
@@ -209,6 +210,20 @@ interface DashboardRow {
 const isBun = "Bun" in globalThis;
 
 /**
+ * F1 — read `BLOK_INDEXED_METADATA_KEYS=tier,region` from the env.
+ * Empty / unset = no F1 indexing. Exposed for test seams; production
+ * code reads through the `SqliteRunStore` constructor.
+ */
+export function readIndexedMetadataKeysFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+	const raw = env.BLOK_INDEXED_METADATA_KEYS;
+	if (typeof raw !== "string" || raw.length === 0) return [];
+	return raw
+		.split(",")
+		.map((k) => k.trim())
+		.filter((k) => k.length > 0);
+}
+
+/**
  * SQLite-backed RunStore supporting both bun:sqlite and better-sqlite3.
  *
  * When running under Bun, uses the built-in bun:sqlite module for
@@ -219,13 +234,39 @@ const isBun = "Bun" in globalThis;
  *
  * Schema is auto-migrated on construction via a versioned migration system.
  */
+/**
+ * F1 (v0.5) — options for `SqliteRunStore`. `indexedMetadataKeys`
+ * declares the metadata keys that should be promoted to indexed
+ * generated columns; the store creates a `metadata_<key>_idx` virtual
+ * generated column + a btree index per declared key the first time it
+ * sees that key (idempotent — pre-existing columns are detected and
+ * skipped). Queries against declared keys reference the indexed column
+ * directly so SQLite's planner uses the index.
+ *
+ * When omitted, the store reads `BLOK_INDEXED_METADATA_KEYS` from the
+ * environment (comma-separated). Empty list = no F1 indexing,
+ * sequential `json_extract` scan as before.
+ */
+export interface SqliteRunStoreOptions {
+	indexedMetadataKeys?: string[];
+}
+
 export class SqliteRunStore implements RunStore {
 	private db: SqliteDatabase;
 
 	// Prepared statements (lazy-initialized)
 	private stmts: Record<string, SqliteStatement> = {};
 
-	constructor(dbPath = ".blok/trace.db") {
+	/**
+	 * F1 — the validated, frozen set of metadata keys that have an
+	 * indexed generated column on `workflow_runs`. Read at query time
+	 * to decide whether a filter's LHS is `metadata_<key>_idx`
+	 * (indexed path) or `json_extract(metadata_json, '$.<key>')`
+	 * (sequential path).
+	 */
+	private readonly indexedMetadataKeys: ReadonlySet<string>;
+
+	constructor(dbPath = ".blok/trace.db", opts?: SqliteRunStoreOptions) {
 		if (isBun) {
 			// Use Bun's built-in SQLite (3-6x faster than better-sqlite3)
 			const bunMod = "bun:sqlite";
@@ -253,6 +294,55 @@ export class SqliteRunStore implements RunStore {
 		this.db.exec("PRAGMA synchronous = NORMAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
 		this.migrate();
+
+		// F1 — resolve declared indexed keys (constructor option wins over
+		// env var) and ensure each one has a generated column + index.
+		// Runs AFTER `migrate()` so the base `workflow_runs` table exists.
+		const declared = opts?.indexedMetadataKeys ?? readIndexedMetadataKeysFromEnv();
+		this.indexedMetadataKeys = new Set(declared.filter((k) => isValidMetadataKey(k)));
+		this.ensureIndexedMetadataColumns(this.indexedMetadataKeys);
+	}
+
+	/**
+	 * F1 — for each declared key, ensure (a) the `metadata_<key>_idx`
+	 * virtual generated column exists on `workflow_runs`, and (b) an
+	 * index on that column exists. Both are idempotent — pre-existing
+	 * columns are detected via `PRAGMA table_info` since SQLite doesn't
+	 * support `ALTER TABLE ADD COLUMN IF NOT EXISTS`.
+	 *
+	 * Generated columns are `VIRTUAL` rather than `STORED` so they can
+	 * be added to a non-empty table (STORED columns can't, per SQLite's
+	 * `ALTER TABLE` rules). The query planner can still use a btree
+	 * index built on a VIRTUAL column — that's the F1 win.
+	 */
+	private ensureIndexedMetadataColumns(keys: ReadonlySet<string>): void {
+		if (keys.size === 0) return;
+		// Use `table_xinfo` rather than `table_info` — virtual generated
+		// columns are HIDDEN columns and `PRAGMA table_info` deliberately
+		// omits them. `table_xinfo` returns hidden columns too (with
+		// `hidden=2` for virtual generated columns specifically), so the
+		// idempotency check actually works against a previously-added
+		// column on a re-opened db.
+		const existingColumns = new Set(
+			this.db
+				.prepare("PRAGMA table_xinfo(workflow_runs)")
+				.all()
+				.map((r) => (r as { name: string }).name),
+		);
+		for (const key of keys) {
+			const columnName = `metadata_${key}_idx`;
+			const indexName = `idx_workflow_runs_metadata_${key}`;
+			if (!existingColumns.has(columnName)) {
+				// TEXT type-hint is explicit so the planner has a stable
+				// expectation; the actual stored type still matches
+				// whatever `json_extract` returns at evaluation time
+				// (SQLite uses dynamic type affinity).
+				this.db.exec(
+					`ALTER TABLE workflow_runs ADD COLUMN ${columnName} TEXT GENERATED ALWAYS AS (json_extract(metadata_json, '$.${key}')) VIRTUAL`,
+				);
+			}
+			this.db.exec(`CREATE INDEX IF NOT EXISTS ${indexName} ON workflow_runs(${columnName})`);
+		}
 	}
 
 	// === Schema Migration ===
@@ -907,20 +997,29 @@ export class SqliteRunStore implements RunStore {
 			conditions.push("status = ?");
 			params.push(opts.status);
 		}
-		// Tier 2 quick-wins — metadata key=value filter via json_extract.
-		// Multiple key=value pairs combine with AND semantics. Indexed scans
-		// aren't possible against arbitrary JSON keys; sequential scan is
-		// acceptable given the runs table has size cap via evictOldRuns.
+		// F2 (v0.5) — metadata filter with operator support
+		// (eq / ne / gt / gte / lt / lte / like / in / nin) via
+		// `translateFilterToSql`. F1 (v0.5) — declared indexed keys
+		// (`BLOK_INDEXED_METADATA_KEYS=tier,region`) reference
+		// `metadata_<key>_idx` (the generated column ensured at
+		// construction time) so the query planner uses the btree
+		// index instead of a sequential `json_extract` scan.
+		//
+		// `normaliseMetadataFilters` accepts both the legacy
+		// `Record<string, string>` shape (v0.4) AND the new
+		// `MetadataFilter[]` shape (v0.5) — keys outside
+		// `/^[a-zA-Z0-9_-]+$/` are silently dropped for JSON-path
+		// injection safety.
 		if (opts?.metadata) {
-			const entries = Object.entries(opts.metadata);
-			for (const [k, v] of entries) {
-				// Use prefixed paths for safety: only allow keys matching
-				// /^[a-zA-Z0-9_-]+$/ to prevent JSON path injection. Keys with
-				// special characters silently skip filtering — caller can
-				// always fall back to client-side filter for those.
-				if (!/^[a-zA-Z0-9_-]+$/.test(k)) continue;
-				conditions.push(`json_extract(metadata_json, '$.${k}') = ?`);
-				params.push(v);
+			const filters = normaliseMetadataFilters(opts.metadata);
+			for (const f of filters) {
+				const lhs = this.indexedMetadataKeys.has(f.key)
+					? `metadata_${f.key}_idx`
+					: `json_extract(metadata_json, '$.${f.key}')`;
+				const translated = translateFilterToSql(f, lhs);
+				if (!translated) continue;
+				conditions.push(translated.fragment);
+				params.push(...translated.params);
 			}
 		}
 		const tags = opts?.tags;

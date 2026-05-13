@@ -243,6 +243,108 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(runs).toHaveLength(1);
 				expect(runs[0].id).toBe("run_1");
 			});
+
+			// F2 (v0.5) — operator-aware metadata filters
+			describe("metadata operators (F2)", () => {
+				it("ne — not equal (and matches runs with the key absent)", () => {
+					store.saveRun(makeRun("run_1", { metadata: { tier: "premium" } }));
+					store.saveRun(makeRun("run_2", { metadata: { tier: "free" } }));
+					store.saveRun(makeRun("run_3", { metadata: { other: "x" } })); // tier absent — `ne` matches
+					const { runs } = store.getRuns({
+						metadata: [{ key: "tier", op: "ne", value: "free" }],
+					});
+					expect(runs.map((r) => r.id).sort()).toEqual(["run_1", "run_3"]);
+				});
+
+				it("gt / gte / lt / lte — numeric comparisons against JSON-stored numbers", () => {
+					store.saveRun(makeRun("run_1", { metadata: { count: "5" } }));
+					store.saveRun(makeRun("run_2", { metadata: { count: "10" } }));
+					store.saveRun(makeRun("run_3", { metadata: { count: "20" } }));
+
+					expect(store.getRuns({ metadata: [{ key: "count", op: "gt", value: "10" }] }).runs.map((r) => r.id)).toEqual([
+						"run_3",
+					]);
+					expect(
+						store
+							.getRuns({ metadata: [{ key: "count", op: "gte", value: "10" }] })
+							.runs.map((r) => r.id)
+							.sort(),
+					).toEqual(["run_2", "run_3"]);
+					expect(store.getRuns({ metadata: [{ key: "count", op: "lt", value: "10" }] }).runs.map((r) => r.id)).toEqual([
+						"run_1",
+					]);
+					expect(
+						store
+							.getRuns({ metadata: [{ key: "count", op: "lte", value: "10" }] })
+							.runs.map((r) => r.id)
+							.sort(),
+					).toEqual(["run_1", "run_2"]);
+				});
+
+				it("in / nin — set membership", () => {
+					store.saveRun(makeRun("run_1", { metadata: { region: "us" } }));
+					store.saveRun(makeRun("run_2", { metadata: { region: "eu" } }));
+					store.saveRun(makeRun("run_3", { metadata: { region: "ap" } }));
+					store.saveRun(makeRun("run_4", { metadata: { other: "x" } })); // region absent
+
+					const inResult = store.getRuns({
+						metadata: [{ key: "region", op: "in", value: ["us", "eu"] }],
+					}).runs;
+					expect(inResult.map((r) => r.id).sort()).toEqual(["run_1", "run_2"]);
+
+					// `nin` parallels `ne` — absent keys satisfy the filter.
+					const ninResult = store.getRuns({
+						metadata: [{ key: "region", op: "nin", value: ["us", "eu"] }],
+					}).runs;
+					expect(ninResult.map((r) => r.id).sort()).toEqual(["run_3", "run_4"]);
+				});
+
+				it("like — SQL-style pattern with % and _ wildcards", () => {
+					store.saveRun(makeRun("run_1", { metadata: { name: "test-alpha" } }));
+					store.saveRun(makeRun("run_2", { metadata: { name: "test-beta" } }));
+					store.saveRun(makeRun("run_3", { metadata: { name: "prod-alpha" } }));
+
+					const result = store.getRuns({
+						metadata: [{ key: "name", op: "like", value: "test-%" }],
+					}).runs;
+					expect(result.map((r) => r.id).sort()).toEqual(["run_1", "run_2"]);
+				});
+
+				it("multiple operator filters combine with AND", () => {
+					store.saveRun(makeRun("run_1", { metadata: { tier: "premium", count: "5" } }));
+					store.saveRun(makeRun("run_2", { metadata: { tier: "premium", count: "20" } }));
+					store.saveRun(makeRun("run_3", { metadata: { tier: "free", count: "20" } }));
+
+					const result = store.getRuns({
+						metadata: [
+							{ key: "tier", op: "eq", value: "premium" },
+							{ key: "count", op: "gt", value: "10" },
+						],
+					}).runs;
+					expect(result.map((r) => r.id)).toEqual(["run_2"]);
+				});
+
+				it("back-compat — Record<string, string> still works and is equivalent to `op: 'eq'`", () => {
+					store.saveRun(makeRun("run_1", { metadata: { tier: "premium" } }));
+					store.saveRun(makeRun("run_2", { metadata: { tier: "free" } }));
+
+					const legacyResult = store.getRuns({ metadata: { tier: "premium" } }).runs;
+					const operatorResult = store.getRuns({
+						metadata: [{ key: "tier", op: "eq", value: "premium" }],
+					}).runs;
+					expect(legacyResult.map((r) => r.id)).toEqual(operatorResult.map((r) => r.id));
+				});
+
+				it("invalid keys silently drop (JSON-path injection guard)", () => {
+					store.saveRun(makeRun("run_1", { metadata: { tier: "premium" } }));
+					// Key with single-quote — would break JSON-path syntax.
+					const result = store.getRuns({
+						metadata: [{ key: "tier'; DROP TABLE", op: "eq", value: "premium" }],
+					}).runs;
+					// Invalid key dropped → no metadata filter → all rows returned.
+					expect(result).toHaveLength(1);
+				});
+			});
 		});
 
 		// === Node Runs ===

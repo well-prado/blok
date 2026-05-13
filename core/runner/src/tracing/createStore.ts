@@ -90,9 +90,20 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 				fs.mkdirSync(dir, { recursive: true });
 			}
 
-			// Dynamic require to avoid hard dependency on better-sqlite3
-			const { SqliteRunStore } = esmRequire("./SqliteRunStore") as typeof import("./SqliteRunStore");
-			store = new SqliteRunStore(sqlitePath);
+			// Dynamic require to avoid hard dependency on better-sqlite3.
+			// Cast via the typeof-import type so we get autocomplete +
+			// type-checking even though `esmRequire` is `unknown` at the
+			// type level. One-liner to keep biome's formatter from
+			// breaking the dynamic-import-type expression across lines.
+			// biome-ignore format: typeof import(...) must stay on one line for tsc to parse
+			const sqliteMod = esmRequire("./SqliteRunStore") as typeof import("./SqliteRunStore");
+			const { SqliteRunStore, readIndexedMetadataKeysFromEnv } = sqliteMod;
+			// F1 (v0.5) — opt-in indexed metadata keys via
+			// `BLOK_INDEXED_METADATA_KEYS=tier,region`. The store
+			// promotes each declared key to a generated column + index
+			// so SQLite's planner uses the index when a `RunQuery`
+			// filter references it.
+			store = new SqliteRunStore(sqlitePath, { indexedMetadataKeys: readIndexedMetadataKeysFromEnv() });
 			break;
 		}
 		default:

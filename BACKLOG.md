@@ -504,25 +504,28 @@ Add a `↳ async (depth=N)` count to the badge. Read from the run's `_subworkflo
 
 ## Tier F — Filters
 
-### F1 · Indexed metadata filters
+### F1 · Indexed metadata filters — ✅ SHIPPED
 
-**Severity**: NICE-TO-HAVE.
-**Effort**: ~1 day.
-**Why**: today, metadata filter uses sequential scan via `json_extract`. At 100K+ rows, query time grows linearly.
+**Status:** Shipped in v0.5. Operator-facing config: `BLOK_INDEXED_METADATA_KEYS=tier,region` (or pass `{indexedMetadataKeys: [...]}` to the `SqliteRunStore` constructor directly).
 
-**Sketch**: identify scalar metadata fields that authors frequently filter on (e.g., `tier`, `region`). Promote them to dedicated indexed columns. Operator-facing config via `BLOK_INDEXED_METADATA_KEYS=tier,region`.
+**Implementation**: each declared key gets a `metadata_<key>_idx` VIRTUAL generated column + btree index on `workflow_runs`. The store creates them idempotently at boot (probes `PRAGMA table_xinfo` for hidden columns so re-opens skip the `ALTER TABLE` step). The `getRuns` SQL generator rewrites the LHS from `json_extract(metadata_json, '$.<key>')` to `metadata_<key>_idx` when the filter key is declared, so SQLite's planner uses the index instead of a sequential scan. Semantic parity with the non-indexed path is verified in [`__tests__/tracing/SqliteRunStore.test.ts`](core/runner/src/__tests__/tracing/SqliteRunStore.test.ts) (`SqliteRunStore: indexed metadata keys (F1)` block — 6 tests).
 
-Alternative: SQLite virtual columns + index expressions. Less invasive.
+Keys outside `^[a-zA-Z0-9_-]+$` (JSON-path-safe) are silently dropped at construction so a misconfigured env var can't blow up the store boot.
 
 ---
 
-### F2 · Metadata filter operators beyond `=`
+### F2 · Metadata filter operators beyond `=` — ✅ SHIPPED
 
-**Severity**: NICE-TO-HAVE.
-**Effort**: ~1 day.
-**Why**: today only equality. Operators want `tier!=free`, `count>10`, `region IN (us, eu)`.
+**Status:** Shipped in v0.5. Supports `eq` (default), `ne`, `gt`, `gte`, `lt`, `lte`, `like`, `in`, `nin` via the `metadata.<key>__<op>=<value>` URL syntax.
 
-**Sketch**: extend the query parser. URL grammar: `metadata.tier=premium`, `metadata.tier!=free`, `metadata.count>10`. Server: translate to `json_extract` SQL operators.
+**Implementation**:
+- New `MetadataFilter` type + `MetadataOp` union in `core/runner/src/tracing/types.ts`. `RunQuery.metadata` is a back-compat union: legacy `Record<string, string>` still works and is normalised into `MetadataFilter[]` at the store boundary.
+- Shared evaluator + SQL translator in [`core/runner/src/tracing/metadataFilter.ts`](core/runner/src/tracing/metadataFilter.ts) so the three stores (InMemory, Sqlite, Postgres-via-InMemory) share one source of truth.
+- URL parser in `TraceRouter.ts` accepts the `__<op>` suffix: `metadata.tier__ne=free`, `metadata.count__gt=10`, `metadata.region__in=us,eu`, `metadata.name__like=test%`. Unknown suffixes fall through and treat the full remainder as the key.
+- `ne` / `nin` semantics match SQL: a missing key satisfies the "not equal" predicate (parity with `IS NULL OR != ?`).
+- Studio API client (`apps/studio/src/lib/api.ts`) accepts both shapes too — pass `metadata: [{key, op, value}]` for operators, or stick with the legacy `Record` form for plain equality.
+
+Tests: 11 cross-store cases in `__tests__/tracing/RunStore.shared.ts` (covers each operator + AND across multiple filters + invalid-key drop) + 7 URL-parser cases in `__tests__/tracing/TraceRouter.test.ts`.
 
 ---
 

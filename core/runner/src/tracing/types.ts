@@ -817,19 +817,50 @@ export interface Dashboard {
 
 // === Store Query Types ===
 
+/**
+ * F2 (v0.5) — operators accepted on metadata filters. `eq` is the
+ * default (and the only one available before v0.5). Each operator
+ * coerces values the way an operator typically would: numerical
+ * comparisons cast to number, `like` is SQL `LIKE` (with `%` /
+ * `_` wildcards), `in`/`nin` accept array values.
+ */
+export type MetadataOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "like" | "in" | "nin";
+
+/**
+ * F2 (v0.5) — operator-aware metadata filter. Combines with other
+ * filters in the same `RunQuery.metadata` array via AND semantics.
+ *
+ * `value` is `string` for scalar operators (`eq` / `ne` / `gt` / `lt` /
+ * `gte` / `lte` / `like`), `string[]` for set operators (`in` / `nin`).
+ * Numeric comparisons treat the stored metadata value as a number when
+ * possible (the underlying JSON store preserves the native type).
+ */
+export interface MetadataFilter {
+	key: string;
+	op: MetadataOp;
+	value: string | string[];
+}
+
 export interface RunQuery {
 	workflow?: string;
 	status?: WorkflowRunStatus;
 	tags?: string[];
 	/**
-	 * Tier 2 quick-wins — filter by metadata key=value pairs. Multiple
-	 * pairs combine with AND semantics (a run matches only when all
-	 * declared keys match the requested values, compared via stringified
-	 * equality). Backed by `json_extract` on SQLite + `Object` lookup
-	 * on InMemory. Sequential scan (no index); acceptable given the
-	 * `evictOldRuns` size cap on the runs table.
+	 * Filter by metadata key/value pairs. Multiple entries combine with
+	 * AND semantics (a run matches only when every declared filter is
+	 * satisfied).
+	 *
+	 * **Two accepted shapes** — `Record<string, string>` is back-compat
+	 * sugar for an array of `{key, op: "eq", value}` filters. Pass an
+	 * array to use operators beyond `=` (F2: `ne` / `gt` / `gte` / `lt`
+	 * / `lte` / `like` / `in` / `nin`). Both shapes route through the
+	 * same evaluator after normalisation.
+	 *
+	 * **Performance** — sequential JSON-extract scan by default;
+	 * declare hot keys via `BLOK_INDEXED_METADATA_KEYS=tier,region` to
+	 * get an indexed column + index on the SqliteRunStore side (F1).
 	 */
-	metadata?: Record<string, string>;
+	metadata?: Record<string, string> | MetadataFilter[];
 	limit?: number;
 	offset?: number;
 	sort?: "asc" | "desc";
