@@ -1,6 +1,7 @@
 import http from "node:http";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
+import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
 import { RunTracker } from "./RunTracker";
 import { METADATA_OPERATORS, isValidMetadataKey } from "./metadataFilter";
 import type { MetadataFilter, MetadataOp, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
@@ -296,10 +297,17 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			}
 		}
 
+		// E4 — surface the raw workflow JSON (pre-normalization) from
+		// the registry so Studio can render the static DAG. Triggers
+		// feed the registry at boot; if the workflow was registered
+		// inline (e.g. tests with no source file) it's still here.
+		const registered = WorkflowRegistry.getInstance().get(name);
+
 		res.json({
 			...summary,
 			nodeNames: Array.from(nodeNames),
 			runtimes: Array.from(runtimes),
+			definition: registered?.workflow,
 		});
 	});
 

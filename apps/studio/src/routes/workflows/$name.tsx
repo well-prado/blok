@@ -3,13 +3,14 @@ import { RunsTable } from "@/components/runs/RunsTable";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportMenu } from "@/components/shared/ExportMenu";
 import { JsonViewer } from "@/components/shared/JsonViewer";
+import { WorkflowGraph } from "@/components/trace/WorkflowGraph";
 import { useWorkflowRuns } from "@/hooks/useRuns";
 import { useWorkflowDetail } from "@/hooks/useWorkflows";
 import { exportRunsCsv, exportRunsJson } from "@/lib/api";
 import { formatDuration, formatPercent } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Workflow } from "lucide-react";
+import { ArrowLeft, GitBranch, Loader2, Workflow } from "lucide-react";
 import { useState } from "react";
 
 export const Route = createFileRoute("/workflows/$name")({
@@ -20,7 +21,7 @@ function WorkflowDetailPage() {
 	const { name } = Route.useParams();
 	const [statusFilter, setStatusFilter] = useState("");
 	const [page, setPage] = useState(1);
-	const [activeTab, setActiveTab] = useState<"runs" | "definition" | "metrics">("runs");
+	const [activeTab, setActiveTab] = useState<"runs" | "graph" | "definition" | "metrics">("runs");
 	const limit = 25;
 
 	const { data: detail, isLoading: detailLoading } = useWorkflowDetail(name);
@@ -64,6 +65,7 @@ function WorkflowDetailPage() {
 
 	const tabs = [
 		{ key: "runs" as const, label: "Runs" },
+		{ key: "graph" as const, label: "Graph" },
 		{ key: "definition" as const, label: "Definition" },
 		{ key: "metrics" as const, label: "Metrics" },
 	];
@@ -169,6 +171,27 @@ function WorkflowDetailPage() {
 					)}
 				</div>
 			)}
+
+			{activeTab === "graph" &&
+				(detail.definition ? (
+					<WorkflowGraph definition={detail.definition} />
+				) : (
+					<EmptyState
+						icon={<GitBranch className="w-10 h-10" />}
+						title="Definition unavailable"
+						description={
+							<>
+								Studio reads the workflow structure from the runner's in-process registry. Either the runner hasn't
+								registered this workflow yet (restart the trigger to rescan) or it's an older deployment that predates
+								the
+								<code className="font-mono text-[12px] bg-raised border border-zinc-800 rounded px-1.5 py-0.5 mx-1 text-zinc-100">
+									GET /__blok/workflows/:name → definition
+								</code>
+								surface. The "Definition" tab still shows what we know.
+							</>
+						}
+					/>
+				))}
 
 			{activeTab === "definition" && (
 				<div className="rounded-lg border border-zinc-800 bg-overlay p-4">

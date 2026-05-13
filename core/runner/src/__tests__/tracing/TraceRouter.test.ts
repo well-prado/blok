@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
 import { RunTracker } from "../../tracing/RunTracker";
 import { registerTraceRoutes } from "../../tracing/TraceRouter";
+import { WorkflowRegistry } from "../../workflow/WorkflowRegistry";
 
 // --- Mock infrastructure ---
 
@@ -350,6 +351,57 @@ describe("TraceRouter", () => {
 
 			expect(res.statusCode).toBe(404);
 			expect((res.jsonBody as any).error).toContain("not found");
+		});
+
+		// E4 — `definition` field carries the raw workflow JSON when the
+		// WorkflowRegistry has been populated. Studio uses this to render
+		// the static workflow DAG without re-parsing files.
+		describe("definition field (E4)", () => {
+			beforeEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+
+			afterEach(() => {
+				WorkflowRegistry.resetInstance();
+			});
+
+			it("includes the registered workflow definition when registered", () => {
+				const sampleDefinition = {
+					name: "countries",
+					version: "1.0.0",
+					trigger: { http: { method: "GET", path: "/countries" } },
+					steps: [
+						{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://example.com" } },
+						{ id: "respond", use: "@blokjs/respond", inputs: { body: "$.state.fetch" } },
+					],
+				};
+				WorkflowRegistry.getInstance().register({
+					name: "countries",
+					source: "<test>",
+					workflow: sampleDefinition,
+				});
+
+				const req = new MockRequest({ params: { name: "countries" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.definition).toEqual(sampleDefinition);
+			});
+
+			it("omits definition when workflow is not in the registry", () => {
+				// Tracker has run data for 'countries' but the registry was
+				// not populated — older deployments or tests-only flows hit
+				// this path. Studio falls back to the JSON viewer with
+				// nodeNames + runtimes.
+				const req = new MockRequest({ params: { name: "countries" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.name).toBe("countries");
+				expect(body.definition).toBeUndefined();
+			});
 		});
 	});
 
