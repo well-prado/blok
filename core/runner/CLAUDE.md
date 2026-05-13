@@ -306,16 +306,72 @@ but can still set `allowList` for defence-in-depth audit. See
 `SubworkflowNode.resolveSubworkflowName` and the G3 test suite in
 `__tests__/unit/SubworkflowNode.test.ts` for the contract.
 
+**Cross-process dispatch (G2 — shipped in v0.6):**
+
+`subworkflow:` steps accept a `dispatch` field that picks the
+execution strategy:
+
+```ts
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",
+  inputs: { user: $.state.user, order: $.state.order },
+  dispatch: "http-self",  // default is "in-process"
+}
+```
+
+- `"in-process"` (default) — child runs in the SAME Node process.
+  Synchronous when `wait: true`; `setImmediate`-based when
+  `wait: false`. Cheapest, no extra hops.
+- `"http-self"` — child is dispatched as a fresh HTTP request to
+  the deployment's own base URL (`BLOK_SELF_BASE_URL`, defaults to
+  `http://localhost:${PORT || 4000}`). Each child can land on a
+  different process in a horizontally-scaled deployment, or you
+  can use it to fully isolate child execution from the parent's
+  call stack.
+
+Requirements + behaviour for `http-self`:
+- The child workflow MUST have an HTTP trigger
+  (`trigger.http.path` set). A runtime error is thrown otherwise.
+- The request URL is `${BLOK_SELF_BASE_URL}${child.trigger.http.path}`.
+- The request method is `child.trigger.http.method` (defaulting to
+  `POST`).
+- The request body is the parent step's resolved `inputs`
+  (post-mapper, mirroring the in-process dispatch).
+- Lineage crosses the HTTP boundary via headers:
+  `X-Blok-Parent-Run-Id`, `X-Blok-Parent-Node-Run-Id`,
+  `X-Blok-Subworkflow-Depth`. `TriggerBase.run` reads them when
+  the request lands + threads them into `tracker.startRun(...)`.
+- `wait: true` awaits the HTTP response (non-2xx → throw,
+  propagating to the parent step's `retry` loop if configured).
+- `wait: false` fires-and-forgets the fetch (`.catch + console.error`).
+  Parent gets back `{runId: null, workflowName, scheduledAt, dispatch:
+  "http-self", url}` — the actual child runId isn't known on the
+  parent side; the receiver creates the run record when the request
+  lands. Studio's Sub-runs strip surfaces the child once it appears.
+
+Trade-offs vs. in-process:
+- HTTP roundtrip adds latency (~few ms locally, more across
+  network).
+- The deployment must be reachable at `BLOK_SELF_BASE_URL` from
+  the dispatching process — in Docker / Kubernetes, set the env
+  var to the service DNS name (e.g. `http://blok-svc:4000`)
+  rather than relying on the default `localhost`.
+- Idempotency caching still wraps the WHOLE dispatch (the cache
+  hit short-circuits the HTTP call too — for `wait: true` the
+  cached child response is replayed; for `wait: false` the cached
+  dispatch metadata is returned).
+
 **Not yet shipped**:
-- Cross-process sub-workflow dispatch (HTTP self-call) — current
-  implementation is in-process only. `wait: false` async dispatch
-  is `setImmediate`-based, NOT cross-process. Horizontal-scale
-  users with isolation needs may want this in a follow-up.
 - Studio `↳ async` indicator distinguishing sync vs async sub-
   workflow steps in StepRail. Currently both show `↳ sub`; the
   Sub-runs strip on the parent surfaces the actual status.
 - Cancellation API for fire-and-forget children
   (`POST /__blok/runs/:childId/cancel`).
+- Cross-process latest-payload-wins for the `wait: false`
+  http-self path — today the parent's resolved inputs are
+  serialized as the body once; if the parent re-runs (replay),
+  the body comes from the new run's inputs.
 
 ## Concurrency keys (Tier 2 #6)
 

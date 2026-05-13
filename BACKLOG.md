@@ -544,13 +544,21 @@ Trade-off: requires the parent-child link to persist. Already there via `parentR
 
 ---
 
-### G2 · Cross-process sub-workflow dispatch
+### G2 · Cross-process sub-workflow dispatch — ✅ SHIPPED
 
+**Status**: Shipped in v0.6.
 **Severity**: FEATURE.
-**Effort**: ~3-4 days.
-**Why**: today, sub-workflow dispatch is in-process (setImmediate or sync). Horizontal-scale users with strict isolation may want each child to run on a different process.
+**Effort**: ~3-4 days (delivered in one PR).
 
-**Sketch**: add `dispatch: "in-process" | "http-self"` field on the sub-workflow step. `http-self` does an HTTP self-call to the registered workflow's URL, lifting child execution to the trigger layer.
+**Implementation**:
+- New `dispatch: "in-process" | "http-self"` field on `V2SubworkflowStepSchema`. Default is `"in-process"` — preserves the v0.5 behaviour exactly.
+- `SubworkflowNode.dispatchHttpSelf` replaces the in-process Configuration/Runner with a `fetch` to `${BLOK_SELF_BASE_URL}${child.trigger.http.path}`. `BLOK_SELF_BASE_URL` defaults to `http://localhost:${PORT || 4000}` for dev; operators set it to the deployment's service DNS in containerized envs.
+- Lineage crosses the HTTP hop via `X-Blok-Parent-Run-Id` / `X-Blok-Parent-Node-Run-Id` / `X-Blok-Subworkflow-Depth` headers. `TriggerBase.run` reads them on the receiving side + threads them into `tracker.startRun({parentRunId, parentNodeRunId})` so Studio's breadcrumbs work across processes.
+- `wait: true` awaits the HTTP response (non-2xx → throw, propagates to parent's retry loop). `wait: false` fires-and-forgets the fetch and returns `{runId: null, workflowName, scheduledAt, dispatch: "http-self", url}`.
+- Children without an HTTP trigger get a clear runtime error when `dispatch: "http-self"` is requested.
+- 11 new unit tests in `__tests__/unit/SubworkflowNode.test.ts` covering URL composition, lineage headers, missing-HTTP-trigger guard, non-2xx propagation, network-error propagation, wait: false fire-and-forget, and a regression guard that `dispatch` unset still goes in-process.
+
+**Trade-offs**: HTTP roundtrip adds latency vs. in-process. Idempotency caching still wraps the whole dispatch (cache hits short-circuit the HTTP call too). For Docker/k8s deployments, `BLOK_SELF_BASE_URL` must be set to a reachable address (the default `localhost` is just the pod).
 
 ---
 

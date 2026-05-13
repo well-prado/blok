@@ -591,6 +591,14 @@ export default class Configuration implements Config {
 				allowListSource.filter((s): s is string => typeof s === "string" && s.length > 0),
 			);
 		}
+		// G2 (v0.6) — dispatch strategy. `in-process` (default) preserves
+		// the v0.5 behaviour; `http-self` routes the child via a fresh
+		// HTTP request to the deployment's own base URL so multi-process
+		// deployments can isolate child execution from the parent.
+		const dispatchRaw = (node as RunnerNode & { dispatch?: unknown }).dispatch;
+		if (dispatchRaw === "http-self" || dispatchRaw === "in-process") {
+			subworkflowNode.dispatch = dispatchRaw;
+		}
 		// `globalOptions` is the runner's node registry — child Configuration.init
 		// needs it for `module:` step resolution.
 		subworkflowNode.globalOptions = this.globalOptions;

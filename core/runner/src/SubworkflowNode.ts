@@ -23,6 +23,26 @@ function getMaxDepth(): number {
 }
 
 /**
+ * G2 — resolve the deployment's self base URL for HTTP self-call
+ * dispatch. Reads `BLOK_SELF_BASE_URL` when set (recommended in
+ * containerized deployments where `localhost` is just the pod);
+ * otherwise defaults to `http://localhost:${PORT || 4000}` which
+ * works out-of-box for the dev orchestrator. Always trims a trailing
+ * slash so callers can `${base}${path}` without doubling.
+ *
+ * Exported for tests; production callers go through
+ * `SubworkflowNode.dispatchHttpSelf`.
+ */
+export function getSelfBaseUrl(): string {
+	const fromEnv = process.env.BLOK_SELF_BASE_URL;
+	if (typeof fromEnv === "string" && fromEnv.length > 0) {
+		return fromEnv.endsWith("/") ? fromEnv.slice(0, -1) : fromEnv;
+	}
+	const port = process.env.PORT && process.env.PORT.length > 0 ? process.env.PORT : "4000";
+	return `http://localhost:${port}`;
+}
+
+/**
  * Internal ctx field that carries the current sub-workflow depth.
  * Incremented by `SubworkflowNode.run` before invoking the child;
  * read on entry to enforce the cap.
@@ -84,6 +104,29 @@ export class SubworkflowNode extends RunnerNode {
 	 * the registry lookup already gates dispatch on the literal name.
 	 */
 	public allowList?: readonly string[];
+	/**
+	 * G2 (v0.6) — dispatch strategy.
+	 *
+	 * - `"in-process"` (default): the child workflow runs in the SAME
+	 *   Node process — synchronous when `wait: true`, `setImmediate`-
+	 *   based when `wait: false`. Cheapest, no extra hops; the historic
+	 *   behaviour.
+	 * - `"http-self"`: the child is dispatched as a fresh HTTP request
+	 *   to the deployment's own base URL (resolved from
+	 *   `BLOK_SELF_BASE_URL`, defaulting to `http://localhost:${PORT}`).
+	 *   Use when each child run should land on a different process in
+	 *   a horizontally-scaled deployment, or to fully isolate child
+	 *   execution from the parent's call stack. The child MUST have an
+	 *   HTTP trigger — a runtime error is thrown otherwise. Lineage
+	 *   (parentRunId / parentNodeRunId / depth) is preserved across the
+	 *   HTTP hop via `X-Blok-Parent-Run-Id` / `X-Blok-Parent-Node-Run-Id`
+	 *   / `X-Blok-Subworkflow-Depth` headers that the receiving
+	 *   HttpTrigger reads + threads into `tracker.startRun(...)`.
+	 *
+	 * Both modes integrate with `wait` and `idempotencyKey` identically
+	 * (the cache lookup happens BEFORE `SubworkflowNode.run`).
+	 */
+	public dispatch?: "in-process" | "http-self";
 	/**
 	 * Wait mode for the sub-workflow dispatch:
 	 *
@@ -148,6 +191,17 @@ export class SubworkflowNode extends RunnerNode {
 			throw new Error(
 				`[blok] Sub-workflow access denied: workflow "${ctx.workflow_name}" is not authorized to invoke "${resolvedName}". This denial came from the registry-level authorize hook (WorkflowRegistry.setAuthorizeFn). Adjust the hook to allow this composition, or remove the gate.`,
 			);
+		}
+
+		// === 2.6. G2 — HTTP self-call dispatch ===
+		// When `dispatch: "http-self"`, skip the in-process Configuration
+		// + Runner materialization entirely. The child workflow runs on
+		// the OTHER side of an HTTP request that goes through the
+		// deployment's own base URL, hitting whichever process picks it
+		// up. The receiving HttpTrigger registers the child run record;
+		// this side just makes the HTTP call.
+		if (this.dispatch === "http-self") {
+			return this.dispatchHttpSelf(ctx, entry, resolvedName, depth);
 		}
 
 		// === 3. Materialize child Configuration + Runner ===
@@ -325,6 +379,125 @@ export class SubworkflowNode extends RunnerNode {
 		}
 
 		return resolvedName;
+	}
+
+	/**
+	 * G2 (v0.6) — HTTP self-call dispatch.
+	 *
+	 * Replaces the in-process child Configuration / Runner / Context
+	 * with an HTTP request to the deployment's own base URL. The
+	 * receiving HttpTrigger materializes the child as if it were a
+	 * fresh request — registers its own run record, runs the workflow,
+	 * returns the response.
+	 *
+	 * - `wait: true` (default) — `fetch` is awaited. The HTTP response
+	 *   body becomes this step's `model.data`. A non-2xx response is
+	 *   treated as failure (mirrors the in-process error propagation).
+	 * - `wait: false` — `fetch` is fired-and-forgotten. The promise's
+	 *   rejection is caught + logged. Parent step's output is
+	 *   `{runId: null, workflowName, scheduledAt}` — the child's runId
+	 *   isn't known on this side until the receiver actually creates
+	 *   the run record. Studio's Sub-runs strip surfaces the child
+	 *   once it lands.
+	 *
+	 * Lineage (parentRunId / parentNodeRunId / depth) crosses the HTTP
+	 * boundary via headers that the receiving HttpTrigger reads + threads
+	 * into `tracker.startRun(...)`. Same end-result as the in-process
+	 * path: child's `WorkflowRun` carries the parent ids so Studio renders
+	 * the breadcrumbs.
+	 */
+	private async dispatchHttpSelf(
+		parentCtx: Context,
+		entry: { name: string; source: string; workflow: unknown },
+		resolvedName: string,
+		depth: number,
+	): Promise<ResponseContext> {
+		// === 1. Validate the child has an HTTP trigger ===
+		const childWorkflow = entry.workflow as { trigger?: { http?: { method?: string; path?: string } } } | undefined;
+		const httpTrigger = childWorkflow?.trigger?.http;
+		if (!httpTrigger || typeof httpTrigger.path !== "string" || httpTrigger.path.length === 0) {
+			throw new Error(
+				`[blok] Sub-workflow dispatch failed: \`dispatch: "http-self"\` requires the child workflow "${resolvedName}" to have an HTTP trigger with an explicit \`trigger.http.path\`. Switch the step to \`dispatch: "in-process"\` (or omit the field) for non-HTTP children, or add an HTTP trigger to the child.`,
+			);
+		}
+		const method = (httpTrigger.method ?? "POST").toUpperCase();
+		const path = httpTrigger.path.startsWith("/") ? httpTrigger.path : `/${httpTrigger.path}`;
+
+		// === 2. Resolve the deployment's self base URL ===
+		const baseUrl = getSelfBaseUrl();
+		const url = `${baseUrl}${path}`;
+
+		// === 3. Build lineage headers ===
+		const parentRunId = (parentCtx as Record<string, unknown>)._traceRunId as string | undefined;
+		const parentNodeRunId = (parentCtx as Record<string, unknown>)._traceNodeId as string | undefined;
+		const headers: Record<string, string> = {
+			"content-type": "application/json",
+			// Receiving HttpTrigger reads these in `runWorkflowExecution`
+			// and threads them into `tracker.startRun({parentRunId, ...})`.
+			// Same shape as the existing `X-Blok-Replay-Of` plumbing.
+			"X-Blok-Subworkflow-Depth": String(depth),
+		};
+		if (parentRunId) headers["X-Blok-Parent-Run-Id"] = parentRunId;
+		if (parentNodeRunId) headers["X-Blok-Parent-Node-Run-Id"] = parentNodeRunId;
+
+		// === 4. Parent step's resolved inputs become the request body ===
+		const parentNodeConfig = (parentCtx.config as Record<string, { inputs?: unknown }> | undefined)?.[this.name];
+		const parentInputs = parentNodeConfig?.inputs ?? {};
+		const body = JSON.stringify(parentInputs);
+
+		// === 5. Fire-and-forget (wait: false) ===
+		if (this.wait === false) {
+			const scheduledAt = Date.now();
+			fetch(url, { method, headers, body }).catch((err: unknown) => {
+				console.error(
+					`[blok][subworkflow] http-self dispatch to ${url} failed (wait:false):`,
+					err instanceof Error ? err.stack || err.message : err,
+				);
+			});
+			const dispatchData: Record<string, unknown> = {
+				runId: null, // unknown on this side — receiving trigger creates the record
+				workflowName: entry.name,
+				scheduledAt,
+				dispatch: "http-self",
+				url,
+			};
+			const result = { success: true, data: dispatchData };
+			applyStepOutput(parentCtx, this, result);
+			return {
+				success: true,
+				data: dispatchData,
+				error: null,
+			};
+		}
+
+		// === 6. Synchronous (wait: true) ===
+		let response: Response;
+		try {
+			response = await fetch(url, { method, headers, body });
+		} catch (err) {
+			// Network-level failure: connection refused, DNS, etc.
+			throw new Error(
+				`[blok] Sub-workflow http-self dispatch to ${url} failed: ${err instanceof Error ? err.message : String(err)}. The deployment's self base URL is "${baseUrl}" (set via BLOK_SELF_BASE_URL or defaulted from PORT). Make sure the trigger is listening + the URL is reachable from THIS process.`,
+			);
+		}
+		const responseText = await response.text();
+		let responseBody: unknown;
+		try {
+			responseBody = responseText.length > 0 ? JSON.parse(responseText) : undefined;
+		} catch {
+			responseBody = responseText;
+		}
+
+		if (!response.ok) {
+			throw new Error(
+				`[blok] Sub-workflow http-self dispatch returned ${response.status} ${response.statusText} from ${url}. Body: ${typeof responseBody === "string" ? responseBody.slice(0, 500) : JSON.stringify(responseBody).slice(0, 500)}`,
+			);
+		}
+
+		const resp: ResponseContext = { success: true, data: responseBody, error: null };
+		const result = { success: true, data: responseBody };
+		applyStepOutput(parentCtx, this, result);
+		return resp;
 	}
 
 	private dispatchAsync(

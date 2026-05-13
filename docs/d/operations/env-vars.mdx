@@ -41,6 +41,7 @@ store).
 | Variable | Default | Purpose |
 |---|---|---|
 | `BLOK_MAX_SUBWORKFLOW_DEPTH` | `10` | Recursion cap for sub-workflow steps. Throws `Sub-workflow recursion limit exceeded` when exceeded. See [sub-workflows · recursion guard](/d/composition/sub-workflows#recursion-guard). |
+| `BLOK_SELF_BASE_URL` | `http://localhost:${PORT \|\| 4000}` | G2 (v0.6) — base URL used by `dispatch: "http-self"` sub-workflow steps when making the self-call. Set to the deployment's externally-reachable service URL in Docker/k8s envs (e.g. `http://blok-svc:4000`); the default `localhost` only works for single-process dev. Ignored for `dispatch: "in-process"` (the default). |
 
 ## Node env-var allowlist
 
