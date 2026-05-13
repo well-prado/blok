@@ -36,21 +36,12 @@ export interface PgBossConfig {
 interface PgBossInstance {
 	start(): Promise<unknown>;
 	stop(opts?: { graceful?: boolean }): Promise<void>;
-	send(
-		queue: string,
-		data: unknown,
-		opts?: {
-			priority?: number;
-			startAfter?: number;
-			retryLimit?: number;
-			expireInSeconds?: number;
-			singletonKey?: string;
-		},
-	): Promise<string | null>;
+	createQueue(queue: string, opts?: Record<string, unknown>): Promise<unknown>;
+	send(queue: string, data: unknown, opts?: Record<string, unknown>): Promise<string | null>;
 	work(
 		queue: string,
-		opts: { batchSize?: number; teamSize?: number; teamConcurrency?: number },
-		handler: (job: PgBossJob) => Promise<void>,
+		opts: Record<string, unknown>,
+		handler: (job: PgBossJob | PgBossJob[]) => Promise<unknown>,
 	): Promise<string>;
 	offWork(queue: string): Promise<void>;
 	getQueueSize(queue: string): Promise<number>;
@@ -123,42 +114,110 @@ export class PgBossAdapter implements WorkerAdapter {
 		this.stats.set(config.queue, { completed: 0, failed: 0, active: 0 });
 		const stats = this.stats.get(config.queue) as QueueStatsCounters;
 
+		// pg-boss v10 requires explicit queue creation before send/work.
+		// The call is idempotent — succeeds whether the queue exists or
+		// not — so this is safe to repeat across re-entries.
+		await this.ensureQueue(config.queue);
+
+		// pg-boss v10's handler receives an ARRAY of jobs (batch); the
+		// `batchSize` option controls the max. We keep `batchSize: 1` so
+		// the iteration is a single-job loop (matches pre-v10 semantics
+		// the adapter was written against). `pollingIntervalSeconds`
+		// defaults to 2s which adds ~2s latency on the happy path —
+		// tighten it for low-latency workloads via the worker config.
 		const id = await this.boss.work(
 			config.queue,
-			{ teamSize: config.concurrency ?? 1, teamConcurrency: 1 },
-			async (job) => {
-				stats.active += 1;
-				const workerJob: WorkerJob = {
-					id: job.id,
-					data: job.data,
-					headers: {},
-					queue: config.queue,
-					priority: config.priority ?? 0,
-					attempts: 0,
-					maxRetries: config.retries ?? 0,
-					createdAt: new Date(),
-					timeout: config.timeout,
-					raw: job,
-					complete: async () => {
-						stats.completed += 1;
-					},
-					fail: async (_err: Error) => {
-						stats.failed += 1;
-						throw _err;
-					},
-				};
-				try {
-					await handler(workerJob);
-					stats.completed += 1;
-				} catch (err) {
-					stats.failed += 1;
-					throw err;
-				} finally {
-					stats.active = Math.max(0, stats.active - 1);
+			{
+				batchSize: 1,
+				includeMetadata: true,
+			},
+			async (jobOrBatch) => {
+				const jobs = Array.isArray(jobOrBatch) ? jobOrBatch : [jobOrBatch];
+				for (const job of jobs) {
+					await this.runOneJob(config, handler, stats, job);
 				}
 			},
 		);
 		this.workIds.set(config.queue, id);
+	}
+
+	private async runOneJob(
+		config: WorkerTriggerOpts,
+		handler: (job: WorkerJob) => Promise<void>,
+		stats: QueueStatsCounters,
+		job: PgBossJob,
+	): Promise<void> {
+		stats.active += 1;
+		// Tracks whether stats have already been counted by the
+		// WorkerJob API (`complete` / `fail`). Without this, both
+		// the callback and the wrapper's try/catch credit the same
+		// outcome, double-counting `stats.completed` /
+		// `stats.failed`. pg-boss itself handles ack/retry/DLQ via
+		// the handler's return-vs-throw — these callbacks exist
+		// purely for stats parity with the other worker adapters.
+		let settled = false;
+		const workerJob: WorkerJob = {
+			id: job.id,
+			data: job.data,
+			headers: {},
+			queue: config.queue,
+			priority: config.priority ?? 0,
+			attempts: 0,
+			maxRetries: config.retries ?? 0,
+			createdAt: new Date(),
+			timeout: config.timeout,
+			raw: job,
+			complete: async () => {
+				if (settled) return;
+				stats.completed += 1;
+				settled = true;
+			},
+			fail: async (err: Error) => {
+				if (settled) return;
+				stats.failed += 1;
+				settled = true;
+				// Re-throw so pg-boss's `boss.work` sees the handler
+				// failure and schedules a retry / drops to DLQ per
+				// the queue config — the contract is "handler throws
+				// => job failed".
+				throw err;
+			},
+		};
+		try {
+			await handler(workerJob);
+			if (!settled) {
+				stats.completed += 1;
+				settled = true;
+			}
+		} catch (err) {
+			if (!settled) {
+				stats.failed += 1;
+				settled = true;
+			}
+			throw err;
+		} finally {
+			stats.active = Math.max(0, stats.active - 1);
+		}
+	}
+
+	private async ensureQueue(queue: string): Promise<void> {
+		if (!this.boss) return;
+		try {
+			await this.boss.createQueue(queue);
+		} catch (err) {
+			// pg-boss v10's createQueue is idempotent but may throw on
+			// race conditions when multiple processes call it concurrently
+			// against a fresh schema — those errors are harmless once the
+			// queue exists. Swallow + let downstream send/work surface a
+			// real problem if the queue isn't usable.
+			const message = (err as Error).message ?? "";
+			if (!message.includes("already exists")) {
+				// Log the unexpected case but don't propagate — operators
+				// shouldn't see a queue-creation race blow up their
+				// trigger boot path.
+				console.warn(`[blok][pg-boss] ensureQueue(${queue}) warning:`, message);
+			}
+		}
 	}
 
 	async addJob(
@@ -167,13 +226,25 @@ export class PgBossAdapter implements WorkerAdapter {
 		opts?: { priority?: number; delay?: number; retries?: number; timeout?: number; jobId?: string },
 	): Promise<string> {
 		if (!this.connected || !this.boss) throw new Error("[blok][pg-boss] not connected. Call connect() first.");
-		const jobId = await this.boss.send(queue, data, {
-			priority: opts?.priority,
-			startAfter: opts?.delay ? Math.ceil(opts.delay / 1000) : undefined,
-			retryLimit: opts?.retries,
-			expireInSeconds: typeof opts?.timeout === "number" ? Math.ceil(opts.timeout / 1000) : undefined,
-			singletonKey: opts?.jobId,
-		});
+		// pg-boss v10 requires the queue to exist before send. The
+		// call is idempotent — cheap to repeat per add.
+		await this.ensureQueue(queue);
+		// pg-boss v10's `attorney.checkSendArgs` rejects any explicitly
+		// undefined `priority` / `retryLimit` / `startAfter` /
+		// `expireInSeconds` / `singletonKey` with "X must be an integer".
+		// Build the options object with only the keys we actually want
+		// set — caught by the real-broker integration test in
+		// `__tests__/integration/pgboss-adapter.real-pg.test.ts`.
+		const sendOpts: Record<string, unknown> = {};
+		if (typeof opts?.priority === "number") sendOpts.priority = opts.priority;
+		if (typeof opts?.delay === "number" && opts.delay > 0) {
+			sendOpts.startAfter = Math.ceil(opts.delay / 1000);
+		}
+		if (typeof opts?.retries === "number") sendOpts.retryLimit = opts.retries;
+		if (typeof opts?.timeout === "number") sendOpts.expireInSeconds = Math.ceil(opts.timeout / 1000);
+		if (typeof opts?.jobId === "string" && opts.jobId.length > 0) sendOpts.singletonKey = opts.jobId;
+
+		const jobId = await this.boss.send(queue, data, sendOpts);
 		return jobId ?? opts?.jobId ?? uuid();
 	}
 
