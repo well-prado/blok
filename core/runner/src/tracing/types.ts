@@ -686,7 +686,16 @@ export interface WorkflowDetail extends WorkflowSummary {
 	 */
 	examples?: {
 		body: unknown;
-		source: "author" | "inferred" | "empty";
+		/**
+		 * Provenance of the body. `author` = declared in the workflow's
+		 * `trigger.http.examples.body`. `recorded` = captured from the
+		 * first successful run when `recordSample: true` is set on the
+		 * trigger. `inferred` = synthesized from static analysis of step
+		 * inputs. `empty` = no body references + no recording + no
+		 * author override (the literal `{}`). Studio surfaces this in
+		 * the Runs-tab empty-state curl snippet label.
+		 */
+		source: "author" | "recorded" | "inferred" | "empty";
 	};
 }
 
@@ -851,6 +860,29 @@ export interface SavedFilter {
 	metadataInput: string;
 	createdAt: number;
 	updatedAt: number;
+}
+
+/**
+ * Sample-body recording (v0.6 follow-up to #100). When a workflow's
+ * HTTP trigger declares `recordSample: true`, the trigger captures
+ * the request body of the FIRST successful run and persists it
+ * here. Studio's `examples.body` resolution prefers a recorded
+ * sample over static inference but always defers to an author-
+ * declared `trigger.http.examples.body`.
+ *
+ * One row per workflow — re-recording is intentionally skipped
+ * after the first capture so storage stays bounded + the
+ * operator-visible example stays stable. Authors can re-trigger a
+ * recording by deleting the row (no Studio surface for this yet;
+ * call `tracker.deleteWorkflowSample(name)` from a script).
+ */
+export interface WorkflowSample {
+	workflowName: string;
+	body: unknown;
+	/** Run id whose request body was captured. */
+	sourceRunId: string;
+	/** Wall-clock when the sample was recorded. */
+	recordedAt: number;
 }
 
 // === Store Query Types ===

@@ -13,6 +13,7 @@ import type {
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
+	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
 
@@ -348,6 +349,24 @@ export class PostgresRunStore implements RunStore {
 						);
 					},
 				},
+				{
+					// v0.6 follow-up to #100 — recorded sample bodies for the
+					// Studio empty-state curl. Matches the sqlite store's v15
+					// schema. One row per workflow (PK on workflow_name);
+					// the trigger only writes the FIRST successful run's body
+					// so the operator-visible curl stays stable.
+					version: 8,
+					up: async () => {
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS trace_workflow_samples (
+								workflow_name TEXT PRIMARY KEY,
+								body_json JSONB NOT NULL,
+								source_run_id TEXT NOT NULL,
+								recorded_at BIGINT NOT NULL
+							)
+						`);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -448,6 +467,23 @@ export class PostgresRunStore implements RunStore {
 				// when this loadRecent fires (the migration is at boot;
 				// this should follow). Log + continue.
 				console.warn("[blok][pg] failed to load saved filters:", (err as Error).message);
+			}
+
+			// v0.6 · rehydrate recorded sample bodies. Cardinality
+			// bounded by the number of workflows in the deployment, not
+			// the run volume — unbounded SELECT is fine.
+			try {
+				const { rows: sampleRows } = await client.query("SELECT * FROM trace_workflow_samples");
+				for (const row of sampleRows) {
+					this.memory.recordWorkflowSample({
+						workflowName: row.workflow_name,
+						body: typeof row.body_json === "string" ? JSON.parse(row.body_json) : row.body_json,
+						sourceRunId: row.source_run_id,
+						recordedAt: Number(row.recorded_at),
+					});
+				}
+			} catch (err) {
+				console.warn("[blok][pg] failed to load workflow samples:", (err as Error).message);
 			}
 
 			// Tier 2 follow-up · rehydrate idempotency cache (un-expired entries only).
@@ -1011,6 +1047,40 @@ export class PostgresRunStore implements RunStore {
 		if (removed) {
 			this.enqueueWrite(() =>
 				this.pool.query("DELETE FROM trace_saved_filters WHERE name = $1", [name]).then(() => {}),
+			);
+		}
+		return removed;
+	}
+
+	// === Sample-body recording (option C) ===
+
+	recordWorkflowSample(sample: WorkflowSample): WorkflowSample {
+		// First-record-wins. Memory holds the canonical sample (sync
+		// reads). PG INSERT uses ON CONFLICT DO NOTHING — same
+		// "first-record sticks" semantic as the sqlite store.
+		const persisted = this.memory.recordWorkflowSample(sample);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					`INSERT INTO trace_workflow_samples (workflow_name, body_json, source_run_id, recorded_at)
+					 VALUES ($1, $2, $3, $4)
+					 ON CONFLICT (workflow_name) DO NOTHING`,
+					[persisted.workflowName, JSON.stringify(persisted.body), persisted.sourceRunId, persisted.recordedAt],
+				)
+				.then(() => {}),
+		);
+		return persisted;
+	}
+
+	getWorkflowSample(workflowName: string): WorkflowSample | undefined {
+		return this.memory.getWorkflowSample(workflowName);
+	}
+
+	deleteWorkflowSample(workflowName: string): boolean {
+		const removed = this.memory.deleteWorkflowSample(workflowName);
+		if (removed) {
+			this.enqueueWrite(() =>
+				this.pool.query("DELETE FROM trace_workflow_samples WHERE workflow_name = $1", [workflowName]).then(() => {}),
 			);
 		}
 		return removed;

@@ -18,6 +18,7 @@ import type {
 	TraceLogEntry,
 	WorkflowRun,
 	WorkflowRunStatus,
+	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
 
@@ -737,6 +738,24 @@ export class SqliteRunStore implements RunStore {
 						updated_at INTEGER NOT NULL
 					);
 					CREATE INDEX IF NOT EXISTS idx_saved_filters_updated_at ON trace_saved_filters(updated_at);
+				`,
+			},
+			{
+				// v0.6 follow-up to #100 — recorded sample bodies for the
+				// Studio empty-state curl. Opt-in per HTTP trigger via
+				// `recordSample: true`. ONE row per workflow (PK on
+				// workflow_name); the trigger only writes the FIRST
+				// successful run's body so the operator-visible curl stays
+				// stable. Author overrides + static inference still apply
+				// when no row exists.
+				version: 15,
+				sql: `
+					CREATE TABLE IF NOT EXISTS trace_workflow_samples (
+						workflow_name TEXT PRIMARY KEY,
+						body_json TEXT NOT NULL,
+						source_run_id TEXT NOT NULL,
+						recorded_at INTEGER NOT NULL
+					);
 				`,
 			},
 		];
@@ -1511,6 +1530,45 @@ export class SqliteRunStore implements RunStore {
 
 	deleteSavedFilter(name: string): boolean {
 		const result = this.db.prepare("DELETE FROM trace_saved_filters WHERE name = ?").run(name);
+		return result.changes > 0;
+	}
+
+	// === Sample-body recording (option C follow-up to #100) ===
+
+	recordWorkflowSample(sample: WorkflowSample): WorkflowSample {
+		// First-record-wins. INSERT OR IGNORE skips the row when the
+		// PRIMARY KEY (workflow_name) already exists; we then SELECT to
+		// return whatever's actually persisted. Keeps the operator-
+		// visible sample stable across re-runs.
+		const insert = this.db.prepare(
+			"INSERT OR IGNORE INTO trace_workflow_samples (workflow_name, body_json, source_run_id, recorded_at) VALUES (?, ?, ?, ?)",
+		);
+		insert.run(sample.workflowName, JSON.stringify(sample.body), sample.sourceRunId, sample.recordedAt);
+		const existing = this.getWorkflowSample(sample.workflowName);
+		return existing ?? sample;
+	}
+
+	getWorkflowSample(workflowName: string): WorkflowSample | undefined {
+		const row = this.db.prepare("SELECT * FROM trace_workflow_samples WHERE workflow_name = ?").get(workflowName) as
+			| { workflow_name: string; body_json: string; source_run_id: string; recorded_at: number }
+			| undefined;
+		if (!row) return undefined;
+		let body: unknown;
+		try {
+			body = JSON.parse(row.body_json);
+		} catch {
+			body = null;
+		}
+		return {
+			workflowName: row.workflow_name,
+			body,
+			sourceRunId: row.source_run_id,
+			recordedAt: row.recorded_at,
+		};
+	}
+
+	deleteWorkflowSample(workflowName: string): boolean {
+		const result = this.db.prepare("DELETE FROM trace_workflow_samples WHERE workflow_name = ?").run(workflowName);
 		return result.changes > 0;
 	}
 

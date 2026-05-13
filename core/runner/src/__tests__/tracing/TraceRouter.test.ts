@@ -602,6 +602,88 @@ describe("TraceRouter", () => {
 				expect(body.name).toBe("countries");
 				expect(body.definition).toBeUndefined();
 			});
+
+			// v0.6 option C — recorded-body priority. Author override
+			// wins over recorded; recorded wins over inferred; inferred
+			// wins over empty.
+			describe("examples.body source priority (option C)", () => {
+				it("recorded body wins over inferred when no author override", () => {
+					WorkflowRegistry.getInstance().register({
+						name: "echo",
+						source: "<test>",
+						workflow: {
+							name: "echo",
+							trigger: { http: { method: "POST", path: "/echo", recordSample: true } },
+							steps: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.request.body.user.id" } }],
+						},
+					});
+					// Simulate a successful run having captured the body.
+					tracker.recordWorkflowSample({
+						workflowName: "echo",
+						body: { user: { id: "real_id_42", email: "real@example.com" } },
+						sourceRunId: "run_1",
+						recordedAt: Date.now(),
+					});
+
+					const req = new MockRequest({ params: { name: "echo" } });
+					const res = new MockResponse();
+					router.findHandler("GET", "/workflows/:name")!(req, res);
+
+					const body = res.jsonBody as any;
+					expect(body.examples.source).toBe("recorded");
+					// Real body, not the placeholder "string" inference would produce.
+					expect(body.examples.body).toEqual({ user: { id: "real_id_42", email: "real@example.com" } });
+				});
+
+				it("author override beats a recorded body", () => {
+					const authorBody = { event: { id: "evt_demo" } };
+					WorkflowRegistry.getInstance().register({
+						name: "echo",
+						source: "<test>",
+						workflow: {
+							name: "echo",
+							trigger: {
+								http: { method: "POST", path: "/echo", examples: { body: authorBody }, recordSample: true },
+							},
+							steps: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.request.body.x" } }],
+						},
+					});
+					tracker.recordWorkflowSample({
+						workflowName: "echo",
+						body: { recorded: true },
+						sourceRunId: "run_1",
+						recordedAt: Date.now(),
+					});
+
+					const req = new MockRequest({ params: { name: "echo" } });
+					const res = new MockResponse();
+					router.findHandler("GET", "/workflows/:name")!(req, res);
+
+					const body = res.jsonBody as any;
+					expect(body.examples.source).toBe("author");
+					expect(body.examples.body).toEqual(authorBody);
+				});
+
+				it("falls back to inferred when no recording + no author override", () => {
+					WorkflowRegistry.getInstance().register({
+						name: "echo",
+						source: "<test>",
+						workflow: {
+							name: "echo",
+							trigger: { http: { method: "POST", path: "/echo" } },
+							steps: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.request.body.user.id" } }],
+						},
+					});
+
+					const req = new MockRequest({ params: { name: "echo" } });
+					const res = new MockResponse();
+					router.findHandler("GET", "/workflows/:name")!(req, res);
+
+					const body = res.jsonBody as any;
+					expect(body.examples.source).toBe("inferred");
+					expect(body.examples.body).toEqual({ user: { id: "string" } });
+				});
+			});
 		});
 	});
 

@@ -167,7 +167,7 @@ function WorkflowDetailPage() {
 							}
 							snippets={[
 								{
-									lang: detail.examples?.source === "author" ? "curl · http (example body)" : "curl · http",
+									lang: curlLabel(detail.examples?.source),
 									code: buildCurlSnippet(detail),
 								},
 							]}
@@ -229,9 +229,23 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 }
 
 /**
+ * Pick a clearer language label per body provenance. Authors who
+ * declared an explicit `trigger.http.examples.body` get a callout
+ * that their example body is in use; operators who opted into
+ * `recordSample` see the "(recorded)" tag so they know the curl
+ * came from a real successful run. Static inference + empty stay
+ * unlabelled — they're the default heuristic state.
+ */
+function curlLabel(source: "author" | "recorded" | "inferred" | "empty" | undefined): string {
+	if (source === "author") return "curl · http (example body)";
+	if (source === "recorded") return "curl · http (recorded body)";
+	return "curl · http";
+}
+
+/**
  * Build the empty-state curl example. The body is `detail.examples.body`
- * (server-side inferred or author-declared); the method + path come
- * from the workflow definition's `trigger.http` config; the host
+ * (server-side inferred / recorded / author-declared); the method + path
+ * come from the workflow definition's `trigger.http` config; the host
  * defaults to the dev orchestrator's `http://localhost:4000`. Falls
  * back to a sensible POST / `${name}` / `{}` shape when the definition
  * is unavailable (legacy deployments where the registry didn't seed
@@ -273,5 +287,5 @@ interface WorkflowDetailLike {
 	name: string;
 	path?: string;
 	definition?: unknown;
-	examples?: { body: unknown; source: "author" | "inferred" | "empty" };
+	examples?: { body: unknown; source: "author" | "recorded" | "inferred" | "empty" };
 }

@@ -22,6 +22,7 @@ import type {
 	StartRunOptions,
 	TraceLogEntry,
 	WorkflowRun,
+	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
 
@@ -1129,6 +1130,20 @@ export class RunTracker extends EventEmitter {
 
 	deleteSavedFilter(name: string): boolean {
 		return this.store.deleteSavedFilter(name);
+	}
+
+	// === Sample-body recording (option C, delegated to store) ===
+
+	recordWorkflowSample(sample: WorkflowSample): WorkflowSample {
+		return this.store.recordWorkflowSample(sample);
+	}
+
+	getWorkflowSample(workflowName: string): WorkflowSample | undefined {
+		return this.store.getWorkflowSample(workflowName);
+	}
+
+	deleteWorkflowSample(workflowName: string): boolean {
+		return this.store.deleteWorkflowSample(workflowName);
 	}
 
 	// === Webhooks ===

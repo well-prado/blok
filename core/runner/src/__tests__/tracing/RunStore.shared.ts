@@ -933,5 +933,80 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(store.deleteSavedFilter("nonexistent")).toBe(false);
 			});
 		});
+
+		// Sample-body recording (option C follow-up to #100). First-
+		// record-wins semantic — each workflow has at most one row,
+		// captured on its first successful run. Re-recording is a no-op
+		// so the operator-visible curl example stays stable.
+		describe("workflow samples (option C)", () => {
+			function sampleAt(
+				name: string,
+				body: unknown,
+				recordedAt = Date.now(),
+			): {
+				workflowName: string;
+				body: unknown;
+				sourceRunId: string;
+				recordedAt: number;
+			} {
+				return { workflowName: name, body, sourceRunId: `run_${recordedAt}`, recordedAt };
+			}
+
+			it("getWorkflowSample returns undefined for a workflow with no recording", () => {
+				expect(store.getWorkflowSample("never-run")).toBeUndefined();
+			});
+
+			it("recordWorkflowSample persists the body + source run id", () => {
+				const body = { event: { id: "evt_1" }, count: 3 };
+				const persisted = store.recordWorkflowSample(sampleAt("orders", body, 1000));
+				expect(persisted.workflowName).toBe("orders");
+				expect(persisted.body).toEqual(body);
+				expect(persisted.sourceRunId).toBe("run_1000");
+				expect(store.getWorkflowSample("orders")?.body).toEqual(body);
+			});
+
+			it("re-recording the SAME workflow is a no-op (first-record-wins)", () => {
+				const first = store.recordWorkflowSample(sampleAt("orders", { v: 1 }, 1000));
+				const second = store.recordWorkflowSample(sampleAt("orders", { v: 2 }, 2000));
+				// The second recordWorkflowSample returns the EXISTING
+				// row, not the new one. The stored body is still v:1.
+				expect(second.body).toEqual({ v: 1 });
+				expect(second.recordedAt).toBe(first.recordedAt);
+				expect(store.getWorkflowSample("orders")?.body).toEqual({ v: 1 });
+			});
+
+			it("different workflows record independently", () => {
+				store.recordWorkflowSample(sampleAt("orders", { o: 1 }, 1000));
+				store.recordWorkflowSample(sampleAt("users", { u: 1 }, 1001));
+				expect(store.getWorkflowSample("orders")?.body).toEqual({ o: 1 });
+				expect(store.getWorkflowSample("users")?.body).toEqual({ u: 1 });
+			});
+
+			it("deleteWorkflowSample removes the row and returns true", () => {
+				store.recordWorkflowSample(sampleAt("orders", { o: 1 }, 1000));
+				expect(store.deleteWorkflowSample("orders")).toBe(true);
+				expect(store.getWorkflowSample("orders")).toBeUndefined();
+			});
+
+			it("deleteWorkflowSample returns false when no row exists", () => {
+				expect(store.deleteWorkflowSample("nothing-to-delete")).toBe(false);
+			});
+
+			it("after delete, re-recording captures a NEW body (escape hatch path)", () => {
+				store.recordWorkflowSample(sampleAt("orders", { v: 1 }, 1000));
+				store.deleteWorkflowSample("orders");
+				const reRecord = store.recordWorkflowSample(sampleAt("orders", { v: 2 }, 2000));
+				expect(reRecord.body).toEqual({ v: 2 });
+			});
+
+			it("records non-primitive bodies (arrays, nested objects) verbatim", () => {
+				const body = {
+					event: { type: "order.created", payload: { items: [{ sku: "A", qty: 2 }] } },
+					meta: { ip: "127.0.0.1" },
+				};
+				store.recordWorkflowSample(sampleAt("complex", body, 1000));
+				expect(store.getWorkflowSample("complex")?.body).toEqual(body);
+			});
+		});
 	});
 }
