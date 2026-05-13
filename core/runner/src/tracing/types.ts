@@ -826,6 +826,33 @@ export interface Dashboard {
 	widgets: DashboardWidget[];
 }
 
+/**
+ * E2 — server-side saved filter for the runs list. Mirrors the
+ * earlier localStorage shape (`apps/studio/src/lib/savedFilters.ts`)
+ * with `id` + timestamps added. Filter names are UNIQUE across the
+ * deployment — re-saving overwrites the existing row. Studio applies
+ * them by setting the run-list filter UI from the stored values.
+ */
+export interface SavedFilter {
+	id: string;
+	name: string;
+	/** Workflow run status (`""` for "all"). */
+	status: string;
+	/**
+	 * Free-form tag input as the user typed it ("env:prod,team:billing").
+	 * Server stores it verbatim; the run-list URL parser interprets it.
+	 */
+	tagsInput: string;
+	/**
+	 * Free-form metadata input as the user typed it
+	 * ("tier=premium,region__in=us,eu"). Same parsing contract as the
+	 * runs-page URL — `MetadataFilter[]` once parsed.
+	 */
+	metadataInput: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
 // === Store Query Types ===
 
 /**

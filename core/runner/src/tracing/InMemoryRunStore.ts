@@ -8,6 +8,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
@@ -27,6 +28,10 @@ export class InMemoryRunStore implements RunStore {
 	private events: Map<string, RunEvent[]> = new Map(); // runId → RunEvent[]
 	private logs: Map<string, TraceLogEntry[]> = new Map(); // runId → LogEntry[]
 	private dashboards: Map<string, Dashboard> = new Map();
+	// E2 · saved filters keyed by `name` (unique). Matches the sqlite
+	// store's UNIQUE(name) constraint so upsert-by-name semantics are
+	// preserved across backends.
+	private savedFilters: Map<string, SavedFilter> = new Map();
 	private idempotencyCache: Map<string, CachedStepResult> = new Map();
 	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
 	private scheduledDispatches: Map<string, ScheduledDispatchRow> = new Map();
@@ -376,6 +381,28 @@ export class InMemoryRunStore implements RunStore {
 		Object.assign(dashboard, updates, { updatedAt: Date.now() });
 	}
 
+	// === Saved filters (E2) ===
+
+	upsertSavedFilter(filter: SavedFilter): SavedFilter {
+		// Preserve the existing entry's `id` + `createdAt` on overwrite
+		// so the caller's freshly-minted id is dropped when the row
+		// already exists. Matches the Sqlite store's UPSERT semantics.
+		const existing = this.savedFilters.get(filter.name);
+		const merged: SavedFilter = existing
+			? { ...filter, id: existing.id, createdAt: existing.createdAt }
+			: { ...filter };
+		this.savedFilters.set(merged.name, merged);
+		return merged;
+	}
+
+	listSavedFilters(): SavedFilter[] {
+		return Array.from(this.savedFilters.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+	}
+
+	deleteSavedFilter(name: string): boolean {
+		return this.savedFilters.delete(name);
+	}
+
 	// === Cleanup ===
 
 	clearAll(): number {
@@ -386,6 +413,7 @@ export class InMemoryRunStore implements RunStore {
 		this.events.clear();
 		this.logs.clear();
 		this.dashboards.clear();
+		this.savedFilters.clear();
 		this.idempotencyCache.clear();
 		this.concurrencyLocks.clear();
 		return count;

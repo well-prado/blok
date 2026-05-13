@@ -1595,6 +1595,69 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		res.status(201).json(copy);
 	});
 
+	// === Saved filters (E2) ===
+
+	/**
+	 * List every saved filter. Newest-updated first so the dropdown
+	 * surfaces recently-edited presets at the top.
+	 * GET /__blok/saved-filters
+	 */
+	router.get("/saved-filters", (_req: TraceRequest, res: TraceResponse) => {
+		res.json({ filters: t.listSavedFilters() });
+	});
+
+	/**
+	 * Upsert a saved filter. `name` is the unique key — re-posting with
+	 * the same name overwrites the existing entry (preserves `id` +
+	 * `createdAt`). Studio uses this to replace the localStorage
+	 * `saveFilter()` call.
+	 * POST /__blok/saved-filters
+	 * Body: { name, status, tagsInput, metadataInput }
+	 */
+	router.post("/saved-filters", (req: TraceRequest, res: TraceResponse) => {
+		const body = (req.body || {}) as {
+			name?: unknown;
+			status?: unknown;
+			tagsInput?: unknown;
+			metadataInput?: unknown;
+		};
+
+		const name = typeof body.name === "string" ? body.name.trim() : "";
+		if (name.length === 0) {
+			res.status(400).json({ error: "Saved-filter `name` is required" });
+			return;
+		}
+
+		const now = Date.now();
+		const persisted = t.upsertSavedFilter({
+			id: `sf_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+			name,
+			status: typeof body.status === "string" ? body.status : "",
+			tagsInput: typeof body.tagsInput === "string" ? body.tagsInput : "",
+			metadataInput: typeof body.metadataInput === "string" ? body.metadataInput : "",
+			createdAt: now,
+			updatedAt: now,
+		});
+
+		res.status(201).json(persisted);
+	});
+
+	/**
+	 * Delete a saved filter by name. Returns `404` when the row didn't
+	 * exist (so the Studio mutation can disambiguate). Uses the name
+	 * (not the id) so the Studio component — which knows the name from
+	 * the dropdown — doesn't need a round-trip to learn the id first.
+	 * DELETE /__blok/saved-filters/:name
+	 */
+	router.delete("/saved-filters/:name", (req: TraceRequest, res: TraceResponse) => {
+		const removed = t.deleteSavedFilter(req.params.name);
+		if (!removed) {
+			res.status(404).json({ error: `Saved filter '${req.params.name}' not found` });
+			return;
+		}
+		res.json({ deleted: true });
+	});
+
 	// === SSE Endpoints ===
 
 	/**

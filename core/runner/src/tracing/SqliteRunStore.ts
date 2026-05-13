@@ -13,6 +13,7 @@ import type {
 	RunEvent,
 	RunEventType,
 	RunQuery,
+	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
@@ -205,6 +206,16 @@ interface DashboardRow {
 	created_at: number;
 	updated_at: number;
 	widgets_json: string;
+}
+
+interface SavedFilterRow {
+	id: string;
+	name: string;
+	status: string;
+	tags_input: string;
+	metadata_input: string;
+	created_at: number;
+	updated_at: number;
 }
 
 const isBun = "Bun" in globalThis;
@@ -706,6 +717,26 @@ export class SqliteRunStore implements RunStore {
 					ALTER TABLE scheduled_dispatches ADD COLUMN claimed_by TEXT;
 					ALTER TABLE scheduled_dispatches ADD COLUMN claimed_at INTEGER;
 					CREATE INDEX IF NOT EXISTS idx_scheduled_dispatches_claim ON scheduled_dispatches(claimed_by, claimed_at);
+				`,
+			},
+			{
+				// E2 · server-side saved filters for the runs list. Replaces
+				// the prior `localStorage` impl in Studio so filter presets
+				// survive a fresh browser. `name` is UNIQUE — saving with an
+				// existing name overwrites the row (matches the localStorage
+				// "replace by name" semantics callers already rely on).
+				version: 14,
+				sql: `
+					CREATE TABLE IF NOT EXISTS trace_saved_filters (
+						id TEXT PRIMARY KEY,
+						name TEXT NOT NULL UNIQUE,
+						status TEXT NOT NULL DEFAULT '',
+						tags_input TEXT NOT NULL DEFAULT '',
+						metadata_input TEXT NOT NULL DEFAULT '',
+						created_at INTEGER NOT NULL,
+						updated_at INTEGER NOT NULL
+					);
+					CREATE INDEX IF NOT EXISTS idx_saved_filters_updated_at ON trace_saved_filters(updated_at);
 				`,
 			},
 		];
@@ -1427,6 +1458,62 @@ export class SqliteRunStore implements RunStore {
 		this.db.prepare(`UPDATE dashboards SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
 	}
 
+	// === Saved filters (E2) ===
+
+	upsertSavedFilter(filter: SavedFilter): SavedFilter {
+		// UNIQUE(name) lets us collapse "create or overwrite" into one
+		// UPSERT — preserves the existing `id` + `created_at` when the
+		// name matches, bumps `updated_at` to now. Matches the legacy
+		// localStorage replace-by-name semantics callers depend on.
+		const persisted = this.db.transaction((f: SavedFilter): SavedFilter => {
+			const existing = this.db.prepare("SELECT id, created_at FROM trace_saved_filters WHERE name = ?").get(f.name) as
+				| { id: string; created_at: number }
+				| undefined;
+
+			const id = existing?.id ?? f.id;
+			const createdAt = existing?.created_at ?? f.createdAt;
+			const updatedAt = f.updatedAt;
+
+			this.db
+				.prepare(
+					`
+					INSERT INTO trace_saved_filters
+						(id, name, status, tags_input, metadata_input, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT(name) DO UPDATE SET
+						status = excluded.status,
+						tags_input = excluded.tags_input,
+						metadata_input = excluded.metadata_input,
+						updated_at = excluded.updated_at
+				`,
+				)
+				.run(id, f.name, f.status, f.tagsInput, f.metadataInput, createdAt, updatedAt);
+
+			return {
+				id,
+				name: f.name,
+				status: f.status,
+				tagsInput: f.tagsInput,
+				metadataInput: f.metadataInput,
+				createdAt,
+				updatedAt,
+			};
+		})(filter);
+		return persisted;
+	}
+
+	listSavedFilters(): SavedFilter[] {
+		const rows = this.db
+			.prepare("SELECT * FROM trace_saved_filters ORDER BY updated_at DESC")
+			.all() as unknown as SavedFilterRow[];
+		return rows.map((r) => rowToSavedFilter(r));
+	}
+
+	deleteSavedFilter(name: string): boolean {
+		const result = this.db.prepare("DELETE FROM trace_saved_filters WHERE name = ?").run(name);
+		return result.changes > 0;
+	}
+
 	// === Cleanup ===
 
 	clearAll(): number {
@@ -1896,4 +1983,16 @@ export class SqliteRunStore implements RunStore {
 			widgets: row.widgets_json ? JSON.parse(row.widgets_json) : [],
 		};
 	}
+}
+
+function rowToSavedFilter(row: SavedFilterRow): SavedFilter {
+	return {
+		id: row.id,
+		name: row.name,
+		status: row.status,
+		tagsInput: row.tags_input,
+		metadataInput: row.metadata_input,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
 }

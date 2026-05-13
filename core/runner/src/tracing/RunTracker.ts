@@ -17,6 +17,7 @@ import type {
 	RunEvent,
 	RunEventType,
 	RunQuery,
+	SavedFilter,
 	StartNodeOptions,
 	StartRunOptions,
 	TraceLogEntry,
@@ -1114,6 +1115,20 @@ export class RunTracker extends EventEmitter {
 
 	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void {
 		this.store.updateDashboard(dashboardId, updates);
+	}
+
+	// === Saved filters (E2, delegated to store) ===
+
+	upsertSavedFilter(filter: SavedFilter): SavedFilter {
+		return this.store.upsertSavedFilter(filter);
+	}
+
+	listSavedFilters(): SavedFilter[] {
+		return this.store.listSavedFilters();
+	}
+
+	deleteSavedFilter(name: string): boolean {
+		return this.store.deleteSavedFilter(name);
 	}
 
 	// === Webhooks ===

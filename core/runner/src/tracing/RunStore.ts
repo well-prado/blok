@@ -6,6 +6,7 @@ import type {
 	NodeRun,
 	RunEvent,
 	RunQuery,
+	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
 	WorkflowRun,
@@ -52,6 +53,24 @@ export interface RunStore {
 	listDashboards(): Dashboard[];
 	deleteDashboard(dashboardId: string): boolean;
 	updateDashboard(dashboardId: string, updates: Partial<Dashboard>): void;
+
+	// === Saved filters (E2) ===
+	/**
+	 * Upsert a saved filter by `name`. Re-saving with an existing name
+	 * overwrites the row (preserves the original `id` + `createdAt` and
+	 * bumps `updatedAt`). Returns the persisted entry.
+	 */
+	upsertSavedFilter(filter: SavedFilter): SavedFilter;
+	/**
+	 * Snapshot of every saved filter, sorted by `updatedAt` DESC so the
+	 * most recently changed presets surface first.
+	 */
+	listSavedFilters(): SavedFilter[];
+	/**
+	 * Delete a saved filter by its UNIQUE `name`. Returns `true` if a row
+	 * was removed.
+	 */
+	deleteSavedFilter(name: string): boolean;
 
 	// === Sub-workflow lineage (Tier 2) ===
 	/**

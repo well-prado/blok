@@ -2274,6 +2274,83 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	// === Saved Filters (E2) ===
+
+	describe("Saved Filters", () => {
+		it("POST /saved-filters creates a new filter with name + status + inputs", () => {
+			const req = new MockRequest({
+				body: {
+					name: "premium-running",
+					status: "running",
+					tagsInput: "tier:premium",
+					metadataInput: "tier=premium",
+				},
+			});
+			const res = new MockResponse();
+			router.findHandler("POST", "/saved-filters")!(req, res);
+
+			expect(res.statusCode).toBe(201);
+			const body = res.jsonBody as any;
+			expect(body.name).toBe("premium-running");
+			expect(body.status).toBe("running");
+			expect(body.id).toMatch(/^sf_/);
+			expect(typeof body.createdAt).toBe("number");
+			expect(typeof body.updatedAt).toBe("number");
+		});
+
+		it("POST /saved-filters returns 400 when name is missing or whitespace-only", () => {
+			for (const body of [{ name: "" }, { name: "   " }, {}]) {
+				const req = new MockRequest({ body });
+				const res = new MockResponse();
+				router.findHandler("POST", "/saved-filters")!(req, res);
+				expect(res.statusCode).toBe(400);
+			}
+		});
+
+		it("POST /saved-filters with an existing name OVERWRITES the row in place (preserves id)", () => {
+			const first = new MockResponse();
+			router.findHandler("POST", "/saved-filters")!(
+				new MockRequest({ body: { name: "tenant-A", status: "running" } }),
+				first,
+			);
+			const firstId = (first.jsonBody as any).id;
+
+			const second = new MockResponse();
+			router.findHandler("POST", "/saved-filters")!(
+				new MockRequest({ body: { name: "tenant-A", status: "failed" } }),
+				second,
+			);
+			expect((second.jsonBody as any).id).toBe(firstId);
+			expect((second.jsonBody as any).status).toBe("failed");
+		});
+
+		it("GET /saved-filters lists every saved filter newest-updated first", () => {
+			// Create three.
+			for (const name of ["one", "two", "three"]) {
+				router.findHandler("POST", "/saved-filters")!(new MockRequest({ body: { name } }), new MockResponse());
+			}
+			const res = new MockResponse();
+			router.findHandler("GET", "/saved-filters")!(new MockRequest({}), res);
+			const body = res.jsonBody as any;
+			expect(Array.isArray(body.filters)).toBe(true);
+			expect(body.filters.length).toBeGreaterThanOrEqual(3);
+		});
+
+		it("DELETE /saved-filters/:name removes the row", () => {
+			router.findHandler("POST", "/saved-filters")!(new MockRequest({ body: { name: "doomed" } }), new MockResponse());
+			const delRes = new MockResponse();
+			router.findHandler("DELETE", "/saved-filters/:name")!(new MockRequest({ params: { name: "doomed" } }), delRes);
+			expect(delRes.statusCode).toBe(200);
+			expect(delRes.jsonBody).toEqual({ deleted: true });
+		});
+
+		it("DELETE /saved-filters/:name returns 404 for unknown name", () => {
+			const res = new MockResponse();
+			router.findHandler("DELETE", "/saved-filters/:name")!(new MockRequest({ params: { name: "nonexistent" } }), res);
+			expect(res.statusCode).toBe(404);
+		});
+	});
+
 	// === Route Registration ===
 
 	describe("Route registration", () => {
@@ -2294,6 +2371,11 @@ describe("TraceRouter", () => {
 			expect(routePaths).toContain("GET /runs/:runId");
 			expect(routePaths).toContain("GET /runs/:runId/events");
 			expect(routePaths).toContain("DELETE /runs");
+
+			// Saved Filters (E2)
+			expect(routePaths).toContain("GET /saved-filters");
+			expect(routePaths).toContain("POST /saved-filters");
+			expect(routePaths).toContain("DELETE /saved-filters/:name");
 
 			// Diff
 			expect(routePaths).toContain("GET /runs/diff");
