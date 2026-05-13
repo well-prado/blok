@@ -8,6 +8,7 @@ import type {
 	RunDetail,
 	RunEvent,
 	RunListResponse,
+	ScheduledDispatchesResponse,
 	TagsResponse,
 	Webhook,
 	WebhooksResponse,
@@ -257,6 +258,54 @@ export function replayRun(
 		headers: { "Content-Type": "application/json" },
 		body: overrides ? JSON.stringify(overrides) : undefined,
 	});
+}
+
+// === Cancellation ===
+
+export interface CancelRunResponse {
+	cancelled: boolean;
+	runId: string;
+	previousStatus: string;
+	newStatus: "cancelled";
+}
+
+/**
+ * Cancel a pending (delayed / debounced / queued) or running run.
+ * Backend: `POST /__blok/runs/:runId/cancel`. The endpoint flips the
+ * run's status to `"cancelled"` AND cancels the underlying scheduler
+ * entry (`DeferredRunScheduler` / `DebounceCoordinator`) so the timer
+ * doesn't fire later. Terminal states (completed / failed / expired /
+ * crashed / timedOut) are non-cancellable — the endpoint returns 400.
+ */
+export function cancelRun(runId: string): Promise<CancelRunResponse> {
+	return fetchJson(`/runs/${encodeURIComponent(runId)}/cancel`, {
+		method: "POST",
+	});
+}
+
+// === Scheduled dispatches (E1) ===
+
+/**
+ * List pending scheduled dispatches — rows from `scheduled_dispatches`
+ * that haven't fired yet. Powers Studio's "Scheduled" page so operators
+ * can see + cancel inbound dispatches before they execute. Fired
+ * runs are pruned from this table immediately; expired runs are pruned
+ * by the Janitor. To see those, use the regular `/runs` view filtered
+ * by `status=completed` / `status=expired` / etc.
+ */
+export function fetchScheduledDispatches(params?: {
+	status?: string[];
+	workflowName?: string;
+	limit?: number;
+	offset?: number;
+}): Promise<ScheduledDispatchesResponse> {
+	const query = new URLSearchParams();
+	if (params?.status && params.status.length > 0) query.set("status", params.status.join(","));
+	if (params?.workflowName) query.set("workflowName", params.workflowName);
+	if (params?.limit) query.set("limit", String(params.limit));
+	if (params?.offset) query.set("offset", String(params.offset));
+	const qs = query.toString();
+	return fetchJson(`/scheduled${qs ? `?${qs}` : ""}`);
 }
 
 // === Search ===

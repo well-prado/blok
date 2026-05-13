@@ -315,6 +315,34 @@ export interface RunListResponse {
 	page: number;
 }
 
+/**
+ * Mirrors `ScheduledDispatchRow` in `core/runner/src/tracing/types.ts`.
+ * Returned by `GET /__blok/scheduled` for the Studio "Scheduled runs"
+ * view (E1).
+ */
+export interface ScheduledDispatchRow {
+	runId: string;
+	workflowName: string;
+	triggerType: string;
+	scheduledAt: number;
+	expiresAt?: number;
+	dispatchStatus: "delayed" | "queued" | "debounced";
+	payload: unknown;
+	createdAt: number;
+	claimedBy?: string;
+	claimedAt?: number;
+}
+
+export interface ScheduledDispatchesResponse {
+	rows: ScheduledDispatchRow[];
+	total: number;
+	/**
+	 * Server-side `Date.now()` snapshot. Used by the client to render
+	 * accurate "fires in 27s" countdowns without clock skew.
+	 */
+	now: number;
+}
+
 export interface HealthResponse {
 	status: string;
 	version: string;

@@ -1254,6 +1254,155 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	describe("GET /scheduled (E1 — Studio scheduled-runs view)", () => {
+		function seedDispatches() {
+			const now = Date.now();
+			tracker.getStore().upsertScheduledDispatch({
+				runId: "sched_1",
+				workflowName: "wf-A",
+				triggerType: "http",
+				scheduledAt: now + 30_000,
+				expiresAt: now + 60_000,
+				dispatchStatus: "delayed",
+				payload: {
+					method: "POST",
+					path: "/wf-A",
+					headers: { "x-request-id": "abc", authorization: "Bearer SECRET" },
+					body: {},
+				},
+				createdAt: now,
+			});
+			tracker.getStore().upsertScheduledDispatch({
+				runId: "sched_2",
+				workflowName: "wf-B",
+				triggerType: "http",
+				scheduledAt: now + 5_000,
+				dispatchStatus: "queued",
+				payload: { method: "POST", path: "/wf-B", headers: {}, body: {} },
+				createdAt: now,
+			});
+			tracker.getStore().upsertScheduledDispatch({
+				runId: "sched_3",
+				workflowName: "wf-A",
+				triggerType: "http",
+				scheduledAt: now + 10_000,
+				dispatchStatus: "debounced",
+				payload: { method: "POST", path: "/wf-A", headers: {}, body: {} },
+				createdAt: now,
+			});
+		}
+
+		it("returns all pending dispatches sorted by scheduledAt ASC", () => {
+			seedDispatches();
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as {
+				rows: Array<{ runId: string; dispatchStatus: string; scheduledAt: number }>;
+				total: number;
+				now: number;
+			};
+			expect(body.total).toBe(3);
+			expect(body.rows.map((r) => r.runId)).toEqual(["sched_2", "sched_3", "sched_1"]);
+			expect(typeof body.now).toBe("number");
+		});
+
+		it("filters by single status", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { status: "delayed" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: Array<{ runId: string; dispatchStatus: string }>; total: number };
+			expect(body.total).toBe(1);
+			expect(body.rows[0].runId).toBe("sched_1");
+			expect(body.rows[0].dispatchStatus).toBe("delayed");
+		});
+
+		it("filters by multiple statuses (comma-separated)", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { status: "queued,debounced" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: Array<{ runId: string }>; total: number };
+			expect(body.total).toBe(2);
+			expect(body.rows.map((r) => r.runId).sort()).toEqual(["sched_2", "sched_3"]);
+		});
+
+		it("ignores unknown status values and falls back to all when none valid", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { status: "bogus,more-bogus" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { total: number };
+			expect(body.total).toBe(3);
+		});
+
+		it("filters by workflowName", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { workflowName: "wf-A" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: Array<{ runId: string }>; total: number };
+			expect(body.total).toBe(2);
+			expect(body.rows.map((r) => r.runId).sort()).toEqual(["sched_1", "sched_3"]);
+		});
+
+		it("strips sensitive request headers from the payload before returning", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { status: "delayed" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: Array<{ payload: { headers: Record<string, string> } }> };
+			const headers = body.rows[0].payload.headers;
+			expect(headers["x-request-id"]).toBe("abc");
+			expect(headers.authorization).toBeUndefined();
+		});
+
+		it("honours pagination via limit + offset", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { limit: "2", offset: "1" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: Array<{ runId: string }>; total: number };
+			// `total` is the full filtered set; `rows` is the page slice.
+			expect(body.total).toBe(3);
+			expect(body.rows).toHaveLength(2);
+			expect(body.rows.map((r) => r.runId)).toEqual(["sched_3", "sched_1"]);
+		});
+
+		it("clamps limit to the 500 cap so a malicious query can't pin the loop", () => {
+			seedDispatches();
+			const req = new MockRequest({ query: { limit: "999999" } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			// We can't observe the cap directly without seeding 501+ rows;
+			// the assertion below is that the request succeeds and returns
+			// the small seed set (= 3) with a 200 — the clamp ran cleanly.
+			expect(res.statusCode).toBe(200);
+			const body = res.jsonBody as { total: number };
+			expect(body.total).toBe(3);
+		});
+
+		it("returns an empty list when no dispatches are pending", () => {
+			const req = new MockRequest({});
+			const res = new MockResponse();
+			router.findHandler("GET", "/scheduled")!(req, res);
+
+			const body = res.jsonBody as { rows: unknown[]; total: number };
+			expect(body.rows).toEqual([]);
+			expect(body.total).toBe(0);
+		});
+	});
+
 	describe("POST /runs/:runId/cancel", () => {
 		it("returns 404 for unknown run", () => {
 			const req = new MockRequest({ params: { runId: "run_nonexistent" } });

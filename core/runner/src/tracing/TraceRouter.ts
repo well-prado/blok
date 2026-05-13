@@ -32,6 +32,42 @@ function filterReplayHeaders(headers: Record<string, string> | undefined): Recor
 }
 
 /**
+ * Coerce a query-string `?limit=...` / `?offset=...` value to a clamped
+ * integer. Strings parse via `Number.parseInt`; anything non-finite (or
+ * outside `[min, max]`) falls back to `fallback`. Used by paginated GET
+ * endpoints so Studio queries can't pin the event loop with absurd
+ * window sizes.
+ */
+function clampInt(raw: string | undefined, min: number, max: number, fallback: number): number {
+	if (typeof raw !== "string" || raw.length === 0) return fallback;
+	const n = Number.parseInt(raw, 10);
+	if (!Number.isFinite(n) || Number.isNaN(n)) return fallback;
+	if (n < min) return min;
+	if (n > max) return max;
+	return n;
+}
+
+/**
+ * Strip sensitive request headers from a scheduled-dispatch payload
+ * before serving it to Studio. `extractDispatchPayload` already strips
+ * these at PERSIST time (see `HttpTrigger.extractDispatchPayload`); we
+ * re-apply the denylist on read as a belt-and-braces guard against
+ * older sqlite rows that pre-date that strip path.
+ */
+function sanitizeDispatchPayload(payload: unknown): unknown {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+	const obj = payload as Record<string, unknown>;
+	const headers = obj.headers;
+	if (!headers || typeof headers !== "object" || Array.isArray(headers)) return payload;
+	const filtered: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+		if (REPLAY_HEADER_DENYLIST.has(k.toLowerCase())) continue;
+		filtered[k] = v;
+	}
+	return { ...obj, headers: filtered };
+}
+
+/**
  * Minimal interfaces matching the Express API surface used by trace routes.
  * This avoids a hard dependency on express in the runner package.
  */
@@ -983,6 +1019,73 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 				inFlight: b.leases.length,
 				leases: b.leases,
 			})),
+		});
+	});
+
+	/**
+	 * List pending scheduled dispatches — rows from `scheduled_dispatches`
+	 * that haven't fired yet (delayed / queued / debounced). Powers
+	 * Studio's "Scheduled runs" view (E1) so operators can see + cancel
+	 * inbound dispatches BEFORE they execute.
+	 *
+	 * Already-fired runs are pruned from this table the moment
+	 * `dispatchDeferred` re-enters; expired runs are pruned by the
+	 * Janitor sweep. To see those, use `/__blok/runs?status=expired` /
+	 * `?status=completed` / etc. against `workflow_runs`.
+	 *
+	 * GET /__blok/scheduled
+	 *
+	 * Query params:
+	 *   - `status` — comma-separated list of `delayed`/`queued`/`debounced`.
+	 *     When omitted, returns all three.
+	 *   - `workflowName` — exact-match filter.
+	 *   - `limit` — pagination cap (default 100, max 500).
+	 *   - `offset` — pagination offset (default 0).
+	 *
+	 * Returns:
+	 *   `{ rows: ScheduledDispatchRow[], total: number, now: number }`
+	 *   `now` is the server-side `Date.now()` snapshot so the client can
+	 *   render accurate "fires in 27s" countdowns without clock skew.
+	 */
+	router.get("/scheduled", (req: TraceRequest, res: TraceResponse) => {
+		const query = (req.query ?? {}) as Record<string, string | undefined>;
+		const validStatuses = new Set(["delayed", "queued", "debounced"]);
+
+		const requestedStatuses = (query.status ?? "")
+			.split(",")
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0 && validStatuses.has(s));
+		const statusesToReturn = requestedStatuses.length > 0 ? requestedStatuses : ["delayed", "queued", "debounced"];
+
+		// Pull each requested status separately — the underlying
+		// `getScheduledDispatches({status})` only accepts a single status
+		// string. Concatenate + sort by scheduledAt ASC so the soonest
+		// next-fire is at the top of the table.
+		const store = t.getStore();
+		const allRows = statusesToReturn.flatMap((status) =>
+			store.getScheduledDispatches({ status: status as "delayed" | "queued" | "debounced" }),
+		);
+
+		const workflowFilter = typeof query.workflowName === "string" ? query.workflowName : undefined;
+		const filtered = workflowFilter ? allRows.filter((r) => r.workflowName === workflowFilter) : allRows;
+		filtered.sort((a, b) => a.scheduledAt - b.scheduledAt);
+
+		// Pagination — the underlying store does full scans today; cap at
+		// 500 so a runaway query can't pin the event loop.
+		const limit = clampInt(query.limit, 1, 500, 100);
+		const offset = clampInt(query.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+		const page = filtered.slice(offset, offset + limit);
+
+		// Sensitive headers are already stripped at persist time
+		// (see `extractDispatchPayload` in HttpTrigger). Re-strip on read
+		// too as a belt-and-braces measure — operators should never see
+		// `authorization` / `cookie` / `x-api-key` in the Studio UI.
+		const sanitized = page.map((row) => ({ ...row, payload: sanitizeDispatchPayload(row.payload) }));
+
+		res.json({
+			rows: sanitized,
+			total: filtered.length,
+			now: Date.now(),
 		});
 	});
 
