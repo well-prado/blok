@@ -446,6 +446,146 @@ describe("TraceRouter", () => {
 			// Ascending: first run should have earliest startedAt
 			expect(body.runs[0].startedAt).toBeLessThanOrEqual(body.runs[1].startedAt);
 		});
+
+		describe("F2 metadata operator filters", () => {
+			beforeEach(() => {
+				// Seed three runs with metadata fields the operator tests
+				// can pivot on. saveRun directly so we don't trip
+				// `evictOldRuns` or run-tracker side effects.
+				const store = tracker.getStore();
+				store.saveRun({
+					id: "run_meta_1",
+					workflowName: "wf",
+					workflowPath: "/wf",
+					triggerType: "http",
+					triggerSummary: "POST /wf",
+					status: "completed",
+					startedAt: Date.now(),
+					nodeCount: 1,
+					completedNodes: 1,
+					metadata: { tier: "premium", region: "us", count: "5" },
+				});
+				store.saveRun({
+					id: "run_meta_2",
+					workflowName: "wf",
+					workflowPath: "/wf",
+					triggerType: "http",
+					triggerSummary: "POST /wf",
+					status: "completed",
+					startedAt: Date.now(),
+					nodeCount: 1,
+					completedNodes: 1,
+					metadata: { tier: "free", region: "eu", count: "20" },
+				});
+				store.saveRun({
+					id: "run_meta_3",
+					workflowName: "wf",
+					workflowPath: "/wf",
+					triggerType: "http",
+					triggerSummary: "POST /wf",
+					status: "completed",
+					startedAt: Date.now(),
+					nodeCount: 1,
+					completedNodes: 1,
+					metadata: { tier: "enterprise", region: "ap", count: "100" },
+				});
+			});
+
+			it("parses `metadata.<key>=<value>` as `op: 'eq'` (back-compat)", () => {
+				const req = new MockRequest({ query: { "metadata.tier": "premium" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs.map((r: any) => r.id).filter((id: string) => id.startsWith("run_meta_"));
+				expect(ids).toEqual(["run_meta_1"]);
+			});
+
+			it("parses `metadata.<key>__ne` as not-equal", () => {
+				const req = new MockRequest({ query: { "metadata.tier__ne": "free" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs
+					.map((r: any) => r.id)
+					.filter((id: string) => id.startsWith("run_meta_"))
+					.sort();
+				expect(ids).toEqual(["run_meta_1", "run_meta_3"]);
+			});
+
+			it("parses `metadata.<key>__gt` and treats values as numeric", () => {
+				const req = new MockRequest({ query: { "metadata.count__gt": "10" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs
+					.map((r: any) => r.id)
+					.filter((id: string) => id.startsWith("run_meta_"))
+					.sort();
+				expect(ids).toEqual(["run_meta_2", "run_meta_3"]);
+			});
+
+			it("parses `metadata.<key>__in` with comma-separated values", () => {
+				const req = new MockRequest({ query: { "metadata.region__in": "us,eu" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs
+					.map((r: any) => r.id)
+					.filter((id: string) => id.startsWith("run_meta_"))
+					.sort();
+				expect(ids).toEqual(["run_meta_1", "run_meta_2"]);
+			});
+
+			it("parses `metadata.<key>__like` with `%` wildcard", () => {
+				const req = new MockRequest({ query: { "metadata.tier__like": "enter%" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs
+					.map((r: any) => r.id)
+					.filter((id: string) => id.startsWith("run_meta_"))
+					.sort();
+				// Only "enterprise" matches the `enter%` pattern.
+				expect(ids).toEqual(["run_meta_3"]);
+			});
+
+			it("unknown operator suffix treats the full remainder as a literal key", () => {
+				// `metadata.tier__bogus=premium` → operator "bogus" isn't in
+				// the operator set, so the parser falls through and uses
+				// `tier__bogus` as the metadata key with `op: "eq"`. That
+				// key passes the JSON-path-safe regex (underscores allowed)
+				// but no run has a field by that name, so the result is
+				// empty. Operators with a real typo see the empty result
+				// instead of silently getting the full table back.
+				const req = new MockRequest({ query: { "metadata.tier__bogus": "premium" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs.map((r: any) => r.id).filter((id: string) => id.startsWith("run_meta_"));
+				expect(ids).toHaveLength(0);
+			});
+
+			it("multiple operator filters combine with AND across keys", () => {
+				const req = new MockRequest({
+					query: {
+						"metadata.tier__ne": "free",
+						"metadata.count__lt": "50",
+					},
+				});
+				const res = new MockResponse();
+				router.findHandler("GET", "/runs")!(req, res);
+
+				const body = res.jsonBody as any;
+				const ids = body.runs.map((r: any) => r.id).filter((id: string) => id.startsWith("run_meta_"));
+				expect(ids).toEqual(["run_meta_1"]);
+			});
+		});
 	});
 
 	describe("GET /runs/:runId", () => {

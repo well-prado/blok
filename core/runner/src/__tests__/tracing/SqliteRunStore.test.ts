@@ -245,3 +245,158 @@ describe("SqliteRunStore: state_snapshot column (migration v11)", () => {
 		store2.close();
 	});
 });
+
+// F1 (v0.5) — indexed metadata generated columns + indexes.
+describe("SqliteRunStore: indexed metadata keys (F1)", () => {
+	function makeRun(id: string, metadata: Record<string, unknown>) {
+		return {
+			id,
+			workflowName: "wf",
+			workflowPath: "/wf",
+			triggerType: "http" as const,
+			triggerSummary: "POST /wf",
+			status: "completed" as const,
+			startedAt: Date.now(),
+			nodeCount: 1,
+			completedNodes: 1,
+			metadata,
+		};
+	}
+
+	/**
+	 * Narrow shape of the bits of `better-sqlite3` / `bun:sqlite` we
+	 * read here — just enough to introspect the schema via PRAGMAs.
+	 * Stays on the safe `as unknown as <T>` boundary-cast path required
+	 * by the repo's no-`any`-in-tests rule.
+	 */
+	interface SqliteIntrospectDb {
+		prepare(sql: string): { all(): unknown[] };
+	}
+
+	function pragmaColumns(store: SqliteRunStore): string[] {
+		const db = (store as unknown as { db: SqliteIntrospectDb }).db;
+		// `table_xinfo` reports both visible AND hidden columns.
+		// Virtual generated columns (the F1 indexed metadata columns)
+		// are hidden columns under SQLite's classification, so the
+		// shorter `table_info` would silently skip them.
+		return db
+			.prepare("PRAGMA table_xinfo(workflow_runs)")
+			.all()
+			.map((r) => (r as { name: string }).name);
+	}
+
+	function pragmaIndexes(store: SqliteRunStore): string[] {
+		const db = (store as unknown as { db: SqliteIntrospectDb }).db;
+		return db
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'workflow_runs'")
+			.all()
+			.map((r) => (r as { name: string }).name);
+	}
+
+	function withStore<T>(opts: { indexedMetadataKeys?: string[] }, fn: (store: SqliteRunStore, dbPath: string) => T): T {
+		if (!existsSync(TEST_DB_DIR)) mkdirSync(TEST_DB_DIR, { recursive: true });
+		const dbPath = join(TEST_DB_DIR, `indexed-${Date.now()}-${dbCounter++}.db`);
+		const store = new SqliteRunStore(dbPath, opts);
+		try {
+			return fn(store, dbPath);
+		} finally {
+			store.close();
+		}
+	}
+
+	it("creates a generated column + index for each declared key", () => {
+		withStore({ indexedMetadataKeys: ["tier", "region"] }, (store) => {
+			const cols = pragmaColumns(store);
+			expect(cols).toContain("metadata_tier_idx");
+			expect(cols).toContain("metadata_region_idx");
+			const idxs = pragmaIndexes(store);
+			expect(idxs).toContain("idx_workflow_runs_metadata_tier");
+			expect(idxs).toContain("idx_workflow_runs_metadata_region");
+		});
+	});
+
+	it("no-ops when the keys list is empty (no schema change)", () => {
+		withStore({ indexedMetadataKeys: [] }, (store) => {
+			const cols = pragmaColumns(store);
+			expect(cols).not.toContain("metadata_tier_idx");
+			const idxs = pragmaIndexes(store);
+			expect(idxs.filter((i) => i.startsWith("idx_workflow_runs_metadata_"))).toHaveLength(0);
+		});
+	});
+
+	it("indexed columns return the same row set as the non-indexed filter (semantic parity)", () => {
+		// Same data + same filter via two stores (one indexed, one not).
+		// Both must return identical results — F1 is a performance hint,
+		// not a semantic change.
+		const dbPath = join(TEST_DB_DIR, `parity-${Date.now()}-${dbCounter++}.db`);
+		if (!existsSync(TEST_DB_DIR)) mkdirSync(TEST_DB_DIR, { recursive: true });
+
+		const indexed = new SqliteRunStore(dbPath, { indexedMetadataKeys: ["tier"] });
+		indexed.saveRun(makeRun("run_1", { tier: "premium" }));
+		indexed.saveRun(makeRun("run_2", { tier: "free" }));
+		indexed.saveRun(makeRun("run_3", { tier: "premium" }));
+
+		const indexedResult = indexed
+			.getRuns({ metadata: { tier: "premium" } })
+			.runs.map((r) => r.id)
+			.sort();
+		indexed.close();
+
+		const dbPath2 = join(TEST_DB_DIR, `parity-noidx-${Date.now()}-${dbCounter++}.db`);
+		const nonIndexed = new SqliteRunStore(dbPath2, { indexedMetadataKeys: [] });
+		nonIndexed.saveRun(makeRun("run_1", { tier: "premium" }));
+		nonIndexed.saveRun(makeRun("run_2", { tier: "free" }));
+		nonIndexed.saveRun(makeRun("run_3", { tier: "premium" }));
+
+		const nonIndexedResult = nonIndexed
+			.getRuns({ metadata: { tier: "premium" } })
+			.runs.map((r) => r.id)
+			.sort();
+		nonIndexed.close();
+
+		expect(indexedResult).toEqual(nonIndexedResult);
+		expect(indexedResult).toEqual(["run_1", "run_3"]);
+	});
+
+	it("operator filters work against indexed columns", () => {
+		withStore({ indexedMetadataKeys: ["count"] }, (store) => {
+			store.saveRun(makeRun("run_1", { count: 5 }));
+			store.saveRun(makeRun("run_2", { count: 10 }));
+			store.saveRun(makeRun("run_3", { count: 20 }));
+
+			const gt = store.getRuns({ metadata: [{ key: "count", op: "gt", value: "10" }] }).runs.map((r) => r.id);
+			expect(gt).toEqual(["run_3"]);
+		});
+	});
+
+	it("opening an existing db with a new key adds the column + index without losing data", () => {
+		// First boot: index only `tier`.
+		const dbPath = join(TEST_DB_DIR, `evolve-${Date.now()}-${dbCounter++}.db`);
+		if (!existsSync(TEST_DB_DIR)) mkdirSync(TEST_DB_DIR, { recursive: true });
+		const first = new SqliteRunStore(dbPath, { indexedMetadataKeys: ["tier"] });
+		first.saveRun(makeRun("run_1", { tier: "premium", region: "us" }));
+		first.close();
+
+		// Second boot: add `region` to the indexed-keys list. The
+		// generated column + index should be created without losing the
+		// existing row.
+		const second = new SqliteRunStore(dbPath, { indexedMetadataKeys: ["tier", "region"] });
+		const cols = pragmaColumns(second);
+		expect(cols).toContain("metadata_tier_idx");
+		expect(cols).toContain("metadata_region_idx");
+		const fetched = second.getRun("run_1");
+		expect(fetched?.metadata).toEqual({ tier: "premium", region: "us" });
+		second.close();
+	});
+
+	it("declared keys outside ^[a-zA-Z0-9_-]+$ are silently dropped", () => {
+		// Don't blow up the store boot if an operator misconfigures the
+		// env var with a JSON-path-unsafe key. Filter at construction.
+		withStore({ indexedMetadataKeys: ["tier", "bad'; DROP", "region"] }, (store) => {
+			const cols = pragmaColumns(store);
+			expect(cols).toContain("metadata_tier_idx");
+			expect(cols).toContain("metadata_region_idx");
+			expect(cols.some((c) => c.includes("DROP"))).toBe(false);
+		});
+	});
+});

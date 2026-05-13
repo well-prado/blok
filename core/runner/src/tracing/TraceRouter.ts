@@ -2,7 +2,8 @@ import http from "node:http";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import { RunTracker } from "./RunTracker";
-import type { NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
+import { METADATA_OPERATORS, isValidMetadataKey } from "./metadataFilter";
+import type { MetadataFilter, MetadataOp, NodeRun, RunEvent, TraceLogEntry, WorkflowRun } from "./types";
 
 /**
  * Security review FW-2 — sensitive headers that are NEVER honored when
@@ -45,6 +46,58 @@ function clampInt(raw: string | undefined, min: number, max: number, fallback: n
 	if (n < min) return min;
 	if (n > max) return max;
 	return n;
+}
+
+/**
+ * F2 (v0.5) — parse `metadata.<key>[__op]=<value>` query params into
+ * the operator-aware `MetadataFilter[]` shape.
+ *
+ * Supported suffixes (`__op`): `eq` (default), `ne`, `gt`, `gte`,
+ * `lt`, `lte`, `like`, `in`, `nin`. Unknown suffixes silently drop —
+ * preserves the v0.4 contract that unrecognised query keys are ignored
+ * rather than rejected (operators got the same treatment as the v0.4
+ * key-shape validation).
+ *
+ * `in` / `nin` values are comma-split:
+ *   `metadata.region__in=us,eu,ap` → value: ["us", "eu", "ap"]
+ *
+ * Keys outside `^[a-zA-Z0-9_-]+$` silently drop — same SQL-injection
+ * guard the v0.4 parser already applied.
+ */
+function parseMetadataFiltersFromQuery(query: Record<string, string | undefined>): MetadataFilter[] | undefined {
+	let filters: MetadataFilter[] | undefined;
+	const opSet = new Set<string>(METADATA_OPERATORS);
+	for (const [rawKey, value] of Object.entries(query)) {
+		if (!rawKey.startsWith("metadata.")) continue;
+		if (typeof value !== "string" || value.length === 0) continue;
+		const remainder = rawKey.slice("metadata.".length);
+		if (remainder.length === 0) continue;
+		// Suffix split — accepts `key`, `key__op`. Multiple `__` in a
+		// key name are tolerated; only the FINAL `__op` is interpreted
+		// as the operator when it matches the operator set.
+		const opIdx = remainder.lastIndexOf("__");
+		let metaKey: string;
+		let op: MetadataOp;
+		if (opIdx > 0 && opSet.has(remainder.slice(opIdx + 2))) {
+			metaKey = remainder.slice(0, opIdx);
+			op = remainder.slice(opIdx + 2) as MetadataOp;
+		} else {
+			metaKey = remainder;
+			op = "eq";
+		}
+		if (!isValidMetadataKey(metaKey)) continue;
+		const parsedValue: string | string[] =
+			op === "in" || op === "nin"
+				? value
+						.split(",")
+						.map((s) => s.trim())
+						.filter((s) => s.length > 0)
+				: value;
+		if (Array.isArray(parsedValue) && parsedValue.length === 0) continue;
+		if (!filters) filters = [];
+		filters.push({ key: metaKey, op, value: parsedValue });
+	}
+	return filters;
 }
 
 /**
@@ -740,21 +793,21 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		const workflow = req.query.workflow;
 		const status = req.query.status;
 		const tags = req.query.tags ? req.query.tags.split(",").map((t: string) => t.trim()) : undefined;
-		// Tier 2 quick-wins — `metadata.<key>=<value>` query params parsed
-		// into a `Record<string, string>` for the RunQuery filter. Multiple
-		// pairs combine with AND semantics. Keys are restricted by the
-		// SqliteRunStore implementation (`/^[a-zA-Z0-9_-]+$/`) for JSON
-		// path safety; non-matching keys silently drop.
-		let metadata: Record<string, string> | undefined;
-		for (const [key, value] of Object.entries(req.query as Record<string, string>)) {
-			if (key.startsWith("metadata.") && typeof value === "string" && value.length > 0) {
-				const metaKey = key.slice("metadata.".length);
-				if (metaKey.length > 0) {
-					if (!metadata) metadata = {};
-					metadata[metaKey] = value;
-				}
-			}
-		}
+		// F2 (v0.5) — `metadata.<key>[__op]=<value>` query params parsed
+		// into a `MetadataFilter[]` for the RunQuery filter. Multiple
+		// pairs combine with AND semantics.
+		//
+		// Examples:
+		//   metadata.tier=premium             → {key: "tier", op: "eq", value: "premium"}
+		//   metadata.tier__ne=free            → {key: "tier", op: "ne", value: "free"}
+		//   metadata.count__gt=10             → {key: "count", op: "gt", value: "10"}
+		//   metadata.region__in=us,eu         → {key: "region", op: "in", value: ["us","eu"]}
+		//   metadata.name__like=test%         → {key: "name", op: "like", value: "test%"}
+		//
+		// Keys are restricted by the SqliteRunStore implementation
+		// (`/^[a-zA-Z0-9_-]+$/`) for JSON path safety; non-matching keys
+		// or unknown operators silently drop.
+		const metadata = parseMetadataFiltersFromQuery(req.query as Record<string, string | undefined>);
 		const limit = Number.parseInt(req.query.limit || "50", 10);
 		const offset = Number.parseInt(req.query.offset || "0", 10);
 		const sort = (req.query.sort as "asc" | "desc") || "desc";

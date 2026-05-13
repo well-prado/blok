@@ -25,6 +25,7 @@ store).
 | `BLOK_TRACE_SQLITE_PATH` | `.blok/runs.db` | SQLite database path when `BLOK_TRACE_STORE=sqlite`. |
 | `BLOK_TRACE_PG_*` | unset | Postgres connection params (host, port, user, password, database). See [trace storage · Postgres](/d/reference/trace-storage#postgres-store). |
 | `BLOK_TRACE_RETENTION_DAYS` | `30` | Older runs evicted by `evictOldRuns()`. The [janitor](/d/operations/janitor-and-shutdown#janitor) handles ancillary tables (cache, locks, dispatches). |
+| `BLOK_INDEXED_METADATA_KEYS` | unset | Comma-separated metadata keys to promote to indexed columns on `workflow_runs` (F1). Each declared key gets a `metadata_<key>_idx` VIRTUAL generated column + btree index. Queries against declared keys use the index instead of a sequential `json_extract` scan — meaningful for 100K+ row stores. Example: `BLOK_INDEXED_METADATA_KEYS=tier,region`. Keys outside `^[a-zA-Z0-9_-]+$` are silently dropped. SQLite-only — the in-memory and Postgres-via-mirror stores already keep everything in memory. |
 
 ## Workflow loading
 

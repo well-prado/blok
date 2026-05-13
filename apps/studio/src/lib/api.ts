@@ -99,10 +99,20 @@ export function fetchRuns(params?: {
 	 */
 	tags?: string[];
 	/**
-	 * Tier 2 quick-wins — filter by metadata key=value pairs. AND
-	 * semantics across keys. Sent as `?metadata.k1=v1&metadata.k2=v2`.
+	 * Filter by metadata. Accepts either:
+	 *  - **`Record<string, string>`** (back-compat) — sent as
+	 *    `?metadata.k1=v1&metadata.k2=v2`; equivalent to `op: "eq"` per key.
+	 *  - **`MetadataFilterParam[]`** (F2, v0.5) — operator-aware filters.
+	 *    Sent as `?metadata.<key>[__op]=<value>` with the operator as a
+	 *    suffix. `in`/`nin` values are joined with commas; numeric
+	 *    operators (`gt`/`lt`/`gte`/`lte`) accept any string the server
+	 *    can coerce to a number.
+	 *
+	 * AND semantics across filters. Examples:
+	 *   `[{key: "tier", op: "ne", value: "free"}]` → `?metadata.tier__ne=free`
+	 *   `[{key: "region", op: "in", value: ["us", "eu"]}]` → `?metadata.region__in=us,eu`
 	 */
-	metadata?: Record<string, string>;
+	metadata?: Record<string, string> | MetadataFilterParam[];
 }): Promise<RunListResponse> {
 	const query = new URLSearchParams();
 	if (params?.workflow) query.set("workflow", params.workflow);
@@ -115,12 +125,32 @@ export function fetchRuns(params?: {
 		query.set("tags", params.tags.join(","));
 	}
 	if (params?.metadata) {
-		for (const [k, v] of Object.entries(params.metadata)) {
-			query.set(`metadata.${k}`, v);
+		if (Array.isArray(params.metadata)) {
+			for (const f of params.metadata) {
+				const suffix = f.op === "eq" ? "" : `__${f.op}`;
+				const value = Array.isArray(f.value) ? f.value.join(",") : f.value;
+				query.set(`metadata.${f.key}${suffix}`, value);
+			}
+		} else {
+			for (const [k, v] of Object.entries(params.metadata)) {
+				query.set(`metadata.${k}`, v);
+			}
 		}
 	}
 	const qs = query.toString();
 	return fetchJson(`/runs${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * Studio-side shape of a single F2 metadata filter. Mirrors the
+ * `MetadataFilter` type in `core/runner/src/tracing/types.ts` but with
+ * a slightly looser typing — Studio doesn't import the runner's types
+ * directly to keep the dep graph one-way.
+ */
+export interface MetadataFilterParam {
+	key: string;
+	op: "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "like" | "in" | "nin";
+	value: string | string[];
 }
 
 export function fetchRunDetail(runId: string): Promise<RunDetail> {
