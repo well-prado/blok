@@ -7,6 +7,7 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import {
 	Activity,
 	BarChart3,
+	CalendarClock,
 	FileText,
 	GitBranch,
 	LayoutDashboard,
@@ -36,6 +37,7 @@ export function Sidebar() {
 		{ to: "/", label: "Overview", icon: LayoutDashboard },
 		{ to: "/dashboards", label: "Dashboards", icon: LayoutGrid },
 		{ to: "/runs", label: "All Runs", icon: Activity },
+		{ to: "/scheduled", label: "Scheduled", icon: CalendarClock },
 		{ to: "/logs", label: "Logs", icon: FileText },
 		{ to: "/queues", label: "Queues", icon: Timer },
 		{ to: "/deployments", label: "Deployments", icon: GitBranch },

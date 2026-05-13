@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as WebhooksRouteImport } from "./routes/webhooks"
 import { Route as SettingsRouteImport } from "./routes/settings"
+import { Route as ScheduledRouteImport } from "./routes/scheduled"
 import { Route as QueuesRouteImport } from "./routes/queues"
 import { Route as MetricsRouteImport } from "./routes/metrics"
 import { Route as LogsRouteImport } from "./routes/logs"
@@ -30,6 +31,11 @@ const WebhooksRoute = WebhooksRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: "/settings",
   path: "/settings",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScheduledRoute = ScheduledRouteImport.update({
+  id: "/scheduled",
+  path: "/scheduled",
   getParentRoute: () => rootRouteImport,
 } as any)
 const QueuesRoute = QueuesRouteImport.update({
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
   "/queues": typeof QueuesRoute
+  "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
   "/queues": typeof QueuesRoute
+  "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
@@ -119,6 +127,7 @@ export interface FileRoutesById {
   "/logs": typeof LogsRoute
   "/metrics": typeof MetricsRoute
   "/queues": typeof QueuesRoute
+  "/scheduled": typeof ScheduledRoute
   "/settings": typeof SettingsRoute
   "/webhooks": typeof WebhooksRoute
   "/runs/$runId": typeof RunsRunIdRoute
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | "/logs"
     | "/metrics"
     | "/queues"
+    | "/scheduled"
     | "/settings"
     | "/webhooks"
     | "/runs/$runId"
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | "/logs"
     | "/metrics"
     | "/queues"
+    | "/scheduled"
     | "/settings"
     | "/webhooks"
     | "/runs/$runId"
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | "/logs"
     | "/metrics"
     | "/queues"
+    | "/scheduled"
     | "/settings"
     | "/webhooks"
     | "/runs/$runId"
@@ -178,6 +190,7 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MetricsRoute: typeof MetricsRoute
   QueuesRoute: typeof QueuesRoute
+  ScheduledRoute: typeof ScheduledRoute
   SettingsRoute: typeof SettingsRoute
   WebhooksRoute: typeof WebhooksRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -200,6 +213,13 @@ declare module "@tanstack/react-router" {
       path: "/settings"
       fullPath: "/settings"
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/scheduled": {
+      id: "/scheduled"
+      path: "/scheduled"
+      fullPath: "/scheduled"
+      preLoaderRoute: typeof ScheduledRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/queues": {
@@ -282,6 +302,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MetricsRoute: MetricsRoute,
   QueuesRoute: QueuesRoute,
+  ScheduledRoute: ScheduledRoute,
   SettingsRoute: SettingsRoute,
   WebhooksRoute: WebhooksRoute,
   RunsRunIdRoute: RunsRunIdRoute,

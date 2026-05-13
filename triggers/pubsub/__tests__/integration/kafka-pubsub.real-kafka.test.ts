@@ -16,10 +16,19 @@ interface KafkaAdminClient {
 		waitForLeaders?: boolean;
 		topics: Array<{ topic: string; numPartitions: number; replicationFactor: number }>;
 	}): Promise<boolean>;
+	fetchTopicMetadata(opts: { topics: string[] }): Promise<unknown>;
+}
+
+interface KafkaConsumerForWarmup {
+	connect(): Promise<void>;
+	subscribe(opts: { topic: string; fromBeginning?: boolean }): Promise<void>;
+	run(opts: { eachMessage: () => Promise<void> }): Promise<void>;
+	disconnect(): Promise<void>;
 }
 
 interface KafkaClient {
 	admin(): KafkaAdminClient;
+	consumer(opts: { groupId: string }): KafkaConsumerForWarmup;
 }
 
 interface KafkaJsModule {
@@ -84,20 +93,63 @@ d("KafkaPubSubAdapter — real Kafka", () => {
 		const adminKafka = new kafkajs.Kafka({ clientId: "blok-test-pubsub-admin", brokers });
 		admin = adminKafka.admin();
 		await admin.connect();
+
+		// Cold-start warmup. On a freshly booted broker (the CI case),
+		// Kafka's `__consumer_offsets` topic and the group-coordinator
+		// election aren't ready immediately after the broker accepts
+		// admin connections. The first `consumer.run()` that triggers
+		// `findCoordinator` hits the 5-retry budget before the offsets
+		// topic is fully initialised and throws
+		// `KafkaJSNumberOfRetriesExceeded: This is not the correct
+		// coordinator for this group`.
+		//
+		// Drive that initialisation explicitly here: create a throwaway
+		// topic, run a brief consumer against it (which forces group-
+		// coordinator election), then disconnect. Subsequent real test
+		// subscribes find a warm coordinator and skip the race.
+		const warmupTopic = `blok-test-pubsub-warmup-${Math.random().toString(36).slice(2)}`;
+		await admin.createTopics({
+			waitForLeaders: true,
+			topics: [{ topic: warmupTopic, numPartitions: 1, replicationFactor: 1 }],
+		});
+		const warmupConsumer = adminKafka.consumer({ groupId: `blok-test-warmup-${Math.random().toString(36).slice(2)}` });
+		await warmupConsumer.connect();
+		await warmupConsumer.subscribe({ topic: warmupTopic, fromBeginning: true });
+		await warmupConsumer.run({
+			eachMessage: async () => {
+				/* never fires — topic stays empty */
+			},
+		});
+		// Give the group coordinator a beat to finalise the join+sync
+		// for the warmup group. Without this, the next test's subscribe
+		// can still race on a brand-new group's coordinator lookup.
+		await new Promise((r) => setTimeout(r, 2_000));
+		await warmupConsumer.disconnect();
 	}, TEST_TIMEOUT_MS);
 
 	afterAll(async () => {
-		await consumerA.disconnect();
-		await consumerB.disconnect();
-		await producer.disconnect();
-		if (admin) {
+		// Best-effort cleanup. A failed test can leave a consumer in a
+		// state where `disconnect()` hangs (kafkajs internal retry loop
+		// still running). Wrap each call in a 5s timeout so a single
+		// stuck consumer doesn't trip vitest's default 10s afterAll
+		// cap and cascade-mask the real failure.
+		const safeDisconnect = async (label: string, fn: () => Promise<void>): Promise<void> => {
 			try {
-				await admin.disconnect();
+				await Promise.race([
+					fn(),
+					new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} disconnect timed out`)), 5_000)),
+				]);
 			} catch {
-				/* ignore — best-effort cleanup */
+				/* ignore — afterAll is best-effort */
 			}
+		};
+		await safeDisconnect("consumerA", () => consumerA.disconnect());
+		await safeDisconnect("consumerB", () => consumerB.disconnect());
+		await safeDisconnect("producer", () => producer.disconnect());
+		if (admin) {
+			await safeDisconnect("admin", () => admin?.disconnect() ?? Promise.resolve());
 		}
-	});
+	}, 30_000);
 
 	async function createTopic(topic: string, numPartitions = 1): Promise<void> {
 		if (!admin) throw new Error("admin client not initialised — beforeAll didn't run");
