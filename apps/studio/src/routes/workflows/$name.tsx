@@ -167,10 +167,8 @@ function WorkflowDetailPage() {
 							}
 							snippets={[
 								{
-									lang: "curl · http",
-									code: `curl -X POST http://localhost:4000/${detail.name} \\
-  -H 'content-type: application/json' \\
-  -d '{}'`,
+									lang: detail.examples?.source === "author" ? "curl · http (example body)" : "curl · http",
+									code: buildCurlSnippet(detail),
 								},
 							]}
 						/>
@@ -228,4 +226,52 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 			<div className="text-lg font-semibold text-zinc-100 font-mono">{value}</div>
 		</div>
 	);
+}
+
+/**
+ * Build the empty-state curl example. The body is `detail.examples.body`
+ * (server-side inferred or author-declared); the method + path come
+ * from the workflow definition's `trigger.http` config; the host
+ * defaults to the dev orchestrator's `http://localhost:4000`. Falls
+ * back to a sensible POST / `${name}` / `{}` shape when the definition
+ * is unavailable (legacy deployments where the registry didn't seed
+ * the detail endpoint).
+ */
+function buildCurlSnippet(detail: WorkflowDetailLike): string {
+	const trigger = readHttpTrigger(detail.definition);
+	const method = (trigger?.method ?? "POST").toUpperCase();
+	const path = trigger?.path ?? detail.path ?? `/${detail.name}`;
+	const url = `http://localhost:4000${path.startsWith("/") ? path : `/${path}`}`;
+	if (method === "GET" || method === "HEAD" || method === "DELETE") {
+		// Body-less methods — keep the command terse.
+		return `curl -X ${method} ${url}`;
+	}
+	const body = JSON.stringify(detail.examples?.body ?? {}, null, 2);
+	return `curl -X ${method} ${url} \\\n  -H 'content-type: application/json' \\\n  -d '${body}'`;
+}
+
+function readHttpTrigger(definition: unknown): { method?: string; path?: string } | null {
+	if (!definition || typeof definition !== "object") return null;
+	const trigger = (definition as { trigger?: unknown }).trigger;
+	if (!trigger || typeof trigger !== "object") return null;
+	const http = (trigger as { http?: unknown }).http;
+	if (!http || typeof http !== "object") return null;
+	const cfg = http as { method?: unknown; path?: unknown };
+	return {
+		method: typeof cfg.method === "string" ? cfg.method : undefined,
+		path: typeof cfg.path === "string" ? cfg.path : undefined,
+	};
+}
+
+/**
+ * Local structural type narrowing the WorkflowDetail to the fields
+ * `buildCurlSnippet` reads. Avoids re-importing the global type with
+ * the new `examples` field everywhere a curl-snippet helper might
+ * want to live.
+ */
+interface WorkflowDetailLike {
+	name: string;
+	path?: string;
+	definition?: unknown;
+	examples?: { body: unknown; source: "author" | "inferred" | "empty" };
 }

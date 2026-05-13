@@ -2,6 +2,7 @@ import http from "node:http";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
+import { inferSampleBody } from "../workflow/sampleBody";
 import { RoutingDiagnostics } from "./RoutingDiagnostics";
 import { RunTracker } from "./RunTracker";
 import { METADATA_OPERATORS, isValidMetadataKey } from "./metadataFilter";
@@ -361,11 +362,12 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		// inline (e.g. tests with no source file) it's still here.
 		const registered = WorkflowRegistry.getInstance().get(name);
 
-		// Sidebar follow-up — if the workflow is registered but has
-		// never run, `getWorkflowSummaries()` won't return a row for
-		// it (the SQL aggregation derives from `workflow_runs`). Fall
+		// Sidebar follow-up (#99) — if the workflow is registered but
+		// has never run, `getWorkflowSummaries()` won't return a row
+		// for it (SQL aggregation derives from `workflow_runs`). Fall
 		// back to a synthesized zero-stat summary so Studio's detail
-		// page renders + the Graph tab is reachable on first sight.
+		// page renders + the Graph tab AND the empty-state curl example
+		// are reachable on first sight.
 		if (!summary && registered) {
 			const synthesized = synthesizeRegistryOnlySummary(registered);
 			if (synthesized) summary = synthesized;
@@ -389,11 +391,23 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			}
 		}
 
+		// Sample-body inference (B + A — static analysis with author
+		// override). Powers Studio's empty-state curl so first-time
+		// operators get a payload that actually exercises the workflow
+		// instead of `-d '{}'` that immediately crashes anything
+		// reading `ctx.request.body`. Author-declared
+		// `trigger.http.examples.body` wins over inference. Returns
+		// `null` only for non-object workflow values; otherwise the
+		// detail response includes `examples.body` (which may be `{}`
+		// for workflows with no body references).
+		const inferred = registered?.workflow ? inferSampleBody(registered.workflow) : null;
+
 		res.json({
 			...summary,
 			nodeNames: Array.from(nodeNames),
 			runtimes: Array.from(runtimes),
 			definition: registered?.workflow,
+			examples: inferred ? { body: inferred.body, source: inferred.source } : undefined,
 		});
 	});
 

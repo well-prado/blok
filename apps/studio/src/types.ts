@@ -301,6 +301,15 @@ export interface WorkflowDetail extends WorkflowSummary {
 	definition?: unknown;
 	nodeNames: string[];
 	runtimes: string[];
+	/**
+	 * Sample-body inferred (or author-declared) for the empty-state
+	 * curl snippet. `body` is always present when `examples` is set;
+	 * `source` distinguishes author overrides from static inference.
+	 */
+	examples?: {
+		body: unknown;
+		source: "author" | "inferred" | "empty";
+	};
 }
 
 export interface RunDetail {
