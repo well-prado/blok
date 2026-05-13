@@ -438,6 +438,25 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		});
 	});
 
+	// #103 follow-up — operator-facing escape hatch for the
+	// first-record-wins semantic. When the captured body is wrong / stale
+	// / contains a one-off payload, deleting the sample lets the next
+	// successful run re-record (only if the workflow's HTTP trigger has
+	// `recordSample: true`). Studio's workflow detail page wires a
+	// "Re-record sample" button to this endpoint. Returns `{ deleted:
+	// true }` on success, `404` when no sample exists for the workflow.
+	// JSON-rather-than-204 keeps `fetchJson()` on the client side simple
+	// and mirrors the saved-filters DELETE shape.
+	router.delete("/workflows/:name/sample", (req: TraceRequest, res: TraceResponse) => {
+		const { name } = req.params;
+		const removed = t.deleteWorkflowSample(name);
+		if (!removed) {
+			res.status(404).json({ error: `No recorded sample for workflow '${name}'` });
+			return;
+		}
+		res.json({ deleted: true });
+	});
+
 	router.get("/workflows/:name/runs", (req: TraceRequest, res: TraceResponse) => {
 		const { name } = req.params;
 		const status = req.query.status;

@@ -6,12 +6,12 @@ import { JsonViewer } from "@/components/shared/JsonViewer";
 import { RoutingDiagnosticsBanner } from "@/components/shared/RoutingDiagnosticsBanner";
 import { WorkflowGraph } from "@/components/trace/WorkflowGraph";
 import { useWorkflowRuns } from "@/hooks/useRuns";
-import { useWorkflowDetail } from "@/hooks/useWorkflows";
-import { exportRunsCsv, exportRunsJson } from "@/lib/api";
+import { useDeleteWorkflowSample, useWorkflowDetail } from "@/hooks/useWorkflows";
+import { ApiError, exportRunsCsv, exportRunsJson } from "@/lib/api";
 import { formatDuration, formatPercent } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, GitBranch, Loader2, Workflow } from "lucide-react";
+import { ArrowLeft, GitBranch, Loader2, RefreshCw, Workflow } from "lucide-react";
 import { useState } from "react";
 
 export const Route = createFileRoute("/workflows/$name")({
@@ -26,6 +26,7 @@ function WorkflowDetailPage() {
 	const limit = 25;
 
 	const { data: detail, isLoading: detailLoading } = useWorkflowDetail(name);
+	const deleteSample = useDeleteWorkflowSample(name);
 	const { data: runsData, isLoading: runsLoading } = useWorkflowRuns(name, {
 		status: statusFilter || undefined,
 		limit,
@@ -78,13 +79,19 @@ function WorkflowDetailPage() {
 				<Link to="/" className="p-1 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
 					<ArrowLeft className="w-4 h-4" />
 				</Link>
-				<div>
+				<div className="flex-1">
 					<h1 className="text-lg font-semibold text-zinc-100">{name}</h1>
 					<p className="text-sm text-zinc-500">
 						{detail.triggerTypes.join(", ")} &middot; {detail.totalRuns} runs &middot; avg{" "}
 						{formatDuration(detail.avgDurationMs)} &middot; {formatPercent(detail.errorRate)} errors
 					</p>
 				</div>
+				<SampleProvenance
+					source={detail.examples?.source}
+					onRerecord={() => deleteSample.mutate()}
+					pending={deleteSample.isPending}
+					error={deleteSample.error}
+				/>
 			</div>
 
 			{/* Routing diagnostics — boot-time route-build problems
@@ -224,6 +231,66 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 		<div className="rounded-lg border border-zinc-800 bg-overlay p-4">
 			<div className="text-xs text-zinc-500 mb-1">{label}</div>
 			<div className="text-lg font-semibold text-zinc-100 font-mono">{value}</div>
+		</div>
+	);
+}
+
+/**
+ * #103 follow-up — surface where the curl example body came from
+ * (author override / recorded real run / inferred / empty) and offer
+ * a "Re-record" button when a recorded sample is in play. Deleting
+ * the row lets the next successful run capture a fresh body (subject
+ * to `recordSample: true` still being set on the trigger).
+ *
+ * The button is only rendered for `source === "recorded"` — there's
+ * nothing to delete when the body came from the author or static
+ * inference. A short error chip surfaces when the API call fails
+ * (typically `404` if another tab already deleted the sample).
+ */
+function SampleProvenance({
+	source,
+	onRerecord,
+	pending,
+	error,
+}: {
+	source: "author" | "recorded" | "inferred" | "empty" | undefined;
+	onRerecord: () => void;
+	pending: boolean;
+	error: unknown;
+}) {
+	if (!source) return null;
+	const labelByLanding: Record<string, string> = {
+		author: "Sample: author-declared",
+		recorded: "Sample: recorded from a real run",
+		inferred: "Sample: inferred from step inputs",
+		empty: "Sample: none",
+	};
+	const label = labelByLanding[source] ?? "Sample: ?";
+
+	const errorMessage = error instanceof ApiError ? error.message : error instanceof Error ? error.message : null;
+
+	return (
+		<div className="flex items-center gap-2 text-xs text-zinc-500">
+			<span className="hidden sm:inline" title="The provenance of the curl example body shown in the empty-state.">
+				{label}
+			</span>
+			{source === "recorded" && (
+				<button
+					type="button"
+					onClick={onRerecord}
+					disabled={pending}
+					className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-zinc-800 bg-overlay text-zinc-300 hover:text-zinc-100 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+					title="Delete the recorded sample so the next successful run captures a fresh body. Requires `recordSample: true` on the workflow's HTTP trigger to actually re-record."
+				>
+					{pending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+					<span>{pending ? "Clearing…" : "Re-record"}</span>
+				</button>
+			)}
+			{errorMessage && (
+				<span className="text-status-failed text-[11px]" title={errorMessage}>
+					{errorMessage}
+				</span>
+			)}
 		</div>
 	);
 }

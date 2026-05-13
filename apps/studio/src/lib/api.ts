@@ -63,6 +63,18 @@ export function fetchWorkflowDetail(name: string): Promise<WorkflowDetail> {
 	return fetchJson(`/workflows/${encodeURIComponent(name)}`);
 }
 
+/**
+ * #103 follow-up — operator escape hatch for the first-record-wins
+ * semantic. Deleting the recorded sample lets the next successful run
+ * re-record (assuming `recordSample: true` is still set on the trigger).
+ * Resolves with `{deleted:true}` on success; the server returns `404`
+ * when no recorded sample exists, which `fetchJson` raises as an
+ * `ApiError(404, ...)` the caller can surface to the operator.
+ */
+export function deleteWorkflowSample(name: string): Promise<{ deleted: true }> {
+	return fetchJson(`/workflows/${encodeURIComponent(name)}/sample`, { method: "DELETE" });
+}
+
 export function fetchWorkflowRuns(
 	name: string,
 	params?: { status?: string; limit?: number; offset?: number; sort?: string; env?: string },
