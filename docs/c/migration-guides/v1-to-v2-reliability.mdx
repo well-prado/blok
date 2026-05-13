@@ -1,0 +1,308 @@
+---
+title: "v1 → v2 · Reliability primitives"
+description: "How to harden a v2 Blok workflow with idempotency, retry, timeouts, rate-limit, scheduling, and sub-workflows. Each section is a 5-minute recipe."
+icon: "shield-check"
+---
+
+The v2 workflow runtime introduced a set of opt-in reliability
+primitives on top of the v1 step contract: idempotency caching, retry,
+per-step timeouts, per-tenant rate-limit gates, deferred scheduling
+(delay / ttl / debounce), and sub-workflow composition. None of them
+change v1 behaviour by themselves — your existing workflows keep
+running unchanged after migrating to v2 step shapes — but each one
+buys you a specific operational invariant when you opt in.
+
+This page is a workbook of 5-minute recipes: pick a problem, find the
+primitive that solves it, copy the snippet, and verify the result in
+Studio. Each recipe ends with a link to the full feature doc for the
+edge cases.
+
+The migration order assumed throughout is **v1 → v2 step shape** first
+(covered briefly in the first section, with a pointer to
+[`blokctl migrate workflows`](/c/migration-guides/index)). Once on v2,
+the primitives below compose with each other in well-defined ways —
+the table near the end summarizes the interactions.
+
+## Recipe 0 · Migrate the step shape itself (5 min, mechanical)
+
+The v1 step shape kept a separate `nodes{}` map for inputs. v2 inlines
+everything onto the step itself + drops `set_var` in favor of
+default-store-on-success.
+
+```ts
+// v1 — separate nodes{} map; set_var sprinkled
+{
+  steps: [
+    { name: "fetch", node: "@blokjs/api-call", set_var: true },
+    { name: "respond", node: "@blokjs/respond" },
+  ],
+  nodes: {
+    fetch:   { inputs: { url: "https://countriesnow.space/..." } },
+    respond: { inputs: { body: "js/ctx.vars['fetch'].data" } },
+  },
+}
+
+// v2 — inline inputs, id + use, $.state.<id> chains
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Fetch and respond",
+  trigger: { http: { method: "GET", path: "/countries" } },
+  steps: [
+    { id: "fetch",   use: "@blokjs/api-call", inputs: { url: "https://countriesnow.space/..." } },
+    { id: "respond", use: "@blokjs/respond",  inputs: { body: $.state.fetch } },
+  ],
+});
+```
+
+Run `bunx blokctl migrate workflows` to convert every JSON workflow
+under `triggers/http/workflows/json/` in bulk. The codemod:
+
+- Renames `name` → `id` and `node` → `use` on every step.
+- Inlines `nodes[<step>].inputs` onto the step.
+- Drops `set_var: true` (default-store handles it).
+- Rewrites `set_var: false` → `ephemeral: true`.
+- Rewrites `js/ctx.vars[...]` → `$.state.<id>` (or `js/ctx.state.<id>`).
+
+The runner ALSO normalizes v1 workflows at load time, so the migration
+is forward-compatible: you can ship v2-only workflows alongside the
+codemod-rewritten ones and the runner reads both.
+
+After this recipe, the workflow above is on v2 step shape and can opt
+into any of the primitives below.
+
+## Recipe 1 · Cache an expensive step (`idempotencyKey`) — 5 min
+
+Use when: a step performs a side effect or a slow call that you don't
+want repeated on retry, replay, or duplicate trigger.
+
+```ts
+{
+  id: "charge",
+  use: "stripe.create-charge",
+  inputs: {
+    customer: $.req.body.customerId,
+    amount: $.req.body.amount,
+  },
+  idempotencyKey: $.req.body.requestId,  // or a literal string
+  idempotencyKeyTTL: 24 * 60 * 60 * 1000,  // optional; default 24h
+}
+```
+
+What it buys you:
+
+- The runner consults a cache keyed on `(workflowName, step.id, resolvedKey)` BEFORE running the step. On hit, the cached envelope is replayed through the same persistence rules as a fresh run; `step.process()` is never invoked.
+- Retries and replays of the same request short-circuit. Combine with the replay endpoint to re-trigger an upstream HTTP request safely.
+
+Verify in Studio: open the run's detail view and look for the green `cached` badge on the step row. The badge tooltip points at the source run that originally produced the cached value.
+
+Edge cases (skipping the call when the side effect is critical, TTL tuning, key resolution failure modes): [`idempotency` reference →](/d/reliability/idempotency).
+
+## Recipe 2 · Retry transient failures (`retry`) — 5 min
+
+Use when: an upstream service returns 5xx / connection errors that
+typically clear within a few seconds.
+
+```ts
+{
+  id: "send-email",
+  use: "sendgrid.send",
+  inputs: { to: $.state.user.email, template: "welcome" },
+  retry: {
+    maxAttempts: 5,      // default 1 (= no retry)
+    minTimeoutInMs: 500, // default 1000
+    maxTimeoutInMs: 30_000,
+    factor: 2,           // default 2 — capped exponential backoff
+  },
+}
+```
+
+What it buys you:
+
+- The runner wraps `step.process()` in a `for attempt 1..maxAttempts` loop with capped exponential backoff: `delay = min(maxTimeoutInMs, minTimeoutInMs * factor^(attempt-1))`.
+- Per-attempt failures emit `NODE_ATTEMPT_FAILED` events and accumulate on `NodeRun.attempts[]` (capped at 10 entries). The terminal `NODE_FAILED` only fires after every attempt is exhausted.
+
+Verify in Studio: failed attempts appear as `↻N` badges on the step row; the underlying details (per-attempt error message, timestamps) live in an "Attempts (N)" disclosure on the step detail.
+
+Edge cases (jitter, integration with idempotency, when to NOT retry, what counts as a transient error): [`retry` reference →](/d/reliability/retry).
+
+## Recipe 3 · Bound a slow step (`maxDuration`) — 5 min
+
+Use when: a step calls into a runtime / external service that might
+hang. You want SLA-clean failure rather than indefinite blocking.
+
+```ts
+{
+  id: "render-pdf",
+  use: "pdf.render",
+  inputs: { template: $.state.template, data: $.state.data },
+  maxDuration: "30s",   // or a number of ms
+  retry: { maxAttempts: 3 }, // optional — each attempt gets its OWN 30s budget
+}
+```
+
+What it buys you:
+
+- Each retry attempt gets its own timeout — a 30s `maxDuration` with `maxAttempts: 3` and minimal backoff caps total wall time at ~90s.
+- On final-attempt timeout, the run flips to **`"timedOut"`** (distinct from `"failed"`) so SLA dashboards separate timeouts from logic failures.
+- `StepTimeoutError` is exported from `@blokjs/runner` for `instanceof` checks in a `tryCatch.catch` arm.
+
+Verify in Studio: filter the runs list by status `timedOut` to confirm the new status renders. The step row carries a clock icon on the failed step.
+
+Edge cases (cooperative cancellation via `ctx.signal`, runtime adapter timeout semantics, choosing a duration): [`maxDuration` reference →](/d/reliability/max-duration).
+
+## Recipe 4 · Cap per-tenant concurrent runs (`concurrencyKey`) — 5 min
+
+Use when: one trigger handles requests for many tenants and you want
+to bound concurrent execution per tenant without throwing 429 to
+unrelated traffic.
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/render",
+    concurrencyKey: $.req.body.tenantId,
+    concurrencyLimit: 5,         // default 1 (Trigger.dev parity)
+    onLimit: "queue",            // default "throw" — 429 with Retry-After
+    queueRetry: { minBackoffMs: 1000, maxBackoffMs: 30_000, factor: 2 },
+  },
+}
+```
+
+What it buys you:
+
+- At run-entry, the gate resolves the key against ctx, attempts to acquire a slot, and either grants (run proceeds + slot released in `finally`) or denies. Two operator-facing denial behaviors:
+  - `onLimit: "throw"` (default) — HTTP returns `429` with `Retry-After`; worker NACKs with redelivery. Run status flips to `"throttled"`.
+  - `onLimit: "queue"` — run is deferred and re-attempts the gate after a capped exponential backoff. HTTP returns `202 Accepted` with `Location: /__blok/runs/:id`; status flips to `"queued"`.
+- Cross-process coordination available via `BLOK_CONCURRENCY_BACKEND=nats-kv` or `=redis` — see the [cross-process backend section](/d/reliability/concurrency-keys#cross-process-backend-nats-kv) in the reference.
+
+Verify in Studio: open the workflow detail page → Metrics tab. The "ConcurrencyTile" shows active leases per `(workflow, key)` bucket. The runs list filter dropdown picks up `throttled` and `queued` as first-class statuses.
+
+Edge cases (lease tuning, kill-switch, key resolution failure mode, cardinality risk on metrics): [`concurrencyKey` reference →](/d/reliability/concurrency-keys).
+
+## Recipe 5 · Defer or coalesce trigger pings (`delay` / `ttl` / `debounce`) — 5 min
+
+Use when: a trigger receives rapid duplicate pings (collaborative
+editing, webhook bursts) or you want to schedule work for later
+without spawning a cron worker.
+
+### Delay + TTL (one-shot schedule)
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/welcome",
+    delay: "1h",     // schedule for 1h from now
+    ttl: "2h",       // expire if not dispatched within 2h
+  },
+}
+```
+
+The trigger returns `202 Accepted` immediately. The run record exists in
+`"delayed"` state until the timer fires; if the process restarts in the
+meantime, `recoverDispatches()` re-registers the timer at boot. Past-TTL
+rows flip to `"expired"` without running.
+
+### Debounce (coalesce rapid pings)
+
+```ts
+trigger: {
+  http: {
+    method: "POST",
+    path: "/save/:docId",
+    debounce: {
+      key: $.req.params.docId,   // per-doc coalescing
+      mode: "trailing",          // default; or "leading"
+      delay: "500ms",            // wait for silence
+      maxDelay: "5s",            // tail-latency bound (trailing only)
+    },
+  },
+}
+```
+
+In **trailing** mode, each new ping resets the `delay` timer; the run
+fires after that many ms of silence. Latest payload wins via the
+closure captured at the active run's start. In **leading** mode, the
+first ping fires immediately and subsequent pings within the window are
+suppressed (status `"debounced"` terminal).
+
+Verify in Studio: open the runs list and filter by status `delayed`,
+`debounced`, `expired`, or `queued`. The new statuses are first-class
+in the filter dropdown.
+
+Edge cases (durability across restart, cross-process debounce backend, dispatch payload size cap, kill-switch): [`scheduling` reference →](/d/scheduling/overview).
+
+## Recipe 6 · Invoke a workflow from another workflow (`subworkflow`) — 5 min
+
+Use when: you want function-call semantics across workflows — fan-out a
+webhook to multiple handlers, share a sub-pipeline, or split a long
+workflow at a checkpoint.
+
+```ts
+// Workflow A — invoke a child + wait for its response
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",   // literal name
+  inputs: { user: $.state.user, order: $.state.order },
+  // wait: true (default) — synchronous
+  // dispatch: "in-process" (default) — same process
+}
+
+// Or fire-and-forget across processes:
+{
+  id: "queue-render",
+  subworkflow: "render-pdf",
+  inputs: { template: $.state.template },
+  wait: false,
+  dispatch: "http-self",  // POST to ${BLOK_SELF_BASE_URL}${child.trigger.http.path}
+}
+```
+
+What it buys you:
+
+- **`wait: true`** (default) — parent step blocks on child completion; child's `ctx.response` becomes the parent step's output and lands on `state[<id>]` via the normal persistence rules.
+- **`wait: false`** — fire-and-forget. Parent gets back `{runId, workflowName, scheduledAt}` immediately. Child runs asynchronously; errors don't propagate to the parent.
+- **`dispatch: "in-process"`** (default) — child runs in the same Node process. Cheapest, no extra hops.
+- **`dispatch: "http-self"`** — child is dispatched as a fresh HTTP request to `BLOK_SELF_BASE_URL` (must have an `http` trigger). Each child can land on a different process in a horizontally-scaled deployment. Lineage crosses the HTTP boundary via `X-Blok-Parent-Run-Id` headers.
+- **Polymorphic dispatch** — `subworkflow:` accepts a `$.<path>` expression that resolves at dispatch time. Pair with `allowList: ["a", "b"]` to constrain which names the expression can resolve to.
+
+Verify in Studio: open the parent run's detail view. The sub-workflow step renders a `↳ sub` (sync) or `↳ async` (fire-and-forget) badge; HTTP-self dispatches gain an extra `http` chip. The "Sub-runs" strip at the top of the parent surfaces the child's status with click-through.
+
+Edge cases (idempotency caching the whole child, recursion guard, cross-process semantics, allowList safety): [`sub-workflows` reference →](/d/composition/sub-workflows).
+
+## Composition reference
+
+The primitives compose with each other along well-defined axes. The
+common interaction patterns:
+
+| Outer primitive | Inner primitive | Behavior |
+|---|---|---|
+| `idempotencyKey` | `retry` | Cache hit short-circuits `step.process()` entirely; retry never enters the picture. Cache miss + retry: writes the cache only on the final successful attempt. |
+| `idempotencyKey` | `subworkflow` (`wait: true`) | Caches the WHOLE child result. Cache hit means the child workflow is **never invoked** — including its side effects. Document prominently if the child sends emails / charges cards. |
+| `idempotencyKey` | `subworkflow` (`wait: false`) | Caches the dispatch metadata `{runId, ...}`. Cache hit returns the SAME runId regardless of child outcome — Trigger.dev / Stripe at-most-once dispatch dedup. To retry on child failure, use a new key. |
+| `retry` | `maxDuration` | Each retry attempt gets its own timeout budget. Final-attempt timeout flips the run to `"timedOut"`. |
+| `concurrencyKey` | `delay` / `ttl` / `debounce` | Scheduling gates run BEFORE the concurrency gate. A delayed run dispatching into a saturated bucket still throttles cleanly. |
+| `subworkflow` (any) | `concurrencyKey` | Children do NOT contend for the parent's slot — they go through their own trigger gate. Use this to fan-out without head-of-line blocking. |
+| Any | `BLOK_TRACE_ENABLED=false` | Disables the trace store AND every store-backed primitive (cache, gate, scheduler). All become no-ops. |
+
+## Cross-cutting operator concerns
+
+A few primitive-agnostic gotchas worth knowing before you ship:
+
+- **`BLOK_MAPPER_MODE=strict`** in production. The default `warn` mode passes through unresolved input expressions as literal strings. Strict mode throws `MapperResolutionError` instead — the failure surfaces as a clean step error rather than a downstream "why is my URL the string `js/ctx.bad.path`" mystery.
+- **`BLOK_METRICS_PER_KEY=1`** (opt-in) to keep `concurrency_key` as a label on the `blok_concurrency_*` OTel counters. Default OFF strips the key so high-cardinality deployments (per-user / per-tenant keys) don't blow up metrics cardinality. Turn on only when the key space is bounded.
+- **`BLOK_SELF_BASE_URL`** is required for `dispatch: "http-self"` sub-workflows when running in Docker / Kubernetes. Default `http://localhost:${PORT || 4000}` only works for single-process dev.
+- **Cancellation** is cooperative — every ctx now carries `ctx.signal: AbortSignal`. Nodes performing long-running work should consult `ctx.signal.aborted` periodically or pass the signal to `fetch`. See [cancellation reference →](/d/reliability/cancellation).
+- **Graceful shutdown** drains in order: trigger.stop() → Janitor.stop() → DeferredRunScheduler.clear() → backend.disconnect(). Set `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1` only if you have an external signal you'd rather honor first.
+
+## Where to next
+
+After working through these recipes:
+
+- The **[reliability overview](/d/reliability/overview)** page links to every primitive's reference doc with the full edge-case coverage.
+- The **[scheduling overview](/d/scheduling/overview)** covers the dispatch state machine, durability guarantees, and worker transport interactions.
+- The **[observability page](/d/operations/observability)** explains the REST + OTel surface for monitoring the gates and dispatchers in production.
+
+If you hit something the recipes don't cover, the per-feature reference pages have the same examples + the full failure-mode taxonomy + the failure recovery story for each primitive.
