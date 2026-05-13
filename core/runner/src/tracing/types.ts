@@ -305,6 +305,24 @@ export interface NodeRun {
 	 */
 	wait?: boolean;
 	/**
+	 * G2 (v0.6) sub-workflow dispatch strategy — only set for
+	 * `nodeType === "subworkflow"`. Mirrors the step config's `dispatch`
+	 * field so Studio can distinguish in-process invocations from HTTP
+	 * self-call dispatches at a glance.
+	 *
+	 * - `"in-process"` (default; also represented by `undefined` on legacy
+	 *   traces) — child runs in the same Node process via the in-process
+	 *   `Runner`.
+	 * - `"http-self"` — child is dispatched as a fresh HTTP request to
+	 *   `BLOK_SELF_BASE_URL`, potentially landing on a different process
+	 *   in a horizontally-scaled deployment.
+	 *
+	 * Captured at `tracker.startNode()` time alongside `wait` so the rail
+	 * badge can compose them (`↳ async` orange + `http` sky for an
+	 * async http-self dispatch).
+	 */
+	dispatch?: "in-process" | "http-self";
+	/**
 	 * PR 5 E3 — sub-workflow nesting depth surfaced for Studio.
 	 *
 	 * Set on subworkflow node runs. Top-level workflow's sub-workflow
@@ -768,6 +786,13 @@ export interface StartNodeOptions {
 	 * Persisted onto `NodeRun.wait` so Studio can render `↳ async` vs `↳ sub`.
 	 */
 	wait?: boolean;
+	/**
+	 * G2 (v0.6) sub-workflow dispatch strategy. Only meaningful when
+	 * `nodeType === "subworkflow"`. Persisted onto `NodeRun.dispatch` so
+	 * Studio can render an extra `http` badge alongside `↳ async`/`↳ sub`
+	 * for HTTP self-call dispatches.
+	 */
+	dispatch?: "in-process" | "http-self";
 	/**
 	 * PR 5 E3 — sub-workflow nesting depth. Only meaningful when
 	 * `nodeType === "subworkflow"`. The runner computes

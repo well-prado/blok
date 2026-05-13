@@ -406,6 +406,43 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 			it("should return undefined for unknown node", () => {
 				expect(store.getNodeRun("nonexistent")).toBeUndefined();
 			});
+
+			// G2 follow-up (v0.6) — Studio rail badges (↳ async, ↳ sub,
+			// http, mw:<name>, iteration headers) need these flag fields
+			// to survive round-trip; pre-fix they rode only on the
+			// in-memory NodeRun and vanished on persistent reads.
+			it("round-trips wait + dispatch + subworkflowDepth + middleware + iterationIndex (Studio rail flags)", () => {
+				store.saveRun(makeRun("run_1"));
+				store.saveNodeRun(
+					makeNodeRun("node_flags", "run_1", {
+						nodeType: "subworkflow",
+						wait: false,
+						dispatch: "http-self",
+						subworkflowDepth: 2,
+						middleware: "auth-check",
+						iterationIndex: 3,
+					}),
+				);
+
+				const got = store.getNodeRun("node_flags");
+				expect(got?.wait).toBe(false);
+				expect(got?.dispatch).toBe("http-self");
+				expect(got?.subworkflowDepth).toBe(2);
+				expect(got?.middleware).toBe("auth-check");
+				expect(got?.iterationIndex).toBe(3);
+			});
+
+			it("leaves rail flags undefined when not set on the in-memory NodeRun", () => {
+				store.saveRun(makeRun("run_1"));
+				store.saveNodeRun(makeNodeRun("node_plain", "run_1"));
+
+				const got = store.getNodeRun("node_plain");
+				expect(got?.wait).toBeUndefined();
+				expect(got?.dispatch).toBeUndefined();
+				expect(got?.subworkflowDepth).toBeUndefined();
+				expect(got?.middleware).toBeUndefined();
+				expect(got?.iterationIndex).toBeUndefined();
+			});
 		});
 
 		// === Events ===

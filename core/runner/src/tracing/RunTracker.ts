@@ -769,6 +769,7 @@ export class RunTracker extends EventEmitter {
 			depth: opts.depth,
 			stepIndex: opts.stepIndex,
 			wait: opts.wait,
+			dispatch: opts.dispatch,
 			subworkflowDepth: opts.subworkflowDepth,
 			middleware: opts.middleware,
 			iterationIndex: opts.iterationIndex,

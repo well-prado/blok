@@ -165,7 +165,10 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 			    (fire-and-forget). Drill into the child via the "Sub-runs"
 			    strip in the run header. PR 5 E3 — append depth count
 			    when nested (depth >= 2) so operators see "↳ sub (3)" for
-			    a third-level nested invocation. */}
+			    a third-level nested invocation. G2 follow-up — when the
+			    step opted into `dispatch: "http-self"`, the sibling `http`
+			    badge below picks it up; `in-process` (default + legacy
+			    traces) renders unchanged. */}
 			{n.nodeType === "subworkflow" && (
 				<span
 					className={cn(
@@ -173,17 +176,36 @@ export function StepRail({ nodes, activeStepId, onSelect }: Props) {
 						n.wait === false ? "bg-orange-300/15 text-orange-300" : "bg-zinc-700/40 text-zinc-300",
 					)}
 					title={
-						n.wait === false
+						(n.wait === false
 							? `Async sub-workflow (fire-and-forget) — child runs independently; parent does NOT block${
 									n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` · nested at depth ${n.subworkflowDepth}` : ""
 								}`
 							: `Sub-workflow invocation (synchronous) — see Sub-runs in the header${
 									n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` · nested at depth ${n.subworkflowDepth}` : ""
-								}`
+								}`) +
+						(n.dispatch === "http-self"
+							? " · dispatched via HTTP self-call to BLOK_SELF_BASE_URL"
+							: n.dispatch === "in-process"
+								? " · dispatched in-process"
+								: "")
 					}
 				>
 					{n.wait === false ? "↳ async" : "↳ sub"}
 					{n.subworkflowDepth && n.subworkflowDepth >= 2 ? ` (${n.subworkflowDepth})` : ""}
+				</span>
+			)}
+			{/* G2 (v0.6) follow-up — sibling `http` badge when the
+			    sub-workflow step ran via HTTP self-call. Distinct sky-blue
+			    so it composes visually with the orange (async) / zinc
+			    (sub) badge above instead of competing for the same slot.
+			    No badge for the default in-process path — that's the
+			    99% case and would just add visual noise. */}
+			{n.nodeType === "subworkflow" && n.dispatch === "http-self" && (
+				<span
+					className="font-mono text-[9px] uppercase tracking-wide px-1 py-px rounded bg-sky-300/15 text-sky-300 shrink-0"
+					title="HTTP self-call dispatch — child ran as a fresh HTTP request to BLOK_SELF_BASE_URL (potentially on a different process)."
+				>
+					http
 				</span>
 			)}
 			{/* PR 4: wait.for / wait.until step — workflow paused at this
