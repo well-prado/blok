@@ -1,0 +1,80 @@
+{
+	"name": "v06-reliability-showcase",
+	"version": "1.0.0",
+	"description": "v0.6 reliability primitives sampler — one workflow exercising idempotencyKey + retry + maxDuration + recordSample + concurrencyKey. POST it once and the empty-state curl in Studio captures the real body via `recordSample: true`; POST it twice with the same `requestId` and the second call short-circuits via the idempotency cache; flood it with the same `tenant` and the concurrency gate caps in-flight to 3. Each step's settings are tunable inline so this is also a 5-minute hands-on tour of the primitives covered in docs/c/migration-guides/v1-to-v2-reliability.mdx.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/v06-reliability-showcase",
+			"accept": "application/json",
+			"recordSample": true,
+			"examples": {
+				"body": {
+					"requestId": "req-demo-001",
+					"tenant": "acme",
+					"order": { "id": "ord-42", "amount": 1999, "currency": "USD" }
+				}
+			},
+			"concurrencyKey": "$.req.body.tenant",
+			"concurrencyLimit": 3
+		}
+	},
+	"steps": [
+		{
+			"id": "fetch-rates",
+			"use": "@blokjs/api-call",
+			"type": "module",
+			"description": "External call exercising retry + maxDuration. Each attempt gets its own 8s budget; up to 3 attempts with capped exponential backoff.",
+			"inputs": {
+				"url": "https://httpbin.org/json",
+				"method": "GET",
+				"headers": {
+					"Accept": "application/json"
+				},
+				"responseType": "application/json"
+			},
+			"retry": {
+				"maxAttempts": 3,
+				"minTimeoutInMs": 500,
+				"maxTimeoutInMs": 5000,
+				"factor": 2
+			},
+			"maxDuration": "8s"
+		},
+		{
+			"id": "process-order",
+			"use": "@blokjs/api-call",
+			"type": "module",
+			"description": "Expensive step gated by idempotencyKey — on retry / replay / duplicate trigger with the same requestId, the cached envelope replays without re-running step.process().",
+			"idempotencyKey": "$.req.body.requestId",
+			"idempotencyKeyTTL": 86400000,
+			"inputs": {
+				"url": "https://httpbin.org/post",
+				"method": "POST",
+				"headers": {
+					"Content-Type": "application/json",
+					"X-Request-Id": "$.req.body.requestId"
+				},
+				"body": {
+					"order": "$.req.body.order",
+					"rates": "$.state.fetch-rates"
+				},
+				"responseType": "application/json"
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"body": {
+					"requestId": "$.req.body.requestId",
+					"tenant": "$.req.body.tenant",
+					"order": "$.req.body.order",
+					"slip": "$.state.process-order"
+				},
+				"status": 200
+			}
+		}
+	]
+}
