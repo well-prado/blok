@@ -117,6 +117,45 @@ describe("API client", () => {
 		});
 	});
 
+	// #103 follow-up — operator escape hatch for the first-record-wins
+	// semantic. Pinning the wire shape + URL encoding here so the
+	// Studio button can't drift away from the runner endpoint.
+	describe("deleteWorkflowSample", () => {
+		it("issues DELETE to /__blok/workflows/:name/sample with URL-encoded name", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ deleted: true }));
+
+			const result = await api.deleteWorkflowSample("v05-webhook-fanout");
+			expect(result).toEqual({ deleted: true });
+
+			const calledUrl = mockFetch.mock.calls[0]![0] as string;
+			const init = mockFetch.mock.calls[0]![1] as RequestInit;
+			expect(calledUrl).toBe("/__blok/workflows/v05-webhook-fanout/sample");
+			expect(init.method).toBe("DELETE");
+		});
+
+		it("URL-encodes special characters in the workflow name", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ deleted: true }));
+
+			await api.deleteWorkflowSample("my workflow/with slash");
+
+			const calledUrl = mockFetch.mock.calls[0]![0] as string;
+			expect(calledUrl).toBe("/__blok/workflows/my%20workflow%2Fwith%20slash/sample");
+		});
+
+		it("propagates 404 as ApiError so callers can surface the stale-UI case", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ error: "No recorded sample for workflow 'ghost'" }, 404));
+
+			try {
+				await api.deleteWorkflowSample("ghost");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ApiError);
+				expect((e as ApiError).status).toBe(404);
+				expect((e as ApiError).message).toMatch(/No recorded sample/i);
+			}
+		});
+	});
+
 	describe("searchTraces", () => {
 		it("encodes search query", async () => {
 			mockFetch.mockResolvedValueOnce(jsonResponse({ workflows: [], runs: [] }));

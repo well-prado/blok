@@ -684,6 +684,85 @@ describe("TraceRouter", () => {
 					expect(body.examples.body).toEqual({ user: { id: "string" } });
 				});
 			});
+
+			// #103 follow-up — operator escape hatch for the
+			// first-record-wins semantic. The endpoint deletes the
+			// recorded row; the next successful run can then capture a
+			// fresh body (provided `recordSample: true` is still set on
+			// the trigger). 404 distinguishes a stale UI from a real
+			// delete.
+			describe("DELETE /workflows/:name/sample", () => {
+				it("removes the recorded sample and falls back to inferred on the next GET", () => {
+					WorkflowRegistry.getInstance().register({
+						name: "echo",
+						source: "<test>",
+						workflow: {
+							name: "echo",
+							trigger: { http: { method: "POST", path: "/echo", recordSample: true } },
+							steps: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.request.body.user.id" } }],
+						},
+					});
+					tracker.recordWorkflowSample({
+						workflowName: "echo",
+						body: { user: { id: "real_id_42" } },
+						sourceRunId: "run_1",
+						recordedAt: Date.now(),
+					});
+
+					// Sanity — recorded body is the active source before delete.
+					{
+						const req = new MockRequest({ params: { name: "echo" } });
+						const res = new MockResponse();
+						router.findHandler("GET", "/workflows/:name")!(req, res);
+						expect((res.jsonBody as any).examples.source).toBe("recorded");
+					}
+
+					// Delete returns `{ deleted: true }`.
+					{
+						const req = new MockRequest({ params: { name: "echo" } });
+						const res = new MockResponse();
+						router.findHandler("DELETE", "/workflows/:name/sample")!(req, res);
+						expect(res.jsonBody).toEqual({ deleted: true });
+						expect(res.statusCode).toBe(200);
+					}
+
+					// After delete, the GET falls back to inferred (no
+					// recorded row, no author override).
+					{
+						const req = new MockRequest({ params: { name: "echo" } });
+						const res = new MockResponse();
+						router.findHandler("GET", "/workflows/:name")!(req, res);
+						const body = res.jsonBody as any;
+						expect(body.examples.source).toBe("inferred");
+						expect(body.examples.body).toEqual({ user: { id: "string" } });
+					}
+				});
+
+				it("returns 404 when no sample exists for the workflow", () => {
+					WorkflowRegistry.getInstance().register({
+						name: "echo",
+						source: "<test>",
+						workflow: {
+							name: "echo",
+							trigger: { http: { method: "POST", path: "/echo" } },
+							steps: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.request.body.user.id" } }],
+						},
+					});
+
+					const req = new MockRequest({ params: { name: "echo" } });
+					const res = new MockResponse();
+					router.findHandler("DELETE", "/workflows/:name/sample")!(req, res);
+					expect(res.statusCode).toBe(404);
+					expect((res.jsonBody as any).error).toMatch(/No recorded sample/i);
+				});
+
+				it("404 for an unknown workflow name (registry miss is just an absent sample)", () => {
+					const req = new MockRequest({ params: { name: "does-not-exist" } });
+					const res = new MockResponse();
+					router.findHandler("DELETE", "/workflows/:name/sample")!(req, res);
+					expect(res.statusCode).toBe(404);
+				});
+			});
 		});
 	});
 
