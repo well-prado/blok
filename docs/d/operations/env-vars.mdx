@@ -184,6 +184,12 @@ persisting each ping's payload to the shared doc.
 |---|---|---|
 | `BLOK_STREAM_LOGS` | unset | Enable live log streaming for all steps. Per-step opt-in via `stream_logs: true` overrides. |
 
+## Metrics
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_METRICS_PER_KEY` | unset | D6 — opt in to per-`concurrency_key` labels on the `blok_concurrency_*` OTel counters and `blok_concurrency_occ_retries` histogram. Default OFF strips the key before emission so deployments with high-cardinality keys (per-user, per-tenant) don't blow up metrics cardinality. Set to `1` or `true` to keep the key as a label when you have a small, bounded key space and want per-bucket granularity for dashboards / alerts. |
+
 ## Runtime adapters
 
 Connecting non-TypeScript nodes (Python, Go, Rust, etc.) to the runner.

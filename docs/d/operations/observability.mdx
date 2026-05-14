@@ -105,6 +105,26 @@ slot leaks — most often from a runtime crash that bypassed the
 release path. Lease expiration eventually reclaims those, but the gap
 is the early-warning signal.
 
+#### Per-key labels (`BLOK_METRICS_PER_KEY`)
+
+The three gate counters above carry a `concurrency_key` label
+**only when [`BLOK_METRICS_PER_KEY=1`](/d/operations/env-vars#metrics)
+is set**. Default OFF strips the key before emission so a deployment
+with high-cardinality keys (per-user, per-tenant identifiers) doesn't
+blow up its metrics cardinality.
+
+Turn the flag on when you have a small, bounded key space (e.g.
+fewer than a few hundred distinct tenants) and you want per-bucket
+dashboards or alerts. Sample query when enabled:
+
+```promql
+sum by (concurrency_key) (rate(blok_concurrency_denied_total{mode="throw"}[5m]))
+```
+
+The same flag also gates the `concurrency_key` label on
+`blok_concurrency_occ_retries` (the OCC retry-depth histogram from
+the cross-process backends).
+
 ### Scheduling dispatcher
 
 | Counter | Labels | Increments when |
