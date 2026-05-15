@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-cron",
-	"version": "0.2.1",
+	"version": "0.6.0",
 	"description": "Cron/scheduled trigger for Blok workflows - supports cron expressions and interval-based scheduling",
 	"type": "module",
 	"main": "dist/index.js",
@@ -14,9 +14,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^0.4.0",
-		"@blokjs/runner": "^0.4.0",
-		"@blokjs/shared": "^0.4.0",
+		"@blokjs/helper": "workspace:*",
+		"@blokjs/runner": "workspace:*",
+		"@blokjs/shared": "workspace:*",
 		"@opentelemetry/api": "^1.9.0",
 		"cron": "^4.4.0",
 		"uuid": "^11.1.0"

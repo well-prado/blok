@@ -4,34 +4,43 @@ description: "How to publish @blokjs/* and blokctl to npm — normal flow, catch
 icon: "rocket"
 ---
 
-This page documents how to ship a new Blok release end-to-end. Every release publishes 8 packages to npm in a coordinated bump and validates the published surface against a real `npx blokctl create project` smoke test.
+This page documents how to ship a new Blok release end-to-end. Every release publishes 15 packages to npm in a coordinated bump and validates the published surface against a real `npx blokctl create project` smoke test.
 
 The release script at [scripts/release.ts](scripts/release.ts) automates the publish step and runs pre-flight checks for the most common drift modes. The surrounding context — when to bump, what to tag, how to validate — is documented here.
 
-## The 8 publishable packages
+## The 15 publishable packages
 
-Pre-1.0 Blok publishes 8 packages to npm. Every other package in the monorepo (most `triggers/*`, the `templates/*` SDKs, the scaffold private packages) is `private: true` and stays off npm.
+Pre-1.0 Blok publishes 15 packages to npm. Every other package in the monorepo (the `templates/*` SDKs, `@blokjs/studio`, `@blokjs/syntax`, `@blokjs/lsp-server`, `@blokjs/trigger-http`, the scaffold private packages) is `private: true` and stays off npm.
 
-| npm name | Path on disk |
-|---|---|
-| `@blokjs/shared` | `core/shared/` |
-| `@blokjs/helper` | `core/workflow-helper/` |
-| `@blokjs/runner` | `core/runner/` |
-| `@blokjs/trigger-worker` | `triggers/worker/` |
-| `@blokjs/api-call` | `nodes/web/api-call@1.0.0/` |
-| `@blokjs/if-else` | `nodes/control-flow/if-else@1.0.0/` |
-| `@blokjs/react` | `nodes/web/react@1.0.0/` |
-| `blokctl` | `packages/cli/` |
+| npm name | Path on disk | Added |
+|---|---|---|
+| `@blokjs/shared` | `core/shared/` | pre-v0.4 |
+| `@blokjs/helper` | `core/workflow-helper/` | pre-v0.4 |
+| `@blokjs/runner` | `core/runner/` | pre-v0.4 |
+| `@blokjs/api-call` | `nodes/web/api-call@1.0.0/` | pre-v0.4 |
+| `@blokjs/if-else` | `nodes/control-flow/if-else@1.0.0/` | pre-v0.4 |
+| `@blokjs/react` | `nodes/web/react@1.0.0/` | pre-v0.4 |
+| `@blokjs/helpers` | `nodes/utility/helpers@1.0.0/` | **v0.6.0** |
+| `@blokjs/trigger-worker` | `triggers/worker/` | pre-v0.4 |
+| `@blokjs/trigger-sse` | `triggers/sse/` | **v0.6.0** |
+| `@blokjs/trigger-websocket` | `triggers/websocket/` | **v0.6.0** |
+| `@blokjs/trigger-webhook` | `triggers/webhook/` | **v0.6.0** |
+| `@blokjs/trigger-pubsub` | `triggers/pubsub/` | **v0.6.0** |
+| `@blokjs/trigger-cron` | `triggers/cron/` | **v0.6.0** |
+| `@blokjs/trigger-grpc` | `triggers/grpc/` | **v0.6.0** |
+| `blokctl` | `packages/cli/` | pre-v0.4 |
 
 The npm name does not always match the directory name — `@blokjs/helper` lives at `core/workflow-helper/`, and the public node packages live under directory names that include the version (e.g. `nodes/web/api-call@1.0.0/`). Always identify packages by `package.json:name`, never by directory.
 
+The list expanded from 8 to 15 in v0.6.0. `trigger-http`'s source (which the CLI scaffolds into every new project) imports `@blokjs/{trigger-sse, trigger-webhook, trigger-websocket, helpers}` directly — scaffolded projects cannot `bun install` unless all four are published. `@blokjs/trigger-{cron, grpc, pubsub}` ship alongside for v0.6 surface parity even though they're not transitively required by the HTTP scaffold.
+
 ## Lockstep versioning
 
-Pre-1.0 Blok bumps all 8 packages **in lockstep**. There is one Blok version — `v0.4.0` means every public package is at `0.4.0`. We do not ship `@blokjs/runner@0.5.0` while `@blokjs/helper` stays at `0.4.0`.
+Pre-1.0 Blok bumps all 15 packages **in lockstep**. There is one Blok version — `v0.6.0` means every public package is at `0.6.0`. We do not ship `@blokjs/runner@0.7.0` while `@blokjs/helper` stays at `0.6.0`.
 
-Why: lockstep keeps the surface coherent for users (one tag, one mental model) and avoids the cross-package-dep-range trap that bit the v0.4 release. When `@blokjs/runner` moves from `0.2.2` to `0.4.0`, every dep range across the monorepo also has to move from `^0.2.0` to `^0.4.0` — otherwise bun resolves cross-package deps to the npm registry's stale version instead of the workspace, and `nx run-many -t test` starts failing with extensionless-import errors.
+Why: lockstep keeps the surface coherent for users (one tag, one mental model) and avoids the cross-package-dep-range trap that bit the v0.4 release. When `@blokjs/runner` moves from `0.4.0` to `0.6.0`, every dep range across the monorepo also has to move from `^0.4.0` to `^0.6.0` — otherwise bun resolves cross-package deps to the npm registry's stale version instead of the workspace, and `nx run-many -t test` starts failing with extensionless-import errors.
 
-The release script enforces this — it refuses to publish if any cross-package `@blokjs/*` dep range across the workspace doesn't include the target version.
+The release script enforces this — it refuses to publish if any cross-package `@blokjs/*` dep range across the workspace doesn't include the target version, OR if the dep isn't using the `workspace:*` protocol (v0.6.0+).
 
 ## Normal flow — per-PR changesets
 
@@ -53,8 +62,8 @@ Per-PR changesets are the discipline that keeps the registry in sync with `main`
 
 If the registry has fallen far behind `main` (e.g. `@blokjs/helper@0.2.1` on npm but the workspace is at the API surface for `0.4.0`), `bunx changeset version` won't bridge the gap cleanly. Skip it and bump manually:
 
-1. **Manual lockstep bump**: edit each of the 8 public `package.json`s to the target version directly.
-2. **Cross-package dep alignment**: every `@blokjs/<published-package>` dep range across the monorepo (including private trigger packages) must include the new version. If `@blokjs/runner` was at `0.2.2` and the workspace bumps to `0.4.0`, every `"@blokjs/runner": "^0.2.0"` becomes `"^0.4.0"`. Without this, bun resolves cross-package deps to the npm registry's stale version instead of the workspace.
+1. **Manual lockstep bump**: edit each of the 15 public `package.json`s to the target version directly.
+2. **Cross-package dep alignment**: every `@blokjs/<published-package>` dep range across the monorepo (including private trigger packages) must include the new version. **Preferred since v0.6.0**: switch internal deps to `"workspace:*"` so bumps don't propagate to every consumer manually — the release script accepts both. For literal ranges: if `@blokjs/runner` was at `^0.2.0`, every consumer becomes `^0.4.0` (then `^0.6.0` for v0.6). Without this, bun resolves cross-package deps to the npm registry's stale version instead of the workspace.
 3. **CLI scaffold constants**: bump both `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in [packages/cli/src/commands/create/project.ts](packages/cli/src/commands/create/project.ts).
 4. **Delete consumed changesets**: any `.changeset/*.md` accumulated during the gap is now redundant — the manual bump replaces them. Delete to avoid double-bumping on the next changesets run.
 5. **Lockfile**: `bun install` regenerates `bun.lock` with the new ranges.
@@ -68,9 +77,12 @@ Before invoking `npm publish` (which is irreversible after 72h), validate the pu
 
 ```bash
 mkdir -p /tmp/blok-tgz
-for dir in core/shared core/workflow-helper core/runner triggers/worker \
+for dir in core/shared core/workflow-helper core/runner \
            nodes/web/api-call@1.0.0 nodes/control-flow/if-else@1.0.0 \
-           nodes/web/react@1.0.0 packages/cli; do
+           nodes/web/react@1.0.0 nodes/utility/helpers@1.0.0 \
+           triggers/worker triggers/sse triggers/websocket \
+           triggers/webhook triggers/pubsub triggers/cron triggers/grpc \
+           packages/cli; do
   (cd "$dir" && npm pack --pack-destination /tmp/blok-tgz)
 done
 ```
@@ -83,19 +95,19 @@ This catches missing files in `package.json:files`, missing exports in `package.
 
 ```bash
 bun run release --dry-run              # pre-flight + plan, no publish
-bun run release --otp 123456 --yes     # publish all 8 with OTP
+bun run release --otp 123456 --yes     # publish all 15 with OTP
 bun run release --otp 123456 --yes --skip-tests --skip-build  # if validated separately
 ```
 
 What it does:
 
-- Reads all 8 publishable `package.json`s and asserts versions match (lockstep).
-- Walks every `package.json` in the workspace and asserts each `@blokjs/<published-package>` dep range includes the workspace version.
+- Reads all 15 publishable `package.json`s and asserts versions match (lockstep).
+- Walks every `package.json` in the workspace and asserts each `@blokjs/<published-package>` dep range either is `workspace:*` or includes the workspace version literally.
 - Reads `packages/cli/src/commands/create/project.ts` and asserts `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` match the workspace version.
 - Asserts the local git tag `v<version>` exists.
 - Asserts the working tree is clean.
 - Optionally runs `bun run build` and `bunx nx run-many -t test` (skip with flags).
-- Publishes the 8 in dependency order using a single OTP.
+- Publishes the 15 in dependency order using a single OTP.
 
 What it does **not** do:
 
@@ -105,13 +117,13 @@ What it does **not** do:
 
 ## OTP batching
 
-`npm publish` requires a TOTP code per call. The TOTP window is ~30 seconds, which is enough to publish all 8 packages in a single batch with one OTP. Pass the same code via `--otp` and the script runs all 8 publishes within the window.
+`npm publish` requires a TOTP code per call. The TOTP window is ~30 seconds, which is enough to publish all 15 packages in a single batch with one OTP. Pass the same code via `--otp` and the script runs all 15 publishes within the window.
 
 If a publish fails mid-batch (expired OTP, network blip), the script reports which packages succeeded. Re-run with a fresh OTP — already-published versions fail with `EPUBLISHCONFLICT` which is benign and the script will continue past them.
 
 ## Post-publish smoke test
 
-After the script reports all 8 published, validate against real npm from a cold environment:
+After the script reports all 15 published, validate against real npm from a cold environment:
 
 ```bash
 mkdir /tmp/blok-real && cd /tmp/blok-real
@@ -128,7 +140,7 @@ If the smoke test fails, the most common cause is a cross-package dep range stil
 
 The release script verifies the first four automatically:
 
-- [ ] All 8 `package.json` files have the target version.
+- [ ] All 15 `package.json` files have the target version.
 - [ ] Every `@blokjs/<published-package>` dep range across the monorepo includes the target version.
 - [ ] `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in `packages/cli/src/commands/create/project.ts` match.
 - [ ] The git tag `v<version>` exists locally.
@@ -138,7 +150,7 @@ The release script verifies the first four automatically:
 
 ## Versioning conventions
 
-- Pre-1.0: lockstep bumps across all 8 packages. `0.X.0` for breaking changes; `0.X.Y` for additive changes and bug fixes.
+- Pre-1.0: lockstep bumps across all 15 packages. `0.X.0` for breaking changes; `0.X.Y` for additive changes and bug fixes.
 - Tags are annotated (`git tag -a`) with the full release notes embedded in the tag message. `git show v<version>` should produce a complete changelog.
 - Tags are pushed manually — `git push --tags` after the post-publish smoke test confirms a successful release.
 

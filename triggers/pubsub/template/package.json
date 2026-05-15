@@ -25,12 +25,12 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/api-call": "^0.4.0",
-		"@blokjs/helper": "^0.4.0",
-		"@blokjs/if-else": "^0.4.0",
-		"@blokjs/runner": "^0.4.0",
-		"@blokjs/shared": "^0.4.0",
-		"@blokjs/trigger-pubsub": "^0.2.0",
+		"@blokjs/api-call": "workspace:*",
+		"@blokjs/helper": "workspace:*",
+		"@blokjs/if-else": "workspace:*",
+		"@blokjs/runner": "workspace:*",
+		"@blokjs/shared": "workspace:*",
+		"@blokjs/trigger-pubsub": "workspace:*",
 		"@opentelemetry/api": "^1.9.0",
 		"@opentelemetry/exporter-prometheus": "^0.57.2",
 		"@opentelemetry/resources": "^1.30.1",
