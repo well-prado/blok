@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Lockstep publish for the 8 Blok public packages.
+ * Lockstep publish for the 15 Blok public packages (8 pre-v0.6, plus 7
+ * added in v0.6.0 to support the new trigger surface — sse, websocket,
+ * webhook, pubsub, cron, grpc, plus the helpers node).
  *
  * Pre-flight: lockstep version, cross-package dep alignment, CLI scaffold
  * constants, git tag, clean tree. Then ordered npm publish with a single
@@ -30,14 +32,43 @@ interface Publishable {
 	name: string;
 }
 
+/**
+ * Publish order respects the dep graph: every dependency lists before
+ * the consumers that import it. `@blokjs/shared` first (no internal
+ * deps), `@blokjs/helper` and the node packages next (depend on
+ * shared), `@blokjs/runner` after them, then the new v0.6 trigger
+ * surface that depends on runner, and `blokctl` last.
+ *
+ * The v0.6.0 release expanded the list from 8 to 15. `trigger-http`'s
+ * source imports `@blokjs/trigger-sse`, `@blokjs/trigger-webhook`,
+ * `@blokjs/trigger-websocket`, and `@blokjs/helpers` — scaffolded
+ * projects can't `bun install` if any of those four isn't on npm.
+ * `@blokjs/trigger-{cron, grpc, pubsub}` are part of the v0.6 surface
+ * too and published alongside for parity. `@blokjs/syntax` /
+ * `@blokjs/lsp-server` remain off npm until they grow user-visible
+ * docs (CLI / IDE support only).
+ */
 const PUBLISHABLE: readonly Publishable[] = [
+	// Foundation — no internal deps.
 	{ dir: "core/shared", name: "@blokjs/shared" },
 	{ dir: "core/workflow-helper", name: "@blokjs/helper" },
-	{ dir: "core/runner", name: "@blokjs/runner" },
-	{ dir: "triggers/worker", name: "@blokjs/trigger-worker" },
+	// Node packages (depend on shared + helper).
 	{ dir: "nodes/web/api-call@1.0.0", name: "@blokjs/api-call" },
 	{ dir: "nodes/control-flow/if-else@1.0.0", name: "@blokjs/if-else" },
 	{ dir: "nodes/web/react@1.0.0", name: "@blokjs/react" },
+	{ dir: "nodes/utility/helpers@1.0.0", name: "@blokjs/helpers" },
+	// Runner (consumes everything above).
+	{ dir: "core/runner", name: "@blokjs/runner" },
+	// Triggers (consume runner + shared + helper). Order amongst
+	// themselves doesn't matter — none depend on another trigger.
+	{ dir: "triggers/worker", name: "@blokjs/trigger-worker" },
+	{ dir: "triggers/sse", name: "@blokjs/trigger-sse" },
+	{ dir: "triggers/websocket", name: "@blokjs/trigger-websocket" },
+	{ dir: "triggers/webhook", name: "@blokjs/trigger-webhook" },
+	{ dir: "triggers/pubsub", name: "@blokjs/trigger-pubsub" },
+	{ dir: "triggers/cron", name: "@blokjs/trigger-cron" },
+	{ dir: "triggers/grpc", name: "@blokjs/trigger-grpc" },
+	// CLI last — depends on everything via the scaffold.
 	{ dir: "packages/cli", name: "blokctl" },
 ];
 
@@ -57,7 +88,7 @@ interface Failure {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 8 Blok public packages to npm in dependency order using a
+Publishes the 15 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:
@@ -281,7 +312,7 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	console.log("Reading 8 publishable packages...");
+	console.log(`Reading ${PUBLISHABLE.length} publishable packages...`);
 	const packages = PUBLISHABLE.map((p) => ({ ...p, pkg: readPkg(p.dir) }));
 	for (const { name, pkg } of packages) {
 		if (pkg.name !== name) {
