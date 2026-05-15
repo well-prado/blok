@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/helper",
-	"version": "0.6.0",
+	"version": "0.6.1",
 	"description": "",
 	"engines": {
 		"node": ">=18.0.0"

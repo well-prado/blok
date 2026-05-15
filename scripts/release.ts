@@ -278,13 +278,31 @@ function checkCleanTree(): Failure[] {
 }
 
 function publishOne(dir: string, otp: string): { ok: boolean; alreadyPublished: boolean; output: string } {
+	// `npm publish` is used because internal deps are declared with
+	// literal version ranges (e.g. `^0.6.1`) rather than the
+	// `workspace:*` protocol. The v0.6.0 attempt tried `workspace:*` and
+	// learned that `bun publish` resolves workspace protocols to the
+	// **npm registry's latest** version (not the workspace version
+	// about to publish), which is wrong for a coordinated batch publish
+	// — the tarballs ended up pinned to 0.4.0 instead of the target.
+	// Reverted to literal ranges in lockstep across the monorepo; `npm
+	// publish` ships them verbatim. The `release-runbook.mdx` catch-up
+	// flow documents the trade-off (every version bump now requires
+	// coordinated dep-range edits, but the publish is reliable).
 	const result = spawnSync("npm", ["publish", "--access", "public", "--otp", otp], {
 		cwd: join(REPO_ROOT, dir),
 		encoding: "utf-8",
 	});
 	const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	const alreadyPublished = /EPUBLISHCONFLICT|cannot publish over the previously published/i.test(output);
-	return { ok: result.status === 0 || alreadyPublished, alreadyPublished, output };
+	// Distinguish silent npm failures from real success: a successful
+	// publish prints a `+ <name>@<version>` line on stdout. Without
+	// this check, `result.status === 0` paired with an empty stdout
+	// (npm's behavior on certain skip paths) was misreported as OK
+	// in the v0.6.0 attempt.
+	const printedPublishLine = /^\+ /m.test(result.stdout ?? "");
+	const ok = printedPublishLine || alreadyPublished;
+	return { ok, alreadyPublished, output };
 }
 
 function runStep(name: string, cmd: string, args: readonly string[]): boolean {
