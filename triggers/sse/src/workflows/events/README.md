@@ -9,102 +9,121 @@ selected.
 | File | Trigger | Purpose |
 |---|---|---|
 | [`stream-demo.ts`](stream-demo.ts) | `sse` — `GET /sse/demo` | Subscribes the open stream to the in-process bus channel `sse-demo` and pumps events out as SSE frames. |
-| [`publish-demo.ts`](publish-demo.ts) | `http` — `POST /v07-sse-publish` | Publishes one event to the `sse-demo` channel via `@blokjs/sse-publish`. Only useful when the project also has an HTTP trigger. |
+| [`publish-demo.ts`](publish-demo.ts) | `http` — `POST /v07-sse-publish` | Publishes one event to the `sse-demo` channel via `@blokjs/sse-publish`. Only registered when the project also has an HTTP trigger. |
 
-Open the stream in one terminal, POST events from another, and the
-stream client receives them in real time.
+## Test the pair end-to-end
 
-## Test the stream
+When the scaffold includes BOTH `http` and `sse`, `blokctl dev` runs a
+single Node process — the HTTP entry mounts SSE on the shared Hono app
+via `SSETrigger(httpTrigger.getApp(), httpTrigger)`. Same process →
+same in-process bus → events flow from publisher to subscribers in real
+time.
 
-The stream-side works on its own — connect any EventSource client to
-`http://localhost:4001/sse/demo` and you'll see the initial
-`retry: 3000` field plus heartbeat frames every 15 seconds:
+```bash
+# Terminal 1 — open an SSE stream
+curl -N http://localhost:4000/sse/demo
+# data:
+# retry: 3000
+#
+# (waiting…)
+
+# Terminal 2 — publish three events
+curl -X POST http://localhost:4000/v07-sse-publish \
+    -H 'Content-Type: application/json' \
+    -d '{"event":"counter","data":{"n":1}}'
+curl -X POST http://localhost:4000/v07-sse-publish \
+    -H 'Content-Type: application/json' \
+    -d '{"event":"counter","data":{"n":2}}'
+curl -X POST http://localhost:4000/v07-sse-publish \
+    -H 'Content-Type: application/json' \
+    -d '{"event":"counter","data":{"n":3}}'
+
+# Terminal 1 receives:
+# event: counter
+# data: {"n":1}
+# id: 1
+#
+# event: counter
+# data: {"n":2}
+# id: 2
+#
+# event: counter
+# data: {"n":3}
+# id: 3
+```
+
+## Test the stream alone (SSE-only scaffold)
+
+In `--triggers sse` (without HTTP), the SSE process listens on its own
+port (4001 by default). The publisher workflow isn't registered (no
+HTTP trigger). You can still verify connectivity:
 
 ```bash
 curl -N http://localhost:4001/sse/demo
 ```
 
-## Test the pair (in-process)
+To push events from an SSE-only project, write your own publisher —
+any trigger kind works (cron, worker, manual), or call the bus
+singleton directly via `import { _getSSEBus } from "@blokjs/trigger-sse"`.
 
-The publish-demo workflow lives behind the HTTP trigger. In a
-multi-trigger scaffold (`--triggers http,sse`), `blokctl dev` runs
-HTTP and SSE in **separate processes**, so each process gets its own
-in-process bus instance. Events posted to the HTTP process do **not**
-reach the SSE process's subscribers. This is by design — the v0.7
-SSE bus is in-process only; a cross-process backplane (Redis Streams /
-NATS JetStream) is a documented follow-up.
+## How SSE routes mount on HTTP
 
-To exercise the full pair end-to-end today, three options:
+SSE is fundamentally HTTP: a `Content-Type: text/event-stream` response
+that stays open. Every framework worth mentioning mounts SSE on the
+HTTP server — Express, Fastify, FastAPI, Rails, Spring Boot, Phoenix,
+ASP.NET. Blok follows the same pattern.
 
-### Option 1 — run both triggers in the same Node process
-
-Boot only the HTTP entry, which already mounts SSE on the shared
-Hono app via `addPreCatchAllHook`. Edit `src/triggers/http/index.ts`
-to construct `SSETrigger` against the HTTP app instead of letting
-`blokctl dev` spawn a separate SSE process:
+`SSETrigger`'s constructor takes the existing Hono app + HttpTrigger
+handle:
 
 ```ts
-import HttpTrigger from "./runner/HttpTrigger";
-import SSETrigger from "../sse/SSETrigger";
-
-const httpTrigger = new HttpTrigger();
-const sseTrigger = new SSETrigger(httpTrigger.getApp(), httpTrigger);
-sseTrigger.setNodeMap(/* nodes + workflows */);
-await sseTrigger.listen();
-await httpTrigger.listen();
+constructor(app: Hono, httpTrigger?: HttpTriggerLike)
 ```
 
-Then run `bun run src/triggers/http/index.ts` directly — both
-triggers share one bus, one Hono app, one port (4000).
+In multi-trigger scaffolds, the HTTP entry constructs SSE this way and
+SSE registers routes via `httpTrigger.addPreCatchAllHook(...)`. Routes
+land BEFORE Hono's legacy workflow catch-all (`/:workflow{.+}`), so
+`/sse/<path>` upgrade requests reach the SSE handler instead of being
+dispatched as a workflow name.
 
-### Option 2 — point both triggers at a cross-process bus
+In SSE-only scaffolds, the generated `SSEServer.ts` builds its own
+Hono app + calls `serve()` directly. Same trigger code, different
+hosting surface.
 
-Wait for the Redis Streams / NATS JetStream bus backplane.
-Tracked in [BACKLOG.md](../../../../../BACKLOG.md).
+## Cross-process bus backplane (advanced)
 
-### Option 3 — publish from the SSE process itself
+The default SSE bus is in-process — `@blokjs/sse-publish` only fans
+out to subscribers on the SAME Node process. That's fine for the
+default scaffold layout (HTTP+SSE share one process). For
+horizontally-scaled deployments where clients connect to different
+replicas, swap in a Redis Streams or NATS JetStream backplane.
+Tracked as a v0.7 follow-up in [BACKLOG.md](../../../../../BACKLOG.md).
 
-Add a cron- or worker-triggered workflow that publishes to the
-`sse-demo` channel using `@blokjs/sse-publish`. As long as the
-publisher and subscriber live in the same Node process, the
-in-process bus carries the events.
+## Helper nodes available
 
-## How the bus pattern works
+`@blokjs/helpers` exports three SSE-aware helpers, all spread into the
+shared Nodes record when `--triggers sse` is selected:
 
-```
-       publishers                              subscribers
-   ┌─────────────────┐                    ┌──────────────────┐
-   │ POST /publish   │                    │  GET  /sse/demo  │
-   │  ↓              │                    │   ↑              │
-   │ @blokjs/sse-    │                    │ @blokjs/sse-     │
-   │   publish       │                    │   stream         │
-   │   .channel=X    │                    │   .source=        │
-   └────────┬────────┘                    │   $.state.sub    │
-            │                             │   ↑              │
-            ▼                             │ @blokjs/sse-     │
-   ┌──────────────────────────────────────│   subscribe      │
-   │            In-process bus            │   .channels=[X]  │
-   │  (event ring buffer per channel)     └──────────────────┘
-   │  (subscriber iterators per stream)
-   └──────────────────────────────────────┘
-```
+| Node | Purpose |
+|---|---|
+| `@blokjs/sse-subscribe` | Subscribe the current SSE stream to channels on the bus. Returns an iterator handle. |
+| `@blokjs/sse-stream` | Pump events from a subscribed iterator out to the client as SSE frames. |
+| `@blokjs/sse-publish` | Publish one event to a bus channel — works from ANY workflow kind (HTTP, Worker, Cron, WS). |
 
-The bus carries events between **same-process** publishers and
-subscribers. Any trigger kind (HTTP, Worker, Cron, WebSocket) can
-publish; subscribers are always SSE streams. Replay across reconnect
-uses the `Last-Event-ID` header — the bus's ring buffer (100 events
-per channel by default) holds recent events for late joiners.
+## LLM training pattern
 
-## LLM training examples
-
-These templates are designed to read top-to-bottom as canonical
-patterns. A coding-assistant LLM seeing this directory should learn:
+This template reads top-to-bottom as a canonical SSE pattern. A coding-
+assistant LLM seeing this directory should learn:
 
 - The `trigger.sse` config shape (`path`, `heartbeatInterval`,
   `retryInterval`, `maxConnections`, `channels`)
-- The `@blokjs/sse-subscribe` / `@blokjs/sse-stream` step pair as the
+- The `@blokjs/sse-subscribe` → `@blokjs/sse-stream` step pair as the
   stream-side primitive
-- The `@blokjs/sse-publish` helper as the publisher-side primitive
-- `$.state.<id>` for piping `sse-subscribe`'s output into `sse-stream`
+- `@blokjs/sse-publish` as the publisher-side primitive (usable from
+  any trigger kind)
+- `$.state.<id>` (unquoted, TS proxy) for piping `sse-subscribe`'s
+  output into `sse-stream`. Quoted strings like `"$.state.sub"`
+  don't work — the Mapper only recognizes `js/ctx....` strings or
+  the `$` proxy.
 - Why the publisher is decoupled from the subscriber (one HTTP POST
   can fan out to N connected SSE clients via the bus)

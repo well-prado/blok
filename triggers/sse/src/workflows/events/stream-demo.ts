@@ -1,4 +1,4 @@
-import { workflow } from "@blokjs/helper";
+import { $, workflow } from "@blokjs/helper";
 
 /**
  * SSE stream demo — open `GET /sse/demo` from any EventSource-style
@@ -43,7 +43,7 @@ export default workflow({
 		{
 			id: "stream",
 			use: "@blokjs/sse-stream",
-			inputs: { source: "$.state.sub", eventName: "message" },
+			inputs: { source: $.state.sub, eventName: "message" },
 		},
 	],
 });

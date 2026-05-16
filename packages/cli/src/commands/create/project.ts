@@ -151,7 +151,12 @@ export async function createProject(opts: OptionValues, version: string, current
 								message: "Select triggers to install",
 								options: [
 									{ label: "HTTP", value: "http", hint: "REST APIs (port 4000)" },
-									{ label: "SSE", value: "sse", hint: "Real-time push (port 4001)" },
+									{ label: "SSE", value: "sse", hint: "Real-time server push (mounts on HTTP port)" },
+									{
+										label: "WebSocket",
+										value: "websocket",
+										hint: "Bi-directional real-time (mounts on HTTP port)",
+									},
 									{ label: "Queue", value: "queue", hint: "Kafka/RabbitMQ/SQS/Redis (port 4005)" },
 									{ label: "Pub/Sub", value: "pubsub", hint: "GCP/AWS/Azure messaging (port 4006)" },
 									//{ label: "GRPC", value: "grpc", hint: "RPC (port 4003)" }
@@ -324,6 +329,28 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Build trigger configs for all selected triggers
 		const triggerConfigs: TriggerConfig[] = selectedTriggers.map((kind) => createTriggerConfig(kind));
 
+		// v0.6.5 — SSE and WebSocket are sub-protocols of HTTP. SSETrigger's
+		// constructor takes a Hono app + HttpTrigger handle so it can mount
+		// on the shared HTTP server via `addPreCatchAllHook`. Same for
+		// WebSocketTrigger (plus `addServerHook` for the upgrade listener).
+		// The framework's own design assumes single-process colocation;
+		// the multi-process scaffold layout fights that design — the
+		// in-process bus (sse-bus.ts) is per-process, so cross-process
+		// fan-out (HTTP publishes → SSE clients receive) didn't work.
+		// When HTTP is in the trigger set, SSE and WebSocket are mounted
+		// on HTTP's process and removed from the spawn list. The trigger
+		// entry files (src/triggers/{sse,websocket}/index.ts) are still
+		// generated so a user who later peels off HTTP can still run SSE
+		// or WS standalone; they just aren't started by `blokctl dev`
+		// when HTTP is present.
+		const mountedOnHttp = new Set<string>();
+		if (selectedTriggers.includes("http")) {
+			for (const kind of ["sse", "websocket"]) {
+				if (selectedTriggers.includes(kind)) mountedOnHttp.add(kind);
+			}
+		}
+		const spawnedTriggerConfigs: TriggerConfig[] = triggerConfigs.filter((tc) => !mountedOnHttp.has(tc.kind));
+
 		// Use the first trigger as the "primary" for base files (package.json, tsconfig, etc.)
 		const primaryTrigger = selectedTriggers[0];
 		// Pubsub and Queue triggers use template subdirectory
@@ -427,13 +454,15 @@ export async function createProject(opts: OptionValues, version: string, current
 				// HTTP and SSE use the regular src directory.
 				const triggerSrcDir = `${repoSource}/triggers/${triggerKind}/src`;
 
-				if (triggerKind === "sse") {
-					// SSE has a flat layout — every .ts at the package root is
-					// part of the trigger surface (SSETrigger.ts + bus.ts + lib.ts
-					// + future siblings). Pre-v0.6.3 cherry-picking left bus.ts
-					// behind which broke `import { getBus } from "./bus"` inside
-					// SSETrigger. Whole-dir copy + filter out tests is cleaner +
-					// future-proof.
+				if (triggerKind === "sse" || triggerKind === "websocket") {
+					// SSE and WebSocket have flat layouts — every .ts at the
+					// package root is part of the trigger surface
+					// (SSETrigger.ts + bus.ts + lib.ts for SSE,
+					// WebSocketTrigger.ts + Backplane.ts for WebSocket).
+					// Pre-v0.6.3 the SSE branch cherry-picked individual
+					// files and left siblings (bus.ts) behind — breaking
+					// internal imports. Whole-dir copy + filter out tests is
+					// cleaner + future-proof for both triggers.
 					const entries = fsExtra.readdirSync(triggerSrcDir, { withFileTypes: true });
 					for (const entry of entries) {
 						const src = `${triggerSrcDir}/${entry.name}`;
@@ -487,7 +516,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// Generate trigger entry points that import shared nodes/workflows
 		for (const triggerKind of selectedTriggers) {
-			const entryContent = generateTriggerEntryFile(triggerKind);
+			const entryContent = generateTriggerEntryFile(triggerKind, selectedTriggers);
 			fsExtra.writeFileSync(`${dirPath}/src/triggers/${triggerKind}/index.ts`, entryContent);
 		}
 
@@ -502,6 +531,19 @@ export async function createProject(opts: OptionValues, version: string, current
 			const sseServerDir = `${dirPath}/src/triggers/sse/runner`;
 			fsExtra.ensureDirSync(sseServerDir);
 			fsExtra.writeFileSync(`${sseServerDir}/SSEServer.ts`, generateSSEServerFile());
+		}
+
+		// Same pattern for WebSocket: standalone WS scaffolds need a
+		// WSServer wrapper that builds a Hono app, instantiates
+		// WebSocketTrigger(app), registers WS-triggered workflows, then
+		// calls serve() AND injectWebSocket(server) so the WS upgrade
+		// listener attaches. When HTTP is also selected, the WS routes
+		// instead mount on HTTP's process (see generateTriggerEntryFile
+		// for the HTTP branch).
+		if (selectedTriggers.includes("websocket")) {
+			const wsServerDir = `${dirPath}/src/triggers/websocket/runner`;
+			fsExtra.ensureDirSync(wsServerDir);
+			fsExtra.writeFileSync(`${wsServerDir}/WSServer.ts`, generateWSServerFile());
 		}
 
 		// Copy trigger-specific nodes to shared src/nodes/
@@ -752,6 +794,34 @@ export async function createProject(opts: OptionValues, version: string, current
 				...sseDeps,
 			};
 		}
+		// Same rationale for WebSocket — when WS is selected, inject the
+		// deps required for the scaffolded WSServer + workflow runtime.
+		// @blokjs/helpers provides @blokjs/ws-{broadcast,reply,close}.
+		if (selectedTriggers.includes("websocket")) {
+			const wsDeps: Record<string, string> = {
+				"@blokjs/api-call": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/web/api-call@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/if-else": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/control-flow/if-else@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/helpers": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/utility/helpers@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/trigger-websocket": localRepoPath
+					? `file:${path.resolve(repoSource, "triggers/websocket")}`
+					: BLOKJS_DEP_RANGE,
+				"@hono/node-server": "^1.19.9",
+				"@hono/node-ws": "^1.3.1",
+				hono: "^4.11.7",
+				uuid: "^11.1.0",
+				ws: "^8.19.0",
+			};
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				...wsDeps,
+			};
+		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
 			packageJsonContent.dependencies = {
 				...packageJsonContent.dependencies,
@@ -785,7 +855,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 
 		// Write .blok/config.json with both triggers and runtimes
-		writeProjectConfig(dirPath, runtimeConfigs, triggerConfigs);
+		writeProjectConfig(dirPath, runtimeConfigs, spawnedTriggerConfigs);
 
 		// Append trigger env vars to .env.local
 		if (triggerConfigs.length > 0) {
@@ -817,9 +887,11 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Create supervisord.conf with triggers and runtimes
 		const supervisordConfPath = `${dirPath}/supervisord.conf`;
 		let supervisordConfContent = "[supervisord]\nnodaemon=true\n";
-		// Add trigger programs
-		if (triggerConfigs.length > 0) {
-			supervisordConfContent += generateTriggerSupervisordConfig(triggerConfigs);
+		// Add trigger programs — only the ones that spawn their own process.
+		// SSE / WebSocket mounted on HTTP don't need a separate supervisord
+		// program; they live inside the HTTP trigger process.
+		if (spawnedTriggerConfigs.length > 0) {
+			supervisordConfContent += generateTriggerSupervisordConfig(spawnedTriggerConfigs);
 		}
 		// Add runtime programs
 		if (runtimeConfigs.length > 0) {
@@ -855,10 +927,18 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (!currentPath) console.log(`Change to the project directory: cd ${projectName}`);
 		console.log(`Run the command "npm run dev" to start the development server.`);
 
-		// Show trigger health check URLs
+		// Show trigger health check URLs. SSE / WebSocket mounted on the
+		// HTTP process serve their paths on HTTP's port — surface that
+		// accurately so the user doesn't curl the unused dedicated port.
 		console.log("\nTrigger endpoints:");
+		const httpPort = triggerConfigs.find((tc) => tc.kind === "http")?.port;
 		for (const tc of triggerConfigs) {
-			console.log(`  ${tc.label}: http://localhost:${tc.port}/health-check`);
+			if (mountedOnHttp.has(tc.kind) && httpPort !== undefined) {
+				const samplePath = tc.kind === "sse" ? "/sse/demo" : "/ws/echo";
+				console.log(`  ${tc.label}: http://localhost:${httpPort}${samplePath}  (mounted on HTTP)`);
+			} else {
+				console.log(`  ${tc.label}: http://localhost:${tc.port}/health-check`);
+			}
 		}
 
 		// Show runtime health check URLs
@@ -919,14 +999,15 @@ function generateSharedNodesFile(triggers: string[], _repoSource: string): strin
 	nodeExports.set("@blokjs/api-call", "ApiCall");
 	nodeExports.set("@blokjs/if-else", "IfElse");
 
-	// SSE workflows need the helper nodes that drive the bus pattern
-	// (@blokjs/sse-subscribe, @blokjs/sse-stream, @blokjs/sse-publish).
-	// Spread the entire HELPER_NODES registry from @blokjs/helpers
-	// rather than cherry-picking — the same package exports other
-	// reliability helpers (@blokjs/log, @blokjs/expr, @blokjs/audit-log,
-	// etc.) that users will reach for from SSE workflows too. Cost is
-	// negligible (helper nodes are zero-side-effect imports).
-	if (triggers.includes("sse")) {
+	// SSE and WebSocket workflows need helper nodes from @blokjs/helpers:
+	// SSE → @blokjs/sse-subscribe, @blokjs/sse-stream, @blokjs/sse-publish
+	// WS  → @blokjs/ws-broadcast, @blokjs/ws-reply, @blokjs/ws-close
+	// Spread the entire HELPER_NODES registry rather than cherry-picking —
+	// the same package exports other reliability helpers (@blokjs/log,
+	// @blokjs/expr, @blokjs/audit-log, etc.) that users will reach for
+	// from realtime workflows too. Cost is negligible (zero-side-effect
+	// imports).
+	if (triggers.includes("sse") || triggers.includes("websocket")) {
 		nodeImports.add('import { HELPER_NODES } from "@blokjs/helpers";');
 		spreadHelperNodes = true;
 	}
@@ -986,6 +1067,15 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo";');
 				workflowEntries.push('\t"sse-publish-demo": SSEPublishDemo,');
 			}
+		} else if (trigger === "websocket") {
+			// v0.6.5 — WebSocket source ships `src/workflows/events/echo-demo.ts`
+			// (copied to `src/workflows/websocket/events/echo-demo.ts`). It
+			// echoes received messages back via @blokjs/ws-reply. The
+			// scaffold ships this regardless of whether HTTP is selected;
+			// when HTTP is also selected, it mounts on the shared port
+			// alongside HTTP routes via WebSocketTrigger(app, httpTrigger).
+			imports.push('import WSEchoDemo from "./workflows/websocket/events/echo-demo";');
+			workflowEntries.push('\t"ws-echo-demo": WSEchoDemo,');
 		} else if (trigger === "pubsub") {
 			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
 			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
@@ -1014,11 +1104,111 @@ export default workflows;
  * Generate trigger entry point that imports shared nodes/workflows.
  * Matches the pattern of the original trigger index.ts files.
  */
-function generateTriggerEntryFile(triggerKind: string): string {
+function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[] = [triggerKind]): string {
 	if (triggerKind === "http") {
+		// v0.6.5 — when SSE is ALSO selected, mount SSETrigger on HTTP's
+		// shared Hono app instead of spawning a separate SSE process.
+		// SSETrigger is designed to mount on a sibling-trigger's app
+		// (see its constructor signature: `app: Hono, httpTrigger?:
+		// HttpTriggerLike` + the `addPreCatchAllHook` integration point
+		// in HttpTrigger). Single-process bootstrap is the framework's
+		// design intent and makes the in-process bus actually carry
+		// events from publish-side workflows (HTTP POST) to subscribe-
+		// side workflows (SSE streams). With this in place, the
+		// stream-demo + publish-demo template pair works end-to-end on
+		// `blokctl dev` out of the box.
+		//
+		// The separate SSE entry (src/triggers/sse/index.ts) still
+		// exists for SSE-only scaffolds. blokctl dev's trigger spawn
+		// loop skips it when HTTP is also configured (see
+		// createTriggerConfig in this same file).
+		const sseAlsoSelected = selectedTriggers.includes("sse");
+		const wsAlsoSelected = selectedTriggers.includes("websocket");
+		// Critical: import SSETrigger / WebSocketTrigger from the npm
+		// packages rather than the locally-copied trigger files. The
+		// helper nodes (@blokjs/sse-publish, @blokjs/ws-broadcast, etc.)
+		// look up the in-process bus / active trigger singleton via the
+		// npm package's exports. If the HTTP entry's trigger instance
+		// comes from a different module (the local copy), Node treats
+		// them as separate modules with separate singletons — events
+		// would never cross.
+		const needsShared = sseAlsoSelected || wsAlsoSelected;
+		const sharedHelperImports = needsShared
+			? `\nimport { NodeMap, WorkflowRegistry } from "@blokjs/runner";\nimport sharedNodes from "../../Nodes";\nimport sharedWorkflows from "../../Workflows";`
+			: "";
+		const sseImports = sseAlsoSelected ? `\nimport SSETrigger from "@blokjs/trigger-sse";` : "";
+		const wsImports = wsAlsoSelected ? `\nimport WebSocketTrigger from "@blokjs/trigger-websocket";` : "";
+		const sharedBootstrapPrelude = needsShared
+			? `\n\n			// Build a NodeMap from the shared Nodes record; both SSE and
+			// WebSocket triggers consume this via setNodeMap so they can
+			// resolve helper nodes (sse-subscribe, sse-stream, ws-reply,
+			// etc.) at workflow run time.
+			const subTriggerNodeMap = new NodeMap();
+			for (const [key, node] of Object.entries(sharedNodes)) {
+				subTriggerNodeMap.addNode(key, node);
+			}
+			// HttpTrigger.buildFileBasedRoutes() calls WorkflowRegistry.clear()
+			// during listen() and re-registers only HTTP-triggered workflows.
+			// SSE / WebSocket workflows aren't HTTP routes, so they're missing
+			// from the registry by the time the sibling trigger walks it.
+			// Add a preCatchAllHook BEFORE the sibling triggers register their
+			// hooks — preCatchAllHooks fire in insertion order, so this hook
+			// injects SSE + WS workflows into the cleared registry first, and
+			// each sibling trigger's hook then sees them and mounts routes.
+			this.httpTrigger.addPreCatchAllHook(() => {
+				const registry = WorkflowRegistry.getInstance();
+				for (const [name, wf] of Object.entries(sharedWorkflows)) {
+					const w = wf as {
+						name?: string;
+						trigger?: { sse?: unknown; websocket?: unknown };
+						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown } };
+					};
+					const triggerCfg = w._config?.trigger ?? w.trigger;
+					if (!triggerCfg) continue;
+					if (!triggerCfg.sse && !triggerCfg.websocket) continue;
+					const resolvedName = w._config?.name ?? w.name ?? name;
+					if (registry.get(resolvedName)) continue;
+					const kind = triggerCfg.sse ? "sse" : "websocket";
+					registry.register({
+						name: resolvedName,
+						source: \`\${kind}:\${name}\`,
+						workflow: (w._config ?? w) as unknown as Parameters<typeof registry.register>[0]["workflow"],
+					});
+				}
+			});`
+			: "";
+		const sseBootstrap = sseAlsoSelected
+			? `\n			// Mount SSE on the HTTP process's shared Hono app. SSETrigger's
+			// constructor takes the app + the HttpTrigger for pre-catch-all
+			// hook integration; SSE routes register inside that hook so
+			// they win Hono's first-match dispatch over HTTP's legacy
+			// workflow-name catch-all (\`/:workflow{.+}\`).
+			const sseTrigger = new SSETrigger(this.httpTrigger.getApp(), this.httpTrigger);
+			sseTrigger.setNodeMap({
+				nodes: subTriggerNodeMap,
+				workflows: sharedWorkflows as unknown as Parameters<typeof sseTrigger.setNodeMap>[0]["workflows"],
+			});
+			await sseTrigger.listen();`
+			: "";
+		const wsBootstrap = wsAlsoSelected
+			? `\n			// Mount WebSocket on the HTTP process's shared Hono app.
+			// WebSocketTrigger uses TWO HttpTrigger integration points:
+			// 1. addPreCatchAllHook — registers WS routes (Hono's upgradeWebSocket
+			//    handler) BEFORE the legacy workflow catch-all so /ws/<path>
+			//    upgrades cleanly.
+			// 2. addServerHook — attaches the WS upgrade listener to the
+			//    http.Server returned by HttpTrigger's serve() call.
+			const wsTrigger = new WebSocketTrigger(this.httpTrigger.getApp(), this.httpTrigger);
+			wsTrigger.setNodeMap({
+				nodes: subTriggerNodeMap,
+				workflows: sharedWorkflows as unknown as Parameters<typeof wsTrigger.setNodeMap>[0]["workflows"],
+			});
+			await wsTrigger.listen();`
+			: "";
+		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}`;
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import HttpTrigger from "./runner/HttpTrigger";
+import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
@@ -1039,7 +1229,7 @@ export default class App {
 	}
 
 	async run() {
-		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {${fullBootstrap}
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 
@@ -1101,6 +1291,56 @@ export default class App {
 			this.initializer = performance.now() - this.initializer;
 
 			this.logger.log(\`SSE trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}
+`;
+	}
+
+	if (triggerKind === "websocket") {
+		// WS-only entry. When HTTP is ALSO selected, this file is still
+		// generated but blokctl dev skips spawning it (see the
+		// mountedOnHttp filter in createProject) — the HTTP entry mounts
+		// WS on its shared Hono app via the standard constructor
+		// integration (`WebSocketTrigger(app, httpTrigger)`).
+		return `import { DefaultLogger } from "@blokjs/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import WSServer from "./runner/WSServer";
+
+export default class App {
+	private wsServer: WSServer = <WSServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-websocket-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.wsServer = new WSServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.wsServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`WebSocket trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
 			this.app_cold_start.record(this.initializer, {
 				pid: process.pid,
 				env: process.env.NODE_ENV,
@@ -1240,7 +1480,14 @@ function generateSSEServerFile(): string {
 	return `import { serve } from "@hono/node-server";
 import { DefaultLogger, NodeMap, WorkflowRegistry } from "@blokjs/runner";
 import { Hono } from "hono";
-import SSETrigger from "../SSETrigger";
+// Import SSETrigger from the @blokjs/trigger-sse npm package — NOT the
+// locally-copied SSETrigger.ts. The @blokjs/sse-publish helper that
+// publisher workflows use imports the in-process bus from this exact
+// module (\`@blokjs/trigger-sse\`'s \`_getSSEBus\`). If SSEServer uses a
+// different module instance (e.g. the local copy), Node treats them
+// as separate modules with separate bus singletons — events from the
+// helper would never reach subscribers on this trigger.
+import SSETrigger from "@blokjs/trigger-sse";
 import nodes from "../../../Nodes";
 import workflows from "../../../Workflows";
 
@@ -1342,6 +1589,130 @@ export default class SSEServer {
 }
 
 /**
+ * Generate src/triggers/websocket/runner/WSServer.ts — the wrapper class
+ * that bootstraps the WebSocket trigger standalone. Mirrors SSEServer:
+ * builds a Hono app, hands it to WebSocketTrigger's constructor, registers
+ * WS-triggered workflows in WorkflowRegistry, calls listen() to mount
+ * routes, calls serve() to bind the HTTP listener, then attaches the WS
+ * upgrade listener to the http.Server via injectWebSocket (private on
+ * the trigger; the integration test pattern reaches in via a cast).
+ *
+ * When HTTP is ALSO in the trigger set, this file is still generated
+ * (so a user removing HTTP later can keep the WS scaffold) but
+ * `blokctl dev` skips spawning it — the HTTP entry mounts WebSocket
+ * on its own shared Hono app via the standard
+ * `WebSocketTrigger(app, httpTrigger)` integration. The framework's
+ * design assumes single-port colocation; multi-process WebSocket would
+ * require a cross-process backplane (the BLOK_WS_BACKPLANE provider
+ * exists but isn't the default scaffold).
+ */
+function generateWSServerFile(): string {
+	return `import { serve } from "@hono/node-server";
+import { DefaultLogger, NodeMap, WorkflowRegistry } from "@blokjs/runner";
+import { Hono } from "hono";
+// Import from the @blokjs/trigger-websocket npm package — NOT the
+// locally-copied WebSocketTrigger.ts. The WebSocket helper nodes
+// (@blokjs/ws-broadcast, @blokjs/ws-reply, @blokjs/ws-close) look up
+// the active trigger via the singleton accessor exported from the npm
+// package. Using the local copy would create a separate module instance
+// with a separate singleton — helpers would broadcast into a void.
+import WebSocketTrigger from "@blokjs/trigger-websocket";
+import nodes from "../../../Nodes";
+import workflows from "../../../Workflows";
+
+type HonoServer = ReturnType<typeof serve>;
+
+/**
+ * WSServer — concrete WebSocket trigger implementation.
+ *
+ * Bootstraps an isolated Hono app for the WebSocket trigger process,
+ * hands it to WebSocketTrigger, populates the shared NodeMap, registers
+ * WS-triggered workflows with WorkflowRegistry, binds an HTTP listener,
+ * and attaches the WebSocket upgrade handler to the http.Server.
+ *
+ * One WebSocket workflow ships by default (see src/workflows/websocket/
+ * events/):
+ *   - echo-demo.ts    GET /ws/echo  — on \`connect\` greets the client
+ *                                       with \`{event:"connected"}\`; on
+ *                                       each message replies with
+ *                                       \`{event:"echo", original:<msg>}\`.
+ *
+ * Test end-to-end with any WS client:
+ *   1. Connect:          \`wscat -c ws://localhost:4002/ws/echo\`
+ *   2. On connect:       receive \`{"event":"connected","payload":{"ok":true}}\`
+ *   3. Send anything:    \`{"event":"hello","data":{"hi":"there"}}\`
+ *   4. Receive:          \`{"event":"echo","payload":{"original":...}}\`
+ */
+export default class WSServer {
+	private readonly app: Hono = new Hono();
+	private readonly trigger: WebSocketTrigger;
+	private readonly logger = new DefaultLogger();
+	private httpServer: HonoServer | null = null;
+
+	constructor() {
+		this.trigger = new WebSocketTrigger(this.app);
+
+		const nodeMap = new NodeMap();
+		for (const [key, node] of Object.entries(nodes)) {
+			nodeMap.addNode(key, node);
+		}
+		this.trigger.setNodeMap({
+			nodes: nodeMap,
+			workflows: workflows as unknown as Parameters<typeof this.trigger.setNodeMap>[0]["workflows"],
+		});
+
+		// Register WS-triggered workflows in WorkflowRegistry. Same
+		// rationale as SSEServer: \`workflow({...})\` returns a frozen
+		// builder \`{ _blokV2, _config, toJson }\` so the actual trigger
+		// config lives at \`_config.trigger.websocket\`. Tolerate both
+		// shapes so v1 \`Workflow().addTrigger("websocket")\` authoring
+		// also works.
+		const registry = WorkflowRegistry.getInstance();
+		for (const [name, wf] of Object.entries(workflows)) {
+			const w = wf as {
+				name?: string;
+				trigger?: { websocket?: unknown };
+				_config?: { name?: string; trigger?: { websocket?: unknown } };
+			};
+			const triggerCfg = w._config?.trigger ?? w.trigger;
+			if (!triggerCfg?.websocket) continue;
+			const resolvedName = w._config?.name ?? w.name ?? name;
+			if (registry.get(resolvedName)) continue;
+			registry.register({
+				name: resolvedName,
+				source: \`websocket:\${name}\`,
+				workflow: (w._config ?? w) as unknown as Parameters<typeof registry.register>[0]["workflow"],
+			});
+		}
+	}
+
+	async listen(): Promise<void> {
+		await this.trigger.listen();
+		const port = Number(process.env.TRIGGER_WEBSOCKET_PORT || process.env.PORT || 4002);
+		this.httpServer = serve({ fetch: this.app.fetch, port }, () => {
+			this.logger.log(\`WebSocket server listening on http://localhost:\${port}\`);
+		});
+		// Attach WS upgrade listener — WebSocketTrigger sets \`injectWebSocket\`
+		// as a private field inside listen(); when no httpTrigger is provided
+		// to its constructor, the caller must invoke this on the http.Server
+		// after serve() returns.
+		const triggerWithInternals = this.trigger as unknown as {
+			injectWebSocket?: (server: unknown) => void;
+		};
+		if (typeof triggerWithInternals.injectWebSocket === "function" && this.httpServer) {
+			triggerWithInternals.injectWebSocket(this.httpServer);
+		}
+	}
+
+	async stop(): Promise<void> {
+		await this.trigger.stop();
+		this.httpServer?.close();
+	}
+}
+`;
+}
+
+/**
  * Recursively replace @blok/ with @blokjs/ in all TypeScript files.
  * This handles old templates that still use the @blok/ package scope.
  */
@@ -1398,6 +1769,10 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 		// (matches its location at `src/triggers/sse/runner/`). No
 		// rewrite needed, but listed here for documentation alongside
 		// the other trigger runner files.
+	} else if (triggerKind === "websocket") {
+		fileFixes.push({ file: `${triggerDestDir}/WebSocketTrigger.ts`, up: "../../" });
+		// WSServer.ts is generated programmatically (not copied) and
+		// already imports `../../../Nodes` / `../../../Workflows` directly.
 	} else if (triggerKind === "pubsub") {
 		fileFixes.push({ file: `${triggerDestDir}/runner/PubSubServer.ts`, up: "../../../" });
 	} else if (triggerKind === "queue") {

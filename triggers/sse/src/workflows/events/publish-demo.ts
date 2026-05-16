@@ -1,4 +1,4 @@
-import { workflow } from "@blokjs/helper";
+import { $, workflow } from "@blokjs/helper";
 
 /**
  * SSE publish demo — companion to `stream-demo`. Accepts an HTTP POST
@@ -38,8 +38,8 @@ export default workflow({
 			use: "@blokjs/sse-publish",
 			inputs: {
 				channel: "sse-demo",
-				event: "$.req.body.event",
-				data: "$.req.body.data",
+				event: $.req.body.event,
+				data: $.req.body.data,
 			},
 		},
 	],
