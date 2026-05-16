@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.3";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.4";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -329,7 +329,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Pubsub and Queue triggers use template subdirectory
 		const primaryTriggerDir =
 			primaryTrigger === "pubsub" || primaryTrigger === "queue"
-				? `${repoSource}/triggers/${primaryTrigger}/template`
+				? `${repoSource}/triggers/${primaryTrigger === "queue" ? "worker" : primaryTrigger}/template`
 				: `${repoSource}/triggers/${primaryTrigger}`;
 
 		// Copy base config files from primary trigger
@@ -583,7 +583,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.3";
+		const BLOKJS_DEP_RANGE = "^0.6.4";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
