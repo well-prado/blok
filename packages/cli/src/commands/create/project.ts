@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.2";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.3";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -390,9 +390,16 @@ export async function createProject(opts: OptionValues, version: string, current
 			const triggerDestDir = `${dirPath}/src/triggers/${triggerKind}`;
 			fsExtra.ensureDirSync(triggerDestDir);
 
-			// Pubsub and Queue use template directories
+			// Pubsub and Queue use template directories. The "queue" CLI
+			// flag scaffolds the trigger-worker template — the monorepo dir
+			// is `triggers/worker/` and the npm package is
+			// `@blokjs/trigger-worker`. Pre-v0.6.3 the path resolution
+			// looked at `triggers/queue/template/` which doesn't exist; the
+			// scaffold silently no-op'd on the file copy and the user got
+			// an empty `src/triggers/queue/` directory.
 			if (triggerKind === "pubsub" || triggerKind === "queue") {
-				const templateDir = `${repoSource}/triggers/${triggerKind}/template/src`;
+				const templatePkgDir = triggerKind === "queue" ? "worker" : triggerKind;
+				const templateDir = `${repoSource}/triggers/${templatePkgDir}/template/src`;
 				if (fsExtra.existsSync(templateDir)) {
 					// Copy the entire template src directory
 					fsExtra.copySync(templateDir, triggerDestDir);
@@ -417,32 +424,46 @@ export async function createProject(opts: OptionValues, version: string, current
 					}
 				}
 			} else {
-				// HTTP and SSE use the regular src directory
+				// HTTP and SSE use the regular src directory.
 				const triggerSrcDir = `${repoSource}/triggers/${triggerKind}/src`;
 
-				// Copy runner folder (contains the trigger server implementation)
-				if (fsExtra.existsSync(`${triggerSrcDir}/runner`)) {
-					fsExtra.copySync(`${triggerSrcDir}/runner`, `${triggerDestDir}/runner`);
-				}
-
-				// Copy AppRoutes.ts
-				if (fsExtra.existsSync(`${triggerSrcDir}/AppRoutes.ts`)) {
-					fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
-				}
-
-				// Copy trigger-specific workflow files
-				if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
-					fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
-				}
-
-				// For SSE, also copy the base SSETrigger.ts
-				if (triggerKind === "sse" && fsExtra.existsSync(`${triggerSrcDir}/SSETrigger.ts`)) {
-					fsExtra.copySync(`${triggerSrcDir}/SSETrigger.ts`, `${triggerDestDir}/SSETrigger.ts`);
-				}
-
-				// Copy lib.ts if exists (for SSE package exports)
-				if (fsExtra.existsSync(`${triggerSrcDir}/lib.ts`)) {
-					fsExtra.copySync(`${triggerSrcDir}/lib.ts`, `${triggerDestDir}/lib.ts`);
+				if (triggerKind === "sse") {
+					// SSE has a flat layout — every .ts at the package root is
+					// part of the trigger surface (SSETrigger.ts + bus.ts + lib.ts
+					// + future siblings). Pre-v0.6.3 cherry-picking left bus.ts
+					// behind which broke `import { getBus } from "./bus"` inside
+					// SSETrigger. Whole-dir copy + filter out tests is cleaner +
+					// future-proof.
+					const entries = fsExtra.readdirSync(triggerSrcDir, { withFileTypes: true });
+					for (const entry of entries) {
+						const src = `${triggerSrcDir}/${entry.name}`;
+						if (entry.isFile()) {
+							if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".integration.test.ts")) {
+								continue;
+							}
+							fsExtra.copySync(src, `${triggerDestDir}/${entry.name}`);
+						} else if (entry.isDirectory()) {
+							if (entry.name === "__tests__") continue;
+							if (entry.name === "workflows") {
+								fsExtra.copySync(src, `${dirPath}/src/workflows/${triggerKind}`);
+							} else {
+								fsExtra.copySync(src, `${triggerDestDir}/${entry.name}`);
+							}
+						}
+					}
+				} else {
+					// HTTP: cherry-pick the established files. The HTTP scaffold
+					// has been the most-validated path since v0.4 — keep its
+					// copy strategy stable.
+					if (fsExtra.existsSync(`${triggerSrcDir}/runner`)) {
+						fsExtra.copySync(`${triggerSrcDir}/runner`, `${triggerDestDir}/runner`);
+					}
+					if (fsExtra.existsSync(`${triggerSrcDir}/AppRoutes.ts`)) {
+						fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
+					}
+					if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
+						fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
+					}
 				}
 			}
 		}
@@ -551,14 +572,18 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blokjs/runner": "core/runner",
 			"@blokjs/shared": "core/shared",
 			"@blokjs/trigger-pubsub": "triggers/pubsub",
-			"@blokjs/trigger-queue": "triggers/queue",
+			// "queue" CLI flag scaffolds the trigger-worker package
+			// (the monorepo directory + npm package). Pre-v0.6.3 the
+			// workspacePackageMap pointed at `@blokjs/trigger-queue` +
+			// `triggers/queue/`, neither of which exists in this repo.
+			"@blokjs/trigger-worker": "triggers/worker",
 		};
 
 		// The version range scaffolded projects pin @blokjs/* deps at.
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.2";
+		const BLOKJS_DEP_RANGE = "^0.6.3";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -655,8 +680,12 @@ export async function createProject(opts: OptionValues, version: string, current
 				: BLOKJS_DEP_RANGE;
 		}
 		if (selectedTriggers.includes("queue")) {
-			triggerPackageDeps["@blokjs/trigger-queue"] = localRepoPath
-				? `file:${path.resolve(repoSource, "triggers/queue")}`
+			// "queue" CLI flag → @blokjs/trigger-worker (the monorepo
+			// package). The "trigger-queue" name only exists as an old
+			// 0.2.x package on npm from a separate publisher; v0.6.x
+			// ships everything under trigger-worker.
+			triggerPackageDeps["@blokjs/trigger-worker"] = localRepoPath
+				? `file:${path.resolve(repoSource, "triggers/worker")}`
 				: BLOKJS_DEP_RANGE;
 		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
@@ -825,14 +854,12 @@ function generateSharedNodesFile(triggers: string[], _repoSource: string): strin
 	nodeExports.set("@blokjs/api-call", "ApiCall");
 	nodeExports.set("@blokjs/if-else", "IfElse");
 
-	// Add trigger-specific nodes
-	for (const trigger of triggers) {
-		if (trigger === "sse") {
-			nodeImports.add('import WelcomeMessage from "./nodes/welcome-message/index";');
-			nodeExports.set("welcome-message", "WelcomeMessage");
-		}
-		// Add more trigger-specific nodes here as triggers are added
-	}
+	// Add trigger-specific nodes. Pre-v0.6.3 the SSE branch unconditionally
+	// added a `welcome-message` node import, but the SSE source (in
+	// triggers/sse/src/) doesn't ship a nodes/welcome-message directory —
+	// the import failed at boot. Removed; SSE doesn't add any built-in
+	// node. Future trigger-specific nodes should be checked against the
+	// actually-scaffolded directory before being added here.
 
 	const importLines = Array.from(nodeImports).join("\n");
 	const exportEntries = Array.from(nodeExports.entries())
@@ -856,21 +883,28 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 	const imports: string[] = [];
 	const workflowEntries: string[] = [];
 
+	// Each trigger contributes the workflows actually shipped by its source
+	// tree. Pre-v0.6.3 this list hardcoded paths that didn't match reality
+	// for SSE (no notifications workflows in source) and queue (worker
+	// template ships `workflows/jobs/process-job.ts`, not `messages/
+	// on-message.ts`). Now matches what the copy step actually produces.
 	for (const trigger of triggers) {
 		if (trigger === "http") {
-			// HTTP trigger typically has example workflows
-			imports.push("// Import HTTP workflows here");
+			// HTTP trigger source doesn't ship TS workflow files — example
+			// JSON workflows come in via the file-based router under
+			// `workflows/json/`. Skip.
+			imports.push("// HTTP workflows are auto-discovered from workflows/json/");
 		} else if (trigger === "sse") {
-			imports.push('import OnConnect from "./workflows/sse/notifications/on-connect";');
-			imports.push('import OnSubscribe from "./workflows/sse/notifications/on-subscribe";');
-			workflowEntries.push('\t"on-connect": OnConnect,');
-			workflowEntries.push('\t"on-subscribe": OnSubscribe,');
+			// SSE source doesn't ship TS workflow files in `src/`. Users
+			// register SSE workflows themselves; nothing to import here.
+			imports.push("// SSE workflows: register in this Workflows record manually");
 		} else if (trigger === "pubsub") {
 			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
 			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
 		} else if (trigger === "queue") {
-			imports.push('import OnQueueMessage from "./workflows/queue/messages/on-message";');
-			workflowEntries.push('\t"on-queue-message": OnQueueMessage,');
+			// Worker template ships `workflows/jobs/process-job.ts`.
+			imports.push('import ProcessJob from "./workflows/queue/jobs/process-job";');
+			workflowEntries.push('\t"process-job": ProcessJob,');
 		}
 	}
 
@@ -1038,12 +1072,17 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "queue") {
+		// The "queue" CLI flag scaffolds the trigger-worker template (the
+		// monorepo dir is `triggers/worker/`, and the npm package is
+		// `@blokjs/trigger-worker`). The scaffolded file is
+		// `runner/WorkerServer.ts`, exporting a class that extends
+		// `WorkerTrigger` from `@blokjs/trigger-worker`.
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import QueueServer from "./runner/QueueServer";
+import WorkerServer from "./runner/WorkerServer";
 
 export default class App {
-	private queueServer: QueueServer = <QueueServer>{};
+	private workerServer: WorkerServer = <WorkerServer>{};
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -1057,12 +1096,12 @@ export default class App {
 
 	constructor() {
 		this.initializer = performance.now();
-		this.queueServer = new QueueServer();
+		this.workerServer = new WorkerServer();
 	}
 
 	async run() {
 		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.queueServer.listen();
+			await this.workerServer.listen();
 			this.initializer = performance.now() - this.initializer;
 
 			this.logger.log(\`Queue trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
@@ -1144,7 +1183,8 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 	} else if (triggerKind === "pubsub") {
 		fileFixes.push({ file: `${triggerDestDir}/runner/PubSubServer.ts`, up: "../../../" });
 	} else if (triggerKind === "queue") {
-		fileFixes.push({ file: `${triggerDestDir}/runner/QueueServer.ts`, up: "../../../" });
+		// "queue" CLI flag → trigger-worker template (WorkerServer.ts)
+		fileFixes.push({ file: `${triggerDestDir}/runner/WorkerServer.ts`, up: "../../../" });
 	}
 
 	for (const { file, up } of fileFixes) {
@@ -1207,10 +1247,16 @@ function updatePubSubProvider(triggerDestDir: string, provider: string): void {
 }
 
 /**
- * Update Queue trigger to use the selected provider adapter.
+ * Update Queue trigger to use the selected provider adapter. The "queue"
+ * CLI flag scaffolds `@blokjs/trigger-worker` under the hood (the npm
+ * package the monorepo publishes); the scaffolded file is
+ * `WorkerServer.ts` extending `WorkerTrigger`. Pre-v0.6.3 this function
+ * targeted `QueueServer.ts` + `QueueTrigger` + `@blokjs/trigger-queue`
+ * — none of which match the actual scaffold, so provider selection
+ * silently no-op'd.
  */
 function updateQueueProvider(triggerDestDir: string, provider: string): void {
-	const serverPath = `${triggerDestDir}/runner/QueueServer.ts`;
+	const serverPath = `${triggerDestDir}/runner/WorkerServer.ts`;
 	if (!fsExtra.existsSync(serverPath)) return;
 
 	let content = fsExtra.readFileSync(serverPath, "utf8");
@@ -1236,15 +1282,21 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	})`,
 		},
 		redis: {
-			importName: "RedisAdapter",
-			init: `new RedisAdapter({
-		host: process.env.REDIS_HOST || "localhost",
-		port: Number(process.env.REDIS_PORT) || 6379,
+			// trigger-worker exports BullMQAdapter for Redis-backed queues
+			// (and RedisStreamsAdapter for streams). v0.6.x ships BullMQ.
+			importName: "BullMQAdapter",
+			init: `new BullMQAdapter({
+		connection: {
+			host: process.env.REDIS_HOST || "localhost",
+			port: Number(process.env.REDIS_PORT) || 6379,
+		},
 	})`,
 		},
 		nats: {
-			importName: "NATSAdapter",
-			init: `new NATSAdapter({
+			// trigger-worker exports NATSWorkerAdapter (was NATSAdapter in
+			// the pre-Tier-2 trigger-queue package the CLI used to target).
+			importName: "NATSWorkerAdapter",
+			init: `new NATSWorkerAdapter({
 		servers: (process.env.NATS_SERVERS || "localhost:4222").split(","),
 	})`,
 		},
@@ -1253,16 +1305,16 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	const config = adapterConfigs[provider];
 	if (!config) return;
 
-	// Replace import (handles both orders: {Adapter, QueueTrigger} or {QueueTrigger, Adapter})
+	// Replace import (handles both orders: {Adapter, WorkerTrigger} or {WorkerTrigger, Adapter})
 	content = content.replace(
-		/import \{ (\w+), (\w+) \} from ["']@blokjs\/trigger-queue["'];/,
-		`import { ${config.importName}, QueueTrigger } from "@blokjs/trigger-queue";`,
+		/import \{ (\w+), (\w+) \} from ["']@blokjs\/trigger-worker["'];/,
+		`import { ${config.importName}, WorkerTrigger } from "@blokjs/trigger-worker";`,
 	);
 
 	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
 	// Look for the pattern inside the class body (starts with tab for indentation)
 	content = content.replace(
-		/(export default class \w+ extends QueueTrigger \{[\s\S]*?)\n\tprotected adapter = new \w+\(\{[\s\S]*?\}\);/,
+		/(export default class \w+ extends WorkerTrigger \{[\s\S]*?)\n\tprotected adapter = new \w+\(\{[\s\S]*?\}\);/,
 		`$1\n\tprotected adapter = ${config.init};`,
 	);
 
