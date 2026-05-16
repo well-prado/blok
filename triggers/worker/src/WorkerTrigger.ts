@@ -203,11 +203,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
-	constructor() {
-		super();
-		this.loadNodes();
-		this.loadWorkflows();
-	}
+	// Constructor removed in v0.6.3 — pre-fix it called `loadNodes()` +
+	// `loadWorkflows()`, but subclasses use class-field assignments for
+	// `nodes` / `workflows` (the canonical TypeScript pattern). Those
+	// fields run AFTER super(), so accessing `this.nodes` from the parent
+	// constructor read `undefined` and crashed with
+	// `TypeError: undefined is not an object (Object.keys(this.nodes))`.
+	// The registry init now happens at the start of `listen()`, after
+	// the subclass's fields are initialized.
 
 	/**
 	 * Load nodes into the node map
@@ -232,6 +235,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
+
+		// Populate the trigger's node + workflow registries from the
+		// subclass's `nodes` / `workflows` fields. v0.6.3 fix — pre-fix
+		// these calls lived in the constructor and crashed because class
+		// fields haven't run yet at super-constructor time. See the comment
+		// where the old constructor used to live for the full reason.
+		this.loadNodes();
+		this.loadWorkflows();
 
 		try {
 			// Tier 2 #6 follow-up · install the cross-process concurrency
