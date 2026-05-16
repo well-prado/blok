@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/shared",
-	"version": "0.6.4",
+	"version": "0.6.5",
 	"description": "Shared class, interfaces and types",
 	"type": "module",
 	"main": "dist/index.js",

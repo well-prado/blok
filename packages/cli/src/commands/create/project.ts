@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.4";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.5";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -491,6 +491,19 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.writeFileSync(`${dirPath}/src/triggers/${triggerKind}/index.ts`, entryContent);
 		}
 
+		// SSE scaffold needs an SSEServer wrapper that creates a Hono app,
+		// passes it to SSETrigger's constructor, registers nodes/workflows,
+		// and binds an HTTP listener. Pre-v0.6.5 the SSE entry called
+		// `new SSETrigger()` with no args (broken — constructor requires
+		// `app: Hono`) and didn't bind a listener, so SSE trigger never
+		// actually served traffic. Generated here so it inherits the
+		// scaffold's import-path conventions.
+		if (selectedTriggers.includes("sse")) {
+			const sseServerDir = `${dirPath}/src/triggers/sse/runner`;
+			fsExtra.ensureDirSync(sseServerDir);
+			fsExtra.writeFileSync(`${sseServerDir}/SSEServer.ts`, generateSSEServerFile());
+		}
+
 		// Copy trigger-specific nodes to shared src/nodes/
 		for (const triggerKind of selectedTriggers) {
 			const triggerNodesDir = `${repoSource}/triggers/${triggerKind}/src/nodes`;
@@ -565,13 +578,29 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.author = "";
 
 		// Replace workspace:* references that only work inside the monorepo
+		// v0.6.5: expanded to include EVERY publishable @blokjs/* package so
+		// the `--local` install path doesn't fall back to npm for any of
+		// them. Pre-v0.6.5 this map omitted @blokjs/helpers + @blokjs/react
+		// + the trigger-webhook / trigger-websocket / trigger-cron /
+		// trigger-grpc / trigger-sse packages, so scaffolds against `--local`
+		// silently let those resolve to whatever was on the registry.
+		// Worked while versions were already published; broke during pre-
+		// release validation when the registry didn't yet have the new
+		// version.
 		const workspacePackageMap: Record<string, string> = {
 			"@blokjs/api-call": "nodes/web/api-call@1.0.0",
 			"@blokjs/helper": "core/workflow-helper",
+			"@blokjs/helpers": "nodes/utility/helpers@1.0.0",
 			"@blokjs/if-else": "nodes/control-flow/if-else@1.0.0",
+			"@blokjs/react": "nodes/web/react@1.0.0",
 			"@blokjs/runner": "core/runner",
 			"@blokjs/shared": "core/shared",
+			"@blokjs/trigger-cron": "triggers/cron",
+			"@blokjs/trigger-grpc": "triggers/grpc",
 			"@blokjs/trigger-pubsub": "triggers/pubsub",
+			"@blokjs/trigger-sse": "triggers/sse",
+			"@blokjs/trigger-webhook": "triggers/webhook",
+			"@blokjs/trigger-websocket": "triggers/websocket",
 			// "queue" CLI flag scaffolds the trigger-worker package
 			// (the monorepo directory + npm package). Pre-v0.6.3 the
 			// workspacePackageMap pointed at `@blokjs/trigger-queue` +
@@ -583,7 +612,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.4";
+		const BLOKJS_DEP_RANGE = "^0.6.5";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -687,6 +716,41 @@ export async function createProject(opts: OptionValues, version: string, current
 			triggerPackageDeps["@blokjs/trigger-worker"] = localRepoPath
 				? `file:${path.resolve(repoSource, "triggers/worker")}`
 				: BLOKJS_DEP_RANGE;
+		}
+		// v0.6.5 — SSE scaffolds need deps the trigger-sse npm package
+		// doesn't list in its production dependencies because the
+		// package itself only needs them at dev/test time. When SSE is
+		// scaffolded alone (primary trigger), the project inherits
+		// trigger-sse/package.json and is missing:
+		//   - @hono/node-server  (used by the generated SSEServer to serve())
+		//   - @blokjs/helpers    (provides @blokjs/sse-{subscribe,stream,publish})
+		//   - @blokjs/api-call   (referenced by generated Nodes.ts)
+		//   - @blokjs/if-else    (same)
+		//   - @blokjs/trigger-sse (the trigger package itself)
+		// HTTP scaffolds already include all of these via trigger-http's
+		// own dependencies (HTTP package.json declares them), so the
+		// HTTP-as-primary path inherits them naturally. The injection
+		// below is a no-op when those deps are already present.
+		if (selectedTriggers.includes("sse")) {
+			const sseDeps: Record<string, string> = {
+				"@blokjs/api-call": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/web/api-call@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/if-else": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/control-flow/if-else@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/helpers": localRepoPath
+					? `file:${path.resolve(repoSource, "nodes/utility/helpers@1.0.0")}`
+					: BLOKJS_DEP_RANGE,
+				"@blokjs/trigger-sse": localRepoPath ? `file:${path.resolve(repoSource, "triggers/sse")}` : BLOKJS_DEP_RANGE,
+				"@hono/node-server": "^1.19.9",
+				hono: "^4.11.7",
+				uuid: "^11.1.0",
+			};
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				...sseDeps,
+			};
 		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
 			packageJsonContent.dependencies = {
@@ -846,6 +910,7 @@ function generateSharedNodesFile(triggers: string[], _repoSource: string): strin
 	// Collect unique node imports from all triggers
 	const nodeImports: Set<string> = new Set();
 	const nodeExports: Map<string, string> = new Map();
+	let spreadHelperNodes = false;
 
 	// Always include core nodes
 	nodeImports.add('import ApiCall from "@blokjs/api-call";');
@@ -854,22 +919,32 @@ function generateSharedNodesFile(triggers: string[], _repoSource: string): strin
 	nodeExports.set("@blokjs/api-call", "ApiCall");
 	nodeExports.set("@blokjs/if-else", "IfElse");
 
-	// Add trigger-specific nodes. Pre-v0.6.3 the SSE branch unconditionally
-	// added a `welcome-message` node import, but the SSE source (in
-	// triggers/sse/src/) doesn't ship a nodes/welcome-message directory —
-	// the import failed at boot. Removed; SSE doesn't add any built-in
-	// node. Future trigger-specific nodes should be checked against the
-	// actually-scaffolded directory before being added here.
+	// SSE workflows need the helper nodes that drive the bus pattern
+	// (@blokjs/sse-subscribe, @blokjs/sse-stream, @blokjs/sse-publish).
+	// Spread the entire HELPER_NODES registry from @blokjs/helpers
+	// rather than cherry-picking — the same package exports other
+	// reliability helpers (@blokjs/log, @blokjs/expr, @blokjs/audit-log,
+	// etc.) that users will reach for from SSE workflows too. Cost is
+	// negligible (helper nodes are zero-side-effect imports).
+	if (triggers.includes("sse")) {
+		nodeImports.add('import { HELPER_NODES } from "@blokjs/helpers";');
+		spreadHelperNodes = true;
+	}
 
 	const importLines = Array.from(nodeImports).join("\n");
 	const exportEntries = Array.from(nodeExports.entries())
 		.map(([key, value]) => `\t"${key}": ${value},`)
 		.join("\n");
 
+	// When SSE is selected, spread HELPER_NODES first so the explicit
+	// core entries above win on any name collision (today there is none
+	// — defence in depth).
+	const recordBody = spreadHelperNodes ? `\t...HELPER_NODES,\n${exportEntries}` : exportEntries;
+
 	return `${importLines}
 
 const nodes: Record<string, BlokService<unknown>> = {
-${exportEntries}
+${recordBody}
 };
 
 export default nodes;
@@ -895,9 +970,22 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 			// `workflows/json/`. Skip.
 			imports.push("// HTTP workflows are auto-discovered from workflows/json/");
 		} else if (trigger === "sse") {
-			// SSE source doesn't ship TS workflow files in `src/`. Users
-			// register SSE workflows themselves; nothing to import here.
-			imports.push("// SSE workflows: register in this Workflows record manually");
+			// v0.6.5 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
+			// (copied via the scaffold to `src/workflows/sse/events/...`). The
+			// stream-demo workflow is the SSE subscriber; the publish-demo
+			// workflow is HTTP-triggered and only useful when an HTTP trigger
+			// is ALSO selected (otherwise its POST /v07-sse-publish endpoint
+			// has no listener). The CLI registers both in this Workflows
+			// record regardless — SSEServer filters to SSE-triggered only,
+			// and HTTP-only triggers ignore the SSE one. Keeps the file
+			// generation simple + lets a future http-only scaffold opt in
+			// to the publish workflow as a learning example.
+			imports.push('import SSEStreamDemo from "./workflows/sse/events/stream-demo";');
+			workflowEntries.push('\t"sse-stream-demo": SSEStreamDemo,');
+			if (triggers.includes("http")) {
+				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo";');
+				workflowEntries.push('\t"sse-publish-demo": SSEPublishDemo,');
+			}
 		} else if (trigger === "pubsub") {
 			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
 			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
@@ -977,17 +1065,20 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "sse") {
-		// SSE doesn't have a `runner/` subfolder in its source — the
-		// SSETrigger class lives at the package root. v0.6.1's scaffold
-		// imported `./runner/SSEServer` (copy-pasted from HTTP's template)
-		// which broke `blokctl create` for SSE. Importing the actual
-		// `./SSETrigger` file the scaffold copies in.
+		// v0.6.5 — SSE entry now drives an `SSEServer` wrapper (mirrors
+		// the WorkerServer / PubSubServer pattern). The wrapper creates
+		// a Hono app, hands it to SSETrigger's constructor (which
+		// REQUIRES it; pre-v0.6.5 the entry called `new SSETrigger()`
+		// with no args — boots, but every registered SSE route would
+		// crash on `this.app.get(...)` because `app` was undefined),
+		// registers nodes + workflows, and binds an HTTP listener so
+		// `/sse/<path>` requests actually reach the SSE handler.
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import SSETrigger from "./SSETrigger";
+import SSEServer from "./runner/SSEServer";
 
 export default class App {
-	private sseTrigger: SSETrigger = <SSETrigger>{};
+	private sseServer: SSEServer = <SSEServer>{};
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -1001,15 +1092,15 @@ export default class App {
 
 	constructor() {
 		this.initializer = performance.now();
-		this.sseTrigger = new SSETrigger();
+		this.sseServer = new SSEServer();
 	}
 
 	async run() {
 		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.sseTrigger.listen();
+			await this.sseServer.listen();
 			this.initializer = performance.now() - this.initializer;
 
-			this.logger.log(\`Server initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.logger.log(\`SSE trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
 			this.app_cold_start.record(this.initializer, {
 				pid: process.pid,
 				env: process.env.NODE_ENV,
@@ -1129,6 +1220,128 @@ console.log("${triggerKind} trigger not yet implemented");
 }
 
 /**
+ * Generate src/triggers/sse/runner/SSEServer.ts — the wrapper class that
+ * bootstraps the SSE trigger. Pattern mirrors the queue scaffold's
+ * WorkerServer.ts + pubsub's PubSubServer.ts: a thin class the user
+ * can extend, providing the constructor-arg + listener wiring SSETrigger
+ * doesn't do itself.
+ *
+ * Why this exists: SSETrigger's constructor takes `app: Hono` (so SSE
+ * can mount on a shared HTTP port) and SSETrigger.listen() only
+ * registers routes — it doesn't bind a port. Both responsibilities
+ * live here in scaffolded user code.
+ *
+ * Workflow registration: only SSE-triggered workflows are pushed into
+ * WorkflowRegistry from this server. HTTP-companion workflows in the
+ * same shared Workflows.ts get registered by the HTTP server process
+ * (when a multi-trigger scaffold includes HTTP).
+ */
+function generateSSEServerFile(): string {
+	return `import { serve } from "@hono/node-server";
+import { DefaultLogger, NodeMap, WorkflowRegistry } from "@blokjs/runner";
+import { Hono } from "hono";
+import SSETrigger from "../SSETrigger";
+import nodes from "../../../Nodes";
+import workflows from "../../../Workflows";
+
+type HonoServer = ReturnType<typeof serve>;
+
+/**
+ * SSEServer — concrete SSE trigger implementation.
+ *
+ * Bootstraps an isolated Hono app for the SSE trigger process, hands
+ * it to SSETrigger, populates the shared NodeMap, registers
+ * SSE-triggered workflows with WorkflowRegistry, then binds an HTTP
+ * listener so /<sse-path> requests reach the streamer.
+ *
+ * Two SSE-triggered workflows ship by default (see
+ * src/workflows/sse/events/):
+ *   - stream-demo.ts    GET  /sse/demo        — subscribes to the
+ *                                                in-process bus channel
+ *                                                "sse-demo" and pumps
+ *                                                events as SSE frames.
+ *   - publish-demo.ts   POST /v07-sse-publish — publishes one event to
+ *                                                the "sse-demo" channel
+ *                                                (HTTP trigger; only
+ *                                                routable when the
+ *                                                project also includes
+ *                                                an HTTP trigger).
+ *
+ * Test end-to-end:
+ *   1. curl -N http://localhost:4001/sse/demo
+ *   2. curl -X POST http://localhost:4000/v07-sse-publish \\
+ *           -H 'Content-Type: application/json' \\
+ *           -d '{"event":"hello","data":{"msg":"world"}}'
+ *   3. Watch (1) — the event arrives instantly.
+ */
+export default class SSEServer {
+	private readonly app: Hono = new Hono();
+	private readonly trigger: SSETrigger;
+	private readonly logger = new DefaultLogger();
+	private httpServer: HonoServer | null = null;
+
+	constructor() {
+		this.trigger = new SSETrigger(this.app);
+
+		// Populate the NodeMap with all registered nodes. SSE workflows
+		// run their steps through the same runner machinery as HTTP,
+		// so they need every node referenced in their step list
+		// (sse-subscribe, sse-stream, plus any user-defined nodes).
+		const nodeMap = new NodeMap();
+		for (const [key, node] of Object.entries(nodes)) {
+			nodeMap.addNode(key, node);
+		}
+		this.trigger.setNodeMap({
+			nodes: nodeMap,
+			workflows: workflows as unknown as Parameters<SSETrigger["setNodeMap"]>[0]["workflows"],
+		});
+
+		// Push SSE-triggered workflows into the WorkflowRegistry.
+		// HTTP-companion workflows (e.g., publish-demo) share the same
+		// Workflows.ts but get registered by the HTTP trigger process
+		// in a multi-trigger scaffold. Filtering here prevents the SSE
+		// trigger from trying to mount HTTP routes.
+		//
+		// Note: \`workflow({...})\` from @blokjs/helper returns a frozen
+		// builder { _blokV2, _config, toJson() }. The trigger config we
+		// filter on lives at \`_config.trigger.sse\`, not at the top-level
+		// (\`.trigger.sse\` is the v1 helper-response shape). Supporting
+		// both keeps the registration tolerant of either authoring style.
+		const registry = WorkflowRegistry.getInstance();
+		for (const [name, wf] of Object.entries(workflows)) {
+			const w = wf as {
+				name?: string;
+				trigger?: { sse?: unknown };
+				_config?: { name?: string; trigger?: { sse?: unknown } };
+			};
+			const triggerCfg = w._config?.trigger ?? w.trigger;
+			if (!triggerCfg?.sse) continue;
+			const resolvedName = w._config?.name ?? w.name ?? name;
+			registry.register({
+				name: resolvedName,
+				source: \`sse:\${name}\`,
+				workflow: (w._config ?? w) as unknown as Parameters<typeof registry.register>[0]["workflow"],
+			});
+		}
+	}
+
+	async listen(): Promise<void> {
+		await this.trigger.listen();
+		const port = Number(process.env.TRIGGER_SSE_PORT || process.env.PORT || 4001);
+		this.httpServer = serve({ fetch: this.app.fetch, port }, () => {
+			this.logger.log(\`SSE server listening on http://localhost:\${port}\`);
+		});
+	}
+
+	async stop(): Promise<void> {
+		await this.trigger.stop();
+		this.httpServer?.close();
+	}
+}
+`;
+}
+
+/**
  * Recursively replace @blok/ with @blokjs/ in all TypeScript files.
  * This handles old templates that still use the @blok/ package scope.
  */
@@ -1180,6 +1393,11 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 		fileFixes.push({ file: `${triggerDestDir}/runner/HttpTrigger.ts`, up: "../../../" });
 	} else if (triggerKind === "sse") {
 		fileFixes.push({ file: `${triggerDestDir}/SSETrigger.ts`, up: "../../" });
+		// SSEServer.ts is generated programmatically (not copied) and
+		// already uses `../../../Nodes` / `../../../Workflows` directly
+		// (matches its location at `src/triggers/sse/runner/`). No
+		// rewrite needed, but listed here for documentation alongside
+		// the other trigger runner files.
 	} else if (triggerKind === "pubsub") {
 		fileFixes.push({ file: `${triggerDestDir}/runner/PubSubServer.ts`, up: "../../../" });
 	} else if (triggerKind === "queue") {
