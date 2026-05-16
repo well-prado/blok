@@ -30,9 +30,9 @@
 		"babel-minify": "^0.5.2"
 	},
 	"dependencies": {
-		"@blokjs/shared": "^0.6.3",
-		"@blokjs/runner": "^0.6.3",
-		"@blokjs/helper": "^0.6.3",
+		"@blokjs/shared": "^0.6.4",
+		"@blokjs/runner": "^0.6.4",
+		"@blokjs/helper": "^0.6.4",
 		"ejs": "^3.1.10",
 		"zod": "^3.24.2"
 	},
