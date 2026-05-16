@@ -277,6 +277,38 @@ function checkCleanTree(): Failure[] {
 	return [];
 }
 
+/**
+ * Catches the v0.6.1 failure mode: the user's npm session expired
+ * between the first publish attempt and the next. Without this check
+ * we'd silently burn an OTP on a failing batch because every
+ * `npm publish` returns 401 from `result.stderr` only — the v0.6.0
+ * `result.status === 0 || alreadyPublished` heuristic flagged
+ * everything as "OK" while nothing actually landed on the registry.
+ *
+ * Skipped on `--dry-run` so authors can audit a release plan without
+ * being logged in. Hard-fails any non-dry run.
+ */
+function checkNpmAuth(): Failure[] {
+	const result = spawnSync("npm", ["whoami"], {
+		cwd: REPO_ROOT,
+		encoding: "utf-8",
+	});
+	if (result.status !== 0) {
+		return [
+			{
+				category: "npm-auth",
+				detail: `\`npm whoami\` failed (likely a logged-out session). Run \`npm login\` then re-run. stderr: ${(result.stderr ?? "").trim().slice(0, 200)}`,
+			},
+		];
+	}
+	const user = (result.stdout ?? "").trim();
+	if (!user) {
+		return [{ category: "npm-auth", detail: "`npm whoami` returned an empty string" }];
+	}
+	console.log(`  [OK] npm auth (logged in as ${user})`);
+	return [];
+}
+
 function publishOne(dir: string, otp: string): { ok: boolean; alreadyPublished: boolean; output: string } {
 	// `npm publish` is used because internal deps are declared with
 	// literal version ranges (e.g. `^0.6.1`) rather than the
@@ -378,6 +410,16 @@ async function main(): Promise<void> {
 	const treeFailures = checkCleanTree();
 	failures.push(...treeFailures);
 	console.log(treeFailures.length === 0 ? "  [OK] Working tree clean" : "  [FAIL] Working tree not clean");
+
+	// npm auth check — skip in dry-run so the gate can audit a plan
+	// without an active session. Hard requirement for actual publish.
+	if (!flags.dryRun) {
+		const authFailures = checkNpmAuth();
+		failures.push(...authFailures);
+		if (authFailures.length > 0) {
+			console.log("  [FAIL] npm auth");
+		}
+	}
 
 	if (failures.length > 0) {
 		console.log("\nPre-flight FAILED:");

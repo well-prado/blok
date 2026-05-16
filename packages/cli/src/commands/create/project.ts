@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.1";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.2";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -558,7 +558,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.1";
+		const BLOKJS_DEP_RANGE = "^0.6.2";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -642,17 +642,22 @@ export async function createProject(opts: OptionValues, version: string, current
 			};
 		}
 
-		// Add trigger packages to dependencies (pubsub and queue need their trigger packages)
+		// Add trigger packages to dependencies (pubsub and queue need their trigger packages).
+		// Pin to BLOKJS_DEP_RANGE so the lockstep release flow keeps them in
+		// sync with the rest of the @blokjs/* surface — pre-v0.6.2 these
+		// were hardcoded at "^0.2.0", which silently installed the
+		// pre-Tier-2 (pre-`workspace:*`) versions even when BLOKJS_DEP_RANGE
+		// said "^0.6.0+". Discovered during the v0.6.1 cold-env smoke test.
 		const triggerPackageDeps: Record<string, string> = {};
 		if (selectedTriggers.includes("pubsub")) {
 			triggerPackageDeps["@blokjs/trigger-pubsub"] = localRepoPath
 				? `file:${path.resolve(repoSource, "triggers/pubsub")}`
-				: "^0.2.0";
+				: BLOKJS_DEP_RANGE;
 		}
 		if (selectedTriggers.includes("queue")) {
 			triggerPackageDeps["@blokjs/trigger-queue"] = localRepoPath
 				? `file:${path.resolve(repoSource, "triggers/queue")}`
-				: "^0.2.0";
+				: BLOKJS_DEP_RANGE;
 		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
 			packageJsonContent.dependencies = {
@@ -938,12 +943,17 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "sse") {
+		// SSE doesn't have a `runner/` subfolder in its source — the
+		// SSETrigger class lives at the package root. v0.6.1's scaffold
+		// imported `./runner/SSEServer` (copy-pasted from HTTP's template)
+		// which broke `blokctl create` for SSE. Importing the actual
+		// `./SSETrigger` file the scaffold copies in.
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import SSEServer from "./runner/SSEServer";
+import SSETrigger from "./SSETrigger";
 
 export default class App {
-	private sseServer: SSEServer = <SSEServer>{};
+	private sseTrigger: SSETrigger = <SSETrigger>{};
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -957,12 +967,12 @@ export default class App {
 
 	constructor() {
 		this.initializer = performance.now();
-		this.sseServer = new SSEServer();
+		this.sseTrigger = new SSETrigger();
 	}
 
 	async run() {
 		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			await this.sseServer.listen();
+			await this.sseTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 
 			this.logger.log(\`Server initialized in \${(this.initializer).toFixed(2)}ms\`);
@@ -974,13 +984,9 @@ export default class App {
 			span.end();
 		});
 	}
-
-	getApp() {
-		return this.sseServer.getApp();
-	}
 }
 
- {
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
 }
 `;
@@ -1117,30 +1123,37 @@ function replaceBlokImportsInDirectory(dirPath: string): void {
  * Path: runner/ -> http/ -> triggers/ -> src/
  */
 function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void {
-	// Files that need path fixes
-	const filesToFix: string[] = [];
+	// Two file shapes:
+	//  - HTTP / PubSub / Queue keep their trigger class inside a `runner/`
+	//    subfolder (`src/triggers/<kind>/runner/<X>Server.ts`). Imports of
+	//    `../Nodes` / `../Workflows` in those files need three levels
+	//    up to reach `src/Nodes.ts` / `src/Workflows.ts`.
+	//  - SSE keeps `SSETrigger.ts` at the trigger root (`src/triggers/sse/
+	//    SSETrigger.ts`). That's only two levels deep, so its imports of
+	//    `../Nodes` / `../Workflows` need two levels up.
+	//
+	// Pre-v0.6.2 the SSE branch pointed at `runner/SSEServer.ts` (a file
+	// that doesn't exist because SSE's source doesn't use that layout) so
+	// the SSE scaffold silently skipped this fix-up.
+	const fileFixes: Array<{ file: string; up: string }> = [];
 
 	if (triggerKind === "http") {
-		filesToFix.push(`${triggerDestDir}/runner/HttpTrigger.ts`);
+		fileFixes.push({ file: `${triggerDestDir}/runner/HttpTrigger.ts`, up: "../../../" });
 	} else if (triggerKind === "sse") {
-		filesToFix.push(`${triggerDestDir}/runner/SSEServer.ts`);
+		fileFixes.push({ file: `${triggerDestDir}/SSETrigger.ts`, up: "../../" });
 	} else if (triggerKind === "pubsub") {
-		filesToFix.push(`${triggerDestDir}/runner/PubSubServer.ts`);
+		fileFixes.push({ file: `${triggerDestDir}/runner/PubSubServer.ts`, up: "../../../" });
 	} else if (triggerKind === "queue") {
-		filesToFix.push(`${triggerDestDir}/runner/QueueServer.ts`);
+		fileFixes.push({ file: `${triggerDestDir}/runner/QueueServer.ts`, up: "../../../" });
 	}
 
-	for (const filePath of filesToFix) {
-		if (!fsExtra.existsSync(filePath)) continue;
+	for (const { file, up } of fileFixes) {
+		if (!fsExtra.existsSync(file)) continue;
 
-		let content = fsExtra.readFileSync(filePath, "utf8");
-
-		// Replace imports from "../Nodes" and "../Workflows" with "../../../Nodes" and "../../../Workflows"
-		// Path: src/triggers/http/runner/ -> ../../../ = src/
-		content = content.replace(/from ["']\.\.\/Nodes["']/g, 'from "../../../Nodes"');
-		content = content.replace(/from ["']\.\.\/Workflows["']/g, 'from "../../../Workflows"');
-
-		fsExtra.writeFileSync(filePath, content);
+		let content = fsExtra.readFileSync(file, "utf8");
+		content = content.replace(/from ["']\.\.\/Nodes["']/g, `from "${up}Nodes"`);
+		content = content.replace(/from ["']\.\.\/Workflows["']/g, `from "${up}Workflows"`);
+		fsExtra.writeFileSync(file, content);
 	}
 }
 
