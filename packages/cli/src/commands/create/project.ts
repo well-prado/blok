@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.10";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.11";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -345,7 +345,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// when HTTP is present.
 		const mountedOnHttp = new Set<string>();
 		if (selectedTriggers.includes("http")) {
-			for (const kind of ["sse", "websocket"]) {
+			for (const kind of ["sse", "websocket", "webhook"]) {
 				if (selectedTriggers.includes(kind)) mountedOnHttp.add(kind);
 			}
 		}
@@ -355,8 +355,8 @@ export async function createProject(opts: OptionValues, version: string, current
 		const primaryTrigger = selectedTriggers[0];
 		// Pubsub and Queue triggers use template subdirectory
 		const primaryTriggerDir =
-			primaryTrigger === "pubsub" || primaryTrigger === "queue"
-				? `${repoSource}/triggers/${primaryTrigger === "queue" ? "worker" : primaryTrigger}/template`
+			primaryTrigger === "pubsub" || primaryTrigger === "queue" || primaryTrigger === "worker"
+				? `${repoSource}/triggers/${primaryTrigger === "queue" || primaryTrigger === "worker" ? "worker" : primaryTrigger}/template`
 				: `${repoSource}/triggers/${primaryTrigger}`;
 
 		// Copy base config files from primary trigger
@@ -424,8 +424,8 @@ export async function createProject(opts: OptionValues, version: string, current
 			// looked at `triggers/queue/template/` which doesn't exist; the
 			// scaffold silently no-op'd on the file copy and the user got
 			// an empty `src/triggers/queue/` directory.
-			if (triggerKind === "pubsub" || triggerKind === "queue") {
-				const templatePkgDir = triggerKind === "queue" ? "worker" : triggerKind;
+			if (triggerKind === "pubsub" || triggerKind === "queue" || triggerKind === "worker") {
+				const templatePkgDir = triggerKind === "queue" || triggerKind === "worker" ? "worker" : triggerKind;
 				const templateDir = `${repoSource}/triggers/${templatePkgDir}/template/src`;
 				if (fsExtra.existsSync(templateDir)) {
 					// Copy the entire template src directory
@@ -446,7 +446,7 @@ export async function createProject(opts: OptionValues, version: string, current
 					// Update provider-specific adapter
 					if (triggerKind === "pubsub") {
 						updatePubSubProvider(triggerDestDir, pubsubProvider);
-					} else if (triggerKind === "queue") {
+					} else if (triggerKind === "queue" || triggerKind === "worker") {
 						updateQueueProvider(triggerDestDir, queueProvider);
 					}
 				}
@@ -514,8 +514,23 @@ export async function createProject(opts: OptionValues, version: string, current
 		const sharedWorkflowsContent = generateSharedWorkflowsFile(selectedTriggers);
 		fsExtra.writeFileSync(`${dirPath}/src/Workflows.ts`, sharedWorkflowsContent);
 
-		// Generate trigger entry points that import shared nodes/workflows
+		// Generate trigger entry points that import shared nodes/workflows.
+		// SKIP triggers whose template/ ships a real `src/index.ts` (worker /
+		// queue, pubsub) — overwriting their entry with the generic
+		// placeholder breaks the standalone process. SKIP triggers that
+		// mount on HTTP (sse, websocket, webhook) when http is in
+		// selectedTriggers — the HTTP entry handles them inline and a
+		// separate entry is dead code.
+		const triggersWithRealTemplate = new Set(["worker", "queue", "pubsub"]);
 		for (const triggerKind of selectedTriggers) {
+			if (triggersWithRealTemplate.has(triggerKind)) {
+				// Template already shipped a real index.ts; preserve it.
+				continue;
+			}
+			if (mountedOnHttp.has(triggerKind)) {
+				// HTTP entry mounts this trigger; don't generate a placeholder.
+				continue;
+			}
 			const entryContent = generateTriggerEntryFile(triggerKind, selectedTriggers);
 			fsExtra.writeFileSync(`${dirPath}/src/triggers/${triggerKind}/index.ts`, entryContent);
 		}
@@ -597,8 +612,8 @@ export async function createProject(opts: OptionValues, version: string, current
 		fsExtra.copySync(`${repoSource}/infra/metrics`, `${dirPath}/infra/metrics`);
 		fsExtra.removeSync(`${dirPath}/public/metric`);
 
-		// Copy development infra (docker-compose with Redis/NATS) if queue trigger is selected
-		if (selectedTriggers.includes("queue")) {
+		// Copy development infra (docker-compose with Redis/NATS) if queue/worker trigger is selected
+		if (selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) {
 			fsExtra.ensureDirSync(`${dirPath}/infra/development`);
 			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/development`);
 		}
@@ -699,7 +714,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.10";
+		const BLOKJS_DEP_RANGE = "^0.6.11";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -795,11 +810,15 @@ export async function createProject(opts: OptionValues, version: string, current
 				? `file:${path.resolve(repoSource, "triggers/pubsub")}`
 				: BLOKJS_DEP_RANGE;
 		}
-		if (selectedTriggers.includes("queue")) {
-			// "queue" CLI flag → @blokjs/trigger-worker (the monorepo
-			// package). The "trigger-queue" name only exists as an old
-			// 0.2.x package on npm from a separate publisher; v0.6.x
-			// ships everything under trigger-worker.
+		// Accept "queue" (legacy) AND "worker" (v0.6.11+) as aliases for the
+		// trigger-worker package. Also pull the package in under --examples
+		// even when the worker trigger isn't directly selected — the fanout-
+		// enqueue.json scaffold-source workflow calls @blokjs/worker-publish
+		// from the HTTP trigger, which lazy-imports @blokjs/trigger-worker;
+		// without the dep at the root, the HTTP trigger 500s on /fanout/jobs
+		// even though no separate worker process is intended.
+		const needsTriggerWorker = selectedTriggers.includes("queue") || selectedTriggers.includes("worker") || examples;
+		if (needsTriggerWorker) {
 			triggerPackageDeps["@blokjs/trigger-worker"] = localRepoPath
 				? `file:${path.resolve(repoSource, "triggers/worker")}`
 				: BLOKJS_DEP_RANGE;
@@ -1036,7 +1055,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 
 		// Show infrastructure setup instructions for queue/pubsub triggers
-		if (selectedTriggers.includes("queue") && queueProvider === "redis") {
+		if ((selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) && queueProvider === "redis") {
 			console.log(color.cyan("\n📦 Redis Setup (for Queue trigger):"));
 			console.log("  Start Redis with Docker:");
 			console.log(color.dim("    cd infra/development"));
@@ -1045,7 +1064,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log("  Redis Commander UI: http://localhost:8081");
 		}
 
-		if (selectedTriggers.includes("queue") && queueProvider === "nats") {
+		if ((selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) && queueProvider === "nats") {
 			console.log(color.cyan("\n📦 NATS JetStream Setup (for Queue trigger):"));
 			console.log("  Start NATS with Docker:");
 			console.log(color.dim("    cd infra/development"));
@@ -1165,9 +1184,9 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 		} else if (trigger === "pubsub") {
 			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
 			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
-		} else if (trigger === "queue") {
+		} else if (trigger === "queue" || trigger === "worker") {
 			// Worker template ships `workflows/jobs/process-job.ts`.
-			imports.push('import ProcessJob from "./workflows/queue/jobs/process-job";');
+			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job";`);
 			workflowEntries.push('\t"process-job": ProcessJob,');
 		}
 	}
@@ -1210,20 +1229,21 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 		// createTriggerConfig in this same file).
 		const sseAlsoSelected = selectedTriggers.includes("sse");
 		const wsAlsoSelected = selectedTriggers.includes("websocket");
-		// Critical: import SSETrigger / WebSocketTrigger from the npm
-		// packages rather than the locally-copied trigger files. The
-		// helper nodes (@blokjs/sse-publish, @blokjs/ws-broadcast, etc.)
-		// look up the in-process bus / active trigger singleton via the
-		// npm package's exports. If the HTTP entry's trigger instance
-		// comes from a different module (the local copy), Node treats
-		// them as separate modules with separate singletons — events
-		// would never cross.
-		const needsShared = sseAlsoSelected || wsAlsoSelected;
+		const webhookAlsoSelected = selectedTriggers.includes("webhook");
+		// Critical: import SSETrigger / WebSocketTrigger / WebhookTrigger from the
+		// npm packages rather than the locally-copied trigger files. The helper
+		// nodes (@blokjs/sse-publish, @blokjs/ws-broadcast, etc.) look up the
+		// in-process bus / active trigger singleton via the npm package's
+		// exports. If the HTTP entry's trigger instance comes from a different
+		// module (the local copy), Node treats them as separate modules with
+		// separate singletons — events would never cross.
+		const needsShared = sseAlsoSelected || wsAlsoSelected || webhookAlsoSelected;
 		const sharedHelperImports = needsShared
 			? `\nimport { NodeMap, WorkflowRegistry } from "@blokjs/runner";\nimport sharedNodes from "../../Nodes";\nimport sharedWorkflows from "../../Workflows";`
 			: "";
 		const sseImports = sseAlsoSelected ? `\nimport SSETrigger from "@blokjs/trigger-sse";` : "";
 		const wsImports = wsAlsoSelected ? `\nimport WebSocketTrigger from "@blokjs/trigger-websocket";` : "";
+		const webhookImports = webhookAlsoSelected ? `\nimport WebhookTrigger from "@blokjs/trigger-webhook";` : "";
 		const sharedBootstrapPrelude = needsShared
 			? `\n\n			// Build a NodeMap from the shared Nodes record; both SSE and
 			// WebSocket triggers consume this via setNodeMap so they can
@@ -1246,15 +1266,15 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 				for (const [name, wf] of Object.entries(sharedWorkflows)) {
 					const w = wf as {
 						name?: string;
-						trigger?: { sse?: unknown; websocket?: unknown };
-						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown } };
+						trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown };
+						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown } };
 					};
 					const triggerCfg = w._config?.trigger ?? w.trigger;
 					if (!triggerCfg) continue;
-					if (!triggerCfg.sse && !triggerCfg.websocket) continue;
+					if (!triggerCfg.sse && !triggerCfg.websocket && !triggerCfg.webhook) continue;
 					const resolvedName = w._config?.name ?? w.name ?? name;
 					if (registry.get(resolvedName)) continue;
-					const kind = triggerCfg.sse ? "sse" : "websocket";
+					const kind = triggerCfg.sse ? "sse" : triggerCfg.websocket ? "websocket" : "webhook";
 					registry.register({
 						name: resolvedName,
 						source: \`\${kind}:\${name}\`,
@@ -1291,10 +1311,26 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 			});
 			await wsTrigger.listen();`
 			: "";
-		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}`;
+		const webhookBootstrap = webhookAlsoSelected
+			? `\n			// Mount Webhook trigger on the HTTP process's shared Hono app.
+			// WebhookTrigger.constructor(app, httpTrigger?) mirrors SSE / WS —
+			// when an HttpTrigger is supplied, the webhook trigger registers
+			// its /webhooks/<provider> routes inside addPreCatchAllHook so they
+			// win Hono's first-match dispatch over the legacy workflow catch-
+			// all. The shared @blokjs/trigger-webhook singleton this creates
+			// is also what @blokjs/hmac-verify (and other webhook-aware helpers)
+			// look up at run time.
+			const webhookTrigger = new WebhookTrigger(this.httpTrigger.getApp(), this.httpTrigger);
+			webhookTrigger.setNodeMap({
+				nodes: subTriggerNodeMap,
+				workflows: sharedWorkflows as unknown as Parameters<typeof webhookTrigger.setNodeMap>[0]["workflows"],
+			});
+			await webhookTrigger.listen();`
+			: "";
+		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}${webhookBootstrap}`;
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}
+import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
@@ -1861,8 +1897,8 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 		// already imports `../../../Nodes` / `../../../Workflows` directly.
 	} else if (triggerKind === "pubsub") {
 		fileFixes.push({ file: `${triggerDestDir}/runner/PubSubServer.ts`, up: "../../../" });
-	} else if (triggerKind === "queue") {
-		// "queue" CLI flag → trigger-worker template (WorkerServer.ts)
+	} else if (triggerKind === "queue" || triggerKind === "worker") {
+		// "queue" (legacy) and "worker" (v0.6.11+) both → trigger-worker template (WorkerServer.ts)
 		fileFixes.push({ file: `${triggerDestDir}/runner/WorkerServer.ts`, up: "../../../" });
 	}
 
