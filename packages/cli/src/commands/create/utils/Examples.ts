@@ -83,6 +83,7 @@ Examples:
 5- Open "chat.json" in your browser at http://localhost:4000/chat (set OPENROUTER_API_KEY first)
 6- Open "chat-memory.json" in your browser at http://localhost:4000/chat-memory (needs OPENROUTER_API_KEY + Redis at REDIS_URL)
 7- Webhook router: POST /webhooks/{stripe,github,linear} with signed bodies — set the matching *_WEBHOOK_SECRET env vars (needs --triggers webhook)
+8- LLM agent w/ tool calls: open http://localhost:4000/agent — model picks between get_weather and calculate tools (needs OPENROUTER_API_KEY + Redis)
 
 For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
 `;
