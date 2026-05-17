@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.6";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.7";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -329,7 +329,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Build trigger configs for all selected triggers
 		const triggerConfigs: TriggerConfig[] = selectedTriggers.map((kind) => createTriggerConfig(kind));
 
-		// v0.6.6 — SSE and WebSocket are sub-protocols of HTTP. SSETrigger's
+		// v0.6.7 — SSE and WebSocket are sub-protocols of HTTP. SSETrigger's
 		// constructor takes a Hono app + HttpTrigger handle so it can mount
 		// on the shared HTTP server via `addPreCatchAllHook`. Same for
 		// WebSocketTrigger (plus `addServerHook` for the upgrade listener).
@@ -522,7 +522,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		// SSE scaffold needs an SSEServer wrapper that creates a Hono app,
 		// passes it to SSETrigger's constructor, registers nodes/workflows,
-		// and binds an HTTP listener. Pre-v0.6.6 the SSE entry called
+		// and binds an HTTP listener. Pre-v0.6.7 the SSE entry called
 		// `new SSETrigger()` with no args (broken — constructor requires
 		// `app: Hono`) and didn't bind a listener, so SSE trigger never
 		// actually served traffic. Generated here so it inherits the
@@ -554,7 +554,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		// v0.6.6 — when `--examples` is set, the Nodes.ts template
+		// v0.6.7 — when `--examples` is set, the Nodes.ts template
 		// (Examples.ts:`node_file`) imports chain-init / chain-verify /
 		// runtime-bridge / examples nodes from src/nodes/. Those node
 		// directories live under `triggers/http/src/nodes/` and only get
@@ -619,10 +619,10 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/postgresql`);
 			fsExtra.copySync(`${repoSource}/infra/milvus`, `${dirPath}/infra/milvus`);
 
-			// v0.6.6 — `--examples` overrides the generated Nodes.ts with
+			// v0.6.7 — `--examples` overrides the generated Nodes.ts with
 			// the static `node_file` template (api-call + if-else + the
 			// chain-init / chain-verify / runtime-bridge / examples nodes).
-			// Pre-v0.6.6 that template was final. But when SSE or WebSocket
+			// Pre-v0.6.7 that template was final. But when SSE or WebSocket
 			// are also selected, their workflow templates reference helper
 			// nodes from @blokjs/helpers (sse-publish, ws-reply, etc.) —
 			// without HELPER_NODES spread, the runner fails with
@@ -665,9 +665,9 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.author = "";
 
 		// Replace workspace:* references that only work inside the monorepo
-		// v0.6.6: expanded to include EVERY publishable @blokjs/* package so
+		// v0.6.7: expanded to include EVERY publishable @blokjs/* package so
 		// the `--local` install path doesn't fall back to npm for any of
-		// them. Pre-v0.6.6 this map omitted @blokjs/helpers + @blokjs/react
+		// them. Pre-v0.6.7 this map omitted @blokjs/helpers + @blokjs/react
 		// + the trigger-webhook / trigger-websocket / trigger-cron /
 		// trigger-grpc / trigger-sse packages, so scaffolds against `--local`
 		// silently let those resolve to whatever was on the registry.
@@ -699,7 +699,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.6";
+		const BLOKJS_DEP_RANGE = "^0.6.7";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -804,7 +804,7 @@ export async function createProject(opts: OptionValues, version: string, current
 				? `file:${path.resolve(repoSource, "triggers/worker")}`
 				: BLOKJS_DEP_RANGE;
 		}
-		// v0.6.6 — SSE scaffolds need deps the trigger-sse npm package
+		// v0.6.7 — SSE scaffolds need deps the trigger-sse npm package
 		// doesn't list in its production dependencies because the
 		// package itself only needs them at dev/test time. When SSE is
 		// scaffolded alone (primary trigger), the project inherits
@@ -912,6 +912,25 @@ export async function createProject(opts: OptionValues, version: string, current
 		const providerEnvVars = getProviderEnvVars(selectedTriggers, pubsubProvider, queueProvider);
 		if (providerEnvVars) {
 			fsExtra.appendFileSync(envLocal, providerEnvVars);
+		}
+
+		// v0.6.7 chat demo — when --examples is selected, append OPENROUTER
+		// env vars. The chat-message workflow reads OPENROUTER_API_KEY +
+		// OPENROUTER_MODEL via process.env inside its js/ expressions. Left
+		// empty in .env.local; the user populates the key before running
+		// the chat demo. Default model is OpenAI's gpt-4o-mini through
+		// OpenRouter — cheap, fast, broadly available. Any OpenRouter
+		// model works (anthropic/claude-*, google/gemini-*, meta-llama/*,
+		// etc.) — just change OPENROUTER_MODEL.
+		if (examples) {
+			const chatEnvBlock = [
+				"",
+				"# Chat demo (--examples) — get a free OpenRouter key at https://openrouter.ai/keys",
+				"OPENROUTER_API_KEY=",
+				"OPENROUTER_MODEL=openai/gpt-4o-mini",
+				"",
+			].join("\n");
+			fsExtra.appendFileSync(envLocal, chatEnvBlock);
 		}
 
 		// Examples
@@ -1096,7 +1115,7 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 			// `workflows/json/`. Skip.
 			imports.push("// HTTP workflows are auto-discovered from workflows/json/");
 		} else if (trigger === "sse") {
-			// v0.6.6 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
+			// v0.6.7 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
 			// (copied via the scaffold to `src/workflows/sse/events/...`). The
 			// stream-demo workflow is the SSE subscriber; the publish-demo
 			// workflow is HTTP-triggered and only useful when an HTTP trigger
@@ -1113,7 +1132,7 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 				workflowEntries.push('\t"sse-publish-demo": SSEPublishDemo,');
 			}
 		} else if (trigger === "websocket") {
-			// v0.6.6 — WebSocket source ships `src/workflows/events/echo-demo.ts`
+			// v0.6.7 — WebSocket source ships `src/workflows/events/echo-demo.ts`
 			// (copied to `src/workflows/websocket/events/echo-demo.ts`). It
 			// echoes received messages back via @blokjs/ws-reply. The
 			// scaffold ships this regardless of whether HTTP is selected;
@@ -1151,7 +1170,7 @@ export default workflows;
  */
 function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[] = [triggerKind]): string {
 	if (triggerKind === "http") {
-		// v0.6.6 — when SSE is ALSO selected, mount SSETrigger on HTTP's
+		// v0.6.7 — when SSE is ALSO selected, mount SSETrigger on HTTP's
 		// shared Hono app instead of spawning a separate SSE process.
 		// SSETrigger is designed to mount on a sibling-trigger's app
 		// (see its constructor signature: `app: Hono, httpTrigger?:
@@ -1300,10 +1319,10 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	}
 
 	if (triggerKind === "sse") {
-		// v0.6.6 — SSE entry now drives an `SSEServer` wrapper (mirrors
+		// v0.6.7 — SSE entry now drives an `SSEServer` wrapper (mirrors
 		// the WorkerServer / PubSubServer pattern). The wrapper creates
 		// a Hono app, hands it to SSETrigger's constructor (which
-		// REQUIRES it; pre-v0.6.6 the entry called `new SSETrigger()`
+		// REQUIRES it; pre-v0.6.7 the entry called `new SSETrigger()`
 		// with no args — boots, but every registered SSE route would
 		// crash on `this.app.get(...)` because `app` was undefined),
 		// registers nodes + workflows, and binds an HTTP listener so

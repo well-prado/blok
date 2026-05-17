@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/helpers",
-	"version": "0.6.6",
+	"version": "0.6.7",
 	"description": "Generic helper nodes used by the v0.5 workflow primitives — expr, ctx-publish, throw, log, audit-log, metrics-emit, in-memory-kv, json-schema. Designed to be small, predictable, AI-readable.",
 	"type": "module",
 	"engines": {
@@ -19,17 +19,26 @@
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.21",
+		"openai": "^4.77.0",
 		"rimraf": "^6.1.2",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/runner": "^0.6.6",
-		"@blokjs/shared": "^0.6.6",
+		"@blokjs/runner": "^0.6.7",
+		"@blokjs/shared": "^0.6.7",
 		"ajv": "^8.17.1",
 		"ioredis": "^5.10.1",
 		"jose": "^6.2.3",
 		"zod": "^3.24.2"
+	},
+	"peerDependencies": {
+		"openai": "^4.77.0"
+	},
+	"peerDependenciesMeta": {
+		"openai": {
+			"optional": true
+		}
 	},
 	"private": false,
 	"publishConfig": {
