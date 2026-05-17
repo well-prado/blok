@@ -26,6 +26,9 @@ const package_dependencies = {
 	ejs: "^3.1.10",
 	pg: "^8.13.3",
 	mongodb: "^6.14.2",
+	// v0.6.7 chat demo — @blokjs/llm-stream uses the official openai SDK
+	// pointed at OpenRouter's OpenAI-compatible Chat Completions endpoint.
+	openai: "^4.77.0",
 };
 
 const package_dev_dependencies = {

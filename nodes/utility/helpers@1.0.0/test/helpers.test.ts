@@ -61,6 +61,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/in-memory-kv",
 				"@blokjs/json-schema",
 				"@blokjs/jwt-verify",
+				"@blokjs/llm-stream",
 				"@blokjs/log",
 				"@blokjs/metrics-emit",
 				"@blokjs/pubsub-publish",

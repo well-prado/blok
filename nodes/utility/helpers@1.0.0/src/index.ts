@@ -28,6 +28,7 @@ import HmacVerifyNode from "./hmacVerify";
 import InMemoryKvNode, { _resetInMemoryKvForTests } from "./inMemoryKv";
 import JsonSchemaNode from "./jsonSchema";
 import JwtVerifyNode, { _resetJwksCacheForTests } from "./jwtVerify";
+import LlmStreamNode from "./llmStream";
 import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
 import PubsubPublishNode from "./pubsubPublish";
@@ -50,6 +51,7 @@ export {
 	InMemoryKvNode,
 	JsonSchemaNode,
 	JwtVerifyNode,
+	LlmStreamNode,
 	LogNode,
 	MetricsEmitNode,
 	PubsubPublishNode,
@@ -92,6 +94,7 @@ export const HELPER_NODES = {
 	"@blokjs/in-memory-kv": InMemoryKvNode,
 	"@blokjs/json-schema": JsonSchemaNode,
 	"@blokjs/jwt-verify": JwtVerifyNode,
+	"@blokjs/llm-stream": LlmStreamNode,
 	"@blokjs/log": LogNode,
 	"@blokjs/metrics-emit": MetricsEmitNode,
 	"@blokjs/pubsub-publish": PubsubPublishNode,

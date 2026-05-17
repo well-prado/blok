@@ -1,4 +1,5 @@
 import Base64ToPDF from "./base64-pdf";
+import ChatUI from "./chat-ui";
 import ArrayMapNode from "./dashboard-generator/ArrayMap";
 import DashboardChartsGenerator from "./dashboard-generator/DashboardChartsGenerator";
 import MemoryStorage from "./dashboard-generator/MemoryStorage";
@@ -42,6 +43,7 @@ const ExampleNodes = {
 	"base64-pdf": Base64ToPDF,
 	"save-image": SaveImageBase64,
 	"image-capture-ui": ImageCaptureUI,
+	"chat-ui": ChatUI,
 };
 
 export default ExampleNodes;
