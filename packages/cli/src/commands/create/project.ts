@@ -934,6 +934,15 @@ export async function createProject(opts: OptionValues, version: string, current
 				"# The plain /chat demo works without Redis; only /chat-memory needs it.",
 				"REDIS_URL=redis://127.0.0.1:6379",
 				"",
+				"# Webhook router demo (--examples + --triggers webhook) — secrets per provider.",
+				"# Stripe: copy from https://dashboard.stripe.com/webhooks (`whsec_…`).",
+				"# GitHub: set in repo Settings → Webhooks → secret field.",
+				"# Linear: workspace settings → API → Webhooks → signing secret.",
+				"# Until set, signature verification fails with 401 — that's the gate working.",
+				"STRIPE_WEBHOOK_SECRET=",
+				"GITHUB_WEBHOOK_SECRET=",
+				"LINEAR_WEBHOOK_SECRET=",
+				"",
 			].join("\n");
 			fsExtra.appendFileSync(envLocal, chatEnvBlock);
 		}

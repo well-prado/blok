@@ -35,9 +35,10 @@ Worker, Pub/Sub, and Cron run as their own processes, not on the HTTP port.
 | [v07-ws-echo.json](triggers/http/workflows/json/v07-ws-echo.json) | `websocket` | Echo server on `/ws/echo`. Connect → "connected" greeting; send → JSON-wrapped echo. Real WS round-trip via `@blokjs/ws-reply`. |
 | [v07-sse-stream.json](triggers/http/workflows/json/v07-sse-stream.json) | `sse` | SSE endpoint at `/sse/demo` subscribing to in-process bus channel `sse-demo`. Streams forever. |
 | [v07-sse-publish.json](triggers/http/workflows/json/v07-sse-publish.json) | `http` (POST) | Companion — POSTs publish to the bus, every SSE client receives. |
-| [v07-stripe-webhook.json](triggers/http/workflows/json/v07-stripe-webhook.json) | `webhook` (Stripe) | Real Stripe webhook verifier + **polymorphic dispatch**: `subworkflow: "js/ctx.request.body.type"` + `namespace: "stripe"` → `body.type === "invoice.paid"` lands on the `stripe.invoice.paid` workflow. |
-| [v07-github-webhook.json](triggers/http/workflows/json/v07-github-webhook.json) | `webhook` (GitHub) | Real HMAC-SHA256 verifier on `X-Hub-Signature-256`. Switches on `X-GitHub-Event` and dispatches to per-event sub-workflows ([v05-github-handler-push.json](triggers/http/workflows/json/v05-github-handler-push.json) etc.). |
-| [stripe.invoice.paid.json](triggers/http/workflows/json/stripe.invoice.paid.json) | (sub-workflow only) | Real handler — receives the verified Stripe event from `v07-stripe-webhook`. |
+| [webhook-stripe.json](triggers/http/workflows/json/webhook-stripe.json) | `webhook` (Stripe) | Real Stripe webhook verifier + **polymorphic dispatch**: `subworkflow: "js/ctx.request.body.type"` + `namespace: "stripe"` → `body.type === "invoice.paid"` lands on the `stripe.invoice.paid` workflow. Ships under `--examples`. |
+| [webhook-github.json](triggers/http/workflows/json/webhook-github.json) | `webhook` (GitHub) | Real HMAC-SHA256 verifier on `X-Hub-Signature-256`. Switches on `X-GitHub-Event` and dispatches to per-event sub-workflows ([webhook-github-push.json](triggers/http/workflows/json/webhook-github-push.json) etc.). Ships under `--examples`. |
+| [webhook-linear.json](triggers/http/workflows/json/webhook-linear.json) | `webhook` (custom HMAC) | Linear isn't a built-in provider — uses the trigger's CUSTOM signature config. Same pattern works for any HMAC-signed webhook (Discord, Mailgun, Twitch, etc.). Switches on `body.type` to per-type handlers. Ships under `--examples`. |
+| [webhook-stripe-invoice-paid.json](triggers/http/workflows/json/webhook-stripe-invoice-paid.json) | (sub-workflow only) | Stripe `invoice.paid` handler — receives the verified event from `webhook-stripe` via polymorphic dispatch. |
 
 **v0.5 reliability demos** (these exercise every primitive — branch, switch, forEach, loop, tryCatch, wait, sub-workflows, idempotency, retry, debounce, concurrency keys, etc.). All hit real targets like `httpbin.org`, `countriesnow.space`, `swapi.dev`, MongoDB Atlas:
 
@@ -200,7 +201,7 @@ export STRIPE_WEBHOOK_SECRET="whsec_test_..."
 # Use the Stripe CLI or generate a v1 signature yourself
 stripe listen --forward-to http://localhost:4000/webhooks/stripe
 ```
-The polymorphic dispatch is the headline: a `body.type === "invoice.paid"` event routes to the [stripe.invoice.paid.json](triggers/http/workflows/json/stripe.invoice.paid.json) handler with zero switch boilerplate.
+The polymorphic dispatch is the headline: a `body.type === "invoice.paid"` event routes to the [webhook-stripe-invoice-paid.json](triggers/http/workflows/json/webhook-stripe-invoice-paid.json) handler (registered as `stripe.invoice.paid` after the `namespace: "stripe"` prefix) with zero switch boilerplate.
 
 **Webhook (GitHub)**
 ```bash
