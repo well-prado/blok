@@ -1,0 +1,74 @@
+{
+	"name": "webhook-linear",
+	"version": "1.0.0",
+	"description": "Linear webhook receiver. Linear isn't a built-in webhook provider, so we use the trigger's CUSTOM signature config: HMAC-SHA256 over the raw body, hex digest, in the `Linear-Signature` header. This pattern works for ANY HMAC-signed webhook — point `header` + `format` at the right values. After verification, switches on body.type (Linear sends `type: 'Issue' | 'Comment' | 'Project' | ...`) to per-type handlers. Needs `--triggers http,webhook --examples` at scaffold time and LINEAR_WEBHOOK_SECRET set in .env.local.",
+	"trigger": {
+		"webhook": {
+			"path": "/webhooks/linear",
+			"signature": {
+				"scheme": "hmac-sha256",
+				"header": "Linear-Signature",
+				"format": "{hex}",
+				"secretEnv": "LINEAR_WEBHOOK_SECRET",
+				"tolerance": 0
+			}
+		}
+	},
+	"steps": [
+		{
+			"id": "route-by-type",
+			"switch": {
+				"on": "js/(ctx.request.body.type || 'unknown').toLowerCase()",
+				"cases": [
+					{
+						"when": "issue",
+						"do": [
+							{
+								"id": "dispatch-issue",
+								"subworkflow": "webhook-linear-issue",
+								"inputs": {
+									"action": "js/ctx.request.body.action || null",
+									"data": "js/ctx.request.body.data || null",
+									"url": "js/ctx.request.body.url || null"
+								}
+							}
+						]
+					},
+					{
+						"when": "comment",
+						"do": [
+							{
+								"id": "dispatch-comment",
+								"subworkflow": "webhook-linear-comment",
+								"inputs": {
+									"action": "js/ctx.request.body.action || null",
+									"data": "js/ctx.request.body.data || null",
+									"url": "js/ctx.request.body.url || null"
+								}
+							}
+						]
+					}
+				],
+				"default": [
+					{
+						"id": "log-unknown",
+						"use": "@blokjs/log",
+						"type": "module",
+						"inputs": {
+							"level": "warn",
+							"message": "js/`webhook-linear: unhandled type '${ctx.request.body.type || ''}' action='${ctx.request.body.action || ''}'`"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((dispatchKey) => { const childResp = dispatchKey ? ctx.state[dispatchKey] : null; const childData = childResp && childResp.data ? childResp.data : childResp; return { received: true, type: ctx.request.body.type || null, action: ctx.request.body.action || null, dispatchedTo: dispatchKey || 'log-unknown', child: childData }; })(['dispatch-issue', 'dispatch-comment'].find(k => ctx.state[k] !== undefined))"
+			}
+		}
+	]
+}
