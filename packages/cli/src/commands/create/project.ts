@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.8";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.9";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -699,7 +699,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.8";
+		const BLOKJS_DEP_RANGE = "^0.6.9";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -928,6 +928,11 @@ export async function createProject(opts: OptionValues, version: string, current
 				"# Chat demo (--examples) — get a free OpenRouter key at https://openrouter.ai/keys",
 				"OPENROUTER_API_KEY=",
 				"OPENROUTER_MODEL=openai/gpt-4o-mini",
+				"",
+				"# Redis-memory chat (--examples) — /chat-memory needs Redis reachable at REDIS_URL.",
+				"# Start one locally with: docker run --rm -p 6379:6379 redis:7-alpine",
+				"# The plain /chat demo works without Redis; only /chat-memory needs it.",
+				"REDIS_URL=redis://127.0.0.1:6379",
 				"",
 			].join("\n");
 			fsExtra.appendFileSync(envLocal, chatEnvBlock);
