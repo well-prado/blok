@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-pubsub",
-	"version": "0.6.11",
+	"version": "0.6.12",
 	"description": "Pub/Sub trigger for Blok workflows — supports NATS (Core + JetStream), Redis Streams, Kafka, GCP Pub/Sub, AWS SNS+SQS, and Azure Service Bus.",
 	"type": "module",
 	"main": "dist/index.js",
@@ -14,9 +14,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^0.6.11",
-		"@blokjs/runner": "^0.6.11",
-		"@blokjs/shared": "^0.6.11",
+		"@blokjs/helper": "^0.6.12",
+		"@blokjs/runner": "^0.6.12",
+		"@blokjs/shared": "^0.6.12",
 		"@opentelemetry/api": "^1.9.0",
 		"uuid": "^11.1.0"
 	},

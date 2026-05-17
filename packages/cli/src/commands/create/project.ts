@@ -37,7 +37,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.6.11";
+const GITHUB_REPO_RELEASE_TAG = "v0.6.12";
 
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
@@ -714,7 +714,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.6.11";
+		const BLOKJS_DEP_RANGE = "^0.6.12";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -2072,7 +2072,7 @@ function getProviderDependencies(
 		Object.assign(deps, pubsubProviderDeps[pubsubProvider]);
 	}
 
-	if (triggers.includes("queue") && queueProviderDeps[queueProvider]) {
+	if ((triggers.includes("queue") || triggers.includes("worker")) && queueProviderDeps[queueProvider]) {
 		Object.assign(deps, queueProviderDeps[queueProvider]);
 	}
 
@@ -2128,7 +2128,7 @@ NATS_STREAM_NAME=blok-queue`,
 		lines.push(pubsubEnvVars[pubsubProvider]);
 	}
 
-	if (triggers.includes("queue") && queueEnvVars[queueProvider]) {
+	if ((triggers.includes("queue") || triggers.includes("worker")) && queueEnvVars[queueProvider]) {
 		lines.push(queueEnvVars[queueProvider]);
 	}
 
