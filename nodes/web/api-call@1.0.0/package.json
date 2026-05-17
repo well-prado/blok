@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/api-call",
-	"version": "0.6.11",
+	"version": "0.6.12",
 	"description": "Node module for making API calls",
 	"type": "module",
 	"engines": {
@@ -25,8 +25,8 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/runner": "^0.6.11",
-		"@blokjs/shared": "^0.6.11",
+		"@blokjs/runner": "^0.6.12",
+		"@blokjs/shared": "^0.6.12",
 		"lodash": "^4.17.21",
 		"zod": "^3.24.2"
 	},
