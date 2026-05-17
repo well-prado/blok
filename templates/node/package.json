@@ -19,9 +19,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/shared": "^0.6.10",
-		"@blokjs/runner": "^0.6.10",
-		"@blokjs/helper": "^0.6.10",
+		"@blokjs/shared": "^0.6.11",
+		"@blokjs/runner": "^0.6.11",
+		"@blokjs/helper": "^0.6.11",
 		"zod": "^3.24.2"
 	},
 	"private": true
