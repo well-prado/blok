@@ -943,6 +943,14 @@ export async function createProject(opts: OptionValues, version: string, current
 				"GITHUB_WEBHOOK_SECRET=",
 				"LINEAR_WEBHOOK_SECRET=",
 				"",
+				"# Worker fan-out demo (--examples + --triggers worker) — POST /fanout/jobs with",
+				"# `{items: [...], tenantId?: '...'}` enqueues N worker jobs onto `fanout-jobs`.",
+				"# in-memory adapter works single-process; for cross-process set BLOK_WORKER_ADAPTER",
+				"# to nats / redis / bullmq / rabbitmq / sqs / pg-boss / kafka and supply the matching",
+				"# connection env (e.g. NATS_SERVERS=nats://127.0.0.1:4222, or REDIS_URL above).",
+				"BLOK_WORKER_ADAPTER=in-memory",
+				"NATS_SERVERS=nats://127.0.0.1:4222",
+				"",
 			].join("\n");
 			fsExtra.appendFileSync(envLocal, chatEnvBlock);
 		}
