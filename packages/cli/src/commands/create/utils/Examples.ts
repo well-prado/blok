@@ -29,6 +29,12 @@ const package_dependencies = {
 	// v0.6.7 chat demo — @blokjs/llm-stream uses the official openai SDK
 	// pointed at OpenRouter's OpenAI-compatible Chat Completions endpoint.
 	openai: "^4.77.0",
+	// v0.6.8 chat-memory demo — @blokjs/redis-kv lazy-imports ioredis.
+	// Declared as a hard dep so the memory chat workflows boot cleanly
+	// the moment a Redis instance is reachable at REDIS_URL. Pinned to
+	// the same range @blokjs/helpers already declares so deduping picks
+	// the same install on both sides.
+	ioredis: "^5.10.1",
 };
 
 const package_dev_dependencies = {
@@ -74,6 +80,8 @@ Examples:
 2- Open "db-manager.json" in your browser at http://localhost:4000/db-manager
 3- Open "dashboard-gen.json" in your browser at http://localhost:4000/dashboard-gen
 4- Open "countries.json" in your browser at http://localhost:4000/countries
+5- Open "chat.json" in your browser at http://localhost:4000/chat (set OPENROUTER_API_KEY first)
+6- Open "chat-memory.json" in your browser at http://localhost:4000/chat-memory (needs OPENROUTER_API_KEY + Redis at REDIS_URL)
 
 For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
 `;
