@@ -1,0 +1,159 @@
+---
+title: "Run states"
+description: "Every state a workflow run can be in, what causes the transitions, and which kinds emit telemetry events."
+icon: "list-tree"
+---
+
+A workflow run moves through a finite state machine driven by the
+trigger, the reliability gates, the scheduling primitives, and the
+step execution loop. This page catalogs every state, every transition,
+and the events / endpoints / Studio surfaces that observe each one.
+
+## Eleven states
+
+| State | When | Terminal? | Source |
+|---|---|---|---|
+| `running` | Default entry state. Steps are executing. | No | `tracker.startRun()` |
+| `completed` | Last step succeeded. | Yes | `tracker.completeRun()` |
+| `failed` | A step threw and the error wasn't recovered. | Yes | `tracker.failRun()` |
+| `crashed` | Process died mid-flight; `uncaughtException` or `unhandledRejection` flipped the run before exit, OR the boot-time orphan scan found a `running` row older than `BLOK_ORPHAN_THRESHOLD_MS`. | Yes | `tracker.markRunCrashed()` |
+| `timedOut` | A step exceeded `maxDuration` on its final retry attempt. Distinct from `failed` so SLA dashboards separate timeouts from logic errors. | Yes | `tracker.markRunTimedOut()` |
+| `cancelled` | `POST /__blok/runs/:runId/cancel` fired; `RunCancelledError` propagated. | Yes | `tracker.cancelRun()` |
+| `throttled` | Trigger's [concurrency gate](/d/reliability/concurrency-keys) denied entry with `onLimit: "throw"`. Distinct from `failed` — no step ran. | Yes | `tracker.markRunThrottled()` |
+| `queued` | Trigger's concurrency gate denied entry with `onLimit: "queue"`. The run defers, then re-attempts the gate. Transient state — transitions to `running` on grant or back to `queued` on re-denial. | No | `tracker.markRunQueued()` |
+| `delayed` | Trigger-level `delay:` or `ttl:` deferred the run. Awaits the scheduler timer. | No | `tracker.markRunDelayed()` |
+| `debounced` | Trailing-mode [debounce](/d/scheduling/debounce) collapsed this ping into an active window. Carries `intoRunId` pointing at the active run. Or: a coalesce loser in trailing mode. | Yes | `tracker.markRunDebounced()` |
+| `expired` | A `delayed` run hit its TTL before the scheduler fired. | Yes | `tracker.markRunExpired()` |
+
+## State transitions
+
+```
+                       ┌─────────────────────────────────────────────┐
+                       │                                             │
+                       │              ┌───────────────────┐          │
+                       │              │   completed       │          │
+                       │              │   (terminal ✓)    │          │
+                       │              └──────┬────────────┘          │
+                       │                     │ all steps OK          │
+                       │                     │                       │
+   trigger ──▶  running ────┬───────────────►┤                       │
+                       │    │                                        │
+                       │    ├──▶ failed  (step threw)                │
+                       │    ├──▶ timedOut (step maxDuration)         │
+                       │    ├──▶ cancelled (manual cancel)           │
+                       │    └──▶ crashed (process died)              │
+                       │                                             │
+   gate denies (throw) ──▶ throttled (terminal)                      │
+                                                                     │
+   gate denies (queue) ──▶ queued ──┬─▶ running (grant)              │
+                                    └─▶ queued (re-deny)             │
+                                                                     │
+   delay/ttl       ──────▶ delayed ──┬─▶ running (fire)              │
+                                     └─▶ expired (TTL)               │
+                                                                     │
+   debounce coalesce ──▶ debounced (terminal, intoRunId)             │
+                                                                     │
+   debounce owner fire ──▶ running                                   │
+                                                                     │
+```
+
+## Events emitted on transition
+
+Every transition emits a typed event on the SSE event stream
+(`/__blok/runs/:id/events`) and to OpenTelemetry counters when wired:
+
+| Event | Fires on transition to |
+|---|---|
+| `RUN_STARTED` | `running` (first entry) |
+| `RUN_COMPLETED` | `completed` |
+| `RUN_FAILED` | `failed` |
+| `RUN_CRASHED` | `crashed` |
+| `RUN_TIMED_OUT` | `timedOut` |
+| `RUN_CANCELLED` | `cancelled` |
+| `RUN_THROTTLED` | `throttled` |
+| `RUN_QUEUED` | `queued` |
+| `RUN_DELAYED` | `delayed` |
+| `RUN_DEBOUNCED` | `debounced` |
+| `RUN_EXPIRED` | `expired` |
+| `RUN_RESUMED` | `running` (re-entry from delayed / queued / debounced via `dispatchDeferred`) |
+
+Studio's saved-filters surface includes preset views per state — see
+[Studio](/d/studio/index#saved-filters).
+
+## Which states surface where
+
+| Surface | `running` | `completed` | `failed` | `crashed` | `timedOut` | `cancelled` | `throttled` | `queued` | `delayed` | `debounced` | `expired` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Studio run list** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **HTTP 200 response** | — | ✓ | — | — | — | — | — | 202 + Location | 202 + Location | 200 + `intoRunId` | — |
+| **HTTP 4xx/5xx** | — | — | 5xx | 5xx | 5xx | 5xx | 429 + Retry-After | — | — | — | — |
+| **Worker ACK/NACK** | — | ACK | NACK | NACK | NACK | NACK | NACK redeliver | ACK | ACK | ACK | ACK |
+| **`RUN_*` event** | `RUN_STARTED` | `RUN_COMPLETED` | `RUN_FAILED` | `RUN_CRASHED` | `RUN_TIMED_OUT` | `RUN_CANCELLED` | `RUN_THROTTLED` | `RUN_QUEUED` | `RUN_DELAYED` | `RUN_DEBOUNCED` | `RUN_EXPIRED` |
+| **Counter (OTel)** | — | run total | run failed | crash autoflip | timeout total | cancelled total | concurrency denied | concurrency queued | scheduling delayed | scheduling debounced | scheduling expired |
+
+## Why `crashed` vs `failed` is distinct
+
+`failed` is a workflow-level fact: a step threw, the error wasn't
+caught by [`tryCatch`](/d/primitives/tryCatch), the run ended cleanly
+with a failure outcome. The trigger captured a structured error
+response.
+
+`crashed` is a process-level fact: the workflow was mid-flight when
+the host process died (SIGKILL, OOM, panic). The crash auto-flip
+handler (`uncaughtException` / `unhandledRejection`) flips every
+`running` run to `crashed` before re-throwing. The boot scan
+(`recoverOrphanedRuns`) catches signal/OOM deaths that fired no
+handler — flipping `running` rows older than
+`BLOK_ORPHAN_THRESHOLD_MS` (default 2min) to `crashed`.
+
+Same separation between `failed` and `timedOut` — failure modes deserve
+separate metrics so SLA dashboards distinguish "code threw" from
+"step ran too long" from "host died."
+
+## Why `throttled` and `queued` are NOT `failed`
+
+A `throttled` or `queued` run **never ran any step**. The concurrency
+gate ran AT entry, before `runSteps()`. Counting these as `failed`
+would skew failure-rate alerting. They get their own state, their own
+event, and their own counter so backpressure visibility is separate
+from logic-failure visibility.
+
+## Re-entry from transient states
+
+`queued`, `delayed`, and `debounced` (owner-fire path) are transient
+states — the runner re-enters `run(ctx)` later with
+`_blokDispatchReentry = true`. The reentered run skips the scheduling
+gates and re-attempts the concurrency gate. Successful re-entry
+transitions `→ running`; re-denial loops back.
+
+Cancellation flows through re-entry correctly — the deferred-dispatch
+branch re-registers the run's `AbortController` on the tracker, so
+`POST /__blok/runs/:runId/cancel` on a `delayed` run still fires the
+signal when it resumes.
+
+## Queryable via the trace REST API
+
+Filter the run list by status:
+
+```bash
+curl 'http://localhost:4000/__blok/runs?status=throttled&limit=20'
+curl 'http://localhost:4000/__blok/runs?status=queued,delayed&limit=50'
+curl 'http://localhost:4000/__blok/runs?status=failed,timedOut,crashed&since=2026-05-17T00:00:00Z'
+```
+
+`status:` accepts a comma-separated list. Combine with `metadata.*`
+filters — see [metadata filtering](./metadata-filtering).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Concurrency keys" icon="gauge" href="/d/reliability/concurrency-keys">
+    Source of `throttled` + `queued`.
+  </Card>
+  <Card title="Delay & TTL" icon="hourglass" href="/d/scheduling/delay-and-ttl">
+    Source of `delayed` + `expired`.
+  </Card>
+  <Card title="Studio" icon="layout-dashboard" href="/d/studio/index">
+    Run-list filters per state.
+  </Card>
+</Columns>

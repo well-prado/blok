@@ -1,0 +1,198 @@
+---
+title: "Run metadata filtering"
+description: "Query the run list by metadata field with operator suffixes (eq / ne / gt / in / like / etc.). Promote hot keys to indexed virtual columns for SQLite-scale performance."
+icon: "filter"
+---
+
+Every workflow run carries an arbitrary `metadata: Record<string, string>`
+field — tags, tenant ids, environment markers, anything you want to
+filter on later. The trace REST API + Studio's saved filters use this
+to slice runs by user-defined dimensions, with operator suffixes for
+non-equality comparisons and an opt-in index for high-traffic keys.
+
+Two features:
+
+1. **Operator filters (F2)** — `metadata.<key>__<op>=<value>` URL syntax for
+   `eq` / `ne` / `gt` / `gte` / `lt` / `lte` / `like` / `in` / `nin`
+2. **Indexed metadata (F1)** — declare hot keys via env var; the SQLite
+   store materializes them as `metadata_<key>_idx` virtual generated
+   columns and uses an index instead of a sequential `json_extract` scan
+
+## Setting metadata on a run
+
+Either trigger-level (applies to every run from that trigger):
+
+```json
+"trigger": {
+  "http": {
+    "method": "POST",
+    "path": "/render",
+    "metadata": {
+      "tier": "js/ctx.request.headers['x-tier'] || 'free'",
+      "region": "us-east-1"
+    }
+  }
+}
+```
+
+Or per-step via `@blokjs/ctx-publish`:
+
+```json
+{
+  "id": "tag-run",
+  "use": "@blokjs/ctx-publish",
+  "ephemeral": true,
+  "inputs": {
+    "name": "_runMetadata",
+    "value": "js/({ tier: ctx.state.identity.tier, customer: ctx.state.identity.customerId })"
+  }
+}
+```
+
+The tracker reads `_runMetadata` and merges it into the run record on
+the next persistence flush.
+
+## Operator filters (F2)
+
+Append an operator suffix to the metadata key in the URL:
+
+| Operator | Suffix | Example |
+|---|---|---|
+| Equality (default) | none | `?metadata.tier=enterprise` |
+| Not equal | `__ne` | `?metadata.tier__ne=free` |
+| Greater than | `__gt` | `?metadata.count__gt=10` |
+| Greater or equal | `__gte` | `?metadata.count__gte=10` |
+| Less than | `__lt` | `?metadata.count__lt=100` |
+| Less or equal | `__lte` | `?metadata.count__lte=100` |
+| Pattern match | `__like` | `?metadata.name__like=test%` |
+| In set | `__in` | `?metadata.region__in=us-east-1,us-west-2,eu-west-1` |
+| Not in set | `__nin` | `?metadata.tier__nin=free,trial` |
+
+Combine multiple filters with `&` — they AND together:
+
+```bash
+curl 'http://localhost:4000/__blok/runs?metadata.tier__ne=free&metadata.region__in=us-east-1,eu-west-1&status=failed&limit=50'
+```
+
+### Programmatic shape
+
+`RunQuery.metadata` accepts BOTH legacy `Record<string, string>` (treated
+as `eq`) and the operator-aware array:
+
+```typescript
+// Legacy — every key compared by equality
+const runs = await store.getRuns({
+  metadata: { tier: "enterprise", region: "us-east-1" },
+});
+
+// Operator-aware
+const runs = await store.getRuns({
+  metadata: [
+    { key: "tier", op: "ne", value: "free" },
+    { key: "region", op: "in", value: ["us-east-1", "eu-west-1"] },
+    { key: "count", op: "gt", value: 10 },
+  ],
+});
+```
+
+The operator-aware array translates to the URL suffix syntax 1:1.
+
+## Indexed metadata (F1)
+
+By default, every metadata filter scans the JSON `metadata` column via
+`json_extract` — fine for small databases, slow once the run table
+has millions of rows. Promote hot filter keys to **indexed virtual
+generated columns** by declaring them at boot:
+
+```bash
+BLOK_INDEXED_METADATA_KEYS=tier,region,customer
+```
+
+What happens:
+
+1. On boot, the SQLite migration v10 reads the env var and adds:
+   - `metadata_tier_idx TEXT GENERATED ALWAYS AS (json_extract(metadata, '$.tier')) VIRTUAL`
+   - `metadata_region_idx TEXT GENERATED ALWAYS AS (json_extract(metadata, '$.region')) VIRTUAL`
+   - `metadata_customer_idx TEXT GENERATED ALWAYS AS ...`
+   - A B-tree index on each virtual column
+2. Queries against declared keys (`?metadata.tier__ne=free`) compile to
+   `WHERE metadata_tier_idx != 'free'` against the indexed column.
+3. Queries against undeclared keys still work — they fall back to the
+   `json_extract` scan.
+
+### When to declare
+
+- Filter keys used in dashboards or hot saved filters
+- Tenant ids in multi-tenant deployments (every request filters by
+  tenant)
+- Environment / region markers in multi-region deployments
+
+### When NOT to declare
+
+- One-off debugging keys (`debug_session_id` you grep for once and
+  delete next week — the index overhead isn't worth it)
+- Keys with very high cardinality (every value is unique — the index
+  is the same size as the table; better to use a different storage
+  pattern)
+- Keys with very low cardinality (`true`/`false` — index gives little
+  selectivity, scan is fine)
+
+### Backfill
+
+New columns + indexes apply only to rows inserted after migration v10
+runs (SQLite virtual generated columns are computed at write time).
+Pre-existing rows still match via the `json_extract` fallback. For
+deployments that need indexed queries against historical data, set the
+env var BEFORE you start writing runs, or accept a one-time backfill.
+
+## Postgres support
+
+The Postgres run store has separate index support (migration v3) using
+real generated columns + B-tree indexes — same env var
+(`BLOK_INDEXED_METADATA_KEYS`), same comma-separated key list. Behavior
+is identical from the query side; only the storage shape differs
+(real generated columns vs. SQLite virtual).
+
+## Common patterns
+
+### Failure-rate dashboard per tenant
+
+```bash
+# All failed/timedOut/crashed runs for tenant `acme` in the last 24h
+curl 'http://localhost:4000/__blok/runs?status=failed,timedOut,crashed&metadata.tenant=acme&since=24h'
+```
+
+Declare `tenant` in `BLOK_INDEXED_METADATA_KEYS` — every dashboard
+refresh hits the index.
+
+### Production-only error feed
+
+```bash
+curl 'http://localhost:4000/__blok/runs?metadata.env=production&status__in=failed,crashed,timedOut'
+```
+
+### "Long-running tests" exclusion
+
+```bash
+curl 'http://localhost:4000/__blok/runs?metadata.tags__like=%nightly%'
+```
+
+## Studio integration
+
+Studio's saved filters surface accepts operator suffixes verbatim. Type
+`tier__ne=free` into the metadata filter field and Studio composes
+the URL correctly.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Run states" icon="list-tree" href="./run-states">
+    Filter by status alongside metadata.
+  </Card>
+  <Card title="Trace storage" icon="database" href="./trace-storage">
+    Schema for the runs table + indexes.
+  </Card>
+  <Card title="Studio" icon="layout-dashboard" href="/d/studio/index">
+    Saved filters using these operators.
+  </Card>
+</Columns>
