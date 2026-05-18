@@ -1,0 +1,149 @@
+---
+title: "switch — n-way routing"
+description: "Pick one of N branches based on a single value. Array `when` groups related cases under one arm."
+icon: "route"
+---
+
+The `switch` primitive evaluates a single expression and dispatches
+to the first case whose `when` matches. Cleaner than nested `branch`
+when you have three or more arms on the same value, and the array
+`when` syntax groups related cases without duplicating logic.
+
+Used in the [webhook router example](/d/examples/webhook-router) to
+route GitHub's many event types (push / pull_request / issues / …) by
+header value.
+
+## Quickstart
+
+```json
+{
+  "id": "route-by-event",
+  "switch": {
+    "on": "js/ctx.request.headers['x-github-event']",
+    "cases": [
+      {
+        "when": "push",
+        "do": [
+          { "id": "handle-push", "subworkflow": "github-push", "inputs": {} }
+        ]
+      },
+      {
+        "when": ["pull_request", "pull_request_review", "pull_request_review_comment"],
+        "do": [
+          { "id": "handle-pr", "subworkflow": "github-pr", "inputs": {} }
+        ]
+      },
+      {
+        "when": ["issues", "issue_comment"],
+        "do": [
+          { "id": "handle-issues", "subworkflow": "github-issues", "inputs": {} }
+        ]
+      }
+    ],
+    "default": [
+      { "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "unknown event" } }
+    ]
+  }
+}
+```
+
+Three cases, four event types — `pull_request*` collapses into one
+group via array `when`.
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `on` | `string` (JS expression) | The value to switch on. Resolved against live `ctx` at run time. |
+| `cases` | `Case[]` | Ordered list of cases. The first `when` match wins. |
+| `default` | `Step[]` (optional) | Steps to run when no case matches. Acts like a fallback. |
+
+Each `Case`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `when` | `string` \| `string[]` | Value(s) to match against the resolved `on` value. Array means "any of these." |
+| `do` | `Step[]` | Steps to run when `when` matches. |
+
+## Matching semantics
+
+The `on` value is compared **by string equality** to each `when` entry
+(or any element when `when` is an array). For non-string `on` values,
+the resolver `String()`-coerces both sides before comparing.
+
+Need range or numeric comparisons? Use [`branch`](./branch.mdx)
+or [`tryCatch`](./tryCatch.mdx) instead — `switch` is for exact-match
+routing.
+
+## ctx.state result
+
+Same as `branch` — the switch step itself doesn't write state; the
+sub-steps that ran (in the matching case or `default`) populate their
+own entries. Reference them downstream as
+`ctx.state['<sub-step-id>']`.
+
+## Common patterns
+
+### Event type routing (webhooks)
+
+The canonical use case — see the
+[webhook router example](/d/examples/webhook-router) for Stripe +
+GitHub + Linear receivers.
+
+### Per-tenant routing
+
+```json
+{
+  "id": "tenant-routing",
+  "switch": {
+    "on": "ctx.request.headers['x-tenant-tier']",
+    "cases": [
+      { "when": ["enterprise", "premium"], "do": [{ "id": "priority", "subworkflow": "priority-pipeline", "inputs": {} }] },
+      { "when": "free", "do": [{ "id": "free", "subworkflow": "free-tier-pipeline", "inputs": {} }] }
+    ],
+    "default": [
+      { "id": "reject", "use": "@blokjs/throw", "inputs": { "message": "unknown tier", "code": 400 } }
+    ]
+  }
+}
+```
+
+### State-machine transitions
+
+```json
+{
+  "id": "advance",
+  "switch": {
+    "on": "ctx.state.current.status",
+    "cases": [
+      { "when": "pending", "do": [{ "id": "to-processing", "subworkflow": "advance-to-processing", "inputs": {} }] },
+      { "when": "processing", "do": [{ "id": "to-completed", "subworkflow": "advance-to-completed", "inputs": {} }] },
+      { "when": "completed", "do": [{ "id": "noop", "use": "@blokjs/log", "inputs": { "level": "info", "message": "already done" } }] }
+    ]
+  }
+}
+```
+
+## Composition
+
+- Each case's `do` array runs as a nested pipeline — same primitives
+  apply (nested `branch`, `forEach`, `tryCatch`, sub-workflows)
+- Reliability knobs (idempotency, retry) go on the **regular steps**
+  inside each case, not on the switch
+- For wait-inside-switch, see
+  [wait-inside-primitives](./wait.mdx#wait-inside-primitives) —
+  the runtime persists the active case cursor on dispatch re-entry
+
+## Related
+
+<Columns cols={3}>
+  <Card title="branch — if/else" icon="git-fork" href="/d/primitives/branch">
+    For two-way routing.
+  </Card>
+  <Card title="Webhook router" icon="webhook" href="/d/examples/webhook-router">
+    GitHub event-type routing via switch.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Common dispatch target inside switch cases.
+  </Card>
+</Columns>
