@@ -390,6 +390,62 @@ The events timeline carries the dispatch lifecycle:
   </Accordion>
 </AccordionGroup>
 
+## Cross-process scheduler (Tier C #2)
+
+For multi-process PG-backed deployments, the durable scheduler picks
+up where SQLite leaves off. SQLite migration v13 + Postgres migration
+v6 add `claimed_by` + `claimed_at` columns to `scheduled_dispatches`;
+on boot, `RunStore.claimDispatches(processId, leaseMs, now)`
+atomically takes ownership of past-due dispatches so multi-process PG
+deployments don't double-fire.
+
+### Claim + heartbeat protocol
+
+```
+   process A boots                 process B boots
+        │                                │
+        ▼                                ▼
+   ┌──────────────────┐            ┌──────────────────┐
+   │ claimDispatches  │            │ claimDispatches  │
+   │ ↓ takes 12 rows  │            │ ↓ takes 7 rows   │
+   │   marks claimed  │            │   marks claimed  │
+   │   _by = "proc-A" │            │   _by = "proc-B" │
+   └──────────────────┘            └──────────────────┘
+        │                                │
+        ▼                                ▼
+   DeferredRunScheduler            DeferredRunScheduler
+   schedules timers for            schedules timers for
+   its 12 rows                     its 7 rows
+        │                                │
+        ▼                                ▼
+   heartbeat every 20s ────────────────► claimed_at refreshed
+        │
+        ▼
+   (process A dies)
+        ▼
+   60s passes, claim lease expires
+        ▼
+   process B's next claimDispatches
+   call adopts process A's orphaned rows
+```
+
+### Env vars
+
+| Var | Default | Notes |
+|---|---|---|
+| `BLOK_SCHEDULER_HEARTBEAT_INTERVAL_MS` | `20000` | How often the scheduler refreshes `claimed_at` on its registered dispatches. |
+| `BLOK_SCHEDULER_CLAIM_LEASE_MS` | `60000` | How long a claim is considered live. Dispatches whose `claimed_at` is older than this become eligible for re-claim. |
+| `BLOK_SCHEDULER_CLAIM_DISABLED` | unset | Set to `1` to opt out and run pure-SQLite (single-process semantics). |
+
+### When to enable
+
+- **SQLite-only deployment** — no claim needed (one process owns the
+  file by default).
+- **PG-backed deployment, single process** — claim is harmless overhead
+  but not strictly necessary.
+- **PG-backed deployment, multiple processes** — required. Without it,
+  every process would fire every dispatch.
+
 ## Related
 
 <Columns cols={3}>

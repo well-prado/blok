@@ -1,0 +1,155 @@
+---
+title: "Input mapper"
+description: "How `$.path` proxy expressions and `js/...` strings resolve against the live ctx. Configure failure mode via BLOK_MAPPER_MODE."
+icon: "function-square"
+---
+
+Every step's `inputs:` field can interpolate values from the live `ctx`
+via two equivalent syntaxes. The runner's blueprint mapper resolves
+each expression **before** the node runs, so node authors see fully
+resolved values.
+
+## Two syntaxes — same semantics
+
+### TypeScript: `$` proxy
+
+In TypeScript workflows authored via `@blokjs/helper`:
+
+```typescript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  steps: [
+    {
+      id: "fetch",
+      use: "@blokjs/api-call",
+      inputs: { url: $.req.body.url, headers: $.req.headers },
+    },
+  ],
+});
+```
+
+`$.req.body.url` is a typed proxy. At workflow-build time it compiles
+to the string `"js/ctx.request.body.url"`.
+
+### JSON: `js/` prefix
+
+In JSON workflows, write the same compiled string directly:
+
+```json
+{
+  "id": "fetch",
+  "use": "@blokjs/api-call",
+  "inputs": { "url": "js/ctx.request.body.url" }
+}
+```
+
+Both forms resolve identically at run time.
+
+## What's in scope
+
+| Identifier | Value |
+|---|---|
+| `ctx` | The full Context — `ctx.request`, `ctx.state`, `ctx.vars`, `ctx.logger`, `ctx.error`. |
+| `data` | `ctx.response?.data` (last step's data) or `ctx.request?.body` as fallback. |
+| `vars` | `ctx.vars` — alias of `ctx.state` for back-compat. |
+| `func` | Reserved; currently empty. |
+
+The expression runs via `new Function("ctx", "data", "func", "vars",
+"\"use strict\"; return (<your expression>);")`. Standard JS is
+available (template literals, optional chaining, spread, etc.).
+
+## Common patterns
+
+### Reference upstream step output
+
+```json
+"messages": "js/ctx.state.fetch.data.items"
+```
+
+`ctx.state[<step-id>]` holds the upstream step's output.
+
+### Compose with template literals
+
+```json
+"channel": "js/`chat:${ctx.request.params.sessionId}`"
+```
+
+### Default values
+
+```json
+"model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'"
+```
+
+### Step ids with dashes
+
+When a step id has a dash, use bracket notation:
+
+```json
+"value": "js/ctx.state['load-history']?.value || []"
+```
+
+## Failure mode (`BLOK_MAPPER_MODE`)
+
+A `js/` expression that throws at run time (typo, undefined access,
+syntax error) doesn't crash by default — it logs a warning and passes
+the literal string through to the node. That's nice for dev, **dangerous
+for prod**. Set the env var:
+
+| Mode | Behavior on resolution failure |
+|---|---|
+| `warn` (default) | Log structured warning via `ctx.logger.logLevel("warn", ...)` and pass the literal expression through. Backward-compatible with v1. |
+| `strict` | Throw `MapperResolutionError` with full context (workflow + step + expression + cause + hint). The step fails fast. **Recommended for production.** |
+| `silent` | Full suppression (no log, no throw). Pre-v0.3 behavior. Opt-out for tests / workflows that intentionally use undefined-tolerant resolution. |
+
+```bash
+# Production
+BLOK_MAPPER_MODE=strict bun run dist/index.js
+```
+
+### The structured warning includes:
+
+- Workflow + step
+- Expression literal that failed
+- Underlying JS error message
+- Heuristic hint (e.g. *"the path `ctx.req.body` is undefined or
+  doesn't have a `userId` field — check the trigger payload"*)
+- The fix prompt (*"set `BLOK_MAPPER_MODE=strict` to fail fast"*)
+
+`MapperResolutionError` is exported from `@blokjs/shared` for
+`instanceof` checks in custom error handlers.
+
+## v1 → v2 cheat sheet
+
+The v1 mapping syntax is still accepted (the runner normalizes at
+workflow load) but new workflows should use v2:
+
+| v1 | v2 | Notes |
+|---|---|---|
+| `js/ctx.vars['x']` | `$.state.x` (TS) / `js/ctx.state.x` (JSON) | `ctx.vars` still works as an alias of `ctx.state`. |
+| `js/ctx.response.data` | `$.prev.data` (TS) / `js/ctx.prev.data` (JSON) | `ctx.response` still works as an alias. |
+| `js/ctx.request.body` | `$.req.body` (TS) / `js/ctx.request.body` (JSON) | `ctx.req` is a shorthand alias. |
+| `${path}` interpolation | `js/...` or `$.path` | The runner still parses `${path}` for back-compat but warns. |
+
+## Security
+
+The expression runs via `new Function()` — full JS execution. **NEVER
+build expression strings from untrusted input.** Workflow definitions
+are static / authored, so this is safe under v2. If you need to
+evaluate user-supplied expressions (e.g. an arithmetic calculator),
+use a sandboxed math parser like `mathjs` inside a node — not the
+mapper.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/expr" icon="function-square" href="/d/reference/helpers/expr">
+    Use the mapper's surface as a standalone step.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    All step-level fields.
+  </Card>
+  <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
+    `BLOK_MAPPER_MODE` env config.
+  </Card>
+</Columns>
