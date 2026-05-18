@@ -1,0 +1,122 @@
+---
+title: "@blokjs/llm-agent"
+description: "Agent loop with OpenAI tool-calling. Dispatches tool requests to HTTP endpoints, feeds results back, streams tokens + tool events to the SSE bus."
+icon: "bot"
+---
+
+Wraps [`@blokjs/llm-stream`](./llm-stream) with a tool-calling loop.
+Each iteration: stream a completion, if the model picked tools dispatch
+them via HTTP POST and feed results back, otherwise return.
+
+All bus events from `llm-stream` plus two new ones (`tool_call`,
+`tool_result`) for browser observability. Hard cap at `maxIterations`
+to bound runaway loops.
+
+See the [LLM agent example](/d/examples/llm-agent) for the end-to-end
+pattern.
+
+## Quickstart
+
+```json
+{
+  "id": "agent",
+  "use": "@blokjs/llm-agent",
+  "inputs": {
+    "channel": "js/`agent:${ctx.request.params.sessionId}`",
+    "apiKey": "js/process.env.OPENROUTER_API_KEY",
+    "model": "openai/gpt-4o-mini",
+    "messages": "js/[{role:'system',content:'...'}, ...history, {role:'user',content:ctx.request.body.message}]",
+    "tools": [
+      {
+        "name": "get_weather",
+        "description": "Returns the current weather for a given city.",
+        "parameters": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] },
+        "endpoint": "http://localhost:4000/tools/weather"
+      }
+    ],
+    "maxIterations": 10
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `channel` | `string` | required | SSE bus channel for streamed events. |
+| `apiKey` | `string` | required | API key for the upstream provider. |
+| `model` | `string` | required | Model identifier. Must support function calling (gpt-4o-mini, Claude 3.5, etc.). |
+| `messages` | `{role, content, tool_call_id?, name?}[]` | required | OpenAI-format chat messages. |
+| `tools` | `Tool[]` | `[]` | Tool definitions (see below). Empty array = plain chat. |
+| `baseUrl` | `string` (URL) | `https://openrouter.ai/api/v1` | OpenAI-compatible base URL. |
+| `chunkEvent` | `string` | `"token"` | SSE event name for token chunks. |
+| `doneEvent` | `string` | `"done"` | SSE event name for the final completion frame. |
+| `maxIterations` | `number` (1-50) | `10` | Cap on tool-call rounds. |
+| `temperature` | `number` | — | OpenAI temperature param. |
+| `maxTokens` | `number` | — | Per-call token cap. |
+
+### Tool definition
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | `string` | Tool name surfaced to the model. |
+| `description` | `string` | What the tool does. The model's selection accuracy depends on this. |
+| `parameters` | JSON Schema | Tool argument schema (passed verbatim to OpenAI). |
+| `endpoint` | `string` (URL) | URL to POST when the model calls this tool. |
+| `method` | `string` | HTTP method. Defaults to `"POST"`. |
+| `headers` | `Record<string, string>` | Optional extra headers (auth tokens, etc.). |
+
+The agent POSTs `{ args: <parsed-args> }` to the tool's endpoint. The
+response body becomes the tool result message in the conversation.
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `fullText` | The accumulated final assistant message. |
+| `finishReason` | OpenAI's finish reason on the final iteration. |
+| `iterations` | How many model+tool cycles ran. |
+| `channel` | The bus channel published to. |
+| `toolCalls` | Array of `{name, args, result, ok}` for every tool that ran. |
+
+## Bus events
+
+| Event | Payload | When |
+|---|---|---|
+| `<chunkEvent>` (default `"token"`) | `{ delta }` | Per streamed text chunk from the model. |
+| `tool_call` | `{ name, args, iteration }` | The model requested a tool. |
+| `tool_result` | `{ name, ok, status, body, iteration }` | The agent received the tool's response. |
+| `<doneEvent>` (default `"done"`) | `{ fullText, finishReason, iterations, toolCalls }` | The loop terminated normally. |
+
+## Failure modes
+
+| What happens | Result |
+|---|---|
+| Tool endpoint returns non-2xx | Tool result has `ok: false`, status code in `status`. Fed back to the model — it can decide to retry, pick another tool, or apologize. |
+| Tool endpoint network error | Same as above — `ok: false`, error message in `result`. |
+| Unknown tool name (model picks one not in `tools[]`) | `ok: false`, `result: { error: "Unknown tool" }`. |
+| `maxIterations` exceeded while model still requesting tools | The node throws — surface this in the UI so users know to rephrase. |
+
+## Composition
+
+- **`idempotencyKey`** on a `respond` step **after** the agent — cache
+  the agent's final answer. The agent itself doesn't benefit from
+  step-level idempotency directly (each invocation runs the full loop).
+- Pair with [`@blokjs/redis-kv`](./redis-kv) for conversation memory —
+  the [LLM agent example](/d/examples/llm-agent) ships exactly this.
+- Tool endpoints can be any URL — sibling workflows, internal services,
+  external APIs.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/llm-stream" icon="cpu" href="./llm-stream">
+    Streaming without tool calling.
+  </Card>
+  <Card title="LLM agent example" icon="bot" href="/d/examples/llm-agent">
+    End-to-end working code.
+  </Card>
+  <Card title="@blokjs/redis-kv" icon="database" href="./redis-kv">
+    Conversation history backend.
+  </Card>
+</Columns>

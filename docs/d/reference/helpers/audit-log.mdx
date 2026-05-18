@@ -1,0 +1,82 @@
+---
+title: "@blokjs/audit-log"
+description: "Append an audit event to a process-wide ring buffer. Dev-mode default; plug an external store for production."
+icon: "file-clock"
+---
+
+Appends an event to a 1000-entry in-process ring buffer for inspection
+via Studio or the `getAuditEvents()` test utility. The ring is
+bounded — oldest entries drop when full.
+
+For production audit trails, write to a durable store (Postgres, S3,
+Datadog) instead. This helper is the dev / test stand-in.
+
+## Quickstart
+
+```json
+{
+  "id": "audit",
+  "use": "@blokjs/audit-log",
+  "ephemeral": true,
+  "inputs": {
+    "event": "user.deleted",
+    "attrs": { "userId": "js/ctx.request.params.userId", "deletedBy": "js/ctx.state.identity.sub" }
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `event` | `string` | Event name. Required. |
+| `attrs` | `Record<string, unknown>` | Optional event metadata. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `event` | Echo of the event name. |
+| `attrs` | Echo of attrs. |
+| `timestamp` | Server-side timestamp (unix ms). |
+| `requestId` | `ctx.id` of the current run. |
+
+## Reading the audit ring
+
+```typescript
+import { getAuditEvents } from "@blokjs/helpers";
+
+const events = getAuditEvents();
+// → [{ event: "user.deleted", attrs: {...}, timestamp, requestId }, ...]
+```
+
+The ring is bounded at 1000 entries; older entries drop.
+
+## Production replacement
+
+The recommended production shape: write the same audit fields to a
+durable store via `@blokjs/api-call` or a custom node:
+
+```json
+{
+  "id": "audit-prod",
+  "use": "@blokjs/api-call",
+  "ephemeral": true,
+  "inputs": {
+    "url": "https://audit-service.internal/events",
+    "method": "POST",
+    "body": "js/({ event: 'user.deleted', userId: ctx.request.params.userId, ts: Date.now() })"
+  }
+}
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/log" icon="text" href="./log">
+    For non-audit logging (debug messages, traces).
+  </Card>
+  <Card title="@blokjs/metrics-emit" icon="line-chart" href="./metrics-emit">
+    For numeric metrics emitted alongside events.
+  </Card>
+</Columns>

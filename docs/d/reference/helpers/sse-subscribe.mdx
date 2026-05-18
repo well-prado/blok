@@ -1,0 +1,76 @@
+---
+title: "@blokjs/sse-subscribe"
+description: "Subscribe an SSE-triggered workflow to one or more bus channels. Use with sse-stream to pump out as SSE frames."
+icon: "rss"
+---
+
+Creates a subscription to one or more bus channels. The subscription
+becomes the `source` for an [`@blokjs/sse-stream`](./sse-stream) step
+that pumps events out to the connected browser.
+
+Used inside [SSE-triggered workflows](/d/triggers/sse) — the
+two-step pattern (subscribe → stream) is the canonical SSE shape.
+
+## Quickstart
+
+```json
+{
+  "id": "sub",
+  "use": "@blokjs/sse-subscribe",
+  "inputs": { "channels": ["chat:{sessionId}"] }
+}
+```
+
+`{sessionId}` resolves from `ctx.request.params.sessionId` at run
+time.
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `channels` | `string[]` | Channel names. `{paramName}` placeholders interpolate from `ctx.request.params`. |
+
+## Outputs
+
+A subscription handle — opaque, used as the `source:` input on the
+next `@blokjs/sse-stream` step. Don't inspect directly.
+
+## Common patterns
+
+### Per-session subscription
+
+```json
+"trigger": { "sse": { "path": "/sse/chat/:sessionId" } },
+"steps": [
+  { "id": "sub", "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["chat:{sessionId}"] } },
+  { "id": "stream", "use": "@blokjs/sse-stream", "inputs": { "source": "js/ctx.state.sub" } }
+]
+```
+
+Every connected browser subscribes only to its own conversation.
+
+### Multi-channel subscription
+
+```json
+{
+  "id": "sub",
+  "use": "@blokjs/sse-subscribe",
+  "inputs": { "channels": ["feed", "alerts", "system"] }
+}
+```
+
+Events from any of the three channels stream out the one connection.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/sse-stream" icon="cable" href="./sse-stream">
+    Pump subscribed events.
+  </Card>
+  <Card title="@blokjs/sse-publish" icon="send" href="./sse-publish">
+    Publish to a channel.
+  </Card>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Trigger config.
+  </Card>
+</Columns>

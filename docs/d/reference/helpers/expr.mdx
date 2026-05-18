@@ -1,0 +1,133 @@
+---
+title: "@blokjs/expr"
+description: "Evaluate a JS expression against the live ctx. The one-liner that replaces tiny custom nodes for computed state."
+icon: "function-square"
+---
+
+Runs a JS expression via `new Function()` with `ctx`, `data`, `func`,
+`vars` in scope (same surface as the runner's blueprint mapper). Use
+when you need a small computed value — derived field, counter, boolean
+test — inside a loop, branch, or chained step.
+
+The cleanest "response shape" step at the end of a workflow:
+
+```json
+{
+  "id": "respond",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "({ ok: true, count: ctx.state.fetch.data.length, items: ctx.state.fetch.data })"
+  }
+}
+```
+
+## Quickstart
+
+```json
+{
+  "id": "derived",
+  "use": "@blokjs/expr",
+  "inputs": { "expression": "ctx.state.user.firstName + ' ' + ctx.state.user.lastName" }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `expression` | `string` | A JS expression. Evaluated against the live ctx. Required. |
+
+## Output
+
+The expression's return value, written to `ctx.state[<step-id>]`.
+
+## Scope inside the expression
+
+| Identifier | What it is |
+|---|---|
+| `ctx` | The full Context — `ctx.request`, `ctx.state`, `ctx.vars`, `ctx.logger`, etc. |
+| `data` | `ctx.response.data` (last step's output) OR `ctx.request.body` as fallback. |
+| `vars` | `ctx.vars` — alias of `ctx.state` for back-compat. |
+| `func` | Reserved; currently empty record. |
+
+## Common patterns
+
+### Response shaping
+
+```json
+{
+  "id": "respond",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "({ ok: true, fullText: ctx.state.stream.fullText, turn: ctx.state.counter })"
+  }
+}
+```
+
+The HTTP trigger reads the final state and writes the expression's
+return value as the response body.
+
+### Computed predicates inside branches
+
+The `branch.when` field already takes a JS expression — `@blokjs/expr`
+is for the cases where you need to **stash** a computed value into
+state for downstream steps:
+
+```json
+{
+  "id": "compute-priority",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "(ctx.request.body.tier === 'enterprise' || ctx.request.body.priorityFlag) ? 'high' : 'normal'"
+  }
+}
+```
+
+Now `ctx.state['compute-priority']` holds `"high"` or `"normal"` for
+later branches.
+
+### Transforming list elements
+
+```json
+{
+  "id": "extract-ids",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "ctx.state.users.data.map(u => u.id).filter(id => id != null)"
+  }
+}
+```
+
+## Security
+
+The expression runs via `new Function()` with `"use strict"`. **Do
+NOT pass untrusted strings as `expression`** — it's full JS evaluation.
+For computed expressions from user input, use a sandboxed math parser
+(e.g. `mathjs`) instead.
+
+The `expression` field is **literal** in the workflow JSON, so under
+the v2 default this is safe — workflow definitions ship with the
+project and aren't accepted from user input.
+
+## Composition
+
+- Works inside [primitives](/d/primitives/index) — `forEach.do`,
+  `switch.cases[].do`, `tryCatch.try`, etc.
+- Pair with [`ctx-publish`](./ctx-publish) when you want to publish
+  the result under a name that isn't the step id
+- Step-level reliability knobs (idempotency, retry) apply but rarely
+  helpful — expressions are pure compute
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="./ctx-publish">
+    Publish under a specific name.
+  </Card>
+  <Card title="branch primitive" icon="git-fork" href="/d/primitives/branch">
+    Conditionals via `when:` expressions.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    `js/` expressions in step inputs.
+  </Card>
+</Columns>

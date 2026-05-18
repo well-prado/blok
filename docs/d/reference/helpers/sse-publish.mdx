@@ -1,0 +1,83 @@
+---
+title: "@blokjs/sse-publish"
+description: "Publish an event to the in-process SSE bus. Any subscribed sse-stream workflow receives it."
+icon: "send"
+---
+
+Publishes an event on a bus channel. Paired with `@blokjs/sse-subscribe`
++ `@blokjs/sse-stream` in an [SSE-triggered workflow](/d/triggers/sse),
+this is the cross-workflow event delivery primitive.
+
+In-process only — events don't cross process boundaries by default.
+For multi-process pub/sub, layer Redis pub/sub externally.
+
+## Quickstart
+
+```json
+{
+  "id": "publish",
+  "use": "@blokjs/sse-publish",
+  "inputs": {
+    "channel": "js/`feed:${ctx.request.body.userId}`",
+    "event": "new-message",
+    "data": "js/ctx.request.body"
+  }
+}
+```
+
+A sibling SSE workflow subscribed to `feed:<userId>` immediately
+receives the event.
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `channel` | `string` | Channel identifier. Subscribers match by exact string. Required. |
+| `event` | `string` | SSE event name. Browsers listen via `es.addEventListener(event, ...)`. |
+| `data` | unknown | Event payload. Serialized to JSON on the wire. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `channel` | Echo of the channel. |
+| `id` | Bus-issued event id. |
+
+## Common patterns
+
+### Token streaming (LLM)
+
+[`@blokjs/llm-stream`](./llm-stream) and
+[`@blokjs/llm-agent`](./llm-agent) use this internally to publish per-token
+events.
+
+### Cross-workflow notification
+
+```json
+{
+  "id": "broadcast",
+  "use": "@blokjs/sse-publish",
+  "inputs": {
+    "channel": "audit-feed",
+    "event": "user-action",
+    "data": "js/({ userId: ctx.state.identity.sub, action: ctx.state['delete-user'].result })"
+  }
+}
+```
+
+An admin dashboard subscribed to `audit-feed` sees every action in
+real time.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/sse-subscribe" icon="rss" href="./sse-subscribe">
+    Subscribe an SSE workflow.
+  </Card>
+  <Card title="@blokjs/sse-stream" icon="cable" href="./sse-stream">
+    Pump subscribed events out as SSE frames.
+  </Card>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Trigger config for SSE endpoints.
+  </Card>
+</Columns>

@@ -1,0 +1,93 @@
+---
+title: "@blokjs/pubsub-publish"
+description: "Publish a message to GCP Pub/Sub, AWS SNS, or Azure Service Bus from any workflow."
+icon: "share"
+---
+
+Producer-side companion of the [pub/sub trigger](/d/triggers/pubsub).
+Publishes a message to a topic via the configured cloud provider.
+
+Shares the adapter pool with the pub/sub trigger when both are present
+in the same process — same connection, same credentials.
+
+## Quickstart
+
+```json
+{
+  "id": "publish",
+  "use": "@blokjs/pubsub-publish",
+  "inputs": {
+    "provider": "gcp",
+    "topic": "orders.placed",
+    "message": "js/({ orderId: ctx.state.create.id, total: ctx.state.create.total })"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | `"gcp"` \| `"aws"` \| `"azure"` | Cloud provider. Falls back to env var if omitted. |
+| `topic` | `string` | Provider-specific identifier (GCP topic name / SNS ARN / Service Bus topic). |
+| `message` | unknown | Payload. JSON-serialized on the wire. |
+| `attributes` | `Record<string, string>` | Optional message attributes (provider-specific). |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `messageId` | Provider-issued message id. |
+| `provider` | Provider that handled the publish. |
+
+## Common patterns
+
+### Decoupled event emission
+
+```json
+{
+  "name": "Create Order",
+  "trigger": { "http": { "method": "POST", "path": "/orders" } },
+  "steps": [
+    { "id": "create", "use": "@blokjs/postgres-query", "inputs": { "query": "INSERT INTO orders ..." } },
+    {
+      "id": "emit",
+      "use": "@blokjs/pubsub-publish",
+      "inputs": { "provider": "gcp", "topic": "orders.placed", "message": "js/ctx.state.create.data" }
+    }
+  ]
+}
+```
+
+Downstream services subscribe via [pub/sub trigger](/d/triggers/pubsub)
+on `orders.placed` and react asynchronously.
+
+### Provider-agnostic via env var
+
+```json
+{
+  "id": "publish",
+  "use": "@blokjs/pubsub-publish",
+  "inputs": {
+    "topic": "orders.placed",
+    "message": "js/ctx.state.create.data"
+  }
+}
+```
+
+Without an explicit `provider`, the helper reads
+`BLOK_PUBSUB_PROVIDER` from env. Switch clouds without code changes.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Pub/Sub trigger" icon="share-2" href="/d/triggers/pubsub">
+    Consumer side.
+  </Card>
+  <Card title="@blokjs/worker-publish" icon="send" href="./worker-publish">
+    For in-process queue patterns.
+  </Card>
+  <Card title="@blokjs/sse-publish" icon="cable" href="./sse-publish">
+    For in-process pub/sub (single process).
+  </Card>
+</Columns>

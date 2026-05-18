@@ -1,0 +1,108 @@
+---
+title: "@blokjs/json-schema"
+description: "Validate data against a JSON Schema. Throws on failure with structured error paths."
+icon: "braces"
+---
+
+Validates `data` against a JSON Schema (draft-07) using Ajv. Throws a
+`GlobalError` listing every validation error path on failure.
+
+The alternative — Zod inside a custom `defineNode` — is fine too. Use
+this when you want to keep schemas in JSON (e.g. shared across
+languages, or generated from an OpenAPI spec).
+
+## Quickstart
+
+```json
+{
+  "id": "validate",
+  "use": "@blokjs/json-schema",
+  "inputs": {
+    "schema": {
+      "type": "object",
+      "required": ["name", "email"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "email": { "type": "string", "format": "email" },
+        "age": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "data": "js/ctx.request.body"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema` | JSON Schema | Draft-07 schema object. Required. |
+| `data` | unknown | The value to validate. Required. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `valid` | `true` on success. |
+
+On failure, throws `GlobalError` with `code: 400` and a body listing
+every error path: `body.email format email; body.age must be >= 0`.
+
+## Common patterns
+
+### Request-body validation
+
+```json
+{
+  "name": "Create User",
+  "trigger": { "http": { "method": "POST", "path": "/users" } },
+  "steps": [
+    {
+      "id": "validate",
+      "use": "@blokjs/json-schema",
+      "inputs": {
+        "schema": { /* ... */ },
+        "data": "js/ctx.request.body"
+      }
+    },
+    { "id": "create", "use": "...", "inputs": {} }
+  ]
+}
+```
+
+The validate step throws 400 before any side-effects fire. The
+remaining workflow only runs on valid input.
+
+### Inside a tryCatch for graceful 400 responses
+
+```json
+"tryCatch": {
+  "try": [
+    { "id": "validate", "use": "@blokjs/json-schema", "inputs": { /* ... */ } },
+    { "id": "create", "use": "...", "inputs": {} }
+  ],
+  "catch": [
+    {
+      "id": "respond-error",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ ok: false, validationErrors: ctx.error.message })"
+      }
+    }
+  ]
+}
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    For custom error shapes (4xx with bespoke body).
+  </Card>
+  <Card title="tryCatch" icon="shield-alert" href="/d/primitives/tryCatch">
+    Handle validation failures gracefully.
+  </Card>
+  <Card title="Custom nodes" icon="hammer" href="/c/extensions/nodes">
+    Use Zod inside `defineNode` for type-safe validation.
+  </Card>
+</Columns>

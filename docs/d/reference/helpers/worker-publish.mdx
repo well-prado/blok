@@ -1,0 +1,88 @@
+---
+title: "@blokjs/worker-publish"
+description: "Enqueue a job to a worker queue from any workflow. Shares the adapter pool with the worker trigger — same provider env vars, same connection."
+icon: "send"
+---
+
+Producer-side companion of the [worker trigger](/d/triggers/worker).
+Enqueues a job onto a queue / topic / stream via whichever adapter
+matches `BLOK_WORKER_ADAPTER` (or the explicit `provider:` input).
+
+Used in the [worker fan-out example](/d/examples/worker-fanout) inside
+a parallel `forEach` to enqueue N jobs in one HTTP request.
+
+## Quickstart
+
+```json
+{
+  "id": "enqueue",
+  "use": "@blokjs/worker-publish",
+  "inputs": {
+    "queue": "background-jobs",
+    "payload": "js/({ orderId: ctx.request.body.orderId })",
+    "dedupId": "js/ctx.request.body.orderId"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `queue` | `string` | required | Queue / topic / stream name. |
+| `payload` | unknown | required | JSON-serialized by the adapter. |
+| `provider` | `"in-memory"` \| `"nats"` \| `"bullmq"` \| `"kafka"` \| `"rabbitmq"` \| `"sqs"` \| `"redis"` \| `"pg-boss"` | env | Falls back to `BLOK_WORKER_ADAPTER` env, then `"in-memory"`. |
+| `priority` | `number` | — | Higher numbers run first (BullMQ, RabbitMQ). |
+| `delayMs` | `number` | — | Defer job availability by N ms. |
+| `retries` | `number` | — | Per-job retry budget. |
+| `timeoutMs` | `number` | — | Hard per-attempt timeout. |
+| `dedupId` | `string` | — | Adapter-level dedup id (BullMQ jobId / NATS Nats-Msg-Id / SQS MessageDeduplicationId). Duplicates within the dedup window are silently dropped. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `jobId` | Adapter-issued job id. For dedup-id sets, this matches the `dedupId` you passed. |
+| `provider` | The provider that handled the publish. |
+| `queue` | Queue name. |
+
+## Adapter resolution
+
+The publish step shares a process-singleton adapter pool with the
+worker trigger. So if the trigger is consuming NATS jobs on
+`fanout-jobs`, a `@blokjs/worker-publish` step targeting the same
+queue on the same process publishes through the same NATS connection.
+
+## Composition
+
+- Parallel `forEach` for fan-out — see the
+  [worker fan-out example](/d/examples/worker-fanout)
+- `dedupId: $.req.body.requestId` for at-most-once enqueue
+- Pair with a worker trigger that has
+  [`concurrencyKey`](/d/reliability/concurrency-keys) for per-tenant
+  consumer-side fairness
+- For sync function-call semantics (the parent blocks until the child
+  completes), use [sub-workflows](/d/composition/sub-workflows) instead
+  — worker-publish is fire-and-forget
+
+## Failure modes
+
+| Scenario | Result |
+|---|---|
+| Missing adapter package (`nats`, `kafkajs`, `bullmq`, etc.) | Throws on first invocation with `bun add <pkg>` hint. |
+| Broker unreachable | Adapter-specific retry then throws. Wrap in step-level [`retry`](/d/reliability/retry). |
+| Duplicate `dedupId` in window | Silently dropped (or returns the original jobId). |
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Worker trigger" icon="factory" href="/d/triggers/worker">
+    Consumer side.
+  </Card>
+  <Card title="Worker fan-out example" icon="layers" href="/d/examples/worker-fanout">
+    End-to-end producer + consumer.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    For sync dispatch (function-call semantics).
+  </Card>
+</Columns>

@@ -1,0 +1,54 @@
+---
+title: "@blokjs/ctx-publish-many"
+description: "Set multiple ctx.state keys in one step. Useful for computed batches from expr."
+icon: "upload-cloud"
+---
+
+Like [`@blokjs/ctx-publish`](./ctx-publish) but writes N keys in one
+step. Returns `{ count }` of keys published.
+
+## Quickstart
+
+```json
+{
+  "id": "advance",
+  "use": "@blokjs/ctx-publish-many",
+  "inputs": {
+    "values": {
+      "lastStatus": "js/ctx.state.check.status",
+      "attempt": "js/(ctx.state.attempt || 0) + 1",
+      "checkedAt": "js/Date.now()"
+    }
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `values` | `Record<string, unknown>` | Object of key → value pairs to publish. Each entry sets `ctx.state[key] = value`. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `count` | Number of keys published. |
+
+## When to use
+
+- Multiple computed fields from one logical step
+- Replacing several adjacent `ctx-publish` steps with one
+- Inside a loop body when each iteration updates several pieces of
+  state
+
+## Related
+
+<Columns cols={2}>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="./ctx-publish">
+    Single-key variant.
+  </Card>
+  <Card title="@blokjs/expr" icon="function-square" href="./expr">
+    Compute the values to publish.
+  </Card>
+</Columns>
