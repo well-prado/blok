@@ -1,0 +1,82 @@
+---
+title: "Workflow primitives"
+description: "Branching, iteration, error handling, and waits — composable building blocks inside any v2 workflow."
+icon: "boxes"
+---
+
+A v2 workflow's `steps:` array runs straight through by default. The
+**primitives** in this section let you control flow: pick a branch,
+loop a list, retry an error path, pause and resume later.
+
+Every primitive lives inside a step alongside the regular `use:` /
+`inputs:` / reliability fields. They compose freely with
+[idempotency](/d/reliability/idempotency), [retry](/d/reliability/retry),
+[sub-workflows](/d/composition/sub-workflows), and each other (the
+[wait-inside-primitives](./wait.mdx#wait-inside-primitives) page covers
+nested wait semantics).
+
+## The six primitives
+
+| Primitive | Shape | Use it when |
+|---|---|---|
+| [`branch`](./branch.mdx) | `{ when, then, else }` | Two-way if/else routing |
+| [`switch`](./switch.mdx) | `{ on, cases[], default }` | N-way routing on a single value |
+| [`forEach`](./forEach.mdx) | `{ in, as, do, mode?, concurrency? }` | Iterate a list (sequential or parallel) |
+| [`loop`](./loop.mdx) | `{ until, do, maxIterations? }` | Poll until a condition is met |
+| [`tryCatch`](./tryCatch.mdx) | `{ try, catch }` | Recover from a failing step group |
+| [`wait`](./wait.mdx) | `{ for? }` / `{ until? }` | Pause for a duration / until a moment |
+
+## What a primitive step looks like
+
+A primitive step still has an `id:` and (optionally) `ephemeral` /
+`as` / `spread`. The primitive-specific config sits at the step's
+top level — no `use:` field, no `inputs:`:
+
+```json
+{
+  "id": "route",
+  "branch": {
+    "when": "ctx.request.method === 'POST'",
+    "then": [
+      { "id": "create", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
+    ],
+    "else": [
+      { "id": "read", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
+    ]
+  }
+}
+```
+
+Each primitive populates `ctx.state[<step-id>]` with its own
+result shape — see each page for the details.
+
+## Nested primitives
+
+Primitives nest freely. A `forEach` can contain a `branch`; a `loop`
+can contain a `tryCatch`; a `switch` case can contain a `forEach`.
+The v0.6 [wait-inside-primitives](./wait.mdx#wait-inside-primitives)
+runtime supports `wait` steps inside iteration bodies — when the wait
+fires, peer iterations cancel and the runner resumes from the correct
+inner-step cursor on dispatch re-entry.
+
+## Composition with reliability
+
+The reliability knobs ([idempotency](/d/reliability/idempotency),
+[retry](/d/reliability/retry), [maxDuration](/d/reliability/max-duration))
+live on **regular steps inside** primitives, not on the primitive
+itself. Cache an LLM call inside a `forEach` body, retry an API
+call inside a `tryCatch` try arm — same syntax as any other step.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    The complete field reference for every step shape.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Invoke another workflow as a step.
+  </Card>
+  <Card title="Reliability overview" icon="shield-check" href="/d/reliability/overview">
+    Idempotency, retry, replay, concurrency, timeouts.
+  </Card>
+</Columns>

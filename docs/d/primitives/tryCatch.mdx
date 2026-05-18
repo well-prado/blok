@@ -1,0 +1,191 @@
+---
+title: "tryCatch — recover from errors"
+description: "Run a step group; if it throws, run a fallback group. The $.error envelope exposes the failed step + cause."
+icon: "shield-alert"
+---
+
+`tryCatch` wraps a step group with error recovery. If any step in `try`
+throws, control jumps to `catch` with `$.error` populated. Otherwise
+`try` runs to completion and `catch` is skipped.
+
+The saga + workflow-compensation pattern shipped in v0.5 — used in
+`v05-saga.json` and `v05-user-signup-saga.json` for transactional
+multi-step writes with rollback.
+
+## Quickstart
+
+```json
+{
+  "id": "save-with-rollback",
+  "tryCatch": {
+    "try": [
+      { "id": "charge", "use": "@blokjs/stripe-charge", "inputs": { "amount": 1000 } },
+      { "id": "record", "use": "@blokjs/postgres-query", "inputs": { "query": "INSERT INTO orders ..." } }
+    ],
+    "catch": [
+      {
+        "id": "compensate",
+        "branch": {
+          "when": "ctx.error.stepId === 'record'",
+          "then": [
+            { "id": "refund", "use": "@blokjs/stripe-refund", "inputs": { "chargeId": "js/ctx.state.charge.id" } }
+          ]
+        }
+      },
+      {
+        "id": "respond-error",
+        "use": "@blokjs/expr",
+        "inputs": {
+          "expression": "({ ok: false, error: ctx.error.message, failedStep: ctx.error.stepId })"
+        }
+      }
+    ]
+  }
+}
+```
+
+If the `record` step throws (DB constraint violation, say), the
+`catch` arm fires the refund and returns an error payload.
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `try` | `Step[]` | Steps to run. First error jumps to `catch`. |
+| `catch` | `Step[]` | Recovery steps. `ctx.error` is populated on entry. |
+
+## The `$.error` envelope
+
+Inside the `catch` arm, `ctx.error` (or `$.error` in TS workflows)
+exposes structured failure info:
+
+| Field | Source |
+|---|---|
+| `ctx.error.message` | The deepest error in the cause chain. Strips the framework's `[step N/M] X failed: …` wrap. |
+| `ctx.error.name` | `Error.name` of the deepest error. |
+| `ctx.error.stack` | `Error.stack` when present. |
+| `ctx.error.code` | First `GlobalError.code` walking the cause chain. For `@blokjs/throw` errors this is the explicit code; for Zod validation errors it's `400`. |
+| `ctx.error.stepId` | The id of the step that threw. Use for routing the recovery: refund-on-DB-failure, notify-billing-on-charge-failure, etc. |
+
+`stepId` is the headline. Real catch arms typically branch on it to
+route the right compensation:
+
+```json
+"catch": [
+  {
+    "id": "route-by-failure",
+    "switch": {
+      "on": "ctx.error.stepId",
+      "cases": [
+        { "when": "charge", "do": [{ "id": "notify-billing", "use": "...", "inputs": {} }] },
+        { "when": "record", "do": [{ "id": "refund", "use": "...", "inputs": {} }] },
+        { "when": "ship", "do": [{ "id": "release-inventory", "use": "...", "inputs": {} }] }
+      ]
+    }
+  }
+]
+```
+
+## ctx.state result
+
+The tryCatch step itself writes nothing notable. **Inside `catch`**,
+`ctx.state` reflects whatever ran in `try` up to the failing step —
+successful steps populated state normally; the failing step's state
+slot is `undefined`. This is the v0.5.1 fix: an errored step
+**does not** persist an empty envelope, so `ctx.state[<id>] === undefined`
+truthfully means "step did not succeed."
+
+That's load-bearing for compensation logic:
+
+```javascript
+ctx.state.charge !== undefined  // → charge succeeded; refund needed
+ctx.state.record !== undefined  // → record succeeded; nothing to undo
+```
+
+## Common patterns
+
+### Multi-step saga with selective rollback
+
+```json
+"tryCatch": {
+  "try": [
+    { "id": "create-account", "use": "...", "inputs": {} },
+    { "id": "send-welcome", "use": "...", "inputs": {} },
+    { "id": "schedule-onboarding", "use": "...", "inputs": {} }
+  ],
+  "catch": [
+    {
+      "id": "compensate",
+      "branch": {
+        "when": "ctx.state['create-account'] !== undefined",
+        "then": [
+          { "id": "delete-account", "use": "...", "inputs": {} }
+        ]
+      }
+    }
+  ]
+}
+```
+
+If `create-account` succeeds but `send-welcome` fails, the catch arm
+rolls back the account. If `create-account` itself failed, no account
+exists — the catch arm no-ops via the branch guard.
+
+### Try sub-workflows + recover
+
+```json
+"tryCatch": {
+  "try": [
+    { "id": "process", "subworkflow": "expensive-pipeline", "inputs": {} }
+  ],
+  "catch": [
+    { "id": "queue-for-retry-later", "use": "@blokjs/worker-publish", "inputs": { "queue": "retry-queue", "payload": "..." } }
+  ]
+}
+```
+
+The sub-workflow's failure propagates as a single error visible in the
+catch arm. Re-queue for later processing instead of failing the parent.
+
+### Final error response
+
+```json
+"catch": [
+  {
+    "id": "respond",
+    "use": "@blokjs/expr",
+    "inputs": {
+      "expression": "({ ok: false, error: ctx.error.message, code: ctx.error.code, failedStep: ctx.error.stepId })"
+    }
+  }
+]
+```
+
+The HTTP trigger reads the final state of the workflow and writes that
+JSON as the response body.
+
+## Composition
+
+- `tryCatch` inside `forEach` body — catch per-iteration failures,
+  keep the loop going
+- `tryCatch` inside `loop` body — recover transient errors without
+  exiting the loop
+- `tryCatch` inside `tryCatch.try` — nested error scopes
+- Step-level [`retry`](/d/reliability/retry) is the right answer for
+  "rerun on transient." `tryCatch` is for "if it ultimately fails,
+  do something different." They compose: a `try` step with `retry: {
+  maxAttempts: 3 }` runs three attempts before the catch arm fires.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    For transient failures.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Wrap a sub-workflow in tryCatch for transactional dispatch.
+  </Card>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="/d/reference/helpers/throw">
+    Deliberately throw structured errors.
+  </Card>
+</Columns>

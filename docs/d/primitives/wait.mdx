@@ -1,0 +1,165 @@
+---
+title: "wait — pause + resume"
+description: "Pause a workflow for a duration. The runner persists the cursor and re-enters when the timer fires."
+icon: "hourglass"
+---
+
+A `wait` step pauses workflow execution until a timer fires. The
+runner persists the current step cursor before suspending, so the run
+survives process restarts and resumes from the right place when the
+deferred dispatch hits.
+
+The `for` form takes a duration (`"500ms"`, `"30s"`, `"5m"`, `"3h"`);
+the `until` form takes an ISO timestamp expression. Either way, the
+trigger transport returns 202 to the caller — workflows don't block
+HTTP responses.
+
+## Quickstart
+
+### Wait for a duration
+
+```json
+{
+  "id": "throttle",
+  "wait": { "for": "500ms" }
+}
+```
+
+### Wait until a moment
+
+```json
+{
+  "id": "wait-for-business-hours",
+  "wait": { "until": "js/`${new Date().toISOString().slice(0,10)}T09:00:00Z`" }
+}
+```
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `for` | `string` \| `number` | Duration string (`"1h"`, `"30s"`, `"500ms"`) or milliseconds. |
+| `until` | `string` | JS expression resolving to an ISO timestamp or unix epoch millis. |
+
+Set exactly one. The runner throws at load time if both are present.
+
+## What happens when wait fires
+
+1. The runner persists the current step cursor + any captured `ctx`
+   to the run store (sqlite migration v9 / postgres migration v6).
+2. The trigger returns 202 to the caller with `Location: /__blok/runs/:id`.
+3. A background timer waits for the duration. On fire, it re-enters
+   `dispatchDeferred(ctx, traceRunId)` which restores the cursor and
+   resumes the workflow.
+4. The resumed run picks up at the **step after** the wait.
+
+## Trigger-level vs step-level wait
+
+There are two scheduling primitives, and they live at different levels:
+
+| | Trigger-level [`delay`](/d/scheduling/delay-and-ttl) | Step-level `wait` |
+|---|---|---|
+| Where | Trigger config | Step body |
+| Effect | Defers the entire workflow run | Pauses one workflow mid-flight |
+| Use when | You want every invocation to start later | You want some-but-not-all steps to wait |
+
+A `wait` step is the right choice when the workflow needs to do work,
+then pause, then do more work.
+
+## ctx after resume
+
+The wait step writes nothing notable to `ctx.state`. Steps before the
+wait keep their state slots; steps after the wait see the same `ctx`
+they would have seen if the workflow had run synchronously.
+
+`ctx.signal` is preserved across the wait — if the run is cancelled
+via `POST /__blok/runs/:runId/cancel` while paused, the next step's
+`ctx.signal.aborted` is `true` and the runner throws `RunCancelledError`
+on entry. See [cancellation](/d/reliability/cancellation).
+
+## wait-inside-primitives
+
+Phase 2/3/4 runtime supports `wait` steps inside iteration / branching
+primitives. Each primitive persists its own cursor frame so nested
+primitives don't lose state:
+
+```
+Workflow                              cursor frame stack
+   ├─ forEach (id: "outer")          ← outer iteration cursor
+   │   ├─ forEach (id: "inner")      ← inner iteration cursor
+   │   │   ├─ check                  ← inner step cursor
+   │   │   └─ wait { for: "1s" }     ← suspends here
+```
+
+On dispatch re-entry, the runner restores all four cursors in order
+and resumes from `check + 1` in the right inner iteration of the right
+outer iteration.
+
+### Parallel forEach + wait
+
+When a parallel-mode `forEach` has a wait inside its body, the
+**first iteration to hit the wait** wins — peer iterations cancel via
+a pool AbortController (separate from `ctx.signal` so user-cancel
+doesn't get confused with peer-wait cancel), the runner persists the
+parallel-mode cursor with `waitFiringIteration`, `completedResults`,
+and `cancelledIterations`. On dispatch re-entry, ForEachNode
+pre-populates `results[]` from `completedResults`, re-launches
+cancelled iterations from inner step 0, and resumes the wait-firing
+iteration at its `innerStepIndex`.
+
+<Warning>
+**Side-effecting inner steps must use `idempotencyKey`.** When peer
+iterations re-launch from inner step 0 on resume, any non-idempotent
+side effects (sending emails, charging cards) fire **twice**. The
+runner warns at load time if a parallel-foreach-with-wait body has
+side-effecting steps without idempotency keys.
+</Warning>
+
+See the
+[`parallel-foreach-wait-spec`](/c/devtools/parallel-foreach-wait-spec)
+contributor doc for the full design.
+
+## Long-pause `wait.for("3 days")` pattern
+
+The runner doesn't yet ship a single-step primitive for very long
+pauses (multi-day). The composable pattern that works today:
+
+```ts
+// Workflow A — pre-wait
+{ id: "queue-continuation", subworkflow: "post-wait-half",
+  inputs: { state: $.state }, wait: false }
+
+// Workflow B — has delay on its trigger
+{ name: "post-wait-half",
+  trigger: { http: { method: "POST", path: "/internal/...", delay: "3d" } },
+  steps: [ /* the post-wait steps */ ] }
+```
+
+The author splits at the wait boundary — durable + crash-safe today.
+A native `wait.for("3d")` step is on the [BACKLOG](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md);
+the building blocks (durable scheduler, re-entry pattern, per-step
+checkpointing via `idempotencyKey`) are all in place.
+
+## Composition
+
+- `wait` inside [`forEach`](./forEach.mdx) body — paced iteration
+- `wait` inside [`loop`](./loop.mdx) body — polling backoff
+- `wait` inside [`branch`](./branch.mdx) / [`switch`](./switch.mdx)
+  arm — conditional pause
+- `wait` inside [`tryCatch.try`](./tryCatch.mdx) — pause + recover
+  (catch arm sees `ctx.error` for any error before the wait;
+  cancellation during wait throws `RunCancelledError`)
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Delay & TTL" icon="clock" href="/d/scheduling/delay-and-ttl">
+    Trigger-level scheduling (vs. step-level wait).
+  </Card>
+  <Card title="Cancellation" icon="ban" href="/d/reliability/cancellation">
+    What happens when a paused run is cancelled.
+  </Card>
+  <Card title="loop polling" icon="repeat" href="/d/primitives/loop">
+    The canonical wait-inside-primitive pattern.
+  </Card>
+</Columns>

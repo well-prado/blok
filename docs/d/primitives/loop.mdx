@@ -1,0 +1,175 @@
+---
+title: "loop — until condition"
+description: "Repeat a pipeline until a condition is met or a max-iterations cap is hit. The canonical async-job poller."
+icon: "repeat"
+---
+
+`loop` runs a nested pipeline repeatedly until the `until` expression
+evaluates truthy. Always-pair with `maxIterations` to avoid runaways
+— there's no time-based stop, only condition-based.
+
+The most common pattern is polling: hit an upstream until it returns
+"ready," with capped exponential backoff via a `wait` step inside the
+body. The v05 dev fixture `v05-async-job-poller.json` is the
+reference implementation.
+
+## Quickstart
+
+### Poll until ready
+
+```json
+{
+  "id": "poll-job",
+  "loop": {
+    "until": "ctx.state['check'].data.status === 'completed'",
+    "maxIterations": 30,
+    "do": [
+      {
+        "id": "check",
+        "use": "@blokjs/api-call",
+        "inputs": {
+          "url": "js/`https://internal/jobs/${ctx.request.body.jobId}/status`",
+          "method": "GET"
+        }
+      },
+      {
+        "id": "backoff",
+        "wait": { "for": "1s" }
+      }
+    ]
+  }
+}
+```
+
+The loop fires `check` + `backoff` repeatedly until the job status
+turns `completed` or 30 iterations pass.
+
+### Capped exponential backoff
+
+```json
+{
+  "id": "backoff",
+  "wait": {
+    "for": "js/`${Math.min(30000, 1000 * Math.pow(2, ctx.state['poll-job_iteration']))}ms`"
+  }
+}
+```
+
+The runner exposes `ctx.state[<loop-id>_iteration]` as the 0-based
+iteration counter inside the body. Use it for arithmetic backoff.
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `until` | `string` (JS expression) | required | Loop stops when this evaluates truthy. Evaluated **after** each iteration's body completes. |
+| `do` | `Step[]` | required | Body steps. |
+| `maxIterations` | `number` | required | Hard cap. Reaching this without the `until` condition firing throws. |
+
+## ctx.state result
+
+`ctx.state[<loop-id>]` holds an array of per-iteration results, same
+shape as [`forEach`](./forEach.mdx). Each element is the response
+envelope of the last sub-step in that iteration:
+
+```javascript
+ctx.state['poll-job']  // → [{data, error, success, ...}, {data, ...}, ...]
+```
+
+`ctx.state[<loop-id>_iteration]` is the 0-based iteration counter,
+incremented each iteration. Useful for backoff math + telemetry.
+
+## Common patterns
+
+### Polling with cap
+
+The canonical use case — see the
+[`v05-async-job-poller`](https://github.com/deskree-inc/blok/blob/main/triggers/http/workflows/json/v05-async-job-poller.json)
+fixture for the worked example.
+
+### Retry with custom condition
+
+`retry` on a single step is the right tool for "rerun on transient
+failure." A `loop` is the right tool for "rerun until I see the right
+**output**." Subtle but distinct.
+
+```json
+{
+  "id": "wait-for-row",
+  "loop": {
+    "until": "ctx.state['lookup'].data.rowCount > 0",
+    "maxIterations": 20,
+    "do": [
+      { "id": "lookup", "use": "@blokjs/postgres-query", "inputs": { "query": "..." } },
+      { "id": "pause", "wait": { "for": "500ms" } }
+    ]
+  }
+}
+```
+
+The query never throws — the row just isn't there yet. Loop until it
+shows up.
+
+### Generative pagination
+
+```json
+{
+  "id": "all-pages",
+  "loop": {
+    "until": "ctx.state['fetch'].data.nextCursor === null",
+    "maxIterations": 100,
+    "do": [
+      {
+        "id": "fetch",
+        "use": "@blokjs/api-call",
+        "inputs": {
+          "url": "js/`https://api.example.com/list?cursor=${ctx.state['fetch']?.data?.nextCursor || ''}`"
+        }
+      },
+      {
+        "id": "accumulate",
+        "use": "@blokjs/ctx-publish",
+        "inputs": {
+          "name": "results",
+          "value": "js/[...(ctx.state.results || []), ...ctx.state.fetch.data.items]"
+        }
+      }
+    ]
+  }
+}
+```
+
+Each iteration pages forward; the loop terminates when the API stops
+returning a cursor. `@blokjs/ctx-publish` accumulates rows across
+iterations.
+
+## Composition
+
+- Combine with [`wait`](./wait.mdx) for paced polling
+- Wrap iteration body in [`tryCatch`](./tryCatch.mdx) to keep polling
+  across transient errors
+- Step-level [`maxDuration`](/d/reliability/max-duration) on individual
+  body steps caps per-iteration latency
+- Sub-workflows work inside the body — invoke an external workflow
+  per iteration
+
+## Why `maxIterations` is required
+
+The runner refuses to load a `loop` without `maxIterations`. The whole
+point of bounded loops is having a guaranteed upper bound. If you
+truly want unbounded repetition, you want a [cron trigger](/d/triggers/cron)
+or a [worker queue](/d/triggers/worker), not a loop.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="forEach" icon="list-checks" href="/d/primitives/forEach">
+    Iterate a known list (vs. unknown count).
+  </Card>
+  <Card title="wait" icon="hourglass" href="/d/primitives/wait">
+    Pause between iterations.
+  </Card>
+  <Card title="tryCatch" icon="shield-alert" href="/d/primitives/tryCatch">
+    Recover from transient errors inside the loop body.
+  </Card>
+</Columns>

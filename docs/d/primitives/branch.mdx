@@ -1,0 +1,143 @@
+---
+title: "branch — if/else"
+description: "Two-way conditional routing. Pick a then arm or an else arm based on a JavaScript expression."
+icon: "git-fork"
+---
+
+The `branch` primitive evaluates a `when` expression and runs the
+`then` arm when truthy, the `else` arm when falsy. Same shape as
+`if/else` in any language, but stays inside the v2 workflow body.
+
+## Quickstart
+
+```json
+{
+  "id": "route",
+  "branch": {
+    "when": "ctx.request.method === 'POST'",
+    "then": [
+      { "id": "create", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
+    ],
+    "else": [
+      { "id": "read", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
+    ]
+  }
+}
+```
+
+TypeScript via the `@blokjs/helper` proxy:
+
+```typescript
+import { workflow, branch, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Method Router",
+  trigger: { http: { method: "ANY" } },
+  steps: [
+    branch({
+      id: "route",
+      when: $.req.method === "POST",
+      then: [{ id: "create", use: "@blokjs/api-call", inputs: { url: "..." } }],
+      else: [{ id: "read", use: "@blokjs/api-call", inputs: { url: "..." } }],
+    }),
+  ],
+});
+```
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `when` | `string` (JS expression) | Evaluated against the live `ctx`. Falsy values (`false`, `0`, `null`, `undefined`, `""`) take the `else` arm. |
+| `then` | `Step[]` | Steps to run when `when` is truthy. |
+| `else` | `Step[]` (optional) | Steps to run when `when` is falsy. Omit for a no-op fallback. |
+
+## ctx.state result
+
+The branch step itself stores nothing notable on `ctx.state[<id>]`.
+The **sub-steps** that ran (inside `then` or `else`) populate their own
+state entries. Use those for downstream references:
+
+```json
+{
+  "id": "route",
+  "branch": {
+    "when": "ctx.request.body.kind === 'urgent'",
+    "then": [{ "id": "fast-path", "use": "...", "inputs": {} }],
+    "else": [{ "id": "slow-path", "use": "...", "inputs": {} }]
+  }
+},
+{
+  "id": "respond",
+  "use": "@blokjs/expr",
+  "inputs": {
+    "expression": "ctx.state['fast-path'] ?? ctx.state['slow-path']"
+  }
+}
+```
+
+## Common patterns
+
+### Conditional skip
+
+Empty `then` (or `else`) — the arm runs as a no-op. Useful when one
+side has work and the other doesn't:
+
+```json
+{
+  "id": "log-if-error",
+  "branch": {
+    "when": "ctx.state.fetch.error !== null",
+    "then": [
+      { "id": "log", "use": "@blokjs/log", "inputs": { "level": "error", "message": "..." } }
+    ]
+  }
+}
+```
+
+### Method routing (replacing v1 if-else)
+
+Pre-v2, conditional routing used `@blokjs/if-else` + `conditions[]`.
+v2 `branch` is the one-step replacement — see the
+[DB Manager example](/d/examples/db-manager) for nested `branch` steps
+handling six different `(method, path)` pairs.
+
+### Guarded sub-workflow dispatch
+
+```json
+{
+  "id": "maybe-charge",
+  "branch": {
+    "when": "ctx.request.body.requireBilling",
+    "then": [
+      { "id": "charge", "subworkflow": "charge-card", "inputs": { "amount": "js/ctx.request.body.amount" } }
+    ]
+  }
+}
+```
+
+The sub-workflow runs only when the predicate matches. Pair with
+`idempotencyKey` on the charge step so retries don't double-charge.
+
+## Composition
+
+- Nest `branch` inside `branch` for multi-way trees (or use
+  [`switch`](./switch.mdx) for cleaner N-way routing)
+- Branch arms can contain any other primitive — `forEach`,
+  `tryCatch`, sub-workflow steps, regular nodes
+- Each arm runs in the parent's `ctx` — `ctx.state` accumulates
+  across arms
+
+## Related
+
+<Columns cols={3}>
+  <Card title="switch — n-way" icon="route" href="/d/primitives/switch">
+    Cleaner shape when you have 3+ branches on one value.
+  </Card>
+  <Card title="forEach" icon="list-checks" href="/d/primitives/forEach">
+    Iterate inside a branch arm.
+  </Card>
+  <Card title="DB Manager example" icon="database" href="/d/examples/db-manager">
+    Real nested-branch workflow.
+  </Card>
+</Columns>
