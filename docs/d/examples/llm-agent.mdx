@@ -1,0 +1,384 @@
+---
+title: "LLM agent with tool calls"
+description: "OpenAI function-calling loop dispatched to HTTP endpoints. The model picks tools; the agent invokes them and feeds results back."
+icon: "bot"
+---
+
+A full agent loop built on top of the same OpenAI-compatible Chat
+Completions endpoint the [chat demo](./chat.mdx) uses, plus declarative
+tool calls. Tools are HTTP endpoints — pointing at sibling workflows,
+internal services, or external APIs.
+
+Shipped under `--examples` since v0.6.10. The headline pattern:
+**tools are declared inline in the workflow**, the agent runs the
+multi-turn loop in-process, and tool results flow back through plain
+HTTP fetches.
+
+## Prerequisites
+
+- A Blok project with **HTTP + SSE** triggers
+- An [OpenRouter](https://openrouter.ai/keys) API key (or any
+  OpenAI-compatible endpoint that supports function calling)
+- A reachable Redis instance for conversation memory
+- Node.js v22 or later
+
+## Scaffold
+
+```bash
+npx -y -p blokctl@latest blokctl create project \
+  --name agentapp \
+  --triggers http,sse \
+  --runtimes node \
+  --examples
+cd agentapp
+```
+
+Set `.env.local`:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-<your-key>
+OPENROUTER_MODEL=openai/gpt-4o-mini
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+Boot Redis if you don't already have one:
+
+```bash
+docker run --rm -d -p 6379:6379 redis:7-alpine
+```
+
+Boot the project:
+
+```bash
+bun run dev
+```
+
+Open <http://localhost:4000/agent> and ask the model a math or
+weather question. Watch tokens, tool calls, and tool results stream
+into the UI.
+
+## A real two-step roundtrip
+
+```bash
+curl -X POST http://localhost:4000/agent/$(uuidgen)/message \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Use the calculate tool to compute 47 times 89."}'
+```
+
+```json
+{
+  "ok": true,
+  "fullText": "4183",
+  "finishReason": "stop",
+  "iterations": 2,
+  "toolCalls": [
+    {
+      "name": "calculate",
+      "args": { "expression": "47 * 89" },
+      "result": { "expression": "47 * 89", "result": 4183, "ok": true },
+      "ok": true
+    }
+  ]
+}
+```
+
+The model received the user message, decided to call `calculate`,
+the agent POSTed to `/tools/calculator`, the response was fed back
+into the conversation, and the model produced its final answer.
+Two iterations, one tool call.
+
+## How the agent loop works
+
+```
+       user message
+            │
+            ▼
+   ┌─────────────────┐
+   │   load history  │ ← redis-kv GET
+   └─────────────────┘
+            │
+            ▼
+   ┌───────────────────────────────────────────────────┐
+   │   @blokjs/llm-agent — loop (up to maxIterations)   │
+   │                                                    │
+   │   1. stream completion (publish `token` events)    │
+   │   2. if finish_reason === "tool_calls":            │
+   │        for each requested tool:                    │
+   │          - publish `tool_call` event               │
+   │          - HTTP POST to tool.endpoint              │
+   │          - publish `tool_result` event             │
+   │          - append result as `tool` role message    │
+   │        loop back to step 1                         │
+   │   3. else: publish `done`, return                  │
+   └───────────────────────────────────────────────────┘
+            │
+            ▼
+   ┌─────────────────┐
+   │  save history   │ ← redis-kv SET (24h TTL)
+   └─────────────────┘
+            │
+            ▼
+        clean JSON response
+```
+
+Tool calls are dispatched **sequentially** — fine for the demo shape
+(one or two tools per turn). Hard-cap at `maxIterations` (default 10)
+bounds runaway loops.
+
+## Tool declaration
+
+Tools are declared inline in the workflow as part of the `llm-agent`
+step's `inputs.tools` array. Each entry needs four things:
+
+```json
+{
+  "name": "get_weather",
+  "description": "Returns the current weather for a given city.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": { "type": "string", "description": "City name, e.g. 'San Francisco'" }
+    },
+    "required": ["city"]
+  },
+  "endpoint": "http://localhost:4000/tools/weather"
+}
+```
+
+| Field | What it does |
+|---|---|
+| `name` | Identifier the model uses to call the tool. |
+| `description` | Tells the model when to pick this tool. The model's tool-selection accuracy hinges on writing this well. |
+| `parameters` | JSON Schema for the tool's arguments. Passed verbatim to the OpenAI tools array. |
+| `endpoint` | URL the agent POSTs to when the model picks this tool. Body shape: `{ args: <parsed-args> }`. Response body becomes the tool result. |
+
+The `endpoint` can point at a sibling workflow (`http://localhost:4000/tools/x`),
+an internal microservice (`http://billing.svc:4000/charge`), or a
+third-party API (`https://api.weatherapi.com/v1/current.json`).
+
+## The agent message workflow
+
+```json workflows/json/agent-message.json
+{
+  "name": "Agent Message",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/agent/:sessionId/message",
+      "accept": "application/json"
+    }
+  },
+  "steps": [
+    {
+      "id": "load-history",
+      "use": "@blokjs/redis-kv",
+      "inputs": {
+        "action": "get",
+        "key": "js/`agent:${ctx.request.params.sessionId}:history`"
+      }
+    },
+    {
+      "id": "agent",
+      "use": "@blokjs/llm-agent",
+      "inputs": {
+        "channel": "js/`agent:${ctx.request.params.sessionId}`",
+        "apiKey": "js/process.env.OPENROUTER_API_KEY",
+        "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+        "messages": "js/[{ role: 'system', content: 'You are a helpful agent with two tools: get_weather(city) returns current weather; calculate(expression) evaluates arithmetic. Use them when relevant. Be concise.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]",
+        "tools": [
+          {
+            "name": "get_weather",
+            "description": "Returns the current weather for a given city.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "city": { "type": "string", "description": "City name" }
+              },
+              "required": ["city"]
+            },
+            "endpoint": "http://localhost:4000/tools/weather"
+          },
+          {
+            "name": "calculate",
+            "description": "Evaluates a JavaScript arithmetic expression and returns the numeric result.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "expression": { "type": "string", "description": "Arithmetic expression, e.g. '17 * 23'" }
+              },
+              "required": ["expression"]
+            },
+            "endpoint": "http://localhost:4000/tools/calculator"
+          }
+        ],
+        "maxIterations": 10
+      }
+    },
+    {
+      "id": "save-history",
+      "use": "@blokjs/redis-kv",
+      "ephemeral": true,
+      "inputs": {
+        "action": "set",
+        "key": "js/`agent:${ctx.request.params.sessionId}:history`",
+        "value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.agent.fullText }]",
+        "ttlMs": 86400000
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ ok: true, fullText: ctx.state.agent.fullText, finishReason: ctx.state.agent.finishReason, iterations: ctx.state.agent.iterations, toolCalls: ctx.state.agent.toolCalls })"
+      }
+    }
+  ]
+}
+```
+
+Same load-history → call → save-history → respond shape as the
+[memory chat](./chat-memory.mdx). The only difference is the middle
+step uses [`@blokjs/llm-agent`](/d/reference/helpers/llm-agent)
+instead of `@blokjs/llm-stream`, which adds the tool loop.
+
+## SSE events streamed to the browser
+
+The chat UI subscribes to the bus channel `agent:<sessionId>`. Four
+event types arrive:
+
+| Event | Payload | When |
+|---|---|---|
+| `token` | `{delta: "<text>"}` | Per streamed text chunk from the model. |
+| `tool_call` | `{name, args, iteration}` | The model requested a tool. |
+| `tool_result` | `{name, ok, status, body, iteration}` | The agent received the tool's response. |
+| `done` | `{fullText, finishReason, iterations, toolCalls}` | The loop terminated normally. |
+
+The chat-ui node knows about all four — text + tool events render
+inline so users see exactly what the agent is doing.
+
+## Demo tool endpoints
+
+Two tool endpoints ship under `--examples`:
+
+### `workflows/json/agent-tool-weather.json`
+
+A deterministic city-seeded fake — no real weather API needed for the
+demo.
+
+```json
+{
+  "name": "agent-tool-weather",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "POST", "path": "/tools/weather", "accept": "application/json" }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "(() => { const city = (ctx.request.body && ctx.request.body.args && ctx.request.body.args.city) || 'unknown'; const seeded = (city.charCodeAt(0) * 31 + city.length) % 25; return { city: city, temperatureF: 50 + seeded, conditions: ['sunny','cloudy','rainy','windy'][seeded % 4], humidity: 30 + (seeded * 2) % 50 }; })()"
+      }
+    }
+  ]
+}
+```
+
+### `workflows/json/agent-tool-calculator.json`
+
+Arithmetic evaluator via `@blokjs/expr`. **SAFETY**: this evals
+user-supplied input in a sandboxed `new Function` — fine for a
+localhost demo, **not safe to expose** to untrusted callers in
+production. Replace with a real arithmetic parser (e.g. `mathjs`)
+before deploying.
+
+```json
+{
+  "name": "agent-tool-calculator",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "POST", "path": "/tools/calculator", "accept": "application/json" }
+  },
+  "steps": [
+    {
+      "id": "calc",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "(() => { const expr = (ctx.request.body && ctx.request.body.args && ctx.request.body.args.expression) || '0'; try { const result = Function('\"use strict\"; return (' + expr + ')')(); return { expression: expr, result: result, ok: true }; } catch (err) { return { expression: expr, error: String(err), ok: false }; } })()"
+      }
+    }
+  ]
+}
+```
+
+## Customize
+
+### Add your own tool
+
+Add an entry to the agent's `tools:` array — name, description,
+JSON-Schema parameters, and the endpoint URL. Then implement the
+endpoint as a regular HTTP workflow. The agent receives the response
+body as the tool's result.
+
+```json
+{
+  "name": "lookup_user",
+  "description": "Look up a user by id and return their profile.",
+  "parameters": {
+    "type": "object",
+    "properties": { "userId": { "type": "string" } },
+    "required": ["userId"]
+  },
+  "endpoint": "http://localhost:4000/internal/users"
+}
+```
+
+### Cross-deployment tool URLs
+
+Hard-coding `http://localhost:4000` works for the demo but breaks in
+production. Wrap the URL in a `js/` expression backed by an env var:
+
+```json
+"endpoint": "js/`${process.env.BLOK_SELF_BASE_URL || 'http://localhost:4000'}/tools/weather`"
+```
+
+### Bound the loop tighter
+
+Default `maxIterations` is 10. For latency-sensitive flows, cap lower:
+
+```json
+"maxIterations": 3
+```
+
+The agent throws if the cap is hit while the model is still requesting
+tools — surface that in the UI so users know to rephrase.
+
+### Per-tool authentication
+
+Pass per-tool headers via the tool definition:
+
+```json
+{
+  "name": "send_email",
+  "description": "...",
+  "parameters": { "...": "..." },
+  "endpoint": "https://api.sendgrid.com/v3/mail/send",
+  "method": "POST",
+  "headers": { "Authorization": "js/`Bearer ${process.env.SENDGRID_API_KEY}`" }
+}
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Streaming chat" icon="messages-square" href="/d/examples/chat">
+    Stateless chat — the simpler base case.
+  </Card>
+  <Card title="Chat with memory" icon="brain" href="/d/examples/chat-memory">
+    Redis-backed conversation history.
+  </Card>
+  <Card title="@blokjs/llm-agent" icon="bot" href="/d/reference/helpers/llm-agent">
+    Helper-node reference.
+  </Card>
+</Columns>

@@ -29,7 +29,12 @@
 						"pages": [
 							"d/examples/index",
 							"d/examples/countries",
-							"d/examples/db-manager"
+							"d/examples/db-manager",
+							"d/examples/chat",
+							"d/examples/chat-memory",
+							"d/examples/llm-agent",
+							"d/examples/webhook-router",
+							"d/examples/worker-fanout"
 						]
 					},
 					{

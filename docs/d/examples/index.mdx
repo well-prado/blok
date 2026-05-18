@@ -20,11 +20,53 @@ Each example has its own documentation with detailed setup instructions, code ex
 
 ## Available Examples
 
-Here are the examples covered in this documentation. Click on each link to explore the detailed guide:
+Every example ships under `--examples` when you scaffold a Blok
+project — `npx blokctl@latest create project --examples`. Pick a
+trigger combination that matches the example you want, and the
+workflows + helper nodes are copied into your project ready to run.
 
-* **[Countries API Example](./countries-example.mdx)**: A simple example demonstrating how to create a workflow that fetches data from an external API using the built-in `@blokjs/api-call` node. This example shows how to retrieve a list of countries and their capitals from a public API and return the data as a JSON response.
+### Foundational
 
-* **[Database Smart Query (DB Manager)](./db-manager.mdx)**: An advanced example showcasing how to create an AI-powered database query interface. This example demonstrates how to build a workflow that allows users to query a PostgreSQL database using natural language prompts, which are then converted to SQL queries using AI. It includes a complete UI, dynamic database schema introspection, and real-time query execution.
+* **[Countries API](./countries.mdx)** — fetch data from an external API
+  with `@blokjs/api-call` and return it as JSON. The simplest possible
+  v2 workflow. *Needs: HTTP trigger.*
+
+* **[Database Smart Query (DB Manager)](./db-manager.mdx)** — AI-powered
+  natural-language to SQL UI backed by PostgreSQL. Demonstrates UI
+  nodes, branch routing, and custom nodes wrapping a database client.
+  *Needs: HTTP trigger + Postgres + an OpenAI API key.*
+
+### LLM + streaming (v0.6.7+)
+
+* **[Streaming chat](./chat.mdx)** — token-by-token LLM streaming from
+  any OpenAI-compatible model. Uses the in-process SSE bus and the
+  parameterized `chat-ui` node. Swap models via env var.
+  *Needs: HTTP + SSE triggers + OpenRouter (or any OpenAI-compat) key.*
+
+* **[Chat with Redis-memory](./chat-memory.mdx)** — server-side
+  conversation history. The LLM remembers prior turns across browser
+  reloads. Showcases `@blokjs/redis-kv` + multi-step state composition.
+  *Needs: HTTP + SSE triggers + Redis + OpenRouter key.*
+
+* **[LLM agent with tool calls](./llm-agent.mdx)** — OpenAI function
+  calling loop dispatched to HTTP endpoints. The new
+  `@blokjs/llm-agent` helper handles the loop, your tools are sibling
+  workflows or any URL.
+  *Needs: HTTP + SSE triggers + Redis + OpenRouter key.*
+
+### Integration patterns (v0.6.10+)
+
+* **[Webhook router (Stripe + GitHub + Linear)](./webhook-router.mdx)**
+  — provider-signed webhook receivers with HMAC verification and
+  polymorphic sub-workflow dispatch. The custom-signature config
+  covers any HMAC-signed provider.
+  *Needs: HTTP + webhook triggers + provider signing secrets.*
+
+* **[Worker fan-out with NATS](./worker-fanout.mdx)** — async parallel
+  job dispatch with per-tenant `concurrencyKey` + per-job
+  `idempotencyKey` + retry. Demonstrates the worker trigger end-to-end.
+  *Needs: HTTP + worker triggers + a broker (NATS / Redis / BullMQ /
+  SQS / Kafka).*
 
 ## How to Use This Section
 
