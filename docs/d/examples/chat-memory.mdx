@@ -1,0 +1,265 @@
+---
+title: "Chat with Redis-backed memory"
+description: "Server-side conversation history. The LLM remembers prior turns even after the browser reloads."
+icon: "brain"
+---
+
+Extends the [streaming chat example](./chat.mdx) with server-side
+memory. Conversation history lives in Redis keyed by session id, so:
+
+- The LLM sees prior turns when forming each new reply
+- A page reload preserves the conversation (history is server-authoritative)
+- Multiple browser tabs on the same session see the same context
+
+Shipped under `--examples` since v0.6.8. The pattern is a clean
+illustration of multi-step state composition: `load history → call LLM
+with assembled context → save updated history`.
+
+## Prerequisites
+
+- A Blok project with **HTTP + SSE** triggers
+- An [OpenRouter](https://openrouter.ai/keys) API key
+- A reachable Redis instance (the demo uses `redis://127.0.0.1:6379`)
+
+## Scaffold
+
+```bash
+npx -y -p blokctl@latest blokctl create project \
+  --name memchat \
+  --triggers http,sse \
+  --runtimes node \
+  --examples
+cd memchat
+```
+
+Start Redis:
+
+```bash
+docker run --rm -d -p 6379:6379 redis:7-alpine
+```
+
+Set your key in `.env.local`:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-<your-key>
+OPENROUTER_MODEL=openai/gpt-4o-mini
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+Boot:
+
+```bash
+bun run dev
+```
+
+Open <http://localhost:4000/chat-memory>. Send a message, reload the
+page, ask a follow-up — the LLM remembers.
+
+## How memory persists
+
+A real two-turn smoke against the published demo:
+
+```bash
+SID=demo-1
+curl -X POST "http://localhost:4000/chat-memory/$SID/message" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Remember the password is OPENBLOK. Reply OK."}'
+# → {"ok":true,"fullText":"OK","finishReason":"stop","turn":1}
+
+curl -X POST "http://localhost:4000/chat-memory/$SID/message" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What was the password?"}'
+# → {"ok":true,"fullText":"The password is OPENBLOK.","finishReason":"stop","turn":2}
+```
+
+Inspect Redis directly:
+
+```bash
+docker exec <redis-container> redis-cli GET chat-memory:demo-1:history
+# → [{"role":"user","content":"Remember the password is OPENBLOK. Reply OK."},
+#    {"role":"assistant","content":"OK"},
+#    {"role":"user","content":"What was the password?"},
+#    {"role":"assistant","content":"The password is OPENBLOK."}]
+```
+
+The history is JSON-encoded with a 24h TTL. Redis evicts stale
+sessions automatically — no background reaper.
+
+## The message workflow
+
+The page + stream workflows are identical to the
+[stateless chat demo](./chat.mdx#the-three-workflows) — only
+`endpointBase` and the channel name change. The interesting workflow is
+`chat-memory-message.json`:
+
+```json workflows/json/chat-memory-message.json
+{
+  "name": "Chat (Redis Memory) Message",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/chat-memory/:sessionId/message",
+      "accept": "application/json"
+    }
+  },
+  "steps": [
+    {
+      "id": "load-history",
+      "use": "@blokjs/redis-kv",
+      "type": "module",
+      "inputs": {
+        "action": "get",
+        "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`"
+      }
+    },
+    {
+      "id": "stream",
+      "use": "@blokjs/llm-stream",
+      "type": "module",
+      "inputs": {
+        "channel": "js/`chat-memory:${ctx.request.params.sessionId}`",
+        "apiKey": "js/process.env.OPENROUTER_API_KEY",
+        "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+        "messages": "js/[{ role: 'system', content: 'You are a helpful assistant chatting with the user. Earlier messages were stored in Redis and are included below.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]"
+      }
+    },
+    {
+      "id": "save-history",
+      "use": "@blokjs/redis-kv",
+      "type": "module",
+      "ephemeral": true,
+      "inputs": {
+        "action": "set",
+        "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`",
+        "value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.stream.fullText }]",
+        "ttlMs": 86400000
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "type": "module",
+      "inputs": {
+        "expression": "({ ok: true, fullText: ctx.state.stream.fullText, finishReason: ctx.state.stream.finishReason, turn: ((ctx.state['load-history']?.value?.length || 0) / 2) + 1 })"
+      }
+    }
+  ]
+}
+```
+
+Four steps, four lessons:
+
+<Steps>
+  <Step title="load-history reads from Redis">
+    [`@blokjs/redis-kv`](/d/reference/helpers/redis-kv) returns
+    `{action: "get", key, value, exists}`. The `js/` mapper expression
+    interpolates the session id at run time.
+  </Step>
+  <Step title="stream composes the full context">
+    The `messages:` field uses a JS expression to build the OpenAI
+    message array on the fly: a system prompt + prior history (via
+    spread) + the new user turn. `ctx.state['load-history']?.value`
+    is the prior array — bracket-notation because the step id contains
+    a dash.
+  </Step>
+  <Step title="save-history persists the new turn (ephemeral)">
+    Writes the appended history back with a 24h TTL. Marked
+    `ephemeral: true` so the redis-set's return value doesn't leak
+    into the HTTP response.
+  </Step>
+  <Step title="respond returns a clean summary">
+    Reads `ctx.state.stream.fullText` (the model's reply) plus a derived
+    `turn` counter. Returned to the client as JSON.
+  </Step>
+</Steps>
+
+## Field reference
+
+The redis-kv calls store the full message array as a single value with
+a TTL. Keys are namespaced by session id so concurrent users don't
+collide.
+
+| Field | Value |
+|---|---|
+| **Key** | `chat-memory:<sessionId>:history` |
+| **Value** | JSON array of `{role, content}` (user + assistant turns only — no system message) |
+| **TTL** | 86,400,000 ms (24h) |
+| **Channel** | `chat-memory:<sessionId>` (separate from the stateless `/chat` demo's channel) |
+
+The system prompt is **prepended at call time**, not stored. That lets
+you change the prompt without invalidating existing sessions.
+
+## Customize
+
+### Per-tenant memory namespace
+
+If you serve multiple tenants, prefix the key:
+
+```json
+{
+  "id": "load-history",
+  "use": "@blokjs/redis-kv",
+  "inputs": {
+    "action": "get",
+    "key": "js/`chat-memory:${ctx.request.body.tenantId}:${ctx.request.params.sessionId}:history`"
+  }
+}
+```
+
+### Cap history length
+
+For long conversations, the prompt grows unbounded. Trim the array in
+the `stream` step's `messages:` expression:
+
+```javascript
+"messages": "js/[
+  { role: 'system', content: '...' },
+  ...((ctx.state['load-history']?.value || []).slice(-20)),
+  { role: 'user', content: ctx.request.body.message }
+]"
+```
+
+The last 20 turns (10 user + 10 assistant) carry forward.
+
+### Reset a session
+
+Drop the Redis key — the next message starts fresh:
+
+```bash
+docker exec <redis-container> redis-cli DEL chat-memory:demo-1:history
+```
+
+Or build a dedicated reset endpoint:
+
+```json
+{
+  "id": "reset",
+  "use": "@blokjs/redis-kv",
+  "inputs": {
+    "action": "delete",
+    "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`"
+  }
+}
+```
+
+### Use a different KV backend
+
+The example uses [`@blokjs/redis-kv`](/d/reference/helpers/redis-kv)
+but [`@blokjs/in-memory-kv`](/d/reference/helpers/in-memory-kv) is
+a drop-in replacement for single-process dev work (no Redis needed,
+but state vanishes on restart and doesn't cross processes).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Streaming chat" icon="messages-square" href="/d/examples/chat">
+    The stateless base case this extends.
+  </Card>
+  <Card title="LLM agent" icon="bot" href="/d/examples/llm-agent">
+    Tool-calling agent variant.
+  </Card>
+  <Card title="@blokjs/redis-kv" icon="database" href="/d/reference/helpers/redis-kv">
+    Production KV helper reference.
+  </Card>
+</Columns>

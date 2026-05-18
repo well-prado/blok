@@ -1,0 +1,247 @@
+---
+title: "Streaming LLM chat"
+description: "A two-file chat UI with token-by-token streaming from any OpenAI-compatible model. Backed by the in-process SSE bus."
+icon: "messages-square"
+---
+
+A complete chat demo that streams tokens from an OpenAI-compatible
+endpoint (OpenRouter by default) into a browser via Server-Sent Events.
+Three workflows + one UI node, mounted on a single HTTP port.
+
+Shipped under `--examples` since v0.6.7. Swap models at runtime via
+`OPENROUTER_MODEL` — same workflow against GPT-4o, Claude, Gemini,
+Llama, or a local Ollama instance.
+
+## Prerequisites
+
+- A Blok project with **HTTP + SSE** triggers
+- An [OpenRouter](https://openrouter.ai/keys) API key (free tier
+  covers thousands of GPT-4o-mini messages)
+- Node.js v22 or later, Bun installed
+
+## Scaffold
+
+```bash
+npx -y -p blokctl@latest blokctl create project \
+  --name chatapp \
+  --triggers http,sse \
+  --runtimes node \
+  --examples
+cd chatapp
+```
+
+Open `.env.local` and set your key:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-<your-key>
+OPENROUTER_MODEL=openai/gpt-4o-mini
+```
+
+Boot:
+
+```bash
+bun run dev
+```
+
+Open <http://localhost:4000/chat> in a browser. Send a message — tokens
+arrive in real time.
+
+## How it works
+
+Three small workflows under `workflows/json/` plus the `chat-ui` node.
+The browser opens an `EventSource` to receive tokens; HTTP POSTs deliver
+each new message.
+
+```
+        Browser                  HTTP trigger                SSE trigger
+        ┌──────────┐             ┌──────────────────┐        ┌─────────────────┐
+        │          │  GET /chat  │  chat-page → UI  │        │                 │
+        │          │────────────▶│  (chat-ui node)  │        │                 │
+        │          │             └──────────────────┘        │                 │
+        │          │             ┌──────────────────┐        │                 │
+        │          │   EventSrc  │                  │        │   chat-stream   │
+        │          │◀────────────│────────────────────────── │   subscribes to │
+        │          │   tokens    │                  │  bus   │   chat:<sid>    │
+        │          │             │                  │        │                 │
+        │          │ POST .../msg│                  │        │                 │
+        │          │────────────▶│  chat-message    │  pub   │                 │
+        │          │             │  → @blokjs/      │───────▶│                 │
+        │          │             │    llm-stream    │  events│                 │
+        └──────────┘             └──────────────────┘        └─────────────────┘
+```
+
+The HTTP POST and the SSE subscriber run in the same Node process —
+[`@blokjs/llm-stream`](/d/reference/helpers/llm-stream) publishes to an
+in-process event bus, and the SSE trigger pumps every event to whichever
+browser is subscribed to that channel.
+
+## The three workflows
+
+### `workflows/json/chat-page.json`
+
+Renders the chat UI page. The `chat-ui` node is a UI node shipped
+with `--examples` — it returns a vanilla HTML page (no React, no build
+step) with an `EventSource` + `fetch` pair wired up.
+
+```json
+{
+  "name": "Chat Page",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "GET", "path": "/chat", "accept": "text/html" }
+  },
+  "steps": [
+    { "id": "render", "use": "chat-ui", "type": "module", "inputs": {} }
+  ]
+}
+```
+
+### `workflows/json/chat-message.json`
+
+POST handler. Reads the conversation history from the request body and
+calls `@blokjs/llm-stream`. The helper streams each token to the
+bus channel `chat:<sessionId>` and returns the accumulated text when
+the model finishes.
+
+```json
+{
+  "name": "Chat Message",
+  "version": "1.0.0",
+  "trigger": {
+    "http": {
+      "method": "POST",
+      "path": "/chat/:sessionId/message",
+      "accept": "application/json"
+    }
+  },
+  "steps": [
+    {
+      "id": "stream",
+      "use": "@blokjs/llm-stream",
+      "type": "module",
+      "inputs": {
+        "channel": "js/`chat:${ctx.request.params.sessionId}`",
+        "apiKey": "js/process.env.OPENROUTER_API_KEY",
+        "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+        "messages": "js/ctx.request.body.messages"
+      }
+    }
+  ]
+}
+```
+
+### `workflows/json/chat-stream.json`
+
+SSE subscriber. Mounts on the HTTP server's Hono app and pumps the bus
+channel out as SSE frames. The browser's `EventSource` receives
+`token` events as the model produces them and a final `done` event
+with the full reply.
+
+```json
+{
+  "name": "Chat Stream",
+  "version": "1.0.0",
+  "trigger": {
+    "sse": {
+      "path": "/sse/chat/:sessionId",
+      "heartbeatInterval": 15000,
+      "retryInterval": 3000
+    }
+  },
+  "steps": [
+    {
+      "id": "sub",
+      "use": "@blokjs/sse-subscribe",
+      "type": "module",
+      "inputs": { "channels": ["chat:{sessionId}"] }
+    },
+    {
+      "id": "stream",
+      "use": "@blokjs/sse-stream",
+      "type": "module",
+      "inputs": { "source": "js/ctx.state.sub" }
+    }
+  ]
+}
+```
+
+The `{sessionId}` placeholder in `channels` is filled from the request
+path parameter at run time, so every connected browser subscribes only
+to its own conversation.
+
+## Customize
+
+### Swap the model
+
+Change `OPENROUTER_MODEL` in `.env.local` — no code change required.
+OpenRouter exposes 100+ models behind one OpenAI-compatible API:
+
+```bash
+OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+# or
+OPENROUTER_MODEL=google/gemini-2.0-flash-001
+# or
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+```
+
+### Point at OpenAI directly
+
+Set the OpenAI API key as `OPENROUTER_API_KEY` and override the base
+URL in your workflow:
+
+```json
+{
+  "id": "stream",
+  "use": "@blokjs/llm-stream",
+  "inputs": {
+    "apiKey": "js/process.env.OPENAI_API_KEY",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "messages": "js/ctx.request.body.messages",
+    "channel": "js/`chat:${ctx.request.params.sessionId}`"
+  }
+}
+```
+
+### Point at local Ollama
+
+```json
+{
+  "id": "stream",
+  "use": "@blokjs/llm-stream",
+  "inputs": {
+    "apiKey": "ollama-local",
+    "baseUrl": "http://localhost:11434/v1",
+    "model": "llama3.2",
+    "messages": "js/ctx.request.body.messages",
+    "channel": "js/`chat:${ctx.request.params.sessionId}`"
+  }
+}
+```
+
+### Add server-side memory
+
+The base example sends the full history with every POST — the server
+is stateless. For a Redis-backed memory chain that survives reloads,
+see the [Redis-memory chat example](./chat-memory.mdx).
+
+### Tool calls
+
+To let the model call tools (weather lookup, calculator, function
+calling), use [`@blokjs/llm-agent`](./llm-agent.mdx) instead of
+`llm-stream` — same SSE pattern, plus `tool_call` and `tool_result`
+events.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Redis-memory chat" icon="database" href="/d/examples/chat-memory">
+    Conversation history persisted server-side.
+  </Card>
+  <Card title="LLM agent" icon="bot" href="/d/examples/llm-agent">
+    Tool-calling agent on the same SSE bus.
+  </Card>
+  <Card title="@blokjs/llm-stream" icon="cpu" href="/d/reference/helpers/llm-stream">
+    Helper-node reference.
+  </Card>
+</Columns>

@@ -1,0 +1,360 @@
+---
+title: "Webhook router (Stripe + GitHub + Linear)"
+description: "Provider-signed webhook receivers with HMAC verification + polymorphic sub-workflow dispatch. The custom-signature config covers any HMAC-signed provider."
+icon: "webhook"
+---
+
+Three production-shaped webhook receivers in one demo:
+
+- **Stripe** — built-in `provider: "stripe"` verifier + polymorphic
+  dispatch via `subworkflow: $.req.body.type` (no switch step needed)
+- **GitHub** — built-in `provider: "github"` verifier + a switch step
+  that routes per-event-type sub-workflows, grouping related events
+  with array `when`
+- **Linear** — custom HMAC config since Linear isn't a built-in. Same
+  shape works for **any** HMAC-signed webhook (Discord, Mailgun,
+  Twitch, etc.)
+
+Shipped under `--examples` since v0.6.10. The webhook trigger mounts
+on the HTTP server, so all routes live on a single port.
+
+## Prerequisites
+
+- A Blok project with **HTTP + webhook** triggers
+- Webhook signing secrets for the providers you want to handle
+- Node.js v22 or later
+
+## Scaffold
+
+```bash
+npx -y -p blokctl@latest blokctl create project \
+  --name webhooks \
+  --triggers http,webhook \
+  --runtimes node \
+  --examples
+cd webhooks
+```
+
+Open `.env.local` and set the secrets for the providers you actually
+use — leave the others empty and those endpoints will return 401 until
+configured:
+
+```bash
+STRIPE_WEBHOOK_SECRET=whsec_<from Stripe dashboard>
+GITHUB_WEBHOOK_SECRET=<from repo Settings → Webhooks>
+LINEAR_WEBHOOK_SECRET=<from Linear API → Webhooks>
+```
+
+Boot:
+
+```bash
+bun run dev
+```
+
+The trigger registers three signed routes:
+
+```
+POST /webhooks/stripe    ← webhook-stripe   (stripe verifier)
+POST /webhooks/github    ← webhook-github   (github verifier)
+POST /webhooks/linear    ← webhook-linear   (custom HMAC verifier)
+```
+
+Plus the per-event handler workflows under `/webhook-handlers/*`.
+
+## Sign + send (real curl)
+
+A Stripe-signed roundtrip from your terminal:
+
+```bash
+BODY='{"id":"evt_demo","type":"invoice.paid","data":{"object":{"id":"in_demo","amount_paid":4200,"customer":"cus_demo"}}}'
+TS=$(date +%s)
+SIG=$(printf '%s' "$TS.$BODY" \
+  | openssl dgst -sha256 -hmac "$STRIPE_WEBHOOK_SECRET" -hex | awk '{print $NF}')
+
+curl -X POST http://localhost:4000/webhooks/stripe \
+  -H "Stripe-Signature: t=$TS,v1=$SIG" \
+  -H "Content-Type: application/json" \
+  --data-binary "$BODY"
+```
+
+```json
+{
+  "status": "ok",
+  "eventId": "evt_demo",
+  "eventType": "invoice.paid",
+  "runId": "...",
+  "response": {
+    "data": {
+      "handler": "stripe.invoice.paid",
+      "invoiceId": "in_demo",
+      "amountPaid": 4200,
+      "customer": "cus_demo"
+    }
+  }
+}
+```
+
+The trigger verified the signature, looked up `body.type` (= `"invoice.paid"`),
+prepended the namespace (`stripe.`), and dispatched to the
+`stripe.invoice.paid` sub-workflow. Zero switch boilerplate.
+
+## Stripe — polymorphic dispatch
+
+```json workflows/json/webhook-stripe.json
+{
+  "name": "webhook-stripe",
+  "version": "1.0.0",
+  "trigger": {
+    "webhook": {
+      "provider": "stripe",
+      "path": "/webhooks/stripe",
+      "secretEnv": "STRIPE_WEBHOOK_SECRET",
+      "tolerance": 300,
+      "namespace": "stripe",
+      "idempotencyKey": "js/ctx.request.body.id"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "subworkflow": "js/ctx.request.body.type",
+      "inputs": { "stripeEvent": "js/ctx.request.body" }
+    }
+  ]
+}
+```
+
+The headline: **one step** handles every Stripe event type. The
+`subworkflow` field is a `js/` expression that resolves against the
+verified body. After the trigger's `namespace: "stripe"` prefix, a
+`body.type === "invoice.paid"` event lands on the workflow named
+`stripe.invoice.paid`.
+
+| Trigger field | Effect |
+|---|---|
+| `provider: "stripe"` | Built-in Stripe-Signature HMAC verifier (5-minute drift tolerance). |
+| `secretEnv` | Name of the env var holding the signing secret. |
+| `tolerance` | Drift window in seconds. |
+| `namespace: "stripe"` | Prefix applied to the resolved sub-workflow name. |
+| `idempotencyKey: "js/ctx.request.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
+
+To handle a new event type, add a workflow with the matching name —
+no router update needed:
+
+```json workflows/json/webhook-stripe-customer-created.json
+{
+  "name": "stripe.customer.created",
+  "trigger": {
+    "http": { "method": "POST", "path": "/webhook-handlers/stripe.customer.created" }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ handler: 'stripe.customer.created', customerId: ctx.request.body?.stripeEvent?.data?.object?.id })"
+      }
+    }
+  ]
+}
+```
+
+Unhandled `body.type` values dispatch to a sub-workflow that doesn't
+exist and the trigger returns 200 with a structured "no handler" body
+— GitHub-style retry-storm protection.
+
+## GitHub — switch with array `when`
+
+```json workflows/json/webhook-github.json
+{
+  "name": "webhook-github",
+  "version": "1.0.0",
+  "trigger": {
+    "webhook": {
+      "provider": "github",
+      "path": "/webhooks/github",
+      "secretEnv": "GITHUB_WEBHOOK_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "id": "route-by-event",
+      "switch": {
+        "on": "js/(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
+        "cases": [
+          {
+            "when": "push",
+            "do": [{ "id": "dispatch-push", "subworkflow": "webhook-github-push", "inputs": {} }]
+          },
+          {
+            "when": ["pull_request", "pull_request_review", "pull_request_review_comment"],
+            "do": [{ "id": "dispatch-pr", "subworkflow": "webhook-github-pr", "inputs": {} }]
+          },
+          {
+            "when": ["issues", "issue_comment"],
+            "do": [{ "id": "dispatch-issues", "subworkflow": "webhook-github-issues", "inputs": {} }]
+          }
+        ],
+        "default": [
+          {
+            "id": "log-unknown",
+            "use": "@blokjs/log",
+            "inputs": {
+              "level": "warn",
+              "message": "js/`webhook-github: unknown event '${ctx.request.headers['x-github-event']}'`"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+GitHub's many event types group naturally — `issues` and
+`issue_comment` belong together, the four `pull_request*` events too.
+A switch case with **array `when`** matches any value in the list,
+keeping the case list short and intent visible.
+
+## Linear — custom signature config
+
+Linear isn't a built-in provider. The webhook trigger's `signature`
+config lets you describe any HMAC scheme without writing code:
+
+```json workflows/json/webhook-linear.json
+{
+  "name": "webhook-linear",
+  "version": "1.0.0",
+  "trigger": {
+    "webhook": {
+      "path": "/webhooks/linear",
+      "signature": {
+        "scheme": "hmac-sha256",
+        "header": "Linear-Signature",
+        "format": "{hex}",
+        "secretEnv": "LINEAR_WEBHOOK_SECRET",
+        "tolerance": 0
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "route-by-type",
+      "switch": {
+        "on": "js/(ctx.request.body.type || 'unknown').toLowerCase()",
+        "cases": [
+          { "when": "issue", "do": [{ "id": "dispatch-issue", "subworkflow": "webhook-linear-issue", "inputs": {} }] },
+          { "when": "comment", "do": [{ "id": "dispatch-comment", "subworkflow": "webhook-linear-comment", "inputs": {} }] }
+        ],
+        "default": [
+          { "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "..." } }
+        ]
+      }
+    }
+  ]
+}
+```
+
+| Field | What to set |
+|---|---|
+| `scheme` | `hmac-sha256` \| `hmac-sha1` \| `hmac-sha512` |
+| `header` | Header name carrying the signature. |
+| `format` | Template — use `{hex}` or `{base64}` to control encoding. Linear sends raw hex. |
+| `secretEnv` | Env var holding the shared secret. |
+| `tolerance` | Drift window in seconds (0 = no timestamp expected). |
+| `timestampHeader` | Optional — if the provider includes a separate timestamp header, the signed string becomes `<timestamp>.<rawBody>`. Stripe/Slack/Svix use this; Linear doesn't. |
+
+This same pattern handles Discord, Mailgun, Twitch, custom internal
+webhooks — anywhere a partner POSTs an HMAC-signed body.
+
+## Handler sub-workflows
+
+Each handler is a regular HTTP workflow. The router passes the verified
+event through `inputs`, which lands as the child's `ctx.request.body`:
+
+```json workflows/json/webhook-stripe-invoice-paid.json
+{
+  "name": "stripe.invoice.paid",
+  "trigger": {
+    "http": { "method": "POST", "path": "/webhook-handlers/stripe.invoice.paid" }
+  },
+  "steps": [
+    {
+      "id": "log",
+      "use": "@blokjs/log",
+      "ephemeral": true,
+      "inputs": {
+        "level": "info",
+        "message": "js/`stripe.invoice.paid: invoice=${ctx.request.body?.stripeEvent?.data?.object?.id} amount=${ctx.request.body?.stripeEvent?.data?.object?.amount_paid}`"
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ handler: 'stripe.invoice.paid', invoiceId: ctx.request.body?.stripeEvent?.data?.object?.id, amountPaid: ctx.request.body?.stripeEvent?.data?.object?.amount_paid })"
+      }
+    }
+  ]
+}
+```
+
+Real handlers do whatever the event implies — record the payment, send
+a receipt, kick off fulfillment. The demo handlers just log + return a
+structured summary so the test smoke is observable.
+
+## Customize
+
+### Add a new Stripe event
+
+Add a workflow named `stripe.<event-type>`. No router change needed.
+Stripe currently emits 100+ event types — start with the ones you
+actually care about.
+
+### Use `subworkflow.allowList` for safety
+
+Polymorphic dispatch with `subworkflow: $.req.body.type` accepts
+anything the body says. To bound which names a malicious payload can
+resolve to:
+
+```json
+{
+  "id": "dispatch",
+  "subworkflow": "js/ctx.request.body.type",
+  "allowList": ["invoice.paid", "customer.created", "charge.succeeded"],
+  "inputs": { "stripeEvent": "js/ctx.request.body" }
+}
+```
+
+Resolved names not in the allowList are rejected at run time. See
+[sub-workflows](/d/composition/sub-workflows#polymorphic-dispatch).
+
+### Drop verification (don't)
+
+The trigger refuses to start without a configured secret. If you
+absolutely need to test against unsigned requests, build a separate
+HTTP-trigger workflow at a different path — but don't ship that to
+production.
+
+### Replay protection
+
+The Stripe receiver sets `idempotencyKey: $.req.body.id` so retries on
+the same `evt_*` id short-circuit with a `{"status": "duplicate"}`
+response. The cache lives for 5 minutes by default. GitHub doesn't
+need this because the trigger verifier dedups by `X-GitHub-Delivery`
+naturally — but you can add `idempotencyKey: $.req.headers["x-github-delivery"]`
+for extra safety.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Worker fan-out" icon="layers" href="/d/examples/worker-fanout">
+    Async job dispatch with per-tenant concurrency.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Including polymorphic dispatch + allowList.
+  </Card>
+  <Card title="@blokjs/hmac-verify" icon="shield" href="/d/reference/helpers/hmac-verify">
+    DIY HMAC inside a regular HTTP workflow.
+  </Card>
+</Columns>

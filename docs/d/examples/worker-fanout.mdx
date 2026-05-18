@@ -1,0 +1,309 @@
+---
+title: "Worker fan-out with NATS"
+description: "POST a list of items, parallel-enqueue N worker jobs, consume them with per-tenant concurrency + per-job idempotency."
+icon: "layers"
+---
+
+A producer/consumer pattern using the worker trigger and an HTTP
+producer in the same project:
+
+- **Producer** (`POST /fanout/jobs`) — parallel `forEach` over a batch
+  of items, each iteration enqueues via `@blokjs/worker-publish` with
+  adapter-level dedup.
+- **Consumer** (worker trigger on queue `fanout-jobs`) — `concurrencyKey`
+  on the trigger for per-tenant fairness, `idempotencyKey` on the
+  process step for replay protection, `retry` for transient failures.
+
+Shipped under `--examples` since v0.6.10. Defaults to the in-memory
+adapter so it runs single-process out of the box; flip to NATS / Redis
+/ BullMQ for cross-process production deployments.
+
+## Prerequisites
+
+- A Blok project with **HTTP + worker** triggers
+- A reachable broker (the demo uses NATS; in-memory works for
+  single-process dev with no broker)
+- Node.js v22 or later
+
+## Scaffold
+
+```bash
+npx -y -p blokctl@latest blokctl create project \
+  --name fanoutapp \
+  --triggers http,worker \
+  --queue-provider nats \
+  --runtimes node \
+  --examples
+cd fanoutapp
+```
+
+Start NATS:
+
+```bash
+docker run --rm -d -p 4222:4222 nats:2.10-alpine -js
+```
+
+Set `.env.local`:
+
+```bash
+BLOK_WORKER_ADAPTER=nats
+NATS_SERVERS=nats://127.0.0.1:4222
+```
+
+Boot:
+
+```bash
+bun run dev
+```
+
+The orchestrator spawns two processes: the HTTP trigger and the worker
+trigger. The HTTP trigger registers `POST /fanout/jobs`; the worker
+subscribes to the `fanout-jobs` queue.
+
+## Enqueue a batch
+
+```bash
+curl -X POST http://localhost:4000/fanout/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "acme",
+    "items": [
+      {"id": "order-001"},
+      {"id": "order-002"},
+      {"id": "order-003"}
+    ]
+  }'
+```
+
+```json
+{
+  "ok": true,
+  "queued": 3,
+  "tenantId": "acme",
+  "jobIds": ["acme:order-001", "acme:order-002", "acme:order-003"]
+}
+```
+
+The HTTP request returns as soon as all three publishes ack — fast,
+since the producer doesn't wait for processing. The worker consumes
+each job asynchronously. Open Studio at `/__blok/runs` to watch the
+worker traces fire as items complete.
+
+## The producer
+
+```json workflows/json/fanout-enqueue.json
+{
+  "name": "fanout-enqueue",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "POST", "path": "/fanout/jobs", "accept": "application/json" }
+  },
+  "steps": [
+    {
+      "id": "fan-out",
+      "forEach": {
+        "in": "js/Array.isArray(ctx.request.body.items) ? ctx.request.body.items : []",
+        "as": "item",
+        "mode": "parallel",
+        "concurrency": 5,
+        "do": [
+          {
+            "id": "enqueue",
+            "use": "@blokjs/worker-publish",
+            "inputs": {
+              "queue": "fanout-jobs",
+              "payload": {
+                "item": "js/ctx.state.item",
+                "index": "js/ctx.state.itemIndex",
+                "tenantId": "js/ctx.request.body.tenantId || 'default'",
+                "enqueuedAt": "js/Date.now()"
+              },
+              "dedupId": "js/`${ctx.request.body.tenantId || 'default'}:${ctx.state.item && ctx.state.item.id ? ctx.state.item.id : ctx.state.itemIndex}`"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ ok: true, queued: (ctx.state['fan-out'] || []).length, tenantId: ctx.request.body.tenantId || 'default', jobIds: (ctx.state['fan-out'] || []).map(r => r && r.data && r.data.jobId).filter(Boolean) })"
+      }
+    }
+  ]
+}
+```
+
+Three things to notice:
+
+| Pattern | What it gives you |
+|---|---|
+| `forEach { mode: "parallel", concurrency: 5 }` | 1000 items don't serialize 1000 RPCs. Five publishes run concurrently, the next batch starts when one finishes. |
+| `dedupId: <tenantId>:<itemId>` | Adapter-level dedup. Stripe-style retries that re-submit the same batch are no-ops (BullMQ jobId / NATS Nats-Msg-Id / SQS MessageDeduplicationId — same semantics across adapters). |
+| `payload` carries `tenantId` | The consumer's `concurrencyKey` reads this on each delivery, so per-tenant fairness kicks in. |
+
+## The consumer
+
+```json workflows/json/fanout-worker.json
+{
+  "name": "fanout-worker",
+  "version": "1.0.0",
+  "trigger": {
+    "worker": {
+      "queue": "fanout-jobs",
+      "concurrency": 10,
+      "concurrencyKey": "js/ctx.request.body.tenantId || 'default'",
+      "concurrencyLimit": 3
+    }
+  },
+  "steps": [
+    {
+      "id": "process-item",
+      "use": "@blokjs/audit-log",
+      "idempotencyKey": "js/ctx.request.params.jobId",
+      "retry": { "maxAttempts": 3, "minTimeoutInMs": 500 },
+      "inputs": {
+        "event": "fanout-job-processed",
+        "attrs": {
+          "jobId": "js/ctx.request.params.jobId",
+          "queue": "js/ctx.request.params.queue",
+          "attempt": "js/ctx.request.params.attempt",
+          "tenantId": "js/ctx.request.body.tenantId",
+          "itemIndex": "js/ctx.request.body.index",
+          "item": "js/ctx.request.body.item"
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ jobId: ctx.request.params.jobId, tenantId: ctx.request.body.tenantId || 'default', itemIndex: ctx.request.body.index, processedAt: Date.now() })"
+      }
+    }
+  ]
+}
+```
+
+Three reliability primitives stacked together:
+
+<Steps>
+  <Step title="concurrencyKey + concurrencyLimit on the trigger">
+    Caps in-flight processing to 3 jobs **per tenant**. A noisy tenant
+    that floods 10,000 items can't starve other tenants — additional
+    deliveries NACK with a Retry-After. See
+    [concurrency keys](/d/reliability/concurrency-keys).
+  </Step>
+  <Step title="idempotencyKey on the process step">
+    Retry attempts on the same `jobId` hit the cache, never the side
+    effect. Safe to use on a step that writes to a database, sends an
+    email, charges a payment method — but read
+    [the warning](/d/reliability/idempotency#when-not-to-cache) first.
+  </Step>
+  <Step title="retry on the process step">
+    Transient failures (network blip, broker hiccup) get three attempts
+    with exponential backoff. Permanent failures (4xx, validation errors)
+    fail fast — `retry` only kicks in when the step throws. See
+    [per-step retry](/d/reliability/retry).
+  </Step>
+</Steps>
+
+## Worker ctx layout
+
+The worker trigger maps the broker delivery into a familiar `ctx`
+shape:
+
+| Field | What it is |
+|---|---|
+| `ctx.request.body` | The payload — exactly what `@blokjs/worker-publish` sent. |
+| `ctx.request.params.queue` | Queue / topic / stream name. |
+| `ctx.request.params.jobId` | Unique job id (adapter-specific format). |
+| `ctx.request.params.attempt` | 0-based retry counter. The adapter increments this on redelivery. |
+| `ctx.vars._worker_job` | Full job metadata for the adapter (headers, priorities, deadlines). |
+
+So a worker workflow looks structurally identical to an HTTP workflow,
+just with a different trigger config.
+
+## Customize
+
+### Different adapter
+
+The demo defaults to NATS via the scaffold's `--queue-provider nats`.
+The producer + consumer both read `BLOK_WORKER_ADAPTER` from env, so
+switching brokers is one env var:
+
+```bash
+# In-memory (single-process dev, no broker)
+BLOK_WORKER_ADAPTER=in-memory
+
+# BullMQ on Redis
+BLOK_WORKER_ADAPTER=bullmq
+REDIS_URL=redis://127.0.0.1:6379
+
+# AWS SQS
+BLOK_WORKER_ADAPTER=sqs
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/...
+
+# Kafka
+BLOK_WORKER_ADAPTER=kafka
+KAFKA_BROKERS=kafka-1:9092,kafka-2:9092
+```
+
+The `@blokjs/worker-publish` and worker trigger share a single adapter
+pool keyed on `(provider, connection-config)`, so producer and consumer
+share one connection per process.
+
+### Per-tenant rate-limit
+
+If concurrency caps aren't enough, layer on
+[delay](/d/scheduling/delay-and-ttl) or
+[debounce](/d/scheduling/debounce) at the trigger level:
+
+```json
+"trigger": {
+  "worker": {
+    "queue": "fanout-jobs",
+    "concurrencyKey": "js/ctx.request.body.tenantId",
+    "concurrencyLimit": 3,
+    "debounce": {
+      "key": "js/ctx.request.body.tenantId",
+      "mode": "trailing",
+      "delay": "100ms"
+    }
+  }
+}
+```
+
+### Dead-letter handling
+
+The worker adapter retries up to `retries: N` automatically. On the
+final failed attempt, jobs land in the broker's DLQ (BullMQ failed
+jobs, NATS stream DLQ, SQS dead-letter queue) — configure those on the
+broker side; the framework hands the message off and exits cleanly.
+
+### Different fan-out shape
+
+The demo enqueues one job per item. Other shapes work too:
+
+- **Sharded** — split a large list into N chunks, enqueue N jobs each
+  carrying a chunk
+- **Pipeline** — enqueue → worker A → enqueue (`worker-publish` again)
+  → worker B
+- **Saga** — enqueue → worker → on failure, enqueue compensating job
+
+All composable with the same primitives.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Concurrency keys" icon="gauge" href="/d/reliability/concurrency-keys">
+    Per-tenant fairness on any trigger.
+  </Card>
+  <Card title="Idempotency" icon="database" href="/d/reliability/idempotency">
+    Replay-safe steps.
+  </Card>
+  <Card title="@blokjs/worker-publish" icon="send" href="/d/reference/helpers/worker-publish">
+    Producer-side helper reference.
+  </Card>
+</Columns>
