@@ -1,0 +1,238 @@
+---
+title: "Middleware system"
+description: "Workflows-as-middleware. Trigger-level chains for auth, rate-limit, audit; process-global chains for cross-cutting concerns."
+icon: "layers"
+---
+
+Blok middleware is just a regular workflow with a special marker.
+Multiple middleware workflows can chain on a trigger to handle
+cross-cutting concerns (auth, rate-limit, audit, request-id) before
+the main workflow runs.
+
+Three resolution layers, outer → inner:
+
+1. **Process-global** — applies to EVERY workflow run in the process
+2. **Workflow-level** — declared in the workflow's `middleware:` field
+3. **Trigger-level** — declared in the trigger config
+
+Each layer runs in declaration order, and shares one `ctx` with the
+main workflow.
+
+## Quickstart
+
+### A middleware workflow
+
+```json workflows/json/auth-check.json
+{
+  "name": "auth-check",
+  "_middleware": true,
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "verify",
+      "use": "@blokjs/jwt-verify",
+      "inputs": {
+        "token": "js/ctx.request.headers['authorization']?.slice(7)",
+        "secret": "js/process.env.JWT_SECRET",
+        "issuer": "https://auth.example.com",
+        "audience": "my-api"
+      }
+    },
+    {
+      "id": "stash-identity",
+      "use": "@blokjs/ctx-publish",
+      "inputs": {
+        "name": "identity",
+        "value": "js/({ userId: ctx.state.verify.subject, claims: ctx.state.verify.claims })"
+      }
+    }
+  ]
+}
+```
+
+The `_middleware: true` flag marks this workflow as middleware-only —
+it's never reachable as a direct HTTP route.
+
+### Use it from a trigger
+
+```json
+{
+  "name": "Protected Endpoint",
+  "trigger": {
+    "http": {
+      "method": "GET",
+      "path": "/protected",
+      "middleware": ["auth-check", "rate-limit"]
+    }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": { "expression": "({ ok: true, userId: ctx.state.identity.userId })" }
+    }
+  ]
+}
+```
+
+`auth-check` runs first. If it throws (missing/invalid token), the
+trigger returns 401 and the main workflow never runs. `rate-limit`
+runs after, also shares `ctx`. The main workflow sees
+`ctx.state.identity.userId` populated.
+
+## Resolution order
+
+```
+                                        Process
+   ┌────────────────────────────────────────────────────────────┐
+   │  BLOK_GLOBAL_MIDDLEWARE / setGlobalMiddleware              │
+   │  ┌──────────────────────────────────────────────────────┐  │
+   │  │  request-id  →  audit-log                            │  │
+   │  └──────────────────────┬───────────────────────────────┘  │
+   │                          │                                  │
+   │                          ▼ Workflow                         │
+   │  ┌──────────────────────────────────────────────────────┐  │
+   │  │  workflow.middleware: ["tenant-resolve"]             │  │
+   │  └──────────────────────┬───────────────────────────────┘  │
+   │                          │                                  │
+   │                          ▼ Trigger                          │
+   │  ┌──────────────────────────────────────────────────────┐  │
+   │  │  trigger.http.middleware: ["auth-check","rate-limit"] │  │
+   │  └──────────────────────┬───────────────────────────────┘  │
+   │                          │                                  │
+   │                          ▼                                  │
+   │                Main workflow steps                          │
+   └────────────────────────────────────────────────────────────┘
+```
+
+Outer chains run first. The shared `ctx` accumulates state across all
+layers — middleware that stashes `ctx.state.identity` is visible to
+every downstream layer + the main workflow.
+
+## Process-global middleware (v0.5.4+)
+
+For ops concerns that should wrap every workflow without per-file
+changes:
+
+### Programmatic
+
+```typescript
+import { WorkflowRegistry } from "@blokjs/runner";
+
+WorkflowRegistry.getInstance().setGlobalMiddleware([
+  "request-id",
+  "audit-log",
+]);
+```
+
+### Env var fallback
+
+```bash
+BLOK_GLOBAL_MIDDLEWARE=request-id,audit-log
+```
+
+### Semantics
+
+- **Frozen snapshot.** The setter accepts repeated calls (last-wins).
+  Empty array clears.
+- **Survives HMR.** `WorkflowRegistry.clear()` (re-scan) does NOT reset
+  the global chain — operator state survives workflow reloads.
+- **Outer-most.** Always runs first, before workflow-level and trigger-
+  level middleware.
+- **Per-process.** Each Node process has its own snapshot. Set the env
+  var (or programmatic call) in each trigger entry file so the chain
+  applies uniformly across HTTP / Worker / Cron processes.
+
+## Middleware patterns
+
+### Auth + rate-limit
+
+The canonical pair. See `v05-protected.json` in the repo for the worked
+example. Auth-check stashes `ctx.state.identity.token` so rate-limit's
+per-user bucket key is keyed on the authenticated user.
+
+### Request-id propagation
+
+```json workflows/json/middleware/request-id.json
+{
+  "name": "request-id",
+  "_middleware": true,
+  "steps": [
+    {
+      "id": "set-id",
+      "use": "@blokjs/ctx-publish",
+      "inputs": {
+        "name": "requestId",
+        "value": "js/ctx.request.headers['x-request-id'] || crypto.randomUUID()"
+      }
+    }
+  ]
+}
+```
+
+Every downstream step reads `ctx.state.requestId` for log correlation.
+
+### Audit log
+
+```json workflows/json/middleware/audit-log-middleware.json
+{
+  "name": "audit-log-middleware",
+  "_middleware": true,
+  "steps": [
+    {
+      "id": "audit",
+      "use": "@blokjs/audit-log",
+      "ephemeral": true,
+      "inputs": {
+        "event": "request",
+        "attrs": {
+          "method": "js/ctx.request.method",
+          "path": "js/ctx.request.path",
+          "userId": "js/ctx.state.identity?.userId"
+        }
+      }
+    }
+  ]
+}
+```
+
+## Worker + Cron middleware (v0.6+)
+
+Trigger-level middleware works on **every trigger kind**, not just HTTP.
+Useful for worker queues that need auth-style checks on job payloads,
+or cron triggers that need per-tenant context resolution.
+
+```json
+"trigger": {
+  "worker": {
+    "queue": "background-jobs",
+    "middleware": ["tenant-resolve", "audit-log-middleware"]
+  }
+}
+```
+
+The worker trigger runs the middleware chain on each job delivery
+before the main steps.
+
+## Composition
+
+- Middleware steps follow the same v2 step rules — `idempotencyKey`,
+  `retry`, `tryCatch`, sub-workflows all work
+- A middleware that throws short-circuits the chain (trigger returns
+  the structured error per its kind)
+- The trigger's main workflow can read state stashed by middleware
+  via `ctx.state.<name>`
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/jwt-verify" icon="key" href="/d/reference/helpers/jwt-verify">
+    Auth-check middleware staple.
+  </Card>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="/d/reference/helpers/ctx-publish">
+    Stash middleware state.
+  </Card>
+  <Card title="@blokjs/audit-log" icon="file-clock" href="/d/reference/helpers/audit-log">
+    Audit-trail middleware.
+  </Card>
+</Columns>

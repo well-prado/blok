@@ -114,6 +114,8 @@
 							"d/reference/v2-step-shapes",
 							"d/reference/trace-storage",
 							"d/reference/workflow-registry",
+							"d/reference/mapper",
+							"d/reference/middleware",
 							{
 								"group": "Helper nodes",
 								"pages": [

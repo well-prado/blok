@@ -572,17 +572,92 @@ Resolution failure modes:
 - Resolved name not registered → standard "Sub-workflow not found"
   error, listing the registered workflows.
 
+## Cross-process dispatch (`dispatch: "http-self"`)
+
+Sub-workflows accept a `dispatch:` field that picks the execution
+strategy. Default is `"in-process"`; switch to `"http-self"` to
+dispatch the child as a fresh HTTP request to the deployment's own
+base URL.
+
+```ts
+{
+  id: "send-receipt",
+  subworkflow: "send-receipt-email",
+  inputs: { user: $.state.user, order: $.state.order },
+  dispatch: "http-self",
+}
+```
+
+| `dispatch:` value | What happens |
+|---|---|
+| `"in-process"` (default) | Child runs in the SAME Node process. Synchronous (`wait: true`) or `setImmediate` (`wait: false`). Cheapest, no extra hops. |
+| `"http-self"` | Child is dispatched as a fresh HTTP request to `BLOK_SELF_BASE_URL` (defaults to `http://localhost:${PORT || 4000}`). Each child can land on a different process in a horizontally-scaled deployment. |
+
+### Requirements
+
+- Child workflow MUST have an HTTP trigger (`trigger.http.path` set).
+  A runtime error throws otherwise.
+- Request URL: `${BLOK_SELF_BASE_URL}${child.trigger.http.path}`.
+- Request method: `child.trigger.http.method` (default POST).
+- Request body: parent step's resolved `inputs` (post-mapper).
+- `BLOK_SELF_BASE_URL` must point at the deployment's reachable
+  hostname — for Docker / Kubernetes, set to the service DNS name
+  (e.g. `http://blok-svc:4000`).
+
+### Lineage across the HTTP boundary
+
+Three headers carry parent → child lineage so Studio renders the
+sub-run strip correctly:
+
+| Header | Value |
+|---|---|
+| `X-Blok-Parent-Run-Id` | Parent's run id. |
+| `X-Blok-Parent-Node-Run-Id` | The specific NodeRun (the sub-workflow step). |
+| `X-Blok-Subworkflow-Depth` | Recursion depth. Bounded by `BLOK_MAX_SUBWORKFLOW_DEPTH`. |
+
+`TriggerBase.run` reads the headers when the request lands + threads
+them into `tracker.startRun(...)`.
+
+### Wait modes with `http-self`
+
+- **`wait: true`** awaits the HTTP response (non-2xx → throw,
+  propagating to the parent step's `retry` loop if configured).
+- **`wait: false`** fires-and-forgets the fetch (`.catch + console.error`).
+  Parent gets back `{runId: null, workflowName, scheduledAt, dispatch:
+  "http-self", url}` — the actual child runId isn't known on the
+  parent side; the receiver creates the run record when the request
+  lands. Studio's Sub-runs strip surfaces the child once it appears.
+
+### Trade-offs vs. in-process
+
+- HTTP roundtrip adds latency (~few ms locally, more across the
+  network).
+- The deployment must be reachable at `BLOK_SELF_BASE_URL` from the
+  dispatching process.
+- Idempotency caching still wraps the WHOLE dispatch — a cache hit
+  short-circuits the HTTP call too.
+
+When to use:
+
+- **Single process** — stick with `"in-process"`. No reason to pay the
+  HTTP cost.
+- **Multi-process deployment + strict isolation per child** —
+  `"http-self"`. Children can land on different processes; the parent's
+  call stack doesn't block on child resources.
+- **Async backpressure** — `wait: false` + `http-self` decouples the
+  parent from child throughput entirely.
+
 ## What's not yet supported
 
-- **Cross-process dispatch.** The current implementation is in-process
-  for both wait modes — `wait: false` uses `setImmediate`, not a queue
-  or HTTP self-call. Horizontal-scale users with strict isolation
-  needs are tracked as a follow-up.
 - **Cancellation cascade to fire-and-forget children.** Cancelling
   the parent does NOT propagate to `wait: false` children (the
   parent step has already returned by the time the child runs). Cancel
   async children directly via their own `runId` —
   [`POST /__blok/runs/:childId/cancel`](/d/reliability/cancellation).
+- **Cross-process latest-payload-wins for `wait: false` http-self.**
+  Today the parent's resolved inputs are serialized as the body once;
+  if the parent re-runs (replay), the body comes from the new run's
+  inputs.
 
 <Tip>
 A visual workflow editor (React Flow, like n8n) is on the roadmap for
