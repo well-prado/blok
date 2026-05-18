@@ -1,0 +1,210 @@
+---
+title: "Cron trigger"
+description: "Time-based scheduled workflows. Runs in its own process; durable schedules survive restarts."
+icon: "clock"
+---
+
+The cron trigger runs a workflow on a schedule expressed in standard
+cron syntax. Each workflow registers one schedule; the trigger process
+fires the workflow at every match.
+
+## Quickstart
+
+```json workflows/json/daily-cleanup.json
+{
+  "name": "Daily Cleanup",
+  "version": "1.0.0",
+  "trigger": {
+    "cron": {
+      "schedule": "0 2 * * *",
+      "timezone": "America/New_York"
+    }
+  },
+  "steps": [
+    {
+      "id": "purge-stale",
+      "use": "@blokjs/api-call",
+      "inputs": {
+        "url": "https://api.example.com/cleanup",
+        "method": "POST"
+      }
+    }
+  ]
+}
+```
+
+This fires at 2:00 AM every day in `America/New_York`.
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `schedule` | `string` | required | Standard cron expression (`m h dom mon dow`). |
+| `timezone` | `string` | `"UTC"` | IANA timezone — `"America/New_York"`, `"Europe/London"`, etc. |
+| `concurrencyKey` | `string` \| `$.path` | — | Useful when one schedule fans out per-tenant; concurrencyKey prevents overlap. |
+| `middleware` | `string[]` | `[]` | Per-trigger middleware. |
+
+## Cron expression reference
+
+```
+ ┌───── minute  (0 - 59)
+ │ ┌─── hour    (0 - 23)
+ │ │ ┌─ day of month  (1 - 31)
+ │ │ │ ┌─ month  (1 - 12 or JAN-DEC)
+ │ │ │ │ ┌─ day of week  (0 - 6 or SUN-SAT)
+ │ │ │ │ │
+ 0 2 * * *     # 02:00 every day
+*/5 * * * *    # every 5 minutes
+ 0 0 * * 1     # midnight every Monday
+ 0 9 1 * *     # 09:00 on the 1st of each month
+```
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | `{}` (cron has no payload by default) |
+| `ctx.request.params.schedule` | The configured cron expression |
+| `ctx.request.params.firedAt` | ISO timestamp of the scheduled fire time |
+| `ctx.vars._cron_invocation` | `{schedule, firedAt, executionId}` |
+
+You can stash per-schedule context in `ctx.request.body` by setting
+default inputs in the workflow:
+
+```json
+"steps": [
+  {
+    "id": "build-ctx",
+    "use": "@blokjs/expr",
+    "inputs": {
+      "expression": "({ batchSize: 100, dryRun: false })"
+    }
+  },
+  // ... use ctx.state['build-ctx'] in subsequent steps
+]
+```
+
+## Process model
+
+Cron triggers run in a dedicated Node process — `blokctl dev` spawns
+one when any workflow has a `trigger.cron` config. The process polls
+the schedule on a sub-second tick and dispatches when a match fires.
+
+Schedule durability is broker-agnostic — the trigger doesn't persist
+"missed" executions across restarts by default. For exactly-once
+historical replay, layer a [delay/TTL](/d/scheduling/delay-and-ttl) on
+the workflow steps or use a job queue with a [cron-style scheduler
+extension](https://docs.bullmq.io/guide/jobs/repeatable) like
+BullMQ-Repeatable.
+
+## Common patterns
+
+### Daily report → Slack
+
+```json
+{
+  "name": "Daily Metrics Digest",
+  "trigger": { "cron": { "schedule": "0 9 * * 1-5", "timezone": "America/Los_Angeles" } },
+  "steps": [
+    { "id": "fetch-metrics", "use": "@blokjs/api-call", "inputs": { "url": "..." } },
+    {
+      "id": "summarize",
+      "use": "@blokjs/llm-stream",
+      "inputs": { "model": "gpt-4o-mini", "messages": "...", "channel": "internal-summary" }
+    },
+    {
+      "id": "post-slack",
+      "use": "@blokjs/api-call",
+      "inputs": {
+        "url": "js/process.env.SLACK_WEBHOOK_URL",
+        "method": "POST",
+        "body": "js/({ text: ctx.state.summarize.fullText })"
+      }
+    }
+  ]
+}
+```
+
+09:00 every weekday, summarize yesterday's metrics with an LLM, post
+to Slack.
+
+### Per-tenant nightly job (sub-workflow fan-out)
+
+```json
+{
+  "name": "Nightly Per-Tenant Backup",
+  "trigger": { "cron": { "schedule": "0 0 * * *" } },
+  "steps": [
+    {
+      "id": "list-tenants",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": "https://internal/tenants" }
+    },
+    {
+      "id": "fan-out",
+      "forEach": {
+        "in": "js/ctx.state['list-tenants'].data",
+        "as": "tenant",
+        "mode": "parallel",
+        "concurrency": 5,
+        "do": [
+          {
+            "id": "backup",
+            "subworkflow": "backup-tenant",
+            "inputs": { "tenantId": "js/ctx.state.tenant.id" }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+The cron fires once; the `forEach` fans out to one
+[sub-workflow](/d/composition/sub-workflows) per tenant, 5 in parallel.
+
+### Skipping overlapping runs
+
+If a cron run takes longer than the schedule interval, the next tick
+fires while the previous is still running. Use `concurrencyKey` to
+serialize:
+
+```json
+"trigger": {
+  "cron": {
+    "schedule": "*/5 * * * *",
+    "concurrencyKey": "self",
+    "concurrencyLimit": 1
+  }
+}
+```
+
+A literal `"self"` key means "only one run of this workflow at a time
+across all processes." Excess ticks NACK with retry — or use
+`onLimit: "queue"` to defer.
+
+## Composition
+
+Cron triggers compose with:
+
+- [`concurrencyKey`](/d/reliability/concurrency-keys) — prevent
+  overlapping runs
+- Sub-workflows + `forEach` — fan-out per item / tenant
+- Step-level [`idempotencyKey`](/d/reliability/idempotency) — make
+  re-runs cheap if the schedule fires twice (e.g. DST transitions)
+- Step-level [`retry`](/d/reliability/retry) + `maxDuration` — for
+  transient failures and runaway runs
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Fan-out from a cron run.
+  </Card>
+  <Card title="Concurrency keys" icon="gauge" href="/d/reliability/concurrency-keys">
+    Prevent overlapping cron runs.
+  </Card>
+  <Card title="Delay & TTL" icon="hourglass" href="/d/scheduling/delay-and-ttl">
+    Per-run scheduling within a cron job.
+  </Card>
+</Columns>

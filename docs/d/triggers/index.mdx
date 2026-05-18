@@ -1,0 +1,110 @@
+---
+title: "Triggers overview"
+description: "Every kind of event that can start a workflow — HTTP, SSE, WebSocket, Webhook, Worker, Cron, PubSub, gRPC."
+icon: "zap"
+---
+
+A trigger is what starts a workflow. Every workflow declares exactly one
+trigger in its `trigger:` field. The runner reads it, mounts the
+matching listener, and dispatches the workflow when the event fires.
+
+For a friendly intro to the concept, see
+[the introduction page](/d/introduction/triggers). This section is the
+reference — one page per trigger kind, with the config fields you can
+set, the `ctx` shape the trigger populates, and the reliability /
+scheduling knobs that compose with it.
+
+## The trigger kinds
+
+| Kind | Mounts on | What it listens for |
+|---|---|---|
+| [HTTP](./http.mdx) | own port (default 4000) | Inbound HTTP requests |
+| [SSE](./sse.mdx) | HTTP server (shared port) | Browser EventSource connections |
+| [WebSocket](./websocket.mdx) | HTTP server (shared port) | Browser WebSocket upgrades |
+| [Webhook](./webhook.mdx) | HTTP server (shared port) | Provider-signed POSTs (Stripe, GitHub, Slack, Shopify, Svix, or custom HMAC) |
+| [Worker](./worker.mdx) | own process | Jobs from a queue (NATS / BullMQ / SQS / Kafka / RabbitMQ / pg-boss / Redis Streams / in-memory) |
+| [Cron](./cron.mdx) | own process | Time-based schedules |
+| [PubSub](./pubsub.mdx) | own process | Cloud pub/sub messages (GCP Pub/Sub, AWS SNS+SQS, Azure Service Bus) |
+| [gRPC](./grpc.mdx) | own port | Inbound gRPC requests |
+
+## Same-port composition (HTTP + SSE / WS / Webhook)
+
+When a Blok project selects multiple HTTP-family triggers, they **all
+mount on the HTTP server's Hono app** and share one port. The chat
+demo, agent demo, and webhook router examples rely on this — the SSE
+subscriber and the HTTP POST handler talk to each other through the
+in-process event bus without any network hop.
+
+```
+                ┌────────────────────────────────────────┐
+                │  HTTP server (port 4000)               │
+                │                                        │
+                │  /chat                  ← HttpTrigger  │
+                │  /chat/:sid/message     ← HttpTrigger  │
+                │  /sse/chat/:sid         ← SSETrigger   │
+                │  /ws/echo               ← WSTrigger    │
+                │  /webhooks/stripe       ← WebhookTrigger│
+                │                                        │
+                │  In-process bus (single Node process)  │
+                └────────────────────────────────────────┘
+```
+
+Scaffold with `--triggers http,sse,webhook` and the generated entry
+file mounts all three. Cross-trigger workflows (POST publishes to bus
+→ SSE subscriber pumps to browser) Just Work.
+
+## Cross-process triggers (Worker / Cron / PubSub)
+
+Worker, Cron, and PubSub run in **separate Node processes** — managed
+by supervisord (or whatever the deploy target uses). They consume
+events from external brokers (NATS / Redis / Kafka / SQS / GCP / Azure)
+and don't need an HTTP port unless you also add `health-check`.
+
+To share state with HTTP-resident workflows (e.g. the
+[worker fan-out example](/d/examples/worker-fanout) where the HTTP
+producer enqueues and the worker consumes), use a broker — the
+adapter pool is process-local but the broker is cross-process.
+
+## What every trigger populates on `ctx`
+
+Independent of kind, every trigger arranges a familiar `ctx.request`
+shape:
+
+| Field | Meaning |
+|---|---|
+| `ctx.request.body` | Parsed payload (JSON / form / job payload) |
+| `ctx.request.headers` | Lowercased headers — present on HTTP-family triggers |
+| `ctx.request.params` | Path params (HTTP) or job metadata (worker) |
+| `ctx.request.query` | Parsed query string (HTTP-family) |
+| `ctx.request.method` | HTTP method (HTTP-family) |
+
+So a workflow body looks structurally identical regardless of trigger
+— only the trigger config block differs.
+
+## Reliability + scheduling on triggers
+
+Every trigger config block accepts the same scheduling + concurrency
+knobs:
+
+- [`concurrencyKey` + `concurrencyLimit`](/d/reliability/concurrency-keys) — per-key in-flight cap
+- [`onLimit: "queue"`](/d/reliability/concurrency-keys#onlimit-queue) — defer instead of reject
+- [`delay`, `ttl`](/d/scheduling/delay-and-ttl) — schedule + expire
+- [`debounce`](/d/scheduling/debounce) — collapse rapid same-key events
+- `middleware: [...]` — trigger-level middleware chain (see [middleware reference](/d/reference/middleware))
+
+These belong on the trigger, not on individual steps. They gate
+workflow entry, not step entry.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Introduction" icon="book-open" href="/d/introduction/triggers">
+    Concept page — what a trigger is + when to pick which.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    Step-level fields — once a workflow has fired, what each step accepts.
+  </Card>
+  <Card title="Examples" icon="boxes" href="/d/examples/index">
+    Working code combining triggers (chat = HTTP+SSE; webhook router = HTTP+webhook).
+  </Card>
+</Columns>
