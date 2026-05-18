@@ -1,0 +1,164 @@
+---
+title: "WebSocket trigger"
+description: "Bidirectional WebSocket connections backed by a workflow. Mounts on the HTTP server; optional Redis backplane for cross-process broadcast."
+icon: "plug"
+---
+
+The WebSocket trigger handles WebSocket upgrades on the HTTP server's
+port and runs a workflow per inbound message. Same-port operation
+with [HTTP](./http.mdx), [SSE](./sse.mdx), and
+[Webhook](./webhook.mdx) — Hono's `upgradeWebSocket` handler is wired
+into the existing server before the catch-all route.
+
+## Quickstart
+
+```json workflows/json/ws-echo.json
+{
+  "name": "WS Echo",
+  "version": "1.0.0",
+  "trigger": {
+    "websocket": {
+      "path": "/ws/echo",
+      "events": ["message", "open", "close"]
+    }
+  },
+  "steps": [
+    {
+      "id": "reply",
+      "use": "@blokjs/ws-reply",
+      "inputs": {
+        "message": "js/({ echo: ctx.request.body, at: Date.now() })"
+      }
+    }
+  ]
+}
+```
+
+Browser side:
+
+```javascript
+const ws = new WebSocket("ws://localhost:4000/ws/echo");
+ws.onmessage = (ev) => console.log(JSON.parse(ev.data));
+ws.onopen = () => ws.send(JSON.stringify({ hello: "world" }));
+```
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `path` | `string` | required | URL path. Supports dynamic params (e.g. `/ws/room/:roomId`). |
+| `events` | `string[]` | `["message"]` | Which WS lifecycle events trigger the workflow. Supported: `"open"`, `"message"`, `"close"`, `"error"`. |
+| `concurrencyKey` | `string` \| `$.path` | — | Per-key cap on concurrent connections. |
+| `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | Parsed message body (JSON when possible, raw string otherwise) |
+| `ctx.request.headers` | Headers from the WS upgrade request |
+| `ctx.request.params` | Path params from `:name` in the WS path |
+| `ctx.vars._ws_connection` | Connection metadata (id, opened-at, remote address) |
+| `ctx.vars._ws_event` | The lifecycle event name (`"open"` / `"message"` / `"close"` / `"error"`) |
+| `ctx.signal` | Cancelled when the client disconnects |
+
+## Helper nodes
+
+Three helpers wrap the WS surface:
+
+- [`@blokjs/ws-reply`](/d/reference/helpers/ws-reply) — reply only to
+  the connection that triggered the workflow
+- [`@blokjs/ws-broadcast`](/d/reference/helpers/ws-broadcast) — fan
+  out a message to every connection on a path / channel
+- [`@blokjs/ws-close`](/d/reference/helpers/ws-close) — close the
+  connection with a code + reason
+
+## Cross-process broadcast (backplane)
+
+By default, WS connections live in the Node process that accepted the
+upgrade. `@blokjs/ws-broadcast` reaches only connections on the same
+process. For multi-process deployments (HPA, load-balanced), set:
+
+```bash
+BLOK_WS_BACKPLANE=redis
+BLOK_WS_BACKPLANE_REDIS_URL=redis://...
+```
+
+The backplane fans broadcasts through Redis pub/sub so every process
+delivers to its local connections. Per-connection reply
+(`ws-reply`) doesn't need the backplane — replies always go to the
+connection that triggered the current workflow run, which lives on the
+current process.
+
+## Common patterns
+
+### Echo / RPC
+
+The simplest pattern — every `message` event spawns a workflow run
+that processes the request and replies via `@blokjs/ws-reply`.
+
+### Chat room (per-room broadcast)
+
+```json
+"trigger": { "websocket": { "path": "/ws/room/:roomId", "events": ["message"] } }
+```
+
+```json
+{
+  "id": "broadcast",
+  "use": "@blokjs/ws-broadcast",
+  "inputs": {
+    "channel": "js/`room-${ctx.request.params.roomId}`",
+    "message": "js/ctx.request.body"
+  }
+}
+```
+
+Every WS connection on `/ws/room/<roomId>` lands in the same broadcast
+group automatically based on the path pattern.
+
+### Server-pushed updates
+
+WS triggers fire on `events: ["open"]` too — send the connecting client
+an initial state snapshot on open, then handle `message` events for
+incremental updates.
+
+```json
+"trigger": { "websocket": { "path": "/ws/live", "events": ["open", "message"] } }
+```
+
+```json
+{
+  "id": "init-or-update",
+  "branch": {
+    "when": "ctx.vars._ws_event === 'open'",
+    "then": [
+      { "id": "init-snapshot", "use": "@blokjs/ws-reply", "inputs": { "message": "..." } }
+    ],
+    "else": [
+      { "id": "handle-update", "use": "@blokjs/ws-reply", "inputs": { "message": "..." } }
+    ]
+  }
+}
+```
+
+## Composition
+
+WebSocket triggers compose with [concurrency keys](/d/reliability/concurrency-keys)
+for per-tenant connection caps. Other reliability knobs
+(idempotency, retry, replay) live on the **step** level inside the
+workflow body — same as any other trigger.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ws-reply" icon="reply" href="/d/reference/helpers/ws-reply">
+    Per-connection reply helper.
+  </Card>
+  <Card title="@blokjs/ws-broadcast" icon="radio" href="/d/reference/helpers/ws-broadcast">
+    Fan-out to many connections.
+  </Card>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Use SSE for one-way streaming (cheaper + simpler).
+  </Card>
+</Columns>

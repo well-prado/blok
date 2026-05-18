@@ -62,6 +62,20 @@
 						]
 					},
 					{
+						"group": "Triggers",
+						"pages": [
+							"d/triggers/index",
+							"d/triggers/http",
+							"d/triggers/sse",
+							"d/triggers/websocket",
+							"d/triggers/webhook",
+							"d/triggers/worker",
+							"d/triggers/cron",
+							"d/triggers/pubsub",
+							"d/triggers/grpc"
+						]
+					},
+					{
 						"group": "Composition",
 						"pages": ["d/composition/sub-workflows"]
 					},

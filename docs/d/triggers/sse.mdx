@@ -1,0 +1,173 @@
+---
+title: "SSE trigger"
+description: "Server-Sent Events from a Blok workflow. Mounts on the HTTP server for shared-port operation and in-process event bus connectivity."
+icon: "cable"
+---
+
+The SSE trigger turns a workflow into a streaming endpoint that browser
+`EventSource` clients can subscribe to. Routes mount on the same HTTP
+server as the [HTTP trigger](./http.mdx) when both are selected, so
+sibling HTTP workflows can publish to the bus and SSE workflows pump
+those events to connected clients without any network hop.
+
+## Quickstart
+
+```json workflows/json/clock-stream.json
+{
+  "name": "Clock Stream",
+  "version": "1.0.0",
+  "trigger": {
+    "sse": {
+      "path": "/sse/clock",
+      "heartbeatInterval": 15000,
+      "retryInterval": 3000
+    }
+  },
+  "steps": [
+    {
+      "id": "sub",
+      "use": "@blokjs/sse-subscribe",
+      "inputs": { "channels": ["clock"] }
+    },
+    {
+      "id": "stream",
+      "use": "@blokjs/sse-stream",
+      "inputs": { "source": "js/ctx.state.sub" }
+    }
+  ]
+}
+```
+
+A sibling HTTP workflow publishes:
+
+```json
+{
+  "id": "tick",
+  "use": "@blokjs/sse-publish",
+  "inputs": {
+    "channel": "clock",
+    "event": "tick",
+    "data": "js/({ now: Date.now() })"
+  }
+}
+```
+
+Browser side:
+
+```javascript
+const es = new EventSource("/sse/clock");
+es.addEventListener("tick", (ev) => console.log(JSON.parse(ev.data)));
+```
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `path` | `string` | required | URL path. Supports `:name` dynamic params (e.g. `/sse/chat/:sessionId`). |
+| `heartbeatInterval` | `number` (ms) | `15000` | Comment-line keepalive interval to keep proxies from closing the connection. |
+| `retryInterval` | `number` (ms) | `3000` | Reconnection hint sent to the browser (the `retry:` SSE field). |
+| `concurrencyKey` | `string` \| `$.path` | — | Per-key cap on concurrent connections. |
+| `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
+
+## Same-port mounting
+
+When `--triggers http,sse` (or any other HTTP-family combo) is
+selected, the scaffold's `src/triggers/http/index.ts` constructs
+`new SSETrigger(httpTrigger.getApp(), httpTrigger)` and calls
+`listen()`. SSE routes register inside the HTTP server's
+`addPreCatchAllHook` so they win Hono's first-match dispatch over the
+legacy workflow-name catch-all.
+
+```
+                     ┌──────────────────────────────────┐
+                     │  HTTP server (port 4000)         │
+   POST /event  ──▶  │   ┌──── publisher workflow ───┐  │
+                     │   │  @blokjs/sse-publish      │  │
+                     │   └─────────────┬─────────────┘  │
+                     │                 │ in-process bus │
+                     │                 ▼                │
+                     │   ┌─────────────────────────────┐│
+   GET /sse/x   ─◀── │   │  subscriber workflow        ││
+   (EventSource)     │   │  sub → sse-stream           ││
+                     │   └─────────────────────────────┘│
+                     └──────────────────────────────────┘
+```
+
+**Single Node process, single port, in-process bus.** No external
+broker required. For cross-process pub/sub, layer a backplane on
+top (Redis pub/sub is the typical choice).
+
+## Channel placeholders
+
+`channels:` accepts `{paramName}` placeholders that resolve from
+`ctx.request.params` at run time. A workflow that subscribes per
+session looks like:
+
+```json
+{
+  "trigger": { "sse": { "path": "/sse/chat/:sessionId" } },
+  "steps": [
+    {
+      "id": "sub",
+      "use": "@blokjs/sse-subscribe",
+      "inputs": { "channels": ["chat:{sessionId}"] }
+    },
+    {
+      "id": "stream",
+      "use": "@blokjs/sse-stream",
+      "inputs": { "source": "js/ctx.state.sub" }
+    }
+  ]
+}
+```
+
+Every connected browser subscribes only to its own conversation.
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.params` | Path params from `:name` in the SSE path |
+| `ctx.request.query` | Parsed query string |
+| `ctx.request.headers` | Lowercased headers from the upgrade request |
+| `ctx.signal` | Cancelled when the browser closes the EventSource |
+
+## Composition
+
+The whole point of SSE is to chain off the in-process bus, so
+the canonical pattern is:
+
+- **HTTP workflow** publishes to a channel via `@blokjs/sse-publish`
+- **SSE workflow** subscribes via `@blokjs/sse-subscribe` and pumps
+  with `@blokjs/sse-stream`
+
+[`@blokjs/llm-stream`](/d/reference/helpers/llm-stream) and
+[`@blokjs/llm-agent`](/d/reference/helpers/llm-agent) are the most
+common publishers in the example set — both stream tokens directly to
+the bus, and a paired SSE workflow fans them out.
+
+## Common patterns
+
+- **Per-session streams** — `path: "/sse/chat/:sid"` + `channels: ["chat:{sid}"]`. See [streaming chat](/d/examples/chat).
+- **Global notification feed** — `path: "/sse/feed"` + `channels: ["feed"]`; any workflow publishing to `feed` reaches every connected client.
+- **Multi-channel subscriber** — `channels: ["feed", "alerts", "system"]`. Events from any of the three channels stream out the one connection.
+
+## Reliability
+
+SSE doesn't have a body to retry on, but the trigger still supports
+`concurrencyKey` + `concurrencyLimit` for per-tenant or per-user
+connection caps. Useful for free-tier rate limits.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/sse-publish" icon="send" href="/d/reference/helpers/sse-publish">
+    Publish to the bus from any workflow.
+  </Card>
+  <Card title="@blokjs/sse-subscribe" icon="rss" href="/d/reference/helpers/sse-subscribe">
+    Subscribe a workflow to bus channels.
+  </Card>
+  <Card title="Streaming chat" icon="messages-square" href="/d/examples/chat">
+    End-to-end HTTP + SSE example with an LLM.
+  </Card>
+</Columns>

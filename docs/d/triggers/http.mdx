@@ -1,0 +1,154 @@
+---
+title: "HTTP trigger"
+description: "Inbound HTTP requests. File-based routing, dynamic params, the catch-all dispatcher, and how SSE / WebSocket / Webhook triggers mount on top."
+icon: "globe"
+---
+
+The HTTP trigger turns a Blok workflow into an HTTP endpoint. It owns
+the listening Node server and exposes a Hono app that
+[SSE](./sse.mdx) / [WebSocket](./websocket.mdx) /
+[Webhook](./webhook.mdx) triggers can mount on for shared-port
+operation.
+
+## Quickstart
+
+```json workflows/json/hello.json
+{
+  "name": "Hello",
+  "version": "1.0.0",
+  "trigger": {
+    "http": { "method": "GET", "path": "/hello", "accept": "application/json" }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": { "expression": "({ message: 'hello world' })" }
+    }
+  ]
+}
+```
+
+```bash
+curl http://localhost:4000/hello
+# → {"message":"hello world"}
+```
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `method` | `"GET"` \| `"POST"` \| `"PUT"` \| `"PATCH"` \| `"DELETE"` \| `"ANY"` | required | Use `"ANY"` for wildcard. The v1 `"*"` form is still accepted but warns. |
+| `path` | `string` | derived | URL path with `:name` for dynamic params (e.g. `/users/:id`). When omitted, the path is derived from the workflow's file path under `workflows/json/` — see [file-based routing](#file-based-routing). |
+| `accept` | `string` | `"application/json"` | Response content-type. Use `"text/html"` for UI nodes. |
+| `middleware` | `string[]` | `[]` | Per-trigger middleware chain. Resolved by name from the middleware registry. |
+| `concurrencyKey` | `string` \| `$.path` | — | Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
+| `onLimit` | `"throw"` \| `"queue"` | `"throw"` | What happens when the limit is hit. |
+| `delay` | `string` \| `number` | — | Defer the run. See [delay & TTL](/d/scheduling/delay-and-ttl). |
+| `ttl` | `string` \| `number` | — | Expire if not started in time. |
+| `debounce` | `{ key, mode, delay, maxDelay? }` | — | Collapse rapid same-key requests. See [debounce](/d/scheduling/debounce). |
+
+## File-based routing
+
+`BLOK_FILE_BASED_ROUTING=true` (default since v0.6) maps workflow file
+paths to URLs:
+
+| File | URL |
+|---|---|
+| `workflows/json/health.json` | `/health` |
+| `workflows/json/users/list.json` | `/users/list` |
+| `workflows/json/users/index.json` | `/users` |
+| `workflows/json/users/[id].json` | `/users/:id` |
+| `workflows/json/users/[id]/orders.json` | `/users/:id/orders` |
+
+Files / folders starting with `_` or `.` are skipped (drafts, utility
+files). If `trigger.http.path` is set explicitly, it overrides the
+derived path.
+
+When `BLOK_FILE_BASED_ROUTING=false`, the legacy `/<workflow-name>`
+catch-all dispatch handles requests.
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.method` | HTTP verb (lowercase) |
+| `ctx.request.body` | Parsed JSON / form / raw text depending on `Content-Type` |
+| `ctx.request.headers` | Lowercased header map |
+| `ctx.request.params` | Path params (from `:id` in `path`) |
+| `ctx.request.query` | Parsed query string |
+| `ctx.signal` | An `AbortSignal` cancelled when the client disconnects or `POST /__blok/runs/:runId/cancel` fires |
+
+The raw body is captured before parsing — webhook trigger HMAC
+verifiers need the wire bytes, not the JSON-parsed object. See
+[webhook trigger](./webhook.mdx) for that flow.
+
+## Common patterns
+
+### Path params
+
+```json
+"trigger": { "http": { "method": "GET", "path": "/users/:userId/orders/:orderId" } }
+```
+
+```javascript
+"js/`SELECT * FROM orders WHERE user = '${ctx.request.params.userId}' AND id = '${ctx.request.params.orderId}'`"
+```
+
+### Wildcard method
+
+`method: "ANY"` matches every verb. Route per-method via a `branch`
+step on `ctx.request.method`. The [DB Manager example](/d/examples/db-manager)
+uses exactly this shape.
+
+### HTML UI from one workflow
+
+Set `accept: "text/html"` and return a string from a node. UI nodes
+typically read an HTML file template and run EJS:
+
+```json
+"trigger": { "http": { "method": "GET", "path": "/admin", "accept": "text/html" } }
+```
+
+See the [chat demo](/d/examples/chat) for a complete UI-node example.
+
+### Stream tokens with SSE
+
+Pair an HTTP POST handler with an SSE subscriber — they share the
+in-process bus when both triggers run in one process. The
+[streaming chat example](/d/examples/chat) walks the full pattern.
+
+## Composition
+
+Drop any reliability or scheduling knob into the trigger config:
+
+```json
+"trigger": {
+  "http": {
+    "method": "POST",
+    "path": "/render",
+    "concurrencyKey": "js/ctx.request.body.userId",
+    "concurrencyLimit": 5,
+    "onLimit": "queue",
+    "ttl": "5m"
+  }
+}
+```
+
+Per-tenant fairness (5 renders per user, anything over that defers
+via `onLimit: "queue"`), bounded by a 5-minute TTL — declarative.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Stream events back to the browser on the same port.
+  </Card>
+  <Card title="Webhook trigger" icon="webhook" href="/d/triggers/webhook">
+    Signed inbound from providers, also same-port.
+  </Card>
+  <Card title="Reliability overview" icon="shield-check" href="/d/reliability/overview">
+    Every knob you can put on the trigger.
+  </Card>
+</Columns>

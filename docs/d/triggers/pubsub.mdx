@@ -1,0 +1,195 @@
+---
+title: "Pub/Sub trigger"
+description: "Cloud pub/sub message handling — GCP Pub/Sub, AWS SNS+SQS, Azure Service Bus. One workflow per delivery."
+icon: "share-2"
+---
+
+The Pub/Sub trigger consumes messages from a cloud pub/sub broker and
+runs a workflow per delivery. Three providers ship in the box. Runs
+in its own Node process; cross-process state goes through the broker.
+
+For an in-process event bus (single-process pub/sub for HTTP + SSE
+chains), use the [SSE trigger](./sse.mdx) instead — Pub/Sub is the
+multi-process / multi-cloud sibling.
+
+## Quickstart
+
+```json workflows/json/on-order-placed.json
+{
+  "name": "On Order Placed",
+  "version": "1.0.0",
+  "trigger": {
+    "pubsub": {
+      "provider": "gcp",
+      "topic": "orders.placed",
+      "subscription": "fulfillment-svc"
+    }
+  },
+  "steps": [
+    {
+      "id": "fulfill",
+      "use": "@blokjs/api-call",
+      "idempotencyKey": "js/ctx.request.params.messageId",
+      "inputs": {
+        "url": "https://fulfillment.internal/api/orders",
+        "method": "POST",
+        "body": "js/ctx.request.body"
+      }
+    }
+  ]
+}
+```
+
+## Providers + config
+
+### GCP Pub/Sub
+
+```json
+"trigger": {
+  "pubsub": {
+    "provider": "gcp",
+    "topic": "orders.placed",
+    "subscription": "fulfillment-svc",
+    "maxMessages": 10
+  }
+}
+```
+
+Env vars:
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+PUBSUB_PROJECT_ID=my-gcp-project
+# or for the emulator:
+PUBSUB_EMULATOR_HOST=localhost:8085
+```
+
+### AWS SNS + SQS
+
+```json
+"trigger": {
+  "pubsub": {
+    "provider": "aws",
+    "topic": "arn:aws:sns:us-east-1:123:orders-placed",
+    "subscription": "https://sqs.us-east-1.amazonaws.com/123/fulfillment-queue"
+  }
+}
+```
+
+`topic:` is the SNS ARN; `subscription:` is the SQS queue URL that
+SNS fans out to. Env vars: standard AWS credentials chain
+(`AWS_REGION`, `AWS_ACCESS_KEY_ID`, etc.).
+
+### Azure Service Bus
+
+```json
+"trigger": {
+  "pubsub": {
+    "provider": "azure",
+    "topic": "orders",
+    "subscription": "fulfillment-sub"
+  }
+}
+```
+
+Env var: `AZURE_SERVICEBUS_CONNECTION_STRING`.
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | `"gcp"` \| `"aws"` \| `"azure"` | Required. |
+| `topic` | `string` | Provider-specific identifier (topic name / SNS ARN / Service Bus topic). |
+| `subscription` | `string` | Provider-specific subscription (GCP subscription / SQS URL / Azure subscription). |
+| `maxMessages` | `number` | Max messages pulled per batch (GCP). |
+| `concurrencyKey` | `string` \| `$.path` | Per-key processing cap. |
+| `concurrencyLimit` | `number` | Slot count per resolved key. |
+| `middleware` | `string[]` | Per-trigger middleware. |
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | Message payload (JSON-parsed when possible, raw string otherwise) |
+| `ctx.request.headers` | Provider-specific message attributes (lowercased) |
+| `ctx.request.params.topic` | Topic name |
+| `ctx.request.params.subscription` | Subscription identifier |
+| `ctx.request.params.messageId` | Provider message id — use as `idempotencyKey` for replay safety |
+| `ctx.request.params.publishTime` | When the provider received the publish |
+| `ctx.vars._pubsub_message` | Full message metadata |
+
+## Acknowledgment semantics
+
+The trigger ACKs successful runs and NACKs on workflow exceptions —
+the broker redelivers per its own retry policy:
+
+- **GCP** — based on the subscription's `ackDeadlineSeconds` and
+  exponential backoff settings
+- **AWS SQS** — visibility timeout on the queue
+- **Azure** — max delivery count + dead-letter queue
+
+The trigger doesn't implement its own retry budget — broker semantics
+own that. Configure DLQs on the provider side.
+
+## Common patterns
+
+### Cross-service event handling
+
+Service A publishes to `orders.placed` → Service B subscribes via this
+trigger → fulfills the order. Decoupled, async, durable.
+
+### Idempotency on every message
+
+```json
+{
+  "id": "process",
+  "use": "@blokjs/api-call",
+  "idempotencyKey": "js/ctx.request.params.messageId",
+  "inputs": { "url": "..." }
+}
+```
+
+Brokers retry on NACK — `idempotencyKey` makes the processing step
+safe to re-run.
+
+### Fan-out within the trigger process
+
+```json
+"steps": [
+  {
+    "id": "for-each-line",
+    "forEach": {
+      "in": "js/ctx.request.body.orderLines",
+      "as": "line",
+      "do": [
+        { "id": "ship", "subworkflow": "ship-line-item", "inputs": { "line": "js/ctx.state.line" } }
+      ]
+    }
+  }
+]
+```
+
+One pub/sub message becomes one parent run + N sub-workflow runs. The
+parent ACKs only when all sub-runs complete.
+
+## Composition
+
+- `idempotencyKey` on steps — recommended for any side-effect step
+- `concurrencyKey` on the trigger — per-tenant / per-resource caps
+- Sub-workflows + `forEach` — fan-out per item in the message
+- `maxDuration` on steps — bound runaway processing independent of
+  the broker's visibility timeout
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Worker trigger" icon="factory" href="/d/triggers/worker">
+    Sibling for in-process queue patterns.
+  </Card>
+  <Card title="@blokjs/pubsub-publish" icon="send" href="/d/reference/helpers/pubsub-publish">
+    Publish from any workflow.
+  </Card>
+  <Card title="Concurrency keys" icon="gauge" href="/d/reliability/concurrency-keys">
+    Per-tenant fairness on incoming events.
+  </Card>
+</Columns>

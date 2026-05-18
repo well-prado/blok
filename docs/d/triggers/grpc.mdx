@@ -1,0 +1,124 @@
+---
+title: "gRPC trigger"
+description: "Expose a workflow as a gRPC service method. Contract-based inter-service communication."
+icon: "network"
+---
+
+The gRPC trigger turns a workflow into a gRPC method handler. Inbound
+gRPC requests are dispatched to the workflow; the workflow's response
+becomes the gRPC reply. Useful for high-throughput inter-service
+communication where REST-over-HTTP overhead is too much.
+
+## Quickstart
+
+```json workflows/json/get-user.json
+{
+  "name": "GetUser",
+  "version": "1.0.0",
+  "trigger": {
+    "grpc": {
+      "service": "UserService",
+      "method": "GetUser",
+      "proto": "users.proto"
+    }
+  },
+  "steps": [
+    {
+      "id": "lookup",
+      "use": "@blokjs/api-call",
+      "inputs": {
+        "url": "js/`https://internal/users/${ctx.request.body.userId}`",
+        "method": "GET"
+      }
+    }
+  ]
+}
+```
+
+With a `.proto` file alongside:
+
+```protobuf
+// users.proto
+syntax = "proto3";
+package users;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (UserResponse);
+}
+
+message GetUserRequest { string user_id = 1; }
+message UserResponse { string id = 1; string name = 2; string email = 3; }
+```
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `service` | `string` | gRPC service name (matches `service Foo {}` in the proto). |
+| `method` | `string` | gRPC method name (matches `rpc Bar(...) returns (...)` in the proto). |
+| `proto` | `string` | Path to the `.proto` file (relative to the workflow). |
+| `port` | `number` | gRPC server port (default 50051). All gRPC-triggered workflows share one port. |
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | Decoded gRPC request message |
+| `ctx.request.headers` | gRPC metadata (lowercased) |
+| `ctx.request.params.service` | Service name |
+| `ctx.request.params.method` | Method name |
+| `ctx.vars._grpc_call` | Underlying gRPC `ServerUnaryCall` for advanced cases |
+
+The response value flows back through the last step's output — the
+workflow's final state populates the gRPC response message.
+
+## Process model
+
+gRPC triggers spawn a dedicated process bound to the gRPC port. Each
+service/method declared across all workflows is registered with the
+single gRPC server.
+
+For cross-language communication, the proto file is the contract — a
+Python service can call a Blok workflow's gRPC method using the same
+proto, regardless of which language the Blok-side nodes are
+implemented in.
+
+## Common patterns
+
+- **Internal RPC** — between services that already speak gRPC (most
+  Kubernetes microservices)
+- **Cross-runtime calls** — a Go service calls a Blok workflow that
+  invokes a Python ML node and returns the result via gRPC
+- **Streaming RPC** — declare `stream` in the proto + emit responses
+  step-by-step (advanced; the workflow uses `@blokjs/grpc-stream` to
+  push frames)
+
+## Composition
+
+All standard knobs apply:
+
+- `concurrencyKey` on the trigger for per-client / per-tenant caps
+- `idempotencyKey` on steps for replay safety
+- `retry` + `maxDuration` per step
+- Sub-workflows for fan-out within one gRPC call
+
+## Status
+
+The gRPC trigger has been the default runtime transport between the TS
+runner and per-language SDKs since v0.5 (replacing HTTP). The
+inbound-gRPC trigger documented here exposes that same transport
+**externally** — anything that speaks gRPC can call a Blok workflow.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="HTTP trigger" icon="globe" href="/d/triggers/http">
+    REST-over-HTTP sibling for external APIs.
+  </Card>
+  <Card title="Worker trigger" icon="factory" href="/d/triggers/worker">
+    For async work; gRPC is for sync request/response.
+  </Card>
+  <Card title="Architecture" icon="circuit-board" href="/c/overview/architecture">
+    Where gRPC fits in the cross-runtime story.
+  </Card>
+</Columns>

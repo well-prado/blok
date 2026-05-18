@@ -1,0 +1,203 @@
+---
+title: "Webhook trigger"
+description: "Signed inbound webhooks with built-in HMAC verification for Stripe / GitHub / Slack / Shopify / Svix — and a custom-signature config for everything else."
+icon: "webhook"
+---
+
+The webhook trigger handles signed POST requests from third-party
+providers. It verifies the signature, applies optional replay
+protection, and dispatches the verified event to a workflow. Five
+providers ship built-in; the `signature:` config covers any other
+HMAC-signed scheme without writing code.
+
+Mounts on the [HTTP server](./http.mdx) when both triggers are
+selected (same port, same Hono app, single process). The
+[webhook router example](/d/examples/webhook-router) walks the full
+end-to-end pattern.
+
+## Quickstart
+
+### Stripe (built-in)
+
+```json workflows/json/stripe.json
+{
+  "name": "Stripe Webhook",
+  "version": "1.0.0",
+  "trigger": {
+    "webhook": {
+      "provider": "stripe",
+      "path": "/webhooks/stripe",
+      "secretEnv": "STRIPE_WEBHOOK_SECRET",
+      "tolerance": 300,
+      "idempotencyKey": "js/ctx.request.body.id"
+    }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": {
+        "expression": "({ handled: true, type: ctx.request.body.type, id: ctx.request.body.id })"
+      }
+    }
+  ]
+}
+```
+
+### Linear (custom signature)
+
+```json workflows/json/linear.json
+{
+  "name": "Linear Webhook",
+  "version": "1.0.0",
+  "trigger": {
+    "webhook": {
+      "path": "/webhooks/linear",
+      "signature": {
+        "scheme": "hmac-sha256",
+        "header": "Linear-Signature",
+        "format": "{hex}",
+        "secretEnv": "LINEAR_WEBHOOK_SECRET",
+        "tolerance": 0
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "respond",
+      "use": "@blokjs/expr",
+      "inputs": { "expression": "({ handled: true, type: ctx.request.body.type })" }
+    }
+  ]
+}
+```
+
+## Built-in providers
+
+| `provider:` | Signature header | Algorithm | Notes |
+|---|---|---|---|
+| `"github"` | `X-Hub-Signature-256` | HMAC-SHA256 over `rawBody`, hex w/ `sha256=` prefix | Event id from `X-GitHub-Delivery`, type from `X-GitHub-Event`. |
+| `"stripe"` | `Stripe-Signature` (`t=<ts>,v1=<hex>`) | HMAC-SHA256 over `<ts>.<rawBody>`, hex | 5-minute drift tolerance. Event id + type from `body.id` / `body.type`. |
+| `"slack"` | `X-Slack-Signature` (`v0=<hex>`) | HMAC-SHA256 over `v0:<timestamp>:<rawBody>` | Drift via `X-Slack-Request-Timestamp`. Event type from `body.event.type`. |
+| `"shopify"` | `X-Shopify-Hmac-Sha256` | HMAC-SHA256 over `rawBody`, base64 | Event type from `X-Shopify-Topic`, id from `X-Shopify-Webhook-Id`. |
+| `"svix"` | `webhook-signature` (Standard Webhooks) | HMAC-SHA256 over `<id>.<ts>.<rawBody>`, base64 | Strips optional `whsec_` prefix, supports rotated keys via space-separated `v1,sig` list. |
+
+## Custom signature config
+
+When `provider` is omitted, the trigger uses the `signature:` block to
+build a verifier dynamically:
+
+| Field | Type | Notes |
+|---|---|---|
+| `scheme` | `"hmac-sha256"` \| `"hmac-sha1"` \| `"hmac-sha512"` | Hash algorithm. |
+| `header` | `string` | Header name carrying the signature. |
+| `format` | `string` | Template — use `{hex}` or `{base64}` to control encoding (e.g. `"v1={hex}"`). |
+| `secretEnv` | `string` | Env var holding the shared secret. |
+| `tolerance` | `number` (seconds) | Drift window. Use `0` if the provider doesn't include a timestamp. |
+| `timestampHeader` | `string` (optional) | Header carrying the timestamp. When set, the signed string becomes `<ts>.<rawBody>`. |
+
+This same shape covers Discord, Mailgun, Twitch, Postmark, custom
+internal webhooks — anywhere a partner sends an HMAC-signed body.
+
+## Trigger config
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `provider` | one of the built-ins above | — | Pick this OR set `signature` — not both. |
+| `signature` | object (see above) | — | Custom HMAC config. |
+| `path` | `string` | derived | URL path. Defaults to `/webhooks/<provider>` when `provider` set. |
+| `secretEnv` | `string` | — | Env var holding the secret (built-in providers). |
+| `tolerance` | `number` (seconds) | `300` | Drift window for timestamp-based schemes. |
+| `events` | `string[]` | — | Allowlist of `eventType` values. Verified-but-out-of-scope events return 200 + `{status: "ignored"}` (no retry storm). |
+| `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow: $.req.body.type` + `namespace: "stripe"` → looks up `stripe.<type>`). |
+| `idempotencyKey` | `string` \| `$.path` | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | Parsed JSON body |
+| `ctx.request.headers` | Lowercased header map |
+| `ctx.request.params` | Path params from `:name` in the webhook path |
+| `ctx.request.rawBody` | Raw body string (the bytes the HMAC was computed against) |
+| `ctx.vars._webhook_event_id` | The resolved event id (used as the idempotency cache key) |
+| `ctx.vars._webhook_event_type` | The resolved event type |
+
+## Polymorphic dispatch pattern
+
+The Stripe demo uses one step to handle every event type:
+
+```json
+{
+  "trigger": {
+    "webhook": {
+      "provider": "stripe",
+      "namespace": "stripe",
+      "secretEnv": "STRIPE_WEBHOOK_SECRET",
+      "idempotencyKey": "js/ctx.request.body.id"
+    }
+  },
+  "steps": [
+    {
+      "id": "dispatch",
+      "subworkflow": "js/ctx.request.body.type",
+      "inputs": { "stripeEvent": "js/ctx.request.body" }
+    }
+  ]
+}
+```
+
+`body.type === "invoice.paid"` + `namespace: "stripe"` resolves to the
+sub-workflow named `stripe.invoice.paid`. Add a handler workflow with
+that name to handle the event — no router change needed. See
+[sub-workflow polymorphic dispatch](/d/composition/sub-workflows#polymorphic-dispatch)
+for safety guards (`allowList`).
+
+## Switch dispatch pattern
+
+GitHub's many event types group by family — use a `switch` step
+with array `when`:
+
+```json
+{
+  "id": "route-by-event",
+  "switch": {
+    "on": "js/(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
+    "cases": [
+      { "when": "push", "do": [{ "id": "dispatch-push", "subworkflow": "github-push", "inputs": {} }] },
+      { "when": ["pull_request", "pull_request_review"], "do": [{ "id": "dispatch-pr", "subworkflow": "github-pr", "inputs": {} }] }
+    ],
+    "default": [{ "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "..." } }]
+  }
+}
+```
+
+## Failure modes
+
+| Outcome | Response |
+|---|---|
+| Missing / bad signature | `401` with structured body: `{error, reason, message}`. `reason` is one of `missing_signature` \| `missing_timestamp` \| `missing_secret` \| `bad_format` \| `timestamp_drift` \| `signature_mismatch`. |
+| Verified-but-out-of-scope (`events:` allowlist set, this event not in it) | `200` with `{status: "ignored", reason: "event_not_allowed"}`. Providers won't retry — this is intentional. |
+| Replay (idempotency cache hit) | `200` with `{status: "duplicate", eventId, firstSeenRunId}`. |
+| Workflow throws | The trigger still returns `200` after the cache write — webhook senders should not retry on workflow failure. The workflow's own [retry](/d/reliability/retry) / DLQ owns that. |
+
+## Composition
+
+- [`idempotencyKey`](/d/reliability/idempotency) on the **trigger** is replay protection (different cache table from step idempotency)
+- [`concurrencyKey`](/d/reliability/concurrency-keys) caps in-flight processing per resolved key
+- [`debounce`](/d/scheduling/debounce) collapses rapid same-key events
+- Sub-workflow handlers can use step-level idempotency / retry independently
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Webhook router example" icon="webhook" href="/d/examples/webhook-router">
+    Stripe + GitHub + Linear, end-to-end.
+  </Card>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    Polymorphic dispatch with allowList.
+  </Card>
+  <Card title="@blokjs/hmac-verify" icon="shield" href="/d/reference/helpers/hmac-verify">
+    DIY HMAC inside a regular HTTP workflow.
+  </Card>
+</Columns>

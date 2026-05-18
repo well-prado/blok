@@ -71,6 +71,21 @@ The choice of trigger depends entirely on how you want your workflow to be initi
 *   For background tasks that run on a schedule, use a **Scheduled (Cron)** trigger.
 *   For decoupling services and processing events asynchronously, **Message Queue** triggers are ideal.
 
-Triggers are the essential starting points for all operations in Blok . By understanding and correctly configuring them, you can effectively control when and how your application logic is executed.
+Triggers are the essential starting points for all operations in Blok. By understanding and correctly configuring them, you can effectively control when and how your application logic is executed.
+
+## Reference pages per trigger kind
+
+For the full config-field reference, `ctx` mapping, and worked patterns per trigger:
+
+<Columns cols={4}>
+  <Card title="HTTP" icon="globe" href="/d/triggers/http">REST endpoints + file-based routing</Card>
+  <Card title="SSE" icon="cable" href="/d/triggers/sse">Server-Sent Events streaming</Card>
+  <Card title="WebSocket" icon="plug" href="/d/triggers/websocket">Bidirectional WS connections</Card>
+  <Card title="Webhook" icon="webhook" href="/d/triggers/webhook">Signed inbound w/ HMAC verify</Card>
+  <Card title="Worker" icon="factory" href="/d/triggers/worker">Background jobs from a queue</Card>
+  <Card title="Cron" icon="clock" href="/d/triggers/cron">Time-based schedules</Card>
+  <Card title="Pub/Sub" icon="share-2" href="/d/triggers/pubsub">Cloud pub/sub (GCP, AWS, Azure)</Card>
+  <Card title="gRPC" icon="network" href="/d/triggers/grpc">Contract-based RPC</Card>
+</Columns>
 
 This concludes the core concepts in the Introduction. You can now explore [Practical Examples](../examples/index.mdx) or dive deeper into [Fundamentals](../fundamentals/overview.mdx).

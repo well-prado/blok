@@ -1,0 +1,215 @@
+---
+title: "Worker trigger"
+description: "Process background jobs from a queue. Eight broker adapters; per-tenant concurrency keys; idempotent + retriable per-step."
+icon: "factory"
+---
+
+The worker trigger consumes jobs from a queue and runs a workflow per
+delivery. Eight broker adapters ship in the box — switch by env var,
+not code. Runs in its own Node process; the producer (HTTP, cron,
+sub-workflow, anything) enqueues via
+[`@blokjs/worker-publish`](/d/reference/helpers/worker-publish) using
+the same adapter pool.
+
+The [worker fan-out example](/d/examples/worker-fanout) is the
+canonical reference.
+
+## Quickstart
+
+```json workflows/json/process-job.json
+{
+  "name": "Process Job",
+  "version": "1.0.0",
+  "trigger": {
+    "worker": {
+      "queue": "background-jobs",
+      "concurrency": 10,
+      "retries": 3,
+      "timeout": 30000
+    }
+  },
+  "steps": [
+    {
+      "id": "process",
+      "use": "@blokjs/api-call",
+      "idempotencyKey": "js/ctx.request.params.jobId",
+      "inputs": {
+        "url": "https://example.com/process",
+        "method": "POST",
+        "body": "js/ctx.request.body"
+      }
+    }
+  ]
+}
+```
+
+A sibling HTTP workflow enqueues:
+
+```json
+{
+  "id": "enqueue",
+  "use": "@blokjs/worker-publish",
+  "inputs": {
+    "queue": "background-jobs",
+    "payload": "js/ctx.request.body",
+    "dedupId": "js/ctx.request.body.requestId"
+  }
+}
+```
+
+## Config fields
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `queue` | `string` | required | Queue / topic / stream name. Provider-specific semantics. |
+| `concurrency` | `number` | `1` | Max concurrent jobs **per worker process**. |
+| `retries` | `number` | `3` | Per-job retry budget. After exhaustion the job moves to the broker's DLQ. |
+| `timeout` | `number` (ms) | — | Hard timeout per job attempt. |
+| `concurrencyKey` | `string` \| `$.path` | — | Per-key in-flight cap **across all worker processes**. See [concurrency keys](/d/reliability/concurrency-keys). |
+| `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
+| `onLimit` | `"throw"` \| `"queue"` | `"throw"` | What happens when the limit is hit. `"throw"` NACKs with retry; `"queue"` defers. |
+| `delay` | `string` \| `number` | — | Defer the dispatch (job sits in the queue until). |
+| `middleware` | `string[]` | `[]` | Per-trigger middleware. |
+
+## Broker adapters
+
+| `BLOK_WORKER_ADAPTER` | Backend | Install | Best for |
+|---|---|---|---|
+| `in-memory` | None | — | Single-process dev. State vanishes on restart. |
+| `nats` | NATS JetStream | `nats` | Production. Durable streams, pull consumers, server-side retry. |
+| `bullmq` | Redis | `bullmq ioredis` | Production. Priority queues, delayed jobs, dashboards. |
+| `redis` | Redis Streams | `ioredis` | Production. Lighter than BullMQ. |
+| `sqs` | AWS SQS | `@aws-sdk/client-sqs` | AWS-native. FIFO + standard queues. |
+| `kafka` | Kafka | `kafkajs` | High-throughput. Consumer groups. |
+| `rabbitmq` | RabbitMQ | `amqplib` | RabbitMQ shops. |
+| `pg-boss` | Postgres | `pg-boss` | Single-store deployments. No separate broker. |
+
+Resolution: explicit `provider:` on the publish step → `BLOK_WORKER_ADAPTER` env → `"in-memory"`.
+
+The adapter pool is **shared** between the publisher and the worker
+trigger in the same process — a Redis-Streams worker and a Redis-Streams
+publisher share one `ioredis` connection.
+
+## ctx mapping
+
+| Field | Source |
+|---|---|
+| `ctx.request.body` | Job payload (whatever the publisher sent) |
+| `ctx.request.headers` | Job headers / metadata |
+| `ctx.request.params.queue` | Queue name |
+| `ctx.request.params.jobId` | Unique job id (adapter-specific format) |
+| `ctx.request.params.attempt` | 0-based retry counter (string) |
+| `ctx.vars._worker_job` | Full job metadata: `{id, queue, attempts, maxRetries, priority, createdAt, delay, timeout}` |
+| `ctx.signal` | Cancelled if `POST /__blok/runs/:runId/cancel` fires for this run |
+
+So `ctx.request.params.jobId` is the natural
+[`idempotencyKey`](/d/reliability/idempotency) for processing steps —
+retries on the same job hit the cache.
+
+## Common patterns
+
+### Per-tenant fairness
+
+A noisy tenant flooding 10,000 jobs shouldn't starve other tenants:
+
+```json
+"trigger": {
+  "worker": {
+    "queue": "background-jobs",
+    "concurrency": 50,
+    "concurrencyKey": "js/ctx.request.body.tenantId",
+    "concurrencyLimit": 5
+  }
+}
+```
+
+50 concurrent jobs **process-wide**, capped at 5 per tenant. Excess
+deliveries NACK with retry. Combine with `onLimit: "queue"` to defer
+instead of NACK:
+
+```json
+"concurrencyKey": "js/ctx.request.body.tenantId",
+"concurrencyLimit": 5,
+"onLimit": "queue"
+```
+
+### Replay-safe processing
+
+```json
+{
+  "id": "charge-card",
+  "use": "@blokjs/api-call",
+  "idempotencyKey": "js/ctx.request.params.jobId",
+  "inputs": { "url": "https://api.stripe.com/v1/charges", "method": "POST", "body": "..." }
+}
+```
+
+The first attempt charges the card. Retries hit the cache, never the
+API. **Don't use this on every side-effect step** — read
+[when not to cache](/d/reliability/idempotency#when-not-to-cache).
+
+### Delayed dispatch from the producer
+
+```json
+{
+  "id": "enqueue-tomorrow",
+  "use": "@blokjs/worker-publish",
+  "inputs": {
+    "queue": "reminders",
+    "payload": "js/({ user: ctx.request.body.user })",
+    "delayMs": 86400000
+  }
+}
+```
+
+Provider-specific behavior: BullMQ + RabbitMQ support arbitrary delays;
+SQS caps at 15 minutes; NATS uses the consumer-side `x-delay` header
+(setTimeout-based — long delays hold a consumer slot, prefer
+[trigger-level delay](/d/scheduling/delay-and-ttl) for hours/days).
+
+### Dead-letter handling
+
+After `retries` exhausts, the job lands in the broker's DLQ:
+
+- **BullMQ** — `failed` jobs visible in the BullMQ dashboard
+- **NATS** — separate DLQ stream (configurable)
+- **SQS** — DLQ configured at the queue level
+- **RabbitMQ** — dead-letter exchange
+
+Configure those on the broker side. The trigger hands off and exits
+cleanly.
+
+## Process model
+
+Worker triggers run in their own process — `blokctl dev` spawns one
+per worker-triggered project. The process doesn't bind an HTTP port
+unless you also add a health endpoint. State sharing with HTTP
+workflows goes through the broker (the producer publishes, the worker
+consumes — that's the contract).
+
+For cross-process `concurrencyKey` enforcement, set
+`BLOK_CONCURRENCY_BACKEND=nats-kv` (or `redis`) so multiple worker
+processes coordinate slot acquisition. See
+[cross-process concurrency](/d/reliability/concurrency-keys#cross-process-backends).
+
+## Composition
+
+- [`idempotencyKey`](/d/reliability/idempotency) on steps — recommended on side-effect steps
+- [`retry`](/d/reliability/retry) on steps — for transient broker / API errors
+- [`concurrencyKey`](/d/reliability/concurrency-keys) + `onLimit: "queue"` — for tenant isolation
+- [`maxDuration`](/d/reliability/max-duration) — for stuck-step detection independent of the broker's `timeout`
+- Sub-workflows (`subworkflow:` step) — for fan-out within a worker job
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Worker fan-out example" icon="layers" href="/d/examples/worker-fanout">
+    Producer + consumer + per-tenant concurrency.
+  </Card>
+  <Card title="@blokjs/worker-publish" icon="send" href="/d/reference/helpers/worker-publish">
+    Producer-side helper reference.
+  </Card>
+  <Card title="Concurrency keys" icon="gauge" href="/d/reliability/concurrency-keys">
+    Per-tenant fairness across processes.
+  </Card>
+</Columns>
