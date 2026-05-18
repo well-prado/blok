@@ -1,0 +1,147 @@
+---
+title: "Helper nodes reference"
+description: "The @blokjs/helpers package — pre-built nodes you reference by `use:` in any v2 workflow."
+icon: "puzzle"
+---
+
+`@blokjs/helpers` ships 22 pre-built nodes covering the most common
+workflow plumbing — logging, conditionals, KV state, HMAC verification,
+JWT auth, LLM streaming + tool calls, webhook dispatch, and SSE / WS /
+worker / pub-sub publishers. Each helper has a canonical
+`@blokjs/<name>` identifier you reference via `use:` in any step.
+
+Helpers are auto-registered when `@blokjs/helpers` is in your project
+deps. The `HELPER_NODES` barrel is spread into the runner's node
+registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
+
+## Inventory
+
+### Workflow utilities
+
+<Columns cols={2}>
+  <Card title="@blokjs/expr" icon="function-square" href="./expr">
+    Evaluate a JS expression against the live ctx. Use inside loops / branches when you need a small piece of computed state.
+  </Card>
+  <Card title="@blokjs/log" icon="text" href="./log">
+    Emit a log line at info / warn / error / debug. Routes through ctx.logger.
+  </Card>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    Force-throw a GlobalError with custom message, status code, and JSON body.
+  </Card>
+  <Card title="@blokjs/audit-log" icon="file-clock" href="./audit-log">
+    Append an audit event to a process-wide ring buffer (1000-entry cap).
+  </Card>
+  <Card title="@blokjs/metrics-emit" icon="line-chart" href="./metrics-emit">
+    Emit an OpenTelemetry counter. No-op when no exporter is wired.
+  </Card>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="./ctx-publish">
+    Set ctx.state[name] = value explicitly. For when default-store doesn't fit.
+  </Card>
+  <Card title="@blokjs/ctx-publish-many" icon="upload-cloud" href="./ctx-publish-many">
+    Set multiple ctx.state[k] = v in one step.
+  </Card>
+</Columns>
+
+### Validation + auth
+
+<Columns cols={2}>
+  <Card title="@blokjs/json-schema" icon="braces" href="./json-schema">
+    Validate data against a JSON Schema. Throws on failure with structured error paths.
+  </Card>
+  <Card title="@blokjs/hmac-verify" icon="shield-check" href="./hmac-verify">
+    DIY HMAC verification inside a regular HTTP workflow.
+  </Card>
+  <Card title="@blokjs/jwt-verify" icon="key" href="./jwt-verify">
+    Production JWT auth — HS / RS / ES, JWKS lookup, claim validation, structured 401s.
+  </Card>
+</Columns>
+
+### Key-value state
+
+<Columns cols={2}>
+  <Card title="@blokjs/in-memory-kv" icon="memory-stick" href="./in-memory-kv">
+    Process-local KV. Not durable. Use for tests, demos, single-process small state.
+  </Card>
+  <Card title="@blokjs/redis-kv" icon="database" href="./redis-kv">
+    Redis-backed KV. Production drop-in for in-memory-kv. Cross-process, durable.
+  </Card>
+</Columns>
+
+### LLM streaming + agents
+
+<Columns cols={2}>
+  <Card title="@blokjs/llm-stream" icon="cpu" href="./llm-stream">
+    Stream an OpenAI-compatible chat completion to the SSE bus. The chat demo's centerpiece.
+  </Card>
+  <Card title="@blokjs/llm-agent" icon="bot" href="./llm-agent">
+    Agent loop on top of llm-stream with HTTP-dispatched tool calls. Multi-iteration.
+  </Card>
+</Columns>
+
+### Realtime publishers (SSE / WebSocket)
+
+<Columns cols={2}>
+  <Card title="@blokjs/sse-publish" icon="send" href="./sse-publish">
+    Publish an event to a bus channel from any workflow.
+  </Card>
+  <Card title="@blokjs/sse-subscribe" icon="rss" href="./sse-subscribe">
+    Subscribe an SSE-triggered workflow to one or more bus channels.
+  </Card>
+  <Card title="@blokjs/sse-stream" icon="cable" href="./sse-stream">
+    Pump a subscription's events out as SSE frames to the connected browser.
+  </Card>
+  <Card title="@blokjs/ws-reply" icon="reply" href="./ws-reply">
+    Reply only to the connection that triggered the WS workflow.
+  </Card>
+  <Card title="@blokjs/ws-broadcast" icon="radio" href="./ws-broadcast">
+    Fan out a message to every connection on a path / channel.
+  </Card>
+  <Card title="@blokjs/ws-close" icon="x-circle" href="./ws-close">
+    Close the WS connection with a code + reason.
+  </Card>
+</Columns>
+
+### Message-broker publishers
+
+<Columns cols={2}>
+  <Card title="@blokjs/worker-publish" icon="send" href="./worker-publish">
+    Enqueue a job to a worker queue. Shares the adapter pool with the worker trigger.
+  </Card>
+  <Card title="@blokjs/pubsub-publish" icon="share" href="./pubsub-publish">
+    Publish to GCP Pub/Sub, AWS SNS, or Azure Service Bus.
+  </Card>
+</Columns>
+
+## Conventions
+
+Every helper follows the same shape:
+
+- **`use:`** — canonical id (`@blokjs/<name>`)
+- **`inputs:`** — Zod-validated input fields (see each helper page)
+- Output stored at `ctx.state[<step-id>]` by default — opt out with
+  `ephemeral: true`, rename with `as:`, flatten with `spread:`
+- Errors surface as `GlobalError` with `code` propagated to the trigger's
+  HTTP response (so `@blokjs/throw` with `code: 401` gives an actual 401)
+
+## Composition
+
+Helpers compose with the
+[reliability knobs](/d/reliability/overview)
+(`idempotencyKey`, `retry`, `maxDuration`) and
+[primitives](/d/primitives/index) (`forEach`, `tryCatch`, etc.) like any
+other step. An `@blokjs/api-call` wrapped in `idempotencyKey` + `retry`
+inside a parallel `forEach` is the canonical fan-out shape.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    All step-level fields helpers compose with.
+  </Card>
+  <Card title="Workflow primitives" icon="boxes" href="/d/primitives/index">
+    Flow control (forEach, branch, etc.) that wraps helpers.
+  </Card>
+  <Card title="Custom nodes" icon="hammer" href="/c/extensions/nodes">
+    Write your own node with the same defineNode API.
+  </Card>
+</Columns>

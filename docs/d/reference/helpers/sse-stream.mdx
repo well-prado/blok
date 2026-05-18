@@ -1,0 +1,62 @@
+---
+title: "@blokjs/sse-stream"
+description: "Pump a subscription's events out as SSE frames to the connected browser. The last step in any SSE workflow."
+icon: "cable"
+---
+
+Drains a subscription (from [`@blokjs/sse-subscribe`](./sse-subscribe))
+and writes each event as a properly-framed SSE response. Includes
+heartbeat keepalives per the SSE trigger config.
+
+This is the last step in every SSE-triggered workflow. The HTTP
+response stays open until the client disconnects or `ctx.signal`
+fires.
+
+## Quickstart
+
+```json
+{
+  "id": "stream",
+  "use": "@blokjs/sse-stream",
+  "inputs": { "source": "js/ctx.state.sub" }
+}
+```
+
+`ctx.state.sub` is whatever the upstream `@blokjs/sse-subscribe` step
+returned.
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `source` | subscription | The handle returned by `@blokjs/sse-subscribe`. Required. |
+
+## Behavior
+
+- Each event published to a subscribed channel writes `event: <name>\ndata: <json>\n\n` to the response.
+- Heartbeats fire per `trigger.sse.heartbeatInterval` (default 15s) to
+  keep proxies from closing idle connections.
+- The browser's `EventSource` reconnects automatically per
+  `trigger.sse.retryInterval` (default 3s) on transient drops.
+- `ctx.signal` cancels the subscription on disconnect.
+
+## Common patterns
+
+The two-step shape is canonical — see the
+[streaming chat](/d/examples/chat),
+[chat-memory](/d/examples/chat-memory), and
+[LLM agent](/d/examples/llm-agent) examples for live code.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/sse-subscribe" icon="rss" href="./sse-subscribe">
+    Source of the subscription handle.
+  </Card>
+  <Card title="@blokjs/sse-publish" icon="send" href="./sse-publish">
+    Other half of the pub/sub.
+  </Card>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Trigger config (heartbeat, retry).
+  </Card>
+</Columns>

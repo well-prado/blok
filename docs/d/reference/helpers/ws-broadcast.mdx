@@ -1,0 +1,91 @@
+---
+title: "@blokjs/ws-broadcast"
+description: "Fan out a message to every WebSocket connection on a path or channel. Optional Redis backplane for multi-process broadcasts."
+icon: "radio"
+---
+
+Broadcasts a message to all WS connections matching a path / channel.
+In-process by default — every connection on the current Node process
+receives. With `BLOK_WS_BACKPLANE=redis`, broadcasts cross processes
+via Redis pub/sub.
+
+## Quickstart
+
+```json
+{
+  "id": "broadcast",
+  "use": "@blokjs/ws-broadcast",
+  "inputs": {
+    "channel": "js/`room-${ctx.request.params.roomId}`",
+    "message": "js/ctx.request.body"
+  }
+}
+```
+
+Every WS connection in the room sees the message.
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `channel` | `string` | Channel / room identifier. WS connections on the same channel all receive. |
+| `message` | unknown | Payload (JSON-serialized). |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `delivered` | Number of connections that received the broadcast (local count when no backplane; total when backplane is set). |
+
+## Cross-process broadcast (backplane)
+
+Default: in-process only. Set:
+
+```bash
+BLOK_WS_BACKPLANE=redis
+BLOK_WS_BACKPLANE_REDIS_URL=redis://...
+```
+
+The backplane fans broadcasts through Redis pub/sub so every process
+delivers to its local connections. Per-connection
+[`ws-reply`](./ws-reply) doesn't need the backplane.
+
+## Common patterns
+
+### Chat room
+
+```json
+"trigger": { "websocket": { "path": "/ws/room/:roomId" } },
+"steps": [
+  { "id": "broadcast", "use": "@blokjs/ws-broadcast", "inputs": { "channel": "js/`room-${ctx.request.params.roomId}`", "message": "js/ctx.request.body" } }
+]
+```
+
+### Server-pushed event from HTTP
+
+```json
+{
+  "name": "Push Update",
+  "trigger": { "http": { "method": "POST", "path": "/push" } },
+  "steps": [
+    { "id": "push", "use": "@blokjs/ws-broadcast", "inputs": { "channel": "live", "message": "js/ctx.request.body" } }
+  ]
+}
+```
+
+Connected browsers on `/ws/live` receive every POST without an
+intermediate event bus.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ws-reply" icon="reply" href="./ws-reply">
+    Single-connection reply.
+  </Card>
+  <Card title="WebSocket trigger" icon="plug" href="/d/triggers/websocket">
+    Trigger config + backplane setup.
+  </Card>
+  <Card title="@blokjs/sse-publish" icon="send" href="./sse-publish">
+    One-way streaming alternative.
+  </Card>
+</Columns>

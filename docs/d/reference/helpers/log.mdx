@@ -1,0 +1,101 @@
+---
+title: "@blokjs/log"
+description: "Emit a log line at info / warn / error / debug. Routes through ctx.logger so Studio sees it."
+icon: "text"
+---
+
+Logs a message via the runner's `ctx.logger.logLevel(level, message)`.
+Errors route to `ctx.logger.error(message, stack)` so the trace store
+sees the proper severity badge.
+
+## Quickstart
+
+```json
+{
+  "id": "log",
+  "use": "@blokjs/log",
+  "ephemeral": true,
+  "inputs": {
+    "level": "info",
+    "message": "js/`processed ${ctx.state.fetch.data.length} items`"
+  }
+}
+```
+
+`ephemeral: true` is the typical pattern — the log is a side effect,
+not state for downstream steps.
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `level` | `"info"` \| `"warn"` \| `"error"` \| `"debug"` | Log level. |
+| `message` | `string` | The log line. |
+| `attrs` | `Record<string, unknown>` (optional) | Extra fields appended as JSON to the line. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `level` | Echo of the input level. |
+| `message` | Echo of the input message. |
+
+(Mainly for chaining and Studio inspection. Use `ephemeral: true` if
+you don't need state propagation.)
+
+## Where the log goes
+
+`ctx.logger` is the trigger's logger context — typically wired to:
+
+- **Console** when `CONSOLE_LOG_ACTIVE=true` (development default)
+- **The trace store** so the log appears in the run detail in Studio
+- **External log aggregators** if you've configured an OpenTelemetry
+  log exporter
+
+## Common patterns
+
+### Step-trace breadcrumbs
+
+```json
+{
+  "id": "log-progress",
+  "use": "@blokjs/log",
+  "ephemeral": true,
+  "inputs": {
+    "level": "info",
+    "message": "js/`fetched user ${ctx.state.lookup.data.id}`",
+    "attrs": { "userId": "js/ctx.state.lookup.data.id" }
+  }
+}
+```
+
+The `attrs` show up as a JSON suffix on the log line — searchable in
+Studio's log filter.
+
+### Conditional warning
+
+```json
+{
+  "id": "maybe-warn",
+  "branch": {
+    "when": "ctx.state.fetch.data.length === 0",
+    "then": [
+      { "id": "warn", "use": "@blokjs/log", "ephemeral": true, "inputs": { "level": "warn", "message": "empty result set" } }
+    ]
+  }
+}
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    For when you want to STOP execution, not just log.
+  </Card>
+  <Card title="@blokjs/audit-log" icon="file-clock" href="./audit-log">
+    For audit-trail events (different shape, ring-buffered).
+  </Card>
+  <Card title="Observability" icon="line-chart" href="/d/operations/observability">
+    Where logs end up in production.
+  </Card>
+</Columns>

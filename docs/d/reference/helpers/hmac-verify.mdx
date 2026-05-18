@@ -1,0 +1,109 @@
+---
+title: "@blokjs/hmac-verify"
+description: "DIY HMAC verification inside a regular HTTP workflow. For custom signing schemes the webhook trigger's signature config doesn't cover."
+icon: "shield-check"
+---
+
+Verifies an HMAC signature against a payload + secret. Throws a
+structured 401 on mismatch with a `reason:` discriminator
+(`missing_signature` / `misconfigured` / `malformed_signature` /
+`invalid_signature`).
+
+For provider-signed webhooks (Stripe, GitHub, Slack, Shopify, Svix), use
+the [webhook trigger's built-in provider](/d/triggers/webhook) instead
+— it captures rawBody correctly and handles replay protection. This
+helper is for one-off / custom shapes inside an HTTP workflow.
+
+## Quickstart
+
+```json
+{
+  "id": "verify",
+  "use": "@blokjs/hmac-verify",
+  "inputs": {
+    "signature": "js/ctx.request.headers['x-signature']",
+    "payload": "js/ctx.request.rawBody",
+    "secret": "js/process.env.WEBHOOK_SECRET"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `signature` | `string` | required | The signature header value as received. |
+| `payload` | `string` | required | The signed bytes. For HTTP webhooks, use the raw body. |
+| `secret` | `string` | required | Shared HMAC secret. |
+| `algorithm` | `"sha256"` \| `"sha1"` \| `"sha512"` | `"sha256"` | Hash algorithm. |
+| `prefix` | `string` | `""` | Optional prefix to strip before comparison (e.g. `"sha256="` for GitHub). |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `verified` | `true` on success (throws otherwise). |
+| `algorithm` | Echo of the algorithm used. |
+| `signatureLength` | Hex length of the computed signature (64 for SHA-256). |
+
+## Failure modes
+
+Each throws a `GlobalError` with `code: 401` and `body: { reason, message }`:
+
+| reason | Cause |
+|---|---|
+| `missing_signature` | Empty `signature` input. |
+| `misconfigured` | Empty `secret`. |
+| `malformed_signature` | `signature` missing the required prefix. |
+| `invalid_signature` | HMAC mismatch (wrong secret, tampered payload, or wrong algorithm). |
+
+Use the `reason` discriminator in a [tryCatch.catch](/d/primitives/tryCatch)
+arm to route per-failure responses.
+
+## Common patterns
+
+### Manual GitHub-style verification
+
+```json
+{
+  "id": "verify-gh",
+  "use": "@blokjs/hmac-verify",
+  "inputs": {
+    "signature": "js/ctx.request.headers['x-hub-signature-256']",
+    "payload": "js/ctx.request.rawBody",
+    "secret": "js/process.env.GITHUB_WEBHOOK_SECRET",
+    "algorithm": "sha256",
+    "prefix": "sha256="
+  }
+}
+```
+
+### Constant-time comparison
+
+The helper uses `crypto.timingSafeEqual` internally — no need to
+worry about byte-by-byte timing leaks. A naive `===` compare on the
+HMAC would leak the expected signature; this helper is the secure
+default.
+
+## Composition
+
+- Run as the first step in any HTTP workflow that handles signed input
+- Wrap in [`tryCatch`](/d/primitives/tryCatch) to log + 401 on failure
+- For the webhook trigger's verifiers, use
+  [`provider: "github"`](/d/triggers/webhook) etc. — those handle
+  rawBody capture, replay protection, and event allowlisting beyond
+  what this helper does
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Webhook trigger" icon="webhook" href="/d/triggers/webhook">
+    Built-in HMAC + replay protection + dispatch.
+  </Card>
+  <Card title="Webhook router example" icon="layers" href="/d/examples/webhook-router">
+    Stripe + GitHub + Linear with the webhook trigger.
+  </Card>
+  <Card title="@blokjs/jwt-verify" icon="key" href="./jwt-verify">
+    Bearer-token auth (different shape, same gate).
+  </Card>
+</Columns>

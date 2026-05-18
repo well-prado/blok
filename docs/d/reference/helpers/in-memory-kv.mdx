@@ -1,0 +1,70 @@
+---
+title: "@blokjs/in-memory-kv"
+description: "Process-local key-value store. Not durable. Use for tests, demos, single-process state."
+icon: "memory-stick"
+---
+
+A simple in-process `Map`-backed key-value helper. Identical API to
+[`@blokjs/redis-kv`](./redis-kv) — swap one for the other when you
+need durability or cross-process state.
+
+NOT durable: clears on process restart. NOT cross-process: each
+worker process sees its own store.
+
+## Quickstart
+
+```json
+{
+  "id": "save",
+  "use": "@blokjs/in-memory-kv",
+  "inputs": { "action": "set", "key": "user:42", "value": { "name": "Alice" } }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `action` | `"get"` \| `"set"` \| `"delete"` \| `"list"` \| `"clear"` | Operation. |
+| `key` | `string` | Required for get/set/delete. |
+| `value` | unknown | Required for set. |
+| `prefix` | `string` | For `list` only — filter keys starting with this prefix. |
+
+No TTL — entries live until explicitly deleted or the process exits.
+
+## Outputs
+
+| Action | Output |
+|---|---|
+| `get` | `{ value }` — `undefined` if missing |
+| `set` | `{ key, value }` |
+| `delete` | `{ deleted: boolean }` |
+| `list` | array of `{ key, value }` |
+| `clear` | `{ count }` of removed entries |
+
+## When to use
+
+- Unit tests of a workflow that exercises KV state
+- Local-dev demos where Redis would be overkill
+- Single-process state with no durability requirement (caching a
+  computed value within the lifetime of one process)
+
+## When NOT to use
+
+- Any production deployment (use Redis-KV)
+- Multi-process scaffolds (different processes don't share state)
+- Anything that needs to survive a deploy
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/redis-kv" icon="database" href="./redis-kv">
+    Production drop-in. Cross-process, durable.
+  </Card>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="./ctx-publish">
+    For per-run state (lives only inside one workflow invocation).
+  </Card>
+  <Card title="Idempotency cache" icon="layers" href="/d/reliability/idempotency">
+    Step result caching — different shape, durable backend.
+  </Card>
+</Columns>

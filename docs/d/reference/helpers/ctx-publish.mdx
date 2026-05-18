@@ -1,0 +1,100 @@
+---
+title: "@blokjs/ctx-publish"
+description: "Set ctx.state[name] = value explicitly. For when default-store under the step id doesn't fit."
+icon: "upload"
+---
+
+v2 default-stores every step's output to `ctx.state[step.id]`. Use
+`@blokjs/ctx-publish` when you want to publish under a name that isn't
+the step id — typically inside a loop / branch arm to accumulate state
+across iterations.
+
+## Quickstart
+
+```json
+{
+  "id": "accumulate",
+  "use": "@blokjs/ctx-publish",
+  "inputs": {
+    "name": "totals",
+    "value": "js/((ctx.state.totals || 0) + ctx.state.fetch.data.amount)"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | `string` | Key to write under `ctx.state`. Required. |
+| `value` | unknown | Value to publish. |
+
+## Outputs
+
+`{ name, value }` echo.
+
+`ctx.state[name]` AND `ctx.vars[name]` (legacy alias) are both
+written.
+
+## Common patterns
+
+### Loop accumulator
+
+```json
+"loop": {
+  "until": "ctx.state['fetch'].data.nextCursor === null",
+  "maxIterations": 100,
+  "do": [
+    { "id": "fetch", "use": "@blokjs/api-call", "inputs": { "url": "..." } },
+    {
+      "id": "accumulate",
+      "use": "@blokjs/ctx-publish",
+      "inputs": {
+        "name": "results",
+        "value": "js/[...(ctx.state.results || []), ...ctx.state.fetch.data.items]"
+      }
+    }
+  ]
+}
+```
+
+The loop body's `fetch` step's data is per-iteration; `results`
+accumulates across iterations under a stable name.
+
+### Stash auth identity from middleware
+
+```json
+{
+  "id": "stash-identity",
+  "use": "@blokjs/ctx-publish",
+  "inputs": {
+    "name": "identity",
+    "value": "js/({ userId: ctx.state.verify.subject, claims: ctx.state.verify.claims })"
+  }
+}
+```
+
+Downstream steps read `ctx.state.identity.userId` without coupling to
+the verify step's id.
+
+## Composition
+
+- For multiple keys in one step, use [`ctx-publish-many`](./ctx-publish-many)
+- For computed values, prefer [`expr`](./expr) — its return goes to
+  `ctx.state[<step-id>]` by default, no rename needed
+- Pair with `ephemeral: true` to avoid the redundant
+  `ctx.state[<step-id>]` entry (only the published `name` survives)
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ctx-publish-many" icon="upload-cloud" href="./ctx-publish-many">
+    Multiple keys in one step.
+  </Card>
+  <Card title="@blokjs/expr" icon="function-square" href="./expr">
+    Computed values via default-store.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    `as:` and `spread:` — other rename / flatten patterns.
+  </Card>
+</Columns>

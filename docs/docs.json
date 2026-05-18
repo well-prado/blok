@@ -76,6 +76,18 @@
 						]
 					},
 					{
+						"group": "Workflow Primitives",
+						"pages": [
+							"d/primitives/index",
+							"d/primitives/branch",
+							"d/primitives/switch",
+							"d/primitives/forEach",
+							"d/primitives/loop",
+							"d/primitives/tryCatch",
+							"d/primitives/wait"
+						]
+					},
+					{
 						"group": "Composition",
 						"pages": ["d/composition/sub-workflows"]
 					},
@@ -101,7 +113,35 @@
 						"pages": [
 							"d/reference/v2-step-shapes",
 							"d/reference/trace-storage",
-							"d/reference/workflow-registry"
+							"d/reference/workflow-registry",
+							{
+								"group": "Helper nodes",
+								"pages": [
+									"d/reference/helpers/index",
+									"d/reference/helpers/expr",
+									"d/reference/helpers/log",
+									"d/reference/helpers/throw",
+									"d/reference/helpers/audit-log",
+									"d/reference/helpers/metrics-emit",
+									"d/reference/helpers/ctx-publish",
+									"d/reference/helpers/ctx-publish-many",
+									"d/reference/helpers/json-schema",
+									"d/reference/helpers/hmac-verify",
+									"d/reference/helpers/jwt-verify",
+									"d/reference/helpers/in-memory-kv",
+									"d/reference/helpers/redis-kv",
+									"d/reference/helpers/llm-stream",
+									"d/reference/helpers/llm-agent",
+									"d/reference/helpers/sse-publish",
+									"d/reference/helpers/sse-subscribe",
+									"d/reference/helpers/sse-stream",
+									"d/reference/helpers/ws-reply",
+									"d/reference/helpers/ws-broadcast",
+									"d/reference/helpers/ws-close",
+									"d/reference/helpers/worker-publish",
+									"d/reference/helpers/pubsub-publish"
+								]
+							}
 						]
 					},
 					{

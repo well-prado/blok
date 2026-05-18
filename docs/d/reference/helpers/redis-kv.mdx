@@ -1,0 +1,100 @@
+---
+title: "@blokjs/redis-kv"
+description: "Redis-backed key-value helper. Production drop-in for in-memory-kv — survives restarts and works across replicas."
+icon: "database"
+---
+
+Drop-in replacement for [`@blokjs/in-memory-kv`](./in-memory-kv) with
+the same `get` / `set` / `delete` / `list` actions. Connects via the
+`REDIS_URL` env var (default `redis://127.0.0.1:6379`) using `ioredis`.
+
+Used in the [chat-memory](/d/examples/chat-memory) and
+[LLM agent](/d/examples/llm-agent) examples for server-side
+conversation history.
+
+## Quickstart
+
+```json
+{
+  "id": "load-history",
+  "use": "@blokjs/redis-kv",
+  "inputs": {
+    "action": "get",
+    "key": "js/`chat:${ctx.request.params.sessionId}:history`"
+  }
+}
+```
+
+Set + TTL:
+
+```json
+{
+  "id": "save",
+  "use": "@blokjs/redis-kv",
+  "inputs": {
+    "action": "set",
+    "key": "js/`session:${ctx.request.params.sid}`",
+    "value": "js/ctx.state.userData",
+    "ttlMs": 86400000
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `action` | `"get"` \| `"set"` \| `"delete"` \| `"list"` | Operation. |
+| `key` | `string` | Required for `get`/`set`/`delete`. Ignored for `list`. |
+| `value` | unknown | Required for `set`. JSON-encoded internally — any JSON-serializable value works. |
+| `ttlMs` | `number` | Optional per-key TTL in ms. Redis evicts when the TTL elapses. |
+| `prefix` | `string` | For `list` only — `SCAN MATCH <prefix>*`. Without a prefix, `list` returns ALL keys (usually undesirable). |
+
+## Outputs
+
+| Action | Output shape |
+|---|---|
+| `get` | `{ action, key, value, exists }` — `value` and `exists` are undefined when the key doesn't exist. |
+| `set` | `{ action, key, value }` |
+| `delete` | `{ action, key, deleted }` — `deleted` is `true` if the key existed. |
+| `list` | `{ action, entries: [{ key, value }, ...] }` |
+
+## Connection model
+
+One shared `ioredis` client per process, lazy-created on first use,
+keyed off `REDIS_URL`. ioredis handles command queueing internally —
+all calls funnel through the single client. The client lives until
+the process exits.
+
+`list` uses `SCAN` with `MATCH <prefix>*` to avoid the multi-second
+block `KEYS` produces on large databases.
+
+## Composition
+
+- The [chat-memory example](/d/examples/chat-memory) chains
+  `load-history → llm-stream → save-history` (with `ephemeral: true`
+  on save) as the canonical pattern.
+- For cross-process pub/sub layered on top of KV, layer Redis pub/sub
+  separately — this helper is KV only.
+- Pair with `ttlMs` for ephemeral session state (24h sessions, 1h tokens, etc.).
+
+## Failure modes
+
+- Missing `ioredis` install → throws on first invocation with a clear
+  install hint (`bun add ioredis`).
+- Connection failure → ioredis retries internally with exponential
+  backoff. Set a `retry` on the step for higher-level recovery.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/in-memory-kv" icon="memory-stick" href="./in-memory-kv">
+    Dev-mode alternative — no Redis needed.
+  </Card>
+  <Card title="Chat with memory" icon="brain" href="/d/examples/chat-memory">
+    Real Redis-KV usage in an LLM workflow.
+  </Card>
+  <Card title="@blokjs/expr" icon="function-square" href="./expr">
+    Compose KV values via JS expressions.
+  </Card>
+</Columns>

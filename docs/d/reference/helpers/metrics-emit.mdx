@@ -1,0 +1,61 @@
+---
+title: "@blokjs/metrics-emit"
+description: "Emit an OpenTelemetry counter for a custom event. No-op cleanly when no exporter is wired."
+icon: "line-chart"
+---
+
+Emits an OTel counter named `blok_event_total` with `event:<name>`
+attribute. Scrape via Prometheus, view in Grafana, alert via your
+existing observability stack.
+
+When no OTel exporter is configured (the default), the helper no-ops
+— so this is safe to leave in workflows whether you've wired metrics
+or not.
+
+## Quickstart
+
+```json
+{
+  "id": "metric",
+  "use": "@blokjs/metrics-emit",
+  "ephemeral": true,
+  "inputs": {
+    "event": "order_processed",
+    "value": 1,
+    "attrs": { "tenant": "js/ctx.request.body.tenantId" }
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `event` | `string` | required | Emitted as `event:<name>` attribute on `blok_event_total`. |
+| `value` | `number` | `1` | Increment amount. |
+| `attrs` | `Record<string, unknown>` | — | Stringified per-event labels. |
+
+## Outputs
+
+`{ event, value }` echo — `ephemeral: true` is the typical setting.
+
+## Exporters
+
+Wire any OpenTelemetry counter exporter (Prometheus, OTLP, Datadog) at
+process boot and `metrics-emit` calls populate the configured backend.
+See [observability](/d/operations/observability) for the wiring
+guide.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/log" icon="text" href="./log">
+    For per-event text logs.
+  </Card>
+  <Card title="@blokjs/audit-log" icon="file-clock" href="./audit-log">
+    For audit-trail events (different shape).
+  </Card>
+  <Card title="Observability" icon="line-chart" href="/d/operations/observability">
+    Where metrics end up.
+  </Card>
+</Columns>

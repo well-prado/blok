@@ -1,0 +1,96 @@
+---
+title: "@blokjs/ws-close"
+description: "Close the WebSocket connection with a code + reason. For auth failures, idle timeouts, and graceful shutdowns."
+icon: "x-circle"
+---
+
+Closes the WS connection that triggered the workflow. Sends the
+standard WebSocket close frame with the supplied code + reason.
+
+## Quickstart
+
+```json
+{
+  "id": "close",
+  "use": "@blokjs/ws-close",
+  "inputs": {
+    "code": 4001,
+    "reason": "Invalid token"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `code` | `number` | `1000` | WebSocket close code. `1000` = normal closure. `4000-4999` are app-defined. |
+| `reason` | `string` | `""` | Human-readable reason. Surfaced to the client via `event.reason`. |
+
+## Outputs
+
+`{ closed: true, code, reason }`.
+
+## Common patterns
+
+### Auth-fail close
+
+```json
+{
+  "name": "WS Auth-Check",
+  "trigger": { "websocket": { "path": "/ws/secure", "events": ["open", "message"] } },
+  "steps": [
+    {
+      "id": "verify",
+      "branch": {
+        "when": "ctx.request.headers['authorization'] === undefined",
+        "then": [
+          { "id": "close", "use": "@blokjs/ws-close", "inputs": { "code": 4001, "reason": "missing auth header" } }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Idle timeout
+
+Trigger on `events: ["message"]`, track last-activity in a KV, close
+when stale:
+
+```json
+{
+  "id": "close-if-idle",
+  "branch": {
+    "when": "(Date.now() - (ctx.state.lastActivity || 0)) > 300000",
+    "then": [
+      { "id": "close", "use": "@blokjs/ws-close", "inputs": { "code": 1000, "reason": "idle timeout" } }
+    ]
+  }
+}
+```
+
+## Close code reference
+
+| Code | Meaning |
+|---|---|
+| `1000` | Normal closure. |
+| `1001` | Going away (server shutting down). |
+| `1002` | Protocol error. |
+| `1008` | Policy violation (use for auth failures with informational reason). |
+| `1011` | Server error. |
+| `4000-4999` | App-defined. Document your codes in workflow comments. |
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ws-reply" icon="reply" href="./ws-reply">
+    Send a final message before closing.
+  </Card>
+  <Card title="@blokjs/jwt-verify" icon="key" href="./jwt-verify">
+    Auth check that throws on failure (vs. WS close).
+  </Card>
+  <Card title="WebSocket trigger" icon="plug" href="/d/triggers/websocket">
+    Trigger config.
+  </Card>
+</Columns>

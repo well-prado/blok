@@ -1,0 +1,153 @@
+---
+title: "@blokjs/jwt-verify"
+description: "Production JWT auth. HS / RS / ES algorithms, JWKS lookup, claim validation, structured 401 reasons."
+icon: "key"
+---
+
+Verifies a JWT token using the `jose` library. Supports symmetric
+(HS256/384/512), asymmetric (RS, ES, EdDSA), and JWKS-fetched public
+keys. Validates `iss`, `aud`, `exp` claims. Returns the decoded
+payload + convenience aliases (`subject`, `issuer`, `audience`,
+`expiresAt`) on success.
+
+## Quickstart
+
+### HS256 with shared secret
+
+```json
+{
+  "id": "auth",
+  "use": "@blokjs/jwt-verify",
+  "inputs": {
+    "token": "js/ctx.request.headers['authorization']?.replace('Bearer ', '')",
+    "secret": "js/process.env.JWT_SECRET",
+    "issuer": "https://auth.example.com",
+    "audience": "my-api"
+  }
+}
+```
+
+### RS256 with JWKS endpoint
+
+```json
+{
+  "id": "auth",
+  "use": "@blokjs/jwt-verify",
+  "inputs": {
+    "token": "js/ctx.request.headers['authorization']?.slice(7)",
+    "jwksUri": "https://auth.example.com/.well-known/jwks.json",
+    "issuer": "https://auth.example.com",
+    "audience": "my-api",
+    "algorithms": ["RS256"]
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `token` | `string` | The JWT to verify. Required. |
+| `secret` | `string` | Shared HS256/384/512 secret. Exactly one of `secret`, `publicKey`, or `jwksUri` must be set. |
+| `publicKey` | `string` (PEM) | RSA/EC public key. |
+| `jwksUri` | `string` (URL) | JWKS endpoint. Keys are fetched + cached. |
+| `issuer` | `string` \| `string[]` | Allowed `iss` value(s). |
+| `audience` | `string` \| `string[]` | Allowed `aud` value(s). |
+| `algorithms` | `string[]` | Algorithm allowlist. Default permissive — restrict in production (e.g. `["RS256"]`). |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `claims` | The full decoded JWT payload. |
+| `subject` | `claims.sub` convenience alias. |
+| `issuer` | `claims.iss` |
+| `audience` | `claims.aud` |
+| `expiresAt` | `claims.exp` (unix seconds) |
+
+## Failure modes
+
+Each throws `GlobalError` with `code: 401` and structured
+`body: { reason, message }`:
+
+| reason | Cause |
+|---|---|
+| `missing_token` | Empty token input. |
+| `malformed_token` | Token isn't `header.payload.signature`. |
+| `invalid_signature` | HMAC / signature didn't verify against the key. |
+| `token_expired` | `exp` is in the past. |
+| `issuer_mismatch` | `iss` not in the allowlist. |
+| `audience_mismatch` | `aud` not in the allowlist. |
+| `algorithm_not_allowed` | Token algorithm not in the explicit allowlist. |
+
+## JWKS cache
+
+When `jwksUri` is set, the helper fetches the JWKS document and caches
+keys by `kid` in-process. Re-fetched lazily on cache miss. Use
+`_resetJwksCacheForTests()` in test setup to clear between runs.
+
+## Common patterns
+
+### Bearer-token middleware
+
+```json
+{
+  "name": "auth-check",
+  "_middleware": true,
+  "steps": [
+    {
+      "id": "verify",
+      "use": "@blokjs/jwt-verify",
+      "inputs": {
+        "token": "js/ctx.request.headers['authorization']?.slice(7)",
+        "secret": "js/process.env.JWT_SECRET",
+        "issuer": "...",
+        "audience": "..."
+      }
+    },
+    {
+      "id": "stash-identity",
+      "use": "@blokjs/ctx-publish",
+      "inputs": {
+        "name": "identity",
+        "value": "js/({ userId: ctx.state.verify.subject, claims: ctx.state.verify.claims })"
+      }
+    }
+  ]
+}
+```
+
+Reference the middleware from any trigger config:
+`"middleware": ["auth-check"]`. Downstream steps see
+`ctx.state.identity.userId` once verified.
+
+### Algorithm allowlist (defense against alg-mix attacks)
+
+ALWAYS pin `algorithms:` in production. A token signed with a different
+algorithm than expected (or `none`) can otherwise sneak through.
+
+```json
+"algorithms": ["RS256"]
+```
+
+## Composition
+
+- Run as the first step in HTTP workflows that need auth
+- Stash claims into `ctx.state` via [`ctx-publish`](./ctx-publish) for
+  downstream steps
+- Trigger-level middleware is the cleanest place — see
+  [middleware reference](/d/reference/middleware)
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/hmac-verify" icon="shield-check" href="./hmac-verify">
+    For HMAC-signed webhooks (different shape).
+  </Card>
+  <Card title="@blokjs/ctx-publish" icon="upload" href="./ctx-publish">
+    Stash identity for downstream steps.
+  </Card>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    Custom 401 responses inside catch arms.
+  </Card>
+</Columns>

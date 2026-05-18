@@ -1,0 +1,55 @@
+---
+title: "@blokjs/ws-reply"
+description: "Reply only to the WebSocket connection that triggered the current workflow run. Per-message RPC."
+icon: "reply"
+---
+
+Sends a message back to the WS connection that fired the workflow.
+Used in [WebSocket workflows](/d/triggers/websocket) for request-style
+patterns (echo, RPC, per-client updates).
+
+## Quickstart
+
+```json
+{
+  "id": "reply",
+  "use": "@blokjs/ws-reply",
+  "inputs": {
+    "message": "js/({ echo: ctx.request.body, at: Date.now() })"
+  }
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `message` | unknown | The payload to send. Serialized to JSON on the wire (string messages pass through verbatim). |
+
+## Outputs
+
+`{ sent: true }`.
+
+## Behavior
+
+The trigger tracks the connection that fired the workflow via
+`ctx.vars._ws_connection`. `@blokjs/ws-reply` writes to that connection
+directly — no need to specify a connection id.
+
+For server-pushed events to ALL connections, see
+[`@blokjs/ws-broadcast`](./ws-broadcast). For closing the connection,
+see [`@blokjs/ws-close`](./ws-close).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/ws-broadcast" icon="radio" href="./ws-broadcast">
+    Fan-out to many connections.
+  </Card>
+  <Card title="@blokjs/ws-close" icon="x-circle" href="./ws-close">
+    Close the connection.
+  </Card>
+  <Card title="WebSocket trigger" icon="plug" href="/d/triggers/websocket">
+    Trigger config + events.
+  </Card>
+</Columns>

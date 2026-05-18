@@ -1,0 +1,111 @@
+---
+title: "@blokjs/llm-stream"
+description: "Stream an OpenAI-compatible chat completion to the in-process SSE bus. Per-token + done events."
+icon: "cpu"
+---
+
+Streams a chat completion from any OpenAI-compatible Chat Completions
+endpoint (OpenRouter by default — covers 100+ models — plus OpenAI,
+Together, Anyscale, local Ollama / vLLM). Each token delta publishes
+to an SSE bus channel; a paired [SSE trigger](/d/triggers/sse) workflow
+pumps frames to the browser.
+
+Lazy-imports the `openai` SDK on first invocation. Add `openai` as a
+project dep when you use this helper — it's declared as an optional
+peer dep on `@blokjs/helpers` so workflows that don't use llm-stream
+don't pull it in.
+
+## Quickstart
+
+```json
+{
+  "id": "stream",
+  "use": "@blokjs/llm-stream",
+  "inputs": {
+    "channel": "js/`chat:${ctx.request.params.sessionId}`",
+    "apiKey": "js/process.env.OPENROUTER_API_KEY",
+    "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+    "messages": "js/ctx.request.body.messages"
+  }
+}
+```
+
+See the [streaming chat example](/d/examples/chat) for the end-to-end
+pattern.
+
+## Inputs
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `channel` | `string` | required | SSE bus channel to publish chunks on. Typically `chat:<sessionId>` per-conversation. |
+| `apiKey` | `string` | required | API key for the upstream provider. |
+| `model` | `string` | required | Model identifier (e.g. `openai/gpt-4o-mini`). Format depends on the provider. |
+| `messages` | `{role, content}[]` | required | OpenAI-format chat messages. Include the running conversation history. |
+| `baseUrl` | `string` (URL) | `https://openrouter.ai/api/v1` | OpenAI-compatible Chat Completions base URL. |
+| `chunkEvent` | `string` | `"token"` | SSE event name for streamed token frames. |
+| `doneEvent` | `string` | `"done"` | SSE event name for the final completion frame. |
+| `temperature` | `number` | — | OpenAI temperature param. |
+| `maxTokens` | `number` | — | Cap output tokens. |
+
+## Outputs
+
+| Field | Notes |
+|---|---|
+| `fullText` | The accumulated assistant message. |
+| `finishReason` | OpenAI's finish reason (`"stop"`, `"length"`, `"tool_calls"`, etc.). |
+| `channel` | The channel the stream published to. |
+
+## Bus events published
+
+Per token:
+
+```json
+{ "event": "token", "data": { "delta": "<text chunk>" } }
+```
+
+When the stream completes:
+
+```json
+{ "event": "done", "data": { "fullText": "<full reply>", "finishReason": "stop" } }
+```
+
+Pair with `@blokjs/sse-subscribe` + `@blokjs/sse-stream` in a separate
+SSE-triggered workflow to fan these to a connected browser.
+
+## Provider swap (no code change)
+
+| Provider | `baseUrl` | Model id |
+|---|---|---|
+| OpenRouter (default) | `https://openrouter.ai/api/v1` | `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, etc. |
+| OpenAI direct | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Local Ollama | `http://localhost:11434/v1` | `llama3.2` |
+| Together | `https://api.together.xyz/v1` | provider-specific |
+| Anyscale | `https://api.endpoints.anyscale.com/v1` | provider-specific |
+
+Override per-step via the `baseUrl` input, or via env var if you
+prefer a single source of truth.
+
+## Composition
+
+- **`idempotencyKey`** — cache the response by `requestId`. Useful when
+  retried API calls shouldn't regenerate. The cache replays the entire
+  stream from memory on hit (the token events DON'T re-fire — clients
+  should query the cached `fullText` instead).
+- **`retry`** — recover from transient OpenAI errors. Failed attempts
+  never cache.
+- Inside an [agent loop](./llm-agent), use the tool-calling variant
+  instead of llm-stream.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/llm-agent" icon="bot" href="./llm-agent">
+    Adds OpenAI function-calling on top of the same streaming.
+  </Card>
+  <Card title="@blokjs/sse-subscribe" icon="rss" href="./sse-subscribe">
+    Subscribe a workflow to the bus channel.
+  </Card>
+  <Card title="Streaming chat example" icon="messages-square" href="/d/examples/chat">
+    End-to-end working code.
+  </Card>
+</Columns>
