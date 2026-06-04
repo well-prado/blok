@@ -61,10 +61,10 @@
     },
     "core/runner": {
       "name": "@blokjs/runner",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "@grpc/grpc-js": "^1.12.0",
         "@grpc/proto-loader": "^0.7.13",
         "@opentelemetry/api": "^1.9.0",
@@ -113,7 +113,7 @@
     },
     "core/shared": {
       "name": "@blokjs/shared",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "dayjs": "^1.11.19",
         "lodash": "^4.17.21",
@@ -127,7 +127,7 @@
     },
     "core/workflow-helper": {
       "name": "@blokjs/helper",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "zod": "^3.24.2",
       },
@@ -140,11 +140,11 @@
     },
     "nodes/control-flow/if-else@1.0.0": {
       "name": "@blokjs/if-else",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "lodash": "^4.17.21",
         "zod": "^3.24.2",
       },
@@ -158,10 +158,10 @@
     },
     "nodes/utility/helpers@1.0.0": {
       "name": "@blokjs/helpers",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "ajv": "^8.17.1",
         "ioredis": "^5.10.1",
         "jose": "^6.2.3",
@@ -183,10 +183,10 @@
     },
     "nodes/web/api-call@1.0.0": {
       "name": "@blokjs/api-call",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "lodash": "^4.17.21",
         "zod": "^3.24.2",
       },
@@ -200,7 +200,7 @@
     },
     "nodes/web/react@1.0.0": {
       "name": "@blokjs/react",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "@blokjs/helper": "^0.2.0",
         "@blokjs/runner": "^0.2.0",
@@ -222,7 +222,7 @@
     },
     "packages/cli": {
       "name": "blokctl",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "bin": {
         "blokctl": "./dist/index.js",
       },
@@ -359,7 +359,7 @@
     },
     "triggers/cron": {
       "name": "@blokjs/trigger-cron",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
@@ -378,7 +378,7 @@
     },
     "triggers/grpc": {
       "name": "@blokjs/trigger-grpc",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "@blokjs/api-call": "^0.4.0",
         "@blokjs/helper": "^0.4.0",
@@ -418,16 +418,16 @@
       "version": "0.1.1",
       "dependencies": {
         "@ai-sdk/openai": "^1.3.22",
-        "@blokjs/api-call": "^0.6.13",
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/helpers": "^0.6.13",
-        "@blokjs/if-else": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
-        "@blokjs/trigger-mcp": "^0.6.13",
-        "@blokjs/trigger-sse": "^0.6.13",
-        "@blokjs/trigger-webhook": "^0.6.13",
-        "@blokjs/trigger-websocket": "^0.6.13",
+        "@blokjs/api-call": "^0.6.14",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/helpers": "^0.6.14",
+        "@blokjs/if-else": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
+        "@blokjs/trigger-mcp": "^0.6.14",
+        "@blokjs/trigger-sse": "^0.6.14",
+        "@blokjs/trigger-webhook": "^0.6.14",
+        "@blokjs/trigger-websocket": "^0.6.14",
         "@hono/node-server": "^1.19.9",
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-prometheus": "^0.57.2",
@@ -456,11 +456,11 @@
     },
     "triggers/mcp": {
       "name": "@blokjs/trigger-mcp",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@opentelemetry/api": "^1.9.0",
         "hono": "^4.11.7",
@@ -478,7 +478,7 @@
     },
     "triggers/pubsub": {
       "name": "@blokjs/trigger-pubsub",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
@@ -513,11 +513,11 @@
     },
     "triggers/sse": {
       "name": "@blokjs/trigger-sse",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "@opentelemetry/api": "^1.9.0",
         "hono": "^4.11.7",
         "uuid": "^11.1.0",
@@ -532,11 +532,11 @@
     },
     "triggers/webhook": {
       "name": "@blokjs/trigger-webhook",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "@opentelemetry/api": "^1.9.0",
         "hono": "^4.11.7",
         "uuid": "^11.1.0",
@@ -551,11 +551,11 @@
     },
     "triggers/websocket": {
       "name": "@blokjs/trigger-websocket",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
-        "@blokjs/helper": "^0.6.13",
-        "@blokjs/runner": "^0.6.13",
-        "@blokjs/shared": "^0.6.13",
+        "@blokjs/helper": "^0.6.14",
+        "@blokjs/runner": "^0.6.14",
+        "@blokjs/shared": "^0.6.14",
         "@hono/node-ws": "^1.3.1",
         "@opentelemetry/api": "^1.9.0",
         "uuid": "^11.1.0",
@@ -569,7 +569,7 @@
         "ws": "^8.19.0",
       },
       "peerDependencies": {
-        "@blokjs/trigger-pubsub": "^0.6.13",
+        "@blokjs/trigger-pubsub": "^0.6.14",
         "ws": "^8.19.0",
       },
       "optionalPeers": [
@@ -579,7 +579,7 @@
     },
     "triggers/worker": {
       "name": "@blokjs/trigger-worker",
-      "version": "0.6.13",
+      "version": "0.6.14",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
