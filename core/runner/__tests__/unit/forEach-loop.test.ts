@@ -19,10 +19,12 @@
 
 import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import Configuration from "../../src/Configuration";
 import { LoopMaxIterationsError } from "../../src/LoopMaxIterationsError";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
+import { defineNode } from "../../src/defineNode";
 import type GlobalOptions from "../../src/types/GlobalOptions";
 
 /**
@@ -73,6 +75,39 @@ class CtxPublishNode extends RunnerNode {
 }
 
 /**
+ * A REAL `defineNode` node — unlike the hand-rolled RunnerNode replicas above,
+ * it goes through the full `BlokService` pipeline, so its `ctx.response` is a
+ * `BlokResponse` ENVELOPE (`{ data, contentType, success, error, steps }`).
+ * This is what the @blokjs/* nodes a consumer actually uses produce, and what
+ * made `forEach` leak envelopes before the fix. Returns `{ id, ok }` from the
+ * per-iteration var, or `undefined` when `n === 0` (to exercise the sentinel).
+ */
+const RealEnvelopeNode = defineNode({
+	name: "real-envelope",
+	description: "test fixture — a real defineNode node (produces a BlokResponse envelope)",
+	input: z.object({}),
+	output: z.union([z.object({ id: z.number(), ok: z.boolean() }), z.undefined()]),
+	async execute(ctx) {
+		const n = (ctx.state as Record<string, unknown>).n as number;
+		if (n === 0) return undefined;
+		return { id: n, ok: true };
+	},
+});
+
+/** A real defineNode whose body wraps a throwing path in tryCatch-style resilience. */
+const MaybeFailNode = defineNode({
+	name: "maybe-fail",
+	description: "test fixture — throws when n is even",
+	input: z.object({}),
+	output: z.object({ n: z.number() }),
+	async execute(ctx) {
+		const n = (ctx.state as Record<string, unknown>).n as number;
+		if (n % 2 === 0) throw new Error(`boom ${n}`);
+		return { n };
+	},
+});
+
+/**
  * Build a Configuration from a workflow definition + helper nodes.
  */
 async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration; ctx: Context }> {
@@ -80,6 +115,8 @@ async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration
 	const helpers: Record<string, RunnerNode> = {
 		"@blokjs/expr": new ExprNode(),
 		"@blokjs/ctx-publish": new CtxPublishNode(),
+		"real-envelope": RealEnvelopeNode as unknown as RunnerNode,
+		"maybe-fail": MaybeFailNode as unknown as RunnerNode,
 	};
 	const globalOptions = {
 		nodes: {
@@ -235,6 +272,127 @@ describe("v0.5 forEach + loop integration", () => {
 			await runner.run(ctx);
 
 			expect((ctx.state as Record<string, unknown>).indices).toEqual([0, 1, 2]);
+		});
+
+		// Regression for TASK-foreach-output-shape: a body using a REAL
+		// defineNode node (BlokResponse envelope) must aggregate UNWRAPPED
+		// values — `ctx.state[<loopId>]` reads like every other state key, NOT
+		// an array of `{ data, success, error, contentType, steps }` envelopes.
+		it("unwraps the BlokResponse envelope from real (defineNode) nodes — sequential", async () => {
+			const wfDef = {
+				name: "test-foreach-unwrap-seq",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "loop",
+						forEach: {
+							in: [1, 2, 3],
+							as: "n",
+							mode: "sequential",
+							do: [{ id: "make", use: "real-envelope", type: "module", inputs: {} }],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+			expect((ctx.state as Record<string, unknown>).loop).toEqual([
+				{ id: 1, ok: true },
+				{ id: 2, ok: true },
+				{ id: 3, ok: true },
+			]);
+		});
+
+		it("unwraps the BlokResponse envelope from real (defineNode) nodes — parallel", async () => {
+			const wfDef = {
+				name: "test-foreach-unwrap-par",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "loop",
+						forEach: {
+							in: [1, 2, 3, 4],
+							as: "n",
+							mode: "parallel",
+							concurrency: 2,
+							do: [{ id: "make", use: "real-envelope", type: "module", inputs: {} }],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+			expect((ctx.state as Record<string, unknown>).loop).toEqual([
+				{ id: 1, ok: true },
+				{ id: 2, ok: true },
+				{ id: 3, ok: true },
+				{ id: 4, ok: true },
+			]);
+		});
+
+		it("preserves the null sentinel for iterations that return undefined", async () => {
+			// real-envelope returns undefined when n === 0.
+			const wfDef = {
+				name: "test-foreach-sentinel",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "loop",
+						forEach: {
+							in: [1, 0, 2],
+							as: "n",
+							mode: "sequential",
+							do: [{ id: "make", use: "real-envelope", type: "module", inputs: {} }],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+			expect((ctx.state as Record<string, unknown>).loop).toEqual([{ id: 1, ok: true }, null, { id: 2, ok: true }]);
+		});
+
+		it("aggregates a tryCatch body's catch result unwrapped (per-item resilience)", async () => {
+			// maybe-fail throws on even n; the tryCatch catch returns { ok:false }.
+			// The aggregated slot must be the unwrapped { ok:false } / { n } — not
+			// an envelope — so `loop.filter(r => r.ok)` works as authors expect.
+			const wfDef = {
+				name: "test-foreach-trycatch",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "loop",
+						forEach: {
+							in: [1, 2, 3],
+							as: "n",
+							mode: "sequential",
+							do: [
+								{
+									id: "guard",
+									tryCatch: {
+										try: [{ id: "risky", use: "maybe-fail", type: "module", inputs: {} }],
+										catch: [
+											{
+												id: "fallback",
+												use: "@blokjs/expr",
+												type: "module",
+												inputs: { expression: "({ ok: false })" },
+											},
+										],
+									},
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+			expect((ctx.state as Record<string, unknown>).loop).toEqual([{ n: 1 }, { ok: false }, { n: 3 }]);
 		});
 	});
 

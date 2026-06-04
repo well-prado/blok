@@ -45,6 +45,31 @@ import { RunTracker } from "./tracing/RunTracker";
 import type { IterationContext, ParallelIterationContext, SequentialIterationContext } from "./tracing/types";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
+/**
+ * Normalize one iteration's `childCtx.response` to the value that should land
+ * in the aggregated `ctx.state[<loopId>]` array.
+ *
+ * A step leaves EITHER a raw value (e.g. a hand-rolled `RunnerNode`) OR a
+ * `BlokResponse` envelope (`{ data, contentType, success, error, steps }`, the
+ * common `defineNode` / module-node shape) on `ctx.response`. This is the same
+ * dual shape the HTTP trigger resolves with its `hasWrapper` check
+ * (`triggers/http/.../responseEmitter.ts`). Unwrap the envelope to its `.data`
+ * so loop output reads like every other `ctx.state[<id>]` (the unwrapped value)
+ * rather than an array of raw envelopes.
+ *
+ * Sentinel: a `null`/`undefined` result becomes `null` ("ran, returned
+ * undefined") — preserved so the parallel resume rehydration can distinguish it
+ * from an absent slot. `??` (not `||`) keeps falsy-but-present values (`0`,
+ * `false`, `""`) intact.
+ */
+function unwrapIterationResult(resp: unknown): unknown {
+	const unwrapped =
+		resp !== null && typeof resp === "object" && "data" in resp && "contentType" in resp
+			? (resp as { data: unknown }).data
+			: resp;
+	return unwrapped ?? null;
+}
+
 interface ForEachOpts {
 	in?: unknown;
 	as?: string;
@@ -163,11 +188,14 @@ export class ForEachNode extends RunnerNode {
 			// or every iteration's nested steps get marked "skipped (resumed
 			// past wait...)" and the iteration produces no output.
 			await runner.run(childCtx, { deep: true, stepName: this.name });
-			// After Runner.runSteps, `childCtx.response` is set to the last
-			// step's resolved data (RunnerSteps line ~349: `ctx.response =
-			// model.data`). So `childCtx.response` IS the iteration's
-			// output value, not a wrapped envelope.
-			return childCtx.response;
+			// After Runner.runSteps, `childCtx.response` holds the last step's
+			// output — but in one of TWO shapes depending on the node: a RAW
+			// value (e.g. a hand-rolled RunnerNode) OR a `BlokResponse` ENVELOPE
+			// (`{ data, contentType, success, error, steps }`) for the common
+			// `defineNode` / module nodes. Unwrap the envelope so the aggregated
+			// `ctx.state[<loopId>]` reads like every other `ctx.state[<id>]`
+			// (the unwrapped value), not an array of envelopes.
+			return unwrapIterationResult(childCtx.response);
 		};
 
 		// v0.6 Phase 4 — push a primitive frame onto the ctx stack so the
@@ -361,7 +389,9 @@ export class ForEachNode extends RunnerNode {
 					try {
 						const runner = new Runner(steps);
 						await runner.run(childCtx, { deep: true, stepName: this.name });
-						return childCtx.response;
+						// Unwrap the BlokResponse envelope to its `.data` (see the
+						// sequential path comment) so parallel aggregation matches.
+						return unwrapIterationResult(childCtx.response);
 					} finally {
 						// Detach the per-iteration listeners from parent +
 						// pool signals (PR 1 A3 pattern — prevents listener
