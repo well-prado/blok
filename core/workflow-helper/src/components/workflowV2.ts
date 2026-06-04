@@ -26,6 +26,14 @@ export interface WorkflowOpts {
 	trigger: Record<string, unknown>;
 	/** Pipeline of steps to execute in order. At least one required. */
 	steps: V2Step[];
+	/**
+	 * Optional Zod schema describing the workflow's input (request body).
+	 * Used by the `mcp` trigger to generate the exposed tool's `inputSchema`
+	 * (via zod-to-json-schema). Carried verbatim on `_config.input`; not
+	 * validated or serialized by the runner.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: accepts any ZodType without coupling the helper to a zod version
+	input?: any;
 }
 
 /**
@@ -115,7 +123,7 @@ export function workflow(opts: WorkflowOpts): WorkflowV2Builder {
 		const parsedKind = TriggersSchema.safeParse(kind);
 		if (!parsedKind.success) {
 			throw new Error(
-				`workflow("${opts.name}") trigger kind "${kind}" is not recognized. Allowed: http, queue, pubsub, worker, cron, webhook, sse, websocket, grpc, manual.`,
+				`workflow("${opts.name}") trigger kind "${kind}" is not recognized. Allowed: http, queue, pubsub, worker, cron, webhook, sse, websocket, mcp, grpc, manual.`,
 			);
 		}
 		validatedTrigger[kind] = validateTriggerConfig(parsedKind.data, (opts.trigger as Record<string, unknown>)[kind]);
@@ -127,11 +135,16 @@ export function workflow(opts: WorkflowOpts): WorkflowV2Builder {
 		description: opts.description,
 		trigger: validatedTrigger,
 		steps: compiledSteps,
+		// Carry the optional Zod input schema verbatim (authoring metadata for
+		// the `mcp` trigger). Excluded from toJson() — it isn't serializable.
+		...(opts.input !== undefined ? { input: opts.input } : {}),
 	};
 
 	return Object.freeze({
 		_blokV2: true as const,
 		_config,
-		toJson: () => JSON.stringify(_config),
+		// `input` (a Zod schema) is authoring metadata, not part of the
+		// serialized workflow — strip it so JSON consumers see a clean envelope.
+		toJson: () => JSON.stringify({ ..._config, input: undefined }),
 	});
 }

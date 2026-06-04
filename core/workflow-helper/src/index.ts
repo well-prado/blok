@@ -65,6 +65,13 @@ import {
 	HttpMethodSchema,
 	HttpTriggerOpts,
 	HttpTriggerOptsSchema,
+	McpResourceMetaSchema,
+	McpToolMetaSchema,
+	// MCP
+	McpTransport,
+	McpTransportSchema,
+	McpTriggerOpts,
+	McpTriggerOptsSchema,
 	// Pub/Sub
 	PubSubProvider,
 	PubSubProviderSchema,
@@ -221,6 +228,12 @@ export {
 	WebSocketTriggerOptsSchema,
 	SSETriggerOpts,
 	SSETriggerOptsSchema,
+	McpTransport,
+	McpTransportSchema,
+	McpToolMetaSchema,
+	McpResourceMetaSchema,
+	McpTriggerOpts,
+	McpTriggerOptsSchema,
 	TriggersSchema,
 	TriggersEnum,
 	// Trigger registry — runtime dispatch

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Lockstep publish for the 15 Blok public packages (8 pre-v0.6, plus 7
+ * Lockstep publish for the 16 Blok public packages (8 pre-v0.6, plus 7
  * added in v0.6.0 to support the new trigger surface — sse, websocket,
- * webhook, pubsub, cron, grpc, plus the helpers node).
+ * webhook, pubsub, cron, grpc, plus the helpers node — and `trigger-mcp`,
+ * added post-v0.6 and folded into the lockstep list here).
  *
  * Pre-flight: lockstep version, cross-package dep alignment, CLI scaffold
  * constants, git tag, clean tree. Then ordered npm publish with a single
@@ -68,6 +69,7 @@ const PUBLISHABLE: readonly Publishable[] = [
 	{ dir: "triggers/pubsub", name: "@blokjs/trigger-pubsub" },
 	{ dir: "triggers/cron", name: "@blokjs/trigger-cron" },
 	{ dir: "triggers/grpc", name: "@blokjs/trigger-grpc" },
+	{ dir: "triggers/mcp", name: "@blokjs/trigger-mcp" },
 	// CLI last — depends on everything via the scaffold.
 	{ dir: "packages/cli", name: "blokctl" },
 ];
@@ -88,7 +90,7 @@ interface Failure {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 15 Blok public packages to npm in dependency order using a
+Publishes the 16 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:

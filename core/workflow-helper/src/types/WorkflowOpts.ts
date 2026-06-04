@@ -90,6 +90,14 @@ export const WorkflowV2Schema = z.object({
 				"step with `stop: true`. Middleware-only workflows MAY omit `trigger`.",
 		),
 	steps: z.array(V2StepSchema).min(1).describe("Pipeline of steps to execute in order. At least one step required."),
+	input: z
+		.unknown()
+		.optional()
+		.describe(
+			"Optional Zod schema describing the workflow's input (request body). Consumed by the `mcp` " +
+				"trigger to generate each MCP tool's `inputSchema` (via zod-to-json-schema). Not validated or " +
+				"serialized by the runner — it's authoring metadata carried on the workflow config.",
+		),
 });
 
 export type WorkflowV2 = z.infer<typeof WorkflowV2Schema>;

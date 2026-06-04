@@ -37,6 +37,7 @@
 		"@blokjs/if-else": "^0.6.12",
 		"@blokjs/runner": "^0.6.12",
 		"@blokjs/shared": "^0.6.12",
+		"@blokjs/trigger-mcp": "^0.6.12",
 		"@blokjs/trigger-sse": "^0.6.12",
 		"@blokjs/trigger-webhook": "^0.6.12",
 		"@blokjs/trigger-websocket": "^0.6.12",

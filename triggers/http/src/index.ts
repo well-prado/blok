@@ -1,4 +1,5 @@
 import { DefaultLogger } from "@blokjs/runner";
+import McpTrigger from "@blokjs/trigger-mcp";
 import SSETrigger from "@blokjs/trigger-sse";
 import WebhookTrigger from "@blokjs/trigger-webhook";
 import WebSocketTrigger from "@blokjs/trigger-websocket";
@@ -11,6 +12,7 @@ export default class App {
 	private wsTrigger: WebSocketTrigger | null = null;
 	private sseTrigger: SSETrigger | null = null;
 	private webhookTrigger: WebhookTrigger | null = null;
+	private mcpTrigger: McpTrigger | null = null;
 	protected trigger_initializer = 0;
 	protected initializer = 0;
 	protected tracer = trace.getTracer(
@@ -33,14 +35,16 @@ export default class App {
 		this.wsTrigger = new WebSocketTrigger(app, this.httpTrigger);
 		this.sseTrigger = new SSETrigger(app, this.httpTrigger);
 		this.webhookTrigger = new WebhookTrigger(app, this.httpTrigger);
+		this.mcpTrigger = new McpTrigger(app, this.httpTrigger);
 		// Share the HTTP trigger's node + workflow registry with the
-		// sibling triggers so per-event / per-stream / per-webhook
+		// sibling triggers so per-event / per-stream / per-webhook / per-MCP
 		// workflow runs resolve `branch`, helper nodes, and built-in
 		// helpers through the same NodeMap that HTTP requests use.
 		const nodeMap = this.httpTrigger.getNodeMap();
 		this.wsTrigger.setNodeMap(nodeMap);
 		this.sseTrigger.setNodeMap(nodeMap);
 		this.webhookTrigger.setNodeMap(nodeMap);
+		this.mcpTrigger.setNodeMap(nodeMap);
 	}
 
 	async run() {
@@ -57,6 +61,7 @@ export default class App {
 			await this.wsTrigger?.listen();
 			await this.sseTrigger?.listen();
 			await this.webhookTrigger?.listen();
+			await this.mcpTrigger?.listen();
 			await this.httpTrigger.listen();
 			this.initializer = performance.now() - this.initializer;
 

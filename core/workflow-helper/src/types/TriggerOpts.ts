@@ -760,6 +760,53 @@ export const SSETriggerOptsSchema = z.object({
 export type SSETriggerOpts = z.input<typeof SSETriggerOptsSchema>;
 
 // =============================================================================
+// MCP Trigger (Model Context Protocol server)
+// =============================================================================
+
+/** MCP transport flavours the trigger can serve on the shared Hono port. */
+export const McpTransportSchema = z.enum(["sse", "streamable-http"]);
+export type McpTransport = z.infer<typeof McpTransportSchema>;
+
+/** Tool metadata when a workflow is exposed as an MCP tool. */
+export const McpToolMetaSchema = z.object({
+	name: z.string().min(1).optional().describe("Tool name exposed to MCP clients. Defaults to the workflow name."),
+	description: z.string().optional().describe("Human-readable tool description shown to MCP clients."),
+});
+
+/** Resource metadata when a workflow is exposed as an MCP resource instead of a tool. */
+export const McpResourceMetaSchema = z.object({
+	uri: z.string().min(1).describe("Resource URI advertised to clients, e.g. 'tetrix://agents'."),
+	name: z.string().min(1).optional().describe("Resource display name. Defaults to the workflow name."),
+	description: z.string().optional(),
+	mimeType: z.string().default("application/json").describe("MIME type of the resource body."),
+});
+
+/**
+ * v0.7 MCP trigger config. A workflow with `trigger.mcp` is exposed to MCP
+ * clients (Cursor, Claude, …) as a tool (default) or a resource. Workflows
+ * that share the same `path` + `serverName` are aggregated into a single MCP
+ * server mounted on the shared Hono app. Each tool's `inputSchema` is derived
+ * from the workflow's `input` Zod schema (via zod-to-json-schema). `tools/call`
+ * runs the workflow through the runner (Studio tracing / retries free).
+ */
+export const McpTriggerOptsSchema = z.object({
+	path: z.string().min(1).default("/mcp").describe("Base path the MCP server mounts on (e.g. '/mcp')."),
+	serverName: z.string().min(1).default("blok-mcp").describe("MCP server name advertised to clients."),
+	serverVersion: z.string().default("1.0.0").describe("MCP server version advertised to clients."),
+	transports: z
+		.array(McpTransportSchema)
+		.min(1)
+		.default(["sse", "streamable-http"])
+		.describe(
+			"Transports to serve: legacy SSE (GET <path>/sse + POST <path>/messages) and/or Streamable-HTTP (<path>).",
+		),
+	tool: McpToolMetaSchema.optional().describe("Tool metadata. Ignored when `resource` is set."),
+	resource: McpResourceMetaSchema.optional().describe("When set, the workflow is exposed as a resource, not a tool."),
+	middleware: z.array(z.string()).optional().describe("Trigger-level middleware chain."),
+});
+export type McpTriggerOpts = z.input<typeof McpTriggerOptsSchema>;
+
+// =============================================================================
 // Trigger registry (the dispatch table)
 // =============================================================================
 
@@ -775,6 +822,7 @@ export const TriggersSchema = z.enum([
 	"webhook",
 	"sse",
 	"websocket",
+	"mcp",
 ]);
 export type TriggersEnum = z.infer<typeof TriggersSchema>;
 
@@ -795,6 +843,7 @@ export type TriggerConfigMap = {
 	webhook: WebhookTriggerOpts;
 	sse: SSETriggerOpts;
 	websocket: WebSocketTriggerOpts;
+	mcp: McpTriggerOpts;
 };
 
 /**
@@ -813,6 +862,7 @@ export const TRIGGER_SCHEMAS = {
 	webhook: WebhookTriggerOptsSchema,
 	sse: SSETriggerOptsSchema,
 	websocket: WebSocketTriggerOptsSchema,
+	mcp: McpTriggerOptsSchema,
 	grpc: null,
 	manual: null,
 } as const satisfies Record<TriggersEnum, z.ZodTypeAny | null>;
@@ -827,6 +877,7 @@ export type AnyTriggerOpts =
 	| WebhookTriggerOpts
 	| WebSocketTriggerOpts
 	| SSETriggerOpts
+	| McpTriggerOpts
 	| Record<string, unknown>;
 
 /**

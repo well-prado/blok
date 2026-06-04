@@ -157,6 +157,7 @@ export async function createProject(opts: OptionValues, version: string, current
 										value: "websocket",
 										hint: "Bi-directional real-time (mounts on HTTP port)",
 									},
+									{ label: "MCP", value: "mcp", hint: "Model Context Protocol server (mounts on HTTP port)" },
 									{ label: "Queue", value: "queue", hint: "Kafka/RabbitMQ/SQS/Redis (port 4005)" },
 									{ label: "Pub/Sub", value: "pubsub", hint: "GCP/AWS/Azure messaging (port 4006)" },
 									//{ label: "GRPC", value: "grpc", hint: "RPC (port 4003)" }
@@ -345,7 +346,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// when HTTP is present.
 		const mountedOnHttp = new Set<string>();
 		if (selectedTriggers.includes("http")) {
-			for (const kind of ["sse", "websocket", "webhook"]) {
+			for (const kind of ["sse", "websocket", "webhook", "mcp"]) {
 				if (selectedTriggers.includes(kind)) mountedOnHttp.add(kind);
 			}
 		}
@@ -700,6 +701,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			"@blokjs/trigger-cron": "triggers/cron",
 			"@blokjs/trigger-grpc": "triggers/grpc",
 			"@blokjs/trigger-pubsub": "triggers/pubsub",
+			"@blokjs/trigger-mcp": "triggers/mcp",
 			"@blokjs/trigger-sse": "triggers/sse",
 			"@blokjs/trigger-webhook": "triggers/webhook",
 			"@blokjs/trigger-websocket": "triggers/websocket",
@@ -886,6 +888,20 @@ export async function createProject(opts: OptionValues, version: string, current
 				...wsDeps,
 			};
 		}
+		// MCP mounts on the HTTP process (like SSE/WS). Inject the trigger
+		// package so the generated HTTP entry's `import McpTrigger from
+		// "@blokjs/trigger-mcp"` resolves. The trigger package pulls its own
+		// SDK deps (@modelcontextprotocol/sdk, zod-to-json-schema) transitively.
+		if (selectedTriggers.includes("mcp")) {
+			const mcpDeps: Record<string, string> = {
+				"@blokjs/trigger-mcp": localRepoPath ? `file:${path.resolve(repoSource, "triggers/mcp")}` : BLOKJS_DEP_RANGE,
+				hono: "^4.11.7",
+			};
+			packageJsonContent.dependencies = {
+				...packageJsonContent.dependencies,
+				...mcpDeps,
+			};
+		}
 		if (Object.keys(triggerPackageDeps).length > 0) {
 			packageJsonContent.dependencies = {
 				...packageJsonContent.dependencies,
@@ -1039,7 +1055,14 @@ export async function createProject(opts: OptionValues, version: string, current
 		const httpPort = triggerConfigs.find((tc) => tc.kind === "http")?.port;
 		for (const tc of triggerConfigs) {
 			if (mountedOnHttp.has(tc.kind) && httpPort !== undefined) {
-				const samplePath = tc.kind === "sse" ? "/sse/demo" : "/ws/echo";
+				const samplePath =
+					tc.kind === "sse"
+						? "/sse/demo"
+						: tc.kind === "mcp"
+							? "/mcp/sse"
+							: tc.kind === "webhook"
+								? "/webhooks"
+								: "/ws/echo";
 				console.log(`  ${tc.label}: http://localhost:${httpPort}${samplePath}  (mounted on HTTP)`);
 			} else {
 				console.log(`  ${tc.label}: http://localhost:${tc.port}/health-check`);
@@ -1230,6 +1253,7 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 		const sseAlsoSelected = selectedTriggers.includes("sse");
 		const wsAlsoSelected = selectedTriggers.includes("websocket");
 		const webhookAlsoSelected = selectedTriggers.includes("webhook");
+		const mcpAlsoSelected = selectedTriggers.includes("mcp");
 		// Critical: import SSETrigger / WebSocketTrigger / WebhookTrigger from the
 		// npm packages rather than the locally-copied trigger files. The helper
 		// nodes (@blokjs/sse-publish, @blokjs/ws-broadcast, etc.) look up the
@@ -1237,13 +1261,14 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 		// exports. If the HTTP entry's trigger instance comes from a different
 		// module (the local copy), Node treats them as separate modules with
 		// separate singletons — events would never cross.
-		const needsShared = sseAlsoSelected || wsAlsoSelected || webhookAlsoSelected;
+		const needsShared = sseAlsoSelected || wsAlsoSelected || webhookAlsoSelected || mcpAlsoSelected;
 		const sharedHelperImports = needsShared
 			? `\nimport { NodeMap, WorkflowRegistry } from "@blokjs/runner";\nimport sharedNodes from "../../Nodes";\nimport sharedWorkflows from "../../Workflows";`
 			: "";
 		const sseImports = sseAlsoSelected ? `\nimport SSETrigger from "@blokjs/trigger-sse";` : "";
 		const wsImports = wsAlsoSelected ? `\nimport WebSocketTrigger from "@blokjs/trigger-websocket";` : "";
 		const webhookImports = webhookAlsoSelected ? `\nimport WebhookTrigger from "@blokjs/trigger-webhook";` : "";
+		const mcpImports = mcpAlsoSelected ? `\nimport McpTrigger from "@blokjs/trigger-mcp";` : "";
 		const sharedBootstrapPrelude = needsShared
 			? `\n\n			// Build a NodeMap from the shared Nodes record; both SSE and
 			// WebSocket triggers consume this via setNodeMap so they can
@@ -1266,15 +1291,21 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 				for (const [name, wf] of Object.entries(sharedWorkflows)) {
 					const w = wf as {
 						name?: string;
-						trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown };
-						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown } };
+						trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown; mcp?: unknown };
+						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown; mcp?: unknown } };
 					};
 					const triggerCfg = w._config?.trigger ?? w.trigger;
 					if (!triggerCfg) continue;
-					if (!triggerCfg.sse && !triggerCfg.websocket && !triggerCfg.webhook) continue;
+					if (!triggerCfg.sse && !triggerCfg.websocket && !triggerCfg.webhook && !triggerCfg.mcp) continue;
 					const resolvedName = w._config?.name ?? w.name ?? name;
 					if (registry.get(resolvedName)) continue;
-					const kind = triggerCfg.sse ? "sse" : triggerCfg.websocket ? "websocket" : "webhook";
+					const kind = triggerCfg.sse
+						? "sse"
+						: triggerCfg.websocket
+							? "websocket"
+							: triggerCfg.webhook
+								? "webhook"
+								: "mcp";
 					registry.register({
 						name: resolvedName,
 						source: \`\${kind}:\${name}\`,
@@ -1327,10 +1358,25 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 			});
 			await webhookTrigger.listen();`
 			: "";
-		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}${webhookBootstrap}`;
+		const mcpBootstrap = mcpAlsoSelected
+			? `\n			// Mount the MCP server on the HTTP process's shared Hono app.
+			// McpTrigger.constructor(app, httpTrigger?) mirrors SSE / WS / Webhook —
+			// it registers its SSE (/<path>/sse + /<path>/messages) and
+			// Streamable-HTTP (/<path>) routes inside addPreCatchAllHook so they
+			// win Hono's first-match dispatch over the legacy workflow catch-all.
+			// Workflows with \`trigger.mcp\` (registered above) become MCP tools /
+			// resources; tools/call runs them through the runner.
+			const mcpTrigger = new McpTrigger(this.httpTrigger.getApp(), this.httpTrigger);
+			mcpTrigger.setNodeMap({
+				nodes: subTriggerNodeMap,
+				workflows: sharedWorkflows as unknown as Parameters<typeof mcpTrigger.setNodeMap>[0]["workflows"],
+			});
+			await mcpTrigger.listen();`
+			: "";
+		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}${webhookBootstrap}${mcpBootstrap}`;
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}
+import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}${mcpImports}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
