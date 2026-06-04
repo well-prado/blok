@@ -139,6 +139,8 @@
 									"d/reference/helpers/sse-publish",
 									"d/reference/helpers/sse-subscribe",
 									"d/reference/helpers/sse-stream",
+									"d/reference/helpers/sse-emit",
+									"d/reference/helpers/respond",
 									"d/reference/helpers/ws-reply",
 									"d/reference/helpers/ws-broadcast",
 									"d/reference/helpers/ws-close",

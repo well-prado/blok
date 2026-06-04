@@ -84,6 +84,79 @@ The raw body is captured before parsing — webhook trigger HMAC
 verifiers need the wire bytes, not the JSON-parsed object. See
 [webhook trigger](./webhook.mdx) for that flow.
 
+## Controlling the response
+
+By default a workflow's final step output becomes the response body:
+an object → JSON, a string → written verbatim, both at **status 200**
+with the `Content-Type` from `accept` (or the node's `contentType`).
+That covers most JSON APIs with zero ceremony.
+
+When you need a **custom status, headers, `Set-Cookie`, a redirect, or a
+binary body**, end the workflow with [`@blokjs/respond`](/d/reference/helpers/respond) —
+it returns a branded envelope the trigger unpacks. It's purely additive:
+workflows that don't use it are unchanged.
+
+| Capability | How |
+|---|---|
+| Custom status | `inputs.status` (e.g. `201`, `404`, `206`) |
+| Arbitrary headers | `inputs.headers` (e.g. `{ "Content-Disposition": "attachment; filename=\"x.pdf\"" }`) |
+| Redirect | `status: 302` + `headers: { Location: "/next" }` |
+| Cookies | `inputs.cookies` — an **array** of raw `Set-Cookie` strings (the header repeats, so you can set several) |
+| Content-Type | `inputs.contentType` (overrides `accept`) |
+| Binary body | `inputs.body` set to a `Buffer` / `Uint8Array` / `ArrayBuffer` — sent as raw bytes, not JSON |
+
+### Redirect (302)
+
+```json
+{
+  "id": "go",
+  "use": "@blokjs/respond",
+  "inputs": { "status": 302, "headers": { "Location": "/dashboard" } }
+}
+```
+
+### Set a session cookie
+
+```json
+{
+  "id": "login",
+  "use": "@blokjs/respond",
+  "inputs": {
+    "body": { "ok": true },
+    "cookies": ["session=abc123; Path=/; HttpOnly; SameSite=Lax"]
+  }
+}
+```
+
+Pass multiple entries in `cookies` to emit multiple `Set-Cookie`
+headers in one response.
+
+### Binary file download
+
+```json
+{
+  "id": "download",
+  "use": "@blokjs/respond",
+  "inputs": {
+    "body": "js/ctx.state.file.bytes",
+    "contentType": "application/pdf",
+    "headers": { "Content-Disposition": "attachment; filename=\"report.pdf\"" }
+  }
+}
+```
+
+<Tip>
+A node that simply **returns** a `Buffer` / `Uint8Array` / `ArrayBuffer`
+(with a `contentType`) is also sent as raw bytes — you only need
+`@blokjs/respond` when you also want a custom status, headers, or cookies.
+</Tip>
+
+<Note>
+Status/headers/cookies are honored for **in-process** (`module` / `local`)
+nodes — the same surface as `contentType`. Returning binary or a respond
+envelope directly from a non-NodeJS `runtime.*` node is not yet wired.
+</Note>
+
 ## Common patterns
 
 ### Path params

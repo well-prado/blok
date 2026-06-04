@@ -4,11 +4,11 @@ description: "The @blokjs/helpers package — pre-built nodes you reference by `
 icon: "puzzle"
 ---
 
-`@blokjs/helpers` ships 22 pre-built nodes covering the most common
+`@blokjs/helpers` ships 24 pre-built nodes covering the most common
 workflow plumbing — logging, conditionals, KV state, HMAC verification,
-JWT auth, LLM streaming + tool calls, webhook dispatch, and SSE / WS /
-worker / pub-sub publishers. Each helper has a canonical
-`@blokjs/<name>` identifier you reference via `use:` in any step.
+JWT auth, LLM streaming + tool calls, HTTP response shaping, webhook
+dispatch, and SSE / WS / worker / pub-sub publishers. Each helper has a
+canonical `@blokjs/<name>` identifier you reference via `use:` in any step.
 
 Helpers are auto-registered when `@blokjs/helpers` is in your project
 deps. The `HELPER_NODES` barrel is spread into the runner's node
@@ -39,6 +39,14 @@ registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
   </Card>
   <Card title="@blokjs/ctx-publish-many" icon="upload-cloud" href="./ctx-publish-many">
     Set multiple ctx.state[k] = v in one step.
+  </Card>
+</Columns>
+
+### HTTP response
+
+<Columns cols={2}>
+  <Card title="@blokjs/respond" icon="reply" href="./respond">
+    Shape the full HTTP response — status, headers, Set-Cookie, redirect, binary body. Final step of an http workflow.
   </Card>
 </Columns>
 
@@ -89,6 +97,9 @@ registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
   </Card>
   <Card title="@blokjs/sse-stream" icon="cable" href="./sse-stream">
     Pump a subscription's events out as SSE frames to the connected browser.
+  </Card>
+  <Card title="@blokjs/sse-emit" icon="zap" href="./sse-emit">
+    Write a single SSE frame inline — one-shot control events between steps.
   </Card>
   <Card title="@blokjs/ws-reply" icon="reply" href="./ws-reply">
     Reply only to the connection that triggered the WS workflow.

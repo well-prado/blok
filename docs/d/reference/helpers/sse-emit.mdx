@@ -1,0 +1,64 @@
+---
+title: "@blokjs/sse-emit"
+description: "Write exactly one SSE event to the client from a step's inputs. The one-shot complement to @blokjs/sse-stream."
+icon: "zap"
+---
+
+Writes a **single** SSE frame to the connected client and returns
+`{ sent: true }`. Unlike [`@blokjs/sse-stream`](./sse-stream) (which blocks,
+pumping a subscription), `sse-emit` is a one-shot — use it to punctuate a
+workflow with discrete control frames (`message_ids`, `workflow_start`,
+`complete`, `error`) between ordinary steps, without the
+publish→subscribe→pump dance.
+
+Use only inside [SSE-triggered](/d/triggers/sse) workflows; `ctx.stream` is
+undefined elsewhere and the step throws.
+
+## Quickstart
+
+```json
+{
+  "id": "open",
+  "use": "@blokjs/sse-emit",
+  "inputs": { "event": "workflow_start", "data": { "runId": "js/ctx.id" } },
+  "ephemeral": true
+}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `event` | `string` | SSE event name → the frame's `event:` field. Optional. |
+| `data` | `unknown` | Event payload. JSON-serialized when not a string. Required. |
+| `id` | `string` | Frame `id:` — clients echo it as `Last-Event-Id` on reconnect. Optional. |
+| `retry` | `number` | Reconnection hint in ms → the SSE `retry:` field. Optional. |
+
+## Behavior
+
+- Emits one `event: <name>\ndata: <json>\n\n` frame via `ctx.stream.writeSSE(...)`.
+- Returns `{ sent: true }`; pair with `ephemeral: true` so it doesn't store state.
+- Throws if `ctx.stream` is absent (i.e. not under `trigger.sse`).
+
+## Where it fits
+
+The canonical streaming-agent shape emits a fixed event vocabulary around a
+long-running node: `message_ids → workflow_start → … live frames … →
+complete`. `sse-emit` writes the bookend control frames; the live middle is
+produced by a streaming node (see [`@blokjs/sse-stream`](./sse-stream) for the
+bus-pump path, or a `runtime.*` node with `streamTo: "sse"` for native
+runtime→SSE forwarding).
+
+## Related
+
+<Columns cols={3}>
+  <Card title="@blokjs/sse-stream" icon="cable" href="./sse-stream">
+    Blocking pump of a subscription's events.
+  </Card>
+  <Card title="@blokjs/sse-publish" icon="send" href="./sse-publish">
+    Publish to a bus channel from any workflow.
+  </Card>
+  <Card title="SSE trigger" icon="cable" href="/d/triggers/sse">
+    Stream config (heartbeat, retry, channels).
+  </Card>
+</Columns>

@@ -353,6 +353,48 @@ export default step;
 - **BullMQ** (`BullMQAdapter`) — Redis-based, supports priority/delayed jobs
 - **InMemory** (`InMemoryAdapter`) — development/testing only
 
+## Controlling the HTTP Response (status / headers / cookies / redirect / binary)
+
+By default the HTTP trigger emits the final step's output as the body: an
+object → JSON, a string → verbatim, both at **status 200**. For anything
+more, end the workflow with **`@blokjs/respond`** (in `@blokjs/helpers`,
+auto-registered). It returns a branded envelope the trigger unpacks — purely
+additive, so workflows that don't use it are unchanged.
+
+```typescript
+// Redirect
+{ id: "go", use: "@blokjs/respond",
+  inputs: { status: 302, headers: { Location: "/dashboard" } }, ephemeral: true }
+
+// Session cookie (cookies is an ARRAY of raw Set-Cookie strings — the header repeats)
+{ id: "login", use: "@blokjs/respond",
+  inputs: { body: { ok: true },
+            cookies: ["session=abc; Path=/; HttpOnly; SameSite=Lax"] }, ephemeral: true }
+
+// Binary file download
+{ id: "file", use: "@blokjs/respond",
+  inputs: { body: $.state.pdf.bytes, contentType: "application/pdf",
+            headers: { "Content-Disposition": 'attachment; filename="report.pdf"' } },
+  ephemeral: true }
+```
+
+`@blokjs/respond` inputs: `body?` (string → verbatim, `Buffer`/`Uint8Array`/
+`ArrayBuffer` → raw bytes, else → JSON, omit for empty), `status?` (default
+200), `contentType?`, `headers?` (`Record<string,string>`), `cookies?`
+(`string[]`).
+
+Rules:
+- A node that simply **returns** a `Buffer`/`Uint8Array`/`ArrayBuffer` (with a
+  `contentType`) is now sent as raw bytes too — only reach for `@blokjs/respond`
+  when you also need a custom status, headers, or cookies.
+- Put `@blokjs/respond` **last** (the trigger reads the final `ctx.response`);
+  add `ephemeral: true` so it doesn't clutter state.
+- In-process (`module`/`local`) nodes only — same surface as `contentType`.
+  Binary/headers from a non-NodeJS `runtime.*` node is not yet wired.
+- Do NOT route raw binary through a plain JSON return — pre-v0.6.14 that
+  corrupted bytes into `{"type":"Buffer","data":[…]}`; the binary path now
+  handles it, but use `@blokjs/respond`/`contentType` so intent is explicit.
+
 ## Testing Nodes and Workflows
 
 The `@blokjs/runner` package exports testing utilities. Use them with Vitest.

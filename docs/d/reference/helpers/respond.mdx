@@ -1,0 +1,109 @@
+---
+title: "@blokjs/respond"
+description: "Shape the full HTTP response from a workflow — custom status, headers, Set-Cookie, Content-Type, and string / binary / JSON bodies."
+icon: "reply"
+---
+
+Use as the **final step** of an `http`-triggered workflow to control the
+whole response, beyond the default JSON-or-string body at status 200.
+It returns a branded envelope the [HTTP trigger](/d/triggers/http#controlling-the-response)
+recognizes and unpacks: status, arbitrary headers (incl. `Location` for
+redirects), repeatable `Set-Cookie` values, a `Content-Type` override, and
+a body that may be a string, raw binary, an object (JSON), or empty.
+
+It's a stateless mapper — it doesn't touch `ctx`, so it's harmless under a
+non-HTTP trigger (the envelope is just inert data). Fully additive:
+workflows that don't end in `@blokjs/respond` behave exactly as before.
+
+## Quickstart
+
+```json
+{
+  "id": "respond",
+  "use": "@blokjs/respond",
+  "inputs": {
+    "status": 201,
+    "headers": { "Location": "/users/42" },
+    "body": { "id": 42, "name": "Ada" }
+  },
+  "ephemeral": true
+}
+```
+
+```bash
+curl -i http://localhost:4000/users
+# HTTP/1.1 201 Created
+# Location: /users/42
+# Content-Type: application/json
+# {"id":42,"name":"Ada"}
+```
+
+## Inputs
+
+| Field | Type | Notes |
+|---|---|---|
+| `body` | `unknown` | The response body. `string` → verbatim; `Buffer`/`Uint8Array`/`ArrayBuffer` → raw bytes; any other value → JSON. Omit (or `null`) for an empty body (e.g. a redirect). |
+| `status` | `number` | HTTP status code. Defaults to `200`. |
+| `contentType` | `string` | `Content-Type` override. Defaults to `application/json` for object bodies, `application/octet-stream` for binary. |
+| `headers` | `Record<string,string>` | Response headers, e.g. `{ Location }` or `{ "Content-Disposition" }`. |
+| `cookies` | `string[]` | Raw `Set-Cookie` values — **each becomes its own header**, so one response can set several cookies. Format each yourself: `"session=abc; Path=/; HttpOnly; SameSite=Lax"`. |
+
+## Recipes
+
+### Redirect (302)
+
+```json
+{ "id": "go", "use": "@blokjs/respond",
+  "inputs": { "status": 302, "headers": { "Location": "/dashboard" } } }
+```
+
+### Session-cookie login (single + multiple cookies)
+
+```json
+{ "id": "login", "use": "@blokjs/respond",
+  "inputs": { "body": { "ok": true },
+              "cookies": ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"] } }
+```
+
+### Binary file download
+
+```json
+{ "id": "file", "use": "@blokjs/respond",
+  "inputs": { "body": "js/ctx.state.pdf.bytes",
+              "contentType": "application/pdf",
+              "headers": { "Content-Disposition": "attachment; filename=\"report.pdf\"" } } }
+```
+
+### Custom error status
+
+```json
+{ "id": "nope", "use": "@blokjs/respond",
+  "inputs": { "status": 422, "body": { "error": "validation failed" } } }
+```
+
+## Behavior
+
+- The envelope must be the **last** step's output — the trigger reads the
+  final `ctx.response`. Pair with `ephemeral: true` so it doesn't clutter state.
+- `Set-Cookie` is emitted once per entry in `cookies` (the header legitimately
+  repeats). Other headers are set verbatim from `headers`.
+- An object `body` is JSON-encoded; an explicit `contentType` is honored
+  rather than being forced to `application/json`.
+- Returning a bare `Buffer`/`Uint8Array` from any node (with a `contentType`)
+  is also sent as raw bytes — reach for `@blokjs/respond` when you additionally
+  need a custom status, headers, or cookies.
+- In-process (`module` / `local`) nodes only — same surface as `contentType`.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="HTTP trigger" icon="globe" href="/d/triggers/http">
+    Response control, file-based routing, ctx mapping.
+  </Card>
+  <Card title="@blokjs/throw" icon="alert-octagon" href="./throw">
+    Force an error response with a status code + JSON body.
+  </Card>
+  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
+    `ephemeral`, `as`, and the other step-level knobs.
+  </Card>
+</Columns>
