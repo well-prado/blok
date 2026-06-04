@@ -454,7 +454,7 @@ async function main(): Promise<void> {
 
 	const otp = flags.otp;
 	if (otp == null) throw new Error("unreachable");
-	console.log(`\nPublishing 8 packages with OTP ${otp[0]}*****...`);
+	console.log(`\nPublishing ${PUBLISHABLE.length} packages with OTP ${otp[0]}*****...`);
 
 	const succeeded: string[] = [];
 	const skipped: string[] = [];
@@ -487,7 +487,7 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	console.log("\nAll 8 packages published. Run the post-publish smoke test:");
+	console.log(`\nAll ${succeeded.length + skipped.length} packages published. Run the post-publish smoke test:`);
 	console.log("  cd /tmp && npx blokctl@latest create project --name myapp ...");
 }
 
