@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-worker",
-	"version": "0.6.12",
+	"version": "0.6.13",
 	"description": "Worker-based trigger for Blok workflows - supports background job processing with concurrency, retries, and scheduling",
 	"type": "module",
 	"main": "dist/index.js",
@@ -14,9 +14,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^0.6.12",
-		"@blokjs/runner": "^0.6.12",
-		"@blokjs/shared": "^0.6.12",
+		"@blokjs/helper": "^0.6.13",
+		"@blokjs/runner": "^0.6.13",
+		"@blokjs/shared": "^0.6.13",
 		"@opentelemetry/api": "^1.9.0",
 		"uuid": "^11.1.0"
 	},
