@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 class Request:
@@ -85,7 +85,7 @@ class Response:
 class Context:
     """Represents the workflow execution context passed between nodes."""
 
-    __slots__ = ("id", "workflow_name", "workflow_path", "request", "response", "vars", "env")
+    __slots__ = ("id", "workflow_name", "workflow_path", "request", "response", "vars", "env", "_emit_sink")
 
     def __init__(
         self,
@@ -104,6 +104,42 @@ class Context:
         self.response = response or Response()
         self.vars = vars if vars is not None else {}
         self.env = env if env is not None else {}
+        # Set by the gRPC server during ``ExecuteStream`` so ``emit()`` can
+        # push live data events back to the runner. ``None`` under the unary
+        # ``Execute`` path (and any non-streaming caller) — ``emit()`` is then
+        # a no-op, so node code can call it unconditionally.
+        self._emit_sink: Optional[Callable[[Any], None]] = None
+
+    def emit(self, snapshot: Any) -> None:
+        """Emit a live intermediate event while the node is still running.
+
+        Under an ``ExecuteStream`` call (a workflow step with
+        ``streamTo: "sse"`` / ``stream: true``), each ``emit(...)`` is sent to
+        the runner as a ``PartialResult`` frame AS IT HAPPENS — before this
+        node returns its terminal result. The runner forwards it to the SSE
+        client live. Use it to stream tokens, tool-calls, or discovered
+        sources from a long-running agent::
+
+            def execute(ctx, config):
+                ctx.emit({"event": "text", "data": {"delta": "Hel"}, "id": "1"})
+                ctx.emit({"event": "source", "data": {"url": "..."}, "id": "2"})
+                return {"answer": "Hello", "sources": [...]}
+
+        ``snapshot`` is any JSON-serializable value. Emit a framed object
+        ``{"event": str, "data": Any, "id": str?, "retry": int?}`` to name the
+        SSE event yourself (the producer holds the semantic context); any other
+        value becomes the frame ``data`` with no explicit event name.
+
+        A no-op when the node runs under the unary ``Execute`` path (no SSE
+        sink installed), so the same handler works in both modes.
+        """
+        sink = self._emit_sink
+        if sink is not None:
+            sink(snapshot)
+
+    def _set_emit_sink(self, sink: Optional[Callable[[Any], None]]) -> None:
+        """Install (or clear) the live-emit sink. Called by the gRPC server."""
+        self._emit_sink = sink
 
     def set_var(self, key: str, value: Any) -> None:
         """Store a variable in the context for downstream nodes."""

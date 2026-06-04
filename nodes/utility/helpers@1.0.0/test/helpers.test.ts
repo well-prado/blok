@@ -15,6 +15,7 @@ import {
 	LogNode,
 	MetricsEmitNode,
 	RedisKvNode,
+	SseEmitNode,
 	ThrowNode,
 	_resetAuditEventsForTests,
 	_resetInMemoryKvForTests,
@@ -67,6 +68,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/metrics-emit",
 				"@blokjs/pubsub-publish",
 				"@blokjs/redis-kv",
+				"@blokjs/sse-emit",
 				"@blokjs/sse-publish",
 				"@blokjs/sse-stream",
 				"@blokjs/sse-subscribe",
@@ -129,6 +131,57 @@ describe("@blokjs/helpers", () => {
 			const ctx = ctxFor();
 			const r = await CtxPublishManyNode.handle(ctx, { values: { a: 1, b: 2, c: 3 } });
 			expect((r as { data: { count: number } }).data.count).toBe(3);
+		});
+	});
+
+	describe("@blokjs/sse-emit", () => {
+		function ctxWithStream(): {
+			ctx: Context;
+			writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }>;
+		} {
+			const writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }> = [];
+			const ctx = ctxFor();
+			(ctx as unknown as { stream: unknown }).stream = {
+				id: "s-1",
+				writeSSE: vi.fn(async (o: { event?: string; data: unknown; id?: string; retry?: number }) => {
+					writes.push(o);
+				}),
+				writeComment: vi.fn(async () => {}),
+				close: vi.fn(),
+				closed: false,
+				signal: new AbortController().signal,
+				lastEventId: null,
+				subscribe: vi.fn(),
+			};
+			return { ctx, writes };
+		}
+
+		it("writes exactly one SSE frame with the given event/data/id/retry", async () => {
+			const { ctx, writes } = ctxWithStream();
+			const r = await SseEmitNode.handle(ctx, {
+				event: "workflow_start",
+				data: { runId: "r-1" },
+				id: "evt-1",
+				retry: 3000,
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { sent: boolean } }).data).toEqual({ sent: true });
+			expect(writes).toEqual([{ event: "workflow_start", data: { runId: "r-1" }, id: "evt-1", retry: 3000 }]);
+		});
+
+		it("omits the retry field when not provided", async () => {
+			const { ctx, writes } = ctxWithStream();
+			await SseEmitNode.handle(ctx, { data: { delta: "x" } });
+			expect(writes).toHaveLength(1);
+			expect(writes[0]).not.toHaveProperty("retry");
+			expect(writes[0]).toMatchObject({ data: { delta: "x" } });
+		});
+
+		it("fails when ctx.stream is absent (not an SSE-triggered workflow)", async () => {
+			const ctx = ctxFor(); // no .stream
+			const r = await SseEmitNode.handle(ctx, { data: { x: 1 } });
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("ctx.stream is undefined");
 		});
 	});
 

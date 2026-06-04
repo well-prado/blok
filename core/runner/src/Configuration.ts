@@ -540,7 +540,13 @@ export default class Configuration implements Config {
 		// without flipping the whole runtime.
 		const stepStreamLogs = (node as { stream_logs?: boolean }).stream_logs;
 		const streamLogs = stepStreamLogs !== undefined ? stepStreamLogs : isStreamLogsEnabled();
-		return new RuntimeAdapterNode(adapter, targetNode, { streamLogs }) as RunnerNode;
+		// Live data-event forwarding opt-in. `streamTo: "sse"` (canonical) or
+		// `stream: true` (shorthand) routes the node's `PartialResult` frames
+		// to `ctx.stream.writeSSE(...)` as they arrive. Additive + opt-in:
+		// unset preserves the prior unary/observability-only behaviour.
+		const stepNode = node as { streamTo?: string; stream?: boolean };
+		const streamTo = stepNode.streamTo ?? (stepNode.stream === true ? "sse" : undefined);
+		return new RuntimeAdapterNode(adapter, targetNode, { streamLogs, streamTo }) as RunnerNode;
 	}
 
 	/**

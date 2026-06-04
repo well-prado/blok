@@ -107,6 +107,9 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
           2. zero or more :class:`pb.LogLine` events captured from the
              :data:`NODE_LOGGER_NAME` logger **as they happen** while the
              node executes (real-time, not buffered — Phase 5 follow-up)
+          2b. zero or more :class:`pb.PartialResult` events the node emits
+             via ``ctx.emit(...)`` **as they happen** — the live data
+             channel a ``streamTo: "sse"`` step forwards to the client
           3. one terminal :class:`pb.ExecuteResponse` carrying the same payload
              as a unary :meth:`Execute` would return
 
@@ -166,6 +169,15 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
         # in the `finally` block so we don't leave the logger globally chatty.
         node_logger.setLevel(logging.DEBUG)
 
+        # Live data-event channel. The node pushes onto this queue every time
+        # it calls ``ctx.emit(...)``; the streaming loop drains it and yields
+        # ``PartialResult`` frames. ``SimpleQueue.put`` is thread-safe, so the
+        # worker thread can emit freely while this generator (on the gRPC
+        # thread) drains. Cleared in ``finally`` so a handler reference can't
+        # outlive the call.
+        partial_queue: "queue.SimpleQueue[Any]" = queue.SimpleQueue()
+        execution_request.context._set_emit_sink(partial_queue.put)
+
         # Run the handler on a worker thread so we can stream logs as
         # they happen. ``result_box`` carries the success result (one
         # entry on success, none on exception); ``error_box`` carries a
@@ -192,15 +204,31 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
             # stream while keeping wakeup overhead negligible (~20
             # checks/second).
             while worker.is_alive():
+                # Drain all buffered partials immediately — this is the live
+                # data stream the SSE client consumes; we don't want it gated
+                # behind the 50 ms log-poll tick.
+                while True:
+                    try:
+                        snapshot = partial_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    yield pb.ExecuteEvent(partial=_partial_to_proto(snapshot))
                 try:
                     record = log_queue.get(timeout=0.05)
                 except queue.Empty:
                     continue
                 yield pb.ExecuteEvent(log=_log_record_to_proto(record))
 
-            # Worker is done. Drain any logs the worker emitted between
-            # our last `get(timeout=0.05)` and its final return so they
-            # arrive before the final frame.
+            # Worker is done. Drain any partials, then any logs, the worker
+            # emitted between our last poll and its final return so they all
+            # arrive before the terminal frame (partials first — they belong
+            # to the live data stream).
+            while True:
+                try:
+                    snapshot = partial_queue.get_nowait()
+                except queue.Empty:
+                    break
+                yield pb.ExecuteEvent(partial=_partial_to_proto(snapshot))
             while True:
                 try:
                     record = log_queue.get_nowait()
@@ -211,6 +239,9 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
             node_logger.removeHandler(handler)
             node_logger.propagate = previous_propagate
             node_logger.setLevel(previous_level)
+            # Drop the sink so the (possibly daemon) worker thread can't keep
+            # pushing into a queue we're no longer draining.
+            execution_request.context._set_emit_sink(None)
 
         # Surface any exception the worker thread caught.
         if error_box:
@@ -664,6 +695,16 @@ class _QueueLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         self._sink.put(record)
+
+
+def _partial_to_proto(snapshot: Any) -> pb.PartialResult:
+    """Encode a ``ctx.emit(...)`` snapshot into a proto ``PartialResult``.
+
+    The snapshot is any JSON-serializable value; it travels as opaque JSON
+    bytes (``snapshot_json``) exactly like the unary response ``data`` field,
+    so the runner decodes it the same way.
+    """
+    return pb.PartialResult(snapshot_json=_encode_json_bytes(snapshot))
 
 
 def _now_timestamp() -> timestamp_pb2.Timestamp:

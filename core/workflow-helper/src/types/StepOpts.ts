@@ -80,6 +80,8 @@ export const StepOptsSchema = z.object({
 	active: z.boolean().optional(),
 	stop: z.boolean().optional(),
 	stream_logs: z.boolean().optional(),
+	streamTo: z.literal("sse").optional(),
+	stream: z.boolean().optional(),
 });
 
 export type StepOpts = z.infer<typeof StepOptsSchema>;
@@ -247,6 +249,22 @@ export const V2RegularStepSchema = z
 			.boolean()
 			.optional()
 			.describe("Per-step opt-in for live log streaming. Inherits from BLOK_STREAM_LOGS env when unset."),
+		streamTo: z
+			.literal("sse")
+			.optional()
+			.describe(
+				"Runtime steps only. When 'sse', the node's live PartialResult data events " +
+					"(emitted via the SDK's ctx.emit(...)) are forwarded to the SSE client through " +
+					"ctx.stream.writeSSE(...) AS THEY ARRIVE — before the node's terminal result. " +
+					"Requires an `sse` trigger; a no-op when ctx.stream is absent. Opt-in; existing " +
+					"unary runtime steps are unaffected.",
+			),
+		stream: z
+			.boolean()
+			.optional()
+			.describe(
+				'Shorthand for `streamTo: "sse"`. `stream: true` forwards runtime PartialResult frames to the SSE client.',
+			),
 		idempotencyKey: z
 			.string()
 			.min(1)

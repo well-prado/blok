@@ -18,6 +18,16 @@ export class RuntimeAdapterNode extends RunnerNode {
 	private adapter: RuntimeAdapter;
 	private targetNode: RunnerNode;
 	private streamLogs: boolean;
+	/**
+	 * Live data-event destination for this node's `PartialResult` frames.
+	 * `"sse"` forwards each partial to `ctx.stream.writeSSE(...)` AS IT
+	 * ARRIVES (inside `runStreaming`'s for-await loop) so a long-running
+	 * runtime node can stream tokens / tool-calls / sources to an
+	 * SSE-triggered client live, before its terminal result lands.
+	 * Undefined (default) preserves the prior behaviour — partials only
+	 * reach the tracer. Opt-in via step `streamTo: "sse"` / `stream: true`.
+	 */
+	private streamTo?: string;
 
 	/**
 	 * Wire transport this node uses (`http` | `grpc` | `module`). Surfaced
@@ -27,11 +37,12 @@ export class RuntimeAdapterNode extends RunnerNode {
 	 */
 	public readonly transport: RuntimeAdapter["transport"];
 
-	constructor(adapter: RuntimeAdapter, targetNode: RunnerNode, opts: { streamLogs?: boolean } = {}) {
+	constructor(adapter: RuntimeAdapter, targetNode: RunnerNode, opts: { streamLogs?: boolean; streamTo?: string } = {}) {
 		super();
 		this.adapter = adapter;
 		this.targetNode = targetNode;
 		this.streamLogs = opts.streamLogs === true;
+		this.streamTo = opts.streamTo;
 		this.transport = adapter.transport;
 		// Copy properties from target node
 		this.node = targetNode.node;
@@ -129,7 +140,11 @@ export class RuntimeAdapterNode extends RunnerNode {
 	 * streaming Just Works without coupling this class to GrpcRuntimeAdapter.
 	 */
 	private canStream(): boolean {
-		if (!this.streamLogs) return false;
+		// Streaming is engaged when EITHER live-log forwarding (`streamLogs`)
+		// OR live data-event forwarding (`streamTo: "sse"`) is requested. Both
+		// drain the same `executeStream` surface; the for-await loop routes
+		// `log` frames to the tracker and `partial` frames to `ctx.stream`.
+		if (!this.streamLogs && this.streamTo !== "sse") return false;
 		const candidate = this.adapter as unknown as { executeStream?: unknown };
 		return typeof candidate.executeStream === "function";
 	}
@@ -154,6 +169,11 @@ export class RuntimeAdapterNode extends RunnerNode {
 		};
 		const { events, result } = streamingAdapter.executeStream(this.targetNode, ctx);
 
+		// Live SSE forwarding is engaged only when the step opted in AND the
+		// run is under an SSE trigger (so `ctx.stream` exists). Captured once
+		// so the per-event branch stays a cheap field read.
+		const sseStream = this.streamTo === "sse" ? ctx.stream : undefined;
+
 		for await (const event of events) {
 			if (event.type === "log" && tracker && traceRunId) {
 				tracker.addLog({
@@ -168,10 +188,27 @@ export class RuntimeAdapterNode extends RunnerNode {
 				// Live progress hint — overwrites any previous;
 				// emits NODE_PROGRESS for Studio SSE.
 				tracker.recordProgress(traceNodeId, event.percent, event.phase);
-			} else if (event.type === "partial" && tracker && traceNodeId) {
-				// Interim snapshot — overwrites any previous;
-				// emits NODE_PARTIAL_RESULT for Studio SSE.
-				tracker.recordPartialResult(traceNodeId, event.snapshot);
+			} else if (event.type === "partial") {
+				// Interim snapshot. Always recorded for Studio observability;
+				// additionally forwarded LIVE to the SSE client when the step
+				// opted into `streamTo: "sse"`.
+				if (tracker && traceNodeId) {
+					tracker.recordPartialResult(traceNodeId, event.snapshot);
+				}
+				// Forward to the client unless they've disconnected. On
+				// disconnect we intentionally KEEP draining the iterator (no
+				// `break`) so the underlying node still runs to completion and
+				// its terminal result is persisted — only the client writes
+				// stop. `writeSSE` is already a no-op after `close()`, but the
+				// `aborted`/`closed` guard avoids the await + JSON encode work.
+				if (sseStream && !sseStream.closed && !sseStream.signal.aborted) {
+					try {
+						await sseStream.writeSSE(partialToSSE(event.snapshot));
+					} catch {
+						// A write failure (client vanished mid-frame) must not
+						// abort the node — swallow and keep draining.
+					}
+				}
 			}
 			// `started` is intentionally ignored at this layer — the
 			// node lifecycle (NodeStarted / metrics / completion) is
@@ -181,6 +218,35 @@ export class RuntimeAdapterNode extends RunnerNode {
 
 		return result;
 	}
+}
+
+/**
+ * Map a `PartialResult` snapshot (arbitrary JSON the runtime node emitted
+ * via `ctx.emit(...)`) into the `writeSSE` argument shape.
+ *
+ * Two emit conventions are supported so producers choose their ergonomics:
+ *  - **Framed**: emit `{ event?, data, id?, retry? }` — the producer (which
+ *    holds the semantic context: "this delta is `text` vs `tool_call`")
+ *    names the SSE event directly. Detected by an own `data` property.
+ *  - **Raw**: emit any other value — the whole snapshot becomes the frame
+ *    `data` with no explicit event name.
+ */
+function partialToSSE(snapshot: unknown): {
+	event?: string;
+	data: unknown;
+	id?: string;
+	retry?: number;
+} {
+	if (snapshot !== null && typeof snapshot === "object" && Object.hasOwn(snapshot, "data")) {
+		const framed = snapshot as { event?: unknown; data: unknown; id?: unknown; retry?: unknown };
+		return {
+			event: typeof framed.event === "string" ? framed.event : undefined,
+			data: framed.data,
+			id: typeof framed.id === "string" ? framed.id : undefined,
+			retry: typeof framed.retry === "number" ? framed.retry : undefined,
+		};
+	}
+	return { data: snapshot };
 }
 
 /**

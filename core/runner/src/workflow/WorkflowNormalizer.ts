@@ -63,6 +63,14 @@ interface InternalStep {
 	spread?: boolean;
 	ephemeral?: boolean;
 	stream_logs?: boolean;
+	/**
+	 * Live data-event destination for a runtime step's `PartialResult`
+	 * frames. `"sse"` forwards each partial to `ctx.stream.writeSSE(...)`
+	 * as it arrives. `stream: true` is shorthand for `streamTo: "sse"`.
+	 * Read by `Configuration.runtimeResolver`.
+	 */
+	streamTo?: string;
+	stream?: boolean;
 	flow?: boolean;
 	idempotencyKey?: string;
 	idempotencyKeyTTL?: number;
@@ -362,6 +370,11 @@ function normalizeRegularStep(
 		ephemeral,
 	};
 	if (typeof step.stream_logs === "boolean") internalStep.stream_logs = step.stream_logs;
+	// Live SSE forwarding opt-in for runtime steps. `streamTo: "sse"`
+	// (canonical) / `stream: true` (shorthand) reach runtimeResolver and
+	// route the node's PartialResult frames to ctx.stream.writeSSE.
+	if (typeof step.streamTo === "string") internalStep.streamTo = step.streamTo;
+	if (typeof step.stream === "boolean") internalStep.stream = step.stream;
 	// Idempotency cache + retry — pass through verbatim. The runner reads
 	// these in RunnerSteps to wrap step.process() with cache-check + retry-
 	// loop. They never reach PersistenceHelper.applyStepOutput; caching

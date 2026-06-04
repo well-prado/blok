@@ -333,4 +333,141 @@ describe("RuntimeAdapterNode", () => {
 			});
 		});
 	});
+
+	// =========================================================================
+	// G3 / Route A1 — live runtime→SSE streaming via PartialResult forwarding.
+	// A `streamTo: "sse"` runtime step forwards each PartialResult frame to
+	// `ctx.stream.writeSSE(...)` AS IT ARRIVES, before the terminal result.
+	// =========================================================================
+	describe('streamTo: "sse" live forwarding', () => {
+		interface FakeStream {
+			id: string;
+			writeSSE: ReturnType<typeof vi.fn>;
+			writeComment: ReturnType<typeof vi.fn>;
+			close: () => void;
+			closed: boolean;
+			signal: AbortSignal;
+			lastEventId: string | null;
+			subscribe: () => never;
+		}
+
+		function makeStreamCtx(): {
+			ctx: Context;
+			stream: FakeStream;
+			writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }>;
+			controller: AbortController;
+		} {
+			const writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }> = [];
+			const controller = new AbortController();
+			let closed = false;
+			const stream: FakeStream = {
+				id: "stream-1",
+				writeSSE: vi.fn(async (o: { event?: string; data: unknown; id?: string; retry?: number }) => {
+					writes.push(o);
+				}),
+				writeComment: vi.fn(async () => {}),
+				close: () => {
+					closed = true;
+				},
+				get closed() {
+					return closed;
+				},
+				signal: controller.signal,
+				lastEventId: null,
+				subscribe: () => {
+					throw new Error("subscribe not used in this test");
+				},
+			};
+			const ctx = makeCtx();
+			(ctx as Record<string, unknown>).stream = stream;
+			return { ctx, stream, writes, controller };
+		}
+
+		it("forwards framed PartialResult frames to ctx.stream.writeSSE in order, then sets final state", async () => {
+			const events: DecodedExecuteEvent[] = [
+				{ type: "partial", snapshot: { event: "text", data: { delta: "Hel" }, id: "1" } },
+				{ type: "partial", snapshot: { event: "text", data: { delta: "lo" }, id: "2" } },
+				{ type: "partial", snapshot: { event: "source", data: { url: "https://x" }, id: "3" } },
+			];
+			const adapter = makeStreamingAdapter(events, {
+				...successResult,
+				data: { answer: "Hello", sources: ["https://x"] },
+			});
+			const node = new RuntimeAdapterNode(adapter, makeTarget("agent"), { streamTo: "sse" });
+			const { ctx, stream, writes } = makeStreamCtx();
+
+			await node.run(ctx);
+
+			// 3 live frames, in order, with producer-chosen event names + ids.
+			expect(stream.writeSSE).toHaveBeenCalledTimes(3);
+			expect(writes).toEqual([
+				{ event: "text", data: { delta: "Hel" }, id: "1", retry: undefined },
+				{ event: "text", data: { delta: "lo" }, id: "2", retry: undefined },
+				{ event: "source", data: { url: "https://x" }, id: "3", retry: undefined },
+			]);
+			// Terminal result still lands in state for finalization steps.
+			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
+			expect(state.agent).toEqual({ answer: "Hello", sources: ["https://x"] });
+		});
+
+		it("maps a raw (non-framed) partial snapshot to { data: snapshot }", async () => {
+			const events: DecodedExecuteEvent[] = [{ type: "partial", snapshot: { tokens: 5 } }];
+			const adapter = makeStreamingAdapter(events, successResult);
+			const node = new RuntimeAdapterNode(adapter, makeTarget("agent"), { streamTo: "sse" });
+			const { ctx, writes } = makeStreamCtx();
+
+			await node.run(ctx);
+
+			expect(writes).toEqual([{ data: { tokens: 5 } }]);
+		});
+
+		it("does NOT forward partials when streamTo is unset (default behaviour preserved)", async () => {
+			const events: DecodedExecuteEvent[] = [{ type: "partial", snapshot: { event: "text", data: "x" } }];
+			const adapter = makeStreamingAdapter(events, successResult);
+			// streamLogs engages the streaming path, but without streamTo no SSE forward.
+			const node = new RuntimeAdapterNode(adapter, makeTarget("agent"), { streamLogs: true });
+			const { ctx, stream } = makeStreamCtx();
+
+			await node.run(ctx);
+
+			expect(stream.writeSSE).not.toHaveBeenCalled();
+		});
+
+		it("is a no-op (no throw) when streamTo is 'sse' but ctx.stream is absent", async () => {
+			const events: DecodedExecuteEvent[] = [{ type: "partial", snapshot: { event: "text", data: "x" } }];
+			const adapter = makeStreamingAdapter(events, successResult);
+			const node = new RuntimeAdapterNode(adapter, makeTarget("agent"), { streamTo: "sse" });
+			const ctx = makeCtx(); // no .stream attached
+
+			const response = await node.run(ctx);
+
+			expect(response.success).toBe(true);
+			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
+			expect(state.agent).toEqual({ ok: true });
+		});
+
+		it("stops client writes after disconnect but keeps draining so the node completes (final state set)", async () => {
+			const events: DecodedExecuteEvent[] = [
+				{ type: "partial", snapshot: { event: "text", data: "a", id: "1" } },
+				{ type: "partial", snapshot: { event: "text", data: "b", id: "2" } },
+				{ type: "partial", snapshot: { event: "text", data: "c", id: "3" } },
+			];
+			const adapter = makeStreamingAdapter(events, { ...successResult, data: { answer: "done" } });
+			const node = new RuntimeAdapterNode(adapter, makeTarget("agent"), { streamTo: "sse" });
+			const { ctx, stream, writes, controller } = makeStreamCtx();
+			// Client disconnects right after the first frame is written.
+			stream.writeSSE.mockImplementation(async (o: { event?: string; data: unknown; id?: string; retry?: number }) => {
+				writes.push(o);
+				controller.abort();
+			});
+
+			await node.run(ctx);
+
+			// Only the first frame reached the client; the rest were skipped.
+			expect(stream.writeSSE).toHaveBeenCalledTimes(1);
+			// ...but the node still ran to completion and persisted its result.
+			const state = (ctx as unknown as { state: Record<string, unknown> }).state;
+			expect(state.agent).toEqual({ answer: "done" });
+		});
+	});
 });

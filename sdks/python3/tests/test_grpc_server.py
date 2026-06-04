@@ -218,6 +218,86 @@ def test_execute_stream_streams_log_records_from_blok_node_logger(client):
     assert "warning" in log_levels
 
 
+def test_execute_stream_emits_partial_results_from_ctx_emit():
+    """A node calling ``ctx.emit(...)`` produces ``PartialResult`` frames,
+    in order, before the terminal ``final`` frame — the live data channel
+    a ``streamTo: "sse"`` step forwards to the client."""
+    import socket as _socket
+
+    from blok.node.node_registry import NodeRegistry as _NR
+    from blok.server.grpc_server import serve_grpc as _serve
+
+    class _EmittingNode:
+        def execute(self, ctx, config):
+            ctx.emit({"event": "text", "data": {"delta": "Hel"}, "id": "1"})
+            ctx.emit({"event": "text", "data": {"delta": "lo"}, "id": "2"})
+            ctx.emit({"event": "source", "data": {"url": "https://example.com"}, "id": "3"})
+            return {"answer": "Hello", "sources": ["https://example.com"]}
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    reg = _NR(version="1.0.0-test")
+    reg.register("emitter", _EmittingNode())
+    srv = _serve(reg, port=port, host="127.0.0.1", sdk_version="1.0.0-test")
+    try:
+        ch = grpc.insecure_channel(f"127.0.0.1:{port}")
+        stub = pb_grpc.NodeRuntimeStub(ch)
+        events = list(stub.ExecuteStream(_make_request("emitter", {})))
+        ch.close()
+    finally:
+        srv.stop(grace=1.0)
+
+    types = [ev.WhichOneof("event") for ev in events]
+    assert types[0] == "started"
+    assert types[-1] == "final"
+
+    partials = [json.loads(ev.partial.snapshot_json) for ev in events if ev.WhichOneof("event") == "partial"]
+    assert partials == [
+        {"event": "text", "data": {"delta": "Hel"}, "id": "1"},
+        {"event": "text", "data": {"delta": "lo"}, "id": "2"},
+        {"event": "source", "data": {"url": "https://example.com"}, "id": "3"},
+    ]
+
+    # The terminal result is unaffected by the partials.
+    final = events[-1].final
+    assert final.success is True
+    assert json.loads(final.data) == {"answer": "Hello", "sources": ["https://example.com"]}
+
+
+def test_ctx_emit_is_a_noop_under_unary_execute(client):
+    """``ctx.emit`` must be safe to call when there's no streaming sink — the
+    same handler runs under both ``Execute`` and ``ExecuteStream``."""
+    import socket as _socket
+
+    from blok.node.node_registry import NodeRegistry as _NR
+    from blok.server.grpc_server import serve_grpc as _serve
+
+    class _EmittingNode:
+        def execute(self, ctx, config):
+            ctx.emit({"event": "text", "data": "ignored under unary"})
+            return {"ok": True}
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    reg = _NR(version="1.0.0-test")
+    reg.register("emitter", _EmittingNode())
+    srv = _serve(reg, port=port, host="127.0.0.1", sdk_version="1.0.0-test")
+    try:
+        ch = grpc.insecure_channel(f"127.0.0.1:{port}")
+        stub = pb_grpc.NodeRuntimeStub(ch)
+        resp = stub.Execute(_make_request("emitter", {}))
+        ch.close()
+    finally:
+        srv.stop(grace=1.0)
+
+    assert resp.success is True
+    assert json.loads(resp.data) == {"ok": True}
+
+
 def test_execute_stream_real_time_emits_log_before_final():
     """Logs emitted DURING a long-running handler arrive in the stream
     before the final frame — proving the worker-thread + queue model
