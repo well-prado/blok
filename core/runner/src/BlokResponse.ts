@@ -5,9 +5,16 @@ export interface IBlokResponse extends ResponseContext {
 	steps: NodeBase[];
 }
 
+/**
+ * Body shapes a node may return. Beyond JSON, the `http` trigger can emit raw
+ * binary (`Uint8Array`/`Buffer`/`ArrayBuffer`) and a branded response envelope
+ * (object) — so the union is widened to keep those returns type-safe.
+ */
+export type BlokResponseData = string | JsonLikeObject | JsonLikeObject[] | Uint8Array | ArrayBuffer;
+
 export default class BlokResponse implements IBlokResponse {
 	public steps: NodeBase[];
-	public data: string | JsonLikeObject | JsonLikeObject[];
+	public data: BlokResponseData;
 	public error: GlobalError | null;
 	public success?: boolean | undefined;
 	public contentType?: string | undefined;
@@ -26,7 +33,7 @@ export default class BlokResponse implements IBlokResponse {
 		this.data = {};
 	}
 
-	setSuccess(data: string | JsonLikeObject | JsonLikeObject[]): void {
+	setSuccess(data: BlokResponseData): void {
 		this.data = data;
 		this.error = null;
 		this.success = true;

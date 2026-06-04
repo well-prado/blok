@@ -42,11 +42,23 @@
 			}
 		},
 		{
-			"id": "response",
+			"id": "decode",
 			"use": "base64-pdf",
 			"type": "module",
 			"inputs": {
 				"base64": "${ctx.prev.data.pdf_base64}"
+			}
+		},
+		{
+			"id": "response",
+			"use": "@blokjs/respond",
+			"type": "module",
+			"inputs": {
+				"body": "js/ctx.state.decode",
+				"contentType": "application/pdf",
+				"headers": {
+					"Content-Disposition": "attachment; filename=\"rentals.pdf\""
+				}
 			}
 		}
 	]

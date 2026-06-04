@@ -34,6 +34,7 @@ import LogNode from "./log";
 import MetricsEmitNode from "./metricsEmit";
 import PubsubPublishNode from "./pubsubPublish";
 import RedisKvNode, { _teardownRedisForTests } from "./redisKv";
+import RespondNode from "./respond";
 import SseEmitNode from "./sseEmit";
 import SsePublishNode from "./ssePublish";
 import SseStreamNode from "./sseStream";
@@ -59,6 +60,7 @@ export {
 	MetricsEmitNode,
 	PubsubPublishNode,
 	RedisKvNode,
+	RespondNode,
 	SseEmitNode,
 	SsePublishNode,
 	SseStreamNode,
@@ -104,6 +106,7 @@ export const HELPER_NODES = {
 	"@blokjs/metrics-emit": MetricsEmitNode,
 	"@blokjs/pubsub-publish": PubsubPublishNode,
 	"@blokjs/redis-kv": RedisKvNode,
+	"@blokjs/respond": RespondNode,
 	"@blokjs/sse-emit": SseEmitNode,
 	"@blokjs/sse-publish": SsePublishNode,
 	"@blokjs/sse-stream": SseStreamNode,

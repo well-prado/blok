@@ -15,6 +15,7 @@ import {
 	LogNode,
 	MetricsEmitNode,
 	RedisKvNode,
+	RespondNode,
 	SseEmitNode,
 	ThrowNode,
 	_resetAuditEventsForTests,
@@ -68,6 +69,7 @@ describe("@blokjs/helpers", () => {
 				"@blokjs/metrics-emit",
 				"@blokjs/pubsub-publish",
 				"@blokjs/redis-kv",
+				"@blokjs/respond",
 				"@blokjs/sse-emit",
 				"@blokjs/sse-publish",
 				"@blokjs/sse-stream",
@@ -182,6 +184,38 @@ describe("@blokjs/helpers", () => {
 			const r = await SseEmitNode.handle(ctx, { data: { x: 1 } });
 			expect((r as { success: boolean }).success).toBe(false);
 			expect((r as { error: { message: string } }).error.message).toContain("ctx.stream is undefined");
+		});
+	});
+
+	describe("@blokjs/respond", () => {
+		it("returns a branded envelope carrying status/headers/cookies/body", async () => {
+			const ctx = ctxFor();
+			const r = await RespondNode.handle(ctx, {
+				body: { ok: true },
+				status: 201,
+				contentType: "application/json",
+				headers: { Location: "/created/1" },
+				cookies: ["session=abc; Path=/; HttpOnly"],
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			const env = (r as { data: Record<string, unknown> }).data;
+			expect(env.__blokRespond__).toBe(true);
+			expect(env).toMatchObject({
+				body: { ok: true },
+				status: 201,
+				contentType: "application/json",
+				headers: { Location: "/created/1" },
+				cookies: ["session=abc; Path=/; HttpOnly"],
+			});
+		});
+
+		it("brands the output even with only a body (defaults applied downstream)", async () => {
+			const ctx = ctxFor();
+			const r = await RespondNode.handle(ctx, { body: "hello" });
+			const env = (r as { data: Record<string, unknown> }).data;
+			expect(env.__blokRespond__).toBe(true);
+			expect(env.body).toBe("hello");
+			expect(env.status).toBeUndefined();
 		});
 	});
 

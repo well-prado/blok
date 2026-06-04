@@ -39,6 +39,7 @@ import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
 import { type RouteCollision, type RouteEntry, buildRouteTable } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
+import { emitWorkflowResponse } from "./responseEmitter";
 import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
@@ -1118,17 +1119,11 @@ export default class HttpTrigger extends TriggerBase {
 				span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
 				span.setStatus({ code: SpanStatusCode.OK });
 
-				// Support both module nodes (wrapped BlokResponse with .data/.contentType)
-				// and runtime adapter nodes (raw data without wrapper)
-				const hasWrapper =
-					ctx.response && typeof ctx.response === "object" && "data" in ctx.response && "contentType" in ctx.response;
-				const data = hasWrapper ? ctx.response.data : ctx.response;
-				const contentType = hasWrapper ? ctx.response.contentType : "application/json";
-				c.header("Content-Type", contentType);
-				if (typeof data === "string") {
-					return c.body(data, 200);
-				}
-				return c.json(data as object, 200);
+				// Emit the response from the finished workflow's ctx.response.
+				// Honors a `@blokjs/respond` envelope (status / headers /
+				// Set-Cookie / body) and raw binary bodies, falling back to the
+				// default JSON / string-200 behaviour. See `responseEmitter.ts`.
+				return emitWorkflowResponse(c, ctx.response);
 			} catch (e: unknown) {
 				span.setAttribute("success", false);
 				span.setAttribute("workflow_request_id", `${id}`);

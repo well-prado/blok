@@ -20,6 +20,7 @@ import FunctionContext from "./types/FunctionContext";
 import LoggerContext from "./types/LoggerContext";
 import NodeConfigContext from "./types/NodeConfigContext";
 import RequestContext from "./types/RequestContext";
+import { RESPOND_BRAND, type RespondEnvelope, isRespondEnvelope } from "./types/RespondEnvelope";
 import ResponseContext from "./types/ResponseContext";
 import StateContext from "./types/StateContext";
 import Step from "./types/Step";
@@ -33,6 +34,9 @@ export {
 	Context,
 	RequestContext,
 	ResponseContext,
+	RESPOND_BRAND,
+	type RespondEnvelope,
+	isRespondEnvelope,
 	EnvContext,
 	ErrorContext,
 	LoggerContext,
