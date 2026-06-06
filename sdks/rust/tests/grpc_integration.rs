@@ -47,9 +47,9 @@ impl NodeHandler for EchoNode {
     }
 }
 
-/// Start a server on an OS-chosen port; return the bound port and a handle
-/// to abort the server when the test ends.
-async fn start_server() -> (u16, tokio::task::JoinHandle<()>) {
+/// Start a server on an OS-chosen port with a given gRPC max message size;
+/// return the bound port and a handle to abort the server when the test ends.
+async fn start_server_with_limit(max_message_bytes: usize) -> (u16, tokio::task::JoinHandle<()>) {
     // Reserve a free port via TcpListener, then close so the server can bind.
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral");
     let port = listener.local_addr().unwrap().port();
@@ -61,13 +61,18 @@ async fn start_server() -> (u16, tokio::task::JoinHandle<()>) {
 
     let handle = tokio::spawn(async move {
         // serve_grpc binds on 0.0.0.0:<port>; we connect via 127.0.0.1.
-        let _ = serve_grpc(shared, port, "1.0.0-test", 16 * 1024 * 1024).await;
+        let _ = serve_grpc(shared, port, "1.0.0-test", max_message_bytes).await;
     });
 
     // Give the server a brief moment to bind.
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     (port, handle)
+}
+
+/// Start a server with the default 16 MiB limit.
+async fn start_server() -> (u16, tokio::task::JoinHandle<()>) {
+    start_server_with_limit(16 * 1024 * 1024).await
 }
 
 async fn make_client(port: u16) -> NodeRuntimeClient<Channel> {
@@ -239,6 +244,63 @@ async fn execute_stream_emits_started_then_final() {
     let data: serde_json::Value =
         serde_json::from_slice(&final_response.data).expect("final.data is JSON");
     assert_eq!(data, json!({"shape": "round"}));
+
+    handle.abort();
+}
+
+// === gRPC max message size knob (BLOK_GRPC_MAX_MESSAGE_BYTES) ================
+// Proves the configurable limit actually gates message size on the server's
+// decode path — the side that was previously stuck at tonic's 4 MiB default.
+
+#[tokio::test]
+async fn execute_rejects_message_above_configured_limit() {
+    // Server configured with a tiny 64 KiB decode limit.
+    let (port, handle) = start_server_with_limit(64 * 1024).await;
+    let mut client = make_client(port).await;
+
+    // ~256 KiB inputs payload — over the server's 64 KiB limit.
+    let big = "x".repeat(256 * 1024);
+    let result = client.execute(empty_request("echo", json!({ "blob": big }))).await;
+
+    assert!(result.is_err(), "a 256 KiB request must be rejected by a 64 KiB server limit");
+    let status = result.unwrap_err();
+    // tonic surfaces a decode-size-limit violation as OUT_OF_RANGE with a
+    // "decoded message length too large" message. (Note "decoded": the limit is
+    // enforced on the DECOMPRESSED size, which is why compression can't raise it.)
+    assert_eq!(
+        status.code(),
+        tonic::Code::OutOfRange,
+        "expected OUT_OF_RANGE for an over-limit message, got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("too large"),
+        "expected a 'too large' size-limit message, got: {}",
+        status.message()
+    );
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn execute_accepts_message_when_limit_is_raised() {
+    // Same ~256 KiB payload, but the server's limit is raised to 1 MiB — proving
+    // the knob lets larger messages through (the fix for the 4 MiB-default case).
+    let (port, handle) = start_server_with_limit(1024 * 1024).await;
+    let mut client = make_client(port).await;
+
+    let big = "x".repeat(256 * 1024);
+    let inputs = json!({ "blob": big });
+    let response = client
+        .execute(empty_request("echo", inputs.clone()))
+        .await
+        .expect("a 256 KiB request must succeed under a 1 MiB server limit")
+        .into_inner();
+
+    assert!(response.success);
+    let data: serde_json::Value = serde_json::from_slice(&response.data).expect("data is JSON");
+    assert_eq!(data, inputs);
 
     handle.abort();
 }
