@@ -61,7 +61,7 @@ async fn start_server() -> (u16, tokio::task::JoinHandle<()>) {
 
     let handle = tokio::spawn(async move {
         // serve_grpc binds on 0.0.0.0:<port>; we connect via 127.0.0.1.
-        let _ = serve_grpc(shared, port, "1.0.0-test").await;
+        let _ = serve_grpc(shared, port, "1.0.0-test", 16 * 1024 * 1024).await;
     });
 
     // Give the server a brief moment to bind.

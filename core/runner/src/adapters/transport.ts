@@ -83,6 +83,43 @@ export function resolveHealthCheckFailureThreshold(env: NodeJS.ProcessEnv = proc
 }
 
 /**
+ * Hard ceiling for the configurable gRPC max message size. Well under
+ * protobuf's 2 GiB serialized-message limit; bounds per-call memory
+ * amplification (large unary messages are fully buffered on both ends, so peak
+ * ≈ `forEach`-concurrency × this value).
+ */
+export const MAX_MESSAGE_BYTES_CEILING = 256 * 1024 * 1024;
+
+/**
+ * Resolve the gRPC max message size (bytes) from the environment.
+ *
+ * `BLOK_GRPC_MAX_MESSAGE_BYTES` overrides the default
+ * ({@link GRPC_DEFAULTS.MAX_MESSAGE_BYTES}, 16 MB). Applied **symmetrically**
+ * to send + receive on the channel. Must be a positive integer; values above
+ * {@link MAX_MESSAGE_BYTES_CEILING} are clamped (with a warning). Unset /
+ * non-numeric / ≤ 0 → `undefined` (the adapter uses the 16 MB default).
+ *
+ * ⚠️ The limit MUST match the server SDKs' limit — the Python (`bin/serve.py`)
+ * and Rust (`config.rs`) sidecars read the SAME env var. A client-only raise
+ * leaves the under-configured server rejecting oversized messages with
+ * `RESOURCE_EXHAUSTED`. For genuinely bulk data, prefer the claim-check
+ * pattern (write to an object store, pass a handle) over inlining bytes.
+ */
+export function resolveMaxMessageBytes(env: NodeJS.ProcessEnv = process.env): number | undefined {
+	const raw = env.BLOK_GRPC_MAX_MESSAGE_BYTES;
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (Number.isNaN(parsed) || parsed <= 0) return undefined;
+	if (parsed > MAX_MESSAGE_BYTES_CEILING) {
+		console.warn(
+			`[blok][grpc] BLOK_GRPC_MAX_MESSAGE_BYTES=${parsed} exceeds the ${MAX_MESSAGE_BYTES_CEILING}-byte ceiling; clamping. Large unary messages are fully buffered in memory on both ends — prefer the claim-check pattern for bulk data.`,
+		);
+		return MAX_MESSAGE_BYTES_CEILING;
+	}
+	return parsed;
+}
+
+/**
  * Build a {@link TlsConfig} for a given runtime kind from environment
  * variables. Returns `undefined` when nothing is configured (channel stays
  * plaintext — appropriate for loopback dev).

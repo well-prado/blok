@@ -164,17 +164,26 @@ pub async fn serve_grpc(
     registry: Arc<Mutex<NodeRegistry>>,
     port: u16,
     sdk_version: impl Into<String>,
+    max_message_bytes: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = format!("0.0.0.0:{}", port).parse()?;
     let service = BlokNodeRuntime::new(registry, sdk_version);
 
     info!(
-        "Blok gRPC server (NodeRuntime v1) listening on port {}",
-        port
+        "Blok gRPC server (NodeRuntime v1) listening on port {} (max message size {} bytes)",
+        port, max_message_bytes
     );
 
+    // Apply the configurable max message size to BOTH decode (incoming
+    // ExecuteRequest) and encode (outgoing ExecuteResponse). tonic's own
+    // default is only 4 MiB, so leaving these unset would reject payloads the
+    // 16 MiB+ runner client sends. Must match BLOK_GRPC_MAX_MESSAGE_BYTES.
     tonic::transport::Server::builder()
-        .add_service(NodeRuntimeServer::new(service))
+        .add_service(
+            NodeRuntimeServer::new(service)
+                .max_decoding_message_size(max_message_bytes)
+                .max_encoding_message_size(max_message_bytes),
+        )
         .serve(addr)
         .await?;
 

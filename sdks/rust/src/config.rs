@@ -12,6 +12,11 @@ pub struct ServerConfig {
     pub log_level: LogLevel,
     pub enable_cors: bool,
     pub shutdown_timeout_secs: u64,
+    /// Max gRPC message size in bytes (decode + encode). Must match the
+    /// runner client's `BLOK_GRPC_MAX_MESSAGE_BYTES`. Default 16 MiB —
+    /// tonic's own default is only 4 MiB, so leaving this unset would reject
+    /// payloads the 16 MiB client happily sends.
+    pub grpc_max_message_bytes: usize,
 }
 
 impl Default for ServerConfig {
@@ -28,6 +33,7 @@ impl Default for ServerConfig {
             log_level: LogLevel::Info,
             enable_cors: false,
             shutdown_timeout_secs: 10,
+            grpc_max_message_bytes: 16 * 1024 * 1024,
         }
     }
 }
@@ -76,6 +82,13 @@ impl ServerConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10),
+            // Must match the runner client + other sidecars. Default 16 MiB
+            // (tonic's own default is 4 MiB). Invalid/zero falls back to default.
+            grpc_max_message_bytes: env::var("BLOK_GRPC_MAX_MESSAGE_BYTES")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(16 * 1024 * 1024),
         }
     }
 
@@ -98,6 +111,7 @@ mod tests {
         assert_eq!(cfg.grpc_port, 10002);
         assert!(!cfg.enable_grpc);
         assert!(!cfg.enable_cors);
+        assert_eq!(cfg.grpc_max_message_bytes, 16 * 1024 * 1024);
     }
 
     #[test]

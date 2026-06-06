@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	MAX_MESSAGE_BYTES_CEILING,
 	assertGrpcOnlyTransport,
 	isLoopbackHost,
 	isStreamLogsEnabled,
@@ -7,6 +8,7 @@ import {
 	loadTlsConfigForKind,
 	resolveHealthCheckFailureThreshold,
 	resolveHealthCheckIntervalMs,
+	resolveMaxMessageBytes,
 } from "../../../src/adapters/transport";
 
 describe("assertGrpcOnlyTransport", () => {
@@ -113,6 +115,36 @@ describe("resolveHealthCheckFailureThreshold", () => {
 		expect(resolveHealthCheckFailureThreshold({ BLOK_GRPC_HEALTH_FAILURE_THRESHOLD: "0" })).toBeUndefined();
 		expect(resolveHealthCheckFailureThreshold({ BLOK_GRPC_HEALTH_FAILURE_THRESHOLD: "-2" })).toBeUndefined();
 		expect(resolveHealthCheckFailureThreshold({ BLOK_GRPC_HEALTH_FAILURE_THRESHOLD: "nope" })).toBeUndefined();
+	});
+});
+
+describe("resolveMaxMessageBytes", () => {
+	it("returns undefined when unset or empty (adapter uses the 16MB default)", () => {
+		expect(resolveMaxMessageBytes({})).toBeUndefined();
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: "" })).toBeUndefined();
+	});
+
+	it("parses a positive integer (bytes)", () => {
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: "67108864" })).toBe(64 * 1024 * 1024);
+	});
+
+	it("ignores non-numeric and non-positive values (falls back to default)", () => {
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: "big" })).toBeUndefined();
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: "0" })).toBeUndefined();
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: "-1" })).toBeUndefined();
+	});
+
+	it("clamps values above the 256MB ceiling", () => {
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: String(1024 * 1024 * 1024) })).toBe(
+			MAX_MESSAGE_BYTES_CEILING,
+		);
+		expect(MAX_MESSAGE_BYTES_CEILING).toBe(256 * 1024 * 1024);
+	});
+
+	it("accepts exactly the ceiling", () => {
+		expect(resolveMaxMessageBytes({ BLOK_GRPC_MAX_MESSAGE_BYTES: String(MAX_MESSAGE_BYTES_CEILING) })).toBe(
+			MAX_MESSAGE_BYTES_CEILING,
+		);
 	});
 });
 

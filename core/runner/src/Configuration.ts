@@ -20,6 +20,7 @@ import {
 	loadTlsConfigForKind,
 	resolveHealthCheckFailureThreshold,
 	resolveHealthCheckIntervalMs,
+	resolveMaxMessageBytes,
 } from "./adapters/transport";
 import type Condition from "./types/Condition";
 import type Config from "./types/Config";
@@ -110,12 +111,23 @@ export default class Configuration implements Config {
 			);
 		}
 
+		// Env-configurable gRPC message size (default 16 MB). MUST match the
+		// server SDKs' limit — the Python/Rust sidecars read the same
+		// `BLOK_GRPC_MAX_MESSAGE_BYTES`. A client-only raise would have the
+		// under-configured server reject oversized messages.
+		const maxMessageBytes = resolveMaxMessageBytes() ?? GRPC_DEFAULTS.MAX_MESSAGE_BYTES;
+		if (maxMessageBytes !== GRPC_DEFAULTS.MAX_MESSAGE_BYTES) {
+			console.log(
+				`[blok][grpc] runtime.${kind} max message size = ${maxMessageBytes} bytes (BLOK_GRPC_MAX_MESSAGE_BYTES). Ensure the ${kind} sidecar reads the same env var.`,
+			);
+		}
+
 		const config: GrpcAdapterConfig = {
 			kind,
 			host,
 			port,
 			defaultDeadlineMs: GRPC_DEFAULTS.DEFAULT_DEADLINE_MS,
-			maxMessageBytes: GRPC_DEFAULTS.MAX_MESSAGE_BYTES,
+			maxMessageBytes,
 			keepalive: {
 				timeMs: GRPC_DEFAULTS.KEEPALIVE_TIME_MS,
 				timeoutMs: GRPC_DEFAULTS.KEEPALIVE_TIMEOUT_MS,

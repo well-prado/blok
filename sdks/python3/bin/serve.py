@@ -12,6 +12,8 @@ Environment variables:
     BLOK_TRANSPORT   "http" | "grpc" | "both" (default: "http")
     LOG_LEVEL        DEBUG | INFO | WARN | ERROR (default: INFO)
     ENABLE_CORS      true / false (default: false)
+    BLOK_GRPC_MAX_MESSAGE_BYTES  Max gRPC message size, send+recv (default: 16777216).
+                     Must match the runner client + other sidecars.
 """
 
 import logging
@@ -56,11 +58,24 @@ def _start_grpc(registry: NodeRegistry, config: ServerConfig):
         )
         raise SystemExit(1) from exc
 
+    # Max gRPC message size (decode + encode), default 16 MiB. MUST match the
+    # runner client's BLOK_GRPC_MAX_MESSAGE_BYTES and the other sidecars — a
+    # client-only raise leaves this server rejecting oversized messages with
+    # RESOURCE_EXHAUSTED. Invalid / non-positive falls back to the default.
+    default_max = 16 * 1024 * 1024
+    try:
+        max_message_bytes = int(os.environ.get("BLOK_GRPC_MAX_MESSAGE_BYTES", default_max))
+        if max_message_bytes <= 0:
+            max_message_bytes = default_max
+    except (TypeError, ValueError):
+        max_message_bytes = default_max
+
     return serve_grpc(
         registry,
         port=config.grpc_port,
         host=config.host,
         sdk_version=config.version,
+        max_message_bytes=max_message_bytes,
     )
 
 
