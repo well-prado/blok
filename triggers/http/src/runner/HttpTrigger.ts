@@ -686,6 +686,34 @@ export default class HttpTrigger extends TriggerBase {
 				}
 			});
 
+			// --- Typed client RPC mount (P1.3) ---
+			// `POST /__blok/rpc/:name` runs a registered workflow BY NAME and
+			// returns its output as JSON — the name-keyed entrypoint the typed
+			// `@blokjs/client` calls (SPEC-blok-client-sdk.md §4.3). Registered
+			// BEFORE the `/__blok` trace router so it isn't swallowed by it. The
+			// request body is the workflow's input; the workflow's own middleware
+			// chain (auth, etc.) still runs inside `runWorkflowExecution`.
+			this.app.post("/__blok/rpc/:name", async (c) => {
+				const name = c.req.param("name");
+				const entry = WorkflowRegistry.getInstance().get(name);
+				if (!entry || entry.isMiddleware === true) {
+					return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
+				}
+				const requestId = c.req.query("requestId") || (uuid() as string);
+				const { body, rawBody } = await this.parseBody(c);
+				const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+				return this.runWorkflowExecution(c, {
+					workflowName: name,
+					subPath: "",
+					body: input,
+					rawBody,
+					requestId,
+					explicitRoute: true,
+					preloadedWorkflow: entry.workflow,
+					rpcInput: input,
+				});
+			});
+
 			// --- Blok Studio: Trace API ---
 			// Must be registered BEFORE AppRoutes and the catch-all workflow handler
 			// so that /__blok/* requests are handled by the trace router, not treated
@@ -944,6 +972,15 @@ export default class HttpTrigger extends TriggerBase {
 			preloadedWorkflow?: unknown;
 			remoteNodeExecution?: boolean;
 			runtimeWorkflow?: RuntimeWorkflow;
+			/**
+			 * v0.7 · typed-client RPC mount (`/__blok/rpc/:name`). When set, the
+			 * input object's top-level SCALAR fields are mirrored into
+			 * `ctx.request.query` + `ctx.request.params` (in addition to arriving
+			 * as `body`) so a workflow authored for a GET/query or `:param`
+			 * trigger still resolves its inputs uniformly through the name-keyed
+			 * mount. Nested/object fields stay on `body` only.
+			 */
+			rpcInput?: Record<string, unknown>;
 		},
 	): Promise<Response> {
 		const id = opts.requestId;
@@ -1088,6 +1125,19 @@ export default class HttpTrigger extends TriggerBase {
 					path: explicitRoute ? c.req.path : subPath,
 					url: c.req.url,
 				} as unknown as RequestContext;
+
+				// v0.7 · typed-client RPC mount — mirror the input's scalar fields
+				// into query + params so a workflow authored for a GET/query or
+				// `:param` trigger resolves its inputs through the name-keyed mount.
+				if (opts.rpcInput && typeof opts.rpcInput === "object") {
+					const flat: Record<string, string> = {};
+					for (const [k, v] of Object.entries(opts.rpcInput)) {
+						if (v !== null && v !== undefined && typeof v !== "object") flat[k] = String(v);
+					}
+					const req = ctx.request as unknown as { query: Record<string, string>; params: Record<string, string> };
+					req.query = { ...req.query, ...flat };
+					req.params = { ...req.params, ...flat };
+				}
 
 				// v0.6 · merged middleware chain (process-global → workflow-level
 				// → trigger-level). Implementation lives on `TriggerBase`
