@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { $, JS_EXPR_TAG, type V2Step, branch, unwrapProxies, workflow } from "../src/index";
 
 describe("v2 DSL — $ proxy", () => {
@@ -140,6 +141,64 @@ describe("v2 DSL — workflow() factory", () => {
 				steps: [{ id: "x", use: "@blokjs/foo", inputs: {} }],
 			}),
 		).toThrow();
+	});
+});
+
+describe("v2 DSL — workflow() output/events typing metadata (P1.1)", () => {
+	const In = z.object({ q: z.string().optional() });
+	const Out = z.object({ users: z.array(z.string()), total: z.number() });
+
+	it("carries input + output Zod schemas verbatim on _config", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: In,
+			output: Out,
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect((wf._config as { input?: unknown }).input).toBe(In);
+		expect((wf._config as { output?: unknown }).output).toBe(Out);
+	});
+
+	it("carries an events vocabulary verbatim on _config", () => {
+		const events = { progress: z.object({ pct: z.number() }), done: z.object({ ok: z.boolean() }) };
+		const wf = workflow({
+			name: "Streamy",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			events,
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect((wf._config as { events?: unknown }).events).toBe(events);
+	});
+
+	it("omits output/events from _config when not declared", () => {
+		const wf = workflow({
+			name: "Plain",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect("output" in wf._config).toBe(false);
+		expect("events" in wf._config).toBe(false);
+	});
+
+	it("strips input/output/events from toJson() (Zod schemas aren't serializable)", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: In,
+			output: Out,
+			events: { done: z.object({ ok: z.boolean() }) },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		const json = JSON.parse(wf.toJson()) as Record<string, unknown>;
+		expect(json.input).toBeUndefined();
+		expect(json.output).toBeUndefined();
+		expect(json.events).toBeUndefined();
+		expect(json.name).toBe("Typed");
 	});
 });
 

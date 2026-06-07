@@ -34,6 +34,23 @@ export interface WorkflowOpts {
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: accepts any ZodType without coupling the helper to a zod version
 	input?: any;
+	/**
+	 * Optional Zod schema describing the workflow's OUTPUT (terminal response
+	 * body). Consumed by the typed `@blokjs/client` to type each call's return
+	 * value, and — when `BLOK_VALIDATE_WORKFLOW_OUTPUT=true` — validated against
+	 * the terminal step's result. Carried verbatim on `_config.output`; not
+	 * serialized by the runner.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: accepts any ZodType without coupling the helper to a zod version
+	output?: any;
+	/**
+	 * Optional map of SSE event name → Zod schema for STREAMING workflows.
+	 * Consumed by the typed `@blokjs/client` to type the streaming event union
+	 * and by `@blokjs/sse-emit-typed` to constrain emitted events. Carried
+	 * verbatim on `_config.events`; not serialized by the runner.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: values are ZodTypes
+	events?: Record<string, any>;
 }
 
 /**
@@ -135,16 +152,20 @@ export function workflow(opts: WorkflowOpts): WorkflowV2Builder {
 		description: opts.description,
 		trigger: validatedTrigger,
 		steps: compiledSteps,
-		// Carry the optional Zod input schema verbatim (authoring metadata for
-		// the `mcp` trigger). Excluded from toJson() — it isn't serializable.
+		// Carry the optional Zod input/output schemas + event vocabulary verbatim
+		// (authoring metadata for the `mcp` trigger + the typed `@blokjs/client`).
+		// Excluded from toJson() — Zod schemas aren't serializable.
 		...(opts.input !== undefined ? { input: opts.input } : {}),
+		...(opts.output !== undefined ? { output: opts.output } : {}),
+		...(opts.events !== undefined ? { events: opts.events } : {}),
 	};
 
 	return Object.freeze({
 		_blokV2: true as const,
 		_config,
-		// `input` (a Zod schema) is authoring metadata, not part of the
-		// serialized workflow — strip it so JSON consumers see a clean envelope.
-		toJson: () => JSON.stringify({ ..._config, input: undefined }),
+		// `input`/`output`/`events` (Zod schemas) are authoring metadata, not part
+		// of the serialized workflow — strip them so JSON consumers see a clean
+		// envelope.
+		toJson: () => JSON.stringify({ ..._config, input: undefined, output: undefined, events: undefined }),
 	});
 }
