@@ -3,7 +3,7 @@ title: Creating triggers
 ---
 
 # **Guide to Contributing Triggers in Blok **
-<Tip> Make sure you follow the recommendations on how to set up local environment and steps to complete before committing your changes. To learn more [visit](/docs/c/overview/how-to-contribute)</Tip>
+<Tip> Make sure you follow the recommendations on how to set up local environment and steps to complete before committing your changes. To learn more [visit](/c/overview/how-to-contribute)</Tip>
 
 Triggers in `Blok` allow workflows to be executed **automatically** in response to specific events. This guide provides an overview of how to create, test, and contribute new triggers to the framework.
 
@@ -35,7 +35,7 @@ npm install
 ## **Adding a New Trigger**
 1. Create a new directory in `/triggers`  
 2. Use `http-trigger` as a template or build your own
-3. Make sure you are using the [TriggerBase class](/docs/ref/runner/src/classes/TriggerBase) as the base class
+3. Make sure you are using the [TriggerBase class](https://github.com/deskree-inc/blok/blob/main/core/runner/src/TriggerBase.ts) as the base class
 4. Document your code, create interface definitions, and make sure you follow ESlint rules
 5. Make sure you have tests for your trigger and you achieve full coverage after running `pnpm test`
 

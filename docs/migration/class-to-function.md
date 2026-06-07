@@ -434,6 +434,6 @@ The class-based `BlokService` API is not deprecated. Both approaches are support
 
 ## See Also
 
-- [Runtime Adapter System](/docs/architecture/runtime-adapters) -- how nodes execute across runtimes
-- [Migration: Single to Multi-Runtime](/docs/migration/single-to-multi-runtime) -- adding multi-runtime support
-- [Trigger System](/docs/architecture/trigger-system) -- how triggers invoke workflows containing nodes
+- [Runtime Adapter System](/architecture/runtime-adapters) -- how nodes execute across runtimes
+- [Migration: Single to Multi-Runtime](/migration/single-to-multi-runtime) -- adding multi-runtime support
+- [Trigger System](/architecture/trigger-system) -- how triggers invoke workflows containing nodes

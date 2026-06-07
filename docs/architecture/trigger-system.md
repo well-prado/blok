@@ -458,6 +458,6 @@ Register and use the custom trigger:
 
 ## See Also
 
-- [Runtime Adapter System](/docs/architecture/runtime-adapters) -- how different runtimes execute nodes
-- [Observability](/docs/architecture/observability) -- distributed tracing and metrics
-- [Security Model](/docs/architecture/security-model) -- authentication middleware for triggers
+- [Runtime Adapter System](/architecture/runtime-adapters) -- how different runtimes execute nodes
+- [Observability](/architecture/observability) -- distributed tracing and metrics
+- [Security Model](/architecture/security-model) -- authentication middleware for triggers

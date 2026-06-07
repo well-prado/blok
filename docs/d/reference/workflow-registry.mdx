@@ -100,6 +100,14 @@ If you hit this, rename one of the workflows. The registry is
 strict-by-default — silent override would mask the wrong workflow
 being called from a sub-workflow step.
 
+A dotted `domain.action` name (`countries.list`, `users.create`) keeps
+names unique and reads cleanly through the typed client — see the
+[naming convention](/d/introduction/workflows#naming-convention). The
+same uniqueness rule applies to `blokctl gen app-types`: duplicate
+names there are reported as a collision and one of the colliding
+workflows is dropped from the generated `BlokApp` type, so the typed
+client can't reach it.
+
 ## HMR pattern
 
 Triggers that re-scan workflow files on change should:

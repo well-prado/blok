@@ -13,7 +13,7 @@ unstructured throws (`raise ValueError(...)`,
 If you're looking for the **list** of stable codes, that's
 [docs/error-codes.md](./error-codes.md). If you're looking for the
 **proto wire shape**, that's
-[`proto/blok/runtime/v1/runtime.proto`](../proto/blok/runtime/v1/runtime.proto).
+[`proto/blok/runtime/v1/runtime.proto`](https://github.com/deskree-inc/blok/blob/main/proto/blok/runtime/v1/runtime.proto).
 
 ---
 
@@ -567,7 +567,7 @@ builder is almost always the better choice in node code.
 ## Related references
 
 - [docs/error-codes.md](./error-codes.md) — the registry of stable codes.
-- [proto/blok/runtime/v1/runtime.proto](../proto/blok/runtime/v1/runtime.proto)
+- [proto/blok/runtime/v1/runtime.proto](https://github.com/deskree-inc/blok/blob/main/proto/blok/runtime/v1/runtime.proto)
   — wire contract.
 - `core/runner/__tests__/integration/parity/matrix.integration.test.ts`
   — the cross-language proof every SDK ships the same shape.

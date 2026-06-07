@@ -1,0 +1,167 @@
+---
+title: "Streaming"
+description: "Declare an event vocabulary, emit typed SSE events from a workflow, and consume them as a typed async iterable with .stream()."
+icon: "waveform-lines"
+---
+
+A streaming call yields a sequence of typed events instead of one result. The
+workflow declares an `events` vocabulary, emits events as it runs, and the client
+consumes them as a typed discriminated union over Server-Sent Events.
+
+## Declare the event vocabulary
+
+Add an `events` map to the workflow — each key is an event name, each value the
+Zod schema for that event's `data`. This becomes the client's event union.
+
+```ts triggers/http/src/workflows/jobs/watch.ts
+import { workflow } from "@blokjs/helper";
+import { z } from "zod";
+
+export default workflow({
+  name: "jobs.watch",
+  input: z.object({ jobId: z.string() }),
+  events: {
+    progress: z.object({ pct: z.number().min(0).max(100) }),
+    log: z.object({ line: z.string() }),
+    done: z.object({ ok: z.boolean() }),
+    error: z.object({ message: z.string() }),
+  },
+  trigger: { http: { method: "POST", path: "/api/jobs/watch" } },
+  steps: [
+    { id: "p1", use: "@blokjs/sse-emit", inputs: { event: "progress", data: { pct: 10 } }, ephemeral: true },
+    { id: "p2", use: "@blokjs/sse-emit", inputs: { event: "progress", data: { pct: 100 } }, ephemeral: true },
+    { id: "fin", use: "@blokjs/sse-emit", inputs: { event: "done", data: { ok: true } }, ephemeral: true },
+  ],
+});
+```
+
+The client now sees `blok.jobs.watch.stream` yielding:
+
+```ts
+type JobEvent =
+  | { type: "progress"; data: { pct: number } }
+  | { type: "log"; data: { line: string } }
+  | { type: "done"; data: { ok: boolean } }
+  | { type: "error"; data: { message: string } };
+```
+
+## Emit events
+
+Emit with the [`@blokjs/sse-emit`](/d/reference/helpers/sse-emit) node — one event
+per step. Mark the step `ephemeral: true` so it doesn't clutter state.
+
+<Warning>
+When a workflow declares `events`, every literal event name emitted by an
+`@blokjs/sse-emit` step must be a declared key. A typo or an undeclared event is
+a load-time error, not a silent omission:
+
+```
+workflow("jobs.watch") emits SSE event "progres" which is not declared in `events`.
+Declared: progress, log, done, error. Add "progres" to `events`, or fix the @blokjs/sse-emit step.
+```
+</Warning>
+
+## Consume the stream
+
+Call `.stream(input)` and iterate. Narrow on `event.type` — TypeScript types
+`event.data` per arm.
+
+```ts
+for await (const event of blok.jobs.watch.stream({ jobId: "j1" })) {
+  switch (event.type) {
+    case "progress":
+      setProgress(event.data.pct);   // data: { pct: number }
+      break;
+    case "log":
+      appendLog(event.data.line);
+      break;
+    case "done":
+      finish(event.data.ok);
+      break;
+    case "error":
+      showError(event.data.message);
+      break;
+  }
+}
+```
+
+A streaming workflow exposes only `.stream` on the client — there is no direct
+call signature. The reverse is also true: a workflow with no declared events is a
+[unary call](/d/client/unary) and has no `.stream`.
+
+## Error handling
+
+A non-2xx response throws a [`BlokClientError`](/d/client/unary#error-handling)
+before the first event is yielded, so wrap the loop in `try/catch`.
+
+```ts
+import { BlokClientError } from "@blokjs/client";
+
+try {
+  for await (const event of blok.jobs.watch.stream({ jobId: "j1" })) {
+    /* … */
+  }
+} catch (err) {
+  if (err instanceof BlokClientError) console.error(err.status, err.body);
+}
+```
+
+If the workflow throws while the stream is open, the server sends a terminal
+`error` frame (`event: error`, `data: { message }`). Declare an `error` event (as
+above) so that frame is part of your typed union and you can handle it in the
+loop.
+
+## The wire format
+
+`.stream()` POSTs with `Accept: text/event-stream` and reads the response body as
+SSE frames:
+
+```http
+POST /__blok/rpc/jobs.watch HTTP/1.1
+Accept: text/event-stream
+Content-Type: application/json
+
+{ "jobId": "j1" }
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+
+event: progress
+data: {"pct":10}
+
+event: progress
+data: {"pct":100}
+
+event: done
+data: {"ok":true}
+```
+
+The client ships its own spec-correct SSE reader — it has to, because the native
+`EventSource` is GET-only and can't send a body or auth headers. The reader
+handles frames split across network chunks, multi-line `data:`, `:` keep-alive
+comments, and a trailing frame with no final blank line.
+
+<Note>
+A `data:` payload that isn't valid JSON is surfaced verbatim as a string rather
+than dropped, so nothing is silently swallowed. The reader does not
+auto-reconnect — a closed stream ends the iteration.
+</Note>
+
+<Note>
+The same `POST /__blok/rpc/:name` mount serves both modes. Without
+`Accept: text/event-stream` it returns the workflow's terminal output as a single
+JSON response. The typed client always sends the header for `.stream()`.
+</Note>
+
+## Next
+
+<Columns cols={2}>
+  <Card title="sse-emit reference" icon="satellite-dish" href="/d/reference/helpers/sse-emit">
+    The node that writes one SSE event per step.
+  </Card>
+  <Card title="SSE trigger" icon="radio" href="/d/triggers/sse">
+    Long-lived server-push channels, beyond per-call streams.
+  </Card>
+</Columns>

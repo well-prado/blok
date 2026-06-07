@@ -1,0 +1,173 @@
+---
+title: "Typing workflows"
+description: "Declare input, output, and event schemas on a workflow so the client infers them — including outputs that vary through branches, loops, and tryCatch."
+icon: "braces"
+---
+
+The client infers everything from your workflows. A workflow opts into typing by
+declaring Zod schemas on the `workflow()` factory. This page covers what to
+declare and how outputs are typed when control flow makes them vary.
+
+## The three schemas
+
+`workflow()` accepts three optional schemas. Each maps to a phantom type
+parameter on the returned value (`TypedWorkflow<Input, Output, Events>`), which
+is what `BlokApp` carries to the client.
+
+| Schema | Types | Used by |
+|---|---|---|
+| `input` | the call's argument | `blok.x.y(input)` |
+| `output` | the call's return value | `await blok.x.y(input)` |
+| `events` | the streaming event union | `blok.x.y.stream(input)` |
+
+```ts
+import { workflow } from "@blokjs/helper";
+import { z } from "zod";
+
+const User = z.object({ id: z.string(), name: z.string() });
+
+export default workflow({
+  name: "users.list",
+  input: z.object({ q: z.string().optional(), limit: z.number().int().max(100).default(20) }),
+  output: z.object({ users: z.array(User), total: z.number().int() }),
+  trigger: { http: { method: "GET", path: "/api/users" } },
+  steps: [
+    /* … */
+  ],
+});
+```
+
+The client now sees `blok.users.list` as
+`(input: { q?: string; limit?: number }) => Promise<{ users: User[]; total: number }>`.
+
+<Note>
+`input`, `output`, and `events` are type-only metadata. They are not serialized
+into the workflow's runtime config — they exist to drive the client's types (and
+author-time event validation). Declaring them changes no runtime behavior today.
+Runtime output validation (`BLOK_VALIDATE_WORKFLOW_OUTPUT`) is planned.
+</Note>
+
+## No declaration means no types
+
+Declaration is opt-in. A workflow with no `output` schema still works — the
+client just can't type its return, so you get an untyped value you must narrow
+yourself. Add `output` to get a typed, checked return. This makes adoption
+incremental: type the workflows your frontend calls, leave the rest.
+
+## Outputs through control flow
+
+The typed output never comes from analyzing your steps. It comes from the
+declared `output` schema. Control flow is the private body; `output` is the
+public return type — the client only ever sees `output`. Where the body can
+produce more than one shape, declare a Zod union or array and the client gets a
+value it must narrow.
+
+### forEach — declare an array
+
+A loop that produces one item per iteration is an array. The N iterations are
+invisible to the caller.
+
+```ts
+import { workflow, forEach, $ } from "@blokjs/helper";
+import { z } from "zod";
+
+const EnrichedUser = z.object({ id: z.string(), score: z.number() });
+
+export default workflow({
+  name: "users.enrich",
+  input: z.object({ ids: z.array(z.string()) }),
+  output: z.object({ users: z.array(EnrichedUser) }),
+  trigger: { http: { method: "POST", path: "/api/users/enrich" } },
+  steps: [
+    forEach({ id: "loop", items: "$.req.body.ids", as: "users", body: [ /* … */ ] }),
+    { id: "out", use: "@blokjs/respond", inputs: { body: { users: $.state.users } }, ephemeral: true },
+  ],
+});
+```
+
+```ts
+const { users } = await blok.users.enrich({ ids });   // users: EnrichedUser[]
+```
+
+### branch — declare a discriminated union
+
+When arms return different shapes, the union is the contract, and TypeScript
+forces the caller to narrow.
+
+```ts
+import { workflow, branch } from "@blokjs/helper";
+import { z } from "zod";
+
+export default workflow({
+  name: "payments.process",
+  input: z.object({ amount: z.number(), method: z.string() }),
+  output: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("paid"), receiptId: z.string() }),
+    z.object({ status: z.literal("declined"), reason: z.string() }),
+  ]),
+  trigger: { http: { method: "POST", path: "/api/payments" } },
+  steps: [
+    branch({
+      id: "route",
+      when: "$.state.charge.ok",
+      then: [ /* … leaves { status: "paid", receiptId } */ ],
+      else: [ /* … leaves { status: "declined", reason } */ ],
+    }),
+    { id: "out", use: "@blokjs/respond", inputs: { body: "$.prev" }, ephemeral: true },
+  ],
+});
+```
+
+```ts
+const res = await blok.payments.process({ amount, method });
+if (res.status === "paid") showReceipt(res.receiptId);   // narrowed to "paid"
+else showError(res.reason);                              // narrowed to "declined"
+// res.receiptId before the check is a compile error
+```
+
+The two outcomes become two typed cases the caller must handle.
+
+### tryCatch — declare a success/failure union
+
+```ts
+output: z.union([
+  z.object({ ok: z.literal(true), data: PayloadSchema }),
+  z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
+]),
+```
+
+The caller narrows on `ok`. Nested control flow nests the same way — declare the
+outcomes, never trace the path.
+
+<Tip>
+Declaring the outcome union is a feature, not a workaround: the caller is forced
+to handle every case the workflow can return, and the contract is explicit and
+reviewable rather than an implicit union nobody looked at.
+</Tip>
+
+## Generating BlokApp
+
+TypeScript can't discover types from a folder — they only flow through imports.
+So one type must index every workflow. You don't hand-write it:
+[`blokctl gen app-types`](/d/cli/gen) walks your TypeScript workflow files and
+emits `blok-app.d.ts`.
+
+```bash
+npx blokctl gen app-types
+```
+
+The dotted name drives the nesting: `users.list` becomes `BlokApp.users.list`,
+`health` stays `BlokApp.health`. Names must be unique — see the
+[naming convention](/d/introduction/workflows#naming-convention). JSON-authored
+workflows are skipped (there's no TypeScript type to import).
+
+## Next
+
+<Columns cols={2}>
+  <Card title="Calling workflows" icon="square-function" href="/d/client/unary">
+    Make typed unary calls, handle errors, and authenticate.
+  </Card>
+  <Card title="Streaming" icon="waveform-lines" href="/d/client/streaming">
+    Declare an `events` vocabulary and consume typed streams.
+  </Card>
+</Columns>

@@ -28,7 +28,7 @@ Blok ships nine trigger packages under `triggers/`. Today their state is uneven:
 | `queue` | Adapter scaffolds exist, **but → see Q1 resolution** | Files at `triggers/queue/src/adapters/{Kafka,RabbitMQ,SQS,Redis,NATS}Adapter.ts` but no `QueueTrigger.listen()` boot path. **Per Q1 below: this trigger name is dropped; the adapters move into the existing `worker` trigger.** |
 | `pubsub` | Adapter scaffolds exist | GCP / AWS / Azure provider scaffolds but no integrated dev experience. |
 
-The authoring surface (workflow JSON / TS DSL) accepts every trigger type today — the schema in [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) is comprehensive. The integration gap is at the trigger boot layer: nothing scans workflows with `trigger: { websocket: {...} }` and brings up a WebSocket server.
+The authoring surface (workflow JSON / TS DSL) accepts every trigger type today — the schema in [TriggerOpts.ts](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts) is comprehensive. The integration gap is at the trigger boot layer: nothing scans workflows with `trigger: { websocket: {...} }` and brings up a WebSocket server.
 
 **The goal of this plan:** close the gap so authors can write the JSON line and have the workflow respond. No need to subclass anything, write infrastructure code, or run a separate dev server per trigger.
 
@@ -197,7 +197,7 @@ Every trigger emits OTel spans, NodeRun records, and Studio-visible traces. The 
 
 ### P7 — Operational primitives (concurrency, scheduling, retries) are uniform
 
-The existing v0.5/v0.6 ops primitives (`concurrencyKey`, `delay`, `ttl`, `debounce`, `retry`, `idempotencyKey`, `maxDuration`) should work on ALL triggers, not just HTTP. The `ConcurrencyOptsFields` / `SchedulingOptsFields` in [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) are designed for cross-trigger reuse.
+The existing v0.5/v0.6 ops primitives (`concurrencyKey`, `delay`, `ttl`, `debounce`, `retry`, `idempotencyKey`, `maxDuration`) should work on ALL triggers, not just HTTP. The `ConcurrencyOptsFields` / `SchedulingOptsFields` in [TriggerOpts.ts](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts) are designed for cross-trigger reuse.
 
 ---
 
@@ -1333,9 +1333,9 @@ PR 1 (server architecture refactor) starts the chain after sign-off.
 ## References
 
 ### Codebase
-- [TriggerOpts.ts](../../../core/workflow-helper/src/types/TriggerOpts.ts) — schema definitions for all 9 trigger kinds
-- [HttpTrigger.ts](../../../triggers/http/src/runner/HttpTrigger.ts) — Hono integration to mirror
-- [WorkerTrigger.ts](../../../triggers/worker/src/WorkerTrigger.ts) + adapter pattern to extend
+- [TriggerOpts.ts](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts) — schema definitions for all 9 trigger kinds
+- [HttpTrigger.ts](https://github.com/deskree-inc/blok/blob/main/triggers/http/src/runner/HttpTrigger.ts) — Hono integration to mirror
+- [WorkerTrigger.ts](https://github.com/deskree-inc/blok/blob/main/triggers/worker/src/WorkerTrigger.ts) + adapter pattern to extend
 - [middleware.mdx](./middleware.mdx) — 3-tier middleware chain that applies uniformly across triggers
 - [wait-inside-primitives-design.mdx](./wait-inside-primitives-design.mdx) — design doc precedent for spec-first approach
 

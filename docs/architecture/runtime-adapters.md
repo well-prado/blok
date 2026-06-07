@@ -390,6 +390,6 @@ When the `runtime` field is omitted, the step defaults to `nodejs` (in-process e
 
 ## See Also
 
-- [Trigger System](/docs/architecture/trigger-system) -- how triggers invoke workflows
-- [Migration: Single to Multi-Runtime](/docs/migration/single-to-multi-runtime) -- guide for adopting multi-runtime
-- [Security Model](/docs/architecture/security-model) -- authentication and authorization across runtimes
+- [Trigger System](/architecture/trigger-system) -- how triggers invoke workflows
+- [Migration: Single to Multi-Runtime](/migration/single-to-multi-runtime) -- guide for adopting multi-runtime
+- [Security Model](/architecture/security-model) -- authentication and authorization across runtimes

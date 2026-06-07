@@ -959,7 +959,7 @@ Any entity that creates, receives, maintains, or transmits ePHI on behalf of a c
 |---|---|---|
 | Fewer than 500 | Within 60 days of discovery | Written notice to individuals |
 | 500 or more | Within 60 days of discovery | Written notice + media notification + HHS |
-| Any number | Annual log to HHS for breaches <500 | HHS breach portal |
+| Any number | Annual log to HHS for breaches &lt;500 | HHS breach portal |
 
 ### Breach Response Workflow
 

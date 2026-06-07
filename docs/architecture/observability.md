@@ -540,6 +540,6 @@ trigger.enableCircuitBreaker({
 
 ## See Also
 
-- [Trigger System](/docs/architecture/trigger-system) -- monitoring infrastructure in triggers
-- [Security Model](/docs/architecture/security-model) -- audit logging for security events
-- [Runtime Adapters](/docs/architecture/runtime-adapters) -- per-runtime metrics
+- [Trigger System](/architecture/trigger-system) -- monitoring infrastructure in triggers
+- [Security Model](/architecture/security-model) -- audit logging for security events
+- [Runtime Adapters](/architecture/runtime-adapters) -- per-runtime metrics

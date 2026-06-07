@@ -880,6 +880,6 @@ abac.fromJSON(config);
 
 ## See Also
 
-- [Trigger System](/docs/architecture/trigger-system) -- how triggers integrate with authentication
-- [Observability](/docs/architecture/observability) -- monitoring security events
-- [Runtime Adapters](/docs/architecture/runtime-adapters) -- cross-runtime security considerations
+- [Trigger System](/architecture/trigger-system) -- how triggers integrate with authentication
+- [Observability](/architecture/observability) -- monitoring security events
+- [Runtime Adapters](/architecture/runtime-adapters) -- cross-runtime security considerations

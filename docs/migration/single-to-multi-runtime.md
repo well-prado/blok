@@ -572,12 +572,12 @@ registry.replace(new MockPythonAdapter());
 
 | Runtime | First Call | Subsequent Calls | Communication |
 |---|---|---|---|
-| `nodejs` | <1ms | <1ms | In-process |
-| `bun` (Bun host) | <1ms | <1ms | In-process |
+| `nodejs` | &lt;1ms | &lt;1ms | In-process |
+| `bun` (Bun host) | &lt;1ms | &lt;1ms | In-process |
 | `bun` (Node host) | 50-200ms | 50-200ms | Subprocess |
 | `python3` | 1-5ms | 1-5ms | gRPC (protobuf) |
 | `docker` | 2-30s | 5-50ms | HTTP (JSON) |
-| `wasm` | 10-100ms | <1ms | In-process (WASM API) |
+| `wasm` | 10-100ms | &lt;1ms | In-process (WASM API) |
 
 ### Optimization Strategies
 
@@ -628,7 +628,7 @@ max(node_memory) by (runtime)
 
 ## See Also
 
-- [Runtime Adapter System](/docs/architecture/runtime-adapters) -- detailed architecture of the adapter system
-- [Migration: Class to Function](/docs/migration/class-to-function) -- migrating nodes to the function-first API
-- [Observability](/docs/architecture/observability) -- monitoring multi-runtime workflows
-- [Trigger System](/docs/architecture/trigger-system) -- how triggers invoke workflows
+- [Runtime Adapter System](/architecture/runtime-adapters) -- detailed architecture of the adapter system
+- [Migration: Class to Function](/migration/class-to-function) -- migrating nodes to the function-first API
+- [Observability](/architecture/observability) -- monitoring multi-runtime workflows
+- [Trigger System](/architecture/trigger-system) -- how triggers invoke workflows

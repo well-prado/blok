@@ -591,7 +591,7 @@ base URL.
 | `dispatch:` value | What happens |
 |---|---|
 | `"in-process"` (default) | Child runs in the SAME Node process. Synchronous (`wait: true`) or `setImmediate` (`wait: false`). Cheapest, no extra hops. |
-| `"http-self"` | Child is dispatched as a fresh HTTP request to `BLOK_SELF_BASE_URL` (defaults to `http://localhost:${PORT || 4000}`). Each child can land on a different process in a horizontally-scaled deployment. |
+| `"http-self"` | Child is dispatched as a fresh HTTP request to `BLOK_SELF_BASE_URL` (defaults to `http://localhost:$PORT`, or port 4000 when unset). Each child can land on a different process in a horizontally-scaled deployment. |
 
 ### Requirements
 

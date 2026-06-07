@@ -341,13 +341,20 @@ cached value.
 ### Don't put plaintext secrets in `ctx.logger.*`
 
 Sanitize covers logger payloads, but only based on the field-name
-list. A line like `ctx.logger.logLevel("info", "user logged in",
-{ identity: { sub: "u1", token: "abc" } })` will redact `token`
-because the field name matches. A line like
-`ctx.logger.logLevel("info", "user logged in: token=abc")` will not
-— the secret is in a string literal, not a field. Pre-commit linting
-that blocks string-concatenation of secrets is the right defense
-here; sanitize is the safety net, not the policy.
+list. This call redacts `token` because the field name matches:
+
+```ts
+ctx.logger.logLevel("info", "user logged in", { identity: { sub: "u1", token: "abc" } });
+```
+
+This one does not — the secret is in a string literal, not a field:
+
+```ts
+ctx.logger.logLevel("info", "user logged in: token=abc");
+```
+
+Pre-commit linting that blocks string-concatenation of secrets is the
+right defense here; sanitize is the safety net, not the policy.
 
 ## Secure the trace API and Studio
 
