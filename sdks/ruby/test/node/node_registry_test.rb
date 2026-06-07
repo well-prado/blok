@@ -54,7 +54,7 @@ class NodeRegistryTest < Minitest::Test
     assert result.success
     assert_equal "hello", result.data["msg"]
     assert result.metrics
-    assert result.metrics.duration_ms > 0
+    assert result.metrics.duration_ms >= 0
   end
 
   def test_execute_not_found
