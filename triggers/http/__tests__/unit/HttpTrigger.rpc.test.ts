@@ -165,3 +165,73 @@ describe("HttpTrigger — typed-client RPC mount (POST /__blok/rpc/:name) — P1
 		expect(res.status).toBe(404);
 	});
 });
+
+describe("HttpTrigger — RPC SSE streaming (POST /__blok/rpc/:name, Accept: text/event-stream) — P3.2", () => {
+	beforeEach(() => {
+		WorkflowRegistry.getInstance().clear();
+	});
+
+	it("streams a workflow's @blokjs/sse-emit events, with the input on ctx.request.body", async () => {
+		const app = await bootApp();
+		WorkflowRegistry.getInstance().register({
+			name: "jobs.watch",
+			source: "test",
+			workflow: workflow({
+				name: "jobs.watch",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/jobs" } },
+				events: { progress: z.object({ job: z.string(), pct: z.number() }), done: z.object({ ok: z.boolean() }) },
+				steps: [
+					{
+						id: "p1",
+						use: "@blokjs/sse-emit",
+						inputs: { event: "progress", data: { job: "js/ctx.req.body.jobId", pct: 50 } },
+						ephemeral: true,
+					},
+					{ id: "p2", use: "@blokjs/sse-emit", inputs: { event: "done", data: { ok: true } }, ephemeral: true },
+				],
+			}),
+		});
+
+		const res = await app.fetch(
+			new Request("http://localhost/__blok/rpc/jobs.watch", {
+				method: "POST",
+				headers: { "content-type": "application/json", accept: "text/event-stream" },
+				body: JSON.stringify({ jobId: "j1" }),
+			}),
+		);
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toContain("text/event-stream");
+		const text = await res.text();
+		expect(text).toContain("event: progress");
+		expect(text).toContain('"job":"j1"'); // input flowed to ctx.req.body
+		expect(text).toContain('"pct":50');
+		expect(text).toContain("event: done");
+		expect(text).toContain('"ok":true');
+	});
+
+	it("falls back to a unary JSON response when Accept is not text/event-stream", async () => {
+		const app = await bootApp();
+		WorkflowRegistry.getInstance().register({
+			name: "echo.plain",
+			source: "test",
+			workflow: workflow({
+				name: "echo.plain",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/echo-plain" } },
+				steps: [{ id: "out", use: "@blokjs/respond", inputs: { body: { ok: true } }, ephemeral: true }],
+			}),
+		});
+		const res = await app.fetch(
+			new Request("http://localhost/__blok/rpc/echo.plain", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: "{}",
+			}),
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toContain("application/json");
+		expect(await res.json()).toEqual({ ok: true });
+	});
+});
