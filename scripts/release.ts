@@ -70,6 +70,8 @@ const PUBLISHABLE: readonly Publishable[] = [
 	{ dir: "triggers/cron", name: "@blokjs/trigger-cron" },
 	{ dir: "triggers/grpc", name: "@blokjs/trigger-grpc" },
 	{ dir: "triggers/mcp", name: "@blokjs/trigger-mcp" },
+	// Typed client SDK (consumes only @blokjs/helper types). No internal runtime deps.
+	{ dir: "packages/client", name: "@blokjs/client" },
 	// CLI last — depends on everything via the scaffold.
 	{ dir: "packages/cli", name: "blokctl" },
 ];
