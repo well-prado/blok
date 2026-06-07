@@ -29,6 +29,17 @@ impl NodeRegistry {
         self.nodes.insert(name.to_string(), Arc::new(handler));
     }
 
+    /// v0.7 — register a typed node (SPEC-B P3). Wraps the [`TypedNode`] in a
+    /// [`TypedNodeHandler`] (auto-validation + schema reflection) and registers
+    /// it under its own `name()`.
+    ///
+    /// [`TypedNode`]: crate::node::TypedNode
+    /// [`TypedNodeHandler`]: crate::node::TypedNodeHandler
+    pub fn register_typed<T: crate::node::TypedNode + 'static>(&mut self, node: T) {
+        let name = node.name().to_string();
+        self.register(&name, crate::node::TypedNodeHandler(node));
+    }
+
     /// Add middleware to the registry.
     pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
         self.middlewares.push(Arc::new(middleware));

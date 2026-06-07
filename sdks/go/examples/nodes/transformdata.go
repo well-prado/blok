@@ -148,6 +148,7 @@ func RegisterAll(registry *blok.NodeRegistry) {
 	registry.Register(TransformDataNodeName, &TransformDataNode{})
 	registry.Register(ChainTestNodeName, &ChainTestNode{})
 	registry.Register(BlokErrorDemoNodeName, &BlokErrorDemoNode{})
+	registry.Register(TypedGreetNodeName, TypedGreetNode)
 }
 
 // RegisterDefaults is an alias for RegisterAll for convenience.

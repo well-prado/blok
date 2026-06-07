@@ -4,6 +4,16 @@ from examples.api_call_node import ApiCallNode
 from examples.transform_data_node import TransformDataNode
 from examples.blok_error_demo_node import BlokErrorDemoNode
 
+# Typed @node demo (SPEC-B). Optional — requires pydantic; importing the module
+# runs the @node decorator, registering it into the decorated-node global.
+try:
+    import examples.typed_greet_node  # noqa: F401
+    from blok import register_decorated
+
+    _HAS_TYPED_NODES = True
+except Exception:  # pragma: no cover - pydantic not installed
+    _HAS_TYPED_NODES = False
+
 HELLO_WORLD_NODE_NAME = "hello-world"
 API_CALL_NODE_NAME = "api_call"
 TRANSFORM_DATA_NODE_NAME = "transform-data"
@@ -18,3 +28,5 @@ def register_all(registry):
     registry.register(TRANSFORM_DATA_NODE_NAME, TransformDataNode())
     registry.register(CHAIN_TEST_NODE_NAME, ChainTestNode())
     registry.register(BLOK_ERROR_DEMO_NODE_NAME, BlokErrorDemoNode())
+    if _HAS_TYPED_NODES:
+        register_decorated(registry)

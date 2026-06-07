@@ -12,6 +12,7 @@ registry.Register("api-call", new ApiCallNode());
 registry.Register("transform-data", new TransformDataNode());
 registry.Register("chain-test", new ChainTestNode());
 registry.Register("blok-error-demo", new BlokErrorDemoNode());
+registry.Register("typed-greet", new TypedGreetNode());
 
 Console.WriteLine($"Blok C# Runtime v{config.Version}");
 Console.WriteLine($"  Registered {registry.Count} node(s): [{string.Join(", ", registry.NodeNames())}]");

@@ -79,7 +79,17 @@ module Blok
       # Discover registered nodes (drives Studio + OpenAPI generation).
       def list_nodes(_request, _call)
         descriptors = @registry.node_names.map do |name|
-          ::Blok::Runtime::V1::NodeDescriptor.new(name: name)
+          descriptor = ::Blok::Runtime::V1::NodeDescriptor.new(name: name)
+          # SPEC-B P4 — TypedNode handlers expose a description + JSON Schema via
+          # #reflect; legacy NodeHandler nodes report empty.
+          handler = @registry.get(name)
+          if handler.respond_to?(:reflect)
+            reflection = handler.reflect
+            descriptor.description = reflection[:description].to_s
+            descriptor.input_schema_json = reflection[:input_schema_json] if reflection[:input_schema_json]
+            descriptor.output_schema_json = reflection[:output_schema_json] if reflection[:output_schema_json]
+          end
+          descriptor
         end
         ::Blok::Runtime::V1::ListNodesResponse.new(
           nodes: descriptors,

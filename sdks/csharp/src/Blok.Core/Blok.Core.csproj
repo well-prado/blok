@@ -29,12 +29,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="NJsonSchema" Version="11.6.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\..\proto\blok\runtime\v1\runtime.proto"
-              GrpcServices="Server"
-              ProtoRoot="..\..\proto" />
+    <Protobuf Include="..\..\proto\blok\runtime\v1\runtime.proto" GrpcServices="Server" ProtoRoot="..\..\proto" />
   </ItemGroup>
 
 </Project>

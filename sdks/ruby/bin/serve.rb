@@ -26,6 +26,7 @@ require_relative "../examples/api_call_node"
 require_relative "../examples/transform_data_node"
 require_relative "../examples/chain_test_node"
 require_relative "../examples/blok_error_demo_node"
+require_relative "../examples/typed_greet_node"
 
 config = Blok::Config::ServerConfig.from_env
 
@@ -35,6 +36,7 @@ registry.register("api-call", ApiCallNode.new)
 registry.register("transform-data", TransformDataNode.new)
 registry.register("chain-test", ChainTestNode.new)
 registry.register("blok-error-demo", BlokErrorDemoNode.new)
+registry.register("typed-greet", TypedGreetNode.new)
 
 logger = Blok::Logging::Logger.new(config.log_level)
 registry.use(Blok::Middleware::RecoveryMiddleware.new)

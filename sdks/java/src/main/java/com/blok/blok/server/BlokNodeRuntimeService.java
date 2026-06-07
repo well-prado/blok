@@ -150,7 +150,22 @@ public final class BlokNodeRuntimeService extends NodeRuntimeGrpc.NodeRuntimeImp
                 .setSdkVersion(sdkVersion)
                 .setProtoVersion("1.0.0");
         for (String name : registry.nodeNames()) {
-            builder.addNodes(NodeDescriptor.newBuilder().setName(name).build());
+            NodeDescriptor.Builder descriptor = NodeDescriptor.newBuilder().setName(name);
+            // SPEC-B P4 — TypedNode handlers expose a description + JSON Schema
+            // via NodeReflector; legacy handlers report empty.
+            com.blok.blok.node.NodeHandler handler = registry.get(name);
+            if (handler instanceof com.blok.blok.node.NodeReflector reflector) {
+                descriptor.setDescription(reflector.description());
+                String inputSchema = reflector.inputSchemaJson();
+                if (inputSchema != null) {
+                    descriptor.setInputSchemaJson(com.google.protobuf.ByteString.copyFromUtf8(inputSchema));
+                }
+                String outputSchema = reflector.outputSchemaJson();
+                if (outputSchema != null) {
+                    descriptor.setOutputSchemaJson(com.google.protobuf.ByteString.copyFromUtf8(outputSchema));
+                }
+            }
+            builder.addNodes(descriptor.build());
         }
         responseObserver.onNext(builder.build());
         responseObserver.onCompleted();

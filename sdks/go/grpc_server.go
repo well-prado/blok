@@ -208,11 +208,22 @@ func (s *BlokNodeRuntime) ListNodes(ctx context.Context, req *pb.ListNodesReques
 	names := s.registry.NodeNames()
 	descriptors := make([]*pb.NodeDescriptor, 0, len(names))
 	for _, name := range names {
+		// SPEC-B P4 — DefineNode handlers expose a description + JSON Schema via
+		// NodeReflector; legacy map-based handlers report empty.
+		var description string
+		var inputSchema, outputSchema []byte
+		if h, err := s.registry.Get(name); err == nil {
+			if r, ok := h.(NodeReflector); ok {
+				description = r.Description()
+				inputSchema = r.InputSchemaJSON()
+				outputSchema = r.OutputSchemaJSON()
+			}
+		}
 		descriptors = append(descriptors, &pb.NodeDescriptor{
 			Name:             name,
-			Description:      "",
-			InputSchemaJson:  nil,
-			OutputSchemaJson: nil,
+			Description:      description,
+			InputSchemaJson:  inputSchema,
+			OutputSchemaJson: outputSchema,
 			Tags:             nil,
 		})
 	}
