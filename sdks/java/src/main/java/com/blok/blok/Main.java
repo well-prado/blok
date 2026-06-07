@@ -32,6 +32,7 @@ public class Main {
         registry.register("transform-data", new TransformDataNode());
         registry.register("chain-test", new ChainTestNode());
         registry.register("blok-error-demo", new BlokErrorDemoNode());
+        registry.register("typed-greet", new com.blok.blok.nodes.TypedGreetNode());
 
         Logger logger = new Logger(config.getLogLevel());
         registry.use(new RecoveryMiddleware());

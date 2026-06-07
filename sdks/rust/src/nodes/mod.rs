@@ -3,6 +3,7 @@ pub mod blok_error_demo;
 pub mod chain_test;
 pub mod hello_world;
 pub mod transform_data;
+pub mod typed_greet;
 
 use crate::registry::NodeRegistry;
 
@@ -13,4 +14,5 @@ pub fn register_all(registry: &mut NodeRegistry) {
     registry.register("transform-data", transform_data::TransformDataNode);
     registry.register("chain-test", chain_test::ChainTestNode);
     registry.register("blok-error-demo", blok_error_demo::BlokErrorDemoNode);
+    registry.register_typed(typed_greet::TypedGreetNode);
 }

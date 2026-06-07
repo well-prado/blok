@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Blok.Core.Errors;
 using Blok.Core.Types;
 
@@ -96,11 +98,43 @@ public abstract class TypedNode<TInput, TOutput> : INodeHandler, INodeReflector
     {
         try
         {
-            return Encoding.UTF8.GetBytes(NJsonSchema.JsonSchema.FromType(type).ToJson());
+            // NJsonSchema reflects PascalCase property names, but the runtime
+            // serializes with Web (camelCase) options — re-key the schema with
+            // the SAME naming policy so the catalog schema matches the wire.
+            var root = JsonNode.Parse(NJsonSchema.JsonSchema.FromType(type).ToJson())!.AsObject();
+            CamelCaseProperties(root);
+            return Encoding.UTF8.GetBytes(root.ToJsonString());
         }
         catch
         {
             return Array.Empty<byte>();
+        }
+    }
+
+    private static string Camel(string name) => JsonNamingPolicy.CamelCase.ConvertName(name);
+
+    private static void CamelCaseProperties(JsonObject schema)
+    {
+        if (schema["properties"] is JsonObject props)
+        {
+            var rebuilt = new JsonObject();
+            foreach (var key in props.Select(p => p.Key).ToList())
+            {
+                var child = props[key];
+                props.Remove(key); // detach so the node can be re-parented
+                if (child is JsonObject childObj) CamelCaseProperties(childObj);
+                rebuilt[Camel(key)] = child;
+            }
+            schema["properties"] = rebuilt;
+        }
+        if (schema["required"] is JsonArray required)
+        {
+            var rebuilt = new JsonArray();
+            foreach (var item in required.Select(x => x!.GetValue<string>()).ToList())
+            {
+                rebuilt.Add(Camel(item));
+            }
+            schema["required"] = rebuilt;
         }
     }
 }
