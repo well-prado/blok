@@ -6,7 +6,7 @@ icon: "rocket"
 
 This page documents how to ship a new Blok release end-to-end. Every release publishes 15 packages to npm in a coordinated bump and validates the published surface against a real `npx blokctl create project` smoke test.
 
-The release script at [scripts/release.ts](scripts/release.ts) automates the publish step and runs pre-flight checks for the most common drift modes. The surrounding context — when to bump, what to tag, how to validate — is documented here.
+The release script at [scripts/release.ts](https://github.com/deskree-inc/blok/blob/main/scripts/release.ts) automates the publish step and runs pre-flight checks for the most common drift modes. The surrounding context — when to bump, what to tag, how to validate — is documented here.
 
 ## The 15 publishable packages
 
@@ -48,7 +48,7 @@ Most releases follow the changesets workflow:
 
 1. **Per PR**, run `bunx changeset` from any PR that touches a public package. Authors classify as `patch` / `minor` / `major` per package.
 2. **At release time**, on a release branch, run `bunx changeset version`. This consumes the `.changeset/*.md` entries, applies the version bumps, and updates cross-package dep ranges automatically.
-3. **Bump the CLI scaffold constants** in [packages/cli/src/commands/create/project.ts](packages/cli/src/commands/create/project.ts):
+3. **Bump the CLI scaffold constants** in [packages/cli/src/commands/create/project.ts](https://github.com/deskree-inc/blok/blob/main/packages/cli/src/commands/create/project.ts):
    - `GITHUB_REPO_RELEASE_TAG` — the git tag `blokctl create project` clones from
    - `BLOKJS_DEP_RANGE` — the dep range hardcoded into scaffolded `package.json`s
 4. **Tag**: `git tag -a v<version> -m "<release notes>"`.
@@ -64,7 +64,7 @@ If the registry has fallen far behind `main` (e.g. `@blokjs/helper@0.2.1` on npm
 
 1. **Manual lockstep bump**: edit each of the 15 public `package.json`s to the target version directly.
 2. **Cross-package dep alignment**: every `@blokjs/<published-package>` dep range across the monorepo (including private trigger packages) must include the new version. **Preferred since v0.6.0**: switch internal deps to `"workspace:*"` so bumps don't propagate to every consumer manually — the release script accepts both. For literal ranges: if `@blokjs/runner` was at `^0.2.0`, every consumer becomes `^0.4.0` (then `^0.6.0` for v0.6). Without this, bun resolves cross-package deps to the npm registry's stale version instead of the workspace.
-3. **CLI scaffold constants**: bump both `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in [packages/cli/src/commands/create/project.ts](packages/cli/src/commands/create/project.ts).
+3. **CLI scaffold constants**: bump both `BLOKJS_DEP_RANGE` and `GITHUB_REPO_RELEASE_TAG` in [packages/cli/src/commands/create/project.ts](https://github.com/deskree-inc/blok/blob/main/packages/cli/src/commands/create/project.ts).
 4. **Delete consumed changesets**: any `.changeset/*.md` accumulated during the gap is now redundant — the manual bump replaces them. Delete to avoid double-bumping on the next changesets run.
 5. **Lockfile**: `bun install` regenerates `bun.lock` with the new ranges.
 6. **Tag**: `git tag -a v<version> -m "<release notes>"`.

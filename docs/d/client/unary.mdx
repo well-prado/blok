@@ -1,0 +1,153 @@
+---
+title: "Calling workflows"
+description: "Create a client, make typed unary calls, handle errors, authenticate, and understand the RPC wire format."
+icon: "square-function"
+---
+
+A unary call sends an input and gets one typed result back. This is the default
+shape for typed CRUD — list, create, update, delete.
+
+```ts
+import { createBlokClient } from "@blokjs/client";
+import type { BlokApp } from "./blok-app";
+
+const blok = createBlokClient<BlokApp>({ baseUrl: "https://api.example.com" });
+
+const user = await blok.users.create({ name: "Ada" });   // typed input and output
+```
+
+## Configuration
+
+`createBlokClient<BlokApp>(config)` takes an optional config object.
+
+<ParamField path="baseUrl" type="string" default='""'>
+  The origin the RPC mount is served from. Defaults to `""` — same-origin,
+  relative (`/__blok/rpc/:name`), which is right when the frontend is served by
+  the same host as the API. Set it to a full origin
+  (`"https://api.example.com"`) for a cross-origin backend. A trailing slash is
+  trimmed.
+</ParamField>
+
+<ParamField path="headers" type="() => Record<string, string> | Promise<Record<string, string>>">
+  A per-request header factory. It is called before every call, so you can
+  return a fresh auth token each time. May be sync or async. The returned
+  headers merge over the client's defaults.
+</ParamField>
+
+<ParamField path="fetch" type="typeof fetch">
+  The `fetch` implementation. Defaults to the global `fetch`. Inject one for SSR,
+  tests, a custom runtime, or to add interceptors. The client throws at
+  construction if no `fetch` is available and none is provided.
+</ParamField>
+
+## Calling
+
+Access a workflow by its dotted path and call it. Nested groups resolve to the
+dotted name automatically.
+
+```ts
+await blok.users.list({ q: "ada" });   // POST /__blok/rpc/users.list
+await blok.a.b.c({ n: 2 });            // POST /__blok/rpc/a.b.c
+```
+
+The return value is parsed from the response: JSON when the server responds with
+`application/json`, otherwise the raw text. Its type comes from the workflow's
+declared [`output`](/d/client/typing-workflows).
+
+<Note>
+`then`, `catch`, and `finally` are not treated as path segments — so awaiting a
+group node (`await blok.users`) resolves to the object itself instead of hanging.
+`stream` is reserved for [streaming calls](/d/client/streaming). Avoid these as
+workflow group names.
+</Note>
+
+## Error handling
+
+A non-2xx response throws a `BlokClientError`. It carries the HTTP status, the
+parsed body, and the workflow name.
+
+```ts
+import { BlokClientError } from "@blokjs/client";
+
+try {
+  await blok.users.create({ name: "" });
+} catch (err) {
+  if (err instanceof BlokClientError) {
+    console.error(err.status);    // e.g. 422
+    console.error(err.body);      // parsed JSON or text from the server
+    console.error(err.workflow);  // "users.create"
+  }
+}
+```
+
+The mount returns standard statuses from the underlying run — for example `404`
+when the name isn't registered, `429` when a [concurrency key](/d/reliability/concurrency-keys)
+denies the run, or the code set by a thrown [`GlobalError`](/error-handling).
+The error body is whatever the server sent.
+
+## Authentication
+
+There are two layers, and they work together:
+
+<Steps>
+  <Step title="Attach credentials on the client">
+    Return them from the `headers` factory. Because it runs per call, a token
+    that rotates is always current.
+
+    ```ts
+    const blok = createBlokClient<BlokApp>({
+      baseUrl: "https://api.example.com",
+      headers: async () => ({ Authorization: `Bearer ${await getToken()}` }),
+    });
+    ```
+  </Step>
+  <Step title="Enforce them on the workflow">
+    The RPC mount runs the workflow's full middleware chain — process-global,
+    workflow-level, and trigger-level — exactly like a normal HTTP run. Put your
+    auth check in [middleware](/d/reference/middleware); request headers are
+    available on `ctx.request.headers`. The mount itself adds no auth gate, so
+    the workflow's middleware is the gate.
+  </Step>
+</Steps>
+
+## The wire format
+
+A unary call is a single POST to the name-keyed mount:
+
+```http
+POST /__blok/rpc/users.list HTTP/1.1
+Content-Type: application/json
+
+{ "q": "ada" }
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "users": [ { "id": "1", "name": "Ada" } ], "total": 1 }
+```
+
+On the server, the HTTP trigger looks the name up in the
+[workflow registry](/d/reference/workflow-registry), runs it through the normal
+runner, and returns its terminal output. RPC runs are first-class: they get the
+same [reliability](/d/reliability/overview) gates (concurrency, scheduling,
+retry), run tracking, and [Studio](/d/studio/index) traces as any other run.
+
+<Tip>
+The POST body becomes the workflow's `ctx.request.body`. Scalar fields of the
+input are also mirrored into `ctx.request.query` and `ctx.request.params`, so a
+workflow authored for a `GET`/query trigger or a `/:id` path resolves its inputs
+through the RPC mount without changes.
+</Tip>
+
+## Next
+
+<Columns cols={2}>
+  <Card title="Streaming" icon="waveform-lines" href="/d/client/streaming">
+    Consume typed event streams with `.stream()`.
+  </Card>
+  <Card title="Typing workflows" icon="braces" href="/d/client/typing-workflows">
+    Declare the `input` and `output` that type these calls.
+  </Card>
+</Columns>

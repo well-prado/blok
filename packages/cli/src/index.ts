@@ -26,6 +26,7 @@ import "./commands/install/index.js";
 import "./commands/search/index.js";
 import "./commands/generate/index.js";
 import "./commands/gen/index.js";
+import "./commands/nodes/index.js";
 import "./commands/config/index.js";
 import "./commands/migrate/index.js";
 import "./commands/graph/index.js";

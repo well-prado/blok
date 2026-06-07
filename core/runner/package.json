@@ -44,7 +44,8 @@
 		"smol-toml": "^1.6.0",
 		"uuid": "^11.1.0",
 		"yaml": "^2.8.2",
-		"zod": "^3.24.2"
+		"zod": "^3.24.2",
+		"zod-to-json-schema": "^3.24.0"
 	},
 	"peerDependencies": {
 		"@opentelemetry/exporter-prometheus": "^0.57.2",

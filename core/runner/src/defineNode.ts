@@ -1,4 +1,5 @@
 import type { ZodError, z } from "zod";
+import { zodToJsonSchema as toJsonSchema } from "zod-to-json-schema";
 
 import type { Context } from "@blokjs/shared";
 import { GlobalError } from "@blokjs/shared";
@@ -93,10 +94,17 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 	/** Minimum runtime versions required by this node (if any) */
 	public runtimeRequirements?: Partial<Record<string, string>>;
 
+	/** Human-readable description — surfaced in the node catalog (`/__blok/nodes`). */
+	public description?: string;
+
+	/** Lazily-computed real JSON Schema for reflection (see {@link getReflectionSchemas}). */
+	private _reflectionSchemas?: { input: unknown; output: unknown };
+
 	constructor(definition: FnNodeDefinition<TInput, TOutput>) {
 		super();
 		this.definition = definition;
 		this.name = definition.name;
+		this.description = definition.description;
 
 		// Set content type if specified (e.g. "text/html", "application/pdf")
 		if (definition.contentType) {
@@ -261,6 +269,32 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 		// Using {} (no type constraint) instead of { type: "object" } so that nodes
 		// accepting arrays (e.g. if-else conditions) also pass the JSON Schema pre-check.
 		return {};
+	}
+
+	/**
+	 * Real JSON Schema (draft-7) for this node's Zod input/output — for the node
+	 * catalog (`/__blok/nodes`) and gRPC `ListNodes` reflection ONLY. This is
+	 * deliberately SEPARATE from `inputSchema`/`outputSchema` (which stay `{}`):
+	 * those drive the permissive `jsonschema` pre-check in `Blok.run`, and the
+	 * real validation is Zod in `handle()`. Lazily computed + cached; never
+	 * throws (reflection must not break a node).
+	 */
+	getReflectionSchemas(): { input: unknown; output: unknown } {
+		if (!this._reflectionSchemas) {
+			this._reflectionSchemas = {
+				input: this.safeReflectionSchema(this.definition.input),
+				output: this.safeReflectionSchema(this.definition.output),
+			};
+		}
+		return this._reflectionSchemas;
+	}
+
+	private safeReflectionSchema(schema: z.ZodTypeAny): unknown {
+		try {
+			return toJsonSchema(schema, { target: "jsonSchema7", $refStrategy: "none" });
+		} catch {
+			return {};
+		}
 	}
 }
 

@@ -63,8 +63,8 @@
       "name": "@blokjs/runner",
       "version": "0.6.17",
       "dependencies": {
-        "@blokjs/helper": "^0.6.16",
-        "@blokjs/shared": "^0.6.16",
+        "@blokjs/helper": "^0.6.17",
+        "@blokjs/shared": "^0.6.17",
         "@grpc/grpc-js": "^1.12.0",
         "@grpc/proto-loader": "^0.7.13",
         "@opentelemetry/api": "^1.9.0",
@@ -75,6 +75,7 @@
         "uuid": "^11.1.0",
         "yaml": "^2.8.2",
         "zod": "^3.24.2",
+        "zod-to-json-schema": "^3.24.0",
       },
       "devDependencies": {
         "@types/better-sqlite3": "^7.6.13",

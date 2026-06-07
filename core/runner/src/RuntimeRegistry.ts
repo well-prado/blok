@@ -83,6 +83,16 @@ export class RuntimeRegistry {
 	}
 
 	/**
+	 * v0.7 — every registered adapter, for the node catalog (`GET /__blok/nodes`)
+	 * which calls `adapter.listNodes()` on each to enumerate runtime nodes.
+	 *
+	 * @returns Array of `{ kind, adapter }` for all registered runtimes
+	 */
+	public getAll(): { kind: RuntimeKind; adapter: RuntimeAdapter }[] {
+		return Array.from(this.adapters.entries()).map(([kind, adapter]) => ({ kind, adapter }));
+	}
+
+	/**
 	 * Set the detected version for a runtime kind.
 	 *
 	 * @param kind - The runtime kind

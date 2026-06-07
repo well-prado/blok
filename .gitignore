@@ -219,3 +219,6 @@ pnpm-lock.yaml
 .agents/
 .claude/skills/mintlify*
 skills-lock.json
+
+# Internal research dossiers (not part of the Mintlify docs site)
+research-notes/

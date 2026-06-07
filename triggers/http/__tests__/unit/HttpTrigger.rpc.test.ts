@@ -235,3 +235,23 @@ describe("HttpTrigger — RPC SSE streaming (POST /__blok/rpc/:name, Accept: tex
 		expect(await res.json()).toEqual({ ok: true });
 	});
 });
+
+describe("HttpTrigger — node catalog (GET /__blok/nodes) — SPEC-B P1.3", () => {
+	it("lists in-process module nodes with their reflected JSON Schema", async () => {
+		const app = await bootApp();
+		const res = await app.fetch(new Request("http://localhost/__blok/nodes"));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			count: number;
+			nodes: Array<{ name: string; runtime: string; inputSchema: unknown | null; outputSchema: unknown | null }>;
+		};
+		expect(body.count).toBeGreaterThan(0);
+		// @blokjs/respond is one of the registered HELPER_NODES (a defineNode node).
+		const respond = body.nodes.find((n) => n.name === "@blokjs/respond");
+		expect(respond).toBeDefined();
+		expect(respond?.runtime).toBe("module");
+		// defineNode nodes expose a real input schema via getReflectionSchemas().
+		expect(respond?.inputSchema).not.toBeNull();
+		expect((respond?.inputSchema as { type?: string }).type).toBe("object");
+	});
+});

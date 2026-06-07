@@ -18,6 +18,13 @@ npx blokctl@latest create workflow
 You'll be prompted for a workflow name. The CLI writes a v2 JSON file
 under `workflows/json/` (or another supported format).
 
+<Tip>
+Names must be unique across the project. Use a dotted `domain.action`
+form (`cats.facts`, `users.create`) so the typed client and
+`blokctl gen app-types` expose it as `blok.cats.facts(...)`. See the
+[naming convention](/d/introduction/workflows#naming-convention).
+</Tip>
+
 ## v2 workflow structure
 
 A v2 workflow has three sections:
@@ -37,7 +44,7 @@ Save this as `workflows/json/cats.json`:
 
 ```json
 {
-  "name": "fetch-cat-facts",
+  "name": "cats.facts",
   "description": "Fetches random cat facts from a public API.",
   "version": "1.0.0",
   "trigger": {

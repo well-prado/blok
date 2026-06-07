@@ -3,7 +3,7 @@ import type { ClientReadableStream, ServiceError } from "@grpc/grpc-js";
 import { type Client, Metadata } from "@grpc/grpc-js";
 import { SpanStatusCode, type Tracer, trace } from "@opentelemetry/api";
 import type RunnerNode from "../../RunnerNode";
-import type { ExecutionResult, RuntimeAdapter, RuntimeKind } from "../RuntimeAdapter";
+import type { ExecutionResult, RuntimeAdapter, RuntimeKind, RuntimeNodeDescriptor } from "../RuntimeAdapter";
 import { GrpcClientPool } from "./GrpcClientPool";
 import {
 	type DecodedExecuteEvent,
@@ -46,6 +46,24 @@ import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "./types";
  *   });
  *   const result = await adapter.execute(node, ctx);
  */
+
+/** Decoded shape of the proto `NodeDescriptor` (proto-loader `keepCase:false` → camelCase). */
+interface ListNodesNodeShape {
+	name: string;
+	description: string;
+	inputSchemaJson?: Uint8Array | Buffer;
+	outputSchemaJson?: Uint8Array | Buffer;
+	tags?: string[];
+}
+
+/** Decoded shape of the proto `ListNodesResponse`. */
+interface ListNodesResponseShape {
+	nodes?: ListNodesNodeShape[];
+	sdkName?: string;
+	sdkVersion?: string;
+	protoVersion?: string;
+}
+
 export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	readonly kind: RuntimeKind;
 	readonly transport = "grpc" as const;
@@ -353,6 +371,56 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 	// =========================================================================
 	// Private RPC helpers
 	// =========================================================================
+
+	/**
+	 * v0.7 — enumerate this runtime's nodes via the gRPC `ListNodes` RPC, for the
+	 * node catalog (`GET /__blok/nodes`). Schema bytes are JSON Schema when the
+	 * SDK emits them (SPEC-B P2/P3); until then they're empty → `null`. Failures
+	 * are swallowed to an empty list so one unreachable runtime can't break the
+	 * whole catalog.
+	 */
+	async listNodes(): Promise<RuntimeNodeDescriptor[]> {
+		try {
+			const client = this.pool.get(this.config);
+			const response = await this.unaryListNodes(client);
+			return (response.nodes ?? []).map((n) => ({
+				name: n.name,
+				description: n.description || undefined,
+				inputSchema: this.parseSchemaBytes(n.inputSchemaJson),
+				outputSchema: this.parseSchemaBytes(n.outputSchemaJson),
+				tags: n.tags ?? [],
+			}));
+		} catch {
+			return [];
+		}
+	}
+
+	private unaryListNodes(client: Client): Promise<ListNodesResponseShape> {
+		return new Promise((resolve, reject) => {
+			const callable = (
+				client as unknown as {
+					ListNodes: (
+						request: Record<string, never>,
+						callback: (err: ServiceError | null, response: ListNodesResponseShape) => void,
+					) => void;
+				}
+			).ListNodes;
+
+			callable.call(client, {}, (err, response) => {
+				if (err) reject(err);
+				else resolve(response);
+			});
+		});
+	}
+
+	private parseSchemaBytes(bytes: Uint8Array | Buffer | undefined): unknown | null {
+		if (!bytes || bytes.length === 0) return null;
+		try {
+			return JSON.parse(Buffer.from(bytes).toString("utf8"));
+		} catch {
+			return null;
+		}
+	}
 
 	private unaryExecute(
 		client: Client,

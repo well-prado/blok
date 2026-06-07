@@ -8,7 +8,7 @@ import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { RoutingDiagnostics } from "@blokjs/runner";
-import { WorkflowRegistry } from "@blokjs/runner";
+import { RuntimeRegistry, WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
@@ -40,6 +40,7 @@ import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
 import { type RouteCollision, type RouteEntry, buildRouteTable } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
+import { buildNodeCatalog } from "./nodeCatalog";
 import { emitWorkflowResponse } from "./responseEmitter";
 import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
@@ -720,6 +721,17 @@ export default class HttpTrigger extends TriggerBase {
 					preloadedWorkflow: entry.workflow,
 					rpcInput: input,
 				});
+			});
+
+			// --- Node catalog (SPEC-B P1.3) ---
+			// `GET /__blok/nodes` lists every node across all runtimes — in-process
+			// module nodes (with their reflected JSON Schema) + each connected
+			// runtime's `ListNodes`. Powers `blokctl nodes list` + the typed
+			// client's runtime-node typing. Registered before the trace router.
+			this.app.get("/__blok/nodes", async (c) => {
+				const moduleNodes = this.nodeMap.nodes?.getNodes?.() as Map<string, unknown> | undefined;
+				const nodes = await buildNodeCatalog(moduleNodes, RuntimeRegistry.getInstance().getAll());
+				return c.json({ nodes, count: nodes.length });
 			});
 
 			// --- Blok Studio: Trace API ---

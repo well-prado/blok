@@ -92,6 +92,16 @@
 						"pages": ["d/composition/sub-workflows"]
 					},
 					{
+						"group": "Typed client",
+						"pages": [
+							"d/client/overview",
+							"d/client/quickstart",
+							"d/client/typing-workflows",
+							"d/client/unary",
+							"d/client/streaming"
+						]
+					},
+					{
 						"group": "Studio",
 						"pages": ["d/studio/index"]
 					},
@@ -157,6 +167,7 @@
 							"d/cli/project",
 							"d/cli/nodes",
 							"d/cli/workflows",
+							"d/cli/gen",
 							"d/cli/login",
 							"d/cli/build",
 							"d/cli/deploy",
@@ -218,15 +229,6 @@
 							"c/migration-guides/v0.4-explicit-paths",
 							"c/migration-guides/v1-to-v2-reliability"
 						]
-					}
-				]
-			},
-			{
-				"tab": "References",
-				"groups": [
-					{
-						"group": "References",
-						"pages": []
 					}
 				]
 			},

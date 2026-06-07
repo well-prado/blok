@@ -73,4 +73,25 @@ export interface RuntimeAdapter {
 	 * @returns Promise that resolves to ExecutionResult
 	 */
 	execute(node: RunnerNode, ctx: Context): Promise<ExecutionResult>;
+
+	/**
+	 * v0.7 — enumerate the nodes this runtime exposes, for the node catalog
+	 * (`GET /__blok/nodes`) + `blokctl nodes list`. Optional: only adapters that
+	 * can reflect their registry implement it (the gRPC adapter via the
+	 * `ListNodes` RPC). In-process module nodes are enumerated from the node map
+	 * by the catalog directly. Schemas are populated per-SDK (SPEC-B P2/P3);
+	 * until then `inputSchema`/`outputSchema` are `null`.
+	 */
+	listNodes?(): Promise<RuntimeNodeDescriptor[]>;
+}
+
+/** One node as reported by a runtime's reflection (gRPC `ListNodes`). */
+export interface RuntimeNodeDescriptor {
+	name: string;
+	description?: string;
+	/** JSON Schema (parsed) for the node's input, or `null` if the SDK didn't emit one yet. */
+	inputSchema: unknown | null;
+	/** JSON Schema (parsed) for the node's output, or `null`. */
+	outputSchema: unknown | null;
+	tags?: string[];
 }

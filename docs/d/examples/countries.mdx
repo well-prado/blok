@@ -31,7 +31,7 @@ Save this as `workflows/json/countries.json`:
 
 ```json
 {
-  "name": "World Countries",
+  "name": "countries.list",
   "description": "Fetches the list of countries with capitals",
   "version": "1.0.0",
   "trigger": {
@@ -56,6 +56,11 @@ Save this as `workflows/json/countries.json`:
   ]
 }
 ```
+
+The `name` follows the dotted `domain.action` convention so the
+[typed client](/d/introduction/workflows#naming-convention) exposes it
+as `blok.countries.list(...)`. Names must be unique across the
+project — the registry rejects duplicates at boot.
 
 This workflow:
 

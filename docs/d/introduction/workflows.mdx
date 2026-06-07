@@ -55,7 +55,7 @@ Every v2 workflow has four top-level fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | `string` | Unique identifier within the project. Other workflows reference this name when invoking it as a [sub-workflow](/d/composition/sub-workflows). |
+| `name` | `string` | Unique identifier within the project (see [Naming convention](#naming-convention)). Other workflows reference this name when invoking it as a [sub-workflow](/d/composition/sub-workflows). |
 | `version` | `string` | Semantic version (`"1.0.0"`). |
 | `trigger` | `object` | What kicks this workflow off. See [triggers](/d/introduction/triggers). |
 | `steps` | `array` | The ordered sequence of work. |
@@ -70,7 +70,7 @@ Each step in `steps[]` is one of three shapes — see
 import { workflow, $ } from "@blokjs/helper";
 
 export default workflow({
-  name: "World Countries",
+  name: "countries.list",
   version: "1.0.0",
   description: "Fetches the list of countries with capitals",
   trigger: {
@@ -97,7 +97,7 @@ export default workflow({
 
 ```json JSON
 {
-  "name": "World Countries",
+  "name": "countries.list",
   "version": "1.0.0",
   "description": "Fetches the list of countries with capitals",
   "trigger": {
@@ -132,6 +132,25 @@ A few things to notice in the v2 shape:
   `js/ctx.state.<id>` at workflow load time.
 - **Method is `"ANY"` (not `"*"`).** Use `"ANY"` for catch-all routes;
   the runner accepts `"*"` for back-compat with a deprecation warning.
+
+## Naming convention
+
+A workflow's `name` is its identity. Two rules matter:
+
+- **Names must be unique** across the project. The
+  [Workflow Registry](/d/reference/workflow-registry) rejects duplicate
+  names at boot, so if two workflows share a name only one ever
+  registers.
+- **Prefer a dotted `domain.action` form** — `countries.list`,
+  `users.create`, `orders.refund`. The
+  [typed client](/d/client/overview) (`@blokjs/client`) and
+  [`blokctl gen app-types`](/d/cli/gen) nest workflows by their dotted
+  name, so a clean name surfaces as `blok.countries.list(...)` instead
+  of a quoted `blok["World Countries"]` accessor.
+
+Duplicate names also make [`blokctl gen app-types`](/d/cli/gen) report
+a collision and drop one of the colliding workflows from the generated
+`BlokApp` type — another reason to keep every name unique.
 
 ## Built-in nodes
 

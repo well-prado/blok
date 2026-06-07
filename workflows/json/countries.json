@@ -1,5 +1,5 @@
 {
-	"name": "World Countries",
+	"name": "countries.listRoot",
 	"version": "1.0.0",
 	"description": "Returns a list of world countries from the public CountriesNow API.",
 	"trigger": {
