@@ -9,7 +9,16 @@ import { type ForEachOpts, forEach } from "./components/forEach";
 import { type LoopOpts, loop } from "./components/loop";
 import { type SwitchCase, type SwitchOpts, switchOn } from "./components/switchOn";
 import { type TryCatchOpts, tryCatch } from "./components/tryCatch";
-import { type WorkflowV2Builder, type WorkflowOpts as WorkflowV2Opts, workflow } from "./components/workflowV2";
+import {
+	type EmptyEventMap,
+	type EventMap,
+	type EventUnion,
+	type InferOr,
+	type TypedWorkflow,
+	type WorkflowV2Builder,
+	type WorkflowOpts as WorkflowV2Opts,
+	workflow,
+} from "./components/workflowV2";
 import { $, type DollarProxy, type ExprPath, JS_EXPR_TAG, unwrapProxies } from "./proxy/$";
 import {
 	NodeType,
@@ -148,6 +157,12 @@ export {
 	type TryCatchOpts,
 	type WorkflowV2Opts,
 	type WorkflowV2Builder,
+	// v2 typed-client surface (phantom types for @blokjs/client)
+	type TypedWorkflow,
+	type EventMap,
+	type EventUnion,
+	type EmptyEventMap,
+	type InferOr,
 	type DollarProxy,
 	type ExprPath,
 	JS_EXPR_TAG,

@@ -1,13 +1,46 @@
+import type { z } from "zod";
 import { unwrapProxies } from "../proxy/$";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
 import type { WorkflowV2 } from "../types/WorkflowOpts";
 
 /**
- * V2 workflow author input — strict TypeScript shape with the user-facing
- * fields the lowercase `workflow()` factory accepts.
+ * A streaming workflow's event vocabulary: event name → Zod schema for the
+ * event's `data` payload. Consumed by `@blokjs/client` to build a typed
+ * discriminated union and by `@blokjs/sse-emit-typed` to constrain emits.
  */
-export interface WorkflowOpts {
+export type EventMap = Record<string, z.ZodTypeAny>;
+
+/**
+ * The "no declared events" default. `keyof` is `never`, so
+ * `EventUnion<EmptyEventMap>` collapses to `never` — i.e. a non-streaming
+ * workflow, which the client uses to pick the unary call signature.
+ */
+export type EmptyEventMap = Record<never, never>;
+
+/** `z.infer<T>` for a Zod schema, or `Fallback` when `T` is not a concrete schema. */
+export type InferOr<T, Fallback = unknown> = [T] extends [z.ZodTypeAny] ? z.infer<T> : Fallback;
+
+/**
+ * The typed discriminated union of a streaming workflow's events:
+ * `{ type: "progress"; data: {…} } | { type: "done"; data: {…} } | …`.
+ * Collapses to `never` when no events are declared.
+ */
+export type EventUnion<E extends EventMap> = { [K in keyof E]: { type: K; data: z.infer<E[K]> } }[keyof E];
+
+/**
+ * V2 workflow author input — strict TypeScript shape with the user-facing
+ * fields the lowercase `workflow()` factory accepts. Generic over the optional
+ * `input`/`output` Zod schemas and the `events` map so that `workflow()` can
+ * thread their inferred types onto its return ({@link TypedWorkflow}) for the
+ * typed `@blokjs/client`. All three default to permissive types, so existing
+ * authors that omit them are unaffected.
+ */
+export interface WorkflowOpts<
+	I extends z.ZodTypeAny = z.ZodTypeAny,
+	O extends z.ZodTypeAny = z.ZodTypeAny,
+	E extends EventMap = EmptyEventMap,
+> {
 	/** Workflow display name. Min 3 characters. Shown in Studio. */
 	name: string;
 	/** Semantic version (x.x.x). Used for trace recording and audit. */
@@ -29,11 +62,26 @@ export interface WorkflowOpts {
 	/**
 	 * Optional Zod schema describing the workflow's input (request body).
 	 * Used by the `mcp` trigger to generate the exposed tool's `inputSchema`
-	 * (via zod-to-json-schema). Carried verbatim on `_config.input`; not
-	 * validated or serialized by the runner.
+	 * (via zod-to-json-schema) and by `@blokjs/client` to type each call's
+	 * argument. Carried verbatim on `_config.input`; not validated or
+	 * serialized by the runner.
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: accepts any ZodType without coupling the helper to a zod version
-	input?: any;
+	input?: I;
+	/**
+	 * Optional Zod schema describing the workflow's OUTPUT (terminal response
+	 * body). Consumed by the typed `@blokjs/client` to type each call's return
+	 * value, and — when `BLOK_VALIDATE_WORKFLOW_OUTPUT=true` — validated against
+	 * the terminal step's result. Carried verbatim on `_config.output`; not
+	 * serialized by the runner.
+	 */
+	output?: O;
+	/**
+	 * Optional map of SSE event name → Zod schema for STREAMING workflows.
+	 * Consumed by the typed `@blokjs/client` to type the streaming event union
+	 * and by `@blokjs/sse-emit-typed` to constrain emitted events. Carried
+	 * verbatim on `_config.events`; not serialized by the runner.
+	 */
+	events?: E;
 }
 
 /**
@@ -53,6 +101,18 @@ export interface WorkflowV2Builder {
 	 * (`Workflows` map → `LocalStorage.get` fallback).
 	 */
 	toJson(): string;
+}
+
+/**
+ * The typed return of `workflow()`. Structurally a {@link WorkflowV2Builder}
+ * (so it remains a drop-in for the registry / loader), plus a phantom
+ * `__blokTypes` witness that carries the workflow's inferred input/output/event
+ * types. `@blokjs/client`'s `Client<BlokApp>` mapped type `infer`s these to
+ * build the typed call surface. The witness is `?optional` and NEVER assigned
+ * at runtime — it exists purely at the type level.
+ */
+export interface TypedWorkflow<TInput = unknown, TOutput = unknown, TEvents = never> extends WorkflowV2Builder {
+	readonly __blokTypes?: { input: TInput; output: TOutput; events: TEvents };
 }
 
 /**
@@ -93,7 +153,11 @@ export interface WorkflowV2Builder {
  *     ]
  *   });
  */
-export function workflow(opts: WorkflowOpts): WorkflowV2Builder {
+export function workflow<
+	I extends z.ZodTypeAny = z.ZodTypeAny,
+	O extends z.ZodTypeAny = z.ZodTypeAny,
+	E extends EventMap = EmptyEventMap,
+>(opts: WorkflowOpts<I, O, E>): TypedWorkflow<InferOr<I>, InferOr<O>, EventUnion<E>> {
 	if (!opts || typeof opts !== "object") {
 		throw new Error("workflow() requires an options object.");
 	}
@@ -135,16 +199,23 @@ export function workflow(opts: WorkflowOpts): WorkflowV2Builder {
 		description: opts.description,
 		trigger: validatedTrigger,
 		steps: compiledSteps,
-		// Carry the optional Zod input schema verbatim (authoring metadata for
-		// the `mcp` trigger). Excluded from toJson() — it isn't serializable.
+		// Carry the optional Zod input/output schemas + event vocabulary verbatim
+		// (authoring metadata for the `mcp` trigger + the typed `@blokjs/client`).
+		// Excluded from toJson() — Zod schemas aren't serializable.
 		...(opts.input !== undefined ? { input: opts.input } : {}),
+		...(opts.output !== undefined ? { output: opts.output } : {}),
+		...(opts.events !== undefined ? { events: opts.events } : {}),
 	};
 
 	return Object.freeze({
 		_blokV2: true as const,
 		_config,
-		// `input` (a Zod schema) is authoring metadata, not part of the
-		// serialized workflow — strip it so JSON consumers see a clean envelope.
-		toJson: () => JSON.stringify({ ..._config, input: undefined }),
-	});
+		// `input`/`output`/`events` (Zod schemas) are authoring metadata, not part
+		// of the serialized workflow — strip them so JSON consumers see a clean
+		// envelope.
+		toJson: () => JSON.stringify({ ..._config, input: undefined, output: undefined, events: undefined }),
+		// The frozen object has no `__blokTypes` at runtime — it's a phantom
+		// type witness only. Cast to attach the inferred I/O/event types so the
+		// typed client can read them off `typeof <workflow>`.
+	}) as TypedWorkflow<InferOr<I>, InferOr<O>, EventUnion<E>>;
 }

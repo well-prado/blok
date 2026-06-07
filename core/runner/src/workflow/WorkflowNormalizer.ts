@@ -137,6 +137,17 @@ export interface InternalWorkflow {
 	 * simultaneously be a middleware AND apply other middleware to itself.
 	 */
 	appliedMiddleware?: readonly string[];
+	/**
+	 * v0.7 — typed-client authoring metadata, carried verbatim through
+	 * normalization (previously stripped). A Zod schema for TS workflows, a
+	 * JSON Schema for JSON workflows. `input` powers the `mcp` trigger + the
+	 * typed `@blokjs/client` request type; `output` powers the client's return
+	 * type + optional `BLOK_VALIDATE_WORKFLOW_OUTPUT` enforcement; `events`
+	 * powers the typed streaming event union. None are serialized by the runner.
+	 */
+	input?: unknown;
+	output?: unknown;
+	events?: Record<string, unknown>;
 }
 
 /**
@@ -175,6 +186,11 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
+	// v0.7 — typed-client metadata. Carried verbatim (Zod schema for TS
+	// workflows, JSON Schema for JSON). Previously stripped at normalization.
+	const input = wf.input;
+	const output = wf.output;
+	const events = isPlainObject(wf.events) ? (wf.events as Record<string, unknown>) : undefined;
 	// `middleware` is overloaded:
 	//   - `true`            → marker bit, this workflow IS a middleware
 	//   - `string[]`        → workflow-level middleware chain (these run on
@@ -310,6 +326,9 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		nodes: internalNodes,
 		...(middleware ? { middleware } : {}),
 		...(appliedMiddleware ? { appliedMiddleware } : {}),
+		...(input !== undefined ? { input } : {}),
+		...(output !== undefined ? { output } : {}),
+		...(events !== undefined ? { events } : {}),
 	};
 }
 

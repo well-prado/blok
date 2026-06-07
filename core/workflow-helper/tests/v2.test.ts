@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { $, JS_EXPR_TAG, type V2Step, branch, unwrapProxies, workflow } from "../src/index";
 
 describe("v2 DSL — $ proxy", () => {
@@ -140,6 +141,102 @@ describe("v2 DSL — workflow() factory", () => {
 				steps: [{ id: "x", use: "@blokjs/foo", inputs: {} }],
 			}),
 		).toThrow();
+	});
+});
+
+describe("v2 DSL — workflow() output/events typing metadata (P1.1)", () => {
+	const In = z.object({ q: z.string().optional() });
+	const Out = z.object({ users: z.array(z.string()), total: z.number() });
+
+	it("carries input + output Zod schemas verbatim on _config", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: In,
+			output: Out,
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect((wf._config as { input?: unknown }).input).toBe(In);
+		expect((wf._config as { output?: unknown }).output).toBe(Out);
+	});
+
+	it("carries an events vocabulary verbatim on _config", () => {
+		const events = { progress: z.object({ pct: z.number() }), done: z.object({ ok: z.boolean() }) };
+		const wf = workflow({
+			name: "Streamy",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			events,
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect((wf._config as { events?: unknown }).events).toBe(events);
+	});
+
+	it("omits output/events from _config when not declared", () => {
+		const wf = workflow({
+			name: "Plain",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect("output" in wf._config).toBe(false);
+		expect("events" in wf._config).toBe(false);
+	});
+
+	it("strips input/output/events from toJson() (Zod schemas aren't serializable)", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: In,
+			output: Out,
+			events: { done: z.object({ ok: z.boolean() }) },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		const json = JSON.parse(wf.toJson()) as Record<string, unknown>;
+		expect(json.input).toBeUndefined();
+		expect(json.output).toBeUndefined();
+		expect(json.events).toBeUndefined();
+		expect(json.name).toBe("Typed");
+	});
+});
+
+describe("v2 DSL — workflow() phantom types (P1.2)", () => {
+	it("does not add a runtime __blokTypes field (the type witness is compile-time only)", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: z.object({ q: z.string() }),
+			output: z.object({ users: z.array(z.string()), total: z.number() }),
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		// The witness exists only at the type level — never on the runtime object,
+		// so it can't leak into the registry, serialization, or the normalizer.
+		expect("__blokTypes" in wf).toBe(false);
+		// …and it's still a valid v2 builder (registry/loader drop-in).
+		expect(wf._blokV2).toBe(true);
+		expect(wf._config.name).toBe("Typed");
+	});
+
+	// Compile-time intent (documentation; this file is type-checked when `tsc`
+	// runs over the package). If the phantom inference regresses, the client
+	// package's `Client<BlokApp>` build is the CI-enforced guard.
+	it("infers input/output onto the typed return", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: z.object({ q: z.string() }),
+			output: z.object({ total: z.number() }),
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		type Witness = NonNullable<(typeof wf)["__blokTypes"]>;
+		const _out: Witness["output"] = { total: 1 };
+		const _in: Witness["input"] = { q: "ada" };
+		expect(_out.total).toBe(1);
+		expect(_in.q).toBe("ada");
 	});
 });
 

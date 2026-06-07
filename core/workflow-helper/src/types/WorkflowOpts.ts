@@ -98,6 +98,23 @@ export const WorkflowV2Schema = z.object({
 				"trigger to generate each MCP tool's `inputSchema` (via zod-to-json-schema). Not validated or " +
 				"serialized by the runner — it's authoring metadata carried on the workflow config.",
 		),
+	output: z
+		.unknown()
+		.optional()
+		.describe(
+			"Optional Zod schema (TS) or JSON Schema (JSON workflows) describing the workflow's OUTPUT — " +
+				"the terminal response body. Consumed by the typed `@blokjs/client` to type each call's return " +
+				"value, and (when BLOK_VALIDATE_WORKFLOW_OUTPUT=true) validated against the terminal step's " +
+				"result. Authoring metadata carried on the workflow config; not serialized by the runner.",
+		),
+	events: z
+		.record(z.unknown())
+		.optional()
+		.describe(
+			"Optional map of SSE event name → Zod schema (TS) or JSON Schema (JSON) for STREAMING workflows. " +
+				"Consumed by the typed `@blokjs/client` to type the streaming event union, and by " +
+				"`@blokjs/sse-emit-typed` to constrain emitted events. Authoring metadata; not serialized.",
+		),
 });
 
 export type WorkflowV2 = z.infer<typeof WorkflowV2Schema>;

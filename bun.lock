@@ -262,6 +262,23 @@
         "vitest": "^4.0.18",
       },
     },
+    "packages/client": {
+      "name": "@blokjs/client",
+      "version": "0.6.16",
+      "devDependencies": {
+        "@blokjs/helper": "^0.6.16",
+        "@types/node": "^22.15.21",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+        "zod": "^3.24.2",
+      },
+      "peerDependencies": {
+        "@blokjs/helper": "^0.6.16",
+      },
+      "optionalPeers": [
+        "@blokjs/helper",
+      ],
+    },
     "packages/lsp-server": {
       "name": "@blokjs/lsp-server",
       "version": "0.6.0",
@@ -949,6 +966,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@1.9.4", "", { "os": "win32", "cpu": "x64" }, "sha512-8Y5wMhVIPaWe6jw2H+KlEm4wP/f7EW3810ZLmDlrEEy5KvBsb9ECEfu/kMWD484ijfQ8+nIi0giMgu9g1UAuuA=="],
 
     "@blokjs/api-call": ["@blokjs/api-call@workspace:nodes/web/api-call@1.0.0"],
+
+    "@blokjs/client": ["@blokjs/client@workspace:packages/client"],
 
     "@blokjs/helper": ["@blokjs/helper@workspace:core/workflow-helper"],
 

@@ -493,3 +493,67 @@ describe("WorkflowNormalizer — workflow-level middleware (v0.5.2)", () => {
 		expect("appliedMiddleware" in out).toBe(false);
 	});
 });
+
+describe("WorkflowNormalizer — typed-client metadata carry-through (P1.1)", () => {
+	// A stand-in for a Zod schema reference — the normalizer carries it verbatim
+	// without inspecting it, so any object identity proves the pass-through.
+	const inputSchema = { __kind: "input-schema" };
+	const outputSchema = { __kind: "output-schema" };
+	const events = { progress: { __kind: "progress" }, done: { __kind: "done" } };
+
+	it("carries input/output/events verbatim through normalization", () => {
+		const wf = {
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/typed" } },
+			input: inputSchema,
+			output: outputSchema,
+			events,
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.input).toBe(inputSchema);
+		expect(out.output).toBe(outputSchema);
+		expect(out.events).toBe(events);
+	});
+
+	it("carries metadata through the v2 builder envelope (_config) too", () => {
+		const wf = {
+			_blokV2: true,
+			_config: {
+				name: "TypedV2",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/typed2" } },
+				output: outputSchema,
+				steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+			},
+		};
+		const out = normalizeWorkflow(wf);
+		expect(out.output).toBe(outputSchema);
+	});
+
+	it("omits the fields entirely when not declared (no undefined keys)", () => {
+		const wf = {
+			name: "Plain",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/plain" } },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect("input" in out).toBe(false);
+		expect("output" in out).toBe(false);
+		expect("events" in out).toBe(false);
+	});
+
+	it("ignores a non-object events value (defensive)", () => {
+		const wf = {
+			name: "BadEvents",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/bad" } },
+			events: "not-an-object",
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		};
+		const out = normalizeWorkflow(wf);
+		expect("events" in out).toBe(false);
+	});
+});
