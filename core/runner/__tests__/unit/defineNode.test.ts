@@ -788,3 +788,48 @@ describe("defineNode", () => {
 		});
 	});
 });
+
+describe("FunctionNode — reflection schemas for the node catalog (SPEC-B P1.1)", () => {
+	const node = defineNode({
+		name: "@test/reflect",
+		description: "A node with a real schema",
+		input: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(100).default(10) }),
+		output: z.object({ results: z.array(z.string()), count: z.number().int() }),
+		async execute(_ctx, input) {
+			return { results: [input.query], count: 1 };
+		},
+	});
+
+	it("exposes the description on the node instance", () => {
+		expect((node as unknown as { description?: string }).description).toBe("A node with a real schema");
+	});
+
+	it("getReflectionSchemas() returns REAL JSON Schema derived from the Zod input/output", () => {
+		const { input, output } = (
+			node as unknown as { getReflectionSchemas(): { input: Record<string, unknown>; output: Record<string, unknown> } }
+		).getReflectionSchemas();
+
+		expect(input.type).toBe("object");
+		const inputProps = input.properties as Record<string, { type?: string }>;
+		expect(inputProps.query.type).toBe("string");
+		expect(inputProps.limit.type).toBe("integer");
+		expect((input.required as string[]) ?? []).toContain("query");
+
+		expect(output.type).toBe("object");
+		const outputProps = output.properties as Record<string, { type?: string }>;
+		expect(outputProps.count.type).toBe("integer");
+		expect((outputProps.results as { type?: string }).type).toBe("array");
+	});
+
+	it("does NOT change the validation schemas — inputSchema/outputSchema stay permissive {}", () => {
+		// The reflection schema is separate; the validation pre-check in Blok.run
+		// must remain permissive (real validation is Zod in handle()).
+		expect((node as unknown as { inputSchema: unknown }).inputSchema).toEqual({});
+		expect((node as unknown as { outputSchema: unknown }).outputSchema).toEqual({});
+	});
+
+	it("caches the computed reflection schema (stable identity)", () => {
+		const n = node as unknown as { getReflectionSchemas(): unknown };
+		expect(n.getReflectionSchemas()).toBe(n.getReflectionSchemas());
+	});
+});
