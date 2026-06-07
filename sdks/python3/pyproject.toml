@@ -22,10 +22,16 @@ grpc = [
     "protobuf>=4.25",
 ]
 
+# Typed node authoring via the `@node` decorator (SPEC-B P2). Optional — legacy
+# Dict-based NodeHandler nodes work without it. Install with `.[typed]` (the
+# runtime image includes it so projects can author typed nodes).
+typed = ["pydantic>=2.0"]
+
 # Test dependencies. Installed via `pip install -e .[test]`.
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pydantic>=2.0",
 ]
 
 [project.scripts]

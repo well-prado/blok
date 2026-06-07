@@ -38,6 +38,20 @@ __all__ = [
     "LogLevel",
 ]
 
+# Typed node authoring via @node (optional — requires pydantic). Legacy
+# Dict-based NodeHandler nodes keep working without pydantic installed.
+try:
+    from blok.node.define_node import (
+        FunctionNode,
+        node,
+        register_decorated,
+        registered_nodes,
+    )
+
+    __all__ += ["node", "FunctionNode", "register_decorated", "registered_nodes"]
+except ImportError:
+    pass
+
 # Worker (optional — requires nats-py)
 try:
     from blok.worker import Worker, WorkerConfig, JobMessage, listen_and_serve_worker

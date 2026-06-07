@@ -1,5 +1,9 @@
 # Blok Blok Python3 SDK
-# No external dependencies required for HTTP server mode - uses Python standard library only
+# Core runtime uses the Python standard library; the only base dependency is
+# pydantic, which powers the typed `@node` authoring contract (SPEC-B P2).
+# Legacy Dict-based NodeHandler nodes work without it, but the runtime image
+# ships it so projects can author typed nodes out of the box.
+pydantic>=2.0
 #
 # For worker mode (NATS JetStream background jobs), install:
 #   pip install nats-py>=2.9.0

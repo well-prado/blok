@@ -273,16 +273,20 @@ class BlokNodeRuntimeServicer(pb_grpc.NodeRuntimeServicer):
     # -- ListNodes --------------------------------------------------------
 
     def ListNodes(self, request: pb.ListNodesRequest, context: grpc.ServicerContext) -> pb.ListNodesResponse:
-        descriptors = [
-            pb.NodeDescriptor(
-                name=name,
-                description="",
-                input_schema_json=b"",
-                output_schema_json=b"",
-                tags=[],
+        descriptors = []
+        for name in self._registry.node_names():
+            handler = self._registry.get(name)
+            descriptors.append(
+                pb.NodeDescriptor(
+                    name=name,
+                    description=str(getattr(handler, "description", "") or ""),
+                    # @node handlers expose JSON Schema via input/output_json_schema()
+                    # (SPEC-B P2). Legacy Dict handlers don't → empty bytes.
+                    input_schema_json=_node_schema_bytes(handler, "input_json_schema"),
+                    output_schema_json=_node_schema_bytes(handler, "output_json_schema"),
+                    tags=[],
+                )
             )
-            for name in self._registry.node_names()
-        ]
         return pb.ListNodesResponse(
             nodes=descriptors,
             sdk_name="blok-python3",
@@ -338,6 +342,26 @@ def serve_grpc(
 # =============================================================================
 # Codec — proto ↔ internal types
 # =============================================================================
+
+
+def _node_schema_bytes(handler: Any, method_name: str) -> bytes:
+    """JSON-encode a node's reflected JSON Schema for the proto NodeDescriptor.
+
+    `@node` (FunctionNode) handlers expose `input_json_schema()` /
+    `output_json_schema()` (SPEC-B P2); legacy Dict handlers don't. Returns
+    empty bytes when absent, None, or unserializable — reflection must never
+    break ListNodes.
+    """
+    fn = getattr(handler, method_name, None)
+    if not callable(fn):
+        return b""
+    try:
+        schema = fn()
+        if schema is None:
+            return b""
+        return json.dumps(schema).encode("utf-8")
+    except Exception:
+        return b""
 
 
 class _DecodeError(Exception):
