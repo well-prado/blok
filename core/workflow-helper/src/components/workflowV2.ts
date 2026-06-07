@@ -116,6 +116,27 @@ export interface TypedWorkflow<TInput = unknown, TOutput = unknown, TEvents = ne
 }
 
 /**
+ * Deep-walk a step tree and collect every LITERAL SSE event name emitted by an
+ * `@blokjs/sse-emit` step. Skips `js/...` / `$.` mapper expressions (resolved at
+ * run time, not checkable statically). Used to validate emitted events against
+ * the workflow's declared `events` vocabulary at author/load time.
+ */
+function collectLiteralEmitEvents(node: unknown, out: string[]): void {
+	if (Array.isArray(node)) {
+		for (const item of node) collectLiteralEmitEvents(item, out);
+		return;
+	}
+	if (node === null || typeof node !== "object") return;
+	const obj = node as Record<string, unknown>;
+	if (obj.use === "@blokjs/sse-emit" || obj.use === "@blokjs/sse-emit-typed") {
+		const inputs = obj.inputs as Record<string, unknown> | undefined;
+		const ev = inputs?.event;
+		if (typeof ev === "string" && !ev.startsWith("js/") && !ev.startsWith("$.")) out.push(ev);
+	}
+	for (const value of Object.values(obj)) collectLiteralEmitEvents(value, out);
+}
+
+/**
  * Lowercase v2 workflow factory. Validates inputs against the v2 schema,
  * compiles any `$` proxy expressions inside step `inputs` into
  * `"js/ctx..."` strings at definition time, and returns a tagged object
@@ -191,6 +212,25 @@ export function workflow<
 			);
 		}
 		validatedTrigger[kind] = validateTriggerConfig(parsedKind.data, (opts.trigger as Record<string, unknown>)[kind]);
+	}
+
+	// Typed streaming (P3.3): when a workflow declares an `events` vocabulary,
+	// every LITERAL SSE event emitted by an `@blokjs/sse-emit` step must be a
+	// declared key. Catch drift/typos loudly at author/load time instead of
+	// silently shipping an event the typed client's union doesn't include.
+	if (opts.events && typeof opts.events === "object") {
+		const declared = Object.keys(opts.events as Record<string, unknown>);
+		const emitted: string[] = [];
+		collectLiteralEmitEvents(compiledSteps, emitted);
+		for (const ev of emitted) {
+			if (!declared.includes(ev)) {
+				throw new Error(
+					`workflow("${opts.name}") emits SSE event "${ev}" which is not declared in \`events\`. ` +
+						`Declared: ${declared.length > 0 ? declared.join(", ") : "(none)"}. ` +
+						`Add "${ev}" to \`events\`, or fix the @blokjs/sse-emit step.`,
+				);
+			}
+		}
 	}
 
 	const _config: WorkflowV2 = {

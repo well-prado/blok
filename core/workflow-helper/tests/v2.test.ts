@@ -240,6 +240,80 @@ describe("v2 DSL — workflow() phantom types (P1.2)", () => {
 	});
 });
 
+describe("v2 DSL — workflow() typed streaming events validation (P3.3)", () => {
+	const events = { progress: z.object({ pct: z.number() }), done: z.object({ ok: z.boolean() }) };
+
+	it("accepts a workflow whose sse-emit events are all declared", () => {
+		expect(() =>
+			workflow({
+				name: "Streamy",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				events,
+				steps: [
+					{ id: "p", use: "@blokjs/sse-emit", inputs: { event: "progress", data: { pct: 1 } }, ephemeral: true },
+					{ id: "d", use: "@blokjs/sse-emit", inputs: { event: "done", data: { ok: true } }, ephemeral: true },
+				],
+			}),
+		).not.toThrow();
+	});
+
+	it("throws when an sse-emit step emits an UNDECLARED event", () => {
+		expect(() =>
+			workflow({
+				name: "Drift",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				events,
+				steps: [{ id: "x", use: "@blokjs/sse-emit", inputs: { event: "porgress", data: {} }, ephemeral: true }],
+			}),
+		).toThrow(/porgress.*not declared|not declared.*porgress/i);
+	});
+
+	it("catches an undeclared emit nested inside a branch arm", () => {
+		expect(() =>
+			workflow({
+				name: "NestedDrift",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				events,
+				steps: [
+					branch({
+						id: "route",
+						when: "true",
+						then: [{ id: "e", use: "@blokjs/sse-emit", inputs: { event: "unknown", data: {} }, ephemeral: true }],
+					}),
+				],
+			}),
+		).toThrow(/not declared/i);
+	});
+
+	it("does NOT validate when no events vocabulary is declared", () => {
+		expect(() =>
+			workflow({
+				name: "Untyped",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				steps: [{ id: "x", use: "@blokjs/sse-emit", inputs: { event: "anything", data: {} }, ephemeral: true }],
+			}),
+		).not.toThrow();
+	});
+
+	it("skips js/ mapper-expression event names (can't be checked statically)", () => {
+		expect(() =>
+			workflow({
+				name: "DynamicEvent",
+				version: "1.0.0",
+				trigger: { http: { method: "POST" } },
+				events,
+				steps: [
+					{ id: "x", use: "@blokjs/sse-emit", inputs: { event: "js/ctx.req.body.kind", data: {} }, ephemeral: true },
+				],
+			}),
+		).not.toThrow();
+	});
+});
+
 describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
 	it("preserves a literal idempotencyKey on the compiled step", () => {
 		const wf = workflow({
