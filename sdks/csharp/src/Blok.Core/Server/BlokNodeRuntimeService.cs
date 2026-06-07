@@ -124,11 +124,18 @@ public sealed class BlokNodeRuntimeService : NodeRuntime.NodeRuntimeBase
         };
         foreach (var name in _registry.NodeNames())
         {
-            response.Nodes.Add(new NodeDescriptor
+            var descriptor = new NodeDescriptor { Name = name, Description = "" };
+            // SPEC-B P4 — TypedNode handlers expose a description + JSON Schema
+            // via INodeReflector; legacy handlers report empty.
+            if (_registry.Get(name) is Node.INodeReflector reflector)
             {
-                Name = name,
-                Description = "",
-            });
+                descriptor.Description = reflector.Description;
+                var input = reflector.InputSchemaJson();
+                if (input.Length > 0) descriptor.InputSchemaJson = Google.Protobuf.ByteString.CopyFrom(input);
+                var output = reflector.OutputSchemaJson();
+                if (output.Length > 0) descriptor.OutputSchemaJson = Google.Protobuf.ByteString.CopyFrom(output);
+            }
+            response.Nodes.Add(descriptor);
         }
         return Task.FromResult(response);
     }
