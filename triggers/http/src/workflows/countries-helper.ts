@@ -1,7 +1,7 @@
 import { workflow } from "@blokjs/helper";
 
 export default workflow({
-	name: "World Countries",
+	name: "countries.list",
 	version: "1.0.0",
 	description: "Workflow description",
 	trigger: {

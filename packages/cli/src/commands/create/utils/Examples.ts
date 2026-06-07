@@ -799,6 +799,21 @@ export default defineNode({
 }
 \`\`\`
 
+### Workflow Naming
+
+Every workflow's \\\`name\\\` must be UNIQUE across the project. The
+\\\`WorkflowRegistry\\\` rejects duplicate names at boot, so a collision
+means only one of the colliding workflows ever registers.
+
+Prefer a dotted \\\`domain.action\\\` convention — \\\`countries.list\\\`,
+\\\`users.create\\\`, \\\`orders.refund\\\`. The typed client
+(\\\`@blokjs/client\\\`) and \\\`blokctl gen app-types\\\` nest workflows by
+their dotted name, so a clean name surfaces as
+\\\`blok.countries.list(...)\\\` instead of a quoted
+\\\`blok["World Countries"]\\\` accessor. Duplicate names also make
+\\\`gen app-types\\\` report a collision and DROP one workflow from the
+generated \\\`BlokApp\\\` type.
+
 ### Step Types
 
 | Type | Description |
@@ -982,6 +997,16 @@ npm test                           # Run tests
 3. **Blueprint Mapper resolves \\\`$.<path>\\\` and \\\`js/\\\` expressions BEFORE node execution.**
 
 When users have data flow issues, check these three things first.
+
+## Workflow Naming
+
+Workflow \\\`name\\\` must be UNIQUE across the project — the
+\\\`WorkflowRegistry\\\` rejects duplicates at boot. Use a dotted
+\\\`domain.action\\\` convention (\\\`countries.list\\\`, \\\`users.create\\\`)
+so the typed client (\\\`@blokjs/client\\\`) and \\\`blokctl gen app-types\\\`
+expose clean nested accessors like \\\`blok.countries.list(...)\\\`. Duplicate
+names make \\\`gen app-types\\\` flag a collision and drop one workflow from
+the generated \\\`BlokApp\\\` type.
 
 ## Debugging Workflows
 

@@ -1,7 +1,7 @@
 import { branch, workflow } from "@blokjs/helper";
 
 export default workflow({
-	name: "World Countries",
+	name: "countries.withCats",
 	version: "1.0.0",
 	description: "Workflow description",
 	trigger: {
