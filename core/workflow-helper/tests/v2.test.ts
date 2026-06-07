@@ -202,6 +202,44 @@ describe("v2 DSL — workflow() output/events typing metadata (P1.1)", () => {
 	});
 });
 
+describe("v2 DSL — workflow() phantom types (P1.2)", () => {
+	it("does not add a runtime __blokTypes field (the type witness is compile-time only)", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: z.object({ q: z.string() }),
+			output: z.object({ users: z.array(z.string()), total: z.number() }),
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		// The witness exists only at the type level — never on the runtime object,
+		// so it can't leak into the registry, serialization, or the normalizer.
+		expect("__blokTypes" in wf).toBe(false);
+		// …and it's still a valid v2 builder (registry/loader drop-in).
+		expect(wf._blokV2).toBe(true);
+		expect(wf._config.name).toBe("Typed");
+	});
+
+	// Compile-time intent (documentation; this file is type-checked when `tsc`
+	// runs over the package). If the phantom inference regresses, the client
+	// package's `Client<BlokApp>` build is the CI-enforced guard.
+	it("infers input/output onto the typed return", () => {
+		const wf = workflow({
+			name: "Typed",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			input: z.object({ q: z.string() }),
+			output: z.object({ total: z.number() }),
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		type Witness = NonNullable<(typeof wf)["__blokTypes"]>;
+		const _out: Witness["output"] = { total: 1 };
+		const _in: Witness["input"] = { q: "ada" };
+		expect(_out.total).toBe(1);
+		expect(_in.q).toBe("ada");
+	});
+});
+
 describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
 	it("preserves a literal idempotencyKey on the compiled step", () => {
 		const wf = workflow({
