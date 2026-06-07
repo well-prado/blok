@@ -1,0 +1,36 @@
+{
+	"name": "@blokjs/client",
+	"version": "0.6.16",
+	"description": "Fully-typed, tRPC-style client SDK for calling Blok workflows from a frontend.",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build:dev": "tsc --watch",
+		"build": "rm -rf dist && bun run tsc",
+		"test": "vitest run",
+		"test:dev": "vitest"
+	},
+	"keywords": ["blok", "workflow", "client", "sdk", "typed", "rpc"],
+	"author": "Deskree Inc",
+	"license": "MIT",
+	"peerDependencies": {
+		"@blokjs/helper": "^0.6.16"
+	},
+	"peerDependenciesMeta": {
+		"@blokjs/helper": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@blokjs/helper": "^0.6.16",
+		"@types/node": "^22.15.21",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18",
+		"zod": "^3.24.2"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}
