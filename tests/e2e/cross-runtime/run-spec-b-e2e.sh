@@ -9,9 +9,9 @@
 #     structured NODE_INPUT_VALIDATION error)
 #   - a cross-runtime chain threads ctx data through every runtime in order
 #
-# Boots whatever toolchains are present: Go, Rust, Python3, C#, Java.
-# PHP (RoadRunner) + Ruby (needs 3.1 + grpc gem) are not booted here — their
-# typed contract is covered by their in-process unit suites.
+# Boots whatever toolchains are present — all 7 polyglot runtimes:
+# Go, Rust, C#, Java, PHP (via RoadRunner `rr`), Ruby (>= 3.1), Python3.
+# The harness probes reachability and runs against whatever subset is up.
 #
 # Usage:  bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
 set -uo pipefail
@@ -22,6 +22,8 @@ cleanup() {
   echo "--- tearing down servers ---"
   for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
   pkill -f blok-spec-b-go 2>/dev/null || true
+  pkill -f "rr serve" 2>/dev/null || true
+  pkill -f "bin/serve.php" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -60,6 +62,27 @@ if [ -n "$JH" ] && command -v mvn >/dev/null; then
   echo "--- building + booting Java ---"
   (cd "$ROOT/sdks/java" && JAVA_HOME="$JH" BLOK_TRANSPORT=both GRPC_PORT=20003 PORT=19003 mvn -q compile exec:java -Dexec.mainClass=com.blok.blok.Main) >/tmp/blok-java.log 2>&1 &
   PIDS+=($!); wait_port 20003 && echo "Java gRPC up :20003"
+fi
+
+# --- PHP (gRPC 20005, via RoadRunner — no PHP grpc extension needed) ---
+if command -v rr >/dev/null && command -v php >/dev/null && [ -f "$ROOT/sdks/php/.rr.yaml" ]; then
+  echo "--- booting PHP (RoadRunner) ---"
+  (cd "$ROOT/sdks/php" && composer dump-autoload -q 2>/dev/null || true)
+  (cd "$ROOT/sdks/php" && GRPC_PORT=20005 rr serve -c .rr.yaml) >/tmp/blok-php.log 2>&1 &
+  PIDS+=($!); wait_port 20005 && echo "PHP gRPC up :20005"
+fi
+
+# --- Ruby (gRPC 20006) — needs Ruby >= 3.1 + bundled grpc gem ---
+RUBY_BIN="$(command -v ruby || true)"
+for cand in /opt/homebrew/opt/ruby/bin/ruby /opt/homebrew/opt/ruby@3.4/bin/ruby /opt/homebrew/opt/ruby@3.3/bin/ruby; do
+  [ -x "$cand" ] && RUBY_BIN="$cand" && break
+done
+if [ -n "$RUBY_BIN" ] && "$RUBY_BIN" -e 'exit(RUBY_VERSION >= "3.1" ? 0 : 1)' 2>/dev/null; then
+  echo "--- building + booting Ruby ---"
+  RB_DIR="$(dirname "$RUBY_BIN")"
+  (cd "$ROOT/sdks/ruby" && PATH="$RB_DIR:$PATH" bundle install --quiet 2>/dev/null || true)
+  (cd "$ROOT/sdks/ruby" && PATH="$RB_DIR:$PATH" BLOK_TRANSPORT=both GRPC_PORT=20006 PORT=19006 bundle exec ruby bin/serve.rb) >/tmp/blok-ruby.log 2>&1 &
+  PIDS+=($!); wait_port 20006 && echo "Ruby gRPC up :20006"
 fi
 
 # --- Python3 (gRPC 20007) ---

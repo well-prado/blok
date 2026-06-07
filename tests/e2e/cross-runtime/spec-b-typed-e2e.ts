@@ -1,8 +1,8 @@
 /**
  * SPEC-B end-to-end proof over REAL gRPC.
  *
- * Drives running SDK gRPC servers (Go/Rust/C#/Java/Python3) through the runner's
- * OWN `GrpcRuntimeAdapter` — the exact client the runner uses for every runtime
+ * Drives running SDK gRPC servers (all 7: Go/Rust/C#/Java/PHP/Ruby/Python3)
+ * through the runner's OWN `GrpcRuntimeAdapter` — the client the runner uses per
  * step. Probes which runtimes are actually up and, per live runtime, proves:
  *   1. ListNodes returns the typed node WITH a real JSON Schema (SPEC-B P1.2 +
  *      each SDK's typed-schema emission).
@@ -29,6 +29,8 @@ const RUNTIMES = [
 	{ kind: "rust", port: Number(process.env.RUST_GRPC_PORT ?? 20002) },
 	{ kind: "csharp", port: Number(process.env.CS_GRPC_PORT ?? 20004) },
 	{ kind: "java", port: Number(process.env.JAVA_GRPC_PORT ?? 20003) },
+	{ kind: "php", port: Number(process.env.PHP_GRPC_PORT ?? 20005) },
+	{ kind: "ruby", port: Number(process.env.RUBY_GRPC_PORT ?? 20006) },
 	{ kind: "python3", port: Number(process.env.PY_GRPC_PORT ?? 20007) },
 ] as const;
 

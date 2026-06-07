@@ -11,6 +11,7 @@ use Blok\Blok\Examples\BlokErrorDemoNode;
 use Blok\Blok\Examples\ChainTestNode;
 use Blok\Blok\Examples\HelloWorldNode;
 use Blok\Blok\Examples\TransformDataNode;
+use Blok\Blok\Examples\TypedGreetNode;
 use Blok\Blok\Node\NodeRegistry;
 use Blok\Blok\Server\BlokNodeRuntimeService;
 use Blok\Blok\Server\NodeRuntimeInterface;
@@ -25,6 +26,7 @@ $registry->register('api-call', new ApiCallNode());
 $registry->register('transform-data', new TransformDataNode());
 $registry->register('chain-test', new ChainTestNode());
 $registry->register('blok-error-demo', new BlokErrorDemoNode());
+$registry->register('typed-greet', new TypedGreetNode());
 
 fwrite(
     STDERR,
