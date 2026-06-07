@@ -61,7 +61,7 @@
     },
     "core/runner": {
       "name": "@blokjs/runner",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.17",
         "@blokjs/shared": "^0.6.17",
@@ -114,7 +114,7 @@
     },
     "core/shared": {
       "name": "@blokjs/shared",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "dayjs": "^1.11.19",
         "lodash": "^4.17.21",
@@ -128,7 +128,7 @@
     },
     "core/workflow-helper": {
       "name": "@blokjs/helper",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "zod": "^3.24.2",
       },
@@ -141,7 +141,7 @@
     },
     "nodes/control-flow/if-else@1.0.0": {
       "name": "@blokjs/if-else",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.16",
         "@blokjs/runner": "^0.6.16",
@@ -159,7 +159,7 @@
     },
     "nodes/utility/helpers@1.0.0": {
       "name": "@blokjs/helpers",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/runner": "^0.6.16",
         "@blokjs/shared": "^0.6.16",
@@ -184,7 +184,7 @@
     },
     "nodes/web/api-call@1.0.0": {
       "name": "@blokjs/api-call",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/runner": "^0.6.16",
         "@blokjs/shared": "^0.6.16",
@@ -201,7 +201,7 @@
     },
     "nodes/web/react@1.0.0": {
       "name": "@blokjs/react",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.2.0",
         "@blokjs/runner": "^0.2.0",
@@ -223,7 +223,7 @@
     },
     "packages/cli": {
       "name": "blokctl",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "bin": {
         "blokctl": "./dist/index.js",
       },
@@ -265,16 +265,16 @@
     },
     "packages/client": {
       "name": "@blokjs/client",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "devDependencies": {
-        "@blokjs/helper": "^0.6.17",
+        "@blokjs/helper": "^0.6.18",
         "@types/node": "^22.15.21",
         "typescript": "^5.8.3",
         "vitest": "^4.0.18",
         "zod": "^3.24.2",
       },
       "peerDependencies": {
-        "@blokjs/helper": "^0.6.17",
+        "@blokjs/helper": "^0.6.18",
       },
       "optionalPeers": [
         "@blokjs/helper",
@@ -377,7 +377,7 @@
     },
     "triggers/cron": {
       "name": "@blokjs/trigger-cron",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
@@ -396,7 +396,7 @@
     },
     "triggers/grpc": {
       "name": "@blokjs/trigger-grpc",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/api-call": "^0.4.0",
         "@blokjs/helper": "^0.4.0",
@@ -474,7 +474,7 @@
     },
     "triggers/mcp": {
       "name": "@blokjs/trigger-mcp",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.16",
         "@blokjs/runner": "^0.6.16",
@@ -496,7 +496,7 @@
     },
     "triggers/pubsub": {
       "name": "@blokjs/trigger-pubsub",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
@@ -531,7 +531,7 @@
     },
     "triggers/sse": {
       "name": "@blokjs/trigger-sse",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.16",
         "@blokjs/runner": "^0.6.16",
@@ -550,7 +550,7 @@
     },
     "triggers/webhook": {
       "name": "@blokjs/trigger-webhook",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.16",
         "@blokjs/runner": "^0.6.16",
@@ -569,7 +569,7 @@
     },
     "triggers/websocket": {
       "name": "@blokjs/trigger-websocket",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.6.16",
         "@blokjs/runner": "^0.6.16",
@@ -597,7 +597,7 @@
     },
     "triggers/worker": {
       "name": "@blokjs/trigger-worker",
-      "version": "0.6.17",
+      "version": "0.6.18",
       "dependencies": {
         "@blokjs/helper": "^0.4.0",
         "@blokjs/runner": "^0.4.0",
