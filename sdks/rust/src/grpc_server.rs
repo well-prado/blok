@@ -139,15 +139,31 @@ impl NodeRuntime for BlokNodeRuntime {
         _request: Request<ProtoListNodesRequest>,
     ) -> Result<Response<ProtoListNodesResponse>, Status> {
         let registry = self.registry.lock().await;
+        // SPEC-B P3 — surface each node's description + JSON Schema (TypedNode
+        // handlers populate them; legacy Dict handlers report empty).
         let descriptors: Vec<ProtoNodeDescriptor> = registry
             .node_names()
             .into_iter()
-            .map(|name| ProtoNodeDescriptor {
-                name,
-                description: String::new(),
-                input_schema_json: Vec::new(),
-                output_schema_json: Vec::new(),
-                tags: Vec::new(),
+            .map(|name| {
+                let handler = registry.get(&name);
+                let description = handler.as_ref().map(|h| h.description().to_string()).unwrap_or_default();
+                let input_schema_json = handler
+                    .as_ref()
+                    .and_then(|h| h.input_schema())
+                    .and_then(|s| serde_json::to_vec(&s).ok())
+                    .unwrap_or_default();
+                let output_schema_json = handler
+                    .as_ref()
+                    .and_then(|h| h.output_schema())
+                    .and_then(|s| serde_json::to_vec(&s).ok())
+                    .unwrap_or_default();
+                ProtoNodeDescriptor {
+                    name,
+                    description,
+                    input_schema_json,
+                    output_schema_json,
+                    tags: Vec::new(),
+                }
             })
             .collect();
         Ok(Response::new(ProtoListNodesResponse {

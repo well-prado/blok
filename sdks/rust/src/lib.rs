@@ -56,7 +56,7 @@ pub use config::ServerConfig;
 pub use errors::{ErrorCategory, NodeError};
 pub use logging::{LogEntry, LogLevel, Logger};
 pub use middleware::Middleware;
-pub use node::NodeHandler;
+pub use node::{NodeHandler, TypedNode, TypedNodeHandler};
 pub use registry::NodeRegistry;
 pub use types::{
     Context, ExecutionMetrics, ExecutionRequest, ExecutionResult, HealthStatus, NodeConfig,
