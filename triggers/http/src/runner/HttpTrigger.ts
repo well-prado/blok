@@ -22,7 +22,7 @@ import type { TraceAuthorizeFn } from "@blokjs/runner";
 import { createConcurrencyBackend } from "@blokjs/runner";
 import { DebounceCoordinator, createDebounceBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
-import { type Context, GlobalError, type RequestContext } from "@blokjs/shared";
+import { type Context, GlobalError, type RequestContext, type StreamContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -30,6 +30,7 @@ import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
+import { streamSSE } from "hono/streaming";
 import { v4 as uuid } from "uuid";
 import apps from "../AppRoutes";
 import nodes from "../Nodes";
@@ -702,6 +703,13 @@ export default class HttpTrigger extends TriggerBase {
 				const requestId = c.req.query("requestId") || (uuid() as string);
 				const { body, rawBody } = await this.parseBody(c);
 				const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+
+				// Streaming request (P3.2): when the client asks for an SSE stream,
+				// run the workflow with a bound `ctx.stream` and forward its frames.
+				if ((c.req.header("accept") || "").includes("text/event-stream")) {
+					return this.runWorkflowStream(c, { name, preloadedWorkflow: entry.workflow, input, requestId });
+				}
+
 				return this.runWorkflowExecution(c, {
 					workflowName: name,
 					subPath: "",
@@ -932,6 +940,113 @@ export default class HttpTrigger extends TriggerBase {
 
 				done(this.endCounter(this.initializer));
 			}) as Server;
+		});
+	}
+
+	/**
+	 * Stream a workflow's SSE events over the name-keyed RPC mount (P3.2).
+	 *
+	 * Mirrors the dedicated SSE trigger's dispatch: open an `streamSSE` response,
+	 * bind a `ctx.stream` (StreamContext) to the Hono stream, run the workflow
+	 * once, and forward every `ctx.stream.writeSSE(...)` / `@blokjs/sse-emit`
+	 * frame to the client. The input arrives as `ctx.request.body` and its scalar
+	 * fields are mirrored into query + params (same contract as the unary mount).
+	 *
+	 * `ctx.stream.subscribe()` (the in-process SSE event bus) is intentionally
+	 * NOT wired here — bus-subscription workflows should use the dedicated SSE
+	 * trigger. Push-style streaming (`@blokjs/sse-emit`, `streamTo: "sse"`) works.
+	 */
+	private async runWorkflowStream(
+		c: HonoContext<AppBindings>,
+		opts: { name: string; preloadedWorkflow: unknown; input: Record<string, unknown>; requestId: string },
+	): Promise<Response> {
+		const { name, preloadedWorkflow, input, requestId } = opts;
+		const lastEventId = c.req.header("Last-Event-ID") || c.req.header("last-event-id") || null;
+		const headers = Object.fromEntries([...c.req.raw.headers.entries()]);
+
+		return streamSSE(c, async (honoStream) => {
+			const abortController = new AbortController();
+			let closed = false;
+			honoStream.onAbort(() => {
+				closed = true;
+				abortController.abort();
+			});
+
+			const stream: StreamContext = {
+				get id() {
+					return requestId;
+				},
+				get lastEventId() {
+					return lastEventId;
+				},
+				get closed() {
+					return closed;
+				},
+				get signal() {
+					return abortController.signal;
+				},
+				async writeSSE({ event, data, id, retry }) {
+					if (closed) return;
+					const payload = typeof data === "string" ? data : JSON.stringify(data);
+					await honoStream
+						.writeSSE({
+							data: payload,
+							...(event ? { event } : {}),
+							...(id ? { id } : {}),
+							...(typeof retry === "number" ? { retry } : {}),
+						})
+						.catch(() => {
+							/* client gone — swallow */
+						});
+				},
+				async writeComment(text) {
+					if (closed) return;
+					await honoStream.write(`: ${text}\n\n`).catch(() => {});
+				},
+				close() {
+					closed = true;
+					abortController.abort();
+				},
+				subscribe() {
+					throw new Error(
+						"[blok] ctx.stream.subscribe() (the SSE event bus) is not available over /__blok/rpc — " +
+							"use the dedicated SSE trigger for bus-subscription workflows.",
+					);
+				},
+			};
+
+			try {
+				await this.configuration.init(name, this.nodeMap, preloadedWorkflow);
+				const ctx: Context = this.createContext(undefined, name, requestId);
+				const query: Record<string, string> = {};
+				const params: Record<string, string> = {};
+				for (const [k, v] of Object.entries(input)) {
+					if (v !== null && v !== undefined && typeof v !== "object") {
+						query[k] = String(v);
+						params[k] = String(v);
+					}
+				}
+				ctx.request = {
+					body: input,
+					rawBody: "",
+					headers,
+					params,
+					query,
+					method: c.req.method,
+					path: c.req.path,
+					url: c.req.url,
+				} as unknown as RequestContext;
+				ctx.stream = stream;
+
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
+				await this.run(ctx);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				this.logger.error(`[blok] rpc stream "${name}" failed: ${msg}`);
+				if (!closed) {
+					await honoStream.writeSSE({ event: "error", data: JSON.stringify({ message: msg }) }).catch(() => {});
+				}
+			}
 		});
 	}
 
