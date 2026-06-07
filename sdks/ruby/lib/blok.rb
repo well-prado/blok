@@ -27,6 +27,7 @@ require_relative "blok/logging/logger"
 
 # Node
 require_relative "blok/node/node_handler"
+require_relative "blok/node/typed_node"
 require_relative "blok/node/node_registry"
 
 # Middleware
