@@ -83,7 +83,22 @@ final class BlokNodeRuntimeService implements NodeRuntimeInterface
     {
         $descriptors = [];
         foreach ($this->registry->nodeNames() as $name) {
-            $descriptors[] = (new NodeDescriptor())->setName($name);
+            $descriptor = (new NodeDescriptor())->setName($name);
+            // SPEC-B P4 — TypedNode handlers expose a description + JSON Schema
+            // via NodeReflector; legacy handlers report empty.
+            $handler = $this->registry->get($name);
+            if ($handler instanceof \Blok\Blok\Node\NodeReflector) {
+                $descriptor->setDescription($handler->description());
+                $input = $handler->inputSchema();
+                if ($input !== null) {
+                    $descriptor->setInputSchemaJson((string) json_encode($input));
+                }
+                $output = $handler->outputSchema();
+                if ($output !== null) {
+                    $descriptor->setOutputSchemaJson((string) json_encode($output));
+                }
+            }
+            $descriptors[] = $descriptor;
         }
 
         return (new ListNodesResponse())
