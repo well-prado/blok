@@ -1,4 +1,4 @@
-import { $, workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 
 /**
  * Unrelated workflow registered in the SAME process as `eval.run`. It carries
