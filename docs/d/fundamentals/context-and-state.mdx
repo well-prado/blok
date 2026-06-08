@@ -1,0 +1,243 @@
+---
+title: Context & State
+description: The one correct way to pass data between steps in a Blok workflow.
+---
+
+Context is the single most important thing to get right in Blok — and the
+easiest to get wrong. This page describes **the one correct way**. If you
+follow the golden rule and the four reads below, you never have to think about
+it again.
+
+## The golden rule
+
+<Tip>
+**Every step returns its output. The runner persists that output to
+`ctx.state[<step-id>]`. Later steps read it with `$.state.<id>`.**
+
+That's the entire model. You never write `ctx.state` yourself.
+</Tip>
+
+```
+   step "load"  ──returns {items}──►  ctx.state.load = {items}
+   step "score" ──reads $.state.load.items, returns {score}──►  ctx.state.score = {score}
+   step "respond" ──reads $.state.score──►  HTTP response
+```
+
+- **Returning** is how you write. A step `return`s a value; the runner stores
+  it at `ctx.state[<step.id>]` **on success only** (a step that throws writes
+  nothing).
+- **`$.state.<id>`** is how you read. In a TypeScript workflow `$.state.load`
+  compiles to the string `"js/ctx.state.load"`; the runner resolves it against
+  the live context **before** your node runs. In JSON, write the string
+  `"js/ctx.state.load"` (or `"$.state.load"`) directly.
+
+<Warning>
+Do **not** write to `ctx.state` inside a node's `execute()`. Return your output
+and let the runner persist it. (If you genuinely need a side-channel value, use
+`ctx.publish(name, value)` — but that's rare.)
+</Warning>
+
+## The four reads
+
+There are exactly four places a step input can read from. Use these and nothing
+else.
+
+| Read | Resolves to | Use for |
+|---|---|---|
+| `$.state.<id>` | The output of an earlier step `<id>` | **The default.** Cross-step data flow. |
+| `$.req.body` / `$.req.params.x` / `$.req.query.x` | The trigger request | The original input to the workflow. |
+| `$.prev` | The **immediately** previous step's output envelope | Quick adjacent reads only. Overwritten every step. |
+| `ctx.state.<as>` | The current item inside a `forEach` | Per-iteration data (see below). |
+
+<CodeGroup>
+```ts TypeScript
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "fetch-and-respond",
+  trigger: { http: { method: "POST", path: "/demo" } },
+  steps: [
+    { id: "fetch",   use: "@blokjs/api-call", inputs: { url: $.req.body.url } },
+    { id: "respond", use: "@blokjs/respond",  inputs: { body: $.state.fetch }, ephemeral: true },
+  ],
+});
+```
+
+```json JSON
+{
+  "name": "fetch-and-respond",
+  "trigger": { "http": { "method": "POST", "path": "/demo" } },
+  "steps": [
+    { "id": "fetch",   "use": "@blokjs/api-call", "inputs": { "url": "js/ctx.request.body.url" } },
+    { "id": "respond", "use": "@blokjs/respond",  "inputs": { "body": "js/ctx.state.fetch" }, "ephemeral": true }
+  ]
+}
+```
+</CodeGroup>
+
+<Note>
+`$.req` is an alias for `$.request`. Both work in TypeScript. In hand-written
+JSON expressions, prefer the explicit `js/ctx.request.body.x`.
+</Note>
+
+## Writing: just return
+
+A node's job is to **return** its output. The runner does the rest.
+
+```ts
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
+
+export default defineNode({
+  name: "eval-search",
+  input: z.object({ query: z.string() }),
+  output: z.object({ query: z.string(), hits: z.array(z.object({ doc: z.string(), rank: z.number() })) }),
+  async execute(ctx, input) {
+    // input is the validated, already-resolved step input.
+    const hits = [0, 1, 2].map((i) => ({ doc: `${input.query} :: doc-${i}`, rank: i }));
+    return { query: input.query, hits }; // ← stored at ctx.state["<this step's id>"]
+  },
+});
+```
+
+## Persistence knobs
+
+By default a step stores its output at `ctx.state[<id>]`. Four declarative
+knobs change that — set them **on the step**, not in the node.
+
+| Knob | Effect |
+|---|---|
+| *(none)* | Store at `ctx.state[<id>]` (the default). |
+| `as: "name"` | Store at `ctx.state.name` instead of `ctx.state[<id>]`. |
+| `spread: true` | Shallow-merge the returned object's keys into `ctx.state`. Mutually exclusive with `as`. |
+| `ephemeral: true` | Skip storage entirely — the value is only reachable via `$.prev` on the very next step. |
+
+```ts
+{ id: "load",    use: "fetch-user-and-profile", spread: true },   // → state.user + state.profile
+{ id: "audit",   use: "@blokjs/audit-log", inputs: {...}, ephemeral: true }, // side-effect only
+{ id: "result",  use: "compute", as: "finalScore" },              // → state.finalScore
+```
+
+## Context inside `forEach`
+
+Inside a `forEach`, each iteration gets the current item at **`ctx.state.<as>`**
+(and its index at `ctx.state.<as>Index`). Steps inside the loop body read it
+with `$.state.<as>`, and their own outputs land in `ctx.state[<inner-id>]` for
+the duration of that iteration. The loop step's own state slot (`$.state[<loop-id>]`)
+becomes the **array** of each iteration's last-step output.
+
+```ts
+import { workflow, forEach, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "score-items",
+  trigger: { http: { method: "POST", path: "/score" } },
+  steps: [
+    { id: "load", use: "eval-load-items", inputs: {} },   // returns { items: [...] }
+    forEach({
+      id: "scoreItems",
+      in: $.state.load.items,   // the array to iterate
+      as: "item",               // each item → ctx.state.item
+      do: [
+        { id: "search", use: "eval-search", inputs: { query: $.state.item.query } },
+        { id: "score",  use: "eval-score",  inputs: { id: $.state.item.id, hitCount: $.state.search.hits } },
+      ],
+    }),
+    { id: "respond", use: "@blokjs/respond", inputs: { body: { results: $.state.scoreItems } }, ephemeral: true },
+  ],
+});
+```
+
+<Warning>
+Pick an `as` name that does **not** collide with any step `id` in the workflow.
+</Warning>
+
+## Context across sub-workflows
+
+A `subworkflow` step calls another workflow like a function:
+
+- The parent step's resolved **`inputs` become the child's `ctx.request.body`**.
+- With `wait: true` (default), the **child's response lands at
+  `ctx.state[<id>].data`** in the parent.
+
+```ts
+// Parent
+forEach({
+  id: "scoreItems", in: $.state.load.items, as: "item",
+  do: [
+    { id: "retrieve", subworkflow: "eval-retrieve", wait: true, inputs: { query: $.state.item.query } },
+    { id: "score",    use: "eval-score", inputs: { hits: "js/ctx.state.retrieve.data.hits" } },
+  ],
+});
+
+// Child "eval-retrieve" reads the parent's inputs as its request body:
+// { id: "search", use: "eval-search", inputs: { query: $.req.body.query } }
+```
+
+<Note>
+The `subworkflow:` value must match the **name the child is registered under**.
+When you register workflows via an explicit map (e.g. `Workflows.ts`), that's the
+**map key** — not necessarily the workflow's `name` field. File-based routes
+register under the workflow's `name`.
+</Note>
+
+## The footguns (and how to avoid them)
+
+These four mistakes account for almost every "my context isn't working" report.
+
+<AccordionGroup>
+<Accordion title="Reusing a step id across switch / branch arms">
+Every step id is a key in one flat per-workflow config map. Two steps with the
+same id — even in mutually-exclusive `switch` arms or `branch` then/else — **collide,
+last definition wins**, so the matched arm silently runs with the *other* arm's
+inputs.
+
+**Fix:** give every step a unique id. To have both arms write the same state key
+for a downstream reader, use `as:`:
+
+```ts
+cases:   [{ when: "a", do: [{ id: "runA", use: "score", as: "run", inputs: { v: 1 } }] }],
+default:            [{ id: "runDefault", use: "score", as: "run", inputs: { v: 0 } }],
+// both write ctx.state.run; the sibling reads $.state.run uniformly
+```
+</Accordion>
+
+<Accordion title="Putting a js/ expression as @blokjs/expr's `expression`">
+`@blokjs/expr`'s `expression` input is **itself** resolved by the mapper before
+the node runs. So `expression: "js/ctx.state.uid.userId"` resolves to the *value*
+first, then `@blokjs/expr` tries to evaluate that value as code — usually a
+confusing error.
+
+**Fix:** write the JS directly, no `js/` prefix:
+`expression: "ctx.state.uid.userId"`.
+</Accordion>
+
+<Accordion title="Expecting $.prev to survive more than one step">
+`$.prev` (alias of `ctx.response`) is the **immediately** previous step's output.
+It's overwritten on every step.
+
+**Fix:** for anything beyond the adjacent step, read `$.state.<id>`.
+</Accordion>
+
+<Accordion title="A literal ${...} in an authored input string">
+The mapper interpolates `${...}` placeholders in **authored** input strings. A
+stray `${...}` that isn't a real ctx path is left as-is in the default `warn`
+mode, but **throws** under `BLOK_MAPPER_MODE=strict`. (Data that merely *contains*
+`${...}` and flows through `$.state.x` is never re-interpolated — it's safe.)
+
+**Fix:** don't hand-write `${...}` unless it's a real ctx path; use `$.state.x`
+/ `js/ctx...` expressions instead.
+</Accordion>
+</AccordionGroup>
+
+## Quick reference
+
+```
+WRITE:   return your output            → runner stores it at ctx.state[<id>]
+READ:    $.state.<id>                   → an earlier step's output  (the default)
+         $.req.body / .params / .query  → the trigger request
+         $.prev                         → the previous step only (volatile)
+         $.state.<as>                   → the current forEach item
+KNOBS:   as:"name" | spread:true | ephemeral:true
+NEVER:   write ctx.state directly · reuse a step id · prefix @blokjs/expr with js/
+```

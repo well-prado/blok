@@ -146,6 +146,36 @@ Step 3: id "output"
   → ctx.response.data is Step 2's output only
 ```
 
+> **Full guide:** `docs/d/fundamentals/context-and-state.mdx` — the one correct
+> way to use context, with examples for forEach + sub-workflows.
+
+### Context inside forEach + sub-workflows
+
+- **forEach:** each iteration exposes the current item at `ctx.state[<as>]` (and
+  `ctx.state[<as>Index]`). Inner steps read `$.state.<as>`; their outputs land at
+  `ctx.state[<inner-id>]` for that iteration. The loop's own slot
+  `$.state[<loop-id>]` is the **array** of each iteration's last-step output.
+- **sub-workflow:** the parent step's resolved `inputs` become the child's
+  `ctx.request.body`; with `wait: true` (default) the child's response lands at
+  `ctx.state[<id>].data` in the parent.
+
+### Context footguns (the common "my context isn't working" causes)
+
+1. **Never reuse a step `id`.** All step ids share one flat per-workflow config
+   map. Two steps with the same id — even in mutually-exclusive `switch`/`branch`
+   arms — collide (last definition wins), so the matched arm silently runs with
+   the *other* arm's inputs. Give every step a unique id; use `as:` if two arms
+   must write the same downstream state key.
+2. **Don't prefix `@blokjs/expr`'s `expression` with `js/`.** That input is
+   itself mapper-resolved, so `js/...` double-evaluates. Write plain JS:
+   `expression: "ctx.state.x.y"`.
+3. **`$.prev` is volatile** — only the immediately previous step. For anything
+   else, read `$.state.<id>`.
+4. **Don't write `ctx.state` inside a node.** Return your output; the runner
+   persists it. (Side-channel only: `ctx.publish(name, value)`.)
+5. **`subworkflow:` matches the registry name** — for workflows registered via an
+   explicit map (`Workflows.ts`), that's the **map key**, not the `name` field.
+
 ### Blueprint Mapper — Expression Resolution
 
 Node inputs in workflow JSON support dynamic expressions that are resolved BEFORE the node executes.

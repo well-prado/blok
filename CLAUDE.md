@@ -20,6 +20,8 @@ blokctl trace                      # Open Blok Studio
 
 ## Context Rules (Memorize These) — Workflow v2
 
+> Canonical user-facing guide: [`docs/d/fundamentals/context-and-state.mdx`](docs/d/fundamentals/context-and-state.mdx) — the one correct way to use context (the four reads, persistence knobs, forEach + sub-workflow context, and the footguns). Keep these rules and that page in sync.
+
 1. **Every step's output is auto-persisted to `ctx.state[id]`** — *on success only*. A step that throws does NOT write state. `ctx.state[<step-id>] === undefined` is a truthful "did this step actually succeed?" check inside a `tryCatch.catch` arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; centralized fix in `core/runner/src/workflow/PersistenceHelper.ts:applyStepOutput`.) The legacy `set_var` flag was removed in v0.5 — `WorkflowNormalizer.assertNoSetVar` throws at load time with a migration hint if the field is still present. Other steps reference outputs via `$.state.<id>` in their inputs.
 2. **`ctx.prev` is the immediately previous step's output.** Overwritten on every step. Use for adjacent reads only; for cross-step access use `ctx.state[<id>]`.
 3. **Blueprint Mapper resolves `$.<path>` and `js/...` expressions BEFORE node execution.** Authors write `$.state.users` (typed in TS, plain string in JSON); the runner resolves it.
@@ -476,6 +478,8 @@ Common user questions:
 - Do NOT generate code with `any` types
 - Do NOT assume `ctx.prev` (or `ctx.response.data`) persists across more than one step — use `ctx.state[<id>]` for cross-step access
 - Do NOT write to `ctx.state` inside a node's `execute()` — return your output and let the runner persist it. If a node truly needs to publish a side-channel value, use `ctx.publish(name, value)`
+- Do NOT reuse a step `id` anywhere in a workflow — including across mutually-exclusive `switch`/`branch` arms. All step ids share one flat per-workflow config map, so duplicates collide (last definition wins) and the matched arm silently runs with the *other* arm's inputs. Give every step a unique id; use `as:` if two arms must write the same downstream state key (e.g. `{ id: "runA", as: "run", ... }` / `{ id: "runDefault", as: "run", ... }`)
+- Do NOT prefix `@blokjs/expr`'s `expression` input with `js/` — that input is itself mapper-resolved, so `js/...` double-evaluates. Write plain JS: `expression: "ctx.state.x.y"`
 - Do NOT use `set_var` in any workflow — it was removed in v0.5 and the runner now throws at load time. Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`
 - Do NOT use `"*"` for the HTTP wildcard method — use `"ANY"` (the runner accepts both for back-compat but warns)
 - Do NOT skip Zod schemas when creating nodes
