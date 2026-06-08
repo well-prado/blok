@@ -39,7 +39,10 @@
 					},
 					{
 						"group": "Fundamentals",
-						"pages": ["d/fundamentals/blok-concept"]
+						"pages": [
+							"d/fundamentals/blok-concept",
+							"d/fundamentals/context-and-state"
+						]
 					},
 					{
 						"group": "Reliability",
