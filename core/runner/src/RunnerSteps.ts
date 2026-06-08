@@ -228,7 +228,25 @@ export default abstract class RunnerSteps {
 					continue;
 				}
 				if (step.stop) break;
-				ctx.response.contentType = step.contentType;
+				// Stamp the step's declared content-type onto the rolling
+				// response. Between steps `ctx.response` holds the PREVIOUS
+				// step's raw `.data` (see `ctx.response = model.data` below),
+				// which can be anything: a primitive, a frozen object, or a
+				// value with a non-writable `contentType`. Assigning to those
+				// throws ("Cannot create property 'contentType' on number",
+				// "object is not extensible"). The content-type only matters
+				// when the response is a mutable object envelope — skip
+				// silently otherwise so a prior step's exotic return value
+				// can't crash the next step. (Regression: Bug 4 — a
+				// `runtime.python3` node returning a primitive result.)
+				if (ctx.response && typeof ctx.response === "object") {
+					try {
+						ctx.response.contentType = step.contentType;
+					} catch {
+						// Non-extensible / sealed / readonly `contentType` —
+						// nothing downstream depends on stamping it here.
+					}
+				}
 
 				if (!step.flow) {
 					// --- Trace: start node ---

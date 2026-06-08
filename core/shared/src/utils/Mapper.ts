@@ -217,6 +217,20 @@ function toInterpolatedString(value: unknown): string {
 	}
 }
 
+/**
+ * Is `value` a plain container the mapper may safely recurse into — a plain
+ * object (prototype `Object.prototype` or null) or an array? Class instances
+ * (RunnerNode, SubworkflowNode, WorkflowV2Builder, Date, Buffer, Map, …) have
+ * a custom prototype and are NOT recursed: step inputs are always plain data,
+ * and recursing into framework instances can reach internal object graphs
+ * (e.g. `globalOptions.workflows`) that must never be resolved as inputs.
+ */
+function isPlainContainer(value: object): boolean {
+	if (Array.isArray(value)) return true;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
+}
+
 // =============================================================================
 // Mapper
 // =============================================================================
@@ -228,9 +242,22 @@ class Mapper {
 	 * resolve a step's `inputs` against the live `ctx` before the
 	 * step runs.
 	 *
-	 * Object/array values are recursed into; primitive non-string
+	 * Plain object/array values are recursed into; primitive non-string
 	 * values are left untouched. Null values are NOT recursed (avoids
 	 * a TypeError on `for (const k in null)`).
+	 *
+	 * **CLASS INSTANCES ARE NOT RECURSED.** Step `inputs` are always plain
+	 * JSON-like data, so resolution is unaffected. But a step's resolved
+	 * config can embed framework objects with custom prototypes — most
+	 * dangerously a `SubworkflowNode` instance (inside a forEach `steps`
+	 * array) whose `globalOptions.workflows` holds EVERY registered
+	 * workflow's definition. Recursing into those made the mapper evaluate
+	 * (and mutate, in place) every OTHER workflow's `js/...` expressions
+	 * against the current ctx — surfacing as `Failed to resolve` errors
+	 * referencing an unrelated workflow's expression, or a hard failure in
+	 * strict mode. Limiting recursion to plain containers cuts that whole
+	 * object graph off at the boundary. (Regression: cross-workflow
+	 * expression leak via forEach + subworkflow.)
 	 */
 	public replaceObjectStrings(obj: ParamsDictionary, ctx: Context, data: ParamsDictionary): void {
 		for (const key in obj) {
@@ -246,7 +273,7 @@ class Mapper {
 					// without changing the global ParamsDictionary shape
 					// (a much larger refactor).
 					obj[key] = this.replaceString(value, ctx, data) as unknown as string;
-				} else if (value !== null && typeof value === "object") {
+				} else if (value !== null && typeof value === "object" && isPlainContainer(value)) {
 					this.replaceObjectStrings(value as unknown as ParamsDictionary, ctx, data);
 				}
 			}

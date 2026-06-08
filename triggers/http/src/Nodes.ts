@@ -4,6 +4,7 @@ import IfElse from "@blokjs/if-else";
 import type { BlokService } from "@blokjs/runner";
 import ChainInit from "./nodes/chain-init/index";
 import ChainVerify from "./nodes/chain-verify/index";
+import EvalNodes from "./nodes/eval/index";
 import ExampleNodes from "./nodes/examples/index";
 import RuntimeBridge from "./nodes/runtime-bridge/index";
 
@@ -17,6 +18,7 @@ const nodes: Record<string, BlokService<unknown>> = {
 	"chain-init": ChainInit,
 	"chain-verify": ChainVerify,
 	"runtime-bridge": RuntimeBridge,
+	...(EvalNodes as unknown as Record<string, BlokService<unknown>>),
 	...ExampleNodes,
 };
 
