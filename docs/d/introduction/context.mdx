@@ -6,6 +6,14 @@ icon: "box"
 
 The Context Object (`ctx`) facilitates data sharing across the [nodes](/d/introduction/nodes) of a single [workflow](/d/introduction/workflows) run. It's the shared memory space where each step's output lands and where later steps look it up.
 
+<Tip>
+**The golden rule:** a step **returns** its output, the runner **persists** it to
+`ctx.state[<step-id>]`, and later steps **read** it with `$.state.<id>`. You never
+write `ctx.state` yourself. For the complete model — the four reads, persistence
+knobs, forEach + sub-workflow context, and the common footguns — see
+[**Context & State**](/d/fundamentals/context-and-state).
+</Tip>
+
 ## What is the Context Object?
 
 When a [Trigger](./triggers.mdx) initiates a Workflow, Blok creates a unique Context Object for that specific workflow instance. This object persists throughout the execution of that instance and is accessible to every Node within it.
@@ -23,92 +31,73 @@ In `Blok`, the Context Object (`ctx`) has a specific structure that enables node
 
 ```typescript
 const ctx: Context = {
-    vars: {}, // Stores dynamically generated variables
-    request: { 
-        body: {}, 
-        method: "GET", 
-        headers: {}, 
-        query: {}, 
-        params: {} 
-    }, // Incoming request details
-    response: { 
-        data: {} 
-    } // Stores processed results
+    state: {},   // ✅ Every step's output is auto-stored here at ctx.state[<id>]
+    request: {
+        body: {},
+        method: "GET",
+        headers: {},
+        query: {},
+        params: {}
+    }, // Incoming request details (read via $.req)
+    response: {} // The PREVIOUS step's output (read via $.prev) — overwritten each step
 };
 ```
 
 ### Breakdown of the Context Object
 
-- **`ctx.request`**: Contains all HTTP request details:
-  - `body`: The request payload (e.g., for POST, PUT requests)
-  - `method`: HTTP method (e.g., GET, POST, etc.)
-  - `headers`: Request headers
-  - `query`: Query parameters (e.g., `?key=value`)
-  - `params`: Path parameters (e.g., `/:id`)
+- **`ctx.state`**: The persistent store. Every step's output is automatically
+  written to `ctx.state[<step-id>]` on success, and stays there for the rest of
+  the run. **This is how you pass data between steps** — read it with
+  `$.state.<id>`. You don't write it yourself; just return your output.
 
-- **`ctx.response`**: Holds workflow outputs:
-  - `data`: The latest processed data from nodes
+- **`ctx.request`** (alias `ctx.req`): The trigger request — `body`, `method`,
+  `headers`, `query`, `params`. Read via `$.req.body`, `$.req.params.id`, etc.
 
-- **`ctx.vars`**: Temporary workflow variables:
-  - These are **not persisted** across requests.
-  - Nodes can store variables dynamically for later use.
+- **`ctx.response`** (alias `ctx.prev`): The **immediately previous** step's
+  output. Overwritten on every step — use `$.prev` for adjacent reads only.
 
-### Conceptual Example of Context Usage in a Node
+<Note>
+`ctx.vars` is a legacy v1 alias for `ctx.state` (still readable for back-compat).
+New workflows use `ctx.state` / `$.state.<id>`.
+</Note>
+
+### Reading context inside a node
+
+A node reads what it needs from its **validated `input`** (which the workflow
+author wired from context via `$.state` / `$.req` expressions) and **returns** its
+output. It does not touch `ctx.state`.
 
 ```typescript
-// Inside a Node's handle method
-import { type IBlokResponse, BlokService, BlokResponse } from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
 
-type InputType = {
-    message?: string;
-};
-
-export default class Node extends BlokService<InputType> {
-    constructor() {
-        super();
-        this.inputSchema = {};
-        this.outputSchema = {};
-    }
-
-    async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
-        const response: BlokResponse = new BlokResponse();
-
-        try {
-            // 1. Get data from the request via context
-            const userId = ctx.request.params.id;
-            
-            // 2. Get data set by a previous node
-            const previousData = ctx.vars['previous-node-name'];
-            
-            // 3. Process the data
-            const processedInfo = `Processed for ${userId} with ${previousData}`;
-            
-            // 4. Set data for subsequent nodes
-            ctx.vars['current-node'] = processedInfo;
-            
-            // 5. Set the response data
-            response.setSuccess({ message: inputs.message || processedInfo });
-        } catch (error: unknown) {
-            const nodeError: GlobalError = new GlobalError((error as Error).message);
-            nodeError.setCode(500);
-            nodeError.setStack((error as Error).stack);
-            nodeError.setName(this.name);
-            nodeError.setJson(undefined);
-
-            response.setError(nodeError);
-        }
-
-        return response;
-    }
-}
+export default defineNode({
+  name: "greet-user",
+  input: z.object({ userId: z.string(), greeting: z.string() }),
+  output: z.object({ message: z.string() }),
+  async execute(ctx, input) {
+    // `input` is already resolved + validated. The author mapped it from
+    // context in the workflow, e.g. inputs: { userId: $.req.params.id,
+    // greeting: $.state.config.greeting }.
+    return { message: `${input.greeting}, ${input.userId}!` };
+    // ↑ the runner stores this at ctx.state["greet-user"] automatically.
+  },
+});
 ```
 
-## Data Flow and Immutability
+<Warning>
+**Never write `ctx.state` (or the legacy `ctx.vars`) inside a node.** Return your
+output and let the runner persist it. If you genuinely need a side-channel value,
+call `ctx.publish(name, value)` — but that's rare.
+</Warning>
 
-While the Context Object allows for shared mutable state, it's essential to be mindful of how data is modified. Some Blok implementations or best practices might encourage treating parts of the context (like initial trigger data) as immutable to prevent unintended side effects.
+## Data flow and isolation
 
-Nodes typically read the data they need from the context (or directly from their `input` which is often populated from the context by the workflow engine), perform their operations, and then write their results back to the context if those results need to be accessed by subsequent nodes.
+Each run gets its own isolated context — data from one workflow instance never
+leaks into another. Within a run, the flow is always the same: a step **returns**
+its output, the runner **persists** it to `ctx.state[<id>]`, and later steps
+**read** it via `$.state.<id>`. Treat the trigger data (`ctx.request`) as
+read-only input; produce new data by returning it from steps.
 
 ## Context in Workflows
 
@@ -199,21 +188,32 @@ How it works:
 For background on `$.state` vs `ctx.vars` (the v1 alias) and `$.req`
 vs `ctx.request`, see [v2 step shapes](/d/reference/v2-step-shapes).
 
-## Best Practices for Using the Context Object
+## Best practices
 
-*   **Clear Naming Conventions**: Use consistent and descriptive keys when setting data in the context to avoid collisions and improve readability (e.g., `nodeName.outputKey`, `shared.config.apiKey`).
-*   **Minimize Global State**: While the context is shared, avoid overusing it as a global dumping ground. Prefer passing data explicitly through Node inputs and outputs when the data flow is linear and simple.
-*   **Schema Awareness**: Be aware of the data types you are storing and retrieving. While the context itself might be flexible, Nodes often expect specific data types as per their `inputSchema`.
-*   **Error Handling Data**: The context can also be used to store error information if a Node fails, which can then be picked up by error handling Nodes or branches in the workflow.
-*   **Security Considerations**: Be cautious about storing sensitive information in the context, especially if logs or full context dumps are generated for debugging. Sanitize or avoid storing raw sensitive data if possible.
+*   **Unique step ids**: every step `id` is a key in one flat per-workflow config
+    map. Never reuse an id — including across mutually-exclusive `switch`/`branch`
+    arms — or they collide silently. Use `as:` if two arms must write the same
+    downstream state key.
+*   **Return, don't write**: nodes produce data by returning it, never by mutating
+    `ctx.state` / `ctx.vars`.
+*   **Read the right source**: `$.state.<id>` for any earlier step (the default),
+    `$.req.*` for the trigger input, `$.prev` only for the immediately previous
+    step.
+*   **Schema awareness**: define Zod `input`/`output` schemas — the runner
+    validates the resolved inputs before your node runs.
+*   **Security**: avoid storing raw sensitive data in step outputs; it lands in
+    `ctx.state` and may surface in Studio traces.
 
-## Key Takeaways
+## Key takeaways
 
-- ✅ **`ctx` allows passing request data to nodes.**  
-- ✅ **Nodes modify and store values in `ctx.vars`.**  
-- ✅ **Nodes can dynamically read/write to `ctx.response.data`.**  
-- ✅ **`ctx.request.params`, `ctx.request.body`, and `ctx.response` drive workflow execution.**
+- ✅ **A step returns its output; the runner stores it at `ctx.state[<id>]`.**
+- ✅ **Read earlier outputs with `$.state.<id>` — the default for cross-step data.**
+- ✅ **`$.req.body` / `$.req.params` / `$.req.query` read the trigger request.**
+- ✅ **`$.prev` is the previous step only, and is overwritten each step.**
+- ❌ **Never write `ctx.state`/`ctx.vars` inside a node, and never reuse a step id.**
 
-The Context Object is a powerful mechanism that enables dynamic and flexible workflows in Blok . Understanding how to use it effectively is key to building robust and maintainable blok applications.
+For the full reference — persistence knobs (`as` / `spread` / `ephemeral`),
+context inside `forEach`, and sub-workflow data flow — see
+[**Context & State**](/d/fundamentals/context-and-state).
 
 Next, learn about what initiates workflows: [Triggers](./triggers.mdx).
