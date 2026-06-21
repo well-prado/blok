@@ -90,31 +90,20 @@ describe("Trigger.addTrigger()", () => {
 		});
 	});
 
-	describe("queue trigger", () => {
-		it("accepts a valid queue config", () => {
+	// F10 — `queue` is a dead trigger kind (validated by the DSL but consumed
+	// by no runtime). Construction now rejects it and points authors at
+	// `worker`, the kind that actually consumes a queue.
+	describe("queue trigger (F10 — dead kind, rejected)", () => {
+		it("rejects a valid-looking queue config and points to worker", () => {
 			const trigger = createWorkflow();
-			const step = trigger.addTrigger("queue", { provider: "kafka", topic: "events" });
-			expect(step).toBeInstanceOf(StepNode);
+			expect(() => trigger.addTrigger("queue", { provider: "kafka", topic: "events" })).toThrow(
+				/no runtime.+use "worker"/i,
+			);
 		});
 
-		it("rejects queue when no config is provided", () => {
+		it("rejects queue regardless of config (even when none provided)", () => {
 			const trigger = createWorkflow();
-			expect(() => trigger.addTrigger("queue" as unknown as "grpc")).toThrow(/requires a configuration object/);
-		});
-
-		it("rejects queue with an invalid provider", () => {
-			const trigger = createWorkflow();
-			expect(() => trigger.addTrigger("queue", { provider: "mq" as unknown as "kafka", topic: "events" })).toThrow();
-		});
-
-		it("applies queue defaults (ack, maxRetries, batchSize, concurrency)", () => {
-			const trigger = createWorkflow();
-			const step = trigger.addTrigger("queue", { provider: "nats", topic: "jobs" });
-			const json = JSON.parse(step.toJson());
-			expect(json.trigger.queue.ack).toBe(true);
-			expect(json.trigger.queue.maxRetries).toBe(3);
-			expect(json.trigger.queue.batchSize).toBe(1);
-			expect(json.trigger.queue.concurrency).toBe(1);
+			expect(() => trigger.addTrigger("queue" as unknown as "grpc")).toThrow(/no runtime.+use "worker"/i);
 		});
 	});
 

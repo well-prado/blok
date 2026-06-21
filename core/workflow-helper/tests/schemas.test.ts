@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
 	NodeTypeSchema,
 	RetryConfigSchema,
 	RuntimeKindSchema,
 	StepConditionSchema,
 	StepOptsSchema,
+	V2BranchStepSchema,
+	V2ForEachStepSchema,
+	V2LoopStepSchema,
 	V2RegularStepSchema,
+	V2StepSchema,
 	V2SubworkflowStepSchema,
+	V2SwitchStepSchema,
+	V2TryCatchStepSchema,
 	V2WaitStepSchema,
 	isWaitStep,
 } from "../src/types/StepOpts";
@@ -293,6 +300,291 @@ describe("V2SubworkflowStepSchema", () => {
 		expect(result.active).toBe(false);
 		expect(result.stop).toBe(true);
 		expect(result.ephemeral).toBe(true);
+	});
+});
+
+// =============================================================================
+// F9 — step schema strictness. Misplaced trigger fields and typo'd step fields
+// must be REJECTED (not silently stripped), while every legitimate field still
+// passes.
+// =============================================================================
+
+describe("F9 — V2RegularStepSchema strictness", () => {
+	const baseStep = { id: "fetch", use: "@blokjs/api-call" };
+
+	it("still accepts every legitimate regular-step field", () => {
+		expect(() =>
+			V2RegularStepSchema.parse({
+				...baseStep,
+				type: "module",
+				inputs: { url: "https://example.com" },
+				as: "result",
+				ephemeral: false,
+				runtime: "nodejs",
+				active: true,
+				stop: false,
+				stream_logs: true,
+				streamTo: "sse",
+				stream: true,
+				idempotencyKey: "k",
+				idempotencyKeyTTL: 1000,
+				retry: { maxAttempts: 3 },
+				maxDuration: "30s",
+			}),
+		).not.toThrow();
+	});
+
+	it("rejects a typo'd field (`retr` instead of `retry`)", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, retr: { maxAttempts: 3 } })).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("rejects a typo'd `idempotencyKey` (`idempotencykey`)", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, idempotencykey: "x" })).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("rejects a misplaced trigger field (`concurrencyKey`) with a trigger-config hint", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, concurrencyKey: "tenant-1" })).toThrow(
+			/trigger-level field/i,
+		);
+	});
+
+	it("rejects misplaced scheduling fields (`delay` / `ttl` / `debounce`) with a trigger-config hint", () => {
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, delay: "1h" })).toThrow(/trigger-level field/i);
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, ttl: "2h" })).toThrow(/trigger-level field/i);
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, debounce: { key: "k", delay: 500 } })).toThrow(
+			/trigger-level field/i,
+		);
+	});
+
+	it("rejects a step carrying BOTH a misplaced trigger field AND a typo", () => {
+		// The canonical silent-miscompile case from the F9 spec.
+		expect(() => V2RegularStepSchema.parse({ ...baseStep, concurrencyKey: "t", retr: { maxAttempts: 3 } })).toThrow();
+	});
+});
+
+describe("F9 — control-flow step schema strictness", () => {
+	it("branch: rejects an unknown top-level key", () => {
+		expect(() =>
+			V2BranchStepSchema.parse({ id: "b", branch: { when: "true", then: [] }, retry: { maxAttempts: 2 } }),
+		).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("branch: rejects an unknown key inside the `branch` block", () => {
+		expect(() => V2BranchStepSchema.parse({ id: "b", branch: { when: "true", then: [], elze: [] } })).toThrow(
+			/[Uu]nrecognized key/,
+		);
+	});
+
+	it("branch: still accepts the legitimate shape", () => {
+		expect(() =>
+			V2BranchStepSchema.parse({ id: "b", branch: { when: "true", then: [], else: [] }, active: true, stop: false }),
+		).not.toThrow();
+	});
+
+	it("forEach: rejects an unknown top-level key", () => {
+		expect(() =>
+			V2ForEachStepSchema.parse({
+				id: "fe",
+				forEach: { in: "$.state.items", as: "item", do: [{ id: "x", use: "n" }] },
+				bogus: true,
+			}),
+		).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("forEach: still accepts the legitimate shape", () => {
+		expect(() =>
+			V2ForEachStepSchema.parse({
+				id: "fe",
+				forEach: { in: "$.state.items", as: "item", mode: "parallel", concurrency: 5, do: [{ id: "x", use: "n" }] },
+			}),
+		).not.toThrow();
+	});
+
+	it("loop: rejects an unknown top-level key", () => {
+		expect(() =>
+			V2LoopStepSchema.parse({ id: "lp", loop: { while: "true", do: [{ id: "x", use: "n" }] }, retry: {} }),
+		).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("switch: rejects an unknown key inside a case", () => {
+		expect(() =>
+			V2SwitchStepSchema.parse({
+				id: "sw",
+				switch: { on: "$.x", cases: [{ when: "a", do: [{ id: "x", use: "n" }], bogus: 1 }] },
+			}),
+		).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("switch: still accepts the legitimate shape", () => {
+		expect(() =>
+			V2SwitchStepSchema.parse({
+				id: "sw",
+				switch: { on: "$.x", cases: [{ when: "a", do: [{ id: "x", use: "n" }] }], default: [{ id: "d", use: "n" }] },
+			}),
+		).not.toThrow();
+	});
+
+	it("tryCatch: rejects an unknown top-level key", () => {
+		expect(() =>
+			V2TryCatchStepSchema.parse({
+				id: "tc",
+				tryCatch: { try: [{ id: "x", use: "n" }], catch: [{ id: "y", use: "n" }] },
+				ephemeral: true,
+			}),
+		).toThrow(/[Uu]nrecognized key/);
+	});
+
+	it("tryCatch: still accepts the legitimate shape", () => {
+		expect(() =>
+			V2TryCatchStepSchema.parse({
+				id: "tc",
+				tryCatch: {
+					try: [{ id: "x", use: "n" }],
+					catch: [{ id: "y", use: "n" }],
+					finally: [{ id: "z", use: "n" }],
+				},
+			}),
+		).not.toThrow();
+	});
+
+	it("subworkflow: rejects an unknown top-level key", () => {
+		expect(() => V2SubworkflowStepSchema.parse({ id: "sw", subworkflow: "child", bogus: 1 })).toThrow(
+			/[Uu]nrecognized key/,
+		);
+	});
+});
+
+// =============================================================================
+// F22 — V2StepSchema dispatches to one member schema by key presence, so a
+// malformed control-flow step gets THAT member's error verbatim instead of a
+// noisy multi-arm `invalid_union` that also blames the regular-step `use`.
+// =============================================================================
+
+describe("F22 — V2StepSchema single-member error discrimination", () => {
+	it("a branch missing `when` reports the branch error, NOT `use is required`", () => {
+		const result = V2StepSchema.safeParse({ id: "route", branch: { then: [] } });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const msg = result.error.message;
+			// The error must point at branch.when ...
+			expect(msg).toMatch(/when/i);
+			// ... and must NOT mention the regular-step `use` field (the old
+			// z.union behavior aggregated that misleading message).
+			expect(msg).not.toMatch(/`use` is required/i);
+			// No invalid_union aggregation either.
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("a valid branch step parses through V2StepSchema", () => {
+		const result = V2StepSchema.safeParse({ id: "route", branch: { when: "true", then: [], else: [] } });
+		expect(result.success).toBe(true);
+	});
+
+	it("a valid regular step parses through V2StepSchema", () => {
+		const result = V2StepSchema.safeParse({ id: "fetch", use: "@blokjs/api-call" });
+		expect(result.success).toBe(true);
+	});
+
+	it("a regular step missing `use` reports the regular-step error (no control-flow noise)", () => {
+		const result = V2StepSchema.safeParse({ id: "fetch" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).toMatch(/use/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("a malformed subworkflow step reports the subworkflow error, not `use is required`", () => {
+		const result = V2StepSchema.safeParse({ id: "call", subworkflow: "" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+		}
+	});
+
+	it("a forEach missing its `as` reports the forEach error, not `use is required`", () => {
+		const result = V2StepSchema.safeParse({ id: "fe", forEach: { in: "$.x", do: [{ id: "x", use: "n" }] } });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+		}
+	});
+
+	it("a malformed wait step reports the wait error, not `use is required` (dispatch by `wait`)", () => {
+		// `wait` present but empty → wait member's "for/until mutually exclusive"
+		// refinement, NOT the regular-step `use` error.
+		const result = V2StepSchema.safeParse({ id: "w", wait: {} });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("a malformed switch step reports the switch error, not `use is required` (dispatch by `switch`)", () => {
+		const result = V2StepSchema.safeParse({ id: "sw", switch: { on: "$.x", cases: [] } });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("dispatches a misplaced trigger field on a regular step to the F9 trigger-level hint", () => {
+		// A regular step (no control-flow key) carrying a trigger-only field must
+		// surface the F9 hint, NOT a noisy invalid_union, confirming F9 + F22
+		// compose through the single-member dispatch.
+		const result = V2StepSchema.safeParse({ id: "f", use: "n", concurrencyKey: "tenant-1" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).toMatch(/trigger-level field/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("accepts every control-flow step shape through V2StepSchema (dispatch coverage)", () => {
+		const shapes: unknown[] = [
+			{ id: "r", use: "@blokjs/api-call" },
+			{ id: "b", branch: { when: "true", then: [{ id: "x", use: "n" }] } },
+			{ id: "s", subworkflow: "child" },
+			{ id: "w", wait: { for: "1h" } },
+			{ id: "fe", forEach: { in: "$.x", as: "item", do: [{ id: "x", use: "n" }] } },
+			{ id: "lp", loop: { while: "true", do: [{ id: "x", use: "n" }] } },
+			{ id: "sw", switch: { on: "$.x", cases: [{ when: "a", do: [{ id: "x", use: "n" }] }] } },
+			{ id: "tc", tryCatch: { try: [{ id: "x", use: "n" }], catch: [{ id: "y", use: "n" }] } },
+		];
+		for (const shape of shapes) {
+			expect(V2StepSchema.safeParse(shape).success).toBe(true);
+		}
+	});
+
+	// Regression guard: V2StepSchema feeds `WorkflowV2Schema.steps`, which
+	// `scripts/build-schema.ts` runs through `zodToJsonSchema` to publish the
+	// JSON Schema the VS Code extension consumes for `.json`-workflow
+	// autocomplete + inline docs. An earlier F22 attempt used
+	// `z.unknown().transform(...)`, which renders to `{}` (no structure → no
+	// autocomplete), silently gutting that tooling. The schema MUST still emit
+	// an `anyOf` carrying the concrete per-step-type member shapes.
+	it("renders an anyOf of the per-step-type member shapes for editor tooling", () => {
+		const json = zodToJsonSchema(V2StepSchema, { target: "jsonSchema7", $refStrategy: "none" }) as {
+			anyOf?: Array<{ properties?: Record<string, unknown> }>;
+		};
+		expect(Array.isArray(json.anyOf)).toBe(true);
+		const members = json.anyOf ?? [];
+		// The eight concrete step shapes must each be present as a structured
+		// object member (discriminated by their control-flow key, or `use` for
+		// the regular step). The catch-all permissive arm may add one more.
+		const discriminators = new Set<string>();
+		for (const m of members) {
+			if (!m.properties) continue;
+			for (const key of ["branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch", "use"]) {
+				if (key in m.properties) discriminators.add(key);
+			}
+		}
+		for (const key of ["branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch", "use"]) {
+			expect(discriminators.has(key)).toBe(true);
+		}
 	});
 });
 
@@ -722,8 +1014,14 @@ describe("WorkerTriggerOptsSchema scheduling fields", () => {
 	});
 });
 
+// F10 — the QueueTriggerOptsSchema object is intentionally KEPT (it stays
+// exported as `QueueTriggerOpts`/`QueueTriggerOptsSchema` for back-compat and
+// type consumers, and remains in TRIGGER_SCHEMAS so the registry exhaustiveness
+// check holds). Only `validateTriggerConfig` (the construction layer) rejects
+// the `queue` kind — see the validateTriggerConfig block below. The schema
+// shape itself still parses in isolation.
 describe("QueueTriggerOptsSchema", () => {
-	it("should validate queue trigger options", () => {
+	it("should validate queue trigger options (schema shape kept for back-compat)", () => {
 		const result = QueueTriggerOptsSchema.parse({ provider: "kafka", topic: "my-topic" });
 		expect(result.provider).toBe("kafka");
 		expect(result.topic).toBe("my-topic");
@@ -909,8 +1207,17 @@ describe("validateTriggerConfig", () => {
 
 	it("throws when a typed trigger is missing its config", () => {
 		expect(() => validateTriggerConfig("cron", undefined)).toThrow(/requires a configuration object/);
-		expect(() => validateTriggerConfig("queue", undefined)).toThrow(/requires a configuration object/);
 		expect(() => validateTriggerConfig("worker", undefined)).toThrow(/requires a configuration object/);
+	});
+
+	// F10 — `queue` is a dead trigger kind: validated by the DSL but consumed
+	// by no runtime. validateTriggerConfig rejects it BEFORE the config shape
+	// check (so even a well-formed queue config fails) and points to `worker`.
+	it('rejects the dead "queue" trigger kind and points to "worker"', () => {
+		expect(() => validateTriggerConfig("queue", undefined)).toThrow(/no runtime.+use "worker"/i);
+		expect(() => validateTriggerConfig("queue", { provider: "kafka", topic: "events" })).toThrow(
+			/no runtime.+use "worker"/i,
+		);
 	});
 
 	it("applies defaults from the schema", () => {
@@ -924,6 +1231,6 @@ describe("validateTriggerConfig", () => {
 
 	it("rejects invalid configs", () => {
 		expect(() => validateTriggerConfig("cron", { schedule: 123 })).toThrow();
-		expect(() => validateTriggerConfig("queue", { provider: "unknown", topic: "x" })).toThrow();
+		expect(() => validateTriggerConfig("worker", { queue: 123 })).toThrow();
 	});
 });
