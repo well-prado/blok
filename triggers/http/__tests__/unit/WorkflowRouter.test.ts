@@ -4,6 +4,7 @@ import {
 	type RouteCollision,
 	RouteCollisionError,
 	buildRouteTable,
+	readMiddlewareFlag,
 	scorePathSpecificity,
 } from "../../src/runner/WorkflowRouter";
 import type { ScannedWorkflow } from "../../src/runner/scanWorkflows";
@@ -458,5 +459,100 @@ describe("buildRouteTable", () => {
 			expect(out.map((r) => r.path).sort()).toEqual(["/dup", "/items", "/orders", "/users"]);
 			expect(collisions).toHaveLength(1);
 		});
+	});
+
+	// =========================================================================
+	// Bug 01 / F17 — middleware workflows are excluded from the route table.
+	// =========================================================================
+
+	describe("middleware exclusion", () => {
+		it("excludes a SCANNED (JSON) middleware workflow even with a dummy http trigger (F17)", () => {
+			const out = buildRouteTable([
+				{
+					source: "/wf/json/_mw/request-id.json",
+					kind: "json",
+					defaultPath: "/request-id",
+					name: "request-id",
+					workflow: {
+						name: "request-id",
+						version: "1.0.0",
+						middleware: true,
+						trigger: { http: { method: "ANY", path: "/__mw/request-id" } },
+					},
+				},
+			]);
+			expect(out).toHaveLength(0);
+		});
+
+		it("excludes a MANUAL (TS builder) middleware workflow with the flag on _config", () => {
+			const out = buildRouteTable(
+				[],
+				[
+					{
+						key: "request-id",
+						// Shape of a v2 `workflow({ middleware: true, trigger: {...} })` builder:
+						// the middleware flag lives on `_config`, not the root.
+						workflow: {
+							_blokV2: true,
+							_config: {
+								name: "request-id",
+								version: "1.0.0",
+								middleware: true,
+								trigger: { http: { method: "ANY", path: "/__mw/request-id" } },
+							},
+						},
+					},
+				],
+			);
+			expect(out).toHaveLength(0);
+		});
+
+		it("a non-middleware workflow alongside a middleware one still routes", () => {
+			const out = buildRouteTable([
+				scanned({ source: "/wf/users.json", defaultPath: "/users", name: "users" }),
+				{
+					source: "/wf/_mw/audit.json",
+					kind: "json",
+					defaultPath: "/audit",
+					name: "audit",
+					workflow: {
+						name: "audit",
+						version: "1.0.0",
+						middleware: true,
+						trigger: { http: { method: "POST", path: "/audit" } },
+					},
+				},
+			]);
+			expect(out).toHaveLength(1);
+			expect(out[0].path).toBe("/users");
+		});
+	});
+});
+
+describe("readMiddlewareFlag", () => {
+	it("returns true for a root `middleware: true` (JSON / object literal)", () => {
+		expect(readMiddlewareFlag({ name: "x", middleware: true })).toBe(true);
+	});
+
+	it("returns true for `_config.middleware === true` (v2 workflow() builder)", () => {
+		expect(readMiddlewareFlag({ _blokV2: true, _config: { name: "x", middleware: true } })).toBe(true);
+	});
+
+	it("returns false when the flag is absent", () => {
+		expect(readMiddlewareFlag({ name: "x" })).toBe(false);
+		expect(readMiddlewareFlag({ _config: { name: "x" } })).toBe(false);
+	});
+
+	it("treats only the literal `true` as the marker", () => {
+		expect(readMiddlewareFlag({ middleware: false })).toBe(false);
+		expect(readMiddlewareFlag({ middleware: 1 as unknown as boolean })).toBe(false);
+		expect(readMiddlewareFlag({ middleware: "true" as unknown as boolean })).toBe(false);
+	});
+
+	it("is null/undefined/non-object safe", () => {
+		expect(readMiddlewareFlag(null)).toBe(false);
+		expect(readMiddlewareFlag(undefined)).toBe(false);
+		expect(readMiddlewareFlag("middleware")).toBe(false);
+		expect(readMiddlewareFlag(42)).toBe(false);
 	});
 });
