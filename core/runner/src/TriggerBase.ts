@@ -25,6 +25,7 @@ import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import { DeferredDispatchSignal } from "./scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
 import { type NormalizedSchedulingConfig, readSchedulingConfig } from "./scheduling/readSchedulingConfig";
+import { Janitor } from "./tracing/Janitor";
 import { RunTracker } from "./tracing/RunTracker";
 import { TracingLogger } from "./tracing/TracingLogger";
 import type { IterationContext } from "./tracing/types";
@@ -236,7 +237,7 @@ export default abstract class TriggerBase extends Trigger {
 					.map((e) => e.name);
 				const knownStr = known.length > 0 ? known.join(", ") : "(none registered)";
 				throw new Error(
-					`[blok] middleware "${mwName}" not found in WorkflowRegistry. Available middleware: ${knownStr}. Make sure the middleware workflow has \`"middleware": true\` set at the workflow root and is in a scanned WORKFLOWS_PATH directory.`,
+					`[blok] middleware "${mwName}" not found in WorkflowRegistry. Available middleware: ${knownStr}. Check that (a) the chain entry name "${mwName}" exactly matches a registered workflow's \`name\` (typos in \`BLOK_GLOBAL_MIDDLEWARE\`/\`setGlobalMiddleware()\`/\`trigger.<kind>.middleware\` are the most common cause), and (b) that workflow has \`"middleware": true\` set at the workflow root and was registered — via a scanned \`WORKFLOWS_PATH\` directory, a TypeScript \`src/Workflows.ts\` entry, or a worker/cron nodeMap registration.`,
 				);
 			}
 
@@ -472,6 +473,127 @@ export default abstract class TriggerBase extends Trigger {
 			);
 		}
 		return flipped;
+	}
+
+	/**
+	 * F5 — install the full set of process-level operational handlers in
+	 * one call so every trigger family gets uniform run-state integrity +
+	 * storage hygiene, not just HTTP and Worker.
+	 *
+	 * Composes the four existing, independently-idempotent/kill-switched
+	 * primitives:
+	 *   1. `installCrashHandlers` — flip in-flight `running` runs to
+	 *      `crashed` on uncaughtException / unhandledRejection.
+	 *   2. `recoverOrphanedRuns` — boot scan flipping stale `running` runs
+	 *      (SIGKILL/OOM deaths) to `crashed`.
+	 *   3. `Janitor` — periodic purge of expired idempotency /
+	 *      concurrency / scheduled-dispatch rows.
+	 *   4. `installShutdownHandlers` — SIGTERM/SIGINT drain.
+	 *
+	 * Each step is wrapped in try/catch so a failure in one doesn't block
+	 * the others. Safe to call from every trigger's `listen()` — the
+	 * underlying handlers install at most once per process.
+	 */
+	protected installOperationalHandlers(logger?: CrashAutoflipLogger): void {
+		try {
+			TriggerBase.installCrashHandlers(logger);
+			const orphaned = TriggerBase.recoverOrphanedRuns(undefined, logger);
+			if (orphaned > 0) {
+				logger?.log?.(`[blok][crash-autoflip] flipped ${orphaned} orphaned run(s) to crashed on boot`);
+			}
+		} catch (err) {
+			logger?.error?.(`[blok][crash-autoflip] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		try {
+			Janitor.getInstance(RunTracker.getInstance().getStore(), logger).start();
+		} catch (err) {
+			logger?.error?.(`[blok][janitor] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		try {
+			TriggerBase.installShutdownHandlers(this, logger);
+		} catch (err) {
+			logger?.error?.(`[blok][shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	/**
+	 * F6 — populate the `WorkflowRegistry` from `this.nodeMap.workflows`
+	 * so worker/cron/grpc-only deployments resolve `subworkflow:` steps,
+	 * trigger-level middleware, and process-global middleware just like
+	 * HTTP-hosted ones.
+	 *
+	 * Every entry's `name` is read from the workflow's `_config.name`
+	 * (v2 builder) or `name` (legacy/raw), falling back to the locator
+	 * map key. `isMiddleware` is derived from `middleware === true`
+	 * (checked on both the root and `_config`, covering JSON, raw object
+	 * literals, legacy `Workflow()` and v2 `workflow()` builders).
+	 *
+	 * Dedupes by name (last registration wins is avoided — first wins,
+	 * matching the HTTP route-table loop) and swallows per-entry
+	 * collisions so a single bad workflow can't abort boot.
+	 *
+	 * Returns the number of workflows registered (for observability/tests).
+	 */
+	protected registerWorkflowsFromNodeMap(logger?: CrashAutoflipLogger): number {
+		const nodeMap = (this as unknown as { nodeMap?: GlobalOptions }).nodeMap;
+		const workflows = nodeMap?.workflows;
+		if (!workflows) return 0;
+
+		const registry = WorkflowRegistry.getInstance();
+		const seen = new Set<string>();
+		let registered = 0;
+
+		for (const [key, wf] of Object.entries(workflows)) {
+			const w = wf as { name?: unknown; _config?: { name?: unknown; middleware?: unknown }; middleware?: unknown };
+			const name =
+				typeof w?._config?.name === "string"
+					? (w._config.name as string)
+					: typeof w?.name === "string"
+						? (w.name as string)
+						: key;
+			if (!name || seen.has(name) || registry.has(name)) continue;
+			seen.add(name);
+			const isMiddleware = w?.middleware === true || w?._config?.middleware === true;
+			try {
+				registry.register({ name, source: key, workflow: wf, isMiddleware });
+				registered++;
+			} catch (err) {
+				logger?.error?.(
+					`[blok] failed to register workflow "${name}" in WorkflowRegistry: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+			}
+		}
+
+		if (registered > 0) {
+			logger?.log?.(`[blok] workflow registry — ${registered} workflow(s) registered from nodeMap`);
+		}
+		return registered;
+	}
+
+	/**
+	 * F14 — seed the process-global middleware chain from the
+	 * `BLOK_GLOBAL_MIDDLEWARE` env var. Lifted out of `HttpTrigger.listen()`
+	 * so worker/cron/grpc-only deployments honor the documented env-var
+	 * fallback too.
+	 *
+	 * Guarded by the existing `getGlobalMiddleware().length === 0`
+	 * idempotency check so a programmatic `setGlobalMiddleware([...])`
+	 * always takes precedence over the env var (and repeated calls across
+	 * co-hosted triggers are no-ops).
+	 */
+	protected seedGlobalMiddlewareFromEnv(logger?: CrashAutoflipLogger): void {
+		const registry = WorkflowRegistry.getInstance();
+		if (registry.getGlobalMiddleware().length > 0 || !process.env.BLOK_GLOBAL_MIDDLEWARE) return;
+		const fromEnv = process.env.BLOK_GLOBAL_MIDDLEWARE.split(",")
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+		if (fromEnv.length === 0) return;
+		registry.setGlobalMiddleware(fromEnv);
+		logger?.log?.(`[blok] global middleware registered from BLOK_GLOBAL_MIDDLEWARE env: ${fromEnv.join(", ")}`);
 	}
 
 	// --- Hot Module Replacement ---
