@@ -75,6 +75,15 @@ vi.mock("@blokjs/runner", () => {
 				},
 			};
 		}
+		// F1/F5/F6/F14 — TriggerBase gained these shared helpers; the gRPC
+		// trigger now calls them from executeWorkflow (applyMiddlewareChain)
+		// and processRequest (the other three). No-op them in the mock.
+		async applyMiddlewareChain() {}
+		installOperationalHandlers() {}
+		registerWorkflowsFromNodeMap() {
+			return 0;
+		}
+		seedGlobalMiddlewareFromEnv() {}
 	}
 
 	return {

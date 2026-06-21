@@ -204,6 +204,28 @@ describe("SubworkflowNode — dispatch", () => {
 		await expect(node.run(parentCtx)).rejects.toThrow(/not found in WorkflowRegistry/);
 	});
 
+	it("F12 · not-found error enumerates all registration paths (JSON, TS Workflows.ts, worker/cron/grpc)", async () => {
+		const node = makeSubworkflowNode({ stepName: "call-missing", subworkflowName: "no-such-workflow" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { "call-missing": { inputs: {} } } as unknown as Context["config"];
+
+		let message = "";
+		try {
+			await node.run(parentCtx);
+		} catch (err) {
+			message = (err as Error).message;
+		}
+
+		// The pre-fix message hard-coded "registered automatically by the HTTP
+		// trigger" — a dead end for TS + pure-worker. The new message lists the
+		// real registration paths and the exact-name requirement.
+		expect(message).not.toMatch(/registered automatically by the HTTP trigger/);
+		expect(message).toMatch(/src\/Workflows\.ts/);
+		expect(message).toMatch(/worker\/cron\/grpc-only/);
+		expect(message).toMatch(/WorkflowRegistry\.getInstance\(\)\.register/);
+		expect(message).toMatch(/name.*matches "no-such-workflow" exactly/);
+	});
+
 	it("default-allows composition when no authorize hook is installed", async () => {
 		WorkflowRegistry.getInstance().register({
 			name: "child-default-allow",
