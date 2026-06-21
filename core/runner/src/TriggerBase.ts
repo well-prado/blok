@@ -128,8 +128,16 @@ export default abstract class TriggerBase extends Trigger {
 		return new Configuration();
 	}
 
-	getRunner(): Runner {
-		return new Runner(this.configuration.steps);
+	/**
+	 * F2 (additive) — accept an optional `configuration` override so callers
+	 * that resolve a fresh per-invocation `Configuration` (e.g. the worker
+	 * trigger under `concurrency > 1`) read the same object they initialized,
+	 * instead of the shared `this.configuration` instance that a concurrent
+	 * job may have mutated. Defaults to `this.configuration` so every existing
+	 * caller is unaffected.
+	 */
+	getRunner(configuration: Configuration = this.configuration): Runner {
+		return new Runner(configuration.steps);
 	}
 
 	/**
@@ -184,16 +192,27 @@ export default abstract class TriggerBase extends Trigger {
 	 * workflow because they share the same ctx. Middleware authors
 	 * short-circuit via `@blokjs/throw` — the throw propagates to the
 	 * caller's outer catch, and the main workflow does NOT run.
+	 *
+	 * F2 (additive) — `configuration` defaults to the shared `this.configuration`
+	 * so HTTP/cron/etc. are unchanged. The worker trigger, which resolves a
+	 * fresh per-job `Configuration` (and no longer initializes the shared one),
+	 * MUST pass it here; otherwise trigger-level (`trigger.worker.middleware`)
+	 * and workflow-level (`appliedMiddleware`) names would be read off the
+	 * never-initialized shared instance and silently dropped.
 	 */
-	protected async applyMiddlewareChain(ctx: Context, nodeMap: GlobalOptions): Promise<void> {
+	protected async applyMiddlewareChain(
+		ctx: Context,
+		nodeMap: GlobalOptions,
+		configuration: Configuration = this.configuration,
+	): Promise<void> {
 		const triggerType = this.getTriggerType();
-		const triggerCfg = (
-			this.configuration.trigger as Record<string, { middleware?: unknown } | undefined> | undefined
-		)?.[triggerType];
+		const triggerCfg = (configuration.trigger as Record<string, { middleware?: unknown } | undefined> | undefined)?.[
+			triggerType
+		];
 		const triggerLevel = Array.isArray(triggerCfg?.middleware)
 			? (triggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
 			: [];
-		const workflowLevel = this.configuration.appliedMiddleware ?? [];
+		const workflowLevel = configuration.appliedMiddleware ?? [];
 		const globalLevel = WorkflowRegistry.getInstance().getGlobalMiddleware();
 		const middlewareNames: string[] = [...globalLevel, ...workflowLevel, ...triggerLevel];
 		if (middlewareNames.length > 0) {
@@ -718,9 +737,16 @@ export default abstract class TriggerBase extends Trigger {
 		}
 	}
 
-	async run(ctx: Context): Promise<TriggerResponse> {
+	async run(ctx: Context, configuration: Configuration = this.configuration): Promise<TriggerResponse> {
 		this.inFlightRequests++;
 		const runStart = performance.now();
+		// F2 (additive) — read all per-invocation workflow state from the
+		// `configuration` argument instead of the shared `this.configuration`
+		// instance. Defaults to `this.configuration` so HTTP and every other
+		// caller is unchanged; the worker trigger passes a fresh per-job
+		// `Configuration` so concurrent jobs (`concurrency > 1`) never read a
+		// step list / name / trigger config another job's `init()` overwrote.
+		const cfg = configuration;
 		let runSuccess = true;
 		// Tier 2 #6 — concurrency lock claim, populated when the gate grants
 		// a slot. Released in the `finally` block. Null when the workflow has
@@ -850,8 +876,8 @@ export default abstract class TriggerBase extends Trigger {
 				}
 			}
 		} else if (tracker.active) {
-			const runner = this.getRunner();
-			const stepCount = runner.getStepCount?.() ?? this.configuration.steps?.length ?? 0;
+			const runner = this.getRunner(cfg);
+			const stepCount = runner.getStepCount?.() ?? cfg.steps?.length ?? 0;
 			// Tier 1 · replay lineage. The replay endpoint
 			// (TraceRouter.POST /__blok/runs/:id/replay) sets
 			// `X-Blok-Replay-Of: <originalRunId>` on the dispatched HTTP
@@ -872,7 +898,7 @@ export default abstract class TriggerBase extends Trigger {
 			const parentRunId = pickHeader(reqHeaders, "x-blok-parent-run-id");
 			const parentNodeRunId = pickHeader(reqHeaders, "x-blok-parent-node-run-id");
 			const run = tracker.startRun({
-				workflowName: this.configuration.name || ctx.workflow_name || "unknown",
+				workflowName: cfg.name || ctx.workflow_name || "unknown",
 				workflowPath: ctx.workflow_path || "",
 				triggerType: this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown",
 				triggerSummary: this.buildTraceTriggerSummary(ctx),
@@ -919,7 +945,7 @@ export default abstract class TriggerBase extends Trigger {
 			//  - `BLOK_SCHEDULING_DISABLED=1` (kill-switch).
 			const isReentry = (ctx as Record<string, unknown>)._blokDispatchReentry === true;
 			if (!isReentry && traceRunId && process.env.BLOK_SCHEDULING_DISABLED !== "1") {
-				const schedCfg = readSchedulingConfig(this.configuration.trigger as Record<string, unknown> | undefined);
+				const schedCfg = readSchedulingConfig(cfg.trigger as Record<string, unknown> | undefined);
 				if (schedCfg) {
 					const signal = await this.maybeDeferRun(ctx, traceRunId, schedCfg);
 					if (signal) throw signal;
@@ -935,11 +961,11 @@ export default abstract class TriggerBase extends Trigger {
 			//    idempotency-cache semantics)
 			//  - `BLOK_CONCURRENCY_DISABLED=1` (kill-switch).
 			if (traceRunId && process.env.BLOK_CONCURRENCY_DISABLED !== "1") {
-				const concCfg = readConcurrencyConfig(this.configuration.trigger as Record<string, unknown> | undefined);
+				const concCfg = readConcurrencyConfig(cfg.trigger as Record<string, unknown> | undefined);
 				if (concCfg) {
 					const resolvedKey = resolveIdempotencyKey(concCfg.keyExpression, ctx);
 					if (resolvedKey !== null) {
-						const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
+						const workflowName = cfg.name || ctx.workflow_name || "unknown";
 						const now = Date.now();
 						const result = await tracker.acquireConcurrencySlot(
 							workflowName,
@@ -1141,7 +1167,7 @@ export default abstract class TriggerBase extends Trigger {
 			const globalMetrics = new Metrics();
 			globalMetrics.start();
 
-			const runner: Runner = this.getRunner();
+			const runner: Runner = this.getRunner(cfg);
 			const context = await runner.run(ctx);
 			globalMetrics.retry();
 			globalMetrics.stop();
@@ -1154,71 +1180,71 @@ export default abstract class TriggerBase extends Trigger {
 
 			workflow_execution.add(1, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_runner_time.record(end - start, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_memory.record(average.memory.max, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_memory_average.record(average.memory.total, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_memory_usage_min.record(average.memory.min, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_memory_total.record(average.memory.global_memory, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_memory_free.record(average.memory.global_free_memory, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_cpu.record(average.cpu.usage, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_cpu_average.record(average.cpu.average, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
 			workflow_cpu_total.record(average.cpu.total, {
 				env: process.env.NODE_ENV,
-				workflow_version: `${this.configuration.version}`,
-				workflow_name: `${this.configuration.name}`,
+				workflow_version: `${cfg.version}`,
+				workflow_name: `${cfg.name}`,
 				workflow_path: `${ctx.workflow_path}`,
 			});
 
@@ -1236,8 +1262,8 @@ export default abstract class TriggerBase extends Trigger {
 				// return when a sample is already on file to avoid an
 				// unnecessary roundtrip per run.
 				try {
-					if (shouldRecordSample(this.configuration.trigger)) {
-						const workflowName = this.configuration.name || ctx.workflow_name || "";
+					if (shouldRecordSample(cfg.trigger)) {
+						const workflowName = cfg.name || ctx.workflow_name || "";
 						if (workflowName && !tracker.getWorkflowSample(workflowName)) {
 							tracker.recordWorkflowSample({
 								workflowName,
@@ -1272,7 +1298,7 @@ export default abstract class TriggerBase extends Trigger {
 			// WaitDispatchRequest so the dispatchDeferred re-entry skips
 			// past completed pre-wait steps.
 			if (err instanceof WaitDispatchRequest && traceRunId) {
-				const workflowName = this.configuration.name || ctx.workflow_name || "unknown";
+				const workflowName = cfg.name || ctx.workflow_name || "unknown";
 				const scheduledAt = err.info.scheduledAt;
 				const delayMs = Math.max(0, scheduledAt - Date.now());
 
@@ -1369,8 +1395,8 @@ export default abstract class TriggerBase extends Trigger {
 
 			const durationMs = performance.now() - runStart;
 			this.metricsBridge.recordExecution(durationMs, runSuccess, {
-				workflow_name: this.configuration.name || "",
-				workflow_version: `${this.configuration.version}`,
+				workflow_name: cfg.name || "",
+				workflow_version: `${cfg.version}`,
 				env: process.env.NODE_ENV || "development",
 			});
 			this.inFlightRequests--;
@@ -1642,7 +1668,12 @@ export default abstract class TriggerBase extends Trigger {
 		return this.constructor.name.replace("Trigger", "").toLowerCase();
 	}
 
-	createContext(logger?: LoggerContext, blueprintPath?: string, id?: string): Context {
+	createContext(
+		logger?: LoggerContext,
+		blueprintPath?: string,
+		id?: string,
+		configuration: Configuration = this.configuration,
+	): Context {
 		const requestId: string = id || uuid();
 		const request = { body: {} };
 		const response = { data: "", contentType: "", success: true, error: null };
@@ -1661,13 +1692,13 @@ export default abstract class TriggerBase extends Trigger {
 
 		const ctx: Context = {
 			id: requestId,
-			workflow_name: this.configuration.name,
+			workflow_name: configuration.name,
 			workflow_path: blueprintPath || "",
-			config: this.configuration.nodes,
+			config: configuration.nodes,
 			request,
 			response,
 			error: { message: [] },
-			logger: logger || new DefaultLogger(this.configuration.name, blueprintPath, requestId),
+			logger: logger || new DefaultLogger(configuration.name, blueprintPath, requestId),
 			eventLogger: null,
 			state,
 			// vars is a legacy alias of state — same reference, mutations

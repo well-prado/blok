@@ -16,6 +16,11 @@
  *   - **Stats**: KafkaJS exposes consumer-group lag via its admin
  *     client; the lag count is reported as `waiting`. Other stats
  *     are tracked locally per consumer.
+ *   - **Concurrency**: the `concurrency` field maps to KafkaJS's
+ *     `partitionsConsumedConcurrently` — it caps how many partitions
+ *     are processed in parallel, so it's bounded by the topic's
+ *     partition count. A single-partition topic is effectively serial
+ *     regardless of the configured value.
  *
  * Requires `kafkajs` as a peer dependency:
  *
@@ -149,6 +154,12 @@ export class KafkaAdapter implements WorkerAdapter {
 
 		await consumer.run({
 			autoCommit: config.ack !== false,
+			// F25 — honor the documented `concurrency` knob. Kafka processes
+			// messages serially per partition by default; `partitionsConsumedConcurrently`
+			// is KafkaJS's native parallelism cap (bounded by partition count).
+			// Without this the field was silently ignored — validated, accepted,
+			// even logged at startup, but with zero runtime effect.
+			partitionsConsumedConcurrently: Math.max(1, config.concurrency ?? 1),
 			eachMessage: async ({
 				message,
 			}: {
