@@ -32,4 +32,12 @@ describe("create project (non-interactive)", () => {
 	it("should accept package-manager flag in non-interactive mode", async () => {
 		expect(async () => await createProject({ name: "test-ni-pm", packageManager: "bun" })).not.toThrow();
 	});
+
+	// Bug 02: a worker scaffold with no --queue-provider must resolve without
+	// throwing (no broker is hardcoded → in-memory default boots clean). The
+	// adapter/env/dep substance is asserted deterministically in
+	// worker-scaffold.test.ts; this guards the non-interactive entrypoint.
+	it("should accept http,worker triggers without a queue-provider", async () => {
+		expect(async () => await createProject({ name: "test-ni-http-worker", triggers: "http,worker" })).not.toThrow();
+	});
 });

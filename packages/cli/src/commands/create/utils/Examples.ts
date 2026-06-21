@@ -805,14 +805,19 @@ Every workflow's \\\`name\\\` must be UNIQUE across the project. The
 \\\`WorkflowRegistry\\\` rejects duplicate names at boot, so a collision
 means only one of the colliding workflows ever registers.
 
-Prefer a dotted \\\`domain.action\\\` convention — \\\`countries.list\\\`,
-\\\`users.create\\\`, \\\`orders.refund\\\`. The typed client
-(\\\`@blokjs/client\\\`) and \\\`blokctl gen app-types\\\` nest workflows by
-their dotted name, so a clean name surfaces as
-\\\`blok.countries.list(...)\\\` instead of a quoted
+Prefer a dotted \\\`domain.action\\\` convention for the workflow
+\\\`name\\\` — \\\`countries.list\\\`, \\\`users.create\\\`,
+\\\`orders.refund\\\`. The typed client (\\\`@blokjs/client\\\`) and
+\\\`blokctl gen app-types\\\` nest workflows by their dotted name, so a clean
+name surfaces as \\\`blok.countries.list(...)\\\` instead of a quoted
 \\\`blok["World Countries"]\\\` accessor. Duplicate names also make
 \\\`gen app-types\\\` report a collision and DROP one workflow from the
 generated \\\`BlokApp\\\` type.
+
+The dotted convention applies to the workflow \\\`name\\\` only. Keep the
+\\\`Workflows.ts\\\` map KEYS dot-free (e.g. \\\`"refund-order"\\\`, not
+\\\`"orders.refund"\\\`) — the worker resolver treats the first dot in a map
+key as a file-extension delimiter, so a dotted key fails to resolve at load.
 
 ### Step Types
 
@@ -871,19 +876,25 @@ generated \\\`BlokApp\\\` type.
 The worker trigger processes background jobs from a queue with retry logic and concurrency control.
 
 \\\`\\\`\\\`typescript
-Workflow({ name: "Process Job", version: "1.0.0" })
-  .addTrigger("worker", { queue: "background-jobs" })
-  .addStep({
-    name: "process",
-    node: "my-processor",
-    type: "module",
-    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" },
-  });
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Process Job",
+  version: "1.0.0",
+  trigger: { worker: { queue: "background-jobs", concurrency: 5, retries: 3 } },
+  steps: [
+    {
+      id: "process",
+      use: "my-processor",
+      inputs: { payload: $.req.body, jobId: $.req.params.jobId },
+    },
+  ],
+});
 \\\`\\\`\\\`
 
 Job context: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue\\\` = queue name, \\\`ctx.request.params.jobId\\\` = job ID, \\\`ctx.request.params.attempt\\\` = attempt count, \\\`ctx.vars._worker_job\\\` = full metadata.
 
-Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev only).
+Worker providers: \\\`in-memory\\\` (dev default, zero infra), \\\`nats\\\`, \\\`bullmq\\\`, \\\`rabbitmq\\\`, \\\`sqs\\\`, \\\`kafka\\\`, \\\`redis\\\`, \\\`pg-boss\\\`. Resolved per-workflow via \\\`trigger.worker.provider\\\`, then \\\`BLOK_WORKER_ADAPTER\\\`, then \\\`in-memory\\\`.
 
 ### NATS JetStream
 
@@ -1056,14 +1067,21 @@ export default defineNode({
 Worker trigger processes background jobs from a queue:
 
 \\\`\\\`\\\`typescript
-Workflow({ name: "Process Job", version: "1.0.0" })
-  .addTrigger("worker", { queue: "background-jobs" })
-  .addStep({ name: "process", node: "my-processor", type: "module",
-    inputs: { payload: "js/ctx.request.body", jobId: "js/ctx.request.params.jobId" } });
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Process Job",
+  version: "1.0.0",
+  trigger: { worker: { queue: "background-jobs" } },
+  steps: [
+    { id: "process", use: "my-processor",
+      inputs: { payload: $.req.body, jobId: $.req.params.jobId } },
+  ],
+});
 \\\`\\\`\\\`
 
 Job data: \\\`ctx.request.body\\\` = payload, \\\`ctx.request.params.queue/jobId/attempt\\\` = metadata.
-Adapters: NATS JetStream (recommended), BullMQ (Redis), InMemory (dev).
+Providers: \\\`in-memory\\\` (dev default), \\\`nats\\\`, \\\`bullmq\\\`, \\\`rabbitmq\\\`, \\\`sqs\\\`, \\\`kafka\\\`, \\\`redis\\\`, \\\`pg-boss\\\` — set via \\\`trigger.worker.provider\\\` or \\\`BLOK_WORKER_ADAPTER\\\`.
 
 ## Testing
 
