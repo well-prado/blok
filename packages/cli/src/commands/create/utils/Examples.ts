@@ -837,21 +837,16 @@ key as a file-extension delimiter, so a dotted key fails to resolve at load.
 
 \`\`\`json
 {
-  "nodes": {
-    "filter": {
-      "conditions": [
-        {
-          "type": "if",
-          "condition": "ctx.request.query.active === \\\\"true\\\\"",
-          "steps": [{ "name": "active-path", "node": "handle-active", "type": "module" }]
-        },
-        {
-          "type": "else",
-          "steps": [{ "name": "default-path", "node": "handle-default", "type": "module" }]
-        }
-      ]
+  "steps": [
+    {
+      "id": "filter-request",
+      "branch": {
+        "when": "ctx.request.query.active === \\\\"true\\\\"",
+        "then": [{ "id": "active-path", "use": "handle-active", "type": "module" }],
+        "else": [{ "id": "default-path", "use": "handle-default", "type": "module" }]
+      }
     }
-  }
+  ]
 }
 \`\`\`
 
@@ -864,7 +859,6 @@ key as a file-extension delimiter, so a dotted key fails to resolve at load.
 | \\\`http\\\` | \\\`{ "method": "GET", "path": "/", "accept": "application/json" }\\\` |
 | \\\`grpc\\\` | \\\`{ "service": "UserService", "method": "GetUser" }\\\` |
 | \\\`cron\\\` | \\\`{ "schedule": "0 * * * *", "timezone": "UTC" }\\\` |
-| \\\`queue\\\` | \\\`{ "provider": "kafka", "topic": "events" }\\\` |
 | \\\`pubsub\\\` | \\\`{ "provider": "gcp", "topic": "updates" }\\\` |
 | \\\`webhook\\\` | \\\`{ "source": "github", "events": ["push"] }\\\` |
 | \\\`websocket\\\` | \\\`{ "events": ["message"], "path": "/ws" }\\\` |
