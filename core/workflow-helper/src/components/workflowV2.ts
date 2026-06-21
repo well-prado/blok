@@ -215,6 +215,16 @@ export function workflow<
 	// (the schema sees only strings; proxies would fail z.string().min(1)).
 	const compiledSteps = unwrapProxies(opts.steps) as V2Step[];
 
+	// A workflow with no steps does nothing. `WorkflowV2Schema.steps` declares
+	// `.min(1)`, but the factory validates steps per-element (a no-op on `[]`)
+	// rather than parsing the array, so an empty `steps` would otherwise slip
+	// through. Check length explicitly — a dedicated message beats the schema's
+	// generic one, and it sidesteps the schema-step shape vs. compiled-V2Step
+	// shape mismatch a full `.pick({ steps: true })` parse would hit.
+	if (compiledSteps.length === 0) {
+		throw new Error(`workflow("${opts.name}") requires at least one step.`);
+	}
+
 	// Per-step schema check — surface authoring errors loudly.
 	for (let i = 0; i < compiledSteps.length; i++) {
 		const parsed = V2StepSchema.safeParse(compiledSteps[i]);

@@ -124,3 +124,27 @@ describe("workflow() — envelope validation (F16)", () => {
 		).toThrow(/failed validation/);
 	});
 });
+
+describe("workflow() — empty steps", () => {
+	it("throws when `steps` is empty", () => {
+		expect(() =>
+			workflow({
+				name: "no-steps",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/x" } },
+				steps: [],
+			}),
+		).toThrow(/requires at least one step/);
+	});
+
+	it("throws on empty steps even for a trigger-less middleware workflow", () => {
+		expect(() =>
+			workflow({
+				name: "no-steps",
+				version: "1.0.0",
+				middleware: true,
+				steps: [],
+			}),
+		).toThrow(/requires at least one step/);
+	});
+});
