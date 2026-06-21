@@ -256,81 +256,6 @@ export abstract class WorkerTrigger extends TriggerBase {
 	}
 
 	/**
-	 * F6 (worker part) — populate the process-wide {@link WorkflowRegistry}
-	 * from the worker's own `nodeMap.workflows`.
-	 *
-	 * Implemented SELF-CONTAINED inside `WorkerTrigger` (no dependency on a
-	 * shared `TriggerBase` helper) so worker-only deployments get a populated
-	 * registry without an HttpTrigger present. Each workflow is registered
-	 * under its `name`, with `isMiddleware: true` when the workflow root sets
-	 * `middleware: true`, mirroring HttpTrigger's middleware registration.
-	 *
-	 * Idempotent: re-registering the same `(name, source)` is a no-op, so HMR
-	 * re-scans don't throw. Same-name/different-source collisions surface as
-	 * the registry's loud error — but we swallow per-entry failures so one bad
-	 * workflow can't abort worker boot.
-	 */
-	protected registerWorkflowsFromNodeMap(): void {
-		const registry = WorkflowRegistry.getInstance();
-		let count = 0;
-		let middlewareCount = 0;
-
-		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			const wfConfig = (workflow as unknown as { _config?: { name?: unknown; middleware?: unknown } })._config;
-			const name = typeof wfConfig?.name === "string" && wfConfig.name.length > 0 ? wfConfig.name : path;
-			if (!name) continue;
-			const isMiddleware = wfConfig?.middleware === true;
-			try {
-				registry.register({
-					name,
-					source: path,
-					// Pass the original builder/locator object so the registry's
-					// downstream `Configuration.init(name, opts, preloaded)` path
-					// normalizes it identically to HTTP.
-					workflow,
-					isMiddleware,
-				});
-				count++;
-				if (isMiddleware) middlewareCount++;
-			} catch (err) {
-				this.logger.error(
-					`[blok][worker] registry registration failed for "${name}": ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		}
-
-		if (count > 0) {
-			this.logger.log(
-				`[blok][worker] workflow registry — ${count} workflow(s) registered (${middlewareCount} middleware)`,
-			);
-		}
-	}
-
-	/**
-	 * F14 (worker part) — seed the process-global middleware chain from the
-	 * `BLOK_GLOBAL_MIDDLEWARE` env var.
-	 *
-	 * Implemented SELF-CONTAINED inside `WorkerTrigger` (no shared TriggerBase
-	 * helper) and gated on the existing `getGlobalMiddleware().length === 0`
-	 * idempotency check, so a programmatic `setGlobalMiddleware([...])` call
-	 * always takes precedence over the env var.
-	 */
-	protected seedGlobalMiddlewareFromEnv(): void {
-		const registry = WorkflowRegistry.getInstance();
-		if (registry.getGlobalMiddleware().length === 0 && process.env.BLOK_GLOBAL_MIDDLEWARE) {
-			const fromEnv = process.env.BLOK_GLOBAL_MIDDLEWARE.split(",")
-				.map((n) => n.trim())
-				.filter((n) => n.length > 0);
-			if (fromEnv.length > 0) {
-				registry.setGlobalMiddleware(fromEnv);
-				this.logger.log(
-					`[blok][worker] global middleware registered from BLOK_GLOBAL_MIDDLEWARE env: ${fromEnv.join(", ")}`,
-				);
-			}
-		}
-	}
-
-	/**
 	 * Start the worker processor - main entry point
 	 */
 	async listen(): Promise<number> {
@@ -349,12 +274,12 @@ export abstract class WorkerTrigger extends TriggerBase {
 		// this the registry is empty and any trigger-level / process-global
 		// middleware name or `subworkflow:` step fails at runtime. Workflows
 		// flagged `middleware: true` are registered with `isMiddleware`.
-		this.registerWorkflowsFromNodeMap();
+		this.registerWorkflowsFromNodeMap(this.logger);
 
 		// F14 (worker part) — seed BLOK_GLOBAL_MIDDLEWARE from env. Only
 		// HttpTrigger did this before, so a pure worker process silently
 		// dropped the documented env-var configuration.
-		this.seedGlobalMiddlewareFromEnv();
+		this.seedGlobalMiddlewareFromEnv(this.logger);
 
 		try {
 			// Tier 2 #6 follow-up · install the cross-process concurrency
