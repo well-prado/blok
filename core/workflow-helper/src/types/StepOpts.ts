@@ -157,6 +157,32 @@ export const RetryConfigSchema = z
 export type RetryConfig = z.infer<typeof RetryConfigSchema>;
 
 /**
+ * F9 — build an optional `z.never()` field that rejects a trigger-only
+ * config field placed on a step.
+ *
+ * Steps share many field names with the trigger config (`concurrencyKey`,
+ * `delay`, `ttl`, `debounce`, …), so an author who means to gate the
+ * *trigger* can easily drop the field on a *step*. `.strict()` already
+ * rejects unknown keys, but with a generic "Unrecognized key(s)" message.
+ * These `.never()` arms surface a feature-specific error that names the
+ * field and points to the trigger config — turning a silent no-op into a
+ * loud, well-located authoring error (the same philosophy as the wait
+ * step's explicit rejections).
+ *
+ * `.optional()` permits `undefined`, so well-formed steps that simply omit
+ * the field pass unchanged.
+ */
+function triggerOnlyField(field: string) {
+	return z
+		.never({
+			errorMap: () => ({
+				message: `\`${field}\` is a trigger-level field, not a step field — move it to the workflow's trigger config (e.g. \`trigger.http.${field}\` / \`trigger.worker.${field}\`).`,
+			}),
+		})
+		.optional();
+}
+
+/**
  * V2 regular step — invokes a node with inputs.
  *
  * **Identity**
@@ -299,7 +325,19 @@ export const V2RegularStepSchema = z
 				'run auto-flips to `"timedOut"` status (distinct from `"failed"` ' +
 				"so SLA dashboards can separate timeouts from logic failures).",
 		),
+		// F9 — explicit rejection of trigger-only fields that authors plausibly
+		// carry over onto a step. `.strict()` below already rejects unknown keys
+		// with a generic "Unrecognized key(s)" message; these `.never()` arms
+		// produce a feature-specific error that points authors at the trigger
+		// config so a misplaced field doesn't silently disable concurrency /
+		// scheduling. `.optional()` permits undefined (the normal case).
+		concurrencyKey: triggerOnlyField("concurrencyKey"),
+		concurrencyLimit: triggerOnlyField("concurrencyLimit"),
+		delay: triggerOnlyField("delay"),
+		ttl: triggerOnlyField("ttl"),
+		debounce: triggerOnlyField("debounce"),
 	})
+	.strict()
 	.refine((step) => !(step.as && step.spread), {
 		message: "`as` and `spread` are mutually exclusive — pick one.",
 		path: ["spread"],
@@ -330,24 +368,29 @@ export const V2BranchStepSchema: z.ZodType<{
 	active?: boolean;
 	stop?: boolean;
 }> = z.lazy(() =>
-	z.object({
-		id: z.string().min(1).describe("Stable identifier for the branch step. Visible in traces."),
-		branch: z
-			.object({
-				when: z
-					.string()
-					.min(1)
-					.describe(
-						"JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. " +
-							"$ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true').",
-					),
-				then: z.array(z.unknown()).describe("Steps to execute when `when` is truthy."),
-				else: z.array(z.unknown()).optional().describe("Steps to execute when `when` is falsy. Optional."),
-			})
-			.describe("Conditional sub-pipeline."),
-		active: z.boolean().optional(),
-		stop: z.boolean().optional(),
-	}),
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier for the branch step. Visible in traces."),
+			branch: z
+				.object({
+					when: z
+						.string()
+						.min(1)
+						.describe(
+							"JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. " +
+								"$ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true').",
+						),
+					then: z.array(z.unknown()).describe("Steps to execute when `when` is truthy."),
+					else: z.array(z.unknown()).optional().describe("Steps to execute when `when` is falsy. Optional."),
+				})
+				.strict()
+				.describe("Conditional sub-pipeline."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+		})
+		// F9 — reject unknown top-level keys (typo'd `branch`, misplaced trigger
+		// fields) with a clear error instead of silently dropping them.
+		.strict(),
 );
 
 export type V2BranchStep = z.infer<typeof V2BranchStepSchema>;
@@ -521,6 +564,9 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 						"`X-Blok-Parent-Run-Id` / `X-Blok-Parent-Node-Run-Id` headers.",
 				),
 		})
+		// F9 — reject unknown top-level keys (e.g. a misspelled `subworkflow`
+		// or a misplaced trigger field) instead of silently dropping them.
+		.strict()
 		.refine((step) => !(step.as && step.spread), {
 			message: "`as` and `spread` are mutually exclusive — pick one.",
 			path: ["spread"],
@@ -643,39 +689,43 @@ export type V2WaitStep = z.infer<typeof V2WaitStepSchema>;
  *   })
  */
 export const V2ForEachStepSchema = z.lazy(() =>
-	z.object({
-		id: z.string().min(1).describe("Stable identifier for the forEach step. Visible in traces."),
-		forEach: z
-			.object({
-				in: z
-					.unknown()
-					.describe("Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."),
-				as: z
-					.string()
-					.min(1)
-					.regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "as must be a valid identifier (letters, digits, underscore)")
-					.describe(
-						"Per-iteration variable name. Each iteration sets ctx.state[as] = item and ctx.state[as+'Index'] = i.",
-					),
-				mode: z
-					.enum(["sequential", "parallel"])
-					.optional()
-					.describe(
-						"Execution mode. `sequential` (default) awaits each iteration; `parallel` runs with bounded concurrency.",
-					),
-				concurrency: z
-					.number()
-					.int()
-					.min(1)
-					.max(1000)
-					.optional()
-					.describe("Max concurrent inner pipelines when `mode: 'parallel'`. Default 10."),
-				do: z.array(z.unknown()).min(1).describe("Sub-pipeline run for each item."),
-			})
-			.describe("forEach configuration."),
-		active: z.boolean().optional(),
-		stop: z.boolean().optional(),
-	}),
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier for the forEach step. Visible in traces."),
+			forEach: z
+				.object({
+					in: z
+						.unknown()
+						.describe("Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."),
+					as: z
+						.string()
+						.min(1)
+						.regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "as must be a valid identifier (letters, digits, underscore)")
+						.describe(
+							"Per-iteration variable name. Each iteration sets ctx.state[as] = item and ctx.state[as+'Index'] = i.",
+						),
+					mode: z
+						.enum(["sequential", "parallel"])
+						.optional()
+						.describe(
+							"Execution mode. `sequential` (default) awaits each iteration; `parallel` runs with bounded concurrency.",
+						),
+					concurrency: z
+						.number()
+						.int()
+						.min(1)
+						.max(1000)
+						.optional()
+						.describe("Max concurrent inner pipelines when `mode: 'parallel'`. Default 10."),
+					do: z.array(z.unknown()).min(1).describe("Sub-pipeline run for each item."),
+				})
+				.strict()
+				.describe("forEach configuration."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+		})
+		// F9 — reject unknown top-level keys instead of silently dropping them.
+		.strict(),
 );
 
 export type V2ForEachStep = z.infer<typeof V2ForEachStepSchema>;
@@ -695,29 +745,33 @@ export type V2ForEachStep = z.infer<typeof V2ForEachStepSchema>;
  *   })
  */
 export const V2LoopStepSchema = z.lazy(() =>
-	z.object({
-		id: z.string().min(1).describe("Stable identifier for the loop step. Visible in traces."),
-		loop: z
-			.object({
-				while: z
-					.string()
-					.min(1)
-					.describe("JS expression evaluated against ctx before each iteration. Loop continues while truthy."),
-				maxIterations: z
-					.number()
-					.int()
-					.min(1)
-					.optional()
-					.describe(
-						"Hard safety cap on iterations. Default 1000 (override via env BLOK_LOOP_MAX_ITERATIONS). " +
-							"Hitting the cap throws LoopMaxIterationsError.",
-					),
-				do: z.array(z.unknown()).min(1).describe("Sub-pipeline run each iteration."),
-			})
-			.describe("loop configuration."),
-		active: z.boolean().optional(),
-		stop: z.boolean().optional(),
-	}),
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier for the loop step. Visible in traces."),
+			loop: z
+				.object({
+					while: z
+						.string()
+						.min(1)
+						.describe("JS expression evaluated against ctx before each iteration. Loop continues while truthy."),
+					maxIterations: z
+						.number()
+						.int()
+						.min(1)
+						.optional()
+						.describe(
+							"Hard safety cap on iterations. Default 1000 (override via env BLOK_LOOP_MAX_ITERATIONS). " +
+								"Hitting the cap throws LoopMaxIterationsError.",
+						),
+					do: z.array(z.unknown()).min(1).describe("Sub-pipeline run each iteration."),
+				})
+				.strict()
+				.describe("loop configuration."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+		})
+		// F9 — reject unknown top-level keys instead of silently dropping them.
+		.strict(),
 );
 
 export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
@@ -744,36 +798,42 @@ export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
  *   })
  */
 export const V2SwitchStepSchema = z.lazy(() =>
-	z.object({
-		id: z.string().min(1).describe("Stable identifier for the switch step. Visible in traces."),
-		switch: z
-			.object({
-				on: z
-					.unknown()
-					.describe(
-						"Value to match against. Literal, `$` proxy expression, or `js/...` string. " +
-							"Resolved by the blueprint mapper before matching.",
-					),
-				cases: z
-					.array(
-						z.object({
-							when: z
-								.unknown()
-								.describe(
-									"Match value. Literal scalar (number/string/boolean) for `on === when` " +
-										"matching, or an array for `array.includes(on)` matching.",
-								),
-							do: z.array(z.unknown()).min(1).describe("Sub-pipeline run when this case matches."),
-						}),
-					)
-					.min(1)
-					.describe("Ordered list of cases. First match wins."),
-				default: z.array(z.unknown()).optional().describe("Fallback sub-pipeline when no case matches. Optional."),
-			})
-			.describe("switch configuration."),
-		active: z.boolean().optional(),
-		stop: z.boolean().optional(),
-	}),
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier for the switch step. Visible in traces."),
+			switch: z
+				.object({
+					on: z
+						.unknown()
+						.describe(
+							"Value to match against. Literal, `$` proxy expression, or `js/...` string. " +
+								"Resolved by the blueprint mapper before matching.",
+						),
+					cases: z
+						.array(
+							z
+								.object({
+									when: z
+										.unknown()
+										.describe(
+											"Match value. Literal scalar (number/string/boolean) for `on === when` " +
+												"matching, or an array for `array.includes(on)` matching.",
+										),
+									do: z.array(z.unknown()).min(1).describe("Sub-pipeline run when this case matches."),
+								})
+								.strict(),
+						)
+						.min(1)
+						.describe("Ordered list of cases. First match wins."),
+					default: z.array(z.unknown()).optional().describe("Fallback sub-pipeline when no case matches. Optional."),
+				})
+				.strict()
+				.describe("switch configuration."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+		})
+		// F9 — reject unknown top-level keys instead of silently dropping them.
+		.strict(),
 );
 
 export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
@@ -810,36 +870,68 @@ export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
  *   })
  */
 export const V2TryCatchStepSchema = z.lazy(() =>
-	z.object({
-		id: z.string().min(1).describe("Stable identifier for the tryCatch step. Visible in traces."),
-		tryCatch: z
-			.object({
-				try: z
-					.array(z.unknown())
-					.min(1)
-					.describe("Sub-pipeline run first. If any step throws, control jumps to `catch`."),
-				catch: z
-					.array(z.unknown())
-					.min(1)
-					.describe(
-						"Sub-pipeline run when `try` throws. Has access to `$.error` " +
-							"(message, name, stack). Errors here propagate — they do NOT re-trigger catch.",
-					),
-				finally: z
-					.array(z.unknown())
-					.optional()
-					.describe(
-						"Sub-pipeline run unconditionally after try/catch. Runs even if " +
-							"`catch` itself throws. Errors here propagate.",
-					),
-			})
-			.describe("tryCatch configuration."),
-		active: z.boolean().optional(),
-		stop: z.boolean().optional(),
-	}),
+	z
+		.object({
+			id: z.string().min(1).describe("Stable identifier for the tryCatch step. Visible in traces."),
+			tryCatch: z
+				.object({
+					try: z
+						.array(z.unknown())
+						.min(1)
+						.describe("Sub-pipeline run first. If any step throws, control jumps to `catch`."),
+					catch: z
+						.array(z.unknown())
+						.min(1)
+						.describe(
+							"Sub-pipeline run when `try` throws. Has access to `$.error` " +
+								"(message, name, stack). Errors here propagate — they do NOT re-trigger catch.",
+						),
+					finally: z
+						.array(z.unknown())
+						.optional()
+						.describe(
+							"Sub-pipeline run unconditionally after try/catch. Runs even if " +
+								"`catch` itself throws. Errors here propagate.",
+						),
+				})
+				.strict()
+				.describe("tryCatch configuration."),
+			active: z.boolean().optional(),
+			stop: z.boolean().optional(),
+		})
+		// F9 — reject unknown top-level keys instead of silently dropping them.
+		.strict(),
 );
 
 export type V2TryCatchStep = z.infer<typeof V2TryCatchStepSchema>;
+
+/**
+ * F22 — pick the single member schema a step shape should be validated
+ * against, using key presence (the same discriminators the `isXStep` guards
+ * use). The regular-step schema is the catch-all when no control-flow key is
+ * present.
+ *
+ * Returning ONE schema (instead of a `z.union` that tries every member) is
+ * what gives accurate errors: a malformed `branch` step is validated only
+ * against the branch schema, so the surfaced message is "branch.when is
+ * required" — not a noisy `invalid_union` that also complains `use` is
+ * required (a regular-step field unrelated to branches).
+ */
+function selectV2StepSchema(value: unknown): z.ZodTypeAny {
+	if (typeof value !== "object" || value === null) {
+		// Not an object — let the regular-step schema produce the canonical
+		// "id is required" / "use is required" error.
+		return V2RegularStepSchema;
+	}
+	if ("branch" in value) return V2BranchStepSchema;
+	if ("subworkflow" in value) return V2SubworkflowStepSchema;
+	if ("wait" in value) return V2WaitStepSchema;
+	if ("forEach" in value) return V2ForEachStepSchema;
+	if ("loop" in value) return V2LoopStepSchema;
+	if ("switch" in value) return V2SwitchStepSchema;
+	if ("tryCatch" in value) return V2TryCatchStepSchema;
+	return V2RegularStepSchema;
+}
 
 /**
  * Discriminated v2 step — regular, branch, sub-workflow, wait, forEach, loop, switch, or tryCatch.
@@ -853,6 +945,15 @@ export type V2TryCatchStep = z.infer<typeof V2TryCatchStepSchema>;
  * - presence of `switch` → switch step (v0.5)
  * - presence of `tryCatch` → tryCatch step (v0.5)
  * - otherwise → regular step
+ *
+ * **F22**: implemented as a key-presence dispatch rather than a plain
+ * `z.union`. A plain union tries every member and, on failure, aggregates an
+ * `invalid_union` error spanning all arms — so a malformed control-flow step
+ * was reported with a misleading "`use` is required" (the regular-step arm's
+ * error) mixed in. Dispatching to exactly one member surfaces that member's
+ * error verbatim, which matters most for LLM- and hand-authored raw object
+ * literals (the recommended `branch()`/`forEach()`/… helpers already throw a
+ * clean error before this schema runs).
  */
 export const V2StepSchema: z.ZodType<
 	| V2RegularStep
@@ -864,17 +965,27 @@ export const V2StepSchema: z.ZodType<
 	| V2SwitchStep
 	| V2TryCatchStep
 > = z.lazy(() =>
-	z.union([
-		V2BranchStepSchema,
-		V2SubworkflowStepSchema,
-		V2WaitStepSchema,
-		V2ForEachStepSchema,
-		V2LoopStepSchema,
-		V2SwitchStepSchema,
-		V2TryCatchStepSchema,
-		V2RegularStepSchema,
-	]),
-);
+	z.unknown().transform((value, ctx) => {
+		const schema = selectV2StepSchema(value);
+		const parsed = schema.safeParse(value);
+		if (!parsed.success) {
+			for (const issue of parsed.error.issues) {
+				ctx.addIssue(issue);
+			}
+			return z.NEVER;
+		}
+		return parsed.data;
+	}),
+) as z.ZodType<
+	| V2RegularStep
+	| V2BranchStep
+	| V2SubworkflowStep
+	| V2WaitStep
+	| V2ForEachStep
+	| V2LoopStep
+	| V2SwitchStep
+	| V2TryCatchStep
+>;
 
 export type V2Step =
 	| V2RegularStep

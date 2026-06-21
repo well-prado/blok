@@ -899,6 +899,21 @@ export type AnyTriggerOpts =
  *   // throws: 'Trigger "cron" requires a configuration object.'
  */
 export function validateTriggerConfig(name: TriggersEnum, config: unknown): unknown {
+	// F10 — `queue` is a fully-validated DSL trigger kind with NO runtime: no
+	// `triggers/queue` package exists and `WorkerTrigger` only discovers
+	// `triggerType === "worker"`, so a `trigger.queue` workflow constructs
+	// cleanly and then silently never runs. Reject it loudly at construction
+	// time and point authors at `worker` (the kind that actually consumes a
+	// queue) instead of letting them ship a dead trigger. The two schemas
+	// diverge (`queue` uses `topic`/`maxRetries`; `worker` uses
+	// `queue`/`retries`), so we reject rather than silently alias.
+	if (name === "queue") {
+		throw new Error(
+			'Trigger kind "queue" has no runtime and never executes — use "worker" instead ' +
+				'(e.g. `trigger: { worker: { queue: "<name>" } }`). The `queue` config maps ' +
+				"`topic` → `queue` and `maxRetries` → `retries` on the worker trigger.",
+		);
+	}
 	const schema = TRIGGER_SCHEMAS[name];
 	if (schema === null) {
 		// Triggers with no schema accept anything (including undefined).
