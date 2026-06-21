@@ -18,16 +18,22 @@ export default class LocalStorage extends ResolverBase {
 		let name_fixed = name;
 
 		if (name_fixed.indexOf(".") !== -1) {
-			// If the name contains a dot it is a file path
-			// and we should use the file type of the file path
+			// A dot only denotes a file path when the trailing segment is a
+			// supported file extension (json/yaml/xml/toml). Otherwise the dot
+			// is part of a dotted `domain.action` workflow NAME — strip nothing,
+			// keep the default file type, and let the lookup fall through to the
+			// in-memory `workflowLocator` fallback or the accurate
+			// `Workflow not found` error. Bug 03 (defense-in-depth): previously
+			// any non-extension tail threw `File type not supported`, which broke
+			// the framework's own recommended dotted-name convention on the
+			// worker resolver path.
 			const parts = name.split(".");
-			workflowFileType = parts[parts.length - 1].toLowerCase();
+			const maybeExt = parts[parts.length - 1].toLowerCase();
 
-			if (!this.fileTypes.includes(workflowFileType)) {
-				throw new Error(`File type not supported: ${workflowFileType}`);
+			if (this.fileTypes.includes(maybeExt)) {
+				workflowFileType = maybeExt;
+				name_fixed = parts.slice(0, -1).join(".");
 			}
-
-			name_fixed = parts.slice(0, -1).join(".");
 		}
 
 		const workflowPathJson = `${rootPath}/${workflowFileType}/${name_fixed}.${workflowFileType}`;
