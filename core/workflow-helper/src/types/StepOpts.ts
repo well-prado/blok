@@ -954,6 +954,24 @@ function selectV2StepSchema(value: unknown): z.ZodTypeAny {
  * error verbatim, which matters most for LLM- and hand-authored raw object
  * literals (the recommended `branch()`/`forEach()`/… helpers already throw a
  * clean error before this schema runs).
+ *
+ * **Why a union-of-members + a permissive catch-all arm, and NOT a plain
+ * `z.unknown().transform(...)`:** `WorkflowV2Schema.steps` is
+ * `z.array(V2StepSchema)`, and `scripts/build-schema.ts` runs
+ * `zodToJsonSchema(WorkflowV2Schema)` to publish the JSON Schema the VS Code
+ * extension consumes for `.json`-workflow autocomplete + inline docs. A bare
+ * `z.unknown()` renders to `{}` (no structure → no autocomplete), which would
+ * silently gut that tooling. Keeping the eight real member schemas as a
+ * `z.union` preserves their full shapes (and every `.describe(...)` string) in
+ * the generated `anyOf`. The trailing `z.any()` arm makes the union itself
+ * always succeed so the `superRefine` below — which runs the single-member
+ * dispatch and re-emits exactly that member's issues — owns error reporting
+ * (no `invalid_union` aggregation). The catch-all renders as one extra
+ * permissive `{}` branch in `anyOf`; editors still surface all eight concrete
+ * shapes for completion. `superRefine` does not transform, so the parsed
+ * `.data` is the input value unchanged — which is what every consumer relies
+ * on (the factory keeps the original `compiledSteps`; `WorkflowV2Schema` is
+ * only walked for JSON-Schema generation, never enforced at runtime).
  */
 export const V2StepSchema: z.ZodType<
 	| V2RegularStep
@@ -965,17 +983,30 @@ export const V2StepSchema: z.ZodType<
 	| V2SwitchStep
 	| V2TryCatchStep
 > = z.lazy(() =>
-	z.unknown().transform((value, ctx) => {
-		const schema = selectV2StepSchema(value);
-		const parsed = schema.safeParse(value);
-		if (!parsed.success) {
-			for (const issue of parsed.error.issues) {
-				ctx.addIssue(issue);
+	z
+		.union([
+			V2BranchStepSchema,
+			V2SubworkflowStepSchema,
+			V2WaitStepSchema,
+			V2ForEachStepSchema,
+			V2LoopStepSchema,
+			V2SwitchStepSchema,
+			V2TryCatchStepSchema,
+			V2RegularStepSchema,
+			// Catch-all so the union always succeeds and the superRefine below
+			// owns error reporting (single-member, no invalid_union noise). See
+			// the docstring above for why this is a union and not a transform.
+			z.any(),
+		])
+		.superRefine((value, ctx) => {
+			const schema = selectV2StepSchema(value);
+			const parsed = schema.safeParse(value);
+			if (!parsed.success) {
+				for (const issue of parsed.error.issues) {
+					ctx.addIssue(issue);
+				}
 			}
-			return z.NEVER;
-		}
-		return parsed.data;
-	}),
+		}),
 ) as z.ZodType<
 	| V2RegularStep
 	| V2BranchStep

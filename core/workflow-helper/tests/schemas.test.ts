@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
 	NodeTypeSchema,
 	RetryConfigSchema,
@@ -507,6 +508,82 @@ describe("F22 — V2StepSchema single-member error discrimination", () => {
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			expect(result.error.message).not.toMatch(/`use` is required/i);
+		}
+	});
+
+	it("a malformed wait step reports the wait error, not `use is required` (dispatch by `wait`)", () => {
+		// `wait` present but empty → wait member's "for/until mutually exclusive"
+		// refinement, NOT the regular-step `use` error.
+		const result = V2StepSchema.safeParse({ id: "w", wait: {} });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("a malformed switch step reports the switch error, not `use is required` (dispatch by `switch`)", () => {
+		const result = V2StepSchema.safeParse({ id: "sw", switch: { on: "$.x", cases: [] } });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).not.toMatch(/`use` is required/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("dispatches a misplaced trigger field on a regular step to the F9 trigger-level hint", () => {
+		// A regular step (no control-flow key) carrying a trigger-only field must
+		// surface the F9 hint, NOT a noisy invalid_union, confirming F9 + F22
+		// compose through the single-member dispatch.
+		const result = V2StepSchema.safeParse({ id: "f", use: "n", concurrencyKey: "tenant-1" });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.error.message).toMatch(/trigger-level field/i);
+			expect(result.error.issues.some((iss) => iss.code === "invalid_union")).toBe(false);
+		}
+	});
+
+	it("accepts every control-flow step shape through V2StepSchema (dispatch coverage)", () => {
+		const shapes: unknown[] = [
+			{ id: "r", use: "@blokjs/api-call" },
+			{ id: "b", branch: { when: "true", then: [{ id: "x", use: "n" }] } },
+			{ id: "s", subworkflow: "child" },
+			{ id: "w", wait: { for: "1h" } },
+			{ id: "fe", forEach: { in: "$.x", as: "item", do: [{ id: "x", use: "n" }] } },
+			{ id: "lp", loop: { while: "true", do: [{ id: "x", use: "n" }] } },
+			{ id: "sw", switch: { on: "$.x", cases: [{ when: "a", do: [{ id: "x", use: "n" }] }] } },
+			{ id: "tc", tryCatch: { try: [{ id: "x", use: "n" }], catch: [{ id: "y", use: "n" }] } },
+		];
+		for (const shape of shapes) {
+			expect(V2StepSchema.safeParse(shape).success).toBe(true);
+		}
+	});
+
+	// Regression guard: V2StepSchema feeds `WorkflowV2Schema.steps`, which
+	// `scripts/build-schema.ts` runs through `zodToJsonSchema` to publish the
+	// JSON Schema the VS Code extension consumes for `.json`-workflow
+	// autocomplete + inline docs. An earlier F22 attempt used
+	// `z.unknown().transform(...)`, which renders to `{}` (no structure → no
+	// autocomplete), silently gutting that tooling. The schema MUST still emit
+	// an `anyOf` carrying the concrete per-step-type member shapes.
+	it("renders an anyOf of the per-step-type member shapes for editor tooling", () => {
+		const json = zodToJsonSchema(V2StepSchema, { target: "jsonSchema7", $refStrategy: "none" }) as {
+			anyOf?: Array<{ properties?: Record<string, unknown> }>;
+		};
+		expect(Array.isArray(json.anyOf)).toBe(true);
+		const members = json.anyOf ?? [];
+		// The eight concrete step shapes must each be present as a structured
+		// object member (discriminated by their control-flow key, or `use` for
+		// the regular step). The catch-all permissive arm may add one more.
+		const discriminators = new Set<string>();
+		for (const m of members) {
+			if (!m.properties) continue;
+			for (const key of ["branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch", "use"]) {
+				if (key in m.properties) discriminators.add(key);
+			}
+		}
+		for (const key of ["branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch", "use"]) {
+			expect(discriminators.has(key)).toBe(true);
 		}
 	});
 });
