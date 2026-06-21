@@ -38,7 +38,7 @@ import workflows from "../Workflows";
 import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
-import { type RouteCollision, type RouteEntry, buildRouteTable } from "./WorkflowRouter";
+import { type RouteCollision, type RouteEntry, buildRouteTable, readMiddlewareFlag } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
 import { buildNodeCatalog } from "./nodeCatalog";
 import { emitWorkflowResponse } from "./responseEmitter";
@@ -79,6 +79,36 @@ export function isFileBasedRoutingEnabled(): boolean {
 	const legacyFlag = process.env.BLOK_ROUTING_LEGACY === "1" || process.env.BLOK_ROUTING_LEGACY === "true";
 	if (explicitFalse || legacyFlag) return false;
 	return true;
+}
+
+/**
+ * Read a workflow object's `name`, covering both shapes: a JSON / raw object
+ * literal carries `name` on the root, while a v2 `workflow()` builder carries
+ * it on the nested `_config`. Returns `undefined` when neither is a string.
+ */
+function readWorkflowName(wf: unknown): string | undefined {
+	if (!wf || typeof wf !== "object") return undefined;
+	const w = wf as { name?: unknown; _config?: { name?: unknown } };
+	if (typeof w.name === "string") return w.name;
+	if (typeof w._config?.name === "string") return w._config.name;
+	return undefined;
+}
+
+/**
+ * F8 — does a workflow object expose an `http` trigger block? Reads both the
+ * root `trigger` (JSON / raw object literals) and `_config.trigger` (v2
+ * `workflow()` builders). Used to gate the `/__blok/rpc/:name` mount so only
+ * http-callable workflows run via RPC: a worker/cron-only workflow registered
+ * for sub-workflow lookup must NOT be reachable (and middleware-resolvable as
+ * http) over HTTP. Mirrors the route table's `extractHttpTrigger` filter.
+ */
+function hasHttpTrigger(wf: unknown): boolean {
+	if (!wf || typeof wf !== "object") return false;
+	const obj = wf as { trigger?: unknown; _config?: { trigger?: unknown } };
+	const trigger = (obj.trigger ?? obj._config?.trigger) as Record<string, unknown> | undefined;
+	if (!trigger || typeof trigger !== "object") return false;
+	const http = (trigger as Record<string, unknown>).http;
+	return !!http && typeof http === "object";
 }
 
 export default class HttpTrigger extends TriggerBase {
@@ -340,15 +370,43 @@ export default class HttpTrigger extends TriggerBase {
 		// keeps HMR semantics — a re-scan invalidates stale entries.
 		const registry = WorkflowRegistry.getInstance();
 		registry.clear();
-		const registered = new Set<string>();
+		// F7 — track name→source instead of a bare Set so a SECOND file claiming
+		// the same workflow `name` from a DIFFERENT source surfaces as a loud
+		// collision diagnostic. Previously this silent pre-dedupe routed around
+		// `WorkflowRegistry.register`'s same-name/different-source throw, leaving
+		// the registry-keyed callers (sub-workflow lookup, RPC mount) silently
+		// bound to whichever entry sorted first by specificity. We keep the
+		// deterministic winner (first-registered) so boot stays tolerant, but no
+		// longer hide the collision.
+		const registered = new Map<string, string>();
 		for (const r of table) {
-			const wfName = (r.workflow as { name?: string })?.name ?? r.workflowKey;
-			if (registered.has(wfName)) continue;
-			registered.add(wfName);
+			const wfName = readWorkflowName(r.workflow) ?? r.workflowKey;
+			const existingSource = registered.get(wfName);
+			if (existingSource !== undefined) {
+				if (existingSource !== r.source) {
+					const message = `[blok] workflow name collision — "${wfName}" is claimed by ${existingSource} and ${r.source}; only ${existingSource} is reachable as a sub-workflow / via RPC. Rename one workflow so each \`name\` is unique.`;
+					this.logger.error(message);
+					diagnostics.record({
+						kind: "duplicate",
+						winnerSource: existingSource,
+						droppedSource: r.source,
+						message,
+					});
+				}
+				continue;
+			}
+			registered.set(wfName, r.source);
 			registry.register({
 				name: wfName,
 				source: r.source,
 				workflow: r.workflow,
+				// Bug 01 — derive the middleware marker from the workflow object.
+				// `buildRouteTable` already excludes middleware, so in practice
+				// this is always false for routed entries; reading it here keeps
+				// the flag correct if that exclusion is ever relaxed and covers
+				// raw-object-literal / legacy `Workflow()` middleware that slipped
+				// in with a trigger.
+				isMiddleware: readMiddlewareFlag(r.workflow),
 			});
 		}
 		if (registered.size > 0) {
@@ -361,12 +419,11 @@ export default class HttpTrigger extends TriggerBase {
 		// lookups in `runMiddlewareChain` can find them.
 		let middlewareCount = 0;
 		for (const sw of scannedJson) {
-			const wfObj = sw.workflow as { name?: unknown; middleware?: unknown } | undefined;
-			if (!wfObj || wfObj.middleware !== true) continue;
-			const wfName = typeof wfObj.name === "string" ? wfObj.name : sw.name;
+			if (!readMiddlewareFlag(sw.workflow)) continue;
+			const wfName = readWorkflowName(sw.workflow) ?? sw.name;
 			if (!wfName) continue;
 			if (registered.has(wfName)) continue;
-			registered.add(wfName);
+			registered.set(wfName, sw.source);
 			registry.register({
 				name: wfName,
 				source: sw.source,
@@ -380,6 +437,45 @@ export default class HttpTrigger extends TriggerBase {
 		}
 
 		return table;
+	}
+
+	/**
+	 * Bug 01 — register TS-authored middleware from the static `Workflows.ts`
+	 * map. A trigger-less `workflow({ middleware: true })` never appears in the
+	 * route table (and the v2 helper carries the flag on `_config`, not the
+	 * root), so neither `buildFileBasedRoutes` nor `scanAndRegisterMiddleware`
+	 * (JSON-only) picks it up. This pass runs UNCONDITIONALLY from `listen()`
+	 * so TS middleware is registered whether file-based routing is on or off.
+	 *
+	 * Dedupe by name against whatever is already in the registry so it stays
+	 * idempotent across HMR re-scans and never collides with a same-named JSON
+	 * workflow already registered from a different source.
+	 */
+	private registerManualMiddleware(workflows: Record<string, unknown>): void {
+		const registry = WorkflowRegistry.getInstance();
+		let count = 0;
+		for (const key of Object.keys(workflows ?? {})) {
+			const wf = workflows[key];
+			if (!readMiddlewareFlag(wf)) continue;
+			const wfName = readWorkflowName(wf) ?? key;
+			const source = `Workflows.ts[${JSON.stringify(key)}]`;
+			const existing = registry.get(wfName);
+			if (existing) {
+				// Same workflow already registered (HMR re-run or a JSON dupe) —
+				// leave it. The route-table / JSON passes own the canonical entry.
+				continue;
+			}
+			registry.register({
+				name: wfName,
+				source,
+				workflow: wf,
+				isMiddleware: true,
+			});
+			count++;
+		}
+		if (count > 0) {
+			this.logger.log(`[blok] middleware registry — ${count} TS middleware workflow(s) registered`);
+		}
 	}
 
 	/**
@@ -622,6 +718,17 @@ export default class HttpTrigger extends TriggerBase {
 			this.logger.error(`[blok] middleware scan failed: ${(err as Error).message}`);
 		}
 
+		// Bug 01 · register TS-authored middleware (`workflow({ middleware: true })`
+		// exported from `Workflows.ts`). Runs unconditionally — trigger-less TS
+		// middleware never enters the route table, and the JSON-only scan above
+		// won't see it — so without this pass `runMiddlewareChain` 500s for the
+		// documented (recommended) TS authoring path.
+		try {
+			this.registerManualMiddleware((workflows as Record<string, unknown>) ?? {});
+		} catch (err) {
+			this.logger.error(`[blok] TS middleware registration failed: ${(err as Error).message}`);
+		}
+
 		// v0.5.4 · process-global middleware. Read the BLOK_GLOBAL_MIDDLEWARE
 		// env var as a fallback registration path — useful when the operator
 		// wants to add ops middleware (request-id, audit-log) without
@@ -698,7 +805,15 @@ export default class HttpTrigger extends TriggerBase {
 			this.app.post("/__blok/rpc/:name", async (c) => {
 				const name = c.req.param("name");
 				const entry = WorkflowRegistry.getInstance().get(name);
-				if (!entry || entry.isMiddleware === true) {
+				// F8 — only run http-callable workflows over RPC. A workflow is
+				// reachable here only if it (a) is registered, (b) is not
+				// middleware, and (c) actually declares a `trigger.http` block.
+				// Without (c), a worker/cron-only workflow registered for
+				// sub-workflow lookup would be executable over HTTP with no
+				// trigger-surface gate — and `runWorkflowExecution` would resolve
+				// its middleware against the wrong (`http`) trigger kind, silently
+				// dropping the worker/cron middleware chain (e.g. auth).
+				if (!entry || entry.isMiddleware === true || !hasHttpTrigger(entry.workflow)) {
 					return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
 				}
 				const requestId = c.req.query("requestId") || (uuid() as string);
@@ -1063,6 +1178,59 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	/**
+	 * F15 · enforce `trigger.http.headers`. The schema documents this field as
+	 * "Required headers for incoming requests (validated at trigger entry)" but
+	 * nothing ever read it. For each declared header:
+	 *   - presence is checked case-insensitively (HTTP header names are
+	 *     case-insensitive; `ctx.request.headers` keys arrive lower-cased from
+	 *     `Headers.entries()`);
+	 *   - when a non-empty string VALUE is declared, the incoming value must
+	 *     match exactly (case-sensitive) — useful for a fixed API version or a
+	 *     content-type precondition. A declared empty / non-string value only
+	 *     asserts presence.
+	 *
+	 * Throws a `GlobalError` with code 400 + a structured JSON body on the first
+	 * violation, short-circuiting before any step runs. No-op when the workflow
+	 * declares no `headers`.
+	 */
+	private validateRequiredHeaders(requestHeaders: Record<string, unknown> | undefined): void {
+		const http = this.configuration?.trigger?.http as { headers?: unknown } | undefined;
+		const declared = http?.headers as Record<string, unknown> | undefined;
+		if (!declared || typeof declared !== "object") return;
+
+		// Lower-case the incoming header map once for case-insensitive lookup.
+		const incoming: Record<string, string> = {};
+		for (const [k, v] of Object.entries(requestHeaders ?? {})) {
+			incoming[k.toLowerCase()] = typeof v === "string" ? v : String(v ?? "");
+		}
+
+		for (const [rawKey, rawExpected] of Object.entries(declared)) {
+			const key = rawKey.toLowerCase();
+			const present = Object.hasOwn(incoming, key);
+			if (!present) {
+				throw this.headerError(`Missing required header "${rawKey}".`, rawKey, undefined);
+			}
+			if (typeof rawExpected === "string" && rawExpected.length > 0 && incoming[key] !== rawExpected) {
+				throw this.headerError(`Header "${rawKey}" must equal "${rawExpected}".`, rawKey, rawExpected);
+			}
+		}
+	}
+
+	/** Build the 400 `GlobalError` raised by {@link validateRequiredHeaders}. */
+	private headerError(message: string, header: string, expected: string | undefined): GlobalError {
+		const err = new GlobalError(message);
+		err.setCode(400);
+		err.setName("RequiredHeaderError");
+		err.setJson({
+			error: "required_header",
+			message,
+			header,
+			...(expected !== undefined ? { expected } : {}),
+		});
+		return err;
+	}
+
+	/**
 	 * Execute a workflow request — the shared work both the legacy catch-all
 	 * and the explicit file-based routes funnel into.
 	 *
@@ -1252,6 +1420,13 @@ export default class HttpTrigger extends TriggerBase {
 					path: explicitRoute ? c.req.path : subPath,
 					url: c.req.url,
 				} as unknown as RequestContext;
+
+				// F15 · required-header validation. `trigger.http.headers`
+				// declares headers the request MUST carry; enforce them at
+				// trigger entry (on BOTH explicit and catch-all routes) now that
+				// `ctx.request.headers` is populated. A missing/mismatched header
+				// short-circuits with 400 before any step runs.
+				this.validateRequiredHeaders((ctx.request as unknown as RequestContext).headers);
 
 				// v0.7 · typed-client RPC mount — mirror the input's scalar fields
 				// into query + params so a workflow authored for a GET/query or

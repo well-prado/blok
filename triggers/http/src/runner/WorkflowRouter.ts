@@ -33,6 +33,26 @@ function isLegacyRoutingEnabled(): boolean {
 	return raw === "1" || raw === "true";
 }
 
+/**
+ * Detect whether a workflow object is flagged as middleware. Reads BOTH the
+ * root `middleware` field (JSON workflows, raw object literals, legacy
+ * `Workflow()` builders that carry it on the root) AND `_config.middleware`
+ * (the v2 `workflow({ middleware: true })` builder, whose flag lives on the
+ * nested `_config`). Only the literal `true` is the marker — matching
+ * `WorkflowV2Schema.middleware` (`z.literal(true)`) and the normalizer's
+ * `=== true` check.
+ *
+ * Used by {@link buildRouteTable} to exclude middleware workflows from the
+ * route table (so they are never exposed as public Hono routes, even with a
+ * stray trigger block — Bug 01 / F17) and by `HttpTrigger` to register them
+ * with `isMiddleware: true`.
+ */
+export function readMiddlewareFlag(wf: unknown): boolean {
+	if (!wf || typeof wf !== "object") return false;
+	const w = wf as { middleware?: unknown; _config?: { middleware?: unknown } };
+	return w.middleware === true || w._config?.middleware === true;
+}
+
 /** A single registered route entry, ready for `app.<method>(path, handler)`. */
 export interface RouteEntry {
 	readonly method: string;
@@ -130,6 +150,11 @@ export function buildRouteTable(
 	const tolerant = typeof options.onCollision === "function";
 
 	for (const sw of scanned) {
+		// Bug 01 / F17 — a middleware workflow is NEVER a public route, even if
+		// it (incorrectly) carries an `http` trigger block. Exclude it here so
+		// the route table stays semantically pure; HttpTrigger registers it with
+		// `isMiddleware: true` separately.
+		if (readMiddlewareFlag(sw.workflow)) continue;
 		const triggerCfg = extractHttpTrigger(sw.workflow);
 		if (!triggerCfg) continue; // not http-triggered → not a routed workflow
 		const method = normalizeMethod(triggerCfg.method);
@@ -167,6 +192,10 @@ export function buildRouteTable(
 	}
 
 	for (const mr of manual) {
+		// Bug 01 — a TS middleware (`workflow({ middleware: true })`, flag on
+		// `_config`) is excluded from the route table too, even with a dummy
+		// trigger. HttpTrigger's manual-middleware pass registers it instead.
+		if (readMiddlewareFlag(mr.workflow)) continue;
 		const triggerCfg = extractHttpTrigger(mr.workflow);
 		if (!triggerCfg) continue;
 		const method = normalizeMethod(triggerCfg.method);
