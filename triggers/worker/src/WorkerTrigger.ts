@@ -24,6 +24,7 @@ import {
 	type BlokService,
 	ConcurrencyLimitError,
 	ConcurrencyMetrics,
+	Configuration,
 	DebounceCoordinator,
 	DefaultLogger,
 	DeferredDispatchSignal,
@@ -31,15 +32,39 @@ import {
 	Janitor,
 	NodeMap,
 	QueueExpiredError,
+	RunCancelledError,
 	RunTracker,
 	TriggerBase,
 	type TriggerResponse,
+	WorkflowRegistry,
 	createConcurrencyBackend,
 	createDebounceBackend,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
+
+/**
+ * F4 / F24 — thrown by `executeWithTimeout` when a worker job exceeds its
+ * trigger-level `config.timeout`. A dedicated type (instead of a plain
+ * `Error`) lets `handleJob`'s catch discriminate the timeout: it aborts the
+ * detached run via `ctx.signal` and flips the run record to `timedOut`
+ * (matching the per-step `maxDuration` taxonomy) rather than routing the
+ * timeout through the generic retry/DLQ path.
+ */
+export class WorkerTimeoutError extends Error {
+	public readonly timeoutMs: number;
+	/** Run id of the aborted run, when known — used to flip status to `timedOut`. */
+	public readonly runId?: string;
+
+	constructor(timeoutMs: number, runId?: string) {
+		super(`Job timed out after ${timeoutMs}ms`);
+		this.name = "WorkerTimeoutError";
+		this.timeoutMs = timeoutMs;
+		this.runId = runId;
+		Object.setPrototypeOf(this, WorkerTimeoutError.prototype);
+	}
+}
 
 /**
  * Job received from worker queue
@@ -231,6 +256,81 @@ export abstract class WorkerTrigger extends TriggerBase {
 	}
 
 	/**
+	 * F6 (worker part) — populate the process-wide {@link WorkflowRegistry}
+	 * from the worker's own `nodeMap.workflows`.
+	 *
+	 * Implemented SELF-CONTAINED inside `WorkerTrigger` (no dependency on a
+	 * shared `TriggerBase` helper) so worker-only deployments get a populated
+	 * registry without an HttpTrigger present. Each workflow is registered
+	 * under its `name`, with `isMiddleware: true` when the workflow root sets
+	 * `middleware: true`, mirroring HttpTrigger's middleware registration.
+	 *
+	 * Idempotent: re-registering the same `(name, source)` is a no-op, so HMR
+	 * re-scans don't throw. Same-name/different-source collisions surface as
+	 * the registry's loud error — but we swallow per-entry failures so one bad
+	 * workflow can't abort worker boot.
+	 */
+	protected registerWorkflowsFromNodeMap(): void {
+		const registry = WorkflowRegistry.getInstance();
+		let count = 0;
+		let middlewareCount = 0;
+
+		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
+			const wfConfig = (workflow as unknown as { _config?: { name?: unknown; middleware?: unknown } })._config;
+			const name = typeof wfConfig?.name === "string" && wfConfig.name.length > 0 ? wfConfig.name : path;
+			if (!name) continue;
+			const isMiddleware = wfConfig?.middleware === true;
+			try {
+				registry.register({
+					name,
+					source: path,
+					// Pass the original builder/locator object so the registry's
+					// downstream `Configuration.init(name, opts, preloaded)` path
+					// normalizes it identically to HTTP.
+					workflow,
+					isMiddleware,
+				});
+				count++;
+				if (isMiddleware) middlewareCount++;
+			} catch (err) {
+				this.logger.error(
+					`[blok][worker] registry registration failed for "${name}": ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
+
+		if (count > 0) {
+			this.logger.log(
+				`[blok][worker] workflow registry — ${count} workflow(s) registered (${middlewareCount} middleware)`,
+			);
+		}
+	}
+
+	/**
+	 * F14 (worker part) — seed the process-global middleware chain from the
+	 * `BLOK_GLOBAL_MIDDLEWARE` env var.
+	 *
+	 * Implemented SELF-CONTAINED inside `WorkerTrigger` (no shared TriggerBase
+	 * helper) and gated on the existing `getGlobalMiddleware().length === 0`
+	 * idempotency check, so a programmatic `setGlobalMiddleware([...])` call
+	 * always takes precedence over the env var.
+	 */
+	protected seedGlobalMiddlewareFromEnv(): void {
+		const registry = WorkflowRegistry.getInstance();
+		if (registry.getGlobalMiddleware().length === 0 && process.env.BLOK_GLOBAL_MIDDLEWARE) {
+			const fromEnv = process.env.BLOK_GLOBAL_MIDDLEWARE.split(",")
+				.map((n) => n.trim())
+				.filter((n) => n.length > 0);
+			if (fromEnv.length > 0) {
+				registry.setGlobalMiddleware(fromEnv);
+				this.logger.log(
+					`[blok][worker] global middleware registered from BLOK_GLOBAL_MIDDLEWARE env: ${fromEnv.join(", ")}`,
+				);
+			}
+		}
+	}
+
+	/**
 	 * Start the worker processor - main entry point
 	 */
 	async listen(): Promise<number> {
@@ -243,6 +343,18 @@ export abstract class WorkerTrigger extends TriggerBase {
 		// where the old constructor used to live for the full reason.
 		this.loadNodes();
 		this.loadWorkflows();
+
+		// F6 (worker part) — feed the WorkflowRegistry from the worker nodeMap.
+		// Worker-only deployments never instantiate an HttpTrigger, so without
+		// this the registry is empty and any trigger-level / process-global
+		// middleware name or `subworkflow:` step fails at runtime. Workflows
+		// flagged `middleware: true` are registered with `isMiddleware`.
+		this.registerWorkflowsFromNodeMap();
+
+		// F14 (worker part) — seed BLOK_GLOBAL_MIDDLEWARE from env. Only
+		// HttpTrigger did this before, so a pure worker process silently
+		// dropped the documented env-var configuration.
+		this.seedGlobalMiddlewareFromEnv();
 
 		try {
 			// Tier 2 #6 follow-up · install the cross-process concurrency
@@ -514,15 +626,18 @@ export abstract class WorkerTrigger extends TriggerBase {
 		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
 			const workflowConfig = (workflow as unknown as { _config: WorkerWorkflowModel["config"] })._config;
 
-			if (workflowConfig?.trigger) {
-				const triggerType = Object.keys(workflowConfig.trigger)[0];
-
-				if (triggerType === "worker" && workflowConfig.trigger.worker) {
-					workflows.push({
-						path,
-						config: workflowConfig,
-					});
-				}
+			// F11 — discover the worker trigger by direct key access, NOT by
+			// inspecting only the FIRST key. A multi-trigger workflow such as
+			// `trigger: { http: {...}, worker: { queue: "jobs" } }` declares
+			// `worker` second; the old `Object.keys(trigger)[0] === "worker"`
+			// check silently dropped it, making discovery depend on JS object
+			// key insertion order. Every sibling trigger (HTTP/SSE/Webhook)
+			// already reads its key directly.
+			if (workflowConfig?.trigger?.worker) {
+				workflows.push({
+					path,
+					config: workflowConfig,
+				});
 			}
 		}
 
@@ -546,14 +661,36 @@ export abstract class WorkerTrigger extends TriggerBase {
 		});
 
 		await this.tracer.startActiveSpan(`worker:${config.queue}`, async (span: Span) => {
+			// F2 — give each job its OWN Configuration so concurrent jobs
+			// (`concurrency > 1`, or two queues in one process) never read a
+			// step list / name / trigger config another job's `init()`
+			// overwrote. Declared outside the try so the catch can flip the
+			// run's status via the per-job config name.
+			const configuration = new Configuration();
+			// F4 — captured from createContext so the timeout path can abort
+			// the detached run cooperatively.
+			let runCtx: Context | undefined;
 			try {
 				const start = performance.now();
 
-				// Initialize configuration for this workflow
-				await this.configuration.init(workflow.path, this.nodeMap);
+				// Bug 03 — resolve the already-loaded workflow object from the
+				// in-memory nodeMap and pass it as the `preloaded` arg (mirrors
+				// HTTP). This routes init through the preloaded branch and skips
+				// the disk-based `LocalStorage` resolver whose dot heuristic
+				// rejected dotted `domain.action` workflow names ("File type not
+				// supported"). Fallback to `workflow.config` so `preloaded` is
+				// never undefined (which would re-trigger the disk branch).
+				const preloaded =
+					(this.nodeMap.workflows && (this.nodeMap.workflows as Record<string, unknown>)[workflow.path]) ??
+					workflow.config;
 
-				// Create context
-				const ctx: Context = this.createContext(undefined, workflow.path, jobId);
+				// F2 — initialize the per-job Configuration instead of the shared
+				// `this.configuration`.
+				await configuration.init(workflow.path, this.nodeMap, preloaded);
+
+				// Create context — bind it to the per-job Configuration (F2).
+				const ctx: Context = this.createContext(undefined, workflow.path, jobId, configuration);
+				runCtx = ctx;
 
 				// Populate request with job data
 				ctx.request = {
@@ -594,12 +731,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 				// logic exactly like a main-workflow error.
 				await this.applyMiddlewareChain(ctx, this.nodeMap);
 
-				// Execute workflow with timeout if configured
+				// Execute workflow with timeout if configured.
+				// F2 — pass the per-job `configuration` into `run` so the runner
+				// reads the same object this job initialized.
 				let response: TriggerResponse;
 				if (config.timeout && config.timeout > 0) {
-					response = await this.executeWithTimeout(ctx, config.timeout);
+					response = await this.executeWithTimeout(ctx, config.timeout, configuration);
 				} else {
-					response = await this.run(ctx);
+					response = await this.run(ctx, configuration);
 				}
 
 				const end = performance.now();
@@ -616,7 +755,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 				workerJobs.add(1, {
 					env: process.env.NODE_ENV,
 					queue: config.queue,
-					workflow_name: this.configuration.name,
+					workflow_name: configuration.name,
 					success: "true",
 				});
 
@@ -686,11 +825,71 @@ export abstract class WorkerTrigger extends TriggerBase {
 					workerRetries.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,
-						workflow_name: this.configuration?.name || "unknown",
+						workflow_name: configuration?.name || "unknown",
 						reason: "throttled",
 					});
 
 					await job.fail(error as Error, true);
+					return;
+				}
+
+				// F3 — the run was cancelled by an operator
+				// (`POST /__blok/runs/:runId/cancel`). `RunnerSteps` throws
+				// `RunCancelledError`, which `TriggerBase.run` re-throws
+				// untouched (status already flipped to `cancelled`). The run is
+				// terminal — ACK the broker WITHOUT requeue so the
+				// deliberately-cancelled, often non-idempotent work doesn't run
+				// again on redelivery.
+				if (error instanceof RunCancelledError) {
+					span.setAttribute("success", false);
+					span.setAttribute("cancelled", true);
+					span.setStatus({ code: SpanStatusCode.OK, message: "run_cancelled" });
+
+					this.logger.log(`Job ${jobId} cancelled (run already terminal) → ACK (no requeue)`);
+
+					await job.complete();
+					return;
+				}
+
+				// F4 / F24 — trigger-level `config.timeout` elapsed. The detached
+				// run was already aborted via `ctx.signal` inside
+				// `executeWithTimeout`, so it unwinds with `RunCancelledError`
+				// at the next between-step check. Flip the run record to the
+				// dedicated `timedOut` status (matching the per-step
+				// `maxDuration` taxonomy) instead of routing through the generic
+				// retry/DLQ path, and ACK without requeue.
+				if (error instanceof WorkerTimeoutError) {
+					span.setAttribute("success", false);
+					span.setAttribute("timed_out", true);
+					span.setStatus({ code: SpanStatusCode.ERROR, message: "job_timed_out" });
+
+					const timedOutRunId = error.runId ?? (runCtx as { _traceRunId?: string } | undefined)?._traceRunId;
+					if (timedOutRunId) {
+						try {
+							RunTracker.getInstance().markRunTimedOut(timedOutRunId, {
+								stepId: "__worker_timeout__",
+								maxDurationMs: error.timeoutMs,
+								attemptsExhausted: job.attempts + 1,
+							});
+						} catch (markErr) {
+							this.logger.error(
+								`[blok][worker] markRunTimedOut failed for run ${timedOutRunId}: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
+							);
+						}
+					}
+
+					workerErrors.add(1, {
+						env: process.env.NODE_ENV,
+						queue: config.queue,
+						workflow_name: configuration?.name || "unknown",
+						reason: "timeout",
+					});
+
+					this.logger.error(
+						`Job ${jobId} timed out after ${error.timeoutMs}ms → run flipped to timedOut, ACK (no requeue)`,
+					);
+
+					await job.complete();
 					return;
 				}
 
@@ -717,7 +916,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 					workerRetries.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,
-						workflow_name: this.configuration?.name || "unknown",
+						workflow_name: configuration?.name || "unknown",
 						attempt: String(job.attempts + 1),
 					});
 
@@ -731,7 +930,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 					workerErrors.add(1, {
 						env: process.env.NODE_ENV,
 						queue: config.queue,
-						workflow_name: this.configuration?.name || "unknown",
+						workflow_name: configuration?.name || "unknown",
 					});
 
 					this.logger.error(
@@ -748,21 +947,53 @@ export abstract class WorkerTrigger extends TriggerBase {
 	}
 
 	/**
-	 * Execute workflow with a timeout
+	 * Execute workflow with a timeout.
+	 *
+	 * F4 — on timeout, fire the ctx AbortController so the detached `run`
+	 * unwinds cooperatively (it throws `RunCancelledError` at the next
+	 * between-step check; long uninterruptible nodes should still poll
+	 * `ctx.signal.aborted`). The promise rejects with a dedicated
+	 * {@link WorkerTimeoutError} carrying the run id so `handleJob`'s catch can
+	 * flip the run record to `timedOut` (F24). The second `run` (broker
+	 * redelivery) is prevented because we ACK without requeue on timeout.
+	 *
+	 * F2 — `configuration` is the per-job Configuration; threaded into `run`.
 	 */
-	protected async executeWithTimeout(ctx: Context, timeoutMs: number): Promise<TriggerResponse> {
+	protected async executeWithTimeout(
+		ctx: Context,
+		timeoutMs: number,
+		configuration?: Configuration,
+	): Promise<TriggerResponse> {
 		return new Promise<TriggerResponse>((resolve, reject) => {
+			let settled = false;
 			const timer = setTimeout(() => {
-				reject(new Error(`Job timed out after ${timeoutMs}ms`));
+				if (settled) return;
+				settled = true;
+
+				// F4 — abort the detached run so it stops executing rather than
+				// continuing to settle its own run record out of band.
+				const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
+				try {
+					privateSlot?.abortController?.abort();
+				} catch {
+					/* best-effort — abort never throws, but guard anyway */
+				}
+
+				const runId = (ctx as { _traceRunId?: string })._traceRunId;
+				reject(new WorkerTimeoutError(timeoutMs, runId));
 			}, timeoutMs);
 
-			this.run(ctx)
+			this.run(ctx, configuration)
 				.then((result) => {
 					clearTimeout(timer);
+					if (settled) return; // already timed out — ignore the late result
+					settled = true;
 					resolve(result);
 				})
 				.catch((error) => {
 					clearTimeout(timer);
+					if (settled) return; // already rejected with WorkerTimeoutError
+					settled = true;
 					reject(error);
 				});
 		});

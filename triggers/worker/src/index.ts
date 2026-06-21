@@ -65,6 +65,7 @@
 // Core exports
 export {
 	WorkerTrigger,
+	WorkerTimeoutError,
 	type WorkerAdapter,
 	type WorkerJob,
 	type WorkerQueueStats,

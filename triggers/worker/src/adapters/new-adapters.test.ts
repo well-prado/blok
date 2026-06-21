@@ -42,6 +42,49 @@ describe("KafkaAdapter — v0.7 PR 5", () => {
 		]);
 		process.env.KAFKA_BROKERS = undefined;
 	});
+
+	// F25 — the `concurrency` field maps to KafkaJS's
+	// `partitionsConsumedConcurrently`. Pre-fix it was silently ignored.
+	it("passes concurrency to consumer.run as partitionsConsumedConcurrently", async () => {
+		const adapter = new KafkaAdapter();
+		let captured: { partitionsConsumedConcurrently?: number } | undefined;
+		const fakeConsumer = {
+			connect: async () => {},
+			subscribe: async () => {},
+			run: async (opts: { partitionsConsumedConcurrently?: number }) => {
+				captured = opts;
+			},
+			stop: async () => {},
+			disconnect: async () => {},
+		};
+		// Inject a connected kafka client whose consumer() returns our fake.
+		(adapter as unknown as { connected: boolean }).connected = true;
+		(adapter as unknown as { kafka: unknown }).kafka = { consumer: () => fakeConsumer };
+
+		await adapter.process({ queue: "events", concurrency: 7, retries: 0, priority: 0 }, async () => {});
+
+		expect(captured?.partitionsConsumedConcurrently).toBe(7);
+	});
+
+	it("defaults partitionsConsumedConcurrently to 1 when concurrency is unset", async () => {
+		const adapter = new KafkaAdapter();
+		let captured: { partitionsConsumedConcurrently?: number } | undefined;
+		const fakeConsumer = {
+			connect: async () => {},
+			subscribe: async () => {},
+			run: async (opts: { partitionsConsumedConcurrently?: number }) => {
+				captured = opts;
+			},
+			stop: async () => {},
+			disconnect: async () => {},
+		};
+		(adapter as unknown as { connected: boolean }).connected = true;
+		(adapter as unknown as { kafka: unknown }).kafka = { consumer: () => fakeConsumer };
+
+		await adapter.process({ queue: "events", retries: 0, priority: 0 } as never, async () => {});
+
+		expect(captured?.partitionsConsumedConcurrently).toBe(1);
+	});
 });
 
 describe("RabbitMQAdapter — v0.7 PR 5", () => {
