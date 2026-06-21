@@ -69,6 +69,13 @@ export async function createProject(opts: OptionValues, version: string, current
 	let selectedManager: string = opts.packageManager || "npm";
 	let pubsubProvider: string = opts.pubsubProvider || "gcp";
 	let queueProvider: string = opts.queueProvider || "kafka";
+	// Whether the user EXPLICITLY chose a worker/queue broker (a --queue-provider
+	// flag, or an interactive prompt that actually ran and resolved). When false,
+	// the scaffold leaves `this.adapter` undefined so the framework resolves
+	// provider → BLOK_WORKER_ADAPTER → in-memory (zero-infra, boots clean) and
+	// avoids pulling in broker deps. Only an explicit choice injects an active
+	// adapter + its env block + its dependency.
+	let explicitQueueProvider: boolean = Boolean(opts.queueProvider);
 
 	// Detect available runtimes on the machine
 	let detectedRuntimes: RuntimeInfo[] = [];
@@ -215,6 +222,10 @@ export async function createProject(opts: OptionValues, version: string, current
 		projectName = blokctlProject.projectName;
 		selectedTriggers = blokctlProject.triggers;
 		pubsubProvider = (blokctlProject.pubsubProvider as string) || "gcp";
+		// The queueProvider prompt only runs (and resolves to a non-null value)
+		// when a `queue` trigger was selected or --queue-provider was passed; a
+		// worker-only run never prompts, so it stays implicitly in-memory.
+		explicitQueueProvider = blokctlProject.queueProvider != null;
 		queueProvider = (blokctlProject.queueProvider as string) || "kafka";
 		selectedRuntimeKinds = blokctlProject.runtimes;
 		selectedManager = blokctlProject.selectedManager;
@@ -448,7 +459,7 @@ export async function createProject(opts: OptionValues, version: string, current
 					if (triggerKind === "pubsub") {
 						updatePubSubProvider(triggerDestDir, pubsubProvider);
 					} else if (triggerKind === "queue" || triggerKind === "worker") {
-						updateQueueProvider(triggerDestDir, queueProvider);
+						updateQueueProvider(triggerDestDir, queueProvider, explicitQueueProvider);
 					}
 				}
 			} else {
@@ -792,7 +803,12 @@ export async function createProject(opts: OptionValues, version: string, current
 		};
 
 		// Add provider-specific dependencies for pubsub and queue triggers
-		const providerDeps = getProviderDependencies(selectedTriggers, pubsubProvider, queueProvider);
+		const providerDeps = getProviderDependencies(
+			selectedTriggers,
+			pubsubProvider,
+			queueProvider,
+			explicitQueueProvider,
+		);
 		if (Object.keys(providerDeps).length > 0) {
 			packageJsonContent.dependencies = {
 				...packageJsonContent.dependencies,
@@ -944,21 +960,25 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 
 		// Append provider-specific env vars to .env.local
-		const providerEnvVars = getProviderEnvVars(selectedTriggers, pubsubProvider, queueProvider);
+		const providerEnvVars = getProviderEnvVars(selectedTriggers, pubsubProvider, queueProvider, explicitQueueProvider);
 		if (providerEnvVars) {
 			fsExtra.appendFileSync(envLocal, providerEnvVars);
 		}
 
-		// v0.6.7 chat demo — when --examples is selected, append OPENROUTER
-		// env vars. The chat-message workflow reads OPENROUTER_API_KEY +
-		// OPENROUTER_MODEL via process.env inside its js/ expressions. Left
-		// empty in .env.local; the user populates the key before running
-		// the chat demo. Default model is OpenAI's gpt-4o-mini through
-		// OpenRouter — cheap, fast, broadly available. Any OpenRouter
-		// model works (anthropic/claude-*, google/gemini-*, meta-llama/*,
-		// etc.) — just change OPENROUTER_MODEL.
+		// v0.6.7 chat demo — when --examples is selected, append env vars for
+		// the bundled demos. Each segment is gated on whether its demo is
+		// actually reachable (its trigger was selected) so a plain HTTP
+		// --examples project doesn't get webhook secrets or worker adapter vars
+		// for triggers it never installed. The chat demos are HTTP-triggered and
+		// always present, so the OpenRouter + Redis segment is unconditional
+		// under --examples. The chat-message workflow reads OPENROUTER_API_KEY +
+		// OPENROUTER_MODEL via process.env inside its js/ expressions; left empty
+		// in .env.local for the user to populate. Default model is OpenAI's
+		// gpt-4o-mini through OpenRouter — cheap, fast, broadly available. Any
+		// OpenRouter model works (anthropic/claude-*, google/gemini-*,
+		// meta-llama/*, etc.) — just change OPENROUTER_MODEL.
 		if (examples) {
-			const chatEnvBlock = [
+			const exampleEnvLines: string[] = [
 				"",
 				"# Chat demo (--examples) — get a free OpenRouter key at https://openrouter.ai/keys",
 				"OPENROUTER_API_KEY=",
@@ -968,26 +988,39 @@ export async function createProject(opts: OptionValues, version: string, current
 				"# Start one locally with: docker run --rm -p 6379:6379 redis:7-alpine",
 				"# The plain /chat demo works without Redis; only /chat-memory needs it.",
 				"REDIS_URL=redis://127.0.0.1:6379",
-				"",
-				"# Webhook router demo (--examples + --triggers webhook) — secrets per provider.",
-				"# Stripe: copy from https://dashboard.stripe.com/webhooks (`whsec_…`).",
-				"# GitHub: set in repo Settings → Webhooks → secret field.",
-				"# Linear: workspace settings → API → Webhooks → signing secret.",
-				"# Until set, signature verification fails with 401 — that's the gate working.",
-				"STRIPE_WEBHOOK_SECRET=",
-				"GITHUB_WEBHOOK_SECRET=",
-				"LINEAR_WEBHOOK_SECRET=",
-				"",
-				"# Worker fan-out demo (--examples + --triggers worker) — POST /fanout/jobs with",
-				"# `{items: [...], tenantId?: '...'}` enqueues N worker jobs onto `fanout-jobs`.",
-				"# in-memory adapter works single-process; for cross-process set BLOK_WORKER_ADAPTER",
-				"# to nats / redis / bullmq / rabbitmq / sqs / pg-boss / kafka and supply the matching",
-				"# connection env (e.g. NATS_SERVERS=nats://127.0.0.1:4222, or REDIS_URL above).",
-				"BLOK_WORKER_ADAPTER=in-memory",
-				"NATS_SERVERS=nats://127.0.0.1:4222",
-				"",
-			].join("\n");
-			fsExtra.appendFileSync(envLocal, chatEnvBlock);
+			];
+
+			if (selectedTriggers.includes("webhook")) {
+				exampleEnvLines.push(
+					"",
+					"# Webhook router demo (--examples + --triggers webhook) — secrets per provider.",
+					"# Stripe: copy from https://dashboard.stripe.com/webhooks (`whsec_…`).",
+					"# GitHub: set in repo Settings → Webhooks → secret field.",
+					"# Linear: workspace settings → API → Webhooks → signing secret.",
+					"# Until set, signature verification fails with 401 — that's the gate working.",
+					"STRIPE_WEBHOOK_SECRET=",
+					"GITHUB_WEBHOOK_SECRET=",
+					"LINEAR_WEBHOOK_SECRET=",
+				);
+			}
+
+			if (selectedTriggers.includes("worker") || selectedTriggers.includes("queue")) {
+				// BLOK_WORKER_ADAPTER is already written by getProviderEnvVars for
+				// any worker/queue project — keep this segment comment-only so the
+				// var isn't declared twice.
+				exampleEnvLines.push(
+					"",
+					"# Worker fan-out demo (--examples + --triggers worker) — POST /fanout/jobs with",
+					"# `{items: [...], tenantId?: '...'}` enqueues N worker jobs onto `fanout-jobs`.",
+					"# in-memory adapter (BLOK_WORKER_ADAPTER above) works single-process; for",
+					"# cross-process set it to nats / redis / bullmq / rabbitmq / sqs / pg-boss /",
+					"# kafka and supply the matching connection env",
+					"# (e.g. NATS_SERVERS=nats://127.0.0.1:4222, or REDIS_URL above).",
+				);
+			}
+
+			exampleEnvLines.push("");
+			fsExtra.appendFileSync(envLocal, exampleEnvLines.join("\n"));
 		}
 
 		// Examples
@@ -1053,6 +1086,11 @@ export async function createProject(opts: OptionValues, version: string, current
 		// accurately so the user doesn't curl the unused dedicated port.
 		console.log("\nTrigger endpoints:");
 		const httpPort = triggerConfigs.find((tc) => tc.kind === "http")?.port;
+		// Broker-consumer triggers (worker/queue/pubsub) never call serve() or
+		// bind an HTTP port — they consume from a broker. Printing a
+		// /health-check URL for them points at nothing (connection-refused), so
+		// describe the broker source instead.
+		const brokerConsumerKinds = new Set(["worker", "queue", "pubsub"]);
 		for (const tc of triggerConfigs) {
 			if (mountedOnHttp.has(tc.kind) && httpPort !== undefined) {
 				const samplePath =
@@ -1064,6 +1102,9 @@ export async function createProject(opts: OptionValues, version: string, current
 								? "/webhooks"
 								: "/ws/echo";
 				console.log(`  ${tc.label}: http://localhost:${httpPort}${samplePath}  (mounted on HTTP)`);
+			} else if (brokerConsumerKinds.has(tc.kind)) {
+				const provider = tc.kind === "pubsub" ? pubsubProvider : explicitQueueProvider ? queueProvider : "in-memory";
+				console.log(`  ${tc.label}: consumes via ${provider} (no HTTP endpoint)`);
 			} else {
 				console.log(`  ${tc.label}: http://localhost:${tc.port}/health-check`);
 			}
@@ -1077,8 +1118,12 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		// Show infrastructure setup instructions for queue/pubsub triggers
-		if ((selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) && queueProvider === "redis") {
+		// Show infrastructure setup instructions for queue/pubsub triggers —
+		// only when a broker was EXPLICITLY chosen. The default (in-memory)
+		// scaffold needs no infra, so don't tell the user to start Redis/NATS.
+		const workerInfraSelected =
+			explicitQueueProvider && (selectedTriggers.includes("queue") || selectedTriggers.includes("worker"));
+		if (workerInfraSelected && queueProvider === "redis") {
 			console.log(color.cyan("\n📦 Redis Setup (for Queue trigger):"));
 			console.log("  Start Redis with Docker:");
 			console.log(color.dim("    cd infra/development"));
@@ -1087,7 +1132,7 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log("  Redis Commander UI: http://localhost:8081");
 		}
 
-		if ((selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) && queueProvider === "nats") {
+		if (workerInfraSelected && queueProvider === "nats") {
 			console.log(color.cyan("\n📦 NATS JetStream Setup (for Queue trigger):"));
 			console.log("  Start NATS with Docker:");
 			console.log(color.dim("    cd infra/development"));
@@ -2016,11 +2061,16 @@ function updatePubSubProvider(triggerDestDir: string, provider: string): void {
  * — none of which match the actual scaffold, so provider selection
  * silently no-op'd.
  */
-function updateQueueProvider(triggerDestDir: string, provider: string): void {
+export function updateQueueProvider(triggerDestDir: string, provider: string, explicit: boolean): void {
 	const serverPath = `${triggerDestDir}/runner/WorkerServer.ts`;
 	if (!fsExtra.existsSync(serverPath)) return;
 
 	let content = fsExtra.readFileSync(serverPath, "utf8");
+
+	// No provider was explicitly chosen → leave the commented resolution block
+	// in place. `this.adapter` stays undefined, so the framework resolves
+	// provider → BLOK_WORKER_ADAPTER → in-memory (boots clean, zero infra).
+	if (!explicit) return;
 
 	const adapterConfigs: Record<string, { importName: string; init: string }> = {
 		kafka: {
@@ -2066,37 +2116,34 @@ function updateQueueProvider(triggerDestDir: string, provider: string): void {
 	const config = adapterConfigs[provider];
 	if (!config) return;
 
-	// Replace import (handles both orders: {Adapter, WorkerTrigger} or {WorkerTrigger, Adapter})
+	// Add the adapter import alongside the existing WorkerTrigger import.
 	content = content.replace(
-		/import \{ (\w+), (\w+) \} from ["']@blokjs\/trigger-worker["'];/,
+		/import \{ WorkerTrigger \} from ["']@blokjs\/trigger-worker["'];/,
 		`import { ${config.importName}, WorkerTrigger } from "@blokjs/trigger-worker";`,
 	);
 
-	// Replace adapter instantiation (match only actual class property, not JSDoc examples)
-	// Look for the pattern inside the class body (starts with tab for indentation)
+	// INSERT the active adapter into the class header. The template ships only a
+	// commented example (no active `protected adapter = …`), so we match the
+	// class declaration and inject the assignment rather than replacing one.
 	content = content.replace(
-		/(export default class \w+ extends WorkerTrigger \{[\s\S]*?)\n\tprotected adapter = new \w+\(\{[\s\S]*?\}\);/,
-		`$1\n\tprotected adapter = ${config.init};`,
+		/(export default class \w+ extends WorkerTrigger \{)/,
+		`$1\n\tprotected adapter = ${config.init};\n`,
 	);
 
 	fsExtra.writeFileSync(serverPath, content);
-
-	// Update the example workflow's provider field to match the selected provider
-	const workflowPath = `${triggerDestDir}/workflows/messages/on-message.ts`;
-	if (fsExtra.existsSync(workflowPath)) {
-		let workflowContent = fsExtra.readFileSync(workflowPath, "utf8");
-		workflowContent = workflowContent.replace(/provider: "kafka"/, `provider: "${provider}"`);
-		fsExtra.writeFileSync(workflowPath, workflowContent);
-	}
 }
 
 /**
  * Get provider-specific dependencies for pubsub and queue triggers.
+ *
+ * Broker deps for the worker/queue trigger are only added when the user
+ * EXPLICITLY chose a provider — the default in-memory adapter needs no deps.
  */
-function getProviderDependencies(
+export function getProviderDependencies(
 	triggers: string[],
 	pubsubProvider: string,
 	queueProvider: string,
+	explicitQueueProvider = false,
 ): Record<string, string> {
 	const deps: Record<string, string> = {};
 
@@ -2118,7 +2165,11 @@ function getProviderDependencies(
 		Object.assign(deps, pubsubProviderDeps[pubsubProvider]);
 	}
 
-	if ((triggers.includes("queue") || triggers.includes("worker")) && queueProviderDeps[queueProvider]) {
+	if (
+		explicitQueueProvider &&
+		(triggers.includes("queue") || triggers.includes("worker")) &&
+		queueProviderDeps[queueProvider]
+	) {
 		Object.assign(deps, queueProviderDeps[queueProvider]);
 	}
 
@@ -2127,8 +2178,18 @@ function getProviderDependencies(
 
 /**
  * Get provider-specific environment variables for pubsub and queue triggers.
+ *
+ * When a worker/queue trigger is selected but no provider was EXPLICITLY chosen,
+ * write `BLOK_WORKER_ADAPTER=in-memory` (the zero-infra dev default) instead of
+ * a broker block — matching the scaffolded WorkerServer, which leaves
+ * `this.adapter` undefined so the framework resolves to in-memory.
  */
-function getProviderEnvVars(triggers: string[], pubsubProvider: string, queueProvider: string): string {
+export function getProviderEnvVars(
+	triggers: string[],
+	pubsubProvider: string,
+	queueProvider: string,
+	explicitQueueProvider = false,
+): string {
 	const lines: string[] = [];
 
 	const pubsubEnvVars: Record<string, string> = {
@@ -2174,8 +2235,17 @@ NATS_STREAM_NAME=blok-queue`,
 		lines.push(pubsubEnvVars[pubsubProvider]);
 	}
 
-	if ((triggers.includes("queue") || triggers.includes("worker")) && queueEnvVars[queueProvider]) {
-		lines.push(queueEnvVars[queueProvider]);
+	const hasWorkerTrigger = triggers.includes("queue") || triggers.includes("worker");
+	if (hasWorkerTrigger) {
+		if (explicitQueueProvider && queueEnvVars[queueProvider]) {
+			lines.push(queueEnvVars[queueProvider]);
+		} else {
+			// No explicit broker → zero-infra in-memory dev default.
+			lines.push(
+				"\n# Worker adapter — dev default. Set a provider + the matching broker env" +
+					"\n# (KAFKA_*, NATS_SERVERS, REDIS_*, etc.) for production.\nBLOK_WORKER_ADAPTER=in-memory",
+			);
+		}
 	}
 
 	return lines.join("\n");

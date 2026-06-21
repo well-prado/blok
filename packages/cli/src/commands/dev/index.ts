@@ -189,11 +189,18 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
-	// Show trigger endpoints
+	// Show trigger endpoints. Broker-consumer triggers (worker/queue/pubsub)
+	// never bind an HTTP port — they consume from a broker — so printing a
+	// /health-check URL for them points at nothing (connection-refused).
 	if (config?.triggers && Object.keys(config.triggers).length > 0) {
+		const brokerConsumerKinds = new Set(["worker", "queue", "pubsub"]);
 		console.log("\nTrigger endpoints:");
 		for (const [, trigger] of Object.entries(config.triggers)) {
-			console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
+			if (brokerConsumerKinds.has(trigger.kind)) {
+				console.log(`  ${trigger.label}: consumes from broker (no HTTP endpoint)`);
+			} else {
+				console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
+			}
 		}
 	}
 
