@@ -169,6 +169,21 @@ export abstract class PubSubTrigger extends TriggerBase {
 		this.loadNodes();
 		this.loadWorkflows();
 
+		// F5 · install crash/orphan/janitor/shutdown handlers so a
+		// pubsub-only process gets the same run-state integrity + storage
+		// hygiene guarantees as HTTP/Worker. Each handler is idempotent.
+		this.installOperationalHandlers(this.logger);
+
+		// F6 · feed the WorkflowRegistry from the nodeMap so `subworkflow:`
+		// steps + trigger/workflow/process-global middleware resolve in a
+		// pubsub-only deployment.
+		this.registerWorkflowsFromNodeMap(this.logger);
+
+		// F14 · seed the process-global middleware chain from
+		// `BLOK_GLOBAL_MIDDLEWARE` (idempotent — programmatic
+		// setGlobalMiddleware takes precedence).
+		this.seedGlobalMiddlewareFromEnv(this.logger);
+
 		try {
 			// Find all workflows with pub/sub triggers
 			const pubsubWorkflows = this.getPubSubWorkflows();
@@ -337,6 +352,14 @@ export abstract class PubSubTrigger extends TriggerBase {
 				};
 
 				ctx.logger.log(`Processing message from ${config.topic}: ${id}`);
+
+				// F1 · apply the merged middleware chain (process-global →
+				// workflow-level → trigger-level) before the main workflow
+				// body, after ctx.request is populated so middleware sees the
+				// real body/headers. A throwing middleware propagates to the
+				// outer catch (nack). Pre-fix pubsub silently skipped ALL
+				// middleware — including auth gates.
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
 
 				// Execute workflow
 				const response: TriggerResponse = await this.run(ctx);

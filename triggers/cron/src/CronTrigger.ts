@@ -14,10 +14,12 @@ import type { CronTriggerOpts, HelperResponse } from "@blokjs/helper";
 import {
 	type BlokService,
 	DefaultLogger,
+	DeferredDispatchSignal,
 	type GlobalOptions,
 	NodeMap,
 	TriggerBase,
 	type TriggerResponse,
+	WaitDispatchRequest,
 } from "@blokjs/runner";
 import type { Context, MetricsType, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -140,6 +142,22 @@ export abstract class CronTrigger extends TriggerBase {
 		const startTime = this.startCounter();
 
 		try {
+			// F5 · install crash/orphan/janitor/shutdown handlers so a
+			// cron-only process gets the same run-state integrity + storage
+			// hygiene guarantees as HTTP/Worker. Each handler is idempotent
+			// + individually kill-switched.
+			this.installOperationalHandlers(this.logger);
+
+			// F6 · feed the WorkflowRegistry from the nodeMap so `subworkflow:`
+			// steps + trigger/workflow/process-global middleware resolve in a
+			// cron-only deployment (no HTTP trigger to populate the registry).
+			this.registerWorkflowsFromNodeMap(this.logger);
+
+			// F14 · seed the process-global middleware chain from
+			// `BLOK_GLOBAL_MIDDLEWARE` (idempotent — programmatic
+			// setGlobalMiddleware takes precedence).
+			this.seedGlobalMiddlewareFromEnv(this.logger);
+
 			// Find all workflows with cron triggers
 			const cronWorkflows = this.getCronWorkflows();
 
@@ -419,6 +437,32 @@ export abstract class CronTrigger extends TriggerBase {
 
 					resolve(response);
 				} catch (error) {
+					// F5 · a cron workflow with a `wait` step (or a scheduling
+					// gate) throws DeferredDispatchSignal / WaitDispatchRequest
+					// to defer the run — that's a successful deferral, NOT a
+					// failure. TriggerBase.run already marked the run
+					// delayed/queued/debounced and (for HTTP) persisted the
+					// dispatch. Cron's in-process scheduler owns the eventual
+					// re-fire, so we just record success and don't bump
+					// `cron_errors`.
+					if (error instanceof DeferredDispatchSignal || error instanceof WaitDispatchRequest) {
+						span.setAttribute("success", true);
+						span.setAttribute("deferred", true);
+						span.setStatus({ code: SpanStatusCode.OK });
+
+						cronExecutions.add(1, {
+							env: process.env.NODE_ENV,
+							job_id: jobId,
+							workflow_name: this.configuration.name,
+							manual: String(manual),
+							success: "true",
+						});
+
+						this.logger.log(`Cron job deferred ${jobId}: ${(error as Error).message}`);
+						resolve({ ctx: {} as Context, metrics: {} as MetricsType });
+						return;
+					}
+
 					const errorMessage = (error as Error).message;
 
 					// Set span error

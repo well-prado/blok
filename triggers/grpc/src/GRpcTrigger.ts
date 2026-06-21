@@ -74,6 +74,16 @@ export default class GRpcTrigger extends TriggerBase {
 	}
 
 	processRequest(router: ConnectRouter, trigger: GRpcTrigger) {
+		// F5/F6/F14 · gRPC boots via `GrpcServer.start()` → `processRequest`
+		// (its `listen()` is a no-op that returns 0). Run the shared boot
+		// setup here so a gRPC-only process gets crash/orphan/janitor/shutdown
+		// handlers, a populated WorkflowRegistry (subworkflow + middleware
+		// resolution), and `BLOK_GLOBAL_MIDDLEWARE` env seeding — parity with
+		// HTTP/Worker. All three helpers are idempotent.
+		trigger.installOperationalHandlers(trigger.logger);
+		trigger.registerWorkflowsFromNodeMap(trigger.logger);
+		trigger.seedGlobalMiddlewareFromEnv(trigger.logger);
+
 		router.service(WorkflowService, {
 			executeWorkflow: (request: WorkflowRequest) => trigger.executeWorkflow(request),
 		});
@@ -137,6 +147,13 @@ export default class GRpcTrigger extends TriggerBase {
 				let ctx: Context = this.createContext(undefined, name, id);
 				ctx.request = messageContext.request;
 				ctx.logger.log(`Workflow: ${name}, Version: ${this.configuration.version}`);
+
+				// F1 · apply the merged middleware chain (process-global →
+				// workflow-level → trigger-level) before the main workflow
+				// body, after ctx.request is populated. A throwing middleware
+				// propagates to the outer catch (error encode). Pre-fix gRPC
+				// silently skipped ALL middleware — including auth gates.
+				await this.applyMiddlewareChain(ctx, this.nodeMap);
 
 				const response: TriggerResponse = await this.run(ctx);
 				ctx = response.ctx;
