@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { unwrapProxies } from "../proxy/$";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
-import type { WorkflowV2 } from "../types/WorkflowOpts";
+import { type WorkflowV2, WorkflowV2Schema } from "../types/WorkflowOpts";
 
 /**
  * A streaming workflow's event vocabulary: event name → Zod schema for the
@@ -55,8 +55,21 @@ export interface WorkflowOpts<
 	 *
 	 * See `TRIGGER_SCHEMAS` for per-kind shapes. Validated per-kind at
 	 * factory time.
+	 *
+	 * Optional ONLY when `middleware: true` — a middleware-only workflow is
+	 * invoked from another workflow's `trigger.<kind>.middleware: [...]` array
+	 * and has no public route of its own.
 	 */
-	trigger: Record<string, unknown>;
+	trigger?: Record<string, unknown>;
+	/**
+	 * When `true`, this workflow is registered as MIDDLEWARE and is NOT exposed
+	 * as a public HTTP route. It runs on the parent ctx when another workflow
+	 * lists this one's `name` in its `trigger.<kind>.middleware: [...]` array
+	 * (or via `setGlobalMiddleware([...])` / `BLOK_GLOBAL_MIDDLEWARE`). Mirrors
+	 * `WorkflowV2Schema.middleware`, which already makes `trigger` optional for
+	 * middleware. Only the literal `true` is the marker.
+	 */
+	middleware?: true;
 	/** Pipeline of steps to execute in order. At least one required. */
 	steps: V2Step[];
 	/**
@@ -183,6 +196,21 @@ export function workflow<
 		throw new Error("workflow() requires an options object.");
 	}
 
+	// F16 — enforce the v2 envelope's scalar constraints (name.min(3),
+	// version.min(5)). Mirrors the v1 path (`Workflow()` parses
+	// `WorkflowOptsSchema`), which the recommended v2 path otherwise lacked,
+	// making it the *less*-validated authoring surface. Validate only the
+	// scalar fields here — `steps`, `trigger`, and `events` get their own
+	// dedicated (and more specific) checks below, so reusing the full schema
+	// would double-validate and emit worse messages.
+	const envelope = WorkflowV2Schema.pick({ name: true, version: true }).safeParse({
+		name: opts.name,
+		version: opts.version,
+	});
+	if (!envelope.success) {
+		throw new Error(`workflow("${opts.name}") failed validation: ${envelope.error.message}`);
+	}
+
 	// Compile $ proxy expressions into js/ strings BEFORE schema validation
 	// (the schema sees only strings; proxies would fail z.string().min(1)).
 	const compiledSteps = unwrapProxies(opts.steps) as V2Step[];
@@ -200,7 +228,10 @@ export function workflow<
 	// Per-kind trigger validation. Mirrors what `Trigger.addTrigger` does
 	// in the v1 builder so v2 authors get the same error messages.
 	const triggerKeys = Object.keys(opts.trigger ?? {});
-	if (triggerKeys.length === 0) {
+	// A middleware-only workflow may omit a trigger — it's invoked from another
+	// workflow's `middleware: [...]` chain, not via a public route. Matches
+	// `WorkflowV2Schema`, which already makes `trigger` optional for middleware.
+	if (triggerKeys.length === 0 && opts.middleware !== true) {
 		throw new Error(`workflow("${opts.name}") requires a trigger.`);
 	}
 	const validatedTrigger: Record<string, unknown> = {};
@@ -239,6 +270,10 @@ export function workflow<
 		description: opts.description,
 		trigger: validatedTrigger,
 		steps: compiledSteps,
+		// Carry the middleware marker so it survives onto `_config` and through
+		// `toJson()` — the HTTP layer's `readMiddlewareFlag` reads it to register
+		// the workflow as middleware (and exclude it from the route table).
+		...(opts.middleware === true ? { middleware: true as const } : {}),
 		// Carry the optional Zod input/output schemas + event vocabulary verbatim
 		// (authoring metadata for the `mcp` trigger + the typed `@blokjs/client`).
 		// Excluded from toJson() — Zod schemas aren't serializable.
