@@ -191,16 +191,27 @@ export default abstract class TriggerBase extends Trigger {
 	 * workflow because they share the same ctx. Middleware authors
 	 * short-circuit via `@blokjs/throw` — the throw propagates to the
 	 * caller's outer catch, and the main workflow does NOT run.
+	 *
+	 * F2 (additive) — `configuration` defaults to the shared `this.configuration`
+	 * so HTTP/cron/etc. are unchanged. The worker trigger, which resolves a
+	 * fresh per-job `Configuration` (and no longer initializes the shared one),
+	 * MUST pass it here; otherwise trigger-level (`trigger.worker.middleware`)
+	 * and workflow-level (`appliedMiddleware`) names would be read off the
+	 * never-initialized shared instance and silently dropped.
 	 */
-	protected async applyMiddlewareChain(ctx: Context, nodeMap: GlobalOptions): Promise<void> {
+	protected async applyMiddlewareChain(
+		ctx: Context,
+		nodeMap: GlobalOptions,
+		configuration: Configuration = this.configuration,
+	): Promise<void> {
 		const triggerType = this.getTriggerType();
-		const triggerCfg = (
-			this.configuration.trigger as Record<string, { middleware?: unknown } | undefined> | undefined
-		)?.[triggerType];
+		const triggerCfg = (configuration.trigger as Record<string, { middleware?: unknown } | undefined> | undefined)?.[
+			triggerType
+		];
 		const triggerLevel = Array.isArray(triggerCfg?.middleware)
 			? (triggerCfg.middleware as unknown[]).filter((n): n is string => typeof n === "string" && n.length > 0)
 			: [];
-		const workflowLevel = this.configuration.appliedMiddleware ?? [];
+		const workflowLevel = configuration.appliedMiddleware ?? [];
 		const globalLevel = WorkflowRegistry.getInstance().getGlobalMiddleware();
 		const middlewareNames: string[] = [...globalLevel, ...workflowLevel, ...triggerLevel];
 		if (middlewareNames.length > 0) {

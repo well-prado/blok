@@ -729,7 +729,14 @@ export abstract class WorkerTrigger extends TriggerBase {
 				// throws (via `@blokjs/throw`) propagates to the outer
 				// catch and is routed through the worker's retry / DLQ
 				// logic exactly like a main-workflow error.
-				await this.applyMiddlewareChain(ctx, this.nodeMap);
+				//
+				// F2 — pass the per-job `configuration` so trigger-level
+				// (`trigger.worker.middleware`) and workflow-level middleware
+				// are read from the object THIS job initialized. Without it the
+				// chain would read the never-initialized shared `this.configuration`
+				// (the worker no longer calls `this.configuration.init`) and
+				// silently drop everything but the process-global chain.
+				await this.applyMiddlewareChain(ctx, this.nodeMap, configuration);
 
 				// Execute workflow with timeout if configured.
 				// F2 — pass the per-job `configuration` into `run` so the runner
