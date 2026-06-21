@@ -121,7 +121,7 @@ describe("WorkerTrigger.seedGlobalMiddlewareFromEnv (F14)", () => {
 
 	it("seeds BLOK_GLOBAL_MIDDLEWARE into the registry's global chain", () => {
 		process.env.BLOK_GLOBAL_MIDDLEWARE = "request-id, audit-log";
-		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf") });
+		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf-x") });
 		trigger.seedGlobalMw();
 
 		expect(WorkflowRegistry.getInstance().getGlobalMiddleware()).toEqual(["request-id", "audit-log"]);
@@ -131,7 +131,7 @@ describe("WorkerTrigger.seedGlobalMiddlewareFromEnv (F14)", () => {
 		WorkflowRegistry.getInstance().setGlobalMiddleware(["explicit"]);
 		process.env.BLOK_GLOBAL_MIDDLEWARE = "from-env";
 
-		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf") });
+		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf-x") });
 		trigger.seedGlobalMw();
 
 		expect(WorkflowRegistry.getInstance().getGlobalMiddleware()).toEqual(["explicit"]);
@@ -140,7 +140,7 @@ describe("WorkerTrigger.seedGlobalMiddlewareFromEnv (F14)", () => {
 	it("is a no-op when BLOK_GLOBAL_MIDDLEWARE is unset", () => {
 		// biome-ignore lint/performance/noDelete: env-var reset must reach `undefined`, not the string "undefined".
 		delete process.env.BLOK_GLOBAL_MIDDLEWARE;
-		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf") });
+		const trigger = new TestWorkerTrigger({ jobs: workerWf("wf-x") });
 		trigger.seedGlobalMw();
 
 		expect(WorkflowRegistry.getInstance().getGlobalMiddleware()).toEqual([]);

@@ -86,7 +86,7 @@ describe("WorkerTrigger.handleJob — cancellation (F3)", () => {
 	afterEach(() => vi.restoreAllMocks());
 
 	it("ACKs without requeue when the run throws RunCancelledError", async () => {
-		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf", "q") }, async () => {
+		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf-x", "q") }, async () => {
 			throw new RunCancelledError("run-123");
 		});
 
@@ -106,7 +106,7 @@ describe("WorkerTrigger.handleJob — timeout taxonomy (F4 + F24)", () => {
 		const markSpy = vi.spyOn(RunTracker.getInstance(), "markRunTimedOut").mockImplementation(() => {});
 
 		let capturedCtx: Context | undefined;
-		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf", "q", 30) }, (ctx) => {
+		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf-x", "q", 30) }, (ctx) => {
 			capturedCtx = ctx;
 			// Simulate a run that has started (so it owns a run id) but hangs
 			// past the timeout. It must settle only AFTER the abort fires.
@@ -144,7 +144,7 @@ describe("WorkerTrigger.handleJob — timeout taxonomy (F4 + F24)", () => {
 
 	it("does NOT time out a fast run (completes normally)", async () => {
 		const markSpy = vi.spyOn(RunTracker.getInstance(), "markRunTimedOut").mockImplementation(() => {});
-		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf", "q", 1000) }, async (ctx) => {
+		const trigger = new TestWorkerTrigger({ wf: makeWorkerWorkflow("wf-x", "q", 1000) }, async (ctx) => {
 			(ctx as { _traceRunId?: string })._traceRunId = "run-fast";
 			return { ctx, metrics: {} as never };
 		});
