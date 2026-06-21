@@ -24,8 +24,27 @@ cd blok
 ```
 
 ### 3. **Set Up Your Environment**
-- Follow the instructions in the `README.md` to set up your development environment.
-- Run tests to ensure everything works as expected.
+
+Blok is a [Bun](https://bun.sh) + [nx](https://nx.dev) monorepo. You need **Bun** installed (and **Docker** if you want to run the broker-backed integration tests).
+
+```bash
+bun install        # install all workspace deps + set up git hooks
+bun run build      # build every package (nx, in dependency order)
+bun run test       # run the test suites
+bun run lint       # format + lint with Biome
+```
+
+Git hooks are installed automatically by `bun install`:
+- **pre-commit** formats/lints your *staged* files with Biome (fast).
+- **pre-push** runs `lint:check` + a full `nx` build, so type/compile errors are caught locally before they reach CI. (nx caches, so it's near-instant when nothing changed.)
+
+To run the integration tests against real brokers locally (requires Docker):
+
+```bash
+bun run test:integration:up      # start Postgres / Redis / NATS / Kafka / RabbitMQ / ...
+bun run test:integration
+bun run test:integration:down
+```
 
 ### 4. **Work on Your Contribution**
 - Create a new branch for your work:
@@ -54,8 +73,8 @@ cd blok
 ---
 
 ## Code Style and Standards
-- Use ESLint to ensure code consistency.
-- Adhere to the project's architectural patterns and modular design principles.
+- Code is formatted and linted with **[Biome](https://biomejs.dev)** (not ESLint/Prettier). Run `bun run lint` before committing — the pre-commit hook does this for staged files automatically.
+- Adhere to the project's architectural patterns and modular design principles (see `AGENTS.md` and `CLAUDE.md`).
 - Avoid introducing unnecessary dependencies.
 
 ---

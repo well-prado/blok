@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-sse",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "Server-Sent Events (SSE) trigger for Blok workflows — real-time server push on the shared Hono port.",
 	"type": "module",
 	"main": "dist/index.js",

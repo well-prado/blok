@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-worker",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "Worker-based trigger for Blok workflows - supports background job processing with concurrency, retries, and scheduling",
 	"type": "module",
 	"main": "dist/index.js",

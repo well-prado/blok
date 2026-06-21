@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-grpc",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "",
 	"type": "module",
 	"engines": {

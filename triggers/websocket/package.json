@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-websocket",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "WebSocket trigger for Blok workflows - real-time bidirectional communication",
 	"type": "module",
 	"main": "dist/index.js",

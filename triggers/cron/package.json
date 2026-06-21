@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-cron",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "Cron/scheduled trigger for Blok workflows - supports cron expressions and interval-based scheduling",
 	"type": "module",
 	"main": "dist/index.js",

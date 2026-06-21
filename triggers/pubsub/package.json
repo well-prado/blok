@@ -1,6 +1,7 @@
 {
 	"name": "@blokjs/trigger-pubsub",
 	"version": "0.6.18",
+	"files": ["dist"],
 	"description": "Pub/Sub trigger for Blok workflows — supports NATS (Core + JetStream), Redis Streams, Kafka, GCP Pub/Sub, AWS SNS+SQS, and Azure Service Bus.",
 	"type": "module",
 	"main": "dist/index.js",
