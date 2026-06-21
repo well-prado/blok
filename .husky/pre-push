@@ -1,0 +1,5 @@
+# Pre-push gate — mirrors CI's build step so type/compile errors are caught
+# locally before they reach GitHub Actions. nx caches build outputs, so after
+# the first run only changed packages (and their dependents) rebuild.
+# Skip with `git push --no-verify` if you must.
+bun run lint:check && bunx nx run-many -t build

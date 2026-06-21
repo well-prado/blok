@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Lint (Biome)
+        run: bun run lint:check
+
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
           postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator

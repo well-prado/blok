@@ -28,6 +28,7 @@
 		"doc:generate": "bunx typedoc --skipErrorChecking && bun run ./docs/generateRefLinks.js",
 		"prepare": "husky",
 		"lint": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
+		"lint:check": "biome check --no-errors-on-unmatched --files-ignore-unknown=true",
 		"test": "nx run-many -t test",
 		"test:integration": "bash scripts/integration-test.sh",
 		"test:integration:up": "docker compose -f infra/testing/docker-compose.yml up -d",
@@ -46,7 +47,7 @@
 		"sdks:build": "bash scripts/sdks-build.sh",
 		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
-		"build": "bun run --filter @blokjs/shared --filter @blokjs/helper build && bun run --filter @blokjs/runner build && bun run --filter blokctl --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build"
+		"build": "bunx nx run-many -t build"
 	},
 	"devDependencies": {
 		"@aws-sdk/client-sns": "^3.981.0",
@@ -68,8 +69,7 @@
 	},
 	"lint-staged": {
 		"*": [
-			"biome check --unsafe --write --no-errors-on-unmatched --files-ignore-unknown=true",
-			"bun run test"
+			"biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
 		]
 	},
 	"private": true
