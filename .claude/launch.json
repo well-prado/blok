@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blok-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8090", "--directory", "/tmp/blok-preview"],
+      "port": 8090
+    },
+    {
+      "name": "blok-frontend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd /Users/wellprado/Projects/Personal/blok/blok-sites-spike/frontend && exec bun run dev"],
+      "port": 3000
+    }
+  ]
+}
