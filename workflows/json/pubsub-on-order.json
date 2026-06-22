@@ -1,0 +1,24 @@
+{
+	"name": "On Order Placed",
+	"version": "1.0.0",
+	"description": "Consumes messages from a pub/sub topic (cross-service events over a broker) — NOT an HTTP request. Example of the `pubsub` trigger. One run per delivered message; ctx.request.body is the message payload. Start a local broker with `cd infra/development && docker compose up -d nats`.",
+	"trigger": {
+		"pubsub": {
+			"provider": "nats",
+			"topic": "orders.placed",
+			"consumerGroup": "fulfillment-svc"
+		}
+	},
+	"steps": [
+		{
+			"id": "fulfill",
+			"use": "@blokjs/api-call",
+			"idempotencyKey": "js/ctx.request.params.messageId",
+			"inputs": {
+				"url": "https://httpbin.org/post",
+				"method": "POST",
+				"body": "js/ctx.request.body"
+			}
+		}
+	]
+}
