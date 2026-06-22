@@ -1,0 +1,33 @@
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Chat (Redis Memory) Stream",
+	version: "1.0.0",
+	description:
+		"v0.6.8 — SSE subscriber for the Redis-memory chat. Mirrors chat-stream.json but on the `chat-memory:<sessionId>` bus channel so the two chat variants run side-by-side without crosstalk. Mounts on the HTTP server's Hono app (same process as chat-memory-message).",
+	trigger: {
+		sse: {
+			path: "/sse/chat-memory/:sessionId",
+			heartbeatInterval: 15000,
+			retryInterval: 3000,
+		},
+	},
+	steps: [
+		{
+			id: "sub",
+			use: "@blokjs/sse-subscribe",
+			type: "module",
+			inputs: {
+				channels: ["chat-memory:{sessionId}"],
+			},
+		},
+		{
+			id: "stream",
+			use: "@blokjs/sse-stream",
+			type: "module",
+			inputs: {
+				source: "js/ctx.state.sub",
+			},
+		},
+	],
+});

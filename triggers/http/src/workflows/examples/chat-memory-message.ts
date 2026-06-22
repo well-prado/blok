@@ -1,0 +1,60 @@
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Chat (Redis Memory) Message",
+	version: "1.0.0",
+	description:
+		"v0.6.8 — POST handler for the Redis-memory chat. Loads prior conversation from Redis (key `chat-memory:<sid>:history`), prepends a system prompt, calls @blokjs/llm-stream with the full reconstructed message list, then writes the new user+assistant turns back to Redis with a 24h TTL. Demonstrates: redis-kv get/set, multi-step state composition via `js/` mapper expressions, llm-stream chained with persistence.",
+	trigger: {
+		http: {
+			method: "POST",
+			path: "/chat-memory/:sessionId/message",
+			accept: "application/json",
+		},
+	},
+	steps: [
+		{
+			id: "load-history",
+			use: "@blokjs/redis-kv",
+			type: "module",
+			inputs: {
+				action: "get",
+				key: "js/`chat-memory:${ctx.request.params.sessionId}:history`",
+			},
+		},
+		{
+			id: "stream",
+			use: "@blokjs/llm-stream",
+			type: "module",
+			inputs: {
+				channel: "js/`chat-memory:${ctx.request.params.sessionId}`",
+				apiKey: "js/process.env.OPENROUTER_API_KEY",
+				model: "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+				messages:
+					"js/[{ role: 'system', content: 'You are a helpful assistant chatting with the user. The conversation may span many turns — earlier messages were stored in Redis and are included below. Be concise.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]",
+			},
+		},
+		{
+			id: "save-history",
+			use: "@blokjs/redis-kv",
+			type: "module",
+			inputs: {
+				action: "set",
+				key: "js/`chat-memory:${ctx.request.params.sessionId}:history`",
+				value:
+					"js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.stream.fullText }]",
+				ttlMs: 86400000,
+			},
+			ephemeral: true,
+		},
+		{
+			id: "respond",
+			use: "@blokjs/expr",
+			type: "module",
+			inputs: {
+				expression:
+					"({ ok: true, fullText: ctx.state.stream.fullText, finishReason: ctx.state.stream.finishReason, turn: ((ctx.state['load-history']?.value?.length || 0) / 2) + 1 })",
+			},
+		},
+	],
+});

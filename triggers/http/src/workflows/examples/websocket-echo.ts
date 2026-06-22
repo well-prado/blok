@@ -1,0 +1,18 @@
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "WebSocket Echo",
+	version: "1.0.0",
+	description:
+		"Bidirectional realtime over a WebSocket — replies to each inbound message on the same connection. Example of the `websocket` trigger (two-way), NOT http (request/response) or sse (one-way push). One run per inbound message/lifecycle event.",
+	trigger: {
+		websocket: { path: "/ws/echo", events: ["open", "message", "close"] },
+	},
+	steps: [
+		{
+			id: "reply",
+			use: "@blokjs/ws-reply",
+			inputs: { message: "js/({ echo: ctx.request.body, at: Date.now() })" },
+		},
+	],
+});
