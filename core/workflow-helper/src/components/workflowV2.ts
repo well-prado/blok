@@ -249,7 +249,7 @@ export function workflow<
 		const parsedKind = TriggersSchema.safeParse(kind);
 		if (!parsedKind.success) {
 			throw new Error(
-				`workflow("${opts.name}") trigger kind "${kind}" is not recognized. Allowed: http, queue, pubsub, worker, cron, webhook, sse, websocket, mcp, grpc, manual.`,
+				`workflow("${opts.name}") trigger kind "${kind}" is not recognized. Allowed: http, pubsub, worker, cron, webhook, sse, websocket, mcp, grpc, manual.`,
 			);
 		}
 		validatedTrigger[kind] = validateTriggerConfig(parsedKind.data, (opts.trigger as Record<string, unknown>)[kind]);

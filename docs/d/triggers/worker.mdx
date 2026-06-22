@@ -179,6 +179,12 @@ After `retries` exhausts, the job lands in the broker's DLQ:
 Configure those on the broker side. The trigger hands off and exits
 cleanly.
 
+A **cancelled** run (`POST /__blok/runs/:runId/cancel`) and a job that
+exceeds the trigger's `timeout` both ACK without requeue — they're
+terminal, so the broker won't redeliver and the often non-idempotent
+work won't re-run. Only genuine failures consume the `retries` budget
+and reach the DLQ.
+
 ## Process model
 
 Worker triggers run in their own process — `blokctl dev` spawns one
@@ -186,6 +192,10 @@ per worker-triggered project. The process doesn't bind an HTTP port
 unless you also add a health endpoint. State sharing with HTTP
 workflows goes through the broker (the producer publishes, the worker
 consumes — that's the contract).
+
+Each job gets its **own isolated `Configuration`**, so running with
+`concurrency > 1` (or two queues in one process) is safe — concurrent
+jobs never share config state or race on each other's run records.
 
 For cross-process `concurrencyKey` enforcement, set
 `BLOK_CONCURRENCY_BACKEND=nats-kv` (or `redis`) so multiple worker

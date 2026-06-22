@@ -17,7 +17,7 @@ and the events / endpoints / Studio surfaces that observe each one.
 | `completed` | Last step succeeded. | Yes | `tracker.completeRun()` |
 | `failed` | A step threw and the error wasn't recovered. | Yes | `tracker.failRun()` |
 | `crashed` | Process died mid-flight; `uncaughtException` or `unhandledRejection` flipped the run before exit, OR the boot-time orphan scan found a `running` row older than `BLOK_ORPHAN_THRESHOLD_MS`. | Yes | `tracker.markRunCrashed()` |
-| `timedOut` | A step exceeded `maxDuration` on its final retry attempt. Distinct from `failed` so SLA dashboards separate timeouts from logic errors. | Yes | `tracker.markRunTimedOut()` |
+| `timedOut` | A step exceeded `maxDuration` on its final retry attempt, **or a worker job exceeded the trigger's `timeout` (`WorkerTimeoutError`)**. Distinct from `failed` so SLA dashboards separate timeouts from logic errors. | Yes | `tracker.markRunTimedOut()` |
 | `cancelled` | `POST /__blok/runs/:runId/cancel` fired; `RunCancelledError` propagated. | Yes | `tracker.cancelRun()` |
 | `throttled` | Trigger's [concurrency gate](/d/reliability/concurrency-keys) denied entry with `onLimit: "throw"`. Distinct from `failed` — no step ran. | Yes | `tracker.markRunThrottled()` |
 | `queued` | Trigger's concurrency gate denied entry with `onLimit: "queue"`. The run defers, then re-attempts the gate. Transient state — transitions to `running` on grant or back to `queued` on re-denial. | No | `tracker.markRunQueued()` |
@@ -87,7 +87,7 @@ Studio's saved-filters surface includes preset views per state — see
 | **Studio run list** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **HTTP 200 response** | — | ✓ | — | — | — | — | — | 202 + Location | 202 + Location | 200 + `intoRunId` | — |
 | **HTTP 4xx/5xx** | — | — | 5xx | 5xx | 5xx | 5xx | 429 + Retry-After | — | — | — | — |
-| **Worker ACK/NACK** | — | ACK | NACK | NACK | NACK | NACK | NACK redeliver | ACK | ACK | ACK | ACK |
+| **Worker ACK/NACK** | — | ACK | NACK | NACK | ACK | ACK | NACK redeliver | ACK | ACK | ACK | ACK |
 | **`RUN_*` event** | `RUN_STARTED` | `RUN_COMPLETED` | `RUN_FAILED` | `RUN_CRASHED` | `RUN_TIMED_OUT` | `RUN_CANCELLED` | `RUN_THROTTLED` | `RUN_QUEUED` | `RUN_DELAYED` | `RUN_DEBOUNCED` | `RUN_EXPIRED` |
 | **Counter (OTel)** | — | run total | run failed | crash autoflip | timeout total | cancelled total | concurrency denied | concurrency queued | scheduling delayed | scheduling debounced | scheduling expired |
 

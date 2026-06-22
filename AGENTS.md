@@ -31,7 +31,7 @@ blok/
 │   ├── websocket/           # WebSocket trigger
 │   ├── sse/                 # Server-Sent Events trigger
 │   ├── cron/                # Scheduled trigger
-│   ├── queue/               # Queue trigger (Kafka, RabbitMQ, SQS, Redis)
+│   ├── queue/               # Queue adapter backend (Kafka, RabbitMQ, SQS, Redis) — NOT a usable trigger kind; `trigger.queue` is rejected at workflow construction (use `worker`)
 │   ├── pubsub/              # Pub/Sub trigger (GCP, AWS, Azure)
 │   └── worker/              # Background worker trigger
 ├── nodes/
@@ -683,15 +683,17 @@ Conditions are evaluated in order. First match wins. `condition` strings are Jav
 | `http` | method, path, accept | `{ "method": "GET", "path": "/", "accept": "application/json" }` |
 | `grpc` | service, method, proto | `{ "service": "UserService", "method": "GetUser" }` |
 | `cron` | schedule, timezone | `{ "schedule": "0 * * * *", "timezone": "UTC" }` |
-| `queue` | provider, topic, consumerGroup | `{ "provider": "kafka", "topic": "events" }` |
 | `pubsub` | provider, topic, subscription | `{ "provider": "gcp", "topic": "updates" }` |
 | `webhook` | source, events, secret | `{ "source": "github", "events": ["push"] }` |
 | `websocket` | events, path | `{ "events": ["message"], "path": "/ws" }` |
 | `sse` | events, channels, path | `{ "events": ["update"], "path": "/stream" }` |
 | `worker` | queue, concurrency, retries | `{ "queue": "jobs", "concurrency": 5 }` |
 
-Queue providers: `kafka`, `rabbitmq`, `sqs`, `redis`, `beanstalk`, `nats`
+> `trigger.queue` is **not** a usable trigger kind — it's rejected at workflow construction (F10). Use `worker`, which consumes a queue and has a runtime. The `queue/` package exists only as an adapter backend.
+
 Pub/Sub providers: `gcp`, `aws`, `azure`
+
+Trigger-level `middleware` and `concurrencyKey` apply to every trigger kind — HTTP, worker, cron, pubsub, and grpc — not just HTTP. See the per-trigger reference pages for details.
 
 ### Worker Trigger
 
@@ -712,27 +714,24 @@ interface WorkerTriggerOpts {
 #### Worker Workflow Example (TypeScript)
 
 ```typescript
-import { type Step, Workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 
-const step: Step = Workflow({
+export default workflow({
   name: "Process Background Job",
   version: "1.0.0",
-})
-  .addTrigger("worker", {
-    queue: "background-jobs",
-  })
-  .addStep({
-    name: "process-job",
-    node: "@blokjs/api-call",
-    type: "module",
-    inputs: {
-      url: "https://example.com/process",
-      method: "POST",
-      body: "js/ctx.request.body",
+  trigger: { worker: { queue: "background-jobs", concurrency: 5, retries: 3 } },
+  steps: [
+    {
+      id: "process-job",
+      use: "@blokjs/api-call",
+      inputs: {
+        url: "https://example.com/process",
+        method: "POST",
+        body: "js/ctx.request.body",
+      },
     },
-  });
-
-export default step;
+  ],
+});
 ```
 
 #### Job Context Mapping
@@ -750,11 +749,19 @@ ctx.vars._worker_job          → { id, queue, attempts, maxRetries, priority, c
 
 #### Worker Adapters
 
-| Adapter | Backend | Install | Use Case |
+Eight adapters ship in the box. Select via `trigger.worker.provider`,
+then `BLOK_WORKER_ADAPTER` env, then default `in-memory`.
+
+| `BLOK_WORKER_ADAPTER` | Backend | Install | Use Case |
 |---------|---------|---------|----------|
-| `NATSWorkerAdapter` | NATS JetStream | `nats` | Production — durable, distributed |
-| `BullMQAdapter` | Redis via BullMQ | `bullmq ioredis` | Production — priority queues, delayed jobs |
-| `InMemoryAdapter` | In-process | None | Development/testing only |
+| `in-memory` | In-process | None | Single-process dev / testing. State vanishes on restart. |
+| `nats` | NATS JetStream | `nats` | Production — durable streams, pull consumers, server-side retry. |
+| `bullmq` | Redis via BullMQ | `bullmq ioredis` | Production — priority queues, delayed jobs, dashboards. |
+| `redis` | Redis Streams | `ioredis` | Production — lighter than BullMQ. |
+| `sqs` | AWS SQS | `@aws-sdk/client-sqs` | AWS-native. FIFO + standard queues. |
+| `kafka` | Kafka | `kafkajs` | High-throughput. Consumer groups. |
+| `rabbitmq` | RabbitMQ | `amqplib` | RabbitMQ shops. |
+| `pg-boss` | Postgres | `pg-boss` | Single-store deployments. No separate broker. |
 
 #### Worker Retry Logic
 

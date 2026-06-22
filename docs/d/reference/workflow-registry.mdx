@@ -27,8 +27,11 @@ confirms:
 [blok] workflow registry — N workflow(s) callable as sub-workflow
 ```
 
-Future trigger types (worker, cron) feed the same registry. The
-lookup is decoupled from any particular trigger.
+Worker and Cron triggers also register their scanned workflows on boot
+via `TriggerBase.registerWorkflowsFromNodeMap`, so sub-workflow dispatch
+works uniformly across HTTP, Worker, and Cron processes — a worker
+workflow can be a sub-workflow target, and vice versa. The lookup is
+decoupled from any particular trigger.
 
 ## API
 

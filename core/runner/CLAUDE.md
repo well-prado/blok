@@ -221,8 +221,9 @@ semantics — sub-workflow inputs become the child's `request.body`.
 **Workflow registration**: triggers feed the registry at boot. The
 HTTP trigger's `buildFileBasedRoutes()` calls
 `WorkflowRegistry.getInstance().registerAll(...)` after scanning
-workflows. Future trigger types (worker, cron) feed the same registry.
-Sub-workflow lookup is decoupled from any particular trigger.
+workflows. Worker and cron triggers feed the same registry via
+`TriggerBase.registerWorkflowsFromNodeMap` (shipped F6). Sub-workflow
+lookup is decoupled from any particular trigger.
 
 **Lineage**: child's `WorkflowRun.parentRunId` carries the parent's
 run id; `parentNodeRunId` carries the specific NodeRun (the

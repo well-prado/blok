@@ -58,6 +58,7 @@ message UserResponse { string id = 1; string name = 2; string email = 3; }
 | `method` | `string` | gRPC method name (matches `rpc Bar(...) returns (...)` in the proto). |
 | `proto` | `string` | Path to the `.proto` file (relative to the workflow). |
 | `port` | `number` | gRPC server port (default 50051). All gRPC-triggered workflows share one port. |
+| `middleware` | `string[]` | Per-trigger middleware chain, applied on each inbound call before the workflow body. |
 
 ## ctx mapping
 
@@ -98,6 +99,7 @@ implemented in.
 All standard knobs apply:
 
 - `concurrencyKey` on the trigger for per-client / per-tenant caps
+- `middleware` on the trigger — the chain runs on each inbound call before the workflow body, identical to HTTP (auth gates, per-tenant context resolution)
 - `idempotencyKey` on steps for replay safety
 - `retry` + `maxDuration` per step
 - Sub-workflows for fan-out within one gRPC call

@@ -53,6 +53,32 @@ main workflow.
 The `_middleware: true` flag marks this workflow as middleware-only —
 it's never reachable as a direct HTTP route.
 
+The same middleware in the TypeScript DSL — `middleware: true` (the
+literal `true` is the only accepted value) marks it middleware-only, and
+`trigger` is optional **only** for middleware workflows:
+
+```typescript triggers/http/src/workflows/auth-check.ts
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+  name: "auth-check",
+  version: "1.0.0",
+  middleware: true, // marks middleware-only; trigger is omitted entirely
+  steps: [
+    {
+      id: "verify",
+      use: "@blokjs/jwt-verify",
+      inputs: {
+        token: "js/ctx.request.headers['authorization']?.slice(7)",
+        secret: "js/process.env.JWT_SECRET",
+        issuer: "https://auth.example.com",
+        audience: "my-api",
+      },
+    },
+  ],
+});
+```
+
 ### Use it from a trigger
 
 ```json
@@ -139,9 +165,12 @@ BLOK_GLOBAL_MIDDLEWARE=request-id,audit-log
   the global chain — operator state survives workflow reloads.
 - **Outer-most.** Always runs first, before workflow-level and trigger-
   level middleware.
-- **Per-process.** Each Node process has its own snapshot. Set the env
-  var (or programmatic call) in each trigger entry file so the chain
-  applies uniformly across HTTP / Worker / Cron processes.
+- **Per-process.** Each Node process has its own snapshot.
+  `BLOK_GLOBAL_MIDDLEWARE` is read automatically by HTTP, Worker, and
+  Cron trigger boot (`TriggerBase.seedGlobalMiddlewareFromEnv`) — set it
+  once in the deploy env and every trigger process picks it up, no
+  per-entry-file wiring needed. The programmatic `setGlobalMiddleware`
+  call still has to run in each process that needs it.
 
 ## Middleware patterns
 

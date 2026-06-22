@@ -90,6 +90,11 @@ Cron triggers run in a dedicated Node process — `blokctl dev` spawns
 one when any workflow has a `trigger.cron` config. The process polls
 the schedule on a sub-second tick and dispatches when a match fires.
 
+The cron process installs the same crash / orphan / shutdown / janitor
+handlers as HTTP and Worker, and runs trigger-level `middleware` on each
+fire — identical chain resolution (process-global → workflow → trigger)
+to the other trigger kinds.
+
 Schedule durability is broker-agnostic — the trigger doesn't persist
 "missed" executions across restarts by default. For exactly-once
 historical replay, layer a [delay/TTL](/d/scheduling/delay-and-ttl) on

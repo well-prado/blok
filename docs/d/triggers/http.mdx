@@ -41,6 +41,7 @@ curl http://localhost:4000/hello
 | `method` | `"GET"` \| `"POST"` \| `"PUT"` \| `"PATCH"` \| `"DELETE"` \| `"ANY"` | required | Use `"ANY"` for wildcard. The v1 `"*"` form is still accepted but warns. |
 | `path` | `string` | derived | URL path with `:name` for dynamic params (e.g. `/users/:id`). When omitted, the path is derived from the workflow's file path under `workflows/json/` — see [file-based routing](#file-based-routing). |
 | `accept` | `string` | `"application/json"` | Response content-type. Use `"text/html"` for UI nodes. |
+| `headers` | `Record<string, string>` | — | Required headers validated at trigger entry. A request missing any declared header is rejected before any step runs. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware chain. Resolved by name from the middleware registry. |
 | `concurrencyKey` | `string` \| `$.path` | — | Per-key in-flight cap. See [concurrency keys](/d/reliability/concurrency-keys). |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
@@ -191,6 +192,17 @@ See the [chat demo](/d/examples/chat) for a complete UI-node example.
 Pair an HTTP POST handler with an SSE subscriber — they share the
 in-process bus when both triggers run in one process. The
 [streaming chat example](/d/examples/chat) walks the full pattern.
+
+### Required headers
+
+List headers that every request must carry under `headers`. A request
+missing any of them is rejected with `400` at trigger entry, before any
+step runs. An empty declared value asserts presence only; a non-empty
+value also requires an exact match (handy for pinning an API version):
+
+```json
+"trigger": { "http": { "method": "POST", "path": "/api", "headers": { "x-api-key": "", "x-api-version": "2026-01" } } }
+```
 
 ## Composition
 

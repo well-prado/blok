@@ -21,6 +21,21 @@ In v0.5, **middleware is just a workflow**. You declare a workflow with `"middle
 }
 ```
 
+The TypeScript DSL takes the same `middleware: [...]` array on the
+workflow body:
+
+```typescript
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+  name: "v05-jwt-protected",
+  version: "1.0.0",
+  middleware: ["jwt-auth"],
+  trigger: { http: { method: "POST", path: "/" } },
+  steps: [/* ... */],
+});
+```
+
 **Trigger-level** — declare on a specific trigger config. Applies only when that particular trigger fires. Use this when the chain varies by trigger (e.g. only the public HTTP endpoint needs CAPTCHA, the worker queue doesn't):
 
 ```json
@@ -43,9 +58,20 @@ Middleware run **before** the main workflow, in the order declared, sharing the 
 
 ## Authoring a middleware
 
-Middleware workflows go in `triggers/http/workflows/json/middleware/`. They look like normal workflows, except:
+JSON middleware workflows go in `triggers/http/workflows/json/middleware/`; TypeScript middleware live in `triggers/http/src/workflows/` like any other TS workflow. They look like normal workflows, except:
 
-1. The top-level `"middleware": true` flag marks them as middleware-only (they don't get their own HTTP route).
+1. The top-level `"middleware": true` flag marks them as middleware-only (they don't get their own HTTP route). In the TypeScript DSL this is `middleware: true` (the literal `true`) on the `workflow({...})` body, and `trigger` may be omitted:
+
+   ```typescript
+   import { workflow } from "@blokjs/helper";
+
+   export default workflow({
+     name: "jwt-auth",
+     version: "1.0.0",
+     middleware: true, // middleware-only; no trigger / no route
+     steps: [/* ... */],
+   });
+   ```
 2. They typically end either by throwing (short-circuit) or by publishing context for the main workflow to read (`@blokjs/ctx-publish`).
 
 ### JWT auth (production)
