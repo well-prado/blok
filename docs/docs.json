@@ -168,6 +168,7 @@
 						"pages": [
 							"d/cli/overview",
 							"d/cli/project",
+							"d/cli/runtimes",
 							"d/cli/nodes",
 							"d/cli/workflows",
 							"d/cli/gen",

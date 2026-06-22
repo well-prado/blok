@@ -1,0 +1,264 @@
+---
+title: Language Runtimes
+description: Add, remove, and list language runtimes (Go, Rust, Java, C#, PHP, Ruby, Python) in an existing Blok project.
+---
+
+Blok runs your workflow steps across **eight language runtimes**. Node/TypeScript runs **in‑process** (it's always there, nothing to install). The other seven — **Go, Rust, Java, C#, PHP, Ruby, and Python 3** — run as lightweight **gRPC sidecars** that the runner talks to.
+
+You choose which runtimes you want when you scaffold a project (`create project --runtimes go,python3`). But you don't have to decide everything up front: the **`blokctl runtime`** commands let you **add or remove a language at any time**, in place, on a project that already exists.
+
+<Note>
+**Node / TypeScript is always available.** It runs in the same process as your triggers, so there's nothing to add or remove. The `runtime` commands manage the seven *sidecar* languages: `go`, `rust`, `java`, `csharp`, `php`, `ruby`, `python3`.
+</Note>
+
+## The commands at a glance
+
+| Command | What it does |
+| --- | --- |
+| `blokctl runtime add <lang>` | Install a language sidecar into this project |
+| `blokctl runtime remove <lang>` | Remove a language sidecar from this project |
+| `blokctl runtime list` | Show what's installed and what you can add |
+
+Run them from your project's root (or point at it with `-d <path>`). `remove` has the alias `rm`, and `list` has `ls`.
+
+<Tip>
+Not sure where to start? Run `blokctl runtime list` to see what's installed and which languages your machine already has the toolchain for — then `blokctl runtime add` (with no argument) to pick one from an interactive menu.
+</Tip>
+
+---
+
+## `runtime list` — see what you have
+
+A read‑only snapshot: which sidecars are installed (with their gRPC port and detected version), and which supported languages are still available to add (with whether the toolchain is ready on your machine).
+
+```bash
+blokctl runtime list
+```
+
+```text
+┌   Blok runtimes
+│
+◇  Installed (1) ───────────────────────────────╮
+│  ✓ Python 3     gRPC :10007    python3 3.9.6  │
+├───────────────────────────────────────────────╯
+│
+◇  Available to add (6) ────────────────────────────────────────╮
+│  Go           needs go             blokctl runtime add go      │
+│  Rust         needs rustc + cargo  blokctl runtime add rust    │
+│  Ruby         ruby + bundler ready blokctl runtime add ruby    │
+│  …                                                             │
+├────────────────────────────────────────────────────────────────╯
+│
+└  Node / TypeScript runs in-process — always available, nothing to install.
+```
+
+Add `--json` for a machine‑readable version (handy in scripts or CI):
+
+```bash
+blokctl runtime list --json
+```
+
+---
+
+## `runtime add` — add a language
+
+This is the command you'll reach for when you scaffolded a project with, say, just Node and later realize you want to write a step in Python or Go.
+
+```bash
+# Add a specific runtime
+blokctl runtime add python3
+
+# …or omit the name to pick one from an interactive menu
+blokctl runtime add
+```
+
+<Steps>
+  <Step title="Checks the toolchain">
+    Confirms the language is installed (e.g. `python3`, or `java` **and** `mvn`). If it isn't, you get the install link — or pass `--skip-toolchain-check` to scaffold anyway.
+  </Step>
+  <Step title="Fetches a version‑matched SDK">
+    Downloads the SDK source for **your project's Blok version**, so the gRPC contract always matches your `@blokjs/runner`. (Cached under `~/.blok`, so the next add is instant. Use `--local <path>` to point at a checkout instead.)
+  </Step>
+  <Step title="Builds it">
+    Runs the language's install/build (`pip install`, `go mod download`, `cargo build`, …). Nothing is written to your project until this succeeds, so a failed build never leaves you half‑configured.
+  </Step>
+  <Step title="Wires it in">
+    Merges the runtime into `.blok/config.json`, `.env.local`, and `supervisord.conf`, and creates `runtimes/<lang>/nodes/` for your code. Your triggers and any other runtimes are left untouched.
+  </Step>
+</Steps>
+
+After a successful add you'll see exactly what changed:
+
+```text
+◇  Python 3 added ─────────────────────────────────────────╮
+│  ✓ .blok/config.json   runtimes.python3                  │
+│  ✓ .env.local          RUNTIME_PYTHON3_GRPC_PORT=10007    │
+│  ✓ supervisord.conf    [program:python3_runtime]         │
+│  ✓ runtimes/python3/nodes/  (your runtime nodes go here)  │
+├────────────────────────────────────────────────────────────╯
+│
+└  Run blokctl dev to start it, then add type: "runtime.python3" steps to your workflows.
+```
+
+<Note>
+**No application code changes are needed.** The runner already knows how to dispatch to all seven languages — adding one is purely configuration plus the SDK files. You never touch `@blokjs/runner` or your trigger code.
+</Note>
+
+### Use it in a workflow
+
+A step runs on a sidecar when its `type` is `runtime.<lang>`. Write your node under `runtimes/<lang>/nodes/`, then reference it by name:
+
+<CodeGroup>
+```ts TypeScript workflow
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Resize Image",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/resize" } },
+  steps: [
+    {
+      id: "resize",
+      use: "image-resizer",        // a node in runtimes/python3/nodes/
+      type: "runtime.python3",     // ← run this step on the Python sidecar
+      inputs: { image: $.req.body.image },
+    },
+  ],
+});
+```
+
+```json JSON workflow
+{
+  "id": "resize",
+  "use": "image-resizer",
+  "type": "runtime.python3",
+  "inputs": { "image": "$.req.body.image" }
+}
+```
+</CodeGroup>
+
+Then start everything together:
+
+```bash
+blokctl dev
+```
+
+`blokctl dev` reads `.blok/config.json`, spawns each sidecar, waits for its gRPC port to come up, and then starts your triggers — exactly as if you'd scaffolded the runtime at project creation.
+
+### Options
+
+| Flag | Purpose |
+| --- | --- |
+| `-d, --directory <path>` | Project directory (default: current directory) |
+| `--local <path>` | Use a local Blok checkout for the SDK source instead of fetching by version |
+| `--grpc-port <port>` | Use a non‑default gRPC port for this runtime |
+| `--force` | Reinstall even if the runtime is already present (does a clean re‑copy) |
+| `--skip-toolchain-check` | Add even if the language toolchain isn't detected |
+| `-y, --yes` | Skip prompts (non‑interactive — for CI/scripts) |
+
+<Warning>
+**Toolchain not installed?** `add` stops with the exact tool you're missing and a link to install it — for example, *"Java toolchain not detected (need **Maven**). Install Maven: …"*. Install it and re‑run, or pass `--skip-toolchain-check` if you'll set it up later.
+</Warning>
+
+---
+
+## `runtime remove` — remove a language
+
+Cleanly undoes everything `add` did — and it's careful with your code.
+
+```bash
+blokctl runtime remove go
+```
+
+<Steps>
+  <Step title="Warns you about dependent workflows">
+    First it scans your project for steps that use `runtime.<lang>` and lists the files. Those steps will fail once the sidecar is gone, so you know exactly what to update.
+  </Step>
+  <Step title="Asks before deleting your nodes">
+    Your runtime nodes in `runtimes/<lang>/nodes/` are **kept by default**. `remove` asks before deleting them; pass `--purge-nodes` to delete them without a prompt.
+  </Step>
+  <Step title="Undoes the wiring">
+    Removes the entry from `.blok/config.json`, the `RUNTIME_<LANG>_*` vars from `.env.local`, the `supervisord.conf` block, and the `.blok/runtimes/<lang>/` SDK directory.
+  </Step>
+</Steps>
+
+```text
+▲  1 workflow file(s) reference runtime.python3 — those steps will fail after removal:
+   • src/workflows/demo.ts
+◇  Python 3 removed ───────────────────────────────────────╮
+│  − .blok/config.json   runtimes.python3                  │
+│  − .env.local          RUNTIME_PYTHON3_*                  │
+│  − supervisord.conf    [program:python3_runtime]         │
+│  − .blok/runtimes/python3/  (SDK source + build output)  │
+├────────────────────────────────────────────────────────────╯
+│
+└  Update the 1 workflow(s) that referenced runtime.python3. Re-add anytime: blokctl runtime add python3.
+```
+
+<Warning>
+Any workflow step with `type: "runtime.<lang>"` will fail at run time after you remove that language. Update or delete those steps — or just `blokctl runtime add <lang>` to put it back. Removal is fully reversible.
+</Warning>
+
+### Options
+
+| Flag | Purpose |
+| --- | --- |
+| `-d, --directory <path>` | Project directory (default: current directory) |
+| `--purge-nodes` | Also delete your custom nodes in `runtimes/<lang>/nodes/` |
+| `-y, --yes` | Skip prompts (keeps your custom nodes) |
+
+---
+
+## How runtimes are wired (under the hood)
+
+If you're curious what these commands actually change, a runtime lives in **four places** — and that's the whole story. There's no hidden state, and nothing in your application code:
+
+| Where | What's there |
+| --- | --- |
+| `.blok/config.json` → `runtimes.<lang>` | The runtime's command, ports, version, and working directory |
+| `.env.local` → `RUNTIME_<LANG>_*` | Host + gRPC port the runner connects to |
+| `supervisord.conf` → `[program:<lang>_runtime]` | How the sidecar boots in a container deploy |
+| `.blok/runtimes/<lang>/` + `runtimes/<lang>/nodes/` | The SDK server (managed) + **your** runtime nodes (yours) |
+
+Each language has a fixed default gRPC port:
+
+| Runtime | gRPC port |
+| --- | --- |
+| Go | `10001` |
+| Rust | `10002` |
+| Java | `10003` |
+| C# / .NET | `10004` |
+| PHP | `10005` |
+| Ruby | `10006` |
+| Python 3 | `10007` |
+
+Because it's all configuration, a runtime added later is **indistinguishable** from one you picked at `create project` — same files, same shape, started the same way by `blokctl dev`.
+
+---
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="I scaffolded my project with only Node. How do I add Go?">
+    `cd` into the project and run `blokctl runtime add go` (you'll need the Go toolchain installed). That's it — write your Go nodes in `runtimes/go/nodes/`, reference them with `type: "runtime.go"` steps, and `blokctl dev` will start the Go sidecar alongside your triggers.
+  </Accordion>
+  <Accordion title="Will removing a runtime delete my code?">
+    No — not unless you ask. Your nodes in `runtimes/<lang>/nodes/` are kept by default; `remove` prompts before touching them and only deletes them if you confirm (or pass `--purge-nodes`). It does delete the managed SDK directory under `.blok/runtimes/<lang>/`, which is regenerated by `add`.
+  </Accordion>
+  <Accordion title="The gRPC port is already in use.">
+    `add` refuses if the runtime's default port is taken (by another runtime in the project, or a live process on your machine) and tells you to pass `--grpc-port <n>`. The override is threaded everywhere consistently — config, `.env.local`, and the boot command.
+  </Accordion>
+  <Accordion title="Does this match `create project --runtimes`?">
+    Yes, exactly. `runtime add` reuses the same setup code and writes the same configuration, so a runtime added later behaves identically to one scaffolded at creation. `blokctl dev` and the runner can't tell the difference.
+  </Accordion>
+  <Accordion title="What if my project is on an unreleased / local Blok version?">
+    `add` fetches the SDK that matches your project's pinned `@blokjs/runner` version, so the gRPC contract always lines up. If that version isn't published (e.g. you're developing Blok itself), point at a local checkout with `--local /path/to/blok`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Related
+
+- [`create project`](./project.mdx) — choose your initial runtimes with `--runtimes go,python3`.
+- [All `blokctl` commands](./overview.mdx) — the full CLI reference.
