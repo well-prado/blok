@@ -1,0 +1,444 @@
+---
+title: "MCP trigger"
+description: "Expose a workflow as a Model Context Protocol tool or resource — so AI clients like Claude Code, Cursor, and Claude Desktop can discover and call it. Mounts on the shared HTTP port; tool input schemas are generated from your Zod input."
+icon: "robot"
+---
+
+The MCP trigger turns a workflow into a [Model Context Protocol](https://modelcontextprotocol.io)
+server. Any MCP client — Claude Code, Cursor, Claude Desktop, your own
+agent — connects over HTTP, discovers your workflows as **tools** (or
+**resources**), and calls them. The tool's input schema is generated
+automatically from the workflow's Zod `input`, and every call runs
+through the normal runner, so retries, idempotency, middleware, and
+[Studio](/d/studio/index) tracing all apply.
+
+It [mounts on the HTTP server](./http.mdx) (same port, same Hono app,
+single process) — no separate listener. A workflow opts in with a
+`trigger.mcp` block; everything else is a normal v2 workflow.
+
+<Note>
+MCP is "give an LLM a callable tool backed by a workflow." If you want a
+plain REST endpoint for non-MCP clients, use the [HTTP trigger](./http.mdx)
+instead — an MCP client can't discover or call a bare HTTP route as a tool.
+</Note>
+
+## Quickstart
+
+A tool that greets a person by name. The workflow-level `input` Zod
+schema becomes the tool's `inputSchema`; the single step builds the
+result, which is what the client receives.
+
+```ts src/workflows/examples/mcp-greeter.ts
+import { workflow } from "@blokjs/helper";
+import { z } from "zod";
+
+export default workflow({
+  name: "mcp-greeter",
+  version: "1.0.0",
+  description: "MCP tool that greets a person by name.",
+
+  // → becomes the tool's JSON inputSchema (via zod-to-json-schema)
+  input: z.object({
+    name: z.string().min(1).describe("Name of the person to greet"),
+    excited: z.boolean().default(false).describe("End with '!' instead of '.'"),
+  }),
+
+  output: z.object({ greeting: z.string() }),
+
+  trigger: {
+    mcp: {
+      path: "/mcp",
+      serverName: "blok-examples",
+      tool: {
+        name: "greet",
+        description: "Greet a person by name. Pass { name, excited? }.",
+      },
+    },
+  },
+
+  steps: [
+    {
+      id: "greet",
+      use: "@blokjs/expr",
+      inputs: {
+        expression:
+          '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
+      },
+    },
+  ],
+});
+```
+
+Scaffold a project that includes this exact example with:
+
+```bash
+npx blokctl@latest create project --triggers http,mcp --examples
+```
+
+Start it (`blokctl dev` or `bun run start:http`) and the console shows
+the MCP server mounted on the HTTP port:
+
+```
+[blok][mcp] server "blok-examples" at /mcp — 1 tool(s), 0 resource(s), transports=[sse,streamable-http]
+[blok][mcp]   GET  /mcp/sse   POST /mcp/messages  (sse)
+[blok][mcp]   ALL  /mcp  (streamable-http)
+```
+
+That's the whole server. Now point a client at `http://localhost:4000/mcp`.
+
+## Connect a client
+
+Every MCP client needs the same two things: a **URL** and a **transport**.
+
+| Transport | URL to give the client | When |
+|---|---|---|
+| **Streamable-HTTP** (recommended) | `http://localhost:4000/mcp` | Modern clients, serverless, anything new |
+| **SSE** (legacy 2024-11-05) | `http://localhost:4000/mcp/sse` | Older clients that only speak SSE |
+
+Both are served by default. Use the streamable-HTTP URL unless a client
+only supports SSE.
+
+<Tabs>
+  <Tab title="Claude Code">
+    Add the server from the CLI — `--transport http` is streamable-HTTP:
+
+    ```bash
+    claude mcp add --transport http blok http://localhost:4000/mcp
+    # legacy SSE-only clients:
+    #   claude mcp add --transport sse blok http://localhost:4000/mcp/sse
+    ```
+
+    Then in a session, `/mcp` lists the connected servers and the `greet`
+    tool appears namespaced under the `blok` server. Ask Claude to
+    "greet Ada excitedly" and it calls the tool.
+  </Tab>
+  <Tab title="Cursor">
+    Create `.cursor/mcp.json` in your project (or `~/.cursor/mcp.json`
+    for all projects):
+
+    ```json .cursor/mcp.json
+    {
+      "mcpServers": {
+        "blok": { "url": "http://localhost:4000/mcp" }
+      }
+    }
+    ```
+
+    Cursor picks it up on reload — Settings → MCP shows `blok` with its
+    tools. The agent can now call `greet`.
+  </Tab>
+  <Tab title="Claude Desktop">
+    Edit `claude_desktop_config.json` (Settings → Developer → Edit
+    Config) and add the remote server by URL:
+
+    ```json claude_desktop_config.json
+    {
+      "mcpServers": {
+        "blok": { "url": "http://localhost:4000/mcp" }
+      }
+    }
+    ```
+
+    Restart Claude Desktop. If your build only accepts stdio servers,
+    bridge to the HTTP endpoint with `mcp-remote`:
+
+    ```json claude_desktop_config.json
+    {
+      "mcpServers": {
+        "blok": {
+          "command": "npx",
+          "args": ["-y", "mcp-remote", "http://localhost:4000/mcp"]
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Inspector / programmatic">
+    Poke the server interactively with the official inspector — no config
+    files, great for debugging:
+
+    ```bash
+    npx @modelcontextprotocol/inspector
+    # then connect to http://localhost:4000/mcp (Streamable HTTP)
+    ```
+
+    Or drive it from code with the MCP SDK:
+
+    ```ts
+    import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+    import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+    const client = new Client({ name: "my-app", version: "1.0.0" }, { capabilities: {} });
+    await client.connect(new StreamableHTTPClientTransport(new URL("http://localhost:4000/mcp")));
+
+    const { tools } = await client.listTools();           // [{ name: "greet", inputSchema, ... }]
+    const res = await client.callTool({ name: "greet", arguments: { name: "Ada", excited: true } });
+    console.log(res.content[0].text);                      // { "greeting": "Hello, Ada!" }
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+**Deploying?** Swap `http://localhost:4000` for your public origin (e.g.
+`https://api.example.com/mcp`). The path (`/mcp`) and transports are
+identical — only the host changes. Put it behind TLS and an auth proxy;
+the trigger does not authenticate callers (see [Identity](#identity)).
+</Tip>
+
+## Talk to it with curl
+
+Under the hood it's plain JSON-RPC 2.0 over HTTP. The streamable-HTTP
+endpoint is stateless — no handshake needed — so you can hit it directly.
+You **must** send `Accept: application/json, text/event-stream` (the
+transport replies with an SSE-framed message; without that header you get
+`406 Not Acceptable`).
+
+List the tools:
+
+```bash
+curl -sS http://localhost:4000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+```
+event: message
+data: {"result":{"tools":[{"name":"greet","description":"Greet a person by name. Pass { name, excited? }.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"description":"Name of the person to greet"},"excited":{"type":"boolean","default":false,"description":"End with '!' instead of '.'"}},"required":["name"],"additionalProperties":false}}]},"jsonrpc":"2.0","id":1}
+```
+
+Call the `greet` tool:
+
+```bash
+curl -sS http://localhost:4000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
+       "params":{"name":"greet","arguments":{"name":"Ada","excited":true}}}'
+```
+
+```
+event: message
+data: {"result":{"content":[{"type":"text","text":"{\n  \"greeting\": \"Hello, Ada!\"\n}"}]},"jsonrpc":"2.0","id":2}
+```
+
+The tool's return value (`ctx.response.data`) is JSON-stringified into the
+text content block — that's what the LLM sees.
+
+## Tools vs resources
+
+A `trigger.mcp` workflow is exposed as a **tool** by default. Set
+`resource` instead to expose it as a read-only **resource**.
+
+| | Tool (default) | Resource (`resource:` set) |
+|---|---|---|
+| Config | `tool: { name?, description? }` | `resource: { uri, name?, description?, mimeType? }` |
+| Client call | `tools/call` with `arguments` | `resources/read` with `uri` |
+| Client discovery | `tools/list` (with `inputSchema`) | `resources/list` |
+| `ctx.request.body` | the call's `arguments` | always `{}` (resources take no args) |
+| Use it for | actions, computations, anything with inputs | static or dynamic read-only data |
+
+```ts
+// Resource: expose a read-only list at a stable URI
+trigger: {
+  mcp: {
+    path: "/mcp",
+    resource: { uri: "blok://agents", name: "Agents", mimeType: "application/json" },
+  },
+}
+```
+
+<Note>
+A workflow is **either** a tool **or** a resource — `resource` wins if both
+are set. Need both surfaces? Write two thin workflows that each call a
+shared sub-workflow.
+</Note>
+
+## Trigger config
+
+```ts
+trigger: { mcp: {
+  path?: string,            // default "/mcp" — base HTTP path the server mounts on
+  serverName?: string,      // default "blok-mcp" — name advertised to clients
+  serverVersion?: string,   // default "1.0.0"
+  transports?: ("sse" | "streamable-http")[],  // default both
+  tool?: { name?: string, description?: string },        // tool mode (default)
+  resource?: { uri: string, name?: string, description?: string, mimeType?: string },
+  middleware?: string[],    // trigger-level middleware chain
+} }
+```
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `path` | `string` | `"/mcp"` | Base path the server mounts on. Workflows sharing a path aggregate into one server. |
+| `serverName` | `string` | `"blok-mcp"` | Advertised to clients. Set something project-specific — the default is generic across all Blok apps. |
+| `serverVersion` | `string` | `"1.0.0"` | Advertised server version. |
+| `transports` | `("sse" \| "streamable-http")[]` | both | Which transports to serve. At least one required. |
+| `tool.name` | `string` | workflow `name` | Tool name clients see. |
+| `tool.description` | `string` | `Run the "<name>" workflow.` | Human-readable description shown to the LLM — write a good one; it's how the model decides when to call. |
+| `resource.uri` | `string` | — | **Required** for resource mode. Advertised URI, e.g. `blok://agents`. |
+| `resource.name` | `string` | workflow `name` | Resource display name. |
+| `resource.description` | `string` | — | Resource description. |
+| `resource.mimeType` | `string` | `"application/json"` | MIME type of the body. |
+| `middleware` | `string[]` | — | Trigger-level [middleware](/d/reference/middleware) chain (workflow names) run before this workflow. |
+
+## Transports & routes
+
+| Transport | Route(s) | State |
+|---|---|---|
+| **Streamable-HTTP** | `ALL <path>` (e.g. `POST /mcp`) | Stateless — a fresh server + transport per request, no session id. |
+| **SSE** (legacy) | `GET <path>/sse` opens the stream, `POST <path>/messages?sessionId=…` carries JSON-RPC | Stateful — one session per open stream, tracked until it closes. |
+
+More specific routes win Hono's first-match dispatch, so `/mcp/sse` and
+`/mcp/messages` resolve before the `/mcp` streamable-HTTP catch-all. The
+startup logs print every route as it mounts.
+
+<Warning>
+SSE requires the Node HTTP server (`@hono/node-server`). On non-Node
+runtimes (e.g. Cloudflare Workers) set `transports: ["streamable-http"]` —
+streamable-HTTP is the portable, stateless choice.
+</Warning>
+
+## How a tool call runs
+
+A `tools/call` runs the workflow through the normal runner. The mapping:
+
+| ctx field | Value on an MCP call |
+|---|---|
+| `ctx.request.body` | The call's `arguments` object (tools) / `{}` (resources) |
+| `ctx.request.headers["x-user-context"]` | Base64 identity, if the client sent one (see [Identity](#identity)) |
+| `ctx.request.params` / `ctx.request.query` | `{}` |
+| `ctx._mcp.userContext` | Parsed `{ userId, email }` or `null` |
+| **result** | `ctx.response.data` — the final step's output, JSON-stringified into the tool result |
+
+The lifecycle per call:
+
+<Steps>
+  <Step title="Discover">
+    The client calls `tools/list` (or `resources/list`). Blok scans the
+    [workflow registry](/d/reference/workflow-registry) for `trigger.mcp` workflows,
+    builds each tool's `inputSchema` from its Zod `input`, and returns the list.
+  </Step>
+  <Step title="Map inputs">
+    On `tools/call`, the `arguments` become `ctx.request.body`. Any
+    `x-user-context` is parsed and injected. Arguments are **not** validated
+    against the Zod schema here — validate in a step or middleware if you need to.
+  </Step>
+  <Step title="Run through the runner">
+    `middleware` runs (global → workflow → trigger), then the workflow steps.
+    Retries, idempotency, sub-workflows, concurrency gating, cancellation, and
+    Studio tracing all apply — exactly like an HTTP-triggered run.
+  </Step>
+  <Step title="Return">
+    `ctx.response.data` is stringified (objects via `JSON.stringify`) and wrapped
+    as the tool result `{ content: [{ type: "text", text }] }`.
+  </Step>
+</Steps>
+
+## Generated input schema
+
+The tool's `inputSchema` is generated from the workflow's `input` Zod
+schema with `zod-to-json-schema`. Descriptions, defaults, and
+`required` carry through — so a well-described Zod schema gives the LLM a
+well-described tool.
+
+```ts
+input: z.object({
+  query: z.string().describe("Search term"),
+  limit: z.number().optional(),
+})
+```
+
+becomes
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "Search term" },
+    "limit": { "type": "number" }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}
+```
+
+<Note>
+No `input` schema → the tool advertises `{ type: "object", additionalProperties: true }`
+(accepts anything). Always give tools an `input` schema with `.describe()`d
+fields — it's the single biggest lever on whether the model calls the tool correctly.
+</Note>
+
+## One server, many tools
+
+Workflows that share the same `path` **aggregate into one MCP server**.
+Write one workflow per tool; the client sees them all on one endpoint:
+
+```ts
+// search.ts      → trigger.mcp.path "/mcp", tool.name "search"
+// list_files.ts  → trigger.mcp.path "/mcp", tool.name "list_files"
+// agents.ts      → trigger.mcp.path "/mcp", resource.uri "blok://agents"
+```
+
+```
+[blok][mcp] server "my-platform" at /mcp — 2 tool(s), 1 resource(s), transports=[sse,streamable-http]
+```
+
+The aggregation key is `path` only. Use the **same `serverName`** for
+workflows on the same path (the first one registered wins; the rest are
+ignored). Put unrelated tool groups on **different paths** (`/mcp`,
+`/admin/mcp`) to run separate servers in the same process.
+
+## Identity
+
+If a client sends an `x-user-context` header — base64-encoded JSON
+`{ userId, email }` — or a `?user_context=` query param, Blok parses it and
+makes it available to the workflow at `ctx._mcp.userContext` (and re-injected
+as a header). Use it for "who is calling" personalization, e.g. emailing the
+caller.
+
+<Warning>
+**Identity is injection, not authorization.** The trigger does **not**
+verify the header or scope access — anyone who can reach the endpoint can
+call any tool. Enforce auth yourself: front it with an auth proxy, or add
+[trigger middleware](/d/reference/middleware) that reads `ctx._mcp.userContext`
+and throws on unauthorized calls. Tokens are redacted from logs by the global sanitizer.
+</Warning>
+
+## Errors & failure modes
+
+| Situation | What the client gets |
+|---|---|
+| Tool throws (workflow error) | `200 OK` with `{ isError: true, content: [{ text: "Error: <message>" }] }` — the transport does **not** crash. |
+| Unknown tool name | `200 OK` with `{ isError: true, content: [{ text: "Unknown tool: <name>" }] }`. |
+| Transport itself fails | JSON-RPC error `{ code: -32603 }` with HTTP `500`. |
+| Missing `Accept: text/event-stream` (streamable-HTTP) | HTTP `406 Not Acceptable`. |
+
+Tool failures are surfaced *to the model* (so it can recover), not raised
+as HTTP errors. Every call — success or failure — is recorded as a run in
+[Studio](/d/studio/index) with the label `mcp.tool:<name>`.
+
+## Composition
+
+Because tool calls run through the runner, the full reliability surface
+composes:
+
+- [`retry`](/d/reliability/retry) / [`idempotencyKey`](/d/reliability/idempotency) on steps
+- [`maxDuration`](/d/reliability/max-duration) + [`ctx.signal`](/d/reliability/cancellation) cancellation
+- [sub-workflows](/d/composition/sub-workflows) for shared logic across tools
+- `middleware: [...]` on the trigger for auth / logging / rate-limit gates
+- OTel counters `blok_mcp_tool_calls_total{tool}` and `blok_mcp_sse_sessions_total{server}`
+
+## Related
+
+<Columns cols={3}>
+  <Card title="MCP greeter example" icon="robot" href="/d/examples/mcp-greeter">
+    The greeter end-to-end — author, run, connect a client.
+  </Card>
+  <Card title="HTTP trigger" icon="globe" href="/d/triggers/http">
+    The server MCP mounts on — same port, same process.
+  </Card>
+  <Card title="Middleware" icon="layer-group" href="/d/reference/middleware">
+    Add auth / rate-limiting in front of your tools.
+  </Card>
+</Columns>

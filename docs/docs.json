@@ -34,7 +34,8 @@
 							"d/examples/chat-memory",
 							"d/examples/llm-agent",
 							"d/examples/webhook-router",
-							"d/examples/worker-fanout"
+							"d/examples/worker-fanout",
+							"d/examples/mcp-greeter"
 						]
 					},
 					{
@@ -72,6 +73,7 @@
 							"d/triggers/sse",
 							"d/triggers/websocket",
 							"d/triggers/webhook",
+							"d/triggers/mcp",
 							"d/triggers/worker",
 							"d/triggers/cron",
 							"d/triggers/pubsub",

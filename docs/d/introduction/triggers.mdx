@@ -18,6 +18,7 @@ Blok supports various types of triggers to cater to different use cases. Common 
 *   **Scheduled (Cron)**: Executes a workflow at predefined times or intervals (e.g., run a report every night at 2 AM, perform a cleanup task every hour).
 *   **Message Queue**: Starts a workflow when a new message arrives in a specific queue (e.g., RabbitMQ, Kafka, AWS SQS). This is useful for asynchronous processing and event-driven architectures.
 *   **gRPC**: Initiates a workflow based on an incoming gRPC request. This is suitable for high-performance, contract-based inter-service communication.
+*   **MCP**: Exposes a workflow as a [Model Context Protocol](/d/triggers/mcp) tool or resource, so AI clients (Claude Code, Cursor, Claude Desktop) can discover and call it. The tool's input schema is generated from the workflow's Zod `input`.
 *   **Database Events**: (Potentially) Triggers a workflow in response to changes in a database (e.g., a new record inserted into a table). Support for this depends on the Blok runtime and integrations.
 *   **Custom Triggers**: The framework might allow for the development of custom triggers to integrate with proprietary systems or unique event sources.
 
@@ -82,6 +83,7 @@ For the full config-field reference, `ctx` mapping, and worked patterns per trig
   <Card title="SSE" icon="cable" href="/d/triggers/sse">Server-Sent Events streaming</Card>
   <Card title="WebSocket" icon="plug" href="/d/triggers/websocket">Bidirectional WS connections</Card>
   <Card title="Webhook" icon="webhook" href="/d/triggers/webhook">Signed inbound w/ HMAC verify</Card>
+  <Card title="MCP" icon="robot" href="/d/triggers/mcp">Workflows as AI tools (Claude, Cursor)</Card>
   <Card title="Worker" icon="factory" href="/d/triggers/worker">Background jobs from a queue</Card>
   <Card title="Cron" icon="clock" href="/d/triggers/cron">Time-based schedules</Card>
   <Card title="Pub/Sub" icon="share-2" href="/d/triggers/pubsub">Cloud pub/sub (GCP, AWS, Azure)</Card>

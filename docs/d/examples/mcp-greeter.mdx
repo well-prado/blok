@@ -1,0 +1,184 @@
+---
+title: "MCP greeter example"
+description: "Expose a workflow as an MCP tool and call it from Claude Code, Cursor, or curl. End-to-end walkthrough of the mcp trigger."
+icon: "robot"
+---
+
+This example builds the smallest useful [MCP](/d/triggers/mcp) server: a
+single `greet` tool, backed by a one-step workflow, that any AI client can
+discover and call. No external services — it runs in-process with the
+built-in `@blokjs/expr` node.
+
+## Prerequisites
+
+- A Blok project with the **HTTP** and **MCP** triggers
+- Node.js v22 or later
+- An MCP client to connect with (Claude Code, Cursor, Claude Desktop, or just `curl`)
+
+Scaffold a project that ships this exact example:
+
+```bash
+npx blokctl@latest create project --triggers http,mcp --examples
+```
+
+Or, in the interactive flow, select **HTTP** and **MCP** as triggers and
+choose **YES** to install examples. The greeter lands at
+`src/workflows/examples/mcp-greeter.ts` and is registered automatically.
+
+## The workflow
+
+```ts src/workflows/examples/mcp-greeter.ts
+import { workflow } from "@blokjs/helper";
+import { z } from "zod";
+
+export default workflow({
+  name: "mcp-greeter",
+  version: "1.0.0",
+  description: "MCP tool that greets a person by name.",
+
+  // The workflow's input schema becomes the tool's inputSchema,
+  // so the LLM knows exactly what arguments to pass.
+  input: z.object({
+    name: z.string().min(1).describe("Name of the person to greet"),
+    excited: z.boolean().default(false).describe("End the greeting with '!' instead of '.'"),
+  }),
+
+  output: z.object({ greeting: z.string() }),
+
+  trigger: {
+    mcp: {
+      path: "/mcp",
+      serverName: "blok-examples",
+      tool: {
+        name: "greet",
+        description: "Greet a person by name. Pass { name, excited? }.",
+      },
+    },
+  },
+
+  steps: [
+    {
+      // @blokjs/expr evaluates the expression against ctx and returns it.
+      // That return value (ctx.response.data) is what the client receives.
+      id: "greet",
+      use: "@blokjs/expr",
+      inputs: {
+        expression:
+          '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
+      },
+    },
+  ],
+});
+```
+
+Three things make this an MCP tool:
+
+1. **`trigger.mcp`** opts the workflow into the MCP server (instead of an HTTP route).
+2. **`input`** (a Zod schema) is converted to the tool's JSON `inputSchema` — the contract the LLM sees.
+3. **`tool.name` / `tool.description`** are what the client lists; the description is how the model decides *when* to call.
+
+## Run it
+
+```bash
+blokctl dev
+# or: bun run start:http
+```
+
+The MCP server mounts on the HTTP port and logs its routes:
+
+```
+[blok][mcp] server "blok-examples" at /mcp — 1 tool(s), 0 resource(s), transports=[sse,streamable-http]
+[blok][mcp]   GET  /mcp/sse   POST /mcp/messages  (sse)
+[blok][mcp]   ALL  /mcp  (streamable-http)
+```
+
+Your server is live at `http://localhost:4000/mcp`.
+
+## Smoke-test with curl
+
+Before wiring up an AI client, confirm the tool works. The streamable-HTTP
+endpoint is plain JSON-RPC (send `Accept: application/json, text/event-stream`):
+
+```bash
+curl -sS http://localhost:4000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"greet","arguments":{"name":"Ada","excited":true}}}'
+```
+
+```
+event: message
+data: {"result":{"content":[{"type":"text","text":"{\n  \"greeting\": \"Hello, Ada!\"\n}"}]},"jsonrpc":"2.0","id":2}
+```
+
+## Connect an AI client
+
+<Tabs>
+  <Tab title="Claude Code">
+    ```bash
+    claude mcp add --transport http blok http://localhost:4000/mcp
+    ```
+
+    In a session, run `/mcp` to confirm `blok` is connected, then ask:
+    *"Use the greet tool to greet Grace."* Claude calls `greet` with
+    `{ "name": "Grace" }` and reads back `Hello, Grace.`
+  </Tab>
+  <Tab title="Cursor">
+    ```json .cursor/mcp.json
+    {
+      "mcpServers": {
+        "blok": { "url": "http://localhost:4000/mcp" }
+      }
+    }
+    ```
+
+    Reload Cursor. Settings → MCP shows `blok` and the `greet` tool. The
+    agent can now call it.
+  </Tab>
+  <Tab title="Inspector">
+    ```bash
+    npx @modelcontextprotocol/inspector
+    ```
+
+    Connect to `http://localhost:4000/mcp` (Streamable HTTP), open the
+    **Tools** tab, select `greet`, fill in `name` / `excited`, and run it.
+  </Tab>
+</Tabs>
+
+## How it flows
+
+```
+AI client ──tools/call greet {name:"Ada",excited:true}──▶ /mcp
+                                                            │
+                          arguments → ctx.request.body      ▼
+                                              @blokjs/expr step runs
+                                              returns { greeting: "Hello, Ada!" }
+                                                            │
+   { "greeting": "Hello, Ada!" } ◀── ctx.response.data ─────┘
+```
+
+The tool's arguments arrive as `ctx.request.body`; the final step's output
+(`ctx.response.data`) is JSON-stringified and returned to the client. Every
+call is recorded in [Studio](/d/studio/index) as an `mcp.tool:greet` run —
+inspect inputs, output, and timing there.
+
+## Next steps
+
+- Add a second tool: a new workflow with `path: "/mcp"` — it [aggregates](/d/triggers/mcp#one-server-many-tools) onto the same server.
+- Give tools real work: call an API with `@blokjs/api-call`, hit a database, or fan out to [sub-workflows](/d/composition/sub-workflows).
+- Gate access with [trigger middleware](/d/reference/middleware) reading `ctx._mcp.userContext`.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="MCP trigger reference" icon="robot" href="/d/triggers/mcp">
+    Every config field, both transports, tools vs resources.
+  </Card>
+  <Card title="HTTP trigger" icon="globe" href="/d/triggers/http">
+    The server MCP mounts on.
+  </Card>
+  <Card title="Triggers overview" icon="zap" href="/d/triggers/index">
+    All nine trigger kinds.
+  </Card>
+</Columns>

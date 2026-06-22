@@ -1,6 +1,6 @@
 ---
 title: "Triggers overview"
-description: "Every kind of event that can start a workflow — HTTP, SSE, WebSocket, Webhook, Worker, Cron, PubSub, gRPC."
+description: "Every kind of event that can start a workflow — HTTP, SSE, WebSocket, Webhook, MCP, Worker, Cron, PubSub, gRPC."
 icon: "zap"
 ---
 
@@ -22,12 +22,13 @@ scheduling knobs that compose with it.
 | [SSE](./sse.mdx) | HTTP server (shared port) | Browser EventSource connections |
 | [WebSocket](./websocket.mdx) | HTTP server (shared port) | Browser WebSocket upgrades |
 | [Webhook](./webhook.mdx) | HTTP server (shared port) | Provider-signed POSTs (Stripe, GitHub, Slack, Shopify, Svix, or custom HMAC) |
+| [MCP](./mcp.mdx) | HTTP server (shared port) | Model Context Protocol clients (Claude Code, Cursor, …) calling workflows as tools/resources |
 | [Worker](./worker.mdx) | own process | Jobs from a queue (NATS / BullMQ / SQS / Kafka / RabbitMQ / pg-boss / Redis Streams / in-memory) |
 | [Cron](./cron.mdx) | own process | Time-based schedules |
 | [PubSub](./pubsub.mdx) | own process | Cloud pub/sub messages (GCP Pub/Sub, AWS SNS+SQS, Azure Service Bus) |
 | [gRPC](./grpc.mdx) | own port | Inbound gRPC requests |
 
-## Same-port composition (HTTP + SSE / WS / Webhook)
+## Same-port composition (HTTP + SSE / WS / Webhook / MCP)
 
 When a Blok project selects multiple HTTP-family triggers, they **all
 mount on the HTTP server's Hono app** and share one port. The chat
@@ -44,6 +45,7 @@ in-process event bus without any network hop.
                 │  /sse/chat/:sid         ← SSETrigger   │
                 │  /ws/echo               ← WSTrigger    │
                 │  /webhooks/stripe       ← WebhookTrigger│
+                │  /mcp                   ← McpTrigger    │
                 │                                        │
                 │  In-process bus (single Node process)  │
                 └────────────────────────────────────────┘

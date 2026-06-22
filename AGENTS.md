@@ -26,6 +26,7 @@ blok/
 │   └── python3/             # Python3 SDK   (port 9007)
 ├── triggers/
 │   ├── http/                # @blokjs/trigger-http — Hono-based HTTP trigger
+│   ├── mcp/                 # @blokjs/trigger-mcp — Model Context Protocol trigger (mounts on HTTP port)
 │   ├── grpc/                # gRPC trigger
 │   ├── webhook/             # Webhook trigger
 │   ├── websocket/           # WebSocket trigger
@@ -687,13 +688,30 @@ Conditions are evaluated in order. First match wins. `condition` strings are Jav
 | `webhook` | source, events, secret | `{ "source": "github", "events": ["push"] }` |
 | `websocket` | events, path | `{ "events": ["message"], "path": "/ws" }` |
 | `sse` | events, channels, path | `{ "events": ["update"], "path": "/stream" }` |
+| `mcp` | path, serverName, tool/resource, transports | `{ "path": "/mcp", "tool": { "name": "greet", "description": "..." } }` |
 | `worker` | queue, concurrency, retries | `{ "queue": "jobs", "concurrency": 5 }` |
 
 > `trigger.queue` is **not** a usable trigger kind — it's rejected at workflow construction (F10). Use `worker`, which consumes a queue and has a runtime. The `queue/` package exists only as an adapter backend.
 
 Pub/Sub providers: `gcp`, `aws`, `azure`
 
-Trigger-level `middleware` and `concurrencyKey` apply to every trigger kind — HTTP, worker, cron, pubsub, and grpc — not just HTTP. See the per-trigger reference pages for details.
+Trigger-level `middleware` and `concurrencyKey` apply to every trigger kind — HTTP, MCP, SSE, WebSocket, webhook, worker, cron, pubsub, and grpc — not just HTTP. See the per-trigger reference pages for details.
+
+### MCP Trigger
+
+The `mcp` trigger exposes a workflow as a [Model Context Protocol](https://modelcontextprotocol.io) **tool** (default) or **resource** to AI clients (Claude Code, Cursor, Claude Desktop). It mounts on the shared HTTP port — `ALL <path>` for Streamable-HTTP and `GET <path>/sse` + `POST <path>/messages` for legacy SSE (both default on). The tool's `inputSchema` is auto-generated from the workflow's Zod `input` (via zod-to-json-schema). `tools/call` arguments arrive as `ctx.request.body`; the final step's `ctx.response.data` is returned to the client. Calls run through the normal runner, so retries, idempotency, middleware, and Studio tracing all apply.
+
+```ts
+trigger: { mcp: {
+  path: "/mcp",                 // default; workflows sharing a path aggregate into one server
+  serverName: "my-platform",    // default "blok-mcp" — set something project-specific
+  tool: { name: "search", description: "Full-text search the indexed code" },
+  // OR resource: { uri: "blok://agents", mimeType: "application/json" }
+  // transports: ["streamable-http"],  // default ["sse","streamable-http"]
+} }
+```
+
+Identity: an `x-user-context` header (base64 `{ userId, email }`) lands at `ctx._mcp.userContext` — credential **injection only**, NOT authorization (scope access yourself via middleware). See the [MCP trigger reference](docs/d/triggers/mcp.mdx).
 
 ### Worker Trigger
 

@@ -69,7 +69,7 @@ export default class MyCustomTrigger extends TriggerBase {
 
 ## Available Triggers
 
-Blok ships with nine built-in trigger types:
+Blok ships with ten built-in trigger types:
 
 | Trigger | Directory | Protocol | Use Case |
 |---|---|---|---|
@@ -81,6 +81,7 @@ Blok ships with nine built-in trigger types:
 | **Webhook** | `triggers/webhook` | HTTP callbacks | Third-party integrations |
 | **WebSocket** | `triggers/websocket` | WebSocket (ws://) | Real-time bidirectional communication |
 | **SSE** | `triggers/sse` | Server-Sent Events | Real-time unidirectional streaming |
+| **MCP** | `triggers/mcp` | Model Context Protocol (SSE + Streamable-HTTP) | Expose workflows as tools/resources to AI clients |
 | **Worker** | `triggers/worker` | In-process worker threads | CPU-intensive background work |
 
 ### HTTP Trigger

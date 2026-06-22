@@ -976,6 +976,13 @@ export default workflow({
 
 Serves over SSE (\`GET <path>/sse\` + \`POST <path>/messages\`) and/or Streamable-HTTP (\`<path>\`).
 
+**Connecting a client** — the server mounts on the HTTP port (default 4000). Give an MCP client the URL \`http://localhost:4000/mcp\` (Streamable-HTTP, recommended) or \`http://localhost:4000/mcp/sse\` (legacy SSE):
+- **Claude Code:** \`claude mcp add --transport http blok http://localhost:4000/mcp\`
+- **Cursor** (\`.cursor/mcp.json\`): \`{ "mcpServers": { "blok": { "url": "http://localhost:4000/mcp" } } }\`
+- **Quick test:** \`npx @modelcontextprotocol/inspector\` → connect to \`http://localhost:4000/mcp\`
+
+\`tools/call\` arguments arrive as \`ctx.request.body\`; the final step's \`ctx.response.data\` is returned. Identity via the \`x-user-context\` header is injection-only, NOT authorization — scope access yourself.
+
 ### 2.9 GRPC — \`trigger: { grpc: {...} }\`
 
 **Purpose:** Expose a workflow as a gRPC service method handler — typed, contract-based RPC. Dedicated process bound to a gRPC port.

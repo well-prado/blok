@@ -86,11 +86,10 @@ The **CTX** is a shared execution object that flows through your workflow. It ca
 
 Workflows can be triggered by:
 
-* HTTP
-* gRPC
-* More to come (e.g. Cron, events, queues)
+* HTTP, SSE, WebSocket, Webhook, and MCP (all mount on one shared HTTP port)
+* Worker (queue jobs), Cron (schedules), PubSub (cloud messages), and gRPC
 
-Triggers are defined declaratively and allow the same logic to be accessed from multiple interfaces.
+Triggers are defined declaratively and allow the same logic to be accessed from multiple interfaces. See the [Triggers reference](/d/triggers/index) for the full list and per-kind config.
 
 ## CLI-First Development
 

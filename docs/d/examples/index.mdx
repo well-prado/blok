@@ -68,6 +68,14 @@ workflows + helper nodes are copied into your project ready to run.
   *Needs: HTTP + worker triggers + a broker (NATS / Redis / BullMQ /
   SQS / Kafka).*
 
+### AI tools (MCP)
+
+* **[MCP greeter](./mcp-greeter.mdx)** — expose a workflow as a
+  [Model Context Protocol](/d/triggers/mcp) tool and call it from Claude
+  Code, Cursor, or curl. The tool's input schema is generated from the
+  workflow's Zod `input`; runs in-process with `@blokjs/expr`.
+  *Needs: HTTP + MCP triggers (no external services).*
+
 ## How to Use This Section
 
 1. **Choose an example**: Select either the simple Countries API example or the more advanced DB Manager example based on your needs.
