@@ -78,17 +78,16 @@ services:
 
 networks:
   shared-network:
-    external: true
+    driver: bridge
 
 volumes:
   redis-data:
   nats-data:
 
-# Setup:
-# 1. Create the network: docker network create shared-network
-# 2. Start all services: docker compose up -d
-# 3. Start only specific services: docker compose up -d redis redis-commander
-# 4. Start NATS only: docker compose up -d nats
+# Setup (the network is created automatically — no `docker network create` needed):
+# 1. Start all services: docker compose up -d
+# 2. Start only specific services: docker compose up -d redis redis-commander
+# 3. Start NATS only: docker compose up -d nats
 #
 # Services:
 # - PostgreSQL: localhost:5432 (user: postgres, password: example)

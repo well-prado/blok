@@ -627,7 +627,13 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Copy development infra (docker-compose with Redis/NATS) if queue/worker trigger is selected
 		if (selectedTriggers.includes("queue") || selectedTriggers.includes("worker")) {
 			fsExtra.ensureDirSync(`${dirPath}/infra/development`);
-			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/development`);
+			// Broker scaffolds only need Redis/NATS — skip the ~2.6MB Postgres
+			// "dvdrental" sample-DB binaries (the .dat dump + schema.sql). Those
+			// only matter for the --examples DB demos, which copy infra/development
+			// in full below.
+			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/development`, {
+				filter: (src: string) => !/\.dat$|schema\.sql$/.test(src),
+			});
 		}
 
 		// Examples
@@ -1127,7 +1133,6 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log(color.cyan("\n📦 Redis Setup (for Queue trigger):"));
 			console.log("  Start Redis with Docker:");
 			console.log(color.dim("    cd infra/development"));
-			console.log(color.dim("    docker network create shared-network"));
 			console.log(color.dim("    docker compose up -d redis redis-commander"));
 			console.log("  Redis Commander UI: http://localhost:8081");
 		}
@@ -1136,7 +1141,6 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.log(color.cyan("\n📦 NATS JetStream Setup (for Queue trigger):"));
 			console.log("  Start NATS with Docker:");
 			console.log(color.dim("    cd infra/development"));
-			console.log(color.dim("    docker network create shared-network"));
 			console.log(color.dim("    docker compose up -d nats"));
 			console.log("  NATS Monitoring: http://localhost:8222");
 		}
