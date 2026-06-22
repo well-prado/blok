@@ -21,6 +21,11 @@ import {
 /** The blokctl-managed env header, matched exactly when rewriting the block. */
 const RUNTIME_ENV_HEADER = "# Runtimes (auto-configured by blokctl)";
 
+/** The `.env.local` / config env-var prefix for a runtime kind (csharp is special). */
+export function runtimeEnvKey(kind: string): string {
+	return kind === "csharp" ? "CSHARP" : kind.toUpperCase();
+}
+
 /** Add or replace a runtime in the config map. Preserves triggers + other runtimes. Pure. */
 export function withRuntime(config: ProjectConfig, rc: RuntimeConfig): ProjectConfig {
 	return { ...config, runtimes: { ...(config.runtimes ?? {}), [rc.kind]: rc } };
@@ -44,15 +49,20 @@ export function withoutRuntime(config: ProjectConfig, kind: string): ProjectConf
  * `runtimes` is empty the block is removed entirely. Pure.
  */
 export function rewriteRuntimeEnvBlock(envContent: string, runtimes: RuntimeConfig[]): string {
-	const isManaged = (line: string): boolean =>
-		line.trim() === RUNTIME_ENV_HEADER ||
-		/^RUNTIME_[A-Z0-9]+_(HOST|PORT|GRPC_PORT)=/.test(line) ||
-		/^BLOK_TRANSPORT=/.test(line);
+	const isManaged = (line: string): boolean => {
+		const t = line.trimStart(); // tolerate hand-indented edits
+		return (
+			line.trim() === RUNTIME_ENV_HEADER ||
+			/^RUNTIME_[A-Z0-9]+_(HOST|PORT|GRPC_PORT)=/.test(t) ||
+			/^BLOK_TRANSPORT=/.test(t)
+		);
+	};
 
 	const kept = envContent
 		.split("\n")
 		.filter((line) => !isManaged(line))
 		.join("\n")
+		.replace(/\n{3,}/g, "\n\n") // collapse blank-line drift left where the block was
 		.replace(/\n+$/, "");
 
 	const block = generateRuntimeEnvVars(runtimes); // "\n# Runtimes…\n…" or ""
@@ -69,11 +79,12 @@ export function rewriteSupervisordRuntimes(supervisordContent: string, runtimes:
 	const out: string[] = [];
 	let skipping = false;
 	for (const line of supervisordContent.split("\n")) {
-		if (/^\[program:[\w-]+_runtime\]/.test(line)) {
+		const t = line.trimStart(); // tolerate hand-indented edits
+		if (/^\[program:[\w-]+_runtime\]/.test(t)) {
 			skipping = true; // drop this runtime program block
 			continue;
 		}
-		if (/^\[/.test(line)) skipping = false; // any other section header ends the skip
+		if (/^\[/.test(t)) skipping = false; // any other section header ends the skip
 		if (!skipping) out.push(line);
 	}
 	const kept = out.join("\n").replace(/\n+$/, "");

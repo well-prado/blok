@@ -8,12 +8,13 @@ import { getRuntimeDefinition } from "../../services/runtime-detector.js";
 import {
 	rewriteRuntimeEnvBlock,
 	rewriteSupervisordRuntimes,
+	runtimeEnvKey,
 	withoutRuntime,
 } from "../../services/runtime-mutations.js";
-import { readProjectConfig } from "../../services/runtime-setup.js";
 import {
 	assertSidecarKind,
 	listUserNodes,
+	readConfigSafe,
 	reportRuntimeError,
 	resolveProjectRoot,
 	scanWorkflowsForRuntime,
@@ -32,7 +33,7 @@ export async function runtimeRemove(kind: string, options: OptionValues): Promis
 		const nonInteractive = isNonInteractive() || options.yes === true;
 		const label = getRuntimeDefinition(kind)?.label ?? kind;
 
-		const config = readProjectConfig(root) ?? {};
+		const config = readConfigSafe(root);
 		const sdkDir = path.join(root, ".blok", "runtimes", kind);
 		const inConfig = Boolean(config.runtimes?.[kind]);
 		const onDisk = fs.existsSync(sdkDir);
@@ -80,9 +81,11 @@ export async function runtimeRemove(kind: string, options: OptionValues): Promis
 			}
 		}
 
-		// 3. Final confirmation (skipped with --yes / non-interactive).
+		// 3. Final confirmation (skipped with --yes / non-interactive). Defaults to
+		//    "no" — a bare Enter shouldn't be the destructive path, especially right
+		//    after a workflow-reference warning.
 		if (!nonInteractive) {
-			const ok = await p.confirm({ message: `Remove the ${label} runtime?`, initialValue: true });
+			const ok = await p.confirm({ message: `Remove the ${label} runtime?`, initialValue: false });
 			if (p.isCancel(ok) || !ok) {
 				p.outro(color.dim("Left unchanged."));
 				return;
@@ -140,7 +143,7 @@ export async function runtimeRemove(kind: string, options: OptionValues): Promis
 		p.note(
 			[
 				`${color.red("−")} .blok/config.json   ${color.dim(`runtimes.${kind}`)}`,
-				`${color.red("−")} .env.local          ${color.dim(`RUNTIME_${kind === "csharp" ? "CSHARP" : kind.toUpperCase()}_*`)}`,
+				`${color.red("−")} .env.local          ${color.dim(`RUNTIME_${runtimeEnvKey(kind)}_*`)}`,
 				fs.existsSync(supervisordPath)
 					? `${color.red("−")} supervisord.conf    ${color.dim(`[program:${kind}_runtime]`)}`
 					: "",
@@ -155,8 +158,10 @@ export async function runtimeRemove(kind: string, options: OptionValues): Promis
 		);
 		p.outro(
 			hits.length > 0
-				? color.yellow(`Remember to update the ${hits.length} workflow(s) that referenced runtime.${kind}.`)
-				: color.dim("Done."),
+				? color.yellow(
+						`Update the ${hits.length} workflow(s) that referenced runtime.${kind}. Re-add anytime: blokctl runtime add ${kind}.`,
+					)
+				: color.dim(`Done. Re-add anytime: blokctl runtime add ${kind}.`),
 		);
 	} catch (err) {
 		reportRuntimeError(err);

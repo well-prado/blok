@@ -10,7 +10,9 @@ import path from "node:path";
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import simpleGit, { type SimpleGit } from "simple-git";
+import { tryConnect } from "../../services/health-probe.js";
 import { getRuntimeDefinition } from "../../services/runtime-detector.js";
+import { type ProjectConfig, readProjectConfig } from "../../services/runtime-setup.js";
 
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
@@ -19,6 +21,34 @@ const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 export const NON_SIDECAR_KINDS = new Set(["node", "nodejs", "typescript", "ts", "bun", "docker", "wasm"]);
 
 export class RuntimeCommandError extends Error {}
+
+/**
+ * Read `.blok/config.json`, turning a malformed file into a friendly error
+ * (the bare `readProjectConfig` throws a raw SyntaxError). Returns `{}` when the
+ * project simply has no config yet.
+ */
+export function readConfigSafe(projectRoot: string): ProjectConfig {
+	try {
+		return readProjectConfig(projectRoot) ?? {};
+	} catch {
+		throw new RuntimeCommandError(
+			`Could not parse ${path.join(projectRoot, ".blok", "config.json")} — fix or delete it and retry.`,
+		);
+	}
+}
+
+/**
+ * Best-effort guard: reject when something is already listening on the target
+ * gRPC port (a co-located project, or a stray process). Cheap TCP connect with
+ * a short timeout; a refused connection (port free) returns quickly.
+ */
+export async function assertGrpcPortFree(grpcPort: number): Promise<void> {
+	if (await tryConnect("127.0.0.1", grpcPort, 400)) {
+		throw new RuntimeCommandError(
+			`gRPC port ${grpcPort} is already in use by a live process. Stop it, or pass --grpc-port <n> to use another port.`,
+		);
+	}
+}
 
 /**
  * Resolve + validate the Blok project root. Uses `--directory` when given,

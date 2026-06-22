@@ -36,7 +36,7 @@ vi.mock("../../../src/services/runtime-setup.js", async (orig) => {
 		// command's existence checks expect and return a plausible config.
 		setupRuntime: vi.fn(
 			async (
-				rt: { kind: string; label: string; defaultPort: number; defaultGrpcPort: number },
+				rt: { kind: string; label: string; defaultPort: number; defaultGrpcPort: number; grpcStartCmd?: string },
 				_src: string,
 				projectDir: string,
 			) => {
@@ -45,6 +45,7 @@ vi.mock("../../../src/services/runtime-setup.js", async (orig) => {
 				return {
 					port: rt.defaultPort,
 					grpcPort: rt.defaultGrpcPort,
+					grpcStartCmd: rt.grpcStartCmd, // carried so the php --grpc-port rewrite is exercisable
 					startCmd: `start-${rt.kind}`,
 					cwd: `.blok/runtimes/${rt.kind}`,
 					kind: rt.kind,
@@ -57,6 +58,10 @@ vi.mock("../../../src/services/runtime-setup.js", async (orig) => {
 		),
 	};
 });
+
+vi.mock("../../../src/services/health-probe.js", () => ({
+	tryConnect: vi.fn(async () => false), // ports are free in tests → deterministic collision behavior
+}));
 
 import { runtimeAdd } from "../../../src/commands/runtime/add.js";
 import { runtimeList } from "../../../src/commands/runtime/list.js";
@@ -228,6 +233,29 @@ describe("runtime add", () => {
 		});
 		expect(process.exitCode).toBe(1); // reported error, no mutation
 		expect(readConfig(dir).runtimes.rust).toBeUndefined();
+	});
+
+	it("threads --grpc-port into php's baked-in RoadRunner grpcStartCmd", async () => {
+		const dir = await makeProject();
+		await runtimeAdd("php", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc, grpcPort: "10105" });
+		const php = readConfig(dir).runtimes.php;
+		expect(php.grpcPort).toBe(10105);
+		expect(php.grpcStartCmd).toContain("10105");
+		expect(php.grpcStartCmd).not.toContain("10005"); // the default port is gone
+	});
+
+	it("errors (no crash) when no runtime is given non-interactively", async () => {
+		const dir = await makeProject();
+		await runtimeAdd(undefined, { directory: dir, yes: true });
+		expect(process.exitCode).toBe(1);
+		expect(readConfig(dir).runtimes).toBeUndefined();
+	});
+
+	it("reports a friendly error on a malformed .blok/config.json", async () => {
+		const dir = await makeProject();
+		await fsp.writeFile(path.join(dir, ".blok", "config.json"), "{ not valid json");
+		await runtimeAdd("go", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
+		expect(process.exitCode).toBe(1); // RuntimeCommandError, not an unhandled SyntaxError
 	});
 });
 
