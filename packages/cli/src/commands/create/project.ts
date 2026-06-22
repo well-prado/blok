@@ -39,6 +39,24 @@ const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 const GITHUB_REPO_RELEASE_TAG = "v0.6.20";
 
+/**
+ * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
+ * by runtime kind → filename under `examples/ts-workflows/`. Each runs that
+ * SDK's built-in `hello-world` node over gRPC. Single source of truth shared by
+ * the scaffold copy step and `generateSharedWorkflowsFile` so the copied files
+ * and the generated imports never drift. Only entries for selected runtimes are
+ * copied/registered.
+ */
+const RUNTIME_HELLO_EXAMPLES: Record<string, string> = {
+	go: "runtime-go-hello.ts",
+	rust: "runtime-rust-hello.ts",
+	java: "runtime-java-hello.ts",
+	csharp: "runtime-csharp-hello.ts",
+	php: "runtime-php-hello.ts",
+	ruby: "runtime-ruby-hello.ts",
+	python3: "runtime-python3-hello.ts",
+};
+
 fsExtra.ensureDirSync(HOME_DIR);
 const options: Partial<SimpleGitOptions> = {
 	baseDir: HOME_DIR,
@@ -523,7 +541,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, sharedNodesContent);
 
 		// Generate shared Workflows.ts
-		const sharedWorkflowsContent = generateSharedWorkflowsFile(selectedTriggers);
+		const sharedWorkflowsContent = generateSharedWorkflowsFile(selectedTriggers, selectedRuntimeKinds, examples);
 		fsExtra.writeFileSync(`${dirPath}/src/Workflows.ts`, sharedWorkflowsContent);
 
 		// Generate trigger entry points that import shared nodes/workflows.
@@ -641,6 +659,10 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (!examples) {
 			fsExtra.removeSync(`${nodesDir}/examples`);
 			fsExtra.removeSync(`${workflowsDir}`);
+			// The TS examples are only copied on the `else` (examples) branch,
+			// but remove the dir defensively so no orphan example workflows can
+			// ship without a matching registration in the generated Workflows.ts.
+			fsExtra.removeSync(`${dirPath}/src/workflows/examples`);
 			fsExtra.ensureDirSync(`${workflowsDir}`);
 			fsExtra.ensureDirSync(`${workflowsDir}/json`);
 			fsExtra.ensureDirSync(`${workflowsDir}/yaml`);
@@ -655,17 +677,18 @@ export async function createProject(opts: OptionValues, version: string, current
 			// v0.6.7 — `--examples` overrides the generated Nodes.ts with
 			// the static `node_file` template (api-call + if-else + the
 			// chain-init / chain-verify / runtime-bridge / examples nodes).
-			// Pre-v0.6.7 that template was final. But when SSE or WebSocket
-			// are also selected, their workflow templates reference helper
-			// nodes from @blokjs/helpers (sse-publish, ws-reply, etc.) —
-			// without HELPER_NODES spread, the runner fails with
-			// "Node @blokjs/sse-publish not found". Merge the helper
-			// registry into the examples template when realtime triggers
-			// are present so both example workflows AND the SSE/WS demos
-			// resolve their dependencies. Cheap (helper nodes are zero-
-			// side-effect imports) and consistent with the non-examples
-			// branch.
-			const needsHelpers = selectedTriggers.includes("sse") || selectedTriggers.includes("websocket");
+			// Pre-v0.6.7 that template was final. But when SSE, WebSocket, or
+			// MCP are also selected, their workflow templates reference helper
+			// nodes from @blokjs/helpers (sse-publish, ws-reply, and the MCP
+			// greeter's @blokjs/expr) — without the HELPER_NODES spread, the
+			// runner fails with "Node @blokjs/<name> not found". Merge the
+			// helper registry into the examples template when any of those
+			// triggers are present so both the example workflows AND the
+			// SSE/WS/MCP demos resolve their dependencies. Cheap (helper nodes
+			// are zero-side-effect imports) and consistent with the
+			// non-examples branch.
+			const needsHelpers =
+				selectedTriggers.includes("sse") || selectedTriggers.includes("websocket") || selectedTriggers.includes("mcp");
 			const examplesNodesContent = needsHelpers
 				? node_file
 						.replace(
@@ -679,6 +702,26 @@ export async function createProject(opts: OptionValues, version: string, current
 				: node_file;
 			fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, examplesNodesContent);
 			fsExtra.copySync(`${repoSource}/sdk`, `${dirPath}/public/sdk`);
+
+			// Ship TS example workflows that register via the generated
+			// src/Workflows.ts (see generateSharedWorkflowsFile): the MCP
+			// greeter and one hello-world-over-gRPC workflow per selected
+			// runtime. Each file is gated on its trigger/runtime so the
+			// generated imports never reference a file that wasn't copied.
+			const tsExamplesSrc = `${repoSource}/examples/ts-workflows`;
+			const tsExamplesDest = `${dirPath}/src/workflows/examples`;
+			if (fsExtra.existsSync(tsExamplesSrc)) {
+				fsExtra.ensureDirSync(tsExamplesDest);
+				if (selectedTriggers.includes("mcp")) {
+					fsExtra.copySync(`${tsExamplesSrc}/mcp-greeter.ts`, `${tsExamplesDest}/mcp-greeter.ts`);
+				}
+				for (const kind of selectedRuntimeKinds) {
+					const file = RUNTIME_HELLO_EXAMPLES[kind];
+					if (file && fsExtra.existsSync(`${tsExamplesSrc}/${file}`)) {
+						fsExtra.copySync(`${tsExamplesSrc}/${file}`, `${tsExamplesDest}/${file}`);
+					}
+				}
+			}
 		}
 
 		// Create .env.local file
@@ -1212,7 +1255,7 @@ export default nodes;
 /**
  * Generate shared Workflows.ts that imports workflows from all trigger directories.
  */
-function generateSharedWorkflowsFile(triggers: string[]): string {
+function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: string[] = [], examples = false): string {
 	const imports: string[] = [];
 	const workflowEntries: string[] = [];
 
@@ -1263,13 +1306,41 @@ function generateSharedWorkflowsFile(triggers: string[]): string {
 		}
 	}
 
+	// TS example workflows (only with `--examples`). These are copied into
+	// `src/workflows/examples/` by the scaffold's example branch — each import
+	// here is gated on the SAME condition that gates its copy, so the generated
+	// file never references a file that wasn't shipped.
+	if (examples) {
+		// MCP greeter — exposed as the `greet` MCP tool. Needs the mcp trigger.
+		if (triggers.includes("mcp")) {
+			imports.push('import McpGreeter from "./workflows/examples/mcp-greeter";');
+			workflowEntries.push('\t"mcp-greeter": McpGreeter,');
+		}
+		// One hello-world-over-gRPC workflow per selected non-node runtime.
+		for (const kind of runtimeKinds) {
+			const file = RUNTIME_HELLO_EXAMPLES[kind];
+			if (!file) continue;
+			const fileBase = file.replace(/\.ts$/, "");
+			const importName = `Runtime${kind.charAt(0).toUpperCase()}${kind.slice(1)}Hello`;
+			imports.push(`import ${importName} from "./workflows/examples/${fileBase}";`);
+			workflowEntries.push(`\t"${fileBase}": ${importName},`);
+		}
+	}
+
 	const importSection = imports.length > 0 ? `${imports.join("\n")}\n` : "";
 	const entriesSection = workflowEntries.length > 0 ? workflowEntries.join("\n") : "\t// Add your workflows here";
 
-	return `import type { HelperResponse } from "@blokjs/helper";
+	// The registry accepts BOTH legacy v1 builders (HelperResponse, from
+	// `Workflow().addTrigger()…`) and v2 builders (WorkflowV2Builder, the return
+	// of the lowercase `workflow({…})` factory used by every shipped example).
+	// Typing it as `HelperResponse` alone rejects v2 workflows at `tsc` time
+	// (TypedWorkflow lacks `setConfig`), so `npm run build` would fail in any
+	// scaffold that registers a TS workflow here. Mirror the framework's own
+	// `Workflows` type (triggers/http/src/runner/types/Workflows.ts).
+	return `import type { HelperResponse, WorkflowV2Builder } from "@blokjs/helper";
 
 ${importSection}
-const workflows: Record<string, HelperResponse> = {
+const workflows: Record<string, HelperResponse | WorkflowV2Builder> = {
 ${entriesSection}
 };
 
@@ -1338,7 +1409,7 @@ function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[
 			this.httpTrigger.addPreCatchAllHook(() => {
 				const registry = WorkflowRegistry.getInstance();
 				for (const [name, wf] of Object.entries(sharedWorkflows)) {
-					const w = wf as {
+					const w = wf as unknown as {
 						name?: string;
 						trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown; mcp?: unknown };
 						_config?: { name?: string; trigger?: { sse?: unknown; websocket?: unknown; webhook?: unknown; mcp?: unknown } };
@@ -1773,7 +1844,7 @@ export default class SSEServer {
 		// both keeps the registration tolerant of either authoring style.
 		const registry = WorkflowRegistry.getInstance();
 		for (const [name, wf] of Object.entries(workflows)) {
-			const w = wf as {
+			const w = wf as unknown as {
 				name?: string;
 				trigger?: { sse?: unknown };
 				_config?: { name?: string; trigger?: { sse?: unknown } };
@@ -1886,7 +1957,7 @@ export default class WSServer {
 		// also works.
 		const registry = WorkflowRegistry.getInstance();
 		for (const [name, wf] of Object.entries(workflows)) {
-			const w = wf as {
+			const w = wf as unknown as {
 				name?: string;
 				trigger?: { websocket?: unknown };
 				_config?: { name?: string; trigger?: { websocket?: unknown } };
