@@ -30,6 +30,7 @@
 		"lint": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
 		"lint:check": "biome check --no-errors-on-unmatched --files-ignore-unknown=true",
 		"test": "nx run-many -t test",
+		"test:coverage": "nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage",
 		"test:integration": "bash scripts/integration-test.sh",
 		"test:integration:up": "docker compose -f infra/testing/docker-compose.yml up -d",
 		"test:integration:down": "docker compose -f infra/testing/docker-compose.yml down -v",

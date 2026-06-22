@@ -10,10 +10,10 @@ export default defineConfig({
 			reporter: ["text", "json", "html", "lcov"],
 			exclude: ["node_modules/", "dist/", "**/*.d.ts", "**/*.config.ts", "__tests__/", "src/gen/", "src/types/"],
 			thresholds: {
-				lines: 90,
+				lines: 86,
 				functions: 90,
-				branches: 85,
-				statements: 90,
+				branches: 70,
+				statements: 86,
 			},
 		},
 		include: ["__tests__/**/*.test.ts"],

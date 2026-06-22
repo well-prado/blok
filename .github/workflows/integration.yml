@@ -61,6 +61,14 @@ jobs:
         # entries at test time.
         run: bunx nx run-many -t build
 
+      # Informational only — never gates the merge (continue-on-error). Prints
+      # current coverage for the framework packages that have honest, current-
+      # state thresholds in their vitest config. Ratchet those floors up as
+      # coverage improves. worker/pubsub coverage belongs in a broker lane.
+      - name: Coverage report (non-gating)
+        continue-on-error: true
+        run: bunx nx run-many -t test -p @blokjs/runner @blokjs/shared @blokjs/trigger-grpc @blokjs/trigger-sse @blokjs/trigger-websocket -- --coverage
+
       - name: Run integration tests
         env:
           BLOK_INTEGRATION_REDIS_URL: redis://localhost:6380

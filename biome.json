@@ -11,6 +11,7 @@
 			"node_modules",
 			".claude/**",
 			"dist",
+			"**/coverage/**",
 			".nx/**",
 			"**/routeTree.gen.ts",
 			"sdks/*/vendor/**",
