@@ -12,6 +12,7 @@ import { RuntimeRegistry, WorkflowRegistry } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
+import { bootstrapTracing } from "@blokjs/runner";
 import { DeferredDispatchSignal } from "@blokjs/runner";
 import { DeferredRunScheduler, getSchedulerClaimLeaseMs } from "@blokjs/runner";
 import { Janitor } from "@blokjs/runner";
@@ -157,6 +158,9 @@ export default class HttpTrigger extends TriggerBase {
 	 */
 	private traceAuthFn: TraceAuthorizeFn | undefined;
 
+	/** OBS-02 — graceful shutdown for the OTel tracer provider, if tracing was enabled. */
+	private tracingShutdown: (() => Promise<void>) | null = null;
+
 	/**
 	 * Register the authorize hook for `/__blok/*` (Blok Studio + trace
 	 * API). Call before {@link listen}.
@@ -246,6 +250,13 @@ export default class HttpTrigger extends TriggerBase {
 	 */
 	async stop(): Promise<void> {
 		await this.waitForInFlightRequests();
+		if (this.tracingShutdown) {
+			// Flush pending spans before exit so the last requests aren't lost.
+			await this.tracingShutdown().catch((err) =>
+				this.logger.error(`[blok][tracing] shutdown failed: ${(err as Error).message}`),
+			);
+			this.tracingShutdown = null;
+		}
 		return new Promise<void>((resolve) => {
 			if (this.server) {
 				this.server.close(() => {
@@ -256,6 +267,37 @@ export default class HttpTrigger extends TriggerBase {
 				resolve();
 			}
 		});
+	}
+
+	/**
+	 * OBS-02 — install the OpenTelemetry SDK at boot when an OTLP endpoint is
+	 * configured, so the spans the runner already creates export to a backend
+	 * (Tempo/Jaeger/…). No-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset or
+	 * `BLOK_TRACING_DISABLED=1`. Stores the shutdown so `stop()` can flush.
+	 */
+	private async maybeBootstrapTracing(): Promise<void> {
+		if (process.env.BLOK_TRACING_DISABLED === "1") return;
+		const base = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+		if (!base) return;
+		const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? base : `${base.replace(/\/$/, "")}/v1/traces`;
+		try {
+			const result = await bootstrapTracing({
+				serviceName: process.env.APP_NAME || process.env.PROJECT_NAME || "blok-http",
+				serviceVersion: process.env.PROJECT_VERSION,
+				exporter: "otlp",
+				endpoint,
+			});
+			if (result) {
+				this.tracingShutdown = result.shutdown;
+				this.logger.log(`[blok][tracing] OTLP distributed tracing enabled → ${endpoint}`);
+			} else {
+				this.logger.error(
+					"[blok][tracing] OTEL_EXPORTER_OTLP_ENDPOINT is set but the OTel trace SDK isn't installed — tracing is OFF.",
+				);
+			}
+		} catch (err) {
+			this.logger.error(`[blok][tracing] failed to initialize: ${(err as Error).message}`);
+		}
 	}
 
 	protected override async onHmrNodeChange(event: HMREvent): Promise<void> {
@@ -694,6 +736,14 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	async listen(): Promise<number> {
+		// OBS-02 — opt-in distributed tracing. When OTEL_EXPORTER_OTLP_ENDPOINT
+		// is set, install an OTel SDK so the spans created throughout the runner
+		// (every trigger handler, gRPC runtime call, etc. via `startActiveSpan` /
+		// `recordException`) actually export to Tempo/Jaeger/etc. Without this the
+		// global tracer is a no-op: spans run but go nowhere. No-op + zero
+		// overhead when the env var is unset.
+		await this.maybeBootstrapTracing();
+
 		// File-based routing — scan workflow folders, build the route table,
 		// and register each entry as an explicit Hono route BEFORE the
 		// catch-all. **Default ON since v0.6**; opt out via

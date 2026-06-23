@@ -42,6 +42,12 @@ import { HealthCheck } from "./monitoring/HealthCheck";
 import { bootstrapPrometheus, resetPrometheusBootstrap } from "./monitoring/PrometheusBootstrap";
 import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
+import {
+	type TracingBootstrapConfig,
+	type TracingBootstrapResult,
+	bootstrapTracing,
+	resetTracingBootstrap,
+} from "./monitoring/TracingBootstrap";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 
 import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
@@ -258,6 +264,10 @@ export {
 	PrometheusMetricsBridge,
 	bootstrapPrometheus,
 	resetPrometheusBootstrap,
+	bootstrapTracing,
+	resetTracingBootstrap,
+	type TracingBootstrapConfig,
+	type TracingBootstrapResult,
 	// Marketplace
 	RuntimeCatalog,
 	RuntimeDiscovery,
