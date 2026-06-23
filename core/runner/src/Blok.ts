@@ -1,6 +1,6 @@
 import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
 import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
-import { metrics } from "@opentelemetry/api";
+import { type Counter, type Histogram, metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";
 import type { IBlokResponse } from "./BlokResponse";
@@ -8,6 +8,38 @@ import type RunnerNode from "./RunnerNode";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
+
+/**
+ * OBS-01 (T3) — canonical per-node metrics on the `blok` meter, alongside the
+ * legacy un-prefixed `node*` family (retired in a later migration step). Unlike
+ * the legacy counters these use the correct failure signal (`errored`, derived
+ * from the node's `BlokResponse.error`) rather than the never-flipped local
+ * `response.success`, so `blok_node_errors_total` actually fires on a failing
+ * node. Lazily created so they bind to the trigger's MeterProvider at boot.
+ */
+let _nodeInstruments: { executions: Counter; duration: Histogram; errors: Counter } | null = null;
+function nodeInstruments(): { executions: Counter; duration: Histogram; errors: Counter } {
+	if (!_nodeInstruments) {
+		const meter = metrics.getMeter("blok");
+		_nodeInstruments = {
+			executions: meter.createCounter("blok_node_executions_total", {
+				description: "Total node executions",
+				unit: "1",
+			}),
+			duration: meter.createHistogram("blok_node_duration_seconds", {
+				description: "Node execution duration in seconds",
+				unit: "s",
+			}),
+			errors: meter.createCounter("blok_node_errors_total", { description: "Total node execution errors", unit: "1" }),
+		};
+	}
+	return _nodeInstruments;
+}
+
+/** Test-only: drop the cached node instruments so a fresh MeterProvider is picked up. */
+export function _resetNodeInstrumentsForTests(): void {
+	_nodeInstruments = null;
+}
 
 export default abstract class BlokService<T> extends NodeBase {
 	public inputSchema: Schema;
@@ -126,6 +158,21 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
+		// OBS-01 (T3) — canonical `blok_node_*` mirrors of the above, on the
+		// `blok` meter. Duration is in seconds (Prometheus histogram convention).
+		const blokNodeAttrs = {
+			env: process.env.NODE_ENV ?? "development",
+			workflow_path: `${ctx.workflow_path}`,
+			workflow_name: `${ctx.workflow_name}`,
+			node_name: `${this.name}`,
+		};
+		const blokNode = nodeInstruments();
+		blokNode.executions.add(1, blokNodeAttrs);
+		blokNode.duration.record((end - start) / 1000, blokNodeAttrs);
+		if (errored) {
+			blokNode.errors.add(1, blokNodeAttrs);
+		}
+
 		// Surface failures clearly on the per-node log so operators don't
 		// see a misleading "Executed node" line followed by a contradictory
 		// "FAILED" line from RunnerSteps. The structured per-step log
@@ -229,7 +276,12 @@ export default abstract class BlokService<T> extends NodeBase {
 
 		globalMetrics.clear();
 
-		if (response.success === false) {
+		// OBS-01 — fire the per-node error counter on the TRUE failure signal.
+		// Previously this checked the local `response.success`, which is
+		// initialized to `true` and never flipped here (the real error lands on
+		// `BlokResponse.error`, captured above as `errored`), so `node_errors`
+		// NEVER incremented — per-node error counts were silently always zero.
+		if (errored) {
 			const node_errors = defaultMeter.createCounter("node_errors", {
 				description: "Node errors",
 			});
