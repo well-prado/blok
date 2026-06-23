@@ -1,7 +1,19 @@
 global:
   scrape_interval: 5s #Scrape interval to every 15 seconds.
   evaluation_interval: 5s #Evaluate rules every 15 seconds.
-  
+
+# OBS-05 A6 — alerting. Load Blok's alert rules and forward firing alerts to
+# Alertmanager (added to the metrics docker-compose). Mount the rules dir at
+# /etc/prometheus/rules. Without this block, metrics are recorded but nobody
+# is ever paged.
+rule_files:
+  - "/etc/prometheus/rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: "prometheus"
     static_configs:

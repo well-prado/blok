@@ -1,0 +1,76 @@
+# Blok alerting rules (OBS-05 A6).
+#
+# These turn the metrics Blok already emits into pages. They are intentionally
+# conservative (warnings on rates over a sustained window) so they don't flap.
+# Tune the thresholds (`> 0.05`, `for: 10m`, etc.) to your SLOs.
+#
+# Crash / timeout alerts (run states `crashed` / `timedOut`) need dedicated
+# metrics that OBS-06 (B7) adds — add rules for `blok_unhandled_rejection_total`
+# / `blok_boot_error_total` once that lands.
+groups:
+  - name: blok-availability
+    rules:
+      - alert: BlokTargetDown
+        expr: up{job=~"blok-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blok target {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.job }}) for 2m. The process may have crashed or be unreachable."
+
+  - name: blok-errors
+    rules:
+      - alert: BlokWorkflowErrorRateHigh
+        expr: |
+          sum(rate(blok_workflow_errors_total[5m])) by (workflow_name)
+            /
+          clamp_min(sum(rate(blok_workflow_executions_total[5m])) by (workflow_name), 1)
+          > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Workflow {{ $labels.workflow_name }} error rate > 5%"
+          description: "{{ $labels.workflow_name }} has been failing >5% of runs for 10m (current: {{ $value | humanizePercentage }})."
+
+      - alert: BlokRuntimeNodeErrors
+        expr: sum(rate(blok_runtime_node_errors_total[5m])) by (runtime_kind, node_name) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cross-language node {{ $labels.node_name }} ({{ $labels.runtime_kind }}) is failing"
+          description: "The {{ $labels.runtime_kind }} runtime node {{ $labels.node_name }} has sustained gRPC execution failures for 10m."
+
+      - alert: BlokNodeErrorRateHigh
+        expr: sum(rate(blok_node_errors_total[5m])) by (node_name, workflow_name) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.node_name }} in {{ $labels.workflow_name }} is failing"
+          description: "{{ $labels.node_name }} has been erroring at >0.1/s for 10m."
+
+  - name: blok-saturation
+    rules:
+      - alert: BlokWorkflowLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(blok_workflow_duration_seconds_bucket[5m])) by (le, workflow_name)
+          ) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Workflow {{ $labels.workflow_name }} p99 latency > 5s"
+          description: "p99 of {{ $labels.workflow_name }} has been above 5s for 10m (current: {{ $value | humanizeDuration }})."
+
+      - alert: BlokConcurrencyThrottling
+        expr: sum(rate(blok_concurrency_denied_total[5m])) by (mode) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Blok is throttling runs (mode={{ $labels.mode }})"
+          description: "Runs have been denied/queued by the concurrency gate for 10m — a tenant is over its limit or capacity is short."

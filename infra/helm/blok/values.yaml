@@ -178,6 +178,14 @@ monitoring:
   prometheus:
     # -- Enable Prometheus annotations on the service
     enabled: false
+  prometheusRule:
+    # -- Create a PrometheusRule with Blok's default alert rules (OBS-05 A6).
+    #    Requires the Prometheus Operator. Gated on monitoring.enabled too.
+    enabled: false
+    # -- Extra labels for the PrometheusRule (e.g. to match your Prometheus' ruleSelector)
+    labels: {}
+    # -- Append your own alert/recording rule groups here (raw PrometheusRule groups)
+    additionalGroups: []
 
 ## Persistence (for workflow/node storage)
 persistence:

@@ -48,9 +48,26 @@ services:
       - "9090:9090"
     volumes:
       - "./prometheus.yml:/etc/prometheus/prometheus.yml"
+      # OBS-05 A6 — alert rules dir, loaded via `rule_files` in prometheus.yml.
+      - "./rules/:/etc/prometheus/rules/"
     privileged: true
     # depends_on:
     #   - cadvisor
+    restart: unless-stopped
+    networks:
+      - shared-network
+
+  # OBS-05 A6 — Alertmanager. Prometheus forwards firing alerts here; configure
+  # receivers (Slack / PagerDuty / email) in alertmanager.yml. Without this,
+  # rules fire in Prometheus but go nowhere. UI on http://localhost:9093.
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager:latest
+    hostname: alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - "./alertmanager.yml:/etc/alertmanager/alertmanager.yml"
     restart: unless-stopped
     networks:
       - shared-network

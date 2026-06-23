@@ -180,11 +180,25 @@ services:
       - "9090:9090"
     volumes:
       - ./metrics/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # OBS-05 A6 — alert rules (prometheus.yml loads /etc/prometheus/rules/*.yml).
+      - ./metrics/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
+    networks:
+      - blok-net
+
+  # OBS-05 A6 — Alertmanager. Prometheus forwards firing alerts here; wire a
+  # receiver (Slack/PagerDuty/email) in metrics/alertmanager.yml.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles: ["monitoring", "full"]
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./metrics/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     networks:
       - blok-net
 
