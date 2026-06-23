@@ -84,6 +84,10 @@ interface WebhookTriggerConfig {
 		secretEnv: string;
 		tolerance?: number;
 		timestampHeader?: string;
+		/** Event-id source for replay dedup — header name (wins) … */
+		eventIdHeader?: string;
+		/** … or a dot-path into the parsed body (e.g. "id", "data.id"). */
+		eventIdPath?: string;
 	};
 	tolerance?: number;
 	idempotencyKey?: string;
@@ -343,6 +347,8 @@ export default class WebhookTrigger extends TriggerBase {
 				secretEnv: config.signature.secretEnv,
 				tolerance: config.signature.tolerance ?? DEFAULT_TOLERANCE_SEC,
 				timestampHeader: config.signature.timestampHeader,
+				eventIdHeader: config.signature.eventIdHeader,
+				eventIdPath: config.signature.eventIdPath,
 			});
 		}
 		return null;
