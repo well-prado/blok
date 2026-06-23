@@ -105,6 +105,24 @@ function getEventTypeFromBody(parsedBody: unknown, key = "type"): string | undef
 	return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Read a value from a parsed body by dot-separated path (e.g. `"data.id"`,
+ * `"resource.id"`). Returns the value coerced to string when it's a string or
+ * number, otherwise `undefined`. Used to pull a custom provider's event id out
+ * of the payload so webhook replay-protection has a key to dedup on.
+ */
+function getByPath(parsedBody: unknown, path: string): string | undefined {
+	if (!path) return undefined;
+	let cur: unknown = parsedBody;
+	for (const segment of path.split(".")) {
+		if (!cur || typeof cur !== "object") return undefined;
+		cur = (cur as Record<string, unknown>)[segment];
+	}
+	if (typeof cur === "string") return cur;
+	if (typeof cur === "number") return String(cur);
+	return undefined;
+}
+
 // =============================================================================
 // Built-in providers
 // =============================================================================
@@ -288,6 +306,16 @@ export interface CustomSignatureConfig {
 	secretEnv: string;
 	tolerance: number;
 	timestampHeader?: string;
+	/**
+	 * Where to read the provider's event id from, for replay-protection dedup.
+	 * `eventIdHeader` takes precedence; otherwise `eventIdPath` reads a
+	 * dot-separated path from the parsed body (e.g. `"id"`, `"data.id"`).
+	 * When neither is set the verifier returns `eventId: ""` and webhook-level
+	 * idempotency is disabled (no key to dedup on) — set one when the provider
+	 * redelivers (most PSPs do).
+	 */
+	eventIdPath?: string;
+	eventIdHeader?: string;
 }
 
 export function buildCustomVerifier(config: CustomSignatureConfig): Verifier {
@@ -295,6 +323,7 @@ export function buildCustomVerifier(config: CustomSignatureConfig): Verifier {
 		config.scheme === "hmac-sha1" ? "sha1" : config.scheme === "hmac-sha512" ? "sha512" : "sha256";
 	const headerLower = config.header.toLowerCase();
 	const tsHeaderLower = config.timestampHeader?.toLowerCase();
+	const eventIdHeaderLower = config.eventIdHeader?.toLowerCase();
 
 	return {
 		verify({ headers, rawBody, parsedBody, secret, toleranceSec }) {
@@ -339,9 +368,17 @@ export function buildCustomVerifier(config: CustomSignatureConfig): Verifier {
 			if (!safeEqualString(sig, expected)) {
 				return { ok: false, reason: "signature_mismatch", message: `${config.header}: signature mismatch` };
 			}
+			// Resolve the event id for replay-protection: header wins, then body
+			// path, then "" (idempotency disabled — no key to dedup on).
+			let eventId = "";
+			if (eventIdHeaderLower) {
+				eventId = headers[eventIdHeaderLower] ?? "";
+			} else if (config.eventIdPath) {
+				eventId = getByPath(parsedBody, config.eventIdPath) ?? "";
+			}
 			return {
 				ok: true,
-				eventId: "",
+				eventId,
 				eventType: getEventTypeFromBody(parsedBody) ?? "unknown",
 			};
 		},

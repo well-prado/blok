@@ -313,4 +313,87 @@ describe("buildCustomVerifier (custom signature scheme)", () => {
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.reason).toBe("timestamp_drift");
 	});
+
+	it("extracts eventId from a dot-path into the body (eventIdPath)", () => {
+		const payload = JSON.stringify({ type: "payment.received", data: { id: "evt_abc123" } });
+		const verifier = buildCustomVerifier({
+			scheme: "hmac-sha256",
+			header: "X-Acme-Signature",
+			format: "sha256={hex}",
+			secretEnv: "ACME_SECRET",
+			tolerance: 300,
+			eventIdPath: "data.id",
+		});
+		const result = verifier.verify({
+			headers: { "x-acme-signature": `sha256=${hmacHex(payload)}` },
+			rawBody: payload,
+			parsedBody: JSON.parse(payload),
+			secret: SECRET,
+			toleranceSec: 300,
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.eventId).toBe("evt_abc123");
+	});
+
+	it("extracts eventId from a header (eventIdHeader wins over path)", () => {
+		const payload = JSON.stringify({ type: "ping", id: "from-body" });
+		const verifier = buildCustomVerifier({
+			scheme: "hmac-sha256",
+			header: "X-Acme-Signature",
+			format: "sha256={hex}",
+			secretEnv: "ACME_SECRET",
+			tolerance: 300,
+			eventIdHeader: "X-Acme-Delivery",
+			eventIdPath: "id",
+		});
+		const result = verifier.verify({
+			headers: { "x-acme-signature": `sha256=${hmacHex(payload)}`, "x-acme-delivery": "hdr-evt-9" },
+			rawBody: payload,
+			parsedBody: JSON.parse(payload),
+			secret: SECRET,
+			toleranceSec: 300,
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.eventId).toBe("hdr-evt-9");
+	});
+
+	it("falls back to empty eventId when neither eventIdHeader nor eventIdPath is configured", () => {
+		const verifier = buildCustomVerifier({
+			scheme: "hmac-sha256",
+			header: "X-Acme-Signature",
+			format: "sha256={hex}",
+			secretEnv: "ACME_SECRET",
+			tolerance: 300,
+		});
+		const result = verifier.verify({
+			headers: { "x-acme-signature": `sha256=${hmacHex(body)}` },
+			rawBody: body,
+			parsedBody: JSON.parse(body),
+			secret: SECRET,
+			toleranceSec: 300,
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.eventId).toBe("");
+	});
+
+	it("coerces a numeric body eventId to string", () => {
+		const payload = JSON.stringify({ type: "ping", id: 778899 });
+		const verifier = buildCustomVerifier({
+			scheme: "hmac-sha256",
+			header: "X-Acme-Signature",
+			format: "sha256={hex}",
+			secretEnv: "ACME_SECRET",
+			tolerance: 300,
+			eventIdPath: "id",
+		});
+		const result = verifier.verify({
+			headers: { "x-acme-signature": `sha256=${hmacHex(payload)}` },
+			rawBody: payload,
+			parsedBody: JSON.parse(payload),
+			secret: SECRET,
+			toleranceSec: 300,
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.eventId).toBe("778899");
+	});
 });

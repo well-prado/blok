@@ -17,8 +17,10 @@ import color from "picocolors";
  * is what the client's RPC call is keyed by (`/__blok/rpc/<name>`), so the
  * nesting mirrors the registered name exactly.
  *
- * JSON-authored workflows are skipped (no TS type to import) — use the codegen
- * fallback (`blokctl gen client`, planned) against `/__blok/schema` for those.
+ * JSON-authored workflows are skipped (no TS type to import). The generator
+ * scans for them and LISTS any it finds at the end of the run, so the gap is
+ * visible rather than silent — convert them to TS workflows to include them in
+ * the typed client, or call them by string name on the client.
  */
 
 /** One discovered TS workflow: its registered name + absolute file path. */
@@ -180,6 +182,43 @@ async function collectTsFiles(dir: string): Promise<string[]> {
 	return out;
 }
 
+/**
+ * Recursively collect `.json` files under `dir` that look like Blok workflows
+ * (a top-level string `name` plus a `trigger` or `steps`). Returns the
+ * workflow names. Used only to WARN that JSON workflows are excluded from the
+ * typed client — they are never code-generated here.
+ */
+async function collectJsonWorkflowNames(dir: string): Promise<string[]> {
+	const names: string[] = [];
+	let dirents: import("node:fs").Dirent[];
+	try {
+		dirents = await fsp.readdir(dir, { withFileTypes: true });
+	} catch {
+		return names;
+	}
+	for (const d of dirents) {
+		if (d.name.startsWith("_") || d.name.startsWith(".")) continue;
+		const full = path.join(dir, d.name);
+		if (d.isDirectory()) {
+			names.push(...(await collectJsonWorkflowNames(full)));
+		} else if (d.name.endsWith(".json")) {
+			try {
+				const parsed = JSON.parse(await fsp.readFile(full, "utf8")) as {
+					name?: unknown;
+					trigger?: unknown;
+					steps?: unknown;
+				};
+				if (typeof parsed.name === "string" && (parsed.trigger !== undefined || parsed.steps !== undefined)) {
+					names.push(parsed.name);
+				}
+			} catch {
+				/* not a parseable workflow JSON — ignore */
+			}
+		}
+	}
+	return names;
+}
+
 async function resolveWorkflowsDir(cwd: string, explicit?: string | null): Promise<string | null> {
 	const candidates = explicit
 		? [explicit]
@@ -223,6 +262,23 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 	console.log(color.dim(`Scanning ${color.cyan(dir)} (recursive)\n`));
 	const files = await collectTsFiles(dir);
 
+	// Discover JSON-authored workflows so we can WARN they're excluded from the
+	// typed client (they have no TS type to import). Scan the resolved TS dir
+	// plus the conventional JSON locations; dedupe by name.
+	const jsonScanDirs = [dir, path.join(cwd, "workflows/json"), path.join(cwd, "triggers/http/workflows/json")];
+	const jsonNames = [...new Set((await Promise.all(jsonScanDirs.map((d) => collectJsonWorkflowNames(d)))).flat())];
+	const warnJsonSkipped = () => {
+		if (jsonNames.length === 0) return;
+		console.log(
+			color.yellow(
+				`ℹ️  ${jsonNames.length} JSON workflow(s) are NOT in app-types (JSON has no TS type to import): ${jsonNames.join(", ")}.`,
+			),
+		);
+		console.log(
+			color.dim("    Convert them to TS workflows to type them, or call them by string name on the client.\n"),
+		);
+	};
+
 	const entries: WorkflowEntry[] = [];
 	const skipped: string[] = [];
 	for (const file of files) {
@@ -235,6 +291,7 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 	if (entries.length === 0) {
 		console.log(color.yellow("No TS workflows with a literal `name:` found — nothing to generate."));
 		if (skipped.length > 0) console.log(color.dim(`Skipped (no literal name): ${skipped.join(", ")}`));
+		warnJsonSkipped();
 		return;
 	}
 
@@ -259,7 +316,8 @@ export async function generateAppTypes(opts: OptionValues): Promise<void> {
 			),
 		);
 	}
+	warnJsonSkipped();
 	console.log(
-		color.dim('\nNext: `import type { BlokApp } from "<out>"` and `createBlokClient<BlokApp>({ baseUrl })`.\n'),
+		color.dim('Next: `import type { BlokApp } from "<out>"` and `createBlokClient<BlokApp>({ baseUrl })`.\n'),
 	);
 }

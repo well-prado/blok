@@ -776,8 +776,23 @@ export default class HttpTrigger extends TriggerBase {
 			// Static files
 			this.app.use("/public/*", serveStatic({ root: "./" }));
 
-			// CORS
-			this.app.use(cors());
+			// CORS — configurable via BLOK_CORS_ORIGIN.
+			// Default (unset): NO CORS headers are emitted (same-origin policy).
+			// Set BLOK_CORS_ORIGIN=* to opt into the permissive wildcard (public
+			// API); set a single origin or a comma-separated allow-list for a
+			// credentialed app. Previously this was an unconditional `cors()` —
+			// Hono's default is `origin: "*"`, which can't be tightened and is a
+			// footgun for any API that returns user-scoped data.
+			const corsOriginEnv = process.env.BLOK_CORS_ORIGIN;
+			if (corsOriginEnv) {
+				const origins = corsOriginEnv
+					.split(",")
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				if (origins.length > 0) {
+					this.app.use(cors({ origin: origins.length === 1 ? origins[0] : origins }));
+				}
+			}
 
 			// Health check
 			this.app.all("/health-check", (c) => {
@@ -816,6 +831,45 @@ export default class HttpTrigger extends TriggerBase {
 				if (!entry || entry.isMiddleware === true || !hasHttpTrigger(entry.workflow)) {
 					return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
 				}
+
+				// Mount-level auth gate. The RPC surface is in the /__blok/
+				// namespace but is registered BEFORE the trace router, so the
+				// trace-auth gate (FW-1) never covers it — meaning any
+				// http-triggered workflow without its own auth middleware was
+				// callable unauthenticated. Mirror the trace gate here: in
+				// production, refuse unless an authorize hook is registered (or
+				// BLOK_RPC_AUTH_DISABLED=1 opts out, e.g. /__blok/* is firewalled
+				// at the network layer). Reuses the operator's `setTraceAuth`
+				// hook so there's one auth surface for the whole /__blok/ mount.
+				// Per-workflow middleware still runs inside runWorkflowExecution.
+				const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
+				if (isProd && process.env.BLOK_RPC_AUTH_DISABLED !== "1") {
+					if (!this.traceAuthFn) {
+						return c.json(
+							{
+								error: "RPC endpoint requires auth in production",
+								hint: "Register an authorize hook before listen() — `trigger.setTraceAuth(req => ...)` — or set BLOK_RPC_AUTH_DISABLED=1 to opt out (typically because /__blok/* is firewalled).",
+							},
+							503,
+						);
+					}
+					const raw = c.req.raw;
+					const allowed = await Promise.resolve()
+						.then(() =>
+							// biome-ignore lint/style/noNonNullAssertion: guarded above
+							this.traceAuthFn!({
+								method: raw.method,
+								params: c.req.param(),
+								query: Object.fromEntries(new URL(raw.url).searchParams),
+								headers: Object.fromEntries(raw.headers),
+								body: null,
+								on: () => {},
+							}),
+						)
+						.catch(() => false);
+					if (!allowed) return c.json({ error: "Unauthorized" }, 401);
+				}
+
 				const requestId = c.req.query("requestId") || (uuid() as string);
 				const { body, rawBody } = await this.parseBody(c);
 				const input = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};

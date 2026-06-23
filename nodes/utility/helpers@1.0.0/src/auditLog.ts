@@ -2,15 +2,17 @@ import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 /**
- * Append an audit event to a process-wide ring buffer. Returns the
- * event with a server-side timestamp for chaining.
+ * Append an audit event to a process-wide, in-memory ring buffer. Returns
+ * the event with a server-side timestamp for chaining.
  *
- * The ring is bounded at 1000 entries (oldest dropped) to bound memory
- * use. For real audit trails plug an external store (Postgres, S3,
- * audit service) — this helper is the development/test stand-in.
+ * ⚠️ NOT DURABLE. The ring is bounded at 1000 entries (oldest silently
+ * dropped) and lives only in this process's memory — it is cleared on every
+ * restart and is invisible across replicas. It is a development/test
+ * stand-in, NOT a compliance audit log. For real audit trails write to an
+ * external store (Postgres, S3, an audit service) from your own node.
  *
- * Inspect via the exported `getAuditEvents()` (test-only) or via the
- * GET /__blok/audit endpoint added by the trigger when wired.
+ * Inspect the buffer via the exported `getAuditEvents()` (test/dev only).
+ * (There is no `/__blok/audit` HTTP endpoint — that was never implemented.)
  */
 export interface AuditEvent {
 	event: string;
@@ -21,6 +23,11 @@ export interface AuditEvent {
 
 const MAX_AUDIT_RING = 1000;
 const ring: AuditEvent[] = [];
+
+// Warn once, in production only, so operators don't mistake this dev/test
+// helper for a durable audit trail. Gated to production to avoid noise in
+// tests and local dev.
+let warnedEphemeral = false;
 
 export function getAuditEvents(): readonly AuditEvent[] {
 	return ring;
@@ -45,6 +52,12 @@ export default defineNode({
 	}),
 
 	async execute(ctx, input) {
+		if (!warnedEphemeral && process.env.NODE_ENV === "production") {
+			warnedEphemeral = true;
+			console.warn(
+				"[blok][@blokjs/audit-log] Events are stored in an in-memory ring buffer (max 1000, cleared on restart, per-process). This is NOT a durable audit trail — write to an external store for compliance.",
+			);
+		}
 		const ev: AuditEvent = {
 			event: input.event,
 			attrs: input.attrs,
