@@ -8,6 +8,13 @@ import {
 	Server as ServerCtor,
 	type ServiceError,
 } from "@grpc/grpc-js";
+import { metrics } from "@opentelemetry/api";
+import {
+	AggregationTemporality,
+	InMemoryMetricExporter,
+	MeterProvider,
+	PeriodicExportingMetricReader,
+} from "@opentelemetry/sdk-metrics";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
 import {
@@ -19,7 +26,7 @@ import {
 	bufferToJson,
 	jsonToBuffer,
 } from "../../../../src/adapters/grpc/GrpcCodec";
-import { GrpcRuntimeAdapter } from "../../../../src/adapters/grpc/GrpcRuntimeAdapter";
+import { GrpcRuntimeAdapter, _resetRuntimeInstrumentsForTests } from "../../../../src/adapters/grpc/GrpcRuntimeAdapter";
 import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "../../../../src/adapters/grpc/types";
 
 class TestNode extends RunnerNode {
@@ -644,5 +651,78 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 				isolated.close();
 			}
 		});
+	});
+});
+
+// OBS-01 (T4) — cross-language runtime nodes must be visible to Prometheus,
+// not just to the trace span. These assert the two new instruments emit with a
+// `runtime_kind` label so per-language failure rates are alertable.
+describe("GrpcRuntimeAdapter — OBS-01 runtime node metrics", () => {
+	let metricsMock: Awaited<ReturnType<typeof startMockServer>>;
+	let metricsAdapter: GrpcRuntimeAdapter;
+	let reader: PeriodicExportingMetricReader;
+	let shouldFail = false;
+
+	beforeAll(async () => {
+		reader = new PeriodicExportingMetricReader({
+			exporter: new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE),
+			// Effectively never auto-exports; we drive collection manually.
+			exportIntervalMillis: 2 ** 31 - 1,
+		});
+		metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] }));
+		// Drop any instruments cached against the no-op provider from earlier tests.
+		_resetRuntimeInstrumentsForTests();
+
+		metricsMock = await startMockServer({
+			executeImpl: (req) => {
+				if (shouldFail) return new Error("simulated runtime failure");
+				return {
+					success: true,
+					data: req.inputs,
+					contentType: "application/json",
+					error: null,
+					varsDelta: Buffer.alloc(0),
+					logs: [],
+					metrics: { durationMs: 1, cpuMs: 0, memoryBytes: "0", requestBytes: "0", responseBytes: "0" },
+				};
+			},
+		});
+		metricsAdapter = new GrpcRuntimeAdapter(makeAdapterConfig(metricsMock.port));
+	});
+
+	afterAll(async () => {
+		await metricsMock.stop();
+		await metrics.disable();
+		_resetRuntimeInstrumentsForTests();
+	});
+
+	async function collectByName(name: string) {
+		const { resourceMetrics } = await reader.collect();
+		return resourceMetrics.scopeMetrics.flatMap((s) => s.metrics).find((m) => m.descriptor.name === name);
+	}
+
+	it("records blok_runtime_node_duration_seconds labelled by runtime_kind on success", async () => {
+		shouldFail = false;
+		const res = await metricsAdapter.execute(makeNode("echo", "runtime.python3"), makeCtx());
+		expect(res.success).toBe(true);
+
+		const dur = await collectByName("blok_runtime_node_duration_seconds");
+		expect(dur).toBeDefined();
+		const point = dur?.dataPoints.find((p) => (p.attributes as Record<string, unknown>).runtime_kind === "python3");
+		expect(point).toBeDefined();
+	});
+
+	it("increments blok_runtime_node_errors_total on a runtime failure", async () => {
+		shouldFail = true;
+		const res = await metricsAdapter.execute(makeNode("echo", "runtime.python3"), makeCtx());
+		expect(res.success).toBe(false);
+
+		const err = await collectByName("blok_runtime_node_errors_total");
+		expect(err).toBeDefined();
+		const pythonPoints = (err?.dataPoints ?? []).filter(
+			(p) => (p.attributes as Record<string, unknown>).runtime_kind === "python3",
+		);
+		const total = pythonPoints.reduce((acc, p) => acc + (p.value as number), 0);
+		expect(total).toBeGreaterThanOrEqual(1);
 	});
 });
