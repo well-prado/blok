@@ -1346,9 +1346,6 @@ export default class HttpTrigger extends TriggerBase {
 		const workflow_runner_errors = defaultMeter.createCounter("workflow_errors", {
 			description: "Workflow runner errors",
 		});
-		const workflow_execution = defaultMeter.createCounter("workflow", {
-			description: "Workflow requests",
-		});
 
 		return this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
 			try {
@@ -1543,12 +1540,12 @@ export default class HttpTrigger extends TriggerBase {
 				span.setAttribute("workflow_request_id", `${id}`);
 				span.recordException(e as Error);
 
-				workflow_execution.add(0, {
-					env: process.env.NODE_ENV,
-					workflow_version: `${this.configuration?.version || "unknown"}`,
-					workflow_name: `${this.configuration?.name || "unknown"}`,
-					workflow_path: `${workflowNameInPath}`,
-				});
+				// OBS-01 (T5a): removed a dead `workflow_execution.add(0, …)` here.
+				// Adding 0 to a counter is a no-op, and this catch also runs for
+				// control-flow signals (DeferredDispatchSignal, ConcurrencyLimitError),
+				// so even add(1) would over-count. Real workflow error counting is
+				// owned by the canonical `blok_workflow_errors_total`
+				// (PrometheusMetricsBridge), which fires on genuine run failure.
 
 				// Tier 2 #5 + #7 — scheduling-deferred run. Surface as 202
 				// Accepted with a `Location` header pointing at the run's

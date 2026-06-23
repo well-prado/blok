@@ -1,7 +1,7 @@
 import { BlokError, type Context, ErrorCategory, ErrorSeverity } from "@blokjs/shared";
 import type { ClientReadableStream, ServiceError } from "@grpc/grpc-js";
 import { type Client, Metadata } from "@grpc/grpc-js";
-import { SpanStatusCode, type Tracer, trace } from "@opentelemetry/api";
+import { type Counter, type Histogram, SpanStatusCode, type Tracer, metrics, trace } from "@opentelemetry/api";
 import type RunnerNode from "../../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind, RuntimeNodeDescriptor } from "../RuntimeAdapter";
 import { GrpcClientPool } from "./GrpcClientPool";
@@ -18,6 +18,37 @@ import {
 import { type GrpcErrorContext, toBlokError } from "./GrpcErrors";
 import { GrpcHealthChecker } from "./GrpcHealthChecker";
 import { GRPC_DEFAULTS, type GrpcAdapterConfig } from "./types";
+
+/**
+ * OBS-01 (T4) — cross-language runtime node metrics. Before this, a gRPC
+ * runtime node (Go/Rust/Python/Java/C#/PHP/Ruby) emitted only a trace span:
+ * it was invisible to Prometheus, so a Python node failing 30% of the time
+ * could not be alerted on. These two instruments make every runtime-node
+ * execution countable + rateable, labelled by `runtime_kind` so per-language
+ * failure rates are queryable. Created lazily on first use so they bind to
+ * whatever global MeterProvider the trigger installed at boot.
+ */
+let _runtimeInstruments: { duration: Histogram; errors: Counter } | null = null;
+function runtimeInstruments(): { duration: Histogram; errors: Counter } {
+	if (!_runtimeInstruments) {
+		const meter = metrics.getMeter("blok");
+		_runtimeInstruments = {
+			duration: meter.createHistogram("blok_runtime_node_duration_seconds", {
+				description: "Duration of a cross-language runtime node execution (gRPC), in seconds.",
+				unit: "s",
+			}),
+			errors: meter.createCounter("blok_runtime_node_errors_total", {
+				description: "Cross-language runtime node execution failures (gRPC), labelled by runtime_kind + reason.",
+			}),
+		};
+	}
+	return _runtimeInstruments;
+}
+
+/** Test-only: drop the cached instruments so a fresh MeterProvider is picked up. */
+export function _resetRuntimeInstrumentsForTests(): void {
+	_runtimeInstruments = null;
+}
 
 /**
  * Runtime adapter that executes a node by calling
@@ -132,6 +163,7 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		// Fail fast when the circuit breaker has tripped — avoids stacking up
 		// blocked calls on top of a known-unhealthy SDK.
 		if (this.healthChecker && !this.healthChecker.isAvailable()) {
+			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, true, "circuit_open");
 			return {
 				success: false,
 				data: null,
@@ -171,11 +203,19 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			const result = this.toExecutionResult(decoded, requestBytes, performance.now() - startTime);
 			span.setAttribute("blok.response.bytes", result.metrics?.response_bytes ?? 0);
 			span.setStatus({ code: result.success ? SpanStatusCode.OK : SpanStatusCode.ERROR });
+			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, !result.success, "node_error");
 			return result;
 		} catch (err) {
 			const blokError = toBlokError(err, this.errorContext(node));
 			span.recordException(blokError);
 			span.setStatus({ code: SpanStatusCode.ERROR, message: blokError.message });
+			this.recordRuntimeMetrics(
+				node,
+				ctx,
+				performance.now() - startTime,
+				true,
+				String(blokError.category ?? "grpc_error"),
+			);
 			return {
 				success: false,
 				data: null,
@@ -187,6 +227,32 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			};
 		} finally {
 			span.end();
+		}
+	}
+
+	/**
+	 * Record the duration histogram (always) and the error counter (on failure)
+	 * for a runtime-node execution. Labelled by `runtime_kind` so per-language
+	 * failure rates are alertable, e.g.
+	 * `rate(blok_runtime_node_errors_total{runtime_kind="python3"}[5m])`.
+	 */
+	private recordRuntimeMetrics(
+		node: RunnerNode,
+		ctx: Context,
+		durationMs: number,
+		failed: boolean,
+		reason?: string,
+	): void {
+		const instruments = runtimeInstruments();
+		const attrs: Record<string, string> = {
+			runtime_kind: this.kind,
+			node_name: `${node.name}`,
+			workflow_name: `${ctx.workflow_name}`,
+			env: process.env.NODE_ENV ?? "development",
+		};
+		instruments.duration.record(Math.max(0, durationMs) / 1000, attrs);
+		if (failed) {
+			instruments.errors.add(1, reason ? { ...attrs, reason } : attrs);
 		}
 	}
 
