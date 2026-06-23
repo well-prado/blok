@@ -11,6 +11,14 @@ datasources:
     jsonData:
       timeout: 60
       maxLines: 1000
+      # OBS-03 — extract `trace_id` from Blok's JSON log lines and turn it into a
+      # clickable link to the trace in Tempo. Completes the Loki → Tempo half of
+      # the correlation (Tempo → Loki is already wired via Tempo's tracesToLogsV2).
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '$${__value.raw}'
+          datasourceUid: tempo
   - name: Tempo
     type: tempo
     access: proxy
