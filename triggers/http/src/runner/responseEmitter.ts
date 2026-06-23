@@ -19,6 +19,45 @@ import type { Context as HonoContext } from "hono";
  * Extracted from the trigger handler so the emission logic is unit-testable
  * against a real Hono context (`app.request(...)`).
  */
+/**
+ * Normalize a finished workflow's `ctx.response` into a `{ data, contentType,
+ * … }` envelope WITHOUT mutating the node's return value.
+ *
+ * Module nodes already hand back a `BlokResponse` wrapper (carrying its own
+ * `data` + `contentType`). Runtime adapter nodes — and any raw `RunnerNode` —
+ * leave their return value verbatim on `ctx.response`. The old trigger code
+ * wrote `ctx.response.contentType = …` straight onto that raw value, which (a)
+ * leaked a spurious `contentType` key into the JSON body of every `runtime.*`
+ * node and (b) threw on a primitive return.
+ *
+ * This wraps raw values instead, so the content-type travels ALONGSIDE the body
+ * (mapped to the `Content-Type` header by {@link emitWorkflowResponse}), never
+ * inside it. `fallbackContentType` is the SDK's proto `content_type` (surfaced
+ * via the `_stepContentType` ctx side-channel), defaulting to JSON.
+ *
+ * Returns the SAME object for an already-wrapped response (defaulting an
+ * empty/missing `contentType` in place); a fresh wrapper otherwise.
+ */
+export function normalizeResponseEnvelope(ctxResponse: unknown, fallbackContentType = "application/json"): unknown {
+	const isWrapper =
+		!!ctxResponse && typeof ctxResponse === "object" && "data" in ctxResponse && "contentType" in ctxResponse;
+
+	if (!isWrapper) {
+		return { data: ctxResponse, contentType: fallbackContentType, success: true, error: null };
+	}
+
+	const wrapper = ctxResponse as { contentType?: string };
+	if (wrapper.contentType === undefined || wrapper.contentType === "") {
+		try {
+			wrapper.contentType = fallbackContentType;
+		} catch {
+			// Non-extensible / readonly `contentType` — emitWorkflowResponse
+			// falls back to JSON, so nothing downstream breaks.
+		}
+	}
+	return ctxResponse;
+}
+
 export function emitWorkflowResponse(c: HonoContext, ctxResponse: unknown): Response {
 	// Module nodes wrap output in a BlokResponse ({ data, contentType, … });
 	// runtime adapter nodes leave raw data on ctx.response.

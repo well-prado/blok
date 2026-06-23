@@ -41,7 +41,7 @@ import { handleDynamicRoute, validateRoute } from "./Util";
 import { type RouteCollision, type RouteEntry, buildRouteTable, readMiddlewareFlag } from "./WorkflowRouter";
 import { metricsHandler } from "./metrics/opentelemetry_metrics";
 import { buildNodeCatalog } from "./nodeCatalog";
-import { emitWorkflowResponse } from "./responseEmitter";
+import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter";
 import { scanWorkflows } from "./scanWorkflows";
 import NodeTypes from "./types/NodeTypes";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
@@ -1453,11 +1453,19 @@ export default class HttpTrigger extends TriggerBase {
 				const end = performance.now();
 				ctx.logger.log(`Completed in ${(end - start).toFixed(2)}ms`);
 
-				if (ctx.response.contentType === undefined || ctx.response.contentType === "")
-					ctx.response.contentType = "application/json";
+				// Normalize the final response into a `{ data, contentType }`
+				// envelope WITHOUT mutating the node's raw return value — this
+				// is what stops a `runtime.*` node's content-type from leaking
+				// into its JSON body. The content-type is sourced from the
+				// SDK's proto `content_type` via the `_stepContentType`
+				// side-channel (set by RuntimeAdapterNode, reset per-step by
+				// RunnerSteps), defaulting to JSON. See `normalizeResponseEnvelope`.
+				const resolvedContentType =
+					((ctx as Record<string, unknown>)._stepContentType as string | undefined) || "application/json";
+				ctx.response = normalizeResponseEnvelope(ctx.response, resolvedContentType) as typeof ctx.response;
 
 				span.setAttribute("success", true);
-				span.setAttribute("Content-Type", ctx.response.contentType);
+				span.setAttribute("Content-Type", ctx.response.contentType ?? "application/json");
 				span.setAttribute("workflow_request_id", `${ctx.id}`);
 				span.setAttribute("workflow_elapsed_time", `${end - start}`);
 				span.setAttribute("workflow_version", `${this.configuration.version}`);

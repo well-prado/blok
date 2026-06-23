@@ -31,6 +31,14 @@ export type AdapterTransport = "module" | "http" | "grpc";
 export type ExecutionResult = {
 	success: boolean;
 	data: unknown;
+	/**
+	 * The node's intended response Content-Type, sourced from the proto
+	 * `content_type` field the SDK populates (default `"application/json"`).
+	 * It travels ALONGSIDE `data`, never inside it — the trigger maps it to
+	 * the HTTP `Content-Type` header. Omitted by in-process adapters that
+	 * don't carry a wire content-type.
+	 */
+	contentType?: string;
 	errors: unknown | null;
 	logs?: string[];
 	metrics?: {

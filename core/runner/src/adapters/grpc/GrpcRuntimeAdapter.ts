@@ -479,6 +479,13 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		return {
 			success: decoded.success,
 			data: decoded.data,
+			// Relocate the SDK's content-type OUT of the data envelope and onto
+			// its own field. The proto carries it in `content_type`
+			// (GrpcCodec.decodeExecuteResponse), never inside `data`. The
+			// trigger reads this to set the HTTP `Content-Type` header — so the
+			// node's returned object is emitted as the response body verbatim,
+			// with no spurious `contentType` key leaking into it.
+			contentType: decoded.contentType,
 			errors: decoded.error
 				? // The decoded NodeError is rich; the adapter pipeline expects an
 					// `unknown | null` where instances of `GlobalError` are passed through.

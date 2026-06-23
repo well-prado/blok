@@ -89,6 +89,17 @@ export class RuntimeAdapterNode extends RunnerNode {
 			(ctx as Record<string, unknown>)._stepMetrics = result.metrics;
 		}
 
+		// Surface the SDK's intended response Content-Type on a ctx side-channel
+		// (NOT on the returned data) so the trigger can map it to the HTTP
+		// `Content-Type` header. Runtime nodes leave their raw return value on
+		// `ctx.response`, so there is no envelope to carry the content-type —
+		// folding it into the data object would leak a spurious `contentType`
+		// key into the response body. `RunnerSteps` resets this slot before
+		// every step, so after the run it reflects the LAST step only.
+		if (typeof result.contentType === "string" && result.contentType.length > 0) {
+			(ctx as Record<string, unknown>)._stepContentType = result.contentType;
+		}
+
 		// Defensive: ensure state exists. TriggerBase initializes it, but
 		// some legacy code paths construct ctx by hand. ctx.vars and
 		// ctx.state alias the same object; we read/write through `state`.

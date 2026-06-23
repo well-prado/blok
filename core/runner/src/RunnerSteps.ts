@@ -229,19 +229,22 @@ export default abstract class RunnerSteps {
 				}
 				if (step.stop) break;
 				// Stamp the step's declared content-type onto the rolling
-				// response. Between steps `ctx.response` holds the PREVIOUS
-				// step's raw `.data` (see `ctx.response = model.data` below),
-				// which can be anything: a primitive, a frozen object, or a
-				// value with a non-writable `contentType`. Assigning to those
-				// throws ("Cannot create property 'contentType' on number",
-				// "object is not extensible"). The content-type only matters
-				// when the response is a mutable object envelope — skip
-				// silently otherwise so a prior step's exotic return value
-				// can't crash the next step. (Regression: Bug 4 — a
-				// `runtime.python3` node returning a primitive result.)
-				if (ctx.response && typeof ctx.response === "object") {
+				// response, but ONLY when `ctx.response` is a `BlokResponse`
+				// envelope — i.e. it already carries its own `contentType` key.
+				// Between steps `ctx.response` holds the PREVIOUS step's raw
+				// `.data` (see `ctx.response = model.data` below). For runtime
+				// (and other raw `RunnerNode`) steps that is the node's return
+				// value VERBATIM and, crucially, the SAME object reference held
+				// in `ctx.state[<id>]`. Writing `contentType` onto it would (a)
+				// leak a spurious `contentType` key into the response body and
+				// `$.state.<id>`, and (b) throw on a primitive / frozen return.
+				// The `"contentType" in` guard limits stamping to the wrapper
+				// shape, leaving raw payloads — and the state they're shared
+				// with — untouched. (Regression: Bug 4 + the `runtime.*`
+				// content-type leak.)
+				if (ctx.response && typeof ctx.response === "object" && "contentType" in ctx.response) {
 					try {
-						ctx.response.contentType = step.contentType;
+						(ctx.response as { contentType?: string }).contentType = step.contentType;
 					} catch {
 						// Non-extensible / sealed / readonly `contentType` —
 						// nothing downstream depends on stamping it here.
@@ -273,6 +276,15 @@ export default abstract class RunnerSteps {
 						total: steps.length,
 						depth: depthLevel,
 					};
+
+					// Reset the response content-type side-channel before the
+					// step runs. A runtime adapter step repopulates it from the
+					// SDK's proto `content_type` (see RuntimeAdapterNode.run);
+					// module / raw steps leave it cleared so the trigger falls
+					// back to the default. Clearing per-step means the value
+					// surviving to the trigger reflects ONLY the final step,
+					// never a stale content-type from an earlier runtime step.
+					(ctx as Record<string, unknown>)._stepContentType = undefined;
 
 					if (tracker && traceRunId) {
 						const configAny = ctx.config as unknown as Record<string, Record<string, unknown>>;

@@ -164,10 +164,16 @@ export default class GRpcTrigger extends TriggerBase {
 				const hasWrapper =
 					ctx.response && typeof ctx.response === "object" && "data" in ctx.response && "contentType" in ctx.response;
 				if (!hasWrapper) {
-					// Runtime adapter node: ctx.response is raw data, wrap it
+					// Runtime adapter node: ctx.response is raw data, wrap it.
+					// The content-type comes from the SDK's proto `content_type`
+					// via the `_stepContentType` side-channel (set by
+					// RuntimeAdapterNode, reset per-step by RunnerSteps), so it
+					// travels alongside the body rather than inside it.
+					const resolvedContentType =
+						((ctx as Record<string, unknown>)._stepContentType as string | undefined) || "application/json";
 					ctx.response = {
 						data: ctx.response,
-						contentType: "application/json",
+						contentType: resolvedContentType,
 						success: true,
 						error: null,
 					} as typeof ctx.response;

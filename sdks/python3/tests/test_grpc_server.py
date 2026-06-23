@@ -17,8 +17,9 @@ import pytest
 from blok.node.node_registry import NodeRegistry
 from blok.runtime.v1 import runtime_pb2 as pb
 from blok.runtime.v1 import runtime_pb2_grpc as pb_grpc
-from blok.server.grpc_server import _encode_json_bytes, serve_grpc
+from blok.server.grpc_server import _encode_execute_response, _encode_json_bytes, serve_grpc
 from blok.types.context import Context
+from blok.types.execution_result import ExecutionMetrics, ExecutionResult
 
 
 def _reserve_free_port() -> int:
@@ -103,6 +104,25 @@ def _make_request(node_name: str, inputs: Dict[str, Any], body: Any = None) -> p
 # =============================================================================
 # Tests
 # =============================================================================
+
+
+def test_encode_response_keeps_content_type_out_of_data():
+    """Regression — the `runtime.*` contentType leak (cross-runtime live test,
+    Finding #2). The node's return MUST be serialized as `data` verbatim, with
+    NO `contentType` key folded in; the content-type travels ONLY in the proto
+    `content_type` field (which the runner maps to the HTTP Content-Type header).
+    """
+    node_return = {"message": "Hi, Ada!", "timestamp": "2026", "language": "python3"}
+    result = ExecutionResult.success_with_metrics(node_return, ExecutionMetrics(duration_ms=1.0))
+
+    resp = _encode_execute_response(result, node_name="hello-world", sdk_version="1.0.0")
+
+    # (a) data is the node's return verbatim — no contentType key.
+    decoded = json.loads(resp.data)
+    assert decoded == node_return
+    assert "contentType" not in decoded
+    # (b) content-type travels in the dedicated proto field.
+    assert resp.content_type == "application/json"
 
 
 def test_execute_returns_success_with_unwrapped_inputs(client):

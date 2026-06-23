@@ -1,5 +1,6 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, ResponseContext } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import { RuntimeAdapterNode } from "../../src/RuntimeAdapterNode";
 import type { ExecutionResult, RuntimeAdapter } from "../../src/adapters/RuntimeAdapter";
@@ -121,6 +122,92 @@ describe("RuntimeAdapterNode", () => {
 
 			expect(response.success).toBe(true);
 			expect(adapter.execute).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("content-type side-channel (runtime.* contentType leak fix)", () => {
+		// Regression: a `runtime.*` node's `contentType` MUST travel on the
+		// ctx side-channel, never inside the returned `data` / persisted state —
+		// otherwise it leaks a spurious `contentType` key into the HTTP body and
+		// `$.state.<id>`. See specs/blok-framework-fixes/05-cross-runtime-live-test.md
+		// Finding #2.
+		const withContentType = (data: unknown, contentType: string): ExecutionResult => ({
+			success: true,
+			data,
+			contentType,
+			errors: null,
+			logs: [],
+			metrics: { duration_ms: 1, cpu_ms: 0, memory_bytes: 0, request_bytes: 0, response_bytes: 0 },
+			vars: {},
+		});
+
+		it("does NOT fold contentType into the returned data or persisted state", async () => {
+			const adapter = makeUnaryOnlyAdapter(withContentType({ message: "hi" }, "application/json"));
+			const node = new RuntimeAdapterNode(adapter, makeTarget("greet"));
+			const ctx = makeCtx();
+
+			const response = await node.run(ctx);
+
+			// Body / state stay verbatim — no `contentType` key.
+			expect(response.data).toEqual({ message: "hi" });
+			expect(response.data).not.toHaveProperty("contentType");
+			const state = ctx.state as Record<string, unknown>;
+			expect(state.greet).toEqual({ message: "hi" });
+			expect(state.greet).not.toHaveProperty("contentType");
+		});
+
+		it("stashes the SDK content-type on ctx._stepContentType for the trigger", async () => {
+			const adapter = makeUnaryOnlyAdapter(withContentType("<h1>hi</h1>", "text/html"));
+			const node = new RuntimeAdapterNode(adapter, makeTarget("page"));
+			const ctx = makeCtx();
+
+			const response = await node.run(ctx);
+
+			expect(response.data).toBe("<h1>hi</h1>");
+			expect((ctx as Record<string, unknown>)._stepContentType).toBe("text/html");
+		});
+
+		it("leaves the side-channel unset when the result carries no contentType", async () => {
+			const adapter = makeUnaryOnlyAdapter(successResult); // no contentType field
+			const node = new RuntimeAdapterNode(adapter, makeTarget());
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			expect((ctx as Record<string, unknown>)._stepContentType).toBeUndefined();
+		});
+
+		it("a LATER step does not pollute an earlier runtime step's persisted state", async () => {
+			// `ctx.state[<id>]` and the rolling `ctx.response` share the SAME
+			// object reference for a runtime step. RunnerSteps used to stamp the
+			// next step's content-type onto `ctx.response`, mutating the stored
+			// state object. The guard limits that stamp to wrapper-shaped
+			// responses, so `$.state.greet` stays the node's return verbatim.
+			class PassThroughNode extends RunnerNode {
+				constructor(name: string) {
+					super();
+					this.name = name;
+					this.node = name;
+					this.type = "module";
+					this.active = true;
+				}
+				async run(): Promise<ResponseContext> {
+					return { success: true, data: { done: true }, error: null };
+				}
+			}
+
+			const greet = new RuntimeAdapterNode(
+				makeUnaryOnlyAdapter(withContentType({ message: "hi" }, "text/html")),
+				makeTarget("greet"),
+			);
+			const runner = new Runner([greet, new PassThroughNode("next")]);
+			const ctx = makeCtx();
+
+			await runner.run(ctx);
+
+			const state = ctx.state as Record<string, unknown>;
+			expect(state.greet).toEqual({ message: "hi" });
+			expect(state.greet).not.toHaveProperty("contentType");
 		});
 	});
 

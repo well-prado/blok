@@ -1,6 +1,6 @@
 # SPEC 05 — Cross-runtime examples: live test + fixes
 
-**Status:** Fix #1 shipped · Finding #2 spun off as a follow-up
+**Status:** Fix #1 shipped · Finding #2 **fixed** (root cause was runner-side, not per-SDK — see below)
 **Scope:** `examples/ts-workflows/runtime-<lang>-hello.ts` (the 7 cross-runtime examples)
 
 ## What this is
@@ -98,25 +98,47 @@ response includes a spurious `contentType` field:
 In-process (`module`) nodes do **not** exhibit this — the earlier MCP greeter
 (`@blokjs/expr`) returned clean JSON. So it is specific to the gRPC runtime path.
 
-**Trace.** `GrpcCodec.decodeExecuteResponse` keeps `data` and `contentType` as
-separate fields, and `GrpcRuntimeAdapter.toExecutionResult` returns
-`data: decoded.data` without folding `contentType` in — so the `contentType`
-key is already present **inside** `ExecuteResponse.data` as serialized by the
-SDK. The proto carries a dedicated `content_type` field (runtime.proto:143)
-*and* the SDK is also serializing it into the data envelope, so it surfaces in
-the response body.
+**Actual root cause (corrected).** The original hypothesis — that each SDK
+serializes `contentType` *inside* `ExecuteResponse.data` — was **wrong**. Every
+SDK (go / rust / java / csharp / php / ruby / python3) already serializes `data`
+verbatim from the node's return and puts the content-type ONLY in the dedicated
+proto `content_type` field. Proven for Python3 both by reading
+`grpc_server._encode_execute_response` and empirically:
+`json.loads(resp.data)` has **no** `contentType` key while `resp.content_type ==
+"application/json"`. `GrpcCodec.decodeExecuteResponse` likewise keeps the two
+fields separate, so `decoded.data` reaching the runner is clean.
 
-**Scope / why it's a follow-up, not an inline fix.** It affects every
-`runtime.*` SDK (the data-envelope serialization is per-SDK), and the
-`contentType` mechanism exists for legitimate binary/HTML responses — ripping it
-out naively would regress that. It deserves a focused change across all 7 SDKs
-(+ a runner-side assertion) with its own test matrix, separate from this
-example fix.
+The leak was **runner-side**, in the HTTP trigger. Runtime adapter nodes leave
+their raw return value on `ctx.response` (no `BlokResponse` wrapper). The trigger
+then ran `ctx.response.contentType = "application/json"` — mutating that raw
+payload object IN PLACE (and, via the shared reference, the value stored in
+`ctx.state[<id>]`). Because the mutated object now had a `contentType` key but
+no `data` key, `emitWorkflowResponse`'s wrapper detection (`"data" in x &&
+"contentType" in x`) treated it as a raw body and emitted the whole polluted
+object. `RunnerSteps` had the same in-place stamp between steps, so a later step
+could pollute an earlier runtime step's `$.state` too.
 
-**Recommendation.** Normalize the runtime response contract so `contentType`
-travels only in the proto `content_type` field (→ a response header), never
-inside `data`. Verify the binary/`@blokjs/respond`-equivalent path on each SDK
-still sets the header correctly.
+**Fix (shipped).** Runner-side, no SDK changes needed:
+
+- `HttpTrigger` (and `GRpcTrigger`) now *wrap* a raw response into a fresh
+  `{ data, contentType }` envelope via `normalizeResponseEnvelope()` instead of
+  mutating it — so the node's return is emitted as the body verbatim and the
+  content-type maps to the `Content-Type` header.
+- The content-type is sourced from the SDK's proto `content_type`, threaded
+  `GrpcCodec` → `GrpcRuntimeAdapter.toExecutionResult` (`ExecutionResult.contentType`)
+  → `RuntimeAdapterNode` (ctx `_stepContentType` side-channel, reset per-step by
+  `RunnerSteps`) → trigger. So a future SDK that emits a non-default
+  `content_type` (binary/HTML) flows straight to the header.
+- `RunnerSteps`' between-step stamp is guarded to wrapper-shaped responses only,
+  so it can no longer pollute a raw runtime payload or its `$.state` slot.
+
+Regression coverage: `RuntimeAdapterNode.test.ts` (no leak into data/state +
+side-channel + multi-step state isolation), `responseEmitter.test.ts`
+(`normalizeResponseEnvelope` + end-to-end clean body / mapped header), and the
+Python3 SDK `test_encode_response_keeps_content_type_out_of_data`. Verified live
+end-to-end against the Python3 sidecar: the body is now
+`{"message":…,"language":"python3"}` with no `contentType` key and a correct
+`Content-Type: application/json` header.
 
 ## Notes
 

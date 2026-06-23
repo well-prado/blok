@@ -8,12 +8,25 @@
 import { RESPOND_BRAND } from "@blokjs/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { emitWorkflowResponse } from "../../src/runner/responseEmitter";
+import { emitWorkflowResponse, normalizeResponseEnvelope } from "../../src/runner/responseEmitter";
 
 /** Build an app whose GET /x route emits `ctxResponse` via the real emitter. */
 function appFor(ctxResponse: unknown): Hono {
 	const app = new Hono();
 	app.get("/x", (c) => emitWorkflowResponse(c, ctxResponse));
+	return app;
+}
+
+/**
+ * Build an app that mirrors the trigger's success branch for a RAW runtime
+ * payload: normalize first (the leak-fix step), then emit. `sideChannelCt`
+ * stands in for the SDK proto `content_type` surfaced via `_stepContentType`.
+ */
+function runtimeAppFor(rawResponse: unknown, sideChannelCt?: string): Hono {
+	const app = new Hono();
+	app.get("/x", (c) =>
+		emitWorkflowResponse(c, normalizeResponseEnvelope(rawResponse, sideChannelCt || "application/json")),
+	);
 	return app;
 }
 
@@ -114,6 +127,65 @@ describe("emitWorkflowResponse — workflow-controllable HTTP responses", () => 
 			const res = await appFor(wrap("plain text", "text/plain")).request("/x");
 			expect(res.status).toBe(200);
 			expect(await res.text()).toBe("plain text");
+		});
+	});
+});
+
+describe("normalizeResponseEnvelope — runtime.* contentType leak fix", () => {
+	// Regression: a `runtime.*` node leaves its raw return value on
+	// `ctx.response`; the content-type must travel ALONGSIDE it (→ header),
+	// never get written into the body as a spurious `contentType` key.
+	// See specs/blok-framework-fixes/05-cross-runtime-live-test.md Finding #2.
+
+	describe("pure normalization", () => {
+		it("wraps a raw object payload without mutating it (no contentType key added to the body)", () => {
+			const raw = { message: "Hi, Ada!", language: "python3" };
+			const env = normalizeResponseEnvelope(raw, "application/json") as { data: unknown; contentType: string };
+			expect(env.contentType).toBe("application/json");
+			expect(env.data).toBe(raw); // same reference — body emitted verbatim
+			expect(raw).not.toHaveProperty("contentType"); // original untouched
+		});
+
+		it("carries a non-default side-channel content-type onto the envelope", () => {
+			const env = normalizeResponseEnvelope("<h1>hi</h1>", "text/html") as { data: unknown; contentType: string };
+			expect(env.contentType).toBe("text/html");
+			expect(env.data).toBe("<h1>hi</h1>");
+		});
+
+		it("wraps a primitive payload instead of throwing (no `.contentType =` on a number)", () => {
+			expect(() => normalizeResponseEnvelope(42, "application/json")).not.toThrow();
+			const env = normalizeResponseEnvelope(42, "application/json") as { data: unknown };
+			expect(env.data).toBe(42);
+		});
+
+		it("returns an already-wrapped module response as-is, preserving its content-type", () => {
+			const wrapper = wrap({ ok: true }, "application/ld+json");
+			const env = normalizeResponseEnvelope(wrapper, "application/json");
+			expect(env).toBe(wrapper); // not re-wrapped
+			expect((env as { contentType: string }).contentType).toBe("application/ld+json");
+		});
+
+		it("defaults an empty content-type on an already-wrapped response", () => {
+			const wrapper = { data: { ok: true }, contentType: "", success: true, error: null };
+			const env = normalizeResponseEnvelope(wrapper, "application/json") as { contentType: string };
+			expect(env.contentType).toBe("application/json");
+		});
+	});
+
+	describe("end-to-end emission", () => {
+		it("emits a clean JSON body with NO contentType key + application/json header", async () => {
+			const res = await runtimeAppFor({ message: "Hi, Ada!", language: "python3" }).request("/x");
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toMatch(/application\/json/);
+			const body = await res.json();
+			expect(body).toEqual({ message: "Hi, Ada!", language: "python3" });
+			expect(body).not.toHaveProperty("contentType");
+		});
+
+		it("maps a non-default SDK content-type to the Content-Type header", async () => {
+			const res = await runtimeAppFor("<h1>Hi</h1>", "text/html").request("/x");
+			expect(res.headers.get("content-type")).toBe("text/html");
+			expect(await res.text()).toBe("<h1>Hi</h1>");
 		});
 	});
 });
