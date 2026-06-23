@@ -3,28 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 // Prevent auto-run
 process.env.DISABLE_TRIGGER_RUN = "true";
 
-// Mock OpenTelemetry
-vi.mock("@opentelemetry/api", () => ({
-	trace: {
-		getTracer: () => ({
-			startActiveSpan: (name: string, fn: (span: any) => any) =>
-				fn({
-					setAttribute: vi.fn(),
-					setStatus: vi.fn(),
-					end: vi.fn(),
-				}),
-		}),
-	},
-	metrics: {
-		getMeter: () => ({
-			createCounter: () => ({ add: vi.fn() }),
-			createHistogram: () => ({ record: vi.fn() }),
-			createGauge: () => ({ record: vi.fn() }),
-			createObservableGauge: () => ({ addCallback: vi.fn() }),
-		}),
-	},
-	SpanStatusCode: { OK: 0, ERROR: 1 },
-}));
+// Mock OpenTelemetry — shared complete double (OBS-02 B2 propagation surface).
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
 	metricsHandler: vi.fn(),

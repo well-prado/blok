@@ -28,7 +28,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
-import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
+import { type Span, SpanKind, SpanStatusCode, context, metrics, propagation, trace } from "@opentelemetry/api";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -1397,340 +1397,370 @@ export default class HttpTrigger extends TriggerBase {
 			description: "Workflow runner errors",
 		});
 
-		return this.tracer.startActiveSpan(`${workflowNameInPath}`, async (span: Span) => {
-			try {
-				const start = performance.now();
-				if (remoteNodeExecution && runtimeWorkflow !== undefined) {
-					const workflowModel = runtimeWorkflow.workflow;
-					const node_type = (workflowModel.steps[0] as unknown as ParamsDictionary).type;
-					let set_node_type: NodeTypes = NodeTypes.MODULE;
-					switch (node_type) {
-						case "runtime.python3":
-							set_node_type = NodeTypes.PYTHON3;
-							break;
-						case "runtime.go":
-							set_node_type = NodeTypes.GO;
-							break;
-						case "runtime.rust":
-							set_node_type = NodeTypes.RUST;
-							break;
-						case "runtime.java":
-							set_node_type = NodeTypes.JAVA;
-							break;
-						case "runtime.csharp":
-							set_node_type = NodeTypes.CSHARP;
-							break;
-						case "runtime.php":
-							set_node_type = NodeTypes.PHP;
-							break;
-						case "runtime.ruby":
-							set_node_type = NodeTypes.RUBY;
-							break;
-						case "local":
-							set_node_type = NodeTypes.LOCAL;
-							break;
-						default:
-							set_node_type = NodeTypes.MODULE;
-							break;
+		// OBS-02 B2.1 — join the caller's distributed trace. Extract a W3C
+		// `traceparent`/`tracestate` from the inbound request headers so the
+		// workflow span nests under the upstream span instead of starting a
+		// fresh root. With no `traceparent` present (or no provider registered)
+		// `propagation.extract` returns the active context unchanged — identical
+		// behaviour to before, zero overhead when tracing is off.
+		const inboundCarrier = Object.fromEntries(c.req.raw.headers.entries());
+		const parentContext = propagation.extract(context.active(), inboundCarrier);
+		return this.tracer.startActiveSpan(
+			`${workflowNameInPath}`,
+			{ kind: SpanKind.SERVER },
+			parentContext,
+			async (span: Span) => {
+				try {
+					const start = performance.now();
+					if (remoteNodeExecution && runtimeWorkflow !== undefined) {
+						const workflowModel = runtimeWorkflow.workflow;
+						const node_type = (workflowModel.steps[0] as unknown as ParamsDictionary).type;
+						let set_node_type: NodeTypes = NodeTypes.MODULE;
+						switch (node_type) {
+							case "runtime.python3":
+								set_node_type = NodeTypes.PYTHON3;
+								break;
+							case "runtime.go":
+								set_node_type = NodeTypes.GO;
+								break;
+							case "runtime.rust":
+								set_node_type = NodeTypes.RUST;
+								break;
+							case "runtime.java":
+								set_node_type = NodeTypes.JAVA;
+								break;
+							case "runtime.csharp":
+								set_node_type = NodeTypes.CSHARP;
+								break;
+							case "runtime.php":
+								set_node_type = NodeTypes.PHP;
+								break;
+							case "runtime.ruby":
+								set_node_type = NodeTypes.RUBY;
+								break;
+							case "local":
+								set_node_type = NodeTypes.LOCAL;
+								break;
+							default:
+								set_node_type = NodeTypes.MODULE;
+								break;
+						}
+
+						const trigger = Object.keys(workflowModel.trigger)[0];
+						const trigger_config =
+							((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
+
+						let remoteNodeName = workflowNameInPath + subPath;
+						if (remoteNodeName.substring(remoteNodeName.length - 1) === "/") {
+							remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
+						}
+
+						const step: Step = Workflow({
+							name: `Remote Node: ${remoteNodeName}`,
+							version: "1.0.0",
+							description: "Remote Node",
+						})
+							.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
+							.addStep({
+								name: "node",
+								node: remoteNodeName,
+								type: set_node_type,
+								inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary)
+									.inputs,
+							});
+
+						this.nodeMap.workflows[id] = step;
+						workflowNameInPath = id;
+						remoteNodeExecution = true;
 					}
 
-					const trigger = Object.keys(workflowModel.trigger)[0];
-					const trigger_config =
-						((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
-
-					let remoteNodeName = workflowNameInPath + subPath;
-					if (remoteNodeName.substring(remoteNodeName.length - 1) === "/") {
-						remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
+					// File-based routing path: pass the pre-loaded workflow object
+					// directly to Configuration.init so it bypasses the disk lookup.
+					// Falls back to the standard nodeMap-resolver path otherwise.
+					if (preloadedWorkflow !== undefined) {
+						await this.configuration.init(workflowNameInPath, this.nodeMap, preloadedWorkflow);
+					} else {
+						await this.configuration.init(workflowNameInPath, this.nodeMap);
 					}
-
-					const step: Step = Workflow({
-						name: `Remote Node: ${remoteNodeName}`,
-						version: "1.0.0",
-						description: "Remote Node",
-					})
-						.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
-						.addStep({
-							name: "node",
-							node: remoteNodeName,
-							type: set_node_type,
-							inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary).inputs,
-						});
-
-					this.nodeMap.workflows[id] = step;
-					workflowNameInPath = id;
-					remoteNodeExecution = true;
-				}
-
-				// File-based routing path: pass the pre-loaded workflow object
-				// directly to Configuration.init so it bypasses the disk lookup.
-				// Falls back to the standard nodeMap-resolver path otherwise.
-				if (preloadedWorkflow !== undefined) {
-					await this.configuration.init(workflowNameInPath, this.nodeMap, preloadedWorkflow);
-				} else {
-					await this.configuration.init(workflowNameInPath, this.nodeMap);
-				}
-				let ctx: Context = this.createContext(undefined, workflowNameInPath || (c.req.param("workflow") as string), id);
-
-				// For explicit (file-based) routes, Hono already validated the
-				// method + matched path params. `c.req.param()` returns the
-				// captured params directly. For the catch-all, parse via
-				// handleDynamicRoute against the trigger's path pattern.
-				let resolvedParams: Record<string, string>;
-				if (explicitRoute) {
-					const all = (c.req.param() as Record<string, string>) || {};
-					const filtered: Record<string, string> = {};
-					for (const k of Object.keys(all)) {
-						if (k !== "workflow") filtered[k] = all[k];
-					}
-					resolvedParams = filtered;
-				} else {
-					resolvedParams = handleDynamicRoute(
-						this.configuration.trigger.http.path,
-						subPath,
-						(c.req.param() as Record<string, string>) || {},
+					let ctx: Context = this.createContext(
+						undefined,
+						workflowNameInPath || (c.req.param("workflow") as string),
+						id,
 					);
-				}
 
-				ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
-
-				// Method/path validation only for the catch-all path. Hono
-				// already enforced both for explicit routes.
-				if (!explicitRoute) {
-					const { method, path } = this.configuration.trigger.http;
-					if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
-						throw new Error("Invalid HTTP method");
-					if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
-				}
-
-				// Build RequestContext from Hono request
-				const url = new URL(c.req.url);
-				const queryObj: Record<string, string> = {};
-				for (const [key, value] of url.searchParams.entries()) {
-					if (key !== "requestId") {
-						queryObj[key] = value;
-					}
-				}
-
-				ctx.request = {
-					body,
-					rawBody,
-					headers: Object.fromEntries([...c.req.raw.headers.entries()]),
-					params: resolvedParams,
-					query: queryObj,
-					method: c.req.method,
-					path: explicitRoute ? c.req.path : subPath,
-					url: c.req.url,
-				} as unknown as RequestContext;
-
-				// F15 · required-header validation. `trigger.http.headers`
-				// declares headers the request MUST carry; enforce them at
-				// trigger entry (on BOTH explicit and catch-all routes) now that
-				// `ctx.request.headers` is populated. A missing/mismatched header
-				// short-circuits with 400 before any step runs.
-				this.validateRequiredHeaders((ctx.request as unknown as RequestContext).headers);
-
-				// v0.7 · typed-client RPC mount — mirror the input's scalar fields
-				// into query + params so a workflow authored for a GET/query or
-				// `:param` trigger resolves its inputs through the name-keyed mount.
-				if (opts.rpcInput && typeof opts.rpcInput === "object") {
-					const flat: Record<string, string> = {};
-					for (const [k, v] of Object.entries(opts.rpcInput)) {
-						if (v !== null && v !== undefined && typeof v !== "object") flat[k] = String(v);
-					}
-					const req = ctx.request as unknown as { query: Record<string, string>; params: Record<string, string> };
-					req.query = { ...req.query, ...flat };
-					req.params = { ...req.params, ...flat };
-				}
-
-				// v0.6 · merged middleware chain (process-global → workflow-level
-				// → trigger-level). Implementation lives on `TriggerBase`
-				// so worker + cron triggers reuse the same merge logic.
-				await this.applyMiddlewareChain(ctx, this.nodeMap);
-
-				const response: TriggerResponse = await this.run(ctx);
-				ctx = response.ctx;
-				const average = response.metrics;
-
-				const end = performance.now();
-				ctx.logger.log(`Completed in ${(end - start).toFixed(2)}ms`);
-
-				// Normalize the final response into a `{ data, contentType }`
-				// envelope WITHOUT mutating the node's raw return value — this
-				// is what stops a `runtime.*` node's content-type from leaking
-				// into its JSON body. The content-type is sourced from the
-				// SDK's proto `content_type` via the `_stepContentType`
-				// side-channel (set by RuntimeAdapterNode, reset per-step by
-				// RunnerSteps), defaulting to JSON. See `normalizeResponseEnvelope`.
-				const resolvedContentType =
-					((ctx as Record<string, unknown>)._stepContentType as string | undefined) || "application/json";
-				ctx.response = normalizeResponseEnvelope(ctx.response, resolvedContentType) as typeof ctx.response;
-
-				span.setAttribute("success", true);
-				span.setAttribute("Content-Type", ctx.response.contentType ?? "application/json");
-				span.setAttribute("workflow_request_id", `${ctx.id}`);
-				span.setAttribute("workflow_elapsed_time", `${end - start}`);
-				span.setAttribute("workflow_version", `${this.configuration.version}`);
-				span.setAttribute("workflow_name", `${this.configuration.name}`);
-				span.setAttribute("workflow_memory_avg_mb", `${average.memory.total}`);
-				span.setAttribute("workflow_memory_min_mb", `${average.memory.min}`);
-				span.setAttribute("workflow_memory_max_mb", `${average.memory.max}`);
-				span.setAttribute("workflow_cpu_percentage", `${average.cpu.average}`);
-				span.setAttribute("workflow_cpu_total", `${average.cpu.total}`);
-				span.setAttribute("workflow_cpu_usage", `${average.cpu.usage}`);
-				span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
-				span.setStatus({ code: SpanStatusCode.OK });
-
-				// Emit the response from the finished workflow's ctx.response.
-				// Honors a `@blokjs/respond` envelope (status / headers /
-				// Set-Cookie / body) and raw binary bodies, falling back to the
-				// default JSON / string-200 behaviour. See `responseEmitter.ts`.
-				return emitWorkflowResponse(c, ctx.response);
-			} catch (e: unknown) {
-				span.setAttribute("success", false);
-				span.setAttribute("workflow_request_id", `${id}`);
-				span.recordException(e as Error);
-
-				// OBS-01 (T5a): removed a dead `workflow_execution.add(0, …)` here.
-				// Adding 0 to a counter is a no-op, and this catch also runs for
-				// control-flow signals (DeferredDispatchSignal, ConcurrencyLimitError),
-				// so even add(1) would over-count. Real workflow error counting is
-				// owned by the canonical `blok_workflow_errors_total`
-				// (PrometheusMetricsBridge), which fires on genuine run failure.
-
-				// Tier 2 #5 + #7 — scheduling-deferred run. Surface as 202
-				// Accepted with a `Location` header pointing at the run's
-				// detail endpoint and a structured JSON body. The actual
-				// dispatch happens later via the in-process scheduler.
-				if (e instanceof DeferredDispatchSignal) {
-					const targetRunId = e.info.intoRunId ?? e.info.runId;
-					this.logger.log(
-						`[scheduling] ${e.info.workflowName} runId=${e.info.runId} status=${e.info.status} ` +
-							`scheduledAt=${e.info.scheduledAt}${e.info.expiresAt ? ` expiresAt=${e.info.expiresAt}` : ""} ` +
-							`pingCount=${e.info.pingCount} → 202`,
-					);
-					span.setStatus({ code: SpanStatusCode.OK, message: `deferred:${e.info.status}` });
-					c.header("Location", `/__blok/runs/${targetRunId}`);
-					return c.json(
-						{
-							runId: e.info.runId,
-							workflowName: e.info.workflowName,
-							status: e.info.status,
-							scheduledAt: e.info.scheduledAt,
-							expiresAt: e.info.expiresAt,
-							debounced: e.info.debounced,
-							pingCount: e.info.pingCount,
-							intoRunId: e.info.intoRunId,
-						},
-						202,
-					);
-				}
-
-				// PR 2 A4 — durable scheduler payload too large. Surface as
-				// 413 Payload Too Large with structured info so callers know
-				// the dispatch was rejected because the body would push the
-				// `scheduled_dispatches` row past the configured cap. Operators
-				// raise the cap via BLOK_DISPATCH_PAYLOAD_MAX_BYTES (default 1MB).
-				if (e instanceof PayloadTooLargeError) {
-					span.setStatus({ code: SpanStatusCode.OK, message: "payload_too_large_for_durable_scheduling" });
-					this.logger.log(`[scheduling] payload too large: ${e.actualBytes} bytes > cap of ${e.maxBytes} bytes → 413`);
-					return c.json(
-						{
-							error: "Payload too large for durable scheduling",
-							actualBytes: e.actualBytes,
-							maxBytes: e.maxBytes,
-							configurable: "BLOK_DISPATCH_PAYLOAD_MAX_BYTES",
-						},
-						413,
-					);
-				}
-
-				// PR 1-5 polish — queue-mode TTL elapsed. The tracker already
-				// flipped the run to `expired` (see TriggerBase queue branch);
-				// surface as 410 Gone (NOT 429) so HTTP clients don't retry a
-				// permanently-dead run. No `Retry-After` header — would
-				// contradict the 410 contract. Distinct from
-				// ConcurrencyLimitError (transient, 429) below.
-				if (e instanceof QueueExpiredError) {
-					span.setStatus({ code: SpanStatusCode.OK, message: "queue_expired" });
-					this.logger.log(
-						`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
-							`queueExpiredAt=${e.info.queueExpiredAt} → 410`,
-					);
-					return c.json(
-						{
-							error: "Queued run expired",
-							workflowName: e.info.workflowName,
-							concurrencyKey: e.info.concurrencyKey,
-							queueExpiredAt: e.info.queueExpiredAt,
-							runId: e.info.runId,
-						},
-						410,
-					);
-				}
-
-				// Tier 2 #6 — concurrency gate denial. Surface as 429 with a
-				// Retry-After header (in seconds, rounded up) and a structured
-				// JSON body so callers can build smart back-off without
-				// parsing the message string.
-				if (e instanceof ConcurrencyLimitError) {
-					const retryAfterSeconds = Math.max(1, Math.ceil(e.info.retryAfterMs / 1000));
-					span.setStatus({ code: SpanStatusCode.OK, message: "concurrency_limit_reached" });
-					this.logger.log(
-						`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
-							`limit=${e.info.concurrencyLimit} inFlight=${e.info.currentInFlight} → 429`,
-					);
-					c.header("Retry-After", String(retryAfterSeconds));
-					return c.json(
-						{
-							error: "Concurrency limit reached",
-							workflowName: e.info.workflowName,
-							concurrencyKey: e.info.concurrencyKey,
-							concurrencyLimit: e.info.concurrencyLimit,
-							currentInFlight: e.info.currentInFlight,
-							retryAfterMs: e.info.retryAfterMs,
-							runId: e.info.runId,
-						},
-						429,
-					);
-				}
-
-				if (e instanceof GlobalError) {
-					const error_context = e as GlobalError;
-
-					if (error_context.context.message === "{}" && error_context.context.json instanceof DOMException) {
-						workflow_runner_errors.add(1, {
-							env: process.env.NODE_ENV,
-							workflow_version: `${this.configuration?.version || "unknown"}`,
-							workflow_name: `${this.configuration?.name || "unknown"}`,
-							workflow_path: `${workflowNameInPath}`,
-						});
-						span.setStatus({
-							code: SpanStatusCode.ERROR,
-							message: (error_context.context.json as Error).toString(),
-						});
-						this.logger.error(`${(error_context.context.json as Error).toString()}`);
-						return c.json(
-							{
-								origin: error_context.context.name,
-								error: (error_context.context.json as Error).toString(),
-							},
-							500,
+					// For explicit (file-based) routes, Hono already validated the
+					// method + matched path params. `c.req.param()` returns the
+					// captured params directly. For the catch-all, parse via
+					// handleDynamicRoute against the trigger's path pattern.
+					let resolvedParams: Record<string, string>;
+					if (explicitRoute) {
+						const all = (c.req.param() as Record<string, string>) || {};
+						const filtered: Record<string, string> = {};
+						for (const k of Object.keys(all)) {
+							if (k !== "workflow") filtered[k] = all[k];
+						}
+						resolvedParams = filtered;
+					} else {
+						resolvedParams = handleDynamicRoute(
+							this.configuration.trigger.http.path,
+							subPath,
+							(c.req.param() as Record<string, string>) || {},
 						);
 					}
 
-					if (error_context.context.code === undefined) error_context.setCode(500);
-					const code = error_context.context.code as number;
+					ctx.logger.log(`Version: ${this.configuration.version}, Method: ${c.req.method}`);
 
-					if (error_context.hasJson()) {
+					// Method/path validation only for the catch-all path. Hono
+					// already enforced both for explicit routes.
+					if (!explicitRoute) {
+						const { method, path } = this.configuration.trigger.http;
+						if (method && method !== "*" && method !== "ANY" && c.req.method.toLowerCase() !== method.toLowerCase())
+							throw new Error("Invalid HTTP method");
+						if (!validateRoute(path, subPath)) throw new Error("Invalid HTTP path");
+					}
+
+					// Build RequestContext from Hono request
+					const url = new URL(c.req.url);
+					const queryObj: Record<string, string> = {};
+					for (const [key, value] of url.searchParams.entries()) {
+						if (key !== "requestId") {
+							queryObj[key] = value;
+						}
+					}
+
+					ctx.request = {
+						body,
+						rawBody,
+						headers: Object.fromEntries([...c.req.raw.headers.entries()]),
+						params: resolvedParams,
+						query: queryObj,
+						method: c.req.method,
+						path: explicitRoute ? c.req.path : subPath,
+						url: c.req.url,
+					} as unknown as RequestContext;
+
+					// F15 · required-header validation. `trigger.http.headers`
+					// declares headers the request MUST carry; enforce them at
+					// trigger entry (on BOTH explicit and catch-all routes) now that
+					// `ctx.request.headers` is populated. A missing/mismatched header
+					// short-circuits with 400 before any step runs.
+					this.validateRequiredHeaders((ctx.request as unknown as RequestContext).headers);
+
+					// v0.7 · typed-client RPC mount — mirror the input's scalar fields
+					// into query + params so a workflow authored for a GET/query or
+					// `:param` trigger resolves its inputs through the name-keyed mount.
+					if (opts.rpcInput && typeof opts.rpcInput === "object") {
+						const flat: Record<string, string> = {};
+						for (const [k, v] of Object.entries(opts.rpcInput)) {
+							if (v !== null && v !== undefined && typeof v !== "object") flat[k] = String(v);
+						}
+						const req = ctx.request as unknown as { query: Record<string, string>; params: Record<string, string> };
+						req.query = { ...req.query, ...flat };
+						req.params = { ...req.params, ...flat };
+					}
+
+					// v0.6 · merged middleware chain (process-global → workflow-level
+					// → trigger-level). Implementation lives on `TriggerBase`
+					// so worker + cron triggers reuse the same merge logic.
+					await this.applyMiddlewareChain(ctx, this.nodeMap);
+
+					const response: TriggerResponse = await this.run(ctx);
+					ctx = response.ctx;
+					const average = response.metrics;
+
+					const end = performance.now();
+					ctx.logger.log(`Completed in ${(end - start).toFixed(2)}ms`);
+
+					// Normalize the final response into a `{ data, contentType }`
+					// envelope WITHOUT mutating the node's raw return value — this
+					// is what stops a `runtime.*` node's content-type from leaking
+					// into its JSON body. The content-type is sourced from the
+					// SDK's proto `content_type` via the `_stepContentType`
+					// side-channel (set by RuntimeAdapterNode, reset per-step by
+					// RunnerSteps), defaulting to JSON. See `normalizeResponseEnvelope`.
+					const resolvedContentType =
+						((ctx as Record<string, unknown>)._stepContentType as string | undefined) || "application/json";
+					ctx.response = normalizeResponseEnvelope(ctx.response, resolvedContentType) as typeof ctx.response;
+
+					span.setAttribute("success", true);
+					span.setAttribute("Content-Type", ctx.response.contentType ?? "application/json");
+					span.setAttribute("workflow_request_id", `${ctx.id}`);
+					span.setAttribute("workflow_elapsed_time", `${end - start}`);
+					span.setAttribute("workflow_version", `${this.configuration.version}`);
+					span.setAttribute("workflow_name", `${this.configuration.name}`);
+					span.setAttribute("workflow_memory_avg_mb", `${average.memory.total}`);
+					span.setAttribute("workflow_memory_min_mb", `${average.memory.min}`);
+					span.setAttribute("workflow_memory_max_mb", `${average.memory.max}`);
+					span.setAttribute("workflow_cpu_percentage", `${average.cpu.average}`);
+					span.setAttribute("workflow_cpu_total", `${average.cpu.total}`);
+					span.setAttribute("workflow_cpu_usage", `${average.cpu.usage}`);
+					span.setAttribute("workflow_cpu_model", `${average.cpu.model}`);
+					span.setStatus({ code: SpanStatusCode.OK });
+
+					// Emit the response from the finished workflow's ctx.response.
+					// Honors a `@blokjs/respond` envelope (status / headers /
+					// Set-Cookie / body) and raw binary bodies, falling back to the
+					// default JSON / string-200 behaviour. See `responseEmitter.ts`.
+					return emitWorkflowResponse(c, ctx.response);
+				} catch (e: unknown) {
+					span.setAttribute("success", false);
+					span.setAttribute("workflow_request_id", `${id}`);
+					span.recordException(e as Error);
+
+					// OBS-01 (T5a): removed a dead `workflow_execution.add(0, …)` here.
+					// Adding 0 to a counter is a no-op, and this catch also runs for
+					// control-flow signals (DeferredDispatchSignal, ConcurrencyLimitError),
+					// so even add(1) would over-count. Real workflow error counting is
+					// owned by the canonical `blok_workflow_errors_total`
+					// (PrometheusMetricsBridge), which fires on genuine run failure.
+
+					// Tier 2 #5 + #7 — scheduling-deferred run. Surface as 202
+					// Accepted with a `Location` header pointing at the run's
+					// detail endpoint and a structured JSON body. The actual
+					// dispatch happens later via the in-process scheduler.
+					if (e instanceof DeferredDispatchSignal) {
+						const targetRunId = e.info.intoRunId ?? e.info.runId;
+						this.logger.log(
+							`[scheduling] ${e.info.workflowName} runId=${e.info.runId} status=${e.info.status} ` +
+								`scheduledAt=${e.info.scheduledAt}${e.info.expiresAt ? ` expiresAt=${e.info.expiresAt}` : ""} ` +
+								`pingCount=${e.info.pingCount} → 202`,
+						);
+						span.setStatus({ code: SpanStatusCode.OK, message: `deferred:${e.info.status}` });
+						c.header("Location", `/__blok/runs/${targetRunId}`);
+						return c.json(
+							{
+								runId: e.info.runId,
+								workflowName: e.info.workflowName,
+								status: e.info.status,
+								scheduledAt: e.info.scheduledAt,
+								expiresAt: e.info.expiresAt,
+								debounced: e.info.debounced,
+								pingCount: e.info.pingCount,
+								intoRunId: e.info.intoRunId,
+							},
+							202,
+						);
+					}
+
+					// PR 2 A4 — durable scheduler payload too large. Surface as
+					// 413 Payload Too Large with structured info so callers know
+					// the dispatch was rejected because the body would push the
+					// `scheduled_dispatches` row past the configured cap. Operators
+					// raise the cap via BLOK_DISPATCH_PAYLOAD_MAX_BYTES (default 1MB).
+					if (e instanceof PayloadTooLargeError) {
+						span.setStatus({ code: SpanStatusCode.OK, message: "payload_too_large_for_durable_scheduling" });
+						this.logger.log(
+							`[scheduling] payload too large: ${e.actualBytes} bytes > cap of ${e.maxBytes} bytes → 413`,
+						);
+						return c.json(
+							{
+								error: "Payload too large for durable scheduling",
+								actualBytes: e.actualBytes,
+								maxBytes: e.maxBytes,
+								configurable: "BLOK_DISPATCH_PAYLOAD_MAX_BYTES",
+							},
+							413,
+						);
+					}
+
+					// PR 1-5 polish — queue-mode TTL elapsed. The tracker already
+					// flipped the run to `expired` (see TriggerBase queue branch);
+					// surface as 410 Gone (NOT 429) so HTTP clients don't retry a
+					// permanently-dead run. No `Retry-After` header — would
+					// contradict the 410 contract. Distinct from
+					// ConcurrencyLimitError (transient, 429) below.
+					if (e instanceof QueueExpiredError) {
+						span.setStatus({ code: SpanStatusCode.OK, message: "queue_expired" });
+						this.logger.log(
+							`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
+								`queueExpiredAt=${e.info.queueExpiredAt} → 410`,
+						);
+						return c.json(
+							{
+								error: "Queued run expired",
+								workflowName: e.info.workflowName,
+								concurrencyKey: e.info.concurrencyKey,
+								queueExpiredAt: e.info.queueExpiredAt,
+								runId: e.info.runId,
+							},
+							410,
+						);
+					}
+
+					// Tier 2 #6 — concurrency gate denial. Surface as 429 with a
+					// Retry-After header (in seconds, rounded up) and a structured
+					// JSON body so callers can build smart back-off without
+					// parsing the message string.
+					if (e instanceof ConcurrencyLimitError) {
+						const retryAfterSeconds = Math.max(1, Math.ceil(e.info.retryAfterMs / 1000));
+						span.setStatus({ code: SpanStatusCode.OK, message: "concurrency_limit_reached" });
+						this.logger.log(
+							`[concurrency] ${e.info.workflowName} key='${e.info.concurrencyKey}' ` +
+								`limit=${e.info.concurrencyLimit} inFlight=${e.info.currentInFlight} → 429`,
+						);
+						c.header("Retry-After", String(retryAfterSeconds));
+						return c.json(
+							{
+								error: "Concurrency limit reached",
+								workflowName: e.info.workflowName,
+								concurrencyKey: e.info.concurrencyKey,
+								concurrencyLimit: e.info.concurrencyLimit,
+								currentInFlight: e.info.currentInFlight,
+								retryAfterMs: e.info.retryAfterMs,
+								runId: e.info.runId,
+							},
+							429,
+						);
+					}
+
+					if (e instanceof GlobalError) {
+						const error_context = e as GlobalError;
+
+						if (error_context.context.message === "{}" && error_context.context.json instanceof DOMException) {
+							workflow_runner_errors.add(1, {
+								env: process.env.NODE_ENV,
+								workflow_version: `${this.configuration?.version || "unknown"}`,
+								workflow_name: `${this.configuration?.name || "unknown"}`,
+								workflow_path: `${workflowNameInPath}`,
+							});
+							span.setStatus({
+								code: SpanStatusCode.ERROR,
+								message: (error_context.context.json as Error).toString(),
+							});
+							this.logger.error(`${(error_context.context.json as Error).toString()}`);
+							return c.json(
+								{
+									origin: error_context.context.name,
+									error: (error_context.context.json as Error).toString(),
+								},
+								500,
+							);
+						}
+
+						if (error_context.context.code === undefined) error_context.setCode(500);
+						const code = error_context.context.code as number;
+
+						if (error_context.hasJson()) {
+							workflow_runner_errors.add(1, {
+								env: process.env.NODE_ENV,
+								workflow_version: `${this.configuration?.version || "unknown"}`,
+								workflow_name: `${this.configuration?.name || "unknown"}`,
+								workflow_path: `${workflowNameInPath}`,
+							});
+							span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
+							this.logger.error(`${JSON.stringify(error_context.context.json)}`);
+							return c.json(error_context.context.json as object, code as 500);
+						}
+
 						workflow_runner_errors.add(1, {
 							env: process.env.NODE_ENV,
 							workflow_version: `${this.configuration?.version || "unknown"}`,
 							workflow_name: `${this.configuration?.name || "unknown"}`,
 							workflow_path: `${workflowNameInPath}`,
 						});
-						span.setStatus({ code: SpanStatusCode.ERROR, message: JSON.stringify(error_context.context.json) });
-						this.logger.error(`${JSON.stringify(error_context.context.json)}`);
-						return c.json(error_context.context.json as object, code as 500);
+						span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
+						this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
+						return c.json({ error: error_context.message }, code as 500);
 					}
 
 					workflow_runner_errors.add(1, {
@@ -1739,30 +1769,20 @@ export default class HttpTrigger extends TriggerBase {
 						workflow_name: `${this.configuration?.name || "unknown"}`,
 						workflow_path: `${workflowNameInPath}`,
 					});
-					span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
-					this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
-					return c.json({ error: error_context.message }, code as 500);
+					span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
+					this.logger.error(
+						`${workflowNameInPath}: ${(e as Error).message}`,
+						`${(e as Error).stack?.replace(/\n/g, " ")}`,
+					);
+					return c.json({ error: (e as Error).message }, 500);
+				} finally {
+					if (remoteNodeExecution) {
+						delete this.nodeMap.workflows[id];
+					}
+					span.end();
 				}
-
-				workflow_runner_errors.add(1, {
-					env: process.env.NODE_ENV,
-					workflow_version: `${this.configuration?.version || "unknown"}`,
-					workflow_name: `${this.configuration?.name || "unknown"}`,
-					workflow_path: `${workflowNameInPath}`,
-				});
-				span.setStatus({ code: SpanStatusCode.ERROR, message: (e as Error).message });
-				this.logger.error(
-					`${workflowNameInPath}: ${(e as Error).message}`,
-					`${(e as Error).stack?.replace(/\n/g, " ")}`,
-				);
-				return c.json({ error: (e as Error).message }, 500);
-			} finally {
-				if (remoteNodeExecution) {
-					delete this.nodeMap.workflows[id];
-				}
-				span.end();
-			}
-		});
+			},
+		);
 	}
 
 	// === Tier 2 #5+#7 follow-up · durable scheduling for HTTP delays ===

@@ -8,13 +8,15 @@ import {
 	Server as ServerCtor,
 	type ServiceError,
 } from "@grpc/grpc-js";
-import { metrics } from "@opentelemetry/api";
+import { metrics, propagation, trace } from "@opentelemetry/api";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
 	AggregationTemporality,
 	InMemoryMetricExporter,
 	MeterProvider,
 	PeriodicExportingMetricReader,
 } from "@opentelemetry/sdk-metrics";
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
 import {
@@ -76,6 +78,8 @@ function makeCtx(overrides: Partial<Context> = {}): Context {
 interface MockServerBehavior {
 	executeImpl?: (request: ExecuteRequestProto) => ExecuteResponseProto | Error;
 	healthImpl?: () => "SERVING" | "NOT_SERVING" | "UNKNOWN" | Error;
+	/** Capture the inbound gRPC `Metadata` for the unary `Execute` call (OBS-02 B2.2). */
+	onExecuteMetadata?: (metadata: Metadata) => void;
 	/**
 	 * Server-streaming `ExecuteStream` impl. Each yielded `ExecuteEventProto`
 	 * is written to the call. If a value of type `Error` is yielded the
@@ -98,6 +102,7 @@ async function startMockServer(behavior: MockServerBehavior): Promise<{
 			call: { request: ExecuteRequestProto; metadata: Metadata },
 			callback: (err: ServiceError | null, response?: ExecuteResponseProto) => void,
 		) => {
+			behavior.onExecuteMetadata?.(call.metadata);
 			const result = behavior.executeImpl?.(call.request);
 			if (result instanceof Error) {
 				callback(result as ServiceError);
@@ -724,5 +729,73 @@ describe("GrpcRuntimeAdapter — OBS-01 runtime node metrics", () => {
 		);
 		const total = pythonPoints.reduce((acc, p) => acc + (p.value as number), 0);
 		expect(total).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// OBS-02 B2.2 — outbound gRPC trace context propagation. With a real tracer
+// provider + W3C propagator registered, `execute()` / `executeStream()` must
+// inject a `traceparent` into the gRPC Metadata so the SDK process joins the
+// trace. Registers a real provider for this block only and tears it down after.
+describe("GrpcRuntimeAdapter — OBS-02 B2.2 traceparent injection", () => {
+	let provider: BasicTracerProvider;
+
+	beforeAll(() => {
+		provider = new BasicTracerProvider({
+			spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
+		});
+		trace.setGlobalTracerProvider(provider);
+		propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+	});
+
+	afterAll(async () => {
+		await provider.shutdown();
+		// Restore the no-op tracer + propagator so later files see a clean slate.
+		trace.disable();
+		propagation.disable();
+		_resetRuntimeInstrumentsForTests();
+	});
+
+	const TRACEPARENT_RE = /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/;
+
+	it("injects a W3C traceparent into the unary Execute Metadata", async () => {
+		let captured: Metadata | undefined;
+		const mock = await startMockServer({
+			onExecuteMetadata: (md) => {
+				captured = md;
+			},
+		});
+		const adapter = new GrpcRuntimeAdapter(makeAdapterConfig(mock.port));
+		try {
+			const result = await adapter.execute(makeNode(), makeCtx());
+			expect(result.success).toBe(true);
+		} finally {
+			adapter.close();
+			await mock.stop();
+		}
+		const traceparent = captured?.get("traceparent");
+		expect(traceparent?.length ?? 0).toBeGreaterThan(0);
+		expect(String(traceparent?.[0])).toMatch(TRACEPARENT_RE);
+	});
+
+	it("does not throw and omits the header when no provider is active (no-op gate)", async () => {
+		// Disable tracing for this single assertion, then restore for the block.
+		trace.disable();
+		let captured: Metadata | undefined;
+		const mock = await startMockServer({
+			onExecuteMetadata: (md) => {
+				captured = md;
+			},
+		});
+		const adapter = new GrpcRuntimeAdapter(makeAdapterConfig(mock.port));
+		try {
+			const result = await adapter.execute(makeNode(), makeCtx());
+			expect(result.success).toBe(true);
+		} finally {
+			adapter.close();
+			await mock.stop();
+			trace.setGlobalTracerProvider(provider);
+		}
+		// No recording span → propagation.inject writes nothing.
+		expect(captured?.get("traceparent")?.length ?? 0).toBe(0);
 	});
 });

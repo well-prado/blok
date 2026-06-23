@@ -1,7 +1,16 @@
 import { BlokError, type Context, ErrorCategory, ErrorSeverity } from "@blokjs/shared";
 import type { ClientReadableStream, ServiceError } from "@grpc/grpc-js";
 import { type Client, Metadata } from "@grpc/grpc-js";
-import { type Counter, type Histogram, SpanStatusCode, type Tracer, metrics, trace } from "@opentelemetry/api";
+import {
+	type Counter,
+	type Histogram,
+	SpanStatusCode,
+	type Tracer,
+	context,
+	metrics,
+	propagation,
+	trace,
+} from "@opentelemetry/api";
 import type RunnerNode from "../../RunnerNode";
 import type { ExecutionResult, RuntimeAdapter, RuntimeKind, RuntimeNodeDescriptor } from "../RuntimeAdapter";
 import { GrpcClientPool } from "./GrpcClientPool";
@@ -197,8 +206,15 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 			},
 		});
 
+		// OBS-02 B2.2 — inject W3C trace context into the gRPC Metadata so the
+		// SDK process (Go/Rust/Python/…) joins this trace. Built from a context
+		// in which THIS span is active, so the runtime's server span nests under
+		// `grpc.<kind>.Execute`. No-op carrier when no provider is registered.
+		const traceCarrier: Record<string, string> = {};
+		propagation.inject(trace.setSpan(context.active(), span), traceCarrier);
+
 		try {
-			const response = await this.unaryExecute(client, request, deadlineMs);
+			const response = await this.unaryExecute(client, request, deadlineMs, traceCarrier);
 			const decoded = decodeExecuteResponse(response);
 			const result = this.toExecutionResult(decoded, requestBytes, performance.now() - startTime);
 			span.setAttribute("blok.response.bytes", result.metrics?.response_bytes ?? 0);
@@ -321,12 +337,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		const requestBytes = approximateRequestBytes(request);
 
 		const client = this.pool.get(this.config);
-		const call = this.openExecuteStream(client, request, deadlineMs);
 
 		// Streaming span lives for the lifetime of the call; ended in the
 		// same `settle()` path that resolves the result promise so timing
 		// captures the full server-streaming arc rather than just the first
-		// frame.
+		// frame. Created BEFORE the stream is opened (OBS-02 B2.2) so its
+		// context can be injected into the gRPC Metadata.
 		const span = this.tracer.startSpan(`grpc.${this.kind}.ExecuteStream`, {
 			attributes: {
 				"rpc.system": "grpc",
@@ -339,6 +355,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 				"blok.request.bytes": requestBytes,
 			},
 		});
+
+		// OBS-02 B2.2 — inject W3C trace context into the streaming call's
+		// Metadata so the runtime's server span nests under this span.
+		const traceCarrier: Record<string, string> = {};
+		propagation.inject(trace.setSpan(context.active(), span), traceCarrier);
+		const call = this.openExecuteStream(client, request, deadlineMs, traceCarrier);
 
 		let finalDecoded: DecodedExecuteResponse | null = null;
 		const errorContext = this.errorContext(node);
@@ -395,8 +417,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		client: Client,
 		request: ExecuteRequestProto,
 		deadlineMs: number,
+		traceCarrier?: Record<string, string>,
 	): ClientReadableStream<ExecuteEventProto> {
 		const metadata = new Metadata();
+		if (traceCarrier) {
+			for (const [k, v] of Object.entries(traceCarrier)) metadata.set(k, v);
+		}
 		const deadline = new Date(Date.now() + deadlineMs);
 		const callable = (
 			client as unknown as {
@@ -492,8 +518,12 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		client: Client,
 		request: ExecuteRequestProto,
 		deadlineMs: number,
+		traceCarrier?: Record<string, string>,
 	): Promise<ExecuteResponseProto> {
 		const metadata = new Metadata();
+		if (traceCarrier) {
+			for (const [k, v] of Object.entries(traceCarrier)) metadata.set(k, v);
+		}
 		const deadline = new Date(Date.now() + deadlineMs);
 
 		return new Promise((resolve, reject) => {

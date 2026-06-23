@@ -1,23 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock external dependencies before imports (mirrors HttpTrigger.test.ts).
-vi.mock("@opentelemetry/api", () => ({
-	trace: {
-		getTracer: () => ({
-			startActiveSpan: (_name: string, fn: (span: any) => any) =>
-				fn({ setAttribute: vi.fn(), setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() }),
-		}),
-	},
-	metrics: {
-		getMeter: () => ({
-			createCounter: () => ({ add: vi.fn() }),
-			createHistogram: () => ({ record: vi.fn() }),
-			createGauge: () => ({ record: vi.fn() }),
-			createObservableGauge: () => ({ addCallback: vi.fn() }),
-		}),
-	},
-	SpanStatusCode: { OK: 0, ERROR: 1 },
-}));
+// Shared complete OTel double (OBS-02 B2 propagation surface).
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({ metricsHandler: vi.fn() }));
 vi.mock("../../src/Nodes", () => ({ default: {} }));

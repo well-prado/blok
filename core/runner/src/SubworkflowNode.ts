@@ -1,4 +1,5 @@
 import type { Context, ResponseContext } from "@blokjs/shared";
+import { context, propagation } from "@opentelemetry/api";
 import Configuration from "./Configuration";
 import RunnerNode from "./RunnerNode";
 import { RunTracker } from "./tracing/RunTracker";
@@ -439,6 +440,11 @@ export class SubworkflowNode extends RunnerNode {
 		};
 		if (parentRunId) headers["X-Blok-Parent-Run-Id"] = parentRunId;
 		if (parentNodeRunId) headers["X-Blok-Parent-Node-Run-Id"] = parentNodeRunId;
+
+		// OBS-02 B2.3 — inject W3C trace context so a child workflow running in
+		// another process joins this trace instead of starting a fresh root.
+		// No-op (headers unchanged) when no tracer provider is registered.
+		propagation.inject(context.active(), headers);
 
 		// === 4. Parent step's resolved inputs become the request body ===
 		const parentNodeConfig = (parentCtx.config as Record<string, { inputs?: unknown }> | undefined)?.[this.name];
