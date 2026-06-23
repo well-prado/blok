@@ -14,6 +14,7 @@ Each problem lives in its own file so you can review and approve them independen
 | [`03-worker-dotted-names.md`](03-worker-dotted-names.md) | **Bug 03** — Worker workflow names containing a dot throw `File type not supported` |
 | [`04-additional-design-flaws.md`](04-additional-design-flaws.md) | **25 additional design flaws** discovered during the research pass, severity-ordered, each with evidence + a recommended fix |
 | [`05-cross-runtime-live-test.md`](05-cross-runtime-live-test.md) | **Cross-runtime examples** — first live end-to-end test (Python3 over gRPC). Fixed a misleading `inputs` mapping in all 7 examples; documented a `contentType`-in-body leak as a follow-up |
+| [`06-paga-validation-fixes.md`](06-paga-validation-fixes.md) | **Paga.eu validation pass (2026-06-23)** — 8 framework defects **fixed** (webhook custom-verifier replay, `api-call` Retry-After, broken reference deploy, multi-replica backend wiring, audit-log honesty, wildcard CORS, unauthenticated RPC mount, codegen JSON skip) + 3 SPEC-only (per-step `rateLimit`, SSE backplane, pluggable audit backend). Verified 01/02/03 already fixed. |
 | [`appendix-architecture-notes.md`](appendix-architecture-notes.md) | Reference: the source-cited subsystem maps the research produced (trigger lifecycle, workflow loading, registry/middleware, DSL, CLI scaffold, worker adapters, execution/persistence) |
 
 ---
