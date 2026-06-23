@@ -1,5 +1,12 @@
 import type { LoggerContext } from "@blokjs/shared";
+import { isSpanContextValid, trace } from "@opentelemetry/api";
 import { RunTracker } from "./RunTracker";
+
+/** Loggers (e.g. DefaultLogger) that accept OBS-03 correlation keys. */
+interface CorrelatableLogger {
+	setRunId?(runId?: string): void;
+	setTraceContext?(traceId?: string, spanId?: string): void;
+}
 
 /**
  * Wraps an existing LoggerContext to forward log entries to RunTracker
@@ -15,6 +22,18 @@ export class TracingLogger implements LoggerContext {
 		this.inner = inner;
 		this.runId = runId;
 		this.tracker = tracker || RunTracker.getInstance();
+
+		// OBS-03 — stamp correlation keys onto the inner (stdout) logger so a log
+		// line can be joined to its Studio run + Tempo trace. `runId` is known
+		// here; the trace/span ids come from the active span, which IS active at
+		// construction (this runs inside the trigger's `startActiveSpan` callback)
+		// when distributed tracing is enabled — otherwise they're simply omitted.
+		const correlatable = inner as CorrelatableLogger;
+		correlatable.setRunId?.(runId);
+		const sc = trace.getActiveSpan()?.spanContext();
+		if (sc && isSpanContextValid(sc)) {
+			correlatable.setTraceContext?.(sc.traceId, sc.spanId);
+		}
 	}
 
 	log(message: string): void {

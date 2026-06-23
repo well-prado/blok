@@ -32,6 +32,27 @@ export default class DefaultLogger extends GlobalLogger {
 	appName: string | undefined = "";
 
 	/**
+	 * OBS-03 — correlation keys. `runId` ties a stdout line to the Studio run;
+	 * `traceId`/`spanId` tie it to the OTel trace in Tempo. Set by `TracingLogger`
+	 * after `tracker.startRun()` (run id) + from the active span (trace ids), so
+	 * Studio ↔ Tempo ↔ Loki become one joined view. Unset → simply omitted.
+	 */
+	runId: string | undefined = undefined;
+	traceId: string | undefined = undefined;
+	spanId: string | undefined = undefined;
+
+	/** OBS-03 — set the Studio run id on subsequent log lines. */
+	setRunId(runId?: string): void {
+		this.runId = runId;
+	}
+
+	/** OBS-03 — set the active OTel trace/span ids on subsequent log lines. */
+	setTraceContext(traceId?: string, spanId?: string): void {
+		this.traceId = traceId;
+		this.spanId = spanId;
+	}
+
+	/**
 	 * Constructs a new DefaultLogger instance.
 	 *
 	 * @param workflowName - The name of the workflow.
@@ -98,6 +119,10 @@ export default class DefaultLogger extends GlobalLogger {
 		if (this.workflowName) logEntry.workflow_name = this.workflowName;
 		if (this.workflowPath) logEntry.workflow_path = this.workflowPath;
 		if (this.requestId) logEntry.request_id = this.requestId;
+		// OBS-03 — correlation keys so a log line joins to its Studio run + Tempo trace.
+		if (this.runId) logEntry.run_id = this.runId;
+		if (this.traceId) logEntry.trace_id = this.traceId;
+		if (this.spanId) logEntry.span_id = this.spanId;
 		if (stack !== "") logEntry.stack = stack;
 
 		return JSON.stringify(logEntry);
