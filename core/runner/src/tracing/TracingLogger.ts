@@ -30,9 +30,18 @@ export class TracingLogger implements LoggerContext {
 		// when distributed tracing is enabled — otherwise they're simply omitted.
 		const correlatable = inner as CorrelatableLogger;
 		correlatable.setRunId?.(runId);
-		const sc = trace.getActiveSpan()?.spanContext();
-		if (sc && isSpanContextValid(sc)) {
-			correlatable.setTraceContext?.(sc.traceId, sc.spanId);
+		// Best-effort trace correlation. This logger is constructed on EVERY run
+		// (its core job is forwarding logs to RunTracker for Studio, independent
+		// of OTel), so reading the active span must never crash the request path
+		// — when distributed tracing is off, or the @opentelemetry/api surface is
+		// partial (e.g. stubbed in tests), we simply omit the trace ids.
+		try {
+			const sc = trace.getActiveSpan()?.spanContext();
+			if (sc && isSpanContextValid(sc)) {
+				correlatable.setTraceContext?.(sc.traceId, sc.spanId);
+			}
+		} catch {
+			// trace context unavailable — correlation is non-essential enrichment.
 		}
 	}
 
