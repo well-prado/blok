@@ -13,6 +13,7 @@ Each problem lives in its own file so you can review and approve them independen
 | [`02-worker-kafka-scaffold.md`](02-worker-kafka-scaffold.md) | **Bug 02** — Scaffolded worker hardcodes a Kafka adapter and crashes out of the box |
 | [`03-worker-dotted-names.md`](03-worker-dotted-names.md) | **Bug 03** — Worker workflow names containing a dot throw `File type not supported` |
 | [`04-additional-design-flaws.md`](04-additional-design-flaws.md) | **25 additional design flaws** discovered during the research pass, severity-ordered, each with evidence + a recommended fix |
+| [`05-cross-runtime-live-test.md`](05-cross-runtime-live-test.md) | **Cross-runtime examples** — first live end-to-end test (Python3 over gRPC). Fixed a misleading `inputs` mapping in all 7 examples; documented a `contentType`-in-body leak as a follow-up |
 | [`appendix-architecture-notes.md`](appendix-architecture-notes.md) | Reference: the source-cited subsystem maps the research produced (trigger lifecycle, workflow loading, registry/middleware, DSL, CLI scaffold, worker adapters, execution/persistence) |
 
 ---
