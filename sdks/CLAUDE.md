@@ -22,6 +22,22 @@ Go: 10001, Rust: 10002, Java: 10003, C#: 10004, PHP: 10005, Ruby: 10006, Python3
 
 Convention: gRPC port = legacy HTTP port + 1000.
 
+## Cross-runtime E2E + CI gate
+
+[`tests/e2e/cross-runtime/`](../tests/e2e/cross-runtime) proves all 7 runtimes
+serve the gRPC contract and a single chain threads `ctx` through every language.
+Two ways to run it:
+
+- **Docker (CI):** `docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build`
+  then `BLOK_E2E_REQUIRE_ALL=1 bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts`.
+  The compose builds each SDK in gRPC mode on its convention port (10001–10007).
+- **Host toolchains:** `bash tests/e2e/cross-runtime/run-spec-b-e2e.sh` (boots on
+  2000x to avoid clashing with a local dev stack; runs against whatever is up).
+
+The `.github/workflows/cross-runtime.yml` job runs the Docker path on every PR
+to `main` with `BLOK_E2E_REQUIRE_ALL=1` — a broken runtime build fails the gate
+instead of silently dropping out of the matrix.
+
 ## SDK Node Pattern
 
 Each SDK registers nodes with a `NodeHandler` interface (language-specific):

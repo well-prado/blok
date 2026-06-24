@@ -17,13 +17,18 @@ WORKDIR /app
 
 COPY --from=builder /app /app
 
-# gRPC transport needs grpcio (the `[grpc]` extra) — the runner speaks gRPC
-RUN pip install --no-cache-dir 'grpcio>=1.60' 'grpcio-health-checking>=1.60'
+# Runtime deps: pydantic (the typed @node contract, declared in requirements.txt
+# — without it `typed-greet` silently de-registers) + grpcio (the runner speaks
+# gRPC). The builder stage's site-packages aren't copied into this stage, so
+# install against the requirements.txt copied above.
+RUN pip install --no-cache-dir -r requirements.txt 'grpcio>=1.60' 'grpcio-health-checking>=1.60'
 
-EXPOSE 8080
+# HTTP port (informational /health) + gRPC port (the runner only speaks gRPC).
+EXPOSE 8080 10007
 
 ENV PORT=8080
 ENV HOST=0.0.0.0
+ENV GRPC_PORT=10007
 ENV VERSION=1.0.0
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \

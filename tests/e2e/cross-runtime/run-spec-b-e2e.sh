@@ -93,4 +93,8 @@ if command -v python3 >/dev/null && python3 -c "import grpc, pydantic" 2>/dev/nu
 fi
 
 echo "--- running harness ---"
-cd "$ROOT" && bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
+# This script boots on 2000x (offset from a local dev stack's 1000x); the
+# harness defaults to the 1000x convention, so pass the boot ports explicitly.
+cd "$ROOT" && GO_GRPC_PORT=20001 RUST_GRPC_PORT=20002 JAVA_GRPC_PORT=20003 \
+	CS_GRPC_PORT=20004 PHP_GRPC_PORT=20005 RUBY_GRPC_PORT=20006 PY_GRPC_PORT=20007 \
+	bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts

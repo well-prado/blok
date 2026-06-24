@@ -15,7 +15,9 @@ RUN mkdir -p src && \
     rm -rf src
 
 COPY . .
-RUN cargo build --release
+# The gRPC server lives behind the `grpc` cargo feature — the runner only speaks
+# gRPC, so it must be compiled in (default features are http-only).
+RUN cargo build --release --features grpc
 
 # Runtime stage
 FROM alpine:3.19
@@ -23,9 +25,12 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=builder /app/target/release/blok .
 
-EXPOSE 8080
+# HTTP port (informational /health) + gRPC port (the runner only speaks gRPC).
+EXPOSE 8080 10002
 
 ENV PORT=8080
+ENV GRPC_PORT=10002
+ENV ENABLE_GRPC=true
 ENV VERSION=1.0.0
 ENV RUST_LOG=info
 

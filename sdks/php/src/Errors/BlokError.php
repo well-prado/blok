@@ -37,9 +37,12 @@ use Throwable;
  */
 final class BlokError extends \Exception
 {
-    public const string DEFAULT_SDK_NAME = 'blok-php';
-    public const string DEFAULT_RUNTIME_KIND = 'runtime.php';
-    public const int CONTEXT_SNAPSHOT_MAX_BYTES = 4096;
+    // Untyped consts: typed class constants are PHP 8.3+, but composer declares
+    // `php: >=8.2`. Under 8.2 `const string NAME` is a parse error, which only
+    // surfaced on the error path (BlokError autoloads lazily) as a gRPC SoftJob.
+    public const DEFAULT_SDK_NAME = 'blok-php';
+    public const DEFAULT_RUNTIME_KIND = 'runtime.php';
+    public const CONTEXT_SNAPSHOT_MAX_BYTES = 4096;
 
     public BlokErrorCategory $category;
     public BlokErrorSeverity $severity;
