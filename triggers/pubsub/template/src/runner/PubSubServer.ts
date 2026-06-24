@@ -35,5 +35,5 @@ export default class PubSubServer extends PubSubTrigger {
 	});
 
 	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
-	protected workflows: Record<string, import("@blokjs/helper").HelperResponse> = workflows;
+	protected workflows: Record<string, import("@blokjs/helper").WorkflowV2Builder> = workflows;
 }

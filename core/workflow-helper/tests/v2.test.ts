@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { $, JS_EXPR_TAG, type V2Step, branch, unwrapProxies, workflow } from "../src/index";
+import { $, branch, workflow } from "../src/index";
+import { JS_EXPR_TAG, type V2Step, unwrapProxies } from "../src/internal";
 
 describe("v2 DSL — $ proxy", () => {
 	it("compiles property access to js/ctx.<path> via toString()", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { forEach, isForEachStep } from "../src/index";
+import { forEach } from "../src/index";
+import { isForEachStep } from "../src/internal";
 
 describe("forEach()", () => {
 	it("returns a v0.5 forEach step shape", () => {

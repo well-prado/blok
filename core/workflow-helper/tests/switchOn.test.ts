@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isSwitchStep, switchOn } from "../src/index";
+import { switchOn } from "../src/index";
+import { isSwitchStep } from "../src/internal";
 
 describe("switchOn()", () => {
 	it("returns a v0.5 switch step shape", () => {
