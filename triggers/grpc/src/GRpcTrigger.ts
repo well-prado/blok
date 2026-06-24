@@ -17,7 +17,7 @@ import workflows from "./Workflows";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 
 import { type Step, Workflow } from "@blokjs/helper";
-import type { TriggerOpts } from "@blokjs/helper/dist/types/TriggerOpts";
+import type { TriggerOpts } from "@blokjs/helper";
 import {
 	MessageEncoding,
 	MessageType,

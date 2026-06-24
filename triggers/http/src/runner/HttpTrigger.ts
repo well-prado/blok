@@ -1,7 +1,7 @@
 import type { Server } from "node:http";
 import * as path from "node:path";
 import { type Step, Workflow } from "@blokjs/helper";
-import type { TriggerOpts } from "@blokjs/helper/dist/types/TriggerOpts";
+import type { TriggerOpts } from "@blokjs/helper";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
 import { TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
