@@ -744,8 +744,6 @@ describe("RuntimeGenerator E2E", () => {
 		});
 	});
 
-	describe("analytics integration", () => {});
-
 	describe("multi-file parsing", () => {
 		it("should parse files separated by // FILE: markers", async () => {
 			const code = [

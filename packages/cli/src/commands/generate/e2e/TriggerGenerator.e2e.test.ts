@@ -379,6 +379,4 @@ describe("TriggerGenerator E2E", () => {
 			expect(system).toContain("loadNodes");
 		});
 	});
-
-	describe("analytics integration", () => {});
 });
