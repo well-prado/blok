@@ -36,7 +36,7 @@ export default workflow({
   steps: [
     branch({
       id: "route",
-      when: $.req.method === "POST",
+      when: eq($.req.method, "POST"),
       then: [{ id: "create", use: "@blokjs/api-call", inputs: { url: "..." } }],
       else: [{ id: "read", use: "@blokjs/api-call", inputs: { url: "..." } }],
     }),

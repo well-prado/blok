@@ -52,31 +52,33 @@ Once the node is created, navigate to its directory:
 cd src/nodes/fetch
 ```
 
-### 3. Update the Node Class Name
+### 3. Update the Node Definition
 
-Open the `index.ts` file inside the node directory and **update the class name** to match your node name (`Fetch` in this example):
+Open the `index.ts` file inside the node directory. For TypeScript, update the node name in the `defineNode()` call to match your node (`fetch` in this example):
 
 ```typescript
-// Original class name
-export default class Node extends BlokService {
-     ...
-}
+// Original
+export default defineNode({
+  name: "node",
+  ...
+});
 
-// Updated class name
-export default class Fetch extends BlokService {
-     ...
-}
+// Updated
+export default defineNode({
+  name: "fetch",
+  ...
+});
 ```
 
-### 4. Register the Node in the `Nodes.ts` File
+### 4. Register the Node (TypeScript only)
 
-To make your node available in workflows, **register it inside `src/Nodes.ts`**:
+For TypeScript nodes, **register it inside `src/Nodes.ts`**:
 
 ```typescript
 import ApiCall from "@blokjs/api-call";
 import IfElse from "@blokjs/if-else";
-import type { NodeBase } from "@blokjs/shared";
 import Fetch from "./nodes/fetch";
+import type { NodeBase } from "@blokjs/shared";
 
 const nodes: {
      [key: string]: NodeBase;
@@ -88,6 +90,8 @@ const nodes: {
 
 export default nodes;
 ```
+
+For Python nodes, they are auto-discovered from `runtimes/python3/nodes/` via the `BLOK_NODES_DIR` environment variable — no manual registration is needed.
 
 ### 5. Validate the Node
 

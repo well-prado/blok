@@ -123,6 +123,20 @@ registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
   </Card>
 </Columns>
 
+## Public surface & imports
+
+The `@blokjs/helper` package exports ~8 author symbols: `workflow`, `branch`, `eq`, `forEach`, `loop`, `switchOn`, `tryCatch`, and `$` (the typed context proxy). These are the tools for authoring workflows and nodes.
+
+Advanced imports (Zod schemas, type-guards, step-shape internals, trigger validation) live behind `@blokjs/helper/internal` — reserved for framework tooling and advanced use cases. Regular authors don't need them; they're separated to avoid bloating the main entry point.
+
+```ts
+// Regular authoring — use these
+import { workflow, branch, $ } from "@blokjs/helper";
+
+// Advanced only — framework tooling
+import { V2StepSchema, isBranchStep, type V2Step } from "@blokjs/helper/internal";
+```
+
 ## Conventions
 
 Every helper follows the same shape:

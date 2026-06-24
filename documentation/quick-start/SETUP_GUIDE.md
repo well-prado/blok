@@ -686,16 +686,16 @@ When a user runs `npx blokctl@latest create project`, the CLI:
 | Blok HTTP Server | 4000 | HTTP |
 | Blok Metrics | 9091 | HTTP (Prometheus) |
 
-### SDK Runtimes (HTTP)
+### SDK Runtimes (gRPC)
 | Service | Host Port | Container Port | Protocol |
 |---------|-----------|----------------|----------|
-| Go SDK | 9001 | 8080 | HTTP |
-| Rust SDK | 9002 | 8080 | HTTP |
-| Java SDK | 9003 | 8080 | HTTP |
-| C# SDK | 9004 | 8080 | HTTP |
-| PHP SDK | 9005 | 8080 | HTTP |
-| Ruby SDK | 9006 | 8080 | HTTP |
-| Python3 SDK | 9007 | 8080 | HTTP |
+| Go SDK | 9001 | 8080 | gRPC |
+| Rust SDK | 9002 | 8080 | gRPC |
+| Java SDK | 9003 | 8080 | gRPC |
+| C# SDK | 9004 | 8080 | gRPC |
+| PHP SDK | 9005 | 8080 | gRPC |
+| Ruby SDK | 9006 | 8080 | gRPC |
+| Python3 SDK | 9007 | 8080 | gRPC |
 
 ### Infrastructure
 | Service | Port | Protocol |

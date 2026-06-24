@@ -1,17 +1,18 @@
 import { JS_EXPR_TAG } from "../proxy/$";
 
 /**
- * First-class equality for `branch`/`switchOn`/`loop` conditions.
+ * First-class comparators for `branch`/`switchOn`/`loop` conditions.
  *
  * `branch({ when })` is evaluated at runtime by the if-else node via a raw
  * `Function("ctx", …)` — it does NOT go through the Mapper, so a `$` proxy
  * (`$.req.method`, which compiles to `"js/ctx.req.method"`) or a `$.`-prefixed
  * string never gets its `js/` prefix stripped and the condition silently
- * mis-evaluates. `eq()` sidesteps that footgun: it reads the proxy's raw path
- * and emits a plain `ctx.* === <literal>` string the runtime evaluates directly.
+ * mis-evaluates. These helpers sidestep that footgun: each reads the proxy's
+ * raw path and emits a plain `ctx.* <op> <literal>` string the runtime
+ * evaluates directly.
  *
  * @example
- *   import { branch, eq, $ } from "@blokjs/helper";
+ *   import { branch, eq, ne, gt, $ } from "@blokjs/helper";
  *
  *   branch({
  *     id: "route",
@@ -19,6 +20,8 @@ import { JS_EXPR_TAG } from "../proxy/$";
  *     then: [ ... ],
  *     else: [ ... ],
  *   });
+ *   // ne($.state.fetch.error, null) → 'ctx.state.fetch.error !== null'
+ *   // gt($.state.count, 10)         → 'ctx.state.count > 10'
  *
  * Left/right may each be a `$` proxy path or a literal (string, number,
  * boolean, null). Proxy paths are normalized to their canonical ctx field
@@ -26,7 +29,36 @@ import { JS_EXPR_TAG } from "../proxy/$";
  * expression resolves against the real ctx regardless of the alias.
  */
 export function eq(left: unknown, right: unknown): string {
-	return `${operandToExpr(left)} === ${operandToExpr(right)}`;
+	return cmp(left, "===", right);
+}
+
+/** Strict not-equal. `ne($.state.x, null)` → `ctx.state.x !== null`. */
+export function ne(left: unknown, right: unknown): string {
+	return cmp(left, "!==", right);
+}
+
+/** Greater-than. `gt($.state.count, 10)` → `ctx.state.count > 10`. */
+export function gt(left: unknown, right: unknown): string {
+	return cmp(left, ">", right);
+}
+
+/** Greater-than-or-equal. */
+export function gte(left: unknown, right: unknown): string {
+	return cmp(left, ">=", right);
+}
+
+/** Less-than. */
+export function lt(left: unknown, right: unknown): string {
+	return cmp(left, "<", right);
+}
+
+/** Less-than-or-equal. */
+export function lte(left: unknown, right: unknown): string {
+	return cmp(left, "<=", right);
+}
+
+function cmp(left: unknown, op: string, right: unknown): string {
+	return `${operandToExpr(left)} ${op} ${operandToExpr(right)}`;
 }
 
 function operandToExpr(value: unknown): string {

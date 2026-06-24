@@ -40,16 +40,16 @@ instead of silently dropping out of the matrix.
 
 ## SDK Node Pattern
 
-Each SDK registers nodes with a `NodeHandler` interface (language-specific):
+Each SDK registers nodes with a language-specific handler interface:
 - **Go**: `NodeHandler` interface with `Execute(ctx, config) (interface{}, error)`
 - **Rust**: `NodeHandler` trait with `async fn execute(&self, ctx, config) -> Result<Value>`
-- **Python3**: Function-based handler
+- **Python3**: `@node` decorator on functions with Pydantic model type hints; auto-discovered from `BLOK_NODES_DIR`
 - **Java**: `NodeHandler` interface with `execute(Context ctx, Map config)`
 - **C#**: `INodeHandler` interface
 - **PHP**: `NodeHandler` interface
 - **Ruby**: Handler module
 
-User nodes live in `runtimes/{lang}/nodes/` within projects.
+User nodes live in `runtimes/{lang}/nodes/` within projects. Python nodes auto-discover via the `BLOK_NODES_DIR` environment variable (set by CLI to `runtimes/python3/nodes/`), requiring no manual registration.
 
 ## Adding a New SDK Language
 
