@@ -522,46 +522,32 @@ Expected response — all 8 languages chained:
 }
 ```
 
-**Run the automated E2E test suite:**
+**Run the automated cross-runtime E2E test suite (gRPC):**
 ```bash
-cd tests/e2e/cross-runtime
-npx tsx chain.test.ts
+# Builds + boots whatever polyglot SDK gRPC servers your toolchain supports,
+# drives each live runtime through the runner's own GrpcRuntimeAdapter, then
+# tears everything down.
+bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
 ```
 
-This runs health checks on all SDKs, individual node tests, and the full 8-language chain validation.
+For each live runtime this proves, over real gRPC: `ListNodes` returns the typed node *with* a real JSON Schema, `Execute` validates the typed input (valid → typed output; invalid → structured validation error), and a cross-runtime chain threads ctx data through every runtime in order.
 
-### Execute a Node Directly on an SDK Container
-
-You can test any SDK runtime independently without the Blok server:
-
+If the SDK gRPC servers are already running, run the harness directly (it connects to ports `20001–20007` by default — override per runtime with `GO_GRPC_PORT`, `RUST_GRPC_PORT`, … ):
 ```bash
-# Execute the chain-test node directly on the Go SDK
-curl -s -X POST http://localhost:9001/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "node": { "name": "chain-test", "type": "default", "config": {} },
-    "context": {
-      "id": "test-1",
-      "workflow_name": "manual-test",
-      "workflow_path": "/test",
-      "request": {
-        "body": { "chain": [], "origin": "manual" },
-        "headers": {},
-        "params": {},
-        "query": {},
-        "method": "POST",
-        "url": "/test",
-        "cookies": {},
-        "baseUrl": ""
-      },
-      "response": { "data": null, "contentType": "application/json", "success": true, "error": null },
-      "vars": {},
-      "env": {}
-    }
-  }' | jq .
+bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
 ```
 
-Replace port `9001` with any SDK port (9002-9007) to test other runtimes.
+### Execute a Node Directly on an SDK Runtime
+
+Since v0.5 the runner reaches every runtime over gRPC — the `POST /execute` HTTP path it used to call was removed (the SDK processes now expose only `GET /health` over HTTP). To exercise a runtime's nodes directly, talk to the `blok.runtime.v1.NodeRuntime/Execute` gRPC service (proto at [`proto/blok/runtime/v1/runtime.proto`](../../proto/blok/runtime/v1/runtime.proto)).
+
+The simplest way is the cross-runtime harness, which constructs the runner's own `GrpcRuntimeAdapter` against each runtime's gRPC port and then calls `listNodes()` (returns each node's JSON Schema) and `execute(node, ctx)`:
+
+```bash
+bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
+```
+
+`tests/e2e/cross-runtime/spec-b-typed-e2e.ts` is the contract in TypeScript and a good copy-paste starting point. The same `Execute` RPC can be driven from any gRPC client (for example `grpcurl`, using the proto at `proto/blok/runtime/v1/runtime.proto`).
 
 ---
 
@@ -578,39 +564,16 @@ curl -s -X POST http://localhost:4000/cross-runtime-chain \
 
 ### Per-Runtime Latency (Individual SDK Overhead)
 
-Measure how fast each SDK responds to a direct `/execute` call:
-
-```bash
-for port in 9001 9002 9003 9004 9005 9006 9007; do
-  lang=$(curl -s http://localhost:$port/health | jq -r '.runtime // "unknown"')
-  time_total=$(curl -s -o /dev/null -w "%{time_total}" -X POST http://localhost:$port/execute \
-    -H "Content-Type: application/json" \
-    -d '{
-      "node": {"name": "chain-test", "type": "default", "config": {}},
-      "context": {
-        "id": "bench",
-        "workflow_name": "bench",
-        "workflow_path": "/bench",
-        "request": {"body": {"chain": [], "origin": "bench"}, "headers": {}, "params": {}, "query": {}, "method": "POST", "url": "/bench", "cookies": {}, "baseUrl": ""},
-        "response": {"data": null, "contentType": "application/json", "success": true, "error": null},
-        "vars": {},
-        "env": {}
-      }
-    }')
-  printf "%-10s (:%s)  %ss\n" "$lang" "$port" "$time_total"
-done
-```
+The runner calls each runtime over gRPC (`blok.runtime.v1.NodeRuntime/Execute`), not HTTP, so measure per-runtime overhead with a gRPC-aware load tool such as [`ghz`](https://ghz.sh) against the `Execute` method, using the proto at `proto/blok/runtime/v1/runtime.proto`. `curl`/`hey` only speak HTTP and can no longer drive a runtime directly — the `POST /execute` path was removed in v0.5.
 
 ### Load Testing with `hey`
 
 Install: `brew install hey` (macOS) or `go install github.com/rakyll/hey@latest`
 
 ```bash
-# Benchmark a single SDK runtime (Go) — 1000 requests, 10 concurrent
-hey -n 1000 -c 10 -m POST \
-  -H "Content-Type: application/json" \
-  -d '{"node":{"name":"chain-test","type":"default","config":{}},"context":{"id":"bench","workflow_name":"bench","workflow_path":"/bench","request":{"body":{"chain":[],"origin":"bench"},"headers":{},"params":{},"query":{},"method":"POST","url":"/bench","cookies":{},"baseUrl":""},"response":{"data":null,"contentType":"application/json","success":true,"error":null},"vars":{},"env":{}}}' \
-  http://localhost:9001/execute
+# To benchmark a single runtime in isolation, use a gRPC load tester such as
+# `ghz` against blok.runtime.v1.NodeRuntime/Execute (proto in proto/blok/runtime/v1/).
+# `hey` only speaks HTTP, and the runner no longer exposes POST /execute.
 
 # Benchmark the full cross-runtime chain workflow — 100 requests, 5 concurrent
 hey -n 100 -c 5 -m POST \
@@ -627,7 +590,7 @@ hey -n 1000 -c 50 -m GET \
 
 | Metric | Good | Needs Investigation |
 |--------|------|---------------------|
-| Individual SDK `/execute` latency | < 5ms | > 20ms |
+| Individual SDK gRPC `Execute` latency | < 5ms | > 20ms |
 | Full 8-runtime chain end-to-end | < 100ms | > 500ms |
 | Local-only workflow (NodeJS) | < 2ms | > 10ms |
 | Throughput (local workflow) | > 5000 req/s | < 1000 req/s |
@@ -671,9 +634,9 @@ pnpm helper:test
 docker compose -f infra/testing/docker-compose.yml up -d
 cd core/runner && pnpm test:integration
 
-# Cross-runtime E2E tests (requires SDK containers + Blok server)
-cd tests/e2e/cross-runtime
-npx tsx chain.test.ts
+# Cross-runtime E2E tests (gRPC) — builds + boots the polyglot SDK servers,
+# drives them through the runner's GrpcRuntimeAdapter, then tears down
+bash tests/e2e/cross-runtime/run-spec-b-e2e.sh
 ```
 
 ### Linting
