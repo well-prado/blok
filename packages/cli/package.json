@@ -13,7 +13,7 @@
 	"bin": {
 		"blokctl": "./dist/index.js"
 	},
-	"files": ["dist", "node_modules"],
+	"files": ["dist"],
 	"scripts": {
 		"build": "rm -rf dist && bun run tsc",
 		"build:dev": "tsc --watch",

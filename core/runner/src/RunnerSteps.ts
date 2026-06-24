@@ -611,12 +611,7 @@ export default abstract class RunnerSteps {
 					// finally). The Phase 2/3 single-slot
 					// `_blokActivePrimitiveNodeRunId` mechanism is gone —
 					// nested primitives each register their own frame, and
-					// the wait-throw site walks the full stack. We keep
-					// `isIteratingPrimitive` only as a hook for legacy
-					// readers (none in core today) — wait-cursor writes no
-					// longer depend on it.
-					const isIteratingPrimitive =
-						(step as unknown as { isPrimitiveIterator?: boolean }).isPrimitiveIterator === true;
+					// the wait-throw site walks the full stack.
 
 					// === OBS-02 B4 — per-step OTel child span ===
 					// One span per EXECUTING leaf step, nested under the workflow span.
@@ -787,13 +782,6 @@ export default abstract class RunnerSteps {
 							}
 						}
 					} finally {
-						// v0.6 Phase 4 — primitives own their stack frame
-						// lifecycle now (push on entry, pop in finally), so
-						// there's nothing to restore here. The
-						// `isIteratingPrimitive` flag stays in the type
-						// system for documentation but no longer drives
-						// cursor accounting.
-						void isIteratingPrimitive;
 						// OBS-02 B4 — close the per-step span on every exit (success / failure /
 						// wait / cancel / timeout).
 						stepSpan.end();
