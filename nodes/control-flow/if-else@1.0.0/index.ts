@@ -5,7 +5,6 @@
  * Migrated from class-based to function-first pattern using defineNode.
  */
 
-import type { ConditionOpts } from "@blokjs/helper";
 import { type BlokService, type Condition, defineNode } from "@blokjs/runner";
 import type { Context, NodeBase } from "@blokjs/shared";
 import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
@@ -53,7 +52,7 @@ export default defineNode({
 		let steps: NodeBase[] = [];
 
 		// Validate first condition is "if"
-		const firstCondition = conditions[0] as ConditionOpts;
+		const firstCondition = conditions[0] as z.infer<typeof conditionSchema>;
 		if (firstCondition.type !== "if") {
 			throw new Error("First condition must be an if");
 		}

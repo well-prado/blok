@@ -32,13 +32,18 @@
  *
  * Workflow Definition:
  * ```typescript
- * Workflow({ name: "daily-cleanup", version: "1.0.0" })
- *   .addTrigger("cron", {
- *     schedule: "0 2 * * *",  // Run at 2 AM daily
- *     timezone: "America/New_York",
- *     overlap: false,
- *   })
- *   .addStep({ ... });
+ * workflow({
+ *   name: "daily-cleanup",
+ *   version: "1.0.0",
+ *   trigger: {
+ *     cron: {
+ *       schedule: "0 2 * * *",  // Run at 2 AM daily
+ *       timezone: "America/New_York",
+ *       overlap: false,
+ *     },
+ *   },
+ *   steps: [ ... ],
+ * });
  * ```
  *
  * Cron Expression Format:

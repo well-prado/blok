@@ -10,7 +10,7 @@
  * Uses the 'cron' package for cron parsing and scheduling.
  */
 
-import type { CronTriggerOpts, HelperResponse } from "@blokjs/helper";
+import type { CronTriggerOpts, WorkflowV2Builder } from "@blokjs/helper";
 import {
 	type BlokService,
 	DefaultLogger,
@@ -101,7 +101,7 @@ export abstract class CronTrigger extends TriggerBase {
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
+	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	// Constructor removed (mirrors WorkerTrigger's v0.6.3 fix) — pre-fix it
 	// called `loadNodes()` + `loadWorkflows()`, but subclasses use class-field

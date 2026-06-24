@@ -4,7 +4,6 @@ import {
 	NodeTypeSchema,
 	RetryConfigSchema,
 	RuntimeKindSchema,
-	StepConditionSchema,
 	StepOptsSchema,
 	V2BranchStepSchema,
 	V2ForEachStepSchema,
@@ -1062,15 +1061,6 @@ describe("WebhookTriggerOptsSchema", () => {
 		expect(result.signature?.header).toBe("X-Acme-Signature");
 		expect(result.signature?.scheme).toBe("hmac-sha256");
 		expect(result.signature?.tolerance).toBe(300);
-	});
-});
-
-describe("StepConditionSchema", () => {
-	it("should validate step condition", () => {
-		const result = StepConditionSchema.parse({
-			node: { name: "cond-node", node: "control-flow/if-else@1.0.0", type: "local" },
-		});
-		expect(result.node.name).toBe("cond-node");
 	});
 });
 

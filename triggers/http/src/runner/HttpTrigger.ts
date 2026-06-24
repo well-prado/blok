@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import * as path from "node:path";
-import { type Step, Workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
 import { TriggerBase } from "@blokjs/runner";
@@ -1455,19 +1455,21 @@ export default class HttpTrigger extends TriggerBase {
 							remoteNodeName = remoteNodeName.substring(0, remoteNodeName.length - 1);
 						}
 
-						const step: Step = Workflow({
+						const step = workflow({
 							name: `Remote Node: ${remoteNodeName}`,
 							version: "1.0.0",
 							description: "Remote Node",
-						})
-							.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
-							.addStep({
-								name: "node",
-								node: remoteNodeName,
-								type: set_node_type,
-								inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary)
-									.inputs,
-							});
+							trigger: { [(trigger as string) || "grpc"]: trigger_config },
+							steps: [
+								{
+									id: "node",
+									use: remoteNodeName,
+									type: set_node_type,
+									inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary)
+										.inputs,
+								},
+							],
+						} as unknown as Parameters<typeof workflow>[0]);
 
 						this.nodeMap.workflows[id] = step;
 						workflowNameInPath = id;

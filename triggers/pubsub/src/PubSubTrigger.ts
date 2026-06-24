@@ -18,7 +18,7 @@
  *    - Ack/nack based on response
  */
 
-import type { HelperResponse, PubSubProvider, PubSubTriggerOpts } from "@blokjs/helper";
+import type { PubSubProvider, PubSubTriggerOpts, WorkflowV2Builder } from "@blokjs/helper";
 import {
 	type BlokService,
 	DefaultLogger,
@@ -138,7 +138,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
+	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	/**
 	 * Load nodes into the node map
@@ -285,7 +285,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 		const workflows: PubSubWorkflowModel[] = [];
 
 		for (const [path, workflow] of Object.entries(this.nodeMap.workflows || {})) {
-			// HelperResponse has a protected _config property
+			// WorkflowV2Builder exposes a _config property
 			const workflowConfig = (workflow as unknown as { _config: PubSubWorkflowModel["config"] })._config;
 
 			if (workflowConfig?.trigger) {

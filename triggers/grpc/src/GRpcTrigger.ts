@@ -16,7 +16,7 @@ import nodes from "./Nodes";
 import workflows from "./Workflows";
 import type RuntimeWorkflow from "./types/RuntimeWorkflow";
 
-import { type Step, Workflow } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper";
 import {
 	MessageEncoding,
@@ -125,18 +125,21 @@ export default class GRpcTrigger extends TriggerBase {
 					const trigger_config =
 						((workflowModel.trigger as unknown as ParamsDictionary)[trigger] as unknown as TriggerOpts) || {};
 
-					const step: Step = Workflow({
+					const step = workflow({
 						name: `Remote Node: ${name}`,
 						version: "1.0.0",
 						description: "Remote Node",
-					})
-						.addTrigger((trigger as unknown as "http") || "grpc", trigger_config)
-						.addStep({
-							name: "node",
-							node: name,
-							type: set_node_type,
-							inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary).inputs,
-						});
+						trigger: { [(trigger as string) || "grpc"]: trigger_config },
+						steps: [
+							{
+								id: "node",
+								use: name,
+								type: set_node_type,
+								inputs: ((workflowModel.nodes as unknown as ParamsDictionary).node as unknown as ParamsDictionary)
+									.inputs,
+							},
+						],
+					} as unknown as Parameters<typeof workflow>[0]);
 
 					this.nodeMap.workflows[id] = step;
 					name = id;

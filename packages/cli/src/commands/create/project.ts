@@ -1342,17 +1342,14 @@ function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: string[] 
 	const importSection = imports.length > 0 ? `${imports.join("\n")}\n` : "";
 	const entriesSection = workflowEntries.length > 0 ? workflowEntries.join("\n") : "\t// Add your workflows here";
 
-	// The registry accepts BOTH legacy v1 builders (HelperResponse, from
-	// `Workflow().addTrigger()…`) and v2 builders (WorkflowV2Builder, the return
-	// of the lowercase `workflow({…})` factory used by every shipped example).
-	// Typing it as `HelperResponse` alone rejects v2 workflows at `tsc` time
-	// (TypedWorkflow lacks `setConfig`), so `npm run build` would fail in any
-	// scaffold that registers a TS workflow here. Mirror the framework's own
-	// `Workflows` type (triggers/http/src/runner/types/Workflows.ts).
-	return `import type { HelperResponse, WorkflowV2Builder } from "@blokjs/helper";
+	// The registry maps workflow keys to `WorkflowV2Builder` instances (the
+	// return of the `workflow({…})` factory used by every shipped example).
+	// Mirror the framework's own `Workflows` type
+	// (triggers/http/src/runner/types/Workflows.ts).
+	return `import type { WorkflowV2Builder } from "@blokjs/helper";
 
 ${importSection}
-const workflows: Record<string, HelperResponse | WorkflowV2Builder> = {
+const workflows: Record<string, WorkflowV2Builder> = {
 ${entriesSection}
 };
 
