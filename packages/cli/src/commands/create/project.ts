@@ -390,7 +390,10 @@ export async function createProject(opts: OptionValues, version: string, current
 				: `${repoSource}/triggers/${primaryTrigger}`;
 
 		// Copy base config files from primary trigger
-		const baseFiles = ["package.json", "tsconfig.json", ".env.example", ".gitignore", "vitest.config.ts"];
+		// ponytail: no `vitest.config.ts` — a fresh scaffold ships no internal
+		// test infra (the framework's config is full of `src/runner/` excludes
+		// meaningless to a user project). Users add their own if they want it.
+		const baseFiles = ["package.json", "tsconfig.json", ".env.example", ".gitignore"];
 		for (const file of baseFiles) {
 			const src = `${primaryTriggerDir}/${file}`;
 			if (fsExtra.existsSync(src)) {
@@ -850,6 +853,15 @@ export async function createProject(opts: OptionValues, version: string, current
 			...packageJsonContent.devDependencies,
 			blokctl: blokctlRef,
 		};
+
+		// ponytail: strip the framework's internal test setup so it doesn't bleed
+		// into the user's project — no `test`/`test:dev` scripts, no vitest dep.
+		packageJsonContent.scripts = Object.fromEntries(
+			Object.entries(packageJsonContent.scripts).filter(([s]) => s !== "test" && s !== "test:dev"),
+		);
+		packageJsonContent.devDependencies = Object.fromEntries(
+			Object.entries(packageJsonContent.devDependencies).filter(([d]) => d !== "vitest" && !d.startsWith("@vitest/")),
+		);
 
 		// Add provider-specific dependencies for pubsub and queue triggers
 		const providerDeps = getProviderDependencies(
