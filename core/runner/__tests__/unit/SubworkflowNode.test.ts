@@ -1,4 +1,8 @@
 import type { Context, ResponseContext } from "@blokjs/shared";
+import { context, propagation, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
@@ -1143,6 +1147,49 @@ describe("SubworkflowNode — http-self dispatch (G2)", () => {
 		expect(headers["X-Blok-Parent-Run-Id"]).toBe((parentCtx as Record<string, unknown>)._traceRunId);
 		expect(headers["X-Blok-Parent-Node-Run-Id"]).toBe("parent-node-id-42");
 		expect(headers["X-Blok-Subworkflow-Depth"]).toBe("1");
+		// No tracer provider registered in this test → propagation.inject is a
+		// no-op, so the lineage assertions above are unaffected by OBS-02 B2.3.
+		expect(headers.traceparent).toBeUndefined();
+	});
+
+	it("injects a W3C traceparent header so the child process joins the trace (OBS-02 B2.3)", async () => {
+		// Register a real provider + W3C propagator + context manager so the
+		// active span is visible to `propagation.inject(context.active(), …)`.
+		const provider = new BasicTracerProvider({
+			spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
+		});
+		trace.setGlobalTracerProvider(provider);
+		propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+		const cm = new AsyncLocalStorageContextManager().enable();
+		context.setGlobalContextManager(cm);
+		try {
+			WorkflowRegistry.getInstance().register({
+				name: "child-http",
+				source: "/c.ts",
+				workflow: makeChildWithHttpTrigger("child-http"),
+			});
+			const node = makeSubworkflowNode({
+				stepName: "dispatch",
+				subworkflowName: "child-http",
+				dispatch: "http-self",
+			});
+			const parentCtx = makeParentCtx();
+			parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+			await trace.getTracer("test").startActiveSpan("parent-span", async (span) => {
+				await node.run(parentCtx);
+				span.end();
+			});
+
+			const headers = (fetchSpy.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers;
+			expect(headers.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+		} finally {
+			await provider.shutdown();
+			cm.disable();
+			context.disable();
+			trace.disable();
+			propagation.disable();
+		}
 	});
 
 	it("throws when the child has no HTTP trigger", async () => {
