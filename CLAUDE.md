@@ -91,11 +91,11 @@ Old (v1) workflows keep working — the runner normalizes them at load time:
 | `branch step is missing 'when'` | Branch with no condition string | Set `when: "..."` (or pass a `$` proxy expression) |
 | `Two workflows claim GET /path` | Route collision in file-based routing | Set explicit `trigger.http.path` on one to disambiguate |
 | `step "..." uses \`set_var\`, which was removed in v0.5` | Workflow still carries the legacy `set_var` field (removed in v0.5) | Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1 workflows automatically. |
-| `[blok][mapper] Failed to resolve ...` | A `js/...` or `${...}` expression in step inputs threw at run time (typo, undefined access, syntax error). Default mode logs + passes the literal string through (silent miscompile risk). | Read the hint in the warning. Set `BLOK_MAPPER_MODE=strict` to fail fast in production — the `MapperResolutionError` carries workflow + step + expression context. |
+| `[blok][mapper] Failed to resolve ...` | A `js/...` or `${...}` expression in step inputs threw at run time (typo, undefined access, syntax error). The default `strict` mode fails the step fast with a `MapperResolutionError`. | Read the hint in the error. Set `BLOK_MAPPER_MODE=warn` to fall back to the old log-and-pass-through — the `MapperResolutionError` carries workflow + step + expression context. |
 
 ### Production env vars worth setting
 
-- `BLOK_MAPPER_MODE=strict` — fail-fast on input expression resolution errors. Strongly recommended for production. Default `warn` preserves v1 silent-fallback behavior with diagnostics.
+- `BLOK_MAPPER_MODE` — input expression resolution failure mode. Default is now `strict` (fail-fast: a typo'd expression fails the step instead of silently passing a literal through). Set `warn` for the old v1 log-and-pass-through, or `silent` to suppress.
 - `BLOK_TRACE_ENABLED=false` — disable Studio trace recording (also disables idempotency cache reads/writes since they share the store).
 - `BLOK_MAX_SUBWORKFLOW_DEPTH=10` — recursion cap for sub-workflow steps. Bump if you have legitimate deep nesting.
 

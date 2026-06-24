@@ -69,7 +69,8 @@ describe("Mapper — ${...} in data values flowing between steps (Bug 2)", () =>
 		expect((inputs as Record<string, unknown>).value).toEqual(poison);
 	});
 
-	it("a LITERAL authored ${path} is left in place in warn (default) mode — no throw", () => {
+	it("a LITERAL authored ${path} is left in place in warn mode — no throw", () => {
+		process.env.BLOK_MAPPER_MODE = "warn";
 		const ctx = createMockContext();
 		const inputs: ParamsDictionary = { tmpl: "before-${path}-after" } as unknown as ParamsDictionary;
 		expect(() => mapper.replaceObjectStrings(inputs, ctx, {} as ParamsDictionary)).not.toThrow();

@@ -879,11 +879,11 @@ Less ergonomic than `wait.for()` but durable + crash-safe today.
 
 | Mode | Behavior on resolution failure |
 |---|---|
-| `warn` (default) | Log a structured warning via `ctx.logger.logLevel("warn", ...)` (routes to console + Studio's log viewer via `TracingLogger`) and pass the literal expression string through to the node. Backward-compatible with v1. |
+| `warn` | Log a structured warning via `ctx.logger.logLevel("warn", ...)` (routes to console + Studio's log viewer via `TracingLogger`) and pass the literal expression string through to the node. The pre-fail-fast v1 behavior; opt-in. |
 | `strict` | Throw `MapperResolutionError` with full context (workflow name, step name, expression, underlying cause + heuristic hint). The step fails fast. **Recommended for production.** |
 | `silent` | Pre-v0.3.x behavior — full suppression (no log, no throw). Opt-out for tests / workflows that intentionally use undefined-tolerant resolution. |
 
-Production deployments should set `BLOK_MAPPER_MODE=strict` —
+`strict` is now the default (fail-fast) —
 silent miscompiles (where a `js/ctx.bad.path` evaluation fails and
 the literal string passes through to the node, producing wrong output
 downstream) have historically been a major source of subtle bugs.
