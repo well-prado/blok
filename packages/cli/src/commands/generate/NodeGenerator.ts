@@ -1,8 +1,6 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
-import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 import createFnNodeSystemPrompt from "./prompts/create-fn-node.system.js";
 import createNodeSystemPrompt from "./prompts/create-node.system.js";
 import * as CompilationValidator from "./validators/CompilationValidator.js";
@@ -18,8 +16,6 @@ type NodeInformation = {
 		errors: string[];
 		warnings: string[];
 		attempts: number;
-		promptVersion?: string;
-		durationMs?: number;
 	};
 };
 
@@ -35,11 +31,6 @@ export default class NodeGenerator {
 		update = false,
 		nodeStyle = "function",
 	): Promise<NodeInformation> {
-		const analytics = GenerationAnalytics.getInstance();
-		const getElapsed = analytics.startTimer();
-		const promptId = nodeStyle === "function" ? "create-fn-node" : "create-node";
-		const promptVersion = getVersionStamp(promptId);
-
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
@@ -51,7 +42,6 @@ export default class NodeGenerator {
 		let existingCode: string | null = null;
 
 		// Register prompt content for hash tracking
-		registerPromptContent(promptId, prompt);
 
 		if (update) {
 			// Read existing file and get the code
@@ -126,19 +116,6 @@ export default class NodeGenerator {
 			}
 		}
 
-		// Record analytics event
-		const durationMs = getElapsed();
-		analytics.recordEvent({
-			type: "node",
-			subtype: nodeStyle,
-			name: nodeName,
-			success: isValid,
-			attempts,
-			durationMs,
-			errors: allErrors,
-			promptVersion,
-		});
-
 		return {
 			nodeName,
 			userPrompt,
@@ -148,8 +125,6 @@ export default class NodeGenerator {
 				errors: validationErrors,
 				warnings: validationWarnings,
 				attempts,
-				promptVersion,
-				durationMs,
 			},
 		};
 	}

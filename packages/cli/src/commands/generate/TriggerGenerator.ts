@@ -1,8 +1,6 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
-import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 import createTriggerSystemPrompt from "./prompts/create-trigger.system.js";
 import * as CompilationValidator from "./validators/CompilationValidator.js";
 
@@ -16,8 +14,6 @@ export type TriggerInformation = {
 		errors: string[];
 		warnings: string[];
 		attempts: number;
-		promptVersion?: string;
-		durationMs?: number;
 	};
 };
 
@@ -32,10 +28,6 @@ export default class TriggerGenerator {
 		update = false,
 		existingTriggerPath?: string,
 	): Promise<TriggerInformation> {
-		const analytics = GenerationAnalytics.getInstance();
-		const getElapsed = analytics.startTimer();
-		const promptVersion = getVersionStamp("create-trigger");
-
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
@@ -44,7 +36,6 @@ export default class TriggerGenerator {
 		let prompt = createTriggerSystemPrompt.prompt;
 
 		// Register prompt content for hash tracking
-		registerPromptContent("create-trigger", prompt);
 
 		// If updating, include existing trigger code
 		if (update && existingTriggerPath) {
@@ -110,19 +101,6 @@ export default class TriggerGenerator {
 			}
 		}
 
-		// Record analytics event
-		const durationMs = getElapsed();
-		analytics.recordEvent({
-			type: "trigger",
-			subtype: triggerType,
-			name: triggerName,
-			success: isValid,
-			attempts,
-			durationMs,
-			errors: allErrors,
-			promptVersion,
-		});
-
 		return {
 			triggerName,
 			triggerType,
@@ -133,8 +111,6 @@ export default class TriggerGenerator {
 				errors: validationErrors,
 				warnings: validationWarnings,
 				attempts,
-				promptVersion,
-				durationMs,
 			},
 		};
 	}

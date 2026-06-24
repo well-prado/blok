@@ -18,7 +18,6 @@ vi.mock("ai", () => ({
 }));
 
 import { generateText } from "ai";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
 import RuntimeGenerator, { isSupportedLanguage } from "./RuntimeGenerator.js";
 
 const mockedGenerateText = vi.mocked(generateText);
@@ -30,7 +29,6 @@ describe("RuntimeGenerator", () => {
 		generator = new RuntimeGenerator();
 		vi.clearAllMocks();
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		GenerationAnalytics.resetInstance();
 	});
 
 	afterEach(() => {
@@ -493,49 +491,12 @@ func main() {
 			expect(result.validationResult?.errors.length).toBeGreaterThan(0);
 		});
 
-		it("should record analytics event", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: validGoRuntime } as never);
-
-			await generator.generateRuntime("go", "test", "test-key");
-
-			const analytics = GenerationAnalytics.getInstance();
-			const stats = analytics.getStats();
-			expect(stats.totalGenerations).toBe(1);
-			expect(stats.successCount).toBe(1);
-		});
-
-		it("should record failed analytics event", async () => {
-			mockedGenerateText.mockResolvedValue({ text: "invalid" } as never);
-
-			await generator.generateRuntime("java", "test", "test-key");
-
-			const analytics = GenerationAnalytics.getInstance();
-			const stats = analytics.getStats();
-			expect(stats.totalGenerations).toBe(1);
-			expect(stats.failureCount).toBe(1);
-		});
-
 		it("should strip markdown fences from LLM output", async () => {
 			const wrappedCode = `\`\`\`go\n${validGoRuntime}\n\`\`\``;
 			mockedGenerateText.mockResolvedValueOnce({ text: wrappedCode } as never);
 
 			const result = await generator.generateRuntime("go", "test", "test-key");
 			expect(result.validationResult?.valid).toBe(true);
-		});
-
-		it("should include prompt version in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: validGoRuntime } as never);
-
-			const result = await generator.generateRuntime("go", "test", "test-key");
-			expect(result.validationResult?.promptVersion).toBe("create-runtime@1.0.0");
-		});
-
-		it("should include duration in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: validGoRuntime } as never);
-
-			const result = await generator.generateRuntime("go", "test", "test-key");
-			expect(result.validationResult?.durationMs).toBeDefined();
-			expect(typeof result.validationResult?.durationMs).toBe("number");
 		});
 	});
 
