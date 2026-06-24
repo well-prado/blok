@@ -379,10 +379,10 @@ migration hint.
 
 ## Type guards (TypeScript only)
 
-Available from `@blokjs/helper`:
+Available from `@blokjs/helper/internal`:
 
 ```ts
-import { isBranchStep, isSubworkflowStep, type V2Step } from "@blokjs/helper";
+import { isBranchStep, isSubworkflowStep, type V2Step } from "@blokjs/helper/internal";
 
 function describe(step: V2Step): string {
   if (isBranchStep(step)) return "branch";

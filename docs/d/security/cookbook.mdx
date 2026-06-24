@@ -40,7 +40,7 @@ export default workflow({
     },
     branch({
       id: "guard",
-      when: "$.state['auth-check'].authenticated === false",
+      when: eq($.state['auth-check'].authenticated, false),
       then: [
         {
           id: "deny",
@@ -111,7 +111,7 @@ export default workflow({
     },
     branch({
       id: "guard",
-      when: "$.state.validate.authenticated === false",
+      when: eq($.state.validate.authenticated, false),
       then: [
         {
           id: "deny",
@@ -171,9 +171,9 @@ helper:
 
 ```ts
 // triggers/http/src/lib/withAuth.ts
-import { type Step } from "@blokjs/helper";
+import { type V2Step } from "@blokjs/helper/internal";
 
-export function withAuth(steps: Step[]): Step[] {
+export function withAuth(steps: V2Step[]): V2Step[] {
   return [
     {
       id: "auth",
@@ -241,7 +241,7 @@ export default workflow({
     },
     branch({
       id: "rbac",
-      when: '!$.state.auth.identity.roles.includes("admin")',
+      when: !$.state.auth.identity.roles.includes("admin"),
       then: [
         {
           id: "forbidden",

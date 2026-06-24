@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { branch } from "../src/components/branch";
-import { eq } from "../src/components/eq";
+import { eq, gt, gte, lt, lte, ne } from "../src/components/eq";
 import { $ } from "../src/proxy/$";
 
 // Exact replica of the if-else node's condition evaluator
@@ -50,5 +50,25 @@ describe("eq()", () => {
 		const footgun = branch({ id: "bad", when: $.req.method, then: [{ id: "a", use: "x" }] });
 		expect(footgun.branch.when).toBe("js/ctx.req.method");
 		expect(() => runJs(footgun.branch.when, { request: { method: "POST" } })).toThrow(); // `js` is undefined
+	});
+});
+
+describe("comparators (ne/gt/gte/lt/lte)", () => {
+	it("emit the right operator with canonicalized ctx paths", () => {
+		expect(ne($.state.fetch.error, null)).toBe("ctx.state.fetch.error !== null");
+		expect(gt($.state.count, 10)).toBe("ctx.state.count > 10");
+		expect(gte($.state.count, 10)).toBe("ctx.state.count >= 10");
+		expect(lt($.state.count, 10)).toBe("ctx.state.count < 10");
+		expect(lte($.state.count, 10)).toBe("ctx.state.count <= 10");
+		expect(ne($.req.method, "GET")).toBe('ctx.request.method !== "GET"');
+	});
+
+	it("evaluate correctly via the if-else runJs path", () => {
+		expect(runJs(ne($.state.error, null), { state: { error: "boom" } })).toBe(true);
+		expect(runJs(ne($.state.error, null), { state: { error: null } })).toBe(false);
+		expect(runJs(gt($.state.count, 10), { state: { count: 11 } })).toBe(true);
+		expect(runJs(gt($.state.count, 10), { state: { count: 10 } })).toBe(false);
+		expect(runJs(gte($.state.count, 10), { state: { count: 10 } })).toBe(true);
+		expect(runJs(lte($.state.count, 10), { state: { count: 10 } })).toBe(true);
 	});
 });

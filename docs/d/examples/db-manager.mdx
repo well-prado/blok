@@ -290,7 +290,7 @@ For deeper structure, see the
 
 ### The Database-UI Node
 
-The `database-ui` node is responsible for serving the HTML, CSS, and JavaScript for the UI. When a GET request is made to the root path (`/db-manager`), the `if-else` node routes the request to this node.
+The `database-ui` node is responsible for serving the HTML, CSS, and JavaScript for the UI. When a GET request is made to the root path (`/db-manager`), the `branch` step routes the request to this node.
 
 The node is implemented as a custom node that returns HTML content. The HTML includes:
 
@@ -299,52 +299,33 @@ The node is implemented as a custom node that returns HTML content. The HTML inc
 3. **React Components**: JavaScript code for the interactive UI
 4. **API Integration**: Code to communicate with the workflow's API endpoints
 
-Here's a simplified example of how the `database-ui` node might be implemented:
+Here's a simplified example of how the `database-ui` node might be implemented using `defineNode()`:
 
 ```typescript
-import {
-  type IBlokResponse,
-  BlokService,
-  BlokResponse,
-} from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
-import fs from 'fs';
-import path from 'path';
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
+import fs from 'node:fs';
+import path from 'node:path';
 
-type InputType = {};
-
-export default class DatabaseUI extends BlokService<InputType> {
-  constructor() {
-    super();
-    this.inputSchema = {};
-  }
-
-  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
-    const response: BlokResponse = new BlokResponse();
-
+export default defineNode({
+  name: "database-ui",
+  description: "Serves the database UI HTML",
+  contentType: "text/html",
+  
+  input: z.object({}),
+  output: z.string(),
+  
+  async execute(ctx, inputs) {
     try {
       // Read the HTML file
       const htmlPath = path.resolve(__dirname, './ui/index.html');
       const htmlContent = fs.readFileSync(htmlPath, 'utf8');
-      
-      // Set the content type to HTML
-      response.headers = {
-        'Content-Type': 'text/html',
-      };
-      
-      // Return the HTML content
-      response.setSuccess(htmlContent);
+      return htmlContent;
     } catch (error: unknown) {
-      const nodeError = new GlobalError((error as Error).message);
-      nodeError.setCode(500);
-      nodeError.setStack((error as Error).stack);
-      nodeError.setName(this.name);
-      response.setError(nodeError);
+      throw new Error((error as Error).message);
     }
-
-    return response;
-  }
-}
+  },
+});
 ```
 
 ### The Complete UI Rendering Flow
@@ -352,9 +333,9 @@ export default class DatabaseUI extends BlokService<InputType> {
 When a user accesses the DB Manager at `http://localhost:4000/db-manager`, the following happens:
 
 1. The HTTP trigger receives the GET request
-2. The `if-else` node evaluates the conditions:
+2. The `branch` step evaluates the condition:
    ```javascript
-   ctx.request.method.toLowerCase() === "get" && ctx.request.params.function === undefined
+   eq($.req.method.toLowerCase(), "get") && $.req.params.function === undefined
    ```
 3. Since this condition is true (it's a GET request to the root path), the `database-ui` node is executed
 4. The `database-ui` node returns HTML content with the appropriate Content-Type header
@@ -367,106 +348,83 @@ The same workflow also handles API requests through different conditions:
 
 1. **GET /db-manager/tables**: Lists available database tables
    ```javascript
-   ctx.request.method.toLowerCase() === "get" && ctx.request.params.function === "tables"
+   eq($.req.method.toLowerCase(), "get") && eq($.req.params.function, "tables")
    ```
 
 2. **POST /db-manager/execute-prompt**: Generates and executes an SQL query
    ```javascript
-   ctx.request.method.toLowerCase() === "post" && ctx.request.params.function === "execute-prompt"
+   eq($.req.method.toLowerCase(), "post") && eq($.req.params.function, "execute-prompt")
    ```
 
 ### Benefits of This Approach
 
-Using the `if-else` node for UI rendering in Blok  offers several advantages:
+Using `branch` steps for UI rendering in Blok  offers several advantages:
 
 1. **Unified Workflow**: Both UI and API logic are contained in a single workflow
 2. **Simplified Deployment**: No need for separate frontend and backend deployments
 3. **Shared Context**: UI and API can share the same context and configuration
-4. **Conditional Logic**: Complex routing can be implemented with JavaScript expressions
+4. **Conditional Logic**: Complex routing can be implemented with expressions using `eq()` and other primitives
 5. **Content Negotiation**: Different content types can be served based on request parameters
 
 ### Implementing Your Own UI Rendering
 
 To implement UI rendering in your own Blok  workflows:
 
-1. **Create a UI Node**: Implement a node that returns HTML content
-2. **Use the If-Else Node**: Configure conditions based on request properties
-3. **Set Content-Type Headers**: Ensure the correct Content-Type is set for HTML responses
+1. **Create a UI Node**: Implement a node with `defineNode()` that returns HTML content
+2. **Use Branch Steps**: Configure conditions using `eq()` and other branch primitives based on request properties
+3. **Set Content-Type**: Set `contentType: "text/html"` in the node definition
 4. **Include Client-Side Code**: Add JavaScript for client-side interactivity
-5. **Define API Endpoints**: Add conditions for API endpoints in the same workflow
+5. **Define API Endpoints**: Add nested branch steps for API endpoints in the same workflow
 
 ## The Postgres-Query Node
 
 The DB Manager example uses the `postgres-query` node to interact with the PostgreSQL database. This node is a custom implementation that allows executing SQL queries against the database.
 
-Here's a simplified version of the `postgres-query` node:
+Here's a simplified version of the `postgres-query` node using `defineNode()`:
 
 ```typescript
-import {
-  type IBlokResponse,
-  type JsonLikeObject,
-  BlokService,
-  BlokResponse,
-} from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
 import pg from "pg";
 
-type PostgresQueryInputs = {
-  user: string;
-  password: string;
-  host: string;
-  query: string;
-};
+export default defineNode({
+  name: "postgres-query",
+  description: "Executes SQL queries against a PostgreSQL database",
+  
+  input: z.object({
+    user: z.string(),
+    password: z.string(),
+    host: z.string(),
+    port: z.number().optional().default(5432),
+    database: z.string(),
+    query: z.string(),
+  }),
+  
+  output: z.object({
+    total: z.number(),
+    data: z.array(z.record(z.unknown())),
+  }),
+  
+  async execute(ctx, inputs) {
+    const { Client } = pg;
+    const client = new Client({
+      user: inputs.user,
+      password: inputs.password,
+      host: inputs.host,
+      port: inputs.port,
+      database: inputs.database,
+    });
 
-export default class PostgresQuery extends BlokService<PostgresQueryInputs> {
-  constructor() {
-    super();
-    this.inputSchema = {
-      $schema: "http://json-schema.org/draft-04/schema#",
-      type: "object",
-      properties: {
-        user: { type: "string" },
-        password: { type: "string" },
-        host: { type: "string" },
-        query: { type: "string" },
-      },
-      required: ["user", "password", "host", "query"],
+    await client.connect();
+    const result = await client.query(inputs.query);
+    await client.end();
+
+    return {
+      total: result.rowCount || 0,
+      data: result.rows,
     };
-    this.outputSchema = {};
-  }
-
-  async handle(ctx: Context, inputs: PostgresQueryInputs): Promise<IBlokResponse> {
-    const response: BlokResponse = new BlokResponse();
-
-    try {
-      const { Client } = pg;
-      const client = new Client({
-        user: inputs.user,
-        password: inputs.password,
-        host: inputs.host,
-        port: 5432,
-        database: "dvdrental",
-      });
-
-      await client.connect();
-      const result = await client.query(inputs.query);
-      await client.end();
-
-      response.setSuccess({
-        total: result.rowCount,
-        data: result.rows,
-      });
-    } catch (error: unknown) {
-      const nodeError = new GlobalError((error as Error).message);
-      nodeError.setCode(500);
-      nodeError.setStack((error as Error).stack);
-      nodeError.setName(this.name);
-      response.setError(nodeError);
-    }
-
-    return response;
-  }
-}
+  },
+});
 ```
 
 The `postgres-query` node is used in three places in the workflow:
@@ -484,102 +442,67 @@ The DB Manager example uses several custom nodes:
 This node uses OpenAI to generate an SQL query based on a natural language prompt and table schema:
 
 ```typescript
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
-import {
-  type IBlokResponse,
-  BlokService,
-  BlokResponse,
-  type ParamsDictionary,
-} from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
 import { generateText } from "ai";
 
-type InputType = {
-  table_name: string;
-  columns: Column[];
-  prompt: string;
-};
+const columnSchema = z.object({
+  column_name: z.string(),
+  data_type: z.string(),
+  primary_key: z.string().optional(),
+});
 
-type Column = {
-  column_name: string;
-  data_type: string;
-  primary_key: string;
-};
-
-export default class QueryGeneratorNode extends BlokService<InputType> {
-  constructor() {
-    super();
-    this.inputSchema = {
-      $schema: "http://json-schema.org/draft-04/schema#",
-      type: "object",
-      properties: {
-        table_name: { type: "string" },
-        columns: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              column_name: { type: "string" },
-              data_type: { type: "string" },
-              primary_key: { type: "string" },
-            },
-          },
-        },
-        prompt: { type: "string" },
-      },
-      required: ["table_name", "columns"],
-    };
-  }
-
-  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
-    const response: BlokResponse = new BlokResponse();
+export default defineNode({
+  name: "query-generator",
+  description: "Generates SQL queries from natural language prompts using AI",
+  
+  input: z.object({
+    table_name: z.string(),
+    columns: z.array(columnSchema),
+    prompt: z.string(),
+  }),
+  
+  output: z.object({
+    query: z.string(),
+  }),
+  
+  async execute(ctx, inputs) {
     const { table_name: tableName, columns, prompt } = inputs;
 
-    try {
-      // Format column information
-      const tableSchema = columns
-        .map(
-          (col) => `${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
-        )
-        .join(", ");
+    // Format column information
+    const tableSchema = columns
+      .map(
+        (col) => `${col.column_name} (${col.data_type}${col.column_name === col.primary_key ? ", PRIMARY KEY" : ""})`,
+      )
+      .join(", ");
 
-      // Generate SQL query using AI
-      const openai = createOpenAI({
-        compatibility: "strict",
-        apiKey: process.env.OPENAI_API_KEY,
-      });
+    // Generate SQL query using AI
+    const openai = createOpenAI({
+      compatibility: "strict",
+      apiKey: process.env.OPENAI_API_KEY,
+    });
 
-      const ai_prompt = `Table: ${tableName}
-            Schema: ${tableSchema}
-            
-            Generate a SQL query for the following request: ${prompt}
-            
-            Return ONLY the SQL query with no explanations, additional text or markdown code group.
-            
-            Double check the query to not include markdown code blocks or any other text that is not a valid SQL query.`;
+    const ai_prompt = `Table: ${tableName}
+Schema: ${tableSchema}
 
-      const { text: sqlQuery } = await generateText({
-        model: openai("gpt-4o"),
-        system: `You are a SQL expert. Generate only valid SQL queries without any explanations or markdown. 
-            The query should be executable directly against a PostgreSQL database.`,
-        prompt: ai_prompt,
-      });
+Generate a SQL query for the following request: ${prompt}
 
-      if (ctx.vars === undefined) ctx.vars = {};
-      ctx.vars.query = sqlQuery as unknown as ParamsDictionary;
+Return ONLY the SQL query with no explanations, additional text or markdown code group.
 
-      response.setSuccess({
-        query: sqlQuery,
-      });
-    } catch (error: unknown) {
-      const nodeError = new GlobalError((error as Error).message);
-      nodeError.setCode(500);
-      response.setError(nodeError);
-    }
+Double check the query to not include markdown code blocks or any other text that is not a valid SQL query.`;
 
-    return response;
-  }
-}
+    const { text: sqlQuery } = await generateText({
+      model: openai("gpt-4o"),
+      system: `You are a SQL expert. Generate only valid SQL queries without any explanations or markdown. The query should be executable directly against a PostgreSQL database.`,
+      prompt: ai_prompt,
+    });
+
+    return {
+      query: sqlQuery,
+    };
+  },
+});
 ```
 
 ### 2. MapperNode
@@ -587,47 +510,23 @@ export default class QueryGeneratorNode extends BlokService<InputType> {
 This node maps data from one format to another:
 
 ```typescript
-import {
-  type IBlokResponse,
-  type JsonLikeObject,
-  BlokService,
-  BlokResponse,
-} from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
+import { defineNode } from "@blokjs/runner";
+import { z } from "zod";
 
-type InputType = {
-  model: object;
-};
-
-export default class MapperNode extends BlokService<InputType> {
-  constructor() {
-    super();
-    this.inputSchema = {
-      $schema: "http://json-schema.org/draft-04/schema#",
-      type: "object",
-      properties: {
-        model: { type: "object" },
-      },
-      required: ["model"],
-    };
-  }
-
-  async handle(ctx: Context, inputs: InputType): Promise<IBlokResponse> {
-    const response: BlokResponse = new BlokResponse();
-
-    try {
-      response.setSuccess(inputs.model as JsonLikeObject);
-    } catch (error: unknown) {
-      const nodeError = new GlobalError((error as Error).message);
-      nodeError.setCode(500);
-      nodeError.setStack((error as Error).stack);
-      nodeError.setName(this.name);
-      response.setError(nodeError);
-    }
-
-    return response;
-  }
-}
+export default defineNode({
+  name: "mapper",
+  description: "Maps data from one format to another",
+  
+  input: z.object({
+    mapper: z.record(z.unknown()),
+  }),
+  
+  output: z.record(z.unknown()),
+  
+  async execute(ctx, inputs) {
+    return inputs.mapper;
+  },
+});
 ```
 
 ## Running the Example
