@@ -114,7 +114,7 @@ export async function setupRuntime(
 	let startCmdOverride: string | undefined;
 	switch (runtime.kind) {
 		case "python3":
-			await setupPython3(blokctlRuntimeDir, projectRuntimeDir, spinner);
+			await setupPython3(blokctlRuntimeDir, spinner);
 			break;
 		case "go":
 			await setupGo(blokctlRuntimeDir, spinner);
@@ -156,7 +156,7 @@ export async function setupRuntime(
  * Python3: create venv, install requirements, symlink nodes/core.
  * Mirrors the existing logic in project.ts:262-308.
  */
-async function setupPython3(sdkDir: string, projectRuntimeDir: string, spinner: SpinnerHandler): Promise<void> {
+async function setupPython3(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
 	// Create virtual environment
 	spinner.message("Creating Python3 virtual environment...");
 	await createPythonVenv(sdkDir);
@@ -171,18 +171,9 @@ async function setupPython3(sdkDir: string, projectRuntimeDir: string, spinner: 
 	}
 	spinner.message("Python3 packages installed.");
 
-	// Symlink nodes and core to project runtime directory
-	const nodesLink = path.join(projectRuntimeDir, "nodes");
-	const sdkNodesDir = path.join(sdkDir, "nodes");
-	if (fsExtra.existsSync(sdkNodesDir) && !fsExtra.existsSync(nodesLink)) {
-		fsExtra.symlinkSync(sdkNodesDir, nodesLink, "junction");
-	}
-
-	const coreLink = path.join(projectRuntimeDir, "core");
-	const sdkCoreDir = path.join(sdkDir, "core");
-	if (fsExtra.existsSync(sdkCoreDir) && !fsExtra.existsSync(coreLink)) {
-		fsExtra.symlinkSync(sdkCoreDir, coreLink, "junction");
-	}
+	// User nodes live in projectRuntimeDir/nodes/<name>/node.py and are
+	// discovered at boot via BLOK_NODES_DIR (set by dev/index.ts + supervisord).
+	// No symlinks needed — the live SDK has no nodes/ or core/ dirs to link.
 }
 
 async function createPythonVenv(sdkDir: string): Promise<void> {
@@ -366,11 +357,13 @@ export function generateSupervisordConfig(runtimeConfigs: RuntimeConfig[]): stri
 	for (const rc of runtimeConfigs) {
 		const cmd = rc.grpcStartCmd ?? rc.startCmd;
 		const grpcPortLine = rc.grpcPort !== undefined ? `,GRPC_PORT="${rc.grpcPort}"` : "";
+		// Python discovers user nodes from this dir at boot (serve.py).
+		const nodesDirLine = rc.kind === "python3" ? `,BLOK_NODES_DIR="/app/runtimes/python3/nodes"` : "";
 		config += `
 [program:${rc.kind}_runtime]
 command=${cmd}
 directory=/app/${rc.cwd}
-environment=PORT="${rc.port}"${grpcPortLine},HOST="0.0.0.0",BLOK_TRANSPORT="grpc"
+environment=PORT="${rc.port}"${grpcPortLine}${nodesDirLine},HOST="0.0.0.0",BLOK_TRANSPORT="grpc"
 autostart=true
 autorestart=true
 stderr_logfile=/var/log/${rc.kind}.err.log

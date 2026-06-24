@@ -42,36 +42,27 @@ const package_dev_dependencies = {
 	"@types/pg": "^8.11.11",
 };
 
-const python3_file = `
-from core.blok import BlokService
-from core.types.context import Context
-from core.types.blok_response import BlokResponse
-from core.types.global_error import GlobalError
-from typing import Any, Dict
-import traceback
+const python3_file = `from pydantic import BaseModel
 
-class Node(BlokService):
-    def __init__(self):
-        BlokService.__init__(self)
-        self.input_schema = {}
-        self.output_schema = {}
+from blok import node
+from blok.types.context import Context
 
-    async def handle(self, ctx: Context, inputs: Dict[str, Any]) -> BlokResponse:
-        response = BlokResponse()
 
-        try:
-            response.setSuccess({ "message": "Hello World from Python3!" })
-        except Exception as error:
-            err = GlobalError(error)
-            err.setCode(500)
-            err.setName(self.name)
+class Input(BaseModel):
+    """Validated inputs for the {{NODE_NAME}} node."""
 
-            stack_trace = traceback.format_exc()
-            err.setStack(stack_trace)
-            response.success = False
-            response.setError(err)
+    name: str = "world"
 
-        return response
+
+class Output(BaseModel):
+    message: str
+
+
+@node("{{NODE_NAME}}", "Describe what {{NODE_NAME}} does")
+def run(ctx: Context, input: Input) -> Output:
+    # \`input\` is already validated against Input; the return is validated
+    # against Output and serialized for you.
+    return Output(message=f"Hello, {input.name}!")
 `;
 
 const examples_url = `
