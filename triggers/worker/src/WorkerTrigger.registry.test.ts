@@ -13,7 +13,7 @@
  *     takes precedence (idempotency guard).
  */
 
-import { type HelperResponse, workflow } from "@blokjs/helper";
+import { type WorkflowV2Builder, workflow } from "@blokjs/helper";
 import { type BlokService, WorkflowRegistry, defineNode } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -29,13 +29,13 @@ const echoNode = defineNode({
 	},
 });
 
-function workerWf(name: string): HelperResponse {
+function workerWf(name: string): WorkflowV2Builder {
 	return workflow({
 		name,
 		version: "1.0.0",
 		trigger: { worker: { queue: "q" } },
 		steps: [{ id: "process", use: "echo", type: "module", inputs: {} }],
-	}) as unknown as HelperResponse;
+	}) as unknown as WorkflowV2Builder;
 }
 
 /**
@@ -44,7 +44,7 @@ function workerWf(name: string): HelperResponse {
  * from (`{ _config }`) directly, mirroring a normalized JSON middleware
  * workflow.
  */
-function middlewareWf(name: string): HelperResponse {
+function middlewareWf(name: string): WorkflowV2Builder {
 	const config = {
 		name,
 		version: "1.0.0",
@@ -55,14 +55,14 @@ function middlewareWf(name: string): HelperResponse {
 		_blokV2: true,
 		_config: config,
 		toJson: () => JSON.stringify(config),
-	} as unknown as HelperResponse;
+	} as unknown as WorkflowV2Builder;
 }
 
 class TestWorkerTrigger extends WorkerTrigger {
 	protected nodes: Record<string, BlokService<unknown>> = { echo: echoNode as unknown as BlokService<unknown> };
-	protected workflows: Record<string, HelperResponse>;
+	protected workflows: Record<string, WorkflowV2Builder>;
 
-	constructor(workflows: Record<string, HelperResponse>) {
+	constructor(workflows: Record<string, WorkflowV2Builder>) {
 		super();
 		this.workflows = workflows;
 		this.loadNodes();

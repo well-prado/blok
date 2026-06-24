@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isTryCatchStep, tryCatch } from "../src/index";
+import { tryCatch } from "../src/index";
+import { isTryCatchStep } from "../src/internal";
 
 describe("tryCatch()", () => {
 	it("returns a v0.5 tryCatch step shape", () => {

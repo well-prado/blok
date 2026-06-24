@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isLoopStep, loop } from "../src/index";
+import { loop } from "../src/index";
+import { isLoopStep } from "../src/internal";
 
 describe("loop()", () => {
 	it("returns a v0.5 loop step shape", () => {

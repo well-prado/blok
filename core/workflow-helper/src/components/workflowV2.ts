@@ -108,10 +108,9 @@ export interface WorkflowV2Builder {
 	readonly _blokV2: true;
 	readonly _config: WorkflowV2;
 	/**
-	 * Serialize the wrapped workflow to a JSON string. Mirrors the
-	 * `HelperResponse.toJson()` contract so v2 builders are
-	 * structurally compatible with the v1 workflow registry
-	 * (`Workflows` map → `LocalStorage.get` fallback).
+	 * Serialize the wrapped workflow to a JSON string. This is the contract
+	 * the workflow registry (`Workflows` map → `LocalStorage.get` fallback)
+	 * consumes.
 	 */
 	toJson(): string;
 }

@@ -14,7 +14,7 @@
  *   - Non-dotted regression: the common case still resolves.
  */
 
-import { type HelperResponse, workflow } from "@blokjs/helper";
+import { type WorkflowV2Builder, workflow } from "@blokjs/helper";
 import { type BlokService, Configuration, type TriggerResponse, defineNode } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -35,13 +35,17 @@ const echoNode = defineNode({
  * Build a worker WorkflowModel-shaped entry. `workflow()` returns the
  * `{ _blokV2, _config, toJson }` envelope the trigger reads via `._config`.
  */
-function makeWorkerWorkflow(name: string, queue: string, extraTriggers: Record<string, unknown> = {}): HelperResponse {
+function makeWorkerWorkflow(
+	name: string,
+	queue: string,
+	extraTriggers: Record<string, unknown> = {},
+): WorkflowV2Builder {
 	return workflow({
 		name,
 		version: "1.0.0",
 		trigger: { ...extraTriggers, worker: { queue } },
 		steps: [{ id: "process", use: "echo", type: "module", inputs: { payload: "js/ctx.request.body" } }],
-	}) as unknown as HelperResponse;
+	}) as unknown as WorkflowV2Builder;
 }
 
 /**
@@ -51,11 +55,11 @@ function makeWorkerWorkflow(name: string, queue: string, extraTriggers: Record<s
  */
 class TestWorkerTrigger extends WorkerTrigger {
 	protected nodes: Record<string, BlokService<unknown>> = { echo: echoNode as unknown as BlokService<unknown> };
-	protected workflows: Record<string, HelperResponse>;
+	protected workflows: Record<string, WorkflowV2Builder>;
 
 	public runCalls = 0;
 
-	constructor(workflows: Record<string, HelperResponse>) {
+	constructor(workflows: Record<string, WorkflowV2Builder>) {
 		super();
 		this.workflows = workflows;
 		this.loadNodes();
@@ -196,7 +200,7 @@ describe("WorkerTrigger.getWorkerWorkflows — multi-trigger discovery (F11)", (
 			version: "1.0.0",
 			trigger: { http: { method: "GET", path: "/x" } },
 			steps: [{ id: "process", use: "echo", type: "module", inputs: {} }],
-		}) as unknown as HelperResponse;
+		}) as unknown as WorkflowV2Builder;
 		const trigger = new TestWorkerTrigger({ "http-only": httpOnly });
 
 		expect(trigger.discover()).toHaveLength(0);

@@ -13,7 +13,7 @@
  *     path.
  */
 
-import { type HelperResponse, workflow } from "@blokjs/helper";
+import { type WorkflowV2Builder, workflow } from "@blokjs/helper";
 import { type BlokService, RunCancelledError, RunTracker, type TriggerResponse, defineNode } from "@blokjs/runner";
 import type { Context } from "@blokjs/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,23 +30,23 @@ const echoNode = defineNode({
 	},
 });
 
-function makeWorkerWorkflow(name: string, queue: string, timeout?: number): HelperResponse {
+function makeWorkerWorkflow(name: string, queue: string, timeout?: number): WorkflowV2Builder {
 	return workflow({
 		name,
 		version: "1.0.0",
 		trigger: { worker: { queue, ...(timeout !== undefined ? { timeout } : {}) } },
 		steps: [{ id: "process", use: "echo", type: "module", inputs: {} }],
-	}) as unknown as HelperResponse;
+	}) as unknown as WorkflowV2Builder;
 }
 
 type RunImpl = (ctx: Context) => Promise<TriggerResponse>;
 
 class TestWorkerTrigger extends WorkerTrigger {
 	protected nodes: Record<string, BlokService<unknown>> = { echo: echoNode as unknown as BlokService<unknown> };
-	protected workflows: Record<string, HelperResponse>;
+	protected workflows: Record<string, WorkflowV2Builder>;
 	private runImpl: RunImpl;
 
-	constructor(workflows: Record<string, HelperResponse>, runImpl: RunImpl) {
+	constructor(workflows: Record<string, WorkflowV2Builder>, runImpl: RunImpl) {
 		super();
 		this.workflows = workflows;
 		this.runImpl = runImpl;
