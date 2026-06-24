@@ -38,10 +38,10 @@ import { MapperResolutionError } from "./MapperResolutionError";
  * context (workflow, step, expression, underlying cause + heuristic
  * hint) and routes it according to `BLOK_MAPPER_MODE`:
  *
- * - `"warn"` (default) — log via `ctx.logger.logLevel("warn", ...)`,
- *   pass through the original string. Backward-compatible diagnostics.
- * - `"strict"` — throw the error, fail the step fast. **Recommended
- *   for production.**
+ * - `"strict"` (default) — throw the error, fail the step fast. A typo'd
+ *   expression no longer silently passes a literal through to the node.
+ * - `"warn"` — log via `ctx.logger.logLevel("warn", ...)` and pass the
+ *   original string through. The pre-fail-fast behavior; opt-in.
  * - `"silent"` — full suppression. Tests / opt-out only.
  *
  * ## Bug fixes shipped alongside the diagnostic upgrade (v0.3.x)
@@ -83,9 +83,16 @@ const TEMPLATE_RESOLUTION_FAILED: unique symbol = Symbol("TEMPLATE_RESOLUTION_FA
 
 function readMode(): MapperMode {
 	const raw = process.env.BLOK_MAPPER_MODE;
-	if (raw === "strict") return "strict";
+	// ponytail: fail-fast by default. A `js/...`/`$.` expression that THROWS while
+	// resolving used to pass the literal string through to the node (looks like it
+	// ran) — the worst failure for LLM-authored workflows. Opt back in with
+	// BLOK_MAPPER_MODE=warn (log + pass-through) or =silent (suppress). An
+	// expression that merely resolves to `undefined` is NOT an error and never
+	// throws in any mode — only genuine eval failures (e.g. `ctx.a.b` when `a` is
+	// undefined) fail fast.
+	if (raw === "warn") return "warn";
 	if (raw === "silent") return "silent";
-	return "warn";
+	return "strict";
 }
 
 function readStepContext(ctx: Context): { workflowName?: string; stepName?: string } {

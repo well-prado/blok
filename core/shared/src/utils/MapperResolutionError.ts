@@ -15,18 +15,18 @@
  *
  * **What happens next depends on `BLOK_MAPPER_MODE`** (read from env):
  *
- * - `"warn"` (default) — the error is caught inside the Mapper, logged
- *   via `ctx.logger.logLevel("warn", ...)` (which routes to both the
- *   console AND Studio's log viewer via `TracingLogger`), and the
- *   original expression string passes through to the node. Backward-
- *   compatible with v1 behavior + actionable diagnostics.
+ * - `"strict"` (default) — the error escapes the Mapper, is re-thrown
+ *   by `NodeBase.blueprintMapper`, and the step fails fast with a
+ *   structured error. Fail-fast by default because silent input
+ *   resolution failures are a major source of subtle bugs (the node
+ *   receives a literal `"js/ctx.bad.path"` string instead of the
+ *   resolved value, then produces wrong output downstream).
  *
- * - `"strict"` — the error escapes the Mapper, is re-thrown by
- *   `NodeBase.blueprintMapper`, and the step fails fast with a
- *   structured error. **Recommended for production deployments** —
- *   silent input resolution failures are a source of subtle bugs
- *   (the node receives a literal `"js/ctx.bad.path"` string instead
- *   of the resolved value, then produces wrong output downstream).
+ * - `"warn"` — the error is caught inside the Mapper, logged via
+ *   `ctx.logger.logLevel("warn", ...)` (routes to both the console AND
+ *   Studio's log viewer via `TracingLogger`), and the original
+ *   expression string passes through to the node. The pre-fail-fast
+ *   behavior; opt back in for v1-compatible undefined-tolerant flows.
  *
  * - `"silent"` — pre-v0.3.x behavior: completely suppress the error
  *   (no log, no throw). Provided as an opt-out for tests / workflows

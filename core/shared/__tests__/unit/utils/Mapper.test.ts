@@ -23,7 +23,7 @@ function createMockContext(overrides: Partial<Context> = {}): Context {
 
 /**
  * Test helper — set the resolution mode for the duration of one test.
- * Resets to the v0.3.x default (`"warn"`) after each case.
+ * Resets to the default (`"strict"` — fail-fast) after each case.
  */
 function setMode(mode: "warn" | "strict" | "silent"): void {
 	process.env.BLOK_MAPPER_MODE = mode;
@@ -32,12 +32,9 @@ function setMode(mode: "warn" | "strict" | "silent"): void {
 describe("Mapper", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
-		// Reset to the v0.3.x default ("warn"). Assignment to undefined
-		// keeps biome's `noDelete` rule happy without changing semantics —
-		// `process.env.X = undefined` makes `process.env.X` evaluate to
-		// the string `"undefined"` in Node, but Mapper's `readMode()`
-		// treats anything that isn't "strict" or "silent" as warn, so
-		// the default is preserved.
+		// Reset to the default. Assigning undefined makes process.env.X read
+		// back as the string "undefined" in Node; readMode() treats anything
+		// that isn't "warn"/"silent" as the default — now "strict" (fail-fast).
 		process.env.BLOK_MAPPER_MODE = undefined;
 	});
 
@@ -145,7 +142,8 @@ describe("Mapper", () => {
 	// Failure modes (BLOK_MAPPER_MODE)
 	// =========================================================================
 
-	describe('mode = "warn" (default) — log + pass-through', () => {
+	describe('mode = "warn" — log + pass-through', () => {
+		beforeEach(() => setMode("warn"));
 		it("logs an actionable warning via ctx.logger.logLevel", () => {
 			const logLevel = vi.fn();
 			const ctx = createMockContext({
@@ -222,6 +220,19 @@ describe("Mapper", () => {
 			const ctx = createMockContext();
 			expect(mapper.replaceString("js/1 + 2", ctx, {})).toBe(3);
 			expect(mapper.replaceString("${name}", ctx, { name: "ok" } as unknown as ParamsDictionary)).toBe("ok");
+		});
+	});
+
+	describe("default mode (BLOK_MAPPER_MODE unset) — fail-fast", () => {
+		// beforeEach resets the env to unset, so these test the DEFAULT.
+		it("throws on a failed js/ expression by default — no opt-in needed", () => {
+			const ctx = createMockContext();
+			expect(() => mapper.replaceString("js/ctx.req.body.bad.path", ctx, {})).toThrow(MapperResolutionError);
+		});
+
+		it("does NOT throw when the expression resolves successfully", () => {
+			const ctx = createMockContext();
+			expect(mapper.replaceString("js/1 + 2", ctx, {})).toBe(3);
 		});
 	});
 
@@ -374,12 +385,13 @@ describe("Mapper", () => {
 			expect(result).toBe(5);
 		});
 
-		it("handles js/ errors in default mode (warn) by passing through the literal", () => {
+		it("handles js/ errors in warn mode by passing through the literal", () => {
+			setMode("warn");
 			const ctx = createMockContext({
 				logger: { log: vi.fn(), logLevel: vi.fn(), error: vi.fn() } as unknown as Context["logger"],
 			});
 			const result = mapper.replaceString('js/throw new Error("fail")', ctx, {});
-			// Original literal passes through (back-compat).
+			// In warn mode the original literal passes through (back-compat).
 			expect(result).toBe('js/throw new Error("fail")');
 		});
 

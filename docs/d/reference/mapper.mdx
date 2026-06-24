@@ -98,7 +98,7 @@ for prod**. Set the env var:
 
 | Mode | Behavior on resolution failure |
 |---|---|
-| `warn` (default) | Log structured warning via `ctx.logger.logLevel("warn", ...)` and pass the literal expression through. Backward-compatible with v1. |
+| `warn` | Log structured warning via `ctx.logger.logLevel("warn", ...)` and pass the literal expression through. The pre-fail-fast v1 behavior; opt-in. |
 | `strict` | Throw `MapperResolutionError` with full context (workflow + step + expression + cause + hint). The step fails fast. **Recommended for production.** |
 | `silent` | Full suppression (no log, no throw). Pre-v0.3 behavior. Opt-out for tests / workflows that intentionally use undefined-tolerant resolution. |
 
