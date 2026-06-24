@@ -103,11 +103,14 @@ export abstract class CronTrigger extends TriggerBase {
 	protected abstract nodes: Record<string, BlokService<unknown>>;
 	protected abstract workflows: Record<string, HelperResponse>;
 
-	constructor() {
-		super();
-		this.loadNodes();
-		this.loadWorkflows();
-	}
+	// Constructor removed (mirrors WorkerTrigger's v0.6.3 fix) — pre-fix it
+	// called `loadNodes()` + `loadWorkflows()`, but subclasses use class-field
+	// assignments for `nodes` / `workflows` (the canonical TypeScript pattern).
+	// Those fields run AFTER super(), so accessing `this.nodes` from the parent
+	// constructor read `undefined` and crashed with
+	// `TypeError: Cannot convert undefined or null to object` (Object.keys(this.nodes)).
+	// The registry init now happens at the start of `listen()`, after the
+	// subclass's fields are initialized.
 
 	/**
 	 * Load nodes into the node map
@@ -150,6 +153,15 @@ export abstract class CronTrigger extends TriggerBase {
 			// spans the runner creates per cron run/step export to a backend.
 			// Mirrors HttpTrigger's B1 wiring; no-op when the env var is unset.
 			await this.maybeBootstrapTracing();
+
+			// Populate the trigger's node + workflow registries from the
+			// subclass's `nodes` / `workflows` fields. Mirrors WorkerTrigger's
+			// v0.6.3 fix — pre-fix these calls lived in the constructor and
+			// crashed because class fields haven't run yet at super-constructor
+			// time. Must run before `registerWorkflowsFromNodeMap`,
+			// which reads `this.nodeMap.workflows`.
+			this.loadNodes();
+			this.loadWorkflows();
 
 			// F5 · install crash/orphan/janitor/shutdown handlers so a
 			// cron-only process gets the same run-state integrity + storage
