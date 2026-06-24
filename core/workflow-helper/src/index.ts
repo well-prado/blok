@@ -5,6 +5,7 @@ import Step from "./components/StepNode";
 import Trigger from "./components/Trigger";
 import Workflow from "./components/Workflow";
 import { type BranchOpts, branch } from "./components/branch";
+import { eq } from "./components/eq";
 import { type ForEachOpts, forEach } from "./components/forEach";
 import { type LoopOpts, loop } from "./components/loop";
 import { type SwitchCase, type SwitchOpts, switchOn } from "./components/switchOn";
@@ -141,6 +142,8 @@ export {
 	// v2 DSL primitives — the canonical authoring surface
 	workflow,
 	branch,
+	// First-class condition equality (emits raw ctx — avoids the when footgun)
+	eq,
 	// v0.5 control-flow primitives
 	forEach,
 	loop,
