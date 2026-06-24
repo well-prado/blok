@@ -50,38 +50,18 @@ import {
 } from "./monitoring/TracingBootstrap";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
 
-import { RuntimeAutoScaler } from "./marketplace/RuntimeAutoScaler";
 // Marketplace infrastructure
-import { RuntimeCatalog } from "./marketplace/RuntimeCatalog";
-import { RuntimeDiscovery } from "./marketplace/RuntimeDiscovery";
-import { RuntimeHealthMonitor } from "./marketplace/RuntimeHealthMonitor";
-import { RuntimeMetricsDashboard } from "./marketplace/RuntimeMetricsDashboard";
 
 // Hot Module Replacement (HMR)
 import { FileWatcher } from "./hmr/FileWatcher";
 import { HmrDevConsole } from "./hmr/HmrDevConsole";
 import { HotReloadManager } from "./hmr/HotReloadManager";
 
-import { ABACEngine, createDefaultABAC } from "./security/ABAC";
-import { AuditLogger, ConsoleAuditSink, FileAuditSink, InMemoryAuditSink } from "./security/AuditLogger";
 // Security
-import { APIKeyAuthProvider, AuthMiddleware, JWTAuthProvider } from "./security/AuthMiddleware";
-import { OAuthOIDCProvider, TokenCache } from "./security/OAuthProvider";
-import { RBAC, createDefaultRBAC } from "./security/RBAC";
-import {
-	AWSSecretsProvider,
-	EnvironmentSecretProvider,
-	GCPSecretProvider,
-	InMemorySecretProvider,
-	SecretManager,
-	VaultSecretProvider,
-} from "./security/SecretManager";
 
 // OpenAPI
-import { OpenAPIGenerator } from "./openapi/OpenAPIGenerator";
 
 // GraphQL
-import { GraphQLSchemaGenerator } from "./graphql/GraphQLSchemaGenerator";
 
 import { NodeDependencyGraph } from "./visualization/NodeDependencyGraph";
 // Visualization
@@ -186,10 +166,8 @@ import { CostEstimator } from "./cost/CostEstimator";
 import { DEFAULT_DURATIONS, DEFAULT_MEMORY, PRICING, getRuntimeCategory } from "./cost/pricing";
 
 // Integrations
-import { SentryIntegration } from "./integrations/SentryIntegration";
 
 // Cache
-import { InMemoryCache, NodeResultCache } from "./cache/NodeResultCache";
 
 // Testing Framework
 import { NodeTestHarness } from "./testing/TestHarness";
@@ -269,41 +247,15 @@ export {
 	type TracingBootstrapConfig,
 	type TracingBootstrapResult,
 	// Marketplace
-	RuntimeCatalog,
-	RuntimeDiscovery,
-	RuntimeHealthMonitor,
-	RuntimeMetricsDashboard,
-	RuntimeAutoScaler,
 	// HMR
 	FileWatcher,
 	HotReloadManager,
 	HmrDevConsole,
 	// Security
-	AuthMiddleware,
-	JWTAuthProvider,
-	APIKeyAuthProvider,
-	RBAC,
-	createDefaultRBAC,
-	ABACEngine,
-	createDefaultABAC,
-	AuditLogger,
-	ConsoleAuditSink,
-	FileAuditSink,
-	InMemoryAuditSink,
 	// OAuth 2.0 / OIDC
-	OAuthOIDCProvider,
-	TokenCache,
 	// Secret Management
-	SecretManager,
-	EnvironmentSecretProvider,
-	InMemorySecretProvider,
-	VaultSecretProvider,
-	AWSSecretsProvider,
-	GCPSecretProvider,
 	// OpenAPI
-	OpenAPIGenerator,
 	// GraphQL
-	GraphQLSchemaGenerator,
 	// Visualization
 	WorkflowVisualizer,
 	NodeDependencyGraph,
@@ -388,10 +340,7 @@ export {
 	DEFAULT_MEMORY,
 	getRuntimeCategory,
 	// Integrations
-	SentryIntegration,
 	// Cache
-	InMemoryCache,
-	NodeResultCache,
 	// Testing
 	NodeTestHarness,
 	WorkflowTestRunner,
@@ -480,40 +429,6 @@ export type {
 	PrometheusBootstrapConfig,
 	PrometheusBootstrapResult,
 } from "./monitoring/PrometheusBootstrap";
-export type {
-	RuntimePackageManifest,
-	RuntimeNodeInfo,
-	CatalogSearchOptions,
-	CatalogSearchResult,
-	CatalogStats,
-} from "./marketplace/RuntimeCatalog";
-export type {
-	CompatibilityInfo,
-	DiscoveryResult,
-	ResolveOptions,
-} from "./marketplace/RuntimeDiscovery";
-export type {
-	RuntimeHealthStatus,
-	HealthMonitorConfig,
-	HealthCheckRecord,
-	HealthChangeListener,
-} from "./marketplace/RuntimeHealthMonitor";
-export type {
-	RuntimeExecutionMetrics,
-	LatencyPercentiles,
-	ThroughputMetrics,
-	ResourceMetrics,
-	DashboardSnapshot,
-	AggregateMetrics,
-} from "./marketplace/RuntimeMetricsDashboard";
-export type {
-	ScalingPolicy,
-	ScalingDecision,
-	ScalingMetrics,
-	ScalingHistory,
-	AutoScalerConfig,
-	ScalingListener,
-} from "./marketplace/RuntimeAutoScaler";
 
 // HMR types
 export type {
@@ -528,85 +443,14 @@ export type {
 } from "./hmr/HotReloadManager";
 
 // Security types
-export type {
-	AuthMiddlewareConfig,
-	AuthProvider,
-	AuthIdentity,
-	AuthRequest,
-	AuthResult,
-	JWTAuthProviderConfig,
-	APIKeyAuthProviderConfig,
-	APIKeyInfo,
-} from "./security/AuthMiddleware";
-export type {
-	Action,
-	Permission,
-	RoleDefinition,
-	AccessCheckResult,
-	RBACPolicy,
-} from "./security/RBAC";
-export type {
-	ABACOperator,
-	ABACEffect,
-	ABACCondition,
-	ABACConditionGroup,
-	ABACPolicyTarget,
-	ABACPolicy,
-	SubjectAttributes,
-	ResourceAttributes,
-	EnvironmentAttributes,
-	ABACRequest,
-	ABACResult,
-} from "./security/ABAC";
-export type {
-	AuditEntry,
-	AuditCategory,
-	AuditSeverity,
-	AuditSink,
-	AuditLoggerConfig,
-} from "./security/AuditLogger";
 
 // OAuth 2.0 / OIDC types
-export type {
-	OAuthOIDCConfig,
-	OIDCDiscoveryDocument,
-	JWK,
-	JWKS,
-	TokenCacheStats,
-} from "./security/OAuthProvider";
 
 // Secret Management types
-export type {
-	SecretProvider,
-	SecretMetadata,
-	SecretAccessEvent,
-	SecretManagerConfig,
-	SecretCacheConfig,
-	SecretProviderConfig,
-	EnvironmentProviderConfig,
-	InMemoryProviderConfig,
-	VaultProviderConfig,
-	AWSSecretsProviderConfig,
-	GCPSecretProviderConfig,
-} from "./security/SecretManager";
 
 // OpenAPI types
-export type {
-	OpenAPIGeneratorConfig,
-	OpenAPISecurityScheme,
-	WorkflowDefinition,
-	OpenAPISpec,
-} from "./openapi/OpenAPIGenerator";
 
 // GraphQL types
-export type {
-	GraphQLGeneratorConfig,
-	GqlWorkflowDefinition,
-	GqlFieldDef,
-	GraphQLSchemaJSON,
-	GraphQLTypeInfo,
-	GraphQLFieldInfo,
-} from "./graphql/GraphQLSchemaGenerator";
 
 // Visualization types
 export type {
@@ -646,26 +490,8 @@ export type {
 } from "./cost/pricing";
 
 // Integration types
-export type {
-	SentryConfig,
-	WorkflowErrorContext,
-	SentryClient,
-	SentryTransaction,
-	SentrySpan,
-} from "./integrations/SentryIntegration";
 
 // Cache types
-export type {
-	CacheProvider,
-	CacheEntry,
-	CacheSetOptions,
-	CacheStats,
-	InMemoryCacheConfig,
-	CacheKeyStrategy,
-	CustomKeyFn,
-	CacheResult,
-	NodeResultCacheConfig,
-} from "./cache/NodeResultCache";
 
 // Testing types
 export type { LogEntry } from "./testing/TestLogger";
