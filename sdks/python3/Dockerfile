@@ -17,6 +17,9 @@ WORKDIR /app
 
 COPY --from=builder /app /app
 
+# gRPC transport needs grpcio (the `[grpc]` extra) — the runner speaks gRPC
+RUN pip install --no-cache-dir 'grpcio>=1.60' 'grpcio-health-checking>=1.60'
+
 EXPOSE 8080
 
 ENV PORT=8080
