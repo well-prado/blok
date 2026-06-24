@@ -152,6 +152,13 @@ export async function devProject(opts: OptionValues) {
 				BLOK_TRANSPORT: "grpc",
 			};
 
+			// Python discovers user nodes from this dir at boot (serve.py). The
+			// runtime cwd is .blok/runtimes/python3; user nodes live in the
+			// project's runtimes/python3/nodes.
+			if (rt.kind === "python3") {
+				env.BLOK_NODES_DIR = path.resolve(currentPath, "runtimes", "python3", "nodes");
+			}
+
 			runtimeDefs.push({
 				cmd,
 				args,

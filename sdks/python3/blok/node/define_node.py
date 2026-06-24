@@ -32,7 +32,10 @@ migration is incremental and the existing `NodeHandler` ABC keeps working.
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
+import logging
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, get_type_hints
 
 from pydantic import BaseModel, ValidationError
@@ -197,6 +200,38 @@ def register_decorated(registry: Any) -> int:
         registry.register(getattr(handler, "name"), handler)
         count += 1
     return count
+
+
+def load_user_nodes(registry: Any, nodes_dir: Optional[str]) -> int:
+    """Discover + register user-authored `@node` handlers from a directory.
+
+    Each user node lives in ``<nodes_dir>/<name>/node.py`` and self-registers via
+    the `@node` decorator on import. We import each module so its decorator runs,
+    then register only the handlers collected during THIS call — purely additive,
+    so the SDK's built-in nodes (registered earlier) are untouched. Returns the
+    number of newly registered nodes. A node that fails to import is logged and
+    skipped so one bad file can't sink the whole runtime.
+    """
+    if not nodes_dir or not os.path.isdir(nodes_dir):
+        return 0
+    before = len(_DECORATED_NODES)
+    log = logging.getLogger("blok.discovery")
+    for entry in sorted(os.listdir(nodes_dir)):
+        node_file = os.path.join(nodes_dir, entry, "node.py")
+        if not os.path.isfile(node_file):
+            continue
+        spec = importlib.util.spec_from_file_location(f"blok_user_node_{entry}", node_file)
+        if spec is None or spec.loader is None:
+            continue
+        try:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # runs the @node decorator(s)
+        except Exception:  # noqa: BLE001 — one bad node must not crash the runtime
+            log.exception("Failed to load user node from %s", node_file)
+    new_handlers = _DECORATED_NODES[before:]
+    for handler in new_handlers:
+        registry.register(getattr(handler, "name"), handler)
+    return len(new_handlers)
 
 
 def _reset_decorated_for_tests() -> None:

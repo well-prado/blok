@@ -340,7 +340,8 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			}
 
 			fsExtra.ensureDirSync(dirPath);
-			fsExtra.writeFileSync(`${dirPath}/node.py`, python3_file);
+			const pythonNodeContent = python3_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			fsExtra.writeFileSync(`${dirPath}/node.py`, pythonNodeContent);
 			fsExtra.writeFileSync(`${dirPath}/__init__.py`, "");
 		}
 

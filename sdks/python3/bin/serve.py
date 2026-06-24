@@ -14,6 +14,10 @@ Environment variables:
     ENABLE_CORS      true / false (default: false)
     BLOK_GRPC_MAX_MESSAGE_BYTES  Max gRPC message size, send+recv (default: 16777216).
                      Must match the runner client + other sidecars.
+    BLOK_NODES_DIR   Directory of user-authored nodes to discover (each node in
+                     a `<name>/node.py` using the `@node` decorator). Set by
+                     blokctl to the project's `runtimes/python3/nodes`. When
+                     unset, only the SDK's built-in example nodes load.
 """
 
 import logging
@@ -79,6 +83,19 @@ def _start_grpc(registry: NodeRegistry, config: ServerConfig):
     )
 
 
+def _load_user_nodes(registry: NodeRegistry) -> int:
+    """Discover user nodes from ``BLOK_NODES_DIR`` (delegates to the SDK).
+
+    `@node` authoring requires pydantic; if it isn't installed there are no
+    user nodes to load, so a missing import is a no-op.
+    """
+    try:
+        from blok.node.define_node import load_user_nodes
+    except ImportError:
+        return 0
+    return load_user_nodes(registry, os.environ.get("BLOK_NODES_DIR"))
+
+
 def main():
     config = ServerConfig.from_env()
 
@@ -91,17 +108,19 @@ def main():
 
     registry = NodeRegistry(version=config.version)
     register_all(registry)
+    user_node_count = _load_user_nodes(registry)
     registry.use(recovery_middleware)
     registry.use(logging_middleware)
 
     transport = config.transport
     log = logging.getLogger("blok.serve")
     log.info(
-        "Blok Python3 SDK starting (transport=%s, http_port=%d, grpc_port=%d, %d nodes)",
+        "Blok Python3 SDK starting (transport=%s, http_port=%d, grpc_port=%d, %d nodes, %d user)",
         transport,
         config.port,
         config.grpc_port,
         len(registry.node_names()),
+        user_node_count,
     )
 
     if transport == "http":
