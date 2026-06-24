@@ -19,7 +19,7 @@
  *    - Ack on success, retry or DLQ on failure
  */
 
-import { type HelperResponse, type WorkerTriggerOpts, tryParseDuration } from "@blokjs/helper";
+import { type WorkerTriggerOpts, type WorkflowV2Builder, tryParseDuration } from "@blokjs/helper";
 import {
 	type BlokService,
 	ConcurrencyLimitError,
@@ -229,7 +229,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
-	protected abstract workflows: Record<string, HelperResponse>;
+	protected abstract workflows: Record<string, WorkflowV2Builder>;
 
 	// Constructor removed in v0.6.3 — pre-fix it called `loadNodes()` +
 	// `loadWorkflows()`, but subclasses use class-field assignments for

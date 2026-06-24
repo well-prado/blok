@@ -1,9 +1,3 @@
-import AddElse from "./components/AddElse";
-import AddIf, { ConditionOpts } from "./components/AddIf";
-import HelperResponse from "./components/HelperResponse";
-import Step from "./components/StepNode";
-import Trigger from "./components/Trigger";
-import Workflow from "./components/Workflow";
 import { type BranchOpts, branch } from "./components/branch";
 import { eq } from "./components/eq";
 import { type ForEachOpts, forEach } from "./components/forEach";
@@ -126,19 +120,12 @@ import { WorkflowV2, WorkflowV2Schema } from "./types/WorkflowOpts";
 import { parseDuration, tryParseDuration } from "./utils/parseDuration";
 
 export {
-	AddElse,
-	AddIf,
-	ConditionOpts,
-	HelperResponse,
 	NodeType,
 	NodeTypeSchema,
 	RuntimeKind,
 	RuntimeKindSchema,
-	Step,
 	StepInputs,
 	StepOpts,
-	Trigger,
-	Workflow,
 	// v2 DSL primitives — the canonical authoring surface
 	workflow,
 	branch,

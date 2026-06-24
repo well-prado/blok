@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { ConditionElseOpts } from "../components/AddElse";
-import type { ConditionOpts } from "../components/AddIf";
 import { DurationSchema } from "./TriggerOpts";
 
 /**
@@ -89,17 +87,6 @@ export type StepOpts = z.infer<typeof StepOptsSchema>;
 // It is used globally in the project
 export const StepInputsSchema = z.object({}, { message: "Inputs required" });
 export type StepInputs = z.infer<typeof StepInputsSchema>;
-
-export const StepConditionSchema = z.object({
-	node: StepOptsSchema,
-	conditions: z.function().optional(),
-});
-
-export interface IConditions {
-	conditions: () => ConditionOpts[] | ConditionElseOpts[];
-}
-
-export type StepConditionOpts = z.infer<typeof StepConditionSchema>;
 
 // =============================================================================
 // V2 — Canonical step shape. LLM- and human-friendly.

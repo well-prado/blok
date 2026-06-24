@@ -1,7 +1,7 @@
-import type { HelperResponse } from "@blokjs/helper";
+import type { WorkflowV2Builder } from "@blokjs/helper";
 
 type Workflows = {
-	[key: string]: HelperResponse;
+	[key: string]: WorkflowV2Builder;
 };
 
 export default Workflows;
