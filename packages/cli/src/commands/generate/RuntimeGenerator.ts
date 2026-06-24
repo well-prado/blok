@@ -1,8 +1,6 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
-import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 import createRuntimeSystemPrompt from "./prompts/create-runtime.system.js";
 
 export type RuntimeInformation = {
@@ -15,8 +13,6 @@ export type RuntimeInformation = {
 		errors: string[];
 		warnings: string[];
 		attempts: number;
-		promptVersion?: string;
-		durationMs?: number;
 	};
 };
 
@@ -37,10 +33,6 @@ export default class RuntimeGenerator {
 		update = false,
 		existingPath?: string,
 	): Promise<RuntimeInformation> {
-		const analytics = GenerationAnalytics.getInstance();
-		const getElapsed = analytics.startTimer();
-		const promptVersion = getVersionStamp("create-runtime");
-
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
@@ -49,7 +41,6 @@ export default class RuntimeGenerator {
 		let prompt = createRuntimeSystemPrompt.prompt;
 
 		// Register prompt content for hash tracking
-		registerPromptContent("create-runtime", prompt);
 
 		// If updating, include existing code
 		if (update && existingPath) {
@@ -108,19 +99,6 @@ export default class RuntimeGenerator {
 		// Parse generated files
 		const files = this.parseFiles(generatedCode, language);
 
-		// Record analytics event
-		const durationMs = getElapsed();
-		analytics.recordEvent({
-			type: "node",
-			subtype: `runtime-${language}`,
-			name: `runtime-${language}`,
-			success: isValid,
-			attempts,
-			durationMs,
-			errors: allErrors,
-			promptVersion,
-		});
-
 		return {
 			language,
 			userPrompt,
@@ -131,8 +109,6 @@ export default class RuntimeGenerator {
 				errors: validationErrors,
 				warnings: validationWarnings,
 				attempts,
-				promptVersion,
-				durationMs,
 			},
 		};
 	}

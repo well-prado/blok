@@ -1,8 +1,6 @@
 import * as fs from "node:fs";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
-import { GenerationAnalytics } from "./GenerationAnalytics.js";
-import { getVersionStamp, registerPromptContent } from "./PromptVersioning.js";
 import createWorkflowSystemPrompt from "./prompts/create-workflow.system.js";
 import * as WorkflowValidator from "./validators/WorkflowValidator.js";
 
@@ -16,8 +14,6 @@ export type WorkflowInformation = {
 		errors: string[];
 		warnings: string[];
 		attempts: number;
-		promptVersion?: string;
-		durationMs?: number;
 	};
 };
 
@@ -32,10 +28,6 @@ export default class WorkflowGenerator {
 		update = false,
 		existingWorkflowPath?: string,
 	): Promise<WorkflowInformation> {
-		const analytics = GenerationAnalytics.getInstance();
-		const getElapsed = analytics.startTimer();
-		const promptVersion = getVersionStamp("create-workflow");
-
 		const openai = createOpenAI({
 			compatibility: "strict",
 			apiKey: apiKey,
@@ -44,7 +36,6 @@ export default class WorkflowGenerator {
 		let prompt = createWorkflowSystemPrompt.prompt;
 
 		// Register prompt content for hash tracking
-		registerPromptContent("create-workflow", prompt);
 
 		// If updating, include existing workflow
 		if (update && existingWorkflowPath) {
@@ -101,19 +92,6 @@ export default class WorkflowGenerator {
 			}
 		}
 
-		// Record analytics event
-		const durationMs = getElapsed();
-		analytics.recordEvent({
-			type: "workflow",
-			subtype: triggerType,
-			name: workflowName,
-			success: isValid,
-			attempts,
-			durationMs,
-			errors: allErrors,
-			promptVersion,
-		});
-
 		return {
 			workflowName,
 			userPrompt,
@@ -124,8 +102,6 @@ export default class WorkflowGenerator {
 				errors: validationErrors,
 				warnings: validationWarnings,
 				attempts,
-				promptVersion,
-				durationMs,
 			},
 		};
 	}

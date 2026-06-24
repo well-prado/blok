@@ -172,24 +172,6 @@ describe("NodeGenerator E2E", () => {
 			const callArgs = mockedGenerateText.mock.calls[0][0] as Record<string, unknown>;
 			expect(callArgs.temperature).toBe(0.2);
 		});
-
-		it("should include prompt version in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: VALID_FUNCTION_FIRST_NODE } as never);
-			mockValidPass();
-
-			const result = await generator.generateNode("test-node", "Create a test node", "test-api-key", false, "function");
-
-			expect(result.validationResult!.promptVersion).toContain("create-fn-node@");
-		});
-
-		it("should include duration in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: VALID_FUNCTION_FIRST_NODE } as never);
-			mockValidPass();
-
-			const result = await generator.generateNode("test-node", "Create a test node", "test-api-key", false, "function");
-
-			expect(result.validationResult!.durationMs).toBeGreaterThanOrEqual(0);
-		});
 	});
 
 	describe("validation feedback loop", () => {

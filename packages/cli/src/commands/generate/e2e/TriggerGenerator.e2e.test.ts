@@ -379,24 +379,4 @@ describe("TriggerGenerator E2E", () => {
 			expect(system).toContain("loadNodes");
 		});
 	});
-
-	describe("analytics integration", () => {
-		it("should include prompt version in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: VALID_QUEUE_TRIGGER } as never);
-			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
-
-			const result = await generator.generateTrigger("test-trigger", "queue", "Create a test trigger", "test-api-key");
-
-			expect(result.validationResult!.promptVersion).toContain("create-trigger@");
-		});
-
-		it("should include duration in validation result", async () => {
-			mockedGenerateText.mockResolvedValueOnce({ text: VALID_QUEUE_TRIGGER } as never);
-			mockedValidateCode.mockReturnValue({ success: true, errors: [], warnings: [] });
-
-			const result = await generator.generateTrigger("test-trigger", "queue", "Create a test trigger", "test-api-key");
-
-			expect(result.validationResult!.durationMs).toBeGreaterThanOrEqual(0);
-		});
-	});
 });
