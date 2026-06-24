@@ -37,6 +37,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 	WorkflowRegistry,
+	bootstrapTracing,
 	createConcurrencyBackend,
 	createDebounceBackend,
 } from "@blokjs/runner";
@@ -199,6 +200,8 @@ export abstract class WorkerTrigger extends TriggerBase {
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
 	protected readonly logger = new DefaultLogger();
+	/** OBS-02 T4 — graceful shutdown for the OTel tracer provider, if tracing was enabled. */
+	private tracingShutdown: (() => Promise<void>) | null = null;
 	/**
 	 * v0.7 PR 5 — the "default" adapter, used when a workflow's
 	 * `trigger.worker.provider` field is omitted AND the
@@ -260,6 +263,12 @@ export abstract class WorkerTrigger extends TriggerBase {
 	 */
 	async listen(): Promise<number> {
 		const startTime = this.startCounter();
+
+		// OBS-02 T4 — opt-in distributed tracing for worker jobs. When
+		// OTEL_EXPORTER_OTLP_ENDPOINT is set, install an OTel SDK so the spans
+		// the runner creates per job/step export to Tempo/Jaeger/etc. Mirrors
+		// HttpTrigger's B1 wiring; no-op + zero overhead when the env var is unset.
+		await this.maybeBootstrapTracing();
 
 		// Populate the trigger's node + workflow registries from the
 		// subclass's `nodes` / `workflows` fields. v0.6.3 fix — pre-fix
@@ -403,7 +412,46 @@ export abstract class WorkerTrigger extends TriggerBase {
 	/**
 	 * Stop all workers and disconnect
 	 */
+	/**
+	 * OBS-02 T4 — install the OpenTelemetry SDK at boot when an OTLP endpoint is
+	 * configured, so the spans the runner already creates for worker jobs export
+	 * to a backend (Tempo/Jaeger/…). No-op when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+	 * unset or `BLOK_TRACING_DISABLED=1`. Stores the shutdown so `stop()` flushes.
+	 */
+	private async maybeBootstrapTracing(): Promise<void> {
+		if (process.env.BLOK_TRACING_DISABLED === "1") return;
+		const base = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+		if (!base) return;
+		const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? base : `${base.replace(/\/$/, "")}/v1/traces`;
+		try {
+			const result = await bootstrapTracing({
+				serviceName: process.env.APP_NAME || process.env.PROJECT_NAME || "blok-worker",
+				serviceVersion: process.env.PROJECT_VERSION,
+				exporter: "otlp",
+				endpoint,
+			});
+			if (result) {
+				this.tracingShutdown = result.shutdown;
+				this.logger.log(`[blok][tracing] OTLP distributed tracing enabled → ${endpoint}`);
+			} else {
+				this.logger.error(
+					"[blok][tracing] OTEL_EXPORTER_OTLP_ENDPOINT is set but the OTel trace SDK isn't installed — tracing is OFF.",
+				);
+			}
+		} catch (err) {
+			this.logger.error(`[blok][tracing] failed to initialize: ${(err as Error).message}`);
+		}
+	}
+
 	async stop(): Promise<void> {
+		// OBS-02 T4 — flush pending spans before draining so the last jobs'
+		// spans aren't lost on shutdown.
+		if (this.tracingShutdown) {
+			await this.tracingShutdown().catch((err) =>
+				this.logger.error(`[blok][tracing] shutdown failed: ${(err as Error).message}`),
+			);
+			this.tracingShutdown = null;
+		}
 		// Stop each queue on its owning adapter — adapters are tracked
 		// in the pool so multi-provider workers all drain cleanly.
 		for (const queue of this.activeQueues) {
