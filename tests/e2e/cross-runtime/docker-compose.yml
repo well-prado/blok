@@ -1,116 +1,82 @@
-version: "3.8"
-
-# Cross-Runtime Chain Test Infrastructure
-# Runs all SDK runtime containers for end-to-end testing.
+# Cross-Runtime gRPC E2E Infrastructure
+#
+# Builds + boots all 7 SDK runtimes in gRPC mode — the transport the runner
+# actually uses (HttpRuntimeAdapter was removed in v0.5). Each container serves
+# the canonical `blok.runtime.v1.NodeRuntime` service; the spec-b harness drives
+# them through the runner's OWN GrpcRuntimeAdapter.
+#
+# gRPC port convention = HTTP port + 1000 (see sdks/CLAUDE.md): Go 10001,
+# Rust 10002, Java 10003, C# 10004, PHP 10005, Ruby 10006, Python3 10007.
+# Host ports mirror the container ports so the harness needs no env plumbing.
 #
 # Usage:
 #   docker compose up -d --build
-#   docker compose ps          # wait for all "healthy"
-#   docker compose down
+#   bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts   # BLOK_E2E_REQUIRE_ALL=1 in CI
+#   docker compose down -v
 
 services:
   sdk-go:
     build:
       context: ../../../sdks/go
-      dockerfile: Dockerfile
     ports:
-      - "9001:8080"
+      - "10001:10001"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10001"
 
   sdk-rust:
     build:
       context: ../../../sdks/rust
-      dockerfile: Dockerfile
     ports:
-      - "9002:8080"
+      - "10002:10002"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
+      ENABLE_GRPC: "true"
+      GRPC_PORT: "10002"
       RUST_LOG: info
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   sdk-java:
     build:
       context: ../../../sdks/java
-      dockerfile: Dockerfile
     ports:
-      - "9003:8080"
+      - "10003:10003"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10003"
 
   sdk-csharp:
     build:
       context: ../../../sdks/csharp
-      dockerfile: Dockerfile
     ports:
-      - "9004:8080"
+      - "10004:10004"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10004"
 
   sdk-php:
+    # gRPC is served by RoadRunner (rr serve) — the image's default CMD.
     build:
       context: ../../../sdks/php
-      dockerfile: Dockerfile
     ports:
-      - "9005:8080"
+      - "10005:10005"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      GRPC_PORT: "10005"
 
   sdk-ruby:
     build:
       context: ../../../sdks/ruby
-      dockerfile: Dockerfile
     ports:
-      - "9006:8080"
+      - "10006:10006"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10006"
 
   sdk-python3:
+    # The Dockerfile's last stage is `worker` (NATS); the runner needs `runtime`.
     build:
       context: ../../../sdks/python3
-      dockerfile: Dockerfile
+      target: runtime
     ports:
-      - "9007:8080"
+      - "10007:10007"
     environment:
-      PORT: "8080"
-      VERSION: "1.0.0"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      BLOK_TRANSPORT: grpc
+      GRPC_PORT: "10007"

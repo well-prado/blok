@@ -22,10 +22,16 @@ WORKDIR /app
 COPY --from=builder /usr/local/bundle /usr/local/bundle
 COPY --from=builder /app /app
 
-EXPOSE 8080
+# HTTP port (informational /health) + gRPC port (the runner only speaks gRPC).
+EXPOSE 8080 10006
 
 ENV PORT=8080
 ENV HOST=0.0.0.0
+ENV GRPC_PORT=10006
+ENV BLOK_TRANSPORT=grpc
 ENV RACK_ENV=production
 
-CMD ["bundle", "exec", "rackup", "--host", "0.0.0.0", "--port", "8080", "config.ru"]
+# bin/serve.rb honors BLOK_TRANSPORT and registers all 6 example nodes
+# (typed-greet/chain-test included). `rackup config.ru` was HTTP-only and
+# registered only 4 nodes — the runner reaches Ruby over gRPC.
+CMD ["bundle", "exec", "ruby", "bin/serve.rb"]

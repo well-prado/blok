@@ -1,0 +1,55 @@
+name: Cross-runtime gRPC
+
+# Builds all 7 SDK runtimes (Go/Rust/Java/C#/PHP/Ruby/Python3) in gRPC mode and
+# drives them through the runner's own GrpcRuntimeAdapter. This is the only lane
+# that exercises the polyglot runtimes end-to-end — without it they silently rot
+# (the whole reason this gate exists). BLOK_E2E_REQUIRE_ALL=1 fails the run if
+# any single runtime fails to come up, so a broken Dockerfile can't pass as a
+# skip.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-runtime:
+    name: Cross-runtime chain over gRPC (7 languages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The harness imports GrpcRuntimeAdapter from @blokjs/runner.
+      - name: Build @blokjs/runner
+        run: bunx nx build @blokjs/runner
+
+      - name: Build + start the 7 SDK gRPC runtimes
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
+
+      - name: Run cross-runtime gRPC harness (all 7 required)
+        env:
+          BLOK_E2E_REQUIRE_ALL: "1"
+        run: bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
+
+      - name: Print runtime logs on failure
+        if: failure()
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml down -v

@@ -24,15 +24,50 @@ interface ExecResult {
 	error?: unknown;
 }
 
+// Default ports follow the gRPC convention (HTTP+1000, see sdks/CLAUDE.md) —
+// matching the docker-compose harness so no env plumbing is needed in CI. The
+// host-toolchain script (run-spec-b-e2e.sh) boots on 2000x and passes overrides.
 const RUNTIMES = [
-	{ kind: "go", port: Number(process.env.GO_GRPC_PORT ?? 20001) },
-	{ kind: "rust", port: Number(process.env.RUST_GRPC_PORT ?? 20002) },
-	{ kind: "csharp", port: Number(process.env.CS_GRPC_PORT ?? 20004) },
-	{ kind: "java", port: Number(process.env.JAVA_GRPC_PORT ?? 20003) },
-	{ kind: "php", port: Number(process.env.PHP_GRPC_PORT ?? 20005) },
-	{ kind: "ruby", port: Number(process.env.RUBY_GRPC_PORT ?? 20006) },
-	{ kind: "python3", port: Number(process.env.PY_GRPC_PORT ?? 20007) },
+	{ kind: "go", port: Number(process.env.GO_GRPC_PORT ?? 10001) },
+	{ kind: "rust", port: Number(process.env.RUST_GRPC_PORT ?? 10002) },
+	{ kind: "csharp", port: Number(process.env.CS_GRPC_PORT ?? 10004) },
+	{ kind: "java", port: Number(process.env.JAVA_GRPC_PORT ?? 10003) },
+	{ kind: "php", port: Number(process.env.PHP_GRPC_PORT ?? 10005) },
+	{ kind: "ruby", port: Number(process.env.RUBY_GRPC_PORT ?? 10006) },
+	{ kind: "python3", port: Number(process.env.PY_GRPC_PORT ?? 10007) },
 ] as const;
+
+// CI gate: a runtime named here MUST come up or the run fails (instead of
+// silently skipping — the exact rot the cross-runtime harness exists to catch).
+// `BLOK_E2E_REQUIRE_ALL=1` requires all 7; `BLOK_E2E_REQUIRE=go,rust` a subset.
+const REQUIRE_ALL = /^(1|true)$/i.test(process.env.BLOK_E2E_REQUIRE_ALL ?? "");
+const REQUIRED = new Set(
+	REQUIRE_ALL
+		? RUNTIMES.map((r) => r.kind)
+		: (process.env.BLOK_E2E_REQUIRE ?? "")
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean),
+);
+const WAIT_MS = Number(process.env.BLOK_E2E_WAIT_MS ?? 90_000);
+
+// Poll listNodes until every required runtime is reachable or the deadline hits
+// (containers take a few seconds to boot under `docker compose up`).
+async function waitForLive(): Promise<{ kind: string; port: number }[]> {
+	const deadline = Date.now() + WAIT_MS;
+	const liveByKind = new Map<string, { kind: string; port: number }>();
+	for (;;) {
+		for (const r of RUNTIMES) {
+			if (liveByKind.has(r.kind)) continue;
+			const nodes = await makeAdapter(r.kind, r.port).listNodes();
+			if (nodes.length > 0) liveByKind.set(r.kind, r);
+		}
+		const missing = [...REQUIRED].filter((k) => !liveByKind.has(k));
+		if (missing.length === 0 || Date.now() >= deadline) break;
+		await new Promise((res) => setTimeout(res, 2000));
+	}
+	return RUNTIMES.filter((r) => liveByKind.has(r.kind));
+}
 
 function makeAdapter(kind: string, port: number): GrpcRuntimeAdapter {
 	return new GrpcRuntimeAdapter({
@@ -83,16 +118,19 @@ function check(cond: boolean, msg: string): void {
 }
 
 async function main(): Promise<void> {
-	// Probe reachability (listNodes returns [] on a connection error) so the
-	// harness runs against whatever subset of runtimes is actually booted.
-	const live: { kind: string; port: number }[] = [];
+	// Probe reachability (listNodes returns [] on a connection error), waiting
+	// for any REQUIRED runtimes to boot. Runs against whatever subset is up.
+	const live = await waitForLive();
 	for (const r of RUNTIMES) {
-		const nodes = await makeAdapter(r.kind, r.port).listNodes();
-		if (nodes.length > 0) live.push(r);
-		else console.log(`  • skipping ${r.kind} (:${r.port}) — not running`);
+		if (!live.some((l) => l.kind === r.kind)) console.log(`  • skipping ${r.kind} (:${r.port}) — not running`);
+	}
+	const missingRequired = [...REQUIRED].filter((k) => !live.some((l) => l.kind === k));
+	if (missingRequired.length > 0) {
+		console.error(`\nRequired runtime(s) never came up within ${WAIT_MS}ms: ${missingRequired.join(", ")}`);
+		process.exit(1);
 	}
 	if (live.length === 0) {
-		console.error("No runtimes reachable — boot servers first (run-spec-b-e2e.sh).");
+		console.error("No runtimes reachable — boot servers first (run-spec-b-e2e.sh or docker compose up).");
 		process.exit(2);
 	}
 
