@@ -1,4 +1,5 @@
 import { type Context, GlobalError, type NodeBase, type Step } from "@blokjs/shared";
+import { SpanKind, SpanStatusCode, context, trace } from "@opentelemetry/api";
 import type BlokResponse from "./BlokResponse";
 import { RunCancelledError } from "./RunCancelledError";
 import { WaitDispatchRequest } from "./WaitDispatchRequest";
@@ -15,6 +16,13 @@ import { applyStepOutput } from "./workflow/PersistenceHelper";
  * default and the decision recorded in the Tier 1 ROADMAP session.
  */
 const DEFAULT_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * OBS-02 B4 — module-level tracer for per-step child spans. Returns a no-op
+ * tracer (zero overhead) until a real TracerProvider is registered at trigger
+ * boot, so free-running deployments are unaffected.
+ */
+const stepTracer = trace.getTracer("@blokjs/runner.steps", "1.0.0");
 
 /**
  * Compute the delay before retry attempt N+1 using capped exponential
@@ -610,12 +618,35 @@ export default abstract class RunnerSteps {
 					const isIteratingPrimitive =
 						(step as unknown as { isPrimitiveIterator?: boolean }).isPrimitiveIterator === true;
 
+					// === OBS-02 B4 — per-step OTel child span ===
+					// One span per EXECUTING leaf step, nested under the workflow span.
+					// `wait` + idempotency-cache-hit steps continue above this point, so only
+					// steps that actually invoke process() reach here. Made active around
+					// process() so a gRPC runtime call / http-self sub-workflow dispatch
+					// (B2.2/B2.3) nests beneath it. No-op + zero overhead when no provider
+					// is registered (OTel API guarantee).
+					const stepSpan = stepTracer.startSpan(`step ${step.name}`, {
+						kind: SpanKind.INTERNAL,
+						attributes: {
+							"blok.step.id": step.name,
+							"blok.step.index": i,
+							"blok.node.name": step.name,
+							"blok.node.type": stepType,
+							...(stepAny.runtime ? { "blok.runtime.kind": stepAny.runtime as string } : {}),
+						},
+					});
+
 					try {
 						while (true) {
 							attempt += 1;
 
 							try {
-								const processInvocation = (): Promise<{ data: unknown }> => step.process(ctx, step as unknown as Step);
+								// Run process() inside the step span's context so child spans
+								// (gRPC runtime / sub-workflow dispatch) nest under it.
+								const processInvocation = (): Promise<{ data: unknown }> =>
+									context.with(trace.setSpan(context.active(), stepSpan), () =>
+										step.process(ctx, step as unknown as Step),
+									);
 								const model =
 									typeof maxDurationMs === "number" && maxDurationMs > 0
 										? await wrapWithTimeout(processInvocation, maxDurationMs, step.name)
@@ -673,6 +704,7 @@ export default abstract class RunnerSteps {
 
 								const attemptSuffix = attempt > 1 ? ` after ${attempt} attempts` : "";
 								ctx.logger.log(`${stepPrefix} → completed (${stepDuration}ms${attemptSuffix})`);
+								stepSpan.setStatus({ code: SpanStatusCode.OK });
 								break;
 							} catch (nodeErr) {
 								// v0.5.3 — control-flow signals from a step's run()
@@ -749,6 +781,8 @@ export default abstract class RunnerSteps {
 								};
 								enrichedAny.cause = nodeErr;
 								enrichedAny._blokStepId = step.name;
+								stepSpan.recordException(nodeErr instanceof Error ? nodeErr : new Error(String(nodeErr)));
+								stepSpan.setStatus({ code: SpanStatusCode.ERROR, message: originalMsg });
 								throw enrichedError;
 							}
 						}
@@ -760,6 +794,9 @@ export default abstract class RunnerSteps {
 						// system for documentation but no longer drives
 						// cursor accounting.
 						void isIteratingPrimitive;
+						// OBS-02 B4 — close the per-step span on every exit (success / failure /
+						// wait / cancel / timeout).
+						stepSpan.end();
 					}
 				} else {
 					stepName = step.name;

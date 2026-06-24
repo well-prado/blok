@@ -27,7 +27,12 @@ vi.mock("@opentelemetry/api", () => ({
 	trace: {
 		getTracer: () => ({
 			startActiveSpan: (_name: string, fn: (s: typeof span) => unknown) => fn(span),
+			// OBS-02 T7 — per-step spans use startSpan; a SEPARATE no-op span so
+			// step-span activity doesn't pollute the asserted trigger `span`.
+			startSpan: () => ({ setAttribute: vi.fn(), setStatus: vi.fn(), recordException: vi.fn(), end: vi.fn() }),
 		}),
+		getActiveSpan: () => undefined,
+		setSpan: (c: unknown) => c,
 	},
 	metrics: {
 		getMeter: () => ({
@@ -44,7 +49,11 @@ vi.mock("@opentelemetry/api", () => ({
 			createObservableUpDownCounter: () => ({ addCallback: vi.fn() }),
 		}),
 	},
+	context: { active: () => ({}), with: (_c: unknown, fn: () => unknown) => fn() },
+	propagation: { extract: (c: unknown) => c, inject: () => {} },
+	SpanKind: { INTERNAL: 0, SERVER: 1, CLIENT: 2, PRODUCER: 3, CONSUMER: 4 },
 	SpanStatusCode: { OK: 0, ERROR: 1 },
+	isSpanContextValid: () => false,
 }));
 
 import { CronTrigger } from "../src/CronTrigger";

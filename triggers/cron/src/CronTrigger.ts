@@ -20,6 +20,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 	WaitDispatchRequest,
+	bootstrapTracing,
 } from "@blokjs/runner";
 import type { Context, MetricsType, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -95,6 +96,8 @@ export abstract class CronTrigger extends TriggerBase {
 	);
 	protected readonly logger = new DefaultLogger();
 	protected jobs: Map<string, ScheduledJob> = new Map();
+	/** OBS-02 T4 — graceful shutdown for the OTel tracer provider, if tracing was enabled. */
+	private tracingShutdown: (() => Promise<void>) | null = null;
 
 	// Subclasses provide these
 	protected abstract nodes: Record<string, BlokService<unknown>>;
@@ -145,12 +148,17 @@ export abstract class CronTrigger extends TriggerBase {
 		const startTime = this.startCounter();
 
 		try {
+			// OBS-02 T4 — opt-in distributed tracing for scheduled executions.
+			// When OTEL_EXPORTER_OTLP_ENDPOINT is set, install an OTel SDK so the
+			// spans the runner creates per cron run/step export to a backend.
+			// Mirrors HttpTrigger's B1 wiring; no-op when the env var is unset.
+			await this.maybeBootstrapTracing();
+
 			// Populate the trigger's node + workflow registries from the
 			// subclass's `nodes` / `workflows` fields. Mirrors WorkerTrigger's
 			// v0.6.3 fix — pre-fix these calls lived in the constructor and
 			// crashed because class fields haven't run yet at super-constructor
-			// time. See the comment where the old constructor used to live for
-			// the full reason. Must run before `registerWorkflowsFromNodeMap`,
+			// time. Must run before `registerWorkflowsFromNodeMap`,
 			// which reads `this.nodeMap.workflows`.
 			this.loadNodes();
 			this.loadWorkflows();
@@ -237,7 +245,45 @@ export abstract class CronTrigger extends TriggerBase {
 	/**
 	 * Stop all cron jobs
 	 */
+	/**
+	 * OBS-02 T4 — install the OpenTelemetry SDK at boot when an OTLP endpoint is
+	 * configured, so the spans the runner already creates for scheduled runs
+	 * export to a backend (Tempo/Jaeger/…). No-op when `OTEL_EXPORTER_OTLP_ENDPOINT`
+	 * is unset or `BLOK_TRACING_DISABLED=1`. Stores the shutdown so `stop()` flushes.
+	 */
+	private async maybeBootstrapTracing(): Promise<void> {
+		if (process.env.BLOK_TRACING_DISABLED === "1") return;
+		const base = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+		if (!base) return;
+		const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ? base : `${base.replace(/\/$/, "")}/v1/traces`;
+		try {
+			const result = await bootstrapTracing({
+				serviceName: process.env.APP_NAME || process.env.PROJECT_NAME || "blok-cron",
+				serviceVersion: process.env.PROJECT_VERSION,
+				exporter: "otlp",
+				endpoint,
+			});
+			if (result) {
+				this.tracingShutdown = result.shutdown;
+				this.logger.log(`[blok][tracing] OTLP distributed tracing enabled → ${endpoint}`);
+			} else {
+				this.logger.error(
+					"[blok][tracing] OTEL_EXPORTER_OTLP_ENDPOINT is set but the OTel trace SDK isn't installed — tracing is OFF.",
+				);
+			}
+		} catch (err) {
+			this.logger.error(`[blok][tracing] failed to initialize: ${(err as Error).message}`);
+		}
+	}
+
 	async stop(): Promise<void> {
+		// OBS-02 T4 — flush pending spans before the process exits.
+		if (this.tracingShutdown) {
+			await this.tracingShutdown().catch((err) =>
+				this.logger.error(`[blok][tracing] shutdown failed: ${(err as Error).message}`),
+			);
+			this.tracingShutdown = null;
+		}
 		for (const [jobId, scheduledJob] of this.jobs) {
 			scheduledJob.job.stop();
 			this.logger.log(`Job ${jobId} stopped`);

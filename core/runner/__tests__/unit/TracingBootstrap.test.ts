@@ -36,4 +36,22 @@ describe("bootstrapTracing (OBS-02 — distributed tracing flows)", () => {
 
 		await result?.shutdown();
 	});
+
+	it("supports the OTLP gRPC exporter — proves exporter-trace-otlp-grpc is a real dep, not peer-optional", async () => {
+		// OBS-02 review fix: gRPC-to-Tempo is common in Kubernetes. Before the
+		// dep was promoted from peer-optional to a hard dependency, this path's
+		// dynamic import failed and bootstrapTracing silently returned null —
+		// tracing OFF with no signal. Non-null here proves the package resolves.
+		const result = await bootstrapTracing({
+			serviceName: "blok-grpc-test",
+			exporter: "otlp",
+			protocol: "grpc",
+			endpoint: "http://localhost:4317",
+		});
+
+		expect(result).not.toBeNull();
+		expect(typeof result?.shutdown).toBe("function");
+
+		await result?.shutdown();
+	});
 });
