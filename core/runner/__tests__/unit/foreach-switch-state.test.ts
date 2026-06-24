@@ -131,18 +131,17 @@ describe("switch arm output → sibling (Bug 3 — real cause is duplicate inner
 		expect((ctx.state as Record<string, unknown>).scoreItems).toEqual([{ got: 1 }, { got: 0 }]);
 	});
 
-	it("COLLISION: duplicate inner id `run` across arms silently uses the wrong arm's inputs", async () => {
-		const { config, ctx } = await bootConfig({
-			name: "collision",
-			version: "1.0.0",
-			trigger: { http: { method: "POST", path: "/x" } },
-			steps: [dupIdSwitch("pick"), siblingStep],
-		});
-		(ctx.state as Record<string, unknown>).item = { kind: "a" };
-		await new Runner(config.steps as NodeBase[]).run(ctx);
-		// BUG: matched the "a" arm (v:1) but ran with the default arm's inputs (v:0).
-		// This documents the current miscompile; a load-time duplicate-id guard
-		// should make this a clear error instead.
-		expect((ctx.state as Record<string, unknown>).next).toEqual({ got: 0 });
+	it("COLLISION: duplicate inner id `run` across arms is rejected at load time", async () => {
+		// Previously this silently ran the matched arm with the OTHER arm's
+		// inputs (a miscompile). The load-time duplicate-id guard now turns it
+		// into a clear error instead.
+		await expect(
+			bootConfig({
+				name: "collision",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [dupIdSwitch("pick"), siblingStep],
+			}),
+		).rejects.toThrow(/duplicate step id "run"/);
 	});
 });

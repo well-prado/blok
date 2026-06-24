@@ -170,7 +170,7 @@ describe("v0.5 switch integration", () => {
 								when: "push",
 								do: [
 									{
-										id: "p",
+										id: "pPush",
 										use: "@blokjs/ctx-publish",
 										type: "module",
 										inputs: { name: "handler", value: "PUSH" },
@@ -181,7 +181,7 @@ describe("v0.5 switch integration", () => {
 								when: ["pull_request", "pull_request_review", "pull_request_review_comment"],
 								do: [
 									{
-										id: "p",
+										id: "pPr",
 										use: "@blokjs/ctx-publish",
 										type: "module",
 										inputs: { name: "handler", value: "PR_FAMILY" },

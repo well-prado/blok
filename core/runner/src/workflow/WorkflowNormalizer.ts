@@ -182,6 +182,7 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	// was the only opt-out and is replaced by `ephemeral: true`).
 	if (Array.isArray(wf.steps)) {
 		assertNoSetVar(wf.steps as unknown[], sourcePath);
+		assertNoDuplicateStepIds(wf.steps as unknown[], sourcePath);
 	}
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
@@ -1127,6 +1128,62 @@ export function _resetWildcardWarningCache(): void {
  * field at any depth is caught at load time rather than after the
  * partial-normalization point.
  */
+/**
+ * Step ids must be unique across the ENTIRE workflow — including across
+ * mutually-exclusive branch/switch arms — because every step shares ONE flat
+ * per-workflow config map. A collision silently runs a step with another
+ * step's inputs (the matched arm runs with the other arm's config). Walk the
+ * raw step tree (same nesting as `assertNoSetVar`) with a shared `seen` set
+ * and throw on the first duplicate, at load time.
+ */
+function assertNoDuplicateStepIds(steps: unknown[], sourcePath?: string, seen: Set<string> = new Set()): void {
+	for (const raw of steps) {
+		if (!isPlainObject(raw)) continue;
+		const step = raw as Record<string, unknown>;
+		const id = pickString(step.id) ?? pickString(step.name);
+		if (id) {
+			if (seen.has(id)) {
+				const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
+				throw new Error(
+					`[blok] WorkflowNormalizer: duplicate step id "${id}". Step ids must be unique across the whole workflow — including across mutually-exclusive branch/switch arms — because all steps share one flat per-workflow config map, so a collision silently runs a step with another step's inputs. If two arms must write the same state key, give them unique ids + the same \`as\` (e.g. { id: "runA", as: "run" } / { id: "runB", as: "run" }).${suffix}`,
+				);
+			}
+			seen.add(id);
+		}
+		// Recurse into nested sub-pipelines — same shape as assertNoSetVar.
+		if (isPlainObject(step.branch)) {
+			const branch = step.branch as { then?: unknown; else?: unknown };
+			if (Array.isArray(branch.then)) assertNoDuplicateStepIds(branch.then as unknown[], sourcePath, seen);
+			if (Array.isArray(branch.else)) assertNoDuplicateStepIds(branch.else as unknown[], sourcePath, seen);
+		}
+		if (isPlainObject(step.forEach)) {
+			const fe = step.forEach as { do?: unknown };
+			if (Array.isArray(fe.do)) assertNoDuplicateStepIds(fe.do as unknown[], sourcePath, seen);
+		}
+		if (isPlainObject(step.loop)) {
+			const lp = step.loop as { do?: unknown };
+			if (Array.isArray(lp.do)) assertNoDuplicateStepIds(lp.do as unknown[], sourcePath, seen);
+		}
+		if (isPlainObject(step.switch)) {
+			const sw = step.switch as { cases?: unknown; default?: unknown };
+			if (Array.isArray(sw.cases)) {
+				for (const c of sw.cases as unknown[]) {
+					if (isPlainObject(c) && Array.isArray((c as { do?: unknown }).do)) {
+						assertNoDuplicateStepIds((c as { do: unknown[] }).do, sourcePath, seen);
+					}
+				}
+			}
+			if (Array.isArray(sw.default)) assertNoDuplicateStepIds(sw.default as unknown[], sourcePath, seen);
+		}
+		if (isPlainObject(step.tryCatch)) {
+			const tc = step.tryCatch as { try?: unknown; catch?: unknown; finally?: unknown };
+			if (Array.isArray(tc.try)) assertNoDuplicateStepIds(tc.try as unknown[], sourcePath, seen);
+			if (Array.isArray(tc.catch)) assertNoDuplicateStepIds(tc.catch as unknown[], sourcePath, seen);
+			if (Array.isArray(tc.finally)) assertNoDuplicateStepIds(tc.finally as unknown[], sourcePath, seen);
+		}
+	}
+}
+
 function assertNoSetVar(steps: unknown[], sourcePath?: string): void {
 	for (const raw of steps) {
 		if (!isPlainObject(raw)) continue;

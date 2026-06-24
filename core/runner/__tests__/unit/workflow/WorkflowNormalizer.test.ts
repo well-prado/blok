@@ -71,6 +71,57 @@ describe("WorkflowNormalizer — v1 input", () => {
 		expect(() => normalizeWorkflow(v2, "nested.json")).toThrow(/`set_var`, which was removed in v0.5/);
 	});
 
+	it("rejects a duplicate step id (flat config map → silent wrong-inputs)", () => {
+		const wf = {
+			name: "Dup",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [
+				{ id: "a", use: "@blokjs/respond" },
+				{ id: "a", use: "@blokjs/respond" },
+			],
+		};
+		expect(() => normalizeWorkflow(wf, "dup.json")).toThrow(/duplicate step id "a"/);
+	});
+
+	it("rejects a duplicate step id across mutually-exclusive branch arms", () => {
+		const wf = {
+			name: "DupArms",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [
+				{
+					id: "route",
+					branch: {
+						when: "true",
+						then: [{ id: "run", use: "@blokjs/respond" }],
+						else: [{ id: "run", use: "@blokjs/respond" }],
+					},
+				},
+			],
+		};
+		expect(() => normalizeWorkflow(wf, "duparms.json")).toThrow(/duplicate step id "run"/);
+	});
+
+	it("allows the same downstream key via unique ids + `as`", () => {
+		const wf = {
+			name: "AsOk",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [
+				{
+					id: "route",
+					branch: {
+						when: "true",
+						then: [{ id: "runA", as: "run", use: "@blokjs/respond" }],
+						else: [{ id: "runB", as: "run", use: "@blokjs/respond" }],
+					},
+				},
+			],
+		};
+		expect(() => normalizeWorkflow(wf, "asok.json")).not.toThrow();
+	});
+
 	it("preserves trigger kinds other than http unchanged", () => {
 		const v1 = {
 			name: "Cron",
