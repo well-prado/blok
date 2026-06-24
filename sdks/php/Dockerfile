@@ -6,11 +6,14 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 
+# spiral/roadrunner-worker requires ext-sockets (needs linux-headers to compile on alpine)
+RUN apk add --no-cache linux-headers && docker-php-ext-install sockets
+
 # Copy composer files first for better layer caching
 COPY composer.json composer.lock* ./
 
 # Install dependencies (no dev)
-RUN composer install --no-dev --no-scripts --no-interaction --prefer-dist --optimize-autoloader
+RUN composer install --no-dev --no-scripts --no-interaction --prefer-dist --optimize-autoloader --no-security-blocking
 
 # Copy source code
 COPY . .
@@ -24,6 +27,9 @@ FROM php:8.2-cli-alpine
 # Install required PHP extensions (none needed beyond defaults for this SDK)
 # Add ca-certificates for HTTPS requests in ApiCallNode
 RUN apk add --no-cache ca-certificates
+
+# ext-sockets is needed at runtime by spiral/roadrunner
+RUN apk add --no-cache --virtual .ext-deps linux-headers && docker-php-ext-install sockets && apk del .ext-deps
 
 WORKDIR /app
 

@@ -32,7 +32,10 @@
 		"serve": "php bin/serve.php"
 	},
 	"config": {
-		"sort-packages": true
+		"sort-packages": true,
+		"audit": {
+			"ignore": ["PKSA-xbp4-qwr2-cbjj"]
+		}
 	},
 	"minimum-stability": "stable"
 }
