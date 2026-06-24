@@ -1,26 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock OpenTelemetry
-vi.mock("@opentelemetry/api", () => ({
-	trace: {
-		getTracer: () => ({
-			startActiveSpan: (_name: string, fn: (span: any) => any) =>
-				fn({
-					setAttribute: vi.fn(),
-					setStatus: vi.fn(),
-					recordException: vi.fn(),
-					end: vi.fn(),
-				}),
-		}),
-	},
-	metrics: {
-		getMeter: () => ({
-			createCounter: () => ({ add: vi.fn() }),
-			createGauge: () => ({ record: vi.fn() }),
-		}),
-	},
-	SpanStatusCode: { OK: 0, ERROR: 1 },
-}));
+vi.mock("@opentelemetry/api", () => {
+	const noop = { setAttribute: () => {}, setStatus: () => {}, recordException: () => {}, end: () => {} };
+	return {
+		trace: {
+			getTracer: () => ({
+				startActiveSpan: (...a: unknown[]) => {
+					const fn = a.find((x) => typeof x === "function") as ((s: typeof noop) => unknown) | undefined;
+					return fn?.(noop);
+				},
+				startSpan: () => noop,
+			}),
+			getActiveSpan: () => undefined,
+			setSpan: (c: unknown) => c,
+		},
+		metrics: {
+			getMeter: () => ({
+				createCounter: () => ({ add: () => {} }),
+				createHistogram: () => ({ record: () => {} }),
+				createGauge: () => ({ record: () => {} }),
+				createObservableGauge: () => ({ addCallback: () => {} }),
+			}),
+		},
+		context: { active: () => ({}), with: (_c: unknown, fn: () => unknown) => fn() },
+		propagation: { extract: (c: unknown) => c, inject: () => {} },
+		SpanKind: { INTERNAL: 0, SERVER: 1, CLIENT: 2, PRODUCER: 3, CONSUMER: 4 },
+		SpanStatusCode: { OK: 0, ERROR: 1 },
+		isSpanContextValid: () => false,
+	};
+});
 
 // Mock fastify — must be a callable function (not arrow, since source may use `new`)
 vi.mock("fastify", () => ({
