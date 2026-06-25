@@ -74,7 +74,7 @@ describe("BlokService.run — OBS-01 node metrics", () => {
 		expect(await metricByName("blok_node_duration_seconds")).toBeDefined();
 	});
 
-	it("fires blok_node_errors_total AND the legacy node_errors on a failing node (the bug fix)", async () => {
+	it("fires blok_node_errors_total on a failing node, and NOT the retired legacy node_* family", async () => {
 		const node = defineNode({
 			name: "boom-node",
 			description: "",
@@ -92,9 +92,32 @@ describe("BlokService.run — OBS-01 node metrics", () => {
 		expect(point).toBeDefined();
 		expect((point?.value as number) ?? 0).toBeGreaterThanOrEqual(1);
 
-		// The legacy `node_errors` counter — the one `blokctl monitor` actually
-		// queries — previously NEVER fired (the bug). It must now fire too.
-		expect(await metricByName("node_errors")).toBeDefined();
+		// The legacy un-prefixed family is retired — none of it should emit.
+		expect(await metricByName("node_errors")).toBeUndefined();
+		expect(await metricByName("node_time")).toBeUndefined();
+		expect(await metricByName("node_memory")).toBeUndefined();
+		expect(await metricByName("node_cpu")).toBeUndefined();
+	});
+
+	it("emits blok_node_memory_bytes + blok_node_cpu_usage on success", async () => {
+		const node = defineNode({
+			name: "metered-node",
+			description: "",
+			input: z.object({}),
+			output: z.object({}),
+			async execute() {
+				return {};
+			},
+		});
+		await node.run(ctxFor("metered-node", {}));
+
+		const mem = await metricByName("blok_node_memory_bytes");
+		const cpu = await metricByName("blok_node_cpu_usage");
+		expect(mem).toBeDefined();
+		expect(cpu).toBeDefined();
+		expect(
+			mem?.dataPoints.find((p) => (p.attributes as Record<string, unknown>).node_name === "metered-node"),
+		).toBeDefined();
 	});
 
 	it("does NOT fire node errors on a successful node", async () => {

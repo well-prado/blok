@@ -4,44 +4,30 @@ import { type Counter, type Gauge, type Histogram, metrics } from "@opentelemetr
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";
 import type { IBlokResponse } from "./BlokResponse";
-import type RunnerNode from "./RunnerNode";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 /**
- * OBS-01 (T3) — canonical per-node metrics on the `blok` meter, alongside the
- * legacy un-prefixed `node*` family (retired in a later migration step). Unlike
- * the legacy counters these use the correct failure signal (`errored`, derived
- * from the node's `BlokResponse.error`) rather than the never-flipped local
- * `response.success`, so `blok_node_errors_total` actually fires on a failing
- * node. Lazily created so they bind to the trigger's MeterProvider at boot.
+ * OBS-01 — canonical per-node metrics on the `blok` meter. The legacy
+ * un-prefixed `node*` family was retired (OBS-05 follow-up); `blokctl
+ * profile`/`monitor` + the Grafana dashboard now read `blok_node_*`. These use
+ * the correct failure signal (`errored`, from `BlokResponse.error`) rather than
+ * the never-flipped `response.success`, so `blok_node_errors_total` actually
+ * fires on a failing node. Lazily created once so they bind to the trigger's
+ * MeterProvider at boot (and never re-created per execution).
  */
 interface NodeInstruments {
 	executions: Counter;
 	duration: Histogram;
 	errors: Counter;
-	// Legacy un-prefixed family — still queried by `blokctl profile`/`monitor` +
-	// the Grafana dashboard. Cached here (created once) instead of being recreated
-	// on every node execution; consumer migration to `blok_node_*` + removal is a
-	// follow-up (needs live-Prometheus dashboard verification).
-	legacyExecution: Counter;
-	legacyTime: Gauge;
-	legacyMem: Gauge;
-	legacyMemAverage: Gauge;
-	legacyMemMin: Gauge;
-	legacyMemTotal: Gauge;
-	legacyMemFree: Gauge;
-	legacyCpu: Gauge;
-	legacyCpuAverage: Gauge;
-	legacyCpuTotal: Gauge;
-	legacyErrors: Counter;
+	memory: Gauge;
+	cpu: Gauge;
 }
 let _nodeInstruments: NodeInstruments | null = null;
 function nodeInstruments(): NodeInstruments {
 	if (!_nodeInstruments) {
 		const meter = metrics.getMeter("blok");
-		const def = metrics.getMeter("default");
 		_nodeInstruments = {
 			executions: meter.createCounter("blok_node_executions_total", {
 				description: "Total node executions",
@@ -52,17 +38,11 @@ function nodeInstruments(): NodeInstruments {
 				unit: "s",
 			}),
 			errors: meter.createCounter("blok_node_errors_total", { description: "Total node execution errors", unit: "1" }),
-			legacyExecution: def.createCounter("node", { description: "Node requests" }),
-			legacyTime: def.createGauge("node_time", { description: "Node elapsed time" }),
-			legacyMem: def.createGauge("node_memory", { description: "Node memory usage" }),
-			legacyMemAverage: def.createGauge("node_memory_average", { description: "Node memory average" }),
-			legacyMemMin: def.createGauge("node_memory_usage_min", { description: "Node memory usage min" }),
-			legacyMemTotal: def.createGauge("node_memory_total", { description: "Node memory total" }),
-			legacyMemFree: def.createGauge("node_memory_free", { description: "Node memory free" }),
-			legacyCpu: def.createGauge("node_cpu", { description: "Node cpu usage" }),
-			legacyCpuAverage: def.createGauge("node_cpu_average", { description: "Node cpu average" }),
-			legacyCpuTotal: def.createGauge("node_cpu_total", { description: "Node cpu total" }),
-			legacyErrors: def.createCounter("node_errors", { description: "Node errors" }),
+			memory: meter.createGauge("blok_node_memory_bytes", {
+				description: "Peak node heap memory, in bytes",
+				unit: "By",
+			}),
+			cpu: meter.createGauge("blok_node_cpu_usage", { description: "Node CPU usage", unit: "1" }),
 		};
 	}
 	return _nodeInstruments;
@@ -134,24 +114,8 @@ export default abstract class BlokService<T> extends NodeBase {
 		const blokResponse = result as IBlokResponse;
 		const errored = blokResponse.error !== undefined && blokResponse.error !== null;
 
-		inst.legacyExecution.add(1, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyTime.record(end - start, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		// OBS-01 (T3) — canonical `blok_node_*` mirrors of the above, on the
-		// `blok` meter. Duration is in seconds (Prometheus histogram convention).
+		// Per-node metrics on the `blok` meter. Duration is in seconds
+		// (Prometheus histogram convention).
 		const blokNodeAttrs = {
 			env: process.env.NODE_ENV ?? "development",
 			workflow_path: `${ctx.workflow_path}`,
@@ -201,86 +165,12 @@ export default abstract class BlokService<T> extends NodeBase {
 		globalMetrics.stop();
 		const average = await globalMetrics.getMetrics();
 
-		inst.legacyMem.record(average.memory.max, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyMemAverage.record(average.memory.total, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyMemMin.record(average.memory.min, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyMemTotal.record(average.memory.global_memory, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyMemFree.record(average.memory.global_free_memory, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyCpu.record(average.cpu.usage, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyCpuAverage.record(average.cpu.average, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
-
-		inst.legacyCpuTotal.record(average.cpu.total, {
-			env: process.env.NODE_ENV,
-			workflow_path: `${ctx.workflow_path}`,
-			workflow_name: `${ctx.workflow_name}`,
-			node_name: `${this.name}`,
-			node: (this as unknown as RunnerNode).node,
-		});
+		// `average.memory.max` is MB (MemoryUsage divides heapUsed by 1e6);
+		// re-expand to bytes for the Prometheus base-unit `_bytes` convention.
+		inst.memory.record(average.memory.max * 1_000_000, blokNodeAttrs);
+		inst.cpu.record(average.cpu.usage, blokNodeAttrs);
 
 		globalMetrics.clear();
-
-		// OBS-01 — fire the per-node error counter on the TRUE failure signal.
-		// Previously this checked the local `response.success`, which is
-		// initialized to `true` and never flipped here (the real error lands on
-		// `BlokResponse.error`, captured above as `errored`), so `node_errors`
-		// NEVER incremented — per-node error counts were silently always zero.
-		if (errored) {
-			inst.legacyErrors.add(1, {
-				env: process.env.NODE_ENV,
-				workflow_path: `${ctx.workflow_path}`,
-				workflow_name: `${ctx.workflow_name}`,
-				node_name: `${this.name}`,
-				node: (this as unknown as RunnerNode).node,
-			});
-		}
 
 		return response;
 	}
