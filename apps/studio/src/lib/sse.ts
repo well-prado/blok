@@ -37,14 +37,32 @@ export function connectGlobalStream(options: SSEConnectionOptions, workflows?: s
 	return createSSEConnection(url, options);
 }
 
+// Must mirror the RunEventType union in core/runner/src/tracing/types.ts — the
+// browser EventSource only delivers events whose `event:` name has a registered
+// listener, so any type missing here is silently dropped by the client. The
+// terminal run events (crashed/timedOut/throttled/cancelled/expired) and the
+// Tier-1/2 node events (cached/attempt-failed/progress) were absent, so Studio
+// never saw a run that ended in any state other than completed/failed.
 const EVENT_TYPES = [
 	"RUN_STARTED",
 	"RUN_COMPLETED",
 	"RUN_FAILED",
+	"RUN_THROTTLED",
+	"RUN_DELAYED",
+	"RUN_EXPIRED",
+	"RUN_DEBOUNCED",
+	"RUN_QUEUED",
+	"RUN_CANCELLED",
+	"RUN_CRASHED",
+	"RUN_TIMED_OUT",
 	"NODE_STARTED",
 	"NODE_COMPLETED",
 	"NODE_FAILED",
 	"NODE_SKIPPED",
+	"NODE_CACHED",
+	"NODE_ATTEMPT_FAILED",
+	"NODE_PROGRESS",
+	"NODE_PARTIAL_RESULT",
 	"VARS_UPDATED",
 	"LOG_ENTRY",
 ] as const;
