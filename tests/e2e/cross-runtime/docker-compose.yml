@@ -9,15 +9,21 @@
 # Rust 10002, Java 10003, C# 10004, PHP 10005, Ruby 10006, Python3 10007.
 # Host ports mirror the container ports so the harness needs no env plumbing.
 #
+# Each build context is `.build/<lang>/` — produced by prepare-usernodes.ts with
+# a scaffolded `e2e-user` node baked in (real codegen for compiled langs, a
+# BLOK_NODES_DIR node-dir for dynamic ones). This proves user-authored nodes are
+# discovered + executed in every SDK, not just the built-in examples (E05-T007).
+#
 # Usage:
+#   bun tests/e2e/cross-runtime/prepare-usernodes.ts   # MUST run first (creates .build/)
 #   docker compose up -d --build
-#   bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts   # BLOK_E2E_REQUIRE_ALL=1 in CI
+#   bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts    # BLOK_E2E_REQUIRE_ALL=1 in CI
 #   docker compose down -v
 
 services:
   sdk-go:
     build:
-      context: ../../../sdks/go
+      context: .build/go/.blok/runtimes/go
     ports:
       - "10001:10001"
     environment:
@@ -26,7 +32,7 @@ services:
 
   sdk-rust:
     build:
-      context: ../../../sdks/rust
+      context: .build/rust/.blok/runtimes/rust
     ports:
       - "10002:10002"
     environment:
@@ -36,7 +42,7 @@ services:
 
   sdk-java:
     build:
-      context: ../../../sdks/java
+      context: .build/java/.blok/runtimes/java
     ports:
       - "10003:10003"
     environment:
@@ -45,7 +51,7 @@ services:
 
   sdk-csharp:
     build:
-      context: ../../../sdks/csharp
+      context: .build/csharp/.blok/runtimes/csharp
     ports:
       - "10004:10004"
     environment:
@@ -55,28 +61,31 @@ services:
   sdk-php:
     # gRPC is served by RoadRunner (rr serve) — the image's default CMD.
     build:
-      context: ../../../sdks/php
+      context: .build/php
     ports:
       - "10005:10005"
     environment:
       GRPC_PORT: "10005"
+      BLOK_NODES_DIR: /app/e2e_usernodes
 
   sdk-ruby:
     build:
-      context: ../../../sdks/ruby
+      context: .build/ruby
     ports:
       - "10006:10006"
     environment:
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10006"
+      BLOK_NODES_DIR: /app/e2e_usernodes
 
   sdk-python3:
     # The Dockerfile's last stage is `worker` (NATS); the runner needs `runtime`.
     build:
-      context: ../../../sdks/python3
+      context: .build/python3
       target: runtime
     ports:
       - "10007:10007"
     environment:
       BLOK_TRANSPORT: grpc
       GRPC_PORT: "10007"
+      BLOK_NODES_DIR: /app/e2e_usernodes

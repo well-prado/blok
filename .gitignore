@@ -222,3 +222,6 @@ skills-lock.json
 
 # Internal research dossiers (not part of the Mintlify docs site)
 research-notes/
+
+# cross-runtime e2e prepared build contexts (prepare-usernodes.ts)
+tests/e2e/cross-runtime/.build/
