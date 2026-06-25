@@ -1,3 +1,4 @@
+using Blok.Core;
 using Blok.Core.Config;
 using Blok.Core.Node;
 using Blok.Core.Nodes;
@@ -13,6 +14,10 @@ registry.Register("transform-data", new TransformDataNode());
 registry.Register("chain-test", new ChainTestNode());
 registry.Register("blok-error-demo", new BlokErrorDemoNode());
 registry.Register("typed-greet", new TypedGreetNode());
+
+// Register user nodes scaffolded under runtimes/csharp/nodes. No-op in the SDK
+// tree; blokctl regenerates UserNodeRegistry.cs per project before dev spawn.
+UserNodeRegistry.RegisterUserNodes(registry);
 
 Console.WriteLine($"Blok C# Runtime v{config.Version}");
 Console.WriteLine($"  Registered {registry.Count} node(s): [{string.Join(", ", registry.NodeNames())}]");

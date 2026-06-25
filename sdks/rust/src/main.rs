@@ -7,6 +7,11 @@ use blok::middleware::LoggingMiddleware;
 use blok::nodes;
 use blok::registry::NodeRegistry;
 
+// User nodes scaffolded under runtimes/rust/nodes. The committed default is a
+// no-op; `blokctl dev` regenerates src/user_nodes/ in the project's
+// .blok/runtimes/rust copy with one module per user node.
+mod user_nodes;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -19,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create registry and register nodes
     let mut registry = NodeRegistry::new(&config.version);
     nodes::register_all(&mut registry);
+    user_nodes::register_user_nodes(&mut registry);
 
     // Add middleware
     let logger = Logger::new(LogLevel::Info);
@@ -40,10 +46,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // via `nodes::register_all` so they expose the same node set.
         let mut grpc_registry = NodeRegistry::new(&config.version);
         nodes::register_all(&mut grpc_registry);
+        user_nodes::register_user_nodes(&mut grpc_registry);
         let grpc_shared = Arc::new(Mutex::new(grpc_registry));
 
         let mut http_registry = NodeRegistry::new(&config.version);
         nodes::register_all(&mut http_registry);
+        user_nodes::register_user_nodes(&mut http_registry);
 
         let version = config.version.clone();
 

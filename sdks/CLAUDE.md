@@ -49,7 +49,10 @@ Each SDK registers nodes with a language-specific handler interface:
 - **PHP**: `NodeHandler` interface
 - **Ruby**: Handler module
 
-User nodes live in `runtimes/{lang}/nodes/` within projects, registered into the same runtime as the built-in nodes — no manual wiring. Dynamic languages discover them at boot: **Python** scans `BLOK_NODES_DIR` (set by the CLI to `runtimes/python3/nodes/`). Compiled languages can't fs-scan, so the CLI codegens a registration shim before the build: **Go** copies each `runtimes/go/nodes/<name>/` library package (exporting `func Register(registry *blok.NodeRegistry)`) into the build module and generates `cmd/server/register_user_nodes.go`, regenerated on every `blokctl dev` (`go run` recompiles). Rust/Java/C# follow the same codegen model (in progress).
+User nodes live in `runtimes/{lang}/nodes/` within projects, registered into the same runtime as the built-in nodes — no manual wiring. The CLI handles every language by one of two models:
+
+- **Dynamic (`BLOK_NODES_DIR` fs-scan at boot):** **Python** (`@node` decorator), **Ruby** (subclass `Blok::Node::NodeHandler`, discovered via a `self.inherited` registry in `lib/blok/node/discovery.rb`), **PHP** (`implements NodeHandler`, globbed + `require_once` in `bin/serve.php`). The CLI sets `BLOK_NODES_DIR` to `runtimes/<lang>/nodes/` on dev-spawn + in supervisord.
+- **Compiled (codegen a registration shim before the build):** **Go** (`func Register(registry)` → `cmd/server/register_user_nodes.go`), **Rust** (`pub fn register(registry)` → `src/user_nodes/mod.rs`), **C#** (`: INodeHandler` → `UserNodeRegistry.cs`), **Java** (`implements NodeHandler` → `UserNodeRegistry.java`). `generateXxxNodeRegistry` (in `packages/cli/src/services/runtime-setup.ts`) copies each node's sources into the build module + generates the shim, regenerated on every `blokctl dev`. Go/Rust/C# recompile on boot (`go run`/`cargo run`/`dotnet run`); Java boots a prebuilt jar so dev runs `mvn package` after codegen. Each SDK ships a committed no-op default shim so the pristine SDK compiles in CI with zero user nodes.
 
 ## Adding a New SDK Language
 

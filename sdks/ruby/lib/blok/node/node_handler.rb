@@ -18,6 +18,17 @@ module Blok
     #   end
     #
     class NodeHandler
+      # Subclasses defined anywhere (SDK built-ins + user nodes) are collected
+      # here in definition order. `Blok::Node.load_user_nodes` snapshots this
+      # list before/after requiring each user file and registers only the new
+      # subclasses — an explicit, traceable discovery rule (no ObjectSpace scan).
+      DESCENDANTS = []
+
+      def self.inherited(subclass)
+        super
+        DESCENDANTS << subclass
+      end
+
       # Execute the node logic.
       #
       # @param ctx [Blok::Types::Context] The workflow execution context
