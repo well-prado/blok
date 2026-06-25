@@ -1,6 +1,6 @@
 import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
 import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
-import { type Counter, type Histogram, metrics } from "@opentelemetry/api";
+import { type Counter, type Gauge, type Histogram, metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";
 import type { IBlokResponse } from "./BlokResponse";
@@ -17,10 +17,31 @@ import { applyStepOutput } from "./workflow/PersistenceHelper";
  * `response.success`, so `blok_node_errors_total` actually fires on a failing
  * node. Lazily created so they bind to the trigger's MeterProvider at boot.
  */
-let _nodeInstruments: { executions: Counter; duration: Histogram; errors: Counter } | null = null;
-function nodeInstruments(): { executions: Counter; duration: Histogram; errors: Counter } {
+interface NodeInstruments {
+	executions: Counter;
+	duration: Histogram;
+	errors: Counter;
+	// Legacy un-prefixed family — still queried by `blokctl profile`/`monitor` +
+	// the Grafana dashboard. Cached here (created once) instead of being recreated
+	// on every node execution; consumer migration to `blok_node_*` + removal is a
+	// follow-up (needs live-Prometheus dashboard verification).
+	legacyExecution: Counter;
+	legacyTime: Gauge;
+	legacyMem: Gauge;
+	legacyMemAverage: Gauge;
+	legacyMemMin: Gauge;
+	legacyMemTotal: Gauge;
+	legacyMemFree: Gauge;
+	legacyCpu: Gauge;
+	legacyCpuAverage: Gauge;
+	legacyCpuTotal: Gauge;
+	legacyErrors: Counter;
+}
+let _nodeInstruments: NodeInstruments | null = null;
+function nodeInstruments(): NodeInstruments {
 	if (!_nodeInstruments) {
 		const meter = metrics.getMeter("blok");
+		const def = metrics.getMeter("default");
 		_nodeInstruments = {
 			executions: meter.createCounter("blok_node_executions_total", {
 				description: "Total node executions",
@@ -31,6 +52,17 @@ function nodeInstruments(): { executions: Counter; duration: Histogram; errors: 
 				unit: "s",
 			}),
 			errors: meter.createCounter("blok_node_errors_total", { description: "Total node execution errors", unit: "1" }),
+			legacyExecution: def.createCounter("node", { description: "Node requests" }),
+			legacyTime: def.createGauge("node_time", { description: "Node elapsed time" }),
+			legacyMem: def.createGauge("node_memory", { description: "Node memory usage" }),
+			legacyMemAverage: def.createGauge("node_memory_average", { description: "Node memory average" }),
+			legacyMemMin: def.createGauge("node_memory_usage_min", { description: "Node memory usage min" }),
+			legacyMemTotal: def.createGauge("node_memory_total", { description: "Node memory total" }),
+			legacyMemFree: def.createGauge("node_memory_free", { description: "Node memory free" }),
+			legacyCpu: def.createGauge("node_cpu", { description: "Node cpu usage" }),
+			legacyCpuAverage: def.createGauge("node_cpu_average", { description: "Node cpu average" }),
+			legacyCpuTotal: def.createGauge("node_cpu_total", { description: "Node cpu total" }),
+			legacyErrors: def.createCounter("node_errors", { description: "Node errors" }),
 		};
 	}
 	return _nodeInstruments;
@@ -66,7 +98,7 @@ export default abstract class BlokService<T> extends NodeBase {
 	}
 
 	public async run(ctx: Context): Promise<ResponseContext> {
-		const defaultMeter = metrics.getMeter("default");
+		const inst = nodeInstruments();
 
 		const globalMetrics = new Metrics();
 		globalMetrics.start();
@@ -74,46 +106,6 @@ export default abstract class BlokService<T> extends NodeBase {
 
 		const start = performance.now();
 		ctx.logger.log(`Running node: ${this.name} [${JSON.stringify(this.originalConfig)}]`);
-
-		const node_execution = defaultMeter.createCounter("node", {
-			description: "Node requests",
-		});
-
-		const node_time = defaultMeter.createGauge("node_time", {
-			description: "Node elapsed time",
-		});
-
-		const node_mem = defaultMeter.createGauge("node_memory", {
-			description: "Node memory usage",
-		});
-
-		const node_mem_average = defaultMeter.createGauge("node_memory_average", {
-			description: "Node memory average",
-		});
-
-		const node_memory_usage_min = defaultMeter.createGauge("node_memory_usage_min", {
-			description: "Node memory usage min",
-		});
-
-		const node_memory_total = defaultMeter.createGauge("node_memory_total", {
-			description: "Node memory total",
-		});
-
-		const node_memory_free = defaultMeter.createGauge("node_memory_free", {
-			description: "Node memory free",
-		});
-
-		const node_cpu = defaultMeter.createGauge("node_cpu", {
-			description: "Node cpu usage",
-		});
-
-		const node_cpu_average = defaultMeter.createGauge("node_cpu_average", {
-			description: "Node cpu average",
-		});
-
-		const node_cpu_total = defaultMeter.createGauge("node_cpu_total", {
-			description: "Node cpu total",
-		});
 
 		const config = _.cloneDeep(ctx.config) as ConfigContext;
 		let opts: JsonLikeObject = (config as JsonLikeObject)[this.name] as unknown as JsonLikeObject;
@@ -142,7 +134,7 @@ export default abstract class BlokService<T> extends NodeBase {
 		const blokResponse = result as IBlokResponse;
 		const errored = blokResponse.error !== undefined && blokResponse.error !== null;
 
-		node_execution.add(1, {
+		inst.legacyExecution.add(1, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -150,7 +142,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_time.record(end - start, {
+		inst.legacyTime.record(end - start, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -166,11 +158,10 @@ export default abstract class BlokService<T> extends NodeBase {
 			workflow_name: `${ctx.workflow_name}`,
 			node_name: `${this.name}`,
 		};
-		const blokNode = nodeInstruments();
-		blokNode.executions.add(1, blokNodeAttrs);
-		blokNode.duration.record((end - start) / 1000, blokNodeAttrs);
+		inst.executions.add(1, blokNodeAttrs);
+		inst.duration.record((end - start) / 1000, blokNodeAttrs);
 		if (errored) {
-			blokNode.errors.add(1, blokNodeAttrs);
+			inst.errors.add(1, blokNodeAttrs);
 		}
 
 		// Surface failures clearly on the per-node log so operators don't
@@ -210,7 +201,7 @@ export default abstract class BlokService<T> extends NodeBase {
 		globalMetrics.stop();
 		const average = await globalMetrics.getMetrics();
 
-		node_mem.record(average.memory.max, {
+		inst.legacyMem.record(average.memory.max, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -218,7 +209,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_mem_average.record(average.memory.total, {
+		inst.legacyMemAverage.record(average.memory.total, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -226,7 +217,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_memory_usage_min.record(average.memory.min, {
+		inst.legacyMemMin.record(average.memory.min, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -234,7 +225,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_memory_total.record(average.memory.global_memory, {
+		inst.legacyMemTotal.record(average.memory.global_memory, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -242,7 +233,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_memory_free.record(average.memory.global_free_memory, {
+		inst.legacyMemFree.record(average.memory.global_free_memory, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -250,7 +241,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_cpu.record(average.cpu.usage, {
+		inst.legacyCpu.record(average.cpu.usage, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -258,7 +249,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_cpu_average.record(average.cpu.average, {
+		inst.legacyCpuAverage.record(average.cpu.average, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -266,7 +257,7 @@ export default abstract class BlokService<T> extends NodeBase {
 			node: (this as unknown as RunnerNode).node,
 		});
 
-		node_cpu_total.record(average.cpu.total, {
+		inst.legacyCpuTotal.record(average.cpu.total, {
 			env: process.env.NODE_ENV,
 			workflow_path: `${ctx.workflow_path}`,
 			workflow_name: `${ctx.workflow_name}`,
@@ -282,11 +273,7 @@ export default abstract class BlokService<T> extends NodeBase {
 		// `BlokResponse.error`, captured above as `errored`), so `node_errors`
 		// NEVER incremented — per-node error counts were silently always zero.
 		if (errored) {
-			const node_errors = defaultMeter.createCounter("node_errors", {
-				description: "Node errors",
-			});
-
-			node_errors.add(1, {
+			inst.legacyErrors.add(1, {
 				env: process.env.NODE_ENV,
 				workflow_path: `${ctx.workflow_path}`,
 				workflow_name: `${ctx.workflow_name}`,
