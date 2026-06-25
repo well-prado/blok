@@ -12,6 +12,7 @@ import type {
 	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
+	Webhook,
 	WorkflowRun,
 	WorkflowSample,
 	WorkflowSummary,
@@ -380,6 +381,25 @@ export class PostgresRunStore implements RunStore {
 						await client.query("ALTER TABLE node_runs ADD COLUMN IF NOT EXISTS flags_json JSONB");
 					},
 				},
+				{
+					// OBS-05 T7 — durable webhook registrations. Mirrors the
+					// sqlite store's v17 schema. Only the durable subset is
+					// persisted; runtime telemetry (failCount/lastStatus/
+					// lastTriggeredAt) stays on the in-memory hot copy.
+					version: 10,
+					up: async () => {
+						await client.query(`
+							CREATE TABLE IF NOT EXISTS webhooks (
+								id TEXT PRIMARY KEY,
+								url TEXT NOT NULL,
+								events_json JSONB NOT NULL,
+								secret TEXT,
+								created_at BIGINT NOT NULL,
+								active BOOLEAN NOT NULL DEFAULT TRUE
+							)
+						`);
+					},
+				},
 			];
 
 			for (const m of migrations) {
@@ -497,6 +517,28 @@ export class PostgresRunStore implements RunStore {
 				}
 			} catch (err) {
 				console.warn("[blok][pg] failed to load workflow samples:", (err as Error).message);
+			}
+
+			// OBS-05 T7 · rehydrate durable webhook registrations. Cardinality
+			// bounded by the operator-curated registration set — unbounded
+			// SELECT is fine. Telemetry fields reset on seed (never persisted).
+			try {
+				const { rows: webhookRows } = await client.query("SELECT * FROM webhooks ORDER BY created_at ASC");
+				for (const row of webhookRows) {
+					this.memory.saveWebhook({
+						id: row.id,
+						url: row.url,
+						events: typeof row.events_json === "string" ? JSON.parse(row.events_json) : row.events_json,
+						secret: row.secret ?? undefined,
+						createdAt: Number(row.created_at),
+						active: row.active !== false,
+						failCount: 0,
+					});
+				}
+			} catch (err) {
+				if (!String((err as Error).message).match(/relation .* does not exist/i)) {
+					console.error("[PostgresRunStore] webhooks load failed:", (err as Error).message);
+				}
 			}
 
 			// Tier 2 follow-up · rehydrate idempotency cache (un-expired entries only).
@@ -1098,6 +1140,45 @@ export class PostgresRunStore implements RunStore {
 			this.enqueueWrite(() =>
 				this.pool.query("DELETE FROM trace_workflow_samples WHERE workflow_name = $1", [workflowName]).then(() => {}),
 			);
+		}
+		return removed;
+	}
+
+	// === Durable webhook registrations (OBS-05 T7) ===
+
+	saveWebhook(webhook: Webhook): void {
+		this.memory.saveWebhook(webhook);
+		this.enqueueWrite(() =>
+			this.pool
+				.query(
+					`INSERT INTO webhooks (id, url, events_json, secret, created_at, active)
+					 VALUES ($1, $2, $3, $4, $5, $6)
+					 ON CONFLICT (id) DO UPDATE SET
+						url = EXCLUDED.url,
+						events_json = EXCLUDED.events_json,
+						secret = EXCLUDED.secret,
+						active = EXCLUDED.active`,
+					[
+						webhook.id,
+						webhook.url,
+						JSON.stringify(webhook.events),
+						webhook.secret ?? null,
+						webhook.createdAt,
+						webhook.active,
+					],
+				)
+				.then(() => {}),
+		);
+	}
+
+	getWebhooks(): Webhook[] {
+		return this.memory.getWebhooks();
+	}
+
+	deleteWebhook(id: string): boolean {
+		const removed = this.memory.deleteWebhook(id);
+		if (removed) {
+			this.enqueueWrite(() => this.pool.query("DELETE FROM webhooks WHERE id = $1", [id]).then(() => {}));
 		}
 		return removed;
 	}

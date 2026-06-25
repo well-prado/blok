@@ -9,6 +9,7 @@ import type {
 	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
+	Webhook,
 	WorkflowRun,
 	WorkflowSample,
 	WorkflowSummary,
@@ -266,6 +267,27 @@ export interface RunStore {
 	 * not here. This sweep only handles past-TTL rows.
 	 */
 	purgeExpiredScheduledDispatches(now: number): number;
+
+	// === Durable webhook registrations (OBS-05 T7) ===
+
+	/**
+	 * Persist (or replace) a webhook registration so it survives a process
+	 * restart. INSERT-OR-REPLACE by `id`. Only the durable subset is stored
+	 * (`id, url, events, secret, created_at, active`); the runtime telemetry
+	 * fields (failCount/lastStatus/lastTriggeredAt) are NOT round-tripped.
+	 */
+	saveWebhook(webhook: Webhook): void;
+
+	/**
+	 * Snapshot of every persisted webhook. Used by `RunTracker` to seed its
+	 * in-memory hot Map on first access after a restart.
+	 */
+	getWebhooks(): Webhook[];
+
+	/**
+	 * Delete a webhook registration by `id`. Returns `true` if a row existed.
+	 */
+	deleteWebhook(id: string): boolean;
 
 	// === Lifecycle ===
 	close(): void;

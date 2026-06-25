@@ -562,6 +562,29 @@ export interface ScheduledDispatchRow {
 	claimedAt?: number;
 }
 
+/**
+ * Webhook registration for run event notifications (OBS-05).
+ *
+ * The durable subset — `id, url, events, secret, createdAt, active` — is
+ * persisted to the RunStore so registrations survive a restart. The runtime
+ * telemetry fields (`lastTriggeredAt`, `lastStatus`, `failCount`) are
+ * best-effort and live only on the in-memory hot copy; they are NOT
+ * round-tripped through the store (would amplify writes on every fire-and-
+ * forget delivery for ephemeral counters). `active` IS persisted so the
+ * auto-disable (failCount >= 10) survives, but only at register/remove time.
+ */
+export interface Webhook {
+	id: string;
+	url: string;
+	events: string[];
+	secret?: string;
+	createdAt: number;
+	active: boolean;
+	lastTriggeredAt?: number;
+	lastStatus?: number;
+	failCount: number;
+}
+
 // === Events ===
 
 export type RunEventType =

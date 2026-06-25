@@ -1045,5 +1045,61 @@ export function runStoreTests(name: string, factory: () => RunStore) {
 				expect(store.getWorkflowSample("complex")?.body).toEqual(body);
 			});
 		});
+
+		describe("webhooks (OBS-05 T7)", () => {
+			function wh(id: string, overrides?: Partial<import("../../tracing/types").Webhook>) {
+				return {
+					id,
+					url: `https://example.com/${id}`,
+					events: ["run.failed", "run.completed"],
+					secret: "s3cr3t",
+					createdAt: 1000,
+					active: true,
+					failCount: 0,
+					...overrides,
+				};
+			}
+
+			it("getWebhooks is empty before any save", () => {
+				expect(store.getWebhooks()).toEqual([]);
+			});
+
+			it("saveWebhook persists the durable subset and getWebhooks round-trips it", () => {
+				store.saveWebhook(wh("wh_1"));
+				const all = store.getWebhooks();
+				expect(all).toHaveLength(1);
+				expect(all[0]).toMatchObject({
+					id: "wh_1",
+					url: "https://example.com/wh_1",
+					events: ["run.failed", "run.completed"],
+					secret: "s3cr3t",
+					createdAt: 1000,
+					active: true,
+				});
+			});
+
+			it("round-trips a webhook with no secret and inactive state", () => {
+				store.saveWebhook(wh("wh_2", { secret: undefined, active: false }));
+				const got = store.getWebhooks().find((w) => w.id === "wh_2");
+				expect(got?.secret).toBeUndefined();
+				expect(got?.active).toBe(false);
+			});
+
+			it("saveWebhook is INSERT-OR-REPLACE by id", () => {
+				store.saveWebhook(wh("wh_1", { url: "https://old" }));
+				store.saveWebhook(wh("wh_1", { url: "https://new", events: ["run.crashed"] }));
+				const all = store.getWebhooks().filter((w) => w.id === "wh_1");
+				expect(all).toHaveLength(1);
+				expect(all[0].url).toBe("https://new");
+				expect(all[0].events).toEqual(["run.crashed"]);
+			});
+
+			it("deleteWebhook removes the row and returns true; false when absent", () => {
+				store.saveWebhook(wh("wh_1"));
+				expect(store.deleteWebhook("wh_1")).toBe(true);
+				expect(store.getWebhooks()).toEqual([]);
+				expect(store.deleteWebhook("wh_missing")).toBe(false);
+			});
+		});
 	});
 }
