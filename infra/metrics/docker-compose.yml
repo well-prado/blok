@@ -140,6 +140,30 @@ services:
     networks:
       - shared-network
 
+  # OBS-03 — Grafana Alloy: the log-shipper. Scrapes every container's stdout off
+  # the Docker socket, parses Blok's structured JSON (run_id/trace_id/span_id), and
+  # ships to Loki. Container-based + zero host plugins (vs. the old `logging:
+  # driver: loki` which needs `docker plugin install grafana/loki-docker-driver`).
+  alloy:
+    container_name: alloy
+    hostname: alloy
+    image: grafana/alloy:v1.10.0
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"   # Alloy UI / health
+    volumes:
+      - "./alloy-config.alloy:/etc/alloy/config.alloy:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - shared-network
+
   # blok-http:
   #   container_name: blok-http
   #   hostname: blok-http

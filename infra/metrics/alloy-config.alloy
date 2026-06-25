@@ -1,0 +1,75 @@
+// OBS-03 — Grafana Alloy: the log-shipper that completes Blok's logs→Loki path.
+// Scrapes every Docker container's stdout/stderr off the Docker socket, parses
+// Blok's structured JSON log lines (DefaultLogger.injectMetadata), and ships them
+// to Loki. run_id/trace_id/span_id become queryable so Studio ↔ Tempo ↔ Loki join.
+//
+// Promtail (the old shipper) was EOL'd by Grafana in Feb 2025; Alloy is the
+// supported successor. discovery.docker + loki.source.docker replace Promtail's
+// docker_sd_configs; loki.process replaces its pipeline_stages.
+
+// Discover running containers via the Docker Engine API on the mounted socket.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Relabel: expose the container name as a stable `container` label and drop the
+// leading slash Docker prefixes it with.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+// Tail container logs and forward to the JSON-parsing process stage.
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { job = "blok" }
+  forward_to = [loki.process.blok_json.receiver]
+}
+
+// Parse Blok's structured JSON and promote correlation keys.
+// run_id/level become labels (low-cardinality, good for filtering); trace_id and
+// span_id stay as structured-metadata fields (high-cardinality — labels would
+// blow up Loki's index, and Grafana's Loki derived field links trace_id → Tempo
+// straight off the log line regardless).
+loki.process "blok_json" {
+  stage.json {
+    expressions = {
+      level    = "level",
+      run_id   = "run_id",
+      trace_id = "trace_id",
+      span_id  = "span_id",
+      workflow = "workflow_name",
+    }
+  }
+
+  // Promote the low-cardinality keys to labels for fast filtering in Grafana.
+  stage.labels {
+    values = {
+      level    = "",
+      run_id   = "",
+      workflow = "",
+    }
+  }
+
+  // Keep the high-cardinality ids as structured metadata, not labels.
+  stage.structured_metadata {
+    values = {
+      trace_id = "",
+      span_id  = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
