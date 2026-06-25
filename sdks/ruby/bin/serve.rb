@@ -17,6 +17,10 @@
 #   BLOK_TRANSPORT "http" | "grpc" | "both" (default: "http")
 #   HOST           Bind address (default: 0.0.0.0)
 #   LOG_LEVEL      DEBUG | INFO | WARN | ERROR (default: INFO)
+#   BLOK_NODES_DIR Directory of user-authored nodes to discover (each in a
+#                  `<name>/node.rb` subclassing Blok::Node::NodeHandler). Set by
+#                  blokctl to the project's `runtimes/ruby/nodes`. When unset,
+#                  only the SDK's built-in example nodes load.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
@@ -38,12 +42,17 @@ registry.register("chain-test", ChainTestNode.new)
 registry.register("blok-error-demo", BlokErrorDemoNode.new)
 registry.register("typed-greet", TypedGreetNode.new)
 
+# Discover user-authored nodes from BLOK_NODES_DIR (set by blokctl to the
+# project's runtimes/ruby/nodes). Each lives in <name>/node.rb subclassing
+# Blok::Node::NodeHandler; no manual registration. Unset => built-ins only.
+user_node_count = Blok::Node.load_user_nodes(registry, ENV["BLOK_NODES_DIR"])
+
 logger = Blok::Logging::Logger.new(config.log_level)
 registry.use(Blok::Middleware::RecoveryMiddleware.new)
 registry.use(Blok::Middleware::LoggingMiddleware.new(logger))
 
 warn "Blok Ruby SDK starting (transport=#{config.transport}, http_port=#{config.port}, " \
-     "grpc_port=#{config.grpc_port}, #{registry.node_names.length} nodes)"
+     "grpc_port=#{config.grpc_port}, #{registry.node_names.length} nodes, #{user_node_count} user)"
 
 # Lazy-load the gRPC server only when we actually need it. This keeps the
 # HTTP-only path free of grpc dependency load time.

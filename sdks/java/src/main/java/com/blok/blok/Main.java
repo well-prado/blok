@@ -34,6 +34,10 @@ public class Main {
         registry.register("blok-error-demo", new BlokErrorDemoNode());
         registry.register("typed-greet", new com.blok.blok.nodes.TypedGreetNode());
 
+        // Register user nodes scaffolded under runtimes/java/nodes. No-op in the
+        // SDK tree; blokctl regenerates UserNodeRegistry.java per project.
+        UserNodeRegistry.registerUserNodes(registry);
+
         Logger logger = new Logger(config.getLogLevel());
         registry.use(new RecoveryMiddleware());
         registry.use(new LoggingMiddleware(logger));

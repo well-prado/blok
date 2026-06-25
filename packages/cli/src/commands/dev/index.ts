@@ -1,10 +1,21 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import child_process from "node:child_process";
 import path from "node:path";
+import util from "node:util";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import { waitForGrpcPort } from "../../services/health-probe.js";
 import { detectRr } from "../../services/runtime-detector.js";
-import { generateGoNodeRegistry, readProjectConfig, validateProjectRuntimes } from "../../services/runtime-setup.js";
+import {
+	generateCSharpNodeRegistry,
+	generateGoNodeRegistry,
+	generateJavaNodeRegistry,
+	generateRustNodeRegistry,
+	readProjectConfig,
+	validateProjectRuntimes,
+} from "../../services/runtime-setup.js";
+
+const exec = util.promisify(child_process.exec);
 
 const runningProcesses: ChildProcess[] = [];
 
@@ -152,11 +163,11 @@ export async function devProject(opts: OptionValues) {
 				BLOK_TRANSPORT: "grpc",
 			};
 
-			// Python discovers user nodes from this dir at boot (serve.py). The
-			// runtime cwd is .blok/runtimes/python3; user nodes live in the
-			// project's runtimes/python3/nodes.
-			if (rt.kind === "python3") {
-				env.BLOK_NODES_DIR = path.resolve(currentPath, "runtimes", "python3", "nodes");
+			// Dynamic runtimes fs-scan this dir at boot (serve.py / serve.rb /
+			// serve.php). The runtime cwd is .blok/runtimes/<lang>; user nodes
+			// live in the project's runtimes/<lang>/nodes.
+			if (rt.kind === "python3" || rt.kind === "ruby" || rt.kind === "php") {
+				env.BLOK_NODES_DIR = path.resolve(currentPath, "runtimes", rt.kind, "nodes");
 			}
 
 			// Go is compiled — regenerate the user-node registration shim before
@@ -167,6 +178,35 @@ export async function devProject(opts: OptionValues) {
 					generateGoNodeRegistry(currentPath);
 				} catch (err) {
 					console.log(`  Warning: Go user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			// Rust is compiled — regenerate the shim before `cargo run` recompiles.
+			if (rt.kind === "rust") {
+				try {
+					generateRustNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: Rust user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			// C# is compiled — regenerate the shim before `dotnet run` rebuilds.
+			if (rt.kind === "csharp") {
+				try {
+					generateCSharpNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: C# user-node codegen failed: ${(err as Error).message}`);
+				}
+			}
+
+			// Java boots a prebuilt jar (no recompile-on-boot like `go run`), so
+			// codegen the shim AND `mvn package` before spawning.
+			if (rt.kind === "java") {
+				try {
+					generateJavaNodeRegistry(currentPath);
+					await exec("mvn package -q -DskipTests", { cwd: runtimeCwd, timeout: 300000 });
+				} catch (err) {
+					console.log(`  Warning: Java user-node codegen/build failed: ${(err as Error).message}`);
 				}
 			}
 

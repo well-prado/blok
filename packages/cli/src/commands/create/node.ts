@@ -10,23 +10,13 @@ import color from "picocolors";
 import { isNonInteractive, resolveOrThrow } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
 import {
-	csharp_csproj_file,
-	csharp_dockerfile,
 	csharp_node_file,
 	function_first_node_file,
 	go_node_file,
-	java_dockerfile,
 	java_node_file,
-	java_pom_file,
-	php_composer_file,
-	php_dockerfile,
 	php_node_file,
 	python3_file,
-	ruby_dockerfile,
-	ruby_gemfile,
 	ruby_node_file,
-	rust_cargo_file,
-	rust_dockerfile,
 	rust_node_file,
 } from "./utils/Examples.js";
 
@@ -429,21 +419,22 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 			fsExtra.ensureDirSync(dirPath);
 
-			// Create Maven directory structure
-			const srcDir = `${dirPath}/src/main/java/com/blok/nodes`;
+			// Library node: the class lives at the fixed package com.blok.blok.nodes
+			// under src/main/java so blokctl's codegen can copy the package tree into
+			// the build module and register it. No per-node pom.xml / Dockerfile —
+			// the node isn't a standalone service; it's compiled into the SDK jar.
+			const srcDir = `${dirPath}/src/main/java/com/blok/blok/nodes`;
 			fsExtra.ensureDirSync(srcDir);
 
-			// Write Java files with node name replacement
-			const javaNodeContent = java_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const javaPomContent = java_pom_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const javaDockerContent = java_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const pascalName = toPascalCase(nodeName);
+			const javaNodeContent = java_node_file
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName)
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
-			fsExtra.writeFileSync(`${srcDir}/HelloWorldNode.java`, javaNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/pom.xml`, javaPomContent);
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, javaDockerContent);
+			fsExtra.writeFileSync(`${srcDir}/${pascalName}Node.java`, javaNodeContent);
 
 			// Create README
-			const readmeContent = `# ${nodeName}\n\nJava-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			const readmeContent = `# ${nodeName}\n\nJava-based Blok node, compiled into the Java runtime jar.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/java/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -482,24 +473,18 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 			fsExtra.ensureDirSync(dirPath);
 
-			// Create src directory
-			const srcDir = `${dirPath}/src`;
-			fsExtra.ensureDirSync(srcDir);
-
-			// Write Rust files with node name replacement
+			// Library module: the Rust runtime discovers it under runtimes/rust/nodes
+			// and registers it into the shared gRPC server (same model as Go/Python).
+			// No per-node Cargo.toml / Dockerfile — the node isn't a standalone crate.
 			const pascalName = toPascalCase(nodeName);
 			const rustNodeContent = rust_node_file
-				.replace(/\{\{NODE_NAME\}\}/g, nodeName)
-				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName);
-			const rustCargoContent = rust_cargo_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const rustDockerContent = rust_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName)
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
-			fsExtra.writeFileSync(`${srcDir}/main.rs`, rustNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/Cargo.toml`, rustCargoContent);
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, rustDockerContent);
+			fsExtra.writeFileSync(`${dirPath}/node.rs`, rustNodeContent);
 
 			// Create README
-			const readmeContent = `# ${nodeName}\n\nRust-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			const readmeContent = `# ${nodeName}\n\nRust-based Blok node, served by the Rust runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/rust/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -511,7 +496,14 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 					fsExtra.ensureDirSync(currentDir);
 				}
 				const currentNodesDir = `${currentDir}/nodes`;
-				fsExtra.ensureDirSync(currentNodesDir);
+				if (!skipPrompts) {
+					fsExtra.ensureDirSync(currentNodesDir);
+				} else {
+					const nodeDirExists = fsExtra.existsSync(currentNodesDir);
+					if (!nodeDirExists) {
+						fsExtra.ensureDirSync(currentNodesDir);
+					}
+				}
 				dirPath = path.join(currentNodesDir, nodeName);
 			}
 
@@ -522,19 +514,18 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			}
 
 			fsExtra.ensureDirSync(dirPath);
-			const srcDir = `${dirPath}/src/Nodes`;
-			fsExtra.ensureDirSync(srcDir);
 
+			// Library node: the C# runtime discovers it under runtimes/csharp/nodes
+			// and registers it into the shared gRPC server (same model as Go/Python).
+			// No per-node csproj / Dockerfile — the node isn't a standalone service.
 			const pascalName = toPascalCase(nodeName);
-			const csNodeContent = csharp_node_file.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName);
-			const csprojContent = csharp_csproj_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const csDockerContent = csharp_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			const csNodeContent = csharp_node_file
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName)
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
-			fsExtra.writeFileSync(`${srcDir}/${pascalName}Node.cs`, csNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/BlokRuntime.csproj`, csprojContent);
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, csDockerContent);
+			fsExtra.writeFileSync(`${dirPath}/${pascalName}Node.cs`, csNodeContent);
 
-			const readmeContent = `# ${nodeName}\n\nC#/.NET-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			const readmeContent = `# ${nodeName}\n\nC#/.NET-based Blok node, served by the C# runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/csharp/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -560,18 +551,17 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			const srcDir = `${dirPath}/src/Nodes`;
 			fsExtra.ensureDirSync(srcDir);
 
+			// Discoverable node file only: the PHP runtime globs runtimes/php/nodes
+			// at boot (serve.php + BLOK_NODES_DIR) and registers it into the shared
+			// gRPC server. No per-node composer.json / Dockerfile — same model as Python/Go.
 			const pascalName = toPascalCase(nodeName);
 			const phpNodeContent = php_node_file
 				.replace(/\{\{NODE_NAME\}\}/g, nodeName)
 				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName);
-			const phpComposerContent = php_composer_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const phpDockerContent = php_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
 			fsExtra.writeFileSync(`${srcDir}/${pascalName}Node.php`, phpNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/composer.json`, phpComposerContent);
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, phpDockerContent);
 
-			const readmeContent = `# ${nodeName}\n\nPHP-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			const readmeContent = `# ${nodeName}\n\nPHP-based Blok node, served by the PHP runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/php/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -594,21 +584,18 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 			}
 
 			fsExtra.ensureDirSync(dirPath);
-			const libDir = `${dirPath}/lib/nodes`;
-			fsExtra.ensureDirSync(libDir);
 
-			const pascalName = toPascalCase(nodeName);
+			// The Ruby runtime discovers this under runtimes/ruby/nodes/<name>/node.rb
+			// and registers it into the shared gRPC server (same model as Python).
+			// No per-node Gemfile / Dockerfile — the node isn't a standalone service.
 			const rubyNodeContent = ruby_node_file
-				.replace(/\{\{NODE_NAME\}\}/g, nodeName)
-				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, pascalName);
-			const rubyGemContent = ruby_gemfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const rubyDockerContent = ruby_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, toPascalCase(nodeName))
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
-			fsExtra.writeFileSync(`${libDir}/${nodeName.replace(/-/g, "_")}.rb`, rubyNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/Gemfile`, rubyGemContent);
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, rubyDockerContent);
+			fsExtra.writeFileSync(`${dirPath}/node.rb`, rubyNodeContent);
 
-			const readmeContent = `# ${nodeName}\n\nRuby-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			// Create README
+			const readmeContent = `# ${nodeName}\n\nRuby-based Blok node, served by the Ruby runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/ruby/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -642,32 +629,27 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 		if (!currentPath && node_runtime === "java") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/java/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the Java runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "rust") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/rust/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the Rust runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "csharp") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/csharp/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the C# runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "php") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/php/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the PHP runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "ruby") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/ruby/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the Ruby runtime discovers and registers this node automatically.`);
 		}
 
 		console.log("\nFor more documentation, visit https://blok.build/docs/d/core-concepts/nodes");
