@@ -1223,9 +1223,8 @@ export class PostgresRunStore implements RunStore {
 
 	// === Concurrency gating (Tier 2 #6) ===
 	// Sync grants happen on the in-memory mirror; PG mirror is async-only.
-	// Cross-process coordination via the gate itself requires the dedicated
-	// `BLOK_CONCURRENCY_BACKEND=nats-kv` backend (Tier 2 #6 follow-up).
-	// PG persistence here is purely for crash-recovery — boot loads active
+	// The gate is single-process (in-process backend); PG persistence here is
+	// purely for crash-recovery — boot loads active
 	// (un-expired) leases back into memory so a process restart doesn't
 	// over-grant.
 

@@ -25,16 +25,6 @@ services:
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://blok:${RABBITMQ_PASSWORD:-blok_prod}@rabbitmq:5672
       NATS_URL: nats://nats:4222
-      # ── Cross-replica coordination (this service runs replicas: 3 below) ──
-      # The concurrency gate and debounce windows default to an IN-PROCESS
-      # (per-replica) backend. With replicas > 1 that silently fragments
-      # per-tenant concurrency limits and runs each debounce window N times.
-      # Point them at the shared Redis service so all replicas coordinate.
-      # (Requires a redis client dep — e.g. `ioredis` — in the image.)
-      BLOK_CONCURRENCY_BACKEND: redis
-      BLOK_CONCURRENCY_REDIS_URL: redis://redis:6379
-      BLOK_DEBOUNCE_BACKEND: redis
-      BLOK_DEBOUNCE_REDIS_URL: redis://redis:6379
       # Webhook idempotency dedup AND the durable scheduler share the trace
       # store, which defaults to per-replica in-memory/sqlite — NOT shared
       # across replicas. For cross-replica idempotency + durable scheduling,

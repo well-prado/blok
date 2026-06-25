@@ -90,19 +90,6 @@ import {
 // Queue-mode TTL expiry (PR 1-5 polish · 410 Gone vs 429)
 import { QueueExpiredError, type QueueExpiredInfo, isQueueExpiredError } from "./concurrency/QueueExpiredError";
 
-// Cross-process concurrency backend (Tier 2 #6 follow-up)
-import type { ConcurrencyBackend } from "./concurrency/ConcurrencyBackend";
-import {
-	NatsKvConcurrencyBackend,
-	type NatsKvConcurrencyConfig,
-	readNatsKvConfigFromEnv,
-} from "./concurrency/NatsKvConcurrencyBackend";
-import {
-	RedisConcurrencyBackend,
-	type RedisConcurrencyConfig,
-	readRedisConfigFromEnv,
-} from "./concurrency/RedisConcurrencyBackend";
-import { createConcurrencyBackend } from "./concurrency/createConcurrencyBackend";
 import {
 	CONCURRENCY_DEFAULTS,
 	type NormalizedConcurrencyConfig,
@@ -125,12 +112,6 @@ import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 // Janitor sweep OTel metrics (PR 3 D3)
 import { JanitorMetrics } from "./monitoring/JanitorMetrics";
 
-import type {
-	DebounceBackend,
-	DebounceFinalizeResult,
-	DebounceRegisterBackendOpts,
-	DebounceRegisterBackendResult,
-} from "./scheduling/DebounceBackend";
 // Scheduling — delay / TTL / debounce (Tier 2 #5 + #7) + cross-process debounce (Tier C #1)
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import {
@@ -143,17 +124,7 @@ import {
 	type DeferredScheduleOptions,
 	getSchedulerClaimLeaseMs,
 } from "./scheduling/DeferredRunScheduler";
-import {
-	NatsKvDebounceBackend,
-	type NatsKvDebounceConfig,
-	readNatsKvDebounceConfigFromEnv,
-} from "./scheduling/NatsKvDebounceBackend";
-import {
-	RedisDebounceBackend,
-	type RedisDebounceConfig,
-	readRedisDebounceConfigFromEnv,
-} from "./scheduling/RedisDebounceBackend";
-import { createDebounceBackend } from "./scheduling/createDebounceBackend";
+
 import {
 	type NormalizedDebounceConfig,
 	type NormalizedSchedulingConfig,
@@ -281,15 +252,6 @@ export {
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,
-	// Cross-process concurrency backend (Tier 2 #6 follow-up)
-	type ConcurrencyBackend,
-	createConcurrencyBackend,
-	NatsKvConcurrencyBackend,
-	type NatsKvConcurrencyConfig,
-	readNatsKvConfigFromEnv,
-	RedisConcurrencyBackend,
-	type RedisConcurrencyConfig,
-	readRedisConfigFromEnv,
 	// Per-step timeout (Tier 2 quick-wins)
 	StepTimeoutError,
 	isStepTimeoutError,
@@ -318,18 +280,6 @@ export {
 	type NormalizedDebounceConfig,
 	type NormalizedSchedulingConfig,
 	SCHEDULING_DEFAULTS,
-	// Cross-process debounce backend (Tier C #1)
-	type DebounceBackend,
-	type DebounceRegisterBackendOpts,
-	type DebounceRegisterBackendResult,
-	type DebounceFinalizeResult,
-	createDebounceBackend,
-	NatsKvDebounceBackend,
-	type NatsKvDebounceConfig,
-	readNatsKvDebounceConfigFromEnv,
-	RedisDebounceBackend,
-	type RedisDebounceConfig,
-	readRedisDebounceConfigFromEnv,
 	TracingLogger,
 	traceSanitize,
 	traceRedactSensitive,
