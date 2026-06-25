@@ -11,8 +11,10 @@ import type {
 	MetadataOp,
 	NodeRun,
 	RunEvent,
+	RunEventType,
 	TraceLogEntry,
 	WorkflowRun,
+	WorkflowRunStatus,
 	WorkflowSummary,
 } from "./types";
 
@@ -31,6 +33,35 @@ const REPLAY_HEADER_DENYLIST = new Set([
 	"x-api-key",
 	"x-auth-token",
 	"proxy-authorization",
+]);
+
+/**
+ * OBS-04 — run statuses/events from which NO further events ever follow, so an
+ * SSE stream watching a single run can safely close. Excludes the transient /
+ * ambiguous states: "running"/"pending" (not done), "delayed"/"queued" (resume
+ * to "running" later), and "debounced" (terminal in leading mode but transient
+ * in trailing — closing early would cut off a trailing-debounce run mid-flight).
+ * Before this, the stream only closed on completed/failed, so a run that ended
+ * crashed/timedOut/throttled/expired/cancelled left the client hanging on an
+ * open socket until it disconnected.
+ */
+export const TERMINAL_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
+	"completed",
+	"failed",
+	"cancelled",
+	"crashed",
+	"timedOut",
+	"throttled",
+	"expired",
+]);
+export const TERMINAL_RUN_EVENTS: ReadonlySet<RunEventType> = new Set([
+	"RUN_COMPLETED",
+	"RUN_FAILED",
+	"RUN_CANCELLED",
+	"RUN_CRASHED",
+	"RUN_TIMED_OUT",
+	"RUN_THROTTLED",
+	"RUN_EXPIRED",
 ]);
 
 function filterReplayHeaders(headers: Record<string, string> | undefined): Record<string, string> {
@@ -1739,7 +1770,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		}
 
 		// If run already finished, close stream
-		if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+		if (TERMINAL_RUN_STATUSES.has(run.status)) {
 			res.write('event: stream-end\ndata: {"reason":"run_finished"}\n\n');
 			res.end();
 			return;
@@ -1751,7 +1782,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			writeSSE(res, event);
 
 			// Auto-close when run finishes
-			if (event.type === "RUN_COMPLETED" || event.type === "RUN_FAILED") {
+			if (TERMINAL_RUN_EVENTS.has(event.type)) {
 				res.write('event: stream-end\ndata: {"reason":"run_finished"}\n\n');
 				res.end();
 			}
