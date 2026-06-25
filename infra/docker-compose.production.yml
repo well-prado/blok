@@ -20,23 +20,27 @@ services:
       PORT: 4000
       WORKFLOWS_PATH: /app/workflows
       NODES_PATH: /app/src/nodes
-      CONSOLE_LOG_ACTIVE: "false"
+      # Emit structured JSON logs (run_id/trace_id) to stdout. Setting this to
+      # "false" silences DefaultLogger + StructuredLogger entirely — never do
+      # that in prod or you lose all container-log observability.
+      CONSOLE_LOG_ACTIVE: "true"
       APP_NAME: blok-production
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://blok:${RABBITMQ_PASSWORD:-blok_prod}@rabbitmq:5672
       NATS_URL: nats://nats:4222
-      # Webhook idempotency dedup AND the durable scheduler share the trace
-      # store, which defaults to per-replica in-memory/sqlite — NOT shared
-      # across replicas. For cross-replica idempotency + durable scheduling,
-      # run a shared Postgres trace store: add a `postgres` service and set
-      #   BLOK_TRACE_STORE: postgres
-      #   DATABASE_URL: postgres://user:pass@postgres:5432/blok
-      # (requires `pg` in the image). Left commented — no Postgres ships here.
+      # Shared Postgres trace store. The webhook idempotency dedup AND the
+      # durable scheduler live in the trace store; the in-memory/sqlite default
+      # is per-replica, so with replicas:3 both break. Postgres makes them
+      # cross-replica durable. `pg` ships in the deploy image.
+      BLOK_TRACE_STORE: postgres
+      BLOK_TRACE_DATABASE_URL: postgres://blok:${POSTGRES_PASSWORD:-blok_prod}@postgres:5432/blok
       PROMETHEUS_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
       SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
@@ -89,6 +93,28 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
+    networks:
+      - blok-net
+
+  # ─── Postgres (trace store: idempotency dedup + durable scheduler) ──
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: blok
+      POSTGRES_USER: blok
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blok_prod}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blok -d blok"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
     networks:
       - blok-net
 
@@ -233,6 +259,7 @@ services:
       - blok-net
 
 volumes:
+  postgres-data:
   redis-data:
   rabbitmq-data:
   nats-data:
