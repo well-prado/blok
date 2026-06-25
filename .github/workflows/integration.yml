@@ -1,11 +1,33 @@
 name: Integration tests
 
 on:
+  # Skip the heavy suite for changes that can't affect the TypeScript under test
+  # (docs, markdown, Helm chart, Grafana/Prometheus infra). A PR touching ONLY
+  # these never starts a runner — e.g. a Helm-only PR no longer burns 8 minutes.
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
   workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit lands on the same branch/PR — don't
+# pay Actions minutes for a SHA you've already superseded. Run the full job
+# locally first with `bun run ci` to avoid pushing a known-red SHA at all.
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

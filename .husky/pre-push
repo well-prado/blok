@@ -1,5 +1,16 @@
-# Pre-push gate — mirrors CI's build step so type/compile errors are caught
-# locally before they reach GitHub Actions. nx caches build outputs, so after
-# the first run only changed packages (and their dependents) rebuild.
-# Skip with `git push --no-verify` if you must.
+# Pre-push gate — FAST by default (lint + type/compile build) so pushing stays
+# snappy. nx caches build outputs, so after the first run only changed packages
+# (and their dependents) rebuild. Skip with `git push --no-verify`.
+#
+# The full real-broker suite (~8min, needs Docker) is too slow to run on every
+# push, so it is NOT run here by default. Validate it on demand instead:
+#   bun run ci          # mirror the GitHub integration job locally
+#   bun run ci:all      # + the 7-language cross-runtime lane
+# Or opt into the full integration lane on this push:
+#   BLOK_PREPUSH_CI=1 git push
 bun run lint:check && bunx nx run-many -t build
+
+if [ "${BLOK_PREPUSH_CI:-0}" = "1" ]; then
+  echo "[pre-push] BLOK_PREPUSH_CI=1 → running full local integration lane (bun run ci)"
+  bun run ci
+fi

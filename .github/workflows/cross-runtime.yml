@@ -8,11 +8,31 @@ name: Cross-runtime gRPC
 # skip.
 
 on:
+  # Skip the 7-image polyglot build for changes that can't affect the runtimes
+  # (docs, markdown, Helm chart, Grafana/Prometheus infra).
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
   workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit lands on the same branch/PR — this
+# lane builds 7 Docker images, so a superseded run is expensive to leave running.
+concurrency:
+  group: cross-runtime-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
