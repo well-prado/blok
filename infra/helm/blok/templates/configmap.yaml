@@ -5,6 +5,18 @@ metadata:
   labels:
     {{- include "blok.labels" . | nindent 4 }}
 data:
+  {{- $ts := .Values.traceStore }}
+  BLOK_TRACE_STORE: {{ $ts.backend | quote }}
+  {{- if eq $ts.backend "sqlite" }}
+  BLOK_TRACE_SQLITE_PATH: {{ $ts.sqlite.path | quote }}
+  {{- else if eq $ts.backend "postgres" }}
+  {{- if not $ts.postgres.url }}
+  {{- fail "traceStore.backend=postgres requires traceStore.postgres.url" }}
+  {{- end }}
+  BLOK_TRACE_DATABASE_URL: {{ $ts.postgres.url | quote }}
+  BLOK_TRACE_PG_POOL_SIZE: {{ $ts.postgres.poolSize | quote }}
+  BLOK_TRACE_PG_SSL: {{ $ts.postgres.ssl | quote }}
+  {{- end }}
   {{- range $key, $value := .Values.env }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}

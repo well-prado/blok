@@ -135,13 +135,18 @@ ingress:
         - blok.example.com
 
 # ─── Monitoring ───────────────────────────────────────────
-serviceMonitor:
+# serviceMonitor lives UNDER monitoring — the chart's servicemonitor.yaml reads
+# .Values.monitoring.serviceMonitor.*, so a top-level serviceMonitor block never
+# took effect (the ServiceMonitor silently never rendered).
+monitoring:
   enabled: true
-  interval: 15s
-  scrapeTimeout: 10s
-  path: /metrics
-  labels:
-    release: prometheus
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+    scrapeTimeout: 10s
+    path: /metrics
+    labels:
+      release: prometheus
 
 # ─── Environment ──────────────────────────────────────────
 env:

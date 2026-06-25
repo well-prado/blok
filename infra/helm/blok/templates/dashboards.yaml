@@ -1,0 +1,20 @@
+{{- if .Values.monitoring.grafanaDashboards.enabled -}}
+{{- $root := . -}}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $name := base $path | trimSuffix ".json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "blok.fullname" $root }}-dashboard-{{ $name }}
+  labels:
+    {{- include "blok.labels" $root | nindent 4 }}
+    grafana_dashboard: "1"
+    {{- with $root.Values.monitoring.grafanaDashboards.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  {{ base $path }}: |-
+    {{- $root.Files.Get $path | nindent 4 }}
+{{- end }}
+{{- end }}

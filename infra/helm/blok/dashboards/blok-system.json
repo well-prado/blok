@@ -1,0 +1,175 @@
+{
+	"annotations": {
+		"list": []
+	},
+	"editable": true,
+	"fiscalYearStartMonth": 0,
+	"graphTooltip": 1,
+	"id": null,
+	"links": [],
+	"panels": [
+		{
+			"title": "Process Heap Memory",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "bytes",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 20
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_process_memory_heap_bytes",
+					"legendFormat": "{{trigger_type}} heap"
+				}
+			]
+		},
+		{
+			"title": "Process RSS Memory",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "bytes",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 20
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_process_memory_rss_bytes",
+					"legendFormat": "{{trigger_type}} RSS"
+				}
+			]
+		},
+		{
+			"title": "Workflow Memory Usage (Max MB)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "decmbytes",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "workflow_memory",
+					"legendFormat": "{{workflow_name}} max"
+				},
+				{
+					"expr": "workflow_memory_average",
+					"legendFormat": "{{workflow_name}} avg"
+				}
+			]
+		},
+		{
+			"title": "Workflow CPU Usage (%)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percent",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "workflow_cpu",
+					"legendFormat": "{{workflow_name}} usage"
+				},
+				{
+					"expr": "workflow_cpu_average",
+					"legendFormat": "{{workflow_name}} avg"
+				}
+			]
+		},
+		{
+			"title": "System Memory (Total / Free)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "decmbytes",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 15
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "workflow_memory_total",
+					"legendFormat": "Total Memory (MB)"
+				},
+				{
+					"expr": "workflow_memory_free",
+					"legendFormat": "Free Memory (MB)"
+				}
+			]
+		},
+		{
+			"title": "Workflow Execution Time (ms)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ms",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "workflow_time",
+					"legendFormat": "{{workflow_name}}"
+				}
+			]
+		}
+	],
+	"schemaVersion": 39,
+	"tags": ["blok", "system"],
+	"templating": {
+		"list": [
+			{
+				"name": "DS_PROMETHEUS",
+				"type": "datasource",
+				"query": "prometheus",
+				"current": {
+					"selected": true,
+					"text": "prometheus",
+					"value": "prometheus"
+				}
+			}
+		]
+	},
+	"time": { "from": "now-1h", "to": "now" },
+	"title": "Blok - System Resources",
+	"uid": "blok-system"
+}

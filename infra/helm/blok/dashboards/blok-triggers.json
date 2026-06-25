@@ -1,0 +1,258 @@
+{
+	"annotations": {
+		"list": []
+	},
+	"editable": true,
+	"fiscalYearStartMonth": 0,
+	"graphTooltip": 1,
+	"id": null,
+	"links": [],
+	"panels": [
+		{
+			"title": "Requests by Trigger Type",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "reqps",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 15
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(blok_workflow_executions_total{trigger_type=~\"$trigger_type\"}[$__rate_interval])) by (trigger_type)",
+					"legendFormat": "{{trigger_type}}"
+				}
+			]
+		},
+		{
+			"title": "Latency Percentiles",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 5
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_trigger_latency_p50_seconds{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "p50 {{trigger_name}}"
+				},
+				{
+					"expr": "blok_trigger_latency_p95_seconds{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "p95 {{trigger_name}}"
+				},
+				{
+					"expr": "blok_trigger_latency_p99_seconds{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "p99 {{trigger_name}}"
+				}
+			]
+		},
+		{
+			"title": "Error Distribution",
+			"type": "piechart",
+			"gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"color": { "mode": "palette-classic" }
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(blok_workflow_errors_total{trigger_type=~\"$trigger_type\"}) by (error_category)",
+					"legendFormat": "{{error_category}}"
+				}
+			]
+		},
+		{
+			"title": "Circuit Breaker State",
+			"type": "stat",
+			"gridPos": { "h": 4, "w": 4, "x": 8, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"mappings": [
+						{
+							"type": "value",
+							"options": { "0": { "text": "CLOSED", "color": "green" } }
+						},
+						{
+							"type": "value",
+							"options": { "1": { "text": "OPEN", "color": "red" } }
+						},
+						{
+							"type": "value",
+							"options": { "2": { "text": "HALF_OPEN", "color": "yellow" } }
+						}
+					],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{ "color": "green", "value": null },
+							{ "color": "red", "value": 1 },
+							{ "color": "yellow", "value": 2 }
+						]
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_circuit_breaker_state{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "{{trigger_name}}"
+				}
+			]
+		},
+		{
+			"title": "Rate Limiter Remaining",
+			"type": "gauge",
+			"gridPos": { "h": 4, "w": 4, "x": 12, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{ "color": "red", "value": null },
+							{ "color": "yellow", "value": 10 },
+							{ "color": "green", "value": 50 }
+						]
+					},
+					"min": 0,
+					"max": 100
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_rate_limiter_remaining{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "{{trigger_name}}"
+				}
+			]
+		},
+		{
+			"title": "Success Rate by Trigger",
+			"type": "timeseries",
+			"gridPos": { "h": 4, "w": 8, "x": 16, "y": 8 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percentunit",
+					"min": 0,
+					"max": 1,
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					},
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{ "color": "red", "value": null },
+							{ "color": "yellow", "value": 0.95 },
+							{ "color": "green", "value": 0.99 }
+						]
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_trigger_success_rate{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "{{trigger_type}} / {{trigger_name}}"
+				}
+			]
+		},
+		{
+			"title": "Active Connections by Trigger",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"custom": {
+						"drawStyle": "bars",
+						"fillOpacity": 50
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_trigger_active_connections{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "{{trigger_type}} / {{trigger_name}}"
+				}
+			]
+		},
+		{
+			"title": "Throughput by Trigger (RPS)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "reqps",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "blok_trigger_throughput_rps{trigger_type=~\"$trigger_type\", trigger_name=~\"$trigger_name\"}",
+					"legendFormat": "{{trigger_type}} / {{trigger_name}}"
+				}
+			]
+		}
+	],
+	"schemaVersion": 39,
+	"tags": ["blok", "triggers"],
+	"templating": {
+		"list": [
+			{
+				"name": "DS_PROMETHEUS",
+				"type": "datasource",
+				"query": "prometheus",
+				"current": {
+					"selected": true,
+					"text": "prometheus",
+					"value": "prometheus"
+				}
+			},
+			{
+				"name": "trigger_type",
+				"type": "query",
+				"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+				"query": "label_values(blok_workflow_executions_total, trigger_type)",
+				"includeAll": true,
+				"multi": true,
+				"current": { "selected": true, "text": "All", "value": "$__all" }
+			},
+			{
+				"name": "trigger_name",
+				"type": "query",
+				"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+				"query": "label_values(blok_workflow_executions_total{trigger_type=~\"$trigger_type\"}, trigger_name)",
+				"includeAll": true,
+				"multi": true,
+				"current": { "selected": true, "text": "All", "value": "$__all" }
+			}
+		]
+	},
+	"time": { "from": "now-1h", "to": "now" },
+	"title": "Blok - Trigger Monitoring",
+	"uid": "blok-triggers"
+}
