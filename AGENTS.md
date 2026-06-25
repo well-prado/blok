@@ -1282,6 +1282,7 @@ import { z } from "zod";
 
 ## Do
 
+- **Keep the GitHub Project board in sync.** Roadmap work is tracked in Project #3 ("Blok Core Simplification", https://github.com/users/well-prado/projects/3). When you start a task move its issue Status → In Progress; comment findings/decisions/blockers on the issue; close stale/done issues with an explanation; and use `Closes #N` in the PR body for every task + epic so merge auto-closes them. If you spawn sub-agents to work the board, tell them to do the same.
 - Use `$.state.<id>` (or `js/ctx.state.<id>`) to pass data between non-adjacent steps — every step default-stores its output there
 - Opt out with `ephemeral: true` when a step is a side effect only
 - Use Zod schemas for all input/output validation in defineNode

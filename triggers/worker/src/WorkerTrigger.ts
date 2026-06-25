@@ -38,8 +38,6 @@ import {
 	type TriggerResponse,
 	WorkflowRegistry,
 	bootstrapTracing,
-	createConcurrencyBackend,
-	createDebounceBackend,
 } from "@blokjs/runner";
 import type { Context, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
@@ -291,55 +289,6 @@ export abstract class WorkerTrigger extends TriggerBase {
 		this.seedGlobalMiddlewareFromEnv(this.logger);
 
 		try {
-			// Tier 2 #6 follow-up · install the cross-process concurrency
-			// backend (NATS KV) when the operator opted in via
-			// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null preserves the
-			// existing in-process behavior.
-			//
-			// PR 3 D1 — record install attempts via OTel counter.
-			try {
-				const backend = createConcurrencyBackend();
-				if (backend) {
-					await backend.connect();
-					RunTracker.getInstance().setConcurrencyBackend(backend);
-					ConcurrencyMetrics.getInstance().recordBackendInstall({
-						backend: backend.name,
-						status: "success",
-					});
-					this.logger.log(`[concurrency] backend installed: ${backend.name}`);
-				}
-			} catch (err) {
-				ConcurrencyMetrics.getInstance().recordBackendInstall({
-					backend: "unknown",
-					status: "failure",
-				});
-				this.logger.error(
-					`[concurrency] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
-				);
-			}
-
-			// Tier C #1 · install the cross-process debounce backend
-			// (NATS KV / Redis) when the operator opted in via
-			// `BLOK_DEBOUNCE_BACKEND`. Default unset = the existing
-			// in-process behavior is preserved. On connect failure, log +
-			// fall back to in-memory coordination.
-			try {
-				const debounceBackend = createDebounceBackend();
-				if (debounceBackend) {
-					const leaseRaw = process.env.BLOK_DEBOUNCE_OWNER_LEASE_MS;
-					if (leaseRaw && /^\d+$/.test(leaseRaw)) {
-						DebounceCoordinator.getInstance().setOwnerLeaseMs(Number(leaseRaw));
-					}
-					await debounceBackend.connect();
-					DebounceCoordinator.getInstance().setBackend(debounceBackend);
-					this.logger.log(`[debounce] backend installed: ${debounceBackend.name}`);
-				}
-			} catch (err) {
-				this.logger.error(
-					`[debounce] backend install failed: ${err instanceof Error ? err.message : String(err)}; falling back to in-memory coordination`,
-				);
-			}
-
 			// Tier 2 quick-wins follow-up · install crash handlers + recover
 			// orphaned runs from a previous (dead) process. Idempotent + opt-out
 			// via `BLOK_CRASH_AUTOFLIP_DISABLED=1`.

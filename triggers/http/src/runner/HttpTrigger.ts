@@ -20,8 +20,6 @@ import { PayloadTooLargeError } from "@blokjs/runner";
 import { RunTracker } from "@blokjs/runner";
 import { traceRedactSensitive } from "@blokjs/runner";
 import type { TraceAuthorizeFn } from "@blokjs/runner";
-import { createConcurrencyBackend } from "@blokjs/runner";
-import { DebounceCoordinator, createDebounceBackend } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
 import { type Context, GlobalError, type RequestContext, type StreamContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
@@ -1086,78 +1084,6 @@ export default class HttpTrigger extends TriggerBase {
 					HttpTrigger.installShutdownHandlers(this, this.logger);
 				} catch (err) {
 					this.logger.error(`[shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
-				}
-
-				// Tier 2 #6 follow-up · install the cross-process concurrency
-				// backend (NATS KV) when the operator opted in via
-				// `BLOK_CONCURRENCY_BACKEND=nats-kv`. Default null = the existing
-				// in-process behavior is preserved (zero overhead).
-				//
-				// PR 3 D1 — record install attempts via OTel counter so the
-				// silent fallback (connect failure → in-process) is visible.
-				try {
-					const backend = createConcurrencyBackend();
-					if (backend) {
-						backend
-							.connect()
-							.then(() => {
-								RunTracker.getInstance().setConcurrencyBackend(backend);
-								ConcurrencyMetrics.getInstance().recordBackendInstall({
-									backend: backend.name,
-									status: "success",
-								});
-								this.logger.log(`[concurrency] backend installed: ${backend.name}`);
-							})
-							.catch((err: unknown) => {
-								ConcurrencyMetrics.getInstance().recordBackendInstall({
-									backend: backend.name,
-									status: "failure",
-								});
-								this.logger.error(
-									`[concurrency] backend connect failed (${backend.name}): ${err instanceof Error ? err.message : String(err)}; falling back to in-process behavior`,
-								);
-							});
-					}
-				} catch (err) {
-					ConcurrencyMetrics.getInstance().recordBackendInstall({
-						backend: "unknown",
-						status: "failure",
-					});
-					this.logger.error(
-						`[concurrency] createConcurrencyBackend failed: ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
-
-				// Tier C #1 · install the cross-process debounce backend
-				// (NATS KV / Redis) when the operator opted in via
-				// `BLOK_DEBOUNCE_BACKEND`. Default unset = the existing
-				// in-process DebounceCoordinator behavior is preserved
-				// (zero overhead). On connect failure, log + fall back to
-				// in-memory window coordination so the trigger still serves
-				// traffic.
-				try {
-					const debounceBackend = createDebounceBackend();
-					if (debounceBackend) {
-						const leaseRaw = process.env.BLOK_DEBOUNCE_OWNER_LEASE_MS;
-						if (leaseRaw && /^\d+$/.test(leaseRaw)) {
-							DebounceCoordinator.getInstance().setOwnerLeaseMs(Number(leaseRaw));
-						}
-						debounceBackend
-							.connect()
-							.then(() => {
-								DebounceCoordinator.getInstance().setBackend(debounceBackend);
-								this.logger.log(`[debounce] backend installed: ${debounceBackend.name}`);
-							})
-							.catch((err: unknown) => {
-								this.logger.error(
-									`[debounce] backend connect failed (${debounceBackend.name}): ${err instanceof Error ? err.message : String(err)}; falling back to in-memory coordination`,
-								);
-							});
-					}
-				} catch (err) {
-					this.logger.error(
-						`[debounce] createDebounceBackend failed: ${err instanceof Error ? err.message : String(err)}`,
-					);
 				}
 
 				// Tier 2 #5+#7 follow-up · re-fire HTTP dispatches that were

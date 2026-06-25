@@ -1199,9 +1199,8 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 	 * GET /__blok/concurrency/health
 	 */
 	router.get("/concurrency/health", (_req: TraceRequest, res: TraceResponse) => {
-		const backend = t.getConcurrencyBackend();
 		res.json({
-			backend: backend?.name ?? "in-process",
+			backend: "in-process",
 			disabled: process.env.BLOK_CONCURRENCY_DISABLED === "1",
 			leaseMs: process.env.BLOK_CONCURRENCY_LEASE_MS ? Number(process.env.BLOK_CONCURRENCY_LEASE_MS) : 60 * 60 * 1000,
 		});

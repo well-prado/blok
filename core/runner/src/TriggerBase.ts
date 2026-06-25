@@ -406,39 +406,6 @@ export default abstract class TriggerBase extends Trigger {
 					// Best-effort.
 				}
 
-				// 4. Disconnect cross-process concurrency backend.
-				//
-				// PR 3 D5 — wrap disconnect() in a Promise.race timeout so a
-				// slow NATS drain doesn't hang past the SIGTERM-to-SIGKILL
-				// window. Default 10s; configurable via
-				// BLOK_BACKEND_DISCONNECT_TIMEOUT_MS. Timer is .unref()'d so
-				// it doesn't keep the event loop alive after a successful
-				// disconnect.
-				const backend = RunTracker.getInstance().getConcurrencyBackend();
-				if (backend) {
-					const disconnectTimeoutMs = (() => {
-						const raw = process.env.BLOK_BACKEND_DISCONNECT_TIMEOUT_MS;
-						if (!raw || !/^\d+$/.test(raw)) return 10_000;
-						return Number(raw);
-					})();
-					try {
-						await Promise.race([
-							backend.disconnect(),
-							new Promise<never>((_, reject) => {
-								const t = setTimeout(
-									() => reject(new Error(`backend.disconnect() timed out after ${disconnectTimeoutMs}ms`)),
-									disconnectTimeoutMs,
-								);
-								t.unref?.();
-							}),
-						]);
-					} catch (err) {
-						logger?.error?.(
-							`[blok][shutdown] backend disconnect failed (or timed out): ${err instanceof Error ? err.message : String(err)}`,
-						);
-					}
-				}
-
 				logger?.log?.("[blok][shutdown] graceful shutdown complete");
 			} catch (err) {
 				logger?.error?.(`[blok][shutdown] drain error: ${err instanceof Error ? err.message : String(err)}`);
