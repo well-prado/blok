@@ -27,6 +27,10 @@ func main() {
 	// Register all example nodes
 	nodes.RegisterAll(registry)
 
+	// Register user nodes scaffolded under runtimes/go/nodes. This is a no-op
+	// in the SDK tree; blokctl regenerates register_user_nodes.go per project.
+	registerUserNodes(registry)
+
 	// Add middleware
 	logger := blok.NewLogger(blok.LogLevelInfo)
 	registry.Use(

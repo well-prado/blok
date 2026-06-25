@@ -131,83 +131,46 @@ stderr_logfile=/var/log/python.err.log
 stdout_logfile=/var/log/python.out.log
 `;
 
-const go_node_file = `package main
+// Go user-node template. A *library* package — the Go runtime discovers it
+// under runtimes/go/nodes/, generates a registration shim, and serves it over
+// the shared gRPC port alongside the built-in nodes (same model as Python).
+// Run `blokctl dev` to load it; no per-node server or Dockerfile.
+const go_node_file = `// {{NODE_NAME}} — a Blok node for the Go runtime.
+package {{NODE_PKG}}
 
 import (
-	"github.com/blok/sdk"
+	blok "github.com/nickincloud/blok-go"
 )
 
-type HelloWorldNode struct{}
+// {{NODE_NAME_PASCAL}}Node implements blok.NodeHandler.
+type {{NODE_NAME_PASCAL}}Node struct{}
 
-func (n *HelloWorldNode) Execute(ctx *sdk.Context, config map[string]interface{}) (*sdk.ExecutionResult, error) {
-	// Access request body
+// Execute runs the node. Input arrives on ctx.Request; config holds the step's
+// inputs from the workflow. Return any JSON-serialisable value (or an error).
+func (n *{{NODE_NAME_PASCAL}}Node) Execute(ctx *blok.Context, config map[string]interface{}) (interface{}, error) {
 	name := "World"
-	if body, ok := ctx.Request.Body.(map[string]interface{}); ok {
-		if nameVal, ok := body["name"].(string); ok {
-			name = nameVal
+	if body := ctx.Request.BodyMap(); body != nil {
+		if v, ok := body["name"].(string); ok {
+			name = v
 		}
 	}
 
-	// Access configuration
 	prefix := "Hello"
-	if prefixVal, ok := config["prefix"].(string); ok {
-		prefix = prefixVal
+	if v, ok := config["prefix"].(string); ok {
+		prefix = v
 	}
 
-	// Store result in context for downstream nodes
-	ctx.Vars["greeting"] = prefix + ", " + name + "!"
-
-	// Return successful result
-	return &sdk.ExecutionResult{
-		Success: true,
-		Data: map[string]interface{}{
-			"message": prefix + ", " + name + "!",
-			"timestamp": sdk.GetCurrentTimestamp(),
-			"language": "Go",
-		},
-		Errors: nil,
+	return map[string]interface{}{
+		"message":  prefix + ", " + name + "!",
+		"language": "Go",
 	}, nil
 }
 
-func main() {
-	// Register node
-	registry := sdk.NewNodeRegistry()
-	registry.Register("{{NODE_NAME}}", &HelloWorldNode{})
-
-	// Start HTTP server
-	server := sdk.NewHTTPServer(registry, ":8080")
-	if err := server.Start(); err != nil {
-		panic(err)
-	}
+// Register wires this node into the runtime registry. The generated
+// register_user_nodes.go calls it for every node under runtimes/go/nodes.
+func Register(registry *blok.NodeRegistry) {
+	registry.Register("{{NODE_NAME}}", &{{NODE_NAME_PASCAL}}Node{})
 }
-`;
-
-const go_mod_file = `module github.com/blok/nodes/{{NODE_NAME}}
-
-go 1.21
-
-require github.com/blok/sdk v1.0.0
-`;
-
-const go_dockerfile = `FROM golang:1.21-alpine AS builder
-
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /node main.go
-
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /node .
-
-EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \\
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
-
-CMD ["./node"]
 `;
 
 const java_node_file = `package com.blok.nodes;
@@ -1817,8 +1780,6 @@ export {
 	supervisord_nodejs,
 	supervisord_python,
 	go_node_file,
-	go_mod_file,
-	go_dockerfile,
 	java_node_file,
 	java_pom_file,
 	java_dockerfile,

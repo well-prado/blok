@@ -4,7 +4,7 @@ import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import { waitForGrpcPort } from "../../services/health-probe.js";
 import { detectRr } from "../../services/runtime-detector.js";
-import { readProjectConfig, validateProjectRuntimes } from "../../services/runtime-setup.js";
+import { generateGoNodeRegistry, readProjectConfig, validateProjectRuntimes } from "../../services/runtime-setup.js";
 
 const runningProcesses: ChildProcess[] = [];
 
@@ -157,6 +157,17 @@ export async function devProject(opts: OptionValues) {
 			// project's runtimes/python3/nodes.
 			if (rt.kind === "python3") {
 				env.BLOK_NODES_DIR = path.resolve(currentPath, "runtimes", "python3", "nodes");
+			}
+
+			// Go is compiled — regenerate the user-node registration shim before
+			// `go run ./cmd/server` recompiles and picks it up. Best-effort: a
+			// codegen failure shouldn't block the rest of the dev stack.
+			if (rt.kind === "go") {
+				try {
+					generateGoNodeRegistry(currentPath);
+				} catch (err) {
+					console.log(`  Warning: Go user-node codegen failed: ${(err as Error).message}`);
+				}
 			}
 
 			runtimeDefs.push({

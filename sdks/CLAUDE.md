@@ -49,7 +49,7 @@ Each SDK registers nodes with a language-specific handler interface:
 - **PHP**: `NodeHandler` interface
 - **Ruby**: Handler module
 
-User nodes live in `runtimes/{lang}/nodes/` within projects. Python nodes auto-discover via the `BLOK_NODES_DIR` environment variable (set by CLI to `runtimes/python3/nodes/`), requiring no manual registration.
+User nodes live in `runtimes/{lang}/nodes/` within projects, registered into the same runtime as the built-in nodes — no manual wiring. Dynamic languages discover them at boot: **Python** scans `BLOK_NODES_DIR` (set by the CLI to `runtimes/python3/nodes/`). Compiled languages can't fs-scan, so the CLI codegens a registration shim before the build: **Go** copies each `runtimes/go/nodes/<name>/` library package (exporting `func Register(registry *blok.NodeRegistry)`) into the build module and generates `cmd/server/register_user_nodes.go`, regenerated on every `blokctl dev` (`go run` recompiles). Rust/Java/C# follow the same codegen model (in progress).
 
 ## Adding a New SDK Language
 
