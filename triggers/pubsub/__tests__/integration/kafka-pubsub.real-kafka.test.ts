@@ -64,7 +64,12 @@ const d = KAFKA_BROKERS ? describe : describe.skip;
 const TEST_TIMEOUT_MS = 45_000;
 const SUBSCRIPTION_WARMUP_MS = 2_000;
 
-d("KafkaPubSubAdapter — real Kafka", () => {
+// retry: a single-broker Kafka can still transiently report "This server does
+// not host this topic-partition" right after topic creation — leader/metadata
+// propagation lags the admin createTopics({waitForLeaders:true}) ack. The
+// beforeAll warmup narrows the window but can't fully close it on a contended
+// CI broker, so let each test self-heal on a fresh produce/consume attempt.
+d("KafkaPubSubAdapter — real Kafka", { retry: 2 }, () => {
 	let producer: KafkaPubSubAdapter;
 	let consumerA: KafkaPubSubAdapter;
 	let consumerB: KafkaPubSubAdapter;
