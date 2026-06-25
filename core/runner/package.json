@@ -15,7 +15,6 @@
 		"build": "rm -rf dist && bun run tsc && bun run sync:proto",
 		"build:dev": "bun run build && tsc --watch",
 		"sync:proto": "mkdir -p dist/adapters/grpc/proto/blok/runtime/v1 && cp src/adapters/grpc/proto/blok/runtime/v1/runtime.proto dist/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
-		"sync:proto:fromroot": "mkdir -p src/adapters/grpc/proto/blok/runtime/v1 && cp ../../proto/blok/runtime/v1/runtime.proto src/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
 		"test:dev": "vitest",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit --incremental"
