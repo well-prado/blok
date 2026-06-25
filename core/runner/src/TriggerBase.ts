@@ -704,6 +704,188 @@ export default abstract class TriggerBase extends Trigger {
 		}
 	}
 
+	/**
+	 * Re-entry trace setup (deferred timer fire). Rehydrates ctx.state +
+	 * iteration cursors from the persisted snapshot and re-registers the
+	 * AbortController. Extracted verbatim from run(); see the inline notes.
+	 */
+	private rehydrateDeferredRun(ctx: Context, tracker: RunTracker): string | undefined {
+		const ctxRecord = ctx as Record<string, unknown>;
+		const traceRunId = ctxRecord._traceRunId as string | undefined;
+		// Logger wrapping was already applied on the first pass — no
+		// need to re-wrap (and re-wrapping would double-route logs).
+
+		// PR 1 follow-up · A2 fix. The first-pass `finally` block
+		// unregisters the AbortController via `tracker.unregisterAbortController`.
+		// Without re-registering on re-entry, `tracker.abortRunningRun(runId)`
+		// can't fire the controller — the controller stays on
+		// `ctx._PRIVATE_.abortController` but the tracker's lookup
+		// returns undefined. Operator cancel of a `running` run that
+		// came from delayed/queued/debounced flips status to "cancelled"
+		// but the in-flight step never sees `ctx.signal.aborted`.
+		// Re-register here mirroring the first-pass branch below.
+		if (traceRunId) {
+			const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
+			if (privateSlot?.abortController) {
+				tracker.registerAbortController(traceRunId, privateSlot.abortController);
+			}
+
+			// v0.6 prerequisite for wait-inside-primitives Phase 2 —
+			// rehydrate `ctx.state` from the persisted snapshot the
+			// runner took at the wait throw site. Two re-entry paths
+			// converge here:
+			//   1. In-process timer fire — same `ctx`, state already
+			//      populated. Rehydrate is a no-op (the parsed
+			//      snapshot equals current state); we still apply it
+			//      for uniformity and to forgive any micro-drift
+			//      between snapshot and current state if a malicious
+			//      caller re-enters with a tampered ctx.
+			//   2. Cross-process recovery (`recoverDispatches` →
+			//      `restoreDispatch` → `dispatchDeferred` with a
+			//      fresh ctx). Without rehydrate, state is empty and
+			//      forEach iteration index / loop accumulator / saga
+			//      progress are all lost.
+			//
+			// Mutates `ctx.state` IN PLACE rather than reassigning so
+			// the `vars: state` alias set up in `createContext` keeps
+			// pointing at the same object. Authors writing
+			// `ctx.vars[k] = v` continue to mutate the canonical
+			// store; otherwise we'd silently fork the two views.
+			const persistedRun = tracker.getStore().getRun(traceRunId);
+			if (persistedRun?.stateSnapshot) {
+				try {
+					const parsed = JSON.parse(persistedRun.stateSnapshot) as unknown;
+					if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+						const stateObj = ctx.state as Record<string, unknown>;
+						for (const k of Object.keys(stateObj)) {
+							delete stateObj[k];
+						}
+						Object.assign(stateObj, parsed as Record<string, unknown>);
+					}
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					ctx.logger.logLevel(
+						"warn",
+						`[blok][wait] failed to rehydrate ctx.state from snapshot: ${msg}. Proceeding with the ctx the runner was given.`,
+					);
+				}
+			}
+
+			// v0.6 wait-inside-primitives — rehydrate every NodeRun's
+			// `iteration_context` into a Map keyed by step NAME
+			// (not NodeRun id) so each primitive's run() can look
+			// itself up across defer/resume cycles. NodeRun ids
+			// CHANGE on every dispatchDeferred re-entry (tracker
+			// creates a fresh NodeRun per pass), but step names are
+			// stable across the run. Phase 4 — multiple primitives'
+			// cursors coexist (e.g. forEach > forEach > wait), one
+			// entry per primitive name. When two NodeRuns share a
+			// name (the rare case of two siblings at the same depth
+			// with the same step id), the LATEST wins via the
+			// startedAt-with-insertion-order tiebreak.
+			try {
+				const nodeRuns = tracker.getStore().getNodeRuns(traceRunId);
+				const sortedDesc = nodeRuns
+					.map((n, idx) => ({ n, idx }))
+					.filter(({ n }) => n.iterationContext !== undefined)
+					.sort((a, b) => {
+						const dt = b.n.startedAt - a.n.startedAt;
+						return dt !== 0 ? dt : b.idx - a.idx;
+					});
+				const cursorMap = new Map<string, IterationContext>();
+				for (const { n } of sortedDesc) {
+					if (n.iterationContext === undefined) continue;
+					// First write per name wins because sortedDesc is
+					// latest-first; this gives each primitive its most
+					// recent cursor.
+					if (!cursorMap.has(n.nodeName)) {
+						cursorMap.set(n.nodeName, n.iterationContext);
+					}
+				}
+				if (cursorMap.size > 0) {
+					(ctx as Record<string, unknown>)._blokIterationCursors = cursorMap;
+				}
+
+				// Back-compat `_blokIterationResume` (single-slot)
+				// keeps legacy callers working. Populated from the
+				// most recent cursor across the run.
+				const top = sortedDesc[0]?.n.iterationContext;
+				if (top) {
+					(ctx as Record<string, unknown>)._blokIterationResume = top;
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				ctx.logger.logLevel(
+					"warn",
+					`[blok][wait] failed to rehydrate iteration_context: ${msg}. primitives will resume from iteration 0.`,
+				);
+			}
+		}
+		return traceRunId;
+	}
+
+	/**
+	 * First-pass trace setup. Starts the run record (replay + sub-workflow
+	 * lineage from headers), registers the AbortController, and wraps the
+	 * logger. Extracted verbatim from run().
+	 */
+	private startRunTrace(ctx: Context, cfg: Configuration, tracker: RunTracker): string {
+		const ctxRecord = ctx as Record<string, unknown>;
+		const runner = this.getRunner(cfg);
+		const stepCount = runner.getStepCount?.() ?? cfg.steps?.length ?? 0;
+		// Tier 1 · replay lineage. The replay endpoint
+		// (TraceRouter.POST /__blok/runs/:id/replay) sets
+		// `X-Blok-Replay-Of: <originalRunId>` on the dispatched HTTP
+		// request. Read it here so the new run carries `replayOf` and
+		// Studio can render a "Replay of #..." breadcrumb.
+		const reqHeaders = (ctx.request?.headers ?? {}) as Record<string, string | string[] | undefined>;
+		const replayOfHeader = reqHeaders["x-blok-replay-of"] ?? reqHeaders["X-Blok-Replay-Of"];
+		const replayOf = Array.isArray(replayOfHeader)
+			? replayOfHeader[0]
+			: typeof replayOfHeader === "string"
+				? replayOfHeader
+				: undefined;
+		// G2 (v0.6) · sub-workflow lineage across the HTTP boundary.
+		// `SubworkflowNode.dispatchHttpSelf` sets these headers on the
+		// outbound self-call so the receiver's run record carries the
+		// parent ids. Without this, an http-self child would appear
+		// as a fresh top-level run with no Studio breadcrumb.
+		const parentRunId = pickHeader(reqHeaders, "x-blok-parent-run-id");
+		const parentNodeRunId = pickHeader(reqHeaders, "x-blok-parent-node-run-id");
+		const run = tracker.startRun({
+			workflowName: cfg.name || ctx.workflow_name || "unknown",
+			workflowPath: ctx.workflow_path || "",
+			triggerType: this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown",
+			triggerSummary: this.buildTraceTriggerSummary(ctx),
+			nodeCount: stepCount,
+			replayOf,
+			parentRunId,
+			parentNodeRunId,
+		});
+		const traceRunId = run.id;
+		ctxRecord._traceRunId = run.id;
+
+		// Carry the sub-workflow depth across the HTTP hop so the
+		// recursion guard in nested children still fires.
+		const depthHeader = pickHeader(reqHeaders, "x-blok-subworkflow-depth");
+		const parsedDepth = depthHeader ? Number.parseInt(depthHeader, 10) : Number.NaN;
+		if (Number.isFinite(parsedDepth) && parsedDepth > 0) {
+			ctxRecord._subworkflowDepth = parsedDepth;
+		}
+
+		// Tier 2 follow-up · register the ctx's AbortController so the
+		// cancel API can fire it for `running` runs. Stashed on
+		// _PRIVATE_ by createContext; lookup via the optional shape.
+		const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
+		if (privateSlot?.abortController) {
+			tracker.registerAbortController(run.id, privateSlot.abortController);
+		}
+
+		// Wrap logger to forward log entries to RunTracker
+		ctx.logger = new TracingLogger(ctx.logger, run.id, tracker);
+		return traceRunId;
+	}
+
 	async run(ctx: Context, configuration: Configuration = this.configuration): Promise<TriggerResponse> {
 		this.inFlightRequests++;
 		const runStart = performance.now();
@@ -732,169 +914,9 @@ export default abstract class TriggerBase extends Trigger {
 		const isReentryAtTrace = ctxRecord._blokDispatchReentry === true;
 
 		if (tracker.active && isReentryAtTrace) {
-			traceRunId = ctxRecord._traceRunId as string | undefined;
-			// Logger wrapping was already applied on the first pass — no
-			// need to re-wrap (and re-wrapping would double-route logs).
-
-			// PR 1 follow-up · A2 fix. The first-pass `finally` block
-			// unregisters the AbortController via `tracker.unregisterAbortController`.
-			// Without re-registering on re-entry, `tracker.abortRunningRun(runId)`
-			// can't fire the controller — the controller stays on
-			// `ctx._PRIVATE_.abortController` but the tracker's lookup
-			// returns undefined. Operator cancel of a `running` run that
-			// came from delayed/queued/debounced flips status to "cancelled"
-			// but the in-flight step never sees `ctx.signal.aborted`.
-			// Re-register here mirroring the first-pass branch below.
-			if (traceRunId) {
-				const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
-				if (privateSlot?.abortController) {
-					tracker.registerAbortController(traceRunId, privateSlot.abortController);
-				}
-
-				// v0.6 prerequisite for wait-inside-primitives Phase 2 —
-				// rehydrate `ctx.state` from the persisted snapshot the
-				// runner took at the wait throw site. Two re-entry paths
-				// converge here:
-				//   1. In-process timer fire — same `ctx`, state already
-				//      populated. Rehydrate is a no-op (the parsed
-				//      snapshot equals current state); we still apply it
-				//      for uniformity and to forgive any micro-drift
-				//      between snapshot and current state if a malicious
-				//      caller re-enters with a tampered ctx.
-				//   2. Cross-process recovery (`recoverDispatches` →
-				//      `restoreDispatch` → `dispatchDeferred` with a
-				//      fresh ctx). Without rehydrate, state is empty and
-				//      forEach iteration index / loop accumulator / saga
-				//      progress are all lost.
-				//
-				// Mutates `ctx.state` IN PLACE rather than reassigning so
-				// the `vars: state` alias set up in `createContext` keeps
-				// pointing at the same object. Authors writing
-				// `ctx.vars[k] = v` continue to mutate the canonical
-				// store; otherwise we'd silently fork the two views.
-				const persistedRun = tracker.getStore().getRun(traceRunId);
-				if (persistedRun?.stateSnapshot) {
-					try {
-						const parsed = JSON.parse(persistedRun.stateSnapshot) as unknown;
-						if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-							const stateObj = ctx.state as Record<string, unknown>;
-							for (const k of Object.keys(stateObj)) {
-								delete stateObj[k];
-							}
-							Object.assign(stateObj, parsed as Record<string, unknown>);
-						}
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						ctx.logger.logLevel(
-							"warn",
-							`[blok][wait] failed to rehydrate ctx.state from snapshot: ${msg}. Proceeding with the ctx the runner was given.`,
-						);
-					}
-				}
-
-				// v0.6 wait-inside-primitives — rehydrate every NodeRun's
-				// `iteration_context` into a Map keyed by step NAME
-				// (not NodeRun id) so each primitive's run() can look
-				// itself up across defer/resume cycles. NodeRun ids
-				// CHANGE on every dispatchDeferred re-entry (tracker
-				// creates a fresh NodeRun per pass), but step names are
-				// stable across the run. Phase 4 — multiple primitives'
-				// cursors coexist (e.g. forEach > forEach > wait), one
-				// entry per primitive name. When two NodeRuns share a
-				// name (the rare case of two siblings at the same depth
-				// with the same step id), the LATEST wins via the
-				// startedAt-with-insertion-order tiebreak.
-				try {
-					const nodeRuns = tracker.getStore().getNodeRuns(traceRunId);
-					const sortedDesc = nodeRuns
-						.map((n, idx) => ({ n, idx }))
-						.filter(({ n }) => n.iterationContext !== undefined)
-						.sort((a, b) => {
-							const dt = b.n.startedAt - a.n.startedAt;
-							return dt !== 0 ? dt : b.idx - a.idx;
-						});
-					const cursorMap = new Map<string, IterationContext>();
-					for (const { n } of sortedDesc) {
-						if (n.iterationContext === undefined) continue;
-						// First write per name wins because sortedDesc is
-						// latest-first; this gives each primitive its most
-						// recent cursor.
-						if (!cursorMap.has(n.nodeName)) {
-							cursorMap.set(n.nodeName, n.iterationContext);
-						}
-					}
-					if (cursorMap.size > 0) {
-						(ctx as Record<string, unknown>)._blokIterationCursors = cursorMap;
-					}
-
-					// Back-compat `_blokIterationResume` (single-slot)
-					// keeps legacy callers working. Populated from the
-					// most recent cursor across the run.
-					const top = sortedDesc[0]?.n.iterationContext;
-					if (top) {
-						(ctx as Record<string, unknown>)._blokIterationResume = top;
-					}
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					ctx.logger.logLevel(
-						"warn",
-						`[blok][wait] failed to rehydrate iteration_context: ${msg}. primitives will resume from iteration 0.`,
-					);
-				}
-			}
+			traceRunId = this.rehydrateDeferredRun(ctx, tracker);
 		} else if (tracker.active) {
-			const runner = this.getRunner(cfg);
-			const stepCount = runner.getStepCount?.() ?? cfg.steps?.length ?? 0;
-			// Tier 1 · replay lineage. The replay endpoint
-			// (TraceRouter.POST /__blok/runs/:id/replay) sets
-			// `X-Blok-Replay-Of: <originalRunId>` on the dispatched HTTP
-			// request. Read it here so the new run carries `replayOf` and
-			// Studio can render a "Replay of #..." breadcrumb.
-			const reqHeaders = (ctx.request?.headers ?? {}) as Record<string, string | string[] | undefined>;
-			const replayOfHeader = reqHeaders["x-blok-replay-of"] ?? reqHeaders["X-Blok-Replay-Of"];
-			const replayOf = Array.isArray(replayOfHeader)
-				? replayOfHeader[0]
-				: typeof replayOfHeader === "string"
-					? replayOfHeader
-					: undefined;
-			// G2 (v0.6) · sub-workflow lineage across the HTTP boundary.
-			// `SubworkflowNode.dispatchHttpSelf` sets these headers on the
-			// outbound self-call so the receiver's run record carries the
-			// parent ids. Without this, an http-self child would appear
-			// as a fresh top-level run with no Studio breadcrumb.
-			const parentRunId = pickHeader(reqHeaders, "x-blok-parent-run-id");
-			const parentNodeRunId = pickHeader(reqHeaders, "x-blok-parent-node-run-id");
-			const run = tracker.startRun({
-				workflowName: cfg.name || ctx.workflow_name || "unknown",
-				workflowPath: ctx.workflow_path || "",
-				triggerType: this.constructor.name.replace("Trigger", "").toLowerCase() || "unknown",
-				triggerSummary: this.buildTraceTriggerSummary(ctx),
-				nodeCount: stepCount,
-				replayOf,
-				parentRunId,
-				parentNodeRunId,
-			});
-			traceRunId = run.id;
-			ctxRecord._traceRunId = run.id;
-
-			// Carry the sub-workflow depth across the HTTP hop so the
-			// recursion guard in nested children still fires.
-			const depthHeader = pickHeader(reqHeaders, "x-blok-subworkflow-depth");
-			const parsedDepth = depthHeader ? Number.parseInt(depthHeader, 10) : Number.NaN;
-			if (Number.isFinite(parsedDepth) && parsedDepth > 0) {
-				ctxRecord._subworkflowDepth = parsedDepth;
-			}
-
-			// Tier 2 follow-up · register the ctx's AbortController so the
-			// cancel API can fire it for `running` runs. Stashed on
-			// _PRIVATE_ by createContext; lookup via the optional shape.
-			const privateSlot = ctx._PRIVATE_ as { abortController?: AbortController } | null;
-			if (privateSlot?.abortController) {
-				tracker.registerAbortController(run.id, privateSlot.abortController);
-			}
-
-			// Wrap logger to forward log entries to RunTracker
-			ctx.logger = new TracingLogger(ctx.logger, run.id, tracker);
+			traceRunId = this.startRunTrace(ctx, cfg, tracker);
 		}
 
 		try {
