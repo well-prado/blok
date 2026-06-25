@@ -68,6 +68,25 @@ runtimes:
     # -- Enable Docker runtime
     enabled: false
 
+## Durable trace store (core/runner createStore — durable by default outside tests)
+traceStore:
+  # -- Backend: sqlite (default) | postgres | memory. memory loses all runs on restart.
+  backend: sqlite
+  sqlite:
+    # -- SQLite database file path. Its directory MUST be writable (see writableData).
+    path: /data/trace.db
+  postgres:
+    # -- PostgreSQL connection string (required when backend=postgres)
+    url: ""
+    # -- Connection pool size
+    poolSize: 5
+    # -- Enable SSL
+    ssl: false
+  # -- Mount an emptyDir at the sqlite directory so the default sqlite backend can
+  #    write even with readOnlyRootFilesystem. Disable + supply your own PVC for durability.
+  writableData:
+    enabled: true
+
 ## Environment variables
 # -- Extra environment variables to inject into the Blok container
 env: {}
@@ -186,6 +205,12 @@ monitoring:
     labels: {}
     # -- Append your own alert/recording rule groups here (raw PrometheusRule groups)
     additionalGroups: []
+  grafanaDashboards:
+    # -- Ship Blok's Grafana dashboards as ConfigMaps (grafana_dashboard sidecar convention).
+    #    NOT gated on monitoring.enabled — the Grafana sidecar discovers these by label.
+    enabled: false
+    # -- Extra labels for the dashboard ConfigMaps (e.g. to match your sidecar's label selector)
+    labels: {}
 
 ## Persistence (for workflow/node storage)
 persistence:

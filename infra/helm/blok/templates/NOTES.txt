@@ -43,5 +43,22 @@ App version: {{ .Chart.AppVersion }}
   Autoscaling:       {{ if .Values.autoscaling.enabled }}Enabled ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas){{ else }}Disabled{{ end }}
   Monitoring:        {{ if .Values.monitoring.enabled }}Enabled{{ else }}Disabled{{ end }}
   Persistence:       {{ if .Values.persistence.enabled }}Enabled ({{ .Values.persistence.size }}){{ else }}Disabled{{ end }}
+  Trace Store:       {{ .Values.traceStore.backend }}{{ if eq .Values.traceStore.backend "sqlite" }} (path {{ .Values.traceStore.sqlite.path }}){{ end }}
+  Grafana Dashboards:{{ if .Values.monitoring.grafanaDashboards.enabled }} Enabled (ConfigMaps, grafana_dashboard sidecar){{ else }} Disabled{{ end }}
+
+{{- if eq .Values.traceStore.backend "sqlite" }}
+{{- if not .Values.traceStore.writableData.enabled }}
+
+== WARNING: sqlite trace store has NO writable volume ==
+
+  traceStore.backend is "sqlite" but traceStore.writableData.enabled is false.
+  With readOnlyRootFilesystem the runner CANNOT write {{ .Values.traceStore.sqlite.path }}
+  — every run, the idempotency cache, and the durable scheduler will be lost
+  (createStore falls back to in-memory with a warning, or crashes on an explicit
+  BLOK_TRACE_STORE=sqlite). Either set traceStore.writableData.enabled=true (mounts
+  an emptyDir at {{ dir .Values.traceStore.sqlite.path }}) or point traceStore.sqlite.path
+  at a writable PVC mount, or switch to traceStore.backend=postgres.
+{{- end }}
+{{- end }}
 
 For more information, visit: https://github.com/nicholasgriffintn/blok

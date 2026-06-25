@@ -108,6 +108,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and (eq .Values.traceStore.backend "sqlite") .Values.traceStore.writableData.enabled }}
+            - name: trace-data
+              mountPath: {{ dir .Values.traceStore.sqlite.path | quote }}
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: workflows
               mountPath: /app/workflows
@@ -133,6 +137,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and (eq .Values.traceStore.backend "sqlite") .Values.traceStore.writableData.enabled }}
+        - name: trace-data
+          emptyDir: {}
+        {{- end }}
         {{- if .Values.persistence.enabled }}
         - name: workflows
           persistentVolumeClaim:

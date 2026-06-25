@@ -1,0 +1,235 @@
+{
+	"annotations": {
+		"list": []
+	},
+	"editable": true,
+	"fiscalYearStartMonth": 0,
+	"graphTooltip": 1,
+	"id": null,
+	"links": [],
+	"panels": [
+		{
+			"title": "Trace Search",
+			"description": "Search for traces by service, operation, duration, or tags",
+			"type": "traces",
+			"gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+			"datasource": { "type": "tempo", "uid": "tempo" },
+			"targets": [
+				{
+					"queryType": "nativeSearch",
+					"serviceName": "${service}",
+					"spanName": "",
+					"search": "",
+					"minDuration": "${min_duration}",
+					"maxDuration": "",
+					"limit": 20
+				}
+			]
+		},
+		{
+			"title": "Workflow Execution Duration (Trace-Derived)",
+			"description": "P50, P95, P99 workflow execution duration from span metrics",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "histogram_quantile(0.50, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\"workflow.*\", service=~\"$service\"}[$__rate_interval])) by (le, span_name))",
+					"legendFormat": "p50 {{span_name}}"
+				},
+				{
+					"expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\"workflow.*\", service=~\"$service\"}[$__rate_interval])) by (le, span_name))",
+					"legendFormat": "p95 {{span_name}}"
+				},
+				{
+					"expr": "histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\"workflow.*\", service=~\"$service\"}[$__rate_interval])) by (le, span_name))",
+					"legendFormat": "p99 {{span_name}}"
+				}
+			]
+		},
+		{
+			"title": "Node Execution Duration (Trace-Derived)",
+			"description": "Average node execution duration from span metrics",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"custom": {
+						"drawStyle": "bars",
+						"fillOpacity": 50
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(traces_spanmetrics_latency_sum{span_name=~\"node.*\", service=~\"$service\"}[$__rate_interval])) by (span_name) / sum(rate(traces_spanmetrics_latency_count{span_name=~\"node.*\", service=~\"$service\"}[$__rate_interval])) by (span_name)",
+					"legendFormat": "{{span_name}}"
+				}
+			]
+		},
+		{
+			"title": "Span Rate by Operation",
+			"description": "Spans per second by operation name",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ops",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 15
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(traces_spanmetrics_calls_total{service=~\"$service\"}[$__rate_interval])) by (span_name)",
+					"legendFormat": "{{span_name}}"
+				}
+			]
+		},
+		{
+			"title": "Error Spans by Operation",
+			"description": "Error span rate by operation name",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ops",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 15
+					},
+					"color": { "mode": "palette-classic" }
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(traces_spanmetrics_calls_total{service=~\"$service\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) by (span_name)",
+					"legendFormat": "{{span_name}}"
+				}
+			]
+		},
+		{
+			"title": "Service Graph (Node Map)",
+			"description": "Service dependency graph derived from traces",
+			"type": "nodeGraph",
+			"gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
+			"datasource": { "type": "tempo", "uid": "tempo" },
+			"targets": [
+				{
+					"queryType": "serviceMap"
+				}
+			]
+		},
+		{
+			"title": "Runtime Adapter Latency",
+			"description": "Execution time for cross-runtime calls (gRPC, Docker, HTTP)",
+			"type": "timeseries",
+			"gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "s",
+					"custom": {
+						"drawStyle": "line",
+						"lineInterpolation": "smooth",
+						"fillOpacity": 10
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\"runtime.*\", service=~\"$service\"}[$__rate_interval])) by (le, span_name))",
+					"legendFormat": "p95 {{span_name}}"
+				}
+			]
+		},
+		{
+			"title": "Trace Error Rate",
+			"description": "Percentage of traces with error status",
+			"type": "stat",
+			"gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+			"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+			"fieldConfig": {
+				"defaults": {
+					"unit": "percentunit",
+					"thresholds": {
+						"steps": [
+							{ "color": "green", "value": null },
+							{ "color": "yellow", "value": 0.01 },
+							{ "color": "red", "value": 0.05 }
+						]
+					}
+				}
+			},
+			"targets": [
+				{
+					"expr": "sum(rate(traces_spanmetrics_calls_total{service=~\"$service\", status_code=\"STATUS_CODE_ERROR\"}[$__rate_interval])) / sum(rate(traces_spanmetrics_calls_total{service=~\"$service\"}[$__rate_interval]))",
+					"legendFormat": "Error Rate"
+				}
+			]
+		}
+	],
+	"templating": {
+		"list": [
+			{
+				"name": "DS_PROMETHEUS",
+				"type": "datasource",
+				"query": "prometheus",
+				"current": { "text": "prometheus", "value": "prometheus" },
+				"hide": 0
+			},
+			{
+				"name": "service",
+				"type": "query",
+				"datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+				"query": "label_values(traces_spanmetrics_calls_total, service)",
+				"refresh": 2,
+				"includeAll": true,
+				"multi": false,
+				"current": { "text": "All", "value": "$__all" }
+			},
+			{
+				"name": "env",
+				"type": "custom",
+				"query": "production,staging,development",
+				"current": { "text": "All", "value": "$__all" },
+				"includeAll": true,
+				"multi": false
+			},
+			{
+				"name": "min_duration",
+				"type": "custom",
+				"query": ",100ms,500ms,1s,5s,10s",
+				"current": { "text": "", "value": "" },
+				"includeAll": false,
+				"multi": false
+			}
+		]
+	},
+	"schemaVersion": 39,
+	"tags": ["blok", "tracing", "opentelemetry", "tempo"],
+	"time": { "from": "now-1h", "to": "now" },
+	"timepicker": {},
+	"timezone": "browser",
+	"title": "Blok - Distributed Tracing",
+	"uid": "blok-tracing",
+	"version": 1
+}
