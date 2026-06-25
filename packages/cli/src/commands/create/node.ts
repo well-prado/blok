@@ -14,8 +14,6 @@ import {
 	csharp_dockerfile,
 	csharp_node_file,
 	function_first_node_file,
-	go_dockerfile,
-	go_mod_file,
 	go_node_file,
 	java_dockerfile,
 	java_node_file,
@@ -380,18 +378,19 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 			fsExtra.ensureDirSync(dirPath);
 
-			// Write Go files with node name replacement
-			const goNodeContent = go_node_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const goModContent = go_mod_file.replace(/\{\{NODE_NAME\}\}/g, nodeName);
-			const goDockerContent = go_dockerfile.replace(/\{\{NODE_NAME\}\}/g, nodeName);
+			// Library package: the Go runtime discovers it under runtimes/go/nodes
+			// and registers it into the shared gRPC server (same model as Python).
+			// No per-node go.mod / Dockerfile — the node isn't a standalone service.
+			const goPkg = nodeName.replace(/[^a-z0-9]/gi, "").toLowerCase();
+			const goNodeContent = go_node_file
+				.replace(/\{\{NODE_NAME_PASCAL\}\}/g, toPascalCase(nodeName))
+				.replace(/\{\{NODE_PKG\}\}/g, goPkg)
+				.replace(/\{\{NODE_NAME\}\}/g, nodeName);
 
-			fsExtra.writeFileSync(`${dirPath}/main.go`, goNodeContent);
-			fsExtra.writeFileSync(`${dirPath}/go.mod`, goModContent);
-			fsExtra.writeFileSync(`${dirPath}/go.sum`, "");
-			fsExtra.writeFileSync(`${dirPath}/Dockerfile`, goDockerContent);
+			fsExtra.writeFileSync(`${dirPath}/node.go`, goNodeContent);
 
 			// Create README
-			const readmeContent = `# ${nodeName}\n\nGo-based Blok node.\n\n## Build\n\n\`\`\`bash\ndocker build -t blok-${nodeName}:latest .\n\`\`\`\n\n## Run\n\n\`\`\`bash\ndocker run -p 8080:8080 blok-${nodeName}:latest\n\`\`\`\n`;
+			const readmeContent = `# ${nodeName}\n\nGo-based Blok node, served by the Go runtime over gRPC.\n\nRun \`blokctl dev\` — the node is discovered under \`runtimes/go/nodes/\` and registered automatically.\n`;
 			fsExtra.writeFileSync(`${dirPath}/README.md`, readmeContent);
 		}
 
@@ -638,8 +637,7 @@ export async function createNode(opts: OptionValues, currentPath = false) {
 
 		if (!currentPath && node_runtime === "go") {
 			console.log(`\nNavigate to the node directory by running: cd runtimes/go/nodes/${nodeName}`);
-			console.log(`\nBuild the Docker image: docker build -t blok-${nodeName}:latest .`);
-			console.log(`Run the container: docker run -p 8080:8080 blok-${nodeName}:latest`);
+			console.log(`\nRun "blokctl dev" — the Go runtime discovers and registers this node automatically.`);
 		}
 
 		if (!currentPath && node_runtime === "java") {
