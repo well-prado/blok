@@ -255,8 +255,10 @@ thresholds and `for:` windows to your SLOs.
 | `BlokWorkflowLatencyHigh` | warning | A workflow's p99 latency > 5s for 10m. |
 | `BlokConcurrencyThrottling` | warning | The concurrency gate is denying/queueing runs for 10m. |
 
-> `blok_boot_error_total` is referenced as a future signal in the rules file
-> but is **not yet emitted** — there is no boot-error alert today.
+> `blok_boot_error_total{trigger_type, phase, error_class}` is emitted by the
+> HTTP trigger when a workflow fails to boot (config / middleware resolution)
+> before its run starts. A dedicated boot-error **alert rule** is a follow-up —
+> the metric is live but no alert is wired in `blok-alerts.yml` yet.
 
 ### On Kubernetes (Helm)
 
