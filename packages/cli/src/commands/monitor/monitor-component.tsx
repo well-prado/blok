@@ -196,11 +196,11 @@ const fetchPrometheusMetrics = async (host?: string, token?: string): Promise<Wo
 	mapWorkflow(wfReqs, "requests", (v) => Math.round(+v));
 
 	const nodeMetricsRaw = await Promise.all([
-		queryPrometheus("(sum(increase(node_total[1m])) by (node_name, workflow_path)) > 0", host, token),
-		queryPrometheus("sum(increase(node_time[1m])) by (node_name, workflow_path)", host, token),
-		queryPrometheus("(sum(increase(node_errors_total[1m])) by (node_name, workflow_path)) > 0", host, token),
-		queryPrometheus("sum(increase(node_cpu[1m])) by (node_name, workflow_path)", host, token),
-		queryPrometheus("sum(increase(node_memory[1m])) by (node_name, workflow_path)", host, token),
+		queryPrometheus("(sum(increase(blok_node_executions_total[1m])) by (node_name, workflow_path)) > 0", host, token),
+		queryPrometheus("sum(increase(blok_node_duration_seconds_sum[1m])) by (node_name, workflow_path)", host, token),
+		queryPrometheus("(sum(increase(blok_node_errors_total[1m])) by (node_name, workflow_path)) > 0", host, token),
+		queryPrometheus("sum(increase(blok_node_cpu_usage[1m])) by (node_name, workflow_path)", host, token),
+		queryPrometheus("sum(increase(blok_node_memory_bytes[1m])) by (node_name, workflow_path)", host, token),
 	]);
 
 	const nodeMap: Record<string, Record<string, Partial<NodeMetrics>>> = {};

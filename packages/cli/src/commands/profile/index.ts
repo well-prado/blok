@@ -54,15 +54,13 @@ program
 				const token = options.token as string | undefined;
 				const topN = Number.parseInt(options.top as string, 10) || 10;
 
-				// Query per-node metrics from Prometheus
-				const [nodeTimeResults, _nodeCountResults, nodeMemResults, _nodeCpuResults, _nodeErrResults] =
-					await Promise.all([
-						queryPrometheus("node_time", host, token),
-						queryPrometheus("node_total", host, token),
-						queryPrometheus("node_memory", host, token),
-						queryPrometheus("node_cpu", host, token),
-						queryPrometheus("node_errors_total", host, token),
-					]);
+				// Query per-node metrics from Prometheus (the canonical `blok_node_*`
+				// family — the legacy un-prefixed `node_*` gauges were retired).
+				// Duration is averaged ms from the histogram; memory is peak bytes.
+				const [nodeTimeResults, nodeMemResults] = await Promise.all([
+					queryPrometheus("(blok_node_duration_seconds_sum / blok_node_duration_seconds_count) * 1000", host, token),
+					queryPrometheus("blok_node_memory_bytes / 1000000", host, token),
+				]);
 
 				const PerformanceProfiler = await getPerformanceProfiler();
 				const profiler = new PerformanceProfiler({ topN });
@@ -71,8 +69,8 @@ program
 
 				// Process node time metrics
 				for (const result of nodeTimeResults) {
-					const wf = result.metric.workflow || "unknown";
-					const node = result.metric.node || result.metric.name || "unknown";
+					const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
+					const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
 
 					if (workflowName && wf !== workflowName) continue;
 
@@ -85,8 +83,8 @@ program
 
 				// Process memory metrics
 				for (const result of nodeMemResults) {
-					const wf = result.metric.workflow || "unknown";
-					const node = result.metric.node || result.metric.name || "unknown";
+					const wf = result.metric.workflow_name || result.metric.workflow || "unknown";
+					const node = result.metric.node_name || result.metric.node || result.metric.name || "unknown";
 					if (workflowName && wf !== workflowName) continue;
 
 					const memMb = Number.parseFloat(result.value[1]) || 0;
