@@ -2,6 +2,7 @@ import type { Context, ResponseContext } from "@blokjs/shared";
 import { context, propagation } from "@opentelemetry/api";
 import Configuration from "./Configuration";
 import RunnerNode from "./RunnerNode";
+import { SubworkflowMetrics } from "./monitoring/SubworkflowMetrics";
 import { RunTracker } from "./tracing/RunTracker";
 import type GlobalOptions from "./types/GlobalOptions";
 import { createChildContext } from "./utils/createChildContext";
@@ -455,6 +456,12 @@ export class SubworkflowNode extends RunnerNode {
 		if (this.wait === false) {
 			const scheduledAt = Date.now();
 			fetch(url, { method, headers, body }).catch((err: unknown) => {
+				// OBS-05 T5 — surface the silent fire-and-forget failure as a
+				// metric (alongside the existing console.error). Additive.
+				SubworkflowMetrics.getInstance().recordAsyncFailure({
+					workflow_name: parentCtx.workflow_name ?? "<unknown>",
+					dispatch: "http-self",
+				});
 				console.error(
 					`[blok][subworkflow] http-self dispatch to ${url} failed (wait:false):`,
 					err instanceof Error ? err.stack || err.message : err,
@@ -525,6 +532,13 @@ export class SubworkflowNode extends RunnerNode {
 					if (childRunId) {
 						tracker.failRun(childRunId, err instanceof Error ? err : new Error(String(err)));
 					}
+					// OBS-05 T5 — surface the silent fire-and-forget failure as a
+					// metric (alongside the existing failRun + console.error).
+					// Additive.
+					SubworkflowMetrics.getInstance().recordAsyncFailure({
+						workflow_name: parentCtx.workflow_name ?? "<unknown>",
+						dispatch: "in-process",
+					});
 					console.error(
 						`[blok][subworkflow] async child '${childWorkflowName}' (run ${childRunId ?? "?"}) failed:`,
 						err instanceof Error ? err.stack || err.message : err,

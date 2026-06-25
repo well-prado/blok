@@ -1174,6 +1174,14 @@ export class RunTracker extends EventEmitter {
 			RUN_STARTED: "run.started",
 			RUN_COMPLETED: "run.completed",
 			RUN_FAILED: "run.failed",
+			// OBS-05 T4 — terminal-failure webhooks for the non-`failed`
+			// failure statuses (crashed/timedOut/throttled/cancelled) so an
+			// error-sink subscribed to these gets pushed too. Additive:
+			// existing subscribers (started/completed/failed) are unaffected.
+			RUN_CRASHED: "run.crashed",
+			RUN_TIMED_OUT: "run.timedOut",
+			RUN_THROTTLED: "run.throttled",
+			RUN_CANCELLED: "run.cancelled",
 		};
 		const webhookEvent = eventMap[event.type];
 		if (!webhookEvent) return;
