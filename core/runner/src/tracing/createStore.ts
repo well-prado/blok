@@ -35,7 +35,13 @@ export interface CreateStoreOptions {
  * - `BLOK_TRACE_RETENTION_DAYS` → Auto-delete after N days (default: 7, 0 = disabled)
  */
 export function createStore(opts?: CreateStoreOptions): RunStore {
-	const type = opts?.type || (process.env.BLOK_TRACE_STORE as StoreType) || "memory";
+	// OBS-04 — durable by default outside tests. A bare `docker run` / `helm
+	// install` previously fell through to an in-memory store and silently lost
+	// every run, the idempotency cache, and the durable scheduler on restart.
+	// Tests stay on memory (vitest sets NODE_ENV=test) so suites need no fixture.
+	const isTest = process.env.NODE_ENV === "test";
+	const explicitType = opts?.type ?? (process.env.BLOK_TRACE_STORE as StoreType | undefined);
+	const type: StoreType = explicitType ?? (isTest ? "memory" : "sqlite");
 	const sqlitePath = opts?.sqlitePath || process.env.BLOK_TRACE_SQLITE_PATH || ".blok/trace.db";
 
 	const retentionDays =
@@ -84,35 +90,60 @@ export function createStore(opts?: CreateStoreOptions): RunStore {
 			return store;
 		}
 		case "sqlite": {
-			// Ensure directory exists for SQLite file
-			const dir = path.dirname(sqlitePath);
-			if (dir && dir !== "." && !fs.existsSync(dir)) {
-				fs.mkdirSync(dir, { recursive: true });
-			}
+			try {
+				// Ensure directory exists for SQLite file
+				const dir = path.dirname(sqlitePath);
+				if (dir && dir !== "." && !fs.existsSync(dir)) {
+					fs.mkdirSync(dir, { recursive: true });
+				}
 
-			// Dynamic require to avoid hard dependency on better-sqlite3.
-			// Cast via the typeof-import type so we get autocomplete +
-			// type-checking even though `esmRequire` is `unknown` at the
-			// type level. One-liner to keep biome's formatter from
-			// breaking the dynamic-import-type expression across lines.
-			// biome-ignore format: typeof import(...) must stay on one line for tsc to parse
-			const sqliteMod = esmRequire("./SqliteRunStore") as typeof import("./SqliteRunStore");
-			const { SqliteRunStore, readIndexedMetadataKeysFromEnv } = sqliteMod;
-			// F1 (v0.5) — opt-in indexed metadata keys via
-			// `BLOK_INDEXED_METADATA_KEYS=tier,region`. The store
-			// promotes each declared key to a generated column + index
-			// so SQLite's planner uses the index when a `RunQuery`
-			// filter references it.
-			store = new SqliteRunStore(sqlitePath, { indexedMetadataKeys: readIndexedMetadataKeysFromEnv() });
+				// Dynamic require to avoid hard dependency on better-sqlite3.
+				// Cast via the typeof-import type so we get autocomplete +
+				// type-checking even though `esmRequire` is `unknown` at the
+				// type level. One-liner to keep biome's formatter from
+				// breaking the dynamic-import-type expression across lines.
+				// biome-ignore format: typeof import(...) must stay on one line for tsc to parse
+				const sqliteMod = esmRequire("./SqliteRunStore") as typeof import("./SqliteRunStore");
+				const { SqliteRunStore, readIndexedMetadataKeysFromEnv } = sqliteMod;
+				// F1 (v0.5) — opt-in indexed metadata keys via
+				// `BLOK_INDEXED_METADATA_KEYS=tier,region`. The store
+				// promotes each declared key to a generated column + index
+				// so SQLite's planner uses the index when a `RunQuery`
+				// filter references it.
+				store = new SqliteRunStore(sqlitePath, { indexedMetadataKeys: readIndexedMetadataKeysFromEnv() });
+			} catch (err) {
+				// An EXPLICIT sqlite request must fail loudly. The IMPLICIT default
+				// (no env set, outside tests) falls back to memory so a Node consumer
+				// missing the `better-sqlite3` peer dep, or a read-only root
+				// filesystem, still boots — with a loud warning, not a crash.
+				if (explicitType === "sqlite") throw err;
+				const reason = err instanceof Error ? err.message.split("\n")[0] : String(err);
+				console.warn(
+					`[blok] trace store: sqlite unavailable (${reason}); falling back to in-memory. Runs, the idempotency cache, and the durable scheduler are LOST on restart. Install better-sqlite3 or set BLOK_TRACE_STORE=postgres for durability.`,
+				);
+				store = new InMemoryRunStore();
+			}
 			break;
 		}
-		default:
+		default: {
 			store = new InMemoryRunStore();
+			// OBS-04 — surface the silent-data-loss store. Explicit
+			// `BLOK_TRACE_STORE=memory` is a deliberate opt-out, but still warn
+			// outside tests so operators know runs won't survive a restart.
+			if (!isTest) {
+				console.warn(
+					"[blok] trace store is IN-MEMORY — runs, the idempotency cache, and the durable " +
+						"scheduler are lost on restart. Set BLOK_TRACE_STORE=sqlite (the default) or =postgres for durability.",
+				);
+			}
 			break;
+		}
 	}
 
-	// Apply retention policy on startup (for persistent stores)
-	if (retentionDays > 0 && type !== "memory") {
+	// Apply retention policy on startup (for persistent stores). Guard on the
+	// ACTUAL store, not the requested type — a sqlite default that fell back to
+	// memory must not run retention against an in-memory store.
+	if (retentionDays > 0 && !(store instanceof InMemoryRunStore)) {
 		const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
 		store.deleteRunsBefore(cutoff);
 	}
