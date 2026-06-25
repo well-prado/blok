@@ -11,6 +11,7 @@ import type {
 	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
+	Webhook,
 	WorkflowRun,
 	WorkflowRunStatus,
 	WorkflowSample,
@@ -39,6 +40,10 @@ export class InMemoryRunStore implements RunStore {
 	private idempotencyCache: Map<string, CachedStepResult> = new Map();
 	private concurrencyLocks: Map<string, Map<string, number>> = new Map();
 	private scheduledDispatches: Map<string, ScheduledDispatchRow> = new Map();
+	// OBS-05 T7 · durable webhook registrations keyed by `id`. Ephemeral
+	// here (lost on restart) — matches pre-T7 behaviour for the in-memory
+	// backend; the sqlite/PG stores are the ones that actually survive.
+	private webhooks: Map<string, Webhook> = new Map();
 
 	private idemKey(workflowName: string, stepId: string, key: string): string {
 		// US (\x1f) is non-printable and never appears in identifiers, so it
@@ -423,6 +428,20 @@ export class InMemoryRunStore implements RunStore {
 
 	deleteWorkflowSample(workflowName: string): boolean {
 		return this.workflowSamples.delete(workflowName);
+	}
+
+	// === Durable webhook registrations (OBS-05 T7) ===
+
+	saveWebhook(webhook: Webhook): void {
+		this.webhooks.set(webhook.id, { ...webhook });
+	}
+
+	getWebhooks(): Webhook[] {
+		return Array.from(this.webhooks.values()).map((w) => ({ ...w }));
+	}
+
+	deleteWebhook(id: string): boolean {
+		return this.webhooks.delete(id);
 	}
 
 	// === Cleanup ===

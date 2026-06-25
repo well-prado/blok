@@ -84,6 +84,46 @@ describe("SqliteRunStore: persistence", () => {
 		expect(store2.getRun("run_1")).toBeDefined();
 		store2.close();
 	});
+
+	// OBS-05 T7 — the v17 webhooks migration runs cleanly on a DB that
+	// already holds run data, and the existing data survives.
+	it("migration v17 (webhooks) runs cleanly on an existing db with no data loss", () => {
+		if (!existsSync(TEST_DB_DIR)) mkdirSync(TEST_DB_DIR, { recursive: true });
+		const dbPath = join(TEST_DB_DIR, `webhook-migrate-${Date.now()}.db`);
+
+		// First instance: write run data + a webhook, then close.
+		const store1 = new SqliteRunStore(dbPath);
+		store1.saveRun({
+			id: "run_keep",
+			workflowName: "wf",
+			workflowPath: "/wf",
+			triggerType: "http",
+			triggerSummary: "GET /",
+			status: "completed",
+			startedAt: 1000,
+			durationMs: 5,
+			nodeCount: 1,
+			completedNodes: 1,
+		});
+		store1.saveWebhook({
+			id: "wh_keep",
+			url: "https://example.com/hook",
+			events: ["run.failed"],
+			secret: undefined,
+			createdAt: 1000,
+			active: true,
+			failCount: 0,
+		});
+		store1.close();
+
+		// Re-open: migration is idempotent, run data + webhook both survive.
+		const store2 = new SqliteRunStore(dbPath);
+		expect(store2.getRun("run_keep")?.durationMs).toBe(5);
+		const hooks = store2.getWebhooks();
+		expect(hooks).toHaveLength(1);
+		expect(hooks[0]).toMatchObject({ id: "wh_keep", url: "https://example.com/hook", active: true });
+		store2.close();
+	});
 });
 
 describe("SqliteRunStore: cascade deletes", () => {

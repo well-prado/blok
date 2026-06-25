@@ -21,10 +21,15 @@ import type {
 	StartNodeOptions,
 	StartRunOptions,
 	TraceLogEntry,
+	Webhook,
 	WorkflowRun,
 	WorkflowSample,
 	WorkflowSummary,
 } from "./types";
+
+// Re-export so existing `import { Webhook } from "./RunTracker"` (and the
+// `tracing/index.ts` barrel) keep working after the type moved to types.ts.
+export type { Webhook } from "./types";
 
 /**
  * Cap on the number of `NODE_ATTEMPT_FAILED` entries kept on a single
@@ -98,24 +103,16 @@ function toRunErrorDetail(error: unknown): RunErrorDetail {
 	return detail;
 }
 
-/** Webhook registration for run event notifications. */
-export interface Webhook {
-	id: string;
-	url: string;
-	events: string[];
-	secret?: string;
-	createdAt: number;
-	active: boolean;
-	lastTriggeredAt?: number;
-	lastStatus?: number;
-	failCount: number;
-}
-
 export class RunTracker extends EventEmitter {
 	private store: RunStore;
 	private maxRuns: number;
 	private enabled: boolean;
+	// OBS-05 T7 — hot read path for webhooks. Seeded lazily from the store
+	// on first access (registrations survive a restart). The store is the
+	// durable backing; this Map is the source of truth at runtime (it also
+	// carries the ephemeral failCount/lastStatus telemetry the store drops).
 	private webhooks: Map<string, Webhook> = new Map();
+	private webhooksSeeded = false;
 
 	private static instance: RunTracker | null = null;
 
@@ -1117,7 +1114,27 @@ export class RunTracker extends EventEmitter {
 
 	// === Webhooks ===
 
+	/**
+	 * OBS-05 T7 — seed the in-memory Map from the durable store the first
+	 * time any webhook path is hit. Mirrors the scheduled-dispatch recovery
+	 * pattern but stays inside RunTracker (webhooks are only read here, so no
+	 * trigger wiring is needed). Best-effort: a store error leaves the Map
+	 * empty rather than breaking registration.
+	 */
+	private ensureWebhooksSeeded(): void {
+		if (this.webhooksSeeded) return;
+		this.webhooksSeeded = true;
+		try {
+			for (const w of this.store.getWebhooks()) {
+				if (!this.webhooks.has(w.id)) this.webhooks.set(w.id, w);
+			}
+		} catch (err) {
+			console.error("[RunTracker] failed to seed webhooks from store:", (err as Error).message);
+		}
+	}
+
 	registerWebhook(opts: { url: string; events: string[]; secret?: string }): Webhook {
+		this.ensureWebhooksSeeded();
 		const webhook: Webhook = {
 			id: `wh_${uuid().replace(/-/g, "").slice(0, 12)}`,
 			url: opts.url,
@@ -1128,14 +1145,29 @@ export class RunTracker extends EventEmitter {
 			failCount: 0,
 		};
 		this.webhooks.set(webhook.id, webhook);
+		// Best-effort durable persist — don't let a store error break
+		// registration (the Map is still authoritative at runtime).
+		try {
+			this.store.saveWebhook(webhook);
+		} catch (err) {
+			console.error("[RunTracker] failed to persist webhook:", (err as Error).message);
+		}
 		return webhook;
 	}
 
 	removeWebhook(id: string): boolean {
-		return this.webhooks.delete(id);
+		this.ensureWebhooksSeeded();
+		const existed = this.webhooks.delete(id);
+		try {
+			this.store.deleteWebhook(id);
+		} catch (err) {
+			console.error("[RunTracker] failed to delete persisted webhook:", (err as Error).message);
+		}
+		return existed;
 	}
 
 	getWebhooks(): Webhook[] {
+		this.ensureWebhooksSeeded();
 		return Array.from(this.webhooks.values());
 	}
 
@@ -1185,6 +1217,14 @@ export class RunTracker extends EventEmitter {
 		};
 		const webhookEvent = eventMap[event.type];
 		if (!webhookEvent) return;
+
+		// Seed from the durable store so webhooks registered before a restart
+		// fire on the first event after boot (not just after a CRUD call).
+		//
+		// ponytail: multi-replica duplicate-POST (N replicas each seeding the
+		// same registration → each fires its own POST per event) is a known
+		// Tier-C follow-up — needs shared dedup/leadership, out of scope here.
+		this.ensureWebhooksSeeded();
 
 		for (const webhook of this.webhooks.values()) {
 			if (!webhook.active) continue;

@@ -16,6 +16,7 @@ import type {
 	SavedFilter,
 	ScheduledDispatchRow,
 	TraceLogEntry,
+	Webhook,
 	WorkflowRun,
 	WorkflowRunStatus,
 	WorkflowSample,
@@ -817,6 +818,35 @@ export class SqliteRunStore implements RunStore {
 				version: 16,
 				sql: `
 					ALTER TABLE node_runs ADD COLUMN flags_json TEXT;
+				`,
+			},
+			{
+				// OBS-05 T7 — durable webhook registrations. Until now
+				// webhooks lived only in RunTracker's in-memory Map and were
+				// lost on restart. This persists the durable subset so they
+				// survive a process bounce; RunTracker seeds its hot Map from
+				// this table on first access.
+				//
+				// Columns mirror the `Webhook` durable subset:
+				//  - `id` — PK (`wh_<uuid>`).
+				//  - `url` — POST target.
+				//  - `events_json` — JSON array of subscribed event names.
+				//  - `secret` — optional HMAC secret (NULL when unset).
+				//  - `created_at` — ms since epoch.
+				//  - `active` — 0/1; persisted so the failCount-auto-disable
+				//    state survives, but only updated at register/remove time.
+				// Runtime telemetry (failCount/lastStatus/lastTriggeredAt) is
+				// deliberately NOT persisted — ephemeral, would amplify writes.
+				version: 17,
+				sql: `
+					CREATE TABLE IF NOT EXISTS webhooks (
+						id TEXT PRIMARY KEY,
+						url TEXT NOT NULL,
+						events_json TEXT NOT NULL,
+						secret TEXT,
+						created_at INTEGER NOT NULL,
+						active INTEGER NOT NULL DEFAULT 1
+					);
 				`,
 			},
 		];
@@ -1972,6 +2002,57 @@ export class SqliteRunStore implements RunStore {
 			"DELETE FROM scheduled_dispatches WHERE expires_at IS NOT NULL AND expires_at < ?",
 		).run(now);
 		return result.changes;
+	}
+
+	// === Durable webhook registrations (OBS-05 T7) ===
+
+	saveWebhook(webhook: Webhook): void {
+		this.stmt(
+			"saveWebhook",
+			`INSERT OR REPLACE INTO webhooks (id, url, events_json, secret, created_at, active)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		).run(
+			webhook.id,
+			webhook.url,
+			JSON.stringify(webhook.events),
+			webhook.secret ?? null,
+			webhook.createdAt,
+			webhook.active ? 1 : 0,
+		);
+	}
+
+	getWebhooks(): Webhook[] {
+		const rows = this.db.prepare("SELECT * FROM webhooks ORDER BY created_at ASC").all() as Array<{
+			id: string;
+			url: string;
+			events_json: string;
+			secret: string | null;
+			created_at: number;
+			active: number;
+		}>;
+		return rows.map((r) => {
+			let events: string[] = [];
+			try {
+				events = JSON.parse(r.events_json);
+			} catch {
+				events = [];
+			}
+			return {
+				id: r.id,
+				url: r.url,
+				events,
+				secret: r.secret ?? undefined,
+				createdAt: r.created_at,
+				active: r.active !== 0,
+				// Telemetry fields reset on seed — never persisted.
+				failCount: 0,
+			};
+		});
+	}
+
+	deleteWebhook(id: string): boolean {
+		const result = this.stmt("deleteWebhook", "DELETE FROM webhooks WHERE id = ?").run(id);
+		return result.changes > 0;
 	}
 
 	deleteRunsBefore(timestamp: number): number {
