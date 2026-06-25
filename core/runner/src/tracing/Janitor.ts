@@ -137,6 +137,7 @@ export class Janitor {
 			try {
 				stats.idempotencyCachePurged = this.store.purgeExpiredIdempotencyCache(start);
 			} catch (err) {
+				JanitorMetrics.getInstance().recordSweepError({ table: "idempotency_cache" });
 				this.logger?.error?.(
 					`[blok][janitor] purgeExpiredIdempotencyCache failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
@@ -151,6 +152,7 @@ export class Janitor {
 			try {
 				stats.concurrencySlotsPurged = this.store.purgeExpiredConcurrencySlots(start);
 			} catch (err) {
+				JanitorMetrics.getInstance().recordSweepError({ table: "concurrency_locks" });
 				this.logger?.error?.(
 					`[blok][janitor] purgeExpiredConcurrencySlots failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
@@ -165,6 +167,7 @@ export class Janitor {
 			try {
 				stats.scheduledDispatchesPurged = this.store.purgeExpiredScheduledDispatches(start);
 			} catch (err) {
+				JanitorMetrics.getInstance().recordSweepError({ table: "scheduled_dispatches" });
 				this.logger?.error?.(
 					`[blok][janitor] purgeExpiredScheduledDispatches failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
