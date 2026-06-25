@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TriggerBase from "../../../src/TriggerBase";
+import { ProcessErrorMetrics } from "../../../src/monitoring/ProcessErrorMetrics";
 import { RunTracker } from "../../../src/tracing/RunTracker";
 
 describe("RunTracker — markAllRunningRunsAsCrashed (Tier 2 quick-wins follow-up)", () => {
@@ -195,5 +196,24 @@ describe("TriggerBase.recoverOrphanedRuns + installCrashHandlers", () => {
 		const before = process.listenerCount("uncaughtException");
 		TriggerBase.installCrashHandlers();
 		expect(process.listenerCount("uncaughtException")).toBe(before);
+	});
+
+	it("OBS-06 T8 — the unhandledRejection handler increments blok_unhandled_rejection_total", () => {
+		const spy = vi.spyOn(ProcessErrorMetrics.getInstance(), "recordUnhandledRejection");
+		TriggerBase.installCrashHandlers();
+
+		// Fire the handler we just installed directly (don't actually emit
+		// the process event — that would let Node's default behavior run).
+		const listeners = process.listeners("unhandledRejection");
+		const handler = listeners[listeners.length - 1] as (reason: unknown) => void;
+		handler(new TypeError("boom"));
+
+		expect(spy).toHaveBeenCalledWith({ trigger_type: "process", reason_class: "TypeError" });
+
+		// Cleanup — remove the listeners we added + restore the spy.
+		process.removeListener("unhandledRejection", handler);
+		const uncaught = process.listeners("uncaughtException");
+		process.removeListener("uncaughtException", uncaught[uncaught.length - 1]);
+		spy.mockRestore();
 	});
 });

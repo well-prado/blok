@@ -19,6 +19,13 @@ export interface ExecutionLabels {
 	workflow_name: string;
 	workflow_version: string;
 	env: string;
+	/**
+	 * OBS-05 T2 — resolved terminal run status for error emission
+	 * (`failed` | `crashed` | `timedOut` | `throttled` | `cancelled`).
+	 * Optional for back-compat: when absent, `recordError` omits the
+	 * `status` label and prior behavior is preserved.
+	 */
+	status?: string;
 }
 
 export class PrometheusMetricsBridge {
@@ -219,12 +226,17 @@ export class PrometheusMetricsBridge {
 	 * Record an error with a specific category.
 	 */
 	recordError(category: string, labels: Partial<ExecutionLabels> = {}): void {
-		this.errorsCounter.add(1, {
+		const attrs: Record<string, string> = {
 			trigger_type: this.config.triggerType,
 			trigger_name: this.config.triggerName,
 			error_category: category,
 			env: labels.env || process.env.NODE_ENV || "development",
-		});
+		};
+		// OBS-05 T2 — distinguish failed / crashed / timedOut / throttled /
+		// cancelled when the caller resolved a terminal status. Omitted for
+		// back-compat when absent.
+		if (labels.status) attrs.status = labels.status;
+		this.errorsCounter.add(1, attrs);
 	}
 
 	/**

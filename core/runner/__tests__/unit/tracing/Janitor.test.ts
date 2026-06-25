@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JanitorMetrics } from "../../../src/monitoring/JanitorMetrics";
 import { InMemoryRunStore } from "../../../src/tracing/InMemoryRunStore";
 import { Janitor } from "../../../src/tracing/Janitor";
 
@@ -153,13 +154,16 @@ describe("Janitor (Tier 2 follow-up · periodic storage cleanup)", () => {
 		expect(purgedTotals.sort()).toEqual([0, 1]);
 	});
 
-	it("a failing purge method does not abort the others", async () => {
+	it("a failing purge method does not abort the others (and records a sweep-error metric)", async () => {
 		const store = new InMemoryRunStore();
 		// Force purgeExpiredIdempotencyCache to throw.
 		const original = store.purgeExpiredIdempotencyCache.bind(store);
 		store.purgeExpiredIdempotencyCache = (() => {
 			throw new Error("boom");
 		}) as unknown as typeof store.purgeExpiredIdempotencyCache;
+
+		// OBS-06 T10 — the per-table catch increments blok_janitor_sweep_errors_total.
+		const sweepErrorSpy = vi.spyOn(JanitorMetrics.getInstance(), "recordSweepError");
 
 		const past = Date.now() - 1000;
 		store.acquireConcurrencySlot("wf", "k", 1, "dead", past);
@@ -171,7 +175,12 @@ describe("Janitor (Tier 2 follow-up · periodic storage cleanup)", () => {
 		expect(stats.idempotencyCachePurged).toBe(0);
 		expect(stats.concurrencySlotsPurged).toBe(1);
 
+		// The failing table was recorded; the clean tables were not.
+		expect(sweepErrorSpy).toHaveBeenCalledWith({ table: "idempotency_cache" });
+		expect(sweepErrorSpy).toHaveBeenCalledTimes(1);
+
 		// Restore for cleanup.
+		sweepErrorSpy.mockRestore();
 		store.purgeExpiredIdempotencyCache = original;
 	});
 });

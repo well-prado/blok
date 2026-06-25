@@ -32,6 +32,14 @@ export class JanitorMetrics {
 		unit: "1",
 	});
 
+	// OBS-06 T10 — per-table sweep failures. A purge that throws is caught +
+	// logged but otherwise invisible to metrics; this counter lets operators
+	// alert on a store that's failing to sweep (disk full, locked, etc.).
+	private readonly sweepErrorsCounter = metrics.getMeter("blok").createCounter("blok_janitor_sweep_errors_total", {
+		description: "Total Janitor per-table sweep failures.",
+		unit: "1",
+	});
+
 	private constructor() {}
 
 	static getInstance(): JanitorMetrics {
@@ -55,5 +63,10 @@ export class JanitorMetrics {
 		// liveness too, but pairing them under the same emit cadence
 		// keeps dashboards consistent.
 		this.purgedCounter.add(rowsPurged, attrs as unknown as Record<string, string>);
+	}
+
+	/** OBS-06 T10 — increment on a per-table sweep failure. */
+	recordSweepError(attrs: JanitorAttributes): void {
+		this.sweepErrorsCounter.add(1, attrs as unknown as Record<string, string>);
 	}
 }

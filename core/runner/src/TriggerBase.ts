@@ -17,6 +17,7 @@ import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
 import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
 import { HealthCheck } from "./monitoring/HealthCheck";
 import type { DependencyCheckFn } from "./monitoring/HealthCheck";
+import { ProcessErrorMetrics } from "./monitoring/ProcessErrorMetrics";
 import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
@@ -306,6 +307,11 @@ export default abstract class TriggerBase extends Trigger {
 		TriggerBase.crashHandlersInstalled = true;
 
 		const onUncaught = (err: Error) => {
+			// OBS-06 T8 — count the fatal-error event before the flip/rethrow.
+			ProcessErrorMetrics.getInstance().recordUnhandledRejection({
+				trigger_type: "process",
+				reason_class: err?.constructor?.name ?? "Error",
+			});
 			try {
 				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
 				logger?.error?.(
@@ -324,6 +330,11 @@ export default abstract class TriggerBase extends Trigger {
 
 		const onRejection = (reason: unknown) => {
 			const err = reason instanceof Error ? reason : new Error(String(reason));
+			// OBS-06 T8 — count the rejection event.
+			ProcessErrorMetrics.getInstance().recordUnhandledRejection({
+				trigger_type: "process",
+				reason_class: err.constructor?.name ?? "Error",
+			});
 			try {
 				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
 				logger?.error?.(
@@ -1350,6 +1361,23 @@ export default abstract class TriggerBase extends Trigger {
 				!(err instanceof WaitDispatchRequest)
 			) {
 				tracker.failRun(traceRunId, err instanceof Error ? err : new Error(String(err)));
+			}
+
+			// OBS-05 T2 — emit blok_workflow_errors_total with the resolved
+			// terminal status so dashboards separate failed / crashed /
+			// timedOut / throttled / cancelled. DeferredDispatchSignal and
+			// WaitDispatchRequest are deferral control-flow, not errors —
+			// skip them. The status is read back from the run record AFTER
+			// the upstream markers (markRunTimedOut / markRunThrottled /
+			// abortRunningRun / failRun) have flipped it.
+			if (traceRunId && !(err instanceof DeferredDispatchSignal) && !(err instanceof WaitDispatchRequest)) {
+				const resolvedStatus = tracker.getRun(traceRunId)?.status;
+				this.metricsBridge.recordError(err instanceof Error ? err.constructor.name : "Error", {
+					workflow_name: cfg.name || "",
+					workflow_version: `${cfg.version}`,
+					env: process.env.NODE_ENV || "development",
+					status: resolvedStatus,
+				});
 			}
 
 			throw err;

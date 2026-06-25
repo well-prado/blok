@@ -4,9 +4,10 @@
 # conservative (warnings on rates over a sustained window) so they don't flap.
 # Tune the thresholds (`> 0.05`, `for: 10m`, etc.) to your SLOs.
 #
-# Crash / timeout alerts (run states `crashed` / `timedOut`) need dedicated
-# metrics that OBS-06 (B7) adds — add rules for `blok_unhandled_rejection_total`
-# / `blok_boot_error_total` once that lands.
+# Crash / timeout alerts (run states `crashed` / `timedOut`) are distinguishable
+# via the `status` label on `blok_workflow_errors_total` (OBS-05 T2). The
+# `blok_unhandled_rejection_total` counter (OBS-06 T8) pages on process-level
+# fatal errors. (`blok_boot_error_total` from OBS-06 T9 is not yet emitted.)
 groups:
   - name: blok-availability
     rules:
@@ -33,6 +34,33 @@ groups:
         annotations:
           summary: "Workflow {{ $labels.workflow_name }} error rate > 5%"
           description: "{{ $labels.workflow_name }} has been failing >5% of runs for 10m (current: {{ $value | humanizePercentage }})."
+
+      - alert: BlokWorkflowCrashes
+        expr: sum(rate(blok_workflow_errors_total{status="crashed"}[5m])) by (workflow_name) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Workflow {{ $labels.workflow_name }} runs are crashing"
+          description: "{{ $labels.workflow_name }} has runs flipping to `crashed` (process-level fatal error) for 5m."
+
+      - alert: BlokWorkflowTimeouts
+        expr: sum(rate(blok_workflow_errors_total{status="timedOut"}[5m])) by (workflow_name) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Workflow {{ $labels.workflow_name }} runs are timing out"
+          description: "{{ $labels.workflow_name }} has runs flipping to `timedOut` (step maxDuration exceeded) for 10m."
+
+      - alert: BlokUnhandledRejections
+        expr: sum(rate(blok_unhandled_rejection_total[5m])) by (reason_class) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blok process hit unhandled errors ({{ $labels.reason_class }})"
+          description: "The crash handlers caught uncaughtException / unhandledRejection events ({{ $labels.reason_class }}) for 5m."
 
       - alert: BlokRuntimeNodeErrors
         expr: sum(rate(blok_runtime_node_errors_total[5m])) by (runtime_kind, node_name) > 0
