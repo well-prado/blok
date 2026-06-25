@@ -30,6 +30,12 @@ jobs:
       - name: Lint (Biome)
         run: bun run lint:check
 
+      # Single source of truth for the gRPC contract: every SDK + runner copy of
+      # runtime.proto must match the canonical proto/blok/runtime/v1/runtime.proto.
+      # A drifted copy silently breaks one runtime — fail the PR instead.
+      - name: Proto drift check
+        run: bun run proto:check
+
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
           postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator

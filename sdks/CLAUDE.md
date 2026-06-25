@@ -7,8 +7,11 @@ probes, but the runner itself only speaks gRPC.
 
 ## gRPC Contract
 
-Service: `blok.runtime.v1.NodeRuntime/Execute` (proto schema in
-[`core/grpc-proto/`](../core/grpc-proto)). Each SDK serves a Cap'n Proto–style
+Service: `blok.runtime.v1.NodeRuntime/Execute`. The canonical proto schema is
+[`proto/blok/runtime/v1/runtime.proto`](../proto/blok/runtime/v1/runtime.proto);
+every SDK + the runner keep a copy at their own path, kept in lock-step by
+`bun run proto:sync` (and gated by `proto:check` in CI — edit the canonical file
+only). Each SDK serves a Cap'n Proto–style
 binary `ExecuteRequest` and returns an `ExecuteResponse` carrying the same
 fields as the legacy HTTP `ExecutionResult` (`success`, `data`, `errors`,
 `logs`, `metrics`, `vars`).
@@ -56,7 +59,7 @@ User nodes live in `runtimes/{lang}/nodes/` within projects, registered into the
 
 ## Adding a New SDK Language
 
-1. Implement the `blok.runtime.v1.NodeRuntime/Execute` gRPC service against the proto in `core/grpc-proto/`
+1. Implement the `blok.runtime.v1.NodeRuntime/Execute` gRPC service against the canonical proto `proto/blok/runtime/v1/runtime.proto` (add your SDK's copy path to `scripts/sync-proto.ts` so `proto:sync`/`proto:check` keep it in lock-step)
 2. Decode the binary `ExecuteRequest`, route to the registered node handler by `node.name`, and return an `ExecuteResponse`
 3. Bind a `GET /health` HTTP endpoint for orchestrator readiness probes (the CLI's primary check is a TCP-connect against the gRPC port)
 4. Register a `GrpcRuntimeAdapter` in `core/runner/src/Configuration.ts` (per-kind block in `initializeRuntimeRegistry`) with the new kind + gRPC port env var
