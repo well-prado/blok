@@ -161,35 +161,12 @@ export default abstract class RunnerSteps {
 			let flow_step = 0;
 			let stepName = "";
 
-			// PR 4 — wait.for / wait.until resume cursor.
-			//
-			// On `dispatchDeferred` re-entry from a wait step, the runner
-			// must skip past pre-wait steps that already completed in the
-			// previous pass. `lastCompletedStepIndex` is set on the run
-			// record before each WaitDispatchRequest throw and read here
-			// at runSteps entry. Default `-1` = no resume; runner starts
-			// at i = 0.
-			const persistedRun = !deep && tracker && traceRunId ? tracker.getStore().getRun(traceRunId) : undefined;
-			// Two cursor sources:
-			//   - Top-level (deep === false): workflow_runs.lastCompletedStepIndex.
-			//   - Nested inside a primitive iterator (deep === true, v0.6
-			//     Phase 2): `_blokInnerResumeIndex` stamped on the child ctx
-			//     by ForEachNode.runIteration when resuming at a specific
-			//     inner step. Undefined = start at 0 (fresh iteration body).
-			const innerResumeIndexRaw = (ctx as Record<string, unknown>)._blokInnerResumeIndex;
-			const innerResumeIndex = typeof innerResumeIndexRaw === "number" ? innerResumeIndexRaw : undefined;
-			const resumeFromIndex = !deep
-				? persistedRun?.lastCompletedStepIndex !== undefined
-					? persistedRun.lastCompletedStepIndex + 1
-					: 0
-				: (innerResumeIndex ?? 0);
-			// Clear the sentinel so a re-runner started fresh from this
-			// childCtx (e.g. the nested branch flow path) doesn't inherit
-			// a stale resume hint. ForEachNode set it for THIS one re-entry
-			// only; it should not propagate further.
-			if (deep && innerResumeIndex !== undefined) {
-				(ctx as Record<string, unknown>)._blokInnerResumeIndex = undefined;
-			}
+			const { resumeFromIndex, persistedRun, innerResumeIndex } = this.resolveResumeCursor(
+				ctx,
+				deep,
+				tracker,
+				traceRunId,
+			);
 
 			for (let i = 0; i < steps.length; i++) {
 				const step: NodeBase = steps[i];
@@ -831,57 +808,107 @@ export default abstract class RunnerSteps {
 					? (e as { _blokStepId?: unknown })._blokStepId
 					: undefined;
 
-			let error_context = <Error>{};
-			if (e instanceof GlobalError) {
-				error_context = e as GlobalError;
-			} else {
-				// Walk the `.cause` chain looking for a GlobalError. The
-				// step-enrichment wrap at line ~465 sets `cause = nodeErr`,
-				// and `nodeErr` may itself be a GlobalError thrown from
-				// `defineNode`-built nodes (e.g. `@blokjs/throw` setting
-				// `code: 401` for an auth-check middleware). Without this
-				// walk, the outer wrap below would force the framework's
-				// generic `[step N/M] X failed: ...` message + default 500
-				// code, clobbering the author's structured rejection.
-				let inner: unknown = e;
-				let foundGlobal: GlobalError | null = null;
-				while (
-					typeof inner === "object" &&
-					inner !== null &&
-					"cause" in inner &&
-					(inner as { cause?: unknown }).cause !== undefined &&
-					(inner as { cause?: unknown }).cause !== inner
-				) {
-					inner = (inner as { cause: unknown }).cause;
-					if (inner instanceof GlobalError) {
-						foundGlobal = inner;
-						break;
-					}
-				}
-				if (foundGlobal) {
-					error_context = foundGlobal;
-				} else {
-					error_context = new GlobalError((e as Error).message);
-					// Preserve the original error chain so outer handlers
-					// (notably v0.5 TryCatchNode's `$.error.message` resolution)
-					// can peel back through `.cause` to the author's original
-					// `throw new Error("...")` text instead of the runner's
-					// `[step N/M] <name> failed: ...` enriched prefix.
-					(error_context as Error & { cause?: unknown }).cause = e;
-				}
-			}
-
-			// Stamp the wrap's stepId on the unwrapped error so TryCatchNode's
-			// `toErrorEnvelope` walk can surface it as `$.error.stepId`. The
-			// inner-try wrap layer is gone by this point; this is the only
-			// place where the runner can identify which sub-step failed.
-			if (typeof wrapStepId === "string" && wrapStepId.length > 0) {
-				(error_context as Error & { _blokStepId?: string })._blokStepId = wrapStepId;
-			}
-
-			throw error_context;
+			throw this.unwrapAndEnrichError(e, wrapStepId);
 		}
 
 		return ctx;
+	}
+
+	/**
+	 * PR 4 — wait.for / wait.until resume cursor.
+	 *
+	 * On `dispatchDeferred` re-entry from a wait step, the runner must skip
+	 * past pre-wait steps that already completed in the previous pass.
+	 * `lastCompletedStepIndex` is set on the run record before each
+	 * WaitDispatchRequest throw and read here at runSteps entry. Default
+	 * `-1` = no resume; runner starts at i = 0. Extracted verbatim from the
+	 * top of `runSteps` (E06-T002) — the only mutation is clearing the
+	 * `_blokInnerResumeIndex` sentinel.
+	 */
+	private resolveResumeCursor(ctx: Context, deep: boolean, tracker: RunTracker | null, traceRunId: string | undefined) {
+		const persistedRun = !deep && tracker && traceRunId ? tracker.getStore().getRun(traceRunId) : undefined;
+		// Two cursor sources:
+		//   - Top-level (deep === false): workflow_runs.lastCompletedStepIndex.
+		//   - Nested inside a primitive iterator (deep === true, v0.6
+		//     Phase 2): `_blokInnerResumeIndex` stamped on the child ctx
+		//     by ForEachNode.runIteration when resuming at a specific
+		//     inner step. Undefined = start at 0 (fresh iteration body).
+		const innerResumeIndexRaw = (ctx as Record<string, unknown>)._blokInnerResumeIndex;
+		const innerResumeIndex = typeof innerResumeIndexRaw === "number" ? innerResumeIndexRaw : undefined;
+		const resumeFromIndex = !deep
+			? persistedRun?.lastCompletedStepIndex !== undefined
+				? persistedRun.lastCompletedStepIndex + 1
+				: 0
+			: (innerResumeIndex ?? 0);
+		// Clear the sentinel so a re-runner started fresh from this
+		// childCtx (e.g. the nested branch flow path) doesn't inherit
+		// a stale resume hint. ForEachNode set it for THIS one re-entry
+		// only; it should not propagate further.
+		if (deep && innerResumeIndex !== undefined) {
+			(ctx as Record<string, unknown>)._blokInnerResumeIndex = undefined;
+		}
+		return { resumeFromIndex, persistedRun, innerResumeIndex };
+	}
+
+	/**
+	 * Unwrap + enrich a caught error into a `GlobalError`: walk the
+	 * `.cause` chain looking for an inner `GlobalError` (so an author's
+	 * structured rejection survives the framework's `[step N/M] X
+	 * failed: ...` wrap), otherwise build a fresh `GlobalError` that
+	 * preserves the original chain via `.cause`, then stamp the wrap's
+	 * `_blokStepId` back on so `TryCatchNode.toErrorEnvelope` can surface
+	 * it as `$.error.stepId`. Pure — no ctx mutation. Extracted verbatim
+	 * from the `runSteps` catch arm (E06-T002).
+	 */
+	private unwrapAndEnrichError(e: unknown, wrapStepId?: unknown): GlobalError {
+		let error_context = <Error>{};
+		if (e instanceof GlobalError) {
+			error_context = e as GlobalError;
+		} else {
+			// Walk the `.cause` chain looking for a GlobalError. The
+			// step-enrichment wrap at line ~465 sets `cause = nodeErr`,
+			// and `nodeErr` may itself be a GlobalError thrown from
+			// `defineNode`-built nodes (e.g. `@blokjs/throw` setting
+			// `code: 401` for an auth-check middleware). Without this
+			// walk, the outer wrap below would force the framework's
+			// generic `[step N/M] X failed: ...` message + default 500
+			// code, clobbering the author's structured rejection.
+			let inner: unknown = e;
+			let foundGlobal: GlobalError | null = null;
+			while (
+				typeof inner === "object" &&
+				inner !== null &&
+				"cause" in inner &&
+				(inner as { cause?: unknown }).cause !== undefined &&
+				(inner as { cause?: unknown }).cause !== inner
+			) {
+				inner = (inner as { cause: unknown }).cause;
+				if (inner instanceof GlobalError) {
+					foundGlobal = inner;
+					break;
+				}
+			}
+			if (foundGlobal) {
+				error_context = foundGlobal;
+			} else {
+				error_context = new GlobalError((e as Error).message);
+				// Preserve the original error chain so outer handlers
+				// (notably v0.5 TryCatchNode's `$.error.message` resolution)
+				// can peel back through `.cause` to the author's original
+				// `throw new Error("...")` text instead of the runner's
+				// `[step N/M] <name> failed: ...` enriched prefix.
+				(error_context as Error & { cause?: unknown }).cause = e;
+			}
+		}
+
+		// Stamp the wrap's stepId on the unwrapped error so TryCatchNode's
+		// `toErrorEnvelope` walk can surface it as `$.error.stepId`. The
+		// inner-try wrap layer is gone by this point; this is the only
+		// place where the runner can identify which sub-step failed.
+		if (typeof wrapStepId === "string" && wrapStepId.length > 0) {
+			(error_context as Error & { _blokStepId?: string })._blokStepId = wrapStepId;
+		}
+
+		return error_context as GlobalError;
 	}
 }
