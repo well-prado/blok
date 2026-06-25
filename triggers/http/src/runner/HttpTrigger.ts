@@ -26,7 +26,16 @@ import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
-import { type Span, SpanKind, SpanStatusCode, context, metrics, propagation, trace } from "@opentelemetry/api";
+import {
+	type Counter,
+	type Span,
+	SpanKind,
+	SpanStatusCode,
+	context,
+	metrics,
+	propagation,
+	trace,
+} from "@opentelemetry/api";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
@@ -108,6 +117,34 @@ function hasHttpTrigger(wf: unknown): boolean {
 	if (!trigger || typeof trigger !== "object") return false;
 	const http = (trigger as Record<string, unknown>).http;
 	return !!http && typeof http === "object";
+}
+
+/**
+ * OBS-06 (T9) — pre-run boot failures. When `Configuration.init` (workflow
+ * parse / node resolution / runtime registry) or the middleware-chain resolver
+ * throws BEFORE `this.run()` reaches `tracker.startRun()`, the failure is a
+ * config/deploy problem, not workflow logic — but it surfaced only as a generic
+ * 500 with no distinct metric (`blok_workflow_errors_total` fires inside the
+ * run, which never started, so it never sees a boot failure). This counter
+ * separates "the workflow couldn't even boot" from "a step threw", so an alert
+ * can page on deploy/config breakage distinctly. Lazily created once so it binds
+ * to the trigger's MeterProvider; the wrap re-throws, so behaviour is unchanged.
+ */
+let _bootErrorCounter: Counter | null = null;
+function recordBootError(phase: "configuration_init" | "middleware", err: unknown): void {
+	if (!_bootErrorCounter) {
+		_bootErrorCounter = metrics.getMeter("blok").createCounter("blok_boot_error_total", {
+			description: "Workflow boot failures before the run started (config/middleware resolution)",
+			unit: "1",
+		});
+	}
+	const error_class = err instanceof Error && err.name ? err.name : "Error";
+	_bootErrorCounter.add(1, { trigger_type: "http", phase, error_class });
+}
+
+/** Test-only: drop the cached counter so a fresh MeterProvider is picked up. */
+export function _resetBootErrorCounterForTests(): void {
+	_bootErrorCounter = null;
 }
 
 export default class HttpTrigger extends TriggerBase {
@@ -1405,10 +1442,15 @@ export default class HttpTrigger extends TriggerBase {
 					// File-based routing path: pass the pre-loaded workflow object
 					// directly to Configuration.init so it bypasses the disk lookup.
 					// Falls back to the standard nodeMap-resolver path otherwise.
-					if (preloadedWorkflow !== undefined) {
-						await this.configuration.init(workflowNameInPath, this.nodeMap, preloadedWorkflow);
-					} else {
-						await this.configuration.init(workflowNameInPath, this.nodeMap);
+					try {
+						if (preloadedWorkflow !== undefined) {
+							await this.configuration.init(workflowNameInPath, this.nodeMap, preloadedWorkflow);
+						} else {
+							await this.configuration.init(workflowNameInPath, this.nodeMap);
+						}
+					} catch (bootErr) {
+						recordBootError("configuration_init", bootErr);
+						throw bootErr;
 					}
 					let ctx: Context = this.createContext(
 						undefined,
@@ -1490,7 +1532,12 @@ export default class HttpTrigger extends TriggerBase {
 					// v0.6 · merged middleware chain (process-global → workflow-level
 					// → trigger-level). Implementation lives on `TriggerBase`
 					// so worker + cron triggers reuse the same merge logic.
-					await this.applyMiddlewareChain(ctx, this.nodeMap);
+					try {
+						await this.applyMiddlewareChain(ctx, this.nodeMap);
+					} catch (bootErr) {
+						recordBootError("middleware", bootErr);
+						throw bootErr;
+					}
 
 					const response: TriggerResponse = await this.run(ctx);
 					ctx = response.ctx;
