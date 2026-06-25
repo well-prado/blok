@@ -8,6 +8,7 @@ import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import { SubworkflowNode, getSelfBaseUrl } from "../../src/SubworkflowNode";
+import { SubworkflowMetrics } from "../../src/monitoring/SubworkflowMetrics";
 import { RunTracker } from "../../src/tracing/RunTracker";
 import { createChildContext } from "../../src/utils/createChildContext";
 import { WorkflowRegistry } from "../../src/workflow/WorkflowRegistry";
@@ -666,6 +667,54 @@ describe("SubworkflowNode — fire-and-forget (wait: false)", () => {
 		expect(childRun?.status).toBe("failed");
 		expect(errSpy).toHaveBeenCalled();
 		errSpy.mockRestore();
+	});
+
+	// OBS-05 T5 — async (wait:false) child failure increments the metric
+	// counter alongside the existing failRun + console.error.
+	it("records SubworkflowMetrics.recordAsyncFailure on the in-process async failure path", async () => {
+		class FailingNode extends EchoBodyNode {
+			constructor() {
+				super("fail-node");
+			}
+			override async run(): Promise<ResponseContext> {
+				throw new Error("boom");
+			}
+		}
+		WorkflowRegistry.getInstance().register({
+			name: "child-fail-metric",
+			source: "/child-fail-metric.ts",
+			workflow: {
+				name: "child-fail-metric",
+				version: "1.0.0",
+				trigger: { manual: {} },
+				steps: [{ id: "go", use: "fail-node", type: "module", inputs: {} }],
+			},
+		});
+
+		const node = new SubworkflowNode();
+		node.name = "fire";
+		node.node = "@blokjs/subworkflow";
+		node.type = "subworkflow";
+		node.subworkflow = "child-fail-metric";
+		node.wait = false;
+		node.globalOptions = {
+			nodes: {
+				getNode: (name: string) => (name === "fail-node" ? new FailingNode() : null),
+			},
+		} as unknown as SubworkflowNode["globalOptions"];
+
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { fire: { inputs: {} } } as unknown as Context["config"];
+
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const metricSpy = vi.spyOn(SubworkflowMetrics.getInstance(), "recordAsyncFailure");
+
+		await node.run(parentCtx);
+		await flush();
+
+		expect(metricSpy).toHaveBeenCalledWith({ workflow_name: "parent-wf", dispatch: "in-process" });
+		errSpy.mockRestore();
+		metricSpy.mockRestore();
 	});
 
 	it("multiple parallel fire-and-forget invocations create distinct child runs", async () => {
