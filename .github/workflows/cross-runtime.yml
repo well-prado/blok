@@ -38,12 +38,19 @@ jobs:
       - name: Build @blokjs/runner
         run: bunx nx build @blokjs/runner
 
+      # Bake a scaffolded `e2e-user` node into each SDK build context (real
+      # codegen for compiled langs, BLOK_NODES_DIR node-dir for dynamic) so the
+      # harness proves user-authored nodes are discoverable + executable too.
+      - name: Prepare user-node build contexts
+        run: bun tests/e2e/cross-runtime/prepare-usernodes.ts
+
       - name: Build + start the 7 SDK gRPC runtimes
         run: docker compose -f tests/e2e/cross-runtime/docker-compose.yml up -d --build
 
-      - name: Run cross-runtime gRPC harness (all 7 required)
+      - name: Run cross-runtime gRPC harness (all 7 required, user nodes asserted)
         env:
           BLOK_E2E_REQUIRE_ALL: "1"
+          BLOK_E2E_USERNODES: "1"
         run: bun tests/e2e/cross-runtime/spec-b-typed-e2e.ts
 
       - name: Print runtime logs on failure
