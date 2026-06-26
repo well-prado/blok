@@ -44,4 +44,4 @@ USER bun
 EXPOSE 4001/tcp
 EXPOSE 9091/tcp
 
-ENTRYPOINT [ "bun", "--preload", "./dist/runner/metrics/opentelemetry_metrics.js", "run", "dist/index.js" ]
+ENTRYPOINT [ "bun", "run", "dist/index.js" ]

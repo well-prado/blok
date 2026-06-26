@@ -11,7 +11,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
-vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({ metricsHandler: vi.fn() }));
+vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
+	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
+	resetBootstrap: () => {},
+	metricsHandler: vi.fn(),
+}));
 
 // The RPC mount runs real workflows, so the node map must carry the built-in
 // helper nodes (@blokjs/respond etc.) — mock Nodes with the real HELPER_NODES.

@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
-vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({ metricsHandler: vi.fn() }));
+vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
+	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
+	resetBootstrap: () => {},
+	metricsHandler: vi.fn(),
+}));
 vi.mock("../../src/Nodes", () => ({ default: {} }));
 vi.mock("../../src/AppRoutes", () => {
 	const { Hono } = require("hono");

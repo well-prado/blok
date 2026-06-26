@@ -6,7 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
-vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({ metricsHandler: vi.fn() }));
+vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
+	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
+	resetBootstrap: () => {},
+	metricsHandler: vi.fn(),
+}));
 // NOTE: `../../src/Nodes` is intentionally NOT mocked here — F15's header check
 // runs AFTER `Configuration.init` resolves the workflow's nodes, so the real
 // `@blokjs/respond` node must be available for the request to reach the gate.

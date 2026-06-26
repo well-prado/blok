@@ -44,7 +44,12 @@ vi.mock("@hono/node-server", () => ({
 vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() }));
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 // Avoid the real Prometheus exporter binding a port + clobbering the global meter provider on import.
-vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({ metricsHandler: () => () => {}, meter: {} }));
+vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
+	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
+	resetBootstrap: () => {},
+	metricsHandler: () => () => {},
+	meter: {},
+}));
 
 import { WorkflowRegistry } from "@blokjs/runner";
 import HttpTrigger, { _resetBootErrorCounterForTests } from "../../src/runner/HttpTrigger";
