@@ -11,6 +11,7 @@ import simpleGit, { type SimpleGit, type SimpleGitOptions } from "simple-git";
 import { isNonInteractive, parseCommaSeparated, resolveOrThrow } from "../../services/non-interactive.js";
 import { setupObservabilityStack } from "../../services/obs-setup.js";
 import { type ObsStackTier, parseObsTier } from "../../services/obs-tiers.js";
+import { rewriteObservabilityEnvBlock } from "../../services/observability-mutations.js";
 import { manager as pm } from "../../services/package-manager.js";
 import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
 import {
@@ -25,6 +26,12 @@ import {
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
 import { computeDefaultConstraint } from "../../services/semver-utils.js";
+import { resolveObservabilitySelection } from "../observability/apply.js";
+import {
+	OBSERVABILITY_MODULE_IDS,
+	allObservabilityModules,
+	getObservabilityModule,
+} from "../observability/descriptor.js";
 import {
 	agents_md,
 	claude_md,
@@ -101,6 +108,17 @@ export async function createProject(opts: OptionValues, version: string, current
 	// Loki/Tempo stack. Restore the old behaviour with `--obs-stack full` (or add
 	// it later: `blokctl observability add obs-stack`).
 	let selectedObsTier: ObsStackTier = opts.obsStack ? parseObsTier(opts.obsStack) : "none";
+	// Observability modules to enable at create time (the "choose what to add"
+	// half — `blokctl observability add` is the retrofit half). obs-stack is its
+	// own `--obs-stack` tier flag, so it's excluded from this set.
+	let selectedObsModules: string[] = opts.observability
+		? parseCommaSeparated(opts.observability).map((s) => s.trim().toLowerCase())
+		: [];
+	for (const id of selectedObsModules) {
+		if (id !== "obs-stack" && !getObservabilityModule(id)) {
+			throw new Error(`Invalid --observability "${id}". Known: ${OBSERVABILITY_MODULE_IDS.join(", ")}.`);
+		}
+	}
 
 	// Detect available runtimes on the machine
 	let detectedRuntimes: RuntimeInfo[] = [];
@@ -246,6 +264,17 @@ export async function createProject(opts: OptionValues, version: string, current
 								],
 								initialValue: "none",
 							}),
+				observability: () =>
+					opts.observability
+						? Promise.resolve(parseCommaSeparated(opts.observability))
+						: p.multiselect({
+								message: "Observability modules (optional — none by default)",
+								options: allObservabilityModules()
+									.filter((m) => m.id !== "obs-stack")
+									.map((m) => ({ value: m.id, label: m.label, hint: m.description })),
+								initialValues: [],
+								required: false,
+							}),
 				selectedManager: () => resolveSelectedManager(),
 			},
 			{
@@ -266,6 +295,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		queueProvider = (blokctlProject.queueProvider as string) || "kafka";
 		selectedRuntimeKinds = blokctlProject.runtimes;
 		selectedObsTier = parseObsTier(blokctlProject.obsStack as string);
+		selectedObsModules = (blokctlProject.observability as string[] | undefined) ?? [];
 		selectedManager = blokctlProject.selectedManager;
 
 		// Warn about unavailable runtimes
@@ -1029,8 +1059,25 @@ export async function createProject(opts: OptionValues, version: string, current
 			}
 		}
 
-		// Write .blok/config.json with both triggers and runtimes
-		writeProjectConfig(dirPath, runtimeConfigs, spawnedTriggerConfigs);
+		// Resolve the selected observability modules (+ their dependencies) into a
+		// config map + env blocks. obs-stack is handled by --obs-stack, not here.
+		const obsSelection = resolveObservabilitySelection(
+			selectedObsModules.filter((id) => id !== "obs-stack"),
+			{ addedAt: new Date().toISOString(), version, projectDir: dirPath },
+		);
+		if (obsSelection.added.length > 0) {
+			p.log.info(`Auto-enabling required observability dependencies: ${obsSelection.added.join(", ")}`);
+		}
+
+		// Write .blok/config.json with triggers, runtimes, and observability modules.
+		const obsConfigMap = Object.keys(obsSelection.configMap).length > 0 ? obsSelection.configMap : undefined;
+		writeProjectConfig(dirPath, runtimeConfigs, spawnedTriggerConfigs, obsConfigMap);
+
+		// Append the observability env block (fenced, managed) to .env.local.
+		if (obsSelection.envBlocks.some((b) => b.trim())) {
+			const current = fsExtra.existsSync(envLocal) ? fsExtra.readFileSync(envLocal, "utf8") : "";
+			fsExtra.writeFileSync(envLocal, rewriteObservabilityEnvBlock(current, obsSelection.envBlocks));
+		}
 
 		// Append trigger env vars to .env.local
 		if (triggerConfigs.length > 0) {
