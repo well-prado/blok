@@ -38,7 +38,13 @@ export async function observabilityList(options: OptionValues): Promise<void> {
 
 		if (on.length > 0) {
 			p.note(
-				on.map((m) => `${color.green("✓")} ${color.bold(m.label.padEnd(26))} ${color.dim(m.id)}`).join("\n"),
+				on
+					.map((m) => {
+						const added = enabled[m.id]?.addedAt;
+						const when = added ? color.dim(`  added ${added.slice(0, 10)}`) : "";
+						return `${color.green("✓")} ${color.bold(m.label.padEnd(26))} ${color.dim(m.id.padEnd(13))}${when}`;
+					})
+					.join("\n"),
 				`Enabled (${on.length})`,
 			);
 		} else {
