@@ -113,6 +113,7 @@ async function main() {
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--pubsub-provider <value>", "Pub/Sub provider: gcp, aws, azure (default: gcp)")
 			.option("--queue-provider <value>", "Queue provider: kafka, rabbitmq, sqs, redis (default: kafka)")
+			.option("--obs-stack <tier>", "Observability dev stack: none, lite, full (default: none)")
 			.option("--examples", "Install example workflows and nodes")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({

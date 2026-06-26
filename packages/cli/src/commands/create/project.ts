@@ -9,6 +9,8 @@ import fsExtra from "fs-extra";
 import color from "picocolors";
 import simpleGit, { type SimpleGit, type SimpleGitOptions } from "simple-git";
 import { isNonInteractive, parseCommaSeparated, resolveOrThrow } from "../../services/non-interactive.js";
+import { setupObservabilityStack } from "../../services/obs-setup.js";
+import { type ObsStackTier, parseObsTier } from "../../services/obs-tiers.js";
 import { manager as pm } from "../../services/package-manager.js";
 import { type RuntimeInfo, detectRuntimes } from "../../services/runtime-detector.js";
 import {
@@ -94,6 +96,11 @@ export async function createProject(opts: OptionValues, version: string, current
 	// avoids pulling in broker deps. Only an explicit choice injects an active
 	// adapter + its env block + its dependency.
 	let explicitQueueProvider: boolean = Boolean(opts.queueProvider);
+	// Observability dev stack. BEHAVIOR CHANGE (MO-STACK): the default is now
+	// `none` — a fresh project no longer carries the whole Prometheus/Grafana/
+	// Loki/Tempo stack. Restore the old behaviour with `--obs-stack full` (or add
+	// it later: `blokctl observability add obs-stack`).
+	let selectedObsTier: ObsStackTier = opts.obsStack ? parseObsTier(opts.obsStack) : "none";
 
 	// Detect available runtimes on the machine
 	let detectedRuntimes: RuntimeInfo[] = [];
@@ -227,6 +234,18 @@ export async function createProject(opts: OptionValues, version: string, current
 								initialValues: ["node"],
 								required: true,
 							}),
+				obsStack: () =>
+					opts.obsStack
+						? Promise.resolve(opts.obsStack)
+						: p.select({
+								message: "Observability dev stack?",
+								options: [
+									{ label: "None", value: "none", hint: "no infra/metrics — boots standalone (default)" },
+									{ label: "Lite", value: "lite", hint: "Prometheus + Grafana only" },
+									{ label: "Full", value: "full", hint: "Prometheus, Grafana, Loki, Tempo, Alloy, …" },
+								],
+								initialValue: "none",
+							}),
 				selectedManager: () => resolveSelectedManager(),
 			},
 			{
@@ -246,6 +265,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		explicitQueueProvider = blokctlProject.queueProvider != null;
 		queueProvider = (blokctlProject.queueProvider as string) || "kafka";
 		selectedRuntimeKinds = blokctlProject.runtimes;
+		selectedObsTier = parseObsTier(blokctlProject.obsStack as string);
 		selectedManager = blokctlProject.selectedManager;
 
 		// Warn about unavailable runtimes
@@ -638,11 +658,9 @@ export async function createProject(opts: OptionValues, version: string, current
 			console.error(`Failed to change ownership of directory ${dirPath}:`, error);
 		}
 
-		// Infra
-
-		fsExtra.ensureDirSync(`${dirPath}/infra`);
-		fsExtra.ensureDirSync(`${dirPath}/infra/metrics`);
-		fsExtra.copySync(`${repoSource}/infra/metrics`, `${dirPath}/infra/metrics`);
+		// Infra — observability dev stack, tiered (default `none`). Was an
+		// unconditional copy of the whole infra/metrics stack into every project.
+		setupObservabilityStack(repoSource, dirPath, selectedObsTier);
 		fsExtra.removeSync(`${dirPath}/public/metric`);
 
 		// Copy development infra (docker-compose with Redis/NATS) if queue/worker trigger is selected
