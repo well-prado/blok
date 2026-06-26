@@ -196,8 +196,27 @@ const REGISTRY: Record<ObservabilityModuleId, ObservabilityModuleDescriptor> = {
 				"# BLOK_LOG_LEVEL=info",
 			].join("\n"),
 		infraFiles: [],
-		composeServices: [],
+		// Loki (log store) + Alloy (shipper). obs-stack (full) owns their config
+		// files (loki-config.yaml + alloy-config.alloy); this declares that
+		// logging contributes those services.
+		composeServices: ["loki", "alloy"],
 		packageDeps: {},
+		verify: async (projectDir) => {
+			const envPath = path.join(projectDir, ".env.local");
+			const env = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+			const active = env
+				.split("\n")
+				.map((l) => l.trim())
+				.some((l) => !l.startsWith("#") && /^CONSOLE_LOG_ACTIVE\s*=\s*true$/i.test(l));
+			const shipper = fs.existsSync(path.join(projectDir, "infra", "metrics", "alloy-config.alloy"));
+			if (!active) return { ok: true, message: "structured logging is OFF — set CONSOLE_LOG_ACTIVE=true" };
+			if (!shipper) return { ok: true, message: "structured JSON logging on; add obs-stack=full to ship to Loki" };
+			return {
+				ok: true,
+				message: "shipping JSON logs to Loki via Alloy",
+				dashboardUrl: "http://localhost:3000/explore",
+			};
+		},
 	},
 	alerting: {
 		id: "alerting",
