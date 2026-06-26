@@ -538,6 +538,57 @@ trigger.enableCircuitBreaker({
 | `OPEN` | All requests rejected with `CircuitOpenError` |
 | `HALF_OPEN` | Limited requests allowed to test recovery |
 
+## Modular Observability (opt-in via `blokctl`)
+
+Everything above is **opt-in per project**. A fresh `blokctl create` no longer
+drags the whole stack in — you pick what you want at create time and add the
+rest later. Each tool is one module:
+
+| Module | What it is | Enabled by | Off / inert when |
+|---|---|---|---|
+| `metrics` | the `blok_*` Prometheus families + `/metrics` exporter | **on by default** | `BLOK_METRICS_DISABLED=1` |
+| `tracing` | OTLP spans → Tempo | `OTEL_EXPORTER_OTLP_ENDPOINT` set | endpoint unset (inert) |
+| `trace-store` | run history + Studio API | `BLOK_TRACE_STORE=sqlite\|postgres` | — (sqlite default) |
+| `logging` | structured JSON → Loki via Alloy | `CONSOLE_LOG_ACTIVE=true` | — |
+| `alerting` | Prometheus rules + Helm `PrometheusRule` | `BLOK_ALERTING_ENABLED=true` | — |
+| `error-sink` | forward unhandled errors to Sentry | `SENTRY_DSN` set | DSN unset (inert) |
+| `obs-stack` | the local Prometheus/Grafana/Loki/Tempo dev stack | `--obs-stack lite\|full` | `none` (default) |
+
+### Choose at create time
+
+```bash
+blokctl create project \
+  --observability metrics,tracing,trace-store \
+  --obs-stack lite          # none (default) | lite (Prometheus+Grafana) | full
+```
+
+Dependencies auto-resolve (`alerting` → `metrics`, `logging` → `trace-store`).
+Selecting nothing leaves **zero** observability footprint.
+
+### Add / inspect later
+
+```bash
+blokctl observability add logging       # pulls in trace-store automatically
+blokctl observability list              # what's enabled + what's available
+blokctl observability status            # per-module health (reads .env.local)
+blokctl observability remove tracing
+```
+
+`add`/`remove` are idempotent and edit only the project's `.blok/config.json` +
+the fenced `# Blok observability` block in `.env.local`.
+
+### The metrics opt-out — `BLOK_METRICS_DISABLED`
+
+Metrics are the one tool that's **ON by default** (backward compatible). To turn
+the exporter off, set `BLOK_METRICS_DISABLED=1`: no exporter is built, no global
+MeterProvider is installed (every `blok_*` instrument no-ops), and the HTTP
+trigger registers **no** `/metrics` route. This is the canonical kill-switch —
+the inverse `BLOK_METRICS_ENABLED` does not exist.
+
+> **Behavior change:** `blokctl create` now defaults to `--obs-stack none`, so a
+> new project does not copy the `infra/metrics` stack. Restore the old full-stack
+> behavior with `--obs-stack full` (or `blokctl observability add obs-stack`).
+
 ## See Also
 
 - [Trigger System](/architecture/trigger-system) -- monitoring infrastructure in triggers
