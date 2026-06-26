@@ -30,6 +30,7 @@ import "./commands/nodes/index.js";
 import "./commands/config/index.js";
 import "./commands/migrate/index.js";
 import "./commands/runtime/index.js";
+import "./commands/observability/index.js";
 import "./commands/graph/index.js";
 import "./commands/profile/index.js";
 import "./commands/cost/index.js";
@@ -112,6 +113,7 @@ async function main() {
 			.option("-m, --package-manager <value>", "Package manager: npm, yarn, pnpm, bun")
 			.option("--pubsub-provider <value>", "Pub/Sub provider: gcp, aws, azure (default: gcp)")
 			.option("--queue-provider <value>", "Queue provider: kafka, rabbitmq, sqs, redis (default: kafka)")
+			.option("--obs-stack <tier>", "Observability dev stack: none, lite, full (default: none)")
 			.option("--examples", "Install example workflows and nodes")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({

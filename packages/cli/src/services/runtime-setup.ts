@@ -65,9 +65,36 @@ export interface TriggerConfig {
 	startCmd: string;
 }
 
+/**
+ * Per-module record under `.blok/config.json` → `observability`. Tracks which
+ * opt-in observability modules (metrics, tracing, …) are enabled in a project,
+ * written by `blokctl observability add` and the create-time picker.
+ *
+ * Remove contract: `blokctl observability remove <id>` deletes this entry AND
+ * reverses the module's `.env.local` block. Copied infra files (Helm values,
+ * compose services) are left in place with a printed note unless the module's
+ * `cleanup()` hook handles them — removal never destroys operator-edited infra.
+ *
+ * Version drift: `version` records the framework version that scaffolded the
+ * module so a future `observability upgrade` can detect stale scaffolds.
+ * Monorepo note: the config is per-project-root (resolved via
+ * `resolveProjectRoot`), so a workspace with several Blok apps keeps an
+ * independent observability set per app.
+ */
+export interface ObservabilityModuleConfig {
+	/** Whether the module is active. Present-and-true is the only enabled state. */
+	enabled: boolean;
+	/** ISO timestamp the module was added (caller-supplied — keeps this layer pure). */
+	addedAt: string;
+	/** Framework version that scaffolded the module, for drift detection. */
+	version?: string;
+}
+
 export interface ProjectConfig {
 	triggers?: Record<string, TriggerConfig>;
 	runtimes?: Record<string, RuntimeConfig>;
+	/** Opt-in observability modules enabled in this project (keyed by module id). */
+	observability?: Record<string, ObservabilityModuleConfig>;
 }
 
 // Backwards compatibility alias
@@ -680,12 +707,17 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number):
 }
 
 /**
- * Write the .blok/config.json file with runtime and trigger configuration.
+ * Write the .blok/config.json file with runtime, trigger, and (optionally)
+ * observability-module configuration. The observability map round-trips
+ * verbatim, so a create-time picker can persist enabled modules in the same
+ * write. Incremental `observability add`/`remove` bypass this builder and
+ * merge into the full existing config directly (preserving all keys).
  */
 export function writeProjectConfig(
 	projectDir: string,
 	runtimeConfigs: RuntimeConfig[],
 	triggerConfigs?: TriggerConfig[],
+	observabilityConfigs?: Record<string, ObservabilityModuleConfig>,
 ): void {
 	const config: ProjectConfig = {};
 
@@ -701,6 +733,10 @@ export function writeProjectConfig(
 		for (const tc of triggerConfigs) {
 			config.triggers[tc.kind] = tc;
 		}
+	}
+
+	if (observabilityConfigs && Object.keys(observabilityConfigs).length > 0) {
+		config.observability = observabilityConfigs;
 	}
 
 	const configPath = path.join(projectDir, ".blok", "config.json");
