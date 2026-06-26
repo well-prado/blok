@@ -173,6 +173,9 @@ function findAllPackageJsons(): string[] {
 			"-not",
 			"-path",
 			"*/.blok/*",
+			"-not",
+			"-path",
+			"*/.claude/*",
 		],
 		{ cwd: REPO_ROOT, encoding: "utf-8", maxBuffer: 32 * 1024 * 1024 },
 	);

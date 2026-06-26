@@ -218,6 +218,7 @@ pnpm-lock.yaml
 # Claude Code agent + skill state (user-local tooling, not project code)
 .agents/
 .claude/skills/mintlify*
+.claude/worktrees/
 skills-lock.json
 
 # Internal research dossiers (not part of the Mintlify docs site)
