@@ -47,7 +47,7 @@ import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
 import { type RouteCollision, type RouteEntry, buildRouteTable, readMiddlewareFlag } from "./WorkflowRouter";
-import { metricsHandler } from "./metrics/opentelemetry_metrics";
+import { bootstrapMetrics } from "./metrics/opentelemetry_metrics";
 import { buildNodeCatalog } from "./nodeCatalog";
 import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter";
 import { scanWorkflows } from "./scanWorkflows";
@@ -779,6 +779,16 @@ export default class HttpTrigger extends TriggerBase {
 		// overhead when the env var is unset.
 		await this.maybeBootstrapTracing();
 
+		// Metrics opt-out gate. ON by default; `BLOK_METRICS_DISABLED=1` skips the
+		// exporter + global MeterProvider entirely (every blok_* instrument then
+		// no-ops) and the `/metrics` route below is not registered. Previously the
+		// exporter installed itself at module-import + via a Dockerfile --preload,
+		// so it could never be turned off.
+		const metricsBootstrap = await bootstrapMetrics();
+		if (!metricsBootstrap) {
+			this.logger.log("[blok][metrics] disabled (BLOK_METRICS_DISABLED=1) — no /metrics endpoint, instruments no-op.");
+		}
+
 		// File-based routing — scan workflow folders, build the route table,
 		// and register each entry as an explicit Hono route BEFORE the
 		// catch-all. **Default ON since v0.6**; opt out via
@@ -885,15 +895,19 @@ export default class HttpTrigger extends TriggerBase {
 			});
 
 			// Prometheus metrics — uses raw Node.js req/res since the
-			// OpenTelemetry Prometheus exporter expects (IncomingMessage, ServerResponse)
-			this.app.get("/metrics", (c) => {
-				try {
-					metricsHandler(c.env.incoming, c.env.outgoing);
-					return RESPONSE_ALREADY_SENT;
-				} catch (error) {
-					return c.text("Error serving metrics", 500);
-				}
-			});
+			// OpenTelemetry Prometheus exporter expects (IncomingMessage, ServerResponse).
+			// Only registered when metrics are enabled (see the bootstrap gate above);
+			// with BLOK_METRICS_DISABLED=1 there is no /metrics route at all (→ 404).
+			if (metricsBootstrap) {
+				this.app.get("/metrics", (c) => {
+					try {
+						metricsBootstrap.metricsHandler(c.env.incoming, c.env.outgoing);
+						return RESPONSE_ALREADY_SENT;
+					} catch (error) {
+						return c.text("Error serving metrics", 500);
+					}
+				});
+			}
 
 			// --- Typed client RPC mount (P1.3) ---
 			// `POST /__blok/rpc/:name` runs a registered workflow BY NAME and

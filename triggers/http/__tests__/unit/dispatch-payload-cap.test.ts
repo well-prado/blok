@@ -16,6 +16,8 @@ const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-m
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
+	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
+	resetBootstrap: () => {},
 	metricsHandler: vi.fn(),
 }));
 
