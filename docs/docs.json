@@ -171,6 +171,7 @@
 							"d/cli/overview",
 							"d/cli/project",
 							"d/cli/runtimes",
+							"d/cli/observability",
 							"d/cli/nodes",
 							"d/cli/workflows",
 							"d/cli/gen",
@@ -184,6 +185,10 @@
 					{
 						"group": "Deployment",
 						"pages": ["d/deployment/index"]
+					},
+					{
+						"group": "Changelog",
+						"pages": ["changelog"]
 					}
 				]
 			},

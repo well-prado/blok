@@ -188,7 +188,20 @@ persisting each ping's payload to the shared doc.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `BLOK_METRICS_DISABLED` | unset | Opt **out** of metrics. The `~33 blok_*` Prometheus series and the `/metrics` exporter are **on by default** for backward compatibility; set this to `1` (or `true`) to skip the OTel meter provider and the exporter entirely (no import-time side effect). There is **no** `BLOK_METRICS_ENABLED`. Managed per-project by [`blokctl observability`](/d/cli/observability). |
 | `BLOK_METRICS_PER_KEY` | unset | D6 — opt in to per-`concurrency_key` labels on the `blok_concurrency_*` OTel counters and `blok_concurrency_occ_retries` histogram. Default OFF strips the key before emission so deployments with high-cardinality keys (per-user, per-tenant) don't blow up metrics cardinality. Set to `1` or `true` to keep the key as a label when you have a small, bounded key space and want per-bucket granularity for dashboards / alerts. |
+
+## Observability modules
+
+Environment for the opt-in [`blokctl observability`](/d/cli/observability)
+modules. Tracing and the error sink are **inert** until you supply an
+endpoint / DSN.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint for the `tracing` module (e.g. `http://localhost:4318` → Tempo/Jaeger). Spans are emitted only when this is set. |
+| `BLOK_TRACING_DISABLED` | unset | Force-disable OTLP span export even when an endpoint is set. |
+| `SENTRY_DSN` | unset | Destination for the `error-sink` module — unhandled errors are forwarded to this Sentry-compatible sink. Inert when unset. |
 
 ## Runtime adapters
 
@@ -227,6 +240,7 @@ toggled without redeploying code:
 | `BLOK_CRASH_AUTOFLIP_DISABLED=1` | `uncaughtException` / `unhandledRejection` auto-flip to `crashed`. |
 | `BLOK_JANITOR_DISABLED=1` | The periodic storage cleanup sweep. |
 | `BLOK_GRACEFUL_SHUTDOWN_DISABLED=1` | The SIGTERM/SIGINT drain handler. |
+| `BLOK_METRICS_DISABLED=1` | The Prometheus metrics + `/metrics` exporter (on by default). |
 
 Use these for emergency operational recovery, not as long-term
 configuration. The defaults are tuned for production correctness;

@@ -1,0 +1,205 @@
+---
+title: Observability
+description: Add, remove, list, and check observability modules (metrics, tracing, trace-store, logging, alerting, error-sink, and the dev stack) in an existing Blok project.
+---
+
+Observability in Blok is **opt-in and modular**. You pick what you want — at `create project` time with `--observability`, or any time afterwards with the **`blokctl observability`** commands, in place, on a project that already exists.
+
+This mirrors how [language runtimes](./runtimes.mdx) work: each module is a small, self-contained descriptor that writes config + environment, and nothing is on until you add it (with one deliberate exception — see the note below).
+
+<Note>
+**Metrics are the one module that's ON by default.** A Blok app exposes `~33 blok_*` Prometheus metrics out of the box — that's backward-compatible behavior. You opt **out** with `BLOK_METRICS_DISABLED=1` (there is no `_ENABLED` variant). Everything else (tracing, error-sink, the dev stack) is inert until you add it and supply an endpoint/DSN.
+</Note>
+
+## The commands at a glance
+
+| Command | What it does |
+| --- | --- |
+| `blokctl observability add <module>` | Enable a module in this project |
+| `blokctl observability remove <module>` | Disable a module (alias `rm`) |
+| `blokctl observability list` | Show enabled modules + what's available to add (alias `ls`) |
+| `blokctl observability status` | Report the health/wiring of each enabled module |
+
+Run them from your project root (or point at it with `-d <path>`). The group has the alias `obs`, so `blokctl obs list` works too.
+
+## The modules
+
+| Module | What it gives you |
+| --- | --- |
+| `metrics` | ~33 `blok_*` metrics + the `/metrics` exporter. **ON by default**; opt out with `BLOK_METRICS_DISABLED=1`. |
+| `tracing` | OTLP spans + W3C context propagation → Tempo/Jaeger. Already wired in every trigger; inert until you set `OTEL_EXPORTER_OTLP_ENDPOINT`. |
+| `trace-store` | Durable run history + the Studio API (`sqlite` \| `postgres` \| `memory`). |
+| `logging` | Structured JSON logs (with `run_id` / `trace_id`) shipped to Loki via Grafana Alloy. |
+| `alerting` | Prometheus alert rules + a Helm `PrometheusRule`. |
+| `error-sink` | Forward unhandled errors to a Sentry-compatible sink (set `SENTRY_DSN`). |
+| `obs-stack` | A local Prometheus / Grafana / Loki / Tempo **dev stack**, tiered `none` \| `lite` \| `full`. |
+
+<Tip>
+Not sure what you have? `blokctl observability list` shows enabled modules and everything still available to add, each with the exact command to run.
+</Tip>
+
+---
+
+## `observability list` — see what you have
+
+```bash
+blokctl observability list
+```
+
+```text
+┌   Observability modules
+│
+●  No observability modules enabled yet.
+│
+◇  Available to add (7) ───────────────────────────────────────────────────────╮
+│  Observability stack        Local Prometheus/Grafana/Loki/Tempo dev stack     │
+│    blokctl observability add obs-stack                                        │
+│  Distributed tracing        OTLP spans + W3C propagation → Tempo/Jaeger       │
+│    blokctl observability add tracing                                          │
+│  Run trace store            Durable run history + Studio API                  │
+│    blokctl observability add trace-store                                      │
+│  Prometheus metrics         ~33 blok_* metrics + the /metrics exporter        │
+│    blokctl observability add metrics                                          │
+│  Structured logging → Loki  JSON logs (run_id/trace_id) shipped via Alloy     │
+│    blokctl observability add logging                                          │
+│  Alerting rules             Prometheus alert rules + Helm PrometheusRule      │
+│    blokctl observability add alerting                                         │
+│  Error sink (Sentry)        Forward unhandled errors (set SENTRY_DSN)         │
+│    blokctl observability add error-sink                                       │
+├────────────────────────────────────────────────────────────────────────────╯
+│
+└  Add with `blokctl observability add <id>`, remove with `… remove <id>`.
+```
+
+---
+
+## `observability add` — enable a module
+
+```bash
+# Add a specific module
+blokctl observability add tracing
+
+# …or omit the name to pick from an interactive menu
+blokctl observability add
+```
+
+A module write is **idempotent**: re-running `add` on an already-enabled module is a no-op and tells you to pass `--force` to re-apply its scaffold.
+
+```text
+┌   Add Distributed tracing
+│
+◇  Distributed tracing added ─╮
+│  ✓ Distributed tracing      │
+├─────────────────────────────╯
+│
+└  Enabled modules: tracing.
+```
+
+Most modules only touch `.blok/config.json` (an `observability.<module>` entry) and a fenced, blokctl-managed block in `.env.local`. Tracing, for example, is added **inert** — the endpoint is commented out so nothing exports until you opt in:
+
+```bash
+# >>> Blok observability (managed by blokctl) >>>
+# Tracing (tracing module). UNCOMMENT the endpoint to start exporting spans.
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+# BLOK_TRACING_DISABLED=1  # force-disable even when an endpoint is set
+# <<< Blok observability (managed by blokctl) <<<
+```
+
+### The dev stack (`obs-stack`)
+
+`obs-stack` is special: it copies a local Prometheus/Grafana/Loki/Tempo compose stack into `infra/`, tiered so you only get what you ask for.
+
+```bash
+# lite = Prometheus + Grafana; full = + Loki + Tempo + Alloy
+blokctl observability add obs-stack --tier lite
+```
+
+| Tier | Services |
+| --- | --- |
+| `none` | nothing (the default a new project scaffolds with) |
+| `lite` | Prometheus + Grafana |
+| `full` | Prometheus + Grafana + Loki + Tempo + Alloy |
+
+<Note>
+`obs-stack` fetches the infra files for **your project's Blok version**, so the compose stack always matches your `@blokjs/runner`. Pass `--local <path>` to copy from a local Blok checkout instead (handy when developing Blok itself). Re-running with a higher `--tier` upgrades in place (`lite` → `full`).
+</Note>
+
+### Options
+
+| Flag | Purpose |
+| --- | --- |
+| `-d, --directory <path>` | Project directory (default: current directory) |
+| `--force` | Re-apply even if the module is already enabled |
+| `--tier <tier>` | `obs-stack` only: `none` \| `lite` \| `full` (default `lite`) |
+| `--local <path>` | `obs-stack` only: copy infra from a local Blok checkout instead of fetching |
+| `-y, --yes` | Skip prompts (non-interactive — for CI/scripts; auto-enables dependencies) |
+
+---
+
+## `observability remove` — disable a module
+
+```bash
+blokctl observability remove tracing
+```
+
+Cleanly undoes what `add` wrote — the `observability.<module>` entry in `.blok/config.json` and the module's managed block in `.env.local`. Your application code is never touched.
+
+---
+
+## `observability status` — health of what's enabled
+
+A snapshot of each enabled module and whether it's actually wired to do anything (e.g. tracing added but no endpoint yet = "inert").
+
+```bash
+blokctl observability status
+```
+
+```text
+┌   Observability status
+│
+◇  Enabled (1) ─────────────────────────────────────────────╮
+│  ✓ Distributed tracing        added (inert) — uncomment    │
+│  OTEL_EXPORTER_OTLP_ENDPOINT to start exporting            │
+├───────────────────────────────────────────────────────────╯
+```
+
+---
+
+## How modules are wired (under the hood)
+
+Like runtimes, there's no hidden state — a module lives in at most two places (three for `obs-stack`):
+
+| Where | What's there |
+| --- | --- |
+| `.blok/config.json` → `observability.<module>` | `{ enabled, addedAt, version, settings? }` |
+| `.env.local` → fenced managed block | The module's env vars (commented = inert by default) |
+| `infra/` (`obs-stack` only) | The tiered Prometheus/Grafana/Loki/Tempo compose stack |
+
+Because it's all configuration, a module added later is indistinguishable from one picked at `create project --observability ...`.
+
+---
+
+## FAQ
+
+<AccordionGroup>
+  <Accordion title="I scaffolded with --obs-stack none. How do I add metrics dashboards later?">
+    `blokctl observability add obs-stack --tier lite` copies a Prometheus + Grafana compose stack into `infra/`. Bump to `--tier full` later for Loki + Tempo + Alloy.
+  </Accordion>
+  <Accordion title="How do I turn metrics OFF?">
+    Set `BLOK_METRICS_DISABLED=1`. Metrics are the only module that's on by default (backward compatibility); the `/metrics` exporter and the OTel meter provider are skipped when it's set. There is no `BLOK_METRICS_ENABLED`.
+  </Accordion>
+  <Accordion title="I added tracing but nothing shows up.">
+    Tracing is added **inert**. Uncomment `OTEL_EXPORTER_OTLP_ENDPOINT` in `.env.local` (point it at your collector / Tempo / Jaeger). `blokctl observability status` will tell you it's inert until you do.
+  </Accordion>
+  <Accordion title="Is this the same as picking modules at create time?">
+    Yes — `create project --observability tracing,trace-store` and `observability add` reuse the same descriptors and write the same config. Adding later behaves identically.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Related
+
+- [`create project`](./project.mdx) — pick modules up front with `--observability` and the dev stack with `--obs-stack`.
+- [Environment variables](/d/operations/env-vars) — `BLOK_METRICS_DISABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `SENTRY_DSN`, and more.
+- [All `blokctl` commands](./overview.mdx) — the full CLI reference.

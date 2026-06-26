@@ -28,7 +28,23 @@ When you run `npx blokctl@latest create project`, the CLI will typically guide y
 1. Assign a project name.
 2. Select **HTTP trigger** (default).
 3. Choose **NodeJS** as the runtime (Python3 is in alpha).
-4. **Select Example Installation: YES** (recommended for discovery and learning).
+4. Pick any **observability modules** to enable (all optional — see [`blokctl observability`](./observability.mdx)).
+5. **Select Example Installation: YES** (recommended for discovery and learning).
+
+**Non-interactive flags** (for CI/scripts):
+
+| Flag | Purpose |
+| --- | --- |
+| `-n, --name <value>` | Project name |
+| `-T, --triggers <list>` | Comma-separated triggers (e.g. `http,worker`) |
+| `-r, --runtimes <list>` | Comma-separated runtimes (default `node`) |
+| `--observability <list>` | Comma-separated observability modules to enable (e.g. `tracing,trace-store`) |
+| `--obs-stack <tier>` | Local dev stack: `none` (default), `lite`, or `full` |
+| `--examples` | Install example workflows and nodes |
+
+<Note>
+**The dev stack defaults to `none`.** Earlier versions copied a full Prometheus/Grafana/Loki/Tempo stack into every project; now you opt in with `--obs-stack lite|full` (or add it later via `blokctl observability add obs-stack`).
+</Note>
 
 **What it Does**:
 

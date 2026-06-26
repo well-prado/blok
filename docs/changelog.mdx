@@ -1,0 +1,36 @@
+---
+title: Changelog
+description: Notable changes to Blok, newest first. Versions are published in lockstep — one version means every public @blokjs/* package is at that version.
+---
+
+<Update label="v0.7.0" description="2026-06-26">
+## Modular observability
+
+Observability is now **opt-in and modular**. Pick what you want at `create project` time or retrofit it any time with the new [`blokctl observability`](/d/cli/observability) command group.
+
+**New**
+- [`blokctl observability add | remove | list | status`](/d/cli/observability) — manage 7 modules in an existing project: `metrics`, `tracing`, `trace-store`, `logging`, `alerting`, `error-sink`, and the `obs-stack` dev stack.
+- `create project --observability <list>` and `--obs-stack none|lite|full` to choose modules up front.
+- Studio renders the terminal/transient run states added across recent releases — `crashed`, `timedOut`, `throttled`, `cancelled`, `expired`, `queued`, `delayed` — as status badges and toasts.
+
+**Changed**
+- `create project` no longer copies the full Prometheus/Grafana/Loki/Tempo stack unconditionally. The dev stack now defaults to **`none`**; restore the old behavior with `--obs-stack full` (or add it later with `blokctl observability add obs-stack`).
+- Metrics remain **on by default** for backward compatibility, but are now opt-out via `BLOK_METRICS_DISABLED=1` — no import-time side effect, and the `/metrics` exporter is only registered when enabled. (There is no `BLOK_METRICS_ENABLED`.)
+- Tracing and the error sink are **inert by default** — they do nothing until you set `OTEL_EXPORTER_OTLP_ENDPOINT` / `SENTRY_DSN`.
+
+Lockstep bump of all public packages to `0.7.0`.
+</Update>
+
+<Update label="v0.6.21" description="2026-06-23">
+## Framework fixes from the Paga.eu validation pass
+
+Hardening from a real-world build-out: preserve upstream status/body/`Retry-After` on `api-call` errors (≥400), gate `/__blok/rpc` auth in production with configurable CORS, fix custom-provider webhook replay dedup, and coordinate multi-replica state in the reference deploy.
+</Update>
+
+<Update label="v0.6.20" description="2026-06-23">
+## Runtime CLI + scaffold updates
+
+- [`blokctl runtime add | remove | list`](/d/cli/runtimes) — add or remove language sidecars (Go, Rust, Java, C#, PHP, Ruby, Python) in an existing project.
+- Scaffolds gained MCP + cross-runtime TypeScript example workflows.
+- Fix: `runtime.*` nodes no longer leak `contentType` into response bodies.
+</Update>
