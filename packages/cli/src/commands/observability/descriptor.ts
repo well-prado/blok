@@ -174,21 +174,48 @@ const REGISTRY: Record<ObservabilityModuleId, ObservabilityModuleDescriptor> = {
 		label: "Alerting rules",
 		description: "Prometheus alert rules + Helm PrometheusRule",
 		dependencies: ["metrics"],
-		envBlock: () => "",
+		envBlock: () =>
+			[
+				"# Alerting (alerting module). Rules live in infra/metrics/rules + the Helm PrometheusRule.",
+				"BLOK_ALERTING_ENABLED=true",
+			].join("\n"),
 		infraFiles: [],
-		composeServices: [],
+		// Alertmanager fans out firing alerts; obs-stack (full) owns its config.
+		composeServices: ["alertmanager"],
 		packageDeps: {},
+		verify: async (projectDir) => {
+			const rules = path.join(projectDir, "infra", "metrics", "rules", "blok-alerts.yml");
+			if (fs.existsSync(rules)) return { ok: true, message: "alert rules present (validate: promtool check rules)" };
+			return { ok: true, message: "enabled; rules ship with obs-stack=full (infra/metrics/rules)" };
+		},
 	},
 	"error-sink": {
 		id: "error-sink",
 		label: "Error sink (Sentry)",
-		description: "Forward run failures to a Sentry-compatible error sink (set SENTRY_DSN)",
+		description: "Forward unhandled errors to a Sentry-compatible error sink (set SENTRY_DSN)",
 		dependencies: [],
+		// Inert by default: SENTRY_DSN is commented out, so no sink is installed.
 		envBlock: () =>
-			["# Error sink (error-sink module). Set a DSN to enable; unset = no-op.", "# SENTRY_DSN="].join("\n"),
+			[
+				"# Error sink (error-sink module). Set a DSN to forward unhandled errors;",
+				"# unset = inert. Needs the @sentry/node peer dep installed.",
+				"# SENTRY_DSN=",
+			].join("\n"),
 		infraFiles: [],
 		composeServices: [],
 		packageDeps: {},
+		verify: async (projectDir) => {
+			const envPath = path.join(projectDir, ".env.local");
+			const env = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+			const dsnSet = env
+				.split("\n")
+				.map((l) => l.trim())
+				.some((l) => !l.startsWith("#") && /^SENTRY_DSN=\S/.test(l));
+			const installed = fs.existsSync(path.join(projectDir, "node_modules", "@sentry", "node"));
+			if (!dsnSet) return { ok: true, message: "added (inert) — set SENTRY_DSN to start forwarding errors" };
+			if (!installed) return { ok: true, message: "SENTRY_DSN set but @sentry/node missing — run npm i @sentry/node" };
+			return { ok: true, message: "forwarding unhandled errors to Sentry" };
+		},
 	},
 };
 

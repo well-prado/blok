@@ -22,6 +22,8 @@ import { PrometheusMetricsBridge } from "./monitoring/PrometheusMetricsBridge";
 import { RateLimiter } from "./monitoring/RateLimiter";
 import type { RateLimitConfig, RateLimitResult } from "./monitoring/RateLimiter";
 import { TriggerMetricsCollector } from "./monitoring/TriggerMetricsCollector";
+import { captureError, setErrorSink } from "./observability/ErrorSink";
+import { createSentryErrorSink } from "./observability/SentryIntegration";
 import { DebounceCoordinator } from "./scheduling/DebounceCoordinator";
 import { DeferredDispatchSignal } from "./scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler } from "./scheduling/DeferredRunScheduler";
@@ -312,6 +314,7 @@ export default abstract class TriggerBase extends Trigger {
 				trigger_type: "process",
 				reason_class: err?.constructor?.name ?? "Error",
 			});
+			captureError(err, { source: "uncaughtException" });
 			try {
 				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
 				logger?.error?.(
@@ -335,6 +338,7 @@ export default abstract class TriggerBase extends Trigger {
 				trigger_type: "process",
 				reason_class: err.constructor?.name ?? "Error",
 			});
+			captureError(err, { source: "unhandledRejection" });
 			try {
 				const flipped = RunTracker.getInstance().markAllRunningRunsAsCrashed(err);
 				logger?.error?.(
@@ -512,6 +516,19 @@ export default abstract class TriggerBase extends Trigger {
 			TriggerBase.installShutdownHandlers(this, logger);
 		} catch (err) {
 			logger?.error?.(`[blok][shutdown] setup failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		// Error sink (MO-ALERTS) — opt-in via SENTRY_DSN. Forwards uncaught
+		// exceptions / unhandled rejections to Sentry. Unset DSN → no sink
+		// installed → zero behaviour change. Setup failure is logged, never fatal.
+		try {
+			const dsn = process.env.SENTRY_DSN;
+			if (dsn) {
+				setErrorSink(createSentryErrorSink(dsn));
+				logger?.log?.("[blok][error-sink] Sentry error sink initialized (SENTRY_DSN set).");
+			}
+		} catch (err) {
+			logger?.error?.(`[blok][error-sink] setup failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 

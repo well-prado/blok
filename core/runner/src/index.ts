@@ -476,4 +476,7 @@ export type { JanitorStats } from "./tracing/Janitor";
 // tracker without proxying to a live trigger. See
 // `packages/cli/src/commands/trace/startStudio.ts` for the call site.
 export { createStore, InMemoryRunStore, SqliteRunStore } from "./tracing";
+// Error sink (MO-ALERTS) — generic process-wide error forwarding + the Sentry adapter.
+export { type ErrorSink, captureError, getErrorSink, setErrorSink } from "./observability/ErrorSink";
+export { createSentryErrorSink } from "./observability/SentryIntegration";
 export type { CreateStoreOptions, StoreType } from "./tracing";
