@@ -13,6 +13,9 @@
  * stubbed here and filled in by the module epics (MO-STACK, MO-TRACING, …).
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 export type ObservabilityModuleId =
 	| "obs-stack"
 	| "tracing"
@@ -95,15 +98,31 @@ const REGISTRY: Record<ObservabilityModuleId, ObservabilityModuleDescriptor> = {
 		label: "Distributed tracing",
 		description: "OTLP spans + W3C propagation → Tempo/Jaeger (already wired in all triggers)",
 		dependencies: [],
+		// Inert by default: the endpoint is COMMENTED OUT, so adding tracing does
+		// not start exporting. The trigger's maybeBootstrapTracing() no-ops when no
+		// OTEL_EXPORTER_OTLP_ENDPOINT is set — uncomment to turn export on. The OTel
+		// exporters ship with @blokjs/runner, so no package.json deps are needed.
 		envBlock: () =>
 			[
-				"# Tracing (tracing module). Set the OTLP endpoint to enable; unset = no-op.",
-				"OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318",
+				"# Tracing (tracing module). UNCOMMENT the endpoint to start exporting spans.",
+				"# Until then tracing is inert (the trigger no-ops without an endpoint).",
+				"# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318",
 				"# BLOK_TRACING_DISABLED=1  # force-disable even when an endpoint is set",
 			].join("\n"),
 		infraFiles: [],
-		composeServices: [],
+		// Tracing exports to Tempo; obs-stack (full) owns tempo.yaml + the service.
+		composeServices: ["tempo"],
 		packageDeps: {},
+		verify: async (projectDir) => {
+			const envPath = path.join(projectDir, ".env.local");
+			const content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+			const active = content
+				.split("\n")
+				.map((l) => l.trim())
+				.find((l) => !l.startsWith("#") && /^OTEL_EXPORTER_OTLP_(TRACES_)?ENDPOINT=\S/.test(l));
+			if (active) return { ok: true, message: `exporting spans to ${active.split("=").slice(1).join("=")}` };
+			return { ok: true, message: "added (inert) — uncomment OTEL_EXPORTER_OTLP_ENDPOINT to start exporting" };
+		},
 	},
 	"trace-store": {
 		id: "trace-store",
