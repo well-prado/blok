@@ -88,6 +88,8 @@ export interface ObservabilityModuleConfig {
 	addedAt: string;
 	/** Framework version that scaffolded the module, for drift detection. */
 	version?: string;
+	/** Module-specific settings — e.g. obs-stack records its `{ tier }`. */
+	settings?: Record<string, unknown>;
 }
 
 export interface ProjectConfig {
