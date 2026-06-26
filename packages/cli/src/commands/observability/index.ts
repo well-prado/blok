@@ -23,6 +23,8 @@ observability
 	.argument("[module]", "Module to add (omit for an interactive picker)")
 	.option("-d, --directory <path>", "Project directory (default: current directory)")
 	.option("--force", "Re-apply even if the module is already enabled")
+	.option("--tier <tier>", "obs-stack only: none | lite | full (default: lite)")
+	.option("--local <path>", "obs-stack only: copy infra from a local blok repo instead of fetching")
 	.option("-y, --yes", "Skip prompts (non-interactive; auto-enables dependencies)")
 	.action(async (moduleArg: string | undefined, options: OptionValues) => {
 		await observabilityAdd(moduleArg, options);

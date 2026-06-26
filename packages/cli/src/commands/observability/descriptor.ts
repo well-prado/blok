@@ -40,6 +40,10 @@ export interface ObservabilityScaffoldOpts {
 	projectDir: string;
 	/** True when running under `--yes` / non-TTY — hooks must not prompt. */
 	nonInteractive: boolean;
+	/** obs-stack: the dev-stack tier (none | lite | full). Ignored by other modules. */
+	tier?: string;
+	/** obs-stack: a local blok repo to copy infra from, instead of fetching by version (`--local`). */
+	localRepo?: string;
 }
 
 export interface ObservabilityModuleDescriptor {
@@ -92,6 +96,32 @@ const REGISTRY: Record<ObservabilityModuleId, ObservabilityModuleDescriptor> = {
 		infraFiles: [],
 		composeServices: [],
 		packageDeps: {},
+		// Retrofit: copy the tiered infra/metrics stack into an existing project.
+		// Heavy deps (git clone, yaml) are lazily imported so loading the registry
+		// stays cheap. `--local` reuses a blok repo on disk; otherwise the
+		// version-matched repo is cloned (same cache as `runtime add`).
+		scaffold: async ({ projectDir, tier, localRepo }) => {
+			const { parseObsTier } = await import("../../services/obs-tiers.js");
+			const t = parseObsTier(tier ?? "lite");
+			if (t === "none") return { filesCreated: [] };
+			const { resolveSdkSource } = await import("../runtime/shared.js");
+			const { setupObservabilityStack } = await import("../../services/obs-setup.js");
+			const source = await resolveSdkSource(projectDir, localRepo);
+			return { filesCreated: setupObservabilityStack(source, projectDir, t).copied };
+		},
+		verify: async (projectDir) => {
+			const compose = path.join(projectDir, "infra", "metrics", "docker-compose.yml");
+			if (!fs.existsSync(compose)) return { ok: true, message: "no dev stack copied (tier none)" };
+			const { parse } = await import("yaml");
+			const doc = parse(fs.readFileSync(compose, "utf8")) as { services?: Record<string, unknown> };
+			const n = Object.keys(doc.services ?? {}).length;
+			return { ok: true, message: `dev stack present — ${n} service(s)`, dashboardUrl: "http://localhost:3000" };
+		},
+		// `remove obs-stack` tears down the copied dev stack — obs-stack OWNS
+		// infra/metrics (other modules leave their infra in place by contract).
+		cleanup: async ({ projectDir }) => {
+			fs.rmSync(path.join(projectDir, "infra", "metrics"), { recursive: true, force: true });
+		},
 	},
 	tracing: {
 		id: "tracing",

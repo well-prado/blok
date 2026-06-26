@@ -101,17 +101,25 @@ export async function observabilityAdd(moduleArg: string | undefined, options: O
 		//    foundation; module epics fill these in). File writes happen only after.
 		const s = p.spinner();
 		let nextConfig = config;
+		const scaffoldOpts = {
+			projectDir: root,
+			nonInteractive,
+			tier: options.tier as string | undefined,
+			localRepo: options.local as string | undefined,
+		};
 		for (const rid of toApply) {
 			const d = getObservabilityModule(rid);
 			if (!d) continue;
 			if (d.validate) await d.validate(root);
 			if (d.scaffold) {
 				s.start(`Scaffolding ${d.label}…`);
-				await d.scaffold({ projectDir: root, nonInteractive });
+				await d.scaffold(scaffoldOpts);
 				s.stop(`${d.label} ready`);
 			}
-			if (d.setup) await d.setup({ projectDir: root, nonInteractive });
-			nextConfig = withObservabilityModule(nextConfig, rid, { enabled: true, addedAt, version });
+			if (d.setup) await d.setup(scaffoldOpts);
+			// obs-stack records its chosen tier so list/status/remove know it.
+			const extra = rid === "obs-stack" ? { settings: { tier: options.tier ?? "lite" } } : {};
+			nextConfig = withObservabilityModule(nextConfig, rid, { enabled: true, addedAt, version, ...extra });
 		}
 
 		// 6. Persist — full merged config (preserves runtimes/triggers/siblings).
