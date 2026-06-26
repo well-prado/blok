@@ -1,0 +1,29 @@
+# The Blok app container — merges with the backing-services compose so you get
+# the full stack (app + postgres + redis + nats) in one command:
+#
+#   make image APP_DIR=/path/to/your/blok/project    # build blok/runtime:dev
+#   make compose-up                                   # app + backing services
+#
+# (compose-up runs: docker compose -f ../development/docker-compose.yml \
+#                                  -f docker-compose.app.yml up -d)
+services:
+  blok:
+    image: ${BLOK_IMAGE:-blok/runtime:dev}
+    container_name: blok-app
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      BLOK_LOG_LEVEL: debug
+      BLOK_TRACE_STORE: sqlite
+      # Backing services share the dev compose network — reach them by service name.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      NATS_SERVERS: nats:4222
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      - shared-network
