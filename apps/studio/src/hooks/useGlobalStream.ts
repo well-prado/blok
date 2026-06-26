@@ -1,3 +1,4 @@
+import { notificationForRunEvent } from "@/lib/runEvents";
 import { connectGlobalStream } from "@/lib/sse";
 import { useConnectionStore } from "@/stores/connection";
 import { useLiveFeedStore } from "@/stores/liveFeed";
@@ -62,28 +63,12 @@ export function useGlobalStream(enabled = true) {
 				// Push to shared live feed store (consumed by LiveFeed component)
 				pushEvent(event);
 
-				// Emit notifications for run completions/failures
+				// Emit a notification for the terminal run events that warrant one
+				// (completed/failed/crashed/timedOut/cancelled — see notificationForRunEvent).
 				if (notificationsEnabledRef.current) {
-					if (event.type === "RUN_COMPLETED") {
-						const payload = event.payload as Record<string, unknown> | undefined;
-						const durationMs = payload?.durationMs as number | undefined;
-						addNotification({
-							type: "success",
-							title: `${event.workflowName} completed`,
-							message: durationMs ? `Finished in ${formatMs(durationMs)}` : "Run completed successfully",
-							runId: event.runId,
-							workflowName: event.workflowName,
-						});
-					} else if (event.type === "RUN_FAILED") {
-						const payload = event.payload as Record<string, { message?: string }> | undefined;
-						const errorMsg = payload?.error?.message;
-						addNotification({
-							type: "error",
-							title: `${event.workflowName} failed`,
-							message: errorMsg || "Run failed with an error",
-							runId: event.runId,
-							workflowName: event.workflowName,
-						});
+					const toast = notificationForRunEvent(event);
+					if (toast) {
+						addNotification({ ...toast, runId: event.runId, workflowName: event.workflowName });
 					}
 				}
 			},
@@ -101,9 +86,4 @@ export function useGlobalStream(enabled = true) {
 			}
 		};
 	}, [enabled, queryClient, setStatus, incrementStreams, decrementStreams, addNotification, pushEvent]);
-}
-
-function formatMs(ms: number): string {
-	if (ms < 1000) return `${Math.round(ms)}ms`;
-	return `${(ms / 1000).toFixed(1)}s`;
 }

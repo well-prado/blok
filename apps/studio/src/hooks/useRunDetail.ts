@@ -1,7 +1,8 @@
 import { fetchRunDetail } from "@/lib/api";
+import { TERMINAL_RUN_EVENT_STATUS, TRANSIENT_RUN_EVENT_STATUS } from "@/lib/runEvents";
 import { connectRunStream } from "@/lib/sse";
 import { useConnectionStore } from "@/stores/connection";
-import type { NodeRun, RunDetail, RunEvent, TraceLogEntry } from "@/types";
+import type { NodeRun, NodeRunErrorDetail, RunDetail, RunEvent, TraceLogEntry } from "@/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect } from "react";
 
@@ -44,16 +45,34 @@ export function useTraceStream(runId: string) {
 				const updated = { ...old };
 
 				switch (event.type) {
+					// Terminal run events — the run is finished (set finishedAt + duration).
 					case "RUN_COMPLETED":
 					case "RUN_FAILED":
+					case "RUN_CRASHED":
+					case "RUN_TIMED_OUT":
+					case "RUN_THROTTLED":
+					case "RUN_CANCELLED":
+					case "RUN_EXPIRED": {
+						const status = TERMINAL_RUN_EVENT_STATUS[event.type];
+						const isFailure = event.type === "RUN_FAILED" || event.type === "RUN_CRASHED";
 						updated.run = {
 							...updated.run,
-							status: event.type === "RUN_COMPLETED" ? "completed" : "failed",
+							...(status ? { status } : {}),
 							finishedAt: event.timestamp,
 							durationMs: event.timestamp - updated.run.startedAt,
-							...(event.type === "RUN_FAILED" && event.payload ? { error: event.payload as WorkflowRunError } : {}),
+							...(isFailure && event.payload ? { error: event.payload as WorkflowRunError } : {}),
 						};
 						break;
+					}
+
+					// Transient run events — status changes but the run is NOT finished
+					// (queued/delayed resume to running later; no finishedAt).
+					case "RUN_QUEUED":
+					case "RUN_DELAYED": {
+						const status = TRANSIENT_RUN_EVENT_STATUS[event.type];
+						if (status) updated.run = { ...updated.run, status };
+						break;
+					}
 
 					case "NODE_STARTED": {
 						const nodeId = event.nodeId || event.id;
@@ -116,6 +135,40 @@ export function useTraceStream(runId: string) {
 					case "NODE_SKIPPED": {
 						updated.nodes = updated.nodes.map((n) =>
 							n.id === event.nodeId || n.nodeName === event.nodeName ? { ...n, status: "skipped" as const } : n,
+						);
+						break;
+					}
+
+					// Tier 1 idempotency cache hit — the node short-circuited via the
+					// cache. Mark it completed + attach the cache lineage (CACHED badge).
+					case "NODE_CACHED": {
+						const src = (event.payload as { source?: NodeRun["cached"] } | undefined)?.source;
+						updated.nodes = updated.nodes.map((n) =>
+							n.id === event.nodeId || n.nodeName === event.nodeName
+								? { ...n, status: "completed" as const, finishedAt: event.timestamp, cached: src ?? n.cached }
+								: n,
+						);
+						break;
+					}
+
+					// Tier 1 retry — a non-final attempt failed; append it to attempts[]
+					// (the terminal NODE_FAILED still fires once retries are exhausted).
+					case "NODE_ATTEMPT_FAILED": {
+						const p = event.payload as { attempt?: number; error?: NodeRunErrorDetail } | undefined;
+						updated.nodes = updated.nodes.map((n) =>
+							n.id === event.nodeId || n.nodeName === event.nodeName
+								? {
+										...n,
+										attempts: [
+											...(n.attempts ?? []),
+											{
+												attempt: p?.attempt ?? (n.attempts?.length ?? 0) + 1,
+												error: p?.error ?? ({ message: "attempt failed" } as NodeRunErrorDetail),
+												timestamp: event.timestamp,
+											},
+										],
+									}
+								: n,
 						);
 						break;
 					}
