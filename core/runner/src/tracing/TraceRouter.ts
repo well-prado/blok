@@ -1776,26 +1776,30 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			return;
 		}
 
-		// Stream live events
+		// Heartbeat keeps the connection alive. BOTH the terminal auto-close below
+		// AND the client-disconnect handler must tear down the listener + the
+		// interval — previously the auto-close called res.end() without doing
+		// either, leaking the interval (which kept writing to a closed response)
+		// and the event listener for the life of the process.
+		const heartbeat = setInterval(() => {
+			res.write(":heartbeat\n\n");
+		}, 5000);
+
+		// Stream live events; auto-close when the run reaches a terminal state.
 		const onEvent = (event: RunEvent) => {
 			if (event.runId !== runId) return;
 			writeSSE(res, event);
-
-			// Auto-close when run finishes
 			if (TERMINAL_RUN_EVENTS.has(event.type)) {
 				res.write('event: stream-end\ndata: {"reason":"run_finished"}\n\n');
+				t.removeListener("event", onEvent);
+				clearInterval(heartbeat);
 				res.end();
 			}
 		};
 
 		t.on("event", onEvent);
 
-		// Heartbeat to keep connection alive
-		const heartbeat = setInterval(() => {
-			res.write(":heartbeat\n\n");
-		}, 5000);
-
-		// Cleanup on disconnect
+		// Cleanup on client disconnect.
 		req.on("close", () => {
 			t.removeListener("event", onEvent);
 			clearInterval(heartbeat);
