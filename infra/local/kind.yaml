@@ -1,0 +1,8 @@
+# Minimal single-node kind cluster for local Blok development.
+# Kubernetes-in-Docker — no VM, honours the "run everything on Docker" constraint.
+#   kind create cluster --name blok-dev --config kind.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: blok-dev
+nodes:
+  - role: control-plane

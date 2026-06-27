@@ -1,0 +1,44 @@
+# Local-development overlay for the Blok Helm chart (kind / Docker Desktop K8s).
+# The SAME chart deploys to Hetzner / AWS / anywhere — only this overlay changes.
+#   helm upgrade --install blok ../helm/blok -n blok --create-namespace -f values-dev.yaml
+image:
+  repository: blok/runtime
+  tag: dev
+  # Image is loaded into the kind node with `kind load docker-image` — never pulled.
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Reach the app with `make forward` (kubectl port-forward). No ingress controller
+# needed for local dev; flip ingress.enabled in the prod values instead.
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 4000
+
+ingress:
+  enabled: false
+
+autoscaling:
+  enabled: false
+
+monitoring:
+  enabled: false
+
+resources:
+  limits:
+    cpu: "1"
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env:
+  BLOK_LOG_LEVEL: debug
+
+# sqlite trace store on an emptyDir (chart default) — durable enough for local dev,
+# and it satisfies the chart's readOnlyRootFilesystem security context.
+traceStore:
+  backend: sqlite
+  writableData:
+    enabled: true
