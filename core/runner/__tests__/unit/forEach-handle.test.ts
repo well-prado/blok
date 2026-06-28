@@ -142,6 +142,22 @@ describe("forEach — per-item handle is body-scoped (cornerstone canRead)", () 
 			}),
 		).rejects.toThrow(/outside its scope/);
 	});
+
+	it.each(["row", "rowIndex"])("rejects forEach `as` scope collision with sibling state key %s", async (reservedId) => {
+		await expect(
+			workflowCallback("Collision", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				const validate = step("validate", noop, {});
+				step(reservedId, noop, {});
+				forEach(
+					validate.items,
+					(item) => {
+						step("save", noop, { sku: item.sku });
+					},
+					{ id: "loop", as: "row" },
+				);
+			}),
+		).rejects.toThrow(/forEach state key "row(Index)?".*collides/);
+	});
 });
 
 // ───────────────────── (c): real Configuration + ForEachNode + Runner ───────
@@ -257,6 +273,215 @@ describe("forEach — real Configuration + ForEachNode + Runner", () => {
 		// ForEachNode aggregates each iteration's result (ctx-publish returns
 		// { name, value }); value is the per-item sku, proving correct resolution.
 		expect(state.loop).toEqual([
+			{ name: "perItem", value: "A" },
+			{ name: "perItem", value: "B" },
+		]);
+	});
+
+	it.each([
+		{ mode: "sequential" as const, concurrency: undefined },
+		{ mode: "parallel" as const, concurrency: 4 },
+	])("keeps per-item handle and index isolated in $mode mode", async ({ mode, concurrency }) => {
+		const wf = await workflowCallback("Isolated", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const validate = step("validate", noop, {});
+			forEach(
+				validate.items,
+				(item, index) => {
+					step("echo", noop, { id: item.id, original: item.original, index }, { as: "echoed" });
+				},
+				{ id: "loop", as: "row", mode, ...(concurrency ? { concurrency } : {}) },
+			);
+		});
+		const authored = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.forEach) as {
+			forEach: { in: string; as: string; do: Array<Record<string, unknown>> };
+		};
+		expect(authored.forEach.do[0].inputs).toEqual({
+			id: { $ref: { step: "row", path: ["id"] } },
+			original: { $ref: { step: "row", path: ["original"] } },
+			index: { $ref: { step: "rowIndex", path: [] } },
+		});
+
+		const def = {
+			name: `isolated-${mode}`,
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "seed",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: {
+						name: "validate",
+						value: {
+							items: [
+								{ id: "A", original: "alpha" },
+								{ id: "B", original: "bravo" },
+								{ id: "C", original: "charlie" },
+								{ id: "D", original: "delta" },
+							],
+						},
+					},
+				},
+				{
+					id: "loop",
+					forEach: {
+						in: authored.forEach.in,
+						as: authored.forEach.as,
+						mode,
+						...(concurrency ? { concurrency } : {}),
+						do: [
+							{
+								id: "shadow-row",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: {
+									name: "row",
+									value: {
+										id: "js/ctx.state.row.id",
+										original: "js/ctx.state.row.original",
+										shadow: "js/`${ctx.state.row.id}:${ctx.state.rowIndex}`",
+									},
+								},
+							},
+							{
+								id: "echo",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: {
+									name: "perItem",
+									value: {
+										id: "js/ctx.state.row.id",
+										original: "js/ctx.state.row.original",
+										shadow: "js/ctx.state.row.shadow",
+										index: "js/ctx.state.rowIndex",
+									},
+								},
+							},
+						],
+					},
+				},
+			],
+		};
+
+		const state = await bootAndRun(def);
+		expect(state.loop).toEqual([
+			{ name: "perItem", value: { id: "A", original: "alpha", shadow: "A:0", index: 0 } },
+			{ name: "perItem", value: { id: "B", original: "bravo", shadow: "B:1", index: 1 } },
+			{ name: "perItem", value: { id: "C", original: "charlie", shadow: "C:2", index: 2 } },
+			{ name: "perItem", value: { id: "D", original: "delta", shadow: "D:3", index: 3 } },
+		]);
+		expect(state.row).toBeUndefined();
+		expect(state.rowIndex).toBeUndefined();
+	});
+
+	it("returns an empty aggregate for an empty iterable without binding the item handle", async () => {
+		const wf = await workflowCallback("Empty", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const validate = step("validate", noop, {});
+			forEach(
+				validate.items,
+				(item) => {
+					step("echo", noop, { id: item.id });
+				},
+				{ id: "loop", as: "row" },
+			);
+		});
+		const authored = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.forEach) as {
+			forEach: { in: string; as: string };
+		};
+
+		const state = await bootAndRun({
+			name: "empty-loop",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "seed",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "validate", value: { items: [] } },
+				},
+				{
+					id: "loop",
+					forEach: {
+						in: authored.forEach.in,
+						as: authored.forEach.as,
+						do: [
+							{
+								id: "echo",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "perItem", value: "js/ctx.state.row.id" },
+							},
+						],
+					},
+				},
+			],
+		});
+
+		expect(state.loop).toEqual([]);
+		expect(state.row).toBeUndefined();
+		expect(state.rowIndex).toBeUndefined();
+		expect(state.perItem).toBeUndefined();
+	});
+
+	it("makes the returned forEach handle read the aggregate array after the loop", async () => {
+		const wf = await workflowCallback(
+			"AfterAggregate",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				const validate = step("validate", noop, {});
+				const results = forEach(
+					validate.items,
+					(item) => {
+						step("echo", noop, { id: item.id });
+					},
+					{ id: "loop", as: "row" },
+				);
+				step("after", noop, { results });
+			},
+		);
+		const steps = wf._config.steps as Array<Record<string, unknown>>;
+		const authored = steps.find((s) => s.forEach) as { forEach: { in: string; as: string } };
+		expect(steps.find((s) => s.id === "after")?.inputs).toEqual({
+			results: { $ref: { step: "loop", path: [] } },
+		});
+
+		const state = await bootAndRun({
+			name: "after-aggregate",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "seed",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "validate", value: { items: [{ id: "A" }, { id: "B" }] } },
+				},
+				{
+					id: "loop",
+					forEach: {
+						in: authored.forEach.in,
+						as: authored.forEach.as,
+						do: [
+							{
+								id: "echo",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "perItem", value: "js/ctx.state.row.id" },
+							},
+						],
+					},
+				},
+				{
+					id: "after",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "afterLoop", value: "js/ctx.state.loop" },
+				},
+			],
+		});
+
+		expect(state.afterLoop).toEqual([
 			{ name: "perItem", value: "A" },
 			{ name: "perItem", value: "B" },
 		]);
