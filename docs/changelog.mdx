@@ -3,6 +3,34 @@ title: Changelog
 description: Notable changes to Blok, newest first. Versions are published in lockstep — one version means every public @blokjs/* package is at that version.
 ---
 
+<Update label="v1.1.0" description="2026-06-28">
+## `subworkflow()` — the handle-DSL sub-workflow primitive
+
+**New**
+- [`subworkflow(id, name, inputs, opts?)`](/d/composition/sub-workflows) — invoke another workflow like a function from the handle DSL, the callback mirror of `step()`. Returns a typed handle to the child's response. `name` is a literal **or** a handle for polymorphic dispatch (one trigger → N handlers, paired with `allowList`). Opts: `{ wait, dispatch, allowList, idempotencyKey, retry, as, ephemeral }`. Emits the object-style `{ id, subworkflow, inputs }` shape under the hood, so it stays wire-compatible with JSON and the object DSL.
+
+**Docs**
+- [Context & State](/d/fundamentals/context-and-state) reframed handle-first; the security [cookbook](/d/security/cookbook) and [threat model](/d/security/threat-model) corrected.
+
+Lockstep bump of all public packages to `1.1.0`.
+</Update>
+
+<Update label="v1.0.0" description="2026-06-28">
+## The typed-handle authoring DSL
+
+Workflows are now authored in TypeScript with **typed handles** — no `$`, no `js/`, no raw `ctx` strings. `step()` returns a handle to a step's output; pass it straight into later steps and the runner resolves it before the node runs.
+
+**New**
+- [`@blokjs/core`](/d/introduction/workflows) — the handle-DSL barrel: `workflow`, `step`, `branch`, `forEach`, `switchOn`, `tryCatch`, plus `tpl`, `http`, `defineNode`, `runtimeNode` and the typed comparators (`eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`not`). Subpath split — `.` is the light DSL (tree-shaken, no grpc/sqlite), `./runtime` the engine, `./testing` the harnesses; `sideEffects: false`.
+- Local nodes **auto-discover** from `src/nodes/<name>/index.ts` by their `defineNode` `name` — no hand-edited registry. `node.name` is the canonical `use:` reference; duplicate names throw at load.
+
+**Changed**
+- The legacy `Nodes.ts` hand-editing friction is gone. Object-style (`$.state`) and JSON workflows still compile to the same IR and remain fully supported.
+- CLI scaffolds modernized to the handle DSL.
+
+Lockstep bump of all public packages to `1.0.0`.
+</Update>
+
 <Update label="v0.7.0" description="2026-06-26">
 ## Modular observability
 
