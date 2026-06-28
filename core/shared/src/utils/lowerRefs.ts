@@ -63,8 +63,12 @@ function isStructuralRef(value: object): value is StructuralRef {
  * So a ref rooted here lowers to `js/ctx.request`, mirroring the existing
  * `$.req` proxy. Keep this string in sync with stepBuilder's sentinel.
  *
- * Scope: HTTP `req` → `ctx.request` only. Per-trigger entry handles for
- * event/job/msg/etc. roots are #336 (follow-up) — not built here.
+ * Scope: ALL request-shaped triggers funnel into ctx.request, so the typed
+ * per-trigger entry handles (#336 — http`req`/webhook`event`/cron`tick`/
+ * worker`job`/pubsub`msg`/grpc`rpc`) all root here; the per-kind difference is
+ * a TYPE-only refinement in stepBuilder, NOT a lowering change. The greenfield
+ * `manual` (#362) `args` handle + imperative sse/ws `conn`/`stream` are NOT
+ * request-shaped and are not wired through this root.
  */
 const TRIGGER_SENTINEL = "@trigger";
 
