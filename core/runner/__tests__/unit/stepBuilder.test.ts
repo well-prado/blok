@@ -243,6 +243,32 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 		expect(steps.map((s) => s.id)).toEqual(["a", "b"]);
 		expect(steps[1].inputs.message).toEqual({ $ref: { step: "a", path: ["greeting"] } });
 	});
+
+	it("isolates concurrent workflowCallback builds across awaits", async () => {
+		const build = (name: string, first: string, second: string) =>
+			workflowCallback(
+				name,
+				{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+				async (req: TriggerHandle) => {
+					const greeting = step(first, greet, { name: req.body.name });
+					await Promise.resolve();
+					step(second, shout, { message: greeting.greeting });
+				},
+			);
+
+		const [left, right] = await Promise.all([
+			build("Left Async Body", "left-greet", "left-shout"),
+			build("Right Async Body", "right-greet", "right-shout"),
+		]);
+
+		const leftSteps = left._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		const rightSteps = right._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+
+		expect(leftSteps.map((s) => s.id)).toEqual(["left-greet", "left-shout"]);
+		expect(rightSteps.map((s) => s.id)).toEqual(["right-greet", "right-shout"]);
+		expect(leftSteps[1].inputs.message).toEqual({ $ref: { step: "left-greet", path: ["greeting"] } });
+		expect(rightSteps[1].inputs.message).toEqual({ $ref: { step: "right-greet", path: ["greeting"] } });
+	});
 });
 
 describe("ephemeral handle: unreadable/poisoned (#339)", () => {
