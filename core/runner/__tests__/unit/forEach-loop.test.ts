@@ -17,6 +17,7 @@
  *     - maxIterations cap throws LoopMaxIterationsError
  */
 
+import { $, lt } from "@blokjs/helper";
 import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -107,6 +108,25 @@ const MaybeFailNode = defineNode({
 	},
 });
 
+const ifElse = defineNode({
+	name: "@blokjs/if-else",
+	description: "test-local mirror of the real if-else flow node",
+	flow: true,
+	input: z.array(z.object({ type: z.enum(["if", "else"]), condition: z.string().optional(), steps: z.array(z.any()) })),
+	output: z.array(z.any()),
+	execute: (ctx, conditions) => {
+		for (const c of conditions) {
+			if (c.condition && c.condition.trim() !== "") {
+				const result = Function("ctx", `"use strict";return (${c.condition});`)(ctx);
+				if (result) return c.steps as never[];
+			} else {
+				return c.steps as never[];
+			}
+		}
+		return [] as never[];
+	},
+});
+
 /** A real defineNode that just returns already-mapped inputs. */
 const CacheEchoNode = defineNode({
 	name: "cache-echo",
@@ -134,6 +154,7 @@ async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration
 	const helpers: Record<string, RunnerNode> = {
 		"@blokjs/expr": new ExprNode(),
 		"@blokjs/ctx-publish": new CtxPublishNode(),
+		"@blokjs/if-else": ifElse as unknown as RunnerNode,
 		"real-envelope": RealEnvelopeNode as unknown as RunnerNode,
 		"maybe-fail": MaybeFailNode as unknown as RunnerNode,
 		"cache-echo": CacheEchoNode as unknown as RunnerNode,
@@ -471,6 +492,65 @@ describe("v0.5 forEach + loop integration", () => {
 			expect((ctx.state as Record<string, unknown>).loop).toEqual([{ n: 1 }, { ok: false }, { n: 3 }]);
 		});
 
+		it("evaluates branch conditions against the current forEach item", async () => {
+			const wfDef = {
+				name: "test-foreach-branch-item-condition",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "routes",
+						forEach: {
+							in: [
+								{ id: "a", ready: true },
+								{ id: "b", ready: false },
+							],
+							as: "item",
+							mode: "sequential",
+							do: [
+								{
+									id: "route-item",
+									branch: {
+										when: "ctx.state.item.ready",
+										then: [
+											{
+												id: "mark-ready",
+												use: "@blokjs/ctx-publish",
+												type: "module",
+												inputs: { name: "decision", value: "ready" },
+											},
+										],
+										else: [
+											{
+												id: "mark-wait",
+												use: "@blokjs/ctx-publish",
+												type: "module",
+												inputs: { name: "decision", value: "wait" },
+											},
+										],
+									},
+								},
+								{
+									id: "echo-decision",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "({ id: ctx.state.item.id, decision: ctx.state.decision })" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).routes).toEqual([
+				{ id: "a", decision: "ready" },
+				{ id: "b", decision: "wait" },
+			]);
+			expect((ctx.state as Record<string, unknown>).decision).toBeUndefined();
+		});
+
 		it.each([
 			["sequential", "cache426SeqItem"],
 			["parallel", "cache426ParItem"],
@@ -645,6 +725,38 @@ describe("v0.5 forEach + loop integration", () => {
 			expect((ctx.state as Record<string, unknown>)["counter-loopIndex"]).toBe(3);
 		});
 
+		it("terminates from a raw op expression over the loop counter handle", async () => {
+			const whileExpr = lt($.state["poll-loopIndex"], 3);
+			expect(whileExpr).toBe('ctx.state["poll-loopIndex"] < 3');
+
+			const wfDef = {
+				name: "test-loop-counter-op",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "poll-loop",
+						loop: {
+							while: whileExpr,
+							maxIterations: 10,
+							do: [
+								{
+									id: "echo-index",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: 'ctx.state["poll-loopIndex"]' },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+
+			expect((ctx.state as Record<string, unknown>)["poll-loopIndex"]).toBe(3);
+		});
+
 		it("throws LoopMaxIterationsError when cap is exceeded", async () => {
 			const wfDef = {
 				name: "test-loop-cap",
@@ -686,6 +798,7 @@ describe("v0.5 forEach + loop integration", () => {
 			const ctxErr = ctx.response?.error?.message ?? "";
 			const combined = `${errString} ${ctxErr}`;
 			expect(combined).toMatch(/exceeded maxIterations|LoopMaxIterationsError/);
+			expect((ctx.state as Record<string, unknown>).runawayIndex).toBe(3);
 		});
 	});
 });
