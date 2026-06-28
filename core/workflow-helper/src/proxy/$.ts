@@ -29,7 +29,7 @@
  */
 
 /** Internal symbol used to detect proxy values during the deep-walk. */
-export const JS_EXPR_TAG = Symbol("blok.jsExpr");
+export const JS_EXPR_TAG: unique symbol = Symbol.for("blok.jsExpr") as never;
 
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const NUMERIC_RE = /^\d+$/;
