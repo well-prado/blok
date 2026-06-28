@@ -166,11 +166,12 @@ function guessHint(expression: string, errorMessage: string): string | null {
 /**
  * Detect a dangling state reference — the failure case behind
  * {@link NamedMissingStateError}. Given an expression that THREW during
- * resolution and the live ctx, returns the missing state id when the
- * expression reads `ctx.state.<id>` / `ctx.vars.<id>` (or the bare
- * `state.<id>` / `vars.<id>` forms — `vars` aliases `state`, and `data`
- * is the state object inside `${...}`) AND that `<id>` is genuinely
- * absent from `ctx.state`. Returns `null` otherwise.
+ * resolution and the live ctx, returns the missing state id ONLY when the
+ * expression's ROOT read is `ctx.state.<id>` / `ctx.vars.<id>` (or the bare
+ * `state.<id>` / `vars.<id>` root forms — `vars` aliases `state`) AND that
+ * `<id>` is genuinely absent from `ctx.state`. Returns `null` otherwise —
+ * including when `state`/`vars` appears only as a NESTED property of another
+ * object (e.g. `ctx.req.body.state.missing`), which is not a state ref at all.
  *
  * CRITICAL — this only ever fires on the ALREADY-FAILED path (the JS
  * eval threw), so it adds zero happy-path cost. It uses an `in`-check,
@@ -182,10 +183,15 @@ function guessHint(expression: string, errorMessage: string): string | null {
  * MapperResolutionError stands.
  */
 function detectMissingStateId(expression: string, ctx: Context): string | null {
-	// Match the FIRST `state.<id>` / `vars.<id>` access in the expression.
-	// `\b` anchors so `myState.x` doesn't match. The id stops at the next
-	// non-identifier char (`.`, `[`, `)`, whitespace, end).
-	const match = expression.match(/\b(?:ctx\.)?(?:state|vars)\.([A-Za-z_$][\w$]*)/);
+	// Match `state.<id>` / `vars.<id>` ONLY when it is the ROOT of the
+	// expression, optionally behind a `ctx.` prefix. The leading `^` anchor
+	// is load-bearing: a `\b` boundary matched `state.`/`vars.` ANYWHERE, so
+	// `ctx.req.body.state.missing` or `ctx.config.state.X` (state/vars as a
+	// NESTED property of some OTHER object) got misclassified as a dangling
+	// state slot. Those resolve against a different root, not ctx.state, so
+	// they must stay a generic MapperResolutionError. The id stops at the
+	// next non-identifier char (`.`, `[`, `(`, whitespace, end).
+	const match = expression.match(/^(?:ctx\.)?(?:state|vars)\.([A-Za-z_$][\w$]*)/);
 	if (!match) return null;
 	const id = match[1];
 	// `ctx.state` and `ctx.vars` point at the same object. Treat a missing

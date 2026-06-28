@@ -186,6 +186,37 @@ describe("NamedMissingStateError", () => {
 			expect(thrown).toBeInstanceOf(MapperResolutionError);
 			expect(thrown).not.toBeInstanceOf(NamedMissingStateError);
 		});
+
+		it("a NESTED .state.<id> on another object (ctx.req.body.state.missing) stays generic — NOT named", () => {
+			// Regression: the detector used to match `state.`/`vars.` ANYWHERE in
+			// the expression via `\b`, so this — where `state` is a field of
+			// req.body, not the ctx.state root — was wrongly classified as a
+			// dangling state slot named "missing". With the `^`-anchored root
+			// match it must stay a generic MapperResolutionError.
+			setMode("strict");
+			const ctx = createMockContext({ state: {} as Context["state"] });
+			let thrown: unknown = null;
+			try {
+				mapper.replaceString("js/ctx.req.body.state.missing", ctx, {});
+			} catch (e) {
+				thrown = e;
+			}
+			expect(thrown).toBeInstanceOf(MapperResolutionError);
+			expect(thrown).not.toBeInstanceOf(NamedMissingStateError);
+		});
+
+		it("a NESTED .vars.<id> on another object (ctx.config.vars.X) stays generic — NOT named", () => {
+			setMode("strict");
+			const ctx = createMockContext({ state: {} as Context["state"], config: {} as Context["config"] });
+			let thrown: unknown = null;
+			try {
+				mapper.replaceString("js/ctx.config.deep.vars.X", ctx, {});
+			} catch (e) {
+				thrown = e;
+			}
+			expect(thrown).toBeInstanceOf(MapperResolutionError);
+			expect(thrown).not.toBeInstanceOf(NamedMissingStateError);
+		});
 	});
 
 	describe("warn / silent modes — unchanged routing (no throw)", () => {
