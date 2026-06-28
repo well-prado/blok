@@ -2,7 +2,7 @@ import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
-	name: "base64-to-pdf",
+	name: "base64-pdf",
 	description: "Decodes a base64 string into a PDF buffer",
 	contentType: "application/pdf",
 

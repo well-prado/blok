@@ -4,7 +4,7 @@ import { MongoClient, ObjectId, type Sort } from "mongodb";
 import { z } from "zod";
 
 export default defineNode({
-	name: "mongo-query",
+	name: "mongodb-query",
 	description: "Performs CRUD operations on MongoDB based on HTTP method",
 
 	input: z.object({

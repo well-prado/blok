@@ -2,7 +2,7 @@ import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
-	name: "mapper-node",
+	name: "mapper",
 	description: "Passes through the input model as the output",
 
 	input: z.object({

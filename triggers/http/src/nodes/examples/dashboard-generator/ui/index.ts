@@ -11,7 +11,7 @@ function root(relPath: string): string {
 }
 
 export default defineNode({
-	name: "dashboard-generator-ui",
+	name: "dashboard-ui",
 	description: "Renders the dashboard generator UI from an EJS template",
 	contentType: "text/html",
 
