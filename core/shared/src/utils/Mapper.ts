@@ -81,6 +81,32 @@ export type MapperMode = "warn" | "strict" | "silent";
  * expression might produce.
  */
 const TEMPLATE_RESOLUTION_FAILED: unique symbol = Symbol("TEMPLATE_RESOLUTION_FAILED");
+const MAX_COMPILED_JS_CACHE_SIZE = 256;
+type CompiledJsExpression = (ctx: Context, data: ParamsDictionary, func: FunctionContext, vars: VarsContext) => unknown;
+const compiledJsExpressions = new Map<string, CompiledJsExpression>();
+
+function compileJsExpression(expression: string): CompiledJsExpression {
+	const cached = compiledJsExpressions.get(expression);
+	if (cached) {
+		compiledJsExpressions.delete(expression);
+		compiledJsExpressions.set(expression, cached);
+		return cached;
+	}
+
+	const compiled = Function(
+		"ctx",
+		"data",
+		"func",
+		"vars",
+		`"use strict";return (${expression});`,
+	) as CompiledJsExpression;
+	compiledJsExpressions.set(expression, compiled);
+	if (compiledJsExpressions.size > MAX_COMPILED_JS_CACHE_SIZE) {
+		const oldest = compiledJsExpressions.keys().next().value;
+		if (oldest !== undefined) compiledJsExpressions.delete(oldest);
+	}
+	return compiled;
+}
 
 function readMode(): MapperMode {
 	const raw = process.env.BLOK_MAPPER_MODE;
@@ -148,6 +174,12 @@ function guessHint(expression: string, errorMessage: string): string | null {
 		const prop = undefMatch[1] ?? undefMatch[2];
 		const segments = expression.split(".");
 		const parent = segments.slice(0, -1).join(".") || expression;
+		return `the path \`${parent}\` is undefined or doesn't have a "${prop}" field at run time. Check the trigger payload (ctx.req.body) or the upstream step's output (ctx.state.<id>).`;
+	}
+	const bunUndefMatch = errorMessage.match(/undefined is not an object \(evaluating '([^']+)'\)/);
+	if (bunUndefMatch) {
+		const parent = bunUndefMatch[1];
+		const prop = parent.split(".").pop() ?? parent;
 		return `the path \`${parent}\` is undefined or doesn't have a "${prop}" field at run time. Check the trigger payload (ctx.req.body) or the upstream step's output (ctx.state.<id>).`;
 	}
 	// Identifier not in scope — only `ctx`, `data`, `func`, `vars` are
@@ -387,6 +419,11 @@ class Mapper {
 	public replaceString = (strData: string, ctx: Context, data: ParamsDictionary): unknown => {
 		let str = strData;
 
+		// `js/...` is a full-string expression. Do not pre-resolve `${...}`
+		// inside it; template literals such as js/`x=${ctx.state.item}` must
+		// compile once by source string instead of once per interpolated value.
+		if (str.startsWith("js/")) return this.jsMapper(str, ctx, data);
+
 		// === 1. `${path}` template interpolation ===
 		const regex = /\${(.*?)}/g;
 		const matches = str.match(regex);
@@ -495,7 +532,7 @@ class Mapper {
 		// Function constructor (NOT eval) — creates a fresh function
 		// scope without lexical access to the surrounding module. Same
 		// security profile as the v1 implementation.
-		return Function("ctx", "data", "func", "vars", `"use strict";return (${str});`)(ctx, data, func, vars);
+		return compileJsExpression(str)(ctx, data, func, vars);
 	}
 }
 

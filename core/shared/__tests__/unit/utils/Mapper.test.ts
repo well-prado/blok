@@ -401,5 +401,33 @@ describe("Mapper", () => {
 			expect(mapper.replaceString('js/({hello: "world"})', ctx, {})).toEqual({ hello: "world" });
 			expect(mapper.replaceString("js/true", ctx, {})).toBe(true);
 		});
+
+		it("caches compiled js/ expressions by source string", () => {
+			const NativeFunction = globalThis.Function;
+			const compiledBodies: string[] = [];
+			vi.spyOn(globalThis, "Function").mockImplementation(((...args: string[]) => {
+				const body = args.at(-1);
+				if (typeof body === "string" && body.includes("cache426")) compiledBodies.push(body);
+				return NativeFunction(...args);
+			}) as unknown as FunctionConstructor);
+
+			const input = {
+				a: "js/ctx.state.cache426Same + 1",
+				b: "js/ctx.state.cache426Same + 1",
+				c: "js/ctx.state.cache426Different + 1",
+				d: "js/`cache426Label=${ctx.state.cache426Same}`",
+			};
+
+			for (let i = 0; i < 12; i++) {
+				const ctx = createMockContext({
+					state: { cache426Same: i, cache426Different: i * 10 } as unknown as Context["state"],
+				});
+				const copy = { ...input };
+				mapper.replaceObjectStrings(copy as Record<string, string>, ctx, {});
+				expect(copy).toEqual({ a: i + 1, b: i + 1, c: i * 10 + 1, d: `cache426Label=${i}` });
+			}
+
+			expect(compiledBodies).toHaveLength(3);
+		});
 	});
 });
