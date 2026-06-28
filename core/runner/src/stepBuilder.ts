@@ -393,6 +393,133 @@ export function branch(id: string, condition: unknown, arms: BranchArms): void {
 	} as unknown as StepRecord);
 }
 
+// ───────────────────────────── forEach (#329 / #343) ─────────────────────
+//
+// `forEach(iterable, (item, index?) => { ...body... }, opts?)` — a callback-style
+// loop over a handle. The body callback pushes a CHILD builder scope (the SAME
+// mechanism branch() uses via `runArm`), so `step()` calls inside register into
+// the forEach's `do` pipeline. `item` is a PER-ITEM handle rooted at the loop's
+// `as` key, OWNED BY THE CHILD scope — reading it after the forEach (or from a
+// sibling arm) trips the cornerstone's `canRead` guard (ADR 0003/0005, #343).
+// The loop's output (the results array at `state[id]`) is the readable-after
+// value, returned as a parent-owned handle.
+//
+// The iterable handle lowers to the forEach `in` expression as a `js/ctx....`
+// STRING (not `{$ref}`): the normalizer does NOT run `lowerRefs` over
+// `forEach.in`, and ForEachNode reads `opts.in` only after the Mapper resolves
+// it — so `in` must already be the wire string the object-style `forEach()`
+// emits via `unwrapProxies`.
+
+/** Options for the callback-style {@link forEach}. */
+export interface ForEachOptions {
+	/** Step id (visible in traces, root of the results-array handle). Derived from `as` when omitted. */
+	id?: string;
+	/** Per-iteration state key. `state[as] = item`, `state[as + "Index"] = i`. Derived from the iterable's last path segment when omitted. */
+	as?: string;
+	/** `"sequential"` (default) or `"parallel"`. */
+	mode?: "sequential" | "parallel";
+	/** Max concurrent inner pipelines when `mode: "parallel"`. Default 10. */
+	concurrency?: number;
+}
+
+/** Lower a handle to its `js/ctx....` wire string (the `in` expression). */
+function lowerHandleToInExpr(meta: HandleMeta): string {
+	return `js/${lowerHandleToCtx(meta)}`;
+}
+
+/** Derive a stable identifier from the iterable's last path segment (e.g. `validate.items` → `items`). */
+function deriveName(meta: HandleMeta): string {
+	const last = meta.path.length > 0 ? meta.path[meta.path.length - 1] : meta.step;
+	const name = String(last);
+	return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name) ? name : "item";
+}
+
+/**
+ * Callback-style `forEach` over a handle (#329 forEach slice + #343). `iterable`
+ * is a handle (a step output field or a trigger field); it lowers to the forEach
+ * `in` expression. `body(item, index?)` runs inside a CHILD builder scope — its
+ * `step()` calls become the forEach `do` pipeline. `item` is a per-item handle
+ * rooted at the loop's `as` key (scope-guarded to the body, #343); `index` roots
+ * at `<as>Index`. Returns a handle to the results array (readable after the loop).
+ *
+ * Emits the existing v2 `{ id, forEach: { in, as, do } }` shape, so it normalizes
+ * and runs through the UNCHANGED `ForEachNode` engine. The merged
+ * `assertNoForEachStateKeyCollisions` guard (run by the object factory at load)
+ * already protects `as`/`asIndex` against step-id collisions.
+ *
+ * @example
+ *   const items = step("validate", validateNode, { ... }).items;
+ *   const results = forEach(items, (item) => {
+ *     step("save", saveItem, { sku: item.sku });
+ *   });
+ */
+export function forEach<T = unknown>(
+	iterable: Handle<readonly T[]> | Handle<T[]>,
+	body: (item: Handle<T>, index: Handle<number>) => unknown,
+	opts?: ForEachOptions,
+): Handle<unknown[]> {
+	const meta = readHandleMeta(iterable);
+	if (!meta) {
+		throw new Error("forEach() requires a handle as its iterable (a step output field or a trigger field).");
+	}
+	if (typeof body !== "function") {
+		throw new Error("forEach() requires a body callback: forEach(iterable, (item, index?) => { ... }).");
+	}
+	const parent = currentBuilder();
+
+	// Cross-arm guard: the iterable must be readable from the forEach's scope.
+	if (meta.owner && !canRead(meta.owner, parent)) {
+		throw new Error(
+			`forEach() iterable from step "${meta.step}" is read outside its scope — a handle produced inside one control-flow arm is not iterable from a sibling arm or after the flow step.`,
+		);
+	}
+
+	const as = opts?.as ?? deriveName(meta);
+	if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(as)) {
+		throw new Error(`forEach() \`as\` must be a valid JS identifier (got "${as}").`);
+	}
+	// `id` must differ from `as`: the loop's results land at `state[id]` while
+	// `state[as]` holds the current item — the merged collision guard rejects
+	// `id === as`. Default to a distinct `<as>Results` key.
+	const id = opts?.id ?? `${as}Results`;
+	const ids = parent.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	const inExpr = lowerHandleToInExpr(meta);
+
+	// Run the body in a CHILD scope (reuse branch()'s mechanism). The per-item
+	// `item`/`index` handles are owned by this child, so reading them after the
+	// loop (or from a sibling arm) trips `canRead` in lowerHandles/lowerCondition.
+	const child: Builder = { parent, root: parent.root, steps: [] };
+	const store = builders.getStore();
+	if (!store) throw new Error("forEach() must be called inside a workflow callback.");
+	store.stack.push(child);
+	try {
+		const item = buildHandle(as, child, []) as Handle<T>;
+		const index = buildHandle(`${as}Index`, child, []) as Handle<number>;
+		body(item, index);
+	} finally {
+		store.stack.pop();
+	}
+
+	parent.steps.push({
+		id,
+		forEach: {
+			in: inExpr,
+			as,
+			do: child.steps,
+			...(opts?.mode !== undefined ? { mode: opts.mode } : {}),
+			...(opts?.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+		},
+	} as unknown as StepRecord);
+
+	// The results array lands at state[id] — a parent-owned handle, readable after.
+	return buildHandle(id, parent, []) as Handle<unknown[]>;
+}
+
 /** Run one arm callback inside a fresh child builder, returning its collected steps. */
 function runArm(parent: Builder, body: () => unknown): StepRecord[] {
 	const child: Builder = { parent, root: parent.root, steps: [] };
