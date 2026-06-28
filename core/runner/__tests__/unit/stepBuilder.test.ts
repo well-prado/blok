@@ -397,17 +397,13 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 				void event.body;
 			},
 		);
-		await workflowCallback(
-			"T-cron",
-			{ version: "1.0.0", trigger: { cron: { expression: "* * * * *" } } },
-			(tick) => {
-				assert<Expect<typeof tick, CronEntry>>();
-				// cron has NO body — `tick.body` must be a compile error (no phantom body).
-				// @ts-expect-error — cron tick exposes no `.body`.
-				void tick.body;
-				void tick.params;
-			},
-		);
+		await workflowCallback("T-cron", { version: "1.0.0", trigger: { cron: { expression: "* * * * *" } } }, (tick) => {
+			assert<Expect<typeof tick, CronEntry>>();
+			// cron has NO body — `tick.body` must be a compile error (no phantom body).
+			// @ts-expect-error — cron tick exposes no `.body`.
+			void tick.body;
+			void tick.params;
+		});
 		await workflowCallback("T-worker", { version: "1.0.0", trigger: { worker: { queue: "q" } } }, (job) => {
 			assert<Expect<typeof job, WorkerEntry>>();
 			void job.body;
