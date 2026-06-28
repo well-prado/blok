@@ -1198,9 +1198,18 @@ export async function createProject(opts: OptionValues, version: string, current
 		}
 		fsExtra.writeFileSync(supervisordConfPath, supervisordConfContent);
 
-		// Create AI context files (AGENTS.md and CLAUDE.md)
-		fsExtra.writeFileSync(`${dirPath}/AGENTS.md`, agents_md.trimStart());
-		fsExtra.writeFileSync(`${dirPath}/CLAUDE.md`, claude_md.trimStart());
+		// Create AI context files (AGENTS.md + CLAUDE.md) — the LLM authoring guide.
+		// Maintained as real markdown under packages/cli/scaffold-templates/ (present in
+		// the --local repoSource and cloned with the release tag), copied verbatim. Falls
+		// back to the embedded strings for an older repoSource that predates the templates.
+		const docsTemplateDir = `${repoSource}/packages/cli/scaffold-templates`;
+		if (fsExtra.existsSync(`${docsTemplateDir}/AGENTS.md`)) {
+			fsExtra.copySync(`${docsTemplateDir}/AGENTS.md`, `${dirPath}/AGENTS.md`);
+			fsExtra.copySync(`${docsTemplateDir}/CLAUDE.md`, `${dirPath}/CLAUDE.md`);
+		} else {
+			fsExtra.writeFileSync(`${dirPath}/AGENTS.md`, agents_md.trimStart());
+			fsExtra.writeFileSync(`${dirPath}/CLAUDE.md`, claude_md.trimStart());
+		}
 
 		// Install Packages
 		s.message("Installing packages...");
