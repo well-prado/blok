@@ -27,7 +27,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 } from "@blokjs/runner";
-import type { Context, RequestContext } from "@blokjs/shared";
+import type { Context, NodeBase, RequestContext } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -145,10 +145,9 @@ export abstract class PubSubTrigger extends TriggerBase {
 	 */
 	loadNodes(): void {
 		this.nodeMap.nodes = new NodeMap();
-		const nodeKeys = Object.keys(this.nodes);
-		for (const key of nodeKeys) {
-			this.nodeMap.nodes.addNode(key, this.nodes[key]);
-		}
+		// Register each node under its own node.name (the canonical use: ref, ADR
+		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
+		this.nodeMap.nodes.addNodes(Object.values(this.nodes) as unknown as NodeBase[]);
 	}
 
 	/**

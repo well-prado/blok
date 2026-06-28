@@ -6,7 +6,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 } from "@blokjs/runner";
-import { type Context, GlobalError } from "@blokjs/shared";
+import { type Context, GlobalError, type NodeBase } from "@blokjs/shared";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import fastify from "fastify";
@@ -63,10 +63,9 @@ export default class GRpcTrigger extends TriggerBase {
 
 	loadNodes() {
 		this.nodeMap.nodes = new NodeMap();
-		const nodeKeys = Object.keys(nodes);
-		for (const key of nodeKeys) {
-			this.nodeMap.nodes.addNode(key, nodes[key]);
-		}
+		// Register each node under its own node.name (the canonical use: ref, ADR
+		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
+		this.nodeMap.nodes.addNodes(Object.values(nodes) as unknown as NodeBase[]);
 	}
 
 	loadWorkflows() {

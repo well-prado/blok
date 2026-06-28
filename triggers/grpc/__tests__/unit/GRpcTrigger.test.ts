@@ -54,6 +54,9 @@ vi.mock("@blokjs/runner", () => {
 		addNode(key: string, val: any) {
 			this.nodes[key] = val;
 		}
+		addNodes(list: any[]) {
+			for (const node of list) this.nodes[node.name] = node;
+		}
 	}
 
 	class MockTriggerBase {
