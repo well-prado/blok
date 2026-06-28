@@ -1294,46 +1294,38 @@ export async function createProject(opts: OptionValues, version: string, current
  * Generate shared Nodes.ts that combines nodes from all selected triggers.
  */
 function generateSharedNodesFile(triggers: string[], _repoSource: string): string {
-	// Collect unique node imports from all triggers
-	const nodeImports: Set<string> = new Set();
-	const nodeExports: Map<string, string> = new Map();
-	let spreadHelperNodes = false;
+	const imports = [
+		'import { dirname, join } from "node:path";',
+		'import { fileURLToPath } from "node:url";',
+		'import ApiCall from "@blokjs/api-call";',
+		'import IfElse from "@blokjs/if-else";',
+		'import { discoverNodes } from "@blokjs/runner";',
+		'import type { NodeBase } from "@blokjs/shared";',
+	];
 
-	// Always include core nodes
-	nodeImports.add('import ApiCall from "@blokjs/api-call";');
-	nodeImports.add('import IfElse from "@blokjs/if-else";');
-	nodeImports.add('import type { BlokService } from "@blokjs/runner";');
-	nodeExports.set("@blokjs/api-call", "ApiCall");
-	nodeExports.set("@blokjs/if-else", "IfElse");
-
-	// SSE and WebSocket workflows need helper nodes from @blokjs/helpers:
-	// SSE → @blokjs/sse-subscribe, @blokjs/sse-stream, @blokjs/sse-publish
-	// WS  → @blokjs/ws-broadcast, @blokjs/ws-reply, @blokjs/ws-close
-	// Spread the entire HELPER_NODES registry rather than cherry-picking —
-	// the same package exports other reliability helpers (@blokjs/log,
-	// @blokjs/expr, @blokjs/audit-log, etc.) that users will reach for
-	// from realtime workflows too. Cost is negligible (zero-side-effect
-	// imports).
+	// SSE/WebSocket workflows need helper nodes from @blokjs/helpers (sse-*/ws-*
+	// + the general reliability helpers). Spread the whole registry — cost is
+	// negligible (zero-side-effect imports).
+	const explicit = ["ApiCall as unknown as NodeBase", "IfElse as unknown as NodeBase"];
 	if (triggers.includes("sse") || triggers.includes("websocket")) {
-		nodeImports.add('import { HELPER_NODES } from "@blokjs/helpers";');
-		spreadHelperNodes = true;
+		imports.push('import { HELPER_NODES } from "@blokjs/helpers";');
+		explicit.push("...(Object.values(HELPER_NODES) as unknown as NodeBase[])");
 	}
 
-	const importLines = Array.from(nodeImports).join("\n");
-	const exportEntries = Array.from(nodeExports.entries())
-		.map(([key, value]) => `\t"${key}": ${value},`)
-		.join("\n");
+	return `${imports.join("\n")}
 
-	// When SSE is selected, spread HELPER_NODES first so the explicit
-	// core entries above win on any name collision (today there is none
-	// — defence in depth).
-	const recordBody = spreadHelperNodes ? `\t...HELPER_NODES,\n${exportEntries}` : exportEntries;
+// Published nodes (npm) are registered explicitly below. Your OWN nodes under
+// 'nodes/<name>/index.ts' are AUTO-DISCOVERED and registered by their
+// defineNode({ name }) — you never edit this file to add a node.
+const here = dirname(fileURLToPath(import.meta.url));
+const local = await discoverNodes(join(here, "nodes"));
 
-	return `${importLines}
-
-const nodes: Record<string, BlokService<unknown>> = {
-${recordBody}
-};
+// Map keys are cosmetic — the runner registers each node under its own node.name
+// (the canonical 'use:' ref). Duplicate refs throw at startup.
+const nodes: { [key: string]: NodeBase } = {};
+for (const node of [${explicit.join(", ")}, ...local]) {
+\tnodes[(node as { name: string }).name] = node;
+}
 
 export default nodes;
 `;
