@@ -98,8 +98,8 @@ describe("WorkflowGenerator", () => {
 
 		it("should include common fix suggestions", () => {
 			const result = createFeedback("Test", "{}", ["Missing node entry"]);
-			expect(result).toContain("step name has a matching entry");
-			expect(result).toContain("else branch");
+			expect(result).toContain("unique `id`");
+			expect(result).toContain("branch: { when, then, else }");
 		});
 	});
 });

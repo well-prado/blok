@@ -46,7 +46,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v0.7.0";
+const GITHUB_REPO_RELEASE_TAG = "v1.0.0";
 
 /**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
@@ -821,13 +821,14 @@ export async function createProject(opts: OptionValues, version: string, current
 			// workspacePackageMap pointed at `@blokjs/trigger-queue` +
 			// `triggers/queue/`, neither of which exists in this repo.
 			"@blokjs/trigger-worker": "triggers/worker",
+			"@blokjs/core": "core/core",
 		};
 
 		// The version range scaffolded projects pin @blokjs/* deps at.
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^0.7.0";
+		const BLOKJS_DEP_RANGE = "^1.0.0";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -900,6 +901,15 @@ export async function createProject(opts: OptionValues, version: string, current
 		packageJsonContent.devDependencies = {
 			...packageJsonContent.devDependencies,
 			blokctl: blokctlRef,
+		};
+
+		// @blokjs/core — the published typed-handle authoring surface
+		// (workflow/step/branch/forEach/switchOn/tryCatch/tpl/http + comparators).
+		// Scaffolded TypeScript workflows import from here, so every new project
+		// ships with it as a runtime dependency.
+		packageJsonContent.dependencies = {
+			...packageJsonContent.dependencies,
+			"@blokjs/core": localRepoPath ? `file:${path.resolve(repoSource, "core/core")}` : BLOKJS_DEP_RANGE,
 		};
 
 		// ponytail: strip the framework's internal test setup so it doesn't bleed

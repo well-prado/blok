@@ -9,7 +9,7 @@ What to return:
   1. Proper imports:
      * \`z\` from \`zod\`
      * \`Context\` from \`@blokjs/shared\`
-     * \`defineNode\` from \`@blokjs/runner\`
+     * \`defineNode\` from \`@blokjs/core\`
   2. A clear and structured \`input\` schema using Zod (z.object with proper types).
   3. A matching \`output\` schema using Zod.
   4. A single exported node instance created via \`defineNode\` with:
@@ -26,11 +26,11 @@ Constraints:
 * The Zod \`output\` schema must fully describe the object returned by \`execute\`.
 * Inside \`execute(ctx, input)\`:
   * Use the strongly-typed \`input\`, which is automatically inferred from the Zod schema.
-  * Use \`ctx\` to access request data, configuration, and cross-node state when needed:
+  * Use \`ctx\` to access request data, configuration, and logging when needed:
     * \`ctx.request.body\`, \`ctx.request.query\`, \`ctx.request.params\` for HTTP data
-    * \`ctx.vars\` for reading/writing values shared between nodes
     * \`ctx.logger\` for logging
     * \`ctx.env\` for environment variables
+  * Do **not** write to \`ctx.state\`/\`ctx.vars\` from a node — just RETURN your output; the runner auto-persists it to \`ctx.state[<step-id>]\` for downstream steps. Upstream values arrive as \`input.*\` (mapped in the workflow), not by reading \`ctx.vars\`.
   * Do **not** construct or return \`BlokResponse\` here; just return a plain object matching the output schema. The wrapper created by \`defineNode\` will call \`setSuccess\` / \`setError\` and handle \`GlobalError\`.
 * On validation errors or runtime errors, you do NOT manually throw \`GlobalError\`; throw/rethrow normal errors. The \`defineNode\` wrapper will catch them and map them to \`GlobalError\` consistently with proper error codes:
   * Zod validation errors → 400 Bad Request
@@ -52,7 +52,7 @@ Real-World Examples to Guide You:
 \`\`\`typescript
 import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 
 export default defineNode({
 	name: "api-call",
@@ -102,10 +102,6 @@ export default defineNode({
 
 		ctx.logger.log(\`Request completed in \${duration.toFixed(2)}ms with status \${response.status}\`);
 
-		if (ctx.vars) {
-			ctx.vars["api-response"] = { status: response.status, data };
-		}
-
 		return {
 			status: response.status,
 			statusText: response.statusText,
@@ -122,7 +118,7 @@ export default defineNode({
 \`\`\`typescript
 import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 
 export default defineNode({
 	name: "fetch-user",
@@ -149,11 +145,8 @@ export default defineNode({
 		// Simulate database fetch
 		const user = await fetchUserFromDatabase(input.userId, input.includeMetadata);
 
-		// Store in context for downstream nodes
-		if (ctx.vars) {
-			ctx.vars["current-user"] = user;
-		}
-
+		// Just return — the runner persists this to ctx.state["fetch-user"]
+		// for any downstream step that maps it in as an input.
 		return { user };
 	},
 });
@@ -176,7 +169,7 @@ Template to follow (adapt and fill based on the user's request):
 
 import type { Context } from "@blokjs/shared";
 import { z } from "zod";
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 
 /**
  * [Brief description of what this node does]
@@ -210,11 +203,11 @@ export default defineNode({
 		//
 		// Common patterns:
 		// - Read HTTP params: const id = ctx.request.params.id;
-		// - Read previous node output: const prev = ctx.vars["previous-node-key"];
-		// - Write for future nodes: ctx.vars["this-node-key"] = someValue;
+		// - Read upstream values via input.* (mapped from prior steps in the workflow) — NOT ctx.vars
 		// - Use input.* fields that match the input schema (TypeScript infers the type automatically)
 		// - Log messages: ctx.logger.log("Processing request");
 		// - Access environment: const apiKey = ctx.env.API_KEY;
+		// - Do NOT write ctx.state/ctx.vars here — just return; the runner persists your output.
 
 		// TODO: Implement business logic here
 
