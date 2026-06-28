@@ -433,14 +433,11 @@ page; the actionable form lives here.
 
 | Step | What to do |
 |---|---|
-| Set `BLOK_ENV=production` | Activates the trace-auth gate, NATS KV bucket check, etc. |
+| Set `BLOK_ENV=production` | Activates the trace-auth gate and other production-only refusals. |
 | Register `trigger.setTraceAuth(...)` | Required for `/__blok/*` in production. Or set `BLOK_TRACE_AUTH_DISABLED=1` if you've firewalled it separately. |
 | Set `BLOK_TRACE_CORS_ORIGIN=<studio-origin>` | Closes the cross-origin attack surface on `/__blok/*`. |
 | Set `BLOK_MAPPER_MODE=strict` | Fail-fast on workflow expression errors. |
 | Use Postgres with TLS | `BLOK_TRACE_STORE=postgres` and `BLOK_TRACE_PG_*` connecting via `sslmode=verify-full`. |
-| Set `BLOK_CONCURRENCY_NATS_KV_BUCKET=<unique>` | Required when `BLOK_CONCURRENCY_BACKEND=nats-kv`. |
-| Set `BLOK_CONCURRENCY_REDIS_KEY_PREFIX=<unique>` | Required when `BLOK_CONCURRENCY_BACKEND=redis`. Same cross-deployment collision risk as the NATS KV bucket. |
-| Set `BLOK_DEBOUNCE_NATS_KV_BUCKET=<unique>` or `BLOK_DEBOUNCE_REDIS_KEY_PREFIX=<unique>` | Required when `BLOK_DEBOUNCE_BACKEND=nats-kv` / `redis`. Same cross-deployment collision risk as the concurrency backends. |
 | Extend `BLOK_TRACE_SANITIZE_FIELDS` | Add domain-specific PII / PHI / secret field names. |
 | Tune `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` | Default 1MB; raise for media uploads, lower for small-payload services. |
 | Wire auth on user-authored routes | Pattern A above (workflow-level gate) or Pattern B (shared auth sub-workflow). |

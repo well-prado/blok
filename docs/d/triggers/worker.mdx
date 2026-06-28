@@ -177,10 +177,11 @@ Each job gets its **own isolated `Configuration`**, so running with
 `concurrency > 1` (or two queues in one process) is safe — concurrent
 jobs never share config state or race on each other's run records.
 
-For cross-process `concurrencyKey` enforcement, set
-`BLOK_CONCURRENCY_BACKEND=nats-kv` (or `redis`) so multiple worker
-processes coordinate slot acquisition. See
-[cross-process concurrency](/d/reliability/concurrency-keys#cross-process-backends).
+`concurrencyKey` enforcement is **per-process** — each worker process
+tracks its own slots, so across N processes the effective limit is
+`concurrencyLimit × N`. Cross-process coordination is not yet available;
+pin a key to a single process if you need a hard global limit. See
+[concurrency keys](/d/reliability/concurrency-keys#multi-process-scope).
 
 ## Composition
 

@@ -177,7 +177,7 @@ header shows live `(workflow, key)` buckets sorted by lease count.
 The tile is hidden when no slots are in flight — uncluttered at idle.
 
 <StudioConcurrencyTile
-  backendName="nats-kv"
+  backendName="in-process"
   totalLeases={7}
   totalBuckets={2}
   buckets={[
@@ -186,8 +186,7 @@ The tile is hidden when no slots are in flight — uncluttered at idle.
   ]}
 />
 
-When a non-default concurrency backend is configured (e.g. NATS KV),
-the backend name appears as a green badge. The tile polls
+The tile polls
 [`/__blok/concurrency/state`](/d/reliability/concurrency-keys#observability-endpoints)
 every 5 seconds — reads from the same data the OpenTelemetry counters
 expose. See [observability](/d/operations/observability) for the full

@@ -380,70 +380,6 @@ to keep the timeline readable under burst.
   </Accordion>
 </AccordionGroup>
 
-## Cross-process debounce (Tier C #1)
-
-Set `BLOK_DEBOUNCE_BACKEND=nats-kv` or `BLOK_DEBOUNCE_BACKEND=redis`
-to coordinate debounce windows across processes. Without a backend,
-two processes handling the same key both fire — useful only when
-load-balanced traffic pins to a single process.
-
-```bash
-# NATS KV
-BLOK_DEBOUNCE_BACKEND=nats-kv
-BLOK_DEBOUNCE_NATS_SERVERS=nats://localhost:4222
-BLOK_DEBOUNCE_NATS_KV_BUCKET=prod-us-east-debounce  # FW-5: refused if left at default
-
-# Redis
-BLOK_DEBOUNCE_BACKEND=redis
-BLOK_DEBOUNCE_REDIS_URL=redis://localhost:6379
-BLOK_DEBOUNCE_REDIS_KEY_PREFIX=prod-us-east-debounce  # FW-5: refused if left at default
-```
-
-### Storage model
-
-One shared document per `(workflowName, debounceKey)` bucket holding:
-`{mode, delayMs, maxDelayMs?, maxDelayDeadline?, firstPingAt,
-lastPingAt, pingCount, activeRunId, ownerProcessId,
-ownerLeaseExpiresAt, scheduledAt}`. Atomicity via Lua (Redis — single
-round-trip) or revision-based CAS (NATS KV — bounded 10-retry loop,
-over-coalesce on exhaustion).
-
-### Protocol per ping
-
-Each ping calls `backend.registerPing()` → one of three outcomes:
-
-| Outcome | Caller does |
-|---|---|
-| **owner-new** | Fresh window OR owner-lease expired handoff. Caller is the new owner; starts a local timer to fire at `scheduledAt`. |
-| **owner-extend** | Caller IS the existing owner; refresh lease + scheduledAt; replace local timer + closure. |
-| **coalesce** | Another process owns the window; this ping just bumps `pingCount` + pushes `scheduledAt`. Caller marks the run `debounced` with `intoRunId = activeRunId`. |
-
-### Owner-local payload semantic (cross-process trade-off)
-
-Only the owning process's captured `onFire` closure fires. Coalesce
-pings on other processes write to the shared doc but **their payloads
-are dropped**. Cross-process latest-payload-wins is a deferred
-follow-up — it would require persisting each ping's payload to the
-shared doc, subject to a size cap mirroring
-`BLOK_DISPATCH_PAYLOAD_MAX_BYTES`.
-
-For single-process semantics (closure-captured payload always wins),
-leave the backend unset. For cross-process strict coalescing where the
-owner's payload is fine, switch backends.
-
-### Owner-death recovery
-
-`ownerLeaseExpiresAt` bounds how long a dead owner blocks ownership
-(`BLOK_DEBOUNCE_OWNER_LEASE_MS`, default 60s). Next ping after the
-lease expires takes over. The Janitor sweep purges expired buckets.
-
-### Production-refusal safety gate
-
-Both backends refuse to start in `NODE_ENV=production` if the bucket
-name / key prefix is left at the default (`blok-debounce`). Operators
-MUST set a deployment-specific value to prevent two deployments
-sharing a broker from corrupting each other's debounce windows.
-
 ## Not yet shipped
 
 - **`mode: "throttle"`** — rate-cap (fire every N ms regardless of
@@ -452,8 +388,10 @@ sharing a broker from corrupting each other's debounce windows.
 - **Dispatch-time payload merging** — each ping CONTRIBUTES to the
   final payload (instead of OVERWRITES). v1 ships latest-wins;
   contribute-style merging is on the roadmap.
-- **Cross-process latest-payload-wins** — see "owner-local payload
-  semantic" above. Payload-persisted variant pending.
+- **Cross-process debounce** — coordinating debounce windows across
+  processes (today the `DebounceCoordinator` is in-memory and
+  single-process, so each process debounces its own traffic). Not yet
+  built.
 
 ## Related
 

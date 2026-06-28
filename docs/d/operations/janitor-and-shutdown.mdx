@@ -110,10 +110,6 @@ executes the drain sequence:
     in `scheduled_dispatches` and will be recovered on next boot via
     `recoverDispatches()`.
   </Step>
-  <Step title="ConcurrencyBackend.disconnect()">
-    Close NATS KV connections (if `BLOK_CONCURRENCY_BACKEND=nats-kv`).
-    No-op for the in-process backend.
-  </Step>
 </Steps>
 
 The handler then exits the process. Total drain time is bounded by

@@ -341,11 +341,10 @@ the other terminal and transient states.
 
 When at least one slot is in flight, Studio's All Runs page renders an
 in-flight tile in the header showing live `(workflow, key)` buckets
-sorted by lease count, with a backend badge if a non-default backend
-is configured:
+sorted by lease count:
 
 <StudioConcurrencyTile
-  backendName="nats-kv"
+  backendName="in-process"
   totalLeases={7}
   totalBuckets={2}
   buckets={[
@@ -405,98 +404,19 @@ the [trace storage page](/d/reference/trace-storage#concurrency_locks-migration-
 |---|---|
 | **SQLite** (default) | Durable. Read-modify-write wrapped in a transaction so two acquires can't both grant at the limit. |
 | **InMemory** (dev) | `Map<bucketKey, Map<runId, expiresAt>>`. Cleared on process exit. |
-| **Postgres** | Migration v3 persists `concurrency_locks` to PG. Hybrid model — sync reads against an in-memory mirror, writes async-persist via the existing write queue. Survives restart in-process, but cross-process gating still requires the dedicated NATS KV backend below. |
+| **Postgres** | Migration v3 persists `concurrency_locks` to PG. Hybrid model — sync reads against an in-memory mirror, writes async-persist via the existing write queue. Survives restart in-process. |
 
 `BLOK_TRACE_ENABLED=false` disables the gate (the same store backs
 trace recording and the lock table).
 
-### Cross-process backend (NATS KV)
+### Multi-process scope
 
-Single-process backends cap horizontal scale at one Blok process per
-unique key bucket. Switch to the NATS KV backend to coordinate the
-gate across multiple processes:
-
-```bash
-BLOK_CONCURRENCY_BACKEND=nats-kv \
-BLOK_CONCURRENCY_NATS_SERVERS=nats://localhost:4222 \
-bun run http:dev
-```
-
-When set, the `RunTracker` delegates `acquireConcurrencySlot` and
-`releaseConcurrencySlot` to a `NatsKvConcurrencyBackend` that reads
-and writes one JSON document per `(workflowName, concurrencyKey)`
-bucket, using NATS KV's revision-based compare-and-swap (OCC) to
-serialize concurrent acquires. The trigger installs the backend in
-`listen()` before serving traffic; connect failures log and fall back
-to the in-process SQLite gate.
-
-The full env var reference and connection options live on the
-[env vars page](/d/operations/env-vars#concurrency-backend-nats-kv).
-Source: [`core/runner/src/concurrency/NatsKvConcurrencyBackend.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/concurrency/NatsKvConcurrencyBackend.ts).
-
-| Aspect | Behavior |
-|---|---|
-| **Acquire** | One `kv.get` + `kv.update` round-trip per attempt. Bounded retry (10) on CAS failure, then fail-closed. |
-| **Lazy purge** | Expired leases are pruned inside the same `acquireSlot` call that observes them. |
-| **Idempotent re-acquire** | Same `runId` refreshes its lease without double-counting. |
-| **Lease leak protection** | Per-lease `expiresAt` filtered on every acquire; no separate sweeper required. |
-| **High-cardinality buckets** | Single-document model has linear JSON growth; for >50 active leases per bucket, contention rises. A per-lease key model is on the roadmap. |
-
-### Cross-process backend (Redis)
-
-The Redis backend (Tier C #4) is the alternative cross-process gate
-when NATS isn't available. Same storage shape — one JSON document per
-`(workflowName, concurrencyKey)` bucket — but atomicity comes from
-server-side **Lua scripts** instead of OCC retry loops. Acquire,
-release, and purge each run as a single `EVAL`, so there's no
-retry-on-contention.
-
-```bash
-BLOK_CONCURRENCY_BACKEND=redis \
-BLOK_CONCURRENCY_REDIS_URL=redis://localhost:6379 \
-bun run http:dev
-```
-
-Connection defaults: `connectTimeout: 5s`, `maxRetriesPerRequest: 0`,
-`enableOfflineQueue: false`, `lazyConnect: true` — fail-fast on
-broker outage instead of buffering.
-
-| Aspect | NATS KV | Redis |
-|---|---|---|
-| **Concurrency control** | Revision-based CAS, bounded 10-retry loop | Lua scripts (single round-trip, no retry) |
-| **Throughput per bucket** | OCC retry can amplify under contention | Linear with Redis throughput |
-| **Operational dependency** | NATS server | Redis 7+ |
-| **Connection pool** | NATS client (single conn per process) | ioredis (single conn per process) |
-
-Env vars: `BLOK_CONCURRENCY_REDIS_URL` (preferred — `redis://...`), or
-discrete `BLOK_CONCURRENCY_REDIS_HOST` / `_PORT` / `_USERNAME` /
-`_PASSWORD` / `_DB` / `_TLS=1`. The
-[env vars page](/d/operations/env-vars#concurrency-backend-redis) has
-the full reference.
-
-### Production-refusal safety gate
-
-**Both backends refuse to start in `NODE_ENV=production` if the
-bucket name / key prefix is left at the default (`blok-concurrency`).**
-
-Two deployments sharing one broker would silently corrupt each other's
-`(workflow, key)` buckets. Operators MUST set
-`BLOK_CONCURRENCY_NATS_KV_BUCKET` (NATS) or
-`BLOK_CONCURRENCY_REDIS_KEY_PREFIX` (Redis) per deployment — e.g.
-`prod-us-east`, `prod-eu-west`, `staging`. The backend logs a fatal
-error on boot with a clear "set this env var to fix" message.
-
-### When to switch
-
-- **Single process** — leave it default (SQLite). Zero ops overhead,
-  highest throughput per key.
-- **Two or more processes sharing a workflow** — pick NATS KV or Redis.
-  Without one, each process tracks its own bucket and the effective
-  limit is `concurrencyLimit × processCount`.
-- **You already run NATS** — pick `nats-kv` for one-stack deployments.
-- **You already run Redis** — pick `redis` for the same reason.
-- **Latency-sensitive acquires** — Redis (single round-trip) edges out
-  NATS KV (OCC retry).
+The gate is **single-process**: each Blok process tracks its own
+`(workflow, key)` buckets in its local store. Across N processes the
+effective limit is `concurrencyLimit × N`. For a hard global limit
+today, route each key to a single process (e.g. consistent hashing at
+the load balancer) or run one process per key space. Cross-process
+coordination is not yet available.
 
 ## Recipes
 
@@ -576,8 +496,8 @@ error on boot with a clear "set this env var to fix" message.
   acquire immediately instead of waiting for the next tick.
 - **`concurrencyQueueTimeoutMs`** — TTL on queued runs. v1 retries
   indefinitely (lease-bounded).
-- **Redis backend** — same architecture as NATS KV; could use Lua for
-  single round-trip atomic acquire. Pending user pull.
+- **Cross-process coordination** — a shared-store backend (e.g. NATS KV
+  or Redis) so the gate works across multiple processes. Not yet built.
 - **Step-level concurrency keys** — different invariant set, separate
   plan. Today the gate is at the run level only.
 
