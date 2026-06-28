@@ -91,6 +91,36 @@ describe("forEach()", () => {
 		);
 	});
 
+	it("rejects an `as` name that collides with an inner step id", () => {
+		expect(() => forEach({ id: "x", in: "$.x", as: "item", do: [{ id: "item", use: "noop" }] })).toThrow(
+			/forEach state key "item".*collides with step id "item"/,
+		);
+	});
+
+	it("rejects an `as + Index` name that collides with an inner step id", () => {
+		expect(() => forEach({ id: "x", in: "$.x", as: "item", do: [{ id: "itemIndex", use: "noop" }] })).toThrow(
+			/forEach state key "itemIndex".*collides with step id "itemIndex"/,
+		);
+	});
+
+	it("rejects nested forEach aliases that collide with surrounding aliases", () => {
+		expect(() =>
+			forEach({
+				id: "outer",
+				in: "$.rows",
+				as: "row",
+				do: [
+					forEach({
+						id: "inner",
+						in: "$.state.row.items",
+						as: "row",
+						do: [{ id: "read", use: "noop" }],
+					}),
+				],
+			}),
+		).toThrow(/forEach state key "row".*collides with surrounding forEach state key/);
+	});
+
 	it("rejects empty do", () => {
 		expect(() => forEach({ id: "x", in: "$.x", as: "item", do: [] })).toThrow(/non-empty array/);
 	});

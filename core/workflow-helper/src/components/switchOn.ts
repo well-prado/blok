@@ -57,10 +57,10 @@ export interface SwitchOpts {
  *     id: "route-by-event",
  *     on: $.req.headers["x-github-event"],
  *     cases: [
- *       { when: "push", do: [{ id: "h", subworkflow: "handle-push" }] },
+ *       { when: "push", do: [{ id: "handle-push", subworkflow: "handle-push" }] },
  *       {
  *         when: ["pull_request", "pull_request_review"],
- *         do: [{ id: "h", subworkflow: "handle-pr-event" }],
+ *         do: [{ id: "handle-pr-event", subworkflow: "handle-pr-event" }],
  *       },
  *     ],
  *     default: [

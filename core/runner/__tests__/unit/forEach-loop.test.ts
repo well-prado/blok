@@ -220,6 +220,51 @@ describe("v0.5 forEach + loop integration", () => {
 			expect((ctx.state as Record<string, unknown>).results).toEqual([11, 21, 31, 41, 51]);
 		});
 
+		it("parallel mode isolates per-iteration state writes", async () => {
+			const wfDef = {
+				name: "test-foreach-par-isolation",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "results",
+						forEach: {
+							in: [1, 2, 3, 4, 5],
+							as: "v",
+							mode: "parallel",
+							concurrency: 5,
+							do: [
+								{
+									id: "write-temp",
+									use: "@blokjs/ctx-publish",
+									type: "module",
+									inputs: { name: "temp", value: "js/ctx.state.v * 10" },
+								},
+								{
+									id: "read-temp",
+									use: "@blokjs/expr",
+									type: "module",
+									inputs: { expression: "({ v: ctx.state.v, temp: ctx.state.temp })" },
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const runner = new Runner(config.steps as NodeBase[]);
+			await runner.run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).results).toEqual([
+				{ v: 1, temp: 10 },
+				{ v: 2, temp: 20 },
+				{ v: 3, temp: 30 },
+				{ v: 4, temp: 40 },
+				{ v: 5, temp: 50 },
+			]);
+			expect((ctx.state as Record<string, unknown>).temp).toBeUndefined();
+		});
+
 		it("empty input array produces empty results", async () => {
 			const wfDef = {
 				name: "test-foreach-empty",

@@ -1,5 +1,6 @@
 import { unwrapProxies } from "../proxy/$";
 import type { V2ForEachStep, V2Step } from "../types/StepOpts";
+import { assertNoForEachStateKeyCollisions } from "../utils/forEachScope";
 
 /**
  * Author-facing options for {@link forEach}.
@@ -83,6 +84,10 @@ export function forEach(opts: ForEachOpts): V2ForEachStep {
 
 	const inExpr = unwrapProxies(opts.in);
 	const innerSteps = unwrapProxies(opts.do) as V2Step[];
+	assertNoForEachStateKeyCollisions(
+		[{ id: opts.id, forEach: { in: inExpr, as: opts.as, do: innerSteps } }],
+		`forEach("${opts.id}")`,
+	);
 
 	const result: V2ForEachStep = {
 		id: opts.id,

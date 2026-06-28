@@ -3,6 +3,7 @@ import { unwrapProxies } from "../proxy/$";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
 import { type WorkflowV2, WorkflowV2Schema } from "../types/WorkflowOpts";
+import { assertNoForEachStateKeyCollisions } from "../utils/forEachScope";
 
 /**
  * A streaming workflow's event vocabulary: event name → Zod schema for the
@@ -233,6 +234,7 @@ export function workflow<
 			throw new Error(`workflow("${opts.name}") step "${id}" failed validation: ${parsed.error.message}`);
 		}
 	}
+	assertNoForEachStateKeyCollisions(compiledSteps, `workflow("${opts.name}")`);
 
 	// Per-kind trigger validation. Mirrors what `Trigger.addTrigger` does
 	// in the v1 builder so v2 authors get the same error messages.

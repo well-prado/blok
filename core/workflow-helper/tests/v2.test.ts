@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { $, branch, workflow } from "../src/index";
+import { $, branch, forEach, workflow } from "../src/index";
 import { JS_EXPR_TAG, type V2Step, unwrapProxies } from "../src/internal";
 
 describe("v2 DSL — $ proxy", () => {
@@ -120,6 +120,44 @@ describe("v2 DSL — workflow() factory", () => {
 				steps: [{ id: "x", use: "@blokjs/foo", as: "y", spread: true }],
 			}),
 		).toThrow(/mutually exclusive/i);
+	});
+
+	it("rejects forEach `as` collisions with sibling step ids", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [
+					{ id: "item", use: "@blokjs/foo", inputs: {} },
+					forEach({
+						id: "each",
+						in: "$.state.items",
+						as: "item",
+						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
+					}),
+				],
+			}),
+		).toThrow(/workflow\("Bad"\).*forEach state key "item".*collides with step id "item"/);
+	});
+
+	it("rejects forEach `as + Index` collisions with sibling step ids", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [
+					{ id: "xIndex", use: "@blokjs/foo", inputs: {} },
+					forEach({
+						id: "each",
+						in: "$.state.items",
+						as: "x",
+						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
+					}),
+				],
+			}),
+		).toThrow(/forEach state key "xIndex".*collides with step id "xIndex"/);
 	});
 
 	it("rejects unknown trigger kinds", () => {
