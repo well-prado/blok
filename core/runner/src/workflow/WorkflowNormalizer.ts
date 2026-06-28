@@ -1,4 +1,5 @@
 import { parseDuration } from "@blokjs/helper";
+import { lowerRefs } from "@blokjs/shared";
 
 /**
  * WorkflowNormalizer — accepts v1 or v2 workflow shapes and projects both
@@ -420,10 +421,13 @@ function normalizeRegularStep(
 		internalStep.maxDuration = step.maxDuration;
 	}
 
-	// Build node config — only include `inputs` if present.
+	// Build node config — only include `inputs` if present. ADR 0001 Option C:
+	// lower structural `{$ref}` handles to the `js/ctx.state...` wire strings
+	// the Mapper already resolves, at the load boundary before the runner sees
+	// them. No-op for `js/`/`$.` string inputs (no `{$ref}` to find).
 	let nodeConfig: InternalNodeConfig | null = null;
 	if (inputs) {
-		nodeConfig = { inputs };
+		nodeConfig = { inputs: lowerRefs(inputs) };
 		// Carry over any legacy v1 node-config fields that aren't `inputs`
 		// (some workflows attach `outputs`, `mapper`, etc.).
 		if (v1NodeConfig) {
@@ -626,7 +630,8 @@ function normalizeSubworkflowStep(
 	// $.<path> / js/... refs before SubworkflowNode reads them via
 	// `ctx.config[step.name]`.
 	const inlineInputs = isPlainObject(step.inputs) ? (step.inputs as Record<string, unknown>) : null;
-	const nodeConfig: InternalNodeConfig | null = inlineInputs ? { inputs: inlineInputs } : null;
+	// ADR 0001 Option C — lower structural `{$ref}` handles before the Mapper.
+	const nodeConfig: InternalNodeConfig | null = inlineInputs ? { inputs: lowerRefs(inlineInputs) } : null;
 
 	return { internalStep, nodeConfig };
 }
