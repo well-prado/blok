@@ -34,7 +34,7 @@ import {
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
 import type { z } from "zod";
-import type { Handle, OutputOf } from "./handles";
+import type { EphemeralHandle, Handle, OutputOf } from "./handles";
 
 /** The structural handle reference sentinel — mirrors `@blokjs/shared`'s `StructuralRef`. */
 interface StructuralRef {
@@ -58,6 +58,15 @@ interface HandleMeta {
 	step: string;
 	owner: Builder;
 	path: (string | number)[];
+	/** True for a step created with `{ ephemeral: true }` — its output is NOT persisted, so the handle is unreadable (#339). */
+	ephemeral?: boolean;
+}
+
+/** The loud error a poisoned ephemeral handle raises on any read (#339). */
+function ephemeralReadError(step: string): Error {
+	return new Error(
+		`Step "${step}" is ephemeral — its output is not persisted to state and has no readable handle. Remove ephemeral:true, or read the value via the immediately-next step.`,
+	);
 }
 
 /** A collected step record. Mirrors the v2 step shape the object factory accepts. */
@@ -123,14 +132,27 @@ const IDENT_OR_NUM = /^\d+$/;
  * `makeHandle(rootKey)` is the public seam: it mints a handle rooted at a step id
  * (or `@trigger` for the callback's `req` payload) with no owner-scope constraint.
  */
-function buildHandle(rootKey: string, owner: Builder | undefined, path: (string | number)[]): unknown {
+function buildHandle(
+	rootKey: string,
+	owner: Builder | undefined,
+	path: (string | number)[],
+	ephemeral = false,
+): unknown {
 	// Function target so a stray `typeof handle === "function"` check is harmless;
 	// it is never called.
 	return new Proxy(() => undefined, {
 		get(_t, key) {
-			if (key === HANDLE_META) return { step: rootKey, owner, path } satisfies Partial<HandleMeta> as HandleMeta;
-			// Don't masquerade as a thenable — Promise.resolve()/await probes `.then`.
+			// HANDLE_META must stay readable even when poisoned: lowerHandles/tpl read
+			// it STRUCTURALLY to detect the handle and raise the clear authoring error
+			// (#339) rather than a cryptic Proxy throw.
+			if (key === HANDLE_META)
+				return { step: rootKey, owner, path, ephemeral } satisfies Partial<HandleMeta> as HandleMeta;
+			// POISON (#339): an ephemeral step persists no state, so its handle has no
+			// readable value. Any field/index access — `h.field`, `h[0]` — throws loud
+			// instead of silently building a ref that resolves to undefined at runtime.
+			// (`then`/symbol probes below short-circuit first so await/typeof stay safe.)
 			if (key === "then") return undefined;
+			if (ephemeral && typeof key !== "symbol") throw ephemeralReadError(rootKey);
 			// POISON (#425): a bare handle coerced into a plain (untagged) string —
 			// `\`${handle}\`` or `"" + handle` — would silently stringify to garbage
 			// and lose the ref. Throw loud instead. `tpl\`...\`` reads the raw strings
@@ -179,6 +201,7 @@ export function tpl(strings: TemplateStringsArray, ...values: unknown[]): Struct
 		segments.push(strings[i]);
 		if (i < values.length) {
 			const meta = readHandleMeta(values[i]);
+			if (meta?.ephemeral) throw ephemeralReadError(meta.step);
 			segments.push(meta ? ({ $ref: { step: meta.step, path: meta.path } } satisfies StructuralRef) : values[i]);
 		}
 	}
@@ -200,6 +223,8 @@ function readHandleMeta(value: unknown): HandleMeta | undefined {
 function lowerHandles(value: unknown, reader: Builder): unknown {
 	const meta = readHandleMeta(value);
 	if (meta) {
+		// Ephemeral handle used as an input ref — unreadable (#339).
+		if (meta.ephemeral) throw ephemeralReadError(meta.step);
 		// `@trigger` and other unowned handles have no scope constraint.
 		if (meta.owner && !canRead(meta.owner, reader)) {
 			throw new Error(
@@ -329,6 +354,7 @@ function lowerCondition(value: unknown, reader: Builder): string {
 	}
 	const handle = readHandleMeta(value);
 	if (handle) {
+		if (handle.ephemeral) throw ephemeralReadError(handle.step);
 		if (handle.owner && !canRead(handle.owner, reader)) {
 			throw new Error(
 				`Handle from step "${handle.step}" is read in a branch condition outside its scope. A handle produced inside one control-flow arm is not readable from a sibling arm or after the flow step.`,
@@ -431,12 +457,12 @@ export interface StepOptions {
  * Throws if called outside a `workflow(..., callback)`, if `id` is empty, or if
  * `id` duplicates another step id anywhere in the workflow (flat id set, ADR 0003).
  */
-export function step<N extends { name: string }>(
+export function step<N extends { name: string }, O extends StepOptions = StepOptions>(
 	id: string,
 	node: N,
 	inputs?: Record<string, unknown>,
-	opts?: StepOptions,
-): Handle<OutputOf<N>> {
+	opts?: O,
+): O extends { ephemeral: true } ? EphemeralHandle<OutputOf<N>> : Handle<OutputOf<N>> {
 	if (typeof id !== "string" || id.length === 0) {
 		throw new Error("step() requires a non-empty string id.");
 	}
@@ -457,7 +483,11 @@ export function step<N extends { name: string }>(
 		...(opts ?? {}),
 	};
 	builder.steps.push(record);
-	return buildHandle(id, builder, []) as Handle<OutputOf<N>>;
+	// Ephemeral steps skip state persistence (Rule 1), so their handle has no
+	// readable value — return a poisoned handle that throws on any read (#339).
+	return buildHandle(id, builder, [], opts?.ephemeral === true) as O extends { ephemeral: true }
+		? EphemeralHandle<OutputOf<N>>
+		: Handle<OutputOf<N>>;
 }
 
 /**

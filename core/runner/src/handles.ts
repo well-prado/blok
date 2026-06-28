@@ -68,6 +68,24 @@ export type Handle<T> = { readonly [handleBrand]: T } & (T extends Primitive
 			? CommonShape<T>
 			: { readonly [K in keyof T]-?: Handle<NonNullable<T[K]>> });
 
+/** Brand marking a handle to an ephemeral step — unreadable by contract (#339). */
+declare const ephemeralBrand: unique symbol;
+
+/**
+ * The handle returned by `step(..., { ephemeral: true })`. An ephemeral step
+ * skips state persistence (Rule 1), so its output has no readable value — this
+ * handle exposes NO referenceable members, making `h.field` a compile error
+ * ("Property 'field' does not exist"). It carries the output brand so the type
+ * is still distinguishable, but is intentionally NOT assignable to `Refable<T>`,
+ * so passing it as a step input is also a compile error. At runtime any read
+ * throws (the poisoned Proxy in `stepBuilder.ts`). It remains a valid value to
+ * hold as a pure ordering token. The companion type, the runtime throw is the
+ * contract; this type is the early-warning bonus.
+ */
+export type EphemeralHandle<T> = {
+	readonly [ephemeralBrand]: T;
+};
+
 /**
  * The input boundary. A workflow input that expects `T` also accepts a `Handle<T>`,
  * recursively: handles may appear at leaves, inside arrays, or as the whole object.

@@ -358,6 +358,7 @@ export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 // is exported as a type-only declared signature for the same reason.
 export type {
 	Handle,
+	EphemeralHandle,
 	Refable,
 	NodeTypeWitness,
 	InputOf,
