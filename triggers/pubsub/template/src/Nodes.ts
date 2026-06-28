@@ -1,10 +1,20 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import ApiCall from "@blokjs/api-call";
 import IfElse from "@blokjs/if-else";
-import type { BlokService } from "@blokjs/runner";
+import { discoverNodes } from "@blokjs/runner";
+import type { NodeBase } from "@blokjs/shared";
 
-const nodes: Record<string, BlokService<unknown>> = {
-	"@blokjs/api-call": ApiCall,
-	"@blokjs/if-else": IfElse,
-};
+// Published nodes (npm) are registered explicitly. Your OWN nodes under
+// 'nodes/<name>/index.ts' are AUTO-DISCOVERED and registered by their
+// defineNode({ name }) — you never edit this file to add a node.
+const here = dirname(fileURLToPath(import.meta.url));
+const local = await discoverNodes(join(here, "nodes"));
+
+// Map keys are cosmetic — the runner registers each node under its own node.name.
+const nodes: { [key: string]: NodeBase } = {};
+for (const node of [ApiCall as unknown as NodeBase, IfElse as unknown as NodeBase, ...local]) {
+	nodes[(node as { name: string }).name] = node;
+}
 
 export default nodes;
