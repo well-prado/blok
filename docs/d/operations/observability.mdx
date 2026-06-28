@@ -28,7 +28,7 @@ $ curl http://localhost:4000/__blok/concurrency/health
 
 | Field | Type | Meaning |
 |---|---|---|
-| `backend` | `"in-process"` \| `"nats-kv"` | Which backend the gate uses. See [cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv). |
+| `backend` | `"in-process"` | Which backend the gate uses. |
 | `disabled` | `boolean` | `true` when `BLOK_CONCURRENCY_DISABLED=1`. |
 | `leaseMs` | `integer` | Process-wide default lease duration. Per-trigger `concurrencyLeaseMs` overrides this. |
 

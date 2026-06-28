@@ -315,11 +315,9 @@ This means:
 - **Cross-restart hits work.** The mirror rehydrates from PG on boot.
   Idempotency caches, concurrency leases, and scheduled dispatches
   survive restart.
-- **Cross-process gating still requires NATS KV.** PG persistence
-  here is for crash-recovery within a single PG-backed process. For
-  multi-process concurrency coordination, set
-  `BLOK_CONCURRENCY_BACKEND=nats-kv` — see
-  [concurrency keys](/d/reliability/concurrency-keys#cross-process-backend-nats-kv).
+- **Concurrency gating is single-process.** PG persistence here is for
+  crash-recovery within a single PG-backed process; cross-process
+  concurrency coordination is not yet available.
 
 The migration is forward-compatible: it silently ignores `relation
 does not exist` errors during the first migration window so a pre-v3

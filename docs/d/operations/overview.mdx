@@ -55,10 +55,6 @@ Three layers of state determine production behavior:
 2. **Durable layer** — sqlite (default) or Postgres. Stores
    `workflow_runs`, `node_runs`, `idempotency_cache`,
    `concurrency_locks`, and `scheduled_dispatches`. Survives restart.
-3. **Cross-process layer** (opt-in) — NATS KV for the concurrency
-   gate. Coordinates state across multiple Blok processes. Only
-   matters if you run more than one Blok process per shared key
-   bucket.
 
 Operators tune env vars against the layer they're targeting:
 
@@ -66,8 +62,6 @@ Operators tune env vars against the layer they're targeting:
   durations, janitor intervals.
 - **Durable layer tuning** — `BLOK_TRACE_STORE`, `BLOK_TRACE_PG_*`,
   `BLOK_TRACE_RETENTION_DAYS`.
-- **Cross-process tuning** — `BLOK_CONCURRENCY_BACKEND` and the
-  `BLOK_CONCURRENCY_NATS_*` family.
 
 The [env vars page](/d/operations/env-vars) groups them in this same
 order so you can find what you're looking for by intent rather than
@@ -103,9 +97,11 @@ prefix.
   </Accordion>
 
   <Accordion title="Adding a second Blok process behind a load balancer">
-    The default in-process concurrency gate can't coordinate across
-    processes. Switch to NATS KV — see
-    [concurrency keys · cross-process backend](/d/reliability/concurrency-keys#cross-process-backend-nats-kv).
+    The in-process concurrency gate can't coordinate across processes —
+    each tracks its own slots (effective limit `concurrencyLimit × N`).
+    Pin a key to one process or run one process per key space;
+    cross-process coordination is not yet available. See
+    [concurrency keys · multi-process scope](/d/reliability/concurrency-keys#multi-process-scope).
   </Accordion>
 
   <Accordion title="Need Prometheus metrics in our existing dashboard">
