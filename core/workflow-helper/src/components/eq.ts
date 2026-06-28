@@ -4,12 +4,10 @@ import { JS_EXPR_TAG } from "../proxy/$";
  * First-class comparators for `branch`/`switchOn`/`loop` conditions.
  *
  * `branch({ when })` is evaluated at runtime by the if-else node via a raw
- * `Function("ctx", …)` — it does NOT go through the Mapper, so a `$` proxy
- * (`$.req.method`, which compiles to `"js/ctx.req.method"`) or a `$.`-prefixed
- * string never gets its `js/` prefix stripped and the condition silently
- * mis-evaluates. These helpers sidestep that footgun: each reads the proxy's
- * raw path and emits a plain `ctx.* <op> <literal>` string the runtime
- * evaluates directly.
+ * `Function("ctx", …)` — it does NOT go through the Mapper. A `$` proxy used
+ * as a truthiness condition also needs the same raw form.
+ * These helpers read the proxy's raw path and emit plain `ctx.*` strings the
+ * runtime evaluates directly.
  *
  * @example
  *   import { branch, eq, ne, gt, $ } from "@blokjs/helper";
@@ -57,6 +55,19 @@ export function lte(left: unknown, right: unknown): string {
 	return cmp(left, "<=", right);
 }
 
+/** Truthiness/negation helper. `not($.state.ready)` → `!(ctx.state.ready)`. */
+export function not(value: unknown): string {
+	return `!(${conditionToExpr(value)})`;
+}
+
+/** Convert a branch/loop condition value to the raw string those runtimes eval. */
+export function conditionToExpr(value: unknown): string {
+	const proxy = proxyToExpr(value);
+	if (proxy) return proxy;
+	if (typeof value === "string") return value;
+	return JSON.stringify(value) ?? String(value);
+}
+
 function cmp(left: unknown, op: string, right: unknown): string {
 	return `${operandToExpr(left)} ${op} ${operandToExpr(right)}`;
 }
@@ -66,12 +77,16 @@ function operandToExpr(value: unknown): string {
 	// Read the tag directly so we get the bare path WITHOUT the `js/` prefix
 	// (that prefix is only added by the proxy's toString/unwrapProxies, and it
 	// would break the raw-ctx evaluation the if-else node performs).
-	if (typeof value === "function") {
-		const tag = (value as { [JS_EXPR_TAG]?: string })[JS_EXPR_TAG];
-		if (typeof tag === "string") return canonicalizeCtxPath(tag);
-	}
+	const proxy = proxyToExpr(value);
+	if (proxy) return proxy;
 	// Literal: JSON-encode so strings are quoted and number/bool/null are bare.
-	return JSON.stringify(value);
+	return JSON.stringify(value) ?? String(value);
+}
+
+function proxyToExpr(value: unknown): string | undefined {
+	if (typeof value !== "function") return undefined;
+	const tag = (value as { [JS_EXPR_TAG]?: string })[JS_EXPR_TAG];
+	return typeof tag === "string" ? canonicalizeCtxPath(tag) : undefined;
 }
 
 /**

@@ -6,7 +6,7 @@
 // `@blokjs/helper/internal` — tooling occasionally needs them, authors don't.
 
 import { type BranchOpts, branch } from "./components/branch";
-import { eq, gt, gte, lt, lte, ne } from "./components/eq";
+import { eq, gt, gte, lt, lte, ne, not } from "./components/eq";
 import { type ForEachOpts, forEach } from "./components/forEach";
 import { type LoopOpts, loop } from "./components/loop";
 import { type SwitchCase, type SwitchOpts, switchOn } from "./components/switchOn";
@@ -55,6 +55,7 @@ export {
 	gte,
 	lt,
 	lte,
+	not,
 	// control-flow primitives
 	forEach,
 	loop,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { branch } from "../src/components/branch";
-import { eq, gt, gte, lt, lte, ne } from "../src/components/eq";
+import { eq, gt, gte, lt, lte, ne, not } from "../src/components/eq";
 import { $ } from "../src/proxy/$";
 
 // Exact replica of the if-else node's condition evaluator
@@ -44,12 +44,11 @@ describe("eq()", () => {
 		expect(runJs(step.branch.when, { request: { method: "POST" } })).toBe(true);
 	});
 
-	it("contrast: a bare $ proxy as `when` is the footgun eq() avoids", () => {
-		// A proxy when compiles to a js/-prefixed string that runJs cannot
-		// evaluate as a ctx path — this is exactly why eq() exists.
-		const footgun = branch({ id: "bad", when: $.req.method, then: [{ id: "a", use: "x" }] });
-		expect(footgun.branch.when).toBe("js/ctx.req.method");
-		expect(() => runJs(footgun.branch.when, { request: { method: "POST" } })).toThrow(); // `js` is undefined
+	it("turns a bare $ proxy `when` into a raw ctx truthiness check", () => {
+		const step = branch({ id: "ok", when: $.req.body.active, then: [{ id: "a", use: "x" }] });
+		expect(step.branch.when).toBe("ctx.request.body.active");
+		expect(runJs(step.branch.when, { request: { body: { active: true } } })).toBe(true);
+		expect(runJs(step.branch.when, { request: { body: { active: false } } })).toBe(false);
 	});
 });
 
@@ -61,6 +60,10 @@ describe("comparators (ne/gt/gte/lt/lte)", () => {
 		expect(lt($.state.count, 10)).toBe("ctx.state.count < 10");
 		expect(lte($.state.count, 10)).toBe("ctx.state.count <= 10");
 		expect(ne($.req.method, "GET")).toBe('ctx.request.method !== "GET"');
+		expect(gt($.state.order.items[0]["unit-price"], $.prev.data.limit)).toBe(
+			'ctx.state.order.items[0]["unit-price"] > ctx.response.data.limit',
+		);
+		expect(not($.state.ready)).toBe("!(ctx.state.ready)");
 	});
 
 	it("evaluate correctly via the if-else runJs path", () => {
@@ -70,5 +73,6 @@ describe("comparators (ne/gt/gte/lt/lte)", () => {
 		expect(runJs(gt($.state.count, 10), { state: { count: 10 } })).toBe(false);
 		expect(runJs(gte($.state.count, 10), { state: { count: 10 } })).toBe(true);
 		expect(runJs(lte($.state.count, 10), { state: { count: 10 } })).toBe(true);
+		expect(runJs(not($.state.ready), { state: { ready: false } })).toBe(true);
 	});
 });
