@@ -30,6 +30,12 @@ function hasEdge(dag: WorkflowDag, source: string, target: string): boolean {
 	return dag.edges.some((e) => e.source === source && e.target === target);
 }
 
+function idByLabel(dag: WorkflowDag, label: string): string {
+	const node = findNode(dag, (n) => n.data.label === label);
+	if (!node) throw new Error(`missing node ${label}`);
+	return node.id;
+}
+
 // === classifyStep ===
 
 describe("classifyStep", () => {
@@ -165,6 +171,85 @@ describe("buildWorkflowDag · regular steps", () => {
 		expect(fetch?.data.sublabel).toBe("@blokjs/api-call");
 		expect(fetch?.data.meta?.nodeRef).toBe("@blokjs/api-call");
 		expect(fetch?.data.meta?.runtime).toBe("nodejs");
+	});
+});
+
+// === Stable ids ===
+
+describe("buildWorkflowDag · stable node ids", () => {
+	const base = {
+		steps: [
+			{ id: "alpha", use: "n" },
+			{ id: "beta", use: "n" },
+			{ id: "gamma", use: "n" },
+		],
+	};
+
+	it("keeps unrelated step ids stable across insert, delete, and reorder", () => {
+		const before = buildWorkflowDag(base);
+		const ids = {
+			alpha: idByLabel(before, "alpha"),
+			gamma: idByLabel(before, "gamma"),
+		};
+
+		const inserted = buildWorkflowDag({ steps: [{ id: "front", use: "n" }, ...base.steps] });
+		expect(idByLabel(inserted, "alpha")).toBe(ids.alpha);
+		expect(idByLabel(inserted, "gamma")).toBe(ids.gamma);
+
+		const deleted = buildWorkflowDag({ steps: [base.steps[0], base.steps[2]] });
+		expect(idByLabel(deleted, "alpha")).toBe(ids.alpha);
+		expect(idByLabel(deleted, "gamma")).toBe(ids.gamma);
+
+		const reordered = buildWorkflowDag({ steps: [base.steps[2], base.steps[0], base.steps[1]] });
+		expect(idByLabel(reordered, "alpha")).toBe(ids.alpha);
+		expect(idByLabel(reordered, "gamma")).toBe(ids.gamma);
+	});
+
+	it("keeps id-less step ids stable for the same workflow", () => {
+		const def = { steps: [{ use: "first" }, { use: "second" }] };
+		expect(buildWorkflowDag(def).nodes.map((n) => n.id)).toEqual(buildWorkflowDag(def).nodes.map((n) => n.id));
+	});
+
+	it("keeps synthetic ids globally unique in nested control flow", () => {
+		const dag = buildWorkflowDag({
+			steps: [
+				{
+					id: "route",
+					branch: {
+						when: "true",
+						then: [
+							{
+								id: "fan",
+								forEach: {
+									in: "$.state.items",
+									as: "item",
+									do: [
+										{
+											id: "safe",
+											tryCatch: {
+												try: [{ id: "risky", use: "n" }],
+												catch: [{ id: "recover", use: "n" }],
+												finally: [{ id: "cleanup", use: "n" }],
+											},
+										},
+									],
+								},
+							},
+						],
+						else: [
+							{
+								id: "fallback-safe",
+								tryCatch: {
+									try: [{ id: "fallback-risky", use: "n" }],
+									catch: [{ id: "fallback-recover", use: "n" }],
+								},
+							},
+						],
+					},
+				},
+			],
+		});
+		expect(new Set(dag.nodes.map((n) => n.id)).size).toBe(dag.nodes.length);
 	});
 });
 
