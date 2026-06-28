@@ -213,29 +213,28 @@ routes by default.** Pick a strategy and wire it — JWT, API keys,
 session cookies, mTLS, whatever your domain calls for. The
 [cookbook](/d/security/cookbook#add-authentication-to-your-http-trigger-workflows)
 shows the pattern as a workflow-level first-step gate (the most
-portable approach) and as a Hono middleware (when you control the
-trigger setup directly).
+portable approach) and as a shared auth sub-workflow (when many routes
+share one credential strategy).
 
 ### Authorization (RBAC / ABAC)
 
-Once a request is authenticated, who's allowed to run it? Blok
-provides the building blocks at
-[`core/runner/src/security/`](https://github.com/deskree-inc/blok/tree/main/core/runner/src/security)
-(`RBAC.ts`, `ABAC.ts`, `OAuthProvider.ts`, `SecretManager.ts`,
-`AuditLogger.ts`) — but wiring them is your call. The simplest pattern
-uses a `branch` step that consults `ctx.request.headers` or
-`ctx.state.identity` against role claims and short-circuits the
-workflow when authorization fails. See the
-[cookbook](/d/security/cookbook#add-rbac-to-workflow-steps).
+Once a request is authenticated, who's allowed to run it?
+Authorization is **your** code — Blok ships no built-in RBAC/ABAC layer
+(keeping policy out of the framework means your rules stay versioned and
+testable alongside your workflows). The simplest pattern uses a `branch`
+step that consults `ctx.request.headers` or `ctx.state.identity` against
+role claims and short-circuits the workflow when authorization fails.
+See the [cookbook](/d/security/cookbook#add-rbac-to-workflow-steps).
 
 ### Field-level encryption
 
 Blok sanitizes trace storage. We do **not** encrypt arbitrary domain
 data. SSNs, credit cards, medical records — encrypt those at the
 boundary (before they reach the runner) or use a database with
-encryption-at-rest like Postgres with `pgcrypto` or SQLCipher. Blok
-ships [`EncryptionAtRest.ts`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/security/EncryptionAtRest.ts)
-as a starting point if you want field-level encryption inside a node.
+encryption-at-rest like Postgres with `pgcrypto` or SQLCipher. For
+field-level encryption inside a node, wrap a vetted library (`node:crypto`
+AES-GCM, or a KMS client) in a `defineNode` and encrypt before the value
+lands in `ctx.state`.
 
 ### Environment variables and node trust
 

@@ -8,6 +8,12 @@
 		"dark": "#73D997"
 	},
 	"favicon": "/assets/favicon.svg",
+	"redirects": [
+		{
+			"source": "/d/introduction/context",
+			"destination": "/d/fundamentals/context-and-state"
+		}
+	],
 	"navigation": {
 		"tabs": [
 			{
