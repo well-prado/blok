@@ -108,7 +108,7 @@ The protected workflow:
 ```ts
 // triggers/http/src/workflows/api/users-create.ts
 import { workflow, http, step, subworkflow } from "@blokjs/core";
-import { CreateUserNode } from "@blokjs/helpers";
+import createUser from "../../nodes/create-user";
 
 export default workflow(
   "Create user",
@@ -118,7 +118,7 @@ export default workflow(
       authorization: req.headers.authorization,
     });
 
-    step("create", CreateUserNode, {
+    step("create", createUser, {
       payload: req.body,
       actor: auth.identity,
     });
@@ -178,7 +178,8 @@ when authorization fails.
 
 ```ts
 import { workflow, http, step, branch, subworkflow, not } from "@blokjs/core";
-import { ExprNode, RespondNode, DeleteUserNode } from "@blokjs/helpers";
+import { ExprNode, RespondNode } from "@blokjs/helpers";
+import deleteUser from "../../nodes/delete-user";
 
 export default workflow(
   "Delete user",
@@ -201,7 +202,7 @@ export default workflow(
         }, { stop: true });
       },
       else: () => {
-        step("delete", DeleteUserNode, { userId: req.params.id });
+        step("delete", deleteUser, { userId: req.params.id });
       },
     });
   },
@@ -255,23 +256,19 @@ should never be cached at all (rather than cached-redacted), disable
 caching on that step:
 
 ```ts
-{
-  id: "decrypt-payment-token",
-  use: "decrypt-payment-token",
-  // No idempotencyKey — the result is never cached.
-}
+// No idempotencyKey on this step — the result is never cached.
+step("decrypt-payment-token", decryptPaymentToken, { /* … */ });
 ```
 
 If you've already set an `idempotencyKey` and want to invalidate it
 without removing the field, set TTL to zero:
 
 ```ts
-{
-  id: "fetch-pii",
-  use: "fetch-pii",
-  idempotencyKey: $.req.body.requestId,
-  idempotencyKeyTTL: 0,  // expires immediately
-}
+// idempotencyKeyTTL: 0 expires the cache entry immediately — a kill-switch.
+step("fetch-pii", fetchPii, { /* … */ }, {
+  idempotencyKey: req.body.requestId,
+  idempotencyKeyTTL: 0,
+});
 ```
 
 A TTL of `0` short-circuits the cache (treated as immediately

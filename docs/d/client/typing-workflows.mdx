@@ -96,6 +96,7 @@ forces the caller to narrow.
 ```ts
 import { workflow, step, branch, http } from "@blokjs/core";
 import { RespondNode } from "@blokjs/helpers";
+import chargeCard from "../../nodes/charge-card";
 import { z } from "zod";
 
 export default workflow("payments.process", {
