@@ -1,0 +1,187 @@
+@@@ wf.today ts
+import { workflow, branch } from "@blokjs/helper";
+
+export default workflow({
+  name: "Order intake",
+  version: "1.0.0",
+  trigger: { http: { method: "POST", path: "/orders" } },   // trigger tangled into the object
+  steps: [
+    { id: "validate", use: "validate-order",
+      inputs: { body: $.req.body } },                        // $ proxy -> "js/ctx.request.body"
+    { id: "checkStock", use: "@blokjs/api-call",
+      inputs: { url: "js/`https://inv.api/stock/${ctx.state.validate.productId}`" } }, // raw js/ string
+    branch({
+      id: "route",
+      when: 'ctx.state.checkStock.inStock === true',         // raw ctx string - NOT $, the silent-500 footgun
+      then: [
+        { id: "createOrder", use: "db-create-order",
+          inputs: { productId: $.state.validate.productId,
+                    qty: $.state.validate.qty,
+                    stock: $.state.checkStock } },
+        { id: "ok", use: "@blokjs/respond",
+          inputs: { status: 201, body: $.state.createOrder }, ephemeral: true },
+      ],
+      else: [
+        { id: "no", use: "@blokjs/respond",
+          inputs: { status: 409, body: { error: "out of stock" } }, ephemeral: true },
+      ],
+    }),
+  ],
+});
+@@@ wf.A ts
+import { workflow, branch, http } from "@blokjs/helper";
+import { validateOrder } from "../nodes/validate-order";
+import { httpGet, createOrder, respond } from "@blokjs/helpers";
+
+export default workflow("order-intake", (s) => {
+  const validate   = s.step(validateOrder, { body: s.trigger.body });
+  const checkStock = s.step(httpGet, {
+    url: s.tpl`https://inventory.internal/stock/${validate.productId}`,  // typed interpolation
+  });
+
+  return branch(checkStock.inStock, {                         // boolean handle - no string
+    then: (s) => {
+      const order = s.step(createOrder, { productId: validate.productId, qty: validate.qty, stock: checkStock });
+      return s.step(respond, { status: 201, body: order });
+    },
+    else: (s) => s.step(respond, { status: 409, body: { error: "out of stock" } }),
+  });
+}, { trigger: http.post("/orders") });
+@@@ wf.B yaml
+name: Order intake
+on:
+  http: { method: POST, path: /orders }
+
+steps:
+  - id: validate                    # custom node, validates the body
+    use: validate-order
+    with: { body: ${{ trigger.body }} }
+
+  - id: checkStock                  # built-in HTTP node
+    use: blok/http
+    with:
+      url: https://inventory.internal/stock/${{ steps.validate.productId }}
+
+  - id: route
+    when: ${{ steps.checkStock.inStock }}            # branch on a boolean
+    then:
+      - id: createOrder             # custom DB node
+        use: db-create-order
+        with: { productId: ${{ steps.validate.productId }}, qty: ${{ steps.validate.qty }}, stock: ${{ steps.checkStock }} }
+      - { use: blok/respond, with: { status: 201, body: ${{ steps.createOrder }} } }
+    else:
+      - { use: blok/respond, with: { status: 409, body: { error: out of stock } } }
+@@@ wf.C ts
+import { defineWorkflow, http } from "@blok/sdk";
+import { validateOrder } from "../nodes/validate-order";
+import { createOrder } from "../nodes/create-order";
+
+export default defineWorkflow(
+  { id: "order-intake", trigger: http({ method: "POST", path: "/orders" }) },
+  async (req, { run, respond }) => {
+    const body = await run(validateOrder, { body: req.body });        // custom node
+
+    const stock = await run(http.get, {                               // built-in node
+      url: `https://inv.internal/stock/${body.productId}`,
+    });
+
+    if (!stock.inStock) {
+      return respond(409, { error: "out of stock", productId: body.productId });
+    }
+
+    const order = await run(createOrder, {                            // custom DB node
+      productId: body.productId, qty: body.qty, reserved: stock.reservationId,
+    });
+    return respond(201, order);
+  },
+);
+@@@ wf.D ts
+import { flow, http, branch } from "@blokjs/flow";
+import { validateOrder } from "../nodes/validate-order";
+import { createOrder } from "../nodes/create-order";
+
+export default flow("order-intake", (s) => {
+  const req = http.post("/orders");                       // trigger -> typed handle
+
+  const v     = s.step("validate", validateOrder, { body: req.body });
+  const stock = s.http("checkStock", {                    // built-in HTTP node
+    url: "https://inv.api/stock", query: { productId: v.out.productId },
+  });
+
+  return branch(stock.out.inStock, {
+    then: (s) => {
+      const order = s.step("createOrder", createOrder, {
+        productId: v.out.productId, qty: v.out.qty, stock: stock.out,
+      });
+      return s.respond(201, order.out);
+    },
+    else: (s) => s.respond(409, { error: "out of stock" }),
+  });
+});
+@@@ A.flow ts
+// today: opaque string, typo = runtime crash, three dialects
+inputs: { url: $.state.checkStock.inStock }      // proxy -> "js/ctx.state..."
+when:   'ctx.state.checkStock.inStock === true'  // raw-ctx string, the footgun
+
+// Option A: one form, autocompleted, tsc-checked, rename-safe
+s.step(createOrder, { stock: checkStock })       // whole output
+branch(checkStock.inStock, { ... })              // boolean handle, same as any ref
+@@@ A.layout json
+// workflows/orders/intake.layout.json   (separate, Studio-owned)
+{ "version": 1,
+  "nodes": {
+    "validate":   { "x": 0,   "y": 0 },
+    "checkStock": { "x": 220, "y": 0 },
+    "order":      { "x": 440, "y": -80 }
+  },
+  "viewport": { "zoom": 1, "x": 0, "y": 0 } }
+@@@ B.flow text
+today  ->  { url: $.state.checkStock }   "js/ctx.state.checkStock"   when: 'ctx.state.x'
+this   ->  { url: ${{ steps.checkStock.url }} }              when: ${{ steps.checkStock.inStock }}
+
+trigger.body  replaces  $.req.body
+steps.<id>    replaces  $.state.<id>      -- one grammar, three contexts (trigger, steps, env)
+@@@ B.layout json
+// workflows/order-intake.canvas.json   (Studio-owned, runner ignores)
+{ "for": "order-intake.blok.yaml",
+  "nodes": {
+    "validate":   { "x": 80,  "y": 40 },
+    "checkStock": { "x": 80,  "y": 180 },
+    "createOrder":{ "x": 280, "y": 320 }
+  },
+  "viewport": { "zoom": 1, "x": 0, "y": 0 } }
+@@@ C.flow ts
+// before (today)
+inputs: { reserved: $.state.checkStock.reservationId }   // proxy -> "js/..." -> eval at runtime
+when:   'ctx.request.query.x === "true"'                 // raw-ctx, a third dialect
+
+// after (Option C) - one dialect: TypeScript
+const stock = await run(http.get, { ... });
+run(createOrder, { reserved: stock.reservationId });     // plain access, typed, rename-safe
+if (req.query.x === "true") { ... }                      // it's just JS
+@@@ C.layout json
+// orders/intake.layout.json - Studio derives the graph by tracing run() calls
+{ "workflow": "order-intake",
+  "nodes": {
+    "validateOrder": { "x": 80,  "y": 120 },
+    "http.get":      { "x": 320, "y": 120 },
+    "createOrder":   { "x": 560, "y": 40  }
+  },
+  "viewport": { "zoom": 1, "x": 0, "y": 0 } }
+@@@ D.flow ts
+// today:
+inputs: { productId: $.state.validate.productId }   // proxy -> "js/ctx.state..." -> eval'd
+when:   'ctx.request.query.x === "true"'            // 3rd dialect, raw ctx, footgun
+
+// Option D - ONE dialect, same handle in inputs AND conditions:
+inputs: { productId: v.out.productId }              // typed handle, no $, no js/, no ctx
+branch(stock.out.inStock, ...)                      // compiles to { from: "validate", path: "productId" }
+@@@ D.layout json
+// orders/intake.layout.json - logic file has ZERO coordinates (Windmill OpenFlow)
+{ "flow": "order-intake",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "nodes": {
+    "validate":    { "x": 120, "y": 80 },
+    "checkStock":  { "x": 120, "y": 220 },
+    "createOrder": { "x": 40,  "y": 360 }
+  } }
