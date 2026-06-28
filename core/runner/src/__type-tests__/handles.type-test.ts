@@ -13,6 +13,7 @@ import { z } from "zod";
 import { defineNode } from "../defineNode";
 import type { EphemeralHandle, Handle, InputOf, OutputOf, Refable } from "../handles";
 import { runtimeNode } from "../handles";
+import { gt } from "../stepBuilder";
 
 // A workflow input that expects `T` accepts a handle for `T` (the `Refable` boundary).
 declare function consume<T>(value: Refable<T>): void;
@@ -75,6 +76,16 @@ consume<string>(arrayHandle[0].sku);
 
 // @ts-expect-error array member reads are banned even on whole-output arrays
 consume(arrayHandle.length);
+
+// Branch ops inherit handle field soundness: renamed/missing output fields fail
+// at the property read before the condition can be authored.
+type StockOutput = { available: boolean; quantity: number };
+declare const stockHandle: Handle<StockOutput>;
+const validStockCondition = gt(stockHandle.quantity, 0);
+void validStockCondition;
+
+// @ts-expect-error renamed output field is not referenceable in a branch op
+gt(stockHandle.inStock, 0);
 
 // --- #339: EphemeralHandle<T> is unreadable at the type level ------------------
 
