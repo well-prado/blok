@@ -51,8 +51,8 @@ Each primitive populates `ctx.state[<step-id>]` with its own
 result shape — see each page for the details. All of them share one flat
 `ctx.state` namespace; the
 [handle & footgun contract](./handles-and-footguns.mdx) covers what a
-handle is readable from across arms and the four mistakes the framework
-now rejects at load time.
+handle is readable from across arms and the four mistakes it surfaces —
+two caught at load time today, two committed to by ADR 0005.
 
 ## Nested primitives
 

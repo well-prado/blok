@@ -1,6 +1,6 @@
 ---
 title: "Control-flow handles & footguns"
-description: "How handles read across branch / forEach / switch / tryCatch arms, and the four sharp edges the framework now guards at load time."
+description: "How handles read across branch / forEach / switch / tryCatch arms, the load-time guards that catch id and state-key collisions, and the arm-scope rules ADR 0005 commits to."
 icon: "shield-half"
 ---
 
@@ -14,29 +14,39 @@ success, exactly like a top-level step.
 That single shared namespace is what makes the primitives compose, and
 it's also where every "my control flow misbehaves" report comes from.
 This page is the contract — what a handle is readable from, and the four
-footguns the framework now rejects at workflow **load time** so they
-fail loudly instead of mis-running.
+footguns it surfaces. Two of them (duplicate step id, forEach state-key
+collision) are **rejected at workflow load time today** so they fail
+loudly instead of mis-running; the arm-scope rules are an accepted design
+decision (ADR 0005) not yet wired into a guard. Each footgun below says
+which it is.
 
 ## The handle contract
 
 A *handle* is a typed reference to a step's output — `$.state.<id>` in
 TypeScript, `"$.state.<id>"` / `"js/ctx.state.<id>"` in JSON. The scope
-rules (ADR 0003 *step builder stack* + ADR 0005 *arm-scoped handles*) are:
+rules below are the contract ADR 0003 (*step builder stack*) + ADR 0005
+(*arm-scoped handles*) commit to. **ADR 0005 is an accepted design
+decision, not yet a shipped guard** — there is no `step()` API or
+arm-scope check in the helper today, so these reads are *not* rejected at
+load or typecheck yet. Treat the "rejected" rows as "don't do this — the
+value won't be there at runtime, and the future guard will reject it":
 
-| You can read a handle… | Result |
+| You can read a handle… | Outcome |
 |---|---|
 | produced **before** the control-flow step | readable inside either arm and after the step |
 | produced **inside an arm**, read in the **same arm** (or a descendant) | readable |
-| produced inside an arm, read in a **sibling arm** | **rejected** — `then` handle is not visible in `else`, case A not in case B, `try` not in `catch` |
-| produced inside an arm, read **after** the flow step | **rejected** — arm-local handles don't survive the arm |
-| a `forEach` item/body handle, read **after** the loop | **rejected** — only the loop step's own output array survives |
-| any handle on an `ephemeral: true` step | **rejected** — there is no state slot to read |
+| produced inside an arm, read in a **sibling arm** | won't be there — `then` handle is not visible in `else`, case A not in case B, `try` not in `catch` (ADR 0005 will reject) |
+| produced inside an arm, read **after** the flow step | won't be there — arm-local handles don't survive the arm (ADR 0005 will reject) |
+| a `forEach` item/body handle, read **after** the loop | won't be there — only the loop step's own output array survives (ADR 0005 will reject) |
+| any handle on an `ephemeral: true` step | won't be there — `ephemeral` skips persistence, so no state slot exists |
 
 The rule in one line: **a handle is readable from its producing scope or
 a descendant of it — never from a sibling scope or after the scope
-exits.** Cross-arm reads are rejected rather than typed maybe-`undefined`,
-because letting them resolve to `undefined` makes the handle lie and
-pushes the failure to runtime (ADR 0005 *arm-scoped handles*).
+exits.** ADR 0005 commits to *rejecting* cross-arm reads at
+authoring/lowering rather than letting them resolve to typed
+maybe-`undefined` — because resolving to `undefined` makes the handle lie
+and pushes the failure to runtime. That guard is the design target; until
+it lands, a cross-arm read silently resolves to `undefined` at runtime.
 
 ### Getting a value *out* of an arm
 
@@ -72,7 +82,7 @@ expression** — not a `js/` string, not a `{$ref}` (ADR 0004 *branch
 | `$.state.stock.inStock` (boolean field) | `ctx.state.stock.inStock` |
 | `eq($.state.a.field, "x")` | `ctx.state.a.field === "x"` |
 | `gt($.state.a.count, $.state.b.limit)` | `ctx.state.a.count > ctx.state.b.limit` |
-| `not($.state.a.ok)` | `!(ctx.state.a.ok)` |
+| `ne($.state.a.status, "done")` | `ctx.state.a.status !== "done"` |
 | handle from `{ as: "alias" }` step | `ctx.state.alias…` |
 | field handle from `{ spread: true }` step | `ctx.state.<firstField>…` |
 
@@ -84,7 +94,7 @@ Read a field or use `as:` instead.
 
 ## The four footguns
 
-### 1 — Reusing a step id across arms (CF-1)
+### 1 — Reusing a step id across arms (CF-1) — *shipped guard, throws at load*
 
 Every step id is a key in **one flat per-workflow config map** —
 including ids inside mutually-exclusive `branch`/`switch`/`tryCatch`
@@ -104,7 +114,7 @@ whole workflow — including across mutually-exclusive branch/switch arms …
 
 <CodeGroup>
 ```ts Wrong
-switch({
+switchOn({
   id: "route", on: $.req.body.kind,
   cases: [
     { when: "a", do: [{ id: "h", use: "score", inputs: { v: 1 } }] },
@@ -113,7 +123,7 @@ switch({
 })
 ```
 ```ts Right
-switch({
+switchOn({
   id: "route", on: $.req.body.kind,
   cases: [
     { when: "a", do: [{ id: "scoreA", use: "score", as: "score", inputs: { v: 1 } }] },
@@ -127,7 +137,7 @@ switch({
 **Fix:** give every step a unique id. If two arms must feed the same
 downstream key, use `as:` with distinct ids (`runA`/`runB` → `as: "run"`).
 
-### 2 — `branch` / `loop` `when` must be raw `ctx.*` (CF-3)
+### 2 — `branch` / `loop` `when` must be raw `ctx.*` (CF-3) — *runtime footgun; shipped helpers avoid it*
 
 Because `when` is evaluated by `Function("ctx", …)` and **bypasses the
 Mapper** (no `js/` strip — see [the lowering table](#how-branch-loop-when-is-lowered)),
@@ -138,12 +148,12 @@ undefined identifier, so it throws `ReferenceError: js is not defined`
 inside the node (or mis-routes in the multi-condition fall-through path).
 TypeScript can't catch it (the proxy is typed `unknown`), and
 `WorkflowTestRunner` doesn't either — this is the eval-site divergence
-documented in the S3 *expression-ergonomics* spec: the Mapper (step
-inputs) strips `js/`, but the if-else node and `LoopNode` evaluate their
-condition string verbatim.
+documented in the [S3 *expression-ergonomics* spec](https://github.com/well-prado/blok/blob/main/specs/blok-vision/S3-expression-ergonomics.md):
+the Mapper (step inputs) strips `js/`, but the if-else node and `LoopNode`
+evaluate their condition string verbatim.
 
 The framework's answer is the typed comparators from `@blokjs/helper`
-(`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `not`). They read the proxy's raw
+(`eq`, `ne`, `gt`, `gte`, `lt`, `lte`). They read the proxy's raw
 path and emit the correct bare-`ctx.*` string, canonicalizing aliases
 (`$.req` → `ctx.request`, `$.prev` → `ctx.response`):
 
@@ -175,7 +185,7 @@ lowers to `ctx.state.stock.inStock` and takes the `then` arm when truthy.
 For any *comparison* (numeric, string-equality, null-check) reach for an
 `eq`/`gt`/… helper — don't try to hand-build the operator into a proxy.
 
-### 3 — `forEach` `as` / `asIndex` share the state namespace (CF-5)
+### 3 — `forEach` `as` / `asIndex` share the state namespace (CF-5) — *shipped guard, throws at load*
 
 A `forEach` writes its current item to `ctx.state[<as>]` and the index to
 `ctx.state[<as>Index]` on every iteration. Those keys live in the **same
@@ -216,17 +226,22 @@ The same guard rejects **nested** `forEach` that reuse an enclosing
 loop's `as` name (the inner item handle would shadow the outer in the
 shared namespace) — give each loop a distinct `as`.
 
-### 4 — `ephemeral` handles and cross-arm reads (CF-7)
+### 4 — `ephemeral` handles and cross-arm reads (CF-7) — *design-stage, not yet guarded*
 
-Two ways to read a handle that doesn't exist:
+This footgun is **not caught at load time today** — ADR 0005 commits to
+rejecting it, but the arm-scope guard isn't built yet (no `step()` API, no
+arm-scope check in `@blokjs/helper`). Until it lands, both reads below
+just resolve to `undefined` at runtime. Two ways to read a handle that
+doesn't exist:
 
 - **`ephemeral: true`** skips state persistence entirely — there is no
   `ctx.state[<id>]` slot, on the taken path or any other. The value is
-  only available via `ctx.prev` to the *immediately* next step. Reading
-  its handle later is the arm-scope guard's `ephemeral` rejection (ADR
-  0005): *"Step `<id>` is ephemeral, so its handle cannot be read."*
+  only available via `ctx.prev` to the *immediately* next step. ADR 0005's
+  planned guard will reject reading its handle later (*"Step `<id>` is
+  ephemeral, so its handle cannot be read."*); today it silently reads
+  `undefined`.
 - **Cross-arm / post-arm reads** of a non-ephemeral arm-local handle are
-  rejected by the same guard — see [the handle contract](#the-handle-contract).
+  the same design-stage rejection — see [the handle contract](#the-handle-contract).
 
 Inside `tryCatch.catch` there's a subtler truth, and it's load-bearing:
 **a step that throws does not persist state** (the v0.5.1 fix in
@@ -264,10 +279,12 @@ Note the boundaries of `catch`:
 ```
 HANDLE:   $.state.<id>  → readable in its own scope or a descendant; never a sibling/after
 ESCAPE:   return from the flow step, OR write both arms to one `as:` key
-WHEN:     branch/loop `when` is raw ctx.* — use eq/ne/gt/gte/lt/lte/not, never js// or $.
-GUARDS (throw at load time):
+WHEN:     branch/loop `when` is raw ctx.* — use eq/ne/gt/gte/lt/lte, never js// or $.
+GUARDS (throw at load time, shipped):
   duplicate step id across arms        → assertNoDuplicateStepIds (names both arm paths)
   forEach `as`/`asIndex` ↔ step id     → assertNoForEachStateKeyCollisions
+DESIGN (ADR 0005, not yet guarded):
+  cross-arm / post-arm / ephemeral handle reads → resolve to undefined at runtime today
 NEVER:    reuse a step id · name `as:` after a step id · read an ephemeral/cross-arm handle
 ```
 
