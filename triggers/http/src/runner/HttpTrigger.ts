@@ -21,6 +21,7 @@ import { RunTracker } from "@blokjs/runner";
 import { traceRedactSensitive } from "@blokjs/runner";
 import type { TraceAuthorizeFn } from "@blokjs/runner";
 import type { ScheduledDispatchRow } from "@blokjs/runner";
+import type { NodeBase } from "@blokjs/shared";
 import { type Context, GlobalError, type RequestContext, type StreamContext } from "@blokjs/shared";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
@@ -290,10 +291,12 @@ export default class HttpTrigger extends TriggerBase {
 
 	loadNodes() {
 		this.nodeMap.nodes = new NodeMap();
-		const nodeKeys = Object.keys(nodes);
-		for (const key of nodeKeys) {
-			this.nodeMap.nodes.addNode(key, nodes[key]);
-		}
+		// Register every node under its OWN `node.name` (the canonical `use:` ref
+		// per ADR 0002) — the `Nodes.ts` map keys are now cosmetic and the
+		// collision guard (NodeMap.addNode) catches two nodes claiming one ref.
+		// `Nodes.ts` may auto-discover local `src/nodes/` (top-level await +
+		// `discoverNodes`), so the map values are the single source of truth.
+		this.nodeMap.nodes.addNodes(Object.values(nodes) as unknown as NodeBase[]);
 	}
 
 	loadWorkflows() {

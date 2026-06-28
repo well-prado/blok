@@ -26,6 +26,23 @@ export default class NodeMap {
 		this.nodes.set(name, node);
 	}
 
+	/**
+	 * Register a list of nodes, each under its OWN `node.name` (the canonical
+	 * `use:` ref per ADR 0002) — the registration shape for import-registration /
+	 * auto-discovery. Conflicts throw via {@link addNode}.
+	 */
+	public addNodes(nodes: NodeBase[], opts?: { replace?: boolean }): void {
+		for (const node of nodes) {
+			const name = (node as { name?: unknown }).name;
+			if (typeof name !== "string" || name.length === 0) {
+				throw new Error(
+					"[blok] addNodes: a node has no string `name` to register under — every defineNode() needs a name.",
+				);
+			}
+			this.addNode(name, node, opts);
+		}
+	}
+
 	public getNode(name: string): NodeBase | undefined {
 		return this.nodes.get(name);
 	}

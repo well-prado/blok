@@ -1,21 +1,25 @@
-const node_file = `import ApiCall from "@blokjs/api-call";
+const node_file = `import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import ApiCall from "@blokjs/api-call";
 import IfElse from "@blokjs/if-else";
+import { discoverNodes } from "@blokjs/runner";
 import type { NodeBase } from "@blokjs/shared";
-import ChainInit from "./nodes/chain-init/index";
-import ChainVerify from "./nodes/chain-verify/index";
 import ExampleNodes from "./nodes/examples/index";
-import RuntimeBridge from "./nodes/runtime-bridge/index";
 
-const nodes: {
-	[key: string]: NodeBase;
-} = {
-	"@blokjs/api-call": ApiCall,
-	"@blokjs/if-else": IfElse,
-	"chain-init": ChainInit,
-	"chain-verify": ChainVerify,
-	"runtime-bridge": RuntimeBridge,
-	...ExampleNodes,
-};
+// Published nodes (npm) + the example bundle are registered explicitly below.
+// Your OWN nodes under 'nodes/<name>/index.ts' are AUTO-DISCOVERED and registered
+// by their defineNode({ name }) — you never edit this file to add a node.
+const here = dirname(fileURLToPath(import.meta.url));
+const local = await discoverNodes(join(here, "nodes"));
+
+const explicit: NodeBase[] = [ApiCall, IfElse, ...(Object.values(ExampleNodes) as NodeBase[])];
+
+// Map keys are cosmetic — the runner registers each node under its own node.name
+// (the canonical 'use:' ref). Duplicate refs throw at startup.
+const nodes: { [key: string]: NodeBase } = {};
+for (const node of [...explicit, ...local]) {
+	nodes[(node as { name: string }).name] = node;
+}
 
 export default nodes;
 `;
