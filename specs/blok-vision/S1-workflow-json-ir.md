@@ -156,11 +156,13 @@ export function validateWorkflow(input: unknown):
 ```
 Exported from `@blokjs/helper`. Consumers:
 - **blokctl** and the **registry publish gate (S6)** — both already (or will) depend on `@blokjs/helper`. Direct import. ✓
-- **Studio** — has **no `@blokjs/helper` dependency today** (verified). Two honest options; **pick (a) for S1**:
+- **Studio** — has **no `@blokjs/helper` dependency today** (verified). Two honest options; **pick (b) for Studio and defer it to S4**:
   - **(a) Add `@blokjs/helper` as a Studio dependency and import `validateWorkflow` directly.** The helper is already a leaf package (no runner dependency), so the decoupling that `workflowDag.ts:17` relies on is preserved — Studio depends on the *helper*, never on `@blokjs/runner`. Smallest diff; client-side validation; no new endpoint.
-  - **(b) Validate server-side via the runner API** (`GET/POST …/validate`) and have Studio call it. Defer to S4 if Studio's bundle can't take the Zod weight — but that's a real endpoint to design, so it's out of S1's lazy path.
+  - **(b) Validate server-side via the runner API** (`GET/POST …/validate`) and have Studio call it. This is a real endpoint to design, so it belongs in S4, not S1.
 
-  Recommendation: **(a)**. It's the one-dep change that makes Studio's `definition: unknown` narrowing (`workflowDag.ts`) optional rather than load-bearing. If the Studio bundle-size cost of shipping Zod proves unacceptable, fall back to (b) in S4 — non-breaking either way.
+  Measurement (#307): importing the current validation graph (`WorkflowV2Schema.safeParse` from `@blokjs/helper/internal`, as a stand-in for `validateWorkflow`) increased Studio's built JS/CSS by **+91,172 raw bytes / +24,537 gzip bytes** and pushed the main JS chunk from **440,845 raw / 125,090 gzip** to **532,017 raw / 149,627 gzip**, tripping Vite's 500 kB chunk warning. Zod is not already present in Studio, and the recursive schema graph is retained rather than tree-shaken away.
+
+  Recommendation: **(b)**. S1 still ships `validateWorkflow()` for blokctl, registry, MCP/schema tooling, and other non-browser consumers. Studio validation is explicitly deferred to S4, where the write path can add a server-side validation endpoint and UX without making every Studio load pay the Zod/schema cost.
 
 ### 7.6 Example IR (the published shape)
 ```json
@@ -222,7 +224,7 @@ Strip the `ui` blocks and the `schemaVersion` line and the file is byte-identica
 
 **M4 — `ui` pass-through (1 day).** Add to step schemas; thread through each `InternalStep` constructor in the normalizer; round-trip test (IR → normalize → `toJson()` preserves `ui`). *Ships: the canvas round-trip slot (D2), ahead of S4.*
 
-**M5 — Studio adopts the validator (0.5 day; may slip to S4).** Add `@blokjs/helper` dep; replace `definition: unknown` consumption with `validateWorkflow()`; surface errors.
+**M5 — Studio validation transport is handed to S4.** Do not add `@blokjs/helper` to Studio in S1. S4 owns the server-side validation endpoint and Studio error UX; S1 only needs to ship the shared validator for non-browser consumers.
 
 Total ~3.5 days. M1 is the load-bearing deliverable (it's almost entirely deletion); everything after is small and additive.
 
@@ -233,7 +235,7 @@ Total ~3.5 days. M1 is the load-bearing deliverable (it's almost entirely deleti
 3. **`ui` scope for MVP.** Just `{ x, y, notes }`, or also `color`/`collapsed`/`icon`? **Recommend the minimal three**; `.passthrough()` lets the canvas add fields later without a schema bump.
 4. **Publish a v1 schema, or declare v1 "legacy, normalizer-only, no published schema"?** **Recommend the latter** — v1 is structurally detected and migration-discouraged; publishing its schema invites new v1 authoring. (Confirm: no demand for a v1 IR.)
 5. **Does the registry (S6) validate against the *IR schema* or also resolvable `use:` refs?** Out of S1 scope. S1 commits: `validateWorkflow()` checks **shape only**; node-existence / version-resolution is S2/S6's concern. Confirm this boundary so S6 doesn't assume S1 resolves refs.
-6. **Studio validation transport — client-side dep (§7.5a) vs server endpoint (§7.5b)?** S1 recommends (a) for the smallest diff, but if Studio's bundle can't absorb Zod, (b) is the fallback and belongs in S4. Confirm appetite for adding `@blokjs/helper` to the Studio bundle.
+6. **Studio validation transport — client-side dep (§7.5a) vs server endpoint (§7.5b)?** Resolved by #307: the client-side dep adds +24,537 gzip bytes and trips the main-chunk warning, so Studio validation is deferred to S4 via a server endpoint. S1 still ships the validator for non-browser consumers.
 
 ---
 
