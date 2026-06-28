@@ -83,9 +83,10 @@ export default defineNode({
 		// Lazy-load the SSE bus. Without @blokjs/trigger-sse installed
 		// the node can't publish anything — fail loudly with the install
 		// hint rather than silently dropping tokens.
+		const moduleName = "@blokjs/trigger-sse";
 		let bus: ReturnType<SseBusModule["_getSSEBus"]>;
 		try {
-			const mod = (await import("@blokjs/trigger-sse")) as SseBusModule;
+			const mod = (await import(moduleName)) as SseBusModule;
 			bus = mod._getSSEBus();
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);

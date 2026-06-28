@@ -73,10 +73,74 @@ class ThrowNode extends RunnerNode {
 	}
 	async run(ctx: Context): Promise<ResponseContext> {
 		const opts = ((ctx.config as Record<string, unknown> | undefined)?.[this.name] ?? {}) as {
-			inputs?: { message?: string };
+			inputs?: { message?: string; code?: number; body?: Record<string, unknown>; name?: string };
 		};
 		const msg = opts.inputs?.message ?? "test failure";
-		throw new Error(msg);
+		const err = new GlobalError(msg);
+		if (opts.inputs?.code !== undefined) err.setCode(opts.inputs.code);
+		if (opts.inputs?.body !== undefined) err.setJson(opts.inputs.body);
+		if (opts.inputs?.name !== undefined) {
+			err.setName(opts.inputs.name);
+			(err as Error).name = opts.inputs.name;
+		}
+		throw err;
+	}
+}
+
+class PlainErrorNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/test-throw-plain";
+		this.node = "@blokjs/test-throw-plain";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(ctx: Context): Promise<ResponseContext> {
+		const opts = ((ctx.config as Record<string, unknown> | undefined)?.[this.name] ?? {}) as {
+			inputs?: { message?: string; name?: string };
+		};
+		const err = new Error(opts.inputs?.message ?? "plain failure");
+		if (opts.inputs?.name !== undefined) err.name = opts.inputs.name;
+		throw err;
+	}
+}
+
+class DeepWrappedCauseNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/test-deep-wrapped-cause";
+		this.node = "@blokjs/test-deep-wrapped-cause";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		const root = new Error("root cause");
+		root.name = "RootCauseError";
+		const middle = new Error("[step 2/3] middle failed: middle symptom") as Error & { cause?: unknown };
+		middle.cause = root;
+		const outer = new GlobalError("[step 3/3] outer failed: wrapper symptom") as GlobalError & {
+			cause?: unknown;
+		};
+		outer.setCode(418);
+		outer.setName("OuterGlobalError");
+		(outer as Error).name = "OuterGlobalError";
+		outer.cause = middle;
+		throw outer;
+	}
+}
+
+class CircularCauseNode extends RunnerNode {
+	constructor() {
+		super();
+		this.name = "@blokjs/test-circular-cause";
+		this.node = "@blokjs/test-circular-cause";
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		const err = new Error("circular cause") as Error & { cause?: unknown };
+		err.cause = err;
+		throw err;
 	}
 }
 
@@ -179,6 +243,60 @@ function makeSucceedingDefineNode(name: string): RunnerNode {
 	return node;
 }
 
+function makeInvalidInputNode(name: string): RunnerNode {
+	const node = defineNode({
+		name,
+		description: name,
+		input: z.object({ required: z.string() }),
+		output: z.unknown(),
+		async execute(_ctx, input) {
+			return input;
+		},
+	}) as unknown as RunnerNode;
+	(node as unknown as { name: string }).name = name;
+	(node as unknown as { node: string }).node = name;
+	(node as unknown as { type: string }).type = "module";
+	(node as unknown as { active: boolean }).active = true;
+	return node;
+}
+
+type TestStep = { id: string; use: string; type: "module"; inputs?: Record<string, unknown> };
+
+async function captureTryError(
+	tryStep: TestStep,
+	extraNodes: Record<string, RunnerNode> = {},
+): Promise<{ snap: Record<string, unknown>; ctx: Context }> {
+	const wfDef = {
+		name: `test-trycatch-error-envelope-${tryStep.id}`,
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path: "/x" } },
+		steps: [
+			{
+				id: "saga",
+				tryCatch: {
+					try: [tryStep],
+					catch: [
+						{
+							id: "snapshot",
+							use: "@blokjs/ctx-publish",
+							type: "module",
+							inputs: {
+								name: "errSnap",
+								value:
+									"js/({message: ctx.error.message, name: ctx.error.name, code: ctx.error.code, stepId: ctx.error.stepId, hasStack: typeof ctx.error.stack === 'string', frameworkPrefix: String(ctx.error.message).startsWith('[step ')})",
+							},
+						},
+					],
+				},
+			},
+		],
+	};
+	const { config, ctx } = await bootConfig(wfDef, extraNodes);
+	const runner = new Runner(config.steps as NodeBase[]);
+	await runner.run(ctx);
+	return { snap: (ctx.state as Record<string, unknown>).errSnap as Record<string, unknown>, ctx };
+}
+
 async function bootConfig(
 	workflowDef: unknown,
 	extraNodes: Record<string, RunnerNode> = {},
@@ -188,6 +306,9 @@ async function bootConfig(
 		"@blokjs/expr": new ExprNode(),
 		"@blokjs/ctx-publish": new CtxPublishNode(),
 		"@blokjs/throw": new ThrowNode(),
+		"@blokjs/test-throw-plain": new PlainErrorNode(),
+		"@blokjs/test-deep-wrapped-cause": new DeepWrappedCauseNode(),
+		"@blokjs/test-circular-cause": new CircularCauseNode(),
 		"@blokjs/test-throw-wait": new ThrowWaitNode(),
 		"@blokjs/test-throw-cancel": new ThrowCancelNode(),
 		...extraNodes,
@@ -478,6 +599,56 @@ describe("v0.5 tryCatch integration", () => {
 		expect(errMsg).toMatch(/from-catch/);
 		expect((ctx.state as Record<string, unknown>).finallySet).toBe(true);
 	});
+
+	it("finally throws → it supersedes catch's pending error", async () => {
+		const wfDef = {
+			name: "test-trycatch-finally-supersedes-catch",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "saga",
+					tryCatch: {
+						try: [
+							{
+								id: "boom1",
+								use: "@blokjs/throw",
+								type: "module",
+								inputs: { message: "from-try" },
+							},
+						],
+						catch: [
+							{
+								id: "boom2",
+								use: "@blokjs/throw",
+								type: "module",
+								inputs: { message: "from-catch" },
+							},
+						],
+						finally: [
+							{
+								id: "boom3",
+								use: "@blokjs/throw",
+								type: "module",
+								inputs: { message: "from-finally" },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		const runner = new Runner(config.steps as NodeBase[]);
+		let caught: unknown = null;
+		try {
+			await runner.run(ctx);
+		} catch (err) {
+			caught = err;
+		}
+		const errMsg = caught instanceof Error ? caught.message : String(caught);
+		expect(errMsg).toMatch(/from-finally/);
+		expect(errMsg).not.toMatch(/from-catch/);
+	});
 });
 
 /**
@@ -719,6 +890,104 @@ describe("v0.5 tryCatch — error-path state contract (post-fix)", () => {
 	});
 });
 
+describe("v0.5 tryCatch — error envelope fidelity", () => {
+	it("plain Error resolves to the root message and failing step id", async () => {
+		const { snap } = await captureTryError({
+			id: "plain-boom",
+			use: "@blokjs/test-throw-plain",
+			type: "module",
+			inputs: { message: "plain fail", name: "PlainBoom" },
+		});
+
+		expect(snap).toMatchObject({
+			message: "plain fail",
+			name: "PlainBoom",
+			stepId: "plain-boom",
+			hasStack: true,
+			frameworkPrefix: false,
+		});
+		expect(snap.code).toBeUndefined();
+	});
+
+	it("GlobalError.code from context is available inside the catch arm", async () => {
+		const failing = makeFailingDefineNode("auth-check", { code: 401 });
+		const { snap } = await captureTryError(
+			{ id: "auth-check", use: "auth-check", type: "module", inputs: {} },
+			{ "auth-check": failing },
+		);
+
+		expect(snap.message).toBe("auth-check failed with code 401");
+		expect(snap.name).toBe("auth-checkError");
+		expect(snap.code).toBe(401);
+		expect(snap.stepId).toBe("auth-check");
+		expect(snap.frameworkPrefix).toBe(false);
+	});
+
+	it("@blokjs/throw preserves authored code, name, message, and step id", async () => {
+		const { snap } = await captureTryError({
+			id: "throw-auth",
+			use: "@blokjs/throw",
+			type: "module",
+			inputs: { message: "token expired", code: 403, name: "ForbiddenError" },
+		});
+
+		expect(snap).toMatchObject({
+			message: "token expired",
+			name: "ForbiddenError",
+			code: 403,
+			stepId: "throw-auth",
+			hasStack: true,
+			frameworkPrefix: false,
+		});
+	});
+
+	it("Zod input validation maps to a 400 envelope", async () => {
+		const invalidInput = makeInvalidInputNode("needs-required");
+		const { snap } = await captureTryError(
+			{ id: "needs-required", use: "needs-required", type: "module", inputs: {} },
+			{ "needs-required": invalidInput },
+		);
+
+		expect(String(snap.message)).toContain("Validation failed:");
+		expect(String(snap.message)).toContain("required");
+		expect(snap.code).toBe(400);
+		expect(snap.stepId).toBe("needs-required");
+		expect(snap.frameworkPrefix).toBe(false);
+	});
+
+	it("deep cause chains use the deepest author message while keeping the first GlobalError code", async () => {
+		const { snap } = await captureTryError({
+			id: "deep-fail",
+			use: "@blokjs/test-deep-wrapped-cause",
+			type: "module",
+			inputs: {},
+		});
+
+		expect(snap).toMatchObject({
+			message: "root cause",
+			name: "RootCauseError",
+			code: 418,
+			stepId: "deep-fail",
+			hasStack: true,
+			frameworkPrefix: false,
+		});
+	});
+
+	it("circular cause chains stop at the self-reference", async () => {
+		const { snap } = await captureTryError({
+			id: "circular-fail",
+			use: "@blokjs/test-circular-cause",
+			type: "module",
+			inputs: {},
+		});
+
+		expect(snap.message).toBe("circular cause");
+		expect(snap.name).toBe("Error");
+		expect(snap.stepId).toBe("circular-fail");
+		expect(snap.frameworkPrefix).toBe(false);
+	});
+});
+
 /**
  * v0.5.3 Phase 1 — wait-inside-primitives partial fix.
  *
@@ -879,7 +1148,7 @@ describe("v0.5.3 Phase 1 — wait + cancel pass-through (TryCatchNode)", () => {
 				{
 					id: "saga",
 					tryCatch: {
-						try: [{ id: "boom", use: "@blokjs/throw", type: "module", inputs: { message: "kaboom" } }],
+						try: [{ id: "boom", use: "@blokjs/test-throw-plain", type: "module", inputs: { message: "kaboom" } }],
 						catch: [
 							{
 								id: "captured",
