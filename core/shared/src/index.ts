@@ -28,6 +28,7 @@ import type StreamContext from "./types/StreamContext";
 import VarsContext from "./types/VarsContext";
 import mapper from "./utils/Mapper";
 import MemoryUsage from "./utils/MemoryUsage";
+import { type StructuralRef, lowerRefs } from "./utils/lowerRefs";
 
 export {
 	NodeBase,
@@ -62,4 +63,6 @@ export {
 	MemoryUsage,
 	type MetricsType,
 	mapper,
+	lowerRefs,
+	type StructuralRef,
 };
