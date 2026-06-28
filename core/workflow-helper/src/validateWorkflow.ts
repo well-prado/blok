@@ -37,7 +37,8 @@ export interface WorkflowValidationResult {
  * authoring problems early — never to gate loading existing workflows.
  *
  * @param json - an untrusted workflow document (parsed JSON, a TS-compiled
- *   `_config`, or any object).
+ *   `_config`, the `workflow()` / legacy `Workflow()` builder envelope, or any
+ *   object).
  * @returns `{ ok, kind, errors }`. See {@link WorkflowValidationResult}.
  */
 export function validateWorkflow(json: unknown): WorkflowValidationResult {
@@ -49,7 +50,11 @@ export function validateWorkflow(json: unknown): WorkflowValidationResult {
 		};
 	}
 
-	const doc = json as Record<string, unknown>;
+	// Unwrap v2 builder envelopes — a TS `export default workflow({...})` returns
+	// `{_blokV2: true, _config: {...}, toJson}`. The legacy `Workflow()` builder
+	// also carries its definition under `_config`. Mirrors WorkflowNormalizer's
+	// unwrap so the validator classifies the inner config, not the wrapper.
+	const doc = unwrapBuilderEnvelope(json as Record<string, unknown>);
 	const hasSteps = Array.isArray(doc.steps);
 
 	// v1 detection — structural, BEFORE strict v2 parsing. A v1 doc carries a
@@ -90,23 +95,50 @@ export function validateWorkflow(json: unknown): WorkflowValidationResult {
 	};
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Unwrap a v2 / legacy builder envelope to its inner workflow config. Mirrors
+ * `WorkflowNormalizer.normalizeWorkflow` (core/runner) so an author who passes
+ * the raw `workflow()` return value gets the same classification as a plain
+ * parsed JSON doc. Returns the input unchanged when it isn't an envelope.
+ */
+function unwrapBuilderEnvelope(wf: Record<string, unknown>): Record<string, unknown> {
+	if (wf._blokV2 === true && isPlainObject(wf._config)) {
+		return wf._config;
+	}
+	// Legacy builder shape — a `_config` payload with no top-level name/steps.
+	if (isPlainObject(wf._config) && wf.name === undefined && wf.steps === undefined) {
+		return wf._config;
+	}
+	return wf;
+}
+
 /**
  * True when the doc is structurally a legacy v1 workflow:
- * - a top-level `nodes{}` map (v1 stored node inputs separately from steps), OR
  * - any step that carries `.name`/`.node` (v1 step identity) but neither
- *   `.id` nor `.use` (v2 identity).
+ *   `.id` nor `.use` (v2 identity), OR
+ * - a top-level `nodes{}` map (v1 stored node inputs separately from steps) —
+ *   BUT only when no step already declares a v2 identity. A doc whose steps use
+ *   `id`/`use` is genuine v2; a stray `nodes{}` map alongside it should still be
+ *   classified v2 (and surfaced as a strict-schema error) rather than mislabeled.
  */
 function isV1Shaped(doc: Record<string, unknown>, hasSteps: boolean): boolean {
-	if (typeof doc.nodes === "object" && doc.nodes !== null && !Array.isArray(doc.nodes)) {
-		return true;
+	let anyV2Identity = false;
+	if (hasSteps) {
+		for (const step of doc.steps as unknown[]) {
+			if (typeof step !== "object" || step === null) continue;
+			const s = step as Record<string, unknown>;
+			const v1Identity = "name" in s || "node" in s;
+			const v2Identity = "id" in s || "use" in s;
+			if (v2Identity) anyV2Identity = true;
+			if (v1Identity && !v2Identity) return true;
+		}
 	}
-	if (!hasSteps) return false;
-	for (const step of doc.steps as unknown[]) {
-		if (typeof step !== "object" || step === null) continue;
-		const s = step as Record<string, unknown>;
-		const v1Identity = "name" in s || "node" in s;
-		const v2Identity = "id" in s || "use" in s;
-		if (v1Identity && !v2Identity) return true;
+	if (!anyV2Identity && isPlainObject(doc.nodes)) {
+		return true;
 	}
 	return false;
 }

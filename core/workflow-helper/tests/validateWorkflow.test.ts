@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { workflow } from "../src/components/workflowV2";
 import { validateWorkflow } from "../src/validateWorkflow";
 
 /** Recursively collect every *.json path under `dir` (matches scanWorkflows). */
@@ -131,6 +132,50 @@ describe("validateWorkflow — v2", () => {
 	});
 });
 
+describe("validateWorkflow — TS-compiled builder envelope (#466)", () => {
+	it("unwraps a `workflow()` builder envelope and returns ok:true / kind:v2", () => {
+		const built = workflow({
+			name: "Fetch and Respond",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://example.com" } }],
+		});
+		// Sanity: this is the raw envelope, not a plain config.
+		expect((built as { _blokV2?: boolean })._blokV2).toBe(true);
+
+		const r = validateWorkflow(built);
+		expect(r.ok).toBe(true);
+		expect(r.kind).toBe("v2");
+		expect(r.errors).toEqual([]);
+	});
+
+	it("validates the inner config of a builder envelope — malformed steps surface as ok:false / kind:v2", () => {
+		// Hand-built envelope (the `workflow()` helper would reject this at compile
+		// time) carrying a step missing both id and use.
+		const r = validateWorkflow({
+			_blokV2: true,
+			_config: {
+				name: "bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [{ inputs: { url: "x" } }],
+			},
+		});
+		expect(r.ok).toBe(false);
+		expect(r.kind).toBe("v2");
+		expect(r.errors.length).toBeGreaterThan(0);
+		expect(r.errors.some((e) => e.path.startsWith("steps.0"))).toBe(true);
+	});
+
+	it("classifies a malformed builder envelope (missing _config) as unknown, not v2", () => {
+		// `_blokV2: true` but no usable `_config` — the wrapper has no steps/nodes
+		// of its own, so it isn't workflow-shaped.
+		const r = validateWorkflow({ _blokV2: true });
+		expect(r.ok).toBe(false);
+		expect(r.kind).toBe("unknown");
+	});
+});
+
 describe("validateWorkflow — v1 detection (advisory, not strict-reject)", () => {
 	it("detects a top-level nodes{} map as legacy v1", () => {
 		const r = validateWorkflow({
@@ -166,6 +211,19 @@ describe("validateWorkflow — v1 detection (advisory, not strict-reject)", () =
 		});
 		expect(r.kind).toBe("v2");
 		expect(r.ok).toBe(true);
+	});
+
+	it("prefers kind:v2 when steps use id/use even if a stray nodes{} map is present (#466 LOW)", () => {
+		// v2 steps + a leftover top-level nodes{} map → genuine v2; the stray map
+		// is surfaced by the strict schema, NOT masked as a legacy verdict.
+		const r = validateWorkflow({
+			name: "v2-with-stray-nodes",
+			version: "1.0.0",
+			trigger: { http: { method: "GET" } },
+			steps: [{ id: "fetch", use: "@blokjs/api-call" }],
+			nodes: { fetch: { inputs: { url: "https://example.com" } } },
+		});
+		expect(r.kind).toBe("v2");
 	});
 });
 
