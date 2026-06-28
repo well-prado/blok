@@ -17,18 +17,30 @@ don't pull it in.
 
 ## Quickstart
 
-```json
-{
-  "id": "stream",
-  "use": "@blokjs/llm-stream",
-  "inputs": {
-    "channel": "js/`chat:${ctx.request.params.sessionId}`",
-    "apiKey": "js/process.env.OPENROUTER_API_KEY",
-    "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
-    "messages": "js/ctx.request.body.messages"
-  }
-}
+```ts
+import { workflow, step, http, tpl } from "@blokjs/core";
+import { LlmStreamNode } from "@blokjs/helpers";
+
+export default workflow(
+  "chat.message",
+  {
+    version: "1.0.0",
+    trigger: http.post("/chat/:sessionId/message", { accept: "application/json" }),
+  },
+  (req) => {
+    step("stream", LlmStreamNode, {
+      channel: tpl`chat:${req.params.sessionId}`,
+      apiKey: process.env.OPENROUTER_API_KEY,
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      messages: req.body.messages,
+    });
+  },
+);
 ```
+
+`tpl` embeds the `sessionId` path handle into the bus channel string. A
+paired [SSE workflow](/d/triggers/sse) subscribed to `chat:<sessionId>`
+pumps the streamed tokens to the browser.
 
 See the [streaming chat example](/d/examples/chat) for the end-to-end
 pattern.

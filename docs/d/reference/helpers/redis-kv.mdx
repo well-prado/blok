@@ -12,32 +12,35 @@ Used in the [chat-memory](/d/examples/chat-memory) and
 [LLM agent](/d/examples/llm-agent) examples for server-side
 conversation history.
 
+Registered as `@blokjs/redis-kv`. In the handle DSL, import the node
+object (`RedisKvNode`) from `@blokjs/helpers` and pass it to `step()`.
+Build dynamic keys from handles with `tpl`.
+
 ## Quickstart
 
-```json
-{
-  "id": "load-history",
-  "use": "@blokjs/redis-kv",
-  "inputs": {
-    "action": "get",
-    "key": "js/`chat:${ctx.request.params.sessionId}:history`"
-  }
-}
+```ts
+import { workflow, step, tpl, http } from "@blokjs/core";
+import { RedisKvNode } from "@blokjs/helpers";
+
+export default workflow("chat-history", { version: "1.0.0", trigger: http.get("/chat/:sessionId") }, (req) => {
+  step("load-history", RedisKvNode, {
+    action: "get",
+    key: tpl`chat:${req.params.sessionId}:history`,
+  });
+});
 ```
 
-Set + TTL:
+Set + TTL — feed an earlier step's handle straight into `value`:
 
-```json
-{
-  "id": "save",
-  "use": "@blokjs/redis-kv",
-  "inputs": {
-    "action": "set",
-    "key": "js/`session:${ctx.request.params.sid}`",
-    "value": "js/ctx.state.userData",
-    "ttlMs": 86400000
-  }
-}
+```ts
+const build = step("build", buildUserData, { id: req.params.sid });
+
+step("save", RedisKvNode, {
+  action: "set",
+  key: tpl`session:${req.params.sid}`,
+  value: build,
+  ttlMs: 86400000,
+});
 ```
 
 ## Inputs

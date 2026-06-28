@@ -106,7 +106,7 @@ internal webhooks — anywhere a partner sends an HMAC-signed body.
 | `secretEnv` | `string` | — | Env var holding the secret (built-in providers). |
 | `tolerance` | `number` (seconds) | `300` | Drift window for timestamp-based schemes. |
 | `events` | `string[]` | — | Allowlist of `eventType` values. Verified-but-out-of-scope events return 200 + `{status: "ignored"}` (no retry storm). |
-| `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow: event.body.type` + `namespace: "stripe"` → looks up `stripe.<type>`). |
+| `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow("dispatch", event.body.type, ...)` + `namespace: "stripe"` → looks up `stripe.<type>`). |
 | `idempotencyKey` | `string` \| `$.path` | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
 
 ## The `event` handle
@@ -126,7 +126,7 @@ The Stripe demo uses one step to handle every event type. The dispatch target is
 `event.body.type` — resolved against the live event at dispatch time:
 
 ```ts
-import { workflow, step } from "@blokjs/core";
+import { workflow, subworkflow } from "@blokjs/core";
 
 export default workflow("stripe-router", {
   version: "1.0.0",
@@ -139,7 +139,7 @@ export default workflow("stripe-router", {
     },
   },
 }, (event) => {
-  step("dispatch", null, { stripeEvent: event.body }, { subworkflow: event.body.type });
+  subworkflow("dispatch", event.body.type, { stripeEvent: event.body });
 });
 ```
 
@@ -155,7 +155,7 @@ GitHub's many event types group by family — use `switchOn` with array `when`. 
 is the event-name header handle; each `when` is a static literal:
 
 ```ts
-import { workflow, step, switchOn } from "@blokjs/core";
+import { workflow, step, switchOn, subworkflow } from "@blokjs/core";
 import { LogNode } from "@blokjs/helpers";
 
 export default workflow("github-router", {
@@ -164,10 +164,10 @@ export default workflow("github-router", {
 }, (event) => {
   switchOn(event.headers["x-github-event"], {
     cases: [
-      { when: "push", do: () => { step("dispatch-push", null, {}, { subworkflow: "github-push" }); } },
+      { when: "push", do: () => { subworkflow("dispatch-push", "github-push", {}); } },
       {
         when: ["pull_request", "pull_request_review"],
-        do: () => { step("dispatch-pr", null, {}, { subworkflow: "github-pr" }); },
+        do: () => { subworkflow("dispatch-pr", "github-pr", {}); },
       },
     ],
     default: () => { step("log-unknown", LogNode, { level: "warn", message: "unknown event" }); },

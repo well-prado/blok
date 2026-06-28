@@ -135,10 +135,10 @@ safe to re-run.
 ### Fan-out within the trigger process
 
 ```ts
-import { forEach, step } from "@blokjs/core";
+import { forEach, subworkflow } from "@blokjs/core";
 
 forEach(msg.body.orderLines, (line) => {
-  step("ship", null, { line }, { subworkflow: "ship-line-item" });
+  subworkflow("ship", "ship-line-item", { line });
 });
 ```
 

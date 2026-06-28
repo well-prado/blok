@@ -12,19 +12,22 @@ When no OTel exporter is configured (the default), the helper no-ops
 — so this is safe to leave in workflows whether you've wired metrics
 or not.
 
+Registered as `@blokjs/metrics-emit`. In the handle DSL, import the node
+object (`MetricsEmitNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "metric",
-  "use": "@blokjs/metrics-emit",
-  "ephemeral": true,
-  "inputs": {
-    "event": "order_processed",
-    "value": 1,
-    "attrs": { "tenant": "js/ctx.request.body.tenantId" }
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { MetricsEmitNode } from "@blokjs/helpers";
+
+export default workflow("process-order", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  step("metric", MetricsEmitNode, {
+    event: "order_processed",
+    value: 1,
+    attrs: { tenant: req.body.tenantId },
+  }, { ephemeral: true });
+});
 ```
 
 ## Inputs

@@ -11,16 +11,26 @@ across iterations.
 
 ## Quickstart
 
-```json
-{
-  "id": "accumulate",
-  "use": "@blokjs/ctx-publish",
-  "inputs": {
-    "name": "totals",
-    "value": "js/((ctx.state.totals || 0) + ctx.state.fetch.data.amount)"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { CtxPublishNode } from "@blokjs/helpers";
+
+export default workflow(
+  "accumulate",
+  { version: "1.0.0", trigger: http.get("/totals") },
+  () => {
+    const fetch = step("fetch", apiCall, { url: "https://example.com/api" });
+    step("accumulate", CtxPublishNode, {
+      name: "totals",
+      value: fetch.data.amount,
+    });
+  },
+);
 ```
+
+The `value` is computed from the `fetch` handle and published under the
+explicit name `totals` instead of the step id.
 
 ## Inputs
 
@@ -40,6 +50,9 @@ written.
 
 ### Loop accumulator
 
+`loop` is a JSON-only step shape (not part of the typed-handle DSL — see
+[loop](/d/primitives/loop)), so its body uses raw `ctx.*` expressions:
+
 ```json
 "loop": {
   "until": "ctx.state['fetch'].data.nextCursor === null",
@@ -51,7 +64,7 @@ written.
       "use": "@blokjs/ctx-publish",
       "inputs": {
         "name": "results",
-        "value": "js/[...(ctx.state.results || []), ...ctx.state.fetch.data.items]"
+        "value": "[...(ctx.state.results || []), ...ctx.state.fetch.data.items]"
       }
     }
   ]
@@ -61,17 +74,23 @@ written.
 The loop body's `fetch` step's data is per-iteration; `results`
 accumulates across iterations under a stable name.
 
-### Stash auth identity from middleware
+### Stash auth identity from a verify step
 
-```json
-{
-  "id": "stash-identity",
-  "use": "@blokjs/ctx-publish",
-  "inputs": {
-    "name": "identity",
-    "value": "js/({ userId: ctx.state.verify.subject, claims: ctx.state.verify.claims })"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { JwtVerifyNode, CtxPublishNode } from "@blokjs/helpers";
+
+export default workflow(
+  "stash-identity",
+  { version: "1.0.0", trigger: http.get("/me") },
+  (req) => {
+    const verify = step("verify", JwtVerifyNode, { token: req.headers.authorization });
+    step("stash-identity", CtxPublishNode, {
+      name: "identity",
+      value: { userId: verify.subject, claims: verify.claims },
+    });
+  },
+);
 ```
 
 Downstream steps read `ctx.state.identity.userId` without coupling to

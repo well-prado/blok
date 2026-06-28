@@ -10,15 +10,26 @@ patterns (echo, RPC, per-client updates).
 
 ## Quickstart
 
-```json
-{
-  "id": "reply",
-  "use": "@blokjs/ws-reply",
-  "inputs": {
-    "message": "js/({ echo: ctx.request.body, at: Date.now() })"
-  }
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import { WsReplyNode } from "@blokjs/helpers";
+
+export default workflow(
+  "ws-echo",
+  {
+    version: "1.0.0",
+    // websocket is a raw trigger block — pass it through opts.trigger.
+    trigger: { websocket: { path: "/ws/echo", events: ["message"] } },
+  },
+  (conn) => {
+    step("reply", WsReplyNode, {
+      message: { echo: conn.body, at: Date.now() },
+    });
+  },
+);
 ```
+
+`ws-reply` writes back to the exact connection that fired the run.
 
 ## Inputs
 

@@ -11,14 +11,18 @@ need durability or cross-process state.
 NOT durable: clears on process restart. NOT cross-process: each
 worker process sees its own store.
 
+Registered as `@blokjs/in-memory-kv`. In the handle DSL, import the node
+object (`InMemoryKvNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "save",
-  "use": "@blokjs/in-memory-kv",
-  "inputs": { "action": "set", "key": "user:42", "value": { "name": "Alice" } }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { InMemoryKvNode } from "@blokjs/helpers";
+
+export default workflow("save-user", { version: "1.0.0", trigger: http.post("/users") }, () => {
+  step("save", InMemoryKvNode, { action: "set", key: "user:42", value: { name: "Alice" } });
+});
 ```
 
 ## Inputs

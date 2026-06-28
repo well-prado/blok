@@ -118,7 +118,7 @@ to Slack.
 ### Per-tenant nightly job (sub-workflow fan-out)
 
 ```ts
-import { workflow, step, forEach } from "@blokjs/core";
+import { workflow, step, forEach, subworkflow } from "@blokjs/core";
 import apiCall from "@blokjs/api-call";
 
 export default workflow("nightly-per-tenant-backup", {
@@ -128,7 +128,7 @@ export default workflow("nightly-per-tenant-backup", {
   const tenants = step("list-tenants", apiCall, { url: "https://internal/tenants" });
 
   forEach(tenants.data, (tenant) => {
-    step("backup", null, { tenantId: tenant.id }, { subworkflow: "backup-tenant" });
+    subworkflow("backup", "backup-tenant", { tenantId: tenant.id });
   }, { mode: "parallel", concurrency: 5 });
 });
 ```

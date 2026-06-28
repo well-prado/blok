@@ -8,22 +8,28 @@ Logs a message via the runner's `ctx.logger.logLevel(level, message)`.
 Errors route to `ctx.logger.error(message, stack)` so the trace store
 sees the proper severity badge.
 
+Registered as `@blokjs/log`. In the handle DSL, import the node object
+(`LogNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "log",
-  "use": "@blokjs/log",
-  "ephemeral": true,
-  "inputs": {
-    "level": "info",
-    "message": "js/`processed ${ctx.state.fetch.data.length} items`"
-  }
-}
+```ts
+import { workflow, step, tpl, http } from "@blokjs/core";
+import { LogNode } from "@blokjs/helpers";
+
+export default workflow("process-items", { version: "1.0.0", trigger: http.post("/process") }, () => {
+  const fetch = step("fetch", fetchItems, {});
+
+  step("log", LogNode, {
+    level: "info",
+    message: tpl`processed ${fetch.data.length} items`,
+  }, { ephemeral: true });
+});
 ```
 
 `ephemeral: true` is the typical pattern — the log is a side effect,
-not state for downstream steps.
+not state for downstream steps. `tpl` interpolates handles into the
+message string.
 
 ## Inputs
 
@@ -56,17 +62,14 @@ you don't need state propagation.)
 
 ### Step-trace breadcrumbs
 
-```json
-{
-  "id": "log-progress",
-  "use": "@blokjs/log",
-  "ephemeral": true,
-  "inputs": {
-    "level": "info",
-    "message": "js/`fetched user ${ctx.state.lookup.data.id}`",
-    "attrs": { "userId": "js/ctx.state.lookup.data.id" }
-  }
-}
+```ts
+const lookup = step("lookup", lookupUser, { id: req.params.id });
+
+step("log-progress", LogNode, {
+  level: "info",
+  message: tpl`fetched user ${lookup.data.id}`,
+  attrs: { userId: lookup.data.id },
+}, { ephemeral: true });
 ```
 
 The `attrs` show up as a JSON suffix on the log line — searchable in
@@ -74,16 +77,14 @@ Studio's log filter.
 
 ### Conditional warning
 
-```json
-{
-  "id": "maybe-warn",
-  "branch": {
-    "when": "ctx.state.fetch.data.length === 0",
-    "then": [
-      { "id": "warn", "use": "@blokjs/log", "ephemeral": true, "inputs": { "level": "warn", "message": "empty result set" } }
-    ]
-  }
-}
+```ts
+import { branch, eq } from "@blokjs/core";
+
+branch("maybe-warn", eq(fetch.data.length, 0), {
+  then: () => {
+    step("warn", LogNode, { level: "warn", message: "empty result set" }, { ephemeral: true });
+  },
+});
 ```
 
 ## Related

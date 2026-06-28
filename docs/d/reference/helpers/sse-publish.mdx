@@ -13,16 +13,21 @@ For multi-process pub/sub, layer Redis pub/sub externally.
 
 ## Quickstart
 
-```json
-{
-  "id": "publish",
-  "use": "@blokjs/sse-publish",
-  "inputs": {
-    "channel": "js/`feed:${ctx.request.body.userId}`",
-    "event": "new-message",
-    "data": "js/ctx.request.body"
-  }
-}
+```ts
+import { workflow, step, http, tpl } from "@blokjs/core";
+import { SsePublishNode } from "@blokjs/helpers";
+
+export default workflow(
+  "post-message",
+  { version: "1.0.0", trigger: http.post("/messages") },
+  (req) => {
+    step("publish", SsePublishNode, {
+      channel: tpl`feed:${req.body.userId}`,
+      event: "new-message",
+      data: req.body,
+    });
+  },
+);
 ```
 
 A sibling SSE workflow subscribed to `feed:<userId>` immediately
@@ -53,16 +58,16 @@ events.
 
 ### Cross-workflow notification
 
-```json
-{
-  "id": "broadcast",
-  "use": "@blokjs/sse-publish",
-  "inputs": {
-    "channel": "audit-feed",
-    "event": "user-action",
-    "data": "js/({ userId: ctx.state.identity.sub, action: ctx.state['delete-user'].result })"
-  }
-}
+```ts
+const remove = step("delete-user", postgresQuery, {
+  query: "DELETE FROM users WHERE id = $1 RETURNING id",
+  params: [req.params.id],
+});
+step("broadcast", SsePublishNode, {
+  channel: "audit-feed",
+  event: "user-action",
+  data: { userId: req.body.actorId, action: remove.result },
+});
 ```
 
 An admin dashboard subscribed to `audit-feed` sees every action in

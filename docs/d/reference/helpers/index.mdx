@@ -1,6 +1,6 @@
 ---
 title: "Helper nodes reference"
-description: "The @blokjs/helpers package — pre-built nodes you reference by `use:` in any v2 workflow."
+description: "The @blokjs/helpers package — pre-built node objects you pass to step() in any v2 workflow."
 icon: "puzzle"
 ---
 
@@ -8,11 +8,24 @@ icon: "puzzle"
 workflow plumbing — logging, conditionals, KV state, HMAC verification,
 JWT auth, LLM streaming + tool calls, HTTP response shaping, webhook
 dispatch, and SSE / WS / worker / pub-sub publishers. Each helper has a
-canonical `@blokjs/<name>` identifier you reference via `use:` in any step.
+canonical `@blokjs/<name>` identifier.
+
+In the handle DSL, import each helper as a **node object** by its
+PascalCase name (`RespondNode`, `ExprNode`, …) and pass it to `step()`:
+
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow("hello", { version: "1.0.0", trigger: http.get("/hello") }, () => {
+  step("respond", ExprNode, { expression: "({ message: 'hello world' })" });
+});
+```
 
 Helpers are auto-registered when `@blokjs/helpers` is in your project
 deps. The `HELPER_NODES` barrel is spread into the runner's node
-registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
+registry at boot, so the canonical `@blokjs/<name>` refs also resolve in
+JSON workflows.
 
 ## Inventory
 
@@ -125,26 +138,28 @@ registry at boot, so `use: "@blokjs/expr"` (etc.) Just Works.
 
 ## Public surface & imports
 
-The `@blokjs/helper` package exports ~8 author symbols: `workflow`, `branch`, `eq`, `forEach`, `loop`, `switchOn`, `tryCatch`, and `$` (the typed context proxy). These are the tools for authoring workflows and nodes.
-
-Advanced imports (Zod schemas, type-guards, step-shape internals, trigger validation) live behind `@blokjs/helper/internal` — reserved for framework tooling and advanced use cases. Regular authors don't need them; they're separated to avoid bloating the main entry point.
+Author workflows with `@blokjs/core` — `workflow`, `step`, `branch`,
+`switchOn`, `tryCatch`, `forEach`, `loop`, the trigger helpers (`http`,
+…), the typed comparators (`eq`, `ne`, `gt`, …), and `tpl`. Import the
+helper nodes themselves as objects from `@blokjs/helpers`.
 
 ```ts
-// Regular authoring — use these
-import { workflow, branch, $ } from "@blokjs/helper";
-
-// Advanced only — framework tooling
-import { V2StepSchema, isBranchStep, type V2Step } from "@blokjs/helper/internal";
+import { workflow, step, branch, tpl, http, eq } from "@blokjs/core";
+import { RespondNode, ExprNode } from "@blokjs/helpers";
 ```
 
 ## Conventions
 
 Every helper follows the same shape:
 
-- **`use:`** — canonical id (`@blokjs/<name>`)
-- **`inputs:`** — Zod-validated input fields (see each helper page)
+- **node object** — import its PascalCase export from `@blokjs/helpers`
+  and pass it as `step()`'s second argument (the canonical `@blokjs/<name>`
+  ref is what JSON workflows reference via `use:`)
+- **`inputs`** — Zod-validated input fields, the third `step()` argument
+  (see each helper page)
 - Output stored at `ctx.state[<step-id>]` by default — opt out with
-  `ephemeral: true`, rename with `as:`, flatten with `spread:`
+  `ephemeral: true`, rename with `as:`, flatten with `spread:` (the step
+  options object, `step()`'s fourth argument)
 - Errors surface as `GlobalError` with `code` propagated to the trigger's
   HTTP response (so `@blokjs/throw` with `code: 401` gives an actual 401)
 

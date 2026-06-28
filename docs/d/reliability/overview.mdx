@@ -120,7 +120,7 @@ just the fragile step. The rest of the workflow stays simple.
   A `wait.for(duration)` step is a feature-add (~2-3 days), not an
   architectural prerequisite. Until then, compose the same effect
   with a delayed sub-workflow:
-  `step("wait", null, { ... }, { subworkflow: "post-wait-half", wait: false })`
+  `subworkflow("wait", "post-wait-half", { ... }, { wait: false })`
   paired with `delay: "3d"` on the child trigger. See
   [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md)
   for the implementation sketch.

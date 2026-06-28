@@ -13,16 +13,21 @@ a parallel `forEach` to enqueue N jobs in one HTTP request.
 
 ## Quickstart
 
-```json
-{
-  "id": "enqueue",
-  "use": "@blokjs/worker-publish",
-  "inputs": {
-    "queue": "background-jobs",
-    "payload": "js/({ orderId: ctx.request.body.orderId })",
-    "dedupId": "js/ctx.request.body.orderId"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { WorkerPublishNode } from "@blokjs/helpers";
+
+export default workflow(
+  "enqueue-job",
+  { version: "1.0.0", trigger: http.post("/jobs") },
+  (req) => {
+    step("enqueue", WorkerPublishNode, {
+      queue: "background-jobs",
+      payload: { orderId: req.body.orderId },
+      dedupId: req.body.orderId,
+    });
+  },
+);
 ```
 
 ## Inputs
@@ -57,7 +62,7 @@ queue on the same process publishes through the same NATS connection.
 
 - Parallel `forEach` for fan-out — see the
   [worker fan-out example](/d/examples/worker-fanout)
-- `dedupId: $.req.body.requestId` for at-most-once enqueue
+- `dedupId: req.body.requestId` for at-most-once enqueue
 - Pair with a worker trigger that has
   [`concurrencyKey`](/d/reliability/concurrency-keys) for per-tenant
   consumer-side fairness

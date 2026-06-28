@@ -14,11 +14,12 @@ Add an `events` map to the workflow — each key is an event name, each value th
 Zod schema for that event's `data`. This becomes the client's event union.
 
 ```ts triggers/http/src/workflows/jobs/watch.ts
-import { workflow } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import { SseEmitNode } from "@blokjs/helpers";
 import { z } from "zod";
 
-export default workflow({
-  name: "jobs.watch",
+export default workflow("jobs.watch", {
+  version: "1.0.0",
   input: z.object({ jobId: z.string() }),
   events: {
     progress: z.object({ pct: z.number().min(0).max(100) }),
@@ -26,12 +27,11 @@ export default workflow({
     done: z.object({ ok: z.boolean() }),
     error: z.object({ message: z.string() }),
   },
-  trigger: { http: { method: "POST", path: "/api/jobs/watch" } },
-  steps: [
-    { id: "p1", use: "@blokjs/sse-emit", inputs: { event: "progress", data: { pct: 10 } }, ephemeral: true },
-    { id: "p2", use: "@blokjs/sse-emit", inputs: { event: "progress", data: { pct: 100 } }, ephemeral: true },
-    { id: "fin", use: "@blokjs/sse-emit", inputs: { event: "done", data: { ok: true } }, ephemeral: true },
-  ],
+  trigger: http.post("/api/jobs/watch"),
+}, (req) => {
+  step("p1", SseEmitNode, { event: "progress", data: { pct: 10 } }, { ephemeral: true });
+  step("p2", SseEmitNode, { event: "progress", data: { pct: 100 } }, { ephemeral: true });
+  step("fin", SseEmitNode, { event: "done", data: { ok: true } }, { ephemeral: true });
 });
 ```
 

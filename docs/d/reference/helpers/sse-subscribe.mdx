@@ -13,16 +13,27 @@ two-step pattern (subscribe → stream) is the canonical SSE shape.
 
 ## Quickstart
 
-```json
-{
-  "id": "sub",
-  "use": "@blokjs/sse-subscribe",
-  "inputs": { "channels": ["chat:{sessionId}"] }
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import { SseSubscribeNode, SseStreamNode } from "@blokjs/helpers";
+
+export default workflow(
+  "chat.stream",
+  {
+    version: "1.0.0",
+    // sse is a raw trigger block — pass it through opts.trigger.
+    trigger: { sse: { path: "/sse/chat/:sessionId" } },
+  },
+  () => {
+    const sub = step("sub", SseSubscribeNode, { channels: ["chat:{sessionId}"] });
+    step("stream", SseStreamNode, { source: sub });
+  },
+);
 ```
 
-`{sessionId}` resolves from `ctx.request.params.sessionId` at run
-time.
+`{sessionId}` resolves from `ctx.request.params.sessionId` at run time.
+The `sub` handle flows straight into the `stream` step's `source` — no
+`ctx.state` strings.
 
 ## Inputs
 
@@ -39,24 +50,17 @@ next `@blokjs/sse-stream` step. Don't inspect directly.
 
 ### Per-session subscription
 
-```json
-"trigger": { "sse": { "path": "/sse/chat/:sessionId" } },
-"steps": [
-  { "id": "sub", "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["chat:{sessionId}"] } },
-  { "id": "stream", "use": "@blokjs/sse-stream", "inputs": { "source": "js/ctx.state.sub" } }
-]
-```
-
-Every connected browser subscribes only to its own conversation.
+The [quickstart](#quickstart) above is exactly this — the `{sessionId}`
+placeholder fills from the path param, so every connected browser
+subscribes only to its own conversation.
 
 ### Multi-channel subscription
 
-```json
-{
-  "id": "sub",
-  "use": "@blokjs/sse-subscribe",
-  "inputs": { "channels": ["feed", "alerts", "system"] }
-}
+```ts
+const sub = step("sub", SseSubscribeNode, {
+  channels: ["feed", "alerts", "system"],
+});
+step("stream", SseStreamNode, { source: sub });
 ```
 
 Events from any of the three channels stream out the one connection.

@@ -9,19 +9,27 @@ step. Returns `{ count }` of keys published.
 
 ## Quickstart
 
-```json
-{
-  "id": "advance",
-  "use": "@blokjs/ctx-publish-many",
-  "inputs": {
-    "values": {
-      "lastStatus": "js/ctx.state.check.status",
-      "attempt": "js/(ctx.state.attempt || 0) + 1",
-      "checkedAt": "js/Date.now()"
-    }
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { CtxPublishManyNode } from "@blokjs/helpers";
+
+export default workflow(
+  "advance",
+  { version: "1.0.0", trigger: http.get("/advance") },
+  () => {
+    const check = step("check", apiCall, { url: "https://example.com/status" });
+    step("advance", CtxPublishManyNode, {
+      values: {
+        lastStatus: check.status,
+        checkedAt: Date.now(),
+      },
+    });
+  },
+);
 ```
+
+Each entry in `values` writes one key to `ctx.state` in a single step.
 
 ## Inputs
 

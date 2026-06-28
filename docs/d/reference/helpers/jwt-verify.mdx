@@ -10,37 +10,47 @@ keys. Validates `iss`, `aud`, `exp` claims. Returns the decoded
 payload + convenience aliases (`subject`, `issuer`, `audience`,
 `expiresAt`) on success.
 
+Registered as `@blokjs/jwt-verify`. In the handle DSL, import the node
+object (`JwtVerifyNode`) from `@blokjs/helpers` and pass it to `step()`.
+Strip the `Bearer ` prefix off the header with a small `ExprNode` step,
+then feed its handle into the verifier.
+
 ## Quickstart
 
 ### HS256 with shared secret
 
-```json
-{
-  "id": "auth",
-  "use": "@blokjs/jwt-verify",
-  "inputs": {
-    "token": "js/ctx.request.headers['authorization']?.replace('Bearer ', '')",
-    "secret": "js/process.env.JWT_SECRET",
-    "issuer": "https://auth.example.com",
-    "audience": "my-api"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { ExprNode, JwtVerifyNode } from "@blokjs/helpers";
+
+export default workflow("auth", { version: "1.0.0", trigger: http.post("/secure") }, () => {
+  const bearer = step("bearer", ExprNode, {
+    expression: "ctx.request.headers['authorization']?.replace('Bearer ', '')",
+  });
+
+  step("auth", JwtVerifyNode, {
+    token: bearer,
+    secret: process.env.JWT_SECRET,
+    issuer: "https://auth.example.com",
+    audience: "my-api",
+  });
+});
 ```
 
 ### RS256 with JWKS endpoint
 
-```json
-{
-  "id": "auth",
-  "use": "@blokjs/jwt-verify",
-  "inputs": {
-    "token": "js/ctx.request.headers['authorization']?.slice(7)",
-    "jwksUri": "https://auth.example.com/.well-known/jwks.json",
-    "issuer": "https://auth.example.com",
-    "audience": "my-api",
-    "algorithms": ["RS256"]
-  }
-}
+```ts
+const bearer = step("bearer", ExprNode, {
+  expression: "ctx.request.headers['authorization']?.slice(7)",
+});
+
+step("auth", JwtVerifyNode, {
+  token: bearer,
+  jwksUri: "https://auth.example.com/.well-known/jwks.json",
+  issuer: "https://auth.example.com",
+  audience: "my-api",
+  algorithms: ["RS256"],
+});
 ```
 
 ## Inputs
@@ -90,35 +100,30 @@ keys by `kid` in-process. Re-fetched lazily on cache miss. Use
 
 ### Bearer-token middleware
 
-```json
-{
-  "name": "auth-check",
-  "_middleware": true,
-  "steps": [
-    {
-      "id": "verify",
-      "use": "@blokjs/jwt-verify",
-      "inputs": {
-        "token": "js/ctx.request.headers['authorization']?.slice(7)",
-        "secret": "js/process.env.JWT_SECRET",
-        "issuer": "...",
-        "audience": "..."
-      }
-    },
-    {
-      "id": "stash-identity",
-      "use": "@blokjs/ctx-publish",
-      "inputs": {
-        "name": "identity",
-        "value": "js/({ userId: ctx.state.verify.subject, claims: ctx.state.verify.claims })"
-      }
-    }
-  ]
-}
+Verify, then stash the identity for downstream steps. `CtxPublishNode`
+writes under a chosen `ctx.state` name:
+
+```ts
+import { CtxPublishNode, ExprNode, JwtVerifyNode } from "@blokjs/helpers";
+
+const bearer = step("bearer", ExprNode, {
+  expression: "ctx.request.headers['authorization']?.slice(7)",
+});
+
+const verify = step("verify", JwtVerifyNode, {
+  token: bearer,
+  secret: process.env.JWT_SECRET,
+  issuer: "...",
+  audience: "...",
+});
+
+step("stash-identity", CtxPublishNode, {
+  name: "identity",
+  value: { userId: verify.subject, claims: verify.claims },
+});
 ```
 
-Reference the middleware from any trigger config:
-`"middleware": ["auth-check"]`. Downstream steps see
+Mounted as trigger-level middleware, downstream steps see
 `ctx.state.identity.userId` once verified.
 
 ### Algorithm allowlist (defense against alg-mix attacks)
@@ -126,8 +131,8 @@ Reference the middleware from any trigger config:
 ALWAYS pin `algorithms:` in production. A token signed with a different
 algorithm than expected (or `none`) can otherwise sneak through.
 
-```json
-"algorithms": ["RS256"]
+```ts
+step("auth", JwtVerifyNode, { token: bearer, jwksUri: "...", algorithms: ["RS256"] });
 ```
 
 ## Composition

@@ -63,9 +63,25 @@ Instead of building a single service to handle all steps of user registration, b
 2. **Create User**: Another blok creates the user record in the database.  
 3. **Send Welcome Email**: A separate blok handles email delivery.  
 
+In the handle DSL, that's three single-responsibility nodes composed by one
+workflow — each step's output flows into the next as a typed handle:
+
+```typescript
+import { workflow, step, http } from "@blokjs/core";
+import validate from "./nodes/validate-input";
+import createUser from "./nodes/create-user";
+import sendWelcome from "./nodes/send-welcome-email";
+
+export default workflow("users.register", { version: "1.0.0", trigger: http.post("/register") }, (req) => {
+  const valid = step("validate", validate, { body: req.body });
+  const user = step("create", createUser, { email: valid.email });
+  step("welcome", sendWelcome, { userId: user.id }, { ephemeral: true });
+});
+```
+
 By splitting responsibilities this way:  
-- Each service is **independent and reusable**.  
-- Failures in one service (e.g., email sending) do not impact others.  
+- Each blok is **independent and reusable** — `validate` and `sendWelcome` drop into other workflows unchanged.  
+- Failures in one blok (e.g., email sending) do not impact others.  
 - Developers can test, deploy, and scale each blok independently.  
 
 ## When to Use Blok  

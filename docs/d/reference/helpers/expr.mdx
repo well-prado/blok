@@ -9,33 +9,36 @@ Runs a JS expression via `new Function()` with `ctx`, `data`, `func`,
 when you need a small computed value — derived field, counter, boolean
 test — inside a loop, branch, or chained step.
 
+Registered as `@blokjs/expr`. In the handle DSL, import the node object
+(`ExprNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 The cleanest "response shape" step at the end of a workflow:
 
-```json
-{
-  "id": "respond",
-  "use": "@blokjs/expr",
-  "inputs": {
-    "expression": "({ ok: true, count: ctx.state.fetch.data.length, items: ctx.state.fetch.data })"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow("list-items", { version: "1.0.0", trigger: http.get("/items") }, () => {
+  // ... a "fetch" step runs earlier ...
+  step("respond", ExprNode, {
+    expression: "({ ok: true, count: ctx.state.fetch.data.length, items: ctx.state.fetch.data })",
+  });
+});
 ```
 
 ## Quickstart
 
-```json
-{
-  "id": "derived",
-  "use": "@blokjs/expr",
-  "inputs": { "expression": "ctx.state.user.firstName + ' ' + ctx.state.user.lastName" }
-}
+```ts
+step("derived", ExprNode, {
+  expression: "ctx.state.user.firstName + ' ' + ctx.state.user.lastName",
+});
 ```
 
 ## Inputs
 
 | Field | Type | Notes |
 |---|---|---|
-| `expression` | `string` | A JS expression. Evaluated against the live ctx. Required. |
+| `expression` | `string` | A JS expression. Evaluated against the live ctx. Required. **A raw `ctx.*` JS string** — it is itself mapper-resolved, so do NOT prefix it with `js/` (that double-evaluates) and do NOT pass a `$`/handle. Write plain `ctx.state.x.y`. |
 
 ## Output
 
@@ -54,14 +57,10 @@ The expression's return value, written to `ctx.state[<step-id>]`.
 
 ### Response shaping
 
-```json
-{
-  "id": "respond",
-  "use": "@blokjs/expr",
-  "inputs": {
-    "expression": "({ ok: true, fullText: ctx.state.stream.fullText, turn: ctx.state.counter })"
-  }
-}
+```ts
+step("respond", ExprNode, {
+  expression: "({ ok: true, fullText: ctx.state.stream.fullText, turn: ctx.state.counter })",
+});
 ```
 
 The HTTP trigger reads the final state and writes the expression's
@@ -69,18 +68,14 @@ return value as the response body.
 
 ### Computed predicates inside branches
 
-The `branch.when` field already takes a JS expression — `@blokjs/expr`
+The `branch` condition already takes a comparator — `@blokjs/expr`
 is for the cases where you need to **stash** a computed value into
 state for downstream steps:
 
-```json
-{
-  "id": "compute-priority",
-  "use": "@blokjs/expr",
-  "inputs": {
-    "expression": "(ctx.request.body.tier === 'enterprise' || ctx.request.body.priorityFlag) ? 'high' : 'normal'"
-  }
-}
+```ts
+step("compute-priority", ExprNode, {
+  expression: "(ctx.request.body.tier === 'enterprise' || ctx.request.body.priorityFlag) ? 'high' : 'normal'",
+});
 ```
 
 Now `ctx.state['compute-priority']` holds `"high"` or `"normal"` for
@@ -88,14 +83,10 @@ later branches.
 
 ### Transforming list elements
 
-```json
-{
-  "id": "extract-ids",
-  "use": "@blokjs/expr",
-  "inputs": {
-    "expression": "ctx.state.users.data.map(u => u.id).filter(id => id != null)"
-  }
-}
+```ts
+step("extract-ids", ExprNode, {
+  expression: "ctx.state.users.data.map(u => u.id).filter(id => id != null)",
+});
 ```
 
 ## Security
@@ -105,8 +96,8 @@ NOT pass untrusted strings as `expression`** — it's full JS evaluation.
 For computed expressions from user input, use a sandboxed math parser
 (e.g. `mathjs`) instead.
 
-The `expression` field is **literal** in the workflow JSON, so under
-the v2 default this is safe — workflow definitions ship with the
+The `expression` field is a **literal string** in the workflow source, so
+under the v2 default this is safe — workflow definitions ship with the
 project and aren't accepted from user input.
 
 ## Composition
@@ -128,6 +119,6 @@ project and aren't accepted from user input.
     Conditionals via `when:` expressions.
   </Card>
   <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
-    `js/` expressions in step inputs.
+    Step-input expressions and persistence knobs.
   </Card>
 </Columns>

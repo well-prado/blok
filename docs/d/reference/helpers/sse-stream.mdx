@@ -14,16 +14,26 @@ fires.
 
 ## Quickstart
 
-```json
-{
-  "id": "stream",
-  "use": "@blokjs/sse-stream",
-  "inputs": { "source": "js/ctx.state.sub" }
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import { SseSubscribeNode, SseStreamNode } from "@blokjs/helpers";
+
+export default workflow(
+  "chat.stream",
+  {
+    version: "1.0.0",
+    // sse is a raw trigger block — pass it through opts.trigger.
+    trigger: { sse: { path: "/sse/chat/:sessionId" } },
+  },
+  () => {
+    const sub = step("sub", SseSubscribeNode, { channels: ["chat:{sessionId}"] });
+    step("stream", SseStreamNode, { source: sub });
+  },
+);
 ```
 
-`ctx.state.sub` is whatever the upstream `@blokjs/sse-subscribe` step
-returned.
+The `sub` handle returned by `@blokjs/sse-subscribe` flows straight into
+`source` — `sse-stream` drains it and writes each event as an SSE frame.
 
 ## Inputs
 

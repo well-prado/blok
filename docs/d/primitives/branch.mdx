@@ -93,8 +93,7 @@ This is footgun #1 — see [Handles & footguns](/d/primitives/handles-and-footgu
     ```ts
     branch("maybe-charge", req.body.requireBilling, {
       then: () => {
-        step("charge", null, { amount: req.body.amount }, {
-          subworkflow: "charge-card",
+        subworkflow("charge", "charge-card", { amount: req.body.amount }, {
           idempotencyKey: req.body.requestId,
         });
       },

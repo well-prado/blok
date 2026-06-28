@@ -7,7 +7,7 @@ icon: "webhook"
 Three production-shaped webhook receivers in one demo:
 
 - **Stripe** — built-in `provider: "stripe"` verifier + polymorphic
-  dispatch via `subworkflow: $.req.body.type` (no switch step needed)
+  dispatch via `subworkflow("dispatch", event.body.type, ...)` (no switch step needed)
 - **GitHub** — built-in `provider: "github"` verifier + a switch step
   that routes per-event-type sub-workflows, grouping related events
   with array `when`
@@ -101,7 +101,7 @@ prepended the namespace (`stripe.`), and dispatched to the
 ## Stripe — polymorphic dispatch
 
 ```ts src/workflows/webhook-stripe.ts
-import { workflow, step } from "@blokjs/core";
+import { workflow, subworkflow } from "@blokjs/core";
 
 export default workflow(
   "webhook-stripe",
@@ -120,27 +120,25 @@ export default workflow(
   },
   // Webhook entry handle is `event` — body is the verified payload.
   (event) => {
-    // One step, every event type. `subworkflow` resolves the verified
-    // body at dispatch time; `namespace: "stripe"` prefixes the result.
-    step("dispatch", null, { stripeEvent: event.body }, {
-      subworkflow: "$.req.body.type",
-    });
+    // One step, every event type. The dispatch target is the `event.body.type`
+    // handle, resolved at dispatch time; `namespace: "stripe"` prefixes the result.
+    subworkflow("dispatch", event.body.type, { stripeEvent: event.body });
   },
 );
 ```
 
 The headline: **one step** handles every Stripe event type. The
-`subworkflow` field is an expression that resolves against the verified
-body. After the trigger's `namespace: "stripe"` prefix, a
-`body.type === "invoice.paid"` event lands on the workflow named
-`stripe.invoice.paid`.
+`subworkflow()` dispatch target is the `event.body.type` handle, which
+resolves against the verified body at dispatch time. After the
+trigger's `namespace: "stripe"` prefix, a `body.type === "invoice.paid"`
+event lands on the workflow named `stripe.invoice.paid`.
 
 <Note>
-A subworkflow-dispatch step passes `null` as the node — there's no
-local node to run, just a child workflow to invoke. The `subworkflow`
-expression is a trigger-resolved string (`"$.req.body.type"`), not a
-handle, because it's evaluated at dispatch time after the namespace
-prefix is applied.
+`subworkflow(id, name, inputs, opts?)` is the handle-DSL way to invoke a
+child workflow — there's no local node to run, just a child to dispatch.
+The `name` argument accepts a literal string *or* a handle like
+`event.body.type` for polymorphic routing; the handle is resolved at
+dispatch time, after the namespace prefix is applied.
 </Note>
 
 | Trigger field | Effect |
@@ -177,7 +175,7 @@ exist and the trigger returns 200 with a structured "no handler" body
 ## GitHub — switch with array `when`
 
 ```ts src/workflows/webhook-github.ts
-import { workflow, step, switchOn, tpl } from "@blokjs/core";
+import { workflow, step, switchOn, subworkflow, tpl } from "@blokjs/core";
 import { ExprNode, LogNode } from "@blokjs/helpers";
 
 export default workflow(
@@ -203,15 +201,15 @@ export default workflow(
       kind,
       {
         cases: [
-          { when: "push", do: () => { step("dispatch-push", null, {}, { subworkflow: "webhook-github-push" }); } },
+          { when: "push", do: () => { subworkflow("dispatch-push", "webhook-github-push", {}); } },
           {
             // Array `when` — matches any value in the list.
             when: ["pull_request", "pull_request_review", "pull_request_review_comment"],
-            do: () => { step("dispatch-pr", null, {}, { subworkflow: "webhook-github-pr" }); },
+            do: () => { subworkflow("dispatch-pr", "webhook-github-pr", {}); },
           },
           {
             when: ["issues", "issue_comment"],
-            do: () => { step("dispatch-issues", null, {}, { subworkflow: "webhook-github-issues" }); },
+            do: () => { subworkflow("dispatch-issues", "webhook-github-issues", {}); },
           },
         ],
         default: () => {
@@ -238,7 +236,7 @@ Linear isn't a built-in provider. The webhook trigger's `signature`
 config lets you describe any HMAC scheme without writing code:
 
 ```ts src/workflows/webhook-linear.ts
-import { workflow, step, switchOn } from "@blokjs/core";
+import { workflow, step, switchOn, subworkflow } from "@blokjs/core";
 import { ExprNode, LogNode } from "@blokjs/helpers";
 
 export default workflow(
@@ -268,8 +266,8 @@ export default workflow(
       kind,
       {
         cases: [
-          { when: "issue", do: () => { step("dispatch-issue", null, {}, { subworkflow: "webhook-linear-issue" }); } },
-          { when: "comment", do: () => { step("dispatch-comment", null, {}, { subworkflow: "webhook-linear-comment" }); } },
+          { when: "issue", do: () => { subworkflow("dispatch-issue", "webhook-linear-issue", {}); } },
+          { when: "comment", do: () => { subworkflow("dispatch-comment", "webhook-linear-comment", {}); } },
         ],
         default: () => {
           step("log-unknown", LogNode, { level: "warn", message: "webhook-linear: unknown event type" });
@@ -336,15 +334,14 @@ Add a workflow named `stripe.<event-type>`. No router change needed.
 Stripe currently emits 100+ event types — start with the ones you
 actually care about.
 
-### Use `subworkflow.allowList` for safety
+### Use `allowList` for safety
 
-Polymorphic dispatch with `subworkflow: "$.req.body.type"` accepts
-anything the body says. To bound which names a malicious payload can
-resolve to, pass `allowList` in the step opts:
+Polymorphic dispatch on the `event.body.type` handle accepts anything
+the body says. To bound which names a malicious payload can resolve to,
+pass `allowList` in the opts:
 
 ```ts
-step("dispatch", null, { stripeEvent: event.body }, {
-  subworkflow: "$.req.body.type",
+subworkflow("dispatch", event.body.type, { stripeEvent: event.body }, {
   allowList: ["invoice.paid", "customer.created", "charge.succeeded"],
 });
 ```

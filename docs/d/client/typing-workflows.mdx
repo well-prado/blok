@@ -21,19 +21,17 @@ is what `BlokApp` carries to the client.
 | `events` | the streaming event union | `blok.x.y.stream(input)` |
 
 ```ts
-import { workflow } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
 import { z } from "zod";
 
 const User = z.object({ id: z.string(), name: z.string() });
 
-export default workflow({
-  name: "users.list",
+export default workflow("users.list", {
   input: z.object({ q: z.string().optional(), limit: z.number().int().max(100).default(20) }),
   output: z.object({ users: z.array(User), total: z.number().int() }),
-  trigger: { http: { method: "GET", path: "/api/users" } },
-  steps: [
-    /* … */
-  ],
+  trigger: http.get("/api/users"),
+}, (req) => {
+  /* … */
 });
 ```
 
@@ -68,20 +66,21 @@ A loop that produces one item per iteration is an array. The N iterations are
 invisible to the caller.
 
 ```ts
-import { workflow, forEach, $ } from "@blokjs/helper";
+import { workflow, step, forEach, http } from "@blokjs/core";
+import { RespondNode } from "@blokjs/helpers";
 import { z } from "zod";
 
 const EnrichedUser = z.object({ id: z.string(), score: z.number() });
 
-export default workflow({
-  name: "users.enrich",
+export default workflow("users.enrich", {
   input: z.object({ ids: z.array(z.string()) }),
   output: z.object({ users: z.array(EnrichedUser) }),
-  trigger: { http: { method: "POST", path: "/api/users/enrich" } },
-  steps: [
-    forEach({ id: "loop", items: "$.req.body.ids", as: "users", body: [ /* … */ ] }),
-    { id: "out", use: "@blokjs/respond", inputs: { body: { users: $.state.users } }, ephemeral: true },
-  ],
+  trigger: http.post("/api/users/enrich"),
+}, (req) => {
+  const users = forEach(req.body.ids, (id) => {
+    /* … step(...) per id; each iteration's result becomes one array item */
+  }, { as: "users" });
+  step("out", RespondNode, { body: { users } }, { ephemeral: true });
 });
 ```
 
@@ -95,26 +94,24 @@ When arms return different shapes, the union is the contract, and TypeScript
 forces the caller to narrow.
 
 ```ts
-import { workflow, branch } from "@blokjs/helper";
+import { workflow, step, branch, http } from "@blokjs/core";
+import { RespondNode } from "@blokjs/helpers";
 import { z } from "zod";
 
-export default workflow({
-  name: "payments.process",
+export default workflow("payments.process", {
   input: z.object({ amount: z.number(), method: z.string() }),
   output: z.discriminatedUnion("status", [
     z.object({ status: z.literal("paid"), receiptId: z.string() }),
     z.object({ status: z.literal("declined"), reason: z.string() }),
   ]),
-  trigger: { http: { method: "POST", path: "/api/payments" } },
-  steps: [
-    branch({
-      id: "route",
-      when: "$.state.charge.ok",
-      then: [ /* … leaves { status: "paid", receiptId } */ ],
-      else: [ /* … leaves { status: "declined", reason } */ ],
-    }),
-    { id: "out", use: "@blokjs/respond", inputs: { body: "$.prev" }, ephemeral: true },
-  ],
+  trigger: http.post("/api/payments"),
+}, (req) => {
+  const charge = step("charge", chargeCard, { amount: req.body.amount });
+  branch("route", charge.ok, {
+    then: () => { /* … leaves { status: "paid", receiptId } */ },
+    else: () => { /* … leaves { status: "declined", reason } */ },
+  });
+  step("out", RespondNode, { body: charge }, { ephemeral: true });
 });
 ```
 

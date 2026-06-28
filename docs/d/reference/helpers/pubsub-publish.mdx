@@ -12,17 +12,30 @@ in the same process — same connection, same credentials.
 
 ## Quickstart
 
-```json
-{
-  "id": "publish",
-  "use": "@blokjs/pubsub-publish",
-  "inputs": {
-    "provider": "gcp",
-    "topic": "orders.placed",
-    "message": "js/({ orderId: ctx.state.create.id, total: ctx.state.create.total })"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import postgresQuery from "../nodes/postgres-query";
+import { PubsubPublishNode } from "@blokjs/helpers";
+
+export default workflow(
+  "create-order",
+  { version: "1.0.0", trigger: http.post("/orders") },
+  (req) => {
+    const create = step("create", postgresQuery, {
+      query: "INSERT INTO orders ... RETURNING id, total",
+      params: [req.body.items],
+    });
+    step("publish", PubsubPublishNode, {
+      provider: "gcp",
+      topic: "orders.placed",
+      message: { orderId: create.id, total: create.total },
+    });
+  },
+);
 ```
+
+The `publish` step emits the event off the `create` handle — no
+`ctx.state` strings.
 
 ## Inputs
 
@@ -44,35 +57,18 @@ in the same process — same connection, same credentials.
 
 ### Decoupled event emission
 
-```json
-{
-  "name": "Create Order",
-  "trigger": { "http": { "method": "POST", "path": "/orders" } },
-  "steps": [
-    { "id": "create", "use": "@blokjs/postgres-query", "inputs": { "query": "INSERT INTO orders ..." } },
-    {
-      "id": "emit",
-      "use": "@blokjs/pubsub-publish",
-      "inputs": { "provider": "gcp", "topic": "orders.placed", "message": "js/ctx.state.create.data" }
-    }
-  ]
-}
-```
-
-Downstream services subscribe via [pub/sub trigger](/d/triggers/pubsub)
-on `orders.placed` and react asynchronously.
+The [quickstart](#quickstart) above is exactly this pattern — write to the
+database, then emit the event off the returned handle. Downstream services
+subscribe via [pub/sub trigger](/d/triggers/pubsub) on `orders.placed` and
+react asynchronously.
 
 ### Provider-agnostic via env var
 
-```json
-{
-  "id": "publish",
-  "use": "@blokjs/pubsub-publish",
-  "inputs": {
-    "topic": "orders.placed",
-    "message": "js/ctx.state.create.data"
-  }
-}
+```ts
+step("publish", PubsubPublishNode, {
+  topic: "orders.placed",
+  message: create.data,
+});
 ```
 
 Without an explicit `provider`, the helper reads

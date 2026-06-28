@@ -126,7 +126,7 @@ failures. Don't put cleanup that must run on cancel inside a `catch`.
 
     ```ts
     tryCatch("process", {
-      try: () => { step("run", null, { payload: req.body }, { subworkflow: "expensive-pipeline" }); },
+      try: () => { subworkflow("run", "expensive-pipeline", { payload: req.body }); },
       catch: () => { step("requeue", workerPublish, { queue: "retry-queue", payload: req.body }); },
     });
     ```
