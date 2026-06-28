@@ -15,6 +15,7 @@
 export {
 	workflowCallback,
 	step,
+	subworkflow,
 	branch,
 	forEach,
 	switchOn,
@@ -29,5 +30,5 @@ export {
 	not,
 } from "./stepBuilder";
 export { defineNode } from "./defineNode";
-export type { TriggerHandle } from "./stepBuilder";
+export type { TriggerHandle, SubworkflowOptions } from "./stepBuilder";
 export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, runtimeNode } from "./handles";
