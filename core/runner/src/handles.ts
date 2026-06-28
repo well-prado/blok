@@ -87,6 +87,36 @@ export type EphemeralHandle<T> = {
 };
 
 /**
+ * The error envelope a `tryCatch` catch arm receives, modeling
+ * `TryCatchNode.toErrorEnvelope` (core/runner/src/TryCatchNode.ts) EXACTLY:
+ *
+ * - `message` / `name` are ALWAYS present (a thrown non-Error value defaults
+ *   `name` to "Error" and stringifies the value into `message`).
+ * - `stack` is optional (absent on thrown non-Error values).
+ * - `code` is `number | undefined` — only a `GlobalError` carries one; a plain
+ *   `throw new Error(...)` yields `code: undefined`.
+ * - `stepId` is `string | undefined` — set from the try-arm step's id by
+ *   RunnerSteps' wrap; a pre-wrap throw (or a value bypassing the inner-try
+ *   wrap) yields `stepId: undefined`.
+ *
+ * The handle is rooted at the `@error` sentinel, which `lowerRefs` maps to
+ * `ctx.error` — so `error.code` lowers to `js/ctx.error.code`. It is scoped to
+ * the catch arm: reading it from `try`/`finally`/after the tryCatch is rejected
+ * at author time (the cornerstone `canRead` guard).
+ *
+ * Carve-out: the catch arm does NOT fire for `WaitDispatchRequest` /
+ * `RunCancelledError` (re-thrown past catch in TryCatchNode) — the "catches any
+ * throw" mental model is wrong for those two control signals.
+ */
+export type ErrorHandle = Handle<{
+	message: string;
+	name: string;
+	stack?: string;
+	code?: number;
+	stepId?: string;
+}>;
+
+/**
  * The input boundary. A workflow input that expects `T` also accepts a `Handle<T>`,
  * recursively: handles may appear at leaves, inside arrays, or as the whole object.
  */

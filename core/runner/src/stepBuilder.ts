@@ -34,7 +34,7 @@ import {
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
 import type { z } from "zod";
-import type { EphemeralHandle, Handle, OutputOf } from "./handles";
+import type { EphemeralHandle, ErrorHandle, Handle, OutputOf } from "./handles";
 
 /** The structural handle reference sentinel — mirrors `@blokjs/shared`'s `StructuralRef`. */
 interface StructuralRef {
@@ -548,16 +548,102 @@ export function forEach<T = unknown>(
 
 /** Run one arm callback inside a fresh child builder, returning its collected steps. */
 function runArm(parent: Builder, body: () => unknown): StepRecord[] {
+	return runArmWith(parent, (_child) => body());
+}
+
+/**
+ * Run an arm callback inside a fresh child builder, returning its collected
+ * steps. The callback receives the child builder so it can mint arm-scoped
+ * handles (e.g. tryCatch's `@error` handle owned by the catch child).
+ */
+function runArmWith(parent: Builder, body: (child: Builder) => unknown): StepRecord[] {
 	const child: Builder = { parent, root: parent.root, steps: [] };
 	const store = builders.getStore();
-	if (!store) throw new Error("branch() must be called inside a workflow callback.");
+	if (!store) throw new Error("This primitive must be called inside a workflow callback.");
 	store.stack.push(child);
 	try {
-		body();
+		body(child);
 	} finally {
 		store.stack.pop();
 	}
 	return child.steps;
+}
+
+// ───────────────────────────── tryCatch (#317) ───────────────────────────
+//
+// `tryCatch({ try, catch, finally? })` — callback-style JS-like exception
+// handling. Each arm callback pushes a CHILD builder scope (the SAME mechanism
+// branch()/forEach() use via runArm), so `step()` inside registers into that
+// arm's sub-pipeline. The `catch` callback receives a typed `error` handle
+// rooted at the `@error` sentinel (lowerRefs maps it to `ctx.error`, where
+// TryCatchNode writes the envelope on catch entry) — `error.code` lowers to
+// `js/ctx.error.code`. The error handle is OWNED BY THE CATCH CHILD scope, so
+// reading it in try/finally/after the tryCatch trips the cornerstone canRead
+// guard (the same arm-scope contract branch()/forEach() enforce).
+//
+// Emits the existing v2 `{ id, tryCatch: { try, catch, finally? } }` shape, so
+// it normalizes + runs through the UNCHANGED TryCatchNode engine.
+
+/** Arms for {@link tryCatch}: callbacks that register steps into each arm's scope. */
+export interface TryCatchArms {
+	try: () => unknown;
+	catch: (error: ErrorHandle) => unknown;
+	finally?: () => unknown;
+}
+
+/**
+ * Callback-style `tryCatch` over handles (#317). `try`/`catch`/`finally` are
+ * callbacks that push CHILD builder scopes — `step()` calls inside register into
+ * that arm's pipeline, in order. The `catch` callback receives a typed `error`
+ * handle modeling the runtime `$.error` envelope (`message`/`name` always present,
+ * `stack`/`code`/`stepId` optional); it is scoped to the catch arm.
+ *
+ * @example
+ *   tryCatch("signup", {
+ *     try: () => {
+ *       step("create", createUser, { email: req.body.email });
+ *     },
+ *     catch: (error) => {
+ *       step("alert", notify, { message: error.message, code: error.code });
+ *     },
+ *     finally: () => {
+ *       step("metric", emitMetric, { event: "signup-attempt" }, { ephemeral: true });
+ *     },
+ *   });
+ */
+export function tryCatch(id: string, arms: TryCatchArms): void {
+	if (typeof id !== "string" || id.length === 0) throw new Error("tryCatch() requires a non-empty string id.");
+	if (!arms || typeof arms.try !== "function") {
+		throw new Error(`tryCatch("${id}") requires a \`try\` callback.`);
+	}
+	if (typeof arms.catch !== "function") {
+		throw new Error(`tryCatch("${id}") requires a \`catch\` callback.`);
+	}
+	if (arms.finally !== undefined && typeof arms.finally !== "function") {
+		throw new Error(`tryCatch("${id}") \`finally\` must be a callback when provided.`);
+	}
+	const parent = currentBuilder();
+	const ids = parent.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	const trySteps = runArm(parent, arms.try);
+	// The catch arm gets an `@error`-rooted handle OWNED BY the catch child, so
+	// reading it from try/finally/after trips canRead. `@error` matches lowerRefs'
+	// ERROR_SENTINEL — a ref rooted here lowers to `ctx.error`, NOT ctx.state.
+	const catchSteps = runArmWith(parent, (child) => arms.catch(buildHandle("@error", child, []) as ErrorHandle));
+	const finallySteps = arms.finally ? runArm(parent, arms.finally) : undefined;
+
+	parent.steps.push({
+		id,
+		tryCatch: {
+			try: trySteps,
+			catch: catchSteps,
+			...(finallySteps ? { finally: finallySteps } : {}),
+		},
+	} as unknown as StepRecord);
 }
 
 /** Per-step persistence/control knobs carried verbatim onto the step record. */

@@ -253,6 +253,48 @@ describe("lowerRefs — ADR 0001 Option C load-boundary lowering", () => {
 		});
 	});
 
+	// 2d. ERROR-ROOT branch (#317) — a ref rooted at the `@error` pseudo-step
+	//     lowers to `js/ctx.error` (the tryCatch error envelope TryCatchNode
+	//     writes on catch entry), NOT `js/ctx.state["@error"]`.
+	describe("error-root — {$ref step:'@error'} → js/ctx.error + path", () => {
+		it("field ref: error.message → js/ctx.error.message", () => {
+			expect(lowerRefs({ m: { $ref: { step: "@error", path: ["message"] } } })).toEqual({
+				m: "js/ctx.error.message",
+			});
+		});
+
+		it("optional field ref: error.code → js/ctx.error.code", () => {
+			expect(lowerRefs({ c: { $ref: { step: "@error", path: ["code"] } } })).toEqual({
+				c: "js/ctx.error.code",
+			});
+		});
+
+		it("whole-envelope ref: empty path → js/ctx.error", () => {
+			expect(lowerRefs({ all: { $ref: { step: "@error", path: [] } } })).toEqual({
+				all: "js/ctx.error",
+			});
+		});
+
+		it("end-to-end: error refs resolve through the REAL Mapper against ctx.error", () => {
+			const ctx = createCtx({});
+			(ctx as unknown as { error: Record<string, unknown> }).error = {
+				message: "kaboom",
+				name: "Error",
+				code: 402,
+			};
+			const lowered = lowerRefs({
+				m: { $ref: { step: "@error", path: ["message"] } },
+				c: { $ref: { step: "@error", path: ["code"] } },
+			}) as unknown as ParamsDictionary;
+
+			mapper.replaceObjectStrings(lowered, ctx, ctx.request as unknown as ParamsDictionary);
+
+			const out = lowered as Record<string, unknown>;
+			expect(out.m).toBe("kaboom");
+			expect(out.c).toBe(402);
+		});
+	});
+
 	// =========================================================================
 	// 3. Sentinel guard — only the {$ref} shape is treated as a ref
 	// =========================================================================
