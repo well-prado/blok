@@ -154,6 +154,20 @@ step("score", riskModel, { features: order.features }, { type: "runtime.python3"
   `pubsub → msg`, `grpc → rpc`. Read `req.body`, `req.params.id`, `req.query.q`,
   `req.headers["x-…"]`. (A `cron` `tick` has no body — only `tick.params`.)
 
+### Referencing nodes in `step()`
+
+`step(id, node, inputs)` takes the node **object**, not a string ref. Get it four ways:
+
+- **Your own node:** `import myNode from "../nodes/my-node";` (the `defineNode` default export).
+- **A standalone package:** `import apiCall from "@blokjs/api-call";` (the default export).
+- **A helper node:** `import { RespondNode, ExprNode, LogNode } from "@blokjs/helpers";`
+  (named exports — these back the `@blokjs/respond`, `@blokjs/expr`, … refs).
+- **A cross-runtime node:** `const score = runtimeNode<In, Out>("score", "runtime.python3");`
+  then `step("score", score, { … })`.
+
+(The string form `use: "@blokjs/respond"` is for the object-style / JSON workflows in §11, not
+the handle DSL.)
+
 ### Handles + the four persistence reads
 
 `const h = step("id", node, inputs)` returns a **handle**:
@@ -271,18 +285,20 @@ tryCatch("signup", {
 ## 5. Controlling the HTTP response
 
 By default the final step's output is the body (object → JSON, string → verbatim, both at
-status 200). For status / headers / cookies / redirect / binary, end with **`@blokjs/respond`**
-(auto-registered) and mark it `ephemeral: true`.
+status 200). For status / headers / cookies / redirect / binary, end with the **`RespondNode`**
+(imported from `@blokjs/helpers`) and mark it `ephemeral: true`.
 
 ```ts
+import { RespondNode } from "@blokjs/helpers";
+
 // Redirect
-step("go", respond, { status: 302, headers: { Location: "/dashboard" } }, { ephemeral: true });
+step("go", RespondNode, { status: 302, headers: { Location: "/dashboard" } }, { ephemeral: true });
 
 // Session cookie (cookies is an ARRAY of raw Set-Cookie strings)
-step("login", respond, { body: { ok: true }, cookies: ["session=abc; Path=/; HttpOnly; SameSite=Lax"] }, { ephemeral: true });
+step("login", RespondNode, { body: { ok: true }, cookies: ["session=abc; Path=/; HttpOnly; SameSite=Lax"] }, { ephemeral: true });
 
 // Binary download
-step("file", respond, { body: pdf.bytes, contentType: "application/pdf",
+step("file", RespondNode, { body: pdf.bytes, contentType: "application/pdf",
   headers: { "Content-Disposition": 'attachment; filename="report.pdf"' } }, { ephemeral: true });
 ```
 

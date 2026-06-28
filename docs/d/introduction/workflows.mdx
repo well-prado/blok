@@ -1,96 +1,202 @@
 ---
 title: "Workflows"
-description: "How Blok composes nodes into named, observable workflows triggered by HTTP, workers, and schedules."
+description: "Compose nodes into typed, observable workflows with the @blokjs/core handle DSL — triggered by HTTP, workers, schedules, and more."
 icon: "workflow"
 ---
 
-A workflow is a sequence of [nodes](/d/introduction/nodes) that
-together accomplish a piece of business logic. Workflows define what
-runs, in what order, and how data moves between steps. They're the
-backbone of every Blok application.
+A workflow is a sequence of [nodes](/d/introduction/nodes) that together accomplish a piece
+of business logic. You author workflows in **TypeScript** with the typed-handle DSL from
+`@blokjs/core`: each `step()` returns a **handle** — a typed reference to that step's output —
+and you wire steps together by passing handles around. No `$`, no `js/`, no raw `ctx` strings.
 
-## What is a workflow
+## Your first workflow
 
-Think of a workflow as a recipe:
+```ts workflows/countries.ts
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { RespondNode } from "@blokjs/helpers";
 
-- **Ingredients are nodes** — each node performs a small, specific
-  action (fetch user data, send an email, update a record).
-- **Instructions are the workflow definition** — which nodes to use,
-  in what order, and how data flows.
-- **The dish is the outcome** — an API response, a completed pipeline,
-  whatever the workflow is meant to produce.
+export default workflow("countries.list", { version: "1.0.0", trigger: http.get("/countries") }, (req) => {
+  // step(id, node, inputs) runs a node and returns a TYPED handle.
+  const countries = step("fetch", apiCall, {
+    url: "https://countriesnow.space/api/v0.1/countries/capital",
+    method: "GET",
+  });
 
-Workflows are kicked off by [triggers](/d/introduction/triggers): HTTP
-requests, scheduled events, queue messages, and so on.
-
-## Definition formats
-
-Blok accepts workflow definitions in four formats. They are
-structurally identical — the same shape rendered in different syntaxes.
-
-| Format | Best for |
-|---|---|
-| **JSON** | Default, easiest for non-developers and tooling |
-| **TypeScript** | Type safety, IDE autocomplete, dynamic composition |
-| **TOML** | Teams that prefer TOML's syntax |
-| **YAML** | Teams that prefer YAML's readability |
-
-For the rest of this page, we'll show TypeScript and JSON side by side
-since they're the two most common in practice.
-
-## Create a workflow
-
-The fastest way is the CLI:
-
-```bash
-npx blokctl@latest create workflow
+  // Pass the handle straight into the next step — the runner resolves it.
+  step("respond", RespondNode, { body: countries }, { ephemeral: true });
+});
 ```
 
-That scaffolds a workflow file in `workflows/json/` (or your chosen
-format). You can also write the file directly.
+<Note>
+`step()` takes a node **object** (not a string ref). Import published nodes directly — a
+standalone package's default export (`apiCall`) or a named export from `@blokjs/helpers`
+(`RespondNode`, `ExprNode`, `LogNode`, …). Your own `defineNode` nodes are imported from
+`src/nodes/...`. For a cross-runtime node, build a stub with
+`runtimeNode("<name>", "runtime.<lang>")`.
+</Note>
 
-## v2 shape
+Run `blokctl dev` and hit `GET /countries` — you'll get the fetched JSON back. That's a
+complete workflow: a trigger, two steps, and a typed reference (`countries`) flowing between
+them.
 
-Every v2 workflow has four top-level fields:
+<Note>
+`workflow(name, opts, build)` takes a name, an options object (`version` + `trigger`), and a
+**build callback**. The callback's argument is the trigger's *entry handle* — for HTTP it's
+the request, conventionally named `req` (`req.body`, `req.params.id`, `req.query`, `req.headers`).
+</Note>
 
-| Field | Type | Description |
-|---|---|---|
-| `name` | `string` | Unique identifier within the project (see [Naming convention](#naming-convention)). Other workflows reference this name when invoking it as a [sub-workflow](/d/composition/sub-workflows). |
-| `version` | `string` | Semantic version (`"1.0.0"`). |
-| `trigger` | `object` | What kicks this workflow off. See [triggers](/d/introduction/triggers). |
-| `steps` | `array` | The ordered sequence of work. |
+## How data flows: handles
 
-Each step in `steps[]` is one of three shapes — see
-[v2 step shapes](/d/reference/v2-step-shapes) for the full reference.
+`const countries = step("fetch", apiCall, { ... })` does two things:
 
-## Example: simple HTTP workflow
+1. **Runs the node** and auto-persists its output to `ctx.state["fetch"]` — *on success only*
+   (a step that throws writes nothing).
+2. **Returns a handle** shaped like the node's output. Reading a field (`countries.data`,
+   `countries[0].name`) records a typed reference the runner resolves *before the next node
+   runs* — you never read the value yourself.
+
+```ts
+const order = step("validate", validateOrder, { qty: req.body.qty });
+
+order.qty          // Handle<number> → ref to ctx.state.validate.qty
+order.user.email   // nested field access, fully typed
+order.items[0]     // array index (but not .map / .length — do that in a node)
+```
+
+To embed a handle in a string, use the `tpl` tagged template — a bare template literal would
+lose the reference:
+
+```ts
+import { tpl } from "@blokjs/core";
+step("summary", summarize, { line: tpl`order of ${order.qty} item(s)` });
+```
+
+## Triggers
+
+A workflow declares exactly **one** trigger. HTTP uses the `http.*` helper; every other
+trigger is a raw block passed as `opts.trigger`:
+
+```ts
+trigger: http.post("/orders")                       // HTTP
+trigger: { worker: { queue: "emails", retries: 3 } } // background job
+trigger: { cron: { schedule: "0 8 * * *" } }         // scheduled
+trigger: { webhook: { provider: "stripe" } }         // signed webhook
+```
+
+The entry handle is named + typed per trigger: `http → req`, `worker → job`, `cron → tick`,
+`webhook → event`, `pubsub → msg`, `grpc → rpc`. See [Triggers](/d/introduction/triggers) for
+the full decision table and config of all nine.
+
+## Persistence knobs
+
+The 4th argument to `step()` shapes how its output is stored:
+
+| Knob | Effect |
+|---|---|
+| *(none)* | Store at `ctx.state[id]` — the 95% case. |
+| `{ as: "name" }` | Store at `ctx.state[name]` instead. Mutually exclusive with `spread`. |
+| `{ spread: true }` | Shallow-merge the output's keys into `ctx.state` (multi-output nodes). |
+| `{ ephemeral: true }` | Skip storage — the handle is unreadable downstream. Use for response/log steps. |
+
+The same 4th argument carries per-step reliability (`idempotencyKey`, `retry`, `maxDuration`)
+— see [Reliability](/d/reliability/overview).
+
+## Control flow
+
+Branch, loop, and handle errors with the primitives — each takes callback arms where `step()`
+calls register into that arm:
+
+```ts
+import { branch, gt } from "@blokjs/core";
+
+branch("lane", gt(order.qty, 10), {
+  then: () => { step("bulk", routeOrder, { lane: "bulk" }); },
+  else: () => { step("standard", routeOrder, { lane: "standard" }); },
+});
+```
+
+<Columns cols={2}>
+  <Card title="branch / switchOn" icon="git-branch" href="/d/primitives/branch">
+    Conditional routing with typed comparators.
+  </Card>
+  <Card title="forEach / tryCatch" icon="repeat" href="/d/primitives/forEach">
+    Iterate collections; catch + recover from errors.
+  </Card>
+</Columns>
+
+<Warning>
+Mind the [four footguns](/d/primitives/handles-and-footguns): arm-scoped handles don't escape
+their arm, ephemeral handles read `undefined`, step ids must be unique (even across arms), and
+a `forEach` `as:` must not collide with a step id. The last two **throw at load time**.
+</Warning>
+
+## Built-in & local nodes
+
+Reference a published node by importing it (`import apiCall from "@blokjs/api-call"`). Your own
+nodes live at `src/nodes/<name>/index.ts` and are **auto-discovered** by their `defineNode`
+`name` — you never hand-edit a registry to add one:
+
+```ts src/nodes/greet/index.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+export default defineNode({
+  name: "greet",
+  description: "Greets a name",
+  input: z.object({ name: z.string().default("world") }),
+  output: z.object({ message: z.string() }),
+  async execute(_ctx, input) {
+    return { message: `Hello, ${input.name}!` };
+  },
+});
+```
+
+| Built-in node | Use |
+|---|---|
+| `@blokjs/api-call` | HTTP request to an external API. |
+| `@blokjs/respond` | Control the HTTP response (status, headers, cookies, binary). |
+| `@blokjs/if-else` | Conditional routing (usually written via the `branch` primitive instead). |
+
+See [Nodes](/d/introduction/nodes) to write your own.
+
+## Naming convention
+
+A workflow's `name` is its identity:
+
+- **Names must be unique** across the project — the
+  [Workflow Registry](/d/reference/workflow-registry) rejects duplicates at boot.
+- **Prefer a dotted `domain.action` form** — `countries.list`, `users.create`,
+  `orders.refund`. The [typed client](/d/client/overview) and
+  [`blokctl gen app-types`](/d/cli/gen) nest workflows by their dotted name, so a clean name
+  surfaces as `blok.countries.list(...)` instead of a quoted accessor.
+
+## Execution
+
+<Steps>
+  <Step title="Identify">The runtime resolves the workflow matching the trigger event.</Step>
+  <Step title="Initialize">A fresh [Context](/d/introduction/context) is built — request data, env, and an empty `state` map.</Step>
+  <Step title="Run">Steps execute in order; each output auto-stores at `ctx.state[id]` and becomes readable through its handle.</Step>
+  <Step title="Complete">The workflow finishes at the last step (or a step with `stop: true`).</Step>
+</Steps>
+
+## Other formats (legacy, supported)
+
+The handle DSL compiles to the same IR as the older **object-style** and **JSON** forms, which
+remain fully supported. Recognize them, but prefer the handle DSL for new TypeScript workflows.
 
 <CodeGroup>
-```ts TypeScript
+```ts Object-style (@blokjs/helper)
 import { workflow, $ } from "@blokjs/helper";
 
 export default workflow({
   name: "countries.list",
   version: "1.0.0",
-  description: "Fetches the list of countries with capitals",
-  trigger: {
-    http: { method: "GET", path: "/countries" },
-  },
+  trigger: { http: { method: "GET", path: "/countries" } },
   steps: [
-    {
-      id: "fetch",
-      use: "@blokjs/api-call",
-      inputs: {
-        url: "https://countriesnow.space/api/v0.1/countries/capital",
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-      },
-    },
-    {
-      id: "respond",
-      use: "@blokjs/respond",
-      inputs: { body: $.state.fetch },
-    },
+    { id: "fetch", use: "@blokjs/api-call",
+      inputs: { url: "https://countriesnow.space/api/v0.1/countries/capital", method: "GET" } },
+    { id: "respond", use: "@blokjs/respond", inputs: { body: $.state.fetch }, ephemeral: true },
   ],
 });
 ```
@@ -99,109 +205,25 @@ export default workflow({
 {
   "name": "countries.list",
   "version": "1.0.0",
-  "description": "Fetches the list of countries with capitals",
-  "trigger": {
-    "http": { "method": "GET", "path": "/countries" }
-  },
+  "trigger": { "http": { "method": "GET", "path": "/countries" } },
   "steps": [
-    {
-      "id": "fetch",
-      "use": "@blokjs/api-call",
-      "inputs": {
-        "url": "https://countriesnow.space/api/v0.1/countries/capital",
-        "method": "GET",
-        "headers": { "Content-Type": "application/json" }
-      }
-    },
-    {
-      "id": "respond",
-      "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.fetch" }
-    }
+    { "id": "fetch", "use": "@blokjs/api-call",
+      "inputs": { "url": "https://countriesnow.space/api/v0.1/countries/capital", "method": "GET" } },
+    { "id": "respond", "use": "@blokjs/respond", "inputs": { "body": "$.state.fetch" }, "ephemeral": true }
   ]
 }
 ```
 </CodeGroup>
 
-A few things to notice in the v2 shape:
-
-- **Each step has `id` + `use` + `inputs` inline.** No separate
-  `nodes: {}` map.
-- **Cross-step references use `$.state.<id>`.** In TypeScript that's
-  the typed `$` proxy; in JSON it's a plain string. Both compile to
-  `js/ctx.state.<id>` at workflow load time.
-- **Method is `"ANY"` (not `"*"`).** Use `"ANY"` for catch-all routes;
-  the runner accepts `"*"` for back-compat with a deprecation warning.
-
-## Naming convention
-
-A workflow's `name` is its identity. Two rules matter:
-
-- **Names must be unique** across the project. The
-  [Workflow Registry](/d/reference/workflow-registry) rejects duplicate
-  names at boot, so if two workflows share a name only one ever
-  registers.
-- **Prefer a dotted `domain.action` form** — `countries.list`,
-  `users.create`, `orders.refund`. The
-  [typed client](/d/client/overview) (`@blokjs/client`) and
-  [`blokctl gen app-types`](/d/cli/gen) nest workflows by their dotted
-  name, so a clean name surfaces as `blok.countries.list(...)` instead
-  of a quoted `blok["World Countries"]` accessor.
-
-Duplicate names also make [`blokctl gen app-types`](/d/cli/gen) report
-a collision and drop one of the colliding workflows from the generated
-`BlokApp` type — another reason to keep every name unique.
-
-## Built-in nodes
-
-Blok ships a small set of built-in nodes, registered in `src/Nodes.ts`:
-
-```ts
-import ApiCall from "@blokjs/api-call";
-import IfElse from "@blokjs/if-else";
-import type { NodeBase } from "@blokjs/shared";
-
-const nodes: { [key: string]: NodeBase } = {
-  "@blokjs/api-call": new ApiCall(),
-  "@blokjs/if-else": new IfElse(),
-};
-
-export default nodes;
-```
-
-| Node | Use |
-|---|---|
-| `@blokjs/api-call` | HTTP request to an external API |
-| `@blokjs/if-else` | Conditional branching (now usually written via the v2 `branch` step) |
-
-Reference them by string in any step's `use` field.
-
-## Workflow execution
-
-When a trigger fires:
-
-<Steps>
-  <Step title="Identify">
-    The runtime resolves the workflow that matches the trigger event.
-  </Step>
-  <Step title="Initialize">
-    A new [Context](/d/introduction/context) is built — request data,
-    environment, and an empty `state` map.
-  </Step>
-  <Step title="Run">
-    Steps execute in order. Each step's output is auto-stored at
-    `ctx.state[id]` (the v2 default-store rule).
-  </Step>
-  <Step title="Complete">
-    The workflow finishes when it reaches the last step or hits a step
-    with `stop: true`.
-  </Step>
-</Steps>
+In these forms, cross-step references are `$.state.<id>` (a typed proxy in TS, a plain string
+in JSON; both compile to `js/ctx.state.<id>`). Use `"ANY"` for the catch-all HTTP method, never
+`"*"`. JSON workflows live under `workflows/json/` and support
+[file-based routing](#file-based-routing).
 
 ## File-based routing
 
-If `BLOK_FILE_BASED_ROUTING=true`, the URL is derived from each
-workflow's file path under `workflows/json/`:
+With `BLOK_FILE_BASED_ROUTING=true`, JSON workflow URLs derive from the file path under
+`workflows/json/`:
 
 | File path | URL |
 |---|---|
@@ -210,34 +232,16 @@ workflow's file path under `workflows/json/`:
 | `workflows/json/users/index.json` | `/users` |
 | `workflows/json/users/[id].json` | `/users/:id` |
 
-Files starting with `_` or `.` are skipped (utilities, drafts).
-Setting `trigger.http.path` explicitly overrides the file-derived URL.
-
-## Reliability and composition
-
-Every v2 step accepts optional fields for safe rerun and composition:
-
-<Columns cols={3}>
-  <Card title="Idempotent caching" icon="database" href="/d/reliability/idempotency">
-    `idempotencyKey: $.req.body.requestId` — skip re-running an
-    expensive step.
-  </Card>
-  <Card title="Retry" icon="rotate-cw" href="/d/reliability/retry">
-    `retry: { maxAttempts: 3 }` — capped exponential backoff on
-    failure.
-  </Card>
-  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
-    `subworkflow: "<name>"` — invoke another workflow as a step.
-  </Card>
-</Columns>
+Files starting with `_` or `.` are skipped. An explicit `trigger.http.path` overrides the
+file-derived URL.
 
 ## Next
 
 <Columns cols={2}>
   <Card title="Nodes" icon="puzzle" href="/d/introduction/nodes">
-    The building blocks — what they are and how to write one.
+    The building blocks — write one with `defineNode`.
   </Card>
-  <Card title="v2 step shape reference" icon="braces" href="/d/reference/v2-step-shapes">
-    Every field on every step kind, with types and defaults.
+  <Card title="Workflow primitives" icon="diagram-project" href="/d/primitives/index">
+    branch, switchOn, forEach, tryCatch — and the four footguns.
   </Card>
 </Columns>
