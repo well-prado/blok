@@ -39,6 +39,7 @@ import type {
 	WorkerProvider,
 	WorkerTriggerOpts,
 } from "./types/TriggerOpts";
+import { WORKFLOW_IR_VERSION, type WorkflowIR, WorkflowIRSchema } from "./types/WorkflowOpts";
 import { parseDuration, tryParseDuration } from "./utils/parseDuration";
 
 export {
@@ -74,6 +75,10 @@ export {
 	type EventUnion,
 	type EmptyEventMap,
 	type InferOr,
+	// v2 IR schema contract
+	WorkflowIRSchema,
+	WORKFLOW_IR_VERSION,
+	type WorkflowIR,
 	// per-trigger config TYPES (each trigger package re-exports its own)
 	type HttpTriggerOpts,
 	type TriggerOpts,
