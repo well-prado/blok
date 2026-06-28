@@ -322,6 +322,19 @@ export {
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 
+// Typed-handle type foundation (ADR 0006 / 0007). TYPES ONLY — `step()` (#421)
+// and the `{$ref}` recorder ship the runtime that consumes these. `runtimeNode`
+// is exported as a type-only declared signature for the same reason.
+export type {
+	Handle,
+	Refable,
+	NodeTypeWitness,
+	InputOf,
+	OutputOf,
+	RuntimeNode,
+	runtimeNode,
+} from "./handles";
+
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
 

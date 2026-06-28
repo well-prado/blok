@@ -17,7 +17,8 @@
 		"sync:proto": "mkdir -p dist/adapters/grpc/proto/blok/runtime/v1 && cp src/adapters/grpc/proto/blok/runtime/v1/runtime.proto dist/adapters/grpc/proto/blok/runtime/v1/runtime.proto",
 		"test:dev": "vitest",
 		"test": "vitest run",
-		"typecheck": "tsc --noEmit --incremental"
+		"type-test": "tsc --noEmit -p tsconfig.typetest.json",
+		"typecheck": "tsc --noEmit --incremental && bun run type-test"
 	},
 	"devDependencies": {
 		"@types/better-sqlite3": "^7.6.13",
