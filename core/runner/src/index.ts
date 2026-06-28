@@ -368,6 +368,7 @@ export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type {
 	Handle,
 	EphemeralHandle,
+	SpreadHandle,
 	ErrorHandle,
 	Refable,
 	NodeTypeWitness,

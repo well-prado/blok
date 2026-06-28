@@ -41,6 +41,15 @@ const noop = defineNode({
 	execute: (_ctx, input) => input as Record<string, unknown>,
 });
 
+// Spread requires a statically-known object output (#342) — this node has one.
+const spreadable = defineNode({
+	name: "spreadable",
+	description: "object output so { spread: true } has known keys",
+	input: z.object({}).passthrough(),
+	output: z.object({ user: z.object({ active: z.boolean() }) }),
+	execute: () => ({ user: { active: true } }),
+});
+
 // ───────────────────────── (a)+(b): IR-shape assertions ─────────────────────
 
 describe("branch — IR lowering (ADR 0004)", () => {
@@ -114,7 +123,7 @@ describe("branch — IR lowering (ADR 0004)", () => {
 
 	it("roots a spread producing step at its first field (drops the step id)", async () => {
 		const wf = await workflowCallback("Spread", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
-			const load = step("load", noop, {}, { spread: true });
+			const load = step("load", spreadable, {}, { spread: true });
 			branch("active", load.user.active, {
 				then: () => {
 					step("go", noop, {});

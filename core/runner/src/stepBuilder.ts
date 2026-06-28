@@ -34,7 +34,7 @@ import {
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
 import type { z } from "zod";
-import type { EphemeralHandle, ErrorHandle, Handle, OutputOf } from "./handles";
+import type { EphemeralHandle, ErrorHandle, Handle, OutputOf, SpreadHandle } from "./handles";
 
 /** The structural handle reference sentinel — mirrors `@blokjs/shared`'s `StructuralRef`. */
 interface StructuralRef {
@@ -60,12 +60,27 @@ interface HandleMeta {
 	path: (string | number)[];
 	/** True for a step created with `{ ephemeral: true }` — its output is NOT persisted, so the handle is unreadable (#339). */
 	ephemeral?: boolean;
+	/**
+	 * True for the root handle of a `{ spread: true }` step (#342). `spread`
+	 * shallow-merges `result.data` keys into state at TOP LEVEL (Rule 2), so the
+	 * step id is NOT a state slot — only per-key reads are valid. Field access on
+	 * a spread root returns a NORMAL handle rooted at the top-level key; reading
+	 * the spread root AS A WHOLE (whole-output ref) is rejected.
+	 */
+	spread?: boolean;
 }
 
 /** The loud error a poisoned ephemeral handle raises on any read (#339). */
 function ephemeralReadError(step: string): Error {
 	return new Error(
 		`Step "${step}" is ephemeral — its output is not persisted to state and has no readable handle. Remove ephemeral:true, or read the value via the immediately-next step.`,
+	);
+}
+
+/** The loud error reading a spread step's WHOLE output raises (#342). */
+function spreadWholeReadError(step: string): Error {
+	return new Error(
+		`Step "${step}" uses \`spread: true\`, which merges its output keys into state at the top level — the step has no whole-output slot to reference. Read an individual key (e.g. \`${step}Handle.someKey\`) instead, or drop \`spread\` / use \`as:\` to keep a single rooted output.`,
 	);
 }
 
@@ -137,6 +152,7 @@ function buildHandle(
 	owner: Builder | undefined,
 	path: (string | number)[],
 	ephemeral = false,
+	spread = false,
 ): unknown {
 	// Function target so a stray `typeof handle === "function"` check is harmless;
 	// it is never called.
@@ -144,9 +160,9 @@ function buildHandle(
 		get(_t, key) {
 			// HANDLE_META must stay readable even when poisoned: lowerHandles/tpl read
 			// it STRUCTURALLY to detect the handle and raise the clear authoring error
-			// (#339) rather than a cryptic Proxy throw.
+			// (#339/#342) rather than a cryptic Proxy throw.
 			if (key === HANDLE_META)
-				return { step: rootKey, owner, path, ephemeral } satisfies Partial<HandleMeta> as HandleMeta;
+				return { step: rootKey, owner, path, ephemeral, spread } satisfies Partial<HandleMeta> as HandleMeta;
 			// POISON (#339): an ephemeral step persists no state, so its handle has no
 			// readable value. Any field/index access — `h.field`, `h[0]` — throws loud
 			// instead of silently building a ref that resolves to undefined at runtime.
@@ -167,6 +183,11 @@ function buildHandle(
 			if (typeof key === "symbol") return undefined;
 			const k = String(key);
 			const seg = IDENT_OR_NUM.test(k) ? Number(k) : k;
+			// SPREAD (#342): the step id is not a state slot — `spread` merges each
+			// output key into state at the top level (Rule 2). So the FIRST field
+			// access re-roots: `spreadHandle.user` becomes a NORMAL handle rooted at
+			// the top-level state key `user` (→ ctx.state.user), NOT ctx.state.<id>.user.
+			if (spread) return buildHandle(k, owner, []);
 			return buildHandle(rootKey, owner, [...path, seg]);
 		},
 	});
@@ -202,6 +223,7 @@ export function tpl(strings: TemplateStringsArray, ...values: unknown[]): Struct
 		if (i < values.length) {
 			const meta = readHandleMeta(values[i]);
 			if (meta?.ephemeral) throw ephemeralReadError(meta.step);
+			if (meta?.spread) throw spreadWholeReadError(meta.step);
 			segments.push(meta ? ({ $ref: { step: meta.step, path: meta.path } } satisfies StructuralRef) : values[i]);
 		}
 	}
@@ -225,6 +247,8 @@ function lowerHandles(value: unknown, reader: Builder): unknown {
 	if (meta) {
 		// Ephemeral handle used as an input ref — unreadable (#339).
 		if (meta.ephemeral) throw ephemeralReadError(meta.step);
+		// Spread root used as a whole-output ref — invalid; only per-key reads (#342).
+		if (meta.spread) throw spreadWholeReadError(meta.step);
 		// `@trigger` and other unowned handles have no scope constraint.
 		if (meta.owner && !canRead(meta.owner, reader)) {
 			throw new Error(
@@ -308,27 +332,19 @@ export function not(value: Operand): BranchCondition {
 
 /**
  * Lower a handle to its BARE `ctx.state...` (or `ctx.request...`) string, per
- * ADR 0004. Resolves the state ROOT from the producing step's persistence
- * metadata (its owning builder's step record): `as:` renames the root, `spread:`
- * drops the step root entirely (the first path segment becomes the root key).
- * `@trigger` roots at `ctx.request` (mirrors lowerRefs' TRIGGER_SENTINEL).
+ * ADR 0004. The handle's `step` root is ALREADY the resolved state key — `step()`
+ * mints handles rooted at `as ?? id` (#327), and a spread step's sub-handles are
+ * re-rooted at their top-level state key at field-access time (#342). So there is
+ * no per-step record lookup here. `@trigger` roots at `ctx.request` (mirrors
+ * lowerRefs' TRIGGER_SENTINEL). A spread ROOT read as a whole is rejected upstream
+ * (its only valid reads are per-key sub-handles).
  */
 function lowerHandleToCtx(meta: HandleMeta): string {
+	if (meta.spread) throw spreadWholeReadError(meta.step);
 	if (meta.step === "@trigger") {
 		return `ctx.request${encodeCtxPath(meta.path)}`;
 	}
-	const rec = meta.owner?.steps.find((s) => s.id === meta.step);
-	if (rec?.spread === true) {
-		if (meta.path.length === 0) {
-			throw new Error(
-				`branch condition reads the whole output of spread step "${meta.step}", but \`spread: true\` drops the step root — read a field (e.g. \`${meta.step}Handle.someField\`) or rename the step with \`as:\` instead.`,
-			);
-		}
-		// spread: first path segment IS the state root (no step-id prefix).
-		return `ctx.state${encodeCtxPath(meta.path)}`;
-	}
-	const root = typeof rec?.as === "string" ? rec.as : meta.step;
-	return `ctx.state${encodeSeg(root)}${encodeCtxPath(meta.path)}`;
+	return `ctx.state${encodeSeg(meta.step)}${encodeCtxPath(meta.path)}`;
 }
 
 /** Encode one path segment: number → `[n]`, identifier → `.k`, else `["k"]`. */
@@ -765,6 +781,40 @@ export function tryCatch(id: string, arms: TryCatchArms): void {
 	} as unknown as StepRecord);
 }
 
+/**
+ * Guard `spread: true` against a node whose output is NOT a statically-known
+ * object (#342). Spread merges the output's KEYS into state at the top level
+ * (Rule 2) — without a known key set the per-key sub-handles can't be sound, so
+ * we hard-error at authoring time (mirroring the object factory's load-time
+ * `as`/`spread` guard style).
+ *
+ * The check reads the node's reflection JSON-schema (`type: "object"` with
+ * `properties`) when available (a `defineNode` FunctionNode). A cross-runtime
+ * `runtimeNode` stub carries no runtime schema — there the static `OutputOf<N>`
+ * type is the soundness guarantee, so we trust it and skip (documented degrade).
+ *
+ * ponytail: reads the lazily-built reflection JSON-schema rather than the private
+ * Zod `definition.output` — no FunctionNode surface change. Upgrade path if a
+ * cheaper check is wanted: expose the Zod output schema and test `instanceof z.ZodObject`.
+ */
+function assertSpreadableOutput(id: string, node: { name: string; getReflectionSchemas?: () => unknown }): void {
+	if (typeof node.getReflectionSchemas !== "function") return; // runtimeNode stub — trust the type.
+	const schema = (node.getReflectionSchemas() as { output?: unknown }).output as
+		| { type?: unknown; properties?: Record<string, unknown> }
+		| undefined;
+	const isObject =
+		schema != null &&
+		typeof schema === "object" &&
+		schema.type === "object" &&
+		schema.properties != null &&
+		Object.keys(schema.properties).length > 0;
+	if (!isObject) {
+		throw new Error(
+			`step("${id}", "${node.name}", …, { spread: true }) requires a node whose output is a statically-known object (z.object({ … })). Its output is not an object with known keys, so spread cannot produce sound per-key handles. Use \`as: "name"\` to keep a single rooted output, or give the node a z.object output schema.`,
+		);
+	}
+}
+
 /** Per-step persistence/control knobs carried verbatim onto the step record. */
 export interface StepOptions {
 	/** Store the output at `state[as]` instead of `state[id]`. Mutually exclusive with `spread`. */
@@ -794,7 +844,11 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 	node: N,
 	inputs?: Record<string, unknown>,
 	opts?: O,
-): O extends { ephemeral: true } ? EphemeralHandle<OutputOf<N>> : Handle<OutputOf<N>> {
+): O extends { ephemeral: true }
+	? EphemeralHandle<OutputOf<N>>
+	: O extends { spread: true }
+		? SpreadHandle<OutputOf<N>>
+		: Handle<OutputOf<N>> {
 	if (typeof id !== "string" || id.length === 0) {
 		throw new Error("step() requires a non-empty string id.");
 	}
@@ -808,6 +862,14 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 	}
 	ids.add(id);
 
+	// `as` and `spread` are mutually exclusive (mirrors the object factory's
+	// load-time guard) — both re-root the handle, and there is no sound meaning
+	// for combining a rename with a top-level merge.
+	if (opts?.as !== undefined && opts?.spread === true) {
+		throw new Error(`step("${id}"): \`as\` and \`spread\` are mutually exclusive — pick one.`);
+	}
+	if (opts?.spread === true) assertSpreadableOutput(id, node);
+
 	const record: StepRecord = {
 		id,
 		use: node.name,
@@ -815,11 +877,22 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 		...(opts ?? {}),
 	};
 	builder.steps.push(record);
-	// Ephemeral steps skip state persistence (Rule 1), so their handle has no
-	// readable value — return a poisoned handle that throws on any read (#339).
-	return buildHandle(id, builder, [], opts?.ephemeral === true) as O extends { ephemeral: true }
+
+	// The returned handle roots at the step's ACTUAL persisted state key, honoring
+	// the persistence knobs (issues #327/#342 — the gap the cornerstone deferred):
+	// - ephemeral (Rule 1): no state slot → poisoned handle that throws on any read (#339).
+	// - spread (Rule 2): keys merged into state at top level → spread-root handle whose
+	//   FIELD reads re-root at the top-level key (ctx.state.<key>), whole-read rejected (#342).
+	// - as (Rule 3): renamed slot → handle rooted at `as` so `h.field` → ctx.state.<as>.field (#327).
+	// - default: rooted at id.
+	const ephemeral = opts?.ephemeral === true;
+	const spread = opts?.spread === true;
+	const root = typeof opts?.as === "string" ? opts.as : id;
+	return buildHandle(root, builder, [], ephemeral, spread) as O extends { ephemeral: true }
 		? EphemeralHandle<OutputOf<N>>
-		: Handle<OutputOf<N>>;
+		: O extends { spread: true }
+			? SpreadHandle<OutputOf<N>>
+			: Handle<OutputOf<N>>;
 }
 
 /**
