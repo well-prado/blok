@@ -40,8 +40,12 @@
  * HTTP response).
  */
 export class MapperResolutionError extends Error {
-	/** Always the literal string `"MapperResolutionError"`. */
-	public override readonly name = "MapperResolutionError";
+	/**
+	 * Defaults to `"MapperResolutionError"`. Typed `string` (not the
+	 * narrow literal) so subclasses like `NamedMissingStateError` can
+	 * override it with their own name.
+	 */
+	public override readonly name: string = "MapperResolutionError";
 
 	/** Structured diagnostic context attached at construction time. */
 	public readonly context: {
