@@ -1,5 +1,5 @@
 import { unwrapProxies } from "../proxy/$";
-import type { V2Step, V2SwitchStep } from "../types/StepOpts";
+import type { V2Step, V2StepUi, V2SwitchStep } from "../types/StepOpts";
 
 /**
  * Author-facing options for {@link switchOn}.
@@ -38,6 +38,8 @@ export interface SwitchOpts {
 	cases: SwitchCase[];
 	/** Fallback sub-pipeline when no case matches. Optional. */
 	default?: V2Step[];
+	/** Optional Studio/canvas metadata. Ignored by the runner. */
+	ui?: V2StepUi;
 	/** Skip this step at runtime. Default true (active). */
 	active?: boolean;
 	/** Halt the workflow after this step completes. */
@@ -112,6 +114,7 @@ export function switchOn(opts: SwitchOpts): V2SwitchStep {
 			cases,
 			...(opts.default !== undefined ? { default: unwrapProxies(opts.default) as V2Step[] } : {}),
 		},
+		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};
 	if (opts.active === false) (result as V2SwitchStep & { active: boolean }).active = false;
 	if (opts.stop === true) (result as V2SwitchStep & { stop: boolean }).stop = true;

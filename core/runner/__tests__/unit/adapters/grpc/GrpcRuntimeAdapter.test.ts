@@ -78,6 +78,7 @@ function makeCtx(overrides: Partial<Context> = {}): Context {
 interface MockServerBehavior {
 	executeImpl?: (request: ExecuteRequestProto) => ExecuteResponseProto | Error;
 	healthImpl?: () => "SERVING" | "NOT_SERVING" | "UNKNOWN" | Error;
+	listNodesImpl?: () => unknown | Error;
 	/** Capture the inbound gRPC `Metadata` for the unary `Execute` call (OBS-02 B2.2). */
 	onExecuteMetadata?: (metadata: Metadata) => void;
 	/**
@@ -142,7 +143,17 @@ async function startMockServer(behavior: MockServerBehavior): Promise<{
 			}
 		},
 		ListNodes: (_call: unknown, callback: (err: ServiceError | null, response?: unknown) => void) => {
-			callback(null, { nodes: [], sdkName: "blok-test", sdkVersion: "1.0.0", protoVersion: "1.0.0" });
+			const result = behavior.listNodesImpl?.() ?? {
+				nodes: [],
+				sdkName: "blok-test",
+				sdkVersion: "1.0.0",
+				protoVersion: "1.0.0",
+			};
+			if (result instanceof Error) {
+				callback(result as ServiceError);
+			} else {
+				callback(null, result);
+			}
 		},
 		ExecuteStream: (call: {
 			request: ExecuteRequestProto;
@@ -213,6 +224,7 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 	let lastRequest: ExecuteRequestProto | null = null;
 	let executeOverride: ((req: ExecuteRequestProto) => ExecuteResponseProto | Error) | null = null;
 	let healthOverride: (() => "SERVING" | "NOT_SERVING" | "UNKNOWN" | Error) | null = null;
+	let listNodesOverride: (() => unknown | Error) | null = null;
 	let executeStreamOverride: ((req: ExecuteRequestProto) => Iterable<ExecuteEventProto | Error | null>) | null = null;
 
 	beforeAll(async () => {
@@ -237,6 +249,13 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 				};
 			},
 			healthImpl: () => healthOverride?.() ?? "SERVING",
+			listNodesImpl: () =>
+				listNodesOverride?.() ?? {
+					nodes: [],
+					sdkName: "blok-test",
+					sdkVersion: "1.0.0",
+					protoVersion: "1.0.0",
+				},
 			executeStreamImpl: (req) => {
 				lastRequest = req;
 				return executeStreamOverride?.(req) ?? [];
@@ -249,6 +268,7 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 		lastRequest = null;
 		executeOverride = null;
 		healthOverride = null;
+		listNodesOverride = null;
 		executeStreamOverride = null;
 	});
 
@@ -542,6 +562,74 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 		});
 	});
 
+	describe("listNodes()", () => {
+		it("parses JSON Schema bytes from ListNodes descriptors", async () => {
+			listNodesOverride = () => ({
+				nodes: [
+					{
+						name: "@py/typed",
+						description: "typed node",
+						inputSchemaJson: jsonToBuffer({ type: "object", properties: { query: { type: "string" } } }),
+						outputSchemaJson: jsonToBuffer({ type: "object", properties: { count: { type: "integer" } } }),
+						tags: ["typed"],
+					},
+				],
+				sdkName: "blok-test",
+				sdkVersion: "1.0.0",
+				protoVersion: "1.0.0",
+			});
+
+			const nodes = await adapter.listNodes();
+
+			expect(nodes).toEqual([
+				{
+					name: "@py/typed",
+					description: "typed node",
+					inputSchema: { type: "object", properties: { query: { type: "string" } } },
+					outputSchema: { type: "object", properties: { count: { type: "integer" } } },
+					tags: ["typed"],
+				},
+			]);
+		});
+
+		it("maps empty, malformed, and missing schema bytes to null independently", async () => {
+			listNodesOverride = () => ({
+				nodes: [
+					{ name: "empty", inputSchemaJson: Buffer.alloc(0), outputSchemaJson: Buffer.alloc(0), tags: [] },
+					{
+						name: "malformed",
+						inputSchemaJson: Buffer.from("{not json", "utf8"),
+						outputSchemaJson: jsonToBuffer({ type: "string" }),
+						tags: [],
+					},
+					{ name: "input-only", inputSchemaJson: jsonToBuffer({ type: "object" }), tags: [] },
+				],
+				sdkName: "blok-test",
+				sdkVersion: "1.0.0",
+				protoVersion: "1.0.0",
+			});
+
+			const nodes = await adapter.listNodes();
+
+			expect(nodes).toEqual([
+				{ name: "empty", description: undefined, inputSchema: null, outputSchema: null, tags: [] },
+				{ name: "malformed", description: undefined, inputSchema: null, outputSchema: { type: "string" }, tags: [] },
+				{ name: "input-only", description: undefined, inputSchema: { type: "object" }, outputSchema: null, tags: [] },
+			]);
+		});
+
+		it("returns an empty list when the runtime ListNodes call fails", async () => {
+			listNodesOverride = () =>
+				Object.assign(new Error("unreachable"), {
+					code: GrpcStatus.UNAVAILABLE,
+					details: "runtime down",
+					metadata: new Metadata(),
+				}) as unknown as Error;
+
+			await expect(adapter.listNodes()).resolves.toEqual([]);
+		});
+	});
+
 	describe("misconfigured adapter", () => {
 		it("execute() returns a DEPENDENCY error when the host is unreachable", async () => {
 			const isolated = new GrpcRuntimeAdapter(makeAdapterConfig(1, { defaultDeadlineMs: 500 }));
@@ -696,6 +784,7 @@ describe("GrpcRuntimeAdapter — OBS-01 runtime node metrics", () => {
 	});
 
 	afterAll(async () => {
+		metricsAdapter.close();
 		await metricsMock.stop();
 		await metrics.disable();
 		_resetRuntimeInstrumentsForTests();

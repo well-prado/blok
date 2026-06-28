@@ -1137,50 +1137,80 @@ export function _resetWildcardWarningCache(): void {
  * raw step tree (same nesting as `assertNoSetVar`) with a shared `seen` set
  * and throw on the first duplicate, at load time.
  */
-function assertNoDuplicateStepIds(steps: unknown[], sourcePath?: string, seen: Set<string> = new Set()): void {
-	for (const raw of steps) {
+function assertNoDuplicateStepIds(
+	steps: unknown[],
+	sourcePath?: string,
+	seen: Map<string, string> = new Map(),
+	path = "steps",
+): void {
+	for (let i = 0; i < steps.length; i++) {
+		const raw = steps[i];
 		if (!isPlainObject(raw)) continue;
 		const step = raw as Record<string, unknown>;
+		const stepPath = `${path}[${i}]`;
 		const id = pickString(step.id) ?? pickString(step.name);
 		if (id) {
-			if (seen.has(id)) {
+			const firstPath = seen.get(id);
+			if (firstPath !== undefined) {
 				const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
 				throw new Error(
-					`[blok] WorkflowNormalizer: duplicate step id "${id}". Step ids must be unique across the whole workflow — including across mutually-exclusive branch/switch arms — because all steps share one flat per-workflow config map, so a collision silently runs a step with another step's inputs. If two arms must write the same state key, give them unique ids + the same \`as\` (e.g. { id: "runA", as: "run" } / { id: "runB", as: "run" }).${suffix}`,
+					`[blok] WorkflowNormalizer: duplicate step id "${id}" at ${stepPath}; first seen at ${firstPath}. Step ids must be unique across the whole workflow — including across mutually-exclusive branch/switch arms — because all steps share one flat per-workflow config map, so a collision silently runs a step with another step's inputs. If two arms must write the same downstream state key, use \`as:\` with unique ids (e.g. { id: "runA", as: "run" } / { id: "runB", as: "run" }).${suffix}`,
 				);
 			}
-			seen.add(id);
+			seen.set(id, stepPath);
 		}
 		// Recurse into nested sub-pipelines — same shape as assertNoSetVar.
 		if (isPlainObject(step.branch)) {
 			const branch = step.branch as { then?: unknown; else?: unknown };
-			if (Array.isArray(branch.then)) assertNoDuplicateStepIds(branch.then as unknown[], sourcePath, seen);
-			if (Array.isArray(branch.else)) assertNoDuplicateStepIds(branch.else as unknown[], sourcePath, seen);
+			if (Array.isArray(branch.then)) {
+				assertNoDuplicateStepIds(branch.then as unknown[], sourcePath, seen, `${stepPath}.branch.then`);
+			}
+			if (Array.isArray(branch.else)) {
+				assertNoDuplicateStepIds(branch.else as unknown[], sourcePath, seen, `${stepPath}.branch.else`);
+			}
 		}
 		if (isPlainObject(step.forEach)) {
 			const fe = step.forEach as { do?: unknown };
-			if (Array.isArray(fe.do)) assertNoDuplicateStepIds(fe.do as unknown[], sourcePath, seen);
+			if (Array.isArray(fe.do)) {
+				assertNoDuplicateStepIds(fe.do as unknown[], sourcePath, seen, `${stepPath}.forEach.do`);
+			}
 		}
 		if (isPlainObject(step.loop)) {
 			const lp = step.loop as { do?: unknown };
-			if (Array.isArray(lp.do)) assertNoDuplicateStepIds(lp.do as unknown[], sourcePath, seen);
+			if (Array.isArray(lp.do)) {
+				assertNoDuplicateStepIds(lp.do as unknown[], sourcePath, seen, `${stepPath}.loop.do`);
+			}
 		}
 		if (isPlainObject(step.switch)) {
 			const sw = step.switch as { cases?: unknown; default?: unknown };
 			if (Array.isArray(sw.cases)) {
-				for (const c of sw.cases as unknown[]) {
+				for (let ci = 0; ci < sw.cases.length; ci++) {
+					const c = sw.cases[ci];
 					if (isPlainObject(c) && Array.isArray((c as { do?: unknown }).do)) {
-						assertNoDuplicateStepIds((c as { do: unknown[] }).do, sourcePath, seen);
+						assertNoDuplicateStepIds(
+							(c as { do: unknown[] }).do,
+							sourcePath,
+							seen,
+							`${stepPath}.switch.cases[${ci}].do`,
+						);
 					}
 				}
 			}
-			if (Array.isArray(sw.default)) assertNoDuplicateStepIds(sw.default as unknown[], sourcePath, seen);
+			if (Array.isArray(sw.default)) {
+				assertNoDuplicateStepIds(sw.default as unknown[], sourcePath, seen, `${stepPath}.switch.default`);
+			}
 		}
 		if (isPlainObject(step.tryCatch)) {
 			const tc = step.tryCatch as { try?: unknown; catch?: unknown; finally?: unknown };
-			if (Array.isArray(tc.try)) assertNoDuplicateStepIds(tc.try as unknown[], sourcePath, seen);
-			if (Array.isArray(tc.catch)) assertNoDuplicateStepIds(tc.catch as unknown[], sourcePath, seen);
-			if (Array.isArray(tc.finally)) assertNoDuplicateStepIds(tc.finally as unknown[], sourcePath, seen);
+			if (Array.isArray(tc.try)) {
+				assertNoDuplicateStepIds(tc.try as unknown[], sourcePath, seen, `${stepPath}.tryCatch.try`);
+			}
+			if (Array.isArray(tc.catch)) {
+				assertNoDuplicateStepIds(tc.catch as unknown[], sourcePath, seen, `${stepPath}.tryCatch.catch`);
+			}
+			if (Array.isArray(tc.finally)) {
+				assertNoDuplicateStepIds(tc.finally as unknown[], sourcePath, seen, `${stepPath}.tryCatch.finally`);
+			}
 		}
 	}
 }

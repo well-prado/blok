@@ -83,7 +83,30 @@ The proposed handle-based control-flow surface is sound in DIRECTION but rests o
 
 ## context — Adversarial validation: Remove the ctx authoring surface
 **Verdict:** `sound-with-risks`  
-The handle model is sound for the COMMON case (field reads chained between steps). Every primary author-facing ctx.* form has a structural replacement: ctx.state[id] -> step handle; ctx.prev -> immediately-prior handle; ctx.req/event/job -> typed entry handle; $.error -> per-tryCatch.catch error handle; forEach item -> per-item handle. BUT the "ctx becomes internal" framing is half-true and dangerous as written, on two hard walls. (1) defineNode.execute(ctx, input) at core/runner/src/defineNode.ts:76 hands EVERY node the full Context. ctx is the node ABI, not an author surface; ctx.publish, ct
+The handle model is sound for the COMMON case (field reads chained between steps). Every primary workflow-authoring `ctx.*` form has a structural replacement: `ctx.state[id]` -> step handle; `ctx.prev` -> immediately-prior handle; `ctx.req`/event/job -> typed entry handle; `$.error` -> per-`tryCatch.catch` error handle; forEach item -> per-item handle. But the precise boundary is **non-author-facing, not removed**: `defineNode.execute(ctx, input)` at `core/runner/src/defineNode.ts:76` is the node ABI and stays unchanged. Nodes still receive the full `Context`.
+
+**ctx boundary table (new handle-style workflow files):**
+
+| ctx member | Author replacement handle | Retained node-side? | Internal-only? |
+|---|---|---:|---:|
+| `ctx.request` / `ctx.req` | trigger entry handle (`req`, `event`, `job`, `msg`, `tick`, `rpc`, etc.) | yes | no |
+| `ctx.response` / `ctx.prev` | the step handle already bound in local TS; adjacent output is just the previous const | yes | no |
+| `ctx.state` | named step handles; for rare dynamic keys use the explicit escape hatch decided by the persistence/vars tasks | yes, rare reads allowed; never write directly | no |
+| `ctx.vars` | no new author surface; legacy alias of `ctx.state` and dynamic side-channel escape | yes, for back-compat / cross-runtime `vars_delta` | no |
+| `ctx.error` | `catch: (err) => ...` typed error handle | yes inside try/catch implementation and helper nodes | no |
+| `ctx.logger` | no author handle; logging is a node concern | yes | no |
+| `ctx.config` | validated `input` argument to `execute(ctx, input)` | yes for legacy/custom nodes | no |
+| `ctx.func` | no author handle | yes for function/runtime internals | no |
+| `ctx.env` | no workflow handle; future managed connections use `ctx.auth`, not author expressions | yes | no |
+| `ctx.publish(name, value)` | none; side-channel publication is node-only | yes | no |
+| `ctx.signal` | none; cooperative cancellation is node-only | yes | no |
+| `ctx.connection` | none in ordinary workflow authoring; WS helper nodes may use it | yes (`ConnectionContext`) | no |
+| `ctx.stream` | none in ordinary workflow authoring; SSE helper nodes may use it | yes (`StreamContext`) | no |
+| `ctx.id`, `ctx.workflow_name`, `ctx.workflow_path` | no author handle | read-only diagnostics if a node needs them | mostly |
+| `ctx.eventLogger` | no author handle | avoid in ordinary nodes; tracing plumbing owns it | yes |
+| `ctx._PRIVATE_` | none | no | yes |
+
+**Migration lint:** new handle-style workflow files may not name `ctx`. Node files may: `defineNode({ async execute(ctx, input) { ... } })` is unchanged. A node that legitimately needs a cross-step read inside `execute` may still read `ctx.state`, but should prefer its validated `input` when possible and must not write `ctx.state` directly. Helper nodes such as `@blokjs/ws-reply`, `@blokjs/ws-broadcast`, `@blokjs/sse-subscribe`, and `@blokjs/sse-stream` remain valid node-side users of `ctx.connection`/`ctx.stream`.
 
 **Top risks found:**
 - EXPRESSIVENESS LOSS (highest): triggers/http/src/workflows/examples/*.ts use arbitrary exprs the structural {$ref} cannot encode -- 'js/ctx.request.body.tenantId || 1default1', 'body.action || null', 'body.commits || []' (coalescing/defaulting), plus implied arithmetic/.filter/.map/concat. A handle that only records {$ref:{step,path}} loses these. tpl covers string interpolation only. Without a de
@@ -92,9 +115,9 @@ The handle model is sound for the COMMON case (field reads chained between steps
 - CROSS-RUNTIME vars_delta HAS NO HANDLE: cross-runtime nodes publish extra state via the proto vars_delta field, merged in RuntimeAdapterNode.ts:111-115 (Object.assign(state, result.vars)). Those keys are dynamic, decided at runtime by the sidecar, unknown to the TS type system. A typed handle shaped from the node Zod OUTPUT cannot reference them (they are not in output). Either vars_delta keys mus
 - SPREAD AND AS BREAK HANDLE IDENTITY: with spread:true the result.data keys merge into state at top level (state.user not state.<id>.user); with as:'name' the result lands at state[name]. The handle returned by step() is shaped from the node output and keyed by id -- but the actual state key changes. forEach 'as' similarly writes state[as] and state[as+'Index'] (forEach.ts). If step() returns one h
 
-**Open questions:**
+**Open questions / resolved boundaries:**
 - What is the sanctioned escape hatch for non-structural expressions (|| default, arithmetic, .filter/.map, concat beyond tpl)? Options: a js`...` tagged-template handle that emits a raw js/ literal (lowest effort, reuses existing mapper), an expr(fn) helper, or forcing a @blokjs/expr compute node. Th
-- Is ctx formally OUT OF SCOPE inside defineNode? The epic says defineNode is UNCHANGED -- confirm that means nodes keep full ctx and only WORKFLOW FILES lose it. If yes, the epic title 'ctx.state/prev/vars/response/request become internal' should read 'become non-author-facing', and ctx.publish/signa
+- **Resolved boundary:** `ctx` is out of scope only for new handle-style workflow authoring. It remains the unchanged `defineNode` ABI (`execute(ctx, input)`), so node files keep `ctx.publish`, `ctx.signal`, `ctx.connection`, `ctx.stream`, `ctx.logger`, `ctx.func`, and rare `ctx.state` reads.
 - Does branch unify onto the mapper path, or does the boolean handle keep compiling to the raw-ctx Function form? Unifying is cleaner but is an engine change that contradicts the 'engine byte-identical' claim. Keeping raw-ctx means the handle compiler needs a second emit mode.
 - How do authors reference cross-runtime vars_delta keys and ctx.publish names that are not in the node Zod output? Declare them in the manifest, or provide an untyped state('name') accessor?
 - Is ctx.prev adjacency dropped entirely in the new DSL (handles only), and if so, what replaces the genuinely-ergonomic 'use the last step's output' pattern inside a single linear pipeline?
@@ -108,7 +131,7 @@ The engine claim holds. PersistenceHelper.applyStepOutput (Rules 0/1/2/3) and Ma
 - R2 as/spread relocate the output away from state[id], breaking the handle's path root. as:"foo" -> applyStepOutput Rule 3 writes state.foo not state.<id>; spread:true -> Rule 2 scatters result.data.{k} into state.{k}. A handle minted from the step id (and unwrapping to js/ctx.state.<id>...) resolves to undefined under either knob. The handle's compiled root MUST be derived from the persistence dec
 - R3 forEach per-item handle is closure-scoped and mutation-based. ForEachNode.ts:586-587 does state[as]=item / state[as+'Index']=i, overwriting every iteration. A typed per-item handle compiles to js/ctx.state.<as>. It is ONLY valid inside the do[] body of that iteration. If an author captures the per-item handle and references it from a step AFTER the forEach, it resolves to the LAST item (sequent
 - R4 Truthful-undefined contract is preserved BUT now ambiguous between two causes. Rule 0 (errored result) and Rule 1 (ephemeral) BOTH leave state[id]===undefined. Under handles, state[id]===undefined inside a tryCatch.catch arm can mean either 'step threw' or 'step was ephemeral' - the author's did-this-succeed check silently lies for ephemeral steps. The handle layer must forbid the existence-che
-- R5 Persist-all memory growth has no measured ceiling. Every successful step writes state[id]; forEach over N items mutates state[as] N times (bounded, good) but a workflow with thousands of sequential persisted steps, or spread steps fanning many keys, grows ctx.state monotonically for the whole run. Long-lived runs (wait/defer/re-entry) keep the whole state object resident and re-serialize it int
+- R5 Persist-all memory growth now has a measured ceiling in `adr/0012-persist-all-state-growth.md`. Normal sequential state crosses the default 1 MiB cap around 9.2k small persisted slots; forEach item scope stays O(1) while results/node_runs grow O(N); spread-heavy workflows are the sharp edge and need lint warnings. Recommendation: defer state-slot GC for v1, keep `ephemeral: true` explicit, and warn before large state enters wait/defer/http-self paths.
 
 **Open questions:**
 - Should an ephemeral step be allowed to return a handle at all, or should step(id, node, {ephemeral:true}) return void (TS error on any read)? Returning a branded EphemeralHandle gives a better error message than void but costs a type.
