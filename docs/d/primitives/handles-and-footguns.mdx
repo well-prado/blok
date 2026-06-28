@@ -1,0 +1,286 @@
+---
+title: "Control-flow handles & footguns"
+description: "How handles read across branch / forEach / switch / tryCatch arms, and the four sharp edges the framework now guards at load time."
+icon: "shield-half"
+---
+
+The control-flow primitives — [`branch`](./branch.mdx),
+[`switch`](./switch.mdx), [`forEach`](./forEach.mdx),
+[`loop`](./loop.mdx), [`tryCatch`](./tryCatch.mdx) — all read and write
+the **same flat `ctx.state` namespace** as plain steps. A step inside an
+arm is a step: its output lands on `ctx.state[<id>]` (the *handle*) on
+success, exactly like a top-level step.
+
+That single shared namespace is what makes the primitives compose, and
+it's also where every "my control flow misbehaves" report comes from.
+This page is the contract — what a handle is readable from, and the four
+footguns the framework now rejects at workflow **load time** so they
+fail loudly instead of mis-running.
+
+## The handle contract
+
+A *handle* is a typed reference to a step's output — `$.state.<id>` in
+TypeScript, `"$.state.<id>"` / `"js/ctx.state.<id>"` in JSON. The scope
+rules (ADR 0003 *step builder stack* + ADR 0005 *arm-scoped handles*) are:
+
+| You can read a handle… | Result |
+|---|---|
+| produced **before** the control-flow step | readable inside either arm and after the step |
+| produced **inside an arm**, read in the **same arm** (or a descendant) | readable |
+| produced inside an arm, read in a **sibling arm** | **rejected** — `then` handle is not visible in `else`, case A not in case B, `try` not in `catch` |
+| produced inside an arm, read **after** the flow step | **rejected** — arm-local handles don't survive the arm |
+| a `forEach` item/body handle, read **after** the loop | **rejected** — only the loop step's own output array survives |
+| any handle on an `ephemeral: true` step | **rejected** — there is no state slot to read |
+
+The rule in one line: **a handle is readable from its producing scope or
+a descendant of it — never from a sibling scope or after the scope
+exits.** Cross-arm reads are rejected rather than typed maybe-`undefined`,
+because letting them resolve to `undefined` makes the handle lie and
+pushes the failure to runtime (ADR 0005 *arm-scoped handles*).
+
+### Getting a value *out* of an arm
+
+When a downstream step needs a value that one arm computed, you have two
+sanctioned moves:
+
+1. **Return it from the control-flow step** and read the flow step's own
+   handle.
+2. **Write both arms to the same `as:` key** and read that key after the
+   flow step — see footgun #1 below.
+
+```ts
+branch({
+  id: "route",
+  when: gt($.state.cart.total, 100),
+  then: [{ id: "premium", use: "score", as: "tier", inputs: { v: 1 } }],
+  else: [{ id: "standard", use: "score", as: "tier", inputs: { v: 0 } }],
+}),
+// both arms wrote ctx.state.tier; the next step reads it uniformly:
+{ id: "respond", use: "@blokjs/respond", inputs: { body: $.state.tier } },
+```
+
+### How branch / loop `when` is lowered
+
+Branch and loop conditions are **not** resolved by the Mapper. The
+if-else node and `LoopNode` call `Function("ctx", …)` on the condition
+string directly, so a handle/op in `when` lowers to a **bare `ctx.*`
+expression** — not a `js/` string, not a `{$ref}` (ADR 0004 *branch
+`when` lowering*). This third lowering site is the source of footgun #2.
+
+| `when` input | Lowered condition string |
+|---|---|
+| `$.state.stock.inStock` (boolean field) | `ctx.state.stock.inStock` |
+| `eq($.state.a.field, "x")` | `ctx.state.a.field === "x"` |
+| `gt($.state.a.count, $.state.b.limit)` | `ctx.state.a.count > ctx.state.b.limit` |
+| `not($.state.a.ok)` | `!(ctx.state.a.ok)` |
+| handle from `{ as: "alias" }` step | `ctx.state.alias…` |
+| field handle from `{ spread: true }` step | `ctx.state.<firstField>…` |
+
+A whole-output handle from a `spread:` step is **invalid** in `when` —
+`spread` removes the step root, so there's no `ctx.state.<id>` to read.
+Read a field or use `as:` instead.
+
+---
+
+## The four footguns
+
+### 1 — Reusing a step id across arms (CF-1)
+
+Every step id is a key in **one flat per-workflow config map** —
+including ids inside mutually-exclusive `branch`/`switch`/`tryCatch`
+arms. Two steps with the same id collide: last definition wins, so the
+matched arm silently runs with the *other* arm's inputs.
+
+The runner now **throws at load time** before any of that can happen.
+`assertNoDuplicateStepIds`
+(`core/runner/src/workflow/WorkflowNormalizer.ts`) walks the whole step
+tree with one shared `seen` set and reports the colliding arm paths:
+
+```text
+[blok] WorkflowNormalizer: duplicate step id "h" at steps[0].switch.cases[1].do[0];
+first seen at steps[0].switch.cases[0].do[0]. Step ids must be unique across the
+whole workflow — including across mutually-exclusive branch/switch arms …
+```
+
+<CodeGroup>
+```ts Wrong
+switch({
+  id: "route", on: $.req.body.kind,
+  cases: [
+    { when: "a", do: [{ id: "h", use: "score", inputs: { v: 1 } }] },
+    { when: "b", do: [{ id: "h", use: "score", inputs: { v: 2 } }] }, // ← duplicate "h"
+  ],
+})
+```
+```ts Right
+switch({
+  id: "route", on: $.req.body.kind,
+  cases: [
+    { when: "a", do: [{ id: "scoreA", use: "score", as: "score", inputs: { v: 1 } }] },
+    { when: "b", do: [{ id: "scoreB", use: "score", as: "score", inputs: { v: 2 } }] },
+  ],
+})
+// unique ids; both write ctx.state.score via `as:` for a uniform downstream read
+```
+</CodeGroup>
+
+**Fix:** give every step a unique id. If two arms must feed the same
+downstream key, use `as:` with distinct ids (`runA`/`runB` → `as: "run"`).
+
+### 2 — `branch` / `loop` `when` must be raw `ctx.*` (CF-3)
+
+Because `when` is evaluated by `Function("ctx", …)` and **bypasses the
+Mapper** (no `js/` strip — see [the lowering table](#how-branch-loop-when-is-lowered)),
+handing it a `$` proxy or a `js/`-prefixed string is a live silent-500
+bug. A bare `$.req.method` compiles to the string `"js/ctx.req.method"`;
+the node then evaluates `return (js/ctx.req.method)` — `js` is an
+undefined identifier, so it throws `ReferenceError: js is not defined`
+inside the node (or mis-routes in the multi-condition fall-through path).
+TypeScript can't catch it (the proxy is typed `unknown`), and
+`WorkflowTestRunner` doesn't either — this is the eval-site divergence
+documented in the S3 *expression-ergonomics* spec: the Mapper (step
+inputs) strips `js/`, but the if-else node and `LoopNode` evaluate their
+condition string verbatim.
+
+The framework's answer is the typed comparators from `@blokjs/helper`
+(`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `not`). They read the proxy's raw
+path and emit the correct bare-`ctx.*` string, canonicalizing aliases
+(`$.req` → `ctx.request`, `$.prev` → `ctx.response`):
+
+<CodeGroup>
+```ts Wrong
+branch({ id: "route", when: $.req.method, then: [...] })
+// → "js/ctx.req.method" → ReferenceError: js is not defined at runtime
+
+branch({ id: "route", when: "js/ctx.state.x > 10", then: [...] })
+// → the `js/` is never stripped here → ReferenceError
+```
+```ts Right
+import { branch, eq, gt } from "@blokjs/helper";
+
+branch({ id: "route", when: eq($.req.method, "POST"), then: [...] })
+// → 'ctx.request.method === "POST"'
+
+branch({ id: "gate", when: gt($.state.cart.total, 100), then: [...] })
+// → 'ctx.state.cart.total > 100'
+```
+</CodeGroup>
+
+In hand-written JSON the `when` value is already a raw-`ctx.*` string —
+write `"ctx.state.x > 10"`, never `"js/ctx.state.x > 10"` and never
+`"$.state.x > 10"`.
+
+Boolean handles are **truthiness checks**: `when: $.state.stock.inStock`
+lowers to `ctx.state.stock.inStock` and takes the `then` arm when truthy.
+For any *comparison* (numeric, string-equality, null-check) reach for an
+`eq`/`gt`/… helper — don't try to hand-build the operator into a proxy.
+
+### 3 — `forEach` `as` / `asIndex` share the state namespace (CF-5)
+
+A `forEach` writes its current item to `ctx.state[<as>]` and the index to
+`ctx.state[<as>Index]` on every iteration. Those keys live in the **same
+flat `ctx.state`** as step outputs, so naming `as:` after an existing
+step id (or another forEach's `as`) silently clobbers one with the other.
+
+`assertNoForEachStateKeyCollisions`
+(`core/runner/src/workflow/WorkflowNormalizer.ts`, mirrored in
+`core/workflow-helper/src/utils/forEachScope.ts`) **throws at load
+time** for both collision shapes — including when the collision is with
+an `as:`-renamed step's key, since it collects step keys after `as:`
+rename:
+
+```text
+[blok] WorkflowNormalizer: forEach state key "item" at steps[1].forEach.as
+collides with step id "item" at steps[0]. forEach iteration variables share
+ctx.state with step outputs; rename `as` or the step id.
+```
+
+<CodeGroup>
+```ts Wrong
+steps: [
+  { id: "item", use: "load", inputs: {} },          // step id "item"
+  { id: "loop", forEach: { in: $.state.item.rows, as: "item", // ← collides
+      do: [{ id: "proc", use: "process", inputs: { row: $.state.item } }] } },
+]
+```
+```ts Right
+steps: [
+  { id: "rows", use: "load", inputs: {} },
+  { id: "loop", forEach: { in: $.state.rows, as: "row",
+      do: [{ id: "proc", use: "process", inputs: { row: $.state.row } }] } },
+]
+```
+</CodeGroup>
+
+The same guard rejects **nested** `forEach` that reuse an enclosing
+loop's `as` name (the inner item handle would shadow the outer in the
+shared namespace) — give each loop a distinct `as`.
+
+### 4 — `ephemeral` handles and cross-arm reads (CF-7)
+
+Two ways to read a handle that doesn't exist:
+
+- **`ephemeral: true`** skips state persistence entirely — there is no
+  `ctx.state[<id>]` slot, on the taken path or any other. The value is
+  only available via `ctx.prev` to the *immediately* next step. Reading
+  its handle later is the arm-scope guard's `ephemeral` rejection (ADR
+  0005): *"Step `<id>` is ephemeral, so its handle cannot be read."*
+- **Cross-arm / post-arm reads** of a non-ephemeral arm-local handle are
+  rejected by the same guard — see [the handle contract](#the-handle-contract).
+
+Inside `tryCatch.catch` there's a subtler truth, and it's load-bearing:
+**a step that throws does not persist state** (the v0.5.1 fix in
+`PersistenceHelper.applyStepOutput` — Rule 0). So inside `catch`,
+`ctx.state[<id>] === undefined` is a *truthful* "did this try-step
+actually succeed?" check, which is exactly what selective compensation
+needs:
+
+```ts
+catch: [
+  branch({
+    id: "compensate",
+    when: ne($.state.charge, undefined),   // charge succeeded → refund needed
+    then: [{ id: "refund", use: "@blokjs/stripe-refund", inputs: { … } }],
+  }),
+]
+```
+
+Note the boundaries of `catch`:
+
+- `$.error.code` and `$.error.stepId` are **optional** — non-`GlobalError`
+  throws yield `code: undefined`, and throws that bypass the inner-try
+  wrap yield `stepId: undefined`. Don't assume either is present; default
+  before you branch on them.
+- `catch` only fires for **step errors**. It does **not** fire for
+  `wait` deferrals or run cancellation (`ctx.signal`) — those are control
+  signals, not failures, and propagate past the `try` boundary. Don't put
+  cleanup that must run on cancel inside a `catch`; use it for genuine
+  errors only.
+
+---
+
+## Quick reference
+
+```
+HANDLE:   $.state.<id>  → readable in its own scope or a descendant; never a sibling/after
+ESCAPE:   return from the flow step, OR write both arms to one `as:` key
+WHEN:     branch/loop `when` is raw ctx.* — use eq/ne/gt/gte/lt/lte/not, never js// or $.
+GUARDS (throw at load time):
+  duplicate step id across arms        → assertNoDuplicateStepIds (names both arm paths)
+  forEach `as`/`asIndex` ↔ step id     → assertNoForEachStateKeyCollisions
+NEVER:    reuse a step id · name `as:` after a step id · read an ephemeral/cross-arm handle
+```
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Context & state" icon="database" href="/d/fundamentals/context-and-state">
+    The four reads, persistence knobs, and the broader footgun list.
+  </Card>
+  <Card title="branch — if/else" icon="git-fork" href="/d/primitives/branch">
+    The two-way primitive and its `when` helpers.
+  </Card>
+  <Card title="tryCatch — recover" icon="shield-alert" href="/d/primitives/tryCatch">
+    The `$.error` envelope and selective compensation.
+  </Card>
+</Columns>
