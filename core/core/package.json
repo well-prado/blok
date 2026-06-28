@@ -16,9 +16,9 @@
 			"default": "./dist/index.js"
 		},
 		"./dsl": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"default": "./dist/index.js"
+			"types": "./dist/dsl.d.ts",
+			"import": "./dist/dsl.js",
+			"default": "./dist/dsl.js"
 		},
 		"./runtime": {
 			"types": "./dist/runtime.d.ts",

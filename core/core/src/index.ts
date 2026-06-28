@@ -1,21 +1,18 @@
 /**
  * @blokjs/core — the published author import surface for Blok's typed-handle DSL.
  *
- * The `.` entry is the LIGHT authoring surface. It re-exports from
- * `@blokjs/runner/dsl` (not the `@blokjs/runner` barrel), so
- * `import { workflow } from "@blokjs/core"` never evaluates the runner's
- * grpc/otel/sqlite graph — only the clean DSL modules. The full engine and
- * test utilities live at the heavier sibling subpaths:
+ * The `.` entry is the ergonomic authoring surface: workflow DSL plus
+ * `defineNode`. The strict workflow-only bundle boundary lives at `./dsl`,
+ * which avoids the node execution graph entirely. The full engine and test
+ * utilities live at the heavier sibling subpaths:
  *
  *   import { workflow, step, branch, http, tpl, gt } from "@blokjs/core";        // authoring (light)
  *   import { Runner, Configuration, TriggerBase }   from "@blokjs/core/runtime"; // engine (heavy)
  *   import { NodeTestHarness, WorkflowTestRunner }  from "@blokjs/core/testing";
  */
 
-// Callback-style `workflow()` — the new DSL surface (runner exports it as
-// `workflowCallback`; here it IS `workflow`).
 export {
-	workflowCallback as workflow,
+	workflow,
 	step,
 	subworkflow,
 	branch,
@@ -31,9 +28,14 @@ export {
 	lt,
 	lte,
 	not,
-	// Node authoring
-	defineNode,
-} from "@blokjs/runner/dsl";
+	$,
+	http,
+} from "./dsl";
+
+// Node authoring lives on the root authoring surface, but stays out of the
+// pure `@blokjs/core/dsl` subpath so workflow-only bundles can tree-shake the
+// node execution graph.
+export { defineNode } from "@blokjs/runner/defineNode";
 
 // Type-only foundation (handles + runtime stub). `runtimeNode` is a type-only
 // declared signature in the runner, so it rides the type re-export.
@@ -46,8 +48,5 @@ export type {
 	runtimeNode,
 	TriggerHandle,
 	SubworkflowOptions,
-} from "@blokjs/runner/dsl";
-
-// The HTTP trigger-config helper — the design's `http.post("/orders")`.
-export { http } from "./http";
+} from "./dsl";
 export type { HttpTriggerBlock } from "./http";
