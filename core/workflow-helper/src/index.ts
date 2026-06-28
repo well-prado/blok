@@ -42,6 +42,7 @@ import type {
 } from "./types/TriggerOpts";
 import { WORKFLOW_IR_VERSION, type WorkflowIR, WorkflowIRSchema } from "./types/WorkflowOpts";
 import { parseDuration, tryParseDuration } from "./utils/parseDuration";
+import { type WorkflowValidationError, type WorkflowValidationResult, validateWorkflow } from "./validateWorkflow";
 
 export {
 	// v2 DSL primitives — the canonical authoring surface
@@ -81,6 +82,10 @@ export {
 	WorkflowIRSchema,
 	WORKFLOW_IR_VERSION,
 	type WorkflowIR,
+	// advisory shared validator (CLI / registry / Studio / AI authoring checks)
+	validateWorkflow,
+	type WorkflowValidationResult,
+	type WorkflowValidationError,
 	// per-trigger config TYPES (each trigger package re-exports its own)
 	type HttpTriggerOpts,
 	type TriggerOpts,
