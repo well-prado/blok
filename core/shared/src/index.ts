@@ -30,6 +30,7 @@ import mapper from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
 import { NamedMissingStateError } from "./utils/NamedMissingStateError";
+import { type StructuralRef, lowerRefs } from "./utils/lowerRefs";
 
 export {
 	NodeBase,
@@ -66,4 +67,6 @@ export {
 	mapper,
 	MapperResolutionError,
 	NamedMissingStateError,
+	lowerRefs,
+	type StructuralRef,
 };
