@@ -68,6 +68,16 @@ function isStructuralRef(value: object): value is StructuralRef {
  */
 const TRIGGER_SENTINEL = "@trigger";
 
+/**
+ * The tryCatch error-handle sentinel (#317). The callback `tryCatch()` mints the
+ * `error` handle the catch arm receives rooted at this pseudo-step (see
+ * `core/runner/src/stepBuilder.ts:tryCatch`). It is NOT a real step — the error
+ * envelope lives at `ctx.error` (set by `TryCatchNode` on catch entry), NOT
+ * `ctx.state["@error"]`. So a ref rooted here lowers to `js/ctx.error`, mirroring
+ * the `@trigger` → `ctx.request` branch. Keep this string in sync with stepBuilder.
+ */
+const ERROR_SENTINEL = "@error";
+
 /** Valid JS identifier — same shape `$.ts`'s proxy encoder accepts for `.k`. */
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -111,6 +121,12 @@ function refExpr(ref: StructuralRef): string {
 	// `ctx.request` + the same encoded path so `req.body.name` resolves.
 	if (ref.$ref.step === TRIGGER_SENTINEL) {
 		return `ctx.request${suffix}`;
+	}
+	// Error-root: the `@error` pseudo-step's envelope lives at `ctx.error` (set by
+	// TryCatchNode on catch entry), NOT `ctx.state["@error"]`. Lower to `ctx.error`
+	// + the same encoded path so `error.message` / `error.code` resolve.
+	if (ref.$ref.step === ERROR_SENTINEL) {
+		return `ctx.error${suffix}`;
 	}
 	const root = encodeSegment(ref.$ref.step); // `.fanOut` or `["fan-out"]`
 	return `ctx.state${root}${suffix}`;

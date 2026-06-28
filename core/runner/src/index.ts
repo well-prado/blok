@@ -41,6 +41,7 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 import {
 	branch,
 	forEach as callbackForEach,
+	tryCatch as callbackTryCatch,
 	eq as condEq,
 	gt as condGt,
 	gte as condGte,
@@ -238,6 +239,8 @@ export {
 	condNot as not,
 	// forEach over handles (#329 / #343)
 	callbackForEach as forEach,
+	// tryCatch over handles (#317)
+	callbackTryCatch as tryCatch,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -362,6 +365,7 @@ export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type {
 	Handle,
 	EphemeralHandle,
+	ErrorHandle,
 	Refable,
 	NodeTypeWitness,
 	InputOf,
@@ -369,7 +373,14 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 } from "./handles";
-export type { StepOptions, TriggerHandle, BranchCondition, BranchArms, ForEachOptions } from "./stepBuilder";
+export type {
+	StepOptions,
+	TriggerHandle,
+	BranchCondition,
+	BranchArms,
+	ForEachOptions,
+	TryCatchArms,
+} from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
