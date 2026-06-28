@@ -87,6 +87,23 @@ export type EphemeralHandle<T> = {
 };
 
 /**
+ * The handle returned by `step(..., { spread: true })` (#342). `spread`
+ * shallow-merges the node output's KEYS into state at the TOP LEVEL (Rule 2), so
+ * the step id is NOT a state slot — only per-key reads are valid. Each top-level
+ * key is exposed as its own `Handle<value>` rooted at `ctx.state.<key>` (NOT
+ * `ctx.state.<id>.<key>`).
+ *
+ * Intentionally NOT branded as `Handle<T>` and NOT assignable to `Refable<T>`:
+ * passing the whole spread handle as a step input (the whole-output ref) is a
+ * COMPILE error, mirroring the runtime rejection — `spread` removes the step
+ * root, so there is nothing whole to reference. Read an individual key instead.
+ *
+ * Requires `T` to be an object with statically-known keys; `step()` additionally
+ * hard-errors at authoring time if the node output is not a known object.
+ */
+export type SpreadHandle<T> = T extends object ? { readonly [K in keyof T]-?: Handle<NonNullable<T[K]>> } : never;
+
+/**
  * The error envelope a `tryCatch` catch arm receives, modeling
  * `TryCatchNode.toErrorEnvelope` (core/runner/src/TryCatchNode.ts) EXACTLY:
  *

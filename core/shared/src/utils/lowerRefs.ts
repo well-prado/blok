@@ -107,12 +107,12 @@ function encodePath(path: (string | number)[]): string {
  * Lower a single structural `{$ref}` into its `js/ctx.state.<root>...` wire
  * string.
  *
- * ponytail: `<root>` is `ref.step` LITERALLY for now. Resolving the root
- * against the target step's `as`/`spread`/`ephemeral` persistence (a ref to a
- * step that renamed its output with `as:` must point at the renamed slot) is
- * #327/#339's job. Until then a ref to an `as:`/`spread:` step lowers to the
- * step id, which won't be in `ctx.state`. Upgrade path: thread the workflow's
- * resolved step→state-key map into this pass.
+ * `<root>` is `ref.$ref.step` LITERALLY — and that is now correct for every
+ * persistence knob (#327/#342/#339): `step()` mints each handle ALREADY rooted
+ * at its resolved state key (`as ?? id`; a spread step's per-key sub-handles
+ * root at their top-level key), so the `{$ref}.step` this pass sees is already
+ * the final `ctx.state` slot. No step→key map needed here — re-rooting happens
+ * at handle mint time in `core/runner/src/stepBuilder.ts`.
  */
 function refExpr(ref: StructuralRef): string {
 	const suffix = encodePath(ref.$ref.path ?? []);
