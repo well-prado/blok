@@ -7,6 +7,7 @@ import type { Schema } from "jsonschema";
 import BlokService from "./Blok";
 import type { IBlokResponse } from "./BlokResponse";
 import BlokResponse from "./BlokResponse";
+import type { NodeTypeWitness } from "./handles";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
 
@@ -340,9 +341,18 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
  *
  * @param definition - Node definition with Zod schemas
  * @returns FunctionNode instance compatible with existing runner
+ *
+ * The DECLARED return type additionally carries a phantom {@link NodeTypeWitness}
+ * (`z.infer` of the input/output schemas). This is a TYPES-ONLY addition — the
+ * runtime value is the same `FunctionNode` instance, the witness is never present
+ * at runtime. The witness lets `step()` (issue #421) recover the node's
+ * input/output types from a direct `import`, which the broad registry maps
+ * (`Record<string, BlokService<unknown>>`) would otherwise erase. See ADR 0006.
  */
 export function defineNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTypeAny>(
 	definition: FnNodeDefinition<TInput, TOutput>,
-): FunctionNode<TInput, TOutput> {
-	return new FunctionNode(definition);
+): FunctionNode<TInput, TOutput> & NodeTypeWitness<z.infer<TInput>, z.infer<TOutput>> {
+	// Runtime-identical: the witness is a phantom type, never a real property.
+	return new FunctionNode(definition) as FunctionNode<TInput, TOutput> &
+		NodeTypeWitness<z.infer<TInput>, z.infer<TOutput>>;
 }

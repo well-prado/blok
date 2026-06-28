@@ -16,5 +16,10 @@
 	},
 	"compileOnSave": true,
 	"include": ["./src"],
-	"exclude": ["./src/**/__tests__", "./src/**/*.test.ts", "./test"]
+	"exclude": [
+		"./src/**/__tests__",
+		"./src/**/__type-tests__",
+		"./src/**/*.test.ts",
+		"./test"
+	]
 }
