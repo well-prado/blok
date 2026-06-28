@@ -175,33 +175,18 @@ A workflow's `name` is its identity:
 
 <Steps>
   <Step title="Identify">The runtime resolves the workflow matching the trigger event.</Step>
-  <Step title="Initialize">A fresh [Context](/d/introduction/context) is built — request data, env, and an empty `state` map.</Step>
+  <Step title="Initialize">A fresh [Context](/d/fundamentals/context-and-state) is built — request data, env, and an empty `state` map.</Step>
   <Step title="Run">Steps execute in order; each output auto-stores at `ctx.state[id]` and becomes readable through its handle.</Step>
   <Step title="Complete">The workflow finishes at the last step (or a step with `stop: true`).</Step>
 </Steps>
 
-## Other formats (legacy, supported)
+## JSON workflows
 
-The handle DSL compiles to the same IR as the older **object-style** and **JSON** forms, which
-remain fully supported. Recognize them, but prefer the handle DSL for new TypeScript workflows.
+The handle DSL compiles to the same IR as **JSON workflows** — a first-class format, ideal for
+config-driven or generated workflows. The shape mirrors the DSL one-for-one: cross-step
+references are `$.state.<id>` strings (which compile to `js/ctx.state.<id>`).
 
-<CodeGroup>
-```ts Object-style (@blokjs/helper)
-import { workflow, $ } from "@blokjs/helper";
-
-export default workflow({
-  name: "countries.list",
-  version: "1.0.0",
-  trigger: { http: { method: "GET", path: "/countries" } },
-  steps: [
-    { id: "fetch", use: "@blokjs/api-call",
-      inputs: { url: "https://countriesnow.space/api/v0.1/countries/capital", method: "GET" } },
-    { id: "respond", use: "@blokjs/respond", inputs: { body: $.state.fetch }, ephemeral: true },
-  ],
-});
-```
-
-```json JSON
+```json
 {
   "name": "countries.list",
   "version": "1.0.0",
@@ -213,12 +198,9 @@ export default workflow({
   ]
 }
 ```
-</CodeGroup>
 
-In these forms, cross-step references are `$.state.<id>` (a typed proxy in TS, a plain string
-in JSON; both compile to `js/ctx.state.<id>`). Use `"ANY"` for the catch-all HTTP method, never
-`"*"`. JSON workflows live under `workflows/json/` and support
-[file-based routing](#file-based-routing).
+Use `"ANY"` for the catch-all HTTP method, never `"*"`. JSON workflows live under
+`workflows/json/` and support [file-based routing](#file-based-routing).
 
 ## File-based routing
 
