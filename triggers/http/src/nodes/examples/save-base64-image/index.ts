@@ -4,7 +4,7 @@ import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
-	name: "save-image-base64",
+	name: "save-image",
 	description: "Saves a base64-encoded image to disk",
 
 	input: z.object({

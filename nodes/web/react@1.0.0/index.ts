@@ -35,7 +35,7 @@ function root(relPath: string): string {
 }
 
 export default defineNode({
-	name: "react",
+	name: "@blokjs/react",
 	description: "Renders React applications by loading a compiled bundle and rendering it in an HTML template",
 	contentType: "text/html",
 

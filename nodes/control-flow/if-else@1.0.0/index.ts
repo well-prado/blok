@@ -34,7 +34,7 @@ const conditionSchema = z.object({
 });
 
 export default defineNode({
-	name: "if-else",
+	name: "@blokjs/if-else",
 	description: "Evaluates conditions and returns the matching branch's steps for execution",
 
 	// This is a flow control node — the runner uses processFlow() instead of process()

@@ -35,7 +35,7 @@ export type InputType = {
  * - Error handling with status codes
  */
 export default defineNode({
-	name: "api-call",
+	name: "@blokjs/api-call",
 	description: "Makes HTTP API calls with automatic JSON handling",
 
 	// Input schema - Zod validation

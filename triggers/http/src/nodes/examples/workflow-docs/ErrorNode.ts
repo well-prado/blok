@@ -2,7 +2,7 @@ import { defineNode } from "@blokjs/runner";
 import { z } from "zod";
 
 export default defineNode({
-	name: "error-node",
+	name: "error",
 	description: "Intentionally throws an error for testing error handling",
 	contentType: "text/html",
 
