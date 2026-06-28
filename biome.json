@@ -11,6 +11,8 @@
 			"node_modules",
 			".claude/**",
 			"dist",
+			"core/workflow-helper/schemas/workflow.v2.json",
+			"packages/vscode-extension/schemas/workflow.v2.json",
 			"**/coverage/**",
 			".nx/**",
 			"**/routeTree.gen.ts",

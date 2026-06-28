@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { WORKFLOW_SCHEMA_ID, buildWorkflowSchema } from "../scripts/build-schema";
 import {
 	NodeTypeSchema,
 	RetryConfigSchema,
@@ -1281,5 +1284,85 @@ describe("validateTriggerConfig", () => {
 	it("rejects invalid configs", () => {
 		expect(() => validateTriggerConfig("cron", { schedule: 123 })).toThrow();
 		expect(() => validateTriggerConfig("worker", { queue: 123 })).toThrow();
+	});
+});
+
+// #304 — Anti-drift guard. One generator, one consumed artifact. These tests
+// fail the build if anyone hand-edits the checked-in schema, forgets to
+// regenerate after a Zod schema change (e.g. a tweaked `.describe()` string),
+// lets the bundled VS Code copy diverge, or regresses `$refStrategy` (which
+// would silently drop the recursive `z.lazy` step kinds from the output).
+describe("#304 — published schema anti-drift", () => {
+	const canonicalPath = resolve(__dirname, "..", "schemas", "workflow.v2.json");
+	const vscodeCopyPath = resolve(
+		__dirname,
+		"..",
+		"..",
+		"..",
+		"packages",
+		"vscode-extension",
+		"schemas",
+		"workflow.v2.json",
+	);
+
+	it("checked-in schema is byte-identical to a fresh in-memory generation", () => {
+		// Match how `scripts/build-schema.ts` serializes (tab indent + trailing newline).
+		const generated = `${JSON.stringify(buildWorkflowSchema(), null, "\t")}\n`;
+		const onDisk = readFileSync(canonicalPath, "utf8");
+		expect(onDisk).toBe(generated);
+	});
+
+	it("regenerating via the same zodToJsonSchema call deep-equals the on-disk schema (sans wrapper)", () => {
+		// The wrapper test in the spec: regenerate raw, strip the
+		// $id/title/description envelope the generator adds, and compare bodies.
+		const raw = zodToJsonSchema(WorkflowIRSchema, {
+			name: "BlokWorkflowV2",
+			target: "jsonSchema7",
+			$refStrategy: "none",
+		}) as { definitions?: Record<string, unknown> };
+		const regeneratedInner = raw.definitions?.BlokWorkflowV2 ?? raw;
+
+		const onDisk = JSON.parse(readFileSync(canonicalPath, "utf8")) as Record<string, unknown>;
+		const { $schema, $id, title, description, ...onDiskInner } = onDisk;
+		expect(onDiskInner).toEqual(regeneratedInner);
+	});
+
+	it("bundled VS Code copy matches the canonical schema byte-for-byte", () => {
+		expect(readFileSync(vscodeCopyPath, "utf8")).toBe(readFileSync(canonicalPath, "utf8"));
+	});
+
+	it("carries the stable $id identifier", () => {
+		const onDisk = JSON.parse(readFileSync(canonicalPath, "utf8")) as { $id?: string };
+		expect(onDisk.$id).toBe(WORKFLOW_SCHEMA_ID);
+		expect(WORKFLOW_SCHEMA_ID).toBe("https://schemas.blok.build/workflow/v2.json");
+	});
+
+	// Completeness: guards against a future $refStrategy regression silently
+	// dropping the recursive control-flow kinds, and against `ui`/`schemaVersion`
+	// disappearing. Asserts against the GENERATED output (not the file) so it
+	// catches a generator change even before the file is regenerated.
+	it("contains all 8 v2 step kinds plus ui + schemaVersion", () => {
+		const serialized = JSON.stringify(buildWorkflowSchema());
+		// schemaVersion + ui live as named properties in the output.
+		for (const key of ["schemaVersion", "ui"]) {
+			expect(serialized).toContain(`"${key}"`);
+		}
+		// The 8 step kinds: regular (discriminated by `use`), branch, subworkflow,
+		// wait, forEach, loop, switch, tryCatch — each must appear as a property
+		// key in some anyOf member.
+		const steps = (buildWorkflowSchema() as { properties?: { steps?: { items?: { anyOf?: unknown[] } } } }).properties
+			?.steps?.items;
+		const members = (steps?.anyOf ?? []) as Array<{ properties?: Record<string, unknown> }>;
+		expect(members.length).toBeGreaterThan(0);
+		const discriminators = new Set<string>();
+		for (const m of members) {
+			if (!m.properties) continue;
+			for (const key of ["use", "branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch"]) {
+				if (key in m.properties) discriminators.add(key);
+			}
+		}
+		for (const key of ["use", "branch", "subworkflow", "wait", "forEach", "loop", "switch", "tryCatch"]) {
+			expect(discriminators.has(key)).toBe(true);
+		}
 	});
 });

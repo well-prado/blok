@@ -126,7 +126,7 @@
 		"jsonValidation": [
 			{
 				"fileMatch": "**/workflows/**/*.json",
-				"url": "./schemas/workflow.schema.json"
+				"url": "./schemas/workflow.v2.json"
 			}
 		],
 		"configuration": {
