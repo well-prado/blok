@@ -5,6 +5,7 @@
 - **Resolves:** [#424](https://github.com/well-prado/blok/issues/424)
 - **Epic:** [#413](https://github.com/well-prado/blok/issues/413)
 - **Prototype:** `specs/blok-vision/adr/0006-define-node-handle-types-prototype.ts`
+- **Refined by:** [ADR 0007](0007-handle-proxy-soundness.md) — the authoritative `Handle<T>` model. Where this ADR's shorthand and 0007 disagree (assignability, union narrowing, array members), **0007 wins**.
 
 ## Finding
 
@@ -29,6 +30,8 @@ So `defineNode` can stay runtime-identical, but its return type needs a public p
 - untyped/no-schema nodes degrade to `unknown`, not `any`.
 
 `Handle<T>` is assignable to `T` so handles can appear wherever literal input values are expected. At lowering time the handle is still detected by a private symbol and turned into a structural `{$ref}`.
+
+> **Correction (ADR 0007):** the "assignable to every `T`" shorthand above is too strong. A handle is only assignable where a workflow input expects `T` — modeled as `Refable<T>`, not blanket `Handle<T> extends T`. Array members (`.map`, `.length`, `.at`), union narrowing, and tuple-index typing follow [ADR 0007](0007-handle-proxy-soundness.md), which is the authoritative model the implementation must follow.
 
 ## Required changes
 
