@@ -11,16 +11,23 @@
 	"navigation": {
 		"tabs": [
 			{
-				"tab": "For Users",
+				"tab": "Documentation",
 				"groups": [
 					{
-						"group": "Introduction",
+						"group": "Get Started",
 						"pages": [
 							"d/introduction/overview",
-							"d/introduction/first-steps",
+							"d/get-started/quickstart",
+							"d/introduction/first-steps"
+						]
+					},
+					{
+						"group": "Core Concepts",
+						"pages": [
+							"d/fundamentals/blok-concept",
 							"d/introduction/nodes",
 							"d/introduction/workflows",
-							"d/introduction/context",
+							"d/fundamentals/context-and-state",
 							"d/introduction/triggers"
 						]
 					},
@@ -36,13 +43,6 @@
 							"d/examples/webhook-router",
 							"d/examples/worker-fanout",
 							"d/examples/mcp-greeter"
-						]
-					},
-					{
-						"group": "Fundamentals",
-						"pages": [
-							"d/fundamentals/blok-concept",
-							"d/fundamentals/context-and-state"
 						]
 					},
 					{
