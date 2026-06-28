@@ -208,6 +208,83 @@ describe("defineNode", () => {
 			expect(ctx.logger.log).toHaveBeenCalledWith("Processing value");
 		});
 
+		it("keeps node-side ctx publish, signal, connection, and stream reachable", async () => {
+			const sent: unknown[] = [];
+			const streamed: unknown[] = [];
+			const state: Record<string, unknown> = {};
+			const controller = new AbortController();
+			const ctx = {
+				...createTestContext(),
+				state,
+				vars: state,
+				publish: (name: string, value: unknown) => {
+					state[name] = value;
+				},
+				signal: controller.signal,
+				connection: {
+					id: "conn-1",
+					send: (data: string | ArrayBuffer | Uint8Array) => {
+						sent.push(data);
+					},
+					close: vi.fn(),
+					setAttachment: vi.fn(),
+					get attachment() {
+						return undefined;
+					},
+					joinRoom: vi.fn(),
+					leaveRoom: vi.fn(),
+					rooms: new Set<string>(),
+					broadcast: vi.fn(() => 0),
+				},
+				stream: {
+					id: "stream-1",
+					writeSSE: async (opts: { event?: string; data: unknown; id?: string; retry?: number }) => {
+						streamed.push(opts);
+					},
+					writeComment: vi.fn(async () => {}),
+					close: vi.fn(),
+					closed: false,
+					signal: controller.signal,
+					lastEventId: null,
+					subscribe: vi.fn(),
+				},
+			} as unknown as Context;
+
+			const node = defineNode({
+				name: "node-side-ctx",
+				description: "Uses node-only ctx members",
+				input: z.object({}),
+				output: z.object({
+					ok: z.boolean(),
+					aborted: z.boolean(),
+					sent: z.number(),
+					streamed: z.number(),
+				}),
+				async execute(ctx) {
+					const { connection, stream } = ctx;
+
+					ctx.publish?.("published", { ok: true });
+					connection?.send("hello");
+					await stream?.writeSSE({ event: "ready", data: { ok: true } });
+
+					return {
+						ok: true,
+						aborted: ctx.signal?.aborted === true,
+						sent: sent.length,
+						streamed: streamed.length,
+					};
+				},
+			});
+
+			const result = (await node.handle(ctx, {})) as IBlokResponse;
+
+			expect(result.success).toBe(true);
+			expect(result.data).toEqual({ ok: true, aborted: false, sent: 1, streamed: 1 });
+			expect(ctx.state?.published).toEqual({ ok: true });
+			expect(sent).toEqual(["hello"]);
+			expect(streamed).toEqual([{ event: "ready", data: { ok: true } }]);
+		});
+
 		it("should handle complex nested objects", async () => {
 			const node = defineNode({
 				name: "complex-node",

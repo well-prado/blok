@@ -13,7 +13,10 @@ import { z } from "zod";
 import { defineNode } from "../defineNode";
 import type { EphemeralHandle, Handle, InputOf, OutputOf, Refable } from "../handles";
 import { runtimeNode } from "../handles";
-import { gt } from "../stepBuilder";
+import { gt, step, workflowCallback as workflow } from "../stepBuilder";
+
+// @ts-expect-error Workflow author imports intentionally do not expose runtime Context; use trigger/step handles instead.
+import type { Context as WorkflowAuthorContext } from "../dsl";
 
 // A workflow input that expects `T` accepts a handle for `T` (the `Refable` boundary).
 declare function consume<T>(value: Refable<T>): void;
@@ -119,6 +122,26 @@ const fetchUser = defineNode({
 		const userId: string = input.userId;
 		return { user: { id: userId, tags: [] } };
 	},
+});
+
+// --- #326: workflow author callbacks receive handles, not runtime ctx ---------
+
+void workflow("Author Boundary", { version: "1.0.0", trigger: { http: { method: "GET" } } }, (ctx) => {
+	// @ts-expect-error workflow entry handles do not expose runtime ctx.state; use trigger/step handles instead.
+	consume(ctx.state);
+
+	// @ts-expect-error ctx.publish is node-only, not workflow-authoring surface.
+	ctx.publish("side-channel", "value");
+
+	const renamedCtx = ctx;
+
+	// @ts-expect-error aliasing the entry handle does not turn it into runtime ctx.
+	consume(renamedCtx.state);
+
+	step("author-boundary-step", fetchUser, {
+		userId: "u1",
+		filter: { active: true },
+	});
 });
 
 // The phantom witness on the DECLARED return type survives import: Input/Output
