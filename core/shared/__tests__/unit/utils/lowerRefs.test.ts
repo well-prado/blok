@@ -195,6 +195,65 @@ describe("lowerRefs — ADR 0001 Option C load-boundary lowering", () => {
 	});
 
 	// =========================================================================
+	// 2c. TRIGGER-ROOT branch — a ref rooted at the `@trigger` pseudo-step
+	//     lowers to `js/ctx.request` (the trigger payload), NOT
+	//     `js/ctx.state["@trigger"]`. The runner never writes
+	//     ctx.state["@trigger"]; createContext leaves ctx.state = {} and puts
+	//     the payload at ctx.request. (Blocker fix for the callback workflow()
+	//     trigger-input leg — issue #421 / PR #472.)
+	// =========================================================================
+
+	describe("trigger-root — {$ref step:'@trigger'} → js/ctx.request + path", () => {
+		it("field ref: req.body.name → js/ctx.request.body.name", () => {
+			expect(lowerRefs({ name: { $ref: { step: "@trigger", path: ["body", "name"] } } })).toEqual({
+				name: "js/ctx.request.body.name",
+			});
+		});
+
+		it("whole-payload ref: empty path → js/ctx.request", () => {
+			expect(lowerRefs({ all: { $ref: { step: "@trigger", path: [] } } })).toEqual({
+				all: "js/ctx.request",
+			});
+		});
+
+		it("dash/dot/leading-digit path keys still bracket-quote under the trigger root", () => {
+			expect(lowerRefs({ x: { $ref: { step: "@trigger", path: ["body", "user-id", 0] } } })).toEqual({
+				x: 'js/ctx.request.body["user-id"][0]',
+			});
+		});
+
+		it("an ordinary step ref is UNAFFECTED — still js/ctx.state.<id>", () => {
+			expect(lowerRefs({ a: { $ref: { step: "validate", path: ["productId"] } } })).toEqual({
+				a: "js/ctx.state.validate.productId",
+			});
+		});
+
+		it("end-to-end: a trigger-input ref resolves through the REAL Mapper against ctx.request", () => {
+			// ctx exactly as TriggerBase.createContext builds it: payload at
+			// ctx.request, state STARTS EMPTY. If lowering rooted at
+			// ctx.state["@trigger"] (the blocker), this would resolve to
+			// undefined. It must resolve to the request body value.
+			const ctx = createCtx({}); // state = {}
+			(ctx as unknown as { request: Record<string, unknown> }).request = {
+				body: { name: "ada", count: 0 },
+				headers: {},
+				query: {},
+				params: {},
+			};
+			const lowered = lowerRefs({
+				name: { $ref: { step: "@trigger", path: ["body", "name"] } },
+				zero: { $ref: { step: "@trigger", path: ["body", "count"] } },
+			}) as unknown as ParamsDictionary;
+
+			mapper.replaceObjectStrings(lowered, ctx, ctx.request as unknown as ParamsDictionary);
+
+			const out = lowered as Record<string, unknown>;
+			expect(out.name).toBe("ada");
+			expect(out.zero).toBe(0); // falsy preserved
+		});
+	});
+
+	// =========================================================================
 	// 3. Sentinel guard — only the {$ref} shape is treated as a ref
 	// =========================================================================
 
