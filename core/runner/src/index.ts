@@ -40,6 +40,7 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 // branch + typed comparators (#418, ADR 0003/0004); tpl (#425).
 import {
 	branch,
+	forEach as callbackForEach,
 	eq as condEq,
 	gt as condGt,
 	gte as condGte,
@@ -235,6 +236,8 @@ export {
 	condLt as lt,
 	condLte as lte,
 	condNot as not,
+	// forEach over handles (#329 / #343)
+	callbackForEach as forEach,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -366,7 +369,7 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 } from "./handles";
-export type { StepOptions, TriggerHandle, BranchCondition, BranchArms } from "./stepBuilder";
+export type { StepOptions, TriggerHandle, BranchCondition, BranchArms, ForEachOptions } from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
