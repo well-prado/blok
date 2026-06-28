@@ -137,6 +137,44 @@ describe("v2 DSL — workflow() factory", () => {
 		).toThrow(/mutually exclusive/i);
 	});
 
+	it("rejects forEach `as` collisions with sibling step ids", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [
+					{ id: "item", use: "@blokjs/foo", inputs: {} },
+					forEach({
+						id: "each",
+						in: "$.state.items",
+						as: "item",
+						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
+					}),
+				],
+			}),
+		).toThrow(/workflow\("Bad"\).*forEach state key "item".*collides with step id "item"/);
+	});
+
+	it("rejects forEach `as + Index` collisions with sibling step ids", () => {
+		expect(() =>
+			workflow({
+				name: "Bad",
+				version: "1.0.0",
+				trigger: { http: { method: "GET" } },
+				steps: [
+					{ id: "xIndex", use: "@blokjs/foo", inputs: {} },
+					forEach({
+						id: "each",
+						in: "$.state.items",
+						as: "x",
+						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
+					}),
+				],
+			}),
+		).toThrow(/forEach state key "xIndex".*collides with step id "xIndex"/);
+	});
+
 	it("rejects unknown trigger kinds", () => {
 		expect(() =>
 			workflow({
