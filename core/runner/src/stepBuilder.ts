@@ -17,9 +17,10 @@
  * load time, turning into the `js/ctx.state...` wire strings the Mapper resolves.
  *
  * SCOPE (this task): linear `step()` chains + the builder stack + IR emission.
- * `branch()`/`forEach()` handle-ARM integration and `tpl` are SEPARATE follow-ups
- * (#418/#425/#329). The builder stack and `canRead` ancestry check below already
- * model child scopes so those follow-ups can push child builders without redesign.
+ * `branch()` (#418) layers on top: it pushes child builder scopes for its
+ * then/else arms (ADR 0003) and lowers its condition to a BARE `ctx.state...`
+ * when-string (ADR 0004). `forEach()`/`switch`/`loop`/`tryCatch` handle-ARM
+ * integration and `tpl` remain SEPARATE follow-ups (#425/#329).
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -87,13 +88,11 @@ function currentBuilder(): Builder {
  * Is the handle's owning scope an ancestor-or-self of the reading scope?
  * (ADR 0003 cross-arm rule.)
  *
- * ponytail: wired for the branch/forEach follow-up (#418/#425). In THIS
- * linear-only PR `step()` never pushes a child builder, so every reader shares
- * the single root scope and this can never return false — the cross-arm
- * rejection in `lowerHandles` is unreachable here. Do NOT claim it as a working
- * linear guarantee; it activates only once a control-flow primitive pushes a
- * child builder. No public seam pushes a child scope today, so there is no
- * way to exercise the false branch from a linear-only test — it ships dormant.
+ * Activated by `branch()` (#418): its then/else arms push child builder scopes,
+ * so a handle minted in one arm and read from a sibling arm (or after the branch)
+ * fails this check and is rejected by `lowerHandles`/`lowerCondition`. Exercised
+ * by `branch.test.ts`'s cross-arm guard cases. `forEach`/`switch`/`loop`/
+ * `tryCatch` reuse the same mechanism when they land (#425/#329).
  */
 function canRead(owner: Builder, reader: Builder): boolean {
 	for (let cursor: Builder | undefined = reader; cursor; cursor = cursor.parent) {
@@ -170,6 +169,196 @@ function lowerHandles(value: unknown, reader: Builder): unknown {
 		return out;
 	}
 	return value;
+}
+
+// ───────────────────────────── branch (#418) ─────────────────────────────
+//
+// A `branch()` condition is either a boolean Handle (truthiness) or a typed op
+// over handle fields (`gt(a.count, b.limit)`, `eq(a.status, "ok")`, `not(...)`).
+// Per ADR 0004 the condition lowers to a BARE raw `ctx.state...` string — NOT
+// `js/...`, NOT `{$ref}` — because `@blokjs/if-else` evals the `when` via raw
+// `Function("ctx", ...)`. Emitting `js/...` would 500 with "js is not defined".
+
+/** Marker carried by `eq`/`gt`/… and `not`. Private — never user-visible. */
+const COND_META = Symbol("blok.condMeta");
+
+type Operand = unknown; // a Handle proxy, a nested Condition, or a JSON literal
+interface OpMeta {
+	kind: "op";
+	op: "===" | "!==" | ">" | ">=" | "<" | "<=";
+	left: Operand;
+	right: Operand;
+}
+interface NotMeta {
+	kind: "not";
+	value: Operand;
+}
+/** A typed condition (op or negation). Opaque to authors — pass to `branch`. */
+export interface BranchCondition {
+	readonly [COND_META]: OpMeta | NotMeta;
+}
+
+function makeCondition(meta: OpMeta | NotMeta): BranchCondition {
+	return { [COND_META]: meta };
+}
+function readCondMeta(value: unknown): OpMeta | NotMeta | undefined {
+	if (value && typeof value === "object") return (value as { [COND_META]?: OpMeta | NotMeta })[COND_META];
+	return undefined;
+}
+
+/** Strict equality. `eq(a.status, "ready")` → `ctx.state.a.status === "ready"`. */
+export function eq(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: "===", left, right });
+}
+/** Strict inequality. */
+export function ne(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: "!==", left, right });
+}
+/** Greater-than. `gt(a.count, b.limit)` → `ctx.state.a.count > ctx.state.b.limit`. */
+export function gt(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: ">", left, right });
+}
+/** Greater-than-or-equal. */
+export function gte(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: ">=", left, right });
+}
+/** Less-than. */
+export function lt(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: "<", left, right });
+}
+/** Less-than-or-equal. */
+export function lte(left: Operand, right: Operand): BranchCondition {
+	return makeCondition({ kind: "op", op: "<=", left, right });
+}
+/** Negation. `not(a.ok)` → `!(ctx.state.a.ok)`. Accepts a handle or a condition. */
+export function not(value: Operand): BranchCondition {
+	return makeCondition({ kind: "not", value });
+}
+
+/**
+ * Lower a handle to its BARE `ctx.state...` (or `ctx.request...`) string, per
+ * ADR 0004. Resolves the state ROOT from the producing step's persistence
+ * metadata (its owning builder's step record): `as:` renames the root, `spread:`
+ * drops the step root entirely (the first path segment becomes the root key).
+ * `@trigger` roots at `ctx.request` (mirrors lowerRefs' TRIGGER_SENTINEL).
+ */
+function lowerHandleToCtx(meta: HandleMeta): string {
+	if (meta.step === "@trigger") {
+		return `ctx.request${encodeCtxPath(meta.path)}`;
+	}
+	const rec = meta.owner?.steps.find((s) => s.id === meta.step);
+	if (rec?.spread === true) {
+		if (meta.path.length === 0) {
+			throw new Error(
+				`branch condition reads the whole output of spread step "${meta.step}", but \`spread: true\` drops the step root — read a field (e.g. \`${meta.step}Handle.someField\`) or rename the step with \`as:\` instead.`,
+			);
+		}
+		// spread: first path segment IS the state root (no step-id prefix).
+		return `ctx.state${encodeCtxPath(meta.path)}`;
+	}
+	const root = typeof rec?.as === "string" ? rec.as : meta.step;
+	return `ctx.state${encodeSeg(root)}${encodeCtxPath(meta.path)}`;
+}
+
+/** Encode one path segment: number → `[n]`, identifier → `.k`, else `["k"]`. */
+function encodeSeg(seg: string | number): string {
+	if (typeof seg === "number") return `[${seg}]`;
+	return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(seg) ? `.${seg}` : `[${JSON.stringify(seg)}]`;
+}
+function encodeCtxPath(path: (string | number)[]): string {
+	return path.map(encodeSeg).join("");
+}
+
+/**
+ * Lower a branch condition (boolean handle, op, or negation) to the bare raw-ctx
+ * when-string. Enforces the ADR 0003 cross-arm rule for every handle operand:
+ * a handle whose owning scope is not an ancestor-or-self of the branch's scope
+ * is rejected (activates the cornerstone's `canRead` guard).
+ */
+function lowerCondition(value: unknown, reader: Builder): string {
+	const cond = readCondMeta(value);
+	if (cond) {
+		if (cond.kind === "not") return `!(${lowerCondition(cond.value, reader)})`;
+		return `${lowerCondition(cond.left, reader)} ${cond.op} ${lowerCondition(cond.right, reader)}`;
+	}
+	const handle = readHandleMeta(value);
+	if (handle) {
+		if (handle.owner && !canRead(handle.owner, reader)) {
+			throw new Error(
+				`Handle from step "${handle.step}" is read in a branch condition outside its scope. A handle produced inside one control-flow arm is not readable from a sibling arm or after the flow step.`,
+			);
+		}
+		return lowerHandleToCtx(handle);
+	}
+	// JSON literal (string/number/boolean/null). Reject the un-encodable.
+	if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
+		return JSON.stringify(value);
+	}
+	throw new Error(
+		`Unsupported branch condition operand: ${String(value)}. Use a boolean handle, a typed op (eq/ne/gt/gte/lt/lte/not over handle fields), or a string/number/boolean/null literal.`,
+	);
+}
+
+/** Arms for {@link branch}: callbacks that register steps into the arm's scope. */
+export interface BranchArms {
+	then: () => unknown;
+	else?: () => unknown;
+}
+
+/**
+ * Callback-style `branch` over handles (#418, ADR 0003/0004). The condition is a
+ * boolean handle (truthiness) or a typed op (`gt(a.x, b.y)`); it lowers to a BARE
+ * `ctx.state...` when-string. `then`/`else` are callbacks that push CHILD builder
+ * scopes — `step()` calls inside register into that arm's sub-pipeline, in order.
+ * Emits the existing v2 branch step shape so it normalizes + runs through the
+ * unchanged `@blokjs/if-else` engine.
+ *
+ * @example
+ *   branch("route", stock.inStock, {
+ *     then: () => { step("ship", shipNode, { ... }); },
+ *     else: () => { step("backorder", boNode, { ... }); },
+ *   });
+ *   branch("big", gt(order.qty, limit.max), { then: () => { ... } });
+ */
+export function branch(id: string, condition: unknown, arms: BranchArms): void {
+	if (typeof id !== "string" || id.length === 0) throw new Error("branch() requires a non-empty string id.");
+	if (!arms || typeof arms.then !== "function") {
+		throw new Error(`branch("${id}") requires a \`then\` callback.`);
+	}
+	if (arms.else !== undefined && typeof arms.else !== "function") {
+		throw new Error(`branch("${id}") \`else\` must be a callback when provided.`);
+	}
+	const parent = currentBuilder();
+	const ids = parent.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	// Lower the condition in the PARENT scope (the branch step itself lives there).
+	const when = lowerCondition(condition, parent);
+
+	const thenSteps = runArm(parent, arms.then);
+	const elseSteps = arms.else ? runArm(parent, arms.else) : undefined;
+
+	parent.steps.push({
+		id,
+		branch: { when, then: thenSteps, ...(elseSteps ? { else: elseSteps } : {}) },
+	} as unknown as StepRecord);
+}
+
+/** Run one arm callback inside a fresh child builder, returning its collected steps. */
+function runArm(parent: Builder, body: () => unknown): StepRecord[] {
+	const child: Builder = { parent, root: parent.root, steps: [] };
+	const store = builders.getStore();
+	if (!store) throw new Error("branch() must be called inside a workflow callback.");
+	store.stack.push(child);
+	try {
+		body();
+	} finally {
+		store.stack.pop();
+	}
+	return child.steps;
 }
 
 /** Per-step persistence/control knobs carried verbatim onto the step record. */

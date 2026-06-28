@@ -37,7 +37,20 @@ import { assertGrpcOnlyTransport } from "./adapters/transport";
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 
 // Handle-DSL authoring runtime (#421) — the eventual @blokjs/core surface.
-import { makeHandle, step, workflowCallback } from "./stepBuilder";
+// branch + typed comparators (#418, ADR 0003/0004).
+import {
+	branch,
+	eq as condEq,
+	gt as condGt,
+	gte as condGte,
+	lt as condLt,
+	lte as condLte,
+	ne as condNe,
+	not as condNot,
+	makeHandle,
+	step,
+	workflowCallback,
+} from "./stepBuilder";
 
 import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 // Monitoring infrastructure
@@ -211,6 +224,15 @@ export {
 	step,
 	makeHandle,
 	workflowCallback,
+	// branch + typed comparators (#418, ADR 0003/0004)
+	branch,
+	condEq as eq,
+	condNe as ne,
+	condGt as gt,
+	condGte as gte,
+	condLt as lt,
+	condLte as lte,
+	condNot as not,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -341,7 +363,7 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 } from "./handles";
-export type { StepOptions, TriggerHandle } from "./stepBuilder";
+export type { StepOptions, TriggerHandle, BranchCondition, BranchArms } from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
