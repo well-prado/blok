@@ -781,7 +781,7 @@ export default workflow({
 });
 \`\`\`
 
-The request decodes into \`ctx.request.body\`; the final step output becomes the gRPC reply. Streaming RPCs use \`@blokjs/grpc-stream\`.
+The request decodes into \`ctx.request.body\`; the final step output becomes the gRPC reply. (Server-streaming RPCs are not yet supported by the inbound trigger.)
 
 > **\`trigger.queue\` is DEAD** — it has a schema but no runtime and throws at workflow construction. Use \`worker\`. **\`manual\`** has no listener (invoked programmatically only — tests / sub-workflows); not for normal authoring.
 

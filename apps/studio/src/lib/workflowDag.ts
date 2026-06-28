@@ -155,16 +155,51 @@ export interface WorkflowDag {
 interface BuildCtx {
 	nodes: DagNode[];
 	edges: DagEdge[];
-	idCounter: number;
+	path: string[];
+	usedIds: Set<string>;
 }
 
 function newCtx(): BuildCtx {
-	return { nodes: [], edges: [], idCounter: 0 };
+	return { nodes: [], edges: [], path: [], usedIds: new Set() };
 }
 
-function nextId(ctx: BuildCtx, prefix: string): string {
-	ctx.idCounter += 1;
-	return `${prefix}-${ctx.idCounter}`;
+function stablePart(value: string): string {
+	return value.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+}
+
+function stepPathSegment(step: unknown, index: number): string {
+	return isObject(step) && typeof step.id === "string" ? `id-${stablePart(step.id)}` : `at-${index}`;
+}
+
+function scopedStepKey(ctx: BuildCtx, step: Record<string, unknown>, fallback: string): string {
+	const stepId = asString(step.id);
+	return stablePart(stepId ?? ctx.path.join("-") ?? fallback);
+}
+
+function nextId(ctx: BuildCtx, prefix: string, key = ctx.path.join("-") || prefix): string {
+	const base = `${prefix}-${stablePart(key)}`;
+	if (!ctx.usedIds.has(base)) {
+		ctx.usedIds.add(base);
+		return base;
+	}
+	const fallback = `${base}-${stablePart(ctx.path.join("-"))}`;
+	let id = fallback;
+	let n = 2;
+	while (ctx.usedIds.has(id)) {
+		id = `${fallback}-${n}`;
+		n += 1;
+	}
+	ctx.usedIds.add(id);
+	return id;
+}
+
+function withPath<T>(ctx: BuildCtx, segment: string, run: () => T): T {
+	ctx.path.push(segment);
+	try {
+		return run();
+	} finally {
+		ctx.path.pop();
+	}
 }
 
 function pushNode(ctx: BuildCtx, id: string, data: DagNodeData): void {
@@ -245,8 +280,8 @@ function summarizeExpression(value: unknown): string {
 }
 
 function emitRegular(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
-	const id = nextId(ctx, "step");
 	const stepId = asString(step.id);
+	const id = nextId(ctx, "step", stepId ?? ctx.path.join("-"));
 	const use = asString(step.use);
 	const runtime = asString(step.runtime) ?? asString(step.type);
 	pushNode(ctx, id, {
@@ -259,8 +294,8 @@ function emitRegular(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 }
 
 function emitSubworkflow(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
-	const id = nextId(ctx, "subworkflow");
 	const stepId = asString(step.id);
+	const id = nextId(ctx, "subworkflow", stepId ?? ctx.path.join("-"));
 	const target = asString(step.subworkflow) ?? "?";
 	const wait = asBoolean(step.wait);
 	const allowList = Array.isArray(step.allowList)
@@ -276,8 +311,8 @@ function emitSubworkflow(step: Record<string, unknown>, ctx: BuildCtx): Emitted 
 }
 
 function emitWait(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
-	const id = nextId(ctx, "wait");
 	const stepId = asString(step.id);
+	const id = nextId(ctx, "wait", stepId ?? ctx.path.join("-"));
 	const waitCfg = isObject(step.wait) ? step.wait : {};
 	const forValue = waitCfg.for;
 	const untilValue = waitCfg.until;
@@ -298,9 +333,10 @@ function emitWait(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 function emitBranch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const branchCfg = isObject(step.branch) ? step.branch : {};
-	const decisionId = nextId(ctx, "branch");
-	const mergeId = nextId(ctx, "merge");
 	const stepId = asString(step.id);
+	const key = scopedStepKey(ctx, step, "branch");
+	const decisionId = nextId(ctx, "branch", key);
+	const mergeId = nextId(ctx, "merge", `${key}-branch`);
 	const when = asString(branchCfg.when);
 
 	pushNode(ctx, decisionId, {
@@ -314,11 +350,13 @@ function emitBranch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const thenSteps = asArray(branchCfg.then);
 	const elseSteps = asArray(branchCfg.else);
 
-	const thenExit = walkSequence(thenSteps, decisionId, ctx, { entryLabel: "then" });
+	const thenExit = withPath(ctx, "then", () => walkSequence(thenSteps, decisionId, ctx, { entryLabel: "then" }));
 	pushEdge(ctx, thenExit, mergeId);
 
 	if (elseSteps.length > 0) {
-		const elseExit = walkSequence(elseSteps, decisionId, ctx, { entryLabel: "else", entryStyle: "dashed" });
+		const elseExit = withPath(ctx, "else", () =>
+			walkSequence(elseSteps, decisionId, ctx, { entryLabel: "else", entryStyle: "dashed" }),
+		);
 		pushEdge(ctx, elseExit, mergeId, { style: "dashed" });
 	} else {
 		// No else arm — the falsy path skips straight to the merge.
@@ -330,9 +368,10 @@ function emitBranch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 function emitSwitch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const switchCfg = isObject(step.switch) ? step.switch : {};
-	const decisionId = nextId(ctx, "switch");
-	const mergeId = nextId(ctx, "merge");
 	const stepId = asString(step.id);
+	const key = scopedStepKey(ctx, step, "switch");
+	const decisionId = nextId(ctx, "switch", key);
+	const mergeId = nextId(ctx, "merge", `${key}-switch`);
 	const onValue = switchCfg.on;
 
 	pushNode(ctx, decisionId, {
@@ -344,19 +383,23 @@ function emitSwitch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	pushNode(ctx, mergeId, { kind: "merge", label: "" });
 
 	const cases = asArray(switchCfg.cases);
-	for (const c of cases) {
+	for (const [index, c] of cases.entries()) {
 		if (!isObject(c)) continue;
 		const caseLabel = `when ${summarizeExpression(c.when)}`;
-		const caseExit = walkSequence(asArray(c.do), decisionId, ctx, { entryLabel: caseLabel });
+		const caseExit = withPath(ctx, `case-${index}`, () =>
+			walkSequence(asArray(c.do), decisionId, ctx, { entryLabel: caseLabel }),
+		);
 		pushEdge(ctx, caseExit, mergeId);
 	}
 
 	const defaultSteps = asArray(switchCfg.default);
 	if (defaultSteps.length > 0) {
-		const defaultExit = walkSequence(defaultSteps, decisionId, ctx, {
-			entryLabel: "default",
-			entryStyle: "dashed",
-		});
+		const defaultExit = withPath(ctx, "default", () =>
+			walkSequence(defaultSteps, decisionId, ctx, {
+				entryLabel: "default",
+				entryStyle: "dashed",
+			}),
+		);
 		pushEdge(ctx, defaultExit, mergeId, { style: "dashed" });
 	} else if (cases.length > 0) {
 		// No default arm — unmatched values skip the switch entirely.
@@ -371,8 +414,8 @@ function emitSwitch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 function emitForEach(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const cfg = isObject(step.forEach) ? step.forEach : {};
-	const headerId = nextId(ctx, "forEach");
 	const stepId = asString(step.id);
+	const headerId = nextId(ctx, "forEach", stepId ?? ctx.path.join("-"));
 	const asVar = asString(cfg.as);
 	const inExpr = summarizeExpression(cfg.in);
 	const mode = asString(cfg.mode);
@@ -393,7 +436,7 @@ function emitForEach(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 	const body = asArray(cfg.do);
 	if (body.length > 0) {
-		const bodyExit = walkSequence(body, headerId, ctx, { entryLabel: "do" });
+		const bodyExit = withPath(ctx, "do", () => walkSequence(body, headerId, ctx, { entryLabel: "do" }));
 		pushEdge(ctx, bodyExit, headerId, { style: "dotted", backEdge: true, label: "next" });
 	}
 	// Exit edge to next sibling leaves the header itself.
@@ -402,8 +445,8 @@ function emitForEach(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 function emitLoop(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const cfg = isObject(step.loop) ? step.loop : {};
-	const headerId = nextId(ctx, "loop");
 	const stepId = asString(step.id);
+	const headerId = nextId(ctx, "loop", stepId ?? ctx.path.join("-"));
 	const whileExpr = asString(cfg.while) ?? summarizeExpression(cfg.while);
 	const maxIterations = asNumber(cfg.maxIterations);
 
@@ -416,7 +459,7 @@ function emitLoop(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 	const body = asArray(cfg.do);
 	if (body.length > 0) {
-		const bodyExit = walkSequence(body, headerId, ctx, { entryLabel: "do" });
+		const bodyExit = withPath(ctx, "do", () => walkSequence(body, headerId, ctx, { entryLabel: "do" }));
 		pushEdge(ctx, bodyExit, headerId, { style: "dotted", backEdge: true, label: "loop" });
 	}
 	return { entry: headerId, exit: headerId };
@@ -424,10 +467,11 @@ function emitLoop(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 function emitTryCatch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 	const cfg = isObject(step.tryCatch) ? step.tryCatch : {};
-	const tryEnterId = nextId(ctx, "tryEnter");
-	const catchEnterId = nextId(ctx, "catchEnter");
-	const mergeId = nextId(ctx, "merge");
 	const stepId = asString(step.id);
+	const key = scopedStepKey(ctx, step, "tryCatch");
+	const tryEnterId = nextId(ctx, "tryEnter", key);
+	const catchEnterId = nextId(ctx, "catchEnter", key);
+	const mergeId = nextId(ctx, "merge", `${key}-tryCatch`);
 
 	pushNode(ctx, tryEnterId, { kind: "tryEnter", label: stepId ?? "try", meta: { stepId, raw: step } });
 	pushNode(ctx, catchEnterId, {
@@ -439,21 +483,23 @@ function emitTryCatch(step: Record<string, unknown>, ctx: BuildCtx): Emitted {
 
 	// try-body: try-enter → … → merge
 	const trySteps = asArray(cfg.try);
-	const tryExit = trySteps.length > 0 ? walkSequence(trySteps, tryEnterId, ctx) : tryEnterId;
+	const tryExit =
+		trySteps.length > 0 ? withPath(ctx, "try", () => walkSequence(trySteps, tryEnterId, ctx)) : tryEnterId;
 	pushEdge(ctx, tryExit, mergeId);
 
 	// catch-body: dashed from try-enter (any step in try can throw)
 	pushEdge(ctx, tryEnterId, catchEnterId, { style: "dashed", label: "throws" });
 	const catchSteps = asArray(cfg.catch);
-	const catchExit = catchSteps.length > 0 ? walkSequence(catchSteps, catchEnterId, ctx) : catchEnterId;
+	const catchExit =
+		catchSteps.length > 0 ? withPath(ctx, "catch", () => walkSequence(catchSteps, catchEnterId, ctx)) : catchEnterId;
 	pushEdge(ctx, catchExit, mergeId, { style: "dashed" });
 
 	const finallySteps = asArray(cfg.finally);
 	if (finallySteps.length > 0) {
-		const finallyEnterId = nextId(ctx, "finallyEnter");
+		const finallyEnterId = nextId(ctx, "finallyEnter", key);
 		pushNode(ctx, finallyEnterId, { kind: "finallyEnter", label: "finally" });
 		pushEdge(ctx, mergeId, finallyEnterId);
-		const finallyExit = walkSequence(finallySteps, finallyEnterId, ctx);
+		const finallyExit = withPath(ctx, "finally", () => walkSequence(finallySteps, finallyEnterId, ctx));
 		return { entry: tryEnterId, exit: finallyExit };
 	}
 
@@ -506,8 +552,8 @@ interface WalkOptions {
 function walkSequence(steps: readonly unknown[], prevId: string, ctx: BuildCtx, opts?: WalkOptions): string {
 	let prev = prevId;
 	let first = true;
-	for (const step of steps) {
-		const { entry, exit } = emit(step, ctx);
+	for (const [index, step] of steps.entries()) {
+		const { entry, exit } = withPath(ctx, stepPathSegment(step, index), () => emit(step, ctx));
 		if (first && opts) {
 			pushEdge(ctx, prev, entry, { label: opts.entryLabel, style: opts.entryStyle });
 		} else {
@@ -540,7 +586,7 @@ export function buildWorkflowDag(definition: unknown): WorkflowDag {
 	const ctx = newCtx();
 	const def = isObject(definition) ? definition : {};
 
-	const triggerId = nextId(ctx, "trigger");
+	const triggerId = nextId(ctx, "trigger", "workflow");
 	const triggerSummary = summarizeTrigger(def.trigger);
 	pushNode(ctx, triggerId, {
 		kind: "trigger",
@@ -552,7 +598,7 @@ export function buildWorkflowDag(definition: unknown): WorkflowDag {
 	const topLevelSteps = asArray(def.steps);
 	const lastExit = walkSequence(topLevelSteps, triggerId, ctx);
 
-	const endId = nextId(ctx, "end");
+	const endId = nextId(ctx, "end", "workflow");
 	pushNode(ctx, endId, { kind: "end", label: "End" });
 	pushEdge(ctx, lastExit, endId);
 

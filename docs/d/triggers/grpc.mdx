@@ -84,9 +84,10 @@ implemented in.
   Kubernetes microservices)
 - **Cross-runtime calls** — a Go service calls a Blok workflow that
   invokes a Python ML node and returns the result via gRPC
-- **Streaming RPC** — declare `stream` in the proto + emit responses
-  step-by-step (advanced; the workflow uses `@blokjs/grpc-stream` to
-  push frames)
+- **Unary request/response** — the common case; the inbound gRPC trigger
+  decodes the request into `ctx.request.body` and returns the final step
+  output as the reply. (Server-streaming RPCs are not yet supported by the
+  inbound trigger.)
 
 ## Composition
 

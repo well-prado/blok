@@ -71,26 +71,26 @@ export default defineNode({
 });
 ```
 
-### 4. Register the Node (TypeScript only)
+### 4. Registration is automatic
 
-For TypeScript nodes, **register it inside `src/Nodes.ts`**:
+There's no registry to edit. A TypeScript node placed at `src/nodes/<name>/index.ts` is **auto-discovered** and registered by its `defineNode` `name` — the same string you reference from a workflow. `name` is the canonical reference, and a duplicate name throws at load.
 
-```typescript
-import ApiCall from "@blokjs/api-call";
-import IfElse from "@blokjs/if-else";
-import Fetch from "./nodes/fetch";
-import type { NodeBase } from "@blokjs/shared";
+```ts src/nodes/fetch/index.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
 
-const nodes: {
-     [key: string]: NodeBase;
-} = {
-     "@blokjs/api-call": new ApiCall(),
-     "@blokjs/if-else": new IfElse(),
-     "fetch": new Fetch()
-};
-
-export default nodes;
+export default defineNode({
+  name: "fetch",   // ← this IS the registration; reference it as step("...", fetch, …)
+  input: z.object({ url: z.string() }),
+  output: z.object({ body: z.unknown() }),
+  async execute(_ctx, input) {
+    const res = await fetch(input.url);
+    return { body: await res.json() };
+  },
+});
 ```
+
+Published node packages don't need registration either — import them directly where a workflow uses them (`import apiCall from "@blokjs/api-call"`).
 
 For Python nodes, they are auto-discovered from `runtimes/python3/nodes/` via the `BLOK_NODES_DIR` environment variable — no manual registration is needed.
 

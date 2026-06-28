@@ -219,6 +219,43 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 		expect((ctx.state as Record<string, unknown>).fetch).toEqual({ url: "n=0" });
 	});
 
+	it("tpl: mixed literals, adjacent handles, and non-string interpolations resolve end-to-end", async () => {
+		const stats = defineNode({
+			name: "stats",
+			description: "emit tpl stats",
+			input: z.object({}),
+			output: z.object({ count: z.number(), suffix: z.string() }),
+			execute: () => ({ count: 7, suffix: "ok" }),
+		});
+		const wf = await workflowCallback("Tpl Mixed", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const s = step("stats", stats, {});
+			step("fetch", echoUrl, { url: tpl`/v/${s.count}${s.suffix}/${42}/${false}` });
+		});
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+
+		expect(steps[1].inputs.url).toEqual({
+			$tpl: [
+				"/v/",
+				{ $ref: { step: "stats", path: ["count"] } },
+				"",
+				{ $ref: { step: "stats", path: ["suffix"] } },
+				"/",
+				42,
+				"/",
+				false,
+				"",
+			],
+		});
+		expect(lowerRefs(steps[1].inputs)).toEqual({
+			url: "js/`/v/${ctx.state.stats.count}${ctx.state.stats.suffix}/42/false`",
+		});
+
+		const ctx = createTriggerCtx({});
+		await runStep(ctx, steps[0], stats);
+		await runStep(ctx, steps[1], echoUrl);
+		expect((ctx.state as Record<string, unknown>).fetch).toEqual({ url: "/v/7ok/42/false" });
+	});
+
 	it("POISON: a bare handle in an UNTAGGED template literal throws (loud, not silent)", async () => {
 		await expect(
 			workflowCallback("Poison", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (req: TriggerHandle) => {

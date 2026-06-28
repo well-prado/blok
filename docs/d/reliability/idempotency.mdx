@@ -173,7 +173,7 @@ header, SendGrid's deduplication, or your own DB unique constraints.
 |---|---|
 | **SQLite** (default) | Durable. Migration v4 adds the `idempotency_cache` table. Lazy-purges expired rows on read. |
 | **InMemory** (dev) | Process-local `Map`. Cleared on restart. |
-| **Postgres** | Hybrid: sync reads from an in-memory mirror, writes async-persist to PG via `idempotency_cache` (migration v3). On boot, `loadRecent()` rehydrates the mirror so cached results survive restarts within a single PG-backed process. Cross-process gating still requires `BLOK_CONCURRENCY_BACKEND=nats-kv` for coordination above the cache layer. |
+| **Postgres** | Hybrid: sync reads from an in-memory mirror, writes async-persist to PG via `idempotency_cache` (migration v3). On boot, `loadRecent()` rehydrates the mirror so cached results survive restarts within a single PG-backed process. |
 
 Disabled when `BLOK_TRACE_ENABLED=false` — caching lives behind the run
 store, so turning tracing off turns the cache off too.

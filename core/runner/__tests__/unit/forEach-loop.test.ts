@@ -19,7 +19,7 @@
 
 import { $, lt } from "@blokjs/helper";
 import type { Context, NodeBase, ResponseContext } from "@blokjs/shared";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import Configuration from "../../src/Configuration";
 import { LoopMaxIterationsError } from "../../src/LoopMaxIterationsError";
@@ -127,6 +127,25 @@ const ifElse = defineNode({
 	},
 });
 
+/** A real defineNode that just returns already-mapped inputs. */
+const CacheEchoNode = defineNode({
+	name: "cache-echo",
+	description: "test fixture — echo mapped inputs",
+	input: z.object({
+		value: z.unknown(),
+		label: z.string(),
+		copy: z.unknown().optional(),
+	}),
+	output: z.object({
+		value: z.unknown(),
+		label: z.string(),
+		copy: z.unknown().optional(),
+	}),
+	async execute(_ctx, input) {
+		return input;
+	},
+});
+
 /**
  * Build a Configuration from a workflow definition + helper nodes.
  */
@@ -138,6 +157,7 @@ async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration
 		"@blokjs/if-else": ifElse as unknown as RunnerNode,
 		"real-envelope": RealEnvelopeNode as unknown as RunnerNode,
 		"maybe-fail": MaybeFailNode as unknown as RunnerNode,
+		"cache-echo": CacheEchoNode as unknown as RunnerNode,
 	};
 	const globalOptions = {
 		nodes: {
@@ -171,9 +191,20 @@ async function bootConfig(workflowDef: unknown): Promise<{ config: Configuration
 	return { config, ctx };
 }
 
+function spyOnExpressionCompiles(marker: string): string[] {
+	const NativeFunction = globalThis.Function;
+	const compiledBodies: string[] = [];
+	vi.spyOn(globalThis, "Function").mockImplementation(((...args: string[]) => {
+		const body = args.at(-1);
+		if (typeof body === "string" && body.includes(marker)) compiledBodies.push(body);
+		return NativeFunction(...args);
+	}) as unknown as FunctionConstructor);
+	return compiledBodies;
+}
+
 describe("v0.5 forEach + loop integration", () => {
 	afterEach(() => {
-		// no-op
+		vi.restoreAllMocks();
 	});
 
 	describe("forEach", () => {
@@ -518,6 +549,113 @@ describe("v0.5 forEach + loop integration", () => {
 				{ id: "b", decision: "wait" },
 			]);
 			expect((ctx.state as Record<string, unknown>).decision).toBeUndefined();
+		});
+
+		it.each([
+			["sequential", "cache426SeqItem"],
+			["parallel", "cache426ParItem"],
+		] as const)("does not recompile mapper expressions per %s iteration", async (mode, as) => {
+			const valueExpr = `ctx.state.${as} * 10`;
+			const labelExpr = `\`v=\${ctx.state.${as}}\``;
+			const wfDef = {
+				name: `test-foreach-cache-${mode}`,
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "loop",
+						forEach: {
+							in: [1, 2, 3, 4, 5, 6],
+							as,
+							mode,
+							concurrency: 3,
+							do: [
+								{
+									id: "echo",
+									use: "cache-echo",
+									type: "module",
+									inputs: {
+										value: `js/${valueExpr}`,
+										copy: `js/${valueExpr}`,
+										label: `js/${labelExpr}`,
+									},
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const compiledBodies = spyOnExpressionCompiles(as);
+
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).loop).toEqual([
+				{ value: 10, copy: 10, label: "v=1" },
+				{ value: 20, copy: 20, label: "v=2" },
+				{ value: 30, copy: 30, label: "v=3" },
+				{ value: 40, copy: 40, label: "v=4" },
+				{ value: 50, copy: 50, label: "v=5" },
+				{ value: 60, copy: 60, label: "v=6" },
+			]);
+			expect(compiledBodies).toHaveLength(2);
+		});
+
+		it("does not recompile nested forEach mapper expressions per nested item", async () => {
+			const wfDef = {
+				name: "test-foreach-cache-nested",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "outer",
+						forEach: {
+							in: [1, 2],
+							as: "cache426OuterItem",
+							mode: "sequential",
+							do: [
+								{
+									id: "inner",
+									forEach: {
+										in: "js/[ctx.state.cache426OuterItem, ctx.state.cache426OuterItem + 100]",
+										as: "cache426InnerItem",
+										mode: "sequential",
+										do: [
+											{
+												id: "nested-echo",
+												use: "cache-echo",
+												type: "module",
+												inputs: {
+													value: "js/ctx.state.cache426OuterItem + ctx.state.cache426InnerItem",
+													copy: "js/ctx.state.cache426OuterItem + ctx.state.cache426InnerItem",
+													label: "js/`pair=${ctx.state.cache426OuterItem}:${ctx.state.cache426InnerItem}`",
+												},
+											},
+										],
+									},
+								},
+							],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+			const compiledBodies = spyOnExpressionCompiles("cache426");
+
+			await new Runner(config.steps as NodeBase[]).run(ctx);
+
+			expect((ctx.state as Record<string, unknown>).outer).toEqual([
+				[
+					{ value: 2, copy: 2, label: "pair=1:1" },
+					{ value: 102, copy: 102, label: "pair=1:101" },
+				],
+				[
+					{ value: 4, copy: 4, label: "pair=2:2" },
+					{ value: 104, copy: 104, label: "pair=2:102" },
+				],
+			]);
+			expect(compiledBodies).toHaveLength(3);
+			expect(new Set(compiledBodies)).toHaveLength(3);
 		});
 	});
 
