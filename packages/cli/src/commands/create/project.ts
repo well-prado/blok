@@ -845,6 +845,15 @@ export async function createProject(opts: OptionValues, version: string, current
 
 			// Replace workspace:* references
 			for (const [pkg, ver] of Object.entries(deps)) {
+				// --local: a @blokjs/* dep declared as a literal range (e.g. "^1.0.0")
+				// conflicts with the file: override added below — npm rejects it with
+				// EOVERRIDE ("Override for X conflicts with direct dependency"). Pin the
+				// direct dep to the SAME file: link so override == dep. (bun tolerates
+				// the mismatch; npm does not.)
+				if (localRepoPath && workspacePackageMap[pkg] && typeof ver === "string" && /^[~^]?\d/.test(ver)) {
+					deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
+					continue;
+				}
 				if (typeof ver === "string" && ver.startsWith("workspace:")) {
 					if (localRepoPath && workspacePackageMap[pkg]) {
 						deps[pkg] = `file:${path.resolve(repoSource, workspacePackageMap[pkg])}`;
