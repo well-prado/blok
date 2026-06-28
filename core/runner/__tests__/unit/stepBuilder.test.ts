@@ -3,16 +3,24 @@
  *
  *   author via callback workflow() + step() handles
  *     → IR carries structural { $ref }
- *     → lowerRefs (the REAL load-boundary pass) compiles them to "js/ctx.state..."
+ *     → lowerRefs (the REAL load-boundary pass) compiles them to wire strings
  *     → the REAL Mapper resolves those strings against a live ctx
+ *     → the REAL node executes, output persisted via the REAL applyStepOutput
  *     → the chained value comes out correct.
  *
  * Plus the two builder-stack guards: step() outside a callback throws, and a
  * duplicate id throws.
  *
- * The e2e deliberately exercises @blokjs/shared's real `lowerRefs` + `mapper`
- * rather than the simplified WorkflowTestRunner (which bypasses both the
- * normalizer and the Mapper) — that is the authentic wire path the runner uses.
+ * The e2e drives the AUTHENTIC runner wire path — @blokjs/shared's real
+ * `lowerRefs` + `mapper` and the runner's real `applyStepOutput` — against a
+ * ctx built EXACTLY as `TriggerBase.createContext` does: the trigger payload
+ * lives at `ctx.request` and `ctx.state` STARTS EMPTY. (WorkflowTestRunner is
+ * deliberately NOT used here — it bypasses both lowerRefs and the Mapper and
+ * never auto-persists to ctx.state, so it can't prove the trigger-input leg.)
+ *
+ * The trigger-input leg (`req.body.name`) MUST resolve via `ctx.request` — if
+ * lowering ever re-roots `@trigger` at `ctx.state["@trigger"]` (the blocker
+ * this PR fixes), the first step resolves to undefined and this test fails.
  */
 
 import { type Context, lowerRefs, mapper } from "@blokjs/shared";
@@ -20,6 +28,45 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
 import { type TriggerHandle, step, workflowCallback } from "../../src/stepBuilder";
+// The REAL persistence pass the runner uses after every step (Rules 0–3).
+import { applyStepOutput } from "../../src/workflow/PersistenceHelper";
+
+/**
+ * Build a ctx the way TriggerBase.createContext does: payload at ctx.request,
+ * ctx.state STARTS EMPTY (no `@trigger` slot — the runner never writes one).
+ */
+function createTriggerCtx(body: Record<string, unknown>): Context {
+	return {
+		state: {} as Record<string, unknown>,
+		request: { body, headers: {}, query: {}, params: {} },
+		response: { data: null, error: null, success: true },
+		workflow_name: "stepBuilder-e2e",
+		config: {},
+		func: {},
+		vars: {},
+	} as unknown as Context;
+}
+
+/**
+ * Run one collected step the way the runner does: lower its {$ref} inputs to
+ * wire strings, resolve them through the REAL Mapper against the live ctx,
+ * execute the REAL node, and persist via the REAL applyStepOutput. Returns the
+ * node's data envelope so the caller can assert the chained value.
+ */
+async function runStep(
+	ctx: Context,
+	rec: { id: string; use: string; inputs?: Record<string, unknown> },
+	node: { name: string; handle: (ctx: Context, input: Record<string, unknown>) => Promise<unknown> },
+): Promise<void> {
+	const inputs = lowerRefs(rec.inputs ?? {}) as Record<string, unknown>;
+	// The Mapper resolves against ctx; request body is the second arg (the data
+	// root used for `${...}` interpolation), mirroring NodeBase.process.
+	mapper.replaceObjectStrings(inputs, ctx, ctx.request.body as never);
+	const res = (await node.handle(ctx, inputs)) as { success: boolean; data: Record<string, unknown> };
+	expect(res.success).toBe(true);
+	// REAL persistence — output lands at ctx.state[rec.id] (Rule 3 default).
+	applyStepOutput(ctx, { name: rec.id }, res);
+}
 
 const greet = defineNode({
 	name: "greet",
@@ -52,38 +99,38 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 		const steps = wf._config.steps as Array<{ id: string; use: string; inputs: Record<string, unknown> }>;
 		expect(steps.map((s) => s.id)).toEqual(["greet", "shout", "respond"]);
 
-		// (a) the emitted IR carries structural {$ref} — NOT yet "js/..." strings.
+		// (a) the emitted IR carries structural {$ref} — NOT yet wire strings.
+		//     The trigger-input leg roots at the `@trigger` sentinel.
 		expect(steps[0].inputs.name).toEqual({ $ref: { step: "@trigger", path: ["body", "name"] } });
 		expect(steps[1].inputs.message).toEqual({ $ref: { step: "greet", path: ["greeting"] } });
 		expect(steps[2].inputs.name).toEqual({ $ref: { step: "shout", path: ["loud"] } });
 
-		// (b) the REAL lowerRefs compiles {$ref} into the wire strings the engine resolves.
-		expect(lowerRefs(steps[0].inputs)).toEqual({ name: 'js/ctx.state["@trigger"].body.name' });
+		// (b) the REAL lowerRefs compiles {$ref} into the wire strings the engine
+		//     resolves. The trigger leg lowers to ctx.REQUEST (not ctx.state) —
+		//     this is the blocker fix. The intra-chain legs lower to ctx.state.
+		expect(lowerRefs(steps[0].inputs)).toEqual({ name: "js/ctx.request.body.name" });
 		expect(lowerRefs(steps[1].inputs)).toEqual({ message: "js/ctx.state.greet.greeting" });
 		expect(lowerRefs(steps[2].inputs)).toEqual({ name: "js/ctx.state.shout.loud" });
 
-		// (c) the REAL Mapper resolves those strings against a live ctx and the
-		//     REAL nodes execute — exactly like NodeBase.process + PersistenceHelper
-		//     do. Walk the chain: lower → resolve → execute → persist to ctx.state.
-		const ctx = {
-			state: { "@trigger": { body: { name: "ada" } } } as Record<string, unknown>,
-			request: { body: { name: "ada" } },
-		} as unknown as Context;
-		const data = ctx.request.body as Record<string, unknown>;
+		// (c) drive the REAL wire path: ctx built like TriggerBase.createContext
+		//     (payload at ctx.request, state STARTS EMPTY — no `@trigger` slot).
+		//     Each step: lower → Mapper → node.handle → applyStepOutput, exactly
+		//     as NodeBase.process + PersistenceHelper do. The trigger leg only
+		//     resolves because lowerRefs roots `@trigger` at ctx.request.
+		const ctx = createTriggerCtx({ name: "ada" });
 		const nodes = [greet, shout, greet];
-
 		for (let i = 0; i < steps.length; i++) {
-			const inputs = lowerRefs(steps[i].inputs) as Record<string, unknown>;
-			mapper.replaceObjectStrings(inputs, ctx, data);
-			const res = (await nodes[i].handle(ctx, inputs)) as { success: boolean; data: Record<string, unknown> };
-			expect(res.success).toBe(true);
-			(ctx.state as Record<string, unknown>)[steps[i].id] = res.data;
+			await runStep(ctx, steps[i], nodes[i]);
 		}
 
-		// Chained result: trigger.name "ada" → greet → shout → greet again.
-		expect((ctx.state as Record<string, unknown>).greet).toEqual({ greeting: "Hello, ada!" });
-		expect((ctx.state as Record<string, unknown>).shout).toEqual({ loud: "HELLO, ADA!" });
-		expect((ctx.state as Record<string, unknown>).respond).toEqual({ greeting: "Hello, HELLO, ADA!!" });
+		const state = ctx.state as Record<string, unknown>;
+		// Trigger leg actually resolved (NOT undefined) — proves the blocker fix.
+		expect(state.greet).toEqual({ greeting: "Hello, ada!" });
+		// Intra-chain legs.
+		expect(state.shout).toEqual({ loud: "HELLO, ADA!" });
+		expect(state.respond).toEqual({ greeting: "Hello, HELLO, ADA!!" });
+		// And ctx.state never got a phantom `@trigger` slot.
+		expect(state["@trigger"]).toBeUndefined();
 	});
 
 	it("step() outside a workflow callback throws", () => {

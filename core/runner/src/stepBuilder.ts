@@ -83,7 +83,18 @@ function currentBuilder(): Builder {
 	return builder;
 }
 
-/** Is the handle's owning scope an ancestor-or-self of the reading scope? (ADR 0003 cross-arm rule.) */
+/**
+ * Is the handle's owning scope an ancestor-or-self of the reading scope?
+ * (ADR 0003 cross-arm rule.)
+ *
+ * ponytail: wired for the branch/forEach follow-up (#418/#425). In THIS
+ * linear-only PR `step()` never pushes a child builder, so every reader shares
+ * the single root scope and this can never return false — the cross-arm
+ * rejection in `lowerHandles` is unreachable here. Do NOT claim it as a working
+ * linear guarantee; it activates only once a control-flow primitive pushes a
+ * child builder. No public seam pushes a child scope today, so there is no
+ * way to exercise the false branch from a linear-only test — it ships dormant.
+ */
 function canRead(owner: Builder, reader: Builder): boolean {
 	for (let cursor: Builder | undefined = reader; cursor; cursor = cursor.parent) {
 		if (cursor === owner) return true;
@@ -248,6 +259,8 @@ export async function workflowCallback<
 	root.root = root;
 
 	await builders.run({ stack: [root] }, async () => {
+		// `@trigger` MUST match `lowerRefs`'s TRIGGER_SENTINEL — a ref rooted here
+		// lowers to `js/ctx.request` (the trigger payload), NOT `ctx.state[...]`.
 		await build(makeHandle("@trigger") as TriggerHandle);
 	});
 

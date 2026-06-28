@@ -52,6 +52,20 @@ function isStructuralRef(value: object): value is StructuralRef {
 	return typeof ref === "object" && ref !== null && typeof (ref as { step?: unknown }).step === "string";
 }
 
+/**
+ * The trigger/entry-handle sentinel. The callback `workflow()` mints the
+ * trigger-payload handle (`req`) rooted at this pseudo-step (see
+ * `core/runner/src/stepBuilder.ts:makeHandle("@trigger")`). It is NOT a real
+ * step — the runner never writes `ctx.state["@trigger"]`; the trigger payload
+ * lives at `ctx.request` (TriggerBase.createContext sets `ctx.state = {}`).
+ * So a ref rooted here lowers to `js/ctx.request`, mirroring the existing
+ * `$.req` proxy. Keep this string in sync with stepBuilder's sentinel.
+ *
+ * Scope: HTTP `req` → `ctx.request` only. Per-trigger entry handles for
+ * event/job/msg/etc. roots are #336 (follow-up) — not built here.
+ */
+const TRIGGER_SENTINEL = "@trigger";
+
 /** Valid JS identifier — same shape `$.ts`'s proxy encoder accepts for `.k`. */
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
@@ -89,8 +103,14 @@ function encodePath(path: (string | number)[]): string {
  * resolved step→state-key map into this pass.
  */
 function lowerRef(ref: StructuralRef): string {
-	const root = encodeSegment(ref.$ref.step); // `.fanOut` or `["fan-out"]`
 	const suffix = encodePath(ref.$ref.path ?? []);
+	// Trigger-root: the `@trigger` pseudo-step's payload lives at `ctx.request`,
+	// NOT `ctx.state["@trigger"]` (the runner never populates that). Lower to
+	// `js/ctx.request` + the same encoded path so `req.body.name` resolves.
+	if (ref.$ref.step === TRIGGER_SENTINEL) {
+		return `js/ctx.request${suffix}`;
+	}
+	const root = encodeSegment(ref.$ref.step); // `.fanOut` or `["fan-out"]`
 	return `js/ctx.state${root}${suffix}`;
 }
 
