@@ -1,93 +1,133 @@
 ---
 title: "Triggers"
-description: "How workflows start — HTTP requests, queue messages, schedules, and other events."
-icon: "zap"
+description: "What starts a workflow. Nine trigger types — HTTP, worker, cron, pub/sub, SSE, WebSocket, webhook, MCP, gRPC — one identical workflow body."
+icon: "bolt"
 ---
 
-# Concept
+A **trigger** decides *when* a workflow runs. The same workflow body — nodes, handles, control
+flow — works under any trigger; only the trigger block changes. A workflow declares **exactly
+one** trigger.
 
-Triggers are the entry points to your Blok [Workflows](./workflows.mdx). They are specific events or conditions that, when they occur, initiate the execution of an associated workflow. Without a trigger, a workflow is just a definition; triggers bring them to life by starting the process.
+```ts
+// The same "process this order" logic, two different triggers:
+workflow("orders.process", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  step("process", processOrder, { order: req.body });
+});
 
-## What is a Trigger?
-
-Think of a trigger as the starting gun for a race (the race being your workflow). It listens for a particular signal and, upon receiving it, kicks off the defined sequence of [Nodes](./nodes.mdx).
-
-Blok supports various types of triggers to cater to different use cases. Common trigger types include:
-
-*   **HTTP/HTTPS**: Initiates a workflow based on an incoming HTTP request (e.g., a user accessing a URL, an API call from a frontend application or another service). This is one of the most common triggers for web-based applications and APIs.
-*   **Scheduled (Cron)**: Executes a workflow at predefined times or intervals (e.g., run a report every night at 2 AM, perform a cleanup task every hour).
-*   **Message Queue**: Starts a workflow when a new message arrives in a specific queue (e.g., RabbitMQ, Kafka, AWS SQS). This is useful for asynchronous processing and event-driven architectures.
-*   **gRPC**: Initiates a workflow based on an incoming gRPC request. This is suitable for high-performance, contract-based inter-service communication.
-*   **MCP**: Exposes a workflow as a [Model Context Protocol](/d/triggers/mcp) tool or resource, so AI clients (Claude Code, Cursor, Claude Desktop) can discover and call it. The tool's input schema is generated from the workflow's Zod `input`.
-*   **Database Events**: (Potentially) Triggers a workflow in response to changes in a database (e.g., a new record inserted into a table). Support for this depends on the Blok runtime and integrations.
-*   **Custom Triggers**: The framework might allow for the development of custom triggers to integrate with proprietary systems or unique event sources.
-
-## Configuring Triggers
-
-Each trigger type requires specific configuration. This configuration is typically part of the workflow definition (e.g., in the workflow JSON file).
-
-### Example: HTTP Trigger Configuration (in Workflow JSON)
-
-```json
-{
-  "name": "getUserProfile",
-  "trigger": {
-		"http": {
-			"method": "GET",
-			"path": "/",
-			"accept": "application/json"
-		}
-	},
-  "nodes": [
-    // ... nodes for this workflow ...
-  ]
-}
+workflow("orders.process", { version: "1.0.0", trigger: { worker: { queue: "orders" } } }, (job) => {
+  step("process", processOrder, { order: job.body });
+});
 ```
-In this example:
-*   `type: "Http"` declares it as an HTTP trigger.
-*   `config.path: "/users/{userId}"` defines the endpoint. The `{userId}` part indicates a path parameter that will be available in the [Context Object](./context.mdx).
-*   `config.method: "GET"` specifies that only GET requests to this path will trigger the workflow.
 
-## Trigger Data in the Context Object
+The only differences: the trigger block, and the entry handle's name + shape (`req` vs `job`).
 
-When a trigger fires and a workflow instance begins, the data associated with the trigger event is typically passed into the workflow via the [Context Object](./context.mdx). Nodes within the workflow can then access this data.
+## Choosing a trigger
 
-For an HTTP trigger, this might include:
-*   Request headers (e.g., `ctx.request.headers`)
-*   Query parameters (e.g., `ctx.request.query.searchTerm`)
-*   Path parameters (e.g., `ctx.request.params.userId`)
-*   Request body (e.g., `ctx.request.body.payload`)
+Picking `http` reflexively is the most common mistake. Choose by intent:
 
-For a message queue trigger, it would include the message payload and any associated metadata.
+| What you're building | Trigger | Why not HTTP |
+|---|---|---|
+| Respond to an HTTP/REST request; JSON API; HTML; file download | **`http`** | — |
+| Background / queued / async job; offload slow work | **`worker`** | HTTP blocks the caller; jobs need a queue, retries, and a DLQ |
+| Run on a schedule (nightly, hourly, cron) | **`cron`** | HTTP only fires on a request |
+| React to cloud topic/subscription events across services | **`pubsub`** | HTTP isn't subscribed to a broker |
+| One-way live push to a browser (tokens, progress, a feed) | **`sse`** | a plain HTTP response is one-shot |
+| Bidirectional realtime (chat, live cursors) | **`websocket`** | HTTP is half-duplex, no server push-back |
+| Receive a **signed** provider webhook (Stripe, GitHub, Slack, Shopify, Svix) | **`webhook`** | HTTP won't verify the HMAC signature |
+| Expose a workflow as a tool to an AI client (Claude, Cursor) | **`mcp`** | HTTP isn't MCP — the client can't discover it |
+| High-throughput typed RPC with a `.proto` contract | **`grpc`** | HTTP/REST overhead is too high |
 
-## Multiple Triggers
+<Note>
+**There is no `queue` trigger** — use **`worker`**. Queue consumers, fan-out, async jobs: all
+`worker`. (`trigger: { queue: ... }` throws at load.)
+</Note>
 
-While a single workflow definition usually has one primary trigger, advanced scenarios or specific Blok runtime features might allow a workflow to be triggered by multiple different event types or configurations, though this is less common and can add complexity.
+## Two families
 
-## Choosing the Right Trigger
-
-The choice of trigger depends entirely on how you want your workflow to be initiated:
-
-*   For synchronous, request/response interactions (like building APIs), **HTTP** or **gRPC** triggers are suitable.
-*   For background tasks that run on a schedule, use a **Scheduled (Cron)** trigger.
-*   For decoupling services and processing events asynchronously, **Message Queue** triggers are ideal.
-
-Triggers are the essential starting points for all operations in Blok. By understanding and correctly configuring them, you can effectively control when and how your application logic is executed.
-
-## Reference pages per trigger kind
-
-For the full config-field reference, `ctx` mapping, and worked patterns per trigger:
-
-<Columns cols={4}>
-  <Card title="HTTP" icon="globe" href="/d/triggers/http">REST endpoints + file-based routing</Card>
-  <Card title="SSE" icon="cable" href="/d/triggers/sse">Server-Sent Events streaming</Card>
-  <Card title="WebSocket" icon="plug" href="/d/triggers/websocket">Bidirectional WS connections</Card>
-  <Card title="Webhook" icon="webhook" href="/d/triggers/webhook">Signed inbound w/ HMAC verify</Card>
-  <Card title="MCP" icon="robot" href="/d/triggers/mcp">Workflows as AI tools (Claude, Cursor)</Card>
-  <Card title="Worker" icon="factory" href="/d/triggers/worker">Background jobs from a queue</Card>
-  <Card title="Cron" icon="clock" href="/d/triggers/cron">Time-based schedules</Card>
-  <Card title="Pub/Sub" icon="share-2" href="/d/triggers/pubsub">Cloud pub/sub (GCP, AWS, Azure)</Card>
-  <Card title="gRPC" icon="network" href="/d/triggers/grpc">Contract-based RPC</Card>
+<Columns cols={2}>
+  <Card title="Same-port (in-process)" icon="server">
+    `http`, `sse`, `websocket`, `webhook`, `mcp` all mount on **one** Hono HTTP server (default
+    port 4000) and share an in-process event bus.
+  </Card>
+  <Card title="Cross-process" icon="network-wired">
+    `worker`, `cron`, `pubsub`, `grpc` each run in their **own** process and coordinate via
+    external brokers or their own ports.
+  </Card>
 </Columns>
 
-This concludes the core concepts in the Introduction. You can now explore [Practical Examples](../examples/index.mdx) or dive deeper into [Fundamentals](/d/fundamentals/blok-concept).
+## Configuring a trigger
+
+HTTP uses the `http.*` helper. Every other trigger is a raw block passed as `opts.trigger`:
+
+<CodeGroup>
+```ts HTTP
+trigger: http.post("/orders")           // .get / .post / .put / .delete / .patch / .any
+trigger: http.get("/users/:id")         // path params
+trigger: http.any()                     // catch-all (omit path → file-based routing)
+```
+
+```ts Worker
+trigger: { worker: { queue: "emails", provider: "nats", retries: 3, concurrency: 5 } }
+```
+
+```ts Cron
+trigger: { cron: { schedule: "0 8 * * *", timezone: "America/New_York" } }
+```
+
+```ts Webhook
+trigger: { webhook: { provider: "stripe", events: ["payment_intent.succeeded"] } }
+```
+</CodeGroup>
+
+## The entry handle
+
+The build callback's argument is the trigger's **entry handle** — the incoming payload, typed
+and named by convention per trigger:
+
+| Trigger | Entry | Read |
+|---|---|---|
+| `http` | `req` | `req.body`, `req.params.id`, `req.query.q`, `req.headers["x-…"]` |
+| `webhook` | `event` | `event.body` (the verified payload), `event.headers` |
+| `worker` | `job` | `job.body` (payload), `job.params.{queue,jobId,attempt}` |
+| `cron` | `tick` | `tick.params` (schedule metadata — no body) |
+| `pubsub` | `msg` | `msg.body`, `msg.headers` |
+| `grpc` | `rpc` | `rpc.body` |
+
+```ts
+workflow("nightly.digest", { version: "1.0.0", trigger: { cron: { schedule: "0 8 * * *" } } }, (tick) => {
+  step("build", buildDigest, { day: tick.params.scheduledTime });
+});
+```
+
+## Cross-cutting controls
+
+Every trigger block also accepts reliability + scheduling knobs — per-tenant
+[concurrency](/d/reliability/concurrency-keys) (`concurrencyKey`, `concurrencyLimit`,
+`onLimit`), [scheduling](/d/scheduling/overview) (`delay`, `ttl`, `debounce`), and `middleware`.
+
+## Per-trigger reference
+
+Each trigger has a deep-dive with its full config, payload mapping, and worked patterns:
+
+<Columns cols={3}>
+  <Card title="HTTP" icon="globe" href="/d/triggers/http">REST + file-based routing</Card>
+  <Card title="Worker" icon="gears" href="/d/triggers/worker">Background jobs from a queue</Card>
+  <Card title="Cron" icon="clock" href="/d/triggers/cron">Time-based schedules</Card>
+  <Card title="Pub/Sub" icon="tower-broadcast" href="/d/triggers/pubsub">Cloud pub/sub events</Card>
+  <Card title="SSE" icon="wifi" href="/d/triggers/sse">Server-Sent Events</Card>
+  <Card title="WebSocket" icon="plug" href="/d/triggers/websocket">Bidirectional realtime</Card>
+  <Card title="Webhook" icon="webhook" href="/d/triggers/webhook">Signed inbound (HMAC)</Card>
+  <Card title="MCP" icon="robot" href="/d/triggers/mcp">Workflows as AI tools</Card>
+  <Card title="gRPC" icon="diagram-project" href="/d/triggers/grpc">Contract-based RPC</Card>
+</Columns>
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Context & state" icon="database" href="/d/fundamentals/context-and-state">
+    How trigger payloads flow into your workflow.
+  </Card>
+  <Card title="Examples" icon="grid-2" href="/d/examples/index">
+    See each trigger in a real, runnable app.
+  </Card>
+</CardGroup>
