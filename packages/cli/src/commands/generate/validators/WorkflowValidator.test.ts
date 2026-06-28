@@ -728,4 +728,87 @@ describe("WorkflowValidator", () => {
 			expect(result.valid).toBe(true);
 		});
 	});
+
+	describe("v2 workflows (inline inputs, no nodes map)", () => {
+		const base = {
+			name: "V2 Flow",
+			description: "A v2 workflow",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/v2" } },
+		};
+
+		it("accepts a v2 workflow with id/use/inputs and no nodes map", () => {
+			const result = validateWorkflow(
+				JSON.stringify({
+					...base,
+					steps: [
+						{ id: "fetch", use: "@blokjs/api-call", inputs: { url: "https://x" } },
+						{ id: "respond", use: "@blokjs/respond", inputs: { body: "$.state.fetch" }, ephemeral: true },
+					],
+				}),
+			);
+			expect(result.valid).toBe(true);
+		});
+
+		it("accepts a v2 branch step and validates its arm ids", () => {
+			const result = validateWorkflow(
+				JSON.stringify({
+					...base,
+					steps: [
+						{
+							id: "route",
+							branch: {
+								when: "ctx.req.method === 'POST'",
+								then: [{ id: "create", use: "@blokjs/api-call", inputs: {} }],
+								else: [{ id: "read", use: "@blokjs/api-call", inputs: {} }],
+							},
+						},
+					],
+				}),
+			);
+			expect(result.valid).toBe(true);
+		});
+
+		it("errors on a v2 step missing use", () => {
+			const result = validateWorkflow(JSON.stringify({ ...base, steps: [{ id: "x", inputs: {} }] }));
+			expect(result.valid).toBe(false);
+			expect(result.errors.some((e) => e.includes('missing required "use"'))).toBe(true);
+		});
+
+		it("errors on a duplicate id across a branch arm", () => {
+			const result = validateWorkflow(
+				JSON.stringify({
+					...base,
+					steps: [
+						{ id: "dup", use: "@blokjs/api-call", inputs: {} },
+						{
+							id: "b",
+							branch: { when: "ctx.state.dup.ok", then: [{ id: "dup", use: "@blokjs/respond", inputs: {} }] },
+						},
+					],
+				}),
+			);
+			expect(result.valid).toBe(false);
+			expect(result.errors.some((e) => e.includes("Duplicate step id"))).toBe(true);
+		});
+
+		it("errors on a branch when prefixed with js/ or $.", () => {
+			const result = validateWorkflow(
+				JSON.stringify({
+					...base,
+					steps: [{ id: "b", branch: { when: "js/ctx.state.x", then: [{ id: "t", use: "n", inputs: {} }] } }],
+				}),
+			);
+			expect(result.valid).toBe(false);
+			expect(result.errors.some((e) => e.includes("raw"))).toBe(true);
+		});
+
+		it("errors when a v2 step sets both as and spread", () => {
+			const result = validateWorkflow(
+				JSON.stringify({ ...base, steps: [{ id: "x", use: "n", as: "y", spread: true, inputs: {} }] }),
+			);
+			expect(result.valid).toBe(false);
+			expect(result.errors.some((e) => e.includes("mutually exclusive"))).toBe(true);
+		});
+	});
 });

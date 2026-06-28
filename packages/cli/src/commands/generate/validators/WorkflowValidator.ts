@@ -52,8 +52,14 @@ export function validateWorkflow(jsonString: string): WorkflowValidationResult {
 		};
 	}
 
+	// v2 (preferred) workflows carry inputs inline on each step (`id` + `use`,
+	// or a `branch` step) and have NO top-level `nodes{}` map. v1 workflows use
+	// `name` + `node` + a `nodes{}` map. Both load fine (the runner normalizes
+	// v1 → v2), so the validator accepts either shape and routes accordingly.
+	const v2 = isV2Workflow(workflow.steps);
+
 	// Step 2: Validate top-level structure
-	validateTopLevel(workflow, errors, warnings);
+	validateTopLevel(workflow, v2, errors, warnings);
 
 	// Step 3: Validate trigger
 	if (workflow.trigger && typeof workflow.trigger === "object") {
@@ -63,11 +69,15 @@ export function validateWorkflow(jsonString: string): WorkflowValidationResult {
 	// Step 4: Validate steps
 	const stepNames = new Set<string>();
 	if (Array.isArray(workflow.steps)) {
-		validateSteps(workflow.steps, stepNames, errors, warnings);
+		if (v2) {
+			validateV2Steps(workflow.steps, stepNames, errors, warnings);
+		} else {
+			validateSteps(workflow.steps, stepNames, errors, warnings);
+		}
 	}
 
-	// Step 5: Validate nodes and cross-reference with steps
-	if (workflow.nodes && typeof workflow.nodes === "object") {
+	// Step 5 (v1 only): validate nodes and cross-reference with steps.
+	if (!v2 && workflow.nodes && typeof workflow.nodes === "object") {
 		validateNodes(workflow.nodes as Record<string, unknown>, stepNames, errors, warnings);
 	}
 
@@ -78,7 +88,17 @@ export function validateWorkflow(jsonString: string): WorkflowValidationResult {
 	};
 }
 
-function validateTopLevel(workflow: Record<string, unknown>, errors: string[], warnings: string[]): void {
+/** A workflow is v2 if any step carries inline `use`/`branch` (no `nodes{}` map). */
+function isV2Workflow(steps: unknown): boolean {
+	if (!Array.isArray(steps)) return false;
+	return steps.some((s) => {
+		if (!s || typeof s !== "object") return false;
+		const step = s as Record<string, unknown>;
+		return step.use !== undefined || step.branch !== undefined || (step.id !== undefined && step.name === undefined);
+	});
+}
+
+function validateTopLevel(workflow: Record<string, unknown>, v2: boolean, errors: string[], warnings: string[]): void {
 	// Required fields
 	if (!workflow.name || typeof workflow.name !== "string") {
 		errors.push('Missing or invalid "name" field (must be a non-empty string)');
@@ -106,7 +126,8 @@ function validateTopLevel(workflow: Record<string, unknown>, errors: string[], w
 		errors.push('"steps" array must not be empty');
 	}
 
-	if (!workflow.nodes || typeof workflow.nodes !== "object") {
+	// v2 carries inputs inline on each step — no `nodes{}` map. Only v1 needs it.
+	if (!v2 && (!workflow.nodes || typeof workflow.nodes !== "object")) {
 		errors.push('Missing or invalid "nodes" field (must be an object)');
 	}
 }
@@ -260,6 +281,81 @@ function validateSteps(steps: unknown[], stepNames: Set<string>, errors: string[
 			errors.push(`Duplicate step name "${step.name}"`);
 		}
 		stepNames.add(step.name as string);
+	}
+}
+
+/**
+ * Validate v2 steps: inputs live inline on each step (`id` + `use`), there is no
+ * `nodes{}` map, and conditionals are a single step with `branch: { when, then,
+ * else }`. Step ids are flat across the whole workflow (including branch arms),
+ * so duplicates collide — mirror the runner's load-time guard.
+ */
+function validateV2Steps(steps: unknown[], ids: Set<string>, errors: string[], warnings: string[]): void {
+	for (let i = 0; i < steps.length; i++) {
+		const step = steps[i] as Record<string, unknown>;
+
+		if (!step || typeof step !== "object") {
+			errors.push(`Step at index ${i} must be an object`);
+			continue;
+		}
+
+		if (!step.id || typeof step.id !== "string") {
+			errors.push(`Step at index ${i} is missing required "id" field`);
+			continue;
+		}
+
+		if (ids.has(step.id as string)) {
+			errors.push(`Duplicate step id "${step.id}" — step ids are flat per workflow (including branch arms)`);
+		}
+		ids.add(step.id as string);
+
+		// Branch step: { id, branch: { when, then[], else?[] } }
+		if (step.branch !== undefined) {
+			const branch = step.branch as Record<string, unknown>;
+			if (!branch || typeof branch !== "object") {
+				errors.push(`Step "${step.id}" has an invalid "branch" (must be an object)`);
+				continue;
+			}
+			if (!branch.when || typeof branch.when !== "string") {
+				errors.push(`Branch step "${step.id}" is missing a "when" condition string`);
+			} else if ((branch.when as string).startsWith("js/") || (branch.when as string).startsWith("$.")) {
+				errors.push(
+					`Branch step "${step.id}" "when" must be a raw \`ctx.*\` expression (e.g. "ctx.state.x > 10") — never "js/..." or "$...", which throw at runtime`,
+				);
+			}
+			if (!Array.isArray(branch.then) || (branch.then as unknown[]).length === 0) {
+				errors.push(`Branch step "${step.id}" must have a non-empty "then" array`);
+			} else {
+				validateV2Steps(branch.then as unknown[], ids, errors, warnings);
+			}
+			if (branch.else !== undefined) {
+				if (!Array.isArray(branch.else)) {
+					errors.push(`Branch step "${step.id}" "else" must be an array when present`);
+				} else {
+					validateV2Steps(branch.else as unknown[], ids, errors, warnings);
+				}
+			}
+			continue;
+		}
+
+		// Regular step: requires `use` (a node reference) or `subworkflow`.
+		if ((!step.use || typeof step.use !== "string") && typeof step.subworkflow !== "string") {
+			errors.push(`Step "${step.id}" is missing required "use" field (the node to run)`);
+		}
+
+		if (step.type !== undefined) {
+			if (typeof step.type !== "string") {
+				errors.push(`Step "${step.id}" "type" must be a string`);
+			} else if (!VALID_STEP_TYPES.includes(step.type as string) && !(step.type as string).startsWith("runtime.")) {
+				warnings.push(
+					`Step "${step.id}" has unusual type "${step.type}". Common types: ${VALID_STEP_TYPES.join(", ")}`,
+				);
+			}
+		}
+
+		if (step.as !== undefined && step.spread !== undefined) {
+			errors.push(`Step "${step.id}" sets both "as" and "spread" — they are mutually exclusive`);
+		}
 	}
 }
 

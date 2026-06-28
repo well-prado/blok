@@ -60,6 +60,9 @@ const PUBLISHABLE: readonly Publishable[] = [
 	{ dir: "nodes/utility/helpers@1.0.0", name: "@blokjs/helpers" },
 	// Runner (consumes everything above).
 	{ dir: "core/runner", name: "@blokjs/runner" },
+	// Core — the typed-handle authoring barrel. Thin re-export of the DSL
+	// from runner + helper + shared, so it lists after all three.
+	{ dir: "core/core", name: "@blokjs/core" },
 	// Triggers (consume runner + shared + helper). Order amongst
 	// themselves doesn't matter — none depend on another trigger.
 	{ dir: "triggers/worker", name: "@blokjs/trigger-worker" },
@@ -92,7 +95,7 @@ interface Failure {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 16 Blok public packages to npm in dependency order using a
+Publishes the 18 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:

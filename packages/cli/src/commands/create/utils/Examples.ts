@@ -378,7 +378,52 @@ Blok is a **multi-trigger, multi-runtime workflow framework**. A workflow is a d
 The 9 trigger types: \`http\`, \`worker\`, \`cron\`, \`pubsub\`, \`sse\`, \`websocket\`, \`webhook\`, \`mcp\`, \`grpc\`.
 The 8 runtimes: \`typescript\` (in-process), \`go\`, \`rust\`, \`java\`, \`csharp\`, \`php\`, \`ruby\`, \`python3\`.
 
-The canonical workflow form is \`workflow({ name, version, trigger, steps })\` from \`@blokjs/helper\`. The same shape works for all 9 triggers — only the \`trigger:\` block changes.
+The canonical TypeScript form is the **typed-handle DSL** from \`@blokjs/core\`: \`workflow(name, { version, trigger }, (entry) => { ... })\`, where each \`step()\` returns a typed handle you reference directly — **no \`$\`, no \`js/\`, no raw \`ctx\` strings.** The object-style \`workflow({ name, version, trigger, steps: [...] })\` from \`@blokjs/helper\` and JSON workflows are equivalent (all three compile to the same IR) and remain fully supported. The same shape works for all 9 triggers — only the \`trigger:\` block changes.
+
+---
+
+## 0. THE TYPED-HANDLE DSL (\`@blokjs/core\`) — preferred for TypeScript
+
+\`\`\`ts
+import { workflow, step, branch, forEach, switchOn, tryCatch, http, tpl, gt } from "@blokjs/core";
+
+export default workflow("order-intake", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  // step(id, node, inputs) → a TYPED handle shaped like the node's output.
+  const order = step("validate", validateOrder, { qty: req.body.qty });
+
+  // Reference a handle field anywhere downstream — it records a ref the runner resolves.
+  step("summary", summarize, { line: tpl\`order of \${order.qty} item(s)\` });
+
+  // Control flow: a comparator (gt/eq/lt/...) builds the condition; arms are callbacks.
+  branch("lane", gt(order.qty, 10), {
+    then: () => { step("bulk", routeOrder, { lane: "bulk" }); },
+    else: () => { step("standard", routeOrder, { lane: "standard" }); },
+  });
+});
+\`\`\`
+
+**Trigger config:** \`http.{get,post,put,delete,patch,any}(path?, opts?)\` for HTTP (omit \`path\` for file-based routing). For any other trigger pass the raw block as \`trigger:\` — e.g. \`{ worker: { queue: "jobs" } }\`, \`{ cron: { schedule: "0 2 * * *" } }\`, \`{ webhook: { source: "stripe" } }\`.
+
+**The entry handle** (the callback's argument) is the trigger payload — typed and conventionally named per trigger: \`http\`→\`req\`, \`webhook\`→\`event\`, \`cron\`→\`tick\`, \`worker\`→\`job\`, \`pubsub\`→\`msg\`, \`grpc\`→\`rpc\` (others get a loose handle). Read \`req.body\`, \`req.params.id\`, \`req.query.q\`, \`req.headers["x-…"]\`.
+
+**Handles & persistence:**
+- \`const h = step("id", node, inputs)\` — every step auto-persists to \`ctx.state["id"]\` on success; \`h\` / \`h.field\` is how you reference it later (never \`$.state.id\`).
+- 4th arg \`opts\`: \`{ as: "name" }\` roots the handle at \`state["name"]\`; \`{ spread: true }\` flattens \`result.data\` into state (mutually exclusive with \`as\`); \`{ ephemeral: true }\` skips persistence (handle then unreadable downstream); also \`idempotencyKey\`, \`retry\`, \`maxDuration\`, \`type: "runtime.<lang>"\`.
+- \`tpl\`…\${h.field}…\`\` builds a string with embedded handle refs.
+- Comparators (typed): \`eq, ne, gt, gte, lt, lte, not\`. A bare boolean handle is a truthiness check.
+- \`defineNode\` is re-exported from \`@blokjs/core\` — author nodes exactly as before; just RETURN output (never write \`ctx.state\`/\`ctx.vars\`).
+
+**Control-flow primitives** (all from \`@blokjs/core\`):
+- \`branch(id, cond, { then: () => {…}, else?: () => {…} })\` — \`cond\` is a comparator or a boolean handle.
+- \`forEach(iterable, (item, index) => { step(…) }, { as?, mode?, concurrency? })\` — \`iterable\` is a handle; \`item\`/\`index\` are per-iteration handles; \`mode: "parallel"\` bounds with \`concurrency\` (default 10).
+- \`switchOn(discriminant, { cases: [{ when: "push", do: () => {…} }], default?: () => {…} }, { id })\` — \`when\` labels are STATIC literals (a handle never matches).
+- \`tryCatch(id, { try: () => {…}, catch: (error) => { step("log", logger, { msg: error.message }); }, finally?: () => {…} })\` — \`error\` is a typed handle (\`.message\`/\`.name\`/\`.stack\`/\`.code\`/\`.stepId\`).
+
+**The four footguns** (full detail: \`docs/d/primitives/handles-and-footguns.mdx\`):
+1. **Arm-scoped handles don't escape their arm.** A handle minted inside a \`branch\`/\`switchOn\`/\`tryCatch\`/\`forEach\` arm is unreadable outside it. Return a value from the control-flow step, or have both arms write one \`as:\` key.
+2. **Ephemeral handles are unreadable.** Reading an \`{ ephemeral: true }\` step's handle resolves to \`undefined\`.
+3. **Never reuse a step \`id\`** — including across mutually-exclusive arms. Ids are a flat per-workflow map; the runner throws at load time. Use \`as:\` when two arms must write the same downstream key.
+4. **Never name a \`forEach\` \`as:\`/\`asIndex\` after an existing step id** (or another loop's \`as\`) — they share \`ctx.state\`; the runner throws at load time.
 
 ---
 
@@ -887,7 +932,7 @@ Process-global middleware: \`WorkflowRegistry.getInstance().setGlobalMiddleware(
 Always \`export default defineNode(...)\`. Never class-based \`BlokService\`. Zod input/output are mandatory.
 
 \`\`\`ts
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
 export default defineNode({
@@ -1364,7 +1409,7 @@ Per-step reliability lives on the step: \`idempotencyKey\` (cache by \`(workflow
 Always \`export default defineNode(...)\` (TS) — never class-based \`BlokService\`. Zod input/output are mandatory. Never write \`ctx.state\` from a node — return your output and let the runner persist it (use \`ctx.publish(name, value)\` for a true side-channel). No \`any\` types — use \`z.unknown()\`.
 
 \`\`\`typescript
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
 export default defineNode({
@@ -1418,7 +1463,21 @@ Registration is **manual** in non-TS runtimes — importing the module runs the 
 
 ## 4. Generating Workflows
 
-Canonical form: \`workflow({ name, version, trigger, steps })\` from \`@blokjs/helper\` — one object literal, no chained builder, no separate \`nodes{}\` map. \`name\` ≥ 3 chars, \`version\` ≥ 5 chars (semver). Reference earlier outputs with \`$.state.<id>\` / \`$.req.body\`. Use \`branch\`, \`switchOn\`, \`forEach\`, \`loop\`, \`tryCatch\` (all from \`@blokjs/helper\`) for control flow.
+**Preferred (TypeScript): the typed-handle DSL from \`@blokjs/core\`.** \`workflow(name, { version, trigger }, (entry) => { ... })\` — each \`step(id, node, inputs)\` returns a typed handle you reference directly; no \`$\`, no \`js/\`, no raw \`ctx\` strings. \`http.{get,post,…}(path?)\` builds the trigger; other triggers pass the raw block (\`{ worker: { queue } }\`, \`{ cron: { schedule } }\`, …). Entry name per trigger: \`http\`→\`req\`, \`worker\`→\`job\`, \`cron\`→\`tick\`, \`webhook\`→\`event\`, \`pubsub\`→\`msg\`, \`grpc\`→\`rpc\`.
+
+\`\`\`typescript
+import { workflow, step, branch, gt, http } from "@blokjs/core";
+
+export default workflow("Process Order", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  const order = step("validate", orderValidator, { order: req.body });   // typed handle
+  step("save", orderStore, { data: order });                            // reference it directly
+  branch("big", gt(order.total, 100), { then: () => { step("vip", flagVip, { id: order.id }); } });
+});
+\`\`\`
+
+Control flow (all from \`@blokjs/core\`): \`branch(id, cond, {then,else?})\`, \`forEach(iterable, (item,i)=>{}, {as?,mode?})\`, \`switchOn(disc, {cases:[{when,do}],default?}, {id})\`, \`tryCatch(id, {try,catch:(err)=>{},finally?})\`; comparators \`eq/ne/gt/gte/lt/lte/not\`; \`tpl\`…\${h.x}…\`\` for strings. The **four footguns**: arm-scoped handles don't escape their arm; ephemeral handles read \`undefined\`; never reuse a step \`id\`; never name a \`forEach\` \`as:\` after an existing id. See \`docs/d/primitives/handles-and-footguns.mdx\`.
+
+**Equivalent object-style form** (\`@blokjs/helper\`, also valid; JSON mirrors it): one object literal, \`steps: [...]\`, reference outputs with \`$.state.<id>\` / \`$.req.body\`.
 
 \`\`\`typescript
 import { workflow, $ } from "@blokjs/helper";
@@ -1492,7 +1551,7 @@ branch({ id: "route",
 - Do NOT use ESLint/Prettier — this project uses Biome. Do NOT edit auto-generated files in \`.blok/runtimes/\`.
 `;
 
-const function_first_node_file = `import { defineNode } from "@blokjs/runner";
+const function_first_node_file = `import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
 /**
@@ -1517,13 +1576,13 @@ export default defineNode({
 	// Execute function - type-safe with inferred types from Zod schemas
 	async execute(ctx, input) {
 		// Your business logic here
-		// - ctx.vars: Access workflow variables
 		// - ctx.request: Access HTTP request data
 		// - ctx.logger: Log messages
 		// - ctx.env: Access environment variables
-
-		// Example: Store data for downstream nodes
-		ctx.vars["processed-message"] = input.message;
+		//
+		// Just RETURN your output — the runner auto-persists it to
+		// ctx.state["{{NODE_NAME}}"], readable from any later step's handle.
+		// Do NOT write to ctx.state / ctx.vars inside a node.
 
 		// Return type-safe output (validated automatically)
 		return {
