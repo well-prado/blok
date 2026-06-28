@@ -46,7 +46,13 @@ import workflows from "../Workflows";
 import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
 import MessageDecode from "./MessageDecode";
 import { handleDynamicRoute, validateRoute } from "./Util";
-import { type RouteCollision, type RouteEntry, buildRouteTable, readMiddlewareFlag } from "./WorkflowRouter";
+import {
+	type ManualRegistration,
+	type RouteCollision,
+	type RouteEntry,
+	buildRouteTable,
+	readMiddlewareFlag,
+} from "./WorkflowRouter";
 import { bootstrapMetrics } from "./metrics/opentelemetry_metrics";
 import { buildNodeCatalog } from "./nodeCatalog";
 import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter";
@@ -117,6 +123,20 @@ function hasHttpTrigger(wf: unknown): boolean {
 	if (!trigger || typeof trigger !== "object") return false;
 	const http = (trigger as Record<string, unknown>).http;
 	return !!http && typeof http === "object";
+}
+
+async function resolveManualRegistrations(workflowsMap: Record<string, unknown>): Promise<ManualRegistration[]> {
+	return Promise.all(
+		Object.keys(workflowsMap ?? {}).map(async (key) => ({
+			key,
+			workflow: await workflowsMap[key],
+		})),
+	);
+}
+
+async function resolveManualWorkflowMap(workflowsMap: Record<string, unknown>): Promise<Record<string, unknown>> {
+	const entries = await resolveManualRegistrations(workflowsMap);
+	return Object.fromEntries(entries.map(({ key, workflow }) => [key, workflow]));
 }
 
 /**
@@ -277,7 +297,7 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	loadWorkflows() {
-		this.nodeMap.workflows = workflows;
+		this.nodeMap.workflows = workflows as unknown as GlobalOptions["workflows"];
 	}
 
 	/**
@@ -398,9 +418,9 @@ export default class HttpTrigger extends TriggerBase {
 			},
 		);
 
-		const manual = Object.keys(workflows ?? {}).map((key) => ({
+		const manual = Object.keys(this.nodeMap.workflows ?? {}).map((key) => ({
 			key,
-			workflow: (workflows as Record<string, unknown>)[key],
+			workflow: (this.nodeMap.workflows as Record<string, unknown>)[key],
 		}));
 
 		// Boot is tolerant of route-table collisions: a single bad
@@ -789,6 +809,14 @@ export default class HttpTrigger extends TriggerBase {
 			this.logger.log("[blok][metrics] disabled (BLOK_METRICS_DISABLED=1) — no /metrics endpoint, instruments no-op.");
 		}
 
+		try {
+			this.nodeMap.workflows = (await resolveManualWorkflowMap(
+				(workflows as Record<string, unknown>) ?? {},
+			)) as GlobalOptions["workflows"];
+		} catch (err) {
+			this.logger.error(`[blok] TS workflow registration failed: ${(err as Error).message}`);
+		}
+
 		// File-based routing — scan workflow folders, build the route table,
 		// and register each entry as an explicit Hono route BEFORE the
 		// catch-all. **Default ON since v0.6**; opt out via
@@ -819,7 +847,7 @@ export default class HttpTrigger extends TriggerBase {
 		// won't see it — so without this pass `runMiddlewareChain` 500s for the
 		// documented (recommended) TS authoring path.
 		try {
-			this.registerManualMiddleware((workflows as Record<string, unknown>) ?? {});
+			this.registerManualMiddleware((this.nodeMap.workflows as Record<string, unknown>) ?? {});
 		} catch (err) {
 			this.logger.error(`[blok] TS middleware registration failed: ${(err as Error).message}`);
 		}
