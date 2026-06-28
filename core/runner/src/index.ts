@@ -42,6 +42,7 @@ import {
 	branch,
 	forEach as callbackForEach,
 	switchOn as callbackSwitchOn,
+	tryCatch as callbackTryCatch,
 	eq as condEq,
 	gt as condGt,
 	gte as condGte,
@@ -241,6 +242,8 @@ export {
 	callbackForEach as forEach,
 	// switchOn over handles (#319)
 	callbackSwitchOn as switchOn,
+	// tryCatch over handles (#317)
+	callbackTryCatch as tryCatch,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -365,6 +368,7 @@ export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 export type {
 	Handle,
 	EphemeralHandle,
+	ErrorHandle,
 	Refable,
 	NodeTypeWitness,
 	InputOf,
@@ -380,6 +384,7 @@ export type {
 	ForEachOptions,
 	SwitchArms,
 	SwitchCaseArm,
+	TryCatchArms,
 } from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
