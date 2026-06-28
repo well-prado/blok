@@ -227,7 +227,8 @@ export function step<N extends { name: string }>(
 
 /**
  * The trigger-payload handle the callback receives. Rooted at the `@trigger`
- * pseudo-step (lowerRefs maps it to `ctx.state["@trigger"]`). For request-shaped
+ * pseudo-step (lowerRefs maps it to `ctx.request`, where the runner puts the
+ * trigger payload — NOT `ctx.state`). For request-shaped
  * triggers, author reads `req.body.x`, `req.params.id`, etc. Typed loosely for
  * now; ADR 0006 wires the per-trigger input type in a follow-up.
  */
