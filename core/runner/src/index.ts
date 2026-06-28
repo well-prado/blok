@@ -41,6 +41,7 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 import {
 	branch,
 	forEach as callbackForEach,
+	switchOn as callbackSwitchOn,
 	eq as condEq,
 	gt as condGt,
 	gte as condGte,
@@ -238,6 +239,8 @@ export {
 	condNot as not,
 	// forEach over handles (#329 / #343)
 	callbackForEach as forEach,
+	// switchOn over handles (#319)
+	callbackSwitchOn as switchOn,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -369,7 +372,15 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 } from "./handles";
-export type { StepOptions, TriggerHandle, BranchCondition, BranchArms, ForEachOptions } from "./stepBuilder";
+export type {
+	StepOptions,
+	TriggerHandle,
+	BranchCondition,
+	BranchArms,
+	ForEachOptions,
+	SwitchArms,
+	SwitchCaseArm,
+} from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";

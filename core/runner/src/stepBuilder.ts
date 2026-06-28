@@ -546,6 +546,125 @@ export function forEach<T = unknown>(
 	return buildHandle(id, parent, []) as Handle<unknown[]>;
 }
 
+// ───────────────────────────── switchOn (#319) ───────────────────────────
+//
+// `switchOn(discriminant, { cases: [{ when, do }], default? })` — a callback-
+// style N-way branch over a handle. The `discriminant` HANDLE lowers to the
+// switch `on` expression as a `js/ctx....` STRING — the SAME way forEach lowers
+// its `in` (the normalizer passes `on` verbatim; SwitchNode resolves it via the
+// Mapper at run time). Each case `do` (+ optional `default`) is a callback that
+// pushes a CHILD builder scope (reuse branch()'s `runArm`); `step()` calls inside
+// register into that case's sub-pipeline. Per-case handles are arm-scoped
+// (cornerstone `canRead`).
+//
+// Per #319: SwitchNode matches `case.when` by literal `===`/`includes` with NO
+// mapper resolution — so a `when` MUST be a static literal (string/number/boolean,
+// or an array of those). A handle passed as `when` would lower to a `{$ref}`/`js/`
+// string that never `=== on`, so we REJECT it at author time with a clear error.
+
+/** Options for the callback-style {@link switchOn}. */
+export interface SwitchCaseArm {
+	/** Literal match value — string/number/boolean, or an array of those (any-of). NOT a handle. */
+	when: string | number | boolean | Array<string | number | boolean>;
+	/** Callback registering the case's sub-pipeline into a child scope. */
+	do: () => unknown;
+}
+export interface SwitchArms {
+	/** Ordered cases. First match wins. */
+	cases: SwitchCaseArm[];
+	/** Fallback callback when no case matches. */
+	default?: () => unknown;
+}
+
+/** A `when` is valid only as a static literal scalar (or an array of them). */
+function assertLiteralWhen(when: unknown, id: string, ci: number): void {
+	const isScalar = (v: unknown): boolean => v === null || ["string", "number", "boolean"].includes(typeof v);
+	const reject = (): never => {
+		// A handle (or anything non-literal) leaked into a case label.
+		if (readHandleMeta(when) || (Array.isArray(when) && when.some((w) => readHandleMeta(w)))) {
+			throw new Error(
+				`switchOn("${id}") cases[${ci}] \`when\` is a handle/runtime ref. A case label must be a STATIC literal (string/number/boolean, or an array of them) — the switch engine matches \`when\` by literal === with no mapper resolution, so a handle never matches. Read the discriminant value into \`on\`, and write each case as a literal.`,
+			);
+		}
+		throw new Error(
+			`switchOn("${id}") cases[${ci}] \`when\` must be a literal string/number/boolean, or an array of them (got ${typeof when}).`,
+		);
+	};
+	if (Array.isArray(when)) {
+		if (when.length === 0 || !when.every(isScalar)) reject();
+		return;
+	}
+	if (!isScalar(when)) reject();
+}
+
+/**
+ * Callback-style `switchOn` over a handle (#319). `discriminant` is a handle (a
+ * step output field or a trigger field); it lowers to the switch `on` expression
+ * as a `js/ctx....` wire string. `arms.cases[].when` are STATIC literals (handles
+ * are rejected at author time, per #319); `arms.cases[].do` (+ optional
+ * `arms.default`) are callbacks that push CHILD builder scopes — their `step()`
+ * calls become that arm's sub-pipeline. First matching case wins.
+ *
+ * Emits the existing v2 `{ id, switch: { on, cases: [{when, do}], default? } }`
+ * shape, so it normalizes and runs through the UNCHANGED `SwitchNode` engine.
+ * Duplicate ids across arms already throw (`assertNoDuplicateStepIds`).
+ *
+ * @example
+ *   const v = step("validate", validateNode, { ... });
+ *   switchOn(v.kind, {
+ *     cases: [
+ *       { when: "a", do: () => { step("doA", nodeA, { ... }); } },
+ *       { when: ["b", "c"], do: () => { step("doBC", nodeBC, { ... }); } },
+ *     ],
+ *     default: () => { step("fallback", nodeD, { ... }); },
+ *   }, { id: "route" });
+ */
+export function switchOn(discriminant: Handle<unknown>, arms: SwitchArms, opts?: { id?: string }): void {
+	const meta = readHandleMeta(discriminant);
+	if (!meta) {
+		throw new Error("switchOn() requires a handle as its discriminant (a step output field or a trigger field).");
+	}
+	if (!arms || !Array.isArray(arms.cases) || arms.cases.length === 0) {
+		throw new Error("switchOn() requires `cases` to be a non-empty array.");
+	}
+	if (arms.default !== undefined && typeof arms.default !== "function") {
+		throw new Error("switchOn() `default` must be a callback when provided.");
+	}
+	const parent = currentBuilder();
+
+	// Cross-arm guard: the discriminant must be readable from the switch's scope.
+	if (meta.owner && !canRead(meta.owner, parent)) {
+		throw new Error(
+			`switchOn() discriminant from step "${meta.step}" is read outside its scope — a handle produced inside one control-flow arm is not readable from a sibling arm or after the flow step.`,
+		);
+	}
+
+	// Derive a stable id (visible in traces, root of the switch's state slot).
+	const id = opts?.id ?? `${deriveName(meta)}Switch`;
+	const ids = parent.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	// `on` lowers EXACTLY like forEach's `in` — a `js/ctx....` wire string.
+	const on = lowerHandleToInExpr(meta);
+
+	const cases = arms.cases.map((c, ci) => {
+		if (!c || typeof c !== "object" || typeof c.do !== "function") {
+			throw new Error(`switchOn("${id}") cases[${ci}] requires a \`do\` callback.`);
+		}
+		assertLiteralWhen(c.when, id, ci);
+		return { when: c.when, do: runArm(parent, c.do) };
+	});
+	const defaultSteps = arms.default ? runArm(parent, arms.default) : undefined;
+
+	parent.steps.push({
+		id,
+		switch: { on, cases, ...(defaultSteps ? { default: defaultSteps } : {}) },
+	} as unknown as StepRecord);
+}
+
 /** Run one arm callback inside a fresh child builder, returning its collected steps. */
 function runArm(parent: Builder, body: () => unknown): StepRecord[] {
 	const child: Builder = { parent, root: parent.root, steps: [] };
