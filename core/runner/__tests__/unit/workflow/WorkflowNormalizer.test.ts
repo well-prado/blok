@@ -608,3 +608,169 @@ describe("WorkflowNormalizer — typed-client metadata carry-through (P1.1)", ()
 		expect("events" in out).toBe(false);
 	});
 });
+
+// =============================================================================
+// Issue #301 / #302 — `ui` survives IR → normalize → toJson round-trip for
+// every step kind including steps nested inside branch / forEach / switch /
+// tryCatch arms. The runner ignores `ui` at execution; this is purely so the
+// canvas round-trip preserves authoring metadata that the schemas accept.
+// =============================================================================
+
+/**
+ * Deep-walk a normalized-then-JSON-round-tripped workflow and collect every
+ * step-shaped object (`{ name, ... }`) that carries a `ui`, keyed by step name.
+ * Structure-agnostic so the assertion survives where exactly the normalizer
+ * nests inner steps (branch conditions, forEach/loop `steps`, switch cases,
+ * tryCatch try/catch/finally).
+ */
+function collectUiByName(node: unknown, out: Map<string, unknown>): void {
+	if (Array.isArray(node)) {
+		for (const item of node) collectUiByName(item, out);
+		return;
+	}
+	if (node === null || typeof node !== "object") return;
+	const obj = node as Record<string, unknown>;
+	if (typeof obj.name === "string" && "ui" in obj) out.set(obj.name, obj.ui);
+	for (const value of Object.values(obj)) collectUiByName(value, out);
+}
+
+describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
+	// One workflow exercising `ui` on every step kind at the top level PLUS a
+	// nested step inside each nesting context (branch arm, forEach body, switch
+	// case, tryCatch arm), incl. a passthrough `color` key and a deeply-nested
+	// forEach-inside-branch.
+	const wf = {
+		name: "UI RoundTrip",
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path: "/ui" } },
+		steps: [
+			// regular (top level) + passthrough extra key
+			{ id: "reg", use: "@blokjs/respond", inputs: {}, ui: { x: 1, y: 2, notes: "regular", color: "red" } },
+			// branch — ui on the branch step AND on a step in each arm; the else
+			// arm nests a forEach whose body step also carries ui (deeply nested).
+			{
+				id: "br",
+				branch: {
+					when: "ctx.req.method === 'POST'",
+					then: [{ id: "thenStep", use: "@blokjs/respond", inputs: {}, ui: { x: 10, notes: "then arm" } }],
+					else: [
+						{
+							id: "feInBranch",
+							forEach: {
+								in: "$.state.reg",
+								as: "row",
+								do: [{ id: "deep", use: "@blokjs/respond", inputs: {}, ui: { notes: "forEach inside branch" } }],
+							},
+							ui: { notes: "nested forEach" },
+						},
+					],
+				},
+				ui: { x: 20, notes: "branch step" },
+			},
+			// subworkflow (top level)
+			{ id: "sub", subworkflow: "child", inputs: {}, ui: { notes: "subworkflow step" } },
+			// wait (top level)
+			{ id: "wait1", wait: { for: "1s" }, ui: { notes: "wait step" } },
+			// forEach (top level) with a ui-bearing body step
+			{
+				id: "fe",
+				forEach: {
+					in: "$.state.reg",
+					as: "item",
+					do: [{ id: "feBody", use: "@blokjs/respond", inputs: {}, ui: { notes: "forEach body" } }],
+				},
+				ui: { notes: "forEach step" },
+			},
+			// loop (top level) with a ui-bearing body step
+			{
+				id: "lp",
+				loop: {
+					while: "false",
+					do: [{ id: "lpBody", use: "@blokjs/respond", inputs: {}, ui: { notes: "loop body" } }],
+				},
+				ui: { notes: "loop step" },
+			},
+			// switch (top level) with a ui-bearing case step
+			{
+				id: "sw",
+				switch: {
+					on: "$.state.reg",
+					cases: [
+						{ when: "a", do: [{ id: "caseStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "switch case" } }] },
+					],
+					default: [{ id: "defStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "switch default" } }],
+				},
+				ui: { notes: "switch step" },
+			},
+			// tryCatch (top level) with ui-bearing try/catch/finally steps
+			{
+				id: "tc",
+				tryCatch: {
+					try: [{ id: "tryStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "try arm" } }],
+					catch: [{ id: "catchStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "catch arm" } }],
+					finally: [{ id: "finallyStep", use: "@blokjs/respond", inputs: {}, ui: { notes: "finally arm" } }],
+				},
+				ui: { notes: "tryCatch step" },
+			},
+			// step with ui AND as — ui must not interfere with as/spread handling
+			{ id: "withAs", use: "@blokjs/respond", inputs: {}, as: "renamed", ui: { notes: "with as" } },
+		],
+	};
+
+	// Every (stepName -> ui) the workflow declares, top-level + nested.
+	const expectedUi: Record<string, unknown> = {
+		reg: { x: 1, y: 2, notes: "regular", color: "red" },
+		br: { x: 20, notes: "branch step" },
+		thenStep: { x: 10, notes: "then arm" },
+		feInBranch: { notes: "nested forEach" },
+		deep: { notes: "forEach inside branch" },
+		sub: { notes: "subworkflow step" },
+		wait1: { notes: "wait step" },
+		fe: { notes: "forEach step" },
+		feBody: { notes: "forEach body" },
+		lp: { notes: "loop step" },
+		lpBody: { notes: "loop body" },
+		sw: { notes: "switch step" },
+		caseStep: { notes: "switch case" },
+		defStep: { notes: "switch default" },
+		tc: { notes: "tryCatch step" },
+		tryStep: { notes: "try arm" },
+		catchStep: { notes: "catch arm" },
+		finallyStep: { notes: "finally arm" },
+		withAs: { notes: "with as" },
+	};
+
+	it("preserves ui byte-identical after IR → normalize → toJson → parse for every step kind incl. nested arms", () => {
+		const normalized = normalizeWorkflow(wf, "ui-roundtrip.json");
+		// toJson round-trip — the canvas serializes the normalized IR back out.
+		const roundTripped = JSON.parse(JSON.stringify(normalized));
+
+		const found = new Map<string, unknown>();
+		collectUiByName(roundTripped, found);
+
+		for (const [name, ui] of Object.entries(expectedUi)) {
+			expect(found.has(name), `ui missing for step "${name}" after round-trip`).toBe(true);
+			expect(found.get(name), `ui mismatch for step "${name}"`).toEqual(ui);
+		}
+	});
+
+	it("with-as step keeps ui and still renames its output key", () => {
+		const out = normalizeWorkflow(wf, "ui-roundtrip.json");
+		const withAs = out.steps.find((s) => s.name === "withAs");
+		expect(withAs?.as).toBe("renamed");
+		expect(withAs?.ui).toEqual({ notes: "with as" });
+	});
+
+	it("omits ui entirely when a step declares none", () => {
+		const out = normalizeWorkflow(
+			{
+				name: "NoUi",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/noui" } },
+				steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+			},
+			"noui.json",
+		);
+		expect("ui" in out.steps[0]).toBe(false);
+	});
+});
