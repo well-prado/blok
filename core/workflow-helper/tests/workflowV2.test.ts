@@ -80,6 +80,43 @@ describe("workflow() — middleware authoring (Bug 01 part A)", () => {
 });
 
 describe("workflow() — envelope validation (F16)", () => {
+	it('defaults `schemaVersion` to "2" on `_config` and toJson()', () => {
+		const wf = workflow({
+			name: "ValidName",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/x" } },
+			steps: [minimalStep],
+		});
+
+		expect(wf._config.schemaVersion).toBe("2");
+		expect(JSON.parse(wf.toJson()).schemaVersion).toBe("2");
+	});
+
+	it('accepts explicit `schemaVersion: "2"` and preserves it', () => {
+		const wf = workflow({
+			name: "ValidName",
+			schemaVersion: "2",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/x" } },
+			steps: [minimalStep],
+		});
+
+		expect(wf._config.schemaVersion).toBe("2");
+		expect(JSON.parse(wf.toJson()).schemaVersion).toBe("2");
+	});
+
+	it("rejects unsupported future schemaVersion values", () => {
+		expect(() =>
+			workflow({
+				name: "ValidName",
+				schemaVersion: "3",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/x" } },
+				steps: [minimalStep],
+			} as unknown as Parameters<typeof workflow>[0]),
+		).toThrow(/failed validation/);
+	});
+
 	it("rejects a name shorter than 3 characters", () => {
 		expect(() =>
 			workflow({

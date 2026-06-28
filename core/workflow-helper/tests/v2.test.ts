@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { $, branch, forEach, loop, switchOn, tryCatch, workflow } from "../src/index";
+import {
+	$,
+	WORKFLOW_IR_VERSION,
+	WorkflowIRSchema,
+	branch,
+	forEach,
+	loop,
+	switchOn,
+	tryCatch,
+	workflow,
+} from "../src/index";
 import { JS_EXPR_TAG, type V2Step, unwrapProxies } from "../src/internal";
 
 describe("v2 DSL — $ proxy", () => {
@@ -70,6 +80,11 @@ describe("v2 DSL — unwrapProxies", () => {
 });
 
 describe("v2 DSL — workflow() factory", () => {
+	it("exports the public IR schema contract", () => {
+		expect(WORKFLOW_IR_VERSION).toBe("2");
+		expect(WorkflowIRSchema.parse).toBeTypeOf("function");
+	});
+
 	it("validates and returns a v2 builder envelope", () => {
 		const wf = workflow({
 			name: "Test",

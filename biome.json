@@ -56,6 +56,16 @@
 					}
 				}
 			}
+		},
+		{
+			"include": ["specs/**/*.ts"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
 		}
 	],
 	"javascript": {

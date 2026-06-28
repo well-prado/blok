@@ -30,7 +30,7 @@ import {
 	WorkerTriggerOptsSchema,
 	validateTriggerConfig,
 } from "../src/types/TriggerOpts";
-import { WorkflowOptsSchema } from "../src/types/WorkflowOpts";
+import { WORKFLOW_IR_VERSION, WorkflowIRSchema, WorkflowOptsSchema, WorkflowV2Schema } from "../src/types/WorkflowOpts";
 
 describe("WorkflowOptsSchema", () => {
 	it("should require name >= 3 chars", () => {
@@ -49,6 +49,31 @@ describe("WorkflowOptsSchema", () => {
 
 		const withDesc = WorkflowOptsSchema.parse({ name: "test", version: "1.0.0", description: "hello" });
 		expect(withDesc.description).toBe("hello");
+	});
+});
+
+describe("WorkflowIRSchema", () => {
+	const workflowShape = {
+		name: "test",
+		version: "1.0.0",
+		trigger: { http: { method: "GET" } },
+		steps: [{ id: "x", use: "@blokjs/respond" }],
+	};
+
+	it('is the v2 schema and defaults schemaVersion to "2"', () => {
+		expect(WorkflowIRSchema).toBe(WorkflowV2Schema);
+		const result = WorkflowIRSchema.parse(workflowShape);
+		expect(result.schemaVersion).toBe("2");
+		expect(WORKFLOW_IR_VERSION).toBe("2");
+	});
+
+	it('accepts explicit schemaVersion "2"', () => {
+		const result = WorkflowIRSchema.parse({ ...workflowShape, schemaVersion: "2" });
+		expect(result.schemaVersion).toBe("2");
+	});
+
+	it("rejects unsupported future schemaVersion values", () => {
+		expect(() => WorkflowIRSchema.parse({ ...workflowShape, schemaVersion: "3" })).toThrow();
 	});
 });
 
