@@ -22,6 +22,7 @@ import {
 	workflow,
 } from "./components/workflowV2";
 import { $ } from "./proxy/$";
+import type { V2StepUi } from "./types/StepOpts";
 import type {
 	CronTriggerOpts,
 	HttpMethod,
@@ -74,6 +75,7 @@ export {
 	type EventUnion,
 	type EmptyEventMap,
 	type InferOr,
+	type V2StepUi,
 	// per-trigger config TYPES (each trigger package re-exports its own)
 	type HttpTriggerOpts,
 	type TriggerOpts,

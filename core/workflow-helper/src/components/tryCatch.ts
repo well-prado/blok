@@ -1,5 +1,5 @@
 import { unwrapProxies } from "../proxy/$";
-import type { V2Step, V2TryCatchStep } from "../types/StepOpts";
+import type { V2Step, V2StepUi, V2TryCatchStep } from "../types/StepOpts";
 
 /**
  * Author-facing options for {@link tryCatch}.
@@ -25,6 +25,8 @@ export interface TryCatchOpts {
 	 * itself throws. Errors thrown inside `finally` propagate.
 	 */
 	finally?: V2Step[];
+	/** Optional Studio/canvas metadata. Ignored by the runner. */
+	ui?: V2StepUi;
 	/** Skip this step at runtime. Default true (active). */
 	active?: boolean;
 	/** Halt the workflow after this step completes. */
@@ -91,6 +93,7 @@ export function tryCatch(opts: TryCatchOpts): V2TryCatchStep {
 			catch: catchBlock,
 			...(opts.finally !== undefined ? { finally: unwrapProxies(opts.finally) as V2Step[] } : {}),
 		},
+		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};
 	if (opts.active === false) (result as V2TryCatchStep & { active: boolean }).active = false;
 	if (opts.stop === true) (result as V2TryCatchStep & { stop: boolean }).stop = true;

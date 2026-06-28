@@ -92,6 +92,18 @@ export type StepInputs = z.infer<typeof StepInputsSchema>;
 // V2 — Canonical step shape. LLM- and human-friendly.
 // =============================================================================
 
+export const V2StepUiValueSchema = z
+	.object({
+		x: z.number().optional().describe("Optional canvas x-position."),
+		y: z.number().optional().describe("Optional canvas y-position."),
+		notes: z.string().optional().describe("Optional authoring note."),
+	})
+	.passthrough()
+	.describe("Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner.");
+
+export const V2StepUiSchema = V2StepUiValueSchema.optional();
+export type V2StepUi = z.infer<typeof V2StepUiValueSchema>;
+
 /**
  * Retry configuration for a v2 step.
  *
@@ -228,6 +240,7 @@ export const V2RegularStepSchema = z
 				"Inputs passed to the node. May contain $ proxy references " +
 					"(e.g. $.state.foo, $.req.body.id) or 'js/...' expressions for runtime evaluation.",
 			),
+		ui: V2StepUiSchema,
 		as: z
 			.string()
 			.min(1)
@@ -352,6 +365,7 @@ export type V2RegularStep = z.infer<typeof V2RegularStepSchema>;
 export const V2BranchStepSchema: z.ZodType<{
 	id: string;
 	branch: { when: string; then: unknown[]; else?: unknown[] };
+	ui?: V2StepUi;
 	active?: boolean;
 	stop?: boolean;
 }> = z.lazy(() =>
@@ -372,6 +386,7 @@ export const V2BranchStepSchema: z.ZodType<{
 				})
 				.strict()
 				.describe("Conditional sub-pipeline."),
+			ui: V2StepUiSchema,
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
 		})
@@ -417,6 +432,7 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 	subworkflow: string;
 	inputs?: Record<string, unknown>;
 	wait?: boolean;
+	ui?: V2StepUi;
 	as?: string;
 	spread?: boolean;
 	ephemeral?: boolean;
@@ -462,6 +478,7 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 						"them via `$.req.body.<key>` exactly as if HTTP-triggered. " +
 						"May contain $ proxy refs.",
 				),
+			ui: V2StepUiSchema,
 			wait: z
 				.boolean()
 				.optional()
@@ -599,6 +616,7 @@ export const V2WaitStepSchema = z
 					),
 			})
 			.strict(),
+		ui: V2StepUiSchema,
 		as: z.string().min(1).optional().describe("Alternative state key (defaults to `id`)."),
 		ephemeral: z.boolean().optional().describe("If true, no state entry is recorded."),
 		active: z.boolean().optional(),
@@ -710,6 +728,7 @@ export const V2ForEachStepSchema = z.lazy(() =>
 				.describe("forEach configuration."),
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
+			ui: V2StepUiSchema,
 		})
 		// F9 — reject unknown top-level keys instead of silently dropping them.
 		.strict(),
@@ -756,6 +775,7 @@ export const V2LoopStepSchema = z.lazy(() =>
 				.describe("loop configuration."),
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
+			ui: V2StepUiSchema,
 		})
 		// F9 — reject unknown top-level keys instead of silently dropping them.
 		.strict(),
@@ -818,6 +838,7 @@ export const V2SwitchStepSchema = z.lazy(() =>
 				.describe("switch configuration."),
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
+			ui: V2StepUiSchema,
 		})
 		// F9 — reject unknown top-level keys instead of silently dropping them.
 		.strict(),
@@ -885,6 +906,7 @@ export const V2TryCatchStepSchema = z.lazy(() =>
 				.describe("tryCatch configuration."),
 			active: z.boolean().optional(),
 			stop: z.boolean().optional(),
+			ui: V2StepUiSchema,
 		})
 		// F9 — reject unknown top-level keys instead of silently dropping them.
 		.strict(),

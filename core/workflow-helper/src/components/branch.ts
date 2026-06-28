@@ -1,5 +1,5 @@
 import { unwrapProxies } from "../proxy/$";
-import type { V2BranchStep, V2Step } from "../types/StepOpts";
+import type { V2BranchStep, V2Step, V2StepUi } from "../types/StepOpts";
 
 /**
  * Author-facing options for {@link branch}.
@@ -24,6 +24,8 @@ export interface BranchOpts {
 	then: V2Step[];
 	/** Optional. Steps to run when `when` is falsy. */
 	else?: V2Step[];
+	/** Optional Studio/canvas metadata. Ignored by the runner. */
+	ui?: V2StepUi;
 	/** Skip this branch step at runtime. Default true (active). */
 	active?: boolean;
 	/** Halt the workflow after this branch step completes. */
@@ -83,6 +85,7 @@ export function branch(opts: BranchOpts): V2BranchStep {
 			then: thenSteps,
 			...(elseSteps ? { else: elseSteps } : {}),
 		},
+		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};
 	if (opts.active === false) (result as V2BranchStep & { active: boolean }).active = false;
 	if (opts.stop === true) (result as V2BranchStep & { stop: boolean }).stop = true;
