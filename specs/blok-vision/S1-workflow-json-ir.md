@@ -16,30 +16,34 @@ Blok compiles two author-facing surfaces — the TypeScript DSL (`workflow()` + 
 - Studio consumes `definition?: unknown` and narrows defensively (`apps/studio/src/lib/workflowDag.ts:17-18` documents this explicitly: "The builder accepts `unknown` and narrows defensively"). There is **no shared validator**; malformed input renders as placeholder nodes.
 - The format carries **zero canvas metadata** (positions, notes), so a visual editor has nowhere to round-trip layout intent.
 
-Per the dossier's D1, the AI-native and marketplace bets are *gated* on a published, versioned JSON IR that LLMs constrain-decode against and that canvas/registry consume losslessly. The fix is **formalization, not new architecture** — the IR, the generator, and the `zod-to-json-schema` dependency all already exist.
+Per the dossier's D1, the AI-native and marketplace bets are *gated* on a published, versioned JSON IR that LLMs constrain-decode against and that canvas/registry consume losslessly. The fix is **formalization, not new architecture** — the IR and generator already exist, and `zod-to-json-schema` is already a build-time **devDependency**.
 
 ## 2. Current state in Blok (verified)
 
 **The clean v2 IR already exists as Zod.** `V2StepSchema` (`StepOpts.ts:963`) is a discriminated union over: `V2RegularStepSchema` (`:201`), `V2BranchStepSchema` (`:352`), `V2SubworkflowStepSchema` (`:415`), `V2WaitStepSchema` (`:584`), `V2ForEachStepSchema` (`:678`, `z.lazy`), `V2LoopStepSchema` (`:734`, `z.lazy`), `V2SwitchStepSchema` (`:787`, `z.lazy`), `V2TryCatchStepSchema` (`:859`, `z.lazy`). `selectV2StepSchema()` (`:907`) field-discriminates exactly as Studio's `classifyStep()` does.
 
-**A generator exists, is wired into the build, and works on the full union.** `scripts/build-schema.ts` runs `zodToJsonSchema(WorkflowV2Schema, { name: "BlokWorkflowV2", target: "jsonSchema7", $refStrategy: "none" })` → `dist/workflow.schema.json`. Wired via `build:schema` (`package.json:29`), part of `build` (`package.json:27`). `zod-to-json-schema` is a dependency (`package.json:38`, `^3.25.2`). A test exercises every step schema through the generator (`tests/schemas.test.ts`). **Verified: the generator currently runs clean (exit 0) and the 699-line output already contains all four recursive `z.lazy` kinds.** The draft's premise that the published schema is "missing loops/switch/tryCatch" is true only of the *hand-written* artifacts — the generated one is complete.
+**A generator exists, is wired into the build, and works on the full union.** `scripts/build-schema.ts` runs `zodToJsonSchema(WorkflowV2Schema, { name: "BlokWorkflowV2", target: "jsonSchema7", $refStrategy: "none" })` → `dist/workflow.schema.json`. Wired via `build:schema` (`package.json:29`), part of `build` (`package.json:27`). `zod-to-json-schema` is a **devDependency** (`package.json`, `^3.25.2`) because schema emission happens at build time. A test exercises every step schema through the generator (`tests/schemas.test.ts`). **Verified: the generator currently runs clean (exit 0) and the 699-line output already contains all four recursive `z.lazy` kinds.** The draft's premise that the published schema is "missing loops/switch/tryCatch" is true only of the *hand-written* artifacts — the generated one is complete.
 
 **The normalizer is the lowering pass, not the IR.** `normalizeWorkflow(raw, sourcePath?)` (`WorkflowNormalizer.ts:162`) unwraps the v2 builder envelope (`_blokV2: true`, `:172`) and emits the v1-shaped `InternalWorkflow` (`:114`). `InternalStep` (`:56`) carries a `[key: string]: unknown` index signature (`:98`) — unknown fields pass through structurally, but each normalizer (`normalizeRegularStep` `:340`, branch `:444`, subworkflow `:544`, wait `:647`) *explicitly constructs* its `InternalStep`, so a new field is only threaded if copied in each constructor.
 
 **The `$` proxy is already a deterministic compile step.** `unwrapProxies()` replaces `$.state.x` proxies with `"js/ctx.state.x"` strings before validation — by the time anything is JSON, every expression is a plain string. The IR has no proxy objects to serialize.
 
+**The `$ref` contract is layered, not "same Mapper resolves structured refs."** The accepted M1 decision is Option C: the published IR may carry structural `{ "$ref": { "step": "...", "path": [...] } }` so canvas/JSON twin/AI can reason about references, but a deterministic load-boundary lowering pass must convert those refs to today's runtime strings before execution: `js/ctx.state.<step>...` for step inputs and `tpl`, and raw `ctx.state.<step>...` strings for `branch.when` because the if-else node raw-evals its condition. The existing Mapper does **not** dereference `{ $ref }` objects; it resolves strings and recurses into plain objects. Runtime byte-identity is true only after this lowering.
+
+**JSON workflow loading does not Zod-validate today.** `scanWorkflows.ts` parses JSON and hands it to `normalizeWorkflow`; it does not call `WorkflowV2Schema.safeParse`. Any `validateWorkflow()` added in S1 is therefore advisory for Studio/CLI/registry authoring and publish checks, not a mandatory load gate. Turning it into a JSON load gate would be a behavior change because the step schemas are stricter than the current structural normalizer.
+
 **Studio is a projection consuming `unknown`.** `buildWorkflowDag()` classifies by field presence and preserves `raw` per node (`workflowDag.ts:124`); positions are dagre-computed at render, never stored. **Critical:** `apps/studio/package.json` has **no dependency on `@blokjs/helper`** (verified — grep returns nothing). Any plan that has Studio `import { validateWorkflow } from "@blokjs/helper"` must *first add that dependency*, or route validation through the runner's HTTP API. The draft asserted Studio "already imports from `@blokjs/helper`" — that is false and is the spec's one real feasibility hole. Resolved in §7.5.
 
-**Hard invariants the IR must preserve:** step `id` is the sole flat-namespace identity, globally unique across all arms; `as`/`spread` mutually exclusive; nested-flow step configs inline; `$` proxies are strings before validation; trigger config is per-kind; `"ANY"` (not `"*"`) is the wildcard method.
+**Hard invariants the IR must preserve:** step `id` is the sole flat-namespace identity, globally unique across all arms; `as`/`spread` mutually exclusive; nested-flow step configs inline; `$` proxies are strings before validation; structural `$ref` values lower before runtime; trigger config is per-kind; `"ANY"` (not `"*"`) is the wildcard method.
 
 ## 3. Goals & non-goals
 
 **Goals**
-- Promote the existing `WorkflowV2Schema` to a **named, versioned Workflow IR** with **one published JSON Schema** that is the single validation source everywhere (Studio, registry, AI, VS Code).
+- Promote the existing `WorkflowV2Schema` to a **named, versioned Workflow IR** with **one published JSON Schema** that is the shared authoring/registry/AI/VS Code validation source.
 - **One generator, one consumed artifact.** The VS Code extension points at the *generated* schema. Both hand-written schemas are deleted. Drift becomes structurally impossible (a CI equality check guards it).
 - Add an optional `schemaVersion` discriminant so the format can evolve under semver without breaking existing files — the hybrid-appetite opt-in lever S2/S3 need.
 - Add optional pass-through `ui` metadata (per-step `ui: { x?, y?, notes? }`) the normalizer threads through and the runner ignores — the canvas round-trip slot (D2), zero breaking change.
-- Ship a **shared validator** (`validateWorkflow(json) → { ok, errors }`) with a clearly-specified consumption path for Studio (the only consumer that lacks the dep today).
+- Ship a **shared advisory validator** (`validateWorkflow(json) → { ok, errors }`) with a clearly-specified consumption path for Studio (the only consumer that lacks the dep today). It warns/gates authoring and publish flows; it is not a runtime load gate.
 
 **Non-goals**
 - Replacing TS as the human source of truth (D1).
@@ -71,18 +75,18 @@ Define a fresh IR; make TS+JSON+canvas all projections of it.
 
 **Adopt Option A.**
 
-**Ponytail lens — does this need to exist? Reuse before build?** The IR, the Zod schemas, the dependency, the generator, and the generator test all already exist. S1 is mostly **deletion-and-consolidation**: the single highest-leverage act is **deleting both hand-written schemas and pointing every consumer at the one generated artifact** — that permanently eliminates the drift class of bug. The genuinely new code is small: the `schemaVersion` field (one Zod line), the `ui` field (a few lines + per-normalizer copy), the `validateWorkflow()` wrapper (~10 lines), the `exports` entry, and the CI equality assertion. Building a new IR (C) or republishing the worse internal shape (B) is work the codebase actively argues against.
+**Ponytail lens — does this need to exist? Reuse before build?** The IR, the Zod schemas, the generator, and the generator test all already exist. S1 is mostly **deletion-and-consolidation**: the single highest-leverage act is **deleting both hand-written schemas and pointing every authoring consumer at the one generated artifact** — that permanently eliminates the drift class of bug. The genuinely new code is small: the `schemaVersion` field (one Zod line), the `ui` field (a few lines + per-normalizer copy), the `validateWorkflow()` wrapper (~10 lines), the `exports` entry, and the CI equality assertion. Building a new IR (C) or republishing the worse internal shape (B) is work the codebase actively argues against.
 
 **Honest correction to the draft:** the draft over-claimed the problem ("published schema missing flow-control kinds") and prescribed a fix for a non-problem (`$refStrategy: "root"`). The *generated* schema is already complete and the generator already works with `"none"`. **Do not touch `$refStrategy`** — changing it risks regressing a working build for cosmetics. The real problem is narrower and worse: the *consumed* schema (VS Code) is a stale hand-written file that isn't even the v2 shape, and Studio validates nothing. S1 fixes exactly that.
 
-**Consistency with D-decisions:** D1 ✓ (TS stays human source; IR is the projection target). D2 ✓ (`ui` optional/ephemeral, normalizer pass-through, runner ignores). D4 ✓ (`use` stays a plain string; `schemaVersion` is the lever S2 uses to require version-pinned refs only at v3+). D5 ✓ (expressions stay strings; S3 fixes `branch when` independently). D7 ✓ (`validateWorkflow()` is the one shared primitive blokctl/registry/Studio reuse).
+**Consistency with D-decisions:** D1 ✓ (TS stays human source; IR is the projection target). D2 ✓ (`ui` optional/ephemeral, normalizer pass-through, runner ignores). D4 ✓ (`use` stays a plain string; `schemaVersion` is the lever S2 uses to require version-pinned refs only at v3+). D5 ✓ (runtime expressions stay strings after `$ref` lowering; S3 fixes `branch when` independently). D7 ✓ (`validateWorkflow()` is the one shared advisory primitive blokctl/registry/Studio reuse).
 
 ## 6. How it improves Blok
 
 - **AI authoring becomes reliable.** A published, complete schema with `$id` lets any LLM constrain-decode and self-validate before handing back — the bridge to "AI assembles a backend in a day" (vision #6). The blocker isn't the *generated* schema (it's complete) — it's that nothing publishes it as a stable, addressable contract the AI can pin to.
-- **Studio stops rendering garbage.** Studio gains a real validator and shows errors instead of placeholder nodes; the canvas (S4) builds on a validated graph.
-- **The registry gets a free admission gate (S6).** Server-side publish validation = `validateWorkflow(payload)`. One function, reused.
-- **Schema drift is structurally impossible.** Runtime acceptance and published schema derive from one Zod source; the CI equality check fails the build if they diverge. The three-way drift that exists *today* is deleted.
+- **Studio stops rendering garbage.** Studio gains a real advisory validator and shows errors instead of placeholder nodes; the canvas (S4) builds on a validated graph.
+- **The registry gets a free publish gate (S6).** Server-side publish validation = `validateWorkflow(payload)`. One function, reused.
+- **Schema drift is structurally impossible for authoring validators.** TS helper validation and published schema derive from one Zod source; the CI equality check fails the build if they diverge. The JSON load path remains structural/legacy until a later migration explicitly changes it.
 - **The canvas gets a round-trip slot.** `ui: { x, y, notes }` passes through untouched.
 - **VS Code authoring improves immediately.** Pointing the extension at the complete generated schema gives autocomplete + inline docs for *every* step kind — today it points at a 387-line hand-written file describing an older shape.
 
@@ -115,6 +119,8 @@ ui: z.object({
   .describe("Canvas metadata. Ephemeral layout hint; runner ignores it. Absent ⇒ dagre auto-layout.")
 ```
 **Threading (the feasibility detail the draft glossed):** `InternalStep`'s `[key: string]: unknown` (`WorkflowNormalizer.ts:98`) only helps if the field is *copied* into the explicitly-constructed `InternalStep`. So each normalizer that builds an `InternalStep` (`normalizeRegularStep:382`, branch `:516`, subworkflow `:572`, wait, forEach, loop, switch, tryCatch) needs `...(step.ui ? { ui: step.ui } : {})`. This is the *only* runner-side change and it's mechanical. The runner already ignores unknown step fields, so no execution behavior changes. `toJson()` includes `ui` (it's data, not a Zod schema).
+
+**Strict-schema surface:** `StepOpts.ts` has 18 `.strict()` schema sites across the eight step kinds plus nested control-flow arms. Add `ui` everywhere or it will be position-dependent: a top-level step accepts it while the same step inside a branch/forEach/switch/tryCatch arm rejects it.
 
 > ponytail: `ui` is `.passthrough()` so the canvas can add `color`/`collapsed`/`icon` later without a schema bump. Don't enumerate those now — YAGNI until S4 actually needs them.
 
@@ -164,6 +170,8 @@ Exported from `@blokjs/helper`. Consumers:
 
   Recommendation: **(b)**. S1 still ships `validateWorkflow()` for blokctl, registry, MCP/schema tooling, and other non-browser consumers. Studio validation is explicitly deferred to S4, where the write path can add a server-side validation endpoint and UX without making every Studio load pay the Zod/schema cost.
 
+This validator is **advisory**. It is safe for Studio hints, CLI checks, and registry publish gates. It must not be wired into `scanWorkflows.ts` as a mandatory load gate in S1; the existing JSON path is structurally tolerant and would become stricter overnight.
+
 ### 7.6 Example IR (the published shape)
 ```json
 {
@@ -176,12 +184,12 @@ Exported from `@blokjs/helper`. Consumers:
       "inputs": { "url": "https://example.com/api" },
       "ui": { "x": 100, "y": 40 } },
     { "id": "respond", "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.fetch" },
+      "inputs": { "body": { "$ref": { "step": "fetch", "path": [] } } },
       "ui": { "x": 100, "y": 160 } }
   ]
 }
 ```
-Strip the `ui` blocks and the `schemaVersion` line and the file is byte-identical to today's accepted shape.
+At the published-IR layer the response input is structural. At the runtime layer the load-boundary lowering pass converts it to today's accepted string form before the Mapper runs.
 
 ### 7.7 File/dir changes
 | Change | File |
@@ -203,12 +211,13 @@ Strip the `ui` blocks and the `schemaVersion` line and the file is byte-identica
 - `schemaVersion` defaults to `"2"` — every existing TS/JSON workflow validates unchanged.
 - v1 (`steps[]`/`nodes{}`) stays versionless, detected structurally by the normalizer as today; the published IR schema describes v2 only (see open question 4).
 - `ui` is optional; absence is the norm (dagre auto-layout, existing behavior).
-- The runner sees no new required fields and ignores `ui`/`schemaVersion` — no runtime behavior change.
+- The runner sees no new required fields and ignores `ui`/`schemaVersion`; structural `$ref` values are lowered to existing strings before runtime — no runtime behavior change.
 
 **Migration tooling:** none required for correctness. `blokctl migrate workflows` (already exists for `set_var`) *could* stamp `schemaVersion: "2"`, but it's cosmetic — skip until something needs it.
 
 **Failure modes & mitigations:**
 - *Generator output for `z.lazy` unions.* **Already works** with `$refStrategy: "none"` (verified: exit 0, 699-line complete output). Risk is regression if someone changes the strategy — so the spec explicitly says don't. The CI equality test catches any generator behavior change.
+- *Validator accidentally becoming a load gate.* Do not wire `validateWorkflow()` into `scanWorkflows.ts` in S1. Keep it advisory for Studio/CLI/registry; add a separate warn-first migration if JSON load enforcement is ever desired.
 - *Studio lacks `@blokjs/helper`.* Resolved in §7.5(a): add the leaf-package dep (no runner coupling) or fall back to a server-side validate endpoint in S4. Non-breaking either way. **This was the draft's one false plumbing claim — now corrected.**
 - *VS Code can't resolve a node `exports` path for `json.schemas`.* The extension build bundles a generated copy into its `schemas/` dir; the CI equality test keeps it in sync.
 - *`ui` bloats large JSON.* Accepted for MVP (D2); `ui` is opt-in and only the canvas writes it. A future companion-file option is non-breaking.
@@ -220,7 +229,7 @@ Strip the `ui` blocks and the `schemaVersion` line and the file is byte-identica
 
 **M2 — Name the IR + `schemaVersion` (0.5 day).** Export `WorkflowIRSchema`/`WorkflowIR`; add the defaulted `schemaVersion`; tests proving existing files validate unchanged. *Ships: the semver lever S2/S3 need.*
 
-**M3 — Shared validator (0.5 day).** `validateWorkflow()` + tests. *Ships: the primitive S4/S6/S11 reuse.*
+**M3 — Shared advisory validator (0.5 day).** `validateWorkflow()` + tests, including v1 detection that returns a clear legacy/unsupported result instead of strict-rejecting with noisy v2 errors. *Ships: the primitive S4/S6/S11 reuse.*
 
 **M4 — `ui` pass-through (1 day).** Add to step schemas; thread through each `InternalStep` constructor in the normalizer; round-trip test (IR → normalize → `toJson()` preserves `ui`). *Ships: the canvas round-trip slot (D2), ahead of S4.*
 
@@ -234,11 +243,11 @@ Total ~3.5 days. M1 is the load-bearing deliverable (it's almost entirely deleti
 2. **`schemaVersion` value space.** `"2"` (major-only) vs full semver `"2.0.0"`? **Recommend `"2"`** — the workflow's own `version` field is its semver; `schemaVersion` is the *format major*, bumped to `"3"` by S2/S3 for breaking changes.
 3. **`ui` scope for MVP.** Just `{ x, y, notes }`, or also `color`/`collapsed`/`icon`? **Recommend the minimal three**; `.passthrough()` lets the canvas add fields later without a schema bump.
 4. **Publish a v1 schema, or declare v1 "legacy, normalizer-only, no published schema"?** **Recommend the latter** — v1 is structurally detected and migration-discouraged; publishing its schema invites new v1 authoring. (Confirm: no demand for a v1 IR.)
-5. **Does the registry (S6) validate against the *IR schema* or also resolvable `use:` refs?** Out of S1 scope. S1 commits: `validateWorkflow()` checks **shape only**; node-existence / version-resolution is S2/S6's concern. Confirm this boundary so S6 doesn't assume S1 resolves refs.
+5. **Does the registry (S6) validate against the *IR schema* or also resolvable `use:` refs?** Out of S1 scope. S1 commits: `validateWorkflow()` checks **shape only** as an authoring/publish primitive; node-existence / version-resolution is S2/S6's concern. Confirm this boundary so S6 doesn't assume S1 resolves refs.
 6. **Studio validation transport — client-side dep (§7.5a) vs server endpoint (§7.5b)?** Resolved by #307: the client-side dep adds +24,537 gzip bytes and trips the main-chunk warning, so Studio validation is deferred to S4 via a server endpoint. S1 still ships the validator for non-browser consumers.
 
 ---
 
-**Key files grounding this spec (all verified):** `core/workflow-helper/src/types/StepOpts.ts:963` (the IR as a Zod union; recursive `z.lazy` kinds at `:678,734,787,859`), `core/workflow-helper/src/types/WorkflowOpts.ts:63` (`WorkflowV2Schema` envelope), `core/workflow-helper/scripts/build-schema.ts` (the generator — verified runs clean, complete 699-line output with `$refStrategy:"none"`), `core/workflow-helper/package.json:23,29` (`files:["dist"]` and `build:schema`), `packages/vscode-extension/package.json:129` (extension points at the hand-written `workflow.schema.json`, **not** the generated one — the consolidation target), `packages/vscode-extension/schemas/{workflow.schema.json,workflow-v2.schema.json}` (387- and 176-line stale hand-written copies, both to delete), `core/runner/src/workflow/WorkflowNormalizer.ts:56,98,162,382,516,572` (the internal lowering target + the `InternalStep` constructors that must copy `ui`), `apps/studio/src/lib/workflowDag.ts:17,67,124` (the projection consuming `unknown`; **Studio has no `@blokjs/helper` dependency** — the one plumbing gap S1 must fund).
+**Key files grounding this spec (all verified):** `core/workflow-helper/src/types/StepOpts.ts:963` (the IR as a Zod union; recursive `z.lazy` kinds at `:678,734,787,859`, 18 `.strict()` sites across step kinds and nested arms), `core/workflow-helper/src/types/WorkflowOpts.ts:63` (`WorkflowV2Schema` envelope), `core/workflow-helper/scripts/build-schema.ts` (the generator — verified runs clean, complete 699-line output with `$refStrategy:"none"`), `core/workflow-helper/package.json:23,29` (`files:["dist"]`, `build:schema`, and `zod-to-json-schema` as a devDependency), `packages/vscode-extension/package.json:129` (extension points at the hand-written `workflow.schema.json`, **not** the generated one — the consolidation target), `packages/vscode-extension/schemas/{workflow.schema.json,workflow-v2.schema.json}` (387- and 176-line stale hand-written copies, both to delete), `core/runner/src/workflow/WorkflowNormalizer.ts:56,98,162,382,516,572` (the internal lowering target + eight `InternalStep` constructors that must copy `ui`), `triggers/http/src/runner/scanWorkflows.ts` (JSON parse/normalize path, no Zod gate today), `apps/studio/src/lib/workflowDag.ts:17,67,124` (the projection consuming `unknown`; **Studio has no `@blokjs/helper` dependency** — the one plumbing gap S1 must fund).
 
-**Corrections applied to the draft:** (1) the VS Code extension consumes `workflow.schema.json` (387 lines), not `workflow-v2.schema.json` — both are stale and both get deleted; (2) the *generated* `dist/workflow.schema.json` is already complete (verified) — the "missing flow-control kinds" problem applies only to the hand-written files; (3) **do not** switch `$refStrategy` to `"root"` — `"none"` works today and the change is a regression risk for cosmetics; (4) Studio does **not** import `@blokjs/helper` — that dependency must be added (§7.5) or validation routed server-side; (5) `package.json` `files` is `["dist"]` and must become `["dist","schemas"]` or the schema export won't publish.
+**Corrections applied to the draft:** (1) the VS Code extension consumes `workflow.schema.json` (387 lines), not `workflow-v2.schema.json` — both are stale and both get deleted; (2) the *generated* `dist/workflow.schema.json` is already complete (verified) — the "missing flow-control kinds" problem applies only to the hand-written files; (3) **do not** switch `$refStrategy` to `"root"` — `"none"` works today and the change is a regression risk for cosmetics; (4) Studio does **not** import `@blokjs/helper` — that dependency must be added (§7.5) or validation routed server-side; (5) `package.json` `files` is `["dist"]` and must become `["dist","schemas"]` or the schema export won't publish; (6) the existing Mapper does not resolve structured `{ $ref }`, so runtime byte-identity depends on a load-boundary lowering pass; (7) JSON workflows are not Zod-validated on load today, so `validateWorkflow()` is advisory unless a later migration intentionally changes the load path.
