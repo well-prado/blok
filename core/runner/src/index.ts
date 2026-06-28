@@ -171,6 +171,7 @@ import BlokService from "./Blok";
 import BlokResponse, { IBlokResponse } from "./BlokResponse";
 import NodeMap from "./NodeMap";
 import RunnerSteps from "./RunnerSteps";
+import { discoverNodes } from "./discoverNodes";
 import Average from "./types/Average";
 import Condition from "./types/Condition";
 import Conditions from "./types/Conditions";
@@ -223,6 +224,7 @@ export {
 	assertGrpcOnlyTransport,
 	// Function-first API
 	defineNode,
+	discoverNodes,
 	FunctionNode,
 	// Handle-DSL authoring runtime (#421)
 	step,
