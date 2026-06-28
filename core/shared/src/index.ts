@@ -27,7 +27,9 @@ import Step from "./types/Step";
 import type StreamContext from "./types/StreamContext";
 import VarsContext from "./types/VarsContext";
 import mapper from "./utils/Mapper";
+import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
+import { NamedMissingStateError } from "./utils/NamedMissingStateError";
 import { type StructuralRef, lowerRefs } from "./utils/lowerRefs";
 
 export {
@@ -63,6 +65,8 @@ export {
 	MemoryUsage,
 	type MetricsType,
 	mapper,
+	MapperResolutionError,
+	NamedMissingStateError,
 	lowerRefs,
 	type StructuralRef,
 };

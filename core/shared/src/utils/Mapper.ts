@@ -4,6 +4,7 @@ import type FunctionContext from "../types/FunctionContext";
 import type ParamsDictionary from "../types/ParamsDictionary";
 import type VarsContext from "../types/VarsContext";
 import { MapperResolutionError } from "./MapperResolutionError";
+import { NamedMissingStateError } from "./NamedMissingStateError";
 
 /**
  * Mapper — the workflow input resolver.
@@ -160,6 +161,93 @@ function guessHint(expression: string, errorMessage: string): string | null {
 		return "the expression is not valid JavaScript. Check for typos, unmatched parentheses, or stray characters.";
 	}
 	return null;
+}
+
+/**
+ * Detect a dangling state reference — the failure case behind
+ * {@link NamedMissingStateError}. Given an expression that THREW during
+ * resolution and the live ctx, returns the missing state id ONLY when the
+ * expression's ROOT read is `ctx.state.<id>` / `ctx.vars.<id>` (or the bare
+ * `state.<id>` / `vars.<id>` root forms — `vars` aliases `state`) AND that
+ * `<id>` is genuinely absent from `ctx.state`. Returns `null` otherwise —
+ * including when `state`/`vars` appears only as a NESTED property of another
+ * object (e.g. `ctx.req.body.state.missing`), which is not a state ref at all.
+ *
+ * CRITICAL — this only ever fires on the ALREADY-FAILED path (the JS
+ * eval threw), so it adds zero happy-path cost. It uses an `in`-check,
+ * NOT `=== undefined`, so a slot that exists but holds a falsy value
+ * (`0`, `false`, `""`, `null`, even `undefined`) is NOT flagged as
+ * missing — only a never-persisted root key counts. A reference to a
+ * nested field (`ctx.state.foo.bar` where `foo` exists) is likewise not
+ * flagged: `foo` is present, so this returns `null` and the generic
+ * MapperResolutionError stands.
+ */
+function detectMissingStateId(expression: string, ctx: Context): string | null {
+	// Match `state.<id>` / `vars.<id>` ONLY when it is the ROOT of the
+	// expression, optionally behind a `ctx.` prefix. The leading `^` anchor
+	// is load-bearing: a `\b` boundary matched `state.`/`vars.` ANYWHERE, so
+	// `ctx.req.body.state.missing` or `ctx.config.state.X` (state/vars as a
+	// NESTED property of some OTHER object) got misclassified as a dangling
+	// state slot. Those resolve against a different root, not ctx.state, so
+	// they must stay a generic MapperResolutionError. The id stops at the
+	// next non-identifier char (`.`, `[`, `(`, whitespace, end).
+	const match = expression.match(/^(?:ctx\.)?(?:state|vars)\.([A-Za-z_$][\w$]*)/);
+	if (!match) return null;
+	const id = match[1];
+	// `ctx.state` and `ctx.vars` point at the same object. Treat a missing
+	// container as "no state at all" — don't fabricate a named error.
+	const state = (ctx.state ?? ctx.vars) as Record<string, unknown> | undefined;
+	if (state === null || typeof state !== "object") return null;
+	// `in` (not `=== undefined`): a slot holding a falsy/undefined value is
+	// PRESENT and must not be flagged. Only a never-persisted key is missing.
+	if (id in state) return null;
+	return id;
+}
+
+/**
+ * Build the named-missing-state message — same shape/lines as
+ * {@link buildErrorMessage} but the hint NAMES the missing id and the
+ * likely cause (typo / ephemeral / wrong as-spread / errored step).
+ */
+function buildMissingStateMessage(opts: {
+	expression: string;
+	syntax: "js" | "template";
+	workflowName?: string;
+	stepName?: string;
+	missingStateId: string;
+}): string {
+	const wf = opts.workflowName ?? "<unknown workflow>";
+	const step = opts.stepName ?? "<unknown step>";
+	const literal = opts.syntax === "js" ? `js/${opts.expression}` : `\${${opts.expression}}`;
+	return [
+		`[blok][mapper] Step "${step}" in workflow "${wf}" references state \`${opts.missingStateId}\`, which was never persisted.`,
+		`  expression: ${literal}`,
+		`  hint: no step wrote \`ctx.state.${opts.missingStateId}\`. Likely a typo'd id, an \`ephemeral: true\` step, a wrong \`as\`/\`spread\`, a step that errored, or a forEach body reading the slot before the loop populated it.`,
+		`  fix: ensure a prior step's id (or its \`as:\`) is exactly "${opts.missingStateId}" and that it ran successfully without \`ephemeral: true\`.`,
+	].join("\n");
+}
+
+/**
+ * Build the resolution error for a failed expression — a
+ * {@link NamedMissingStateError} when the failure is a dangling state
+ * reference (named, actionable), otherwise the generic
+ * {@link MapperResolutionError}. Additive: every non-state-root failure
+ * is unchanged from before.
+ */
+function buildResolutionError(opts: {
+	expression: string;
+	syntax: "js" | "template";
+	workflowName?: string;
+	stepName?: string;
+	cause: unknown;
+	ctx: Context;
+}): MapperResolutionError {
+	const { ctx, ...rest } = opts;
+	const missingStateId = detectMissingStateId(opts.expression, ctx);
+	if (missingStateId !== null) {
+		return new NamedMissingStateError(buildMissingStateMessage({ ...rest, missingStateId }), missingStateId, rest);
+	}
+	return new MapperResolutionError(buildErrorMessage(rest), rest);
 }
 
 /**
@@ -341,10 +429,7 @@ class Mapper {
 			return this.runJs(key, ctx, data, (ctx.func ?? {}) as FunctionContext, (ctx.vars ?? {}) as VarsContext);
 		} catch (cause) {
 			const stepCtx = readStepContext(ctx);
-			const error = new MapperResolutionError(
-				buildErrorMessage({ expression: key, syntax: "template", ...stepCtx, cause }),
-				{ expression: key, syntax: "template", ...stepCtx, cause },
-			);
+			const error = buildResolutionError({ expression: key, syntax: "template", ...stepCtx, cause, ctx });
 			this.handleResolutionError(ctx, error);
 			return TEMPLATE_RESOLUTION_FAILED;
 		}
@@ -368,12 +453,7 @@ class Mapper {
 			return this.runJs(expression, ctx, data, (ctx.func ?? {}) as FunctionContext, (ctx.vars ?? {}) as VarsContext);
 		} catch (cause) {
 			const stepCtx = readStepContext(ctx);
-			const error = new MapperResolutionError(buildErrorMessage({ expression, syntax: "js", ...stepCtx, cause }), {
-				expression,
-				syntax: "js",
-				...stepCtx,
-				cause,
-			});
+			const error = buildResolutionError({ expression, syntax: "js", ...stepCtx, cause, ctx });
 			this.handleResolutionError(ctx, error);
 			return str; // pre-v0.3.x behavior — pass through the literal string
 		}
