@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { $, WORKFLOW_IR_VERSION, WorkflowIRSchema, branch, workflow } from "../src/index";
+import {
+	$,
+	WORKFLOW_IR_VERSION,
+	WorkflowIRSchema,
+	branch,
+	forEach,
+	loop,
+	switchOn,
+	tryCatch,
+	workflow,
+} from "../src/index";
 import { JS_EXPR_TAG, type V2Step, unwrapProxies } from "../src/internal";
 
 describe("v2 DSL — $ proxy", () => {
@@ -536,5 +546,18 @@ describe("v2 DSL — branch() primitive", () => {
 			then: [{ id: "a", use: "@blokjs/respond", inputs: {} }],
 		});
 		expect(b.branch.else).toBeUndefined();
+	});
+});
+
+describe("v2 DSL — ui metadata", () => {
+	const ui = { x: 1, y: 2, notes: "draft", color: "blue" };
+	const step = { id: "a", use: "@blokjs/respond", inputs: {} };
+
+	it("preserves ui from control-flow helper factories", () => {
+		expect(branch({ id: "b", when: "true", then: [step], ui }).ui).toEqual(ui);
+		expect(forEach({ id: "fe", in: "$.state.items", as: "item", do: [step], ui }).ui).toEqual(ui);
+		expect(loop({ id: "lp", while: "ctx.state.keepGoing", do: [step], ui }).ui).toEqual(ui);
+		expect(switchOn({ id: "sw", on: "$.state.kind", cases: [{ when: "a", do: [step] }], ui }).ui).toEqual(ui);
+		expect(tryCatch({ id: "tc", try: [step], catch: [{ id: "c", use: "@blokjs/respond" }], ui }).ui).toEqual(ui);
 	});
 });

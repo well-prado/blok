@@ -10,6 +10,7 @@ import {
 	V2LoopStepSchema,
 	V2RegularStepSchema,
 	V2StepSchema,
+	V2StepUiSchema,
 	V2SubworkflowStepSchema,
 	V2SwitchStepSchema,
 	V2TryCatchStepSchema,
@@ -475,6 +476,39 @@ describe("F9 — control-flow step schema strictness", () => {
 		expect(() => V2SubworkflowStepSchema.parse({ id: "sw", subworkflow: "child", bogus: 1 })).toThrow(
 			/[Uu]nrecognized key/,
 		);
+	});
+});
+
+describe("V2 step ui metadata", () => {
+	const ui = { x: 12, y: 34, notes: "draft", color: "blue" };
+
+	it("accepts ui on every concrete step shape and keeps passthrough keys", () => {
+		const shapes: unknown[] = [
+			{ id: "r", use: "@blokjs/api-call", ui },
+			{ id: "b", branch: { when: "true", then: [{ id: "x", use: "n" }] }, ui },
+			{ id: "s", subworkflow: "child", ui },
+			{ id: "w", wait: { for: "1h" }, ui },
+			{ id: "fe", forEach: { in: "$.x", as: "item", do: [{ id: "x", use: "n" }] }, ui },
+			{ id: "lp", loop: { while: "true", do: [{ id: "x", use: "n" }] }, ui },
+			{ id: "sw", switch: { on: "$.x", cases: [{ when: "a", do: [{ id: "x", use: "n" }] }] }, ui },
+			{ id: "tc", tryCatch: { try: [{ id: "x", use: "n" }], catch: [{ id: "y", use: "n" }] }, ui },
+		];
+
+		for (const shape of shapes) {
+			const result = V2StepSchema.safeParse(shape);
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect((result.data as { ui?: Record<string, unknown> }).ui?.color).toBe("blue");
+			}
+		}
+	});
+
+	it("accepts an empty ui object", () => {
+		expect(V2StepUiSchema.safeParse({}).success).toBe(true);
+	});
+
+	it("rejects wrong-typed coordinates", () => {
+		expect(V2RegularStepSchema.safeParse({ id: "r", use: "n", ui: { x: "12" } }).success).toBe(false);
 	});
 });
 
