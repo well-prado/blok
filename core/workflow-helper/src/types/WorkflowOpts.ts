@@ -61,6 +61,10 @@ export type WorkflowOpts = z.infer<typeof WorkflowOptsSchema>;
  *   }
  */
 export const WorkflowV2Schema = z.object({
+	schemaVersion: z
+		.literal("2")
+		.default("2")
+		.describe("Workflow IR schema version. Defaults to '2'; future versions must be rejected explicitly."),
 	name: z.string().min(3).describe("Workflow display name. Min 3 characters. Shown in Studio."),
 	version: z
 		.string()
@@ -118,3 +122,6 @@ export const WorkflowV2Schema = z.object({
 });
 
 export type WorkflowV2 = z.infer<typeof WorkflowV2Schema>;
+export const WorkflowIRSchema = WorkflowV2Schema;
+export type WorkflowIR = WorkflowV2;
+export const WORKFLOW_IR_VERSION = "2" as const;

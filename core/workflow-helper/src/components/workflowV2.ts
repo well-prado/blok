@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { unwrapProxies } from "../proxy/$";
 import { type V2Step, V2StepSchema } from "../types/StepOpts";
 import { TriggersSchema, validateTriggerConfig } from "../types/TriggerOpts";
-import { type WorkflowV2, WorkflowV2Schema } from "../types/WorkflowOpts";
+import { WORKFLOW_IR_VERSION, type WorkflowV2, WorkflowV2Schema } from "../types/WorkflowOpts";
 
 /**
  * A streaming workflow's event vocabulary: event name → Zod schema for the
@@ -43,6 +43,8 @@ export interface WorkflowOpts<
 > {
 	/** Workflow display name. Min 3 characters. Shown in Studio. */
 	name: string;
+	/** Workflow IR schema version. Defaults to "2". */
+	schemaVersion?: "2";
 	/** Semantic version (x.x.x). Used for trace recording and audit. */
 	version: string;
 	/** What this workflow does. Optional but recommended. */
@@ -202,7 +204,8 @@ export function workflow<
 	// scalar fields here — `steps`, `trigger`, and `events` get their own
 	// dedicated (and more specific) checks below, so reusing the full schema
 	// would double-validate and emit worse messages.
-	const envelope = WorkflowV2Schema.pick({ name: true, version: true }).safeParse({
+	const envelope = WorkflowV2Schema.pick({ schemaVersion: true, name: true, version: true }).safeParse({
+		schemaVersion: opts.schemaVersion,
 		name: opts.name,
 		version: opts.version,
 	});
@@ -274,6 +277,7 @@ export function workflow<
 	}
 
 	const _config: WorkflowV2 = {
+		schemaVersion: envelope.data.schemaVersion ?? WORKFLOW_IR_VERSION,
 		name: opts.name,
 		version: opts.version,
 		description: opts.description,

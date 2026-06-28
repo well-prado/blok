@@ -28,7 +28,7 @@ The motivation is concrete: (1) the visual canvas is Vision pillar #1 and the sh
 
 **Goals (MVP):**
 - A `PUT /__blok/workflows/:name/definition` endpoint with `dryRun` validation, persisting back to `RegisteredWorkflow.source`.
-- A **callable validation surface** reusing the *existing* zod schemas + the *existing* duplicate-id walker — exported from S1's `@blokjs/workflow-schema`, imported by Studio. **Not a new validator.**
+- A **callable validation surface** reusing the *existing* zod schemas + the *existing* duplicate-id walker — exported from S1's `@blokjs/workflow-schema`, called by Studio through a S4 server-side validation endpoint. **Not a new validator.** Bundle spike #307 measured direct Studio import at +24,537 gzip bytes, so Studio should not import the helper validation graph in S1.
 - A **node palette** to insert steps (regular + the 7 control-flow kinds) with auto-generated unique ids.
 - A **property inspector** to edit a selected step's fields.
 - Drag-to-reposition and (constrained) connect-to-reorder on the existing xyflow canvas.
@@ -228,7 +228,7 @@ apps/studio/src/
 
 ## 9. Phased implementation plan
 
-**M1 — Write path + validation + Monaco floor (smallest shippable).** Export `@blokjs/workflow-schema` (S1; re-exports existing zod + extracted dup-id walker) + `PUT …/definition` with `dryRun`/422/persist-to-`source`. Plus **Option C**: Monaco JSON editor wired to the existing `workflow.schema.json` for native inline validation, with live `buildWorkflowDag` preview. *Exit:* edit a JSON workflow's text in Studio, save, see it re-run.
+**M1 — Write path + server validation + Monaco floor (smallest shippable).** Export `@blokjs/workflow-schema` (S1; re-exports existing zod + extracted dup-id walker) + `PUT …/definition` with `dryRun`/422/persist-to-`source`. The endpoint runs validation server-side; Studio calls it rather than importing `@blokjs/helper`. Plus **Option C**: Monaco JSON editor wired to the existing `workflow.schema.json` for native inline validation, with live `buildWorkflowDag` preview. *Exit:* edit a JSON workflow's text in Studio, save, see it re-run.
 
 **M2 — Draft store + inspector.** `useWorkflowEditor` (snapshot undo/redo/dirty), the property inspector wired to xyflow selection, `updateStep`. Canvas still read-layout; editing is field-level. *Exit:* select a node, change `inputs`/`when`, save. *(Candidate: minimal trigger path/method field-editor — see §10 Q7.)*
 
