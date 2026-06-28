@@ -157,6 +157,39 @@ describe("RunnerSteps — idempotency cache integration", () => {
 		expect(state?.["ephemeral-echo"]).toBeUndefined();
 	});
 
+	it("respects as: on a cache hit (renames the slot identically to a fresh run — #346)", async () => {
+		const node = new EchoNode("echo-as", { computed: 42 });
+		node.idempotencyKey = "static-key-as";
+		node.as = "renamed";
+		const runner = new Runner([node]);
+
+		await runner.run(ctxWithTracing({ workflow: "wf-as" }).ctx);
+		const second = ctxWithTracing({ workflow: "wf-as" });
+		await runner.run(second.ctx);
+
+		expect(node.runs).toBe(1); // cache hit — execute() not re-run
+		const state = (second.ctx as unknown as { state: Record<string, unknown> }).state;
+		expect(state.renamed).toEqual({ computed: 42 }); // landed at state[as]
+		expect(state["echo-as"]).toBeUndefined(); // NOT at state[id]
+	});
+
+	it("respects spread: on a cache hit (merges the cached object's keys into state — #346)", async () => {
+		const node = new EchoNode("echo-spread", { alpha: 1, beta: 2 });
+		node.idempotencyKey = "static-key-spread";
+		node.spread = true;
+		const runner = new Runner([node]);
+
+		await runner.run(ctxWithTracing({ workflow: "wf-spread" }).ctx);
+		const second = ctxWithTracing({ workflow: "wf-spread" });
+		await runner.run(second.ctx);
+
+		expect(node.runs).toBe(1); // cache hit
+		const state = (second.ctx as unknown as { state: Record<string, unknown> }).state;
+		expect(state.alpha).toBe(1); // per-key merged into state
+		expect(state.beta).toBe(2);
+		expect(state["echo-spread"]).toBeUndefined(); // not nested under id
+	});
+
 	it("namespaces cache by (workflowName, stepId, key) — same key in two workflows does not collide", async () => {
 		const nodeA = new EchoNode("echo", { from: "wf-X" });
 		nodeA.idempotencyKey = "shared-key";
