@@ -18,9 +18,10 @@
 			"types": "./dist/internal.d.ts",
 			"import": "./dist/internal.js",
 			"default": "./dist/internal.js"
-		}
+		},
+		"./schema": "./schemas/workflow.v2.json"
 	},
-	"files": ["dist"],
+	"files": ["dist", "schemas"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",
 	"scripts": {

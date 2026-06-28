@@ -1,0 +1,858 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://schemas.blok.build/workflow/v2.json",
+	"title": "Blok Workflow v2",
+	"description": "Schema for Blok v2 JSON workflows. Steps inline their `inputs`; output auto-persists to ctx.state[id]. Use the `branch` step shape for if/else flow control. See https://blok.build/docs/workflow-v2 for full reference.",
+	"type": "object",
+	"properties": {
+		"schemaVersion": {
+			"type": "string",
+			"const": "2",
+			"default": "2",
+			"description": "Workflow IR schema version. Defaults to '2'; future versions must be rejected explicitly."
+		},
+		"name": {
+			"type": "string",
+			"minLength": 3,
+			"description": "Workflow display name. Min 3 characters. Shown in Studio."
+		},
+		"version": {
+			"type": "string",
+			"minLength": 5,
+			"description": "Semantic version (x.x.x). Used for trace recording and audit."
+		},
+		"description": {
+			"type": "string",
+			"description": "What this workflow does. Optional but recommended — surfaces in Studio and CLI."
+		},
+		"trigger": {
+			"type": "object",
+			"additionalProperties": {},
+			"propertyNames": {
+				"enum": [
+					"http",
+					"grpc",
+					"manual",
+					"cron",
+					"queue",
+					"pubsub",
+					"worker",
+					"webhook",
+					"sse",
+					"websocket",
+					"mcp"
+				]
+			},
+			"description": "Trigger configuration. Most workflows use { http: { method: 'GET' } }. Optional ONLY when `middleware: true` is set — middleware-only workflows are invoked from another workflow's `trigger.http.middleware: [...]` array and don't have a public route of their own. See TRIGGER_SCHEMAS for per-kind shapes."
+		},
+		"middleware": {
+			"type": "boolean",
+			"const": true,
+			"description": "v0.5 — when true, this workflow is registered as middleware and is NOT exposed as a public HTTP route. It's invoked by another workflow that lists this one's `name` in its `trigger.http.middleware: [...]` array. Middleware runs on the parent ctx (state mutations carry forward) and can short-circuit by setting `ctx.response` and using a step with `stop: true`. Middleware-only workflows MAY omit `trigger`."
+		},
+		"steps": {
+			"type": "array",
+			"items": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the branch step. Visible in traces."
+							},
+							"branch": {
+								"type": "object",
+								"properties": {
+									"when": {
+										"type": "string",
+										"minLength": 1,
+										"description": "JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. $ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true')."
+									},
+									"then": {
+										"type": "array",
+										"items": {},
+										"description": "Steps to execute when `when` is truthy."
+									},
+									"else": {
+										"type": "array",
+										"items": {},
+										"description": "Steps to execute when `when` is falsy. Optional."
+									}
+								},
+								"required": [
+									"when",
+									"then"
+								],
+								"additionalProperties": false,
+								"description": "Conditional sub-pipeline."
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"id",
+							"branch"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier. The sub-workflow's output lands on $.state[id] after the child completes. Required."
+							},
+							"subworkflow": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Name of the workflow to invoke. Looked up in the WorkflowRegistry at run time. **Literal names** (`\"send-receipt-email\"`) are matched directly. **Polymorphic expressions** (`\"$.req.body.kind\"`, `\"js/ctx.req.body.kind\"`) resolve against the live ctx at dispatch time — pair with `allowList` to constrain which workflows the expression may resolve to."
+							},
+							"inputs": {
+								"type": "object",
+								"additionalProperties": {},
+								"description": "Inputs passed to the child as `ctx.request.body`. The child reads them via `$.req.body.<key>` exactly as if HTTP-triggered. May contain $ proxy refs."
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							},
+							"wait": {
+								"type": "boolean",
+								"description": "If true (default), parent step blocks until child completes and the child's ctx.response becomes the parent step's output. If false, dispatch is fire-and-forget — the parent step returns immediately with `{runId, workflowName, scheduledAt}` and the child runs asynchronously via setImmediate. The child still appears in Studio's Sub-runs strip and the parentRunId/parentNodeRunId lineage is preserved. Combine with `idempotencyKey` for at-most-once dispatch (Trigger.dev / Stripe semantics: the runId is cached against the key regardless of child outcome; new key needed to retry on failure)."
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Alternative state key (defaults to id). Mutually exclusive with spread."
+							},
+							"spread": {
+								"type": "boolean",
+								"description": "Shallow-merge child's response keys into state. Mutually exclusive with as."
+							},
+							"ephemeral": {
+								"type": "boolean",
+								"description": "If true, child output is NOT stored in state. Only ctx.prev carries it."
+							},
+							"active": {
+								"type": "boolean",
+								"description": "If false, the step is skipped at runtime. Default true."
+							},
+							"stop": {
+								"type": "boolean",
+								"description": "If true, the workflow halts after this step completes."
+							},
+							"idempotencyKey": {
+								"type": "string",
+								"minLength": 1,
+								"description": "When set, the sub-workflow's parent step output is cached against the triple (parentWorkflow, step.id, key). Cache semantics depend on `wait`: with `wait: true` (default), cache HIT means the child workflow is NEVER invoked — including any side effects (use with care for sub-workflows that send emails, charge cards, etc.). With `wait: false`, cache HIT returns the SAME `{runId, workflowName, scheduledAt}` for the lifetime of the cache entry — at-most-once dispatch deduplication. To retry on child failure, use a new key."
+							},
+							"idempotencyKeyTTL": {
+								"type": "integer",
+								"minimum": 0,
+								"description": "Cache lifetime in milliseconds. Defaults to 24h. Pass 0 to immediately expire."
+							},
+							"retry": {
+								"type": "object",
+								"properties": {
+									"maxAttempts": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 20,
+										"description": "Total attempts including the first run. 1 = no retry. Capped at 20."
+									},
+									"minTimeoutInMs": {
+										"type": "integer",
+										"minimum": 0,
+										"description": "Initial backoff delay in ms before the second attempt. Default 1000."
+									},
+									"maxTimeoutInMs": {
+										"type": "integer",
+										"minimum": 0,
+										"description": "Cap on the backoff delay between attempts. Default 30000."
+									},
+									"factor": {
+										"type": "number",
+										"minimum": 1,
+										"description": "Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."
+									}
+								},
+								"required": [
+									"maxAttempts"
+								],
+								"additionalProperties": false,
+								"description": "Retry the WHOLE sub-workflow on failure. Each retry creates a fresh child run record under the same parent."
+							},
+							"maxDuration": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 0
+									},
+									{
+										"type": "string",
+										"minLength": 1,
+										"pattern": "^\\d+(ms|s|m|h|d)$"
+									}
+								],
+								"description": "OPTIONAL. Per-attempt execution timeout. Caps the synchronous wait for `wait: true` sub-workflows. No-op for `wait: false` (parent returns immediately; the child's max-duration is the child's concern). Number (ms) or duration string. On final-attempt timeout, the run auto-flips to `\"timedOut\"`."
+							},
+							"allowList": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"minLength": 1
+								},
+								"description": "Exact-match allow-list for polymorphic dispatch. When the resolved workflow name (after any `namespace` prefix is applied) is not in this array, the dispatch is rejected at run time with a structured error. Strongly recommended when `subworkflow` is an expression (`$.<path>` or `js/...`) so a malicious or buggy ctx value can't dispatch arbitrary workflows. Ignored for literal names (they don't need the guard)."
+							},
+							"dispatch": {
+								"type": "string",
+								"enum": [
+									"in-process",
+									"http-self"
+								],
+								"description": "G2 (v0.6) — dispatch strategy. `in-process` (default) invokes the child workflow in the same Node process — synchronous when `wait: true`, `setImmediate`-based when `wait: false`. `http-self` makes an HTTP request to the deployment's own base URL (`BLOK_SELF_BASE_URL` env var, defaults to `http://localhost:${PORT || 4000}`). Use `http-self` when you want each child run to land on a different process in a horizontally-scaled deployment, or to fully isolate child execution from the parent's call stack. The child must have an HTTP trigger; a runtime error is thrown otherwise. Lineage (parentRunId / parentNodeRunId) is preserved across the HTTP hop via `X-Blok-Parent-Run-Id` / `X-Blok-Parent-Node-Run-Id` headers."
+							}
+						},
+						"required": [
+							"id",
+							"subworkflow"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier."
+							},
+							"wait": {
+								"type": "object",
+								"properties": {
+									"for": {
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 0
+											},
+											{
+												"type": "string",
+												"minLength": 1,
+												"pattern": "^\\d+(ms|s|m|h|d)$"
+											}
+										],
+										"description": "Wait this long. Mutually exclusive with `until`. Number (ms) or duration string (`500ms`, `30s`, `5m`, `2h`, `1d`)."
+									},
+									"until": {
+										"type": [
+											"number",
+											"string"
+										],
+										"description": "Wait until this absolute time. Number is ms-since-epoch; string is an ISO date or a $-proxy expression. Mutually exclusive with `for`."
+									}
+								},
+								"additionalProperties": false
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Alternative state key (defaults to `id`)."
+							},
+							"ephemeral": {
+								"type": "boolean",
+								"description": "If true, no state entry is recorded."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"idempotencyKey": {
+								"not": {}
+							},
+							"retry": {
+								"not": {}
+							},
+							"maxDuration": {
+								"not": {}
+							},
+							"concurrencyKey": {
+								"not": {}
+							},
+							"spread": {
+								"not": {}
+							}
+						},
+						"required": [
+							"id",
+							"wait"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the forEach step. Visible in traces."
+							},
+							"forEach": {
+								"type": "object",
+								"properties": {
+									"in": {
+										"description": "Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."
+									},
+									"as": {
+										"type": "string",
+										"minLength": 1,
+										"pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+										"description": "Per-iteration variable name. Each iteration sets ctx.state[as] = item and ctx.state[as+'Index'] = i."
+									},
+									"mode": {
+										"type": "string",
+										"enum": [
+											"sequential",
+											"parallel"
+										],
+										"description": "Execution mode. `sequential` (default) awaits each iteration; `parallel` runs with bounded concurrency."
+									},
+									"concurrency": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 1000,
+										"description": "Max concurrent inner pipelines when `mode: 'parallel'`. Default 10."
+									},
+									"do": {
+										"type": "array",
+										"items": {},
+										"minItems": 1,
+										"description": "Sub-pipeline run for each item."
+									}
+								},
+								"required": [
+									"as",
+									"do"
+								],
+								"additionalProperties": false,
+								"description": "forEach configuration."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							}
+						},
+						"required": [
+							"id",
+							"forEach"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the loop step. Visible in traces."
+							},
+							"loop": {
+								"type": "object",
+								"properties": {
+									"while": {
+										"type": "string",
+										"minLength": 1,
+										"description": "JS expression evaluated against ctx before each iteration. Loop continues while truthy."
+									},
+									"maxIterations": {
+										"type": "integer",
+										"minimum": 1,
+										"description": "Hard safety cap on iterations. Default 1000 (override via env BLOK_LOOP_MAX_ITERATIONS). Hitting the cap throws LoopMaxIterationsError."
+									},
+									"do": {
+										"type": "array",
+										"items": {},
+										"minItems": 1,
+										"description": "Sub-pipeline run each iteration."
+									}
+								},
+								"required": [
+									"while",
+									"do"
+								],
+								"additionalProperties": false,
+								"description": "loop configuration."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							}
+						},
+						"required": [
+							"id",
+							"loop"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the switch step. Visible in traces."
+							},
+							"switch": {
+								"type": "object",
+								"properties": {
+									"on": {
+										"description": "Value to match against. Literal, `$` proxy expression, or `js/...` string. Resolved by the blueprint mapper before matching."
+									},
+									"cases": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"when": {
+													"description": "Match value. Literal scalar (number/string/boolean) for `on === when` matching, or an array for `array.includes(on)` matching."
+												},
+												"do": {
+													"type": "array",
+													"items": {},
+													"minItems": 1,
+													"description": "Sub-pipeline run when this case matches."
+												}
+											},
+											"required": [
+												"do"
+											],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"description": "Ordered list of cases. First match wins."
+									},
+									"default": {
+										"type": "array",
+										"items": {},
+										"description": "Fallback sub-pipeline when no case matches. Optional."
+									}
+								},
+								"required": [
+									"cases"
+								],
+								"additionalProperties": false,
+								"description": "switch configuration."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							}
+						},
+						"required": [
+							"id",
+							"switch"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier for the tryCatch step. Visible in traces."
+							},
+							"tryCatch": {
+								"type": "object",
+								"properties": {
+									"try": {
+										"type": "array",
+										"items": {},
+										"minItems": 1,
+										"description": "Sub-pipeline run first. If any step throws, control jumps to `catch`."
+									},
+									"catch": {
+										"type": "array",
+										"items": {},
+										"minItems": 1,
+										"description": "Sub-pipeline run when `try` throws. Has access to `$.error` (message, name, stack). Errors here propagate — they do NOT re-trigger catch."
+									},
+									"finally": {
+										"type": "array",
+										"items": {},
+										"description": "Sub-pipeline run unconditionally after try/catch. Runs even if `catch` itself throws. Errors here propagate."
+									}
+								},
+								"required": [
+									"try",
+									"catch"
+								],
+								"additionalProperties": false,
+								"description": "tryCatch configuration."
+							},
+							"active": {
+								"type": "boolean"
+							},
+							"stop": {
+								"type": "boolean"
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							}
+						},
+						"required": [
+							"id",
+							"tryCatch"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Stable identifier. Other steps reference this step's output as $.state[id]. Required."
+							},
+							"use": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Node reference. Examples: '@blokjs/api-call', 'my-custom-node'. Type is inferred from this value when `type` is not set."
+							},
+							"type": {
+								"type": "string",
+								"enum": [
+									"local",
+									"module",
+									"runtime.python3",
+									"runtime.nodejs",
+									"runtime.bun",
+									"runtime.go",
+									"runtime.java",
+									"runtime.rust",
+									"runtime.php",
+									"runtime.csharp",
+									"runtime.ruby",
+									"runtime.docker",
+									"runtime.wasm"
+								],
+								"description": "Node type (module/local/runtime.*). When omitted, inferred from `use`: runtime.* prefixes are explicit; @blokjs/* and most others default to 'module'."
+							},
+							"inputs": {
+								"type": "object",
+								"additionalProperties": {},
+								"description": "Inputs passed to the node. May contain $ proxy references (e.g. $.state.foo, $.req.body.id) or 'js/...' expressions for runtime evaluation."
+							},
+							"ui": {
+								"type": "object",
+								"properties": {
+									"x": {
+										"type": "number",
+										"description": "Optional canvas x-position."
+									},
+									"y": {
+										"type": "number",
+										"description": "Optional canvas y-position."
+									},
+									"notes": {
+										"type": "string",
+										"description": "Optional authoring note."
+									}
+								},
+								"additionalProperties": true,
+								"description": "Optional Studio/canvas metadata. Passed through by authoring schemas; ignored by the runner."
+							},
+							"as": {
+								"type": "string",
+								"minLength": 1,
+								"description": "Alternative name for this step's output in state. Defaults to `id`. Useful when the id is implementation-detail-y and the output is referenced by a domain term."
+							},
+							"spread": {
+								"type": "boolean",
+								"description": "If true, the result.data object's top-level keys are shallow-merged into state. Use for multi-output nodes in data-pipeline workflows. Mutually exclusive with `as`."
+							},
+							"ephemeral": {
+								"type": "boolean",
+								"description": "If true, this step's output is NOT stored in state. Only ctx.prev carries it to the immediately next step. Use for side-effects (logging, audit, telemetry)."
+							},
+							"runtime": {
+								"type": "string",
+								"enum": [
+									"nodejs",
+									"bun",
+									"python3",
+									"go",
+									"java",
+									"rust",
+									"php",
+									"csharp",
+									"ruby",
+									"docker",
+									"wasm"
+								],
+								"description": "Optional runtime hint. Most authors don't need this; the type already encodes it."
+							},
+							"active": {
+								"type": "boolean",
+								"description": "If false, the step is skipped at runtime. Default true."
+							},
+							"stop": {
+								"type": "boolean",
+								"description": "If true, the workflow halts after this step completes. Default false."
+							},
+							"stream_logs": {
+								"type": "boolean",
+								"description": "Per-step opt-in for live log streaming. Inherits from BLOK_STREAM_LOGS env when unset."
+							},
+							"streamTo": {
+								"type": "string",
+								"const": "sse",
+								"description": "Runtime steps only. When 'sse', the node's live PartialResult data events (emitted via the SDK's ctx.emit(...)) are forwarded to the SSE client through ctx.stream.writeSSE(...) AS THEY ARRIVE — before the node's terminal result. Requires an `sse` trigger; a no-op when ctx.stream is absent. Opt-in; existing unary runtime steps are unaffected."
+							},
+							"stream": {
+								"type": "boolean",
+								"description": "Shorthand for `streamTo: \"sse\"`. `stream: true` forwards runtime PartialResult frames to the SSE client."
+							},
+							"idempotencyKey": {
+								"type": "string",
+								"minLength": 1,
+								"description": "When set, the step's result is cached against the triple (workflowName, step.id, idempotencyKey). On a subsequent run with the same triple, execution is skipped and the cached result populates state through the same persistence rules (ephemeral / spread / as). Accepts a literal string or a $ proxy expression that compiles to `js/ctx....` (e.g. $.req.body.requestId)."
+							},
+							"idempotencyKeyTTL": {
+								"type": "integer",
+								"minimum": 0,
+								"description": "Cache lifetime in milliseconds. Defaults to 24h (86_400_000) when omitted. Pass 0 to mark a cached result as immediately expired (effectively disables caching)."
+							},
+							"retry": {
+								"type": "object",
+								"properties": {
+									"maxAttempts": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 20,
+										"description": "Total attempts including the first run. 1 = no retry. Capped at 20."
+									},
+									"minTimeoutInMs": {
+										"type": "integer",
+										"minimum": 0,
+										"description": "Initial backoff delay in ms before the second attempt. Default 1000."
+									},
+									"maxTimeoutInMs": {
+										"type": "integer",
+										"minimum": 0,
+										"description": "Cap on the backoff delay between attempts. Default 30000."
+									},
+									"factor": {
+										"type": "number",
+										"minimum": 1,
+										"description": "Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."
+									}
+								},
+								"required": [
+									"maxAttempts"
+								],
+								"additionalProperties": false,
+								"description": "Retry configuration with capped exponential backoff. When omitted, the step runs at most once (no retry) — matches pre-v0.3.x behavior."
+							},
+							"maxDuration": {
+								"anyOf": [
+									{
+										"type": "integer",
+										"minimum": 0
+									},
+									{
+										"type": "string",
+										"minLength": 1,
+										"pattern": "^\\d+(ms|s|m|h|d)$"
+									}
+								],
+								"description": "OPTIONAL. Per-attempt execution timeout. Number (ms) or duration string ('30s', '5m', '500ms'). When the step's `step.process()` exceeds this duration, the attempt fails with a StepTimeoutError. Pairs with `retry` — each attempt gets its own timeout (total budget = maxDuration × maxAttempts). On final-attempt timeout, the run auto-flips to `\"timedOut\"` status (distinct from `\"failed\"` so SLA dashboards can separate timeouts from logic failures)."
+							},
+							"concurrencyKey": {
+								"not": {}
+							},
+							"concurrencyLimit": {
+								"not": {}
+							},
+							"delay": {
+								"not": {}
+							},
+							"ttl": {
+								"not": {}
+							},
+							"debounce": {
+								"not": {}
+							}
+						},
+						"required": [
+							"id",
+							"use"
+						],
+						"additionalProperties": false
+					},
+					{}
+				]
+			},
+			"minItems": 1,
+			"description": "Pipeline of steps to execute in order. At least one step required."
+		},
+		"input": {
+			"description": "Optional Zod schema describing the workflow's input (request body). Consumed by the `mcp` trigger to generate each MCP tool's `inputSchema` (via zod-to-json-schema). Not validated or serialized by the runner — it's authoring metadata carried on the workflow config."
+		},
+		"output": {
+			"description": "Optional Zod schema (TS) or JSON Schema (JSON workflows) describing the workflow's OUTPUT — the terminal response body. Consumed by the typed `@blokjs/client` to type each call's return value, and (when BLOK_VALIDATE_WORKFLOW_OUTPUT=true) validated against the terminal step's result. Authoring metadata carried on the workflow config; not serialized by the runner."
+		},
+		"events": {
+			"type": "object",
+			"additionalProperties": {},
+			"description": "Optional map of SSE event name → Zod schema (TS) or JSON Schema (JSON) for STREAMING workflows. Consumed by the typed `@blokjs/client` to type the streaming event union, and by `@blokjs/sse-emit-typed` to constrain emitted events. Authoring metadata; not serialized."
+		}
+	},
+	"required": [
+		"name",
+		"version",
+		"steps"
+	],
+	"additionalProperties": false
+}
