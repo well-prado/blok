@@ -28,7 +28,19 @@ import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import { defineNode } from "../../src/defineNode";
-import { type TriggerHandle, branch, gt, makeHandle, step, workflowCallback } from "../../src/stepBuilder";
+import {
+	type TriggerHandle,
+	branch,
+	eq,
+	gt,
+	gte,
+	lt,
+	lte,
+	makeHandle,
+	ne,
+	step,
+	workflowCallback,
+} from "../../src/stepBuilder";
 import type GlobalOptions from "../../src/types/GlobalOptions";
 
 const noop = defineNode({
@@ -252,7 +264,7 @@ class PublishNode extends RunnerNode {
 	}
 }
 
-async function bootAndRun(workflowDef: unknown): Promise<Record<string, unknown>> {
+async function bootWorkflow(workflowDef: unknown): Promise<{ config: Configuration; ctx: Context }> {
 	const config = new Configuration();
 	const helpers: Record<string, RunnerNode> = {
 		"@blokjs/if-else": ifElse as unknown as RunnerNode,
@@ -284,6 +296,11 @@ async function bootAndRun(workflowDef: unknown): Promise<Record<string, unknown>
 		eventLogger: null,
 		_PRIVATE_: null,
 	} as unknown as Context;
+	return { config, ctx };
+}
+
+async function bootAndRun(workflowDef: unknown): Promise<Record<string, unknown>> {
+	const { config, ctx } = await bootWorkflow(workflowDef);
 	const runner = new Runner(config.steps as NodeBase[]);
 	await runner.run(ctx);
 	return ctx.state as Record<string, unknown>;
@@ -358,5 +375,146 @@ describe("branch — real Configuration + Runner (if-else engine)", () => {
 		};
 		const state = await bootAndRun(def);
 		expect(state.arm).toBe("ELSE");
+	});
+
+	it.each([
+		{
+			name: "gt",
+			build: gt,
+			expectedWhen: "ctx.state.left.value > ctx.state.right.value",
+			truthy: [11, 10],
+			falsy: [10, 10],
+		},
+		{
+			name: "lt",
+			build: lt,
+			expectedWhen: "ctx.state.left.value < ctx.state.right.value",
+			truthy: [9, 10],
+			falsy: [10, 10],
+		},
+		{
+			name: "eq",
+			build: eq,
+			expectedWhen: "ctx.state.left.value === ctx.state.right.value",
+			truthy: [10, 10],
+			falsy: [10, 11],
+		},
+		{
+			name: "ne",
+			build: ne,
+			expectedWhen: "ctx.state.left.value !== ctx.state.right.value",
+			truthy: [10, 11],
+			falsy: [10, 10],
+		},
+		{
+			name: "gte",
+			build: gte,
+			expectedWhen: "ctx.state.left.value >= ctx.state.right.value",
+			truthy: [10, 10],
+			falsy: [9, 10],
+		},
+		{
+			name: "lte",
+			build: lte,
+			expectedWhen: "ctx.state.left.value <= ctx.state.right.value",
+			truthy: [10, 10],
+			falsy: [11, 10],
+		},
+	])("routes both arms for $name handle-op conditions", async ({ build, expectedWhen, truthy, falsy }) => {
+		const wf = await workflowCallback("RouteOp", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const left = step("left", noop, {});
+			const right = step("right", noop, {});
+			branch("route", build(left.value, right.value), {
+				then: () => {
+					step("take-then", noop, {});
+				},
+				else: () => {
+					step("take-else", noop, {});
+				},
+			});
+		});
+		const branchStep = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.id === "route") as {
+			branch: { when: string };
+		};
+		expect(branchStep.branch.when).toBe(expectedWhen);
+		expect(branchStep.branch.when).not.toMatch(/^js\//);
+
+		for (const [leftValue, rightValue, expectedArm] of [
+			[truthy[0], truthy[1], "THEN"],
+			[falsy[0], falsy[1], "ELSE"],
+		] as const) {
+			const state = await bootAndRun({
+				name: "route-op",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "set-left",
+						use: "@blokjs/ctx-publish",
+						type: "module",
+						inputs: { name: "left", value: { value: leftValue } },
+					},
+					{
+						id: "set-right",
+						use: "@blokjs/ctx-publish",
+						type: "module",
+						inputs: { name: "right", value: { value: rightValue } },
+					},
+					{
+						id: "route",
+						branch: {
+							when: branchStep.branch.when,
+							then: [
+								{ id: "mark-then", use: "@blokjs/ctx-publish", type: "module", inputs: { name: "arm", value: "THEN" } },
+							],
+							else: [
+								{ id: "mark-else", use: "@blokjs/ctx-publish", type: "module", inputs: { name: "arm", value: "ELSE" } },
+							],
+						},
+					},
+				],
+			});
+			expect(state.arm).toBe(expectedArm);
+		}
+	});
+
+	it("surfaces a js/-prefixed branch condition as the raw-eval footgun", async () => {
+		const previousMode = process.env.BLOK_MAPPER_MODE;
+		process.env.BLOK_MAPPER_MODE = "warn";
+		try {
+			const { config, ctx } = await bootWorkflow({
+				name: "route-js-footgun",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "route",
+						branch: {
+							when: "js/ctx.state.missing.open",
+							then: [
+								{ id: "mark", use: "@blokjs/ctx-publish", type: "module", inputs: { name: "arm", value: "THEN" } },
+							],
+							else: [
+								{ id: "mark-else", use: "@blokjs/ctx-publish", type: "module", inputs: { name: "arm", value: "ELSE" } },
+							],
+						},
+					},
+				],
+			});
+
+			const nodeResult = await ifElse.handle(ctx, [{ type: "if", condition: "js/ctx.state.missing.open", steps: [] }]);
+			expect(String((nodeResult as { error?: { message?: string } }).error?.message ?? nodeResult)).toMatch(
+				/js is not defined/,
+			);
+
+			await expect(new Runner(config.steps as NodeBase[]).run(ctx)).rejects.toThrow();
+			expect((ctx.state as Record<string, unknown>).arm).toBeUndefined();
+		} finally {
+			if (previousMode === undefined) {
+				Reflect.deleteProperty(process.env, "BLOK_MAPPER_MODE");
+			} else {
+				process.env.BLOK_MAPPER_MODE = previousMode;
+			}
+		}
 	});
 });
