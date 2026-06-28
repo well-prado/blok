@@ -896,13 +896,88 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 }
 
 /**
- * The trigger-payload handle the callback receives. Rooted at the `@trigger`
- * pseudo-step (lowerRefs maps it to `ctx.request`, where the runner puts the
- * trigger payload — NOT `ctx.state`). For request-shaped
- * triggers, author reads `req.body.x`, `req.params.id`, etc. Typed loosely for
- * now; ADR 0006 wires the per-trigger input type in a follow-up.
+ * The trigger-payload handle the callback receives, untyped. Rooted at the
+ * `@trigger` pseudo-step (lowerRefs maps it to `ctx.request`, where the runner
+ * puts the trigger payload — NOT `ctx.state`). For request-shaped triggers,
+ * author reads `req.body.x`, `req.params.id`, etc.
+ *
+ * This is the FALLBACK surface — when the trigger kind can't be inferred (or the
+ * caller passes no recognized trigger kind), the callback receives this loose
+ * handle. The per-trigger typed handles below ({@link HttpEntry}, {@link CronEntry},
+ * …) narrow it to the fields that trigger kind actually populates in `ctx.request`.
  */
 export type TriggerHandle = Handle<unknown> & Record<string, Handle<unknown>>;
+
+// ───────────────────── per-trigger ENTRY handles (#336) ──────────────────────
+//
+// Every request-shaped trigger funnels its payload into `ctx.request.{body,
+// headers,query,params}` (TriggerBase.createContext + each trigger adapter), so
+// ALL of these entry handles lower through the EXISTING `@trigger` → ctx.request
+// root in lowerRefs — there is NO runtime change here. The deliverable is the
+// TYPED author-facing surface: the entry-handle NAME (`req`/`event`/`tick`/…)
+// and the SHAPE of fields each kind exposes.
+//
+// SCOPE: request-shaped triggers only. Out of scope (follow-ups, NOT built):
+//   - the greenfield `manual` trigger (#362) — its `args` handle has no
+//     ctx.request payload yet; falls back to the loose TriggerHandle below.
+//   - sse/websocket `conn`/`stream` — imperative surfaces (ctx.connection /
+//     ctx.stream), not a declarative `ctx.request`-rooted entry handle.
+//   - per-trigger SIDE-CHANNEL typing (ctx.vars._cron_context Date-vs-ISO,
+//     _worker_job, _pubsub_message) — a separate typing task.
+
+/** Generic request-shaped entry payload: the four `ctx.request.*` slots. */
+type RequestShape<Body = unknown> = {
+	body: Body;
+	headers: Record<string, string>;
+	query: Record<string, string>;
+	params: Record<string, string>;
+};
+
+/** HTTP entry handle (`req`). Full request: body + params + query + headers. */
+export type HttpEntry = Handle<RequestShape>;
+/** Webhook entry handle (`event`). The verified provider event in `body` + the rest of the request. */
+export type WebhookEntry = Handle<RequestShape>;
+/**
+ * Cron entry handle (`tick`). A scheduled tick has NO request body — the handle
+ * exposes only `params` (e.g. the schedule) and headers, NOT a phantom `.body`.
+ * (The richer scheduled-tick context — `_cron_context` Date — is a side-channel,
+ * out of scope for #336.)
+ */
+export type CronEntry = Handle<{ headers: Record<string, string>; params: Record<string, string> }>;
+/**
+ * Worker entry handle (`job`). The job payload is `body`; job metadata lands in
+ * `params.{queue,jobId,attempt}` (attempt is 0-based). Mirrors the worker ctx
+ * mapping the runner funnels into ctx.request.
+ */
+export type WorkerEntry = Handle<{
+	body: unknown;
+	params: { queue: string; jobId: string; attempt: string } & Record<string, string>;
+	headers: Record<string, string>;
+}>;
+/** PubSub entry handle (`msg`). The message payload is `body`; attributes/metadata in params/headers. */
+export type PubSubEntry = Handle<RequestShape>;
+/** gRPC entry handle (`rpc`). The request message is `body`; metadata in headers. */
+export type GrpcEntry = Handle<RequestShape>;
+
+/**
+ * Map a workflow `opts.trigger` shape to the entry handle its callback receives.
+ * Keyed on which request-shaped trigger kind is present. Multiple kinds or none
+ * recognized → the loose {@link TriggerHandle}. Lazy first-match precedence
+ * (http wins if several are set — rare, and the runtime root is identical).
+ */
+type EntryFor<T> = T extends { http: unknown }
+	? HttpEntry
+	: T extends { webhook: unknown }
+		? WebhookEntry
+		: T extends { cron: unknown }
+			? CronEntry
+			: T extends { worker: unknown }
+				? WorkerEntry
+				: T extends { pubsub: unknown }
+					? PubSubEntry
+					: T extends { grpc: unknown }
+						? GrpcEntry
+						: TriggerHandle;
 
 /**
  * Callback-style `workflow()` overload. Runs `build` inside a fresh builder
@@ -910,9 +985,13 @@ export type TriggerHandle = Handle<unknown> & Record<string, Handle<unknown>>;
  * the SAME v2 IR envelope the object-style `workflow()` produces (by delegating
  * to it), with step `inputs` carrying structural `{$ref}`.
  *
- * `entry` is the typed trigger-payload handle (e.g. `req`). The callback may be
- * sync or async (`await` inside is safe — AsyncLocalStorage preserves the
- * builder across the await, ADR 0003).
+ * `entry` is the typed per-trigger payload handle — its TYPE (and the name you
+ * give it) reflects the trigger kind (#336): `http` → `req`, `webhook` →
+ * `event`, `cron` → `tick`, `worker` → `job`, `pubsub` → `msg`, `grpc` → `rpc`.
+ * All of them lower through the existing `@trigger` → `ctx.request` root, so this
+ * is a TYPE-ONLY refinement — runtime is unchanged. The callback may be sync or
+ * async (`await` inside is safe — AsyncLocalStorage preserves the builder across
+ * the await, ADR 0003).
  *
  * The existing object-style `workflow({...})` is UNAFFECTED — this is purely an
  * additive overload, re-exported alongside it.
@@ -921,10 +1000,11 @@ export async function workflowCallback<
 	I extends z.ZodTypeAny = z.ZodTypeAny,
 	O extends z.ZodTypeAny = z.ZodTypeAny,
 	E extends EventMap = EmptyEventMap,
+	Opts extends Omit<WorkflowOpts<I, O, E>, "name" | "steps"> = Omit<WorkflowOpts<I, O, E>, "name" | "steps">,
 >(
 	name: string,
-	opts: Omit<WorkflowOpts<I, O, E>, "name" | "steps">,
-	build: (req: TriggerHandle) => unknown | Promise<unknown>,
+	opts: Opts,
+	build: (entry: EntryFor<Opts["trigger"]>) => unknown | Promise<unknown>,
 ): Promise<TypedWorkflow<InferOr<I>, InferOr<O>, EventUnion<E>>> {
 	const root: RootBuilder = { steps: [], ids: new Set<string>() } as unknown as RootBuilder;
 	root.root = root;
@@ -932,14 +1012,16 @@ export async function workflowCallback<
 	await builders.run({ stack: [root] }, async () => {
 		// `@trigger` MUST match `lowerRefs`'s TRIGGER_SENTINEL — a ref rooted here
 		// lowers to `js/ctx.request` (the trigger payload), NOT `ctx.state[...]`.
-		await build(makeHandle("@trigger") as TriggerHandle);
+		// EVERY per-trigger entry handle shares this one root (all request-shaped
+		// triggers funnel into ctx.request); only the author-facing TYPE differs.
+		await build(makeHandle("@trigger") as EntryFor<Opts["trigger"]>);
 	});
 
 	// Delegate to the object factory so validation + envelope shape are identical.
 	// The `{$ref}` sentinels are plain objects: they pass V2RegularStepSchema's
 	// `inputs: z.record(z.unknown())` and survive `unwrapProxies` untouched.
 	return objectWorkflow<I, O, E>({
-		...(opts as WorkflowOpts<I, O, E>),
+		...(opts as unknown as WorkflowOpts<I, O, E>),
 		name,
 		steps: root.steps as unknown as WorkflowOpts<I, O, E>["steps"],
 	});

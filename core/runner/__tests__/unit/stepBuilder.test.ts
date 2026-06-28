@@ -27,7 +27,18 @@ import { type Context, lowerRefs, mapper } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
-import { type TriggerHandle, step, tpl, workflowCallback } from "../../src/stepBuilder";
+import {
+	type CronEntry,
+	type GrpcEntry,
+	type HttpEntry,
+	type PubSubEntry,
+	type TriggerHandle,
+	type WebhookEntry,
+	type WorkerEntry,
+	step,
+	tpl,
+	workflowCallback,
+} from "../../src/stepBuilder";
 // The REAL persistence pass the runner uses after every step (Rules 0–3).
 import { applyStepOutput } from "../../src/workflow/PersistenceHelper";
 
@@ -302,5 +313,120 @@ describe("ephemeral handle: unreadable/poisoned (#339)", () => {
 		// Normal chain resolved correctly.
 		expect(state.greet).toEqual({ greeting: "Hello, ada!" });
 		expect(state.shout).toEqual({ loud: "HELLO, ADA!" });
+	});
+});
+
+// ───────────────── per-trigger ENTRY handles (#336) ─────────────────
+//
+// All request-shaped triggers funnel into ctx.request, so EVERY entry handle
+// lowers through the same `@trigger` → ctx.request root — the per-kind
+// difference is the author-facing NAME + TYPE, not the runtime mapping.
+
+describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
+	it("cron `tick` reads lower to ctx.request and resolve through the REAL Mapper", async () => {
+		const wf = await workflowCallback(
+			"Cron Tick",
+			{ version: "1.0.0", trigger: { cron: { expression: "* * * * *" } } },
+			// `tick` — cron entry handle. Has no body; read params (the schedule slot).
+			(tick) => {
+				step("greet", greet, { name: tick.params.who });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		// Lowers through the SAME @trigger root → ctx.request.
+		expect(lowerRefs(steps[0].inputs)).toEqual({ name: "js/ctx.request.params.who" });
+
+		// The cron payload funnels into ctx.request just like HTTP.
+		const ctx = createTriggerCtx({});
+		(ctx.request as { params: Record<string, string> }).params = { who: "scheduler" };
+		await runStep(ctx, steps[0], greet);
+		expect((ctx.state as Record<string, unknown>).greet).toEqual({ greeting: "Hello, scheduler!" });
+	});
+
+	it("worker `job.body.x` lowers to ctx.request.body.x and resolves", async () => {
+		const wf = await workflowCallback(
+			"Worker Job",
+			{ version: "1.0.0", trigger: { worker: { queue: "jobs" } } },
+			// `job` — worker entry handle. Payload in body; metadata in params.
+			(job) => {
+				step("greet", greet, { name: job.body.name });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		expect(lowerRefs(steps[0].inputs)).toEqual({ name: "js/ctx.request.body.name" });
+
+		const ctx = createTriggerCtx({ name: "worker" });
+		await runStep(ctx, steps[0], greet);
+		expect((ctx.state as Record<string, unknown>).greet).toEqual({ greeting: "Hello, worker!" });
+	});
+
+	it("pubsub `msg.body.x` lowers to ctx.request.body.x and resolves", async () => {
+		const wf = await workflowCallback(
+			"PubSub Msg",
+			{ version: "1.0.0", trigger: { pubsub: { topic: "events" } } },
+			// `msg` — pubsub entry handle. Message payload in body.
+			(msg) => {
+				step("greet", greet, { name: msg.body.name });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		expect(lowerRefs(steps[0].inputs)).toEqual({ name: "js/ctx.request.body.name" });
+
+		const ctx = createTriggerCtx({ name: "subscriber" });
+		await runStep(ctx, steps[0], greet);
+		expect((ctx.state as Record<string, unknown>).greet).toEqual({ greeting: "Hello, subscriber!" });
+	});
+
+	// TYPE-TEST: each trigger kind yields the right entry-handle TYPE. These are
+	// compile-time assertions — `tsc` (the runner typecheck target) fails if a
+	// kind maps to the wrong handle. No runtime assertions needed.
+	it("type-test: each trigger kind maps to the correct entry handle", async () => {
+		type Expect<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+		const assert = <T extends true>(_v?: T): void => {};
+
+		await workflowCallback("T-http", { version: "1.0.0", trigger: { http: { method: "GET" as const } } }, (req) => {
+			assert<Expect<typeof req, HttpEntry>>();
+			// http has a body.
+			void req.body;
+		});
+		await workflowCallback(
+			"T-webhook",
+			{ version: "1.0.0", trigger: { webhook: { provider: "stripe" as const } } },
+			(event) => {
+				assert<Expect<typeof event, WebhookEntry>>();
+				void event.body;
+			},
+		);
+		await workflowCallback(
+			"T-cron",
+			{ version: "1.0.0", trigger: { cron: { expression: "* * * * *" } } },
+			(tick) => {
+				assert<Expect<typeof tick, CronEntry>>();
+				// cron has NO body — `tick.body` must be a compile error (no phantom body).
+				// @ts-expect-error — cron tick exposes no `.body`.
+				void tick.body;
+				void tick.params;
+			},
+		);
+		await workflowCallback("T-worker", { version: "1.0.0", trigger: { worker: { queue: "q" } } }, (job) => {
+			assert<Expect<typeof job, WorkerEntry>>();
+			void job.body;
+			// Worker metadata is typed on params.
+			void job.params.jobId;
+			void job.params.attempt;
+		});
+		await workflowCallback("T-pubsub", { version: "1.0.0", trigger: { pubsub: { topic: "t" } } }, (msg) => {
+			assert<Expect<typeof msg, PubSubEntry>>();
+			void msg.body;
+		});
+		await workflowCallback("T-grpc", { version: "1.0.0", trigger: { grpc: { service: "S", method: "M" } } }, (rpc) => {
+			assert<Expect<typeof rpc, GrpcEntry>>();
+			void rpc.body;
+		});
+		// Unrecognized / out-of-scope kind (manual, #362) falls back to the loose handle.
+		await workflowCallback("T-manual", { version: "1.0.0", trigger: { manual: {} } }, (args) => {
+			assert<Expect<typeof args, TriggerHandle>>();
+			void args.anything;
+		});
 	});
 });

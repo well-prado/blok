@@ -380,6 +380,13 @@ export type {
 export type {
 	StepOptions,
 	TriggerHandle,
+	// Per-trigger entry handles (#336)
+	HttpEntry,
+	WebhookEntry,
+	CronEntry,
+	WorkerEntry,
+	PubSubEntry,
+	GrpcEntry,
 	BranchCondition,
 	BranchArms,
 	ForEachOptions,
