@@ -92,9 +92,10 @@ When a step id has a dash, use bracket notation:
 ## Failure mode (`BLOK_MAPPER_MODE`)
 
 A `js/` expression that throws at run time (typo, undefined access,
-syntax error) doesn't crash by default — it logs a warning and passes
-the literal string through to the node. That's nice for dev, **dangerous
-for prod**. Set the env var:
+syntax error) **fails the step by default** (`strict` mode) — it throws
+`MapperResolutionError` with full context. Opt into the old
+log-and-pass-through behavior (nice for dev, **dangerous for prod**) with
+`BLOK_MAPPER_MODE=warn`. The modes:
 
 | Mode | Behavior on resolution failure |
 |---|---|

@@ -30,13 +30,14 @@ identifier you pass as the second argument.
 <CodeGroup>
 ```ts src/workflows/send-receipt-email.ts
 import { workflow, http, step } from "@blokjs/core";
-import { SendGridNode, ExprNode } from "@blokjs/helpers";
+import { ExprNode } from "@blokjs/helpers";
+import sendEmail from "../nodes/send-email";
 
 export default workflow(
   "send-receipt-email",
   { version: "1.0.0", trigger: http.post("/internal/send-receipt") },
   (req) => {
-    const sent = step("send", SendGridNode, {
+    const sent = step("send", sendEmail, {
       to: req.body.email,
       body: req.body.body,
     });
@@ -49,13 +50,13 @@ export default workflow(
 
 ```ts src/workflows/checkout.ts
 import { workflow, http, step, subworkflow } from "@blokjs/core";
-import { StripeChargeNode } from "@blokjs/helpers";
+import stripeCharge from "../nodes/stripe-charge";
 
 export default workflow(
   "checkout",
   { version: "1.0.0", trigger: http.post("/checkout") },
   (req) => {
-    const charge = step("charge", StripeChargeNode, {
+    const charge = step("charge", stripeCharge, {
       amount: req.body.amount,
       card: req.body.card,
     });

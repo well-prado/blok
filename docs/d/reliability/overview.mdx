@@ -121,9 +121,7 @@ just the fragile step. The rest of the workflow stays simple.
   architectural prerequisite. Until then, compose the same effect
   with a delayed sub-workflow:
   `subworkflow("wait", "post-wait-half", { ... }, { wait: false })`
-  paired with `delay: "3d"` on the child trigger. See
-  [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md)
-  for the implementation sketch.
+  paired with `delay: "3d"` on the child trigger.
 - **Cross-process replay.** The replay endpoint dispatches in-process;
   a multi-region replay needs an external trigger.
 
