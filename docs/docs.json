@@ -89,7 +89,8 @@
 							"d/primitives/forEach",
 							"d/primitives/loop",
 							"d/primitives/tryCatch",
-							"d/primitives/wait"
+							"d/primitives/wait",
+							"d/primitives/handles-and-footguns"
 						]
 					},
 					{
