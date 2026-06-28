@@ -36,6 +36,9 @@ import { assertGrpcOnlyTransport } from "./adapters/transport";
 // Function-first node API
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 
+// Handle-DSL authoring runtime (#421) — the eventual @blokjs/core surface.
+import { makeHandle, step, workflowCallback } from "./stepBuilder";
+
 import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 // Monitoring infrastructure
 import { HealthCheck } from "./monitoring/HealthCheck";
@@ -204,6 +207,10 @@ export {
 	// Function-first API
 	defineNode,
 	FunctionNode,
+	// Handle-DSL authoring runtime (#421)
+	step,
+	makeHandle,
+	workflowCallback,
 	// Monitoring
 	HealthCheck,
 	RateLimiter,
@@ -334,6 +341,7 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 } from "./handles";
+export type { StepOptions, TriggerHandle } from "./stepBuilder";
 
 // Security review FW-1 · trace API authorize hook signature
 export type { TraceAuthorizeFn, TraceRouterOptions } from "./tracing/TraceRouter";
