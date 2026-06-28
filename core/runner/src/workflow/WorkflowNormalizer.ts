@@ -95,6 +95,13 @@ interface InternalStep {
 	 */
 	waitForMs?: number;
 	waitUntil?: number | string;
+	/**
+	 * Optional Studio/canvas authoring metadata (position, notes, passthrough
+	 * keys). Accepted by all 8 v2 step schemas; the runner IGNORES it at
+	 * execution. Threaded verbatim through normalization so the canvas
+	 * IR→normalize→toJson round-trip preserves it (issue #301).
+	 */
+	ui?: Record<string, unknown>;
 	[key: string]: unknown;
 }
 
@@ -389,6 +396,7 @@ function normalizeRegularStep(
 		as,
 		spread,
 		ephemeral,
+		...copyUi(step),
 	};
 	if (typeof step.stream_logs === "boolean") internalStep.stream_logs = step.stream_logs;
 	// Live SSE forwarding opt-in for runtime steps. `streamTo: "sse"`
@@ -455,59 +463,20 @@ function normalizeBranchStep(
 	const thenSteps = Array.isArray(branch.then) ? (branch.then as unknown[]) : [];
 	const elseSteps = Array.isArray(branch.else) ? (branch.else as unknown[]) : [];
 
-	// Normalize each branch's nested steps recursively. Use empty
-	// `nodesInput` because v2 branches inline `inputs` on each nested step.
-	const thenInternal: InternalStep[] = [];
-	const elseInternal: InternalStep[] = [];
+	// Normalize each branch's nested steps recursively via the shared
+	// `normalizeStepBlock` helper (same path forEach/loop/switch/tryCatch use).
+	// It handles EVERY nested step kind — regular, branch, forEach, loop,
+	// switch, tryCatch, wait, subworkflow — and inlines `inputs` + bubbles up
+	// `innerNodes` identically to the previous hand-rolled loops, which only
+	// special-cased a nested `branch` (so a nested forEach/switch/etc. inside a
+	// branch arm used to crash in `normalizeRegularStep`).
 	const innerNodes: Record<string, InternalNodeConfig> = {};
-
-	for (let i = 0; i < thenSteps.length; i++) {
-		const s = thenSteps[i];
-		if (!isPlainObject(s)) continue;
-		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const {
-				internalStep: nestedStep,
-				nodeConfig: nestedConfig,
-				innerNodes: nestedInner,
-			} = normalizeBranchStep(s as Record<string, unknown>, i);
-			thenInternal.push(nestedStep);
-			innerNodes[nestedStep.name] = nestedConfig;
-			Object.assign(innerNodes, nestedInner);
-			continue;
-		}
-		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
-		// Inline inputs on the step itself so nested-flow execution finds them.
-		// (RunnerSteps recursively executes flow nodes' inner steps.)
-		if (nodeConfig?.inputs) {
-			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
-		}
-		// Also surface the nodeConfig in the bubbled-up innerNodes map so
-		// BlokService.run can read inputs via `ctx.config[step.name]` when
-		// the inner step actually executes.
-		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
-		thenInternal.push(regularStep);
-	}
-	for (let i = 0; i < elseSteps.length; i++) {
-		const s = elseSteps[i];
-		if (!isPlainObject(s)) continue;
-		if (isPlainObject((s as Record<string, unknown>).branch)) {
-			const {
-				internalStep: nestedStep,
-				nodeConfig: nestedConfig,
-				innerNodes: nestedInner,
-			} = normalizeBranchStep(s as Record<string, unknown>, i);
-			elseInternal.push(nestedStep);
-			innerNodes[nestedStep.name] = nestedConfig;
-			Object.assign(innerNodes, nestedInner);
-			continue;
-		}
-		const { internalStep: regularStep, nodeConfig } = normalizeRegularStep(s as Record<string, unknown>, {}, i);
-		if (nodeConfig?.inputs) {
-			(regularStep as Record<string, unknown>).inputs = nodeConfig.inputs;
-		}
-		if (nodeConfig) innerNodes[regularStep.name] = nodeConfig;
-		elseInternal.push(regularStep);
-	}
+	const thenBlock = normalizeStepBlock(thenSteps);
+	Object.assign(innerNodes, thenBlock.innerNodes);
+	const thenInternal = thenBlock.innerInternal;
+	const elseBlock = normalizeStepBlock(elseSteps);
+	Object.assign(innerNodes, elseBlock.innerNodes);
+	const elseInternal = elseBlock.innerInternal;
 
 	const conditions: InternalCondition[] = [{ type: "if", condition: when, steps: thenInternal }];
 	if (elseInternal.length > 0) {
@@ -521,6 +490,7 @@ function normalizeBranchStep(
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
 		flow: true,
+		...copyUi(step),
 	};
 	const nodeConfig: InternalNodeConfig = { conditions };
 
@@ -583,6 +553,7 @@ function normalizeSubworkflowStep(
 		// Default `wait: true` when omitted. `wait: false` triggers the
 		// async dispatch branch in SubworkflowNode.run.
 		wait: step.wait === undefined ? true : Boolean(step.wait),
+		...copyUi(step),
 	};
 
 	if (typeof step.idempotencyKey === "string" && step.idempotencyKey.length > 0) {
@@ -698,6 +669,7 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 		ephemeral,
 		waitForMs,
 		waitUntil,
+		...copyUi(step),
 	};
 }
 
@@ -764,6 +736,7 @@ function normalizeForEachStep(
 		type: "forEach",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
+		...copyUi(step),
 	};
 	// nodeConfig — top-level `steps` triggers Configuration's
 	// isFlowWithProperties path which materializes into NodeBase[].
@@ -831,6 +804,7 @@ function normalizeLoopStep(
 		type: "loop",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
+		...copyUi(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		while: whileExpr,
@@ -996,6 +970,7 @@ function normalizeSwitchStep(
 		type: "switch",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
+		...copyUi(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		on: sw.on,
@@ -1052,6 +1027,7 @@ function normalizeTryCatchStep(
 		type: "tryCatch",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
+		...copyUi(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		try: tryBlock.innerInternal,
@@ -1110,6 +1086,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function pickString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Spread `ui` onto an InternalStep when present. The runner ignores `ui` at
+ * execution — this purely preserves canvas metadata across the
+ * IR→normalize→toJson round-trip (issue #301). Applied in every InternalStep
+ * constructor (incl. nested inner-step builders) so `ui` survives at any depth.
+ */
+function copyUi(step: Record<string, unknown>): { ui?: Record<string, unknown> } {
+	return isPlainObject(step.ui) ? { ui: step.ui } : {};
 }
 
 /**
