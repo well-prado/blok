@@ -221,8 +221,15 @@ export class LoopNode extends RunnerNode {
 	private evaluateCondition(expr: string, ctx: Context): unknown {
 		const data = (ctx.response?.data ?? ctx.request?.body ?? {}) as Record<string, unknown>;
 		const vars = (ctx.vars ?? {}) as Record<string, unknown>;
-		const fn = new Function("ctx", "data", "vars", `"use strict";return (${expr});`);
-		return fn(ctx, data, vars) as unknown;
+		try {
+			const fn = new Function("ctx", "data", "vars", `"use strict";return (${expr});`);
+			return fn(ctx, data, vars) as unknown;
+		} catch (cause) {
+			const reason = cause instanceof Error ? cause.message : String(cause);
+			throw new Error(
+				`[blok] loop "${this.name}" while condition failed: ${reason}. Loop while expressions only bind ctx, data, and vars; func.* is only available in Mapper-resolved step inputs.`,
+			);
+		}
 	}
 
 	private cloneCtxForIteration(ctx: Context): Context {

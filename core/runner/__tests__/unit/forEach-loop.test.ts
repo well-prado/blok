@@ -757,6 +757,29 @@ describe("v0.5 forEach + loop integration", () => {
 			expect((ctx.state as Record<string, unknown>)["poll-loopIndex"]).toBe(3);
 		});
 
+		it("rejects func references in while conditions with a clear loop error", async () => {
+			const wfDef = {
+				name: "test-loop-func-rejected",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "func-loop",
+						loop: {
+							while: "func.isReady()",
+							maxIterations: 1,
+							do: [{ id: "noop", use: "@blokjs/expr", type: "module", inputs: { expression: "1" } }],
+						},
+					},
+				],
+			};
+			const { config, ctx } = await bootConfig(wfDef);
+
+			await expect(new Runner(config.steps as NodeBase[]).run(ctx)).rejects.toThrow(
+				/loop "func-loop" while condition failed: func is not defined.*only bind ctx, data, and vars/,
+			);
+		});
+
 		it("throws LoopMaxIterationsError when cap is exceeded", async () => {
 			const wfDef = {
 				name: "test-loop-cap",
