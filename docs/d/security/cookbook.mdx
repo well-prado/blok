@@ -73,14 +73,12 @@ have it, every protected workflow chains `auth-check` + `branch` and
 the rest of the steps see a populated `ctx.state["auth-check"].identity`.
 
 For domain-heavy services, factor the auth pair into a named
-sub-workflow and invoke it as a step:
+sub-workflow and invoke it with `subworkflow()`:
 
 ```ts
-{
-  id: "auth",
-  subworkflow: "shared.auth-and-deny-if-unauth",
-  inputs: { authorization: $.req.headers.authorization },
-}
+const auth = subworkflow("auth", "shared.auth-and-deny-if-unauth", {
+  authorization: req.headers.authorization,
+});
 ```
 
 ### Pattern B: Shared auth sub-workflow (recommended for multi-route services)
@@ -137,28 +135,23 @@ The protected workflow:
 
 ```ts
 // triggers/http/src/workflows/api/users-create.ts
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, http, step, subworkflow } from "@blokjs/core";
+import { CreateUserNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "Create user",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/api/users" } },
-  steps: [
-    {
-      id: "auth",
-      subworkflow: "shared.auth-and-deny-if-unauth",
-      inputs: { authorization: $.req.headers.authorization },
-    },
-    {
-      id: "create",
-      use: "create-user",
-      inputs: {
-        payload: $.req.body,
-        actor: $.state.auth.identity,
-      },
-    },
-  ],
-});
+export default workflow(
+  "Create user",
+  { version: "1.0.0", trigger: http.post("/api/users") },
+  (req) => {
+    const auth = subworkflow("auth", "shared.auth-and-deny-if-unauth", {
+      authorization: req.headers.authorization,
+    });
+
+    step("create", CreateUserNode, {
+      payload: req.body,
+      actor: auth.identity,
+    });
+  },
+);
 ```
 
 When the sub-workflow's deny branch fires (`stop: true`), the child
@@ -225,41 +218,35 @@ simplest pattern uses a `branch` step that checks role claims on
 when authorization fails.
 
 ```ts
-import { workflow, branch, $ } from "@blokjs/helper";
+import { workflow, http, step, branch, subworkflow, not } from "@blokjs/core";
+import { ExprNode, RespondNode, DeleteUserNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "Delete user",
-  version: "1.0.0",
-  trigger: {
-    http: { method: "DELETE", path: "/api/users/:id" },
+export default workflow(
+  "Delete user",
+  { version: "1.0.0", trigger: http.delete("/api/users/:id") },
+  (req) => {
+    const auth = subworkflow("auth", "shared.auth-and-deny-if-unauth", {
+      authorization: req.headers.authorization,
+    });
+
+    // Compute the admin check in a node so it produces a boolean handle.
+    const isAdmin = step("is-admin", ExprNode, {
+      expression: "(ctx.state.auth.identity.roles || []).includes('admin')",
+    });
+
+    branch("rbac", not(isAdmin), {
+      then: () => {
+        step("forbidden", RespondNode, {
+          status: 403,
+          body: { error: "Admin role required" },
+        }, { stop: true });
+      },
+      else: () => {
+        step("delete", DeleteUserNode, { userId: req.params.id });
+      },
+    });
   },
-  steps: [
-    {
-      id: "auth",
-      subworkflow: "shared.auth-and-deny-if-unauth",
-      inputs: { authorization: $.req.headers.authorization },
-    },
-    branch({
-      id: "rbac",
-      when: !$.state.auth.identity.roles.includes("admin"),
-      then: [
-        {
-          id: "forbidden",
-          use: "@blokjs/respond",
-          inputs: { status: 403, body: { error: "Admin role required" } },
-          stop: true,
-        },
-      ],
-      else: [
-        {
-          id: "delete",
-          use: "delete-user",
-          inputs: { userId: $.req.params.id },
-        },
-      ],
-    }),
-  ],
-});
+);
 ```
 
 For more elaborate policies (resource ownership, attribute-based

@@ -107,24 +107,22 @@ After a successful add you'll see exactly what changed:
 
 ### Use it in a workflow
 
-A step runs on a sidecar when its `type` is `runtime.<lang>`. Write your node under `runtimes/<lang>/nodes/`, then reference it by name:
+A step runs on a sidecar when you pass it a `runtimeNode(name, "runtime.<lang>")`
+stub. Write your node under `runtimes/<lang>/nodes/`, then declare it by name and
+runtime:
 
 <CodeGroup>
 ```ts TypeScript workflow
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, runtimeNode, http } from "@blokjs/core";
 
-export default workflow({
-  name: "Resize Image",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/resize" } },
-  steps: [
-    {
-      id: "resize",
-      use: "image-resizer",        // a node in runtimes/python3/nodes/
-      type: "runtime.python3",     // ← run this step on the Python sidecar
-      inputs: { image: $.req.body.image },
-    },
-  ],
+// A typed stub for a node that lives in runtimes/python3/nodes/
+const resizeImage = runtimeNode<{ image: string }, { url: string }>(
+  "image-resizer",
+  "runtime.python3",   // ← run this step on the Python sidecar
+);
+
+export default workflow("Resize Image", { version: "1.0.0", trigger: http.post("/resize") }, (req) => {
+  step("resize", resizeImage, { image: req.body.image });
 });
 ```
 

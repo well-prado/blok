@@ -40,9 +40,27 @@ inputs directly on the step.
 
 ## Example: fetch cat facts
 
-Save this as `workflows/json/cats.json`:
+The CLI scaffolds JSON, but the same workflow reads cleaner as a TypeScript
+handle-DSL file (the preferred surface — it gives you typed step outputs and
+end-to-end client types). Both compile to the same v2 IR:
 
-```json
+<CodeGroup>
+```ts TypeScript — workflows/cats.ts
+import { workflow, step, http } from "@blokjs/core";
+import { RespondNode } from "@blokjs/helpers";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("cats.facts", {
+  version: "1.0.0",
+  description: "Fetches random cat facts from a public API.",
+  trigger: http.get("/cats"),
+}, (req) => {
+  const fetch = step("fetch", apiCall, { url: "https://catfact.ninja/fact", method: "GET" });
+  step("respond", RespondNode, { body: fetch });
+});
+```
+
+```json JSON — workflows/json/cats.json
 {
   "name": "cats.facts",
   "description": "Fetches random cat facts from a public API.",
@@ -67,6 +85,11 @@ Save this as `workflows/json/cats.json`:
   ]
 }
 ```
+</CodeGroup>
+
+In the TypeScript version, `step("fetch", …)` returns a handle you pass straight
+into the next step (`body: fetch`) — the JSON `"$.state.fetch"` string is the
+same reference, just untyped.
 
 ## Trigger section
 

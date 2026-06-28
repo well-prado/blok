@@ -155,31 +155,32 @@ Pick an `as` name that does **not** collide with any step `id` in the workflow.
 
 ## Context across sub-workflows
 
-A `subworkflow` step calls another workflow like a function:
+`subworkflow()` calls another workflow like a function and returns a
+handle to its response:
 
-- The parent step's resolved **`inputs` become the child's `ctx.request.body`**.
+- The call's resolved **`inputs` become the child's `ctx.request.body`**.
 - With `wait: true` (default), the **child's response lands at
-  `ctx.state[<id>].data`** in the parent.
+  `ctx.state[<id>]`** in the parent — and is what the returned handle points to.
 
 ```ts
+import { forEach, step, subworkflow } from "@blokjs/core";
+import { EvalScoreNode } from "@blokjs/helpers";
+
 // Parent
-forEach({
-  id: "scoreItems", in: $.state.load.items, as: "item",
-  do: [
-    { id: "retrieve", subworkflow: "eval-retrieve", wait: true, inputs: { query: $.state.item.query } },
-    { id: "score",    use: "eval-score", inputs: { hits: "js/ctx.state.retrieve.data.hits" } },
-  ],
-});
+forEach(load.items, (item) => {
+  const retrieve = subworkflow("retrieve", "eval-retrieve", { query: item.query });
+  step("score", EvalScoreNode, { hits: retrieve.data.hits });
+}, { as: "item" });
 
 // Child "eval-retrieve" reads the parent's inputs as its request body:
-// { id: "search", use: "eval-search", inputs: { query: $.req.body.query } }
+//   step("search", EvalSearchNode, { query: req.body.query });
 ```
 
 <Note>
-The `subworkflow:` value must match the **name the child is registered under**.
-When you register workflows via an explicit map (e.g. `Workflows.ts`), that's the
-**map key** — not necessarily the workflow's `name` field. File-based routes
-register under the workflow's `name`.
+The child name (second argument) must match the **name the child is registered
+under**. When you register workflows via an explicit map (e.g. `Workflows.ts`),
+that's the **map key** — not necessarily the workflow's `name` field. File-based
+routes register under the workflow's `name`.
 </Note>
 
 ## The footguns (and how to avoid them)

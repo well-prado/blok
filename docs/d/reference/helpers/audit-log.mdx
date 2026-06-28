@@ -11,18 +11,23 @@ bounded — oldest entries drop when full.
 For production audit trails, write to a durable store (Postgres, S3,
 Datadog) instead. This helper is the dev / test stand-in.
 
+Registered as `@blokjs/audit-log`. In the handle DSL, import the node
+object (`AuditLogNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "audit",
-  "use": "@blokjs/audit-log",
-  "ephemeral": true,
-  "inputs": {
-    "event": "user.deleted",
-    "attrs": { "userId": "js/ctx.request.params.userId", "deletedBy": "js/ctx.state.identity.sub" }
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { AuditLogNode, JwtVerifyNode } from "@blokjs/helpers";
+
+export default workflow("delete-user", { version: "1.0.0", trigger: http.delete("/users/:userId") }, (req) => {
+  const auth = step("auth", JwtVerifyNode, { token: "...", secret: process.env.JWT_SECRET });
+
+  step("audit", AuditLogNode, {
+    event: "user.deleted",
+    attrs: { userId: req.params.userId, deletedBy: auth.subject },
+  }, { ephemeral: true });
+});
 ```
 
 ## Inputs
@@ -55,19 +60,16 @@ The ring is bounded at 1000 entries; older entries drop.
 ## Production replacement
 
 The recommended production shape: write the same audit fields to a
-durable store via `@blokjs/api-call` or a custom node:
+durable store via an `@blokjs/api-call` node or a custom node:
 
-```json
-{
-  "id": "audit-prod",
-  "use": "@blokjs/api-call",
-  "ephemeral": true,
-  "inputs": {
-    "url": "https://audit-service.internal/events",
-    "method": "POST",
-    "body": "js/({ event: 'user.deleted', userId: ctx.request.params.userId, ts: Date.now() })"
-  }
-}
+```ts
+import ApiCallNode from "@blokjs/api-call";
+
+step("audit-prod", ApiCallNode, {
+  url: "https://audit-service.internal/events",
+  method: "POST",
+  body: { event: "user.deleted", userId: req.params.userId, ts: Date.now() },
+}, { ephemeral: true });
 ```
 
 ## Related

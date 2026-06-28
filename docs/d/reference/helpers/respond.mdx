@@ -15,19 +15,22 @@ It's a stateless mapper — it doesn't touch `ctx`, so it's harmless under a
 non-HTTP trigger (the envelope is just inert data). Fully additive:
 workflows that don't end in `@blokjs/respond` behave exactly as before.
 
+Registered as `@blokjs/respond`. In the handle DSL, import the node object
+(`RespondNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "respond",
-  "use": "@blokjs/respond",
-  "inputs": {
-    "status": 201,
-    "headers": { "Location": "/users/42" },
-    "body": { "id": 42, "name": "Ada" }
-  },
-  "ephemeral": true
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { RespondNode } from "@blokjs/helpers";
+
+export default workflow("create-user", { version: "1.0.0", trigger: http.post("/users") }, () => {
+  step("respond", RespondNode, {
+    status: 201,
+    headers: { Location: "/users/42" },
+    body: { id: 42, name: "Ada" },
+  }, { ephemeral: true });
+});
 ```
 
 ```bash
@@ -52,33 +55,37 @@ curl -i http://localhost:4000/users
 
 ### Redirect (302)
 
-```json
-{ "id": "go", "use": "@blokjs/respond",
-  "inputs": { "status": 302, "headers": { "Location": "/dashboard" } } }
+```ts
+step("go", RespondNode, { status: 302, headers: { Location: "/dashboard" } }, { ephemeral: true });
 ```
 
 ### Session-cookie login (single + multiple cookies)
 
-```json
-{ "id": "login", "use": "@blokjs/respond",
-  "inputs": { "body": { "ok": true },
-              "cookies": ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"] } }
+```ts
+step("login", RespondNode, {
+  body: { ok: true },
+  cookies: ["session=abc; Path=/; HttpOnly", "csrf=xyz; Path=/"],
+}, { ephemeral: true });
 ```
 
 ### Binary file download
 
-```json
-{ "id": "file", "use": "@blokjs/respond",
-  "inputs": { "body": "js/ctx.state.pdf.bytes",
-              "contentType": "application/pdf",
-              "headers": { "Content-Disposition": "attachment; filename=\"report.pdf\"" } } }
+Reference an earlier step's output through its returned handle:
+
+```ts
+const pdf = step("render", renderPdf, { id: req.params.id });
+
+step("file", RespondNode, {
+  body: pdf.bytes,
+  contentType: "application/pdf",
+  headers: { "Content-Disposition": 'attachment; filename="report.pdf"' },
+}, { ephemeral: true });
 ```
 
 ### Custom error status
 
-```json
-{ "id": "nope", "use": "@blokjs/respond",
-  "inputs": { "status": 422, "body": { "error": "validation failed" } } }
+```ts
+step("nope", RespondNode, { status: 422, body: { error: "validation failed" } }, { ephemeral: true });
 ```
 
 ## Behavior

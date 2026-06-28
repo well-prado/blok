@@ -20,31 +20,22 @@ type safety.
     contract — `input` types the call, `output` types the return.
 
     ```ts triggers/http/src/workflows/users/list.ts
-    import { workflow, $ } from "@blokjs/helper";
+    import { workflow, step, http } from "@blokjs/core";
+    import { RespondNode } from "@blokjs/helpers";
+    import apiCall from "@blokjs/api-call";
     import { z } from "zod";
 
     const User = z.object({ id: z.string(), name: z.string() });
 
-    export default workflow({
-      name: "users.list",
+    export default workflow("users.list", {
       version: "1.0.0",
       description: "List users, optionally filtered by a query.",
       input: z.object({ q: z.string().optional() }),
       output: z.object({ users: z.array(User), total: z.number().int() }),
-      trigger: { http: { method: "GET", path: "/api/users" } },
-      steps: [
-        {
-          id: "fetch",
-          use: "@blokjs/api-call",
-          inputs: { url: "https://example.com/api/users", method: "GET" },
-        },
-        {
-          id: "out",
-          use: "@blokjs/respond",
-          inputs: { body: { users: $.state.fetch.data, total: 0 } },
-          ephemeral: true,
-        },
-      ],
+      trigger: http.get("/api/users"),
+    }, (req) => {
+      const fetch = step("fetch", apiCall, { url: "https://example.com/api/users", method: "GET" });
+      step("out", RespondNode, { body: { users: fetch.data, total: 0 } }, { ephemeral: true });
     });
     ```
 

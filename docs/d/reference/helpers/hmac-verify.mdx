@@ -14,18 +14,22 @@ the [webhook trigger's built-in provider](/d/triggers/webhook) instead
 — it captures rawBody correctly and handles replay protection. This
 helper is for one-off / custom shapes inside an HTTP workflow.
 
+Registered as `@blokjs/hmac-verify`. In the handle DSL, import the node
+object (`HmacVerifyNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "verify",
-  "use": "@blokjs/hmac-verify",
-  "inputs": {
-    "signature": "js/ctx.request.headers['x-signature']",
-    "payload": "js/ctx.request.rawBody",
-    "secret": "js/process.env.WEBHOOK_SECRET"
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { HmacVerifyNode } from "@blokjs/helpers";
+
+export default workflow("verify-webhook", { version: "1.0.0", trigger: http.post("/hook") }, (req) => {
+  step("verify", HmacVerifyNode, {
+    signature: req.headers["x-signature"],
+    payload: req.rawBody,
+    secret: process.env.WEBHOOK_SECRET,
+  });
+});
 ```
 
 ## Inputs
@@ -64,18 +68,14 @@ arm to route per-failure responses.
 
 ### Manual GitHub-style verification
 
-```json
-{
-  "id": "verify-gh",
-  "use": "@blokjs/hmac-verify",
-  "inputs": {
-    "signature": "js/ctx.request.headers['x-hub-signature-256']",
-    "payload": "js/ctx.request.rawBody",
-    "secret": "js/process.env.GITHUB_WEBHOOK_SECRET",
-    "algorithm": "sha256",
-    "prefix": "sha256="
-  }
-}
+```ts
+step("verify-gh", HmacVerifyNode, {
+  signature: req.headers["x-hub-signature-256"],
+  payload: req.rawBody,
+  secret: process.env.GITHUB_WEBHOOK_SECRET,
+  algorithm: "sha256",
+  prefix: "sha256=",
+});
 ```
 
 ### Constant-time comparison

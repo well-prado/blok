@@ -16,14 +16,32 @@ undefined elsewhere and the step throws.
 
 ## Quickstart
 
-```json
-{
-  "id": "open",
-  "use": "@blokjs/sse-emit",
-  "inputs": { "event": "workflow_start", "data": { "runId": "js/ctx.id" } },
-  "ephemeral": true
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import { SseEmitNode } from "@blokjs/helpers";
+
+export default workflow(
+  "agent.stream",
+  {
+    version: "1.0.0",
+    // sse is a raw trigger block — pass it through opts.trigger.
+    trigger: { sse: { path: "/sse/agent/:sessionId" } },
+  },
+  () => {
+    step(
+      "open",
+      SseEmitNode,
+      { event: "workflow_start", data: { ok: true } },
+      { ephemeral: true },
+    );
+    // … long-running streaming node …
+  },
+);
 ```
+
+`sse-emit` works only under an `sse` trigger — `ctx.stream` is undefined
+elsewhere and the step throws. Pass `ephemeral: true` (4th `step` arg) so
+the control frame doesn't clutter `ctx.state`.
 
 ## Inputs
 

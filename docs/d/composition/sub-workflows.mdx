@@ -6,12 +6,13 @@ icon: "git-branch"
 
 import { StudioRunHeader, StudioStepRail, StudioSubRunsStrip } from "/snippets/studio-mocks.jsx";
 
-A sub-workflow step invokes another named workflow as if calling a
-function. By default the parent step blocks until the child completes
-and the child's `ctx.response` becomes the parent step's output;
-opt into fire-and-forget dispatch with `wait: false` and the parent
-returns immediately with `{runId, workflowName, scheduledAt}` while
-the child runs asynchronously.
+`subworkflow()` invokes another named workflow as if calling a
+function. It returns a typed handle to the child's response — use it
+downstream exactly like a `step()` handle. By default the parent blocks
+until the child completes and the child's `ctx.response` becomes the
+handle's value; opt into fire-and-forget dispatch with `wait: false`
+and the call returns immediately with `{runId, workflowName,
+scheduledAt}` while the child runs asynchronously.
 
 This is the Tier 2 composition primitive — pair it with
 [idempotent caching](/d/reliability/idempotency) and
@@ -22,112 +23,99 @@ matching Trigger.dev / Stripe semantics.
 
 ## Quickstart
 
-The child workflow is just a normal v2 workflow. Its `name:` field is
-the public identifier other workflows reference.
+`subworkflow(id, name, inputs, opts?)` is the handle-DSL way to call a
+child. The child is just a normal workflow; its `name` is the public
+identifier you pass as the second argument.
 
 <CodeGroup>
-```ts triggers/http/src/workflows/send-receipt-email.ts
-import { workflow, $ } from "@blokjs/helper";
+```ts src/workflows/send-receipt-email.ts
+import { workflow, http, step } from "@blokjs/core";
+import { SendGridNode, ExprNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "send-receipt-email",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/internal/send-receipt" } },
-  steps: [
-    {
-      id: "send",
-      use: "@blokjs/sendgrid",
-      inputs: {
-        to: $.req.body.email,
-        body: $.req.body.body,
-      },
-    },
-    {
-      id: "respond",
-      use: "@blokjs/respond",
-      inputs: {
-        body: {
-          messageId: $.state.send.id,
-          sentAt: $.state.send.timestamp,
-        },
-      },
-    },
-  ],
-});
+export default workflow(
+  "send-receipt-email",
+  { version: "1.0.0", trigger: http.post("/internal/send-receipt") },
+  (req) => {
+    const sent = step("send", SendGridNode, {
+      to: req.body.email,
+      body: req.body.body,
+    });
+    step("respond", ExprNode, {
+      expression: { messageId: sent.id, sentAt: sent.timestamp },
+    });
+  },
+);
 ```
 
-```ts triggers/http/src/workflows/checkout.ts
-import { workflow, $ } from "@blokjs/helper";
+```ts src/workflows/checkout.ts
+import { workflow, http, step, subworkflow } from "@blokjs/core";
+import { StripeChargeNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "checkout",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/checkout" } },
-  steps: [
-    {
-      id: "charge",
-      use: "@blokjs/stripe-charge",
-      inputs: { amount: $.req.body.amount, card: $.req.body.card },
-    },
-    {
-      id: "send-receipt",
-      subworkflow: "send-receipt-email",
-      inputs: {
-        email: $.req.body.email,
-        body: $.state.charge.receipt,
-      },
-    },
-  ],
-});
+export default workflow(
+  "checkout",
+  { version: "1.0.0", trigger: http.post("/checkout") },
+  (req) => {
+    const charge = step("charge", StripeChargeNode, {
+      amount: req.body.amount,
+      card: req.body.card,
+    });
+
+    const receipt = subworkflow("send-receipt", "send-receipt-email", {
+      email: req.body.email,
+      body: charge.receipt,
+    });
+
+    // `receipt` is a handle to the child's response — read it downstream.
+    return receipt;
+  },
+);
 ```
 </CodeGroup>
 
-The parent's `inputs` become the child's `ctx.request.body`. The child
-reads them via `$.req.body.<key>` exactly as if it had been
-HTTP-triggered. The child's `ctx.response` lands on the parent's
-`state["send-receipt"]`.
+The parent's `inputs` (third argument) become the child's
+`ctx.request.body`. The child reads them via `req.body.<key>` exactly as
+if it had been HTTP-triggered. The child's `ctx.response` lands on the
+parent's `state["send-receipt"]`, and `subworkflow()` returns a handle
+pointing there.
 
-## Field reference
+## Signature
 
-<ParamField path="id" type="string" required>
-  Stable identifier. The child's response lands at `$.state[id]`.
-</ParamField>
+```ts
+subworkflow(
+  id: string,
+  name: string | Handle,        // literal workflow name OR a handle for polymorphic dispatch
+  inputs: Record<string, unknown>,
+  opts?: {
+    wait?: boolean;             // default true — block for the child; false = fire-and-forget
+    dispatch?: "in-process" | "http-self";
+    allowList?: string[];       // constrain resolved names when `name` is a handle
+    idempotencyKey?: string | Handle;
+    idempotencyKeyTTL?: number; // default 86_400_000 (24h)
+    retry?: RetryConfig;
+    as?: string;                // store the response at state[as] instead of state[id]
+    ephemeral?: boolean;        // skip persistence; only ctx.prev carries it forward
+  },
+): Handle
+```
 
-<ParamField path="subworkflow" type="string" required>
-  Name of the workflow to invoke. Must match a `name:` field registered
-  in the [Workflow Registry](/d/reference/workflow-registry).
-</ParamField>
+The returned handle is rooted at `state[id]` (or `state[as]` when `as`
+is set) — pass it to downstream `step()`/`subworkflow()` inputs, a
+`branch`/`switchOn` discriminant, or `return` it as the workflow's
+response.
 
-<ParamField path="inputs" type="Record<string, unknown>">
-  Inputs passed to the child as `ctx.request.body`. May contain
-  `$`-proxy refs.
-</ParamField>
+<Note>
+**Also supported: object-style steps.** In JSON workflows (and the v1
+object DSL) the same step is a plain object —
+`{ id, subworkflow, inputs, ...opts }` — and works identically. The
+handle-DSL `subworkflow()` emits exactly that shape under the hood, so
+the two are wire-compatible. See
+[v2 step shapes](/d/reference/v2-step-shapes) for the object form.
 
-<ParamField path="wait" type="boolean" default="true">
-  Block until the child completes. `wait: false` is fire-and-forget —
-  the parent step returns immediately with `{runId, workflowName,
-  scheduledAt}` and the child runs asynchronously. See
-  [Wait modes](#wait-modes) for the full contract.
-</ParamField>
-
-<ParamField path="as / spread / ephemeral / active / stop">
-  Identical semantics to a regular step. See
-  [v2 step shapes](/d/reference/v2-step-shapes).
-</ParamField>
-
-<ParamField path="idempotencyKey" type="string">
-  Cache the **whole** sub-workflow's result. Read the warning below
-  before using on side-effect-bearing children.
-</ParamField>
-
-<ParamField path="idempotencyKeyTTL" type="number" default="86400000">
-  Cache lifetime in milliseconds. Default 24h.
-</ParamField>
-
-<ParamField path="retry" type="RetryConfig">
-  Retry the entire sub-workflow on failure. Each retry creates a fresh
-  child run record under the same parent.
-</ParamField>
+```ts
+// equivalent object-style step (JSON or v1 DSL)
+{ id: "send-receipt", subworkflow: "send-receipt-email", inputs: { /* ... */ } }
+```
+</Note>
 
 ## How dispatch works
 
@@ -180,15 +168,14 @@ The parent step `await`s the child runner to completion. The child's
 step (and its `retry` loop, if configured).
 
 ```ts
-{
-  id: "send-receipt",
-  subworkflow: "send-receipt-email",
-  inputs: { user: $.state.user, order: $.state.order },
-  // wait: true (default)
-}
+const receipt = subworkflow("send-receipt", "send-receipt-email", {
+  user: user,
+  order: order,
+}); // wait: true is the default
 ```
 
-`state["send-receipt"]` carries the child's full response shape.
+`receipt` (and `state["send-receipt"]`) carries the child's full
+response shape.
 
 ### `wait: false` — fire-and-forget
 
@@ -197,15 +184,13 @@ runs asynchronously via `setImmediate`. Errors are caught + routed to
 the tracker, NOT propagated to the parent.
 
 ```ts
-{
-  id: "queue-email",
-  subworkflow: "send-receipt-email",
-  inputs: { orderId: $.state.charge.id, email: $.req.body.email },
-  wait: false,
-}
+const queued = subworkflow("queue-email", "send-receipt-email", {
+  orderId: charge.id,
+  email: req.body.email,
+}, { wait: false });
 ```
 
-`state["queue-email"]` carries:
+`queued` (and `state["queue-email"]`) carries:
 
 ```ts
 {
@@ -233,28 +218,23 @@ parent's lifecycle.
 
 ## Output shape
 
-The parent reads the child's response at `$.state[<step.id>]`. Whatever
-the child puts in `ctx.response` (typically via `@blokjs/respond` as
-the last step) becomes the parent's input.
+The returned handle (and `$.state[<id>]`) carries whatever the child
+put in `ctx.response` — typically via `@blokjs/respond` as the last
+step. Feed it straight into downstream node inputs:
 
 ```ts
-// parent
-{
-  id: "fulfill",
-  subworkflow: "ship-order",
-  inputs: { orderId: $.state.charge.orderId },
-}
+const fulfill = subworkflow("fulfill", "ship-order", {
+  orderId: charge.orderId,
+});
 
 // later in the same parent
-{
-  id: "log",
-  use: "@blokjs/postgres-write",
-  inputs: { row: { trackingId: $.state.fulfill.trackingId } },
-}
+step("log", PostgresWriteNode, {
+  row: { trackingId: fulfill.trackingId },
+});
 ```
 
-If the child author wants to expose multiple outputs at the top level
-of the parent's state, use `spread: true` on the parent step.
+If the child exposes multiple outputs you want flattened to the top
+level of the parent's state, pass `{ spread: true }` in the opts.
 
 ## Composing with idempotency caching
 
@@ -267,13 +247,13 @@ Cache HIT means the child workflow is **never invoked** — no child run
 record, no child `NODE_STARTED` events, no side effects fire.
 
 ```ts
-{
-  id: "callPipeline",
-  subworkflow: "generate-and-send-email",
-  inputs: { topic: $.req.body.topic, email: $.state.user.email },
-  idempotencyKey: $.req.body.requestId,
+subworkflow("callPipeline", "generate-and-send-email", {
+  topic: req.body.topic,
+  email: user.email,
+}, {
+  idempotencyKey: req.body.requestId,
   retry: { maxAttempts: 3 },
-}
+});
 ```
 
 <Warning>
@@ -300,13 +280,13 @@ at-most-once dispatch deduplication, matching Trigger.dev and Stripe
 semantics.
 
 ```ts
-{
-  id: "send-receipt",
-  subworkflow: "send-receipt-email",
-  inputs: { orderId: $.state.charge.id, email: $.req.body.email },
+subworkflow("send-receipt", "send-receipt-email", {
+  orderId: charge.id,
+  email: req.body.email,
+}, {
   wait: false,
-  idempotencyKey: $.req.body.requestId,
-}
+  idempotencyKey: req.body.requestId,
+});
 ```
 
 Behavior:
@@ -519,8 +499,8 @@ registration and HMR notes.
   </Accordion>
   <Accordion title="Forgetting that the child reads from req.body, not state">
     The parent's `inputs` become `request.body` for the child. Inside
-    the child, use `$.req.body.foo`, not `$.state.foo` (parent state
-    isn't visible).
+    the child, read the entry handle's `req.body.foo`, not parent state
+    — the parent's state isn't visible to the child.
   </Accordion>
   <Accordion title="Recursion through a shared utility workflow">
     If `validate` calls `lookup-user` which calls `validate`, you'll
@@ -536,32 +516,29 @@ registration and HMR notes.
 
 ## Polymorphic dispatch
 
-`subworkflow:` accepts a literal workflow name *or* a runtime expression
-(`$.<path>`, `js/ctx....`). One trigger can fan out to N handlers
-without a `switch` step.
+The `name` argument accepts a literal workflow name *or* a **handle**
+(`event.body.kind`, `req.body.type`). One trigger can fan out to N
+handlers without a `switch` step.
 
 ```ts
-{
-  id: "dispatch",
-  subworkflow: $.req.body.kind,
-  inputs: { event: $.req.body },
+subworkflow("dispatch", event.body.kind, { event: event.body }, {
   allowList: ["handler.payment", "handler.shipping"],
-}
+});
 ```
 
-When `subworkflow` is an expression, the runner evaluates it against the
-live ctx at dispatch time and looks up the resolved name in the workflow
-registry. If a parent trigger sets a namespace (today: webhook
+When `name` is a handle, the runner resolves it against the live ctx at
+dispatch time and looks up the resolved name in the workflow registry.
+If a parent trigger sets a namespace (today: webhook
 `namespace: "stripe"`), the resolved name is prefixed before lookup —
 `invoice.paid` becomes `stripe.invoice.paid`.
 
 `allowList` is the safety guard. When set, the **final** resolved name
 (post-namespace) must be in the array — otherwise the dispatch is
 rejected with a structured error. **Strongly recommended** when the
-expression depends on caller-supplied data so a malicious request body
+handle resolves from caller-supplied data so a malicious request body
 can't escalate the workflow surface accessible from a route. The
-allow-list also works on literal `subworkflow:` strings for
-defence-in-depth audit.
+allow-list also works on literal `name` strings for defence-in-depth
+audit.
 
 Resolution failure modes:
 - Expression evaluates to a non-string or empty string → throw with the
@@ -574,18 +551,16 @@ Resolution failure modes:
 
 ## Cross-process dispatch (`dispatch: "http-self"`)
 
-Sub-workflows accept a `dispatch:` field that picks the execution
+`subworkflow()` accepts a `dispatch` opt that picks the execution
 strategy. Default is `"in-process"`; switch to `"http-self"` to
 dispatch the child as a fresh HTTP request to the deployment's own
 base URL.
 
 ```ts
-{
-  id: "send-receipt",
-  subworkflow: "send-receipt-email",
-  inputs: { user: $.state.user, order: $.state.order },
-  dispatch: "http-self",
-}
+subworkflow("send-receipt", "send-receipt-email", {
+  user: user,
+  order: order,
+}, { dispatch: "http-self" });
 ```
 
 | `dispatch:` value | What happens |

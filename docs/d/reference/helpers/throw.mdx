@@ -11,81 +11,75 @@ produces a 401; `body: {...}` produces the JSON response body.
 Without this propagation, RunnerSteps' default wrap would lose the
 structured error info and the caller would get a generic 500.
 
+Registered as `@blokjs/throw`. In the handle DSL, import the node object
+(`ThrowNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "reject",
-  "use": "@blokjs/throw",
-  "inputs": {
-    "message": "Unauthorized — invalid token",
-    "code": 401,
-    "body": { "reason": "invalid_token" }
-  }
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { ThrowNode } from "@blokjs/helpers";
+
+export default workflow("guard", { version: "1.0.0", trigger: http.post("/secure") }, () => {
+  step("reject", ThrowNode, {
+    message: "Unauthorized — invalid token",
+    code: 401,
+    body: { reason: "invalid_token" },
+  });
+});
 ```
 
 ## Inputs
 
 | Field | Type | Notes |
 |---|---|---|
-| `message` | `string` | Surfaces as `$.error.message` in [tryCatch.catch](/d/primitives/tryCatch) arms. |
+| `message` | `string` | Surfaces as `ctx.error.message` in [tryCatch.catch](/d/primitives/tryCatch) arms. |
 | `code` | `number` | HTTP status code propagated to the response. Common: `400`, `401`, `403`, `404`, `409`, `422`, `500`. |
 | `body` | unknown (optional) | Custom JSON response body. |
-| `name` | `string` (optional) | Error name. Surfaces as `$.error.name`. |
+| `name` | `string` (optional) | Error name. Surfaces as `ctx.error.name`. |
 
 ## Common use cases
 
 ### tryCatch default catch-arm
 
-```json
-"tryCatch": {
-  "try": [/* ... */],
-  "catch": [
-    {
-      "id": "rethrow",
-      "use": "@blokjs/throw",
-      "inputs": { "message": "js/`processing failed: ${ctx.error.message}`", "code": 500 }
-    }
-  ]
-}
+The `catch` callback receives the error handle — pass `err.message`
+through `tpl` to build the rethrow message:
+
+```ts
+import { tryCatch, tpl } from "@blokjs/core";
+
+tryCatch("process", {
+  try: () => { /* ... */ },
+  catch: (err) => {
+    step("rethrow", ThrowNode, { message: tpl`processing failed: ${err.message}`, code: 500 });
+  },
+});
 ```
 
 ### Switch default arm
 
-```json
-{
-  "id": "route",
-  "switch": {
-    "on": "ctx.request.body.kind",
-    "cases": [/* ... */],
-    "default": [
-      { "id": "unknown-kind", "use": "@blokjs/throw", "inputs": { "message": "unknown kind", "code": 400 } }
-    ]
-  }
-}
+```ts
+import { switchOn } from "@blokjs/core";
+
+switchOn(req.body.kind, {
+  cases: [/* ... */],
+  default: () => { step("unknown-kind", ThrowNode, { message: "unknown kind", code: 400 }); },
+}, { id: "route" });
 ```
 
 ### Middleware short-circuit
 
-In an auth-check middleware:
+In an auth-check middleware, guard with a `branch` and throw on the
+missing-token path:
 
-```json
-{
-  "name": "auth-check",
-  "_middleware": true,
-  "steps": [
-    {
-      "id": "guard",
-      "branch": {
-        "when": "ctx.request.headers['authorization'] === undefined",
-        "then": [
-          { "id": "reject", "use": "@blokjs/throw", "inputs": { "message": "missing bearer token", "code": 401 } }
-        ]
-      }
-    }
-  ]
-}
+```ts
+import { branch, eq } from "@blokjs/core";
+
+branch("guard", eq(req.headers["authorization"], undefined), {
+  then: () => {
+    step("reject", ThrowNode, { message: "missing bearer token", code: 401 });
+  },
+});
 ```
 
 The thrown 401 short-circuits the trigger's middleware chain — the
@@ -97,8 +91,8 @@ main workflow never runs.
 |---|---|
 | `code` | HTTP response status code (HTTP trigger), reject reason (webhook), retry signal (worker). |
 | `body` | HTTP response body (when set). |
-| `message` | `$.error.message` inside `tryCatch.catch`. |
-| `name` | `$.error.name` inside `tryCatch.catch`. |
+| `message` | `err.message` inside `tryCatch.catch`. |
+| `name` | `err.name` inside `tryCatch.catch`. |
 
 The `code` from the deepest `GlobalError` in the cause chain wins —
 useful when one throw wraps another.

@@ -16,6 +16,43 @@ Think of Nodes as specialized microservices that:
 
 This modular approach allows developers to build complex applications by connecting simple, focused components rather than writing monolithic code.
 
+## A minimal node
+
+A node is a `defineNode()` call from `@blokjs/core`: a name, a Zod `input`
+schema, a Zod `output` schema, and an `execute` function. Everything else is
+optional.
+
+```typescript
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+export default defineNode({
+  name: "greet",
+  description: "Greets the caller",
+  input: z.object({ name: z.string().optional() }),
+  output: z.object({ message: z.string() }),
+  async execute(ctx, input) {
+    return { message: `Hello, ${input.name ?? "World"}!` };
+  },
+});
+```
+
+`input` is validated and typed before `execute` runs; the return value is
+validated against `output`. Import the node into a workflow and hand the object
+to `step()` — never reference it by string:
+
+```typescript
+import { workflow, step, http } from "@blokjs/core";
+import greet from "./nodes/greet";
+
+export default workflow("greet", { version: "1.0.0", trigger: http.get("/greet") }, (req) => {
+  step("greet", greet, { name: req.query.name });
+});
+```
+
+The rest of this page covers the CLI scaffold, validation, error handling, and
+the built-in nodes.
+
 ## Creating a Node
 
 ### Using the CLI
@@ -81,12 +118,11 @@ Each Node is essentially a self-contained package with its own dependencies, con
 
 ### TypeScript: defineNode()
 
-In TypeScript, Nodes are defined using the `defineNode()` helper from `@blokjs/runner`. The CLI scaffolds this for you:
+In TypeScript, Nodes are defined using the `defineNode()` helper from `@blokjs/core`. The CLI scaffolds this for you:
 
 ```typescript
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
-import type { Context } from "@blokjs/shared";
 
 const InputType = z.object({
   message: z.string().optional(),
@@ -98,9 +134,10 @@ const OutputType = z.object({
 
 export default defineNode({
   name: "greeter",
+  description: "Greets the caller",
   input: InputType,
   output: OutputType,
-  async execute(ctx: Context, inputs: z.infer<typeof InputType>) {
+  async execute(ctx, inputs) {
     return {
       message: inputs.message || "Hello World from Node!",
     };
@@ -239,9 +276,8 @@ Each Node has its own `package.json` file with dependencies and scripts:
     "vitest": "^3.0.4"
   },
   "dependencies": {
-    "@blokjs/shared": "^0.0.9",
-    "@blokjs/runner": "^0.1.21",
-    "@blokjs/helper": "^0.1.4"
+    "@blokjs/core": "^0.5.0",
+    "zod": "^3.23.0"
   },
   "private": true
 }
@@ -311,7 +347,7 @@ Blok validates inputs and outputs with **Zod** (TypeScript) and **Pydantic**
 
 ```typescript
 // TypeScript — Zod schemas on defineNode()
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
 export default defineNode({
@@ -365,21 +401,16 @@ Errors are propagated to the workflow as step failures and logged for debugging.
 
 ## Built-in Nodes (TypeScript)
 
-Blok comes with several built-in Nodes registered in the `src/Nodes.ts` file:
+Blok ships several built-in nodes as standalone packages. Import the node and
+hand the object straight to `step()` — there's no registry file to maintain:
 
 ```typescript
-import ApiCall from "@blokjs/api-call";
-import IfElse from "@blokjs/if-else";
-import type { NodeBase } from "@blokjs/shared";
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
 
-const nodes: {
-  [key: string]: NodeBase;
-} = {
-  "@blokjs/api-call": new ApiCall(),
-  "@blokjs/if-else": new IfElse(),
-};
-
-export default nodes;
+export default workflow("countries", { version: "1.0.0", trigger: http.get("/countries") }, (req) => {
+  step("fetch", apiCall, { url: "https://countriesnow.space/api/v0.1/countries", method: "GET" });
+});
 ```
 
 ### Key Built-in Nodes
@@ -389,9 +420,9 @@ export default nodes;
    - Supports various HTTP methods (GET, POST, PUT, DELETE, etc.)
    - Handles request headers, body, and response parsing
 
-2. **`@blokjs/if-else`**:
-   - Provides conditional branching in workflows
-   - Evaluates conditions and executes different steps based on the results
+2. **Branching**:
+   - Conditional flow is a first-class primitive: `branch(id, condition, { then, else })`
+   - Use the typed comparators (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `not`) for the condition
    - Essential for creating dynamic workflows
 
 ## Best Practices for Node Development

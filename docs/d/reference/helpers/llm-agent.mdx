@@ -17,27 +17,46 @@ pattern.
 
 ## Quickstart
 
-```json
-{
-  "id": "agent",
-  "use": "@blokjs/llm-agent",
-  "inputs": {
-    "channel": "js/`agent:${ctx.request.params.sessionId}`",
-    "apiKey": "js/process.env.OPENROUTER_API_KEY",
-    "model": "openai/gpt-4o-mini",
-    "messages": "js/[{role:'system',content:'...'}, ...history, {role:'user',content:ctx.request.body.message}]",
-    "tools": [
-      {
-        "name": "get_weather",
-        "description": "Returns the current weather for a given city.",
-        "parameters": { "type": "object", "properties": { "city": { "type": "string" } }, "required": ["city"] },
-        "endpoint": "http://localhost:4000/tools/weather"
-      }
-    ],
-    "maxIterations": 10
-  }
-}
+```ts
+import { workflow, step, http, tpl } from "@blokjs/core";
+import { LlmAgentNode } from "@blokjs/helpers";
+
+export default workflow(
+  "agent.message",
+  {
+    version: "1.0.0",
+    trigger: http.post("/agent/:sessionId/message", { accept: "application/json" }),
+  },
+  (req) => {
+    step("agent", LlmAgentNode, {
+      channel: tpl`agent:${req.params.sessionId}`,
+      apiKey: process.env.OPENROUTER_API_KEY,
+      model: "openai/gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        { role: "user", content: req.body.message },
+      ],
+      tools: [
+        {
+          name: "get_weather",
+          description: "Returns the current weather for a given city.",
+          parameters: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
+          endpoint: "http://localhost:4000/tools/weather",
+        },
+      ],
+      maxIterations: 10,
+    });
+  },
+);
 ```
+
+`tpl` embeds the `sessionId` path handle into the bus channel. When the
+model picks `get_weather`, the agent POSTs to the tool endpoint, feeds
+the result back, and continues the loop.
 
 ## Inputs
 

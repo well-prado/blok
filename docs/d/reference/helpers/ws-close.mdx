@@ -9,15 +9,21 @@ standard WebSocket close frame with the supplied code + reason.
 
 ## Quickstart
 
-```json
-{
-  "id": "close",
-  "use": "@blokjs/ws-close",
-  "inputs": {
-    "code": 4001,
-    "reason": "Invalid token"
-  }
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import { WsCloseNode } from "@blokjs/helpers";
+
+export default workflow(
+  "ws-guard",
+  {
+    version: "1.0.0",
+    // websocket is a raw trigger block — pass it through opts.trigger.
+    trigger: { websocket: { path: "/ws/secure", events: ["open"] } },
+  },
+  () => {
+    step("close", WsCloseNode, { code: 4001, reason: "Invalid token" });
+  },
+);
 ```
 
 ## Inputs
@@ -35,22 +41,27 @@ standard WebSocket close frame with the supplied code + reason.
 
 ### Auth-fail close
 
-```json
-{
-  "name": "WS Auth-Check",
-  "trigger": { "websocket": { "path": "/ws/secure", "events": ["open", "message"] } },
-  "steps": [
-    {
-      "id": "verify",
-      "branch": {
-        "when": "ctx.request.headers['authorization'] === undefined",
-        "then": [
-          { "id": "close", "use": "@blokjs/ws-close", "inputs": { "code": 4001, "reason": "missing auth header" } }
-        ]
-      }
-    }
-  ]
-}
+`branch` conditions are evaluated as raw `ctx.*` expressions (never
+`$.`/`js/`-prefixed), so write them as plain strings:
+
+```ts
+import { workflow, step, branch } from "@blokjs/core";
+import { WsCloseNode } from "@blokjs/helpers";
+
+export default workflow(
+  "ws-auth-check",
+  {
+    version: "1.0.0",
+    trigger: { websocket: { path: "/ws/secure", events: ["open", "message"] } },
+  },
+  () => {
+    branch("verify", "ctx.request.headers['authorization'] === undefined", {
+      then: () => {
+        step("close", WsCloseNode, { code: 4001, reason: "missing auth header" });
+      },
+    });
+  },
+);
 ```
 
 ### Idle timeout
@@ -58,16 +69,12 @@ standard WebSocket close frame with the supplied code + reason.
 Trigger on `events: ["message"]`, track last-activity in a KV, close
 when stale:
 
-```json
-{
-  "id": "close-if-idle",
-  "branch": {
-    "when": "(Date.now() - (ctx.state.lastActivity || 0)) > 300000",
-    "then": [
-      { "id": "close", "use": "@blokjs/ws-close", "inputs": { "code": 1000, "reason": "idle timeout" } }
-    ]
-  }
-}
+```ts
+branch("close-if-idle", "(Date.now() - (ctx.state.lastActivity || 0)) > 300000", {
+  then: () => {
+    step("close", WsCloseNode, { code: 1000, reason: "idle timeout" });
+  },
+});
 ```
 
 ## Close code reference

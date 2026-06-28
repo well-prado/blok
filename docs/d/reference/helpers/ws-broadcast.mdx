@@ -11,18 +11,28 @@ via Redis pub/sub.
 
 ## Quickstart
 
-```json
-{
-  "id": "broadcast",
-  "use": "@blokjs/ws-broadcast",
-  "inputs": {
-    "channel": "js/`room-${ctx.request.params.roomId}`",
-    "message": "js/ctx.request.body"
-  }
-}
+```ts
+import { workflow, step, tpl } from "@blokjs/core";
+import { WsBroadcastNode } from "@blokjs/helpers";
+
+export default workflow(
+  "ws-room",
+  {
+    version: "1.0.0",
+    // websocket is a raw trigger block — pass it through opts.trigger.
+    trigger: { websocket: { path: "/ws/room/:roomId", events: ["message"] } },
+  },
+  (conn) => {
+    step("broadcast", WsBroadcastNode, {
+      channel: tpl`room-${conn.params.roomId}`,
+      message: conn.body,
+    });
+  },
+);
 ```
 
-Every WS connection in the room sees the message.
+Every WS connection in the room sees the message. `tpl` embeds the
+`roomId` path handle into the channel string.
 
 ## Inputs
 
@@ -54,23 +64,23 @@ delivers to its local connections. Per-connection
 
 ### Chat room
 
-```json
-"trigger": { "websocket": { "path": "/ws/room/:roomId" } },
-"steps": [
-  { "id": "broadcast", "use": "@blokjs/ws-broadcast", "inputs": { "channel": "js/`room-${ctx.request.params.roomId}`", "message": "js/ctx.request.body" } }
-]
-```
+The [quickstart](#quickstart) above is exactly the chat-room shape — a
+`websocket` trigger on `/ws/room/:roomId` broadcasting each inbound
+message to everyone in that room.
 
 ### Server-pushed event from HTTP
 
-```json
-{
-  "name": "Push Update",
-  "trigger": { "http": { "method": "POST", "path": "/push" } },
-  "steps": [
-    { "id": "push", "use": "@blokjs/ws-broadcast", "inputs": { "channel": "live", "message": "js/ctx.request.body" } }
-  ]
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { WsBroadcastNode } from "@blokjs/helpers";
+
+export default workflow(
+  "push-update",
+  { version: "1.0.0", trigger: http.post("/push") },
+  (req) => {
+    step("push", WsBroadcastNode, { channel: "live", message: req.body });
+  },
+);
 ```
 
 Connected browsers on `/ws/live` receive every POST without an

@@ -11,25 +11,29 @@ The alternative — Zod inside a custom `defineNode` — is fine too. Use
 this when you want to keep schemas in JSON (e.g. shared across
 languages, or generated from an OpenAPI spec).
 
+Registered as `@blokjs/json-schema`. In the handle DSL, import the node
+object (`JsonSchemaNode`) from `@blokjs/helpers` and pass it to `step()`.
+
 ## Quickstart
 
-```json
-{
-  "id": "validate",
-  "use": "@blokjs/json-schema",
-  "inputs": {
-    "schema": {
-      "type": "object",
-      "required": ["name", "email"],
-      "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "email": { "type": "string", "format": "email" },
-        "age": { "type": "integer", "minimum": 0 }
-      }
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { JsonSchemaNode } from "@blokjs/helpers";
+
+export default workflow("create-user", { version: "1.0.0", trigger: http.post("/users") }, (req) => {
+  step("validate", JsonSchemaNode, {
+    schema: {
+      type: "object",
+      required: ["name", "email"],
+      properties: {
+        name: { type: "string", minLength: 1 },
+        email: { type: "string", format: "email" },
+        age: { type: "integer", minimum: 0 },
+      },
     },
-    "data": "js/ctx.request.body"
-  }
-}
+    data: req.body,
+  });
+});
 ```
 
 ## Inputs
@@ -52,22 +56,15 @@ every error path: `body.email format email; body.age must be >= 0`.
 
 ### Request-body validation
 
-```json
-{
-  "name": "Create User",
-  "trigger": { "http": { "method": "POST", "path": "/users" } },
-  "steps": [
-    {
-      "id": "validate",
-      "use": "@blokjs/json-schema",
-      "inputs": {
-        "schema": { /* ... */ },
-        "data": "js/ctx.request.body"
-      }
-    },
-    { "id": "create", "use": "...", "inputs": {} }
-  ]
-}
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { JsonSchemaNode } from "@blokjs/helpers";
+import createUser from "../nodes/create-user";
+
+export default workflow("create-user", { version: "1.0.0", trigger: http.post("/users") }, (req) => {
+  step("validate", JsonSchemaNode, { schema: { /* ... */ }, data: req.body });
+  step("create", createUser, { user: req.body });
+});
 ```
 
 The validate step throws 400 before any side-effects fire. The
@@ -75,22 +72,24 @@ remaining workflow only runs on valid input.
 
 ### Inside a tryCatch for graceful 400 responses
 
-```json
-"tryCatch": {
-  "try": [
-    { "id": "validate", "use": "@blokjs/json-schema", "inputs": { /* ... */ } },
-    { "id": "create", "use": "...", "inputs": {} }
-  ],
-  "catch": [
-    {
-      "id": "respond-error",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ ok: false, validationErrors: ctx.error.message })"
-      }
-    }
-  ]
-}
+`ExprNode`'s `expression` is a raw `ctx.*` string, so read the error off
+`ctx.error` directly:
+
+```ts
+import { tryCatch } from "@blokjs/core";
+import { ExprNode, JsonSchemaNode } from "@blokjs/helpers";
+
+tryCatch("validate-and-create", {
+  try: () => {
+    step("validate", JsonSchemaNode, { schema: { /* ... */ }, data: req.body });
+    step("create", createUser, { user: req.body });
+  },
+  catch: () => {
+    step("respond-error", ExprNode, {
+      expression: "({ ok: false, validationErrors: ctx.error.message })",
+    });
+  },
+});
 ```
 
 ## Related

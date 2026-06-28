@@ -102,10 +102,10 @@ This is footgun #1 — see [Handles & footguns](/d/primitives/handles-and-footgu
     switchOn(req.headers["x-tenant-tier"], {
       cases: [
         { when: ["enterprise", "premium"], do: () => {
-          step("priority", null, { tenant: req.body.id }, { subworkflow: "priority-pipeline" });
+          subworkflow("priority", "priority-pipeline", { tenant: req.body.id });
         } },
         { when: "free", do: () => {
-          step("free", null, { tenant: req.body.id }, { subworkflow: "free-tier-pipeline" });
+          subworkflow("free", "free-tier-pipeline", { tenant: req.body.id });
         } },
       ],
       default: () => { step("reject", ThrowNode, { message: "unknown tier", code: 400 }); },
@@ -120,8 +120,8 @@ This is footgun #1 — see [Handles & footguns](/d/primitives/handles-and-footgu
 
     switchOn(current.status, {
       cases: [
-        { when: "pending", do: () => { step("toProcessing", null, {}, { subworkflow: "advance-to-processing" }); } },
-        { when: "processing", do: () => { step("toCompleted", null, {}, { subworkflow: "advance-to-completed" }); } },
+        { when: "pending", do: () => { subworkflow("toProcessing", "advance-to-processing", {}); } },
+        { when: "processing", do: () => { subworkflow("toCompleted", "advance-to-completed", {}); } },
         { when: "completed", do: () => { step("noop", LogNode, { level: "info", message: "already done" }); } },
       ],
     }, { id: "advance" });
