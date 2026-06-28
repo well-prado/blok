@@ -41,6 +41,7 @@ import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 import {
 	branch,
 	forEach as callbackForEach,
+	switchOn as callbackSwitchOn,
 	tryCatch as callbackTryCatch,
 	eq as condEq,
 	gt as condGt,
@@ -239,6 +240,8 @@ export {
 	condNot as not,
 	// forEach over handles (#329 / #343)
 	callbackForEach as forEach,
+	// switchOn over handles (#319)
+	callbackSwitchOn as switchOn,
 	// tryCatch over handles (#317)
 	callbackTryCatch as tryCatch,
 	// Monitoring
@@ -379,6 +382,8 @@ export type {
 	BranchCondition,
 	BranchArms,
 	ForEachOptions,
+	SwitchArms,
+	SwitchCaseArm,
 	TryCatchArms,
 } from "./stepBuilder";
 
