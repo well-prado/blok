@@ -14,11 +14,13 @@
  * BEFORE the Mapper, and compiles every structural `{$ref}` into EXACTLY the
  * wire string today's engine already resolves. The Mapper stays untouched.
  *
- * Scope (this task — #416): the STEP-INPUTS and TPL positions only.
+ * Scope: the STEP-INPUTS, TRIGGER-ROOT, and TPL positions.
  *   - step input value: `"js/ctx.state.<root>" + path`
  *   - `path` mapping: string segment → `.seg`, numeric → `[n]`,
  *     empty `path: []` (whole-output ref) → `"js/ctx.state.<root>"`.
- *   - recurses into plain arrays/objects; lowers nested `{$ref}`; leaves
+ *   - `{$tpl}` (#425): a ref embedded in a string → a `js/\`…${ctx.state…}…\``
+ *     template literal; string/literal segments embedded as escaped text.
+ *   - recurses into plain arrays/objects; lowers nested `{$ref}`/`{$tpl}`; leaves
  *     everything else (primitives, class instances, functions) untouched.
  *
  * Out of scope (separate tasks):
@@ -102,16 +104,59 @@ function encodePath(path: (string | number)[]): string {
  * step id, which won't be in `ctx.state`. Upgrade path: thread the workflow's
  * resolved step→state-key map into this pass.
  */
-function lowerRef(ref: StructuralRef): string {
+function refExpr(ref: StructuralRef): string {
 	const suffix = encodePath(ref.$ref.path ?? []);
 	// Trigger-root: the `@trigger` pseudo-step's payload lives at `ctx.request`,
 	// NOT `ctx.state["@trigger"]` (the runner never populates that). Lower to
-	// `js/ctx.request` + the same encoded path so `req.body.name` resolves.
+	// `ctx.request` + the same encoded path so `req.body.name` resolves.
 	if (ref.$ref.step === TRIGGER_SENTINEL) {
-		return `js/ctx.request${suffix}`;
+		return `ctx.request${suffix}`;
 	}
 	const root = encodeSegment(ref.$ref.step); // `.fanOut` or `["fan-out"]`
-	return `js/ctx.state${root}${suffix}`;
+	return `ctx.state${root}${suffix}`;
+}
+
+function lowerRef(ref: StructuralRef): string {
+	return `js/${refExpr(ref)}`;
+}
+
+/**
+ * The structural template sentinel (#425) — a single-key `{$tpl: [...]}` whose
+ * segments alternate raw strings and `{$ref}` nodes (plus the occasional literal
+ * non-string interpolation). Mirrors `tpl\`...\`` in `core/runner/src/stepBuilder.ts`.
+ */
+interface StructuralTpl {
+	$tpl: unknown[];
+}
+
+function isStructuralTpl(value: object): value is StructuralTpl {
+	const keys = Object.keys(value);
+	return keys.length === 1 && keys[0] === "$tpl" && Array.isArray((value as { $tpl?: unknown }).$tpl);
+}
+
+/**
+ * Lower a `{$tpl}` node to a `js/\`…${ctx.state…}…\`` template-literal string the
+ * Mapper resolves (`return (\`…\`)`). String segments are embedded as literal text
+ * (escaped for the backtick context); `{$ref}` segments become `${<refExpr>}` so
+ * the value's native type drives the interpolation (number/0/false preserved by
+ * JS template coercion — and falsy values are NOT dropped, unlike `||`-based code);
+ * any other literal segment is escaped into the literal text.
+ */
+function lowerTpl(node: StructuralTpl): string {
+	let body = "";
+	for (const seg of node.$tpl) {
+		if (seg !== null && typeof seg === "object" && isStructuralRef(seg)) {
+			body += `\${${refExpr(seg)}}`;
+		} else {
+			body += escapeTemplateText(typeof seg === "string" ? seg : String(seg));
+		}
+	}
+	return `js/\`${body}\``;
+}
+
+/** Escape the three chars that are special inside a backtick template literal. */
+function escapeTemplateText(text: string): string {
+	return text.replace(/[\\`$]/g, (c) => `\\${c}`);
 }
 
 /**
@@ -141,6 +186,10 @@ function lower(value: unknown): unknown {
 
 	if (isStructuralRef(value)) {
 		return lowerRef(value);
+	}
+
+	if (isStructuralTpl(value)) {
+		return lowerTpl(value);
 	}
 
 	const out: Record<string, unknown> = {};

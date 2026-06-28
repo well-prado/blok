@@ -37,7 +37,7 @@ import { assertGrpcOnlyTransport } from "./adapters/transport";
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 
 // Handle-DSL authoring runtime (#421) — the eventual @blokjs/core surface.
-import { makeHandle, step, workflowCallback } from "./stepBuilder";
+import { makeHandle, step, tpl, workflowCallback } from "./stepBuilder";
 
 import { CircuitBreaker, CircuitOpenError } from "./monitoring/CircuitBreaker";
 // Monitoring infrastructure
@@ -210,6 +210,7 @@ export {
 	// Handle-DSL authoring runtime (#421)
 	step,
 	makeHandle,
+	tpl,
 	workflowCallback,
 	// Monitoring
 	HealthCheck,

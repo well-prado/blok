@@ -339,4 +339,92 @@ describe("lowerRefs — ADR 0001 Option C load-boundary lowering", () => {
 			expect((lowered as Record<string, unknown>).gone).toBeUndefined();
 		});
 	});
+
+	// =========================================================================
+	// 5. {$tpl} — a ref embedded in a string (#425) lowers to a js/`…` template
+	//    literal, then resolves type-faithfully through the REAL Mapper.
+	// =========================================================================
+
+	describe("tpl — {$tpl} → js/`…${ctx.state…}…` template literal", () => {
+		it("single interpolation between two string segments", () => {
+			expect(
+				lowerRefs({
+					url: { $tpl: ["https://inv/stock/", { $ref: { step: "validate", path: ["productId"] } }, ""] },
+				}),
+			).toEqual({ url: "js/`https://inv/stock/${ctx.state.validate.productId}`" });
+		});
+
+		it("zero interpolations — plain string segment only", () => {
+			expect(lowerRefs({ url: { $tpl: ["https://inv/health"] } })).toEqual({ url: "js/`https://inv/health`" });
+		});
+
+		it("adjacent interpolations ${a}${b} (empty middle segment)", () => {
+			expect(
+				lowerRefs({
+					k: { $tpl: ["", { $ref: { step: "a", path: ["x"] } }, "", { $ref: { step: "b", path: ["y"] } }, ""] },
+				}),
+			).toEqual({ k: "js/`${ctx.state.a.x}${ctx.state.b.y}`" });
+		});
+
+		it("trigger-root ref inside a tpl → ${ctx.request…}", () => {
+			expect(
+				lowerRefs({ greeting: { $tpl: ["Hello, ", { $ref: { step: "@trigger", path: ["body", "name"] } }, "!"] } }),
+			).toEqual({ greeting: "js/`Hello, ${ctx.request.body.name}!`" });
+		});
+
+		it("dash-named root inside a tpl bracket-quotes", () => {
+			expect(lowerRefs({ k: { $tpl: ["/", { $ref: { step: "fan-out", path: ["id"] } }] } })).toEqual({
+				k: 'js/`/${ctx.state["fan-out"].id}`',
+			});
+		});
+
+		it("escapes backtick / backslash / literal $ in string segments", () => {
+			expect(lowerRefs({ k: { $tpl: ["a`b\\c$d", { $ref: { step: "s", path: [] } }] } })).toEqual({
+				k: "js/`a\\`b\\\\c\\$d${ctx.state.s}`",
+			});
+		});
+
+		it("non-string literal segment (number) is stringified into the literal", () => {
+			expect(lowerRefs({ k: { $tpl: ["v", 42, { $ref: { step: "s", path: ["x"] } }] } })).toEqual({
+				k: "js/`v42${ctx.state.s.x}`",
+			});
+		});
+
+		it("end-to-end: tpl resolves to the interpolated URL through the REAL Mapper", () => {
+			const ctx = createCtx(POPULATED_STATE);
+			const lowered = lowerRefs({
+				url: { $tpl: ["https://inv/stock/", { $ref: { step: "validate", path: ["productId"] } }, "?qty="] },
+				qtyUrl: { $tpl: ["q=", { $ref: { step: "validate", path: ["qty"] } }] },
+			}) as unknown as ParamsDictionary;
+
+			mapper.replaceObjectStrings(lowered, ctx, ctx as unknown as ParamsDictionary);
+
+			const out = lowered as Record<string, unknown>;
+			expect(out.url).toBe("https://inv/stock/P-123?qty=");
+			expect(out.qtyUrl).toBe("q=4"); // number coerced by JS template, not dropped
+		});
+
+		it("end-to-end: falsy interpolation (0) preserved, not blanked", () => {
+			const ctx = createCtx(POPULATED_STATE);
+			const lowered = lowerRefs({
+				k: {
+					$tpl: [
+						"free=",
+						{ $ref: { step: "validate", path: ["free"] } },
+						";ok=",
+						{ $ref: { step: "validate", path: ["ok"] } },
+					],
+				},
+			}) as unknown as ParamsDictionary;
+
+			mapper.replaceObjectStrings(lowered, ctx, ctx as unknown as ParamsDictionary);
+
+			expect((lowered as Record<string, unknown>).k).toBe("free=0;ok=false");
+		});
+
+		it("a $tpl alongside another key is NOT the sentinel (multi-key, untouched)", () => {
+			const input = { weird: { $tpl: ["x"], other: 1 } };
+			expect(lowerRefs(input)).toEqual(input);
+		});
+	});
 });
