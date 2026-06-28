@@ -1234,6 +1234,10 @@ function collectStepIds(steps: unknown[], out: Map<string, string>, path: string
 		const stepPath = `${path}[${i}]`;
 		const id = pickString(step.id) ?? pickString(step.name);
 		if (id && !out.has(id)) out.set(id, stepPath);
+		// `as:` redirects a step's output to state[as] — that slot can collide
+		// with a forEach iteration handle too, so reserve it as well.
+		const as = pickString(step.as);
+		if (as && !out.has(as)) out.set(as, `${stepPath}.as`);
 		for (const block of childStepBlocks(step, stepPath)) {
 			collectStepIds(block.steps, out, block.path);
 		}
