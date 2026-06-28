@@ -1285,12 +1285,12 @@ Plus the cross-runtime rules: **the wrong input source** (typed sidecar nodes re
 
 ## 8. TESTING
 
-Use the \`@blokjs/runner\` testing utilities with Vitest.
+Use the \`@blokjs/core/testing\` utilities with Vitest (same package you author against).
 
 **Unit-test a node** with \`NodeTestHarness\`:
 
 \`\`\`ts
-import { NodeTestHarness } from "@blokjs/runner";
+import { NodeTestHarness } from "@blokjs/core/testing";
 import myNode from "../src/nodes/my-node";
 
 const harness = new NodeTestHarness(myNode);
@@ -1302,7 +1302,7 @@ harness.assertOutput(result, { user: { id: "abc-123" } });
 **Integration-test a workflow** with \`WorkflowTestRunner\`:
 
 \`\`\`ts
-import { WorkflowTestRunner } from "@blokjs/runner";
+import { WorkflowTestRunner } from "@blokjs/core/testing";
 
 const runner = new WorkflowTestRunner({ verbose: true, mockAllNodes: true });
 runner.registerNode("validate", ValidateNode);
