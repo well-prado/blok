@@ -11,7 +11,7 @@
 
 import { z } from "zod";
 import { defineNode } from "../defineNode";
-import type { Handle, InputOf, OutputOf, Refable } from "../handles";
+import type { EphemeralHandle, Handle, InputOf, OutputOf, Refable } from "../handles";
 import { runtimeNode } from "../handles";
 
 // A workflow input that expects `T` accepts a handle for `T` (the `Refable` boundary).
@@ -75,6 +75,19 @@ consume<string>(arrayHandle[0].sku);
 
 // @ts-expect-error array member reads are banned even on whole-output arrays
 consume(arrayHandle.length);
+
+// --- #339: EphemeralHandle<T> is unreadable at the type level ------------------
+
+declare const ephemeral: EphemeralHandle<Output>;
+
+// @ts-expect-error an ephemeral handle exposes NO readable fields
+consume(ephemeral.id);
+
+// @ts-expect-error an ephemeral handle is not numerically indexable
+consume((null as unknown as EphemeralHandle<string[]>)[0]);
+
+// @ts-expect-error an ephemeral handle is NOT a Refable input — passing it as a step input is a compile error
+consume<Output>(ephemeral);
 
 // --- ADR 0006: type extraction off a `defineNode` value ------------------------
 

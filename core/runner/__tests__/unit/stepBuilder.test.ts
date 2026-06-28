@@ -55,7 +55,7 @@ function createTriggerCtx(body: Record<string, unknown>): Context {
  */
 async function runStep(
 	ctx: Context,
-	rec: { id: string; use: string; inputs?: Record<string, unknown> },
+	rec: { id: string; use?: string; inputs?: Record<string, unknown>; ephemeral?: boolean },
 	node: { name: string; handle: (ctx: Context, input: Record<string, unknown>) => Promise<unknown> },
 ): Promise<void> {
 	const inputs = lowerRefs(rec.inputs ?? {}) as Record<string, unknown>;
@@ -64,8 +64,9 @@ async function runStep(
 	mapper.replaceObjectStrings(inputs, ctx, ctx.request.body as never);
 	const res = (await node.handle(ctx, inputs)) as { success: boolean; data: Record<string, unknown> };
 	expect(res.success).toBe(true);
-	// REAL persistence — output lands at ctx.state[rec.id] (Rule 3 default).
-	applyStepOutput(ctx, { name: rec.id }, res);
+	// REAL persistence — output lands at ctx.state[rec.id] (Rule 3 default);
+	// Rule 1 skips persistence when the step is ephemeral.
+	applyStepOutput(ctx, { name: rec.id, ephemeral: rec.ephemeral }, res);
 }
 
 const greet = defineNode({
@@ -230,5 +231,76 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
 		expect(steps.map((s) => s.id)).toEqual(["a", "b"]);
 		expect(steps[1].inputs.message).toEqual({ $ref: { step: "a", path: ["greeting"] } });
+	});
+});
+
+describe("ephemeral handle: unreadable/poisoned (#339)", () => {
+	const log = defineNode({
+		name: "log",
+		description: "side-effect only",
+		input: z.object({ message: z.string() }),
+		output: z.object({ logged: z.boolean() }),
+		execute: () => ({ logged: true }),
+	});
+
+	it("still emits the step with ephemeral:true (UNCHANGED runtime)", async () => {
+		const wf = await workflowCallback(
+			"Ephemeral Emit",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				step("log", log, { message: req.body.message }, { ephemeral: true });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; ephemeral?: boolean }>;
+		expect(steps[0].id).toBe("log");
+		expect(steps[0].ephemeral).toBe(true);
+	});
+
+	it("reading a field on the ephemeral handle THROWS the clear error", async () => {
+		await expect(
+			workflowCallback("Ephemeral Read", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				const logged = step("log", log, { message: "x" }, { ephemeral: true });
+				// @ts-expect-error — EphemeralHandle exposes no readable members.
+				void logged.logged;
+			}),
+		).rejects.toThrow(/Step "log" is ephemeral — its output is not persisted to state and has no readable handle/);
+	});
+
+	it("using the ephemeral handle as another step's input THROWS", async () => {
+		await expect(
+			workflowCallback("Ephemeral Input", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				const logged = step("log", log, { message: "x" }, { ephemeral: true });
+				// The whole-handle ref is detected at lowerHandles → throws.
+				step("shout", shout, { message: logged as unknown as string });
+			}),
+		).rejects.toThrow(/Step "log" is ephemeral/);
+	});
+
+	it("a NORMAL (non-ephemeral) handle still resolves through the REAL wire path (no regression)", async () => {
+		const wf = await workflowCallback(
+			"Normal After Ephemeral",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				step("log", log, { message: req.body.name }, { ephemeral: true });
+				const greeting = step("greet", greet, { name: req.body.name });
+				step("shout", shout, { message: greeting.greeting });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; use: string; inputs: Record<string, unknown> }>;
+		// Normal handle lowered exactly as today.
+		expect(lowerRefs(steps[2].inputs)).toEqual({ message: "js/ctx.state.greet.greeting" });
+
+		const ctx = createTriggerCtx({ name: "ada" });
+		// Honor Rule 1: the ephemeral step skips persistence (the runtime is unchanged
+		// — this task only poisons the author-facing handle).
+		await runStep(ctx, { ...steps[0], ephemeral: true }, log);
+		await runStep(ctx, steps[1], greet);
+		await runStep(ctx, steps[2], shout);
+		const state = ctx.state as Record<string, unknown>;
+		// Ephemeral step skipped persistence (Rule 1) — not in state.
+		expect(state.log).toBeUndefined();
+		// Normal chain resolved correctly.
+		expect(state.greet).toEqual({ greeting: "Hello, ada!" });
+		expect(state.shout).toEqual({ loud: "HELLO, ADA!" });
 	});
 });
