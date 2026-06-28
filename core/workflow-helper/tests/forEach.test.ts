@@ -103,6 +103,12 @@ describe("forEach()", () => {
 		);
 	});
 
+	it("rejects an `as` name that collides with an inner step's `as` output key", () => {
+		expect(() => forEach({ id: "x", in: "$.x", as: "item", do: [{ id: "writer", use: "noop", as: "item" }] })).toThrow(
+			/forEach state key "item"/,
+		);
+	});
+
 	it("rejects nested forEach aliases that collide with surrounding aliases", () => {
 		expect(() =>
 			forEach({

@@ -47,6 +47,24 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 		).toThrowError(/forEach state key "xIndex" at steps\[1\]\.forEach\.as \+ "Index".*step id "xIndex"/);
 	});
 
+	it("rejects `as` colliding with a step's `as` output key (not just its id)", () => {
+		expect(() =>
+			normalizeWorkflow(
+				workflow([
+					{ id: "writer", use: "noop", inputs: {}, as: "out" },
+					{
+						id: "each",
+						forEach: {
+							in: "$.req.body.items",
+							as: "out",
+							do: [step("process")],
+						},
+					},
+				]),
+			),
+		).toThrowError(/forEach state key "out" at steps\[1\]\.forEach\.as.*at steps\[0\]\.as/);
+	});
+
 	it("allows non-colliding forEach state keys", () => {
 		const normalized = normalizeWorkflow(
 			workflow([
