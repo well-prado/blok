@@ -895,6 +895,82 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 			: Handle<OutputOf<N>>;
 }
 
+/** Options for a {@link subworkflow} step (a superset of the regular step knobs). */
+export interface SubworkflowOptions extends StepOptions {
+	/** `true` (default) — parent blocks on the child; `false` — fire-and-forget. */
+	wait?: boolean;
+	/** Execution strategy. `"in-process"` (default) or `"http-self"`. */
+	dispatch?: "in-process" | "http-self";
+	/** Constrain a polymorphic (handle) name to a set of allowed workflow names (safety guard). */
+	allowList?: string[];
+}
+
+/**
+ * Invoke another named workflow as a step — the handle-DSL sub-workflow primitive
+ * (#374). The callback mirror of the object-style `{ id, subworkflow, inputs }`
+ * step: it dispatches a *workflow* instead of a node, and returns a handle to the
+ * child's response (rooted at `state[id]` / `state[as]`) so downstream steps read
+ * it exactly like a node's output.
+ *
+ * `name` is either a literal workflow name, or a HANDLE for polymorphic dispatch
+ * (one trigger → N handlers without a switch step). A handle name is lowered to a
+ * `js/ctx…` expression the runner resolves against the live ctx at dispatch time —
+ * pair it with `allowList` whenever it depends on caller-supplied data.
+ *
+ * @example
+ *   const receipt = subworkflow("receipt", "send-receipt-email", { user: order.user }, { wait: true });
+ *   subworkflow("dispatch", event.body.kind, { event: event.body }, { allowList: ["handler.a", "handler.b"] });
+ */
+export function subworkflow(
+	id: string,
+	name: string | Handle<unknown>,
+	inputs?: Record<string, unknown>,
+	opts?: SubworkflowOptions,
+): Handle<unknown> {
+	if (typeof id !== "string" || id.length === 0) {
+		throw new Error("subworkflow() requires a non-empty string id.");
+	}
+
+	// Resolve the target workflow name: a literal string, or a handle lowered to a
+	// `js/ctx…` expression string (polymorphic dispatch — the runner resolves it).
+	let lowered: string;
+	const nameMeta = readHandleMeta(name);
+	if (nameMeta) {
+		lowered = lowerHandleToInExpr(nameMeta);
+	} else if (typeof name === "string" && name.length > 0) {
+		lowered = name;
+	} else {
+		throw new Error(
+			`subworkflow("${id}") requires a workflow name — a non-empty string, or a handle for polymorphic dispatch.`,
+		);
+	}
+
+	const builder = currentBuilder();
+	const ids = builder.root.ids;
+	if (ids.has(id)) {
+		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
+	}
+	ids.add(id);
+
+	if (opts?.as !== undefined && opts?.spread === true) {
+		throw new Error(`subworkflow("${id}"): \`as\` and \`spread\` are mutually exclusive — pick one.`);
+	}
+
+	const record = {
+		id,
+		subworkflow: lowered,
+		...(inputs ? { inputs: lowerHandles(inputs, builder) as Record<string, unknown> } : {}),
+		...(opts ?? {}),
+	} as unknown as StepRecord;
+	builder.steps.push(record);
+
+	// Same handle-rooting rules as step(): ephemeral → poisoned, spread → spread-root, as → renamed, else id.
+	const ephemeral = opts?.ephemeral === true;
+	const spread = opts?.spread === true;
+	const root = typeof opts?.as === "string" ? opts.as : id;
+	return buildHandle(root, builder, [], ephemeral, spread) as Handle<unknown>;
+}
+
 /**
  * The trigger-payload handle the callback receives, untyped. Rooted at the
  * `@trigger` pseudo-step (lowerRefs maps it to `ctx.request`, where the runner

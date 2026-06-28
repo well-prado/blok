@@ -17,6 +17,7 @@
 export {
 	workflowCallback as workflow,
 	step,
+	subworkflow,
 	branch,
 	forEach,
 	switchOn,
@@ -44,6 +45,7 @@ export type {
 	RuntimeNode,
 	runtimeNode,
 	TriggerHandle,
+	SubworkflowOptions,
 } from "@blokjs/runner/dsl";
 
 // The HTTP trigger-config helper — the design's `http.post("/orders")`.

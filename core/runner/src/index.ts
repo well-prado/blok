@@ -52,6 +52,7 @@ import {
 	not as condNot,
 	makeHandle,
 	step,
+	subworkflow,
 	tpl,
 	workflowCallback,
 } from "./stepBuilder";
@@ -228,6 +229,7 @@ export {
 	FunctionNode,
 	// Handle-DSL authoring runtime (#421)
 	step,
+	subworkflow,
 	makeHandle,
 	tpl,
 	workflowCallback,
