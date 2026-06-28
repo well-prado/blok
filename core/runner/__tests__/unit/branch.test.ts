@@ -269,6 +269,7 @@ async function bootWorkflow(workflowDef: unknown): Promise<{ config: Configurati
 	const helpers: Record<string, RunnerNode> = {
 		"@blokjs/if-else": ifElse as unknown as RunnerNode,
 		"@blokjs/ctx-publish": new PublishNode(),
+		noop: noop as unknown as RunnerNode,
 	};
 	const globalOptions = {
 		nodes: { getNode: (name: string): RunnerNode | null => helpers[name] ?? null },
@@ -375,6 +376,47 @@ describe("branch — real Configuration + Runner (if-else engine)", () => {
 		};
 		const state = await bootAndRun(def);
 		expect(state.arm).toBe("ELSE");
+	});
+
+	it("lets branch arms use unique ids with shared as:'run' and a downstream handle read state.run", async () => {
+		const wf = await workflowCallback("SharedAs", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const run = makeHandle<{ lane: string }>("run");
+			branch("route", makeHandle<{ open: boolean }>("gate").open, {
+				then: () => {
+					step("runA", noop, { lane: "A" }, { as: "run" });
+				},
+				else: () => {
+					step("runB", noop, { lane: "B" }, { as: "run" });
+				},
+			});
+			step("after", noop, { lane: run.lane });
+		});
+
+		const steps = wf._config.steps as Array<Record<string, unknown>>;
+		const branchStep = steps.find((s) => s.id === "route");
+		const afterStep = steps.find((s) => s.id === "after");
+		expect(afterStep?.inputs).toEqual({ lane: { $ref: { step: "run", path: ["lane"] } } });
+
+		async function run(open: boolean): Promise<Record<string, unknown>> {
+			return bootAndRun({
+				name: `shared-as-${open ? "then" : "else"}`,
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{ id: "set-gate", use: "@blokjs/ctx-publish", type: "module", inputs: { name: "gate", value: { open } } },
+					branchStep,
+					afterStep,
+				],
+			});
+		}
+
+		const thenState = await run(true);
+		expect(thenState.run).toEqual({ lane: "A" });
+		expect(thenState.after).toEqual({ lane: "A" });
+
+		const elseState = await run(false);
+		expect(elseState.run).toEqual({ lane: "B" });
+		expect(elseState.after).toEqual({ lane: "B" });
 	});
 
 	it.each([
