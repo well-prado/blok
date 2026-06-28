@@ -29,11 +29,11 @@ schema becomes the tool's `inputSchema`; the single step builds the
 result, which is what the client receives.
 
 ```ts src/workflows/examples/mcp-greeter.ts
-import { workflow } from "@blokjs/helper";
+import { workflow, step } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
 import { z } from "zod";
 
-export default workflow({
-  name: "mcp-greeter",
+export default workflow("mcp-greeter", {
   version: "1.0.0",
   description: "MCP tool that greets a person by name.",
 
@@ -55,19 +55,16 @@ export default workflow({
       },
     },
   },
-
-  steps: [
-    {
-      id: "greet",
-      use: "@blokjs/expr",
-      inputs: {
-        expression:
-          '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
-      },
-    },
-  ],
+}, (call) => {
+  step("greet", ExprNode, {
+    expression:
+      '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
+  });
 });
 ```
+
+The build callback receives the call handle (`call`) — for a tool, the call's `arguments` arrive
+as `call.body`; for a resource, `call.body` is always `{}`.
 
 Scaffold a project that includes this exact example with:
 

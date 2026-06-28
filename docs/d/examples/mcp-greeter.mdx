@@ -28,48 +28,54 @@ choose **YES** to install examples. The greeter lands at
 ## The workflow
 
 ```ts src/workflows/examples/mcp-greeter.ts
-import { workflow } from "@blokjs/helper";
+import { workflow, step } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
 import { z } from "zod";
 
-export default workflow({
-  name: "mcp-greeter",
-  version: "1.0.0",
-  description: "MCP tool that greets a person by name.",
+export default workflow(
+  "mcp-greeter",
+  {
+    version: "1.0.0",
+    description: "MCP tool that greets a person by name.",
 
-  // The workflow's input schema becomes the tool's inputSchema,
-  // so the LLM knows exactly what arguments to pass.
-  input: z.object({
-    name: z.string().min(1).describe("Name of the person to greet"),
-    excited: z.boolean().default(false).describe("End the greeting with '!' instead of '.'"),
-  }),
+    // The workflow's input schema becomes the tool's inputSchema,
+    // so the LLM knows exactly what arguments to pass.
+    input: z.object({
+      name: z.string().min(1).describe("Name of the person to greet"),
+      excited: z.boolean().default(false).describe("End the greeting with '!' instead of '.'"),
+    }),
 
-  output: z.object({ greeting: z.string() }),
+    output: z.object({ greeting: z.string() }),
 
-  trigger: {
-    mcp: {
-      path: "/mcp",
-      serverName: "blok-examples",
-      tool: {
-        name: "greet",
-        description: "Greet a person by name. Pass { name, excited? }.",
+    trigger: {
+      mcp: {
+        path: "/mcp",
+        serverName: "blok-examples",
+        tool: {
+          name: "greet",
+          description: "Greet a person by name. Pass { name, excited? }.",
+        },
       },
     },
   },
-
-  steps: [
-    {
-      // @blokjs/expr evaluates the expression against ctx and returns it.
-      // That return value (ctx.response.data) is what the client receives.
-      id: "greet",
-      use: "@blokjs/expr",
-      inputs: {
-        expression:
-          '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
-      },
-    },
-  ],
-});
+  (req) => {
+    // ExprNode evaluates the expression against ctx and returns it.
+    // That return value (ctx.response.data) is what the client receives.
+    // The tool's arguments arrive as ctx.request.body — read them with `req`.
+    step("greet", ExprNode, {
+      expression:
+        '({ greeting: "Hello, " + (ctx.request.body.name || "there") + (ctx.request.body.excited ? "!" : ".") })',
+    });
+  },
+);
 ```
+
+<Note>
+`mcp` isn't an `http.*` helper — it's a raw trigger block passed in
+`opts.trigger`, alongside `version`, `input`, and `output`. The build
+callback's `req` handle still carries the tool arguments as
+`req.body.name` / `req.body.excited`.
+</Note>
 
 Three things make this an MCP tool:
 

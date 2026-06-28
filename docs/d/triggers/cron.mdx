@@ -10,27 +10,19 @@ fires the workflow at every match.
 
 ## Quickstart
 
-```json workflows/json/daily-cleanup.json
-{
-  "name": "Daily Cleanup",
-  "version": "1.0.0",
-  "trigger": {
-    "cron": {
-      "schedule": "0 2 * * *",
-      "timezone": "America/New_York"
-    }
-  },
-  "steps": [
-    {
-      "id": "purge-stale",
-      "use": "@blokjs/api-call",
-      "inputs": {
-        "url": "https://api.example.com/cleanup",
-        "method": "POST"
-      }
-    }
-  ]
-}
+The build callback's argument is the **entry handle** — for cron it's the tick, named `tick`.
+A tick has **no body** (cron carries no payload); read schedule metadata from `tick.params`.
+
+```ts src/workflows/daily-cleanup.ts
+import { workflow, step } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("daily-cleanup", {
+  version: "1.0.0",
+  trigger: { cron: { schedule: "0 2 * * *", timezone: "America/New_York" } },
+}, () => {
+  step("purge-stale", apiCall, { url: "https://api.example.com/cleanup", method: "POST" });
+});
 ```
 
 This fires at 2:00 AM every day in `America/New_York`.
@@ -59,29 +51,22 @@ This fires at 2:00 AM every day in `America/New_York`.
  0 9 1 * *     # 09:00 on the 1st of each month
 ```
 
-## ctx mapping
+## The `tick` handle
 
-| Field | Source |
+A tick has no body — only schedule metadata:
+
+| Read | Source |
 |---|---|
-| `ctx.request.body` | `{}` (cron has no payload by default) |
-| `ctx.request.params.schedule` | The configured cron expression |
-| `ctx.request.params.firedAt` | ISO timestamp of the scheduled fire time |
+| `tick.params.schedule` | The configured cron expression |
+| `tick.params.firedAt` | ISO timestamp of the scheduled fire time |
 | `ctx.vars._cron_invocation` | `{schedule, firedAt, executionId}` |
 
-You can stash per-schedule context in `ctx.request.body` by setting
-default inputs in the workflow:
+Build per-schedule context in a first step and read it downstream via its handle:
 
-```json
-"steps": [
-  {
-    "id": "build-ctx",
-    "use": "@blokjs/expr",
-    "inputs": {
-      "expression": "({ batchSize: 100, dryRun: false })"
-    }
-  },
-  // ... use ctx.state['build-ctx'] in subsequent steps
-]
+```ts
+const cfg = step("build-ctx", ExprNode, { expression: "({ batchSize: 100, dryRun: false })" });
+
+step("run", purgeBatch, { batchSize: cfg.batchSize, dryRun: cfg.dryRun });
 ```
 
 ## Process model
@@ -106,28 +91,25 @@ BullMQ-Repeatable.
 
 ### Daily report → Slack
 
-```json
-{
-  "name": "Daily Metrics Digest",
-  "trigger": { "cron": { "schedule": "0 9 * * 1-5", "timezone": "America/Los_Angeles" } },
-  "steps": [
-    { "id": "fetch-metrics", "use": "@blokjs/api-call", "inputs": { "url": "..." } },
-    {
-      "id": "summarize",
-      "use": "@blokjs/llm-stream",
-      "inputs": { "model": "gpt-4o-mini", "messages": "...", "channel": "internal-summary" }
-    },
-    {
-      "id": "post-slack",
-      "use": "@blokjs/api-call",
-      "inputs": {
-        "url": "js/process.env.SLACK_WEBHOOK_URL",
-        "method": "POST",
-        "body": "js/({ text: ctx.state.summarize.fullText })"
-      }
-    }
-  ]
-}
+```ts
+import { workflow, step } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { LlmStreamNode } from "@blokjs/helpers";
+
+export default workflow("daily-metrics-digest", {
+  version: "1.0.0",
+  trigger: { cron: { schedule: "0 9 * * 1-5", timezone: "America/Los_Angeles" } },
+}, () => {
+  step("fetch-metrics", apiCall, { url: "https://internal/metrics" });
+  const summary = step("summarize", LlmStreamNode, {
+    model: "gpt-4o-mini", messages: "...", channel: "internal-summary",
+  });
+  step("post-slack", apiCall, {
+    url: "js/process.env.SLACK_WEBHOOK_URL",
+    method: "POST",
+    body: { text: summary.fullText },
+  });
+});
 ```
 
 09:00 every weekday, summarize yesterday's metrics with an LLM, post
@@ -135,34 +117,20 @@ to Slack.
 
 ### Per-tenant nightly job (sub-workflow fan-out)
 
-```json
-{
-  "name": "Nightly Per-Tenant Backup",
-  "trigger": { "cron": { "schedule": "0 0 * * *" } },
-  "steps": [
-    {
-      "id": "list-tenants",
-      "use": "@blokjs/api-call",
-      "inputs": { "url": "https://internal/tenants" }
-    },
-    {
-      "id": "fan-out",
-      "forEach": {
-        "in": "js/ctx.state['list-tenants'].data",
-        "as": "tenant",
-        "mode": "parallel",
-        "concurrency": 5,
-        "do": [
-          {
-            "id": "backup",
-            "subworkflow": "backup-tenant",
-            "inputs": { "tenantId": "js/ctx.state.tenant.id" }
-          }
-        ]
-      }
-    }
-  ]
-}
+```ts
+import { workflow, step, forEach } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("nightly-per-tenant-backup", {
+  version: "1.0.0",
+  trigger: { cron: { schedule: "0 0 * * *" } },
+}, () => {
+  const tenants = step("list-tenants", apiCall, { url: "https://internal/tenants" });
+
+  forEach(tenants.data, (tenant) => {
+    step("backup", null, { tenantId: tenant.id }, { subworkflow: "backup-tenant" });
+  }, { mode: "parallel", concurrency: 5 });
+});
 ```
 
 The cron fires once; the `forEach` fans out to one
@@ -174,18 +142,12 @@ If a cron run takes longer than the schedule interval, the next tick
 fires while the previous is still running. Use `concurrencyKey` to
 serialize:
 
-```json
-"trigger": {
-  "cron": {
-    "schedule": "*/5 * * * *",
-    "concurrencyKey": "self",
-    "concurrencyLimit": 1
-  }
-}
+```ts
+trigger: { cron: { schedule: "*/5 * * * *", concurrencyKey: "self", concurrencyLimit: 1 } }
 ```
 
 A literal `"self"` key means "only one run of this workflow at a time
-across all processes." Excess ticks NACK with retry — or use
+across all processes." Excess ticks NACK with retry — or add
 `onLimit: "queue"` to defer.
 
 ## Composition

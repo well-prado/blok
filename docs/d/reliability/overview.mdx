@@ -36,7 +36,7 @@ crash recovery).
   </Card>
   <Card title="Concurrency keys" icon="lock" href="/d/reliability/concurrency-keys">
     Per-tenant rate limiting on triggers. `concurrencyKey:
-    $.req.body.tenantId` plus a `concurrencyLimit`. Over-limit HTTP
+    "$.req.body.tenantId"` plus a `concurrencyLimit`. Over-limit HTTP
     returns `429 Retry-After`; worker NACKs. `onLimit: "queue"` defers
     instead of rejecting.
   </Card>
@@ -120,8 +120,8 @@ just the fragile step. The rest of the workflow stays simple.
   A `wait.for(duration)` step is a feature-add (~2-3 days), not an
   architectural prerequisite. Until then, compose the same effect
   with a delayed sub-workflow:
-  `{ id: "wait", subworkflow: "post-wait-half", wait: false }` paired
-  with `delay: "3d"` on the child trigger. See
+  `step("wait", null, { ... }, { subworkflow: "post-wait-half", wait: false })`
+  paired with `delay: "3d"` on the child trigger. See
   [BACKLOG.md](https://github.com/deskree-inc/blok/blob/main/BACKLOG.md)
   for the implementation sketch.
 - **Cross-process replay.** The replay endpoint dispatches in-process;

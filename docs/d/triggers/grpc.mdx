@@ -11,28 +11,22 @@ communication where REST-over-HTTP overhead is too much.
 
 ## Quickstart
 
-```json workflows/json/get-user.json
-{
-  "name": "GetUser",
-  "version": "1.0.0",
-  "trigger": {
-    "grpc": {
-      "service": "UserService",
-      "method": "GetUser",
-      "proto": "users.proto"
-    }
-  },
-  "steps": [
-    {
-      "id": "lookup",
-      "use": "@blokjs/api-call",
-      "inputs": {
-        "url": "js/`https://internal/users/${ctx.request.body.userId}`",
-        "method": "GET"
-      }
-    }
-  ]
-}
+The build callback's argument is the **entry handle** — for gRPC it's the rpc, named `rpc`
+(`rpc.body` is the decoded request message).
+
+```ts src/workflows/get-user.ts
+import { workflow, step, tpl } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("GetUser", {
+  version: "1.0.0",
+  trigger: { grpc: { service: "UserService", method: "GetUser", proto: "users.proto" } },
+}, (rpc) => {
+  step("lookup", apiCall, {
+    url: tpl`https://internal/users/${rpc.body.userId}`,
+    method: "GET",
+  });
+});
 ```
 
 With a `.proto` file alongside:
@@ -60,14 +54,14 @@ message UserResponse { string id = 1; string name = 2; string email = 3; }
 | `port` | `number` | gRPC server port (default 50051). All gRPC-triggered workflows share one port. |
 | `middleware` | `string[]` | Per-trigger middleware chain, applied on each inbound call before the workflow body. |
 
-## ctx mapping
+## The `rpc` handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.body` | Decoded gRPC request message |
-| `ctx.request.headers` | gRPC metadata (lowercased) |
-| `ctx.request.params.service` | Service name |
-| `ctx.request.params.method` | Method name |
+| `rpc.body` | Decoded gRPC request message |
+| `rpc.headers` | gRPC metadata (lowercased) |
+| `rpc.params.service` | Service name |
+| `rpc.params.method` | Method name |
 | `ctx.vars._grpc_call` | Underlying gRPC `ServerUnaryCall` for advanced cases |
 
 The response value flows back through the last step's output — the

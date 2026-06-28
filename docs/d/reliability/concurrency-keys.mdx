@@ -12,8 +12,12 @@ serializes per-tenant work; bumping `concurrencyLimit` turns it into a
 fairness throttle.
 
 Unlike the per-step reliability primitives, `concurrencyKey` lives on
-the **trigger config** (`trigger.http` or `trigger.worker`). The gate
-runs at run-entry, before any step executes.
+the **trigger config** — the options object passed to `http.post(path,
+opts)` (or `trigger.worker`). The gate runs at run-entry, before any
+step executes. Because the trigger block is plain config the runner
+resolves at run-entry (not a handle minted in the workflow body), keys
+that reference request data are written as path **strings** —
+`"$.req.body.tenantId"` — not handles.
 
 ## Quickstart
 
@@ -22,29 +26,26 @@ per tenant:
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import pdfRender from "@blokjs/pdf-render";
+import s3Upload from "@blokjs/s3-upload";
 
-export default workflow({
-  name: "render-pdf",
-  version: "1.0.0",
-  trigger: {
-    http: {
-      method: "POST",
-      path: "/render",
-      concurrencyKey: $.req.body.tenantId,
+export default workflow(
+  "render-pdf",
+  {
+    version: "1.0.0",
+    trigger: http.post("/render", {
+      concurrencyKey: "$.req.body.tenantId",
       concurrencyLimit: 5,
-    },
+    }),
   },
-  steps: [
-    { id: "fetch", use: "@blokjs/api-call", inputs: { url: $.req.body.sourceUrl } },
-    { id: "render", use: "@blokjs/pdf-render", inputs: { html: $.state.fetch } },
-    {
-      id: "upload",
-      use: "@blokjs/s3-upload",
-      inputs: { key: $.req.body.outputKey, body: $.state.render },
-    },
-  ],
-});
+  (req) => {
+    const fetched = step("fetch", apiCall, { url: req.body.sourceUrl });
+    const render = step("render", pdfRender, { html: fetched });
+    step("upload", s3Upload, { key: req.body.outputKey, body: render });
+  },
+);
 ```
 
 ```json JSON
@@ -95,10 +96,11 @@ and spread into both `HttpTriggerOptsSchema` and
 `WorkerTriggerOptsSchema`.
 
 <ParamField path="concurrencyKey" type="string">
-  Per-key concurrency gate. Literal string or `$.<path>` proxy
-  expression evaluated against the live `ctx` at run-entry. When set,
-  runs sharing the resolved key contend for at most `concurrencyLimit`
-  concurrent slots. When unset, no gating applies — zero overhead.
+  Per-key concurrency gate. A literal string or a `$.<path>` path
+  string (e.g. `"$.req.body.tenantId"`) the runner resolves against the
+  live `ctx` at run-entry. When set, runs sharing the resolved key
+  contend for at most `concurrencyLimit` concurrent slots. When unset,
+  no gating applies — zero overhead.
 </ParamField>
 
 <ParamField path="concurrencyLimit" type="integer (1-10000)" default="1">
@@ -133,14 +135,10 @@ gives you a classic named mutex: at most one run for a given resource.
 
 ```ts
 // Exactly one checkout at a time per cart
-trigger: {
-  http: {
-    method: "POST",
-    path: "/checkout/:cartId",
-    concurrencyKey: $.req.params.cartId,
-    // concurrencyLimit defaults to 1
-  },
-}
+trigger: http.post("/checkout/:cartId", {
+  concurrencyKey: "$.req.params.cartId",
+  // concurrencyLimit defaults to 1
+}),
 ```
 
 Concurrent checkouts on the same cart serialize: the second 429s with
@@ -151,7 +149,7 @@ For per-tenant rate limiting, raise the limit:
 
 ```ts
 // Up to five renders per tenant in flight at once
-{ concurrencyKey: $.req.body.tenantId, concurrencyLimit: 5 }
+http.post("/render", { concurrencyKey: "$.req.body.tenantId", concurrencyLimit: 5 })
 ```
 
 The contract is `(workflowName, resolvedKey)`-scoped — different
@@ -166,9 +164,9 @@ consumers) and the new concurrency-key fields. They're orthogonal:
 trigger: {
   worker: {
     queue: "render-jobs",
-    concurrency: 10,                        // 10 parallel consumers (parallelism cap)
-    concurrencyKey: $.req.body.tenantId,    // per-tenant fairness within those consumers
-    concurrencyLimit: 2,                    // max 2 concurrent per tenant
+    concurrency: 10,                          // 10 parallel consumers (parallelism cap)
+    concurrencyKey: "$.req.body.tenantId",    // per-tenant fairness within those consumers
+    concurrencyLimit: 2,                      // max 2 concurrent per tenant
   },
 }
 ```
@@ -227,7 +225,7 @@ purges the stale entry.
 Default 1h lease; override per-trigger:
 
 ```ts
-{ concurrencyKey: $.req.body.userId, concurrencyLeaseMs: 4 * 60 * 60 * 1000 }  // 4h
+http.post("/render", { concurrencyKey: "$.req.body.userId", concurrencyLeaseMs: 4 * 60 * 60 * 1000 })  // 4h
 ```
 
 Or process-wide via env var:
@@ -247,15 +245,11 @@ on the in-process scheduler instead, retrying acquisition every second
 until a slot frees:
 
 ```ts
-trigger: {
-  http: {
-    method: "POST",
-    path: "/render",
-    concurrencyKey: $.req.body.tenantId,
-    concurrencyLimit: 5,
-    onLimit: "queue",
-  },
-}
+trigger: http.post("/render", {
+  concurrencyKey: "$.req.body.tenantId",
+  concurrencyLimit: 5,
+  onLimit: "queue",
+}),
 ```
 
 The 6th request from a tenant returns `202 Accepted` instead of `429`:
@@ -508,20 +502,20 @@ error on boot with a clear "set this env var to fix" message.
 
 <AccordionGroup>
   <Accordion title="Multi-tenant SaaS rate limiter">
-    `concurrencyKey: $.req.body.tenantId` with `concurrencyLimit: 5`.
+    `concurrencyKey: "$.req.body.tenantId"` with `concurrencyLimit: 5`.
     Each tenant gets up to 5 concurrent renders; the 6th returns
     `429 Too Many Requests`. The client retries after `Retry-After`
     seconds and the runner admits as slots free up.
   </Accordion>
 
   <Accordion title="Mutex per resource (cart, document, user record)">
-    `concurrencyKey: $.req.params.cartId` with the default
+    `concurrencyKey: "$.req.params.cartId"` with the default
     `concurrencyLimit: 1`. The classic named mutex. Concurrent
     checkouts on the same cart serialize.
   </Accordion>
 
   <Accordion title="Worker fairness across tenants">
-    Worker `concurrency: 10` with `concurrencyKey: $.req.body.tenantId`
+    Worker `concurrency: 10` with `concurrencyKey: "$.req.body.tenantId"`
     and `concurrencyLimit: 2`. Up to 10 jobs in parallel total, but no
     single tenant gets more than 2 worker slots — keeps a noisy tenant
     from starving the others.

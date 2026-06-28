@@ -14,45 +14,37 @@ multi-process / multi-cloud sibling.
 
 ## Quickstart
 
-```json workflows/json/on-order-placed.json
-{
-  "name": "On Order Placed",
-  "version": "1.0.0",
-  "trigger": {
-    "pubsub": {
-      "provider": "gcp",
-      "topic": "orders.placed",
-      "subscription": "fulfillment-svc"
-    }
-  },
-  "steps": [
-    {
-      "id": "fulfill",
-      "use": "@blokjs/api-call",
-      "idempotencyKey": "js/ctx.request.params.messageId",
-      "inputs": {
-        "url": "https://fulfillment.internal/api/orders",
-        "method": "POST",
-        "body": "js/ctx.request.body"
-      }
-    }
-  ]
-}
+The build callback's argument is the **entry handle** — for pub/sub it's the message, named
+`msg` (`msg.body` is the payload, `msg.headers` are the provider attributes). The provider
+message id lives at `msg.params.messageId` — the natural idempotency key.
+
+```ts src/workflows/on-order-placed.ts
+import { workflow, step } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("on-order-placed", {
+  version: "1.0.0",
+  trigger: { pubsub: { provider: "gcp", topic: "orders.placed", subscription: "fulfillment-svc" } },
+}, (msg) => {
+  step("fulfill", apiCall, {
+    url: "https://fulfillment.internal/api/orders",
+    method: "POST",
+    body: msg.body,
+  }, { idempotencyKey: msg.params.messageId });
+});
 ```
 
 ## Providers + config
 
 ### GCP Pub/Sub
 
-```json
-"trigger": {
-  "pubsub": {
-    "provider": "gcp",
-    "topic": "orders.placed",
-    "subscription": "fulfillment-svc",
-    "maxMessages": 10
-  }
-}
+```ts
+trigger: { pubsub: {
+  provider: "gcp",
+  topic: "orders.placed",
+  subscription: "fulfillment-svc",
+  maxMessages: 10,
+} }
 ```
 
 Env vars:
@@ -66,14 +58,12 @@ PUBSUB_EMULATOR_HOST=localhost:8085
 
 ### AWS SNS + SQS
 
-```json
-"trigger": {
-  "pubsub": {
-    "provider": "aws",
-    "topic": "arn:aws:sns:us-east-1:123:orders-placed",
-    "subscription": "https://sqs.us-east-1.amazonaws.com/123/fulfillment-queue"
-  }
-}
+```ts
+trigger: { pubsub: {
+  provider: "aws",
+  topic: "arn:aws:sns:us-east-1:123:orders-placed",
+  subscription: "https://sqs.us-east-1.amazonaws.com/123/fulfillment-queue",
+} }
 ```
 
 `topic:` is the SNS ARN; `subscription:` is the SQS queue URL that
@@ -82,14 +72,8 @@ SNS fans out to. Env vars: standard AWS credentials chain
 
 ### Azure Service Bus
 
-```json
-"trigger": {
-  "pubsub": {
-    "provider": "azure",
-    "topic": "orders",
-    "subscription": "fulfillment-sub"
-  }
-}
+```ts
+trigger: { pubsub: { provider: "azure", topic: "orders", subscription: "fulfillment-sub" } }
 ```
 
 Env var: `AZURE_SERVICEBUS_CONNECTION_STRING`.
@@ -106,16 +90,16 @@ Env var: `AZURE_SERVICEBUS_CONNECTION_STRING`.
 | `concurrencyLimit` | `number` | Slot count per resolved key. |
 | `middleware` | `string[]` | Per-trigger middleware. |
 
-## ctx mapping
+## The `msg` handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.body` | Message payload (JSON-parsed when possible, raw string otherwise) |
-| `ctx.request.headers` | Provider-specific message attributes (lowercased) |
-| `ctx.request.params.topic` | Topic name |
-| `ctx.request.params.subscription` | Subscription identifier |
-| `ctx.request.params.messageId` | Provider message id — use as `idempotencyKey` for replay safety |
-| `ctx.request.params.publishTime` | When the provider received the publish |
+| `msg.body` | Message payload (JSON-parsed when possible, raw string otherwise) |
+| `msg.headers` | Provider-specific message attributes (lowercased) |
+| `msg.params.topic` | Topic name |
+| `msg.params.subscription` | Subscription identifier |
+| `msg.params.messageId` | Provider message id — use as `idempotencyKey` for replay safety |
+| `msg.params.publishTime` | When the provider received the publish |
 | `ctx.vars._pubsub_message` | Full message metadata |
 
 ## Acknowledgment semantics
@@ -140,13 +124,9 @@ trigger → fulfills the order. Decoupled, async, durable.
 
 ### Idempotency on every message
 
-```json
-{
-  "id": "process",
-  "use": "@blokjs/api-call",
-  "idempotencyKey": "js/ctx.request.params.messageId",
-  "inputs": { "url": "..." }
-}
+```ts
+step("process", apiCall, { url: "https://internal/process", body: msg.body },
+  { idempotencyKey: msg.params.messageId });
 ```
 
 Brokers retry on NACK — `idempotencyKey` makes the processing step
@@ -154,19 +134,12 @@ safe to re-run.
 
 ### Fan-out within the trigger process
 
-```json
-"steps": [
-  {
-    "id": "for-each-line",
-    "forEach": {
-      "in": "js/ctx.request.body.orderLines",
-      "as": "line",
-      "do": [
-        { "id": "ship", "subworkflow": "ship-line-item", "inputs": { "line": "js/ctx.state.line" } }
-      ]
-    }
-  }
-]
+```ts
+import { forEach, step } from "@blokjs/core";
+
+forEach(msg.body.orderLines, (line) => {
+  step("ship", null, { line }, { subworkflow: "ship-line-item" });
+});
 ```
 
 One pub/sub message becomes one parent run + N sub-workflow runs. The

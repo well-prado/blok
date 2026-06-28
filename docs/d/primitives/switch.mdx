@@ -1,149 +1,157 @@
 ---
 title: "switch — n-way routing"
-description: "Pick one of N branches based on a single value. Array `when` groups related cases under one arm."
+description: "Pick one of N branches based on a single value. An array `when` groups related cases under one arm."
 icon: "route"
 ---
 
-The `switch` primitive evaluates a single expression and dispatches
-to the first case whose `when` matches. Cleaner than nested `branch`
-when you have three or more arms on the same value, and the array
-`when` syntax groups related cases without duplicating logic.
+`switchOn` dispatches to the first case whose `when` matches a discriminant
+handle. Cleaner than nested `branch` when you have three or more arms on the
+same value, and the array `when` syntax groups related cases without
+duplicating logic. Each case's `do` is a **callback** where `step()` calls
+register into that arm.
 
-Used in the [webhook router example](/d/examples/webhook-router) to
-route GitHub's many event types (push / pull_request / issues / …) by
-header value.
+Used in the [webhook router example](/d/examples/webhook-router) to route
+GitHub's many event types (push / pull_request / issues / …) by header value.
 
 ## Quickstart
 
-```json
-{
-  "id": "route-by-event",
-  "switch": {
-    "on": "js/ctx.request.headers['x-github-event']",
-    "cases": [
+```ts
+import { workflow, step, switchOn, http } from "@blokjs/core";
+import handlePush from "../nodes/handle-push";
+import handlePr from "../nodes/handle-pr";
+import handleIssues from "../nodes/handle-issues";
+import { LogNode } from "@blokjs/helpers";
+
+export default workflow("github.webhook", { version: "1.0.0", trigger: http.post("/webhook") }, (req) => {
+  switchOn(req.headers["x-github-event"], {
+    cases: [
+      { when: "push", do: () => { step("push", handlePush, { event: req.body }); } },
       {
-        "when": "push",
-        "do": [
-          { "id": "handle-push", "subworkflow": "github-push", "inputs": {} }
-        ]
+        when: ["pull_request", "pull_request_review", "pull_request_review_comment"],
+        do: () => { step("pr", handlePr, { event: req.body }); },
       },
-      {
-        "when": ["pull_request", "pull_request_review", "pull_request_review_comment"],
-        "do": [
-          { "id": "handle-pr", "subworkflow": "github-pr", "inputs": {} }
-        ]
-      },
-      {
-        "when": ["issues", "issue_comment"],
-        "do": [
-          { "id": "handle-issues", "subworkflow": "github-issues", "inputs": {} }
-        ]
-      }
+      { when: ["issues", "issue_comment"], do: () => { step("issues", handleIssues, { event: req.body }); } },
     ],
-    "default": [
-      { "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "unknown event" } }
-    ]
-  }
-}
+    default: () => { step("unknown", LogNode, { level: "warn", message: "unknown event" }); },
+  }, { id: "route" });
+});
 ```
 
-Three cases, four event types — `pull_request*` collapses into one
-group via array `when`.
+Three cases, four event types — `pull_request*` collapses into one group via
+the array `when`.
 
-## Config fields
+## The signature
 
-| Field | Type | Notes |
-|---|---|---|
-| `on` | `string` (JS expression) | The value to switch on. Resolved against live `ctx` at run time. |
-| `cases` | `Case[]` | Ordered list of cases. The first `when` match wins. |
-| `default` | `Step[]` (optional) | Steps to run when no case matches. Acts like a fallback. |
+`switchOn(discriminant, { cases, default? }, { id })`:
 
-Each `Case`:
+- **`discriminant`** — a **handle** (a step output field or a trigger field).
+  It lowers to the switch's `on` expression and is resolved against the live
+  `ctx` at run time.
+- **`cases`** — an ordered list of `{ when, do }`. The first `when` match wins.
+- **`default`** — an optional fallback callback when no case matches.
 
-| Field | Type | Notes |
-|---|---|---|
-| `when` | `string` \| `string[]` | Value(s) to match against the resolved `on` value. Array means "any of these." |
-| `do` | `Step[]` | Steps to run when `when` matches. |
+<Warning>
+Each `when` must be a **static literal** — a string, number, boolean, or an
+array of those. A handle passed as `when` is rejected at author time: the
+switch engine matches `when` by literal `===` with no mapper resolution, so a
+handle would never match. Read the discriminant into the discriminant handle,
+and write each case label as a plain literal.
+</Warning>
 
 ## Matching semantics
 
-The `on` value is compared **by string equality** to each `when` entry
-(or any element when `when` is an array). For non-string `on` values,
-the resolver `String()`-coerces both sides before comparing.
+The discriminant is compared **by string equality** to each `when` entry (or
+any element when `when` is an array). For non-string discriminants both sides
+are `String()`-coerced before comparing.
 
-Need range or numeric comparisons? Use [`branch`](./branch.mdx)
-or [`tryCatch`](./tryCatch.mdx) instead — `switch` is for exact-match
-routing.
+Need range or numeric comparisons? Use [`branch`](./branch.mdx) with a `gt` /
+`lt` comparator instead — `switchOn` is for exact-match routing.
 
-## ctx.state result
+## Using a result downstream
 
-Same as `branch` — the switch step itself doesn't write state; the
-sub-steps that ran (in the matching case or `default`) populate their
-own entries. Reference them downstream as
-`ctx.state['<sub-step-id>']`.
+Like `branch`, handles minted **inside** a case arm don't escape it. When two
+arms produce a value you need later, write them to one shared key with `as:`
+(unique step ids, same `as` target):
+
+```ts
+switchOn(req.body.tier, {
+  cases: [
+    { when: "enterprise", do: () => { step("scoreEnt", score, { v: 100 }, { as: "score" }); } },
+    { when: "free", do: () => { step("scoreFree", score, { v: 1 }, { as: "score" }); } },
+  ],
+}, { id: "route" });
+
+// both arms wrote ctx.state.score — readable by id "score" downstream
+step("respond", RespondNode, { body: { score: req.body.id } });
+```
+
+This is footgun #1 — see [Handles & footguns](/d/primitives/handles-and-footguns).
 
 ## Common patterns
 
-### Event type routing (webhooks)
+<AccordionGroup>
+  <Accordion title="Event-type routing (webhooks)" icon="webhook">
+    The canonical use case — route a webhook by its event-type header. See the
+    [webhook router example](/d/examples/webhook-router) for Stripe + GitHub +
+    Linear receivers dispatched through one `switchOn`.
+  </Accordion>
+  <Accordion title="Per-tenant routing" icon="users">
+    Group tiers under array `when` and fall through to a `default`:
 
-The canonical use case — see the
-[webhook router example](/d/examples/webhook-router) for Stripe +
-GitHub + Linear receivers.
+    ```ts
+    switchOn(req.headers["x-tenant-tier"], {
+      cases: [
+        { when: ["enterprise", "premium"], do: () => {
+          step("priority", null, { tenant: req.body.id }, { subworkflow: "priority-pipeline" });
+        } },
+        { when: "free", do: () => {
+          step("free", null, { tenant: req.body.id }, { subworkflow: "free-tier-pipeline" });
+        } },
+      ],
+      default: () => { step("reject", ThrowNode, { message: "unknown tier", code: 400 }); },
+    }, { id: "tier" });
+    ```
+  </Accordion>
+  <Accordion title="State-machine transitions" icon="diagram-project">
+    Switch on a status field to advance a state machine:
 
-### Per-tenant routing
+    ```ts
+    const current = step("load", loadOrder, { id: req.params.id });
 
-```json
-{
-  "id": "tenant-routing",
-  "switch": {
-    "on": "ctx.request.headers['x-tenant-tier']",
-    "cases": [
-      { "when": ["enterprise", "premium"], "do": [{ "id": "priority", "subworkflow": "priority-pipeline", "inputs": {} }] },
-      { "when": "free", "do": [{ "id": "free", "subworkflow": "free-tier-pipeline", "inputs": {} }] }
-    ],
-    "default": [
-      { "id": "reject", "use": "@blokjs/throw", "inputs": { "message": "unknown tier", "code": 400 } }
-    ]
-  }
-}
-```
+    switchOn(current.status, {
+      cases: [
+        { when: "pending", do: () => { step("toProcessing", null, {}, { subworkflow: "advance-to-processing" }); } },
+        { when: "processing", do: () => { step("toCompleted", null, {}, { subworkflow: "advance-to-completed" }); } },
+        { when: "completed", do: () => { step("noop", LogNode, { level: "info", message: "already done" }); } },
+      ],
+    }, { id: "advance" });
+    ```
+  </Accordion>
+</AccordionGroup>
 
-### State-machine transitions
+## Footguns
 
-```json
-{
-  "id": "advance",
-  "switch": {
-    "on": "ctx.state.current.status",
-    "cases": [
-      { "when": "pending", "do": [{ "id": "to-processing", "subworkflow": "advance-to-processing", "inputs": {} }] },
-      { "when": "processing", "do": [{ "id": "to-completed", "subworkflow": "advance-to-completed", "inputs": {} }] },
-      { "when": "completed", "do": [{ "id": "noop", "use": "@blokjs/log", "inputs": { "level": "info", "message": "already done" } }] }
-    ]
-  }
-}
-```
+- **Static `when` only** — a `when` is matched literally with no mapper pass;
+  a handle is rejected at author time.
+- **Arm-scoped handles** don't escape their case — use a shared `as:` key.
+- **Unique step ids** — every step id is flat per workflow, including across
+  cases and `default`. Reusing one throws at load time.
 
-## Composition
-
-- Each case's `do` array runs as a nested pipeline — same primitives
-  apply (nested `branch`, `forEach`, `tryCatch`, sub-workflows)
-- Reliability knobs (idempotency, retry) go on the **regular steps**
-  inside each case, not on the switch
-- For wait-inside-switch, see
-  [wait-inside-primitives](./wait.mdx#wait-inside-primitives) —
-  the runtime persists the active case cursor on dispatch re-entry
+Each case's `do` callback can contain any primitive — nested `branch`,
+`forEach`, `tryCatch`, or sub-workflow steps. Reliability knobs
+(`idempotencyKey`, `retry`) go on the regular steps inside a case, never on
+the `switchOn` itself.
 
 ## Related
 
 <Columns cols={3}>
   <Card title="branch — if/else" icon="git-fork" href="/d/primitives/branch">
-    For two-way routing.
+    For two-way routing on a typed condition.
+  </Card>
+  <Card title="Handles & footguns" icon="triangle-exclamation" href="/d/primitives/handles-and-footguns">
+    Arm scope, ephemeral handles, and id collisions.
   </Card>
   <Card title="Webhook router" icon="webhook" href="/d/examples/webhook-router">
-    GitHub event-type routing via switch.
-  </Card>
-  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
-    Common dispatch target inside switch cases.
+    GitHub event-type routing via switchOn.
   </Card>
 </Columns>

@@ -19,26 +19,17 @@ attempt capped at 10s:
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import parseHtml from "@blokjs/parse-html";
 
-export default workflow({
-  name: "scrape-page",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/scrape" } },
-  steps: [
-    {
-      id: "fetch",
-      use: "@blokjs/api-call",
-      inputs: { url: $.req.body.url },
-      maxDuration: "10s",
-      retry: { maxAttempts: 3 },
-    },
-    {
-      id: "parse",
-      use: "@blokjs/parse-html",
-      inputs: { html: $.state.fetch },
-    },
-  ],
+export default workflow("scrape-page", { version: "1.0.0", trigger: http.post("/scrape") }, (req) => {
+  const fetched = step("fetch", apiCall, { url: req.body.url }, {
+    maxDuration: "10s",
+    retry: { maxAttempts: 3 },
+  });
+
+  step("parse", parseHtml, { html: fetched });
 });
 ```
 

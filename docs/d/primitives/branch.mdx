@@ -1,143 +1,129 @@
 ---
-title: "branch — if/else"
-description: "Two-way conditional routing. Pick a then arm or an else arm based on a JavaScript expression."
-icon: "git-fork"
+title: "branch"
+description: "Two-way conditional routing — run the then arm or the else arm based on a typed condition."
+icon: "code-branch"
 ---
 
-The `branch` primitive evaluates a `when` expression and runs the
-`then` arm when truthy, the `else` arm when falsy. Same shape as
-`if/else` in any language, but stays inside the v2 workflow body.
+`branch` is `if/else` for workflows. It evaluates a condition and runs the `then` arm when
+truthy, the `else` arm otherwise. Each arm is a **callback** where `step()` calls register into
+that branch.
 
 ## Quickstart
 
-```json
-{
-  "id": "route",
-  "branch": {
-    "when": "ctx.request.method === 'POST'",
-    "then": [
-      { "id": "create", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
-    ],
-    "else": [
-      { "id": "read", "use": "@blokjs/api-call", "inputs": { "url": "..." } }
-    ]
-  }
-}
-```
+```ts
+import { workflow, step, branch, gt, http } from "@blokjs/core";
+import validateOrder from "../nodes/validate-order";
+import route from "../nodes/route";
 
-TypeScript via the `@blokjs/helper` proxy:
+export default workflow("orders.route", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  const order = step("validate", validateOrder, { qty: req.body.qty });
 
-```typescript
-import { workflow, branch, $ } from "@blokjs/helper";
-
-export default workflow({
-  name: "Method Router",
-  trigger: { http: { method: "ANY" } },
-  steps: [
-    branch({
-      id: "route",
-      when: eq($.req.method, "POST"),
-      then: [{ id: "create", use: "@blokjs/api-call", inputs: { url: "..." } }],
-      else: [{ id: "read", use: "@blokjs/api-call", inputs: { url: "..." } }],
-    }),
-  ],
+  branch("lane", gt(order.qty, 10), {
+    then: () => { step("bulk", route, { lane: "bulk" }); },
+    else: () => { step("standard", route, { lane: "standard" }); },
+  });
 });
 ```
 
-## Config fields
+`gt(order.qty, 10)` is a **typed condition** built from a handle. The `then`/`else` callbacks
+each register their own steps.
 
-| Field | Type | Notes |
-|---|---|---|
-| `when` | `string` (JS expression) | Evaluated against the live `ctx`. Falsy values (`false`, `0`, `null`, `undefined`, `""`) take the `else` arm. |
-| `then` | `Step[]` | Steps to run when `when` is truthy. |
-| `else` | `Step[]` (optional) | Steps to run when `when` is falsy. Omit for a no-op fallback. |
+## The condition
 
-## ctx.state result
+`branch(id, condition, arms)` accepts:
 
-The branch step itself stores nothing notable on `ctx.state[<id>]`.
-The **sub-steps** that ran (inside `then` or `else`) populate their own
-state entries. Use those for downstream references:
+- A **typed comparator** — `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `not` — built from a handle and
+  a value (or two handles):
 
-```json
-{
-  "id": "route",
-  "branch": {
-    "when": "ctx.request.body.kind === 'urgent'",
-    "then": [{ "id": "fast-path", "use": "...", "inputs": {} }],
-    "else": [{ "id": "slow-path", "use": "...", "inputs": {} }]
-  }
-},
-{
-  "id": "respond",
-  "use": "@blokjs/expr",
-  "inputs": {
-    "expression": "ctx.state['fast-path'] ?? ctx.state['slow-path']"
-  }
-}
+  ```ts
+  branch("vip", gte(order.total, 1000), { then: () => { /* … */ } });
+  branch("guest", eq(req.headers["x-role"], "guest"), { then: () => { /* … */ } });
+  ```
+
+- A **boolean handle** — a truthiness check on a node output field:
+
+  ```ts
+  const stock = step("check", checkStock, { sku: order.sku });
+  branch("in-stock", stock.available, {
+    then: () => { step("ship", ship, { id: order.id }); },
+    else: () => { step("backorder", backorder, { id: order.id }); },
+  });
+  ```
+
+<Warning>
+The condition must come from a comparator or a boolean handle — **never a hand-written string**.
+A raw `"ctx.state.x > 10"` or a `js/…` string bypasses the typed lowering and throws at runtime.
+The comparators emit the correct form for you.
+</Warning>
+
+## Using a result downstream
+
+Handles minted **inside** an arm don't escape it — reading `step("bulk", …)`'s handle after the
+branch resolves to `undefined`. When both arms produce a value you need later, write them to one
+shared key with `as:`:
+
+```ts
+branch("lane", gt(order.qty, 10), {
+  then: () => { step("bulk", route, { lane: "bulk" }, { as: "lane" }); },
+  else: () => { step("standard", route, { lane: "standard" }, { as: "lane" }); },
+});
+
+// Both arms wrote ctx.state.lane — now readable by id "lane".
+step("notify", notify, { lane: req.body.email });
 ```
+
+This is footgun #1 — see [Handles & footguns](/d/primitives/handles-and-footguns).
 
 ## Common patterns
 
-### Conditional skip
+<AccordionGroup>
+  <Accordion title="Conditional side effect (no else)" icon="bolt">
+    Omit `else` when one side has work and the other is a no-op:
 
-Empty `then` (or `else`) — the arm runs as a no-op. Useful when one
-side has work and the other doesn't:
+    ```ts
+    branch("alert-on-error", not(result.ok), {
+      then: () => { step("alert", notify, { message: result.error }); },
+    });
+    ```
+  </Accordion>
+  <Accordion title="Guarded sub-workflow dispatch" icon="shield">
+    Run an expensive child only when a predicate matches; pair with `idempotencyKey` so retries
+    don't double-charge:
 
-```json
-{
-  "id": "log-if-error",
-  "branch": {
-    "when": "ctx.state.fetch.error !== null",
-    "then": [
-      { "id": "log", "use": "@blokjs/log", "inputs": { "level": "error", "message": "..." } }
-    ]
-  }
-}
-```
+    ```ts
+    branch("maybe-charge", req.body.requireBilling, {
+      then: () => {
+        step("charge", null, { amount: req.body.amount }, {
+          subworkflow: "charge-card",
+          idempotencyKey: req.body.requestId,
+        });
+      },
+    });
+    ```
+  </Accordion>
+  <Accordion title="Nested branches" icon="code-branch">
+    Branch arms can contain any primitive — `forEach`, `tryCatch`, sub-workflows, or another
+    `branch`. For 3+ cases on one value, reach for [`switchOn`](/d/primitives/switch) instead of
+    nesting.
+  </Accordion>
+</AccordionGroup>
 
-### Method routing (replacing v1 if-else)
+## Footguns
 
-Pre-v2, conditional routing used `@blokjs/if-else` + `conditions[]`.
-v2 `branch` is the one-step replacement — see the
-[DB Manager example](/d/examples/db-manager) for nested `branch` steps
-handling six different `(method, path)` pairs.
-
-### Guarded sub-workflow dispatch
-
-```json
-{
-  "id": "maybe-charge",
-  "branch": {
-    "when": "ctx.request.body.requireBilling",
-    "then": [
-      { "id": "charge", "subworkflow": "charge-card", "inputs": { "amount": "js/ctx.request.body.amount" } }
-    ]
-  }
-}
-```
-
-The sub-workflow runs only when the predicate matches. Pair with
-`idempotencyKey` on the charge step so retries don't double-charge.
-
-## Composition
-
-- Nest `branch` inside `branch` for multi-way trees (or use
-  [`switch`](./switch.mdx) for cleaner N-way routing)
-- Branch arms can contain any other primitive — `forEach`,
-  `tryCatch`, sub-workflow steps, regular nodes
-- Each arm runs in the parent's `ctx` — `ctx.state` accumulates
-  across arms
+- **Arm-scoped handles** don't escape their arm — use a shared `as:` key (above).
+- **Unique step ids** — every step id is flat per workflow, including across `then`/`else`. Reusing
+  one throws at load time; use `as:` to write the same key from both arms.
 
 ## Related
 
 <Columns cols={3}>
-  <Card title="switch — n-way" icon="route" href="/d/primitives/switch">
-    Cleaner shape when you have 3+ branches on one value.
+  <Card title="switchOn" icon="route" href="/d/primitives/switch">
+    Cleaner N-way routing on one discriminant.
   </Card>
-  <Card title="forEach" icon="list-checks" href="/d/primitives/forEach">
+  <Card title="forEach" icon="repeat" href="/d/primitives/forEach">
     Iterate inside a branch arm.
   </Card>
-  <Card title="DB Manager example" icon="database" href="/d/examples/db-manager">
-    Real nested-branch workflow.
+  <Card title="Handles & footguns" icon="triangle-exclamation" href="/d/primitives/handles-and-footguns">
+    Arm scope, ephemeral handles, and id collisions.
   </Card>
 </Columns>

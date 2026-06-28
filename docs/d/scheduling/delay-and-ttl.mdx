@@ -19,27 +19,19 @@ in case the scheduler is unavailable when the timer fires:
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import sendgrid from "@blokjs/sendgrid";
 
-export default workflow({
-  name: "welcome-email",
-  version: "1.0.0",
-  trigger: {
-    http: {
-      method: "POST",
-      path: "/welcome",
-      delay: "1h",
-      ttl: "2h",
-    },
+export default workflow(
+  "welcome-email",
+  {
+    version: "1.0.0",
+    trigger: http.post("/welcome", { delay: "1h", ttl: "2h" }),
   },
-  steps: [
-    {
-      id: "send",
-      use: "@blokjs/sendgrid",
-      inputs: { to: $.req.body.email, body: $.req.body.body },
-    },
-  ],
-});
+  (req) => {
+    step("send", sendgrid, { to: req.body.email, body: req.body.body });
+  },
+);
 ```
 
 ```json JSON

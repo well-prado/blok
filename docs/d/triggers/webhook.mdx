@@ -17,59 +17,56 @@ end-to-end pattern.
 
 ## Quickstart
 
+The build callback's argument is the **entry handle** — for a webhook it's the verified event,
+named `event` (`event.body` is the verified payload, `event.headers` the request headers).
+
 ### Stripe (built-in)
 
-```json workflows/json/stripe.json
-{
-  "name": "Stripe Webhook",
-  "version": "1.0.0",
-  "trigger": {
-    "webhook": {
-      "provider": "stripe",
-      "path": "/webhooks/stripe",
-      "secretEnv": "STRIPE_WEBHOOK_SECRET",
-      "tolerance": 300,
-      "idempotencyKey": "js/ctx.request.body.id"
-    }
+```ts src/workflows/stripe.ts
+import { workflow, step } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow("stripe-webhook", {
+  version: "1.0.0",
+  trigger: {
+    webhook: {
+      provider: "stripe",
+      path: "/webhooks/stripe",
+      secretEnv: "STRIPE_WEBHOOK_SECRET",
+      tolerance: 300,
+      idempotencyKey: "ctx.request.body.id",
+    },
   },
-  "steps": [
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ handled: true, type: ctx.request.body.type, id: ctx.request.body.id })"
-      }
-    }
-  ]
-}
+}, () => {
+  step("respond", ExprNode, {
+    expression: "({ handled: true, type: ctx.request.body.type, id: ctx.request.body.id })",
+  });
+});
 ```
 
 ### Linear (custom signature)
 
-```json workflows/json/linear.json
-{
-  "name": "Linear Webhook",
-  "version": "1.0.0",
-  "trigger": {
-    "webhook": {
-      "path": "/webhooks/linear",
-      "signature": {
-        "scheme": "hmac-sha256",
-        "header": "Linear-Signature",
-        "format": "{hex}",
-        "secretEnv": "LINEAR_WEBHOOK_SECRET",
-        "tolerance": 0
-      }
-    }
+```ts src/workflows/linear.ts
+import { workflow, step } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow("linear-webhook", {
+  version: "1.0.0",
+  trigger: {
+    webhook: {
+      path: "/webhooks/linear",
+      signature: {
+        scheme: "hmac-sha256",
+        header: "Linear-Signature",
+        format: "{hex}",
+        secretEnv: "LINEAR_WEBHOOK_SECRET",
+        tolerance: 0,
+      },
+    },
   },
-  "steps": [
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": { "expression": "({ handled: true, type: ctx.request.body.type })" }
-    }
-  ]
-}
+}, () => {
+  step("respond", ExprNode, { expression: "({ handled: true, type: ctx.request.body.type })" });
+});
 ```
 
 ## Built-in providers
@@ -109,42 +106,41 @@ internal webhooks — anywhere a partner sends an HMAC-signed body.
 | `secretEnv` | `string` | — | Env var holding the secret (built-in providers). |
 | `tolerance` | `number` (seconds) | `300` | Drift window for timestamp-based schemes. |
 | `events` | `string[]` | — | Allowlist of `eventType` values. Verified-but-out-of-scope events return 200 + `{status: "ignored"}` (no retry storm). |
-| `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow: $.req.body.type` + `namespace: "stripe"` → looks up `stripe.<type>`). |
+| `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow: event.body.type` + `namespace: "stripe"` → looks up `stripe.<type>`). |
 | `idempotencyKey` | `string` \| `$.path` | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
 
-## ctx mapping
+## The `event` handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.body` | Parsed JSON body |
-| `ctx.request.headers` | Lowercased header map |
-| `ctx.request.params` | Path params from `:name` in the webhook path |
+| `event.body` | Parsed JSON body (the verified payload) |
+| `event.headers` | Lowercased header map |
+| `event.params` | Path params from `:name` in the webhook path |
 | `ctx.request.rawBody` | Raw body string (the bytes the HMAC was computed against) |
 | `ctx.vars._webhook_event_id` | The resolved event id (used as the idempotency cache key) |
 | `ctx.vars._webhook_event_type` | The resolved event type |
 
 ## Polymorphic dispatch pattern
 
-The Stripe demo uses one step to handle every event type:
+The Stripe demo uses one step to handle every event type. The dispatch target is a handle —
+`event.body.type` — resolved against the live event at dispatch time:
 
-```json
-{
-  "trigger": {
-    "webhook": {
-      "provider": "stripe",
-      "namespace": "stripe",
-      "secretEnv": "STRIPE_WEBHOOK_SECRET",
-      "idempotencyKey": "js/ctx.request.body.id"
-    }
+```ts
+import { workflow, step } from "@blokjs/core";
+
+export default workflow("stripe-router", {
+  version: "1.0.0",
+  trigger: {
+    webhook: {
+      provider: "stripe",
+      namespace: "stripe",
+      secretEnv: "STRIPE_WEBHOOK_SECRET",
+      idempotencyKey: "ctx.request.body.id",
+    },
   },
-  "steps": [
-    {
-      "id": "dispatch",
-      "subworkflow": "js/ctx.request.body.type",
-      "inputs": { "stripeEvent": "js/ctx.request.body" }
-    }
-  ]
-}
+}, (event) => {
+  step("dispatch", null, { stripeEvent: event.body }, { subworkflow: event.body.type });
+});
 ```
 
 `body.type === "invoice.paid"` + `namespace: "stripe"` resolves to the
@@ -155,21 +151,28 @@ for safety guards (`allowList`).
 
 ## Switch dispatch pattern
 
-GitHub's many event types group by family — use a `switch` step
-with array `when`:
+GitHub's many event types group by family — use `switchOn` with array `when`. The discriminant
+is the event-name header handle; each `when` is a static literal:
 
-```json
-{
-  "id": "route-by-event",
-  "switch": {
-    "on": "js/(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
-    "cases": [
-      { "when": "push", "do": [{ "id": "dispatch-push", "subworkflow": "github-push", "inputs": {} }] },
-      { "when": ["pull_request", "pull_request_review"], "do": [{ "id": "dispatch-pr", "subworkflow": "github-pr", "inputs": {} }] }
+```ts
+import { workflow, step, switchOn } from "@blokjs/core";
+import { LogNode } from "@blokjs/helpers";
+
+export default workflow("github-router", {
+  version: "1.0.0",
+  trigger: { webhook: { provider: "github", secretEnv: "GITHUB_WEBHOOK_SECRET" } },
+}, (event) => {
+  switchOn(event.headers["x-github-event"], {
+    cases: [
+      { when: "push", do: () => { step("dispatch-push", null, {}, { subworkflow: "github-push" }); } },
+      {
+        when: ["pull_request", "pull_request_review"],
+        do: () => { step("dispatch-pr", null, {}, { subworkflow: "github-pr" }); },
+      },
     ],
-    "default": [{ "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "..." } }]
-  }
-}
+    default: () => { step("log-unknown", LogNode, { level: "warn", message: "unknown event" }); },
+  });
+});
 ```
 
 ## Failure modes
