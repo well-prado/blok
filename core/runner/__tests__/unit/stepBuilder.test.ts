@@ -27,7 +27,7 @@ import { type Context, lowerRefs, mapper } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
-import { type TriggerHandle, step, workflowCallback } from "../../src/stepBuilder";
+import { type TriggerHandle, step, tpl, workflowCallback } from "../../src/stepBuilder";
 // The REAL persistence pass the runner uses after every step (Rules 0–3).
 import { applyStepOutput } from "../../src/workflow/PersistenceHelper";
 
@@ -82,6 +82,14 @@ const shout = defineNode({
 	input: z.object({ message: z.string() }),
 	output: z.object({ loud: z.string() }),
 	execute: (_ctx, input) => ({ loud: input.message.toUpperCase() }),
+});
+
+const echoUrl = defineNode({
+	name: "echo-url",
+	description: "echo a url back",
+	input: z.object({ url: z.string() }),
+	output: z.object({ url: z.string() }),
+	execute: (_ctx, input) => ({ url: input.url }),
 });
 
 describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs → Mapper", () => {
@@ -144,6 +152,69 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 				step("a", shout, { message: "y" });
 			}),
 		).rejects.toThrow(/Duplicate step id "a"/);
+	});
+
+	it("tpl: captures {$tpl} with a {$ref} segment, lowers to a js/`…` literal, resolves through the REAL Mapper", async () => {
+		const wf = await workflowCallback(
+			"Stock Check",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				const validate = step("validate", greet, { name: req.body.name });
+				// tpl interpolates a handle into a string — captured structurally,
+				// no toString coercion (the poison would throw otherwise).
+				step("fetch", echoUrl, { url: tpl`https://h/${validate.greeting}` });
+			},
+		);
+
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+
+		// (a) IR carries {$tpl} with a {$ref} segment — pre-lowering, structural.
+		expect(steps[1].inputs.url).toEqual({
+			$tpl: ["https://h/", { $ref: { step: "validate", path: ["greeting"] } }, ""],
+		});
+
+		// (b) lowerRefs compiles it to a js/`…${ctx.state…}…` template literal.
+		expect(lowerRefs(steps[1].inputs)).toEqual({
+			url: "js/`https://h/${ctx.state.validate.greeting}`",
+		});
+
+		// (c) drive the REAL wire path end-to-end.
+		const ctx = createTriggerCtx({ name: "ada" });
+		await runStep(ctx, steps[0], greet);
+		await runStep(ctx, steps[1], echoUrl);
+
+		const state = ctx.state as Record<string, unknown>;
+		expect(state.validate).toEqual({ greeting: "Hello, ada!" });
+		expect(state.fetch).toEqual({ url: "https://h/Hello, ada!" });
+	});
+
+	it("tpl: falsy interpolation (0) preserved, not blanked, end-to-end", async () => {
+		const zero = defineNode({
+			name: "zero",
+			description: "emit a zero",
+			input: z.object({}),
+			output: z.object({ n: z.number() }),
+			execute: () => ({ n: 0 }),
+		});
+		const wf = await workflowCallback("Zero", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const z0 = step("z", zero, {});
+			step("fetch", echoUrl, { url: tpl`n=${z0.n}` });
+		});
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		const ctx = createTriggerCtx({});
+		await runStep(ctx, steps[0], zero);
+		await runStep(ctx, steps[1], echoUrl);
+		expect((ctx.state as Record<string, unknown>).fetch).toEqual({ url: "n=0" });
+	});
+
+	it("POISON: a bare handle in an UNTAGGED template literal throws (loud, not silent)", async () => {
+		await expect(
+			workflowCallback("Poison", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (req: TriggerHandle) => {
+				const validate = step("validate", greet, { name: req.body.name });
+				// Untagged template literal coerces the handle to a string → throws.
+				step("fetch", echoUrl, { url: `https://h/${validate.greeting}` });
+			}),
+		).rejects.toThrow(/use tpl`/i);
 	});
 
 	it("survives await inside the callback (AsyncLocalStorage builder context)", async () => {

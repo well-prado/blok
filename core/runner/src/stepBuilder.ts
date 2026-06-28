@@ -41,6 +41,15 @@ interface StructuralRef {
 	$ref: { step: string; path: (string | number)[] };
 }
 
+/**
+ * A structural template node (#425): the alternating string/ref segments a
+ * `tpl\`...${handle}...\`` captures. Mirrors `@blokjs/shared`'s `StructuralTpl`.
+ * lowerRefs compiles it to a `js/\`...${ctx.state...}...\`` template literal.
+ */
+interface StructuralTpl {
+	$tpl: unknown[];
+}
+
 /** Detect a handle Proxy when walking step inputs. Private — never user-visible. */
 const HANDLE_META = Symbol("blok.handleMeta");
 
@@ -122,6 +131,17 @@ function buildHandle(rootKey: string, owner: Builder | undefined, path: (string 
 			if (key === HANDLE_META) return { step: rootKey, owner, path } satisfies Partial<HandleMeta> as HandleMeta;
 			// Don't masquerade as a thenable — Promise.resolve()/await probes `.then`.
 			if (key === "then") return undefined;
+			// POISON (#425): a bare handle coerced into a plain (untagged) string —
+			// `\`${handle}\`` or `"" + handle` — would silently stringify to garbage
+			// and lose the ref. Throw loud instead. `tpl\`...\`` reads the raw strings
+			// array + HANDLE_META structurally (never coerces), so tpl itself works.
+			if (key === "toString" || key === Symbol.toPrimitive) {
+				return () => {
+					throw new Error(
+						`A handle (ref to step "${rootKey}") was coerced to a string. Use tpl\`...\${handle}...\` for string interpolation of handles — a bare \${handle} in an untagged template silently loses the ref.`,
+					);
+				};
+			}
 			if (typeof key === "symbol") return undefined;
 			const k = String(key);
 			const seg = IDENT_OR_NUM.test(k) ? Number(k) : k;
@@ -137,6 +157,32 @@ function buildHandle(rootKey: string, owner: Builder | undefined, path: (string 
  */
 export function makeHandle<T = unknown>(rootKey: string): Handle<T> {
 	return buildHandle(rootKey, undefined, []) as Handle<T>;
+}
+
+/**
+ * `tpl` tagged template (#425). Captures the static string parts + the
+ * interpolated handles as a STRUCTURAL template node — `{$tpl: [str, {$ref}, …]}`
+ * — WITHOUT coercing the handles to strings (the poison toString would throw).
+ * The raw `strings` array is captured before any coercion; each interpolated
+ * value is read structurally via {@link readHandleMeta} and lowered to the SAME
+ * `{$ref}` sentinel `makeHandle` mints. Non-handle interpolations stay as their
+ * value (lowerRefs JSON/String-encodes them into the template literal).
+ *
+ * The result flows through `lowerHandles` (a plain object — passes through) and
+ * lowerRefs at load time, which compiles `{$tpl}` to a `js/\`…\`` template literal.
+ *
+ * @example tpl`https://inv/stock/${validate.productId}` → { $tpl: ["https://inv/stock/", {$ref:{step:"validate",path:["productId"]}}, ""] }
+ */
+export function tpl(strings: TemplateStringsArray, ...values: unknown[]): StructuralTpl {
+	const segments: unknown[] = [];
+	for (let i = 0; i < strings.length; i++) {
+		segments.push(strings[i]);
+		if (i < values.length) {
+			const meta = readHandleMeta(values[i]);
+			segments.push(meta ? ({ $ref: { step: meta.step, path: meta.path } } satisfies StructuralRef) : values[i]);
+		}
+	}
+	return { $tpl: segments };
 }
 
 function readHandleMeta(value: unknown): HandleMeta | undefined {

@@ -37,7 +37,7 @@ import { assertGrpcOnlyTransport } from "./adapters/transport";
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
 
 // Handle-DSL authoring runtime (#421) — the eventual @blokjs/core surface.
-// branch + typed comparators (#418, ADR 0003/0004).
+// branch + typed comparators (#418, ADR 0003/0004); tpl (#425).
 import {
 	branch,
 	eq as condEq,
@@ -49,6 +49,7 @@ import {
 	not as condNot,
 	makeHandle,
 	step,
+	tpl,
 	workflowCallback,
 } from "./stepBuilder";
 
@@ -223,6 +224,7 @@ export {
 	// Handle-DSL authoring runtime (#421)
 	step,
 	makeHandle,
+	tpl,
 	workflowCallback,
 	// branch + typed comparators (#418, ADR 0003/0004)
 	branch,
