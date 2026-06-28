@@ -77,97 +77,89 @@ browser is subscribed to that channel.
 
 ## The three workflows
 
-### `workflows/json/chat-page.json`
+### `src/workflows/chat-page.ts`
 
 Renders the chat UI page. The `chat-ui` node is a UI node shipped
 with `--examples` — it returns a vanilla HTML page (no React, no build
-step) with an `EventSource` + `fetch` pair wired up.
+step) with an `EventSource` + `fetch` pair wired up. Import it from
+`src/nodes/` like any local node:
 
-```json
-{
-  "name": "Chat Page",
-  "version": "1.0.0",
-  "trigger": {
-    "http": { "method": "GET", "path": "/chat", "accept": "text/html" }
+```ts src/workflows/chat-page.ts
+import { workflow, step, http } from "@blokjs/core";
+import chatUi from "../nodes/chat-ui";
+
+export default workflow(
+  "chat.page",
+  { version: "1.0.0", trigger: http.get("/chat", { accept: "text/html" }) },
+  () => {
+    step("render", chatUi, {});
   },
-  "steps": [
-    { "id": "render", "use": "chat-ui", "type": "module", "inputs": {} }
-  ]
-}
+);
 ```
 
-### `workflows/json/chat-message.json`
+### `src/workflows/chat-message.ts`
 
 POST handler. Reads the conversation history from the request body and
-calls `@blokjs/llm-stream`. The helper streams each token to the
-bus channel `chat:<sessionId>` and returns the accumulated text when
-the model finishes.
+runs `LlmStreamNode`. The helper streams each token to the bus channel
+`chat:<sessionId>` and returns the accumulated text when the model
+finishes. `tpl` embeds the `sessionId` handle into the channel string:
 
-```json
-{
-  "name": "Chat Message",
-  "version": "1.0.0",
-  "trigger": {
-    "http": {
-      "method": "POST",
-      "path": "/chat/:sessionId/message",
-      "accept": "application/json"
-    }
+```ts src/workflows/chat-message.ts
+import { workflow, step, http, tpl } from "@blokjs/core";
+import { LlmStreamNode } from "@blokjs/helpers";
+
+export default workflow(
+  "chat.message",
+  {
+    version: "1.0.0",
+    trigger: http.post("/chat/:sessionId/message", { accept: "application/json" }),
   },
-  "steps": [
-    {
-      "id": "stream",
-      "use": "@blokjs/llm-stream",
-      "type": "module",
-      "inputs": {
-        "channel": "js/`chat:${ctx.request.params.sessionId}`",
-        "apiKey": "js/process.env.OPENROUTER_API_KEY",
-        "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
-        "messages": "js/ctx.request.body.messages"
-      }
-    }
-  ]
-}
+  (req) => {
+    step("stream", LlmStreamNode, {
+      channel: tpl`chat:${req.params.sessionId}`,
+      apiKey: process.env.OPENROUTER_API_KEY,
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      messages: req.body.messages,
+    });
+  },
+);
 ```
 
-### `workflows/json/chat-stream.json`
+### `src/workflows/chat-stream.ts`
 
 SSE subscriber. Mounts on the HTTP server's Hono app and pumps the bus
 channel out as SSE frames. The browser's `EventSource` receives
 `token` events as the model produces them and a final `done` event
-with the full reply.
+with the full reply. The `sse` trigger is a raw block — pass it through
+`opts.trigger`:
 
-```json
-{
-  "name": "Chat Stream",
-  "version": "1.0.0",
-  "trigger": {
-    "sse": {
-      "path": "/sse/chat/:sessionId",
-      "heartbeatInterval": 15000,
-      "retryInterval": 3000
-    }
-  },
-  "steps": [
-    {
-      "id": "sub",
-      "use": "@blokjs/sse-subscribe",
-      "type": "module",
-      "inputs": { "channels": ["chat:{sessionId}"] }
+```ts src/workflows/chat-stream.ts
+import { workflow, step } from "@blokjs/core";
+import { SseSubscribeNode, SseStreamNode } from "@blokjs/helpers";
+
+export default workflow(
+  "chat.stream",
+  {
+    version: "1.0.0",
+    trigger: {
+      sse: {
+        path: "/sse/chat/:sessionId",
+        heartbeatInterval: 15_000,
+        retryInterval: 3_000,
+      },
     },
-    {
-      "id": "stream",
-      "use": "@blokjs/sse-stream",
-      "type": "module",
-      "inputs": { "source": "js/ctx.state.sub" }
-    }
-  ]
-}
+  },
+  () => {
+    const sub = step("sub", SseSubscribeNode, { channels: ["chat:{sessionId}"] });
+    step("stream", SseStreamNode, { source: sub });
+  },
+);
 ```
 
 The `{sessionId}` placeholder in `channels` is filled from the request
 path parameter at run time, so every connected browser subscribes only
-to its own conversation.
+to its own conversation. The `sub` handle flows straight into the
+`stream` step's `source` — no `ctx.state` strings.
 
 ## Customize
 
@@ -186,37 +178,29 @@ OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
 
 ### Point at OpenAI directly
 
-Set the OpenAI API key as `OPENROUTER_API_KEY` and override the base
-URL in your workflow:
+Set the OpenAI API key as `OPENAI_API_KEY` and override the base URL
+in the `stream` step:
 
-```json
-{
-  "id": "stream",
-  "use": "@blokjs/llm-stream",
-  "inputs": {
-    "apiKey": "js/process.env.OPENAI_API_KEY",
-    "baseUrl": "https://api.openai.com/v1",
-    "model": "gpt-4o-mini",
-    "messages": "js/ctx.request.body.messages",
-    "channel": "js/`chat:${ctx.request.params.sessionId}`"
-  }
-}
+```ts
+step("stream", LlmStreamNode, {
+  apiKey: process.env.OPENAI_API_KEY,
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4o-mini",
+  messages: req.body.messages,
+  channel: tpl`chat:${req.params.sessionId}`,
+});
 ```
 
 ### Point at local Ollama
 
-```json
-{
-  "id": "stream",
-  "use": "@blokjs/llm-stream",
-  "inputs": {
-    "apiKey": "ollama-local",
-    "baseUrl": "http://localhost:11434/v1",
-    "model": "llama3.2",
-    "messages": "js/ctx.request.body.messages",
-    "channel": "js/`chat:${ctx.request.params.sessionId}`"
-  }
-}
+```ts
+step("stream", LlmStreamNode, {
+  apiKey: "ollama-local",
+  baseUrl: "http://localhost:11434/v1",
+  model: "llama3.2",
+  messages: req.body.messages,
+  channel: tpl`chat:${req.params.sessionId}`,
+});
 ```
 
 ### Add server-side memory

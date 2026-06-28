@@ -100,35 +100,48 @@ prepended the namespace (`stripe.`), and dispatched to the
 
 ## Stripe — polymorphic dispatch
 
-```json workflows/json/webhook-stripe.json
-{
-  "name": "webhook-stripe",
-  "version": "1.0.0",
-  "trigger": {
-    "webhook": {
-      "provider": "stripe",
-      "path": "/webhooks/stripe",
-      "secretEnv": "STRIPE_WEBHOOK_SECRET",
-      "tolerance": 300,
-      "namespace": "stripe",
-      "idempotencyKey": "js/ctx.request.body.id"
-    }
+```ts src/workflows/webhook-stripe.ts
+import { workflow, step } from "@blokjs/core";
+
+export default workflow(
+  "webhook-stripe",
+  {
+    version: "1.0.0",
+    trigger: {
+      webhook: {
+        provider: "stripe",
+        path: "/webhooks/stripe",
+        secretEnv: "STRIPE_WEBHOOK_SECRET",
+        tolerance: 300,
+        namespace: "stripe",
+        idempotencyKey: "$.req.body.id",
+      },
+    },
   },
-  "steps": [
-    {
-      "id": "dispatch",
-      "subworkflow": "js/ctx.request.body.type",
-      "inputs": { "stripeEvent": "js/ctx.request.body" }
-    }
-  ]
-}
+  // Webhook entry handle is `event` — body is the verified payload.
+  (event) => {
+    // One step, every event type. `subworkflow` resolves the verified
+    // body at dispatch time; `namespace: "stripe"` prefixes the result.
+    step("dispatch", null, { stripeEvent: event.body }, {
+      subworkflow: "$.req.body.type",
+    });
+  },
+);
 ```
 
 The headline: **one step** handles every Stripe event type. The
-`subworkflow` field is a `js/` expression that resolves against the
-verified body. After the trigger's `namespace: "stripe"` prefix, a
+`subworkflow` field is an expression that resolves against the verified
+body. After the trigger's `namespace: "stripe"` prefix, a
 `body.type === "invoice.paid"` event lands on the workflow named
 `stripe.invoice.paid`.
+
+<Note>
+A subworkflow-dispatch step passes `null` as the node — there's no
+local node to run, just a child workflow to invoke. The `subworkflow`
+expression is a trigger-resolved string (`"$.req.body.type"`), not a
+handle, because it's evaluated at dispatch time after the namespace
+prefix is applied.
+</Note>
 
 | Trigger field | Effect |
 |---|---|
@@ -136,27 +149,25 @@ verified body. After the trigger's `namespace: "stripe"` prefix, a
 | `secretEnv` | Name of the env var holding the signing secret. |
 | `tolerance` | Drift window in seconds. |
 | `namespace: "stripe"` | Prefix applied to the resolved sub-workflow name. |
-| `idempotencyKey: "js/ctx.request.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
+| `idempotencyKey: "$.req.body.id"` | Replay protection — Stripe retries on the same `evt_*` id return 200 with `status: "duplicate"` and don't re-run the workflow. |
 
 To handle a new event type, add a workflow with the matching name —
 no router update needed:
 
-```json workflows/json/webhook-stripe-customer-created.json
-{
-  "name": "stripe.customer.created",
-  "trigger": {
-    "http": { "method": "POST", "path": "/webhook-handlers/stripe.customer.created" }
+```ts src/workflows/handlers/stripe-customer-created.ts
+import { workflow, step, http } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow(
+  "stripe.customer.created",
+  { version: "1.0.0", trigger: http.post("/webhook-handlers/stripe.customer.created") },
+  () => {
+    step("respond", ExprNode, {
+      expression:
+        "({ handler: 'stripe.customer.created', customerId: ctx.request.body?.stripeEvent?.data?.object?.id })",
+    });
   },
-  "steps": [
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ handler: 'stripe.customer.created', customerId: ctx.request.body?.stripeEvent?.data?.object?.id })"
-      }
-    }
-  ]
-}
+);
 ```
 
 Unhandled `body.type` values dispatch to a sub-workflow that doesn't
@@ -165,50 +176,55 @@ exist and the trigger returns 200 with a structured "no handler" body
 
 ## GitHub — switch with array `when`
 
-```json workflows/json/webhook-github.json
-{
-  "name": "webhook-github",
-  "version": "1.0.0",
-  "trigger": {
-    "webhook": {
-      "provider": "github",
-      "path": "/webhooks/github",
-      "secretEnv": "GITHUB_WEBHOOK_SECRET"
-    }
+```ts src/workflows/webhook-github.ts
+import { workflow, step, switchOn, tpl } from "@blokjs/core";
+import { ExprNode, LogNode } from "@blokjs/helpers";
+
+export default workflow(
+  "webhook-github",
+  {
+    version: "1.0.0",
+    trigger: {
+      webhook: {
+        provider: "github",
+        path: "/webhooks/github",
+        secretEnv: "GITHUB_WEBHOOK_SECRET",
+      },
+    },
   },
-  "steps": [
-    {
-      "id": "route-by-event",
-      "switch": {
-        "on": "js/(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
-        "cases": [
+  (event) => {
+    // Normalize the event header to a lowercase string — the discriminant
+    // needs a transform, so compute it in a node first.
+    const kind = step("event-kind", ExprNode, {
+      expression: "(ctx.request.headers['x-github-event'] || 'unknown').toLowerCase()",
+    });
+
+    switchOn(
+      kind,
+      {
+        cases: [
+          { when: "push", do: () => { step("dispatch-push", null, {}, { subworkflow: "webhook-github-push" }); } },
           {
-            "when": "push",
-            "do": [{ "id": "dispatch-push", "subworkflow": "webhook-github-push", "inputs": {} }]
+            // Array `when` — matches any value in the list.
+            when: ["pull_request", "pull_request_review", "pull_request_review_comment"],
+            do: () => { step("dispatch-pr", null, {}, { subworkflow: "webhook-github-pr" }); },
           },
           {
-            "when": ["pull_request", "pull_request_review", "pull_request_review_comment"],
-            "do": [{ "id": "dispatch-pr", "subworkflow": "webhook-github-pr", "inputs": {} }]
+            when: ["issues", "issue_comment"],
+            do: () => { step("dispatch-issues", null, {}, { subworkflow: "webhook-github-issues" }); },
           },
-          {
-            "when": ["issues", "issue_comment"],
-            "do": [{ "id": "dispatch-issues", "subworkflow": "webhook-github-issues", "inputs": {} }]
-          }
         ],
-        "default": [
-          {
-            "id": "log-unknown",
-            "use": "@blokjs/log",
-            "inputs": {
-              "level": "warn",
-              "message": "js/`webhook-github: unknown event '${ctx.request.headers['x-github-event']}'`"
-            }
-          }
-        ]
-      }
-    }
-  ]
-}
+        default: () => {
+          step("log-unknown", LogNode, {
+            level: "warn",
+            message: tpl`webhook-github: unknown event '${event.headers["x-github-event"]}'`,
+          });
+        },
+      },
+      { id: "route-by-event" },
+    );
+  },
+);
 ```
 
 GitHub's many event types group naturally — `issues` and
@@ -221,38 +237,48 @@ keeping the case list short and intent visible.
 Linear isn't a built-in provider. The webhook trigger's `signature`
 config lets you describe any HMAC scheme without writing code:
 
-```json workflows/json/webhook-linear.json
-{
-  "name": "webhook-linear",
-  "version": "1.0.0",
-  "trigger": {
-    "webhook": {
-      "path": "/webhooks/linear",
-      "signature": {
-        "scheme": "hmac-sha256",
-        "header": "Linear-Signature",
-        "format": "{hex}",
-        "secretEnv": "LINEAR_WEBHOOK_SECRET",
-        "tolerance": 0
-      }
-    }
+```ts src/workflows/webhook-linear.ts
+import { workflow, step, switchOn } from "@blokjs/core";
+import { ExprNode, LogNode } from "@blokjs/helpers";
+
+export default workflow(
+  "webhook-linear",
+  {
+    version: "1.0.0",
+    trigger: {
+      webhook: {
+        path: "/webhooks/linear",
+        // Linear isn't a built-in provider — describe its HMAC scheme inline.
+        signature: {
+          scheme: "hmac-sha256",
+          header: "Linear-Signature",
+          format: "{hex}",
+          secretEnv: "LINEAR_WEBHOOK_SECRET",
+          tolerance: 0,
+        },
+      },
+    },
   },
-  "steps": [
-    {
-      "id": "route-by-type",
-      "switch": {
-        "on": "js/(ctx.request.body.type || 'unknown').toLowerCase()",
-        "cases": [
-          { "when": "issue", "do": [{ "id": "dispatch-issue", "subworkflow": "webhook-linear-issue", "inputs": {} }] },
-          { "when": "comment", "do": [{ "id": "dispatch-comment", "subworkflow": "webhook-linear-comment", "inputs": {} }] }
+  () => {
+    const kind = step("event-kind", ExprNode, {
+      expression: "(ctx.request.body.type || 'unknown').toLowerCase()",
+    });
+
+    switchOn(
+      kind,
+      {
+        cases: [
+          { when: "issue", do: () => { step("dispatch-issue", null, {}, { subworkflow: "webhook-linear-issue" }); } },
+          { when: "comment", do: () => { step("dispatch-comment", null, {}, { subworkflow: "webhook-linear-comment" }); } },
         ],
-        "default": [
-          { "id": "log-unknown", "use": "@blokjs/log", "inputs": { "level": "warn", "message": "..." } }
-        ]
-      }
-    }
-  ]
-}
+        default: () => {
+          step("log-unknown", LogNode, { level: "warn", message: "webhook-linear: unknown event type" });
+        },
+      },
+      { id: "route-by-type" },
+    );
+  },
+);
 ```
 
 | Field | What to set |
@@ -272,31 +298,30 @@ webhooks — anywhere a partner POSTs an HMAC-signed body.
 Each handler is a regular HTTP workflow. The router passes the verified
 event through `inputs`, which lands as the child's `ctx.request.body`:
 
-```json workflows/json/webhook-stripe-invoice-paid.json
-{
-  "name": "stripe.invoice.paid",
-  "trigger": {
-    "http": { "method": "POST", "path": "/webhook-handlers/stripe.invoice.paid" }
+```ts src/workflows/handlers/stripe-invoice-paid.ts
+import { workflow, step, http, tpl } from "@blokjs/core";
+import { LogNode, ExprNode } from "@blokjs/helpers";
+
+export default workflow(
+  "stripe.invoice.paid",
+  { version: "1.0.0", trigger: http.post("/webhook-handlers/stripe.invoice.paid") },
+  (req) => {
+    // The router's inputs land as ctx.request.body — read the stripeEvent off `req`.
+    const invoice = req.body.stripeEvent.data.object;
+
+    step(
+      "log",
+      LogNode,
+      { level: "info", message: tpl`stripe.invoice.paid: invoice=${invoice.id} amount=${invoice.amount_paid}` },
+      { ephemeral: true },
+    );
+
+    step("respond", ExprNode, {
+      expression:
+        "({ handler: 'stripe.invoice.paid', invoiceId: ctx.request.body?.stripeEvent?.data?.object?.id, amountPaid: ctx.request.body?.stripeEvent?.data?.object?.amount_paid })",
+    });
   },
-  "steps": [
-    {
-      "id": "log",
-      "use": "@blokjs/log",
-      "ephemeral": true,
-      "inputs": {
-        "level": "info",
-        "message": "js/`stripe.invoice.paid: invoice=${ctx.request.body?.stripeEvent?.data?.object?.id} amount=${ctx.request.body?.stripeEvent?.data?.object?.amount_paid}`"
-      }
-    },
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ handler: 'stripe.invoice.paid', invoiceId: ctx.request.body?.stripeEvent?.data?.object?.id, amountPaid: ctx.request.body?.stripeEvent?.data?.object?.amount_paid })"
-      }
-    }
-  ]
-}
+);
 ```
 
 Real handlers do whatever the event implies — record the payment, send
@@ -313,17 +338,15 @@ actually care about.
 
 ### Use `subworkflow.allowList` for safety
 
-Polymorphic dispatch with `subworkflow: $.req.body.type` accepts
+Polymorphic dispatch with `subworkflow: "$.req.body.type"` accepts
 anything the body says. To bound which names a malicious payload can
-resolve to:
+resolve to, pass `allowList` in the step opts:
 
-```json
-{
-  "id": "dispatch",
-  "subworkflow": "js/ctx.request.body.type",
-  "allowList": ["invoice.paid", "customer.created", "charge.succeeded"],
-  "inputs": { "stripeEvent": "js/ctx.request.body" }
-}
+```ts
+step("dispatch", null, { stripeEvent: event.body }, {
+  subworkflow: "$.req.body.type",
+  allowList: ["invoice.paid", "customer.created", "charge.succeeded"],
+});
 ```
 
 Resolved names not in the allowList are rejected at run time. See

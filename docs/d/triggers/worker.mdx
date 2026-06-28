@@ -16,45 +16,38 @@ canonical reference.
 
 ## Quickstart
 
-```json workflows/json/process-job.json
-{
-  "name": "Process Job",
-  "version": "1.0.0",
-  "trigger": {
-    "worker": {
-      "queue": "background-jobs",
-      "concurrency": 10,
-      "retries": 3,
-      "timeout": 30000
-    }
-  },
-  "steps": [
-    {
-      "id": "process",
-      "use": "@blokjs/api-call",
-      "idempotencyKey": "js/ctx.request.params.jobId",
-      "inputs": {
-        "url": "https://example.com/process",
-        "method": "POST",
-        "body": "js/ctx.request.body"
-      }
-    }
-  ]
-}
+The build callback's argument is the **entry handle** — for a worker it's the job, named `job`
+(`job.body` is the payload, `job.params.{queue,jobId,attempt}` is the metadata).
+
+```ts src/workflows/process-job.ts
+import { workflow, step } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("process-job", {
+  version: "1.0.0",
+  trigger: { worker: { queue: "background-jobs", concurrency: 10, retries: 3, timeout: 30000 } },
+}, (job) => {
+  step("process", apiCall, {
+    url: "https://example.com/process",
+    method: "POST",
+    body: job.body,
+  }, { idempotencyKey: job.params.jobId });
+});
 ```
 
-A sibling HTTP workflow enqueues:
+A sibling HTTP workflow enqueues with the `WorkerPublishNode` helper:
 
-```json
-{
-  "id": "enqueue",
-  "use": "@blokjs/worker-publish",
-  "inputs": {
-    "queue": "background-jobs",
-    "payload": "js/ctx.request.body",
-    "dedupId": "js/ctx.request.body.requestId"
-  }
-}
+```ts
+import { step, http, workflow } from "@blokjs/core";
+import { WorkerPublishNode } from "@blokjs/helpers";
+
+export default workflow("enqueue", { version: "1.0.0", trigger: http.post("/jobs") }, (req) => {
+  step("enqueue", WorkerPublishNode, {
+    queue: "background-jobs",
+    payload: req.body,
+    dedupId: req.body.requestId,
+  });
+});
 ```
 
 ## Config fields
@@ -90,19 +83,19 @@ The adapter pool is **shared** between the publisher and the worker
 trigger in the same process — a Redis-Streams worker and a Redis-Streams
 publisher share one `ioredis` connection.
 
-## ctx mapping
+## The `job` handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.body` | Job payload (whatever the publisher sent) |
-| `ctx.request.headers` | Job headers / metadata |
-| `ctx.request.params.queue` | Queue name |
-| `ctx.request.params.jobId` | Unique job id (adapter-specific format) |
-| `ctx.request.params.attempt` | 0-based retry counter (string) |
+| `job.body` | Job payload (whatever the publisher sent) |
+| `job.headers` | Job headers / metadata |
+| `job.params.queue` | Queue name |
+| `job.params.jobId` | Unique job id (adapter-specific format) |
+| `job.params.attempt` | 0-based retry counter (string) |
 | `ctx.vars._worker_job` | Full job metadata: `{id, queue, attempts, maxRetries, priority, createdAt, delay, timeout}` |
 | `ctx.signal` | Cancelled if `POST /__blok/runs/:runId/cancel` fires for this run |
 
-So `ctx.request.params.jobId` is the natural
+So `job.params.jobId` is the natural
 [`idempotencyKey`](/d/reliability/idempotency) for processing steps —
 retries on the same job hit the cache.
 
@@ -112,36 +105,27 @@ retries on the same job hit the cache.
 
 A noisy tenant flooding 10,000 jobs shouldn't starve other tenants:
 
-```json
-"trigger": {
-  "worker": {
-    "queue": "background-jobs",
-    "concurrency": 50,
-    "concurrencyKey": "js/ctx.request.body.tenantId",
-    "concurrencyLimit": 5
-  }
-}
+```ts
+trigger: { worker: {
+  queue: "background-jobs",
+  concurrency: 50,
+  concurrencyKey: "ctx.request.body.tenantId",
+  concurrencyLimit: 5,
+} }
 ```
 
 50 concurrent jobs **process-wide**, capped at 5 per tenant. Excess
-deliveries NACK with retry. Combine with `onLimit: "queue"` to defer
-instead of NACK:
-
-```json
-"concurrencyKey": "js/ctx.request.body.tenantId",
-"concurrencyLimit": 5,
-"onLimit": "queue"
-```
+deliveries NACK with retry. Add `onLimit: "queue"` to the same block to
+defer instead of NACK.
 
 ### Replay-safe processing
 
-```json
-{
-  "id": "charge-card",
-  "use": "@blokjs/api-call",
-  "idempotencyKey": "js/ctx.request.params.jobId",
-  "inputs": { "url": "https://api.stripe.com/v1/charges", "method": "POST", "body": "..." }
-}
+```ts
+step("charge-card", apiCall, {
+  url: "https://api.stripe.com/v1/charges",
+  method: "POST",
+  body: job.body,
+}, { idempotencyKey: job.params.jobId });
 ```
 
 The first attempt charges the card. Retries hit the cache, never the
@@ -150,16 +134,12 @@ API. **Don't use this on every side-effect step** — read
 
 ### Delayed dispatch from the producer
 
-```json
-{
-  "id": "enqueue-tomorrow",
-  "use": "@blokjs/worker-publish",
-  "inputs": {
-    "queue": "reminders",
-    "payload": "js/({ user: ctx.request.body.user })",
-    "delayMs": 86400000
-  }
-}
+```ts
+step("enqueue-tomorrow", WorkerPublishNode, {
+  queue: "reminders",
+  payload: { user: req.body.user },
+  delayMs: 86400000,
+});
 ```
 
 Provider-specific behavior: BullMQ + RabbitMQ support arbitrary delays;

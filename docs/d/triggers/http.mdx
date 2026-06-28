@@ -12,21 +12,16 @@ operation.
 
 ## Quickstart
 
-```json workflows/json/hello.json
-{
-  "name": "Hello",
-  "version": "1.0.0",
-  "trigger": {
-    "http": { "method": "GET", "path": "/hello", "accept": "application/json" }
-  },
-  "steps": [
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": { "expression": "({ message: 'hello world' })" }
-    }
-  ]
-}
+The build callback's argument is the **entry handle** — for HTTP it's the request, named `req`
+(`req.body`, `req.params.id`, `req.query.q`, `req.headers["x-…"]`).
+
+```ts src/workflows/hello.ts
+import { workflow, step, http } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+
+export default workflow("hello", { version: "1.0.0", trigger: http.get("/hello") }, () => {
+  step("respond", ExprNode, { expression: "({ message: 'hello world' })" });
+});
 ```
 
 ```bash
@@ -36,10 +31,13 @@ curl http://localhost:4000/hello
 
 ## Config fields
 
+The `http.*` helper sets `method` + `path`; the rest go in its options object —
+`http.post("/api", { accept, headers, concurrencyKey, ... })`.
+
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `method` | `"GET"` \| `"POST"` \| `"PUT"` \| `"PATCH"` \| `"DELETE"` \| `"ANY"` | required | Use `"ANY"` for wildcard. The v1 `"*"` form is still accepted but warns. |
-| `path` | `string` | derived | URL path with `:name` for dynamic params (e.g. `/users/:id`). When omitted, the path is derived from the workflow's file path under `workflows/json/` — see [file-based routing](#file-based-routing). |
+| method | `http.get` / `.post` / `.put` / `.patch` / `.delete` / `.any` | required | One helper per verb. `http.any()` is the wildcard (`"ANY"`). |
+| path | first arg to the helper | derived | URL path with `:name` for dynamic params (e.g. `http.get("/users/:id")`). When omitted, the path is derived from the workflow's file path — see [file-based routing](#file-based-routing). |
 | `accept` | `string` | `"application/json"` | Response content-type. Use `"text/html"` for UI nodes. |
 | `headers` | `Record<string, string>` | — | Required headers validated at trigger entry. A request missing any declared header is rejected before any step runs. |
 | `middleware` | `string[]` | `[]` | Per-trigger middleware chain. Resolved by name from the middleware registry. |
@@ -70,15 +68,17 @@ derived path.
 When `BLOK_FILE_BASED_ROUTING=false`, the legacy `/<workflow-name>`
 catch-all dispatch handles requests.
 
-## ctx mapping
+## The `req` handle
 
-| Field | Source |
+The build callback's `req` argument reads the incoming request:
+
+| Read | Source |
 |---|---|
-| `ctx.request.method` | HTTP verb (lowercase) |
-| `ctx.request.body` | Parsed JSON / form / raw text depending on `Content-Type` |
-| `ctx.request.headers` | Lowercased header map |
-| `ctx.request.params` | Path params (from `:id` in `path`) |
-| `ctx.request.query` | Parsed query string |
+| `req.method` | HTTP verb (lowercase) |
+| `req.body` | Parsed JSON / form / raw text depending on `Content-Type` |
+| `req.headers["x-…"]` | Lowercased header map |
+| `req.params.id` | Path params (from `:id` in `path`) |
+| `req.query.q` | Parsed query string |
 | `ctx.signal` | An `AbortSignal` cancelled when the client disconnects or `POST /__blok/runs/:runId/cancel` fires |
 
 The raw body is captured before parsing — webhook trigger HMAC
@@ -93,40 +93,37 @@ with the `Content-Type` from `accept` (or the node's `contentType`).
 That covers most JSON APIs with zero ceremony.
 
 When you need a **custom status, headers, `Set-Cookie`, a redirect, or a
-binary body**, end the workflow with [`@blokjs/respond`](/d/reference/helpers/respond) —
-it returns a branded envelope the trigger unpacks. It's purely additive:
+binary body**, end the workflow with the [`RespondNode`](/d/reference/helpers/respond)
+helper — it returns a branded envelope the trigger unpacks. It's purely additive:
 workflows that don't use it are unchanged.
 
-| Capability | How |
+| Capability | Input |
 |---|---|
-| Custom status | `inputs.status` (e.g. `201`, `404`, `206`) |
-| Arbitrary headers | `inputs.headers` (e.g. `{ "Content-Disposition": "attachment; filename=\"x.pdf\"" }`) |
+| Custom status | `status` (e.g. `201`, `404`, `206`) |
+| Arbitrary headers | `headers` (e.g. `{ "Content-Disposition": "attachment; filename=\"x.pdf\"" }`) |
 | Redirect | `status: 302` + `headers: { Location: "/next" }` |
-| Cookies | `inputs.cookies` — an **array** of raw `Set-Cookie` strings (the header repeats, so you can set several) |
-| Content-Type | `inputs.contentType` (overrides `accept`) |
-| Binary body | `inputs.body` set to a `Buffer` / `Uint8Array` / `ArrayBuffer` — sent as raw bytes, not JSON |
+| Cookies | `cookies` — an **array** of raw `Set-Cookie` strings (the header repeats, so you can set several) |
+| Content-Type | `contentType` (overrides `accept`) |
+| Binary body | `body` set to a `Buffer` / `Uint8Array` / `ArrayBuffer` — sent as raw bytes, not JSON |
+
+```ts
+import { workflow, step, http } from "@blokjs/core";
+import { RespondNode } from "@blokjs/helpers";
+```
 
 ### Redirect (302)
 
-```json
-{
-  "id": "go",
-  "use": "@blokjs/respond",
-  "inputs": { "status": 302, "headers": { "Location": "/dashboard" } }
-}
+```ts
+step("go", RespondNode, { status: 302, headers: { Location: "/dashboard" } }, { ephemeral: true });
 ```
 
 ### Set a session cookie
 
-```json
-{
-  "id": "login",
-  "use": "@blokjs/respond",
-  "inputs": {
-    "body": { "ok": true },
-    "cookies": ["session=abc123; Path=/; HttpOnly; SameSite=Lax"]
-  }
-}
+```ts
+step("login", RespondNode, {
+  body: { ok: true },
+  cookies: ["session=abc123; Path=/; HttpOnly; SameSite=Lax"],
+}, { ephemeral: true });
 ```
 
 Pass multiple entries in `cookies` to emit multiple `Set-Cookie`
@@ -134,16 +131,14 @@ headers in one response.
 
 ### Binary file download
 
-```json
-{
-  "id": "download",
-  "use": "@blokjs/respond",
-  "inputs": {
-    "body": "js/ctx.state.file.bytes",
-    "contentType": "application/pdf",
-    "headers": { "Content-Disposition": "attachment; filename=\"report.pdf\"" }
-  }
-}
+```ts
+const file = step("render", renderPdf, { id: req.params.id });
+
+step("download", RespondNode, {
+  body: file.bytes,
+  contentType: "application/pdf",
+  headers: { "Content-Disposition": 'attachment; filename="report.pdf"' },
+}, { ephemeral: true });
 ```
 
 <Tip>
@@ -162,18 +157,24 @@ envelope directly from a non-NodeJS `runtime.*` node is not yet wired.
 
 ### Path params
 
-```json
-"trigger": { "http": { "method": "GET", "path": "/users/:userId/orders/:orderId" } }
+```ts
+import { workflow, step, tpl, http } from "@blokjs/core";
+import query from "../nodes/query";
+
+export default workflow("orders.get", { version: "1.0.0",
+  trigger: http.get("/users/:userId/orders/:orderId") }, (req) => {
+  step("query", query, {
+    sql: tpl`SELECT * FROM orders WHERE user = ${req.params.userId} AND id = ${req.params.orderId}`,
+  });
+});
 ```
 
-```javascript
-"js/`SELECT * FROM orders WHERE user = '${ctx.request.params.userId}' AND id = '${ctx.request.params.orderId}'`"
-```
+`req.params.userId` / `req.params.orderId` are typed handles; `tpl` embeds them in the string.
 
 ### Wildcard method
 
-`method: "ANY"` matches every verb. Route per-method via a `branch`
-step on `ctx.request.method`. The [DB Manager example](/d/examples/db-manager)
+`http.any()` matches every verb. Route per-method via a `branch` step on `req.method`
+(use the typed comparator `eq(req.method, "post")`). The [DB Manager example](/d/examples/db-manager)
 uses exactly this shape.
 
 ### HTML UI from one workflow
@@ -181,8 +182,8 @@ uses exactly this shape.
 Set `accept: "text/html"` and return a string from a node. UI nodes
 typically read an HTML file template and run EJS:
 
-```json
-"trigger": { "http": { "method": "GET", "path": "/admin", "accept": "text/html" } }
+```ts
+trigger: http.get("/admin", { accept: "text/html" })
 ```
 
 See the [chat demo](/d/examples/chat) for a complete UI-node example.
@@ -200,25 +201,21 @@ missing any of them is rejected with `400` at trigger entry, before any
 step runs. An empty declared value asserts presence only; a non-empty
 value also requires an exact match (handy for pinning an API version):
 
-```json
-"trigger": { "http": { "method": "POST", "path": "/api", "headers": { "x-api-key": "", "x-api-version": "2026-01" } } }
+```ts
+trigger: http.post("/api", { headers: { "x-api-key": "", "x-api-version": "2026-01" } })
 ```
 
 ## Composition
 
-Drop any reliability or scheduling knob into the trigger config:
+Drop any reliability or scheduling knob into the trigger options:
 
-```json
-"trigger": {
-  "http": {
-    "method": "POST",
-    "path": "/render",
-    "concurrencyKey": "js/ctx.request.body.userId",
-    "concurrencyLimit": 5,
-    "onLimit": "queue",
-    "ttl": "5m"
-  }
-}
+```ts
+trigger: http.post("/render", {
+  concurrencyKey: "ctx.request.body.userId",
+  concurrencyLimit: 5,
+  onLimit: "queue",
+  ttl: "5m",
+})
 ```
 
 Per-tenant fairness (5 renders per user, anything over that defers

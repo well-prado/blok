@@ -9,6 +9,14 @@ runner persists the current step cursor before suspending, so the run
 survives process restarts and resumes from the right place when the
 deferred dispatch hits.
 
+<Note>
+`wait` is **not** part of the `@blokjs/core` typed-handle DSL — there is no
+`wait()` function alongside `step`/`branch`/`forEach`/`switchOn`/`tryCatch`. It
+is an **object-style / JSON step shape**, shown below. For a trigger-level
+deferral instead of a mid-flight pause, see
+[`delay` & TTL](/d/scheduling/delay-and-ttl).
+</Note>
+
 The `for` form takes a duration (`"500ms"`, `"30s"`, `"5m"`, `"3h"`);
 the `until` form takes an ISO timestamp expression. Either way, the
 trigger transport returns 202 to the caller — workflows don't block
@@ -124,15 +132,15 @@ contributor doc for the full design.
 The runner doesn't yet ship a single-step primitive for very long
 pauses (multi-day). The composable pattern that works today:
 
-```ts
-// Workflow A — pre-wait
-{ id: "queue-continuation", subworkflow: "post-wait-half",
-  inputs: { state: $.state }, wait: false }
+```json
+// Workflow A — pre-wait step
+{ "id": "queue-continuation", "subworkflow": "post-wait-half",
+  "inputs": { "state": "js/ctx.state" }, "wait": false }
 
 // Workflow B — has delay on its trigger
-{ name: "post-wait-half",
-  trigger: { http: { method: "POST", path: "/internal/...", delay: "3d" } },
-  steps: [ /* the post-wait steps */ ] }
+{ "name": "post-wait-half",
+  "trigger": { "http": { "method": "POST", "path": "/internal/...", "delay": "3d" } },
+  "steps": [ /* the post-wait steps */ ] }
 ```
 
 The author splits at the wait boundary — durable + crash-safe today.

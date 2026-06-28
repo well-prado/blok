@@ -20,27 +20,26 @@ first keystroke:
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import postgresWrite from "@blokjs/postgres-write";
 
-export default workflow({
-  name: "save-doc",
-  version: "1.0.0",
-  trigger: {
-    http: {
-      method: "POST",
-      path: "/save/:docId",
+export default workflow(
+  "save-doc",
+  {
+    version: "1.0.0",
+    trigger: http.post("/save/:docId", {
       debounce: {
-        key: $.req.params.docId,
+        key: "$.req.params.docId",
         mode: "trailing",
         delay: "500ms",
         maxDelay: "5s",
       },
-    },
+    }),
   },
-  steps: [
-    { id: "save", use: "@blokjs/postgres-write", inputs: { row: $.req.body } },
-  ],
-});
+  (req) => {
+    step("save", postgresWrite, { row: req.body });
+  },
+);
 ```
 
 ```json JSON
@@ -77,10 +76,12 @@ elapsed since the first ping (whichever comes first).
 Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L128-L163).
 
 <ParamField path="key" type="string" required>
-  Debounce key — literal string or `$.<path>` proxy expression
-  evaluated against the live `ctx`. Pings sharing the resolved key
-  collapse. Typically derived from the request payload (`$.req.params.docId`,
-  `$.req.body.userId`).
+  Debounce key — a literal string or a `$.<path>` path string the
+  runner resolves against the live `ctx`. Pings sharing the resolved key
+  collapse. Typically derived from the request payload
+  (`"$.req.params.docId"`, `"$.req.body.userId"`). It's a config string,
+  not a handle — the debounce gate runs at run-entry, before the
+  workflow body.
 </ParamField>
 
 <ParamField path="mode" type='"leading" | "trailing"' default='"trailing"'>
@@ -155,17 +156,13 @@ Useful for click suppression: protect a like button or favorite
 endpoint from double-firing on rapid clicks.
 
 ```ts
-trigger: {
-  http: {
-    method: "POST",
-    path: "/like/:postId",
-    debounce: {
-      key: $.req.params.postId,
-      mode: "leading",
-      delay: "1s",
-    },
+trigger: http.post("/like/:postId", {
+  debounce: {
+    key: "$.req.params.postId",
+    mode: "leading",
+    delay: "1s",
   },
-}
+}),
 ```
 
 ## One run record per ping
@@ -323,19 +320,19 @@ to keep the timeline readable under burst.
 <AccordionGroup>
   <Accordion title="Document autosave (trailing + maxDelay)">
     `mode: "trailing", delay: "500ms", maxDelay: "5s"` keyed on
-    `$.req.params.docId`. Rapid keystrokes collapse into one save
+    `"$.req.params.docId"`. Rapid keystrokes collapse into one save
     after silence; continuous typing guarantees a save within 5
     seconds of the first keystroke.
   </Accordion>
 
   <Accordion title="Click suppression (leading)">
-    `mode: "leading", delay: "1s"` keyed on `$.req.params.postId`. The
+    `mode: "leading", delay: "1s"` keyed on `"$.req.params.postId"`. The
     first like fires; rapid double-clicks within a second drop
     silently.
   </Accordion>
 
   <Accordion title="Search-typeahead (trailing)">
-    `mode: "trailing", delay: "300ms"` keyed on `$.req.body.sessionId`
+    `mode: "trailing", delay: "300ms"` keyed on `"$.req.body.sessionId"`
     (one debounce window per search session). Fires once when the user
     stops typing for 300ms.
   </Accordion>

@@ -1,208 +1,134 @@
 ---
 title: "forEach — iterate"
-description: "Sequential or parallel iteration over an array. The iteration body is a nested pipeline with full access to the live ctx."
+description: "Sequential or parallel iteration over an array handle. The body is a callback with per-item handles."
 icon: "list-checks"
 ---
 
-`forEach` runs a nested pipeline once per item in an array. Iterations
-run sequentially by default; flip to parallel by setting
-`mode: "parallel"` and a `concurrency` budget.
+`forEach` runs a callback once per item in an array handle. Iterations run
+sequentially by default; flip to parallel with `mode: "parallel"` and a
+`concurrency` budget. The body receives a per-item handle and an index handle,
+both scoped to that iteration.
 
 Used in the [worker fan-out example](/d/examples/worker-fanout) to
-parallel-enqueue jobs, and in the
-[chat-memory example](/d/examples/chat-memory) implicitly via the
-LLM agent loop.
+parallel-enqueue jobs.
 
 ## Quickstart
 
-### Sequential
+```ts
+import { workflow, step, forEach, http } from "@blokjs/core";
+import processItem from "../nodes/process-item";
 
-```json
-{
-  "id": "process-each",
-  "forEach": {
-    "in": "js/ctx.request.body.items",
-    "as": "item",
-    "do": [
-      {
-        "id": "process",
-        "use": "@blokjs/api-call",
-        "inputs": {
-          "url": "js/`https://internal/process/${ctx.state.item.id}`",
-          "method": "POST",
-          "body": "js/ctx.state.item"
-        }
-      }
-    ]
-  }
-}
+export default workflow("items.process", { version: "1.0.0", trigger: http.post("/items") }, (req) => {
+  forEach(req.body.items, (item) => {
+    step("process", processItem, { id: item.id, payload: item });
+  });
+});
 ```
 
-### Parallel with concurrency cap
+`req.body.items` is a handle to an array. `item` is a per-iteration handle —
+read its fields (`item.id`, `item.payload`) like any other handle.
 
-```json
-{
-  "id": "fan-out",
-  "forEach": {
-    "in": "js/ctx.request.body.items",
-    "as": "item",
-    "mode": "parallel",
-    "concurrency": 5,
-    "do": [
-      { "id": "enqueue", "use": "@blokjs/worker-publish", "inputs": { "queue": "jobs", "payload": "js/ctx.state.item" } }
-    ]
-  }
-}
+## The signature
+
+`forEach(iterable, (item, index) => {…}, opts?)`:
+
+- **`iterable`** — a **handle to an array** (a step output field or a trigger
+  field). It lowers to the loop's `in` expression.
+- **`item` / `index`** — per-iteration handles, **arm-scoped** to the body.
+  `item` is the current element; `index` is the 0-based position.
+- **`opts`** — `{ as?, mode?, concurrency? }`. `as` names the iteration
+  variable's state key (defaults to a name derived from the iterable);
+  `mode: "parallel"` runs iterations concurrently; `concurrency` caps in-flight
+  iterations (default 10).
+- **Returns** — a handle to the **results array** (one entry per item, in
+  original order), readable after the loop.
+
+### Parallel with a concurrency cap
+
+```ts
+const items = step("validate", validate, { raw: req.body }).items;
+
+const results = forEach(items, (item) => {
+  step("enqueue", workerPublish, { queue: "jobs", payload: item });
+}, { mode: "parallel", concurrency: 5 });
 ```
 
-1000 items don't serialize 1000 RPCs — five run concurrently, the next
-batch starts as one finishes.
+1000 items don't serialize 1000 RPCs — five run concurrently, the next starts
+as one finishes.
 
-## Config fields
+## Reading the results
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `in` | `string` (JS expression) | required | Resolves to an array. Non-array values become `[]` (no iterations). |
-| `as` | `string` | required | Variable name written to `ctx.state[<as>]` for each iteration. |
-| `do` | `Step[]` | required | Steps to run per item. |
-| `mode` | `"sequential"` \| `"parallel"` | `"sequential"` | Iteration order. |
-| `concurrency` | `number` | `1` | Max in-flight iterations when `mode: "parallel"`. Ignored in sequential mode. |
+The returned handle is the results array — readable after the loop, one entry
+per item in original order:
 
-## Iteration ctx variables
+```ts
+const results = forEach(req.body.users, (user) => {
+  step("enrich", apiCall, { url: tpl`https://api.example.com/users/${user.id}` });
+});
 
-Inside the `do` pipeline:
-
-| Variable | Value |
-|---|---|
-| `ctx.state[<as>]` | The current item. |
-| `ctx.state[<as>Index]` (sequential) | 0-based index. |
-| `ctx.state.itemIndex` (parallel) | 0-based index in original array. |
-
-The outer workflow's `ctx.state` is visible too — iterations inherit
-the full context.
-
-## ctx.state result
-
-After the forEach completes, `ctx.state[<step-id>]` holds an array of
-iteration results, one per item, in original order:
-
-```json
-"steps": [
-  {
-    "id": "fan-out",
-    "forEach": { /* ... */ }
-  },
-  {
-    "id": "summary",
-    "use": "@blokjs/expr",
-    "inputs": {
-      "expression": "({ count: ctx.state['fan-out'].length, items: ctx.state['fan-out'] })"
-    }
-  }
-]
+step("summary", summarize, { count: results.length, items: results });
 ```
 
-Each element is the **last sub-step's response envelope** —
-`{data, error, success, ...}`. To extract just the data:
-
-```javascript
-ctx.state['fan-out'].map(r => r && r.data && r.data.jobId).filter(Boolean)
-```
-
-See the [worker fan-out example](/d/examples/worker-fanout)'s
-`respond` step for the canonical extraction pattern.
+Each element is the **last sub-step's response envelope** (`{ data, error,
+success, … }`). The item/index handles do **not** survive the loop — only the
+returned results handle does (footgun: arm-scoped handles, see
+[Handles & footguns](/d/primitives/handles-and-footguns)).
 
 ## Common patterns
 
-### Parallel API fan-out
+<AccordionGroup>
+  <Accordion title="Parallel API fan-out with per-item cache" icon="bolt">
+    Cache each iteration on its own key so re-runs skip completed work:
 
-```json
-{
-  "id": "enrich",
-  "forEach": {
-    "in": "js/ctx.state.users.data",
-    "as": "user",
-    "mode": "parallel",
-    "concurrency": 10,
-    "do": [
-      {
-        "id": "details",
-        "use": "@blokjs/api-call",
-        "idempotencyKey": "js/`user-details:${ctx.state.user.id}`",
-        "inputs": {
-          "url": "js/`https://api.example.com/users/${ctx.state.user.id}`",
-          "method": "GET"
-        }
-      }
-    ]
-  }
-}
-```
+    ```ts
+    forEach(users, (user) => {
+      step("details", apiCall, {
+        url: tpl`https://api.example.com/users/${user.id}`,
+        method: "GET",
+      }, { idempotencyKey: tpl`user-details:${user.id}` });
+    }, { mode: "parallel", concurrency: 10 });
+    ```
+  </Accordion>
+  <Accordion title="Per-row retry" icon="rotate-cw">
+    A per-step `retry` inside the body re-runs only that iteration, not the
+    whole loop. In parallel mode a permanently-failing item errors but peers
+    continue; in sequential mode the error propagates. Wrap the body step in
+    [`tryCatch`](./tryCatch.mdx) to keep going:
 
-`idempotencyKey` on the iteration body caches per-user — re-runs are
-free.
+    ```ts
+    forEach(rows, (row) => {
+      step("process", processRow, { row }, { retry: { maxAttempts: 3 } });
+    });
+    ```
+  </Accordion>
+  <Accordion title="Sub-workflow per item" icon="git-branch">
+    Dispatch a named child workflow once per element — the per-item handle
+    feeds the child's inputs:
 
-### Per-row retry
+    ```ts
+    forEach(req.body.items, (item) => {
+      step("handle", null, { item }, { subworkflow: "process-item" });
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
 
-Each iteration is independent; a per-step retry inside the body
-re-runs only that iteration, not the whole forEach:
+## Footguns
 
-```json
-{
-  "id": "process",
-  "use": "@blokjs/api-call",
-  "retry": { "maxAttempts": 3 },
-  "inputs": { "url": "..." }
-}
-```
-
-If iteration 17 of 100 fails three times, it errors — the forEach
-**continues** the other 99 if running in parallel, but propagates the
-error in sequential mode. Wrap the body in [`tryCatch`](./tryCatch.mdx)
-to keep going.
-
-### Wait inside iteration (Phase 2/3 runtime)
-
-```json
-{
-  "id": "throttled",
-  "forEach": {
-    "in": "js/ctx.request.body.items",
-    "as": "item",
-    "mode": "parallel",
-    "concurrency": 5,
-    "do": [
-      { "id": "record", "use": "@blokjs/expr", "inputs": { "expression": "..." } },
-      { "id": "throttle", "wait": { "for": "100ms" } }
-    ]
-  }
-}
-```
-
-When the first iteration's `wait` fires, peer iterations cancel and
-the runner persists a parallel-mode cursor. On dispatch re-entry,
-ForEachNode pre-populates `results[]` from `completedResults`,
-re-launches cancelled iterations from inner step 0, and resumes the
-wait-firing iteration at its `innerStepIndex`. See
-[wait-inside-primitives](./wait.mdx#wait-inside-primitives) for the
-full design + the `idempotencyKey` warning for side-effecting inner
-steps.
-
-## Composition
-
-- `forEach` inside `forEach` — two-level nesting works
-  (Phase 4 runtime supports nested cursor persistence)
-- `forEach` inside `switch` / `branch` arms — common
-- Sub-workflow per item — `{ id: "x", subworkflow: "process-item",
-  inputs: { item: "js/ctx.state.item" } }`
-- Step-level `idempotencyKey` / `retry` / `maxDuration` apply inside
-  iteration bodies
+- **Item / index handles are arm-scoped** — they read `undefined` after the
+  loop. Only the returned results handle survives.
+- **Never name `as:` after an existing step id** (or another loop's `as`) —
+  iteration variables share the flat `ctx.state` namespace with step outputs;
+  a collision throws at load time. This is footgun #4.
+- `forEach` nests freely — inside a `branch` / `switchOn` arm, inside another
+  `forEach`, or wrapping a `tryCatch`. Reliability knobs (`idempotencyKey`,
+  `retry`, `maxDuration`) go on the regular steps inside the body.
 
 ## Related
 
 <Columns cols={3}>
-  <Card title="loop — until" icon="repeat" href="/d/primitives/loop">
-    Indefinite repetition with a stop condition.
+  <Card title="Handles & footguns" icon="triangle-exclamation" href="/d/primitives/handles-and-footguns">
+    Item-handle scope and `as:` collisions.
   </Card>
   <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
     Common per-item dispatch target.

@@ -12,26 +12,19 @@ into the existing server before the catch-all route.
 
 ## Quickstart
 
-```json workflows/json/ws-echo.json
-{
-  "name": "WS Echo",
-  "version": "1.0.0",
-  "trigger": {
-    "websocket": {
-      "path": "/ws/echo",
-      "events": ["message", "open", "close"]
-    }
-  },
-  "steps": [
-    {
-      "id": "reply",
-      "use": "@blokjs/ws-reply",
-      "inputs": {
-        "message": "js/({ echo: ctx.request.body, at: Date.now() })"
-      }
-    }
-  ]
-}
+The build callback receives the connection's entry handle (`conn`) — read the inbound message
+at `conn.body`, path params at `conn.params`.
+
+```ts src/workflows/ws-echo.ts
+import { workflow, step } from "@blokjs/core";
+import { WsReplyNode } from "@blokjs/helpers";
+
+export default workflow("ws-echo", {
+  version: "1.0.0",
+  trigger: { websocket: { path: "/ws/echo", events: ["message", "open", "close"] } },
+}, (conn) => {
+  step("reply", WsReplyNode, { message: { echo: conn.body, at: Date.now() } });
+});
 ```
 
 Browser side:
@@ -51,13 +44,13 @@ ws.onopen = () => ws.send(JSON.stringify({ hello: "world" }));
 | `concurrencyKey` | `string` \| `$.path` | — | Per-key cap on concurrent connections. |
 | `concurrencyLimit` | `number` | `1` | Slot count per resolved key. |
 
-## ctx mapping
+## The `conn` handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.body` | Parsed message body (JSON when possible, raw string otherwise) |
-| `ctx.request.headers` | Headers from the WS upgrade request |
-| `ctx.request.params` | Path params from `:name` in the WS path |
+| `conn.body` | Parsed message body (JSON when possible, raw string otherwise) |
+| `conn.headers` | Headers from the WS upgrade request |
+| `conn.params` | Path params from `:name` in the WS path |
 | `ctx.vars._ws_connection` | Connection metadata (id, opened-at, remote address) |
 | `ctx.vars._ws_event` | The lifecycle event name (`"open"` / `"message"` / `"close"` / `"error"`) |
 | `ctx.signal` | Cancelled when the client disconnects |
@@ -99,19 +92,19 @@ that processes the request and replies via `@blokjs/ws-reply`.
 
 ### Chat room (per-room broadcast)
 
-```json
-"trigger": { "websocket": { "path": "/ws/room/:roomId", "events": ["message"] } }
-```
+```ts
+import { workflow, step, tpl } from "@blokjs/core";
+import { WsBroadcastNode } from "@blokjs/helpers";
 
-```json
-{
-  "id": "broadcast",
-  "use": "@blokjs/ws-broadcast",
-  "inputs": {
-    "channel": "js/`room-${ctx.request.params.roomId}`",
-    "message": "js/ctx.request.body"
-  }
-}
+export default workflow("chat-room", {
+  version: "1.0.0",
+  trigger: { websocket: { path: "/ws/room/:roomId", events: ["message"] } },
+}, (conn) => {
+  step("broadcast", WsBroadcastNode, {
+    channel: tpl`room-${conn.params.roomId}`,
+    message: conn.body,
+  });
+});
 ```
 
 Every WS connection on `/ws/room/<roomId>` lands in the same broadcast
@@ -121,25 +114,22 @@ group automatically based on the path pattern.
 
 WS triggers fire on `events: ["open"]` too — send the connecting client
 an initial state snapshot on open, then handle `message` events for
-incremental updates.
+incremental updates. The lifecycle event lives at `ctx.vars._ws_event` (a ctx var, not on the
+entry handle) so the `branch` condition is a raw `ctx.*` string:
 
-```json
-"trigger": { "websocket": { "path": "/ws/live", "events": ["open", "message"] } }
-```
+```ts
+import { workflow, step, branch } from "@blokjs/core";
+import { WsReplyNode } from "@blokjs/helpers";
 
-```json
-{
-  "id": "init-or-update",
-  "branch": {
-    "when": "ctx.vars._ws_event === 'open'",
-    "then": [
-      { "id": "init-snapshot", "use": "@blokjs/ws-reply", "inputs": { "message": "..." } }
-    ],
-    "else": [
-      { "id": "handle-update", "use": "@blokjs/ws-reply", "inputs": { "message": "..." } }
-    ]
-  }
-}
+export default workflow("ws-live", {
+  version: "1.0.0",
+  trigger: { websocket: { path: "/ws/live", events: ["open", "message"] } },
+}, () => {
+  branch("init-or-update", "ctx.vars._ws_event === 'open'", {
+    then: () => { step("init-snapshot", WsReplyNode, { message: "..." }); },
+    else: () => { step("handle-update", WsReplyNode, { message: "..." }); },
+  });
+});
 ```
 
 ## Composition

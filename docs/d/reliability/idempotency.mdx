@@ -20,25 +20,16 @@ results from the original).
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import openai from "@blokjs/openai";
+import { RespondNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "AI content pipeline",
-  version: "1.0.0",
-  trigger: { http: { method: "POST", path: "/generate" } },
-  steps: [
-    {
-      id: "draft",
-      use: "@blokjs/openai",
-      inputs: { prompt: $.req.body.prompt, model: "gpt-4o" },
-      idempotencyKey: $.req.body.requestId,
-    },
-    {
-      id: "respond",
-      use: "@blokjs/respond",
-      inputs: { body: $.state.draft },
-    },
-  ],
+export default workflow("ai-content-pipeline", { version: "1.0.0", trigger: http.post("/generate") }, (req) => {
+  const draft = step("draft", openai, { prompt: req.body.prompt, model: "gpt-4o" }, {
+    idempotencyKey: req.body.requestId,
+  });
+
+  step("respond", RespondNode, { body: draft }, { ephemeral: true });
 });
 ```
 
@@ -72,12 +63,12 @@ call and caches the response. The second request short-circuits the
 
 ## Field reference
 
-<ParamField path="idempotencyKey" type="string">
-  Cache key — literal string or `$`-proxy expression. The runner caches
-  the step's result against the triple `(workflowName, step.id, resolvedKey)`.
-  On a subsequent run with the same triple, execution is skipped and the
-  cached result populates state through the same persistence rules
-  (`ephemeral`, `spread`, `as`).
+<ParamField path="idempotencyKey" type="string | handle">
+  Cache key — a literal string or a handle (`req.body.requestId`). The
+  runner caches the step's result against the triple `(workflowName,
+  step.id, resolvedKey)`. On a subsequent run with the same triple,
+  execution is skipped and the cached result populates state through the
+  same persistence rules (`ephemeral`, `spread`, `as`).
 </ParamField>
 
 <ParamField path="idempotencyKeyTTL" type="number" default="86400000">
@@ -86,11 +77,10 @@ call and caches the response. The second request short-circuits the
   to keep the field present but not cache.
 </ParamField>
 
-The key can be a literal string (`"daily-summary"`) or a proxy
-expression (`$.req.body.requestId`) that compiles to a `js/ctx.…`
-lookup evaluated at run time. Returning `null`, `undefined`, or
-throwing during evaluation is a cache miss — the step runs as if the
-key had not been set.
+The key can be a literal string (`"daily-summary"`) or a handle
+(`req.body.requestId`) the runner resolves at run time. Returning
+`null`, `undefined`, or throwing during evaluation is a cache miss —
+the step runs as if the key had not been set.
 
 ## How the namespace works
 
@@ -192,7 +182,7 @@ store, so turning tracing off turns the cache off too.
 
 <AccordionGroup>
   <Accordion title="Forgetting the request id">
-    `idempotencyKey: $.req.body.requestId` works only if the upstream
+    `{ idempotencyKey: req.body.requestId }` works only if the upstream
     client actually sends a stable id across retries. Validate early or
     fall back to a meaningful surrogate (e.g. a hash of the inputs).
   </Accordion>
@@ -202,7 +192,7 @@ store, so turning tracing off turns the cache off too.
     `idempotencyKeyTTL`.
   </Accordion>
   <Accordion title="Keying on a value that always changes">
-    `idempotencyKey: $.req.headers["x-request-id"]` works only if the
+    `{ idempotencyKey: req.headers["x-request-id"] }` works only if the
     upstream client sends a stable value across retries. If each retry
     generates a fresh id, the cache never hits.
   </Accordion>

@@ -19,30 +19,21 @@ between platforms read familiar semantics.
 
 <CodeGroup>
 ```ts TypeScript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { RespondNode } from "@blokjs/helpers";
 
-export default workflow({
-  name: "Fetch with retry",
-  version: "1.0.0",
-  trigger: { http: { method: "GET", path: "/users/:id" } },
-  steps: [
-    {
-      id: "fetch",
-      use: "@blokjs/api-call",
-      inputs: { url: "https://flaky.example.com/users/" },
-      retry: {
-        maxAttempts: 3,
-        minTimeoutInMs: 500,
-        maxTimeoutInMs: 10_000,
-        factor: 2,
-      },
+export default workflow("fetch-with-retry", { version: "1.0.0", trigger: http.get("/users/:id") }, (req) => {
+  const fetched = step("fetch", apiCall, { url: "https://flaky.example.com/users/" }, {
+    retry: {
+      maxAttempts: 3,
+      minTimeoutInMs: 500,
+      maxTimeoutInMs: 10_000,
+      factor: 2,
     },
-    {
-      id: "respond",
-      use: "@blokjs/respond",
-      inputs: { body: $.state.fetch },
-    },
-  ],
+  });
+
+  step("respond", RespondNode, { body: fetched }, { ephemeral: true });
 });
 ```
 

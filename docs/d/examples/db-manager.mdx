@@ -1,5 +1,6 @@
 ---
 title: Database Smart Query (DB Manager)
+icon: "database"
 ---
 
 The Database Smart Query (DB Manager) example demonstrates how to create an AI-powered database query interface using Blok . This advanced example showcases how to build a workflow that allows users to query a PostgreSQL database using natural language prompts, which are then converted to SQL queries using AI.
@@ -113,133 +114,113 @@ To verify that everything is set up correctly:
 
 ## Workflow Structure
 
-The DB Manager workflow is defined in `workflows/json/db-manager.json`:
+The DB Manager workflow lives in `src/workflows/db-manager.ts`. One
+workflow serves the HTML UI **and** the JSON API by routing on
+`(method, function-param)`. The four routes — UI, list tables, run a
+prompt, and a fallback — collapse into a single `switchOn` on a
+computed route key, with each handler's output flowing through typed
+handles:
 
-```json
-{
-  "name": "Database Manager",
-  "description": "Queries a database using an AI prompt UI",
-  "version": "1.0.0",
-  "trigger": {
-    "http": { "method": "ANY", "path": "/db-manager/:function?" }
-  },
-  "steps": [
-    {
-      "id": "route",
-      "branch": {
-        "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === undefined",
-        "then": [
+```ts src/workflows/db-manager.ts
+import { workflow, step, switchOn, tpl, http } from "@blokjs/core";
+import { ExprNode } from "@blokjs/helpers";
+import databaseUi from "../nodes/database-ui";
+import postgresQuery from "../nodes/postgres-query";
+import queryGenerator from "../nodes/query-generator";
+import errorNode from "../nodes/error";
+
+const PG = {
+  host: "localhost",
+  port: 5432,
+  database: "dvdrental",
+  user: "postgres",
+  password: "example",
+};
+
+export default workflow(
+  "db-manager",
+  { version: "1.0.0", trigger: http.any("/db-manager/:function?") },
+  (req) => {
+    // Collapse (method, function) into one route key the switch can read.
+    const route = step("route-key", ExprNode, {
+      expression:
+        "`${ctx.request.method.toLowerCase()}:${ctx.request.params.function || 'index'}`",
+    });
+
+    switchOn(
+      route,
+      {
+        cases: [
+          // GET /db-manager — serve the HTML UI.
+          { when: "get:index", do: () => { step("database-ui", databaseUi, {}); } },
+
+          // GET /db-manager/tables — list public tables.
           {
-            "id": "database-ui",
-            "use": "database-ui",
-            "inputs": {}
-          }
+            when: "get:tables",
+            do: () => {
+              step("get-tables", postgresQuery, {
+                ...PG,
+                query:
+                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+              });
+            },
+          },
+
+          // POST /db-manager/execute-prompt — schema → AI → run → shape.
+          {
+            when: "post:execute-prompt",
+            do: () => {
+              const columns = step("get-table-columns", postgresQuery, {
+                ...PG,
+                query: tpl`SELECT column_name, udt_name AS data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ${req.body.table_name}`,
+              });
+
+              const generated = step("query-generator", queryGenerator, {
+                table_name: req.body.table_name,
+                columns: columns.data,
+                prompt: req.body.prompt,
+              });
+
+              const executed = step("execute-query", postgresQuery, {
+                ...PG,
+                query: generated.query,
+              });
+
+              // Shape the response — ExprNode reads the handles via ctx.state.
+              step("respond", ExprNode, {
+                expression:
+                  "({ total: ctx.state['execute-query'].total, results: ctx.state['execute-query'].data, query: ctx.state['query-generator'].query })",
+              });
+            },
+          },
         ],
-        "else": [
-          {
-            "id": "route-tables",
-            "branch": {
-              "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === 'tables'",
-              "then": [
-                {
-                  "id": "get-tables",
-                  "use": "postgres-query",
-                  "inputs": {
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "dvdrental",
-                    "user": "postgres",
-                    "password": "example",
-                    "query": "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-                  }
-                }
-              ],
-              "else": [
-                {
-                  "id": "route-prompt",
-                  "branch": {
-                    "when": "$.req.method.toLowerCase() === 'post' && $.req.params.function === 'execute-prompt'",
-                    "then": [
-                      {
-                        "id": "get-table-columns",
-                        "use": "postgres-query",
-                        "inputs": {
-                          "host": "localhost",
-                          "port": 5432,
-                          "database": "dvdrental",
-                          "user": "postgres",
-                          "password": "example",
-                          "query": "SELECT column_name, udt_name AS data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $.req.body.table_name"
-                        }
-                      },
-                      {
-                        "id": "query-generator",
-                        "use": "query-generator",
-                        "inputs": {
-                          "table_name": "$.req.body.table_name",
-                          "columns": "$.state.get-table-columns.data",
-                          "prompt": "$.req.body.prompt"
-                        }
-                      },
-                      {
-                        "id": "execute-query",
-                        "use": "postgres-query",
-                        "inputs": {
-                          "host": "localhost",
-                          "port": 5432,
-                          "database": "dvdrental",
-                          "user": "postgres",
-                          "password": "example",
-                          "query": "$.state.query-generator.query"
-                        }
-                      },
-                      {
-                        "id": "respond",
-                        "use": "@blokjs/mapper",
-                        "inputs": {
-                          "mapper": {
-                            "total": "$.state.execute-query.total",
-                            "results": "$.state.execute-query.data",
-                            "query": "$.state.query-generator.query"
-                          }
-                        }
-                      }
-                    ],
-                    "else": [
-                      {
-                        "id": "method-not-allowed",
-                        "use": "error",
-                        "inputs": {}
-                      }
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      }
-    }
-  ]
-}
+        default: () => { step("method-not-allowed", errorNode, {}); },
+      },
+      { id: "route" },
+    );
+  },
+);
 ```
 
 A few v2 things to notice:
 
-- **One `branch` step instead of `@blokjs/if-else` + `conditions[]`.**
-  Each condition is a `when` expression with `then` and `else`
-  branches. Nested branches handle multi-way routing.
-- **Cross-step references use `$.state.<id>`.** Each previous step's
-  output is at `$.state.get-table-columns`, `$.state.query-generator`,
-  etc.
-- **Method `"ANY"` (not `"*"`).** v2 uses the explicit string for the
-  wildcard.
+- **One `switchOn` instead of nested `@blokjs/if-else` + `conditions[]`.**
+  A single `ExprNode` computes a `method:function` route key; the
+  switch routes on it — far flatter than three levels of nested
+  branches.
+- **Data flows through typed handles.** `columns.data` feeds the AI
+  generator, `generated.query` feeds the executor — no `$.state.<id>`
+  strings. The final `respond` step reads `ctx.state[...]` inside an
+  expression because it does object shaping the handle layer leaves to
+  the node.
+- **`http.any(...)` (the "ANY" method).** The handle DSL's wildcard
+  HTTP route — never `"*"`.
 
-## UI rendering with branch steps
+## UI rendering with a route switch
 
 A single workflow can serve both an HTML UI and JSON API responses by
-routing on `(method, path)`. The DB Manager example uses nested
-v2 `branch` steps to do exactly that.
+routing on `(method, path)`. The DB Manager example computes a route
+key and uses one `switchOn` to do exactly that.
 
 ### How UI rendering works
 
@@ -247,50 +228,49 @@ In traditional web apps you'd have separate routes for HTML and JSON.
 In Blok, one workflow handles both:
 
 <Steps>
-  <Step title="Request routing">
-    The `branch` step evaluates a `when` expression against the
-    request method, path, and params.
+  <Step title="Compute a route key">
+    An `ExprNode` step collapses `(method, function-param)` into one
+    string like `"get:tables"` or `"post:execute-prompt"`.
   </Step>
-  <Step title="Branch dispatch">
-    The matching arm runs its `then` (or `else`) sub-pipeline.
+  <Step title="Switch dispatch">
+    `switchOn(route, …)` matches the key against its `cases` and runs
+    the matching arm's callback.
   </Step>
   <Step title="Response">
     The leaf step generates the response (HTML for UI, JSON for API).
   </Step>
 </Steps>
 
-### Branch step structure
+### Route-key structure
 
-In v2, conditional routing uses one `branch` step per decision:
+In v2, N-way routing on one value uses `switchOn` over a computed
+discriminant — far flatter than nesting `branch` arms:
 
-```json
-{
-  "id": "route",
-  "branch": {
-    "when": "$.req.method.toLowerCase() === 'get' && $.req.params.function === undefined",
-    "then": [
-      { "id": "database-ui", "use": "database-ui", "inputs": {} }
-    ],
-    "else": [
-      // … further branching, or a fallback step
-    ]
-  }
-}
+```ts
+const route = step("route-key", ExprNode, {
+  expression: "`${ctx.request.method.toLowerCase()}:${ctx.request.params.function || 'index'}`",
+});
+
+switchOn(route, {
+  cases: [
+    { when: "get:index",  do: () => { step("database-ui", databaseUi, {}); } },
+    { when: "get:tables", do: () => { /* … */ } },
+    // …
+  ],
+  default: () => { step("method-not-allowed", errorNode, {}); },
+}, { id: "route" });
 ```
 
-Each branch has:
-
-1. A JavaScript expression in `when` (truthy → `then`, falsy → `else`).
-2. A `then` array of steps to run when the condition matches.
-3. An optional `else` array — usually another `branch` for multi-way
-   routing, or a fallback step.
-
-For deeper structure, see the
-[v2 branch step reference](/d/reference/v2-step-shapes#branch-step).
+Each case is a `{ when, do }` pair: `when` is a **literal** value (or
+array of values) matched against the discriminant; `do` is a callback
+where `step()` calls register into that arm. The `default` arm runs
+when nothing matches. For two-way decisions reach for
+[`branch`](/d/primitives/branch); for 3+ cases on one value,
+`switchOn` keeps the intent flat.
 
 ### The Database-UI Node
 
-The `database-ui` node is responsible for serving the HTML, CSS, and JavaScript for the UI. When a GET request is made to the root path (`/db-manager`), the `branch` step routes the request to this node.
+The `database-ui` node is responsible for serving the HTML, CSS, and JavaScript for the UI. When a GET request is made to the root path (`/db-manager`), the route key is `"get:index"` and the `switchOn` routes the request to this node.
 
 The node is implemented as a custom node that returns HTML content. The HTML includes:
 
@@ -302,7 +282,7 @@ The node is implemented as a custom node that returns HTML content. The HTML inc
 Here's a simplified example of how the `database-ui` node might be implemented using `defineNode()`:
 
 ```typescript
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 import fs from 'node:fs';
 import path from 'node:path';
@@ -333,48 +313,38 @@ export default defineNode({
 When a user accesses the DB Manager at `http://localhost:4000/db-manager`, the following happens:
 
 1. The HTTP trigger receives the GET request
-2. The `branch` step evaluates the condition:
-   ```javascript
-   eq($.req.method.toLowerCase(), "get") && $.req.params.function === undefined
-   ```
-3. Since this condition is true (it's a GET request to the root path), the `database-ui` node is executed
+2. The `route-key` step computes the discriminant — `"get:index"` for a bare GET
+3. `switchOn` matches the `"get:index"` case, so the `database-ui` node is executed
 4. The `database-ui` node returns HTML content with the appropriate Content-Type header
 5. The browser renders the HTML, which includes the React application
 6. The React application makes API requests to the other endpoints defined in the workflow
 
 ### API Endpoints in the Same Workflow
 
-The same workflow also handles API requests through different conditions:
+The same workflow also handles API requests through different route keys:
 
-1. **GET /db-manager/tables**: Lists available database tables
-   ```javascript
-   eq($.req.method.toLowerCase(), "get") && eq($.req.params.function, "tables")
-   ```
-
-2. **POST /db-manager/execute-prompt**: Generates and executes an SQL query
-   ```javascript
-   eq($.req.method.toLowerCase(), "post") && eq($.req.params.function, "execute-prompt")
-   ```
+1. **GET /db-manager/tables**: Lists available database tables — route key `"get:tables"`
+2. **POST /db-manager/execute-prompt**: Generates and executes an SQL query — route key `"post:execute-prompt"`
 
 ### Benefits of This Approach
 
-Using `branch` steps for UI rendering in Blok  offers several advantages:
+Using a `switchOn` route key for UI rendering in Blok offers several advantages:
 
 1. **Unified Workflow**: Both UI and API logic are contained in a single workflow
 2. **Simplified Deployment**: No need for separate frontend and backend deployments
 3. **Shared Context**: UI and API can share the same context and configuration
-4. **Conditional Logic**: Complex routing can be implemented with expressions using `eq()` and other primitives
+4. **Flat Routing**: One `switchOn` over a computed key replaces deeply nested branches
 5. **Content Negotiation**: Different content types can be served based on request parameters
 
 ### Implementing Your Own UI Rendering
 
-To implement UI rendering in your own Blok  workflows:
+To implement UI rendering in your own Blok workflows:
 
 1. **Create a UI Node**: Implement a node with `defineNode()` that returns HTML content
-2. **Use Branch Steps**: Configure conditions using `eq()` and other branch primitives based on request properties
+2. **Compute a Route Key**: Collapse `(method, path-param)` into one string and `switchOn` it
 3. **Set Content-Type**: Set `contentType: "text/html"` in the node definition
 4. **Include Client-Side Code**: Add JavaScript for client-side interactivity
-5. **Define API Endpoints**: Add nested branch steps for API endpoints in the same workflow
+5. **Define API Endpoints**: Add more `cases` to the same `switchOn` for API endpoints
 
 ## The Postgres-Query Node
 
@@ -383,7 +353,7 @@ The DB Manager example uses the `postgres-query` node to interact with the Postg
 Here's a simplified version of the `postgres-query` node using `defineNode()`:
 
 ```typescript
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 import pg from "pg";
 
@@ -442,7 +412,7 @@ The DB Manager example uses several custom nodes:
 This node uses OpenAI to generate an SQL query based on a natural language prompt and table schema:
 
 ```typescript
-import { defineNode } from "@blokjs/runner";
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
@@ -505,27 +475,18 @@ Double check the query to not include markdown code blocks or any other text tha
 });
 ```
 
-### 2. MapperNode
+### 2. Response shaping with `ExprNode`
 
-This node maps data from one format to another:
+The final `respond` step shapes the executor's output into the JSON
+the UI expects. No custom node needed — the built-in `ExprNode`
+(`@blokjs/expr`) evaluates an expression against `ctx` and returns it:
 
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
+```ts
+import { ExprNode } from "@blokjs/helpers";
 
-export default defineNode({
-  name: "mapper",
-  description: "Maps data from one format to another",
-  
-  input: z.object({
-    mapper: z.record(z.unknown()),
-  }),
-  
-  output: z.record(z.unknown()),
-  
-  async execute(ctx, inputs) {
-    return inputs.mapper;
-  },
+step("respond", ExprNode, {
+  expression:
+    "({ total: ctx.state['execute-query'].total, results: ctx.state['execute-query'].data, query: ctx.state['query-generator'].query })",
 });
 ```
 
@@ -557,7 +518,7 @@ If you encounter issues:
 
 1. **Database Connection Issues**:
    - Ensure the PostgreSQL container is running: `docker ps | grep postgres`
-   - Check the connection parameters in the workflow JSON
+   - Check the connection parameters in the workflow (the `PG` config object)
    - Verify that the `dvdrental` database is properly initialized
 
 2. **AI Query Generation Issues**:
@@ -577,7 +538,7 @@ The DB Manager example demonstrates the power and flexibility of Blok  for build
 Key takeaways:
 
 1. **Unified Workflow**: Both UI and API logic are contained in a single workflow
-2. **Conditional Logic**: The `if-else` node enables complex routing and content negotiation
+2. **Conditional Logic**: A `switchOn` over a computed route key enables routing and content negotiation
 3. **Custom Nodes**: Specialized nodes like `postgres-query` and `query-generator` encapsulate specific functionality
 4. **AI Integration**: Natural language processing enhances the user experience
 5. **Database Access**: Direct database interaction without additional middleware

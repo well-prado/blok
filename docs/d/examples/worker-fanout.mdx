@@ -91,49 +91,47 @@ worker traces fire as items complete.
 
 ## The producer
 
-```json workflows/json/fanout-enqueue.json
-{
-  "name": "fanout-enqueue",
-  "version": "1.0.0",
-  "trigger": {
-    "http": { "method": "POST", "path": "/fanout/jobs", "accept": "application/json" }
+```ts src/workflows/fanout-enqueue.ts
+import { workflow, step, forEach, http, tpl } from "@blokjs/core";
+import { WorkerPublishNode, ExprNode } from "@blokjs/helpers";
+
+export default workflow(
+  "fanout-enqueue",
+  { version: "1.0.0", trigger: http.post("/fanout/jobs", { accept: "application/json" }) },
+  (req) => {
+    // Parallel forEach over the batch — 5 publishes in flight at a time.
+    forEach(
+      req.body.items,
+      (item, index) => {
+        step("enqueue", WorkerPublishNode, {
+          queue: "fanout-jobs",
+          payload: {
+            item,
+            index,
+            tenantId: req.body.tenantId,
+            enqueuedAt: Date.now(),
+          },
+          // Adapter-level dedup key: <tenantId>:<itemId>.
+          dedupId: tpl`${req.body.tenantId}:${item.id}`,
+        });
+      },
+      { as: "item", id: "fan-out", mode: "parallel", concurrency: 5 },
+    );
+
+    // Shape the response off the forEach results in ctx.state["fan-out"].
+    step("respond", ExprNode, {
+      expression:
+        "({ ok: true, queued: (ctx.state['fan-out'] || []).length, tenantId: ctx.request.body.tenantId || 'default', jobIds: (ctx.state['fan-out'] || []).map(r => r && r.data && r.data.jobId).filter(Boolean) })",
+    });
   },
-  "steps": [
-    {
-      "id": "fan-out",
-      "forEach": {
-        "in": "js/Array.isArray(ctx.request.body.items) ? ctx.request.body.items : []",
-        "as": "item",
-        "mode": "parallel",
-        "concurrency": 5,
-        "do": [
-          {
-            "id": "enqueue",
-            "use": "@blokjs/worker-publish",
-            "inputs": {
-              "queue": "fanout-jobs",
-              "payload": {
-                "item": "js/ctx.state.item",
-                "index": "js/ctx.state.itemIndex",
-                "tenantId": "js/ctx.request.body.tenantId || 'default'",
-                "enqueuedAt": "js/Date.now()"
-              },
-              "dedupId": "js/`${ctx.request.body.tenantId || 'default'}:${ctx.state.item && ctx.state.item.id ? ctx.state.item.id : ctx.state.itemIndex}`"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "id": "respond",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ ok: true, queued: (ctx.state['fan-out'] || []).length, tenantId: ctx.request.body.tenantId || 'default', jobIds: (ctx.state['fan-out'] || []).map(r => r && r.data && r.data.jobId).filter(Boolean) })"
-      }
-    }
-  ]
-}
+);
 ```
+
+The `item` and `index` callback arguments are typed handles — pass
+them straight into the publish payload. `forEach` returns a handle to
+the results array (parked at `ctx.state["fan-out"]`), which the
+`respond` step reshapes — `.length` / `.map` live inside the node, not
+on the handle.
 
 Three things to notice:
 
@@ -145,45 +143,53 @@ Three things to notice:
 
 ## The consumer
 
-```json workflows/json/fanout-worker.json
-{
-  "name": "fanout-worker",
-  "version": "1.0.0",
-  "trigger": {
-    "worker": {
-      "queue": "fanout-jobs",
-      "concurrency": 10,
-      "concurrencyKey": "js/ctx.request.body.tenantId || 'default'",
-      "concurrencyLimit": 3
-    }
-  },
-  "steps": [
-    {
-      "id": "process-item",
-      "use": "@blokjs/audit-log",
-      "idempotencyKey": "js/ctx.request.params.jobId",
-      "retry": { "maxAttempts": 3, "minTimeoutInMs": 500 },
-      "inputs": {
-        "event": "fanout-job-processed",
-        "attrs": {
-          "jobId": "js/ctx.request.params.jobId",
-          "queue": "js/ctx.request.params.queue",
-          "attempt": "js/ctx.request.params.attempt",
-          "tenantId": "js/ctx.request.body.tenantId",
-          "itemIndex": "js/ctx.request.body.index",
-          "item": "js/ctx.request.body.item"
-        }
-      }
+```ts src/workflows/fanout-worker.ts
+import { workflow, step } from "@blokjs/core";
+import { AuditLogNode, ExprNode } from "@blokjs/helpers";
+
+export default workflow(
+  "fanout-worker",
+  {
+    version: "1.0.0",
+    trigger: {
+      worker: {
+        queue: "fanout-jobs",
+        concurrency: 10,
+        // Trigger-level expression, resolved against ctx by the gate.
+        concurrencyKey: "$.req.body.tenantId",
+        concurrencyLimit: 3,
+      },
     },
-    {
-      "id": "summary",
-      "use": "@blokjs/expr",
-      "inputs": {
-        "expression": "({ jobId: ctx.request.params.jobId, tenantId: ctx.request.body.tenantId || 'default', itemIndex: ctx.request.body.index, processedAt: Date.now() })"
-      }
-    }
-  ]
-}
+  },
+  // The worker entry handle is `job` — body is the published payload,
+  // params carry queue/jobId/attempt.
+  (job) => {
+    step(
+      "process-item",
+      AuditLogNode,
+      {
+        event: "fanout-job-processed",
+        attrs: {
+          jobId: job.params.jobId,
+          queue: job.params.queue,
+          attempt: job.params.attempt,
+          tenantId: job.body.tenantId,
+          itemIndex: job.body.index,
+          item: job.body.item,
+        },
+      },
+      {
+        idempotencyKey: job.params.jobId,
+        retry: { maxAttempts: 3, minTimeoutInMs: 500 },
+      },
+    );
+
+    step("summary", ExprNode, {
+      expression:
+        "({ jobId: ctx.request.params.jobId, tenantId: ctx.request.body.tenantId || 'default', itemIndex: ctx.request.body.index, processedAt: Date.now() })",
+    });
+  },
+);
 ```
 
 Three reliability primitives stacked together:
@@ -260,18 +266,18 @@ If concurrency caps aren't enough, layer on
 [delay](/d/scheduling/delay-and-ttl) or
 [debounce](/d/scheduling/debounce) at the trigger level:
 
-```json
-"trigger": {
-  "worker": {
-    "queue": "fanout-jobs",
-    "concurrencyKey": "js/ctx.request.body.tenantId",
-    "concurrencyLimit": 3,
-    "debounce": {
-      "key": "js/ctx.request.body.tenantId",
-      "mode": "trailing",
-      "delay": "100ms"
-    }
-  }
+```ts
+trigger: {
+  worker: {
+    queue: "fanout-jobs",
+    concurrencyKey: "$.req.body.tenantId",
+    concurrencyLimit: 3,
+    debounce: {
+      key: "$.req.body.tenantId",
+      mode: "trailing",
+      delay: "100ms",
+    },
+  },
 }
 ```
 

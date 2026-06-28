@@ -27,34 +27,29 @@ When prompted:
 
 ## Workflow
 
-Save this as `workflows/json/countries.json`:
+Save this as `src/workflows/countries.ts`:
 
-```json
-{
-  "name": "countries.list",
-  "description": "Fetches the list of countries with capitals",
-  "version": "1.0.0",
-  "trigger": {
-    "http": { "method": "GET", "path": "/countries" }
+```ts src/workflows/countries.ts
+import { workflow, step, http } from "@blokjs/core";
+import apiCall from "@blokjs/api-call";
+import { RespondNode } from "@blokjs/helpers";
+
+export default workflow(
+  "countries.list",
+  { version: "1.0.0", trigger: http.get("/countries") },
+  (req) => {
+    // step(id, node, inputs) runs the node and returns a TYPED handle.
+    const countries = step("fetch", apiCall, {
+      url: "https://countriesnow.space/api/v0.1/countries/capital",
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      responseType: "application/json",
+    });
+
+    // Pass the handle straight into the next step — the runner resolves it.
+    step("respond", RespondNode, { body: countries }, { ephemeral: true });
   },
-  "steps": [
-    {
-      "id": "fetch",
-      "use": "@blokjs/api-call",
-      "inputs": {
-        "url": "https://countriesnow.space/api/v0.1/countries/capital",
-        "method": "GET",
-        "headers": { "Content-Type": "application/json" },
-        "responseType": "application/json"
-      }
-    },
-    {
-      "id": "respond",
-      "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.fetch" }
-    }
-  ]
-}
+);
 ```
 
 The `name` follows the dotted `domain.action` convention so the
@@ -66,14 +61,17 @@ This workflow:
 
 <Steps>
   <Step title="Triggered by GET /countries">
-    The HTTP trigger maps the route to this workflow file.
+    The `http.get("/countries")` trigger maps the route to this
+    workflow.
   </Step>
   <Step title="Calls the external API">
-    The `fetch` step uses `@blokjs/api-call` to GET the country list.
-    Its output auto-stores at `ctx.state.fetch`.
+    The `fetch` step runs the imported `apiCall` node to GET the
+    country list. Its output auto-stores at `ctx.state.fetch` and is
+    returned as the `countries` handle.
   </Step>
   <Step title="Returns the response">
-    The `respond` step reads `$.state.fetch` and returns it.
+    The `respond` step takes the `countries` handle as its body. It's
+    `ephemeral` — it shapes the response without cluttering state.
   </Step>
 </Steps>
 
@@ -98,61 +96,48 @@ This workflow:
 
 ### Change the endpoint
 
-Modify the `url` to fetch data from a different API:
+Point the `url` at a different API:
 
-```json
-{
-  "id": "fetch",
-  "use": "@blokjs/api-call",
-  "inputs": {
-    "url": "https://your-api-endpoint.com/data",
-    "method": "GET"
-  }
-}
+```ts
+const data = step("fetch", apiCall, {
+  url: "https://your-api-endpoint.com/data",
+  method: "GET",
+});
 ```
 
 ### Add query parameters
 
-```json
-{
-  "id": "fetch",
-  "use": "@blokjs/api-call",
-  "inputs": {
-    "url": "https://countriesnow.space/api/v0.1/countries/capital?filter=region&value=Europe",
-    "method": "GET"
-  }
-}
+```ts
+const europe = step("fetch", apiCall, {
+  url: "https://countriesnow.space/api/v0.1/countries/capital?filter=region&value=Europe",
+  method: "GET",
+});
 ```
 
 ### Add authentication
 
-```json
-{
-  "id": "fetch",
-  "use": "@blokjs/api-call",
-  "inputs": {
-    "url": "https://api.example.com/data",
-    "method": "GET",
-    "headers": {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer your-api-key"
-    }
-  }
-}
+```ts
+const data = step("fetch", apiCall, {
+  url: "https://api.example.com/data",
+  method: "GET",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: "Bearer your-api-key",
+  },
+});
 ```
 
 ### Cache the result
 
-Add `idempotencyKey` to make repeat requests free:
+Pass `idempotencyKey` in the 4th argument to make repeat requests free:
 
-```json
-{
-  "id": "fetch",
-  "use": "@blokjs/api-call",
-  "inputs": { "url": "https://countriesnow.space/api/v0.1/countries/capital" },
-  "idempotencyKey": "countries-list",
-  "idempotencyKeyTTL": 86400000
-}
+```ts
+const countries = step(
+  "fetch",
+  apiCall,
+  { url: "https://countriesnow.space/api/v0.1/countries/capital" },
+  { idempotencyKey: "countries-list", idempotencyKeyTTL: 86_400_000 },
+);
 ```
 
 The first request hits the upstream API. Every subsequent request
@@ -161,21 +146,19 @@ within 24 hours returns the cached response without an HTTP call. See
 
 ### Transform the data
 
-Add another step before `respond`:
+Add a step between `fetch` and `respond` to reshape the result. The
+`ExprNode` helper (`@blokjs/expr`) evaluates a plain JS expression
+against `ctx` and returns it — read the `countries` handle inside:
 
-```json
-{
-  "id": "filter",
-  "use": "@blokjs/mapper",
-  "inputs": {
-    "mapper": {
-      "europeOnly": "$.state.fetch.data.filter(c => c.region === 'Europe')"
-    }
-  }
-}
+```ts
+import { ExprNode } from "@blokjs/helpers";
+
+const filtered = step("filter", ExprNode, {
+  expression: "ctx.state.fetch.data.filter(c => c.region === 'Europe')",
+});
+
+step("respond", RespondNode, { body: filtered }, { ephemeral: true });
 ```
-
-Then point `respond` at `$.state.filter`.
 
 ## Related
 

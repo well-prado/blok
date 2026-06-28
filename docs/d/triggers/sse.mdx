@@ -12,44 +12,29 @@ those events to connected clients without any network hop.
 
 ## Quickstart
 
-```json workflows/json/clock-stream.json
-{
-  "name": "Clock Stream",
-  "version": "1.0.0",
-  "trigger": {
-    "sse": {
-      "path": "/sse/clock",
-      "heartbeatInterval": 15000,
-      "retryInterval": 3000
-    }
-  },
-  "steps": [
-    {
-      "id": "sub",
-      "use": "@blokjs/sse-subscribe",
-      "inputs": { "channels": ["clock"] }
-    },
-    {
-      "id": "stream",
-      "use": "@blokjs/sse-stream",
-      "inputs": { "source": "js/ctx.state.sub" }
-    }
-  ]
-}
+The build callback receives the connection's entry handle (`conn`) — SSE rarely reads it; the
+work is `sse-subscribe` → `sse-stream`. The subscriber handle flows into the streamer.
+
+```ts src/workflows/clock-stream.ts
+import { workflow, step } from "@blokjs/core";
+import { SseSubscribeNode, SseStreamNode } from "@blokjs/helpers";
+
+export default workflow("clock-stream", {
+  version: "1.0.0",
+  trigger: { sse: { path: "/sse/clock", heartbeatInterval: 15000, retryInterval: 3000 } },
+}, () => {
+  const sub = step("sub", SseSubscribeNode, { channels: ["clock"] });
+  step("stream", SseStreamNode, { source: sub });
+});
 ```
 
 A sibling HTTP workflow publishes:
 
-```json
-{
-  "id": "tick",
-  "use": "@blokjs/sse-publish",
-  "inputs": {
-    "channel": "clock",
-    "event": "tick",
-    "data": "js/({ now: Date.now() })"
-  }
-}
+```ts
+import { step } from "@blokjs/core";
+import { SsePublishNode } from "@blokjs/helpers";
+
+step("tick", SsePublishNode, { channel: "clock", event: "tick", data: { now: Date.now() } });
 ```
 
 Browser side:
@@ -99,37 +84,29 @@ top (Redis pub/sub is the typical choice).
 
 ## Channel placeholders
 
-`channels:` accepts `{paramName}` placeholders that resolve from
-`ctx.request.params` at run time. A workflow that subscribes per
+`channels:` accepts `{paramName}` placeholders that resolve from the
+connection's path params at run time. A workflow that subscribes per
 session looks like:
 
-```json
-{
-  "trigger": { "sse": { "path": "/sse/chat/:sessionId" } },
-  "steps": [
-    {
-      "id": "sub",
-      "use": "@blokjs/sse-subscribe",
-      "inputs": { "channels": ["chat:{sessionId}"] }
-    },
-    {
-      "id": "stream",
-      "use": "@blokjs/sse-stream",
-      "inputs": { "source": "js/ctx.state.sub" }
-    }
-  ]
-}
+```ts
+export default workflow("chat-stream", {
+  version: "1.0.0",
+  trigger: { sse: { path: "/sse/chat/:sessionId" } },
+}, () => {
+  const sub = step("sub", SseSubscribeNode, { channels: ["chat:{sessionId}"] });
+  step("stream", SseStreamNode, { source: sub });
+});
 ```
 
 Every connected browser subscribes only to its own conversation.
 
-## ctx mapping
+## The connection handle
 
-| Field | Source |
+| Read | Source |
 |---|---|
-| `ctx.request.params` | Path params from `:name` in the SSE path |
-| `ctx.request.query` | Parsed query string |
-| `ctx.request.headers` | Lowercased headers from the upgrade request |
+| `conn.params` | Path params from `:name` in the SSE path |
+| `conn.query` | Parsed query string |
+| `conn.headers` | Lowercased headers from the upgrade request |
 | `ctx.signal` | Cancelled when the browser closes the EventSource |
 
 ## Composition

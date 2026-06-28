@@ -8,6 +8,14 @@ icon: "repeat"
 evaluates truthy. Always-pair with `maxIterations` to avoid runaways
 — there's no time-based stop, only condition-based.
 
+<Note>
+`loop` is **not** part of the `@blokjs/core` typed-handle DSL — there is no
+`loop()` function alongside `step`/`branch`/`forEach`/`switchOn`/`tryCatch`. It
+is an **object-style / JSON step shape**, shown below. For iterating a known
+array in the handle DSL, use [`forEach`](./forEach.mdx); for condition-based
+repetition (polling), use the JSON `loop` shape on this page.
+</Note>
+
 The most common pattern is polling: hit an upstream until it returns
 "ready," with capped exponential backoff via a `wait` step inside the
 body. The v05 dev fixture `v05-async-job-poller.json` is the

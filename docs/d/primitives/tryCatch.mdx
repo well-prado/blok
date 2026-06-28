@@ -1,189 +1,165 @@
 ---
 title: "tryCatch — recover from errors"
-description: "Run a step group; if it throws, run a fallback group. The $.error envelope exposes the failed step + cause."
+description: "Run a step group; if it throws, run a fallback group. The error handle exposes the failed step + cause."
 icon: "shield-alert"
 ---
 
 `tryCatch` wraps a step group with error recovery. If any step in `try`
-throws, control jumps to `catch` with `$.error` populated. Otherwise
-`try` runs to completion and `catch` is skipped.
+throws, control jumps to `catch` with a typed **error handle** populated.
+Otherwise `try` runs to completion and `catch` is skipped. Each arm is a
+**callback** where `step()` calls register into that arm.
 
-The saga + workflow-compensation pattern shipped in v0.5 — used in
-`v05-saga.json` and `v05-user-signup-saga.json` for transactional
-multi-step writes with rollback.
+The saga + workflow-compensation pattern — transactional multi-step writes
+with rollback.
 
 ## Quickstart
 
-```json
-{
-  "id": "save-with-rollback",
-  "tryCatch": {
-    "try": [
-      { "id": "charge", "use": "@blokjs/stripe-charge", "inputs": { "amount": 1000 } },
-      { "id": "record", "use": "@blokjs/postgres-query", "inputs": { "query": "INSERT INTO orders ..." } }
-    ],
-    "catch": [
-      {
-        "id": "compensate",
-        "branch": {
-          "when": "ctx.error.stepId === 'record'",
-          "then": [
-            { "id": "refund", "use": "@blokjs/stripe-refund", "inputs": { "chargeId": "js/ctx.state.charge.id" } }
-          ]
-        }
-      },
-      {
-        "id": "respond-error",
-        "use": "@blokjs/expr",
-        "inputs": {
-          "expression": "({ ok: false, error: ctx.error.message, failedStep: ctx.error.stepId })"
-        }
-      }
-    ]
-  }
-}
+```ts
+import { workflow, step, tryCatch, branch, eq, http } from "@blokjs/core";
+import stripeCharge from "../nodes/stripe-charge";
+import stripeRefund from "../nodes/stripe-refund";
+import insertOrder from "../nodes/insert-order";
+
+export default workflow("orders.save", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  tryCatch("save-with-rollback", {
+    try: () => {
+      step("charge", stripeCharge, { amount: req.body.amount });
+      step("record", insertOrder, { order: req.body });
+    },
+    catch: (err) => {
+      branch("compensate", eq(err.stepId, "record"), {
+        then: () => { step("refund", stripeRefund, { reason: err.message }); },
+      });
+    },
+  });
+});
 ```
 
-If the `record` step throws (DB constraint violation, say), the
-`catch` arm fires the refund and returns an error payload.
+If `record` throws (a DB constraint violation, say), the `catch` arm fires the
+refund. The `err` handle tells it *which* step failed.
 
-## Config fields
+## The signature
 
-| Field | Type | Notes |
-|---|---|---|
-| `try` | `Step[]` | Steps to run. First error jumps to `catch`. |
-| `catch` | `Step[]` | Recovery steps. `ctx.error` is populated on entry. |
+`tryCatch(id, { try, catch, finally? })`:
 
-## The `$.error` envelope
+- **`try`** — a callback. The first step that throws jumps to `catch`.
+- **`catch`** — a callback that receives the **error handle** (`err` below).
+- **`finally`** — an optional callback that runs after `try`/`catch`,
+  succeed or fail.
 
-Inside the `catch` arm, `ctx.error` (or `$.error` in TS workflows)
-exposes structured failure info:
+## The error handle
+
+The `catch` callback receives a typed handle modeling the runtime error
+envelope. Read its fields like any other handle:
 
 | Field | Source |
 |---|---|
-| `ctx.error.message` | The deepest error in the cause chain. Strips the framework's `[step N/M] X failed: …` wrap. |
-| `ctx.error.name` | `Error.name` of the deepest error. |
-| `ctx.error.stack` | `Error.stack` when present. |
-| `ctx.error.code` | First `GlobalError.code` walking the cause chain. For `@blokjs/throw` errors this is the explicit code; for Zod validation errors it's `400`. |
-| `ctx.error.stepId` | The id of the step that threw. Use for routing the recovery: refund-on-DB-failure, notify-billing-on-charge-failure, etc. |
+| `err.message` | The deepest error in the cause chain. Strips the framework's `[step N/M] X failed: …` wrap. |
+| `err.name` | `Error.name` of the deepest error. |
+| `err.stack` | `Error.stack` when present. |
+| `err.code` | First `GlobalError.code` walking the cause chain. For `@blokjs/throw` errors this is the explicit code; for Zod validation errors it's `400`. **Optional** — `undefined` for non-`GlobalError` throws. |
+| `err.stepId` | The id of the step that threw. **Optional.** Use it to route the recovery. |
 
-`stepId` is the headline. Real catch arms typically branch on it to
-route the right compensation:
+`stepId` is the headline. Real catch arms typically route on it:
 
-```json
-"catch": [
-  {
-    "id": "route-by-failure",
-    "switch": {
-      "on": "ctx.error.stepId",
-      "cases": [
-        { "when": "charge", "do": [{ "id": "notify-billing", "use": "...", "inputs": {} }] },
-        { "when": "record", "do": [{ "id": "refund", "use": "...", "inputs": {} }] },
-        { "when": "ship", "do": [{ "id": "release-inventory", "use": "...", "inputs": {} }] }
-      ]
-    }
-  }
-]
+```ts
+catch: (err) => {
+  switchOn(err.stepId, {
+    cases: [
+      { when: "charge", do: () => { step("notifyBilling", notifyBilling, { reason: err.message }); } },
+      { when: "record", do: () => { step("refund", stripeRefund, { reason: err.message }); } },
+      { when: "ship", do: () => { step("releaseInventory", releaseInventory, {}); } },
+    ],
+  }, { id: "route-by-failure" });
+},
 ```
 
-## ctx.state result
+<Warning>
+The `err` handle is **scoped to the `catch` arm** — reading it in `try`,
+`finally`, or after the `tryCatch` resolves to `undefined`. Default
+`err.code` / `err.stepId` before branching on them; both are optional.
+</Warning>
 
-The tryCatch step itself writes nothing notable. **Inside `catch`**,
-`ctx.state` reflects whatever ran in `try` up to the failing step —
-successful steps populated state normally; the failing step's state
-slot is `undefined`. This is the v0.5.1 fix: an errored step
-**does not** persist an empty envelope, so `ctx.state[<id>] === undefined`
-truthfully means "step did not succeed."
+## Reading state inside catch
 
-That's load-bearing for compensation logic:
+A step that throws **does not persist state** (the v0.5.1 fix). So inside
+`catch`, routing on `err.stepId` is a *truthful* "this step did not succeed"
+check — exactly what selective compensation needs. Branch on which step threw:
 
-```javascript
-ctx.state.charge !== undefined  // → charge succeeded; refund needed
-ctx.state.record !== undefined  // → record succeeded; nothing to undo
+```ts
+catch: (err) => {
+  // the charge step threw → nothing to undo; anything later → refund the charge
+  branch("maybe-refund", ne(err.stepId, "charge"), {
+    then: () => { step("refund", stripeRefund, { reason: err.message }); },
+  });
+},
 ```
+
+`catch` only fires for **step errors**. It does **not** fire for `wait`
+deferrals or run cancellation (`ctx.signal`) — those are control signals, not
+failures. Don't put cleanup that must run on cancel inside a `catch`.
 
 ## Common patterns
 
-### Multi-step saga with selective rollback
+<AccordionGroup>
+  <Accordion title="Multi-step saga with selective rollback" icon="rotate-left">
+    Roll back only the steps that actually succeeded, gated on their handles:
 
-```json
-"tryCatch": {
-  "try": [
-    { "id": "create-account", "use": "...", "inputs": {} },
-    { "id": "send-welcome", "use": "...", "inputs": {} },
-    { "id": "schedule-onboarding", "use": "...", "inputs": {} }
-  ],
-  "catch": [
-    {
-      "id": "compensate",
-      "branch": {
-        "when": "ctx.state['create-account'] !== undefined",
-        "then": [
-          { "id": "delete-account", "use": "...", "inputs": {} }
-        ]
-      }
-    }
-  ]
-}
-```
+    ```ts
+    tryCatch("signup-saga", {
+      try: () => {
+        const account = step("createAccount", createAccount, { email: req.body.email });
+        step("sendWelcome", sendWelcome, { to: account.id });
+        step("scheduleOnboarding", scheduleOnboarding, { user: account.id });
+      },
+      catch: (err) => {
+        branch("rollback", ne(err.stepId, "createAccount"), {
+          then: () => { step("deleteAccount", deleteAccount, { reason: err.message }); },
+        });
+      },
+    });
+    ```
+  </Accordion>
+  <Accordion title="Try a sub-workflow, recover" icon="git-branch">
+    A sub-workflow's failure surfaces as a single error in the catch arm —
+    re-queue for later instead of failing the parent:
 
-If `create-account` succeeds but `send-welcome` fails, the catch arm
-rolls back the account. If `create-account` itself failed, no account
-exists — the catch arm no-ops via the branch guard.
+    ```ts
+    tryCatch("process", {
+      try: () => { step("run", null, { payload: req.body }, { subworkflow: "expensive-pipeline" }); },
+      catch: () => { step("requeue", workerPublish, { queue: "retry-queue", payload: req.body }); },
+    });
+    ```
+  </Accordion>
+  <Accordion title="Compose with retry" icon="rotate-cw">
+    Step-level [`retry`](/d/reliability/retry) handles transient failures;
+    `tryCatch` handles "if it *ultimately* fails, do something different." A
+    `try` step with `retry: { maxAttempts: 3 }` runs three attempts before the
+    catch arm fires:
 
-### Try sub-workflows + recover
+    ```ts
+    try: () => {
+      step("flaky", apiCall, { url: req.body.url }, { retry: { maxAttempts: 3 } });
+    },
+    ```
+  </Accordion>
+</AccordionGroup>
 
-```json
-"tryCatch": {
-  "try": [
-    { "id": "process", "subworkflow": "expensive-pipeline", "inputs": {} }
-  ],
-  "catch": [
-    { "id": "queue-for-retry-later", "use": "@blokjs/worker-publish", "inputs": { "queue": "retry-queue", "payload": "..." } }
-  ]
-}
-```
+## Footguns
 
-The sub-workflow's failure propagates as a single error visible in the
-catch arm. Re-queue for later processing instead of failing the parent.
-
-### Final error response
-
-```json
-"catch": [
-  {
-    "id": "respond",
-    "use": "@blokjs/expr",
-    "inputs": {
-      "expression": "({ ok: false, error: ctx.error.message, code: ctx.error.code, failedStep: ctx.error.stepId })"
-    }
-  }
-]
-```
-
-The HTTP trigger reads the final state of the workflow and writes that
-JSON as the response body.
-
-## Composition
-
-- `tryCatch` inside `forEach` body — catch per-iteration failures,
-  keep the loop going
-- `tryCatch` inside `loop` body — recover transient errors without
-  exiting the loop
-- `tryCatch` inside `tryCatch.try` — nested error scopes
-- Step-level [`retry`](/d/reliability/retry) is the right answer for
-  "rerun on transient." `tryCatch` is for "if it ultimately fails,
-  do something different." They compose: a `try` step with `retry: {
-  maxAttempts: 3 }` runs three attempts before the catch arm fires.
+- **The `err` handle is catch-scoped** — it reads `undefined` outside `catch`.
+- **`err.code` / `err.stepId` are optional** — default them before branching.
+- **Unique step ids across arms** — `try`, `catch`, and `finally` share the
+  flat per-workflow id namespace. Reusing one throws at load time.
 
 ## Related
 
 <Columns cols={3}>
-  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
-    For transient failures.
+  <Card title="Handles & footguns" icon="triangle-exclamation" href="/d/primitives/handles-and-footguns">
+    The error envelope and arm-scope contract.
   </Card>
-  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
-    Wrap a sub-workflow in tryCatch for transactional dispatch.
+  <Card title="Per-step retry" icon="rotate-cw" href="/d/reliability/retry">
+    For transient failures, before the catch arm fires.
   </Card>
   <Card title="@blokjs/throw" icon="alert-octagon" href="/d/reference/helpers/throw">
     Deliberately throw structured errors.
