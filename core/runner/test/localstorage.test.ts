@@ -70,7 +70,13 @@ test("Compare JSON vs Helper", async () => {
 	const json = await storage.get("countries", locator, "json");
 	const helper = await storage.get("countries-helper", locator);
 
-	expect(json).toEqual(helper);
+	// The helper factory stamps the default `schemaVersion: "2"` (the IR version,
+	// #454); JSON files omit it and validate/normalize unchanged (S1). Strip it for
+	// this authoring-equivalence check — the two are otherwise byte-identical, which
+	// is exactly the property this test guards ("strip the schemaVersion line and
+	// the file is byte-identical to today's accepted shape").
+	const { schemaVersion: _ignored, ...helperSansVersion } = helper as Record<string, unknown>;
+	expect(json).toEqual(helperSansVersion);
 });
 
 test("Load YAML example", async () => {
