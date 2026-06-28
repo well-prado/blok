@@ -52,13 +52,29 @@ function isStructuralRef(value: object): value is StructuralRef {
 	return typeof ref === "object" && ref !== null && typeof (ref as { step?: unknown }).step === "string";
 }
 
+/** Valid JS identifier — same shape `$.ts`'s proxy encoder accepts for `.k`. */
+const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Encode a single path segment into its wire-string suffix, mirroring
+ * `unwrapProxies` (core/workflow-helper/src/proxy/$.ts) EXACTLY — three
+ * branches, not two: numeric → `[n]`; valid JS identifier → `.k`; anything
+ * else (dash, dot, space, leading digit on a string key) → `[${JSON.stringify(k)}]`.
+ * The bracket-quote form is the only one that survives the Mapper's `js/...`
+ * eval — `.fan-out` would parse as `fan - out`.
+ */
+function encodeSegment(seg: string | number): string {
+	if (typeof seg === "number") return `[${seg}]`;
+	if (IDENT_RE.test(seg)) return `.${seg}`;
+	return `[${JSON.stringify(seg)}]`;
+}
+
 /**
  * Compile a `path` array into the wire-string suffix the Mapper resolves.
- * Mirrors `unwrapProxies`'s IDENT/NUMERIC encoding: numeric → `[n]`,
- * string → `.seg`. Empty path produces the empty suffix (whole-output ref).
+ * Empty path produces the empty suffix (whole-output ref).
  */
 function encodePath(path: (string | number)[]): string {
-	return path.map((seg) => (typeof seg === "number" ? `[${seg}]` : `.${seg}`)).join("");
+	return path.map(encodeSegment).join("");
 }
 
 /**
@@ -73,8 +89,9 @@ function encodePath(path: (string | number)[]): string {
  * resolved step→state-key map into this pass.
  */
 function lowerRef(ref: StructuralRef): string {
+	const root = encodeSegment(ref.$ref.step); // `.fanOut` or `["fan-out"]`
 	const suffix = encodePath(ref.$ref.path ?? []);
-	return `js/ctx.state.${ref.$ref.step}${suffix}`;
+	return `js/ctx.state${root}${suffix}`;
 }
 
 /**

@@ -125,6 +125,76 @@ describe("lowerRefs — ADR 0001 Option C load-boundary lowering", () => {
 	});
 
 	// =========================================================================
+	// 2b. Non-identifier step ids AND path keys → bracket-quoted form
+	//     (regression for the two HIGH bugs: a dash-named step id like
+	//     "fan-out" must NOT lower to the INVALID `js/ctx.state.fan-out`, and
+	//     a dash/dot/space/leading-digit path key must bracket-quote too.)
+	// =========================================================================
+
+	describe("non-identifier roots & keys → bracket-quoted (mirror $.ts)", () => {
+		it("dash-named step id (root): fan-out → js/ctx.state['fan-out']", () => {
+			expect(lowerRefs({ x: { $ref: { step: "fan-out", path: ["id"] } } })).toEqual({
+				x: 'js/ctx.state["fan-out"].id',
+			});
+		});
+
+		it("dash-named step id, whole-output ref: send-receipt → js/ctx.state['send-receipt']", () => {
+			expect(lowerRefs({ x: { $ref: { step: "send-receipt", path: [] } } })).toEqual({
+				x: 'js/ctx.state["send-receipt"]',
+			});
+		});
+
+		it("dotted step id (root): a.b → bracket-quoted", () => {
+			expect(lowerRefs({ x: { $ref: { step: "a.b", path: ["c"] } } })).toEqual({
+				x: 'js/ctx.state["a.b"].c',
+			});
+		});
+
+		it("leading-digit step id (root): 1step → bracket-quoted", () => {
+			expect(lowerRefs({ x: { $ref: { step: "1step", path: [] } } })).toEqual({
+				x: 'js/ctx.state["1step"]',
+			});
+		});
+
+		it("identifier root stays dotted: fanOut → js/ctx.state.fanOut", () => {
+			expect(lowerRefs({ x: { $ref: { step: "fanOut", path: [] } } })).toEqual({
+				x: "js/ctx.state.fanOut",
+			});
+		});
+
+		it("dash-named PATH key: bracket-quoted suffix", () => {
+			expect(lowerRefs({ x: { $ref: { step: "validate", path: ["user-id"] } } })).toEqual({
+				x: 'js/ctx.state.validate["user-id"]',
+			});
+		});
+
+		it("dotted + space + leading-digit path keys all bracket-quote", () => {
+			expect(lowerRefs({ x: { $ref: { step: "validate", path: ["a.b", "has space", "0key"] } } })).toEqual({
+				x: 'js/ctx.state.validate["a.b"]["has space"]["0key"]',
+			});
+		});
+
+		it("end-to-end: dash-named root + dash-named key resolve through the REAL Mapper", () => {
+			const ctx = createCtx({
+				"fan-out": { "user-id": "U-9", count: 0 },
+				"send-receipt": { ok: false },
+			});
+			const lowered = lowerRefs({
+				uid: { $ref: { step: "fan-out", path: ["user-id"] } },
+				zero: { $ref: { step: "fan-out", path: ["count"] } },
+				whole: { $ref: { step: "send-receipt", path: [] } },
+			}) as unknown as ParamsDictionary;
+
+			mapper.replaceObjectStrings(lowered, ctx, ctx as unknown as ParamsDictionary);
+
+			const out = lowered as Record<string, unknown>;
+			expect(out.uid).toBe("U-9");
+			expect(out.zero).toBe(0); // falsy preserved
+			expect(out.whole).toEqual({ ok: false }); // whole-output ref to dash-named step
+		});
+	});
+
+	// =========================================================================
 	// 3. Sentinel guard — only the {$ref} shape is treated as a ref
 	// =========================================================================
 
