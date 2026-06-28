@@ -64,6 +64,43 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 		expect(normalized.steps).toHaveLength(1);
 	});
 
+	it("allows case-only differences in ids", () => {
+		const normalized = normalizeWorkflow(
+			workflow([
+				{
+					id: "route",
+					branch: {
+						when: "ctx.request.method === 'POST'",
+						then: [step("Run")],
+						else: [step("run")],
+					},
+				},
+			]),
+		);
+
+		expect(normalized.steps).toHaveLength(1);
+	});
+
+	it("allows unique ids that intentionally write the same downstream `as` key", () => {
+		const normalized = normalizeWorkflow(
+			workflow([
+				{
+					id: "route",
+					branch: {
+						when: "ctx.request.method === 'POST'",
+						then: [{ ...step("create-via-post"), as: "result" }],
+						else: [{ ...step("create-via-get"), as: "result" }],
+					},
+				},
+			]),
+		);
+
+		expect(normalized.steps).toHaveLength(1);
+		const conditions = normalized.nodes.route.conditions as Array<{ steps: Array<{ as?: string }> }>;
+		expect(conditions[0].steps[0].as).toBe("result");
+		expect(conditions[1].steps[0].as).toBe("result");
+	});
+
 	it("throws when tryCatch try and finally reuse an id", () => {
 		expect(() =>
 			normalizeWorkflow(
@@ -101,6 +138,23 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 		).toThrowError(/duplicate step id "persist" at steps\[1\]\.forEach\.do\[0\]; first seen at steps\[0\]/);
 	});
 
+	it("throws when a loop body reuses an outer sibling id", () => {
+		expect(() =>
+			normalizeWorkflow(
+				workflow([
+					step("tick"),
+					{
+						id: "retry-until-done",
+						loop: {
+							while: "ctx.state.tick.count < 3",
+							do: [step("tick")],
+						},
+					},
+				]),
+			),
+		).toThrowError(/duplicate step id "tick" at steps\[1\]\.loop\.do\[0\]; first seen at steps\[0\]/);
+	});
+
 	it("throws when switch cases reuse an id", () => {
 		expect(() =>
 			normalizeWorkflow(
@@ -120,6 +174,45 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 		).toThrowError(
 			/duplicate step id "handle" at steps\[0\]\.switch\.cases\[1\]\.do\[0\]; first seen at steps\[0\]\.switch\.cases\[0\]\.do\[0\]/,
 		);
+	});
+
+	it("reports the first duplicate when three or more switch arms share an id", () => {
+		expect(() =>
+			normalizeWorkflow(
+				workflow([
+					{
+						id: "route",
+						switch: {
+							on: "$.req.body.kind",
+							cases: [
+								{ when: "a", do: [step("handle")] },
+								{ when: "b", do: [step("handle-b")] },
+								{ when: "c", do: [step("handle")] },
+							],
+						},
+					},
+				]),
+			),
+		).toThrowError(
+			/duplicate step id "handle" at steps\[0\]\.switch\.cases\[2\]\.do\[0\]; first seen at steps\[0\]\.switch\.cases\[0\]\.do\[0\]/,
+		);
+	});
+
+	it("rejects collisions between legacy v1 step names and v2 ids", () => {
+		expect(() =>
+			normalizeWorkflow(
+				workflow([
+					{ name: "legacy-run", node: "@blokjs/respond", type: "module", inputs: {} },
+					{
+						id: "route",
+						branch: {
+							when: "ctx.request.method === 'POST'",
+							then: [step("legacy-run")],
+						},
+					},
+				]),
+			),
+		).toThrowError(/duplicate step id "legacy-run" at steps\[1\]\.branch\.then\[0\]; first seen at steps\[0\]/);
 	});
 
 	it("names deep branch-in-catch-in-forEach paths", () => {
