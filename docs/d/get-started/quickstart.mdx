@@ -1,0 +1,142 @@
+---
+title: "Quickstart"
+description: "Scaffold a project, write a node, compose a workflow, and watch it run in Blok Studio — in about five minutes."
+icon: "rocket"
+---
+
+By the end of this page you'll have a running Blok API with one typed node, one workflow, and a
+live trace of every request. You'll need **Node 18+** (or Bun) and a terminal.
+
+## 1. Scaffold a project
+
+<Steps>
+  <Step title="Create the project">
+    ```bash
+    npx blokctl@latest create project --name my-api --triggers http
+    cd my-api
+    ```
+    This generates a project wired for the HTTP trigger, with `@blokjs/core` installed and an
+    `AGENTS.md` / `CLAUDE.md` that teaches an AI agent how to build with Blok.
+  </Step>
+  <Step title="Start the dev server">
+    ```bash
+    blokctl dev
+    ```
+    Your API is now serving on **`http://localhost:4000`**, and **Blok Studio** — the live trace
+    viewer — is at **`http://localhost:4000/__blok`**.
+  </Step>
+</Steps>
+
+<Tip>
+Keep `blokctl dev` running in one terminal. It hot-reloads as you edit nodes and workflows.
+</Tip>
+
+## 2. Write a node
+
+A **node** is a small, typed, single-purpose function. Create one at
+`src/nodes/greet/index.ts` — Blok **auto-discovers** any node under `src/nodes/<name>/index.ts`,
+so there's no registry to edit.
+
+```ts src/nodes/greet/index.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+export default defineNode({
+  name: "greet",                                   // this is how workflows reference it
+  description: "Builds a greeting message",
+  input:  z.object({ name: z.string().default("world") }),
+  output: z.object({ message: z.string() }),
+  async execute(_ctx, input) {
+    return { message: `Hello, ${input.name}!` };
+  },
+});
+```
+
+The Zod `input`/`output` schemas are the node's contract — input is validated before `execute`
+runs (a bad request → `400`), and the return value is validated after (a bug → `500`). You
+never write to context inside a node; you just **return** your output.
+
+## 3. Compose a workflow
+
+A **workflow** wires nodes together with the handle DSL. Create `src/workflows/greet.ts`:
+
+```ts src/workflows/greet.ts
+import { workflow, step, http } from "@blokjs/core";
+import greet from "../nodes/greet";
+
+export default workflow("greet.hello", { version: "1.0.0", trigger: http.get("/greet") }, (req) => {
+  // step(id, node, inputs) runs the node and returns a TYPED handle.
+  step("say-hello", greet, { name: req.query.name });
+});
+```
+
+`step("say-hello", greet, …)` returns a handle shaped like `greet`'s output — fully typed. The
+last step's output becomes the HTTP response body.
+
+Register it in `src/Workflows.ts` (TypeScript workflows are registered here; the map key is the
+workflow name):
+
+```ts src/Workflows.ts {2,6}
+// ...existing imports
+import greetHello from "./workflows/greet";
+
+const workflows = {
+  // ...existing entries
+  "greet.hello": greetHello,
+};
+
+export default workflows;
+```
+
+## 4. Call it
+
+With `blokctl dev` still running:
+
+```bash
+curl "http://localhost:4000/greet?name=Blok"
+```
+
+```json Response
+{ "message": "Hello, Blok!" }
+```
+
+## 5. Watch it run
+
+Open **[http://localhost:4000/__blok](http://localhost:4000/__blok)**. Your request appears as a
+run — click it to see the `say-hello` step with its exact inputs, output, and timing. No
+instrumentation required; every workflow is observable by default.
+
+<Frame>
+  Each run is a trace: every step's inputs, outputs, errors, and duration, laid out in order.
+</Frame>
+
+## What you just built
+
+<Steps>
+  <Step title="A typed node">
+    `greet` — validated input/output, unit-testable in isolation.
+  </Step>
+  <Step title="A workflow">
+    `greet.hello` — composed with the handle DSL, triggered by `GET /greet`.
+  </Step>
+  <Step title="A traced API">
+    Running, observable, and type-safe end to end.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Nodes in depth" icon="puzzle" href="/d/introduction/nodes">
+    `defineNode`, error handling, and cross-runtime nodes.
+  </Card>
+  <Card title="Workflows & handles" icon="workflow" href="/d/introduction/workflows">
+    How data flows, persistence knobs, and control flow.
+  </Card>
+  <Card title="Add a branch" icon="diagram-project" href="/d/primitives/branch">
+    Route requests with typed conditions.
+  </Card>
+  <Card title="Make it reliable" icon="rotate" href="/d/reliability/overview">
+    Idempotency, retries, and timeouts in one field.
+  </Card>
+</CardGroup>
