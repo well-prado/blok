@@ -8,6 +8,25 @@
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./dsl": {
+			"types": "./dist/dsl.d.ts",
+			"default": "./dist/dsl.js"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.ts",
+			"default": "./dist/testing/index.js"
+		},
+		"./package.json": "./package.json",
+		"./*": {
+			"types": "./dist/*.d.ts",
+			"default": "./dist/*.js"
+		}
+	},
 	"files": ["dist"],
 	"author": "Marco A. Castillo Della Sera",
 	"license": "MIT",

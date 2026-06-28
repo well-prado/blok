@@ -6,6 +6,7 @@
 		"node": ">=18.0.0"
 	},
 	"type": "module",
+	"sideEffects": false,
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"exports": {
@@ -13,7 +14,23 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js",
 			"default": "./dist/index.js"
-		}
+		},
+		"./dsl": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./runtime": {
+			"types": "./dist/runtime.d.ts",
+			"import": "./dist/runtime.js",
+			"default": "./dist/runtime.js"
+		},
+		"./testing": {
+			"types": "./dist/testing.d.ts",
+			"import": "./dist/testing.js",
+			"default": "./dist/testing.js"
+		},
+		"./package.json": "./package.json"
 	},
 	"files": ["dist"],
 	"author": "Deskree Technologies Inc.",
