@@ -45,10 +45,10 @@ describe("loop()", () => {
 		expect(
 			loop({
 				id: "poll",
-				while: lt($.state["poll-loopIndex"], 3),
+				while: lt($.state.pollIndex, 3),
 				do: [{ id: "step1", use: "noop" }],
 			}).loop.while,
-		).toBe('ctx.state["poll-loopIndex"] < 3');
+		).toBe("ctx.state.pollIndex < 3");
 
 		expect(
 			loop({
