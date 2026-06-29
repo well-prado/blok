@@ -309,3 +309,131 @@ export function connect<T>(ir: T, sourceId: string, targetId: string): T {
 	}
 	return ir;
 }
+
+// === Rename + reference propagation (#408) ===
+
+function escapeRegExp(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Build the boundary-safe rewriter that turns every reference to `oldId` into a
+ * reference to `newId`, inside any `ctx.state...` expression string.
+ *
+ * References in this IR are `js/ctx.state.<id>...` strings (no `{$ref}` objects).
+ * A reference to `<oldId>` shows up as:
+ *   - dot form    `ctx.state.<oldId>`  (optionally `js/`-prefixed, optionally a
+ *                 trailing `.field…` path) — `<oldId>` must be a COMPLETE key.
+ *   - bracket form `ctx.state["<oldId>"]` / `ctx.state['<oldId>']`.
+ *   - loop counter `ctx.state.<oldId>Index` (a loop publishes its index at
+ *                 `<id>Index`).
+ *
+ * TOKEN-BOUNDARY: in dot form, `<oldId>` matches ONLY when the next char ends
+ * the key — `.` `[` `"` `'` `)` whitespace, an operator, or end-of-string — OR
+ * it's the literal `Index` counter suffix. So renaming `old` rewrites
+ * `state.old`, `state.old.x`, `state.oldIndex`, `state["old"]` but NEVER
+ * `state.old2`, `state.oldFoo`, `state.olds`. A naive string replace would hit
+ * those false positives — hence the explicit boundary class.
+ */
+function makeRefRewriter(oldId: string, newId: string): (s: string) => string {
+	const o = escapeRegExp(oldId);
+	// Dot form: ctx.state.<oldId>  — boundary is `Index` suffix, a key-ending
+	// char, or end-of-string. The lookahead consumes nothing so the trailing
+	// path / counter is preserved verbatim.
+	const dot = new RegExp(`(ctx\\.state\\.)${o}(?=Index|[.\\[\\])"'\\s+\\-*/%<>=!&|,?:;}]|$)`, "g");
+	// Bracket form: ctx.state["<oldId>"] or ctx.state['<oldId>'] (quote matched).
+	const bracket = new RegExp(`(ctx\\.state\\[)(["'])${o}\\2(\\])`, "g");
+	return (s: string) =>
+		s.replace(dot, `$1${newId}`).replace(bracket, (_m, pre, q, post) => `${pre}${q}${newId}${q}${post}`);
+}
+
+/** Deep-rewrite every string in a value (objects/arrays/strings) in place. */
+function rewriteDeep(value: unknown, rewrite: (s: string) => string): unknown {
+	if (typeof value === "string") return rewrite(value);
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) value[i] = rewriteDeep(value[i], rewrite);
+		return value;
+	}
+	if (isObject(value)) {
+		for (const k of Object.keys(value)) value[k] = rewriteDeep(value[k], rewrite);
+		return value;
+	}
+	return value;
+}
+
+/**
+ * Rename the step with `oldId` to `newId` and PROPAGATE the rename to every
+ * reference site across the whole IR. Pure: clones the input, returns the copy.
+ *
+ * 1. The target step's `id` is rewritten.
+ * 2. Every step's `inputs` is deep-rewritten (nested objects/arrays/strings).
+ * 3. Step-level expression fields that can carry `js/ctx.state.<id>` refs:
+ *    `branch.when`, `loop.while`, `forEach.in`, `switch.on`, each switch
+ *    `case.when` (only when it references state — plain match literals are
+ *    skipped), and the key sites `idempotencyKey` / `concurrencyKey` (#523).
+ *
+ * Boundary-safe (see `makeRefRewriter`): `<oldId>` matches only as a complete
+ * `ctx.state` key (or its `Index` counter), never as a prefix of a longer id.
+ *
+ * Out-of-scope boundary: a TRIGGER-level `concurrencyKey` lives under the
+ * workflow's `trigger` config, not in the step tree `walkSteps` traverses, so
+ * it is NOT rewritten here. In practice a trigger concurrencyKey keys off
+ * request data (`ctx.req...`), not a step output, so this is a non-issue.
+ *
+ * Throws if `oldId` is not found, or if `newId` already exists anywhere in the
+ * tree (mirrors the #412 duplicate-id guard).
+ *
+ * Note: a step renamed via `as:`/`spread:` publishes under the as-name / spread
+ * keys, NOT its id — so a boundary-safe rewrite of `state.<oldId>` correctly
+ * finds nothing to change for those downstream refs. No special-casing.
+ */
+export function renameStep<T>(ir: T, oldId: string, newId: string): T {
+	const draft = structuredClone(ir);
+	const loc = findStepLocation(draft, oldId);
+	if (!loc) {
+		throw new Error(`[irEditOps] cannot rename: no step with id "${oldId}"`);
+	}
+	if (oldId === newId) return draft;
+	if (collectIds(draft).has(newId)) {
+		throw new Error(
+			`[irEditOps] cannot rename to "${newId}": a step with this id already exists in the workflow — step ids must be globally unique across all arms (the runner throws at load time). Pick a fresh id or use nextId().`,
+		);
+	}
+
+	loc.step.id = newId;
+
+	const rewrite = makeRefRewriter(oldId, newId);
+	// Rewrite a step-level field in place only if it's an expression STRING that
+	// references state (skips plain literals — a switch case `when: "a"` is a
+	// match value, not an expression, so it must be left alone).
+	const rewriteExprField = (container: Record<string, unknown>, key: string) => {
+		const v = container[key];
+		if (typeof v === "string" && v.includes("ctx.state.")) container[key] = rewrite(v);
+	};
+	walkSteps(draft, (step) => {
+		if (isObject(step.inputs)) rewriteDeep(step.inputs, rewrite);
+		// branch.when / loop.while raw conditions (always expressions).
+		if (isObject(step.branch) && typeof step.branch.when === "string") {
+			step.branch.when = rewrite(step.branch.when);
+		}
+		if (isObject(step.loop) && typeof step.loop.while === "string") {
+			step.loop.while = rewrite(step.loop.while);
+		}
+		// forEach.in iterable + switch.on discriminant: step-level expression
+		// fields that live OUTSIDE inputs and can carry js/ctx.state.<id> refs.
+		if (isObject(step.forEach)) rewriteExprField(step.forEach, "in");
+		if (isObject(step.switch)) {
+			rewriteExprField(step.switch, "on");
+			// case `when` may be an expression OR a plain match literal — only
+			// rewrite the ones that reference state (the includes-guard above).
+			const cases = asSteps(step.switch.cases);
+			if (cases) for (const c of cases) if (isObject(c)) rewriteExprField(c, "when");
+		}
+		// Key sites (#523): idempotencyKey / concurrencyKey can be js/ctx.state.<id>
+		// refs. Both are step-level string fields when present.
+		rewriteExprField(step, "idempotencyKey");
+		rewriteExprField(step, "concurrencyKey");
+	});
+
+	return draft;
+}
