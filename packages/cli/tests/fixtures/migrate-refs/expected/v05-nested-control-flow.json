@@ -1,0 +1,256 @@
+{
+	"name": "v05-nested-control-flow",
+	"version": "1.0.0",
+	"description": "v0.5 deep nesting demo — primitives nested inside primitives. Each line item runs through forEach > tryCatch > switch (per-type handler) > regular steps; the catch arm uses a branch to decide whether one bad item should fail the whole order (required items rethrow) or be silently skipped (optional items log + continue). External calls go to httpbin.org so the workflow runs without secrets — pass `handlerUrl: https://httpbin.org/status/500` on a non-required item to exercise the optional-skip path. Demonstrates: forEach > tryCatch > switch > branch nesting, $.error proxy in catch, per-iteration summary so the parent can count successes vs swallowed failures.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/v05-nested-control-flow",
+			"accept": "application/json",
+			"middleware": ["auth-check"]
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-body",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["id", "items"],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"items": {
+							"type": "array"
+						}
+					}
+				},
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"id": "per-item-pipeline",
+			"forEach": {
+				"in": "js/ctx.request.body.items",
+				"as": "item",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "item-tryCatch",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "by-type",
+									"switch": {
+										"on": "js/ctx.state.item.type",
+										"cases": [
+											{
+												"when": "physical",
+												"do": [
+													{
+														"id": "handle-physical",
+														"use": "@blokjs/api-call",
+														"type": "module",
+														"inputs": {
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
+															"method": "POST",
+															"headers": {
+																"Content-Type": "application/json",
+																"X-Handler": "physical"
+															},
+															"body": {
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
+																"type": "physical"
+															},
+															"responseType": "application/json"
+														}
+													}
+												]
+											},
+											{
+												"when": "digital",
+												"do": [
+													{
+														"id": "handle-digital",
+														"use": "@blokjs/api-call",
+														"type": "module",
+														"inputs": {
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
+															"method": "POST",
+															"headers": {
+																"Content-Type": "application/json",
+																"X-Handler": "digital"
+															},
+															"body": {
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
+																"type": "digital"
+															},
+															"responseType": "application/json"
+														}
+													}
+												]
+											},
+											{
+												"when": "service",
+												"do": [
+													{
+														"id": "handle-service",
+														"use": "@blokjs/api-call",
+														"type": "module",
+														"inputs": {
+															"url": {
+																"$ref": {
+																	"step": "item",
+																	"path": ["handlerUrl"]
+																}
+															},
+															"method": "POST",
+															"headers": {
+																"Content-Type": "application/json",
+																"X-Handler": "service"
+															},
+															"body": {
+																"sku": {
+																	"$ref": {
+																		"step": "item",
+																		"path": ["sku"]
+																	}
+																},
+																"type": "service"
+															},
+															"responseType": "application/json"
+														}
+													}
+												]
+											}
+										],
+										"default": [
+											{
+												"id": "throw-unknown-type",
+												"use": "@blokjs/throw",
+												"type": "module",
+												"inputs": {
+													"message": "Unknown item type",
+													"code": 400,
+													"name": "UnknownItemTypeError"
+												}
+											}
+										]
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "audit-item-failure",
+									"use": "@blokjs/audit-log",
+									"type": "module",
+									"inputs": {
+										"event": "item-process-failure",
+										"sku": {
+											"$ref": {
+												"step": "item",
+												"path": ["sku"]
+											}
+										},
+										"reason": "js/ctx.error.message"
+									},
+									"ui": {
+										"notes": "blok-migrate: hand-migrate (dynamic expression)"
+									}
+								},
+								{
+									"id": "mark-item-failed",
+									"use": "@blokjs/ctx-publish",
+									"type": "module",
+									"inputs": {
+										"name": "iterFailed",
+										"value": true
+									}
+								},
+								{
+									"id": "decide-on-failure",
+									"branch": {
+										"when": "ctx.state.item.required === true",
+										"then": [
+											{
+												"id": "rethrow-required",
+												"use": "@blokjs/throw",
+												"type": "module",
+												"inputs": {
+													"message": "js/`Required item ${ctx.state.item.sku} failed: ${ctx.error.message}`",
+													"code": 500,
+													"name": "RequiredItemFailedError"
+												},
+												"ui": {
+													"notes": "blok-migrate: hand-migrate (dynamic expression)"
+												}
+											}
+										],
+										"else": [
+											{
+												"id": "skip-and-log",
+												"use": "@blokjs/log",
+												"type": "module",
+												"inputs": {
+													"level": "warn",
+													"message": "js/`Optional item ${ctx.state.item.sku} skipped: ${ctx.error.message}`"
+												},
+												"ui": {
+													"notes": "blok-migrate: hand-migrate (dynamic expression)"
+												}
+											}
+										]
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "iter-summary",
+						"use": "@blokjs/expr",
+						"type": "module",
+						"inputs": {
+							"expression": "({ sku: ctx.state.item.sku, type: ctx.state.item.type, ok: ctx.state.iterFailed !== true })"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((arr) => { const summaries = arr.map(r => (r && r.data && typeof r.data === 'object') ? r.data : r); return { orderId: ctx.request.body.id, itemsProcessed: summaries.length, failedItems: summaries.filter(s => s && s.ok === false).length, items: summaries }; })(ctx.state['per-item-pipeline'] || [])"
+			}
+		}
+	]
+}

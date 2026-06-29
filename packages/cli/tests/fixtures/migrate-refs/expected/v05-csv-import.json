@@ -1,0 +1,151 @@
+{
+	"name": "v05-csv-import",
+	"version": "1.0.0",
+	"description": "CSV-import pipeline with per-row resilience. Receives an array of rows in the body and processes each through validate → transform → insert. Each row is wrapped in its own tryCatch, so a single bad row doesn't abort the whole import — failed rows go to a per-row DLQ slot the response surfaces. Real deployments swap the inline `inserts` summary for an actual DLQ table or queue. Demonstrates: forEach (sequential — DB inserts shouldn't run wild) + per-iteration tryCatch with $.error.message into the DLQ payload + iter-summary expr that distinguishes ok from failed for the post-loop summary.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/v05-csv-import",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-body",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["rows"],
+					"properties": {
+						"rows": {
+							"type": "array"
+						}
+					}
+				},
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"id": "process-rows",
+			"forEach": {
+				"in": "js/ctx.request.body.rows",
+				"as": "row",
+				"mode": "sequential",
+				"do": [
+					{
+						"id": "row-tryCatch",
+						"tryCatch": {
+							"try": [
+								{
+									"id": "validate-row",
+									"use": "@blokjs/json-schema",
+									"type": "module",
+									"inputs": {
+										"schema": {
+											"type": "object",
+											"required": ["id", "value"],
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"value": {
+													"type": "number"
+												}
+											}
+										},
+										"data": {
+											"$ref": {
+												"step": "row",
+												"path": []
+											}
+										}
+									}
+								},
+								{
+									"id": "insert-row",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"inputs": {
+										"url": "js/ctx.state.row.insertUrl || 'https://httpbin.org/post'",
+										"method": "POST",
+										"headers": {
+											"Content-Type": "application/json",
+											"X-Op": "insert-row"
+										},
+										"body": {
+											"rowId": {
+												"$ref": {
+													"step": "row",
+													"path": ["id"]
+												}
+											},
+											"value": {
+												"$ref": {
+													"step": "row",
+													"path": ["value"]
+												}
+											}
+										},
+										"responseType": "application/json"
+									},
+									"ui": {
+										"notes": "blok-migrate: hand-migrate (dynamic expression)"
+									}
+								}
+							],
+							"catch": [
+								{
+									"id": "log-failed-row",
+									"use": "@blokjs/log",
+									"type": "module",
+									"inputs": {
+										"level": "warn",
+										"message": "js/`csv-import: row ${ctx.state.row.id || '<missing-id>'} failed: ${ctx.error.message}`"
+									},
+									"ui": {
+										"notes": "blok-migrate: hand-migrate (dynamic expression)"
+									}
+								},
+								{
+									"id": "capture-row-error",
+									"use": "@blokjs/ctx-publish",
+									"type": "module",
+									"inputs": {
+										"name": "rowError",
+										"value": "js/ctx.error.message"
+									},
+									"ui": {
+										"notes": "blok-migrate: hand-migrate (dynamic expression)"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "iter-summary",
+						"use": "@blokjs/expr",
+						"type": "module",
+						"inputs": {
+							"expression": "({ rowId: ctx.state.row.id || null, ok: ctx.state['insert-row'] !== undefined, error: ctx.state.rowError || null })"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "((arr) => { const summaries = arr.map(r => (r && r.data && typeof r.data === 'object') ? r.data : r); const ok = summaries.filter(s => s && s.ok === true); const failed = summaries.filter(s => s && s.ok === false); return { totalRows: summaries.length, inserted: ok.length, dlq: failed.map(f => ({ rowId: f.rowId, error: f.error })) }; })(ctx.state['process-rows'] || [])"
+			}
+		}
+	]
+}

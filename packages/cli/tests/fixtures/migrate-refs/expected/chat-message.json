@@ -1,0 +1,44 @@
+{
+	"name": "Chat Message",
+	"version": "1.0.0",
+	"description": "HTTP POST handler for the chat demo. Calls @blokjs/llm-stream which streams the LLM response chunk-by-chunk to the in-process SSE bus channel `chat:<sessionId>`. The companion chat-stream workflow's SSE subscriber pumps those frames to the connected browser.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/chat/:sessionId/message",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "stream",
+			"use": "@blokjs/llm-stream",
+			"type": "module",
+			"inputs": {
+				"channel": {
+					"$tpl": [
+						"chat:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": ["params", "sessionId"]
+							}
+						},
+						""
+					]
+				},
+				"apiKey": "js/process.env.OPENROUTER_API_KEY",
+				"model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
+				"messages": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "messages"]
+					}
+				}
+			},
+			"ui": {
+				"notes": "blok-migrate: hand-migrate (dynamic expression)"
+			}
+		}
+	]
+}

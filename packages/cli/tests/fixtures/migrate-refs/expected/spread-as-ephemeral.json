@@ -1,0 +1,86 @@
+{
+	"name": "Spread/as/ephemeral edge",
+	"version": "1.0.0",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/edge",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "split",
+			"use": "splitter",
+			"spread": true,
+			"inputs": {
+				"body": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"id": "loop",
+			"forEach": {
+				"in": "js/ctx.request.body.items",
+				"as": "item",
+				"do": [
+					{
+						"id": "inner",
+						"use": "sink",
+						"inputs": {
+							"item": {
+								"$ref": {
+									"step": "item",
+									"path": []
+								}
+							},
+							"userName": {
+								"$ref": {
+									"step": "user",
+									"path": ["name"]
+								}
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "mixed-template",
+			"use": "sink",
+			"inputs": {
+				"message": "js/`user:${ctx.state.user.name} flag:${ctx.request.body.flag || 'n'}`"
+			},
+			"ui": {
+				"notes": "blok-migrate: hand-migrate (dynamic expression)"
+			}
+		},
+		{
+			"id": "scratch",
+			"use": "audit",
+			"ephemeral": true,
+			"inputs": {
+				"note": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "note"]
+					}
+				}
+			}
+		},
+		{
+			"id": "after-scratch",
+			"use": "sink",
+			"inputs": {
+				"prev": "js/ctx.prev.value"
+			},
+			"ui": {
+				"notes": "blok-migrate: hand-migrate (dynamic expression)"
+			}
+		}
+	]
+}
