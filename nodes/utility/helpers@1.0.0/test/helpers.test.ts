@@ -17,7 +17,11 @@ import {
 	RedisKvNode,
 	RespondNode,
 	SseEmitNode,
+	SseStreamNode,
+	SseSubscribeNode,
 	ThrowNode,
+	WsBroadcastNode,
+	WsReplyNode,
 	_resetAuditEventsForTests,
 	_resetInMemoryKvForTests,
 	_resetJwksCacheForTests,
@@ -184,6 +188,275 @@ describe("@blokjs/helpers", () => {
 			const r = await SseEmitNode.handle(ctx, { data: { x: 1 } });
 			expect((r as { success: boolean }).success).toBe(false);
 			expect((r as { error: { message: string } }).error.message).toContain("ctx.stream is undefined");
+		});
+	});
+
+	// ====================================================================
+	// @blokjs/sse-subscribe + @blokjs/sse-stream — the bus → client pump
+	// ====================================================================
+	//
+	// We mock `ctx.stream` directly (the trigger normally binds it). The
+	// mock's `subscribe` returns an in-memory async iterator over a fixed
+	// list of bus events so we can assert ordering + id propagation
+	// deterministically, and `signal` is an `AbortController` whose flip
+	// we drive by hand to simulate a client disconnect.
+	describe("@blokjs/sse-subscribe + @blokjs/sse-stream", () => {
+		type BusEvent = { channel: string; id: string; event?: string; data: unknown; timestamp: number };
+
+		function streamCtx(opts: {
+			busEvents?: BusEvent[];
+			abort?: AbortController;
+			lastEventId?: string | null;
+		}): {
+			ctx: Context;
+			writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }>;
+			returned: { called: boolean };
+		} {
+			const writes: Array<{ event?: string; data: unknown; id?: string; retry?: number }> = [];
+			const returned = { called: false };
+			const abort = opts.abort ?? new AbortController();
+			const ctx = ctxFor();
+			(ctx as unknown as { stream: unknown }).stream = {
+				id: "s-1",
+				writeSSE: vi.fn(async (o: { event?: string; data: unknown; id?: string; retry?: number }) => {
+					writes.push(o);
+				}),
+				writeComment: vi.fn(async () => {}),
+				close: vi.fn(),
+				closed: false,
+				signal: abort.signal,
+				lastEventId: opts.lastEventId ?? null,
+				subscribe: vi.fn((channels: string[], lastEventId?: string | null) => {
+					// Honor the replay cursor the same way the real bus does:
+					// only events with seq (numeric id) > lastEventId survive.
+					const cursor = lastEventId ?? opts.lastEventId ?? null;
+					const all = opts.busEvents ?? [];
+					const filtered = cursor != null ? all.filter((e) => Number(e.id) > Number(cursor)) : all;
+					let i = 0;
+					const it: AsyncIterableIterator<BusEvent> = {
+						async next() {
+							if (i < filtered.length) return { value: filtered[i++], done: false };
+							return { value: undefined as unknown as BusEvent, done: true };
+						},
+						async return() {
+							returned.called = true;
+							return { value: undefined as unknown as BusEvent, done: true };
+						},
+						[Symbol.asyncIterator]() {
+							return this;
+						},
+					};
+					return it;
+				}),
+			};
+			return { ctx, writes, returned };
+		}
+
+		it("subscribe returns an iterator handle that sse-stream pumps in order with the bus ids", async () => {
+			const busEvents: BusEvent[] = [
+				{ channel: "order:42", id: "1", event: "update", data: { step: "a" }, timestamp: 1 },
+				{ channel: "order:42", id: "2", event: "update", data: { step: "b" }, timestamp: 2 },
+				{ channel: "order:42", id: "3", event: "update", data: { step: "c" }, timestamp: 3 },
+			];
+			const { ctx, writes } = streamCtx({ busEvents });
+
+			const sub = await SseSubscribeNode.handle(ctx, { channels: ["order:{orderId}"] });
+			expect((sub as { success: boolean }).success).toBe(true);
+			const handle = (sub as { data: { iterator: unknown } }).data;
+
+			const r = await SseStreamNode.handle(ctx, { source: handle });
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { eventsSent: number; endedReason: string } }).data).toEqual({
+				eventsSent: 3,
+				endedReason: "iterator-ended",
+			});
+			// Frames arrive in publish order, each carrying the bus event's id.
+			expect(writes).toEqual([
+				{ event: "update", data: { step: "a" }, id: "1" },
+				{ event: "update", data: { step: "b" }, id: "2" },
+				{ event: "update", data: { step: "c" }, id: "3" },
+			]);
+		});
+
+		it("client disconnect (signal.aborted) unwinds the pump loop cleanly", async () => {
+			const abort = new AbortController();
+			const busEvents: BusEvent[] = [
+				{ channel: "c", id: "1", data: { n: 1 }, timestamp: 1 },
+				{ channel: "c", id: "2", data: { n: 2 }, timestamp: 2 },
+				{ channel: "c", id: "3", data: { n: 3 }, timestamp: 3 },
+			];
+			// Pre-abort: the loop checks signal.aborted at the top of the
+			// first iteration and exits without writing a single frame.
+			abort.abort();
+			const { ctx, writes, returned } = streamCtx({ busEvents, abort });
+
+			const sub = await SseSubscribeNode.handle(ctx, { channels: ["c"] });
+			const r = await SseStreamNode.handle(ctx, { source: (sub as { data: unknown }).data });
+
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { eventsSent: number; endedReason: string } }).data).toEqual({
+				eventsSent: 0,
+				endedReason: "client-disconnected",
+			});
+			expect(writes).toHaveLength(0);
+			// finally{} block still cleans up the iterator on the way out.
+			expect(returned.called).toBe(true);
+		});
+
+		it("Last-Event-Id replays only buffered events with seq > lastEventId", async () => {
+			const busEvents: BusEvent[] = [
+				{ channel: "c", id: "1", data: { n: 1 }, timestamp: 1 },
+				{ channel: "c", id: "2", data: { n: 2 }, timestamp: 2 },
+				{ channel: "c", id: "3", data: { n: 3 }, timestamp: 3 },
+			];
+			const { ctx, writes } = streamCtx({ busEvents, lastEventId: "1" });
+
+			const sub = await SseSubscribeNode.handle(ctx, { channels: ["c"] });
+			const r = await SseStreamNode.handle(ctx, { source: (sub as { data: unknown }).data });
+
+			expect((r as { data: { eventsSent: number } }).data.eventsSent).toBe(2);
+			expect(writes.map((w) => w.id)).toEqual(["2", "3"]);
+		});
+
+		it("maxEvents stops the pump early with endedReason=max-events", async () => {
+			const busEvents: BusEvent[] = [
+				{ channel: "c", id: "1", data: { n: 1 }, timestamp: 1 },
+				{ channel: "c", id: "2", data: { n: 2 }, timestamp: 2 },
+				{ channel: "c", id: "3", data: { n: 3 }, timestamp: 3 },
+			];
+			const { ctx, writes } = streamCtx({ busEvents });
+
+			const sub = await SseSubscribeNode.handle(ctx, { channels: ["c"] });
+			const r = await SseStreamNode.handle(ctx, { source: (sub as { data: unknown }).data, maxEvents: 2 });
+
+			expect((r as { data: { eventsSent: number; endedReason: string } }).data).toEqual({
+				eventsSent: 2,
+				endedReason: "max-events",
+			});
+			expect(writes.map((w) => w.id)).toEqual(["1", "2"]);
+		});
+
+		it("sse-subscribe fails when ctx.stream is absent", async () => {
+			const ctx = ctxFor(); // no .stream
+			const r = await SseSubscribeNode.handle(ctx, { channels: ["c"] });
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("ctx.stream is undefined");
+		});
+
+		it("sse-stream fails when ctx.stream is absent", async () => {
+			const ctx = ctxFor(); // no .stream
+			const r = await SseStreamNode.handle(ctx, { source: { iterator: {} } });
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("ctx.stream is undefined");
+		});
+	});
+
+	// ====================================================================
+	// @blokjs/ws-reply + @blokjs/ws-broadcast — the WebSocket conn handle
+	// ====================================================================
+	//
+	// `ctx.connection` is normally bound per-run by WebSocketTrigger. Here
+	// we mock it with a tiny in-process room registry so `broadcast(room,
+	// ...)` and the `exceptSelf` filter behave like the real fan-out:
+	// every member of the room except (optionally) the sender receives the
+	// frame.
+	describe("@blokjs/ws-reply + @blokjs/ws-broadcast", () => {
+		type Conn = { id: string; received: Array<string | ArrayBuffer | Uint8Array> };
+
+		function wsCtx(opts: {
+			selfId?: string;
+			rooms?: Record<string, Conn[]>;
+		}): { ctx: Context; self: Conn; rooms: Record<string, Conn[]> } {
+			const selfId = opts.selfId ?? "conn-self";
+			const self: Conn = { id: selfId, received: [] };
+			const rooms = opts.rooms ?? {};
+			const ctx = ctxFor();
+			(ctx as unknown as { connection: unknown }).connection = {
+				id: selfId,
+				send: vi.fn((data: string | ArrayBuffer | Uint8Array) => {
+					self.received.push(data);
+				}),
+				close: vi.fn(),
+				setAttachment: vi.fn(),
+				attachment: undefined,
+				joinRoom: vi.fn(),
+				leaveRoom: vi.fn(),
+				rooms: new Set<string>(Object.keys(rooms)),
+				broadcast: vi.fn((room: string, data: string | ArrayBuffer | Uint8Array, o?: { exceptSelf?: boolean }) => {
+					const members = rooms[room] ?? [];
+					let count = 0;
+					for (const m of members) {
+						if (o?.exceptSelf === true && m.id === selfId) continue;
+						m.received.push(data);
+						count += 1;
+					}
+					return count;
+				}),
+			};
+			return { ctx, self, rooms };
+		}
+
+		it("ws-reply sends exactly one JSON frame back to the triggering connection", async () => {
+			const { ctx, self } = wsCtx({ selfId: "conn-1" });
+			const r = await WsReplyNode.handle(ctx, { event: "pong", payload: { ts: 7 } });
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { sent: boolean; connectionId?: string } }).data).toEqual({
+				sent: true,
+				connectionId: "conn-1",
+			});
+			expect(self.received).toEqual([JSON.stringify({ event: "pong", data: { ts: 7 } })]);
+		});
+
+		it("ws-broadcast reaches every connection in the named room", async () => {
+			const peerA: Conn = { id: "a", received: [] };
+			const peerB: Conn = { id: "b", received: [] };
+			const { ctx } = wsCtx({ selfId: "conn-self", rooms: { lobby: [peerA, peerB] } });
+
+			const r = await WsBroadcastNode.handle(ctx, {
+				room: "lobby",
+				event: "msg",
+				payload: { text: "hi" },
+			});
+			expect((r as { success: boolean }).success).toBe(true);
+			expect((r as { data: { room: string; broadcastCount: number } }).data).toEqual({
+				room: "lobby",
+				broadcastCount: 2,
+			});
+			const frame = JSON.stringify({ event: "msg", data: { text: "hi" } });
+			expect(peerA.received).toEqual([frame]);
+			expect(peerB.received).toEqual([frame]);
+		});
+
+		it("ws-broadcast with exceptSelf skips the sending connection", async () => {
+			const self: Conn = { id: "conn-self", received: [] };
+			const peer: Conn = { id: "peer", received: [] };
+			// `self` is a room member too — exceptSelf must filter it out.
+			const { ctx } = wsCtx({ selfId: "conn-self", rooms: { lobby: [self, peer] } });
+
+			const r = await WsBroadcastNode.handle(ctx, {
+				room: "lobby",
+				event: "msg",
+				payload: { text: "hi" },
+				exceptSelf: true,
+			});
+			expect((r as { data: { broadcastCount: number } }).data.broadcastCount).toBe(1);
+			const frame = JSON.stringify({ event: "msg", data: { text: "hi" } });
+			expect(peer.received).toEqual([frame]);
+			expect(self.received).toEqual([]); // sender excluded
+		});
+
+		it("ws-reply fails when ctx.connection is absent (not a WS-triggered workflow)", async () => {
+			const ctx = ctxFor(); // no .connection
+			const r = await WsReplyNode.handle(ctx, { payload: { x: 1 } });
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("ctx.connection is undefined");
+		});
+
+		it("ws-broadcast fails when ctx.connection is absent", async () => {
+			const ctx = ctxFor(); // no .connection
+			const r = await WsBroadcastNode.handle(ctx, { room: "lobby", payload: { x: 1 } });
+			expect((r as { success: boolean }).success).toBe(false);
+			expect((r as { error: { message: string } }).error.message).toContain("ctx.connection is undefined");
 		});
 	});
 
