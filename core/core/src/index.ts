@@ -38,16 +38,17 @@ export {
 // node execution graph.
 export { defineNode } from "@blokjs/runner/defineNode";
 
-// Type-only foundation (handles + runtime stub). `runtimeNode` is a type-only
-// declared signature in the runner, so it rides the type re-export.
+// Type foundation (handles + runtime stub).
 export type {
 	Handle,
 	EphemeralHandle,
 	ErrorHandle,
 	Refable,
 	RuntimeNode,
-	runtimeNode,
 	TriggerHandle,
 	SubworkflowOptions,
 } from "./dsl";
+// `runtimeNode` is a REAL value (#424) — the `blokctl nodes sync` stubs import
+// it from here and pass it to `step()`, which lowers it to a runtime step.
+export { runtimeNode } from "./dsl";
 export type { HttpTriggerBlock } from "./http";

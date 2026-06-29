@@ -956,9 +956,27 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 	if (opts?.spread === true) assertSpreadableOutput(id, node);
 	const loweredOpts = lowerStepOptions(opts, builder);
 
+	// A `runtimeNode(name, runtime)` value (cross-language node, #424) carries a
+	// `kind: "runtimeNode"` discriminant and a `runtime` string that is the
+	// runtime KIND ("runtime.python3"), optionally suffixed with the catalog node
+	// ref ("runtime.python3:ask") as `blokctl nodes sync` emits. Lower it to the
+	// proven runtime-step shape — `use: <bare node name>` + `type: <bare runtime
+	// kind>` — exactly like the object DSL's runtime steps, so Configuration
+	// routes it through the gRPC runtime adapter (which invokes the node by
+	// `use`). A `defineNode` value has no `kind`, so module steps are unaffected:
+	// no `type` emitted → the normalizer infers "module".
+	const runtimeMeta = node as { kind?: unknown; runtime?: unknown };
+	let runtimeType: string | undefined;
+	if (runtimeMeta.kind === "runtimeNode" && typeof runtimeMeta.runtime === "string") {
+		const ref = runtimeMeta.runtime;
+		const colon = ref.indexOf(":");
+		runtimeType = colon > 0 ? ref.slice(0, colon) : ref;
+	}
+
 	const record: StepRecord = {
 		id,
 		use: node.name,
+		...(runtimeType ? { type: runtimeType } : {}),
 		...(inputs ? { inputs: lowerHandles(inputs, builder) as Record<string, unknown> } : {}),
 		...(loweredOpts ?? {}),
 	};

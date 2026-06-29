@@ -120,18 +120,18 @@ runtime. Write your node under `runtimes/<lang>/nodes/`, then declare the step:
 ```
 
 <Note>
-**`runtimeNode` is a type-only stub today.** `@blokjs/core` exports
-`runtimeNode<In, Out>(name, "runtime.<lang>")` as a *type-only* declaration
-(issue #424) — it gives you typed inputs/outputs for a cross-runtime node when
-you sketch a workflow, but it has no runtime value yet, so calling it in
-executable TypeScript throws `runtimeNode is not a function`. Until the
-lowering ships, author cross-runtime steps with the JSON form above (or a v2
-object step with `type: "runtime.<lang>"`). The intended typed form will read:
+**`runtimeNode` is the typed TS form for a cross-runtime step.** `@blokjs/core`
+exports `runtimeNode<In, Out>(name, "runtime.<lang>")` as a real value (issue
+#424) — it gives you typed inputs/outputs for a cross-runtime node, and `step()`
+lowers it to the same `{ use, type: "runtime.<lang>" }` step the JSON form above
+produces, so the runner routes it through the gRPC runtime adapter. The
+`blokctl nodes sync` stubs are these `runtimeNode(...)` values; import and use
+them directly:
 
 ```ts
 import { workflow, step, runtimeNode, http } from "@blokjs/core";
 
-// typed stub — does NOT execute yet (issue #424)
+// typed cross-runtime stub — executes via the runtime adapter
 const resizeImage = runtimeNode<{ image: string }, { url: string }>(
   "image-resizer",
   "runtime.python3",
@@ -141,6 +141,10 @@ export default workflow("Resize Image", { version: "1.0.0", trigger: http.post("
   step("resize", resizeImage, { image: req.body.image });
 });
 ```
+
+The second argument is the runtime kind (`"runtime.python3"`); the
+`blokctl nodes sync` stubs pass the catalog ref (`"runtime.python3:image-resizer"`)
+in the same slot — `step()` accepts either and derives the kind from it.
 </Note>
 
 Then start everything together:

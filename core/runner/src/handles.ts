@@ -180,14 +180,21 @@ export type RuntimeNode<Input, Output> = {
 };
 
 /**
- * Declare a typed reference to a node implemented in another runtime.
+ * Declare a typed reference to a node implemented in another runtime
+ * (Go/Rust/Python/…). Returns a real value `step()` lowers into a
+ * `runtime.<kind>` step (#424) — `step("id", node, inputs)` emits
+ * `{ use: <name>, type: <kind> }`, which `Configuration` routes through the
+ * gRPC runtime adapter.
  *
- * TYPES ONLY for now (issue #424) — the lowering that turns this into a real
- * `runtime.<kind>` step ships with `step()` (#421). With no explicit type
- * parameters both `In` and `Out` default to `unknown`, so the resulting handle
- * is `Handle<unknown>` — never `any`.
+ * `runtime` is the runtime KIND (`"runtime.python3"`), optionally suffixed with
+ * the catalog node ref (`"runtime.python3:ask"`) as emitted by
+ * `blokctl nodes sync`; `step()` parses the bare kind from either form. With no
+ * explicit type parameters both `In` and `Out` default to `unknown`, so the
+ * resulting handle is `Handle<unknown>` — never `any`.
  *
  * @example
  * const ask = runtimeNode<{ prompt: string }, { answer: string }>("@demo/ask", "runtime.python3");
  */
-export declare function runtimeNode<In = unknown, Out = unknown>(name: string, runtime: string): RuntimeNode<In, Out>;
+export function runtimeNode<In = unknown, Out = unknown>(name: string, runtime: string): RuntimeNode<In, Out> {
+	return { kind: "runtimeNode", name, runtime };
+}
