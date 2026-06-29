@@ -304,4 +304,196 @@ export default workflow({
 		expect(twice.value).toBe(once.value);
 		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
 	});
+
+	it("keeps branch.when truthiness equivalent across the raw-ctx corpus", () => {
+		expect(BRANCH_CONTEXTS).toHaveLength(24);
+		expect(BRANCH_CONTEXTS.some((ctx) => Number.isNaN((ctx.state.order as { total: number }).total))).toBe(true);
+
+		const jsonInput = branchJsonWorkflow(CONVERTED_WHENS);
+		const jsonOutput = migrateJsonWorkflow(jsonInput).value as ReturnType<typeof branchJsonWorkflow>;
+		const tsOutput = migrateTsSource(branchTsWorkflow(CONVERTED_WHENS)).value;
+
+		for (const { id, raw } of CONVERTED_WHENS) {
+			const jsonWhen = jsonOutput.steps.find((step) => step.id === id)?.branch.when;
+			const tsWhen = tsBranchWhen(tsOutput, id);
+
+			for (const ctx of BRANCH_CONTEXTS) {
+				expect(evalWhen(String(jsonWhen), ctx), `${id} JSON output diverged for ${raw}`).toEqual(evalWhen(raw, ctx));
+				expect(evalWhen(tsWhen, ctx), `${id} TS output diverged for ${raw}`).toEqual(evalWhen(raw, ctx));
+			}
+		}
+
+		expect(tsBranchWhen(tsOutput, "undefined-literal")).toBe("eq($.request.params.function, undefined)");
+		expect(tsBranchWhen(tsOutput, "empty-string-literal")).toBe("eq($.request.params.function, '')");
+		expect(tsBranchWhen(tsOutput, "null-literal")).toBe("eq($.state.payload, null)");
+	});
+
+	it("leaves branch.when footguns raw and marked", () => {
+		const jsonOutput = migrateJsonWorkflow(branchJsonWorkflow(MARKED_WHENS)).value as ReturnType<
+			typeof branchJsonWorkflow
+		>;
+		for (const { id, raw } of MARKED_WHENS) {
+			const step = jsonOutput.steps.find((candidate) => candidate.id === id);
+			expect(step?.branch.when).toBe(raw);
+			expect(step?.ui?.notes).toContain("blok-migrate: hand-migrate");
+		}
+
+		const shortCircuit = MARKED_WHENS.find((entry) => entry.id === "short-circuit");
+		if (!shortCircuit) throw new Error("missing short-circuit fixture");
+		const shortCtx = makeBranchCtx(2);
+		shortCtx.state.safe = false;
+		shortCtx.state.missing = undefined;
+		expect(evalWhen(shortCircuit.raw, shortCtx)).toEqual({ threw: false, truthy: false });
+	});
 });
+
+const CONVERTED_WHENS = [
+	{ id: "countries-vs-facts", raw: 'ctx.request.query.countries === "true"' },
+	{ id: "websocket-connect", raw: "ctx.request.body.event === 'connect'" },
+	{ id: "request-alias", raw: "ctx.req.method === 'POST'" },
+	{ id: "rate-limit", raw: "ctx.state['next-state'].exceeded" },
+	{ id: "nested-required", raw: "ctx.state.item.required === true" },
+	{ id: "travel-car", raw: "ctx.state['book-car'] !== undefined" },
+	{ id: "travel-hotel", raw: "ctx.state['book-hotel'] !== undefined" },
+	{ id: "travel-flight", raw: "ctx.state['book-flight'] !== undefined" },
+	{ id: "signup-account", raw: "ctx.state['create-account'] !== undefined" },
+	{ id: "undefined-literal", raw: "ctx.request.params.function === undefined" },
+	{ id: "empty-string-literal", raw: "ctx.request.params.function === ''" },
+	{ id: "null-literal", raw: "ctx.state.payload === null" },
+	{ id: "zero-strict", raw: "ctx.state.order.total === 0" },
+	{ id: "gt-total", raw: "ctx.state.order.total > 100" },
+	{ id: "lt-total", raw: "ctx.state.order.total < 1" },
+	{ id: "vars-alias", raw: "ctx.vars['choice'] === 'a'" },
+	{ id: "prev-alias", raw: "ctx.prev.data.ok === true" },
+	{ id: "response-alias", raw: "ctx.response.data.ok === true" },
+] as const;
+
+const MARKED_WHENS = [
+	{
+		id: "dashboard-gen",
+		raw: 'ctx.request.method.toLowerCase() === "get" && ctx.request.params.function === undefined',
+	},
+	{ id: "feedback", raw: 'ctx.request.method.toLowerCase() === "get" && ctx.request.params.function === ""' },
+	{
+		id: "admin-only",
+		raw: "!ctx.state.identity || !ctx.state.identity.claims || ctx.state.identity.claims.role !== 'admin'",
+	},
+	{ id: "auth-check", raw: "ctx.state['extract-token'] === '' || ctx.state['extract-token'] !== ctx.state.expected" },
+	{ id: "short-circuit", raw: "ctx.state.safe && ctx.state.missing.deep === true" },
+	{ id: "dollar-footgun", raw: '$.req.method === "GET"' },
+	{ id: "nan-literal", raw: "ctx.state.metric === NaN" },
+] as const;
+
+const BRANCH_CONTEXTS = Array.from({ length: 24 }, (_, i) => makeBranchCtx(i));
+
+function branchJsonWorkflow(entries: readonly { id: string; raw: string }[]) {
+	return {
+		name: "branch corpus",
+		version: "1.0.0",
+		steps: entries.map(({ id, raw }) => ({ id, branch: { when: raw, then: [] as unknown[] } })),
+	};
+}
+
+function branchTsWorkflow(entries: readonly { id: string; raw: string }[]): string {
+	const steps = entries
+		.map(({ id, raw }) => `\t\t{ id: ${JSON.stringify(id)}, branch: { when: ${JSON.stringify(raw)}, then: [] } },`)
+		.join("\n");
+	return `import { workflow } from "@blokjs/helper";
+
+export default workflow({
+\tname: "branch corpus",
+\tversion: "1.0.0",
+\tsteps: [
+${steps}
+\t],
+});`;
+}
+
+function tsBranchWhen(source: string, id: string): string {
+	const start = source.indexOf(`id: ${JSON.stringify(id)}`);
+	if (start < 0) throw new Error(`missing branch step ${id}`);
+	const whenStart = source.indexOf("when:", start);
+	const thenStart = source.indexOf(", then:", whenStart);
+	if (whenStart < 0 || thenStart < 0) throw new Error(`missing branch.when for ${id}`);
+	return source.slice(whenStart + "when:".length, thenStart).trim();
+}
+
+function makeBranchCtx(i: number) {
+	const totals = [0, 1, 10, 100, 101, Number.NaN];
+	const params = [undefined, "", null, "show", 0, false];
+	const state: Record<string, unknown> = {
+		item: { required: i % 3 === 0 },
+		metric: [Number.NaN, 0, "", null][i % 4],
+		order: { total: totals[i % totals.length] },
+		payload: [null, "", 0, Number.NaN, { ok: true }][i % 5],
+		safe: i % 2 === 0,
+		"next-state": { exceeded: i % 5 === 0 },
+		"extract-token": i % 2 === 0 ? "" : "token",
+		expected: i % 3 === 0 ? "token" : "other",
+		choice: i % 4 === 0 ? "a" : "b",
+	};
+	if (i % 2 === 0) state["book-car"] = { id: i };
+	if (i % 3 === 0) state["book-hotel"] = { id: i };
+	if (i % 4 === 0) state["book-flight"] = { id: i };
+	if (i % 5 === 0) state["create-account"] = { id: i };
+	const response = { data: { ok: i % 2 === 0 } };
+	const request = {
+		method: ["GET", "POST", "get", "DELETE"][i % 4],
+		query: { countries: i % 2 === 0 ? "true" : i % 3 === 0 ? true : "false" },
+		body: { event: ["connect", "message", "", null][i % 4] },
+		params: { function: params[i % params.length] },
+		headers: {},
+	};
+	return {
+		request,
+		req: request,
+		response,
+		prev: response,
+		state,
+		vars: state,
+	};
+}
+
+function evalWhen(expr: string, ctx: ReturnType<typeof makeBranchCtx>): { threw: boolean; truthy?: boolean } {
+	try {
+		const handle = { request: ctx.request, req: ctx.request, state: ctx.state, vars: ctx.state, prev: ctx.response };
+		const result = Function(
+			"ctx",
+			"$",
+			"eq",
+			"ne",
+			"gt",
+			"gte",
+			"lt",
+			"lte",
+			`"use strict"; return (${expr});`,
+		)(ctx, handle, strictEq, strictNe, gt, gte, lt, lte);
+		return { threw: false, truthy: Boolean(result) };
+	} catch {
+		return { threw: true };
+	}
+}
+
+function strictEq(left: unknown, right: unknown): boolean {
+	return left === right;
+}
+
+function strictNe(left: unknown, right: unknown): boolean {
+	return left !== right;
+}
+
+function gt(left: unknown, right: unknown): boolean {
+	return (left as number) > (right as number);
+}
+
+function gte(left: unknown, right: unknown): boolean {
+	return (left as number) >= (right as number);
+}
+
+function lt(left: unknown, right: unknown): boolean {
+	return (left as number) < (right as number);
+}
+
+function lte(left: unknown, right: unknown): boolean {
+	return (left as number) <= (right as number);
+}
