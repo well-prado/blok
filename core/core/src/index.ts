@@ -20,6 +20,7 @@ export {
 	switchOn,
 	tryCatch,
 	tpl,
+	js,
 	// Typed handle comparators (ADR 0003/0004)
 	eq,
 	ne,
