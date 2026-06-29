@@ -120,6 +120,24 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		expect(throttled?.status).toBe("throttled");
 	});
 
+	it("denies when concurrencyKey resolves from a request expression", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "js/ctx.request.body.tenantId", concurrencyLimit: 1 },
+		});
+
+		const tracker = RunTracker.getInstance();
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-derived", 1, "holder", Date.now() + 60_000);
+
+		await expect(t.run(makeCtx({ tenantId: "tenant-derived" }))).rejects.toBeInstanceOf(ConcurrencyLimitError);
+
+		const throttled = tracker
+			.getStore()
+			.getRuns({ status: "throttled" })
+			.runs.find((r) => r.workflowName === "test-wf");
+		expect(throttled).toBeDefined();
+	});
+
 	it("ConcurrencyLimitError carries structured info", async () => {
 		const t = new TestTrigger();
 		t.setTriggerConfig({

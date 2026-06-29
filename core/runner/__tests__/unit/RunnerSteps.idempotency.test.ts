@@ -1,4 +1,4 @@
-import type { Context, ResponseContext } from "@blokjs/shared";
+import { type Context, type ResponseContext, mapper } from "@blokjs/shared";
 import type { GlobalError } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Runner from "../../src/Runner";
@@ -246,9 +246,38 @@ describe("RunnerSteps — idempotency cache integration", () => {
 		expect(node2.attempts).toBe(1);
 	});
 
+	it("treats an idempotencyKey expression that resolves undefined as no-cache", async () => {
+		const expression = "js/ctx.request.body.missing";
+		const node = new EchoNode("echo", { uncached: true });
+		node.idempotencyKey = expression;
+		const runner = new Runner([node]);
+
+		await runner.run(ctxWithTracing({ workflow: "wf-idem-undefined", reqBody: {} }).ctx);
+		await runner.run(ctxWithTracing({ workflow: "wf-idem-undefined", reqBody: {} }).ctx);
+		expect(node.runs).toBe(2);
+	});
+
+	it("fails open when idempotencyKey resolution throws; the same expression is strict in step inputs", async () => {
+		const expression = "js/ctx.request.body.missing.id";
+		const strictInputs = { value: expression };
+		const strictCtx = ctxWithTracing({ workflow: "wf-idem-asym", reqBody: {} }).ctx;
+		expect(() => mapper.replaceObjectStrings(strictInputs, strictCtx, strictCtx.request.body as never)).toThrow(
+			/Failed to resolve|references state|undefined/i,
+		);
+
+		const node = new EchoNode("echo", { uncached: true });
+		node.idempotencyKey = expression;
+		const runner = new Runner([node]);
+
+		await runner.run(ctxWithTracing({ workflow: "wf-idem-asym", reqBody: {} }).ctx);
+		await runner.run(ctxWithTracing({ workflow: "wf-idem-asym", reqBody: {} }).ctx);
+		expect(node.runs).toBe(2);
+	});
+
 	it("resolves a $ proxy idempotencyKey (js/ctx.request.body.requestId) at runtime", async () => {
 		const node = new EchoNode("echo", { dynamic: true });
 		node.idempotencyKey = "js/ctx.request.body.requestId";
+		node.idempotencyKeyTTL = 60_000;
 		const runner = new Runner([node]);
 
 		// Two runs with the SAME requestId → cache hit on second.
@@ -258,6 +287,10 @@ describe("RunnerSteps — idempotency cache integration", () => {
 
 		// Third run with a DIFFERENT requestId → fresh cold key → runs.
 		await runner.run(ctxWithTracing({ workflow: "wf-dyn", reqBody: { requestId: "xyz" } }).ctx);
+		expect(node.runs).toBe(2);
+
+		// The original key is still cached under its own TTL bucket.
+		await runner.run(ctxWithTracing({ workflow: "wf-dyn", reqBody: { requestId: "abc" } }).ctx);
 		expect(node.runs).toBe(2);
 	});
 });

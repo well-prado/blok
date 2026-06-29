@@ -947,6 +947,45 @@ describe("SubworkflowNode — polymorphic dispatch (G3)", () => {
 		expect(result.success).toBe(true);
 	});
 
+	it("rejects a handle-lowered state expression outside `allowList`", async () => {
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.state.route.name",
+		});
+		node.allowList = Object.freeze(["handler.payment"]);
+
+		const parentCtx = makeParentCtx({
+			state: { route: { name: "internal.admin-action" } },
+		} as unknown as Partial<Context>);
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(
+			/Sub-workflow dispatch blocked: resolved name "internal\.admin-action" is not in the step's `allowList`/,
+		);
+	});
+
+	it("namespace-prefixes a handle-lowered state expression before allowList enforcement", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "stripe.invoice.paid",
+			source: "/stripe-invoice-paid.ts",
+			workflow: makeChildWorkflowDef("stripe.invoice.paid"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.state.route.type",
+		});
+		node.namespace = "stripe";
+		node.allowList = Object.freeze(["stripe.invoice.paid"]);
+
+		const parentCtx = makeParentCtx({
+			state: { route: { type: "invoice.paid" } },
+		} as unknown as Partial<Context>);
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
 	it("rejects the dispatch when the resolved name is NOT in `allowList`", async () => {
 		WorkflowRegistry.getInstance().register({
 			name: "internal.admin-action",
