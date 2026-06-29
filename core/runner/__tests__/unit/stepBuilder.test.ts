@@ -33,9 +33,11 @@ import {
 	type GrpcEntry,
 	type HttpEntry,
 	type PubSubEntry,
+	type SseEntry,
 	type TriggerHandle,
 	type WebhookEntry,
 	type WorkerEntry,
+	type WsEntry,
 	step,
 	tpl,
 	workflowCallback,
@@ -518,6 +520,21 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 					void rpc.body;
 				},
 			);
+			await workflowCallback("T-sse", { version: "1.0.0", trigger: { sse: { channel: "chat:1" } } }, (conn) => {
+				assert<Expect<typeof conn, SseEntry>>();
+				// SSE carries NO inbound body — `conn.body` must be a compile error.
+				// @ts-expect-error — the read-only SSE conn handle exposes no `.body` (#431).
+				void conn.body;
+				void conn.params;
+				void conn.query;
+				void conn.headers;
+			});
+			await workflowCallback("T-websocket", { version: "1.0.0", trigger: { websocket: { path: "/ws" } } }, (conn) => {
+				assert<Expect<typeof conn, WsEntry>>();
+				void conn.body;
+				void conn.params;
+				void conn.headers;
+			});
 			// Unrecognized / out-of-scope kind (manual, #362) falls back to the loose handle.
 			await workflowCallback("T-manual", { version: "1.0.0", trigger: { manual: {} } }, (args) => {
 				assert<Expect<typeof args, TriggerHandle>>();
