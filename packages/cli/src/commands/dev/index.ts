@@ -14,6 +14,7 @@ import {
 	readProjectConfig,
 	validateProjectRuntimes,
 } from "../../services/runtime-setup.js";
+import { regenRuntimeStubs } from "../nodes/syncNodes.js";
 
 const exec = util.promisify(child_process.exec);
 
@@ -69,6 +70,38 @@ function killAllGroups(signal: NodeJS.Signals) {
 			}
 		}
 	}
+}
+
+/**
+ * After all sidecars are SERVING and the HTTP trigger is up, regenerate the
+ * cross-runtime `runtimeNode` stubs from the live catalog (`GET /__blok/nodes`).
+ * Reuses the `nodes sync` flow — same generator, same output dir.
+ *
+ * The trigger spawns async, so poll `/__blok/nodes` until it serves (bounded),
+ * then regen ONCE. Best-effort: any failure (trigger never listened, catalog
+ * fetch threw) logs a warning and returns — it never crashes the dev loop.
+ *
+ * ponytail: single regen after the trigger is reachable, not a per-sidecar
+ * watcher; add incremental per-runtime regen if dynamic-lang hot-edits need it.
+ */
+async function regenStubsWhenReady(baseUrl: string, outDir: string, deadlineMs = 60_000): Promise<void> {
+	const endpoint = `${baseUrl}/__blok/nodes`;
+	const start = Date.now();
+	while (Date.now() - start < deadlineMs) {
+		try {
+			const res = await fetch(endpoint);
+			if (res.ok) {
+				const count = await regenRuntimeStubs(baseUrl, outDir);
+				if (count > 0)
+					console.log(`Regenerated ${count} runtime stub file(s) → ${path.relative(process.cwd(), outDir)}`);
+				return;
+			}
+		} catch {
+			// Trigger not listening yet — retry until the deadline.
+		}
+		await new Promise((r) => setTimeout(r, 1000));
+	}
+	console.log(`  Warning: stub regen skipped — ${endpoint} did not respond within ${deadlineMs / 1000}s.`);
 }
 
 export async function devProject(opts: OptionValues) {
@@ -332,6 +365,18 @@ export async function devProject(opts: OptionValues) {
 	} else {
 		// Legacy fallback: single trigger at src/index.ts
 		spawnProcess("bun", ["--watch", "run", "src/index.ts"], "Blok Runner", currentPath, undefined, triggerEnv);
+	}
+
+	// 4. Once the HTTP trigger is listening (it serves GET /__blok/nodes),
+	// regenerate the cross-runtime stubs from the now-live catalog. The HTTP
+	// trigger is the one that exposes the catalog; only meaningful when there
+	// are runtime sidecars to stub for. Fire-and-forget so it doesn't block the
+	// keep-alive loop — failures warn and continue (never crash dev).
+	const httpTrigger = config?.triggers?.http;
+	if (httpTrigger && healthChecks.length > 0) {
+		const baseUrl = `http://localhost:${httpTrigger.port}`;
+		const outDir = path.join(currentPath, "nodes-gen");
+		void regenStubsWhenReady(baseUrl, outDir);
 	}
 
 	// Keep the event loop alive — detached children don't prevent Node

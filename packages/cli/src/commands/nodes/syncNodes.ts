@@ -103,6 +103,29 @@ export function generateRuntimeStubs(nodes: readonly NodeEntry[]): Map<string, s
 }
 
 /**
+ * Fetch the catalog and write the runtime stubs to `outDir`. Shared by the
+ * `nodes sync` CLI and `blokctl dev`'s post-SERVING regen hook. Returns the
+ * number of stub files written (0 when the catalog has no runtime nodes).
+ *
+ * Throws on an unreachable / erroring server (`fetchCatalog` returns null) so
+ * callers choose their own failure policy — `dev` warns and keeps running, the
+ * CLI exits non-zero.
+ */
+export async function regenRuntimeStubs(baseUrl: string | undefined, outDir: string): Promise<number> {
+	const nodes = await fetchCatalog(baseUrl);
+	if (nodes === null) throw new Error("catalog fetch failed");
+
+	const files = generateRuntimeStubs(nodes);
+	if (files.size === 0) return 0;
+
+	await fsp.mkdir(outDir, { recursive: true });
+	for (const [filename, source] of files) {
+		await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+	}
+	return files.size;
+}
+
+/**
  * Diff freshly-generated stubs against what's on disk in `outDir`. Pure of the
  * generator (callers pass the already-generated `files`) and IO-only here, so
  * the comparison logic is exercised by feeding a temp dir in tests. Returns the
