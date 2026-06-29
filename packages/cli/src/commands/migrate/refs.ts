@@ -521,6 +521,7 @@ function expressionToRef(expr: ts.Expression, ctx: StepContext): StructuralRef |
 
 function dollarPathToRef(pathParts: PathSegment[], ctx: StepContext): StructuralRef | null {
 	const [root, ...path] = pathParts;
+	if (root === "vars" && path[0] === "_worker_job") return null;
 	if (root === "state" || root === "vars") return statePathToRef(path, ctx);
 	if (root === "req" || root === "request") return { $ref: { step: "@trigger", path } };
 	if (root === "prev" || root === "response") return prevPathToRef(path, ctx);
@@ -529,6 +530,7 @@ function dollarPathToRef(pathParts: PathSegment[], ctx: StepContext): Structural
 
 function ctxPathToRef(pathParts: PathSegment[], ctx: StepContext): StructuralRef | null {
 	const [root, ...path] = pathParts;
+	if (root === "vars" && path[0] === "_worker_job") return null;
 	if (root === "state" || root === "vars") return statePathToRef(path, ctx);
 	if (root === "request" || root === "req") return { $ref: { step: "@trigger", path } };
 	if (root === "prev") return prevPathToRef(path, ctx);

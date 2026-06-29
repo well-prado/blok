@@ -204,6 +204,63 @@ describe("migrateRefs — JSON workflows", () => {
 		expect(twice.value).toEqual(once.value);
 		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
 	});
+
+	it("keeps @blokjs/expr raw while migrating non-HTTP entry refs", () => {
+		const input = {
+			name: "Non HTTP",
+			version: "1.0.0",
+			trigger: { worker: { queue: "jobs" } },
+			steps: [
+				{
+					id: "expr",
+					use: "@blokjs/expr",
+					inputs: {
+						expression: "({ literal: 'state.value', actual: ctx.state.ready, body: ctx.request.body })",
+					},
+				},
+				{
+					id: "worker-read",
+					use: "sink",
+					inputs: {
+						payload: "js/ctx.request.body",
+						queue: "js/ctx.request.params.queue",
+						jobId: "js/ctx.request.params.jobId",
+						attempt: "js/ctx.request.params.attempt",
+						workerJob: "js/ctx.vars._worker_job.attempts",
+					},
+				},
+				{
+					id: "pubsub-read",
+					use: "sink",
+					inputs: { message: "js/ctx.request.body.messageId" },
+				},
+				{
+					id: "webhook-read",
+					use: "sink",
+					inputs: {
+						event: "js/ctx.request.body.event",
+						signature: "js/ctx.request.headers['x-hub-signature-256']",
+					},
+				},
+			],
+		};
+
+		const once = migrateJsonWorkflow(input);
+		const steps = (once.value as typeof input).steps;
+		expect(steps[0].inputs.expression).toBe(input.steps[0].inputs.expression);
+		expect(steps[1].inputs.payload).toEqual({ $ref: { step: "@trigger", path: ["body"] } });
+		expect(steps[1].inputs.queue).toEqual({ $ref: { step: "@trigger", path: ["params", "queue"] } });
+		expect(steps[1].inputs.jobId).toEqual({ $ref: { step: "@trigger", path: ["params", "jobId"] } });
+		expect(steps[1].inputs.attempt).toEqual({ $ref: { step: "@trigger", path: ["params", "attempt"] } });
+		expect(steps[1].inputs.workerJob).toBe("js/ctx.vars._worker_job.attempts");
+		expect((steps[1].ui as { notes: string }).notes).toContain("blok-migrate: hand-migrate");
+		expect(steps[2].inputs.message).toEqual({ $ref: { step: "@trigger", path: ["body", "messageId"] } });
+		expect(steps[3].inputs.event).toEqual({ $ref: { step: "@trigger", path: ["body", "event"] } });
+		expect(steps[3].inputs.signature).toEqual({
+			$ref: { step: "@trigger", path: ["headers", "x-hub-signature-256"] },
+		});
+		expect(once.stats).toEqual({ migrated: 7, marked: 1 });
+	});
 });
 
 describe("migrateRefs — TypeScript workflows", () => {
@@ -303,6 +360,47 @@ export default workflow({
 		const twice = migrateTsSource(once.value);
 		expect(twice.value).toBe(once.value);
 		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
+	});
+
+	it("keeps TS @blokjs/expr raw while migrating non-HTTP entry refs", () => {
+		const input = `import { workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Non HTTP",
+	version: "1.0.0",
+	trigger: { worker: { queue: "jobs" } },
+	steps: [
+		{
+			id: "expr",
+			use: "@blokjs/expr",
+			inputs: { expression: "({ literal: 'state.value', actual: ctx.state.ready, body: ctx.request.body })" },
+		},
+		{
+			id: "worker-read",
+			use: "sink",
+			inputs: {
+				payload: "js/ctx.request.body",
+				jobId: "js/ctx.request.params.jobId",
+				attempt: "js/ctx.request.params.attempt",
+				workerJob: "js/ctx.vars._worker_job.attempts",
+			},
+		},
+		{ id: "pubsub-read", use: "sink", inputs: { message: "js/ctx.request.body.messageId" } },
+		{ id: "webhook-read", use: "sink", inputs: { signature: "js/ctx.request.headers['x-hub-signature-256']" } },
+	],
+});`;
+
+		const once = migrateTsSource(input);
+		expect(once.value).toContain(
+			"inputs: { expression: \"({ literal: 'state.value', actual: ctx.state.ready, body: ctx.request.body })\" }",
+		);
+		expect(once.value).toContain('payload: { $ref: { step: "@trigger", path: ["body"] } }');
+		expect(once.value).toContain('jobId: { $ref: { step: "@trigger", path: ["params","jobId"] } }');
+		expect(once.value).toContain('attempt: { $ref: { step: "@trigger", path: ["params","attempt"] } }');
+		expect(once.value).toContain('message: { $ref: { step: "@trigger", path: ["body","messageId"] } }');
+		expect(once.value).toContain('signature: { $ref: { step: "@trigger", path: ["headers","x-hub-signature-256"] } }');
+		expect(once.value).toContain('workerJob: "js/ctx.vars._worker_job.attempts"');
+		expect(once.value).toContain("// blok-migrate: hand-migrate");
 	});
 
 	it("keeps branch.when truthiness equivalent across the raw-ctx corpus", () => {
