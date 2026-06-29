@@ -367,10 +367,18 @@ function rewriteDeep(value: unknown, rewrite: (s: string) => string): unknown {
  *
  * 1. The target step's `id` is rewritten.
  * 2. Every step's `inputs` is deep-rewritten (nested objects/arrays/strings).
- * 3. Branch `when` and loop `while` raw condition strings are rewritten.
+ * 3. Step-level expression fields that can carry `js/ctx.state.<id>` refs:
+ *    `branch.when`, `loop.while`, `forEach.in`, `switch.on`, each switch
+ *    `case.when` (only when it references state — plain match literals are
+ *    skipped), and the key sites `idempotencyKey` / `concurrencyKey` (#523).
  *
  * Boundary-safe (see `makeRefRewriter`): `<oldId>` matches only as a complete
  * `ctx.state` key (or its `Index` counter), never as a prefix of a longer id.
+ *
+ * Out-of-scope boundary: a TRIGGER-level `concurrencyKey` lives under the
+ * workflow's `trigger` config, not in the step tree `walkSteps` traverses, so
+ * it is NOT rewritten here. In practice a trigger concurrencyKey keys off
+ * request data (`ctx.req...`), not a step output, so this is a non-issue.
  *
  * Throws if `oldId` is not found, or if `newId` already exists anywhere in the
  * tree (mirrors the #412 duplicate-id guard).
@@ -395,14 +403,36 @@ export function renameStep<T>(ir: T, oldId: string, newId: string): T {
 	loc.step.id = newId;
 
 	const rewrite = makeRefRewriter(oldId, newId);
+	// Rewrite a step-level field in place only if it's an expression STRING that
+	// references state (skips plain literals — a switch case `when: "a"` is a
+	// match value, not an expression, so it must be left alone).
+	const rewriteExprField = (container: Record<string, unknown>, key: string) => {
+		const v = container[key];
+		if (typeof v === "string" && v.includes("ctx.state.")) container[key] = rewrite(v);
+	};
 	walkSteps(draft, (step) => {
 		if (isObject(step.inputs)) rewriteDeep(step.inputs, rewrite);
+		// branch.when / loop.while raw conditions (always expressions).
 		if (isObject(step.branch) && typeof step.branch.when === "string") {
 			step.branch.when = rewrite(step.branch.when);
 		}
 		if (isObject(step.loop) && typeof step.loop.while === "string") {
 			step.loop.while = rewrite(step.loop.while);
 		}
+		// forEach.in iterable + switch.on discriminant: step-level expression
+		// fields that live OUTSIDE inputs and can carry js/ctx.state.<id> refs.
+		if (isObject(step.forEach)) rewriteExprField(step.forEach, "in");
+		if (isObject(step.switch)) {
+			rewriteExprField(step.switch, "on");
+			// case `when` may be an expression OR a plain match literal — only
+			// rewrite the ones that reference state (the includes-guard above).
+			const cases = asSteps(step.switch.cases);
+			if (cases) for (const c of cases) if (isObject(c)) rewriteExprField(c, "when");
+		}
+		// Key sites (#523): idempotencyKey / concurrencyKey can be js/ctx.state.<id>
+		// refs. Both are step-level string fields when present.
+		rewriteExprField(step, "idempotencyKey");
+		rewriteExprField(step, "concurrencyKey");
 	});
 
 	return draft;

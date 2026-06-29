@@ -536,4 +536,114 @@ describe("renameStep — id rewrite + boundary-safe reference propagation (#408/
 		const after = renameStep(renameFixture(), "old", "old") as ReturnType<typeof renameFixture>;
 		expect(findStepLocation(after, "old")).not.toBeNull();
 	});
+
+	// === step-level expression fields beyond inputs/when/while (#408 completeness) ===
+
+	// (a) forEach.in — the iterable expr, lives on the forEach step object
+	it("rewrites a forEach.in iterable expression", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{
+					id: "fe",
+					forEach: { in: "js/ctx.state.old.items", as: "item", do: [{ id: "inner", use: "n", inputs: {} }] },
+				},
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		expect((after.steps[1] as { forEach: { in: string } }).forEach.in).toBe("js/ctx.state.new.items");
+	});
+
+	// (b) switch.on — the discriminant expr
+	it("rewrites a switch.on discriminant expression", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{ id: "sw", switch: { on: "js/ctx.state.old.kind", cases: [{ when: "a", do: [{ id: "ca", use: "n" }] }] } },
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		expect((after.steps[1] as { switch: { on: string } }).switch.on).toBe("js/ctx.state.new.kind");
+	});
+
+	// (c) switch case `when`: expression rewrites, plain literal untouched
+	it("rewrites a switch case `when` expression but leaves a literal case value alone", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{
+					id: "sw",
+					switch: {
+						on: "ctx.req.body.x",
+						cases: [
+							{ when: "ctx.state.old.kind === 'a'", do: [{ id: "expr-case", use: "n" }] },
+							{ when: "literal-b", do: [{ id: "lit-case", use: "n" }] },
+						],
+					},
+				},
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		const cases = (after.steps[1] as { switch: { cases: { when: string }[] } }).switch.cases;
+		expect(cases[0]!.when).toBe("ctx.state.new.kind === 'a'");
+		expect(cases[1]!.when).toBe("literal-b"); // plain literal NOT touched
+	});
+
+	// (d) idempotencyKey + concurrencyKey refs rewrite
+	it("rewrites idempotencyKey and concurrencyKey refs", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{ id: "cached", use: "n", inputs: {}, idempotencyKey: "js/ctx.state.old.id" },
+				{ id: "limited", use: "n", inputs: {}, concurrencyKey: "js/ctx.state.old.tenant" },
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		expect((after.steps[1] as { idempotencyKey: string }).idempotencyKey).toBe("js/ctx.state.new.id");
+		expect((after.steps[2] as { concurrencyKey: string }).concurrencyKey).toBe("js/ctx.state.new.tenant");
+	});
+
+	it("leaves a literal idempotencyKey untouched (no state ref)", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{ id: "cached", use: "n", inputs: {}, idempotencyKey: "static-key-123" },
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		expect((after.steps[1] as { idempotencyKey: string }).idempotencyKey).toBe("static-key-123");
+	});
+
+	// (e) over/under-match boundary still holds in the new sites
+	it("does NOT rewrite a prefix-sibling ref (old2) inside a forEach.in / switch.on", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{ id: "old2", use: "n", inputs: {} },
+				{ id: "fe", forEach: { in: "js/ctx.state.old2.items", as: "i", do: [{ id: "inner", use: "n" }] } },
+				{ id: "sw", switch: { on: "js/ctx.state.old2.kind", cases: [{ when: "a", do: [{ id: "ca", use: "n" }] }] } },
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		expect((after.steps[2] as { forEach: { in: string } }).forEach.in).toBe("js/ctx.state.old2.items");
+		expect((after.steps[3] as { switch: { on: string } }).switch.on).toBe("js/ctx.state.old2.kind");
+	});
 });
