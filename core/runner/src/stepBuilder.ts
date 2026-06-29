@@ -866,8 +866,30 @@ export interface StepOptions {
 	ephemeral?: boolean;
 	/** Node type override (module/local/runtime.*). Inferred from `use` when omitted. */
 	type?: string;
+	/** Literal string or handle lowered to the `js/ctx...` string consumed by resolveIdempotencyKey. */
+	idempotencyKey?: string | Handle<unknown>;
 	/** Escape hatch for the other v2 step knobs (idempotencyKey, retry, maxDuration, …). */
 	[opt: string]: unknown;
+}
+
+function lowerExpressionSite(value: unknown, reader: Builder, site: string): unknown {
+	const meta = readHandleMeta(value);
+	if (!meta) return value;
+	if (meta.ephemeral) throw ephemeralReadError(meta.step);
+	if (meta.owner && !canRead(meta.owner, reader)) {
+		throw new Error(`Handle from step "${meta.step}" is read in ${site} outside its scope.`);
+	}
+	return lowerHandleToInExpr(meta);
+}
+
+function lowerStepOptions<O extends StepOptions | undefined>(opts: O, reader: Builder): O {
+	if (!opts || typeof opts !== "object") return opts;
+	return {
+		...opts,
+		...(opts.idempotencyKey !== undefined
+			? { idempotencyKey: lowerExpressionSite(opts.idempotencyKey, reader, "idempotencyKey") }
+			: {}),
+	} as O;
 }
 
 /**
@@ -910,12 +932,13 @@ export function step<N extends { name: string }, O extends StepOptions = StepOpt
 		throw new Error(`step("${id}"): \`as\` and \`spread\` are mutually exclusive — pick one.`);
 	}
 	if (opts?.spread === true) assertSpreadableOutput(id, node);
+	const loweredOpts = lowerStepOptions(opts, builder);
 
 	const record: StepRecord = {
 		id,
 		use: node.name,
 		...(inputs ? { inputs: lowerHandles(inputs, builder) as Record<string, unknown> } : {}),
-		...(opts ?? {}),
+		...(loweredOpts ?? {}),
 	};
 	builder.steps.push(record);
 
@@ -996,12 +1019,13 @@ export function subworkflow(
 	if (opts?.as !== undefined && opts?.spread === true) {
 		throw new Error(`subworkflow("${id}"): \`as\` and \`spread\` are mutually exclusive — pick one.`);
 	}
+	const loweredOpts = lowerStepOptions(opts, builder);
 
 	const record = {
 		id,
 		subworkflow: lowered,
 		...(inputs ? { inputs: lowerHandles(inputs, builder) as Record<string, unknown> } : {}),
-		...(opts ?? {}),
+		...(loweredOpts ?? {}),
 	} as unknown as StepRecord;
 	builder.steps.push(record);
 

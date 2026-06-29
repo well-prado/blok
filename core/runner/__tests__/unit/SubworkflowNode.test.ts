@@ -926,6 +926,27 @@ describe("SubworkflowNode — polymorphic dispatch (G3)", () => {
 		expect(result.success).toBe(true);
 	});
 
+	it("resolves a handle-lowered state expression and still enforces `allowList`", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.payment",
+			source: "/handler-payment.ts",
+			workflow: makeChildWorkflowDef("handler.payment"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "js/ctx.state.route.name",
+		});
+		node.allowList = Object.freeze(["handler.payment"]);
+
+		const parentCtx = makeParentCtx({
+			state: { route: { name: "handler.payment" } },
+		} as unknown as Partial<Context>);
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		const result = await node.run(parentCtx);
+		expect(result.success).toBe(true);
+	});
+
 	it("rejects the dispatch when the resolved name is NOT in `allowList`", async () => {
 		WorkflowRegistry.getInstance().register({
 			name: "internal.admin-action",
