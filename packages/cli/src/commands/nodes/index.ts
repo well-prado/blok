@@ -18,6 +18,7 @@ const sync = new Command("sync")
 	.description("Generate typed runtimeNode stubs (one file per runtime) from the catalog at GET /__blok/nodes")
 	.option("-u, --url <value>", "Base URL of the running Blok server", "http://localhost:4000")
 	.option("-o, --out <dir>", "Output directory for the generated stubs", "nodes-gen")
+	.option("--check", "CI mode: exit non-zero if checked-in stubs drift from freshly generated (writes nothing)")
 	.action(async (options: OptionValues) => {
 		await syncNodes(options);
 	});

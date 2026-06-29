@@ -102,6 +102,28 @@ export function generateRuntimeStubs(nodes: readonly NodeEntry[]): Map<string, s
 	return files;
 }
 
+/**
+ * Diff freshly-generated stubs against what's on disk in `outDir`. Pure of the
+ * generator (callers pass the already-generated `files`) and IO-only here, so
+ * the comparison logic is exercised by feeding a temp dir in tests. Returns the
+ * filenames that drifted — missing on disk OR byte-different from generated.
+ * `generateRuntimeStubs` output is already stably sorted, so equal catalogs
+ * produce byte-identical files and a clean diff.
+ */
+export async function diffStubs(files: Map<string, string>, outDir: string): Promise<string[]> {
+	const drifted: string[] = [];
+	for (const [filename, expected] of files) {
+		let actual: string | null = null;
+		try {
+			actual = await fsp.readFile(path.join(outDir, filename), "utf8");
+		} catch {
+			actual = null; // missing file → drift
+		}
+		if (actual !== expected) drifted.push(filename);
+	}
+	return drifted.sort();
+}
+
 /** CLI entrypoint for `blokctl nodes sync`. */
 export async function syncNodes(opts: OptionValues): Promise<void> {
 	const cwd = process.cwd();
@@ -111,6 +133,7 @@ export async function syncNodes(opts: OptionValues): Promise<void> {
 
 	const nodes = await fetchCatalog(opts.url as string | undefined);
 	if (nodes === null) {
+		// Runtime unreachable — cannot verify. Fail loud, never a false "in sync".
 		process.exit(1);
 		return;
 	}
@@ -118,6 +141,21 @@ export async function syncNodes(opts: OptionValues): Promise<void> {
 	const files = generateRuntimeStubs(nodes);
 	if (files.size === 0) {
 		console.log(color.yellow("No runtime nodes found — nothing to generate (module nodes are imported directly)."));
+		return;
+	}
+
+	if (opts.check) {
+		const drifted = await diffStubs(files, outDir);
+		if (drifted.length > 0) {
+			console.log(color.red("❌ Stub drift detected — checked-in stubs are stale:"));
+			for (const filename of drifted) {
+				console.log(color.red(`   • ${path.join(path.relative(cwd, outDir), filename)}`));
+			}
+			console.log(color.dim("\nRun `blokctl nodes sync` to regenerate.\n"));
+			process.exit(1);
+			return;
+		}
+		console.log(color.green(`✅ Stubs in sync (${files.size} file(s) checked).`));
 		return;
 	}
 
