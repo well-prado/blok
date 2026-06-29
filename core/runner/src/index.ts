@@ -52,6 +52,7 @@ import {
 	ne as condNe,
 	not as condNot,
 	makeHandle,
+	state,
 	step,
 	subworkflow,
 	tpl,
@@ -233,6 +234,8 @@ export {
 	step,
 	subworkflow,
 	makeHandle,
+	// Read-only escape hatch to a dynamically-published state key (#333)
+	state,
 	tpl,
 	workflowCallback,
 	// branch + typed comparators (#418, ADR 0003/0004)

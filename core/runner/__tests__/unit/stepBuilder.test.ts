@@ -40,6 +40,7 @@ import {
 	type WebhookEntry,
 	type WorkerEntry,
 	type WsEntry,
+	state,
 	step,
 	tpl,
 	workflowCallback,
@@ -591,5 +592,59 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 		}
 		void _typeAssertions; // referenced for tsc; never invoked at runtime
 		expect(typeof _typeAssertions).toBe("function");
+	});
+
+	it("state(): reads a DYNAMICALLY-published key downstream, end-to-end (#333)", async () => {
+		// `dynRate` is NOT in any node's output — it lands in ctx.state only because a
+		// prior node published it (ctx.publish / cross-runtime vars_delta). A normal
+		// step handle can't see it; state("dynRate") is the escape hatch.
+		const wf = await workflowCallback(
+			"Dynamic State",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				step("price", echoUrl, { url: state("dynRate") as unknown as string });
+			},
+		);
+
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+
+		// (a) IR carries a structural {$ref} rooted at the literal key, empty path.
+		expect(steps[0].inputs.url).toEqual({ $ref: { step: "dynRate", path: [] } });
+
+		// (b) lowerRefs compiles it to the same wire string a step-output ref would.
+		expect(lowerRefs(steps[0].inputs)).toEqual({ url: "js/ctx.state.dynRate" });
+
+		// (c) drive the REAL wire path: simulate the dynamic publish by seeding
+		//     ctx.state.dynRate directly (the runner does this via applyStepOutput /
+		//     vars_delta merge — neither declared on echoUrl's output).
+		const ctx = createTriggerCtx({});
+		(ctx.state as Record<string, unknown>).dynRate = "https://h/0.07";
+		await runStep(ctx, steps[0], echoUrl);
+		expect((ctx.state as Record<string, unknown>).price).toEqual({ url: "https://h/0.07" });
+	});
+
+	it("state(): a non-identifier key lowers to BRACKET form (#333)", async () => {
+		const wf = await workflowCallback(
+			"Bracket State",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				// Dotted/colon/dashed keys are not valid JS identifiers — they MUST lower
+				// to bracket form or the Mapper's js/ eval misparses them.
+				step("read", echoUrl, { url: state("user:123") as unknown as string });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		expect(steps[0].inputs.url).toEqual({ $ref: { step: "user:123", path: [] } });
+		expect(lowerRefs(steps[0].inputs)).toEqual({ url: 'js/ctx.state["user:123"]' });
+
+		// And it resolves through the REAL Mapper against the bracket key.
+		const ctx = createTriggerCtx({});
+		(ctx.state as Record<string, unknown>)["user:123"] = "https://h/u";
+		await runStep(ctx, steps[0], echoUrl);
+		expect((ctx.state as Record<string, unknown>).read).toEqual({ url: "https://h/u" });
+	});
+
+	it("state(): rejects an empty key (#333)", () => {
+		expect(() => state("")).toThrow(/non-empty string key/);
 	});
 });
