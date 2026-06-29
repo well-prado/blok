@@ -72,7 +72,7 @@ function createTriggerCtx(body: Record<string, unknown>): Context {
  */
 async function runStep(
 	ctx: Context,
-	rec: { id: string; use?: string; inputs?: Record<string, unknown>; ephemeral?: boolean },
+	rec: { id: string; use?: string; inputs?: Record<string, unknown>; ephemeral?: boolean; as?: string },
 	node: { name: string; handle: (ctx: Context, input: Record<string, unknown>) => Promise<unknown> },
 ): Promise<void> {
 	const inputs = lowerRefs(rec.inputs ?? {}) as Record<string, unknown>;
@@ -81,9 +81,9 @@ async function runStep(
 	mapper.replaceObjectStrings(inputs, ctx, ctx.request.body as never);
 	const res = (await node.handle(ctx, inputs)) as { success: boolean; data: Record<string, unknown> };
 	expect(res.success).toBe(true);
-	// REAL persistence — output lands at ctx.state[rec.id] (Rule 3 default);
-	// Rule 1 skips persistence when the step is ephemeral.
-	applyStepOutput(ctx, { name: rec.id, ephemeral: rec.ephemeral }, res);
+	// REAL persistence — output lands at ctx.state[rec.as ?? rec.id] (Rule 3
+	// default / Rule 1 ephemeral skip), mirroring the runner's PersistenceHelper.
+	applyStepOutput(ctx, { name: rec.id, as: rec.as, ephemeral: rec.ephemeral }, res);
 }
 
 const greet = defineNode({
@@ -646,5 +646,119 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 
 	it("state(): rejects an empty key (#333)", () => {
 		expect(() => state("")).toThrow(/non-empty string key/);
+	});
+
+	// ───────────── #334: ctx.publish → state() reachable + correctly keyed ─────────────
+	//
+	// The prior `state()` tests seed ctx.state directly. These drive the REAL
+	// `ctx.publish` closure (TriggerBase.ts:1767 — `ctx.state[name] = value`) as
+	// the upstream producer, then read the published key downstream via `state()`
+	// through the REAL lowerRefs + Mapper wire path. This is the publish leg the
+	// step type system never saw — only `state()` can reach it.
+
+	/** The REAL `ctx.publish` closure shape from TriggerBase.createContext (line 1767). */
+	function attachPublish(ctx: Context): (name: string, value: unknown) => void {
+		const publish = (name: string, value: unknown): void => {
+			(ctx.state as Record<string, unknown>)[name] = value;
+		};
+		(ctx as { publish: (name: string, value: unknown) => void }).publish = publish;
+		return publish;
+	}
+
+	it("state(): an UPSTREAM ctx.publish(k, v) is read DOWNSTREAM via state(k) end-to-end (#334)", async () => {
+		const wf = await workflowCallback(
+			"Publish Reachable",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				step("price", echoUrl, { url: state("dynRate") as unknown as string });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		expect(lowerRefs(steps[0].inputs)).toEqual({ url: "js/ctx.state.dynRate" });
+
+		const ctx = createTriggerCtx({});
+		// Producer side: a prior node publishes the dynamic key via the REAL closure.
+		const publish = attachPublish(ctx);
+		publish("dynRate", "https://h/0.07");
+
+		// Consumer side: state("dynRate") resolves the published value through the
+		// REAL Mapper — proves the published key is reachable + correctly keyed.
+		await runStep(ctx, steps[0], echoUrl);
+		expect((ctx.state as Record<string, unknown>).price).toEqual({ url: "https://h/0.07" });
+	});
+
+	it("state(): a non-identifier published key ('user:123') reads via the BRACKET-form accessor (#334)", async () => {
+		const wf = await workflowCallback(
+			"Publish Bracket",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				step("read", echoUrl, { url: state("odd.name") as unknown as string });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		// A dotted key MUST lower to bracket form or the Mapper's js/ eval misparses it.
+		expect(lowerRefs(steps[0].inputs)).toEqual({ url: 'js/ctx.state["odd.name"]' });
+
+		const ctx = createTriggerCtx({});
+		attachPublish(ctx)("odd.name", "https://h/odd");
+		await runStep(ctx, steps[0], echoUrl);
+		expect((ctx.state as Record<string, unknown>).read).toEqual({ url: "https://h/odd" });
+	});
+
+	it("state(): step.as WINS over a same-named published key (last-write semantics) (#334)", async () => {
+		// A step writes state[as]; a publish targets the SAME key. The runner
+		// applies vars_delta/publish FIRST, then default-store (Object.assign /
+		// state[as] = data) — so the step output is last-write and wins. This
+		// pins the documented precedence: the explicit step output beats the
+		// side-channel publish on a collision.
+		const wf = await workflowCallback(
+			"Publish Collision",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				// `score` step renames its output to the state key "rank" via `as`.
+				step("score", echoUrl, { url: "https://h/winner" }, { as: "rank" });
+				// Downstream reference to the contested key.
+				step("read", echoUrl, { url: state("rank") as unknown as string });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; as?: string; inputs: Record<string, unknown> }>;
+		expect(steps[0].as).toBe("rank");
+		// The downstream ref lowers to the SAME key the step's `as` writes.
+		expect(lowerRefs(steps[1].inputs)).toEqual({ url: "js/ctx.state.rank" });
+
+		const ctx = createTriggerCtx({});
+		// Producer publishes the loser FIRST (mirrors vars_delta merge running
+		// before the step's own default-store inside RuntimeAdapterNode.run).
+		attachPublish(ctx)("rank", "https://h/loser");
+		// The `score` step's default-store writes state["rank"] LAST — wins.
+		await runStep(ctx, steps[0], echoUrl);
+		expect((ctx.state as Record<string, unknown>).rank).toEqual({ url: "https://h/winner" });
+
+		// Downstream read via state("rank") resolves the winner through the REAL
+		// Mapper (NOT the loser the publish wrote first).
+		const inputs = lowerRefs(steps[1].inputs) as Record<string, unknown>;
+		mapper.replaceObjectStrings(inputs, ctx, ctx.request.body as never);
+		expect(inputs.url).toEqual({ url: "https://h/winner" });
+	});
+
+	it("state(): a declared-but-never-published key resolves to undefined, no crash (#334)", async () => {
+		// Manifest declares a key the SDK never emits. state() lowers it fine; the
+		// Mapper resolves the missing key to undefined rather than throwing.
+		const wf = await workflowCallback(
+			"Declared Not Emitted",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			() => {
+				step("read", echoUrl, { url: state("neverEmitted") as unknown as string });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; inputs: Record<string, unknown> }>;
+		expect(lowerRefs(steps[0].inputs)).toEqual({ url: "js/ctx.state.neverEmitted" });
+
+		const ctx = createTriggerCtx({});
+		// echoUrl tolerates undefined url (no Zod failure path needed): the Mapper
+		// resolves the absent key to undefined and the step runs without crashing.
+		const inputs = lowerRefs(steps[0].inputs) as Record<string, unknown>;
+		mapper.replaceObjectStrings(inputs, ctx, ctx.request.body as never);
+		expect(inputs.url).toBeUndefined();
 	});
 });
