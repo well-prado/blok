@@ -52,6 +52,16 @@ The release script enforces this — it refuses to publish if any cross-package 
 
 To float core: bump only `core/core/package.json`, keep the rest lockstepped, and re-run `bun run release --dry-run` — it prints `Floating: @blokjs/core @ <version>`. The pure pre-flight functions live in `scripts/release-preflight.ts` and are unit-tested in `packages/cli/tests/release-preflight.test.ts` (no npm/git needed). Floating core across a **major** requires bumping the scaffold's `GITHUB_REPO_RELEASE_TAG`/`BLOKJS_DEP_RANGE` too, or pre-flight blocks the publish.
 
+### Deprecated back-compat aliases
+
+`@blokjs/runner`, `@blokjs/shared`, and `@blokjs/helper` are now **back-compat aliases** for `@blokjs/core` (#374/#378). They still publish their full surface so existing imports keep working, but `@blokjs/core` is a complete migration target: the engine + shared primitives are re-exported from `@blokjs/core/runtime`, the harnesses from `@blokjs/core/testing`, and the authoring DSL from `@blokjs/core` (the `.` entry). Each carries a `@deprecated` `@packageDocumentation` JSDoc, and `core/core/src/migration-surface.test.ts` asserts the migration target stays complete. After publishing, mark them on npm so installs surface the notice (`@blokjs/helper` is the DSL — do NOT deprecate `@blokjs/helpers`, the node bag):
+
+```bash
+npm deprecate "@blokjs/runner@<version>" "Use @blokjs/core (engine surface at @blokjs/core/runtime)."
+npm deprecate "@blokjs/shared@<version>" "Use @blokjs/core (primitives at @blokjs/core/runtime)."
+npm deprecate "@blokjs/helper@<version>" "Use @blokjs/core (the DSL barrel)."
+```
+
 ## Normal flow — per-PR changesets
 
 Most releases follow the changesets workflow:

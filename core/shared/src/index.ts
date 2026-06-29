@@ -1,3 +1,11 @@
+/**
+ * @packageDocumentation
+ * @deprecated Prefer `@blokjs/core`. These primitives (Context, mapper,
+ * NodeBase, error envelopes, …) are re-exported from `@blokjs/core/runtime`, so
+ * a project only needs the one package (#374/#378). `@blokjs/shared` stays
+ * published as a back-compat alias — existing imports keep working unchanged —
+ * but new code should import from `@blokjs/core`.
+ */
 import BlokError, {
 	type BlokErrorOpts,
 	DEFAULT_HTTP_STATUS,
