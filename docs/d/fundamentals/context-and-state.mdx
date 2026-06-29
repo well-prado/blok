@@ -1,251 +1,284 @@
 ---
 title: Context & State
-description: How data flows between steps in a Blok workflow — typed handles in the DSL, the equivalent $.state form in JSON.
+description: How data flows between Blok workflow steps with typed handles, entry handles, tpl, and branch operators.
 icon: "database"
 ---
 
-Passing data between steps is the thing you do most in a workflow. Blok has
-**one** model for it, and once you have it you never think about it again:
-a step returns its output, the runner stores it, and `step()` hands you a
-**handle** you pass into later steps.
+Passing data between steps should feel boring. In Blok, authors use **typed
+handles**. A step returns data, the runner persists that data, and the handle
+you got from `step()` points at the persisted slot.
 
-## The golden rule
+## The rule
 
 <Tip>
-**Every step returns its output. The runner persists that output to
-`ctx.state[<step-id>]` (on success). `step()` returns a typed _handle_ to that
-slot — pass the handle into a later step and the runner resolves it before that
-step runs.**
+**Return values write state. Handles read state.**
 
-That's the entire model. You never read or write `ctx.state` yourself.
+A node returns its output. On success, the runner stores it at
+`ctx.state[<step-id>]`. The authoring DSL gives you a typed handle to that
+slot, so downstream steps pass `order.id`, `lookup.user.email`, or the whole
+`lookup` handle directly in their inputs.
 </Tip>
 
-```
-   const fetched = step("fetch", apiCall, …)   ──► runner stores output at ctx.state.fetch
-                                                    `fetched` is a handle pointing there
-   step("respond", RespondNode, { body: fetched })  ──► runner resolves the handle, runs the node
-```
-
 ```ts
-import { workflow, step, http } from "@blokjs/core";
+import { http, step, tpl, workflow } from "@blokjs/core";
+import { z } from "zod";
 import apiCall from "@blokjs/api-call";
 import { RespondNode } from "@blokjs/helpers";
 
-export default workflow("demo", { version: "1.0.0", trigger: http.post("/demo") }, (req) => {
-  // step(id, node, inputs) runs the node and returns a TYPED handle to its output.
-  const fetched = step("fetch", apiCall, { url: req.body.url });
-
-  // Pass the handle straight in — the runner resolves it before `respond` runs.
-  step("respond", RespondNode, { body: fetched }, { ephemeral: true });
-});
+export default workflow(
+  "fetch-and-respond",
+  {
+    version: "1.0.0",
+    trigger: http.post("/demo"),
+    input: z.object({ url: z.string().url() }),
+  },
+  (req) => {
+    const fetched = step("fetch", apiCall, { url: req.body.url });
+    step("respond", RespondNode, { body: tpl`result: ${fetched.data}` }, { ephemeral: true });
+  },
+);
 ```
 
-- **Returning** is how you write. A node `return`s a value; the runner stores it
-  at `ctx.state[<step.id>]` **on success only** — a step that throws writes
-  nothing.
-- **The handle** is how you read. `step()` returns it; reading a field
-  (`fetched.data`, `fetched.items[0]`) records a typed reference the runner
-  resolves *before the next node runs*. You never read the value yourself.
+Inside that workflow:
 
-<Warning>
-Do **not** write to `ctx.state` inside a node's `execute()`. Return your output
-and let the runner persist it. (If you genuinely need a side-channel value, use
-`ctx.publish(name, value)` — but that's rare.)
-</Warning>
+- `req` is the trigger **entry handle**. It reads the incoming request, job,
+  event, message, or RPC payload.
+- `fetched` is a step **output handle**. Field reads on it become structural
+  references the runner resolves before the next node runs.
+- `tpl` embeds handles into strings without turning them into plain text too
+  early.
+- The `respond` step is `ephemeral`, so its return value is not persisted and
+  its handle must not be read later.
 
-## Where data comes from
+## Entry handles
 
-A step input reads from exactly four sources. In the TypeScript DSL each one is
-a typed **handle**; the same reference has an **object-style / JSON** form
-(`$.state.…`) that the DSL compiles to.
+Every callback workflow receives one entry handle. Name it by trigger kind:
 
-| Source | Handle (TypeScript DSL) | Object-style / JSON |
+| Trigger | Entry handle convention | Common reads |
 |---|---|---|
-| An earlier step's output | the handle `step()` returned — `fetched`, `order.qty` | `$.state.<id>` |
-| The trigger payload | the build-callback's entry arg — `req.body`, `req.params.id`, `req.query.x` | `$.req.body` / `$.req.params.x` |
-| The immediately previous step | rarely needed — handles supersede it | `$.prev` |
-| The current `forEach` item | the loop callback's `item` arg | `$.state.<as>` |
+| `http` | `req` | `req.body`, `req.params.id`, `req.query.q`, `req.headers.authorization` |
+| `worker` | `job` | `job.body`, `job.params.queue`, `job.params.jobId`, `job.params.attempt` |
+| `webhook` | `event` | `event.body`, `event.headers`, `event.params` |
+| `pubsub` | `msg` | `msg.body`, `msg.headers`, `msg.params` |
+| `cron` | `tick` | `tick.params`, `tick.headers` |
+| `grpc` | `rpc` | `rpc.body`, `rpc.params`, `rpc.headers` |
+| `sse` | `stream` | `stream.params`, `stream.query`, `stream.headers` |
+| `websocket` | `conn` | `conn.body`, `conn.params`, `conn.headers` |
+| `mcp` | `call` | `call.body`, `call.headers` |
 
-<CodeGroup>
-```ts TypeScript (handles)
-import { workflow, step, http } from "@blokjs/core";
-import apiCall from "@blokjs/api-call";
-import { RespondNode } from "@blokjs/helpers";
+All entry handles lower to the same runtime request context. The names are for
+reader clarity and TypeScript inference.
 
-export default workflow("fetch-and-respond", { version: "1.0.0", trigger: http.post("/demo") }, (req) => {
-  const fetched = step("fetch", apiCall, { url: req.body.url });
-  step("respond", RespondNode, { body: fetched }, { ephemeral: true });
-});
-```
+## Writing data
 
-```json JSON
-{
-  "name": "fetch-and-respond",
-  "version": "1.0.0",
-  "trigger": { "http": { "method": "POST", "path": "/demo" } },
-  "steps": [
-    { "id": "fetch",   "use": "@blokjs/api-call", "inputs": { "url": "$.req.body.url" } },
-    { "id": "respond", "use": "@blokjs/respond",  "inputs": { "body": "$.state.fetch" }, "ephemeral": true }
-  ]
-}
-```
-</CodeGroup>
-
-<Note>
-`$.state.<id>` / `$.req.*` is the **object-style and JSON** surface — the same
-data flow the handle DSL compiles to. In hand-written JSON, write the string
-`"$.state.fetch"` (or the explicit `"js/ctx.state.fetch"`). You only reach for
-these strings when authoring JSON; in TypeScript, pass handles.
-</Note>
-
-## Writing: just return
-
-A node's job is to **return** its output. The runner does the rest.
+Nodes write data by returning it. Do not assign to `ctx.state` in a node.
 
 ```ts
 import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
 export default defineNode({
-  name: "eval-search",
-  input: z.object({ query: z.string() }),
-  output: z.object({ query: z.string(), hits: z.array(z.object({ doc: z.string(), rank: z.number() })) }),
+  name: "load-user",
+  description: "Loads a user by id",
+  input: z.object({ userId: z.string() }),
+  output: z.object({ user: z.object({ id: z.string(), email: z.string().email() }) }),
   async execute(ctx, input) {
-    // `input` is the validated, already-resolved step input.
-    const hits = [0, 1, 2].map((i) => ({ doc: `${input.query} :: doc-${i}`, rank: i }));
-    return { query: input.query, hits }; // ← stored at ctx.state["<this step's id>"]
+    ctx.logger.log(`loading ${input.userId}`);
+    const user = await db.users.findById(input.userId, { signal: ctx.signal });
+    return { user };
   },
 });
 ```
 
-## Persistence knobs
+The node-side `ctx` ABI is still real and kept. Use it for runtime concerns:
 
-By default a step stores its output at `ctx.state[<id>]`. The **4th argument**
-to `step()` changes that — set it on the step, never in the node.
-
-| Knob | Effect |
+| Node-side field | Use |
 |---|---|
-| *(none)* | Store at `ctx.state[<id>]` (the default). |
-| `{ as: "name" }` | Store at `ctx.state.name` instead. Mutually exclusive with `spread`. |
-| `{ spread: true }` | Shallow-merge the returned object's keys into `ctx.state` (multi-output nodes). |
-| `{ ephemeral: true }` | Skip storage — the handle is unreadable downstream; only the immediately next step sees the value via `$.prev`. |
+| `ctx.request` | Trigger payload after the trigger builds the run context. |
+| `ctx.logger` | Logs that should appear in traces and Studio. |
+| `ctx.env` | Environment access. |
+| `ctx.signal` | Cooperative cancellation. Pass it to `fetch` or long-running work. |
+| `ctx.publish(name, value)` | Rare side-channel publication. Prefer returning normal output. |
+| `ctx.connection` | WebSocket-only connection API. Usually reached through helper nodes. |
+| `ctx.stream` | SSE-only stream API. Usually reached through helper nodes. |
+
+## Reading data
+
+Use the handle in the workflow, not runtime context strings.
 
 ```ts
-step("load",   fetchUserAndProfile, {}, { spread: true });   // → state.user + state.profile
-step("audit",  AuditLogNode, { event: "viewed" }, { ephemeral: true }); // side-effect only
-const score = step("result", compute, {}, { as: "finalScore" });        // → state.finalScore
+const order = step("validate", validateOrder, { body: req.body });
+const score = step("score", scoreOrder, { total: order.total });
+step("notify", notifyUser, {
+  email: order.customer.email,
+  line: tpl`order ${order.id} scored ${score.value}`,
+});
 ```
 
-## Context inside `forEach`
+Handles are structural:
 
-`forEach(iterable, (item, index) => {…}, opts?)` runs its callback once per
-element. The `item` handle is the current element, scoped to the loop body;
-steps inside read it like any handle, and their outputs land in
-`ctx.state[<inner-id>]` for that iteration. The loop **returns** a handle to the
-results array (one entry per item, in order) — that's what survives after the
-loop.
+- `order` reads the whole output of `step("validate", ...)`.
+- `order.total` reads a field from that output.
+- `order.items[0].sku` reads an array index and nested field.
+- `tpl` is required when a handle is part of a string.
+
+If handles, `tpl`, and branch operators cannot express what you need, use the
+explicit escape hatch:
 
 ```ts
-import { workflow, step, forEach, http } from "@blokjs/core";
-import evalSearch from "../nodes/eval-search";
-import evalScore from "../nodes/eval-score";
-import { RespondNode } from "@blokjs/helpers";
+import { js } from "@blokjs/core";
 
-export default workflow("score-items", { version: "1.0.0", trigger: http.post("/score") }, (req) => {
-  const results = forEach(req.body.items, (item) => {
-    const search = step("search", evalSearch, { query: item.query });
-    step("score", evalScore, { id: item.id, hitCount: search.hits });
-  }, { as: "item" });
-
-  step("respond", RespondNode, { body: { results } }, { ephemeral: true });
+step("classify", classifyOrder, {
+  lane: js`${order.total} > 100 ? "premium" : "standard"`,
 });
 ```
 
 <Warning>
-Pick an `as` name that does **not** collide with any step `id` in the workflow —
-the loop item and step outputs share one flat `ctx.state`. The builder
-**throws at load time** if they collide. The `item`/`index` handles do not
-survive past the loop; read the returned results handle instead. See
-[Handles & footguns](/d/primitives/handles-and-footguns).
+`js` is intentionally opaque to static analysis and visual tooling. Use it for
+non-structural expressions such as ternaries, nullish defaults, `.map`, dates,
+or environment reads. Prefer handles, `tpl`, and branch operators first.
 </Warning>
 
-## Context across sub-workflows
+## Persistence knobs
 
-`subworkflow()` calls another workflow like a function and returns a handle to
-its response:
+The fourth argument to `step()` changes where, or whether, the output is stored.
 
-- The call's resolved **`inputs` become the child's `ctx.request.body`**.
-- With `wait: true` (default), the **child's response lands at
-  `ctx.state[<id>]`** in the parent — and is what the returned handle points to.
+| Knob | Effect |
+|---|---|
+| none | Store at `ctx.state[id]`. This is the default. |
+| `{ as: "name" }` | Store at `ctx.state[name]`; the returned handle is rooted at `name`. |
+| `{ spread: true }` | Shallow-merge returned object keys into `ctx.state`; field handles root at those keys. |
+| `{ ephemeral: true }` | Store nothing. The returned handle is deliberately unreadable downstream. |
 
 ```ts
-import { forEach, step, subworkflow } from "@blokjs/core";
-import evalScore from "../nodes/eval-score";
-
-// Parent
-forEach(load.items, (item) => {
-  const retrieve = subworkflow("retrieve", "eval-retrieve", { query: item.query });
-  step("score", evalScore, { hits: retrieve.data.hits });
-}, { as: "item" });
-
-// Child "eval-retrieve" reads the parent's inputs as its request body:
-//   step("search", evalSearch, { query: req.body.query });
+const user = step("load", loadUser, { id: req.params.id });
+const profile = step("lookup-profile", loadProfile, { id: user.id }, { as: "profile" });
+step("audit", AuditNode, { userId: user.id }, { ephemeral: true });
 ```
 
-<Note>
-The child name (second argument) must match the **name the child is registered
-under**. File-based routes register under the workflow's `name`; an explicit
-`Workflows.ts` map registers under the **map key**. See
-[Sub-workflows](/d/composition/sub-workflows).
-</Note>
+<Warning>
+An ephemeral step is for side effects only: logs, metrics, response helpers, or
+one-shot emissions. Do not read its returned handle. There is no persisted slot
+for the runner to resolve.
+</Warning>
 
-## The footguns
+## Control flow
 
-The control-flow footguns — arm-scoped handles, ephemeral reads, duplicate step
-ids, `forEach` `as:` collisions — are covered on
-[**Handles & footguns**](/d/primitives/handles-and-footguns). The three below
-are specific to data flow.
+`branch`, `forEach`, `switchOn`, and `tryCatch` all work with handles.
+
+### Branch operators
+
+`branch` conditions are built from typed operators or a boolean handle:
+
+```ts
+import { branch, gt } from "@blokjs/core";
+
+branch("route", gt(order.total, 100), {
+  then: () => {
+    step("premium", routeOrder, { lane: "premium" });
+  },
+  else: () => {
+    step("standard", routeOrder, { lane: "standard" });
+  },
+});
+
+branch("stock", order.inStock, {
+  then: () => {
+    step("ship", shipOrder, { id: order.id });
+  },
+});
+```
+
+Use `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, and `not`. A boolean handle such as
+`order.inStock` is a truthiness check. Do not author raw condition strings for
+new workflows; the helper emits the runtime expression.
+
+### forEach
+
+`forEach` gives the body callback an item handle and an index handle. They are
+readable only inside the loop. The loop itself returns a results-array handle
+for downstream steps.
+
+```ts
+const results = forEach(order.items, (item, index) => {
+  step("reserve", reserveInventory, { sku: item.sku, index });
+}, { as: "line" });
+
+step("summarize", summarizeReservations, { results });
+```
+
+### Sub-workflows
+
+`subworkflow()` calls another workflow and returns a handle to that child
+response. The parent step inputs become the child workflow's request body.
+
+```ts
+const receipt = subworkflow("receipt", "send-receipt", { orderId: order.id });
+step("respond", RespondNode, { body: receipt.data }, { ephemeral: true });
+```
+
+The child name must match the registered workflow name.
+
+## The four control-flow footguns
 
 <AccordionGroup>
-<Accordion title="Putting a js/ expression as @blokjs/expr's `expression`">
-`@blokjs/expr`'s `expression` input is **itself** resolved by the mapper before
-the node runs. So `expression: "js/ctx.state.uid.userId"` resolves to the *value*
-first, then `@blokjs/expr` tries to evaluate that value as code — usually a
-confusing error.
-
-**Fix:** write the JS directly, no `js/` prefix:
-`expression: "ctx.state.uid.userId"`.
+<Accordion title="1. Arm-scoped handles do not escape their arm">
+A handle created inside a `then`, `else`, `case`, `try`, or `catch` arm is
+readable only in that arm or its descendants. To use a value after the control
+flow step, use the flow primitive's returned handle when it has one, such as
+`forEach` results, or have every branch/switch/tryCatch arm write to the same
+`as` key with unique step ids.
 </Accordion>
 
-<Accordion title="Expecting `$.prev` to survive more than one step">
-`$.prev` (the object-style/JSON read for the previous step) is the
-**immediately** previous step's output. It's overwritten on every step. In the
-handle DSL you rarely need it — a handle points at a stable `ctx.state` slot.
-
-**Fix:** for anything beyond the adjacent step, read the step's handle (or
-`$.state.<id>` in JSON).
+<Accordion title="2. Ephemeral handles are unreadable">
+`ephemeral: true` skips persistence. Use it only when nobody reads the returned
+handle later.
 </Accordion>
 
-<Accordion title="A literal ${...} in an authored input string">
-The mapper interpolates `${...}` placeholders in **authored** input strings. A
-stray `${...}` that isn't a real ctx path **throws** under the default
-`BLOK_MAPPER_MODE=strict`. (Data that merely *contains* `${...}` and flows
-through a handle / `$.state.x` is never re-interpolated — it's safe.)
+<Accordion title="3. Step ids are one flat namespace">
+Every step id in a workflow must be unique, including ids inside mutually
+exclusive arms. If two arms need one downstream name, give the steps unique ids
+and set the same `as` key.
+</Accordion>
 
-**Fix:** to embed a handle in a string use the `tpl` tagged template
-(`tpl\`order ${order.id}\``); don't hand-write `${...}` unless it's a real ctx
-path.
+<Accordion title="4. forEach as/asIndex keys share state">
+`forEach` writes the current item to `ctx.state[as]` and the index to
+`ctx.state[as + "Index"]`. Those keys share the same flat namespace as step
+outputs. Pick `as` names that cannot collide with step ids or outer loops.
 </Accordion>
 </AccordionGroup>
 
+See [Control-flow handles & footguns](/d/primitives/handles-and-footguns) for
+the full scope rules.
+
+## Legacy mapping
+
+The runner still understands object-style workflows and JSON workflows after
+normalization. New TypeScript authoring should use the handle DSL. When reading
+old code, translate it this way:
+
+| Legacy v1 / mapper form | v2 IR meaning | Handle DSL authoring |
+|---|---|---|
+| `steps[].name` + `nodes[name].inputs` | `steps[].id` + inline `inputs` | `step("id", node, inputs)` |
+| `steps[].node` | `steps[].use` | Pass the node object to `step()` |
+| `set_var: true` | default persistence | nothing; persistence is default |
+| `set_var: false` | `ephemeral: true` | `step("id", node, inputs, { ephemeral: true })` |
+| previous-step reads | previous result | prefer the producing handle |
+| request/body/path reads | trigger request | read the entry handle (`req.body`, `job.params.jobId`) |
+| string interpolation in mapper input | template expression | `tpl` tagged template |
+| raw branch comparison | branch runtime expression | `eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`not` or boolean handle |
+
+`@blokjs/expr` is the intentional exception: its `expression` input is the
+JavaScript body the node evaluates. Write plain JavaScript there, without a
+mapper prefix.
+
 ## Quick reference
 
-```
-WRITE:   return your output           → runner stores it at ctx.state[<id>]
-READ:    const x = step(...)           → x is a handle to that output  (the default)
-         req.body / .params / .query   → the trigger payload
-         the forEach `item` arg        → the current loop item
-         (JSON twin: $.state.<id> · $.req.* · $.prev)
-KNOBS:   step(id, node, inputs, { as | spread | ephemeral })
-NEVER:   write ctx.state directly · reuse a step id · prefix @blokjs/expr with js/
+```txt
+WRITE:   return from a node; the runner persists on success
+READ:    use the step handle or entry handle
+STRINGS: tpl`order ${order.id}`
+BRANCH:  eq/ne/gt/gte/lt/lte/not, or a boolean handle
+ESCAPE:  js`...${handle}...` only for non-structural expressions
+NEVER:   write ctx.state in a node, reuse step ids, read ephemeral handles
 ```
