@@ -129,7 +129,11 @@ A manual workflow has no listener, so something else dispatches it:
   parent step's resolved `inputs` become the child's `ctx.request.body`
   — i.e. the manual workflow's `args.body`. This works today.
 - **The test harness** — `WorkflowTestRunner` (from `@blokjs/runner`) runs
-  the workflow with a supplied body.
+  a workflow with a supplied body. `loadWorkflow()` takes a plain object (or
+  JSON string) with a **top-level `steps` array** — it does **not** accept the
+  handle-DSL `workflow()` builder result (whose steps live under `_config`).
+  Pass the steps array directly, or feed it `myWorkflow.toJson()` /
+  `myWorkflow._config`.
 - **Application code** — `ManualTrigger.dispatch(name, args)` from
   `@blokjs/runner` (see [Dispatching from host code](#dispatching-from-host-code)
   above). In-process invocation by name with an args object, no network

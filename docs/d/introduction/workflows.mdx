@@ -32,8 +32,10 @@ export default workflow("countries.list", { version: "1.0.0", trigger: http.get(
 `step()` takes a node **object** (not a string ref). Import published nodes directly — a
 standalone package's default export (`apiCall`) or a named export from `@blokjs/helpers`
 (`RespondNode`, `ExprNode`, `LogNode`, …). Your own `defineNode` nodes are imported from
-`src/nodes/...`. For a cross-runtime node, build a stub with
-`runtimeNode("<name>", "runtime.<lang>")`.
+`src/nodes/...`. For a cross-runtime node, `@blokjs/core` exports a type-only
+`runtimeNode<In, Out>("<name>", "runtime.<lang>")` stub — but it carries no
+runtime value yet (issue #424), so author those steps in JSON with
+`type: "runtime.<lang>"` for now (see [runtimes](/d/cli/runtimes)).
 </Note>
 
 Run `blokctl dev` and hit `GET /countries` — you'll get the fetched JSON back. That's a
