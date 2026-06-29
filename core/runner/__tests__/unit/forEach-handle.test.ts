@@ -424,6 +424,60 @@ describe("forEach — real Configuration + ForEachNode + Runner", () => {
 		expect(state.perItem).toBeUndefined();
 	});
 
+	it.each([
+		["undefined", {}],
+		["null", { items: null }],
+		["object", { items: { id: "not-array" } }],
+	])("treats a mapper-resolved %s iterable handle as an empty array", async (_label, validateValue) => {
+		const wf = await workflowCallback("NonArray", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const validate = step("validate", noop, {});
+			forEach(
+				validate.items,
+				(item) => {
+					step("echo", noop, { id: item.id });
+				},
+				{ id: "loop", as: "row" },
+			);
+		});
+		const authored = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.forEach) as {
+			forEach: { in: string; as: string };
+		};
+
+		const state = await bootAndRun({
+			name: "non-array-loop",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "seed",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "validate", value: validateValue },
+				},
+				{
+					id: "loop",
+					forEach: {
+						in: authored.forEach.in,
+						as: authored.forEach.as,
+						do: [
+							{
+								id: "echo",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "perItem", value: "js/ctx.state.row.id" },
+							},
+						],
+					},
+				},
+			],
+		});
+
+		expect(state.loop).toEqual([]);
+		expect(state.row).toBeUndefined();
+		expect(state.rowIndex).toBeUndefined();
+		expect(state.perItem).toBeUndefined();
+	});
+
 	it("makes the returned forEach handle read the aggregate array after the loop", async () => {
 		const wf = await workflowCallback(
 			"AfterAggregate",

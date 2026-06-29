@@ -149,6 +149,59 @@ describe("v0.5 switch integration", () => {
 		expect(state.branch).toBe("PHYSICAL");
 	});
 
+	it("mapper-resolves `case.when` values in raw workflow JSON", async () => {
+		const wfDef = {
+			name: "test-switch-dynamic-when",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "init-kind",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "kind", value: "dynamic" },
+				},
+				{
+					id: "init-expected",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "expected", value: "dynamic" },
+				},
+				{
+					id: "route",
+					switch: {
+						on: "js/ctx.state.kind",
+						cases: [
+							{
+								when: "js/ctx.state.expected",
+								do: [
+									{
+										id: "publish-dynamic",
+										use: "@blokjs/ctx-publish",
+										type: "module",
+										inputs: { name: "branch", value: "DYNAMIC" },
+									},
+								],
+							},
+						],
+						default: [
+							{
+								id: "publish-default",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "branch", value: "DEFAULT" },
+							},
+						],
+					},
+				},
+			],
+		};
+		const { config, ctx } = await bootConfig(wfDef);
+		await new Runner(config.steps as NodeBase[]).run(ctx);
+
+		expect((ctx.state as Record<string, unknown>).branch).toBe("DYNAMIC");
+	});
+
 	it("array `when` matches any-of", async () => {
 		const wfDef = {
 			name: "test-switch-array",
