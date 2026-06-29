@@ -1125,17 +1125,36 @@ export type WsEntry = Handle<{
 	params: Record<string, string>;
 	headers: Record<string, string>;
 }>;
+/**
+ * MCP entry handle (`call`). MCP tool args land in `ctx.request.body` (the same
+ * place MCP advertises as the tool's `inputSchema`). Its `body` is typed from
+ * the workflow's declared `input` Zod when present, `unknown` otherwise (#436).
+ */
+export type McpEntry = Handle<RequestShape>;
+
+/**
+ * The entry-handle `body` type for the null-schema triggers (webhook/grpc/mcp):
+ * the workflow's declared `input` Zod inferred, or `unknown` when none is
+ * declared — one consistent rule (#436). Keyed off the PRESENCE of `input`, not
+ * `InferOr<I>`, because `z.infer<z.ZodTypeAny>` widens an undeclared schema to
+ * `any` (the opposite of the "unknown otherwise" contract).
+ */
+type EntryBodyOf<Opts> = Opts extends { input: infer S } ? (S extends z.ZodTypeAny ? z.infer<S> : unknown) : unknown;
 
 /**
  * Map a workflow `opts.trigger` shape to the entry handle its callback receives.
  * Keyed on which request-shaped trigger kind is present. Multiple kinds or none
  * recognized → the loose {@link TriggerHandle}. Lazy first-match precedence
  * (http wins if several are set — rare, and the runtime root is identical).
+ *
+ * `Body` types the null-schema triggers (webhook/grpc/mcp) from the workflow's
+ * declared `input` Zod (#436); the other kinds carry their own fixed payload
+ * shape and ignore it.
  */
-type EntryFor<T> = T extends { http: unknown }
+type EntryFor<T, Body = unknown> = T extends { http: unknown }
 	? HttpEntry
 	: T extends { webhook: unknown }
-		? WebhookEntry
+		? Handle<RequestShape<Body>>
 		: T extends { cron: unknown }
 			? CronEntry
 			: T extends { worker: unknown }
@@ -1143,12 +1162,14 @@ type EntryFor<T> = T extends { http: unknown }
 				: T extends { pubsub: unknown }
 					? PubSubEntry
 					: T extends { grpc: unknown }
-						? GrpcEntry
+						? Handle<RequestShape<Body>>
 						: T extends { sse: unknown }
 							? SseEntry
 							: T extends { websocket: unknown }
 								? WsEntry
-								: TriggerHandle;
+								: T extends { mcp: unknown }
+									? Handle<RequestShape<Body>>
+									: TriggerHandle;
 
 /**
  * Callback-style `workflow()` overload. Runs `build` inside a fresh builder
@@ -1175,7 +1196,7 @@ export async function workflowCallback<
 >(
 	name: string,
 	opts: Opts,
-	build: (entry: EntryFor<Opts["trigger"]>) => unknown | Promise<unknown>,
+	build: (entry: EntryFor<Opts["trigger"], EntryBodyOf<Opts>>) => unknown | Promise<unknown>,
 ): Promise<TypedWorkflow<InferOr<I>, InferOr<O>, EventUnion<E>>> {
 	const root: RootBuilder = { steps: [], ids: new Set<string>() } as unknown as RootBuilder;
 	root.root = root;
@@ -1185,7 +1206,7 @@ export async function workflowCallback<
 		// lowers to `js/ctx.request` (the trigger payload), NOT `ctx.state[...]`.
 		// EVERY per-trigger entry handle shares this one root (all request-shaped
 		// triggers funnel into ctx.request); only the author-facing TYPE differs.
-		await build(makeHandle("@trigger") as EntryFor<Opts["trigger"]>);
+		await build(makeHandle("@trigger") as EntryFor<Opts["trigger"], EntryBodyOf<Opts>>);
 	});
 
 	// Delegate to the object factory so validation + envelope shape are identical.
