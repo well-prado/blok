@@ -372,8 +372,7 @@ export {
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
 
 // Typed-handle type foundation (ADR 0006 / 0007). TYPES ONLY — `step()` (#421)
-// and the `{$ref}` recorder ship the runtime that consumes these. `runtimeNode`
-// is exported as a type-only declared signature for the same reason.
+// and the `{$ref}` recorder ship the runtime that consumes these.
 export type {
 	Handle,
 	EphemeralHandle,
@@ -384,8 +383,9 @@ export type {
 	InputOf,
 	OutputOf,
 	RuntimeNode,
-	runtimeNode,
 } from "./handles";
+// `runtimeNode` is a REAL value (#424) — `step()` lowers it to a runtime step.
+export { runtimeNode } from "./handles";
 export type {
 	StepOptions,
 	TriggerHandle,

@@ -31,4 +31,6 @@ export {
 } from "./stepBuilder";
 export { defineNode } from "./defineNode";
 export type { TriggerHandle, SubworkflowOptions } from "./stepBuilder";
-export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, runtimeNode } from "./handles";
+export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode } from "./handles";
+// `runtimeNode` is a REAL value (#424) — `step()` lowers it to a runtime step.
+export { runtimeNode } from "./handles";
