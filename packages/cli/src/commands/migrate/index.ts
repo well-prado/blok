@@ -3,6 +3,7 @@ import { program } from "../../services/commander.js";
 import type { OptionValues } from "..//../services/commander.js";
 import { migrateNode } from "./node.js";
 import { migratePaths } from "./paths.js";
+import { migrateRefs } from "./refs.js";
 import { migrateWorkflows } from "./workflows.js";
 
 const migrate = new Command("migrate").description("Migrate nodes and workflows to newer patterns");
@@ -44,8 +45,19 @@ const paths = new Command("paths")
 		await migratePaths(options);
 	});
 
+const refs = new Command("refs")
+	.description("Rewrite pure step input refs to structural handle refs and mark dynamic expressions")
+	.option("-d, --dir <value>", "Path to scan for .ts/.json workflows (defaults to current directory)")
+	.option("--dry-run", "Print what would change without writing files")
+	.option("--backup", "Create .bak files next to each migrated file (default true)")
+	.option("--no-backup", "Skip backup creation")
+	.action(async (options: OptionValues) => {
+		await migrateRefs(options);
+	});
+
 migrate.addCommand(node);
 migrate.addCommand(workflows);
 migrate.addCommand(paths);
+migrate.addCommand(refs);
 
 program.addCommand(migrate);
