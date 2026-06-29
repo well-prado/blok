@@ -2,6 +2,7 @@ import { Command } from "commander";
 import type { OptionValues } from "../../services/commander.js";
 import { program } from "../../services/commander.js";
 import { listNodes } from "./listNodes.js";
+import { syncNodes } from "./syncNodes.js";
 
 const nodes = new Command("nodes").description("Inspect the node catalog of a running Blok server");
 
@@ -13,6 +14,15 @@ const list = new Command("list")
 		await listNodes(options);
 	});
 
+const sync = new Command("sync")
+	.description("Generate typed runtimeNode stubs (one file per runtime) from the catalog at GET /__blok/nodes")
+	.option("-u, --url <value>", "Base URL of the running Blok server", "http://localhost:4000")
+	.option("-o, --out <dir>", "Output directory for the generated stubs", "nodes-gen")
+	.action(async (options: OptionValues) => {
+		await syncNodes(options);
+	});
+
 nodes.addCommand(list);
+nodes.addCommand(sync);
 
 program.addCommand(nodes);

@@ -10,11 +10,41 @@ import color from "picocolors";
 /** One catalog entry, as returned by `GET /__blok/nodes`. */
 export interface NodeEntry {
 	name: string;
+	/** The exact resolvable `use` string (module Map key, or `runtime.<kind>:<name>`). */
+	ref?: string;
 	runtime: string;
 	description?: string;
 	inputSchema: unknown | null;
 	outputSchema: unknown | null;
 	tags?: string[];
+}
+
+/**
+ * Fetch the node catalog from a running server's `GET /__blok/nodes`. Returns
+ * the node list, or `null` after printing a diagnostic when the server is
+ * unreachable / errors (the caller decides whether to `process.exit`). Shared by
+ * `nodes list` and `nodes sync`.
+ */
+export async function fetchCatalog(url: string | undefined): Promise<NodeEntry[] | null> {
+	const baseUrl = (url ?? "http://localhost:4000").replace(/\/+$/, "");
+	const endpoint = `${baseUrl}/__blok/nodes`;
+	try {
+		const res = await fetch(endpoint);
+		if (!res.ok) {
+			console.log(color.red(`❌ ${endpoint} returned HTTP ${res.status}.`));
+			return null;
+		}
+		const body = (await res.json()) as { nodes?: NodeEntry[] };
+		return body.nodes ?? [];
+	} catch (err) {
+		console.log(
+			color.red(
+				`❌ Could not reach ${color.cyan(endpoint)} — is the Blok server running? ` +
+					`Pass --url <baseUrl> to point elsewhere. (${(err as Error).message})`,
+			),
+		);
+		return null;
+	}
 }
 
 /** "in,out" / "in" / "out" / "—" depending on which schemas the node exposes. */
@@ -50,29 +80,11 @@ export function formatCatalog(nodes: readonly NodeEntry[]): string {
 /** CLI entrypoint. */
 export async function listNodes(opts: OptionValues): Promise<void> {
 	const baseUrl = ((opts.url as string | undefined) ?? "http://localhost:4000").replace(/\/+$/, "");
-	const endpoint = `${baseUrl}/__blok/nodes`;
-
-	let body: { nodes?: NodeEntry[]; count?: number };
-	try {
-		const res = await fetch(endpoint);
-		if (!res.ok) {
-			console.log(color.red(`❌ ${endpoint} returned HTTP ${res.status}.`));
-			process.exit(1);
-			return;
-		}
-		body = (await res.json()) as { nodes?: NodeEntry[]; count?: number };
-	} catch (err) {
-		console.log(
-			color.red(
-				`❌ Could not reach ${color.cyan(endpoint)} — is the Blok server running? ` +
-					`Pass --url <baseUrl> to point elsewhere. (${(err as Error).message})`,
-			),
-		);
+	const nodes = await fetchCatalog(opts.url as string | undefined);
+	if (nodes === null) {
 		process.exit(1);
 		return;
 	}
-
-	const nodes = body.nodes ?? [];
 
 	if (opts.json === true) {
 		console.log(JSON.stringify(nodes, null, 2));
