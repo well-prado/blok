@@ -16,6 +16,12 @@
 /** One node in the catalog. */
 export interface NodeCatalogEntry {
 	name: string;
+	/**
+	 * The exact resolvable string an author puts in a step's `use:`.
+	 * Module nodes → the registry Map key (e.g. "@blokjs/api-call", NOT the
+	 * display `name`). Runtime nodes → "runtime.<kind>:<name>" (per inferStepType).
+	 */
+	ref: string;
 	/** "module" for in-process nodes, "runtime.<kind>" for SDK runtimes. */
 	runtime: string;
 	description?: string;
@@ -87,6 +93,7 @@ export async function buildNodeCatalog(
 			const r = reflectModuleNode(node);
 			out.push({
 				name: r.name ?? key,
+				ref: key, // the registry key is the resolvable `use` ref, not the display name
 				runtime: "module",
 				description: r.description,
 				inputSchema: r.inputSchema,
@@ -103,6 +110,7 @@ export async function buildNodeCatalog(
 			for (const n of nodes) {
 				out.push({
 					name: n.name,
+					ref: `runtime.${kind}:${n.name}`, // resolvable `use` ref per inferStepType
 					runtime: `runtime.${kind}`,
 					description: n.description,
 					inputSchema: n.inputSchema,

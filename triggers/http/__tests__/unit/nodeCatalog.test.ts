@@ -72,6 +72,36 @@ describe("buildNodeCatalog (SPEC-B P1.3)", () => {
 		expect(py?.outputSchema).toBeNull();
 	});
 
+	it("exposes the resolvable `use` ref per kind: module=Map key, runtime=runtime.<kind>:<name>", async () => {
+		const moduleNodes = new Map<string, unknown>([
+			// name === key
+			["@blokjs/api-call", fnNode("@blokjs/api-call", "api call")],
+			// name !== key: the registry key is what an author types in `use:`, NOT the display name
+			["@blokjs/respond", { name: "Respond", getSchemas: () => ({ input: {}, output: {} }) }],
+			// empty schema (null) still gets a ref
+			["@x/bare", { name: "@x/bare" }],
+		]);
+		const runtimes = [
+			{
+				kind: "python3",
+				adapter: { listNodes: async () => [{ name: "search", inputSchema: null, outputSchema: null }] },
+			},
+		];
+
+		const catalog = await buildNodeCatalog(moduleNodes, runtimes);
+
+		// module, name === key
+		expect(catalog.find((n) => n.name === "@blokjs/api-call")?.ref).toBe("@blokjs/api-call");
+		// module, name !== key → ref is the resolvable key, not the display name
+		const respond = catalog.find((n) => n.name === "Respond");
+		expect(respond?.ref).toBe("@blokjs/respond");
+		expect(respond?.ref).not.toBe(respond?.name);
+		// module with empty/null schema still carries a ref
+		expect(catalog.find((n) => n.name === "@x/bare")?.ref).toBe("@x/bare");
+		// runtime node → runtime.<kind>:<name>
+		expect(catalog.find((n) => n.name === "search")?.ref).toBe("runtime.python3:search");
+	});
+
 	it("skips an unreachable runtime (listNodes rejects) without failing the catalog", async () => {
 		const runtimes = [
 			{ kind: "rust", adapter: { listNodes: async () => Promise.reject(new Error("connection refused")) } },
