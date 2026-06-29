@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { promises as fsp } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NodeEntry } from "./listNodes.js";
-import { generateRuntimeStubs, jsonSchemaToTs } from "./syncNodes.js";
+import { diffStubs, generateRuntimeStubs, jsonSchemaToTs } from "./syncNodes.js";
 
 describe("jsonSchemaToTs", () => {
 	it("degrades null / empty / unknown schema to unknown", () => {
@@ -70,5 +73,45 @@ describe("generateRuntimeStubs", () => {
 		expect(go).toContain('runtimeNode<unknown, unknown>("do-thing", "runtime.go:do-thing")');
 		// second node camelCases to the same `doThing` → suffixed
 		expect(go).toMatch(/export const doThing2 = runtimeNode<unknown, unknown>\("do\.thing"/);
+	});
+});
+
+describe("diffStubs (--check)", () => {
+	const fixture: NodeEntry[] = [
+		{ name: "ask", ref: "runtime.python3:ask", runtime: "runtime.python3", inputSchema: null, outputSchema: null },
+		{ name: "fast", ref: "runtime.rust:fast", runtime: "runtime.rust", inputSchema: null, outputSchema: null },
+	];
+
+	let outDir: string;
+	beforeEach(async () => {
+		outDir = await fsp.mkdtemp(path.join(tmpdir(), "blok-sync-check-"));
+	});
+	afterEach(async () => {
+		await fsp.rm(outDir, { recursive: true, force: true });
+	});
+
+	it("(a) reports no drift when on-disk stubs match generated", async () => {
+		const files = generateRuntimeStubs(fixture);
+		for (const [filename, source] of files) {
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+		expect(await diffStubs(files, outDir)).toEqual([]);
+	});
+
+	it("(b) reports drift for a stale on-disk stub", async () => {
+		const files = generateRuntimeStubs(fixture);
+		for (const [filename, source] of files) {
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+		// author edited a runtime struct but forgot to re-sync → on-disk file is stale
+		await fsp.writeFile(path.join(outDir, "runtime.python3.ts"), "// stale hand-edit\n", "utf8");
+		expect(await diffStubs(files, outDir)).toEqual(["runtime.python3.ts"]);
+	});
+
+	it("(c) reports drift for a missing on-disk file", async () => {
+		const files = generateRuntimeStubs(fixture);
+		// write only one of the two expected files → the other is missing
+		await fsp.writeFile(path.join(outDir, "runtime.rust.ts"), files.get("runtime.rust.ts") ?? "", "utf8");
+		expect(await diffStubs(files, outDir)).toEqual(["runtime.python3.ts"]);
 	});
 });
