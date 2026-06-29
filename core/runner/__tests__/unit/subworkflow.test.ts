@@ -57,6 +57,25 @@ describe("subworkflow()", () => {
 		expect(step.as).toBe("notification");
 	});
 
+	it("lowers a handle-valued idempotencyKey option without touching subworkflow allowList", async () => {
+		const wf = await workflowCallback(
+			"cached-router",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: HttpEntry) => {
+				subworkflow(
+					"dispatch",
+					req.body.kind,
+					{ event: req.body },
+					{ allowList: ["handler.a"], idempotencyKey: req.body.requestId },
+				);
+			},
+		);
+		const step = (wf._config.steps as unknown as Step[])[0];
+		expect(step.subworkflow).toBe("js/ctx.request.body.kind");
+		expect(step.idempotencyKey).toBe("js/ctx.request.body.requestId");
+		expect(step.allowList).toEqual(["handler.a"]);
+	});
+
 	it("throws on a duplicate step id (shared with step()/branch()'s flat id space)", async () => {
 		await expect(
 			workflowCallback("dup", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {

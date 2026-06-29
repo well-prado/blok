@@ -217,6 +217,7 @@ export function workflow<
 	// Compile $ proxy expressions into js/ strings BEFORE schema validation
 	// (the schema sees only strings; proxies would fail z.string().min(1)).
 	const compiledSteps = unwrapProxies(opts.steps) as V2Step[];
+	const compiledTrigger = unwrapProxies(opts.trigger ?? {}) as Record<string, unknown>;
 
 	// A workflow with no steps does nothing. `WorkflowV2Schema.steps` declares
 	// `.min(1)`, but the factory validates steps per-element (a no-op on `[]`)
@@ -241,7 +242,7 @@ export function workflow<
 
 	// Per-kind trigger validation. Mirrors what `Trigger.addTrigger` does
 	// in the v1 builder so v2 authors get the same error messages.
-	const triggerKeys = Object.keys(opts.trigger ?? {});
+	const triggerKeys = Object.keys(compiledTrigger);
 	// A middleware-only workflow may omit a trigger — it's invoked from another
 	// workflow's `middleware: [...]` chain, not via a public route. Matches
 	// `WorkflowV2Schema`, which already makes `trigger` optional for middleware.
@@ -256,7 +257,7 @@ export function workflow<
 				`workflow("${opts.name}") trigger kind "${kind}" is not recognized. Allowed: http, pubsub, worker, cron, webhook, sse, websocket, mcp, grpc, manual.`,
 			);
 		}
-		validatedTrigger[kind] = validateTriggerConfig(parsedKind.data, (opts.trigger as Record<string, unknown>)[kind]);
+		validatedTrigger[kind] = validateTriggerConfig(parsedKind.data, compiledTrigger[kind]);
 	}
 
 	// Typed streaming (P3.3): when a workflow declares an `events` vocabulary,

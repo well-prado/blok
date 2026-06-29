@@ -27,6 +27,7 @@ import { type Context, lowerRefs, mapper } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
+import { resolveIdempotencyKey } from "../../src/idempotency/resolveIdempotencyKey";
 import {
 	type CronEntry,
 	type GrpcEntry,
@@ -104,6 +105,14 @@ const echoUrl = defineNode({
 	execute: (_ctx, input) => ({ url: input.url }),
 });
 
+const requestInfo = defineNode({
+	name: "request-info",
+	description: "extract request metadata",
+	input: z.object({ id: z.string() }),
+	output: z.object({ requestId: z.string() }),
+	execute: (_ctx, input) => ({ requestId: input.id }),
+});
+
 describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs → Mapper", () => {
 	it("emits structural {$ref} in step inputs and resolves the chain end-to-end", async () => {
 		const wf = await workflowCallback(
@@ -164,6 +173,25 @@ describe("handle-DSL e2e: callback workflow() + step() → {$ref} → lowerRefs 
 				step("a", shout, { message: "y" });
 			}),
 		).rejects.toThrow(/Duplicate step id "a"/);
+	});
+
+	it("lowers a handle-valued idempotencyKey to the fail-open resolver string", async () => {
+		const wf = await workflowCallback(
+			"Handle Idempotency",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				const request = step("request", requestInfo, { id: req.body.requestId });
+				step("work", greet, { name: "ada" }, { idempotencyKey: request.requestId });
+			},
+		);
+
+		const steps = wf._config.steps as Array<{ id: string; idempotencyKey?: string }>;
+		expect(steps[1].idempotencyKey).toBe("js/ctx.state.request.requestId");
+
+		const ctx = createTriggerCtx({});
+		expect(resolveIdempotencyKey(steps[1].idempotencyKey, ctx)).toBeNull();
+		(ctx.state as Record<string, unknown>).request = { requestId: "req-42" };
+		expect(resolveIdempotencyKey(steps[1].idempotencyKey, ctx)).toBe("req-42");
 	});
 
 	it("tpl: captures {$tpl} with a {$ref} segment, lowers to a js/`…` literal, resolves through the REAL Mapper", async () => {

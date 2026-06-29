@@ -199,6 +199,27 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		expect(result.ctx).toBeDefined();
 	});
 
+	it("fails open when concurrencyKey references state only a later step could create", async () => {
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "js/ctx.state.after.tenantId", concurrencyLimit: 1 },
+		});
+
+		const tracker = RunTracker.getInstance();
+		await tracker.acquireConcurrencySlot("test-wf", "tenant-after", 1, "holder", Date.now() + 60_000);
+
+		const ctx = makeCtx();
+		(ctx as unknown as { state: Record<string, unknown> }).state = {};
+		const result = await t.run(ctx);
+		expect(result.ctx).toBeDefined();
+
+		const throttled = tracker
+			.getStore()
+			.getRuns({ status: "throttled" })
+			.runs.find((r) => r.workflowName === "test-wf");
+		expect(throttled).toBeUndefined();
+	});
+
 	it("releases the slot when a step error propagates out of runner.run", async () => {
 		// Subclass that throws during run to verify the finally still releases.
 		class ExplodingTrigger extends TestTrigger {

@@ -115,6 +115,24 @@ describe("v2 DSL — workflow() factory", () => {
 		expect(step.inputs.who).toBe("js/ctx.req.params.id");
 	});
 
+	it("compiles $ proxy expressions in trigger concurrencyKey before trigger validation", () => {
+		const wf = workflow({
+			name: "Gated",
+			version: "1.0.0",
+			trigger: {
+				http: {
+					method: "POST",
+					concurrencyKey: $.req.body.tenantId as unknown as string,
+					concurrencyLimit: 2,
+				},
+			},
+			steps: [{ id: "echo", use: "@blokjs/respond", inputs: { body: "ok" } }],
+		});
+		const http = wf._config.trigger?.http as { concurrencyKey: string; concurrencyLimit: number };
+		expect(http.concurrencyKey).toBe("js/ctx.req.body.tenantId");
+		expect(http.concurrencyLimit).toBe(2);
+	});
+
 	it("rejects steps missing id or use", () => {
 		expect(() =>
 			workflow({
@@ -488,6 +506,24 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 		const step = wf._config.steps[0] as { inputs: Record<string, unknown> };
 		expect(step.inputs.to).toBe("js/ctx.req.body.email");
 		expect(step.inputs.subject).toBe("js/ctx.state.subject");
+	});
+
+	it("compiles a $ proxy polymorphic subworkflow name and keeps allowList", () => {
+		const wf = workflow({
+			name: "Router",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "dispatch",
+					subworkflow: $.req.body.kind as unknown as string,
+					allowList: ["handler.payment"],
+				},
+			],
+		});
+		const step = wf._config.steps[0] as { subworkflow: string; allowList: string[] };
+		expect(step.subworkflow).toBe("js/ctx.req.body.kind");
+		expect(step.allowList).toEqual(["handler.payment"]);
 	});
 
 	it("threads idempotencyKey + retry onto a sub-workflow step", () => {
