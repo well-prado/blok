@@ -47,9 +47,6 @@ const IF_ELSE_NODE_REF = "@blokjs/if-else";
 
 let _wildcardWarnedFiles = new Set<string>();
 
-type WorkflowDslMode = "v1" | "v2";
-type StepDslMode = WorkflowDslMode | "unknown";
-
 interface RetryConfig {
 	maxAttempts: number;
 	minTimeoutInMs?: number;
@@ -186,8 +183,6 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		// Legacy builder shape — same unwrap.
 		wf = wf._config as Record<string, unknown>;
 	}
-
-	assertWorkflowDslMode(wf, sourcePath);
 
 	// `set_var` removed in v0.5. Reject at load time with a migration hint
 	// — silently dropping the field would produce subtly different runtime
@@ -1096,95 +1091,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function pickString(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function assertWorkflowDslMode(wf: Record<string, unknown>, sourcePath?: string): void {
-	const steps = Array.isArray(wf.steps) ? (wf.steps as unknown[]) : [];
-	const explicitMode = explicitWorkflowMode(wf, sourcePath);
-	const hasNodesMap = isPlainObject(wf.nodes);
-
-	if (explicitMode === "v2" && hasNodesMap) {
-		throwMixedMode('`schemaVersion: "2"` workflows must not carry the legacy top-level `nodes{}` map', sourcePath);
-	}
-
-	const seen = new Map<WorkflowDslMode, string>();
-	collectStepDslModes(steps, "steps", (mode, stepPath) => {
-		if (explicitMode && mode !== explicitMode) {
-			throwMixedMode(`found a ${mode} step at ${stepPath} inside an explicit ${explicitMode} workflow`, sourcePath);
-		}
-		if (!explicitMode && hasNodesMap && mode === "v2") {
-			throwMixedMode(
-				`found a v2 step at ${stepPath} in a workflow that still has a legacy top-level \`nodes{}\` map`,
-				sourcePath,
-			);
-		}
-		const firstPath = seen.get(mode);
-		if (!explicitMode && firstPath === undefined) seen.set(mode, stepPath);
-	});
-
-	if (!explicitMode && seen.has("v1") && seen.has("v2")) {
-		throwMixedMode(
-			`found both v1 steps (first at ${seen.get("v1")}) and v2/handle steps (first at ${seen.get("v2")})`,
-			sourcePath,
-		);
-	}
-}
-
-function explicitWorkflowMode(wf: Record<string, unknown>, sourcePath?: string): WorkflowDslMode | undefined {
-	if (wf.schemaVersion === undefined) return undefined;
-	if (wf.schemaVersion === "2") return "v2";
-	const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
-	throw new Error(
-		`[blok] WorkflowNormalizer: unsupported schemaVersion ${JSON.stringify(wf.schemaVersion)}. This runner supports schemaVersion "2"; remove the field for legacy v1 workflows or migrate the file.${suffix}`,
-	);
-}
-
-function collectStepDslModes(
-	steps: unknown[],
-	path: string,
-	visit: (mode: WorkflowDslMode, stepPath: string) => void,
-): void {
-	for (let i = 0; i < steps.length; i++) {
-		const raw = steps[i];
-		if (!isPlainObject(raw)) continue;
-		const step = raw as Record<string, unknown>;
-		const stepPath = `${path}[${i}]`;
-		const mode = stepDslMode(step, stepPath);
-		if (mode !== "unknown") visit(mode, stepPath);
-		for (const block of childStepBlocks(step, stepPath)) {
-			collectStepDslModes(block.steps, block.path, visit);
-		}
-	}
-}
-
-function stepDslMode(step: Record<string, unknown>, stepPath: string): StepDslMode {
-	const hasV1 = step.name !== undefined || step.node !== undefined;
-	const hasV2 =
-		step.id !== undefined ||
-		step.use !== undefined ||
-		isPlainObject(step.branch) ||
-		isPlainObject(step.forEach) ||
-		isPlainObject(step.loop) ||
-		isPlainObject(step.switch) ||
-		isPlainObject(step.tryCatch) ||
-		isPlainObject(step.wait) ||
-		(typeof step.subworkflow === "string" && step.node === undefined);
-
-	if (hasV1 && hasV2) {
-		throwMixedMode(
-			`step at ${stepPath} mixes legacy \`name/node\` fields with v2/handle \`id/use\` or primitive fields`,
-		);
-	}
-	if (hasV2) return "v2";
-	if (hasV1) return "v1";
-	return "unknown";
-}
-
-function throwMixedMode(reason: string, sourcePath?: string): never {
-	const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
-	throw new Error(
-		`[blok] WorkflowNormalizer: mixed workflow DSLs are not supported: ${reason}. Finish migrating this file to one shape: legacy v1 steps+nodes, or schemaVersion "2" v2/handle steps.${suffix}`,
-	);
 }
 
 /**

@@ -198,7 +198,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 		);
 	});
 
-	it("rejects mixed legacy v1 step names and v2 ids before duplicate-id analysis", () => {
+	it("rejects collisions between legacy v1 step names and v2 ids", () => {
 		expect(() =>
 			normalizeWorkflow(
 				workflow([
@@ -212,7 +212,7 @@ describe("WorkflowNormalizer duplicate step-id guard", () => {
 					},
 				]),
 			),
-		).toThrowError(/mixed workflow DSLs.*v1 steps.*v2\/handle steps/);
+		).toThrowError(/duplicate step id "legacy-run" at steps\[1\]\.branch\.then\[0\]; first seen at steps\[0\]/);
 	});
 
 	it("names deep branch-in-catch-in-forEach paths", () => {
