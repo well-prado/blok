@@ -592,7 +592,7 @@ describe("v2 DSL — branch() primitive", () => {
 			when: $.req.query.kind,
 			then: [{ id: "a", use: "@blokjs/respond", inputs: {} }],
 		});
-		expect(b.branch.when).toBe("js/ctx.req.query.kind");
+		expect(b.branch.when).toBe("ctx.request.query.kind");
 	});
 
 	it("compiles $ proxy expressions inside nested step inputs", () => {

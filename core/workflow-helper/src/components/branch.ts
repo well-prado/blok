@@ -1,24 +1,22 @@
 import { unwrapProxies } from "../proxy/$";
 import type { V2BranchStep, V2Step, V2StepUi } from "../types/StepOpts";
+import { conditionToExpr } from "./eq";
 
 /**
  * Author-facing options for {@link branch}.
  *
  * `when` is evaluated at runtime as a raw JS expression against `ctx`
- * (`ctx.request`, `ctx.state.<id>`, `ctx.response`, …). Prefer {@link eq}
- * for equality — `eq($.req.method, "POST")` emits the correct raw-ctx string.
- *
- * Pitfall: a bare `$` proxy (`$.req.method`) or a `$.`-prefixed string compiles
- * to a `"js/ctx.…"` form that the condition evaluator does NOT resolve — the
- * branch then mis-evaluates. Use `eq()` (or a hand-written `ctx.*` string).
+ * (`ctx.request`, `ctx.state.<id>`, `ctx.response`, …). A bare `$` proxy
+ * compiles to a raw truthiness check; use {@link eq} / {@link gt} / friends for
+ * comparisons.
  */
 export interface BranchOpts {
 	/** Stable identifier — visible in traces, referenced as `$.state[id]`. */
 	id: string;
 	/**
 	 * JS condition evaluated against `ctx`. Truthy → run `then`; falsy →
-	 * run `else`. Use {@link eq} (e.g. `eq($.req.method, "POST")`) or a raw
-	 * `ctx.*` expression — NOT a `$` proxy or `$.`-prefixed string.
+	 * run `else`. Use a bare `$` proxy for truthiness, a comparator helper, or a
+	 * raw `ctx.*` expression.
 	 */
 	when: string | unknown;
 	then: V2Step[];
@@ -50,9 +48,8 @@ export interface BranchOpts {
  *   })
  *
  * @example
- *   // For non-equality checks, hand-write a raw ctx expression (truthy →
- *   // `then`). Do NOT pass a $ proxy or `$.`-prefixed string here.
- *   branch({ id: "has-kind", when: "ctx.request.query.kind != null", then: [...] })
+ *   // Truthiness check.
+ *   branch({ id: "has-kind", when: $.req.query.kind, then: [...] })
  */
 export function branch(opts: BranchOpts): V2BranchStep {
 	if (!opts || typeof opts !== "object") {
@@ -61,10 +58,15 @@ export function branch(opts: BranchOpts): V2BranchStep {
 	if (!opts.id || typeof opts.id !== "string") {
 		throw new Error("branch() requires a non-empty `id` string.");
 	}
-	const when = unwrapProxies(opts.when);
+	if (opts.when === undefined || opts.when === null) {
+		throw new Error(
+			`branch("${opts.id}") requires a non-empty \`when\` string. Use a $ proxy path (e.g. $.req.query.kind), a comparator helper, or a raw ctx expression.`,
+		);
+	}
+	const when = conditionToExpr(opts.when);
 	if (typeof when !== "string" || when.length === 0) {
 		throw new Error(
-			`branch("${opts.id}") requires a non-empty \`when\` string. Use a $ proxy path (e.g. $.req.query.kind) or a plain expression (e.g. '$.req.method === "POST"'). For equality comparisons, use a plain string — JavaScript's === operator can't be intercepted by the proxy.`,
+			`branch("${opts.id}") requires a non-empty \`when\` string. Use a $ proxy path (e.g. $.req.query.kind), a comparator helper, or a raw ctx expression.`,
 		);
 	}
 	if (!Array.isArray(opts.then)) {

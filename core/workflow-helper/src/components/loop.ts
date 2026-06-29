@@ -1,5 +1,6 @@
 import { unwrapProxies } from "../proxy/$";
 import type { V2LoopStep, V2Step, V2StepUi } from "../types/StepOpts";
+import { conditionToExpr } from "./eq";
 
 /**
  * Author-facing options for {@link loop}.
@@ -61,7 +62,12 @@ export function loop(opts: LoopOpts): V2LoopStep {
 	if (!opts.id || typeof opts.id !== "string") {
 		throw new Error("loop() requires a non-empty `id` string.");
 	}
-	const whileExpr = unwrapProxies(opts.while);
+	if (opts.while === undefined || opts.while === null) {
+		throw new Error(
+			`loop("${opts.id}") requires a non-empty \`while\` expression. Use a $ proxy path or a plain string expression.`,
+		);
+	}
+	const whileExpr = conditionToExpr(opts.while);
 	if (typeof whileExpr !== "string" || whileExpr.length === 0) {
 		throw new Error(
 			`loop("${opts.id}") requires a non-empty \`while\` expression. Use a $ proxy path or a plain string expression.`,
