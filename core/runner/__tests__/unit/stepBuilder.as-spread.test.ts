@@ -16,6 +16,7 @@ import { type Context, lowerRefs, mapper } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineNode } from "../../src/defineNode";
+import type { RuntimeNode } from "../../src/handles";
 import { type TriggerHandle, step, workflowCallback } from "../../src/stepBuilder";
 import { applyStepOutput } from "../../src/workflow/PersistenceHelper";
 
@@ -146,6 +147,54 @@ describe("#342 spread: per-key sub-handles root at the TOP-LEVEL state key", () 
 		expect(state.load).toBeUndefined(); // spread removes the step root.
 		expect(state.useUser).toEqual({ value: "u-7" });
 		expect(state.useProfile).toEqual({ value: "gold" });
+	});
+
+	it("spreads a typed runtimeNode stub by its manifest-derived output keys", async () => {
+		const runtimeBundle = {
+			kind: "runtimeNode",
+			name: "runtime.bundle",
+			runtime: "python3",
+		} as RuntimeNode<{ id: string }, { user: { name: string }; profile: { tier: string } }>;
+
+		const wf = await workflowCallback(
+			"Runtime Spread Reroot",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				const b = step("load-runtime", runtimeBundle, { id: req.body.id }, { spread: true, type: "runtime.python3" });
+				step("useUser", echo, { value: b.user.name });
+				step("useProfile", echo, { value: b.profile.tier });
+			},
+		);
+		const steps = wf._config.steps as Array<{ type?: string; inputs: Record<string, unknown> }>;
+
+		expect(steps[0].type).toBe("runtime.python3");
+		expect(steps[1].inputs.value).toEqual({ $ref: { step: "user", path: ["name"] } });
+		expect(steps[2].inputs.value).toEqual({ $ref: { step: "profile", path: ["tier"] } });
+		expect(lowerRefs(steps[1].inputs)).toEqual({ value: "js/ctx.state.user.name" });
+		expect(lowerRefs(steps[2].inputs)).toEqual({ value: "js/ctx.state.profile.tier" });
+	});
+
+	it("spread keys collide with existing step ids by writing the top-level state key", async () => {
+		const wf = await workflowCallback(
+			"Spread Collision",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				step("user", loadUser, { id: "seed" });
+				const b = step("load", loadBundle, { id: req.body.id }, { spread: true });
+				step("useUser", echo, { value: b.user.name });
+			},
+		);
+		const steps = wf._config.steps as Array<{ id: string; spread?: boolean; inputs: Record<string, unknown> }>;
+		expect(lowerRefs(steps[2].inputs)).toEqual({ value: "js/ctx.state.user.name" });
+
+		const ctx = createTriggerCtx({ id: "7" });
+		await runStep(ctx, steps[0], loadUser);
+		await runStep(ctx, steps[1], loadBundle);
+		await runStep(ctx, steps[2], echo);
+
+		const state = ctx.state as Record<string, unknown>;
+		expect(state.user).toEqual({ name: "u-7" });
+		expect(state.useUser).toEqual({ value: "u-7" });
 	});
 
 	it("reading a spread handle AS A WHOLE (whole-output ref) throws — only per-key reads are valid", async () => {
