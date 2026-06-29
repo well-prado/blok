@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { promises as fsp } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NodeEntry } from "./listNodes.js";
-import { generateRuntimeStubs, jsonSchemaToTs } from "./syncNodes.js";
+import { generateRuntimeStubs, jsonSchemaToTs, regenRuntimeStubs } from "./syncNodes.js";
 
 describe("jsonSchemaToTs", () => {
 	it("degrades null / empty / unknown schema to unknown", () => {
@@ -70,5 +73,51 @@ describe("generateRuntimeStubs", () => {
 		expect(go).toContain('runtimeNode<unknown, unknown>("do-thing", "runtime.go:do-thing")');
 		// second node camelCases to the same `doThing` → suffixed
 		expect(go).toMatch(/export const doThing2 = runtimeNode<unknown, unknown>\("do\.thing"/);
+	});
+});
+
+describe("regenRuntimeStubs (blokctl dev hook)", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	const catalog: NodeEntry[] = [
+		{ name: "ask", ref: "runtime.python3:ask", runtime: "runtime.python3", inputSchema: null, outputSchema: null },
+		// module node → excluded, so only one runtime file is written
+		{ name: "@blokjs/respond", ref: "@blokjs/respond", runtime: "module", inputSchema: null, outputSchema: null },
+	];
+
+	function stubFetch(impl: () => Promise<Response> | Response) {
+		vi.stubGlobal("fetch", vi.fn(impl));
+	}
+
+	it("fetches the live catalog and writes one stub file per runtime kind", async () => {
+		stubFetch(() => new Response(JSON.stringify({ nodes: catalog }), { status: 200 }));
+		const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), "blok-regen-"));
+
+		const count = await regenRuntimeStubs("http://localhost:4000", outDir);
+
+		expect(count).toBe(1);
+		const written = (await fsp.readdir(outDir)).sort();
+		expect(written).toEqual(["runtime.python3.ts"]);
+		const src = await fsp.readFile(path.join(outDir, "runtime.python3.ts"), "utf8");
+		expect(src).toContain('runtimeNode<unknown, unknown>("ask", "runtime.python3:ask")');
+	});
+
+	it("returns 0 and writes nothing when the catalog has only module nodes", async () => {
+		stubFetch(() => new Response(JSON.stringify({ nodes: [catalog[1]] }), { status: 200 }));
+		const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), "blok-regen-"));
+
+		const count = await regenRuntimeStubs("http://localhost:4000", outDir);
+
+		expect(count).toBe(0);
+		await expect(fsp.readdir(outDir)).resolves.toEqual([]);
+	});
+
+	it("throws when the server is unreachable (caller decides failure policy)", async () => {
+		stubFetch(() => {
+			throw new Error("ECONNREFUSED");
+		});
+		const outDir = await fsp.mkdtemp(path.join(os.tmpdir(), "blok-regen-"));
+
+		await expect(regenRuntimeStubs("http://localhost:4000", outDir)).rejects.toThrow("catalog fetch failed");
 	});
 });
