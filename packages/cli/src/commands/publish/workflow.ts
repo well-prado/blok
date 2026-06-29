@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as p from "@clack/prompts";
 
+import { validateWorkflow } from "@blokjs/helper";
 import { Command, type OptionValues, trackCommandExecution } from "../../services/commander.js";
 import { BLOK_URL } from "../../services/constants.js";
 import { tokenManager } from "../../services/local-token-manager.js";
@@ -94,7 +95,23 @@ async function loadWorkflowFiles(directory: string): Promise<{ label: string; va
 		});
 }
 
+/**
+ * #385 — the JSON IR is the registry's publish/install unit, so it must be a
+ * valid workflow before it ships. `validateWorkflow` is advisory about v1-vs-v2
+ * (both are accepted), but a malformed / not-a-workflow object is a HARD reject:
+ * the client-side admission gate (the registry mirrors this server-side).
+ * Throws a clear, path-prefixed error listing every problem; otherwise returns.
+ */
+export function assertPublishableWorkflow(workflow: unknown, name: string): void {
+	const result = validateWorkflow(workflow);
+	if (result.ok) return;
+	const details = result.errors.map((e) => `  • ${e.path ? `${e.path}: ` : ""}${e.message}`).join("\n");
+	throw new Error(`Workflow "${name}" failed validation — not published:\n${details}`);
+}
+
 async function publishWorkflow(token: string, workflow: Record<string, unknown>, name: string) {
+	assertPublishableWorkflow(workflow, name);
+
 	const response = await fetch(`${BLOK_URL}/publish-workflow`, {
 		method: "POST",
 		headers: {
