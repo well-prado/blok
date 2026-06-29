@@ -11,13 +11,9 @@
 	},
 	"steps": [
 		{
-			"name": "get-countries-api",
-			"node": "@blokjs/api-call",
-			"type": "module"
-		}
-	],
-	"nodes": {
-		"get-countries-api": {
+			"id": "get-countries-api",
+			"use": "@blokjs/api-call",
+			"type": "module",
 			"inputs": {
 				"url": "https://countriesnow.space/api/v0.1/countries/capital",
 				"method": "GET",
@@ -27,5 +23,5 @@
 				"responseType": "application/json"
 			}
 		}
-	}
+	]
 }
