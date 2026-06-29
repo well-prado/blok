@@ -332,6 +332,38 @@ The lifecycle per call:
   </Step>
 </Steps>
 
+## The `call` handle
+
+The build callback's argument is the **entry handle**, named `call`. The
+tool's `arguments` (or `{}` for a resource) land at `ctx.request.body`,
+the same `ctx.request` funnel every trigger uses — so `call.body` reads
+the caller's arguments.
+
+| Read | Source |
+|---|---|
+| `call.body` | The call's `arguments` object (tools) / `{}` (resources) |
+| `call.params` | `{}` — MCP calls carry no path params |
+| `call.query` | `{}` |
+| `call.headers["x-user-context"]` | Base64 identity, if the client sent one (see [Identity](#identity)) |
+| `ctx._mcp.userContext` | Parsed `{ userId, email }` or `null` |
+
+### Typed arguments
+
+Same rule as the other null-schema triggers ([webhook](./webhook.mdx) /
+[gRPC](./grpc.mdx) / [manual](./manual.mdx)): **declare a workflow-level
+`input` Zod schema and `call.body` is typed from it; with no `input`,
+`call.body` is `unknown`** (you narrow it yourself). MCP does **double
+duty** with that one schema — it also generates the tool's advertised
+`inputSchema` (see [Generated input schema](#generated-input-schema)
+below).
+
+The schema types the handle for authoring; arguments are **not**
+auto-validated against it on `tools/call` (validate in a step or
+middleware if you need a runtime guarantee). For the **return** side, set
+`BLOK_VALIDATE_WORKFLOW_OUTPUT=true` and the terminal step's result is
+validated against the workflow's `output` Zod schema — a mismatch fails
+the run rather than returning a malformed tool result to the model.
+
 ## Generated input schema
 
 The tool's `inputSchema` is generated from the workflow's `input` Zod

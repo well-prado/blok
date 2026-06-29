@@ -67,6 +67,16 @@ message UserResponse { string id = 1; string name = 2; string email = 3; }
 The response value flows back through the last step's output — the
 workflow's final state populates the gRPC response message.
 
+### Typed request message
+
+Blok can't infer the decoded message shape statically, so the same rule
+the [webhook](./webhook.mdx) / [MCP](./mcp.mdx) / [manual](./manual.mdx)
+triggers use applies: **declare a workflow-level `input` Zod schema and
+`rpc.body` is typed from it; with no `input`, `rpc.body` is `unknown`**
+(you narrow it yourself). The schema types the handle for authoring; it
+is not auto-validated against the inbound message (validate in a step or
+middleware if you need a runtime guarantee).
+
 ## Process model
 
 gRPC triggers spawn a dedicated process bound to the gRPC port. Each

@@ -53,13 +53,30 @@ This fires at 2:00 AM every day in `America/New_York`.
 
 ## The `tick` handle
 
-A tick has no body — only schedule metadata:
+A tick carries no inbound payload, so the entry handle named `tick`
+exposes only schedule metadata — **no `tick.body`** (reading it is a type
+error; there is no slot for it). Like every trigger, `tick` roots at
+`ctx.request`.
 
 | Read | Source |
 |---|---|
+| `tick.params.jobId` | The cron job id for this schedule |
 | `tick.params.schedule` | The configured cron expression |
-| `tick.params.firedAt` | ISO timestamp of the scheduled fire time |
-| `ctx.vars._cron_invocation` | `{schedule, firedAt, executionId}` |
+| `tick.headers["x-cron-schedule"]` | The schedule, also surfaced as a header |
+| `tick.headers["x-cron-timezone"]` | The configured timezone |
+| `tick.headers["x-cron-job-id"]` | The cron job id |
+| `ctx.vars._cron_context` | `{ jobId, scheduledTime, executionTime, schedule, timezone, manual }` — the side-channel (see the Date-vs-ISO note below) |
+
+<Note>
+**Date vs ISO string.** The runner builds a `CronExecutionContext` whose
+`scheduledTime` / `executionTime` are JavaScript **`Date` objects** and
+puts it on `ctx.request.body`. The `tick` handle deliberately omits
+`.body` (a tick is "no payload"), so reach for the side-channel
+`ctx.vars._cron_context` instead — there the two times are **ISO
+strings** (`.toISOString()`), the JSON-safe form. Don't assume the same
+representation on both: `ctx.request.body.scheduledTime` is a `Date`,
+`ctx.vars._cron_context.scheduledTime` is a string.
+</Note>
 
 Build per-schedule context in a first step and read it downstream via its handle:
 
