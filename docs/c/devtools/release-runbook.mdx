@@ -42,6 +42,16 @@ Why: lockstep keeps the surface coherent for users (one tag, one mental model) a
 
 The release script enforces this — it refuses to publish if any cross-package `@blokjs/*` dep range across the workspace doesn't include the target version, OR if the dep isn't using the `workspace:*` protocol (v0.6.0+).
 
+### `@blokjs/core` floats independently (#380)
+
+`@blokjs/core` is the **exception** to lockstep. It is the leaf author barrel — nothing internal depends on it, and it re-exports the engine — so it can ship a new (minor) version on its own without dragging the trigger/node/CLI surface. The pre-flight is a **hybrid**:
+
+- `checkLockstepVersion` validates one shared version for every package **except** `@blokjs/core`.
+- `checkCrossDepRanges` resolves a dep on `@blokjs/core` against **core's own** version, everything else against the lockstep version — using real caret/tilde semantics, so a trigger pinning `@blokjs/core@^1.1.0` accepts a floated `1.2.0` but **fails** a `2.0.0` major drift.
+- `checkCliConstants` requires the scaffold's `BLOKJS_DEP_RANGE` to admit **both** the lockstep version and core's version (a fresh project pins both).
+
+To float core: bump only `core/core/package.json`, keep the rest lockstepped, and re-run `bun run release --dry-run` — it prints `Floating: @blokjs/core @ <version>`. The pure pre-flight functions live in `scripts/release-preflight.ts` and are unit-tested in `packages/cli/tests/release-preflight.test.ts` (no npm/git needed). Floating core across a **major** requires bumping the scaffold's `GITHUB_REPO_RELEASE_TAG`/`BLOKJS_DEP_RANGE` too, or pre-flight blocks the publish.
+
 ## Normal flow — per-PR changesets
 
 Most releases follow the changesets workflow:

@@ -16,6 +16,14 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+	type Failure,
+	type MinimalPkg,
+	checkCliConstants,
+	checkCrossDepRanges,
+	checkLockstepVersion,
+	floatingVersions,
+} from "./release-preflight";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -88,11 +96,6 @@ interface CliFlags {
 	help: boolean;
 }
 
-interface Failure {
-	category: string;
-	detail: string;
-}
-
 const HELP = `Usage: bun run release [flags]
 
 Publishes the 18 Blok public packages to npm in dependency order using a
@@ -139,24 +142,6 @@ function readPkg(relDir: string): PackageJson {
 	return JSON.parse(raw) as unknown as PackageJson;
 }
 
-function checkLockstepVersion(packages: readonly { dir: string; pkg: PackageJson }[]): {
-	failures: Failure[];
-	version: string | null;
-} {
-	const versions = new Set(packages.map((p) => p.pkg.version));
-	if (versions.size === 0) {
-		return { failures: [{ category: "version", detail: "no packages parsed" }], version: null };
-	}
-	if (versions.size > 1) {
-		const list = packages.map((p) => `${p.pkg.name}=${p.pkg.version}`).join(", ");
-		return {
-			failures: [{ category: "version", detail: `lockstep violated: ${list}` }],
-			version: null,
-		};
-	}
-	return { failures: [], version: [...versions][0] ?? null };
-}
-
 function findAllPackageJsons(): string[] {
 	const result = spawnSync(
 		"find",
@@ -186,79 +171,23 @@ function findAllPackageJsons(): string[] {
 	return result.stdout.trim().split("\n").filter(Boolean);
 }
 
-function rangeIncludesVersion(range: string, version: string): boolean {
-	const m = range.match(/^[\^~]?(\d+)\.(\d+)\.(\d+)/);
-	if (!m) return false;
-	const v = version.match(/^(\d+)\.(\d+)\.(\d+)/);
-	if (!v) return false;
-	return m[1] === v[1] && m[2] === v[2] && m[3] === v[3];
-}
-
-function checkCrossDepRanges(version: string, publishedNames: readonly string[]): Failure[] {
-	const failures: Failure[] = [];
-	const allPkgs = findAllPackageJsons();
-	for (const rel of allPkgs) {
-		const path = join(REPO_ROOT, rel);
-		let pkg: PackageJson;
+/** Read + parse every in-repo package.json for the cross-dep check (the pure check lives in release-preflight.ts). */
+function readAllPackageJsons(): { rel: string; pkg: MinimalPkg }[] {
+	const out: { rel: string; pkg: MinimalPkg }[] = [];
+	for (const rel of findAllPackageJsons()) {
 		try {
-			pkg = JSON.parse(readFileSync(path, "utf-8")) as unknown as PackageJson;
+			out.push({ rel, pkg: JSON.parse(readFileSync(join(REPO_ROOT, rel), "utf-8")) as MinimalPkg });
 		} catch {
-			continue;
-		}
-		const sections: Record<string, Record<string, string> | undefined> = {
-			dependencies: pkg.dependencies,
-			devDependencies: pkg.devDependencies,
-			peerDependencies: pkg.peerDependencies,
-		};
-		for (const [section, deps] of Object.entries(sections)) {
-			if (!deps) continue;
-			for (const [name, range] of Object.entries(deps)) {
-				if (!publishedNames.includes(name)) continue;
-				if (range === "workspace:*" || range === "*") continue;
-				if (!rangeIncludesVersion(range, version)) {
-					failures.push({
-						category: "cross-dep",
-						detail: `${rel}:${section}: ${name} has range "${range}" but workspace is at ${version}`,
-					});
-				}
-			}
+			// Unparseable package.json — skip (matches prior behavior).
 		}
 	}
-	return failures;
+	return out;
 }
 
-function checkCliConstants(version: string): Failure[] {
-	const failures: Failure[] = [];
+/** Read the CLI scaffold source `checkCliConstants` parses (so the check stays pure + testable). */
+function readProjectScaffoldSrc(): string | null {
 	const path = join(REPO_ROOT, "packages/cli/src/commands/create/project.ts");
-	if (!existsSync(path)) {
-		return [{ category: "cli-constants", detail: `missing ${path}` }];
-	}
-	const src = readFileSync(path, "utf-8");
-	const tagMatch = src.match(/GITHUB_REPO_RELEASE_TAG\s*=\s*"(v[^"]+)"/);
-	if (!tagMatch) {
-		failures.push({
-			category: "cli-constants",
-			detail: "GITHUB_REPO_RELEASE_TAG not found in project.ts",
-		});
-	} else if (tagMatch[1] !== `v${version}`) {
-		failures.push({
-			category: "cli-constants",
-			detail: `GITHUB_REPO_RELEASE_TAG="${tagMatch[1]}" but workspace is v${version}`,
-		});
-	}
-	const rangeMatch = src.match(/BLOKJS_DEP_RANGE\s*=\s*"(\^[^"]+)"/);
-	if (!rangeMatch) {
-		failures.push({
-			category: "cli-constants",
-			detail: "BLOKJS_DEP_RANGE not found in project.ts",
-		});
-	} else if (!rangeIncludesVersion(rangeMatch[1], version)) {
-		failures.push({
-			category: "cli-constants",
-			detail: `BLOKJS_DEP_RANGE="${rangeMatch[1]}" does not include ${version}`,
-		});
-	}
-	return failures;
+	return existsSync(path) ? readFileSync(path, "utf-8") : null;
 }
 
 function checkGitTag(version: string): Failure[] {
@@ -388,7 +317,8 @@ async function main(): Promise<void> {
 	console.log("Pre-flight checks...\n");
 	const failures: Failure[] = [];
 
-	const { failures: lsFailures, version } = checkLockstepVersion(packages);
+	const allPkgs = packages.map((p) => p.pkg);
+	const { failures: lsFailures, version } = checkLockstepVersion(allPkgs);
 	failures.push(...lsFailures);
 	if (!version) {
 		reportFailures(failures);
@@ -396,8 +326,12 @@ async function main(): Promise<void> {
 	}
 	console.log(`  [OK] Lockstep version: ${version}`);
 
+	// #380 — @blokjs/core floats independently of the lockstep surface.
+	const floating = floatingVersions(allPkgs);
+	for (const [name, v] of floating) console.log(`  [OK] Floating: ${name} @ ${v}`);
+
 	const publishedNames = PUBLISHABLE.map((p) => p.name);
-	const crossDepFailures = checkCrossDepRanges(version, publishedNames);
+	const crossDepFailures = checkCrossDepRanges(version, floating, publishedNames, readAllPackageJsons());
 	failures.push(...crossDepFailures);
 	console.log(
 		crossDepFailures.length === 0
@@ -405,7 +339,11 @@ async function main(): Promise<void> {
 			: `  [FAIL] Cross-package dep ranges: ${crossDepFailures.length} mismatch(es)`,
 	);
 
-	const cliFailures = checkCliConstants(version);
+	const scaffoldSrc = readProjectScaffoldSrc();
+	const cliFailures =
+		scaffoldSrc === null
+			? [{ category: "cli-constants", detail: "missing packages/cli/src/commands/create/project.ts" }]
+			: checkCliConstants(version, floating, scaffoldSrc);
 	failures.push(...cliFailures);
 	console.log(
 		cliFailures.length === 0
@@ -499,7 +437,11 @@ async function main(): Promise<void> {
 	console.log("  cd /tmp && npx blokctl@latest create project --name myapp ...");
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+// Only run when executed directly (`bun run release`), not when imported by a
+// test — the pre-flight logic is exported from ./release-preflight for that.
+if (import.meta.main) {
+	main().catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
+}
