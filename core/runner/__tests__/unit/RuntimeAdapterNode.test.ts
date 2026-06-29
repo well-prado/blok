@@ -557,4 +557,92 @@ describe("RuntimeAdapterNode", () => {
 			expect(state.agent).toEqual({ answer: "done" });
 		});
 	});
+
+	// =========================================================================
+	// #334 — cross-runtime `vars_delta` reachability + correct keying.
+	//
+	// A non-NodeJS SDK node publishes runtime-decided keys via the proto
+	// `vars_delta` field (surfaced on ExecutionResult.vars). RuntimeAdapterNode
+	// merges them into ctx.state by Object.assign (RuntimeAdapterNode.ts:114-116)
+	// BEFORE applyStepOutput runs the step's own default-store. These tests pin
+	// that a vars_delta key lands under the SDK-chosen name, survives alongside
+	// the step's own output, composes with `spread`, and that two runtime nodes
+	// emitting the same key in sequence resolve last-write.
+	// =========================================================================
+	describe("vars_delta merge into state (#334)", () => {
+		const withVars = (data: unknown, vars: Record<string, unknown>): ExecutionResult => ({
+			success: true,
+			data,
+			errors: null,
+			logs: [],
+			metrics: { duration_ms: 1, cpu_ms: 0, memory_bytes: 0, request_bytes: 0, response_bytes: 0 },
+			vars,
+		});
+
+		it("lands a vars_delta key in ctx.state under the SDK-chosen name, readable downstream", async () => {
+			// `foo` is NOT the step id and NOT in the node's data — it exists in
+			// state ONLY because the SDK published it via vars_delta.
+			const adapter = makeUnaryOnlyAdapter(withVars({ ok: true }, { foo: 1 }));
+			const node = new RuntimeAdapterNode(adapter, makeTarget("compute"));
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			const state = ctx.state as Record<string, unknown>;
+			// vars_delta key landed under its own name (NOT nested under the step id).
+			expect(state.foo).toBe(1);
+			// The step's own output still default-stored at state[id], independently.
+			expect(state.compute).toEqual({ ok: true });
+		});
+
+		it("keeps both the vars_delta key AND the spread-merged output keys (spread composition)", async () => {
+			// Edge case from the issue: spread:true on a cross-runtime node merges
+			// result.data keys into state at top level, while vars_delta ALSO merges
+			// its keys. Both land; they don't clobber each other when names differ.
+			const adapter = makeUnaryOnlyAdapter(withVars({ user: "ada", profile: { tier: "pro" } }, { traceId: "t-9" }));
+			const target = makeTarget("load");
+			target.spread = true;
+			const node = new RuntimeAdapterNode(adapter, target);
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			const state = ctx.state as Record<string, unknown>;
+			expect(state.user).toBe("ada");
+			expect(state.profile).toEqual({ tier: "pro" });
+			expect(state.traceId).toBe("t-9");
+			// spread removes the step root — no state.load slot.
+			expect(state.load).toBeUndefined();
+		});
+
+		it("two runtime nodes emitting the same vars_delta key resolve last-write", async () => {
+			const first = new RuntimeAdapterNode(
+				makeUnaryOnlyAdapter(withVars({ ok: 1 }, { shared: "first" })),
+				makeTarget("a"),
+			);
+			const second = new RuntimeAdapterNode(
+				makeUnaryOnlyAdapter(withVars({ ok: 2 }, { shared: "second" })),
+				makeTarget("b"),
+			);
+			const ctx = makeCtx();
+
+			await first.run(ctx);
+			await second.run(ctx);
+
+			// Object.assign is last-write — the second node's value wins.
+			expect((ctx.state as Record<string, unknown>).shared).toBe("second");
+		});
+
+		it("an empty vars_delta ({}) leaves state untouched (no phantom keys)", async () => {
+			const adapter = makeUnaryOnlyAdapter(withVars({ ok: true }, {}));
+			const node = new RuntimeAdapterNode(adapter, makeTarget("compute"));
+			const ctx = makeCtx();
+
+			await node.run(ctx);
+
+			const state = ctx.state as Record<string, unknown>;
+			// Only the step's own default-store slot — no extra keys from {}.
+			expect(Object.keys(state)).toEqual(["compute"]);
+		});
+	});
 });
