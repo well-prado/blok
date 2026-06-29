@@ -1,0 +1,143 @@
+---
+title: "Manual trigger"
+description: "A workflow with no public route — invoked programmatically by code, a test harness, or another workflow. Its typed args entry handle lands at ctx.request.body, like MCP and webhook."
+icon: "hand"
+---
+
+The manual trigger marks a workflow that has **no listener** — no HTTP
+route, no queue subscription, no schedule. It runs only when something
+**invokes it directly**: application code, the test harness, or another
+workflow via a [sub-workflow](/d/composition/sub-workflows) step. Use it
+for shared logic you want addressable by name but never reachable from
+the network.
+
+<Warning>
+The typed `args` entry handle (the author-facing surface this page
+documents) is **shipped**. The programmatic dispatch runtime — a
+`ManualTrigger` / `blokctl invoke` path and a non-null config schema —
+is still an open item ([#434](https://github.com/well-prado/blok/issues/434)).
+Until it lands, invoke a manual workflow through a
+[sub-workflow](/d/composition/sub-workflows) step or the
+`WorkflowTestRunner` test harness (from `@blokjs/runner`). Authoring
+against `args` works today; the standalone invoke surface is in progress.
+</Warning>
+
+## Quickstart
+
+The build callback's argument is the **entry handle** — for a manual
+workflow it's the dispatch arguments, named `args`. The caller-supplied
+args land at `ctx.request.body`, exactly where MCP and webhook put their
+payload, so `args.body` reads them.
+
+```ts src/workflows/recalc-totals.ts
+import { workflow, step } from "@blokjs/core";
+import { z } from "zod";
+import apiCall from "@blokjs/api-call";
+
+export default workflow("recalc-totals", {
+  version: "1.0.0",
+  description: "Recompute order totals. Invoked by code or another workflow.",
+
+  // → types the `args.body` handle (see "Typed args" below)
+  input: z.object({ orderId: z.string() }),
+
+  trigger: { manual: {} },
+}, (args) => {
+  step("recalc", apiCall, {
+    url: "https://internal/orders/recalc",
+    method: "POST",
+    body: { orderId: args.body.orderId },
+  });
+});
+```
+
+Nothing mounts. The workflow is registered by name in the
+[workflow registry](/d/reference/workflow-registry) and waits to be
+called.
+
+## Config fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `manual` | `{}` | An empty config marks the workflow manual. No route, queue, or schedule is mounted. |
+| `middleware` | `string[]` | Per-trigger middleware chain run before the workflow body. |
+
+<Note>
+`manual` currently carries **no validated config schema** — it's a
+placeholder marker. A real schema is part of the open dispatch-runtime
+work ([#434](https://github.com/well-prado/blok/issues/434)); for now keep
+the config block empty.
+</Note>
+
+## The `args` handle
+
+A manual workflow's caller-supplied arguments arrive at
+`ctx.request.body` — the same `ctx.request` funnel every trigger uses, so
+the workflow body looks structurally identical to an HTTP or MCP one.
+
+| Read | Source |
+|---|---|
+| `args.body` | The dispatch arguments object the caller passed |
+| `args.headers` | Caller-supplied headers (empty unless the dispatcher sets them) |
+| `args.params` | Caller-supplied path-style params (empty by default) |
+| `args.query` | Caller-supplied query-style params (empty by default) |
+
+## Typed args
+
+Declare a workflow-level `input` Zod schema and `args.body` is **typed
+from it**; with no `input`, `args.body` is `unknown`. This is the same
+one rule the [webhook](./webhook.mdx), [gRPC](./grpc.mdx), and
+[MCP](./mcp.mdx) triggers follow — declare the schema to get a typed
+entry handle, omit it and reads are `unknown` (you narrow them yourself):
+
+```ts
+// input: z.object({ orderId: z.string() })  → args.body.orderId is string
+// (no input)                                → args.body is unknown
+```
+
+The schema types the handle for authoring; it is **not** auto-validated
+at dispatch. Validate in a step or middleware if you need a runtime
+guarantee.
+
+## How it's invoked
+
+A manual workflow has no listener, so something else dispatches it:
+
+- **Another workflow** — a [sub-workflow](/d/composition/sub-workflows)
+  step (`subworkflow("recalc", "recalc-totals", { orderId })`). The
+  parent step's resolved `inputs` become the child's `ctx.request.body`
+  — i.e. the manual workflow's `args.body`. This works today.
+- **The test harness** — `WorkflowTestRunner` (from `@blokjs/runner`) runs
+  the workflow with a supplied body.
+- **Application code / `blokctl invoke`** — the dedicated programmatic
+  + CLI invoke surface is the open dispatch-runtime item
+  ([#434](https://github.com/well-prado/blok/issues/434)); the recommended
+  shape is in-process invocation by name with an args object, no network
+  hop.
+
+## Composition
+
+Because a manual run goes through the normal runner, the full step-level
+reliability surface composes:
+
+- [`idempotencyKey`](/d/reliability/idempotency) / [`retry`](/d/reliability/retry) / [`maxDuration`](/d/reliability/max-duration) on steps
+- [Sub-workflows](/d/composition/sub-workflows) for further fan-out
+- Studio tracing — every manual run is recorded like any other
+
+Trigger-level scheduling knobs (`delay`, `ttl`, `debounce`,
+`concurrencyKey`) gate *route entry*; a manual workflow has no route, so
+put those concerns on whatever invokes it instead.
+
+## Related
+
+<Columns cols={3}>
+  <Card title="Sub-workflows" icon="git-branch" href="/d/composition/sub-workflows">
+    The canonical way to invoke a manual workflow today.
+  </Card>
+  <Card title="MCP trigger" icon="robot" href="/d/triggers/mcp">
+    Same `input`-types-the-body rule; different invoker (an LLM client).
+  </Card>
+  <Card title="Triggers overview" icon="zap" href="/d/triggers/index">
+    The entry handle for every trigger kind.
+  </Card>
+</Columns>

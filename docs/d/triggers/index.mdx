@@ -27,6 +27,7 @@ scheduling knobs that compose with it.
 | [Cron](./cron.mdx) | own process | Time-based schedules |
 | [PubSub](./pubsub.mdx) | own process | Cloud pub/sub messages (GCP Pub/Sub, AWS SNS+SQS, Azure Service Bus) |
 | [gRPC](./grpc.mdx) | own port | Inbound gRPC requests |
+| [Manual](./manual.mdx) | nothing (no listener) | Direct invocation by code, the test harness, or another workflow |
 
 ## Same-port composition (HTTP + SSE / WS / Webhook / MCP)
 
@@ -82,6 +83,56 @@ shape:
 
 So a workflow body looks structurally identical regardless of trigger
 — only the trigger config block differs.
+
+## The entry handle (`req` / `event` / `tick` / …)
+
+In the [handle-DSL `workflow()`](/d/primitives/handles-and-footguns), the
+build callback's argument is the **entry handle** — a typed, read-only
+projection of the trigger payload. Its **name** is a convention per
+trigger kind; its **type** narrows to the fields that kind actually
+populates. Every entry handle roots at the `@trigger` pseudo-step, which
+lowers to **`ctx.request`** — so `req.body`, `event.body`, `job.body`,
+etc. all resolve through the one `ctx.request` funnel above. This is a
+type-only refinement: the runtime root is identical across kinds.
+
+| Trigger | Handle | Fields it exposes | Lowers through |
+|---|---|---|---|
+| [HTTP](./http.mdx) | `req` | `body`, `params`, `query`, `headers`, `method` | `ctx.request` |
+| [Webhook](./webhook.mdx) | `event` | `body` (verified payload), `params`, `query`, `headers` | `ctx.request` |
+| [Cron](./cron.mdx) | `tick` | `params`, `headers` — **no `body`** (a tick carries no payload) | `ctx.request` |
+| [Worker](./worker.mdx) | `job` | `body` (payload), `params.{queue,jobId,attempt}`, `headers` | `ctx.request` |
+| [PubSub](./pubsub.mdx) | `msg` | `body`, `params.{topic,subscription,messageId,publishTime}`, `headers` | `ctx.request` |
+| [gRPC](./grpc.mdx) | `rpc` | `body` (decoded message), `params`, `query`, `headers` (metadata) | `ctx.request` |
+| [SSE](./sse.mdx) | `conn` | `params`, `query`, `headers` — **read-only, no `body`** | `ctx.request` |
+| [WebSocket](./websocket.mdx) | `conn` | `body` (message), `params`, `headers` — **read-only** | `ctx.request` |
+| [MCP](./mcp.mdx) | `call` | `body` (tool `arguments`; `{}` for a resource), `params`, `query`, `headers` | `ctx.request` |
+| [Manual](./manual.mdx) | `args` | `body` (dispatch args), `params`, `query`, `headers` | `ctx.request` |
+
+You can name the argument anything — the convention names above keep
+workflows readable across a codebase. Each trigger's page documents its
+handle's exact field-by-field source.
+
+### Typing the body (webhook / gRPC / MCP / manual)
+
+For the four triggers whose payload shape Blok can't know statically —
+**webhook**, **gRPC**, **MCP**, **manual** — there is one rule: **declare
+a workflow-level `input` Zod schema and the entry handle's `body` is typed
+from it; omit it and `body` is `unknown`** (you narrow it yourself). The
+schema types the handle for authoring; it is **not** auto-validated at
+dispatch (validate in a step or middleware if you need a runtime
+guarantee). MCP additionally turns the `input` schema into the tool's
+advertised `inputSchema`, and can opt into terminal-output validation with
+`BLOK_VALIDATE_WORKFLOW_OUTPUT=true` against the workflow's `output` Zod —
+see the [MCP trigger](./mcp.mdx#typed-arguments).
+
+### SSE / WebSocket: the `conn` handle is read-only
+
+The SSE and WebSocket entry handle is named `conn` and is **read-only** —
+it surfaces the connection's `params` / `query` / `headers` (WS also the
+inbound `body`), nothing more. **Emit / broadcast / close are helper
+nodes, not methods on `conn`**: `@blokjs/sse-stream` / `@blokjs/sse-emit`
+for SSE, `@blokjs/ws-reply` / `@blokjs/ws-broadcast` / `@blokjs/ws-close`
+for WebSocket. Real-time output stays imperative in those nodes by design.
 
 ## Reliability + scheduling on triggers
 

@@ -120,6 +120,17 @@ internal webhooks — anywhere a partner sends an HMAC-signed body.
 | `ctx.vars._webhook_event_id` | The resolved event id (used as the idempotency cache key) |
 | `ctx.vars._webhook_event_type` | The resolved event type |
 
+### Typed event payload
+
+A provider's event body has no static shape Blok can infer, so the same
+rule the [gRPC](./grpc.mdx) / [MCP](./mcp.mdx) / [manual](./manual.mdx)
+triggers use applies: **declare a workflow-level `input` Zod schema and
+`event.body` is typed from it; with no `input`, `event.body` is
+`unknown`** (you narrow it yourself). The schema types the handle for
+authoring; it is not auto-validated against the verified payload (the
+trigger verifies the *signature*, not the body shape — validate in a step
+or middleware if you need a runtime guarantee).
+
 ## Polymorphic dispatch pattern
 
 The Stripe demo uses one step to handle every event type. The dispatch target is a handle —

@@ -83,7 +83,8 @@
 							"d/triggers/worker",
 							"d/triggers/cron",
 							"d/triggers/pubsub",
-							"d/triggers/grpc"
+							"d/triggers/grpc",
+							"d/triggers/manual"
 						]
 					},
 					{

@@ -46,6 +46,13 @@ ws.onopen = () => ws.send(JSON.stringify({ hello: "world" }));
 
 ## The `conn` handle
 
+The entry handle is named `conn` and is **read-only** — it surfaces the
+inbound message `body` plus the upgrade request's `params` / `headers`,
+and nothing more. **Emitting back is the helper nodes, not a method on
+`conn`**: `@blokjs/ws-reply` (reply to this connection),
+`@blokjs/ws-broadcast` (fan out), `@blokjs/ws-close` (close). Like every
+trigger, `conn` roots at `ctx.request`.
+
 | Read | Source |
 |---|---|
 | `conn.body` | Parsed message body (JSON when possible, raw string otherwise) |

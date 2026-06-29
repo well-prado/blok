@@ -100,7 +100,15 @@ export default workflow("chat-stream", {
 
 Every connected browser subscribes only to its own conversation.
 
-## The connection handle
+## The `conn` handle
+
+The entry handle is named `conn` and is **read-only** — an SSE connection
+carries no inbound body, so `conn` surfaces only the upgrade request's
+`params` / `query` / `headers`. There is **no `conn.body`** and **no emit
+method on the handle**: streaming out is the helper nodes
+(`@blokjs/sse-subscribe` → `@blokjs/sse-stream`, `@blokjs/sse-publish`,
+`@blokjs/sse-emit`), never a method on `conn`. Like every trigger, `conn`
+roots at `ctx.request`.
 
 | Read | Source |
 |---|---|
