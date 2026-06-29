@@ -1,3 +1,11 @@
+/**
+ * @packageDocumentation
+ * @deprecated Prefer `@blokjs/core`. The full engine surface is re-exported from
+ * `@blokjs/core/runtime` (and the light authoring DSL from `@blokjs/core`), so a
+ * project only needs the one package (#374/#378). `@blokjs/runner` stays
+ * published as a back-compat alias — existing imports keep working unchanged —
+ * but new code should import from `@blokjs/core`.
+ */
 import Configuration from "./Configuration";
 import ConfigurationResolver from "./ConfigurationResolver";
 import DefaultLogger from "./DefaultLogger";

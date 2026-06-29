@@ -1,3 +1,13 @@
+/**
+ * @packageDocumentation
+ * @deprecated Prefer `@blokjs/core`. The workflow & node authoring surface is
+ * re-exported from `@blokjs/core` (the light DSL entry), so a project only needs
+ * the one package (#374/#378). `@blokjs/helper` stays published as a back-compat
+ * alias — existing imports keep working unchanged — but new code should import
+ * from `@blokjs/core`. (Not to be confused with `@blokjs/helpers`, the standard
+ * node bag, which is a separate node package and is NOT deprecated.)
+ */
+
 // @blokjs/helper — the workflow & node authoring surface.
 //
 // This entry is intentionally small: the symbols a workflow/node AUTHOR needs.
