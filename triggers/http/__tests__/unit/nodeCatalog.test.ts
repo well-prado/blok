@@ -1,5 +1,6 @@
+import { Configuration, NodeMap } from "@blokjs/runner";
 import { describe, expect, it } from "vitest";
-import { buildNodeCatalog, reflectModuleNode } from "../../src/runner/nodeCatalog";
+import { type NodeCatalogEntry, buildNodeCatalog, reflectModuleNode } from "../../src/runner/nodeCatalog";
 
 /** A defineNode-style node exposing real reflection schemas. */
 function fnNode(name: string, description: string) {
@@ -133,5 +134,108 @@ describe("buildNodeCatalog (SPEC-B P1.3)", () => {
 
 	it("handles no module nodes + no runtimes", async () => {
 		expect(await buildNodeCatalog(undefined, [])).toEqual([]);
+	});
+});
+
+/**
+ * #356 — the catalog `ref` field (shipped #355) must ROUND-TRIP: every entry the
+ * palette offers is resolvable via the SAME resolver chain a workflow step goes
+ * through. Build the catalog from a node Map, then for every `entry.ref` run it
+ * through `Configuration.nodeResolver` → `moduleResolver` / `runtimeResolver`.
+ *
+ * Closes the "auto-discovery reintroduces the hand-file" hole: the catalog IS
+ * the discovery source, so it must be authoritative + resolvable — never lossy.
+ *
+ * Reuses the #352 regression harness pattern: a `TestConfiguration` subclass
+ * exposing the protected `nodeResolver` (which routes `type: "module"` →
+ * `moduleResolver` against `globalOptions.nodes`, and `type: "runtime.*"` →
+ * `runtimeResolver` without touching the in-process map).
+ */
+class TestConfiguration extends Configuration {
+	public resolve(node: { node: string; name: string; type: string }): Promise<unknown> {
+		return (this as unknown as { nodeResolver(n: unknown): Promise<unknown> }).nodeResolver(node);
+	}
+}
+
+/** Map a catalog entry to the step shape the resolver consumes (ref === `use:`). */
+function stepFor(entry: NodeCatalogEntry): { node: string; name: string; type: string } {
+	// inferStepType: "runtime.<kind>:<name>" → type "runtime.<kind>"; else "module".
+	const type = entry.ref.startsWith("runtime.") ? entry.runtime : "module";
+	return { node: entry.ref, name: entry.ref, type };
+}
+
+describe("palette ref round-trips through moduleResolver (#356)", () => {
+	// A node registered under a fully-qualified key whose DISPLAY name diverges
+	// (the lossy shape the old catalog would have emitted). The catalog's `ref`
+	// must be the resolvable key; the display `name` must NOT resolve.
+	const divergent = { name: "api-call", getSchemas: () => ({ input: {}, output: {} }) };
+	const moduleNodes = new Map<string, unknown>([
+		["@blokjs/api-call", divergent], // name "api-call" !== key "@blokjs/api-call"
+		["@blokjs/respond", { name: "Respond", getSchemas: () => ({ input: {}, output: {} }) }],
+		["@x/bare", { name: "@x/bare" }], // null-schema node — still must carry a resolvable ref
+	]);
+	const runtimes = [
+		{
+			kind: "python3",
+			adapter: { listNodes: async () => [{ name: "search", inputSchema: null, outputSchema: null }] },
+		},
+	];
+
+	function buildConfig(nodes: Map<string, unknown>): TestConfiguration {
+		const map = new NodeMap();
+		for (const [key, node] of nodes) {
+			// Register under the catalog key (== ref) — the production keying (#352).
+			map.addNode(key, node as never, { replace: true });
+		}
+		const config = new TestConfiguration();
+		(config as unknown as { globalOptions: unknown }).globalOptions = { nodes: map };
+		return config;
+	}
+
+	it("EVERY catalog ref resolves via the resolver chain (module + runtime)", async () => {
+		const catalog = await buildNodeCatalog(moduleNodes, runtimes);
+		const config = buildConfig(moduleNodes);
+		expect(catalog.length).toBe(4); // 3 module + 1 runtime
+
+		for (const entry of catalog) {
+			const resolved = (await config.resolve(stepFor(entry))) as { node?: string; type?: string };
+			expect(resolved).toBeDefined();
+			// The resolver stamps the step ref back onto the resolved node.
+			expect(resolved.node).toBe(entry.ref);
+		}
+	});
+
+	it("REGRESSION GUARD: the display name as `use` does NOT resolve (proves the lossy form would break)", async () => {
+		const catalog = await buildNodeCatalog(moduleNodes, runtimes);
+		const config = buildConfig(moduleNodes);
+
+		const apiCall = catalog.find((e) => e.name === "api-call");
+		expect(apiCall?.ref).toBe("@blokjs/api-call");
+		expect(apiCall?.ref).not.toBe(apiCall?.name);
+
+		// The ref resolves...
+		await expect(
+			config.resolve({ node: apiCall?.ref as string, name: apiCall?.ref as string, type: "module" }),
+		).resolves.toBeDefined();
+		// ...but the divergent DISPLAY name (what a lossy catalog would have emitted as `use:`) does NOT.
+		await expect(config.resolve({ node: "api-call", name: "api-call", type: "module" })).rejects.toThrow(
+			/Node api-call not found/,
+		);
+	});
+
+	it("runtime ref round-trips through runtimeResolver (no in-process module throw)", async () => {
+		const catalog = await buildNodeCatalog(moduleNodes, runtimes);
+		const config = buildConfig(moduleNodes);
+
+		const runtimeEntry = catalog.find((e) => e.runtime === "runtime.python3");
+		expect(runtimeEntry?.ref).toBe("runtime.python3:search");
+
+		// A runtime ref MUST bypass the module map entirely — resolution succeeds
+		// (builds a RuntimeAdapterNode stub) even though no python3 sidecar is up.
+		// Crucially it never throws "Node runtime.python3:search not found" — that
+		// would prove the catalog handed the palette an unusable ref.
+		const resolved = (await config.resolve(stepFor(runtimeEntry as NodeCatalogEntry))) as { type?: string };
+		expect(resolved).toBeDefined();
+		expect(resolved.type).toBe("runtime.python3");
 	});
 });
