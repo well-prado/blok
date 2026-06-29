@@ -130,16 +130,48 @@ function nodeSize(kind: DagNodeKind): { width: number; height: number } {
 	return { width: NODE_WIDTH, height: NODE_HEIGHT };
 }
 
-function layoutDag(definition: unknown): { nodes: Node[]; edges: Edge[] } {
+/**
+ * Inline-layout pin (#410/#411). A persisted position lives at
+ * `step.ui.{x,y}` and rides through normalization on the raw step
+ * (`copyUi` in WorkflowNormalizer). We pin ONLY nodes that carry a real
+ * `meta.stepId` — synthetic nodes (merge/trigger/end/tryEnter/…) have no
+ * stepId, so they always fall through to dagre auto-layout. A stale ui on
+ * a now-deleted step simply never matches a node, so it's ignored; a
+ * missing/garbage ui degrades to dagre. The returned position is the
+ * top-left in xyflow space (dagre centers, so callers offset by half-size).
+ */
+export function pinnedPosition(node: DagNode): { x: number; y: number } | undefined {
+	if (typeof node.data.meta?.stepId !== "string") return undefined;
+	const raw = node.data.meta.raw;
+	if (typeof raw !== "object" || raw === null) return undefined;
+	const ui = (raw as { ui?: unknown }).ui;
+	if (typeof ui !== "object" || ui === null) return undefined;
+	const { x, y } = ui as { x?: unknown; y?: unknown };
+	if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) {
+		return undefined;
+	}
+	return { x, y };
+}
+
+export function layoutDag(definition: unknown): { nodes: Node[]; edges: Edge[] } {
 	const dag = buildWorkflowDag(definition);
 
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
 	g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 60, acyclicer: "greedy" });
 
+	const pins = new Map<string, { x: number; y: number }>();
 	for (const n of dag.nodes) {
 		const { width, height } = nodeSize(n.data.kind);
-		g.setNode(n.id, { width, height });
+		const pin = pinnedPosition(n);
+		if (pin) {
+			pins.set(n.id, pin);
+			// Seed dagre with the pinned center so neighbouring auto nodes
+			// rank around it instead of stacking at the origin.
+			g.setNode(n.id, { width, height, x: pin.x + width / 2, y: pin.y + height / 2 });
+		} else {
+			g.setNode(n.id, { width, height });
+		}
 	}
 	for (const e of dag.edges) {
 		g.setEdge(e.source, e.target, { weight: e.backEdge ? 0 : 1 });
@@ -147,15 +179,19 @@ function layoutDag(definition: unknown): { nodes: Node[]; edges: Edge[] } {
 	dagre.layout(g);
 
 	const flowNodes: Node[] = dag.nodes.map((n) => {
-		const pos = g.node(n.id) ?? { x: 0, y: 0 };
 		const { width, height } = nodeSize(n.data.kind);
+		const pin = pins.get(n.id);
+		// Pin wins over dagre's computed position so a structural edit
+		// (insert/delete upstream → dagre re-runs) does not snap a
+		// manually-placed node back. Seed-only would still move it.
+		const pos = pin ?? g.node(n.id) ?? { x: 0, y: 0 };
 		// xyflow types Node.data as Record<string, unknown>. DagNodeData
 		// is a closed shape, so we coerce at the boundary — the node
 		// renderers narrow back via `asData` below.
 		return {
 			id: n.id,
 			type: n.data.kind,
-			position: { x: pos.x - width / 2, y: pos.y - height / 2 },
+			position: pin ? { x: pin.x, y: pin.y } : { x: pos.x - width / 2, y: pos.y - height / 2 },
 			data: n.data as unknown as Record<string, unknown>,
 			draggable: false,
 		};
