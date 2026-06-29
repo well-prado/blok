@@ -1,0 +1,15 @@
+import { step } from "@blokjs/core";
+import { chainTest as chainTestCsharp } from "../../nodes-gen/runtime.csharp";
+import { chainTest } from "../../nodes-gen/runtime.go";
+import { chainTest as chainTestJava } from "../../nodes-gen/runtime.java";
+import { chainTest as chainTestPython3 } from "../../nodes-gen/runtime.python3";
+import { chainTest as chainTestRust } from "../../nodes-gen/runtime.rust";
+
+
+export function build() {
+	step("go", chainTest, {}, { type: "runtime.go" });
+	step("rust", chainTestRust, {}, { type: "runtime.rust" });
+	step("java", chainTestJava, {}, { type: "runtime.java" });
+	step("csharp", chainTestCsharp, {}, { type: "runtime.csharp" });
+	step("python", chainTestPython3, {}, { type: "runtime.python3" });
+}

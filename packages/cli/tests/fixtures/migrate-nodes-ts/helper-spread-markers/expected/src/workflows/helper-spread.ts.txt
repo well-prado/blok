@@ -1,0 +1,15 @@
+import { step } from "@blokjs/core";
+import CustomNode from "../nodes/custom";
+import { ExprNode, LogNode, ThrowNode } from "@blokjs/helpers";
+
+
+export function build() {
+	step("expr", ExprNode, { expression: "ctx.request.body.value" });
+	step("log", LogNode, { level: "info" });
+	step("throw", ThrowNode, { message: "boom" });
+	step("custom", CustomNode, {});
+	// blok-migrate: hand-migrate (node resolution)
+	step("dupe", "dupe", {});
+	// blok-migrate: hand-migrate (node resolution)
+	step("missing", "missing-node", {});
+}
