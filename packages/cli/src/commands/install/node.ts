@@ -10,11 +10,6 @@ import { isNonInteractive } from "../../services/non-interactive.js";
 import { manager as pm } from "../../services/package-manager.js";
 import { registryManager } from "../../services/registry-manager.js";
 
-interface NodeModule {
-	importName: string; // e.g., 'awsGetAuthTokenCodeartifact'
-	importPath: string; // e.g., '@local/aws-get-auth-token-codeartifact'
-}
-
 const discoveryNodeRuntime = async (): Promise<string> => {
 	return "npm";
 };
@@ -26,11 +21,6 @@ export async function install(opts: OptionValues) {
 	try {
 		if (!token) throw new Error("Token is invalid.");
 		if (!opts.node) throw new Error("Node name is required.");
-		// validate if node.ts file exists
-		const nodeFilePath = path.resolve(opts.directory, "./src/Nodes.ts");
-		if (!fs.existsSync(nodeFilePath)) {
-			throw new Error("Node.ts file does not exist in the specified directory.");
-		}
 		// Validate if package.json file exists
 		const packageJsonPath = path.resolve(opts.directory, "./package.json");
 		if (!fs.existsSync(packageJsonPath)) {
@@ -85,11 +75,7 @@ export async function install(opts: OptionValues) {
 		if (stdout) p.log.info(stdout);
 		else if (stderr) throw new Error(stderr);
 
-		// Update Node.ts file
-		updateNodeFile(nodeFilePath, {
-			importName: toPascalCase(opts.node),
-			importPath: nodeName,
-		});
+		p.log.warn(nodeInstallHint(toPascalCase(opts.node), nodeName));
 
 		logger.stop("Node installed successfully.");
 	} catch (error) {
@@ -104,52 +90,8 @@ function toPascalCase(input: string): string {
 	return input.replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => chr.toUpperCase()).replace(/^./, (s) => s.toLowerCase());
 }
 
-function updateNodeFile(filePath: string, newModule: NodeModule) {
-	let fileContent = fs.readFileSync(filePath, "utf-8");
-
-	const { importName, importPath } = newModule;
-	const importStatement = `import ${importName} from "${importPath}";`;
-
-	// 1. Add import if not already there
-	if (!fileContent.includes(importStatement)) {
-		const importLines = fileContent.match(/^import .*;$/gm) || [];
-		const lastImport = importLines[importLines.length - 1];
-		fileContent = fileContent.replace(lastImport, `${lastImport}\n${importStatement}`);
-	}
-
-	// 2. Add to nodes object (append to the end)
-	const nodesRegex = /const\s+nodes\s*:\s*\{[^}]+\}\s*=\s*\{([\s\S]*?)\n\};/;
-	const match = fileContent.match(nodesRegex);
-
-	if (!match) throw new Error("Could not find the `nodes` object.");
-
-	const objectBody = match[1].trimEnd();
-	const entryKey = importPath.replace(/^@[^/]+\//, ""); // e.g. 'aws-get-auth-token-codeartifact'
-	const newEntry = `\t"${entryKey}": new ${importName}()`;
-
-	if (objectBody.includes(`"${entryKey}"`)) {
-		p.log.warn(`Node "${entryKey}" is already installed. Skipping...`);
-		return;
-	}
-
-	// Append new entry after removing any trailing comma
-	const lines = objectBody
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => line.trimEnd());
-
-	if (lines.length > 0 && !lines[lines.length - 1].endsWith(",")) {
-		lines[lines.length - 1] += ",";
-	}
-
-	lines.push(newEntry);
-
-	const newObject = `const nodes: {\n\t[key: string]: NodeBase;\n} = {\n${lines.join("\n")}\n};`;
-
-	fileContent = fileContent.replace(nodesRegex, newObject);
-
-	// 3. Write back cleanly
-	fs.writeFileSync(filePath, `${fileContent.trimEnd()}\n`, "utf-8");
+export function nodeInstallHint(importName: string, importPath: string): string {
+	return `Nodes.ts registration is deprecated. Import the node directly in a handle workflow: import ${importName} from "${importPath}"; then use step("id", ${importName}, inputs).`;
 }
 // Login command
 export default new Command()
