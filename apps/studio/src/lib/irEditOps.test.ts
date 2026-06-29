@@ -6,6 +6,7 @@ import {
 	findStepLocation,
 	insertStep,
 	nextId,
+	renameStep,
 	reorderStep,
 	walkSteps,
 } from "./irEditOps";
@@ -374,5 +375,165 @@ describe("10 random edit ops preserve untouched steps (#407 property-style)", ()
 		// deleted ones are gone
 		expect(findStepLocation(ir, "ins-1")).toBeNull();
 		expect(findStepLocation(ir, "ins-2")).toBeNull();
+	});
+});
+
+describe("renameStep — id rewrite + boundary-safe reference propagation (#408/#409)", () => {
+	// Fixture with `old` referenced from a downstream input, a loop publishing
+	// its counter, sibling ids that share a prefix (`old2`, `oldFoo`), a bracket
+	// ref, and a branch.when / loop.while raw condition string.
+	function renameFixture() {
+		return {
+			name: "Rename Fixture",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY", path: "/r" } },
+			steps: [
+				{ id: "old", use: "n", inputs: { url: "https://x" } },
+				{ id: "old2", use: "n", inputs: {} },
+				{ id: "oldFoo", use: "n", inputs: {} },
+				{
+					id: "downstream",
+					use: "n",
+					inputs: {
+						// dot form with trailing path — must become ctx.state.new.field
+						a: "js/ctx.state.old.field",
+						// prefix-only siblings — must be LEFT UNCHANGED
+						b: "js/ctx.state.old2.x",
+						c: "js/ctx.state.oldFoo",
+						// bracket form — must become ctx.state["new"]
+						d: 'js/ctx.state["old"]',
+						// nested object/array deep rewrite
+						nested: { deep: ["js/ctx.state.old.items", "literal"] },
+					},
+				},
+				{
+					id: "the-loop",
+					loop: {
+						while: "ctx.state.old.count > 0",
+						do: [{ id: "loop-inner", use: "n", inputs: { i: "js/ctx.state.theLoopIndex" } }],
+					},
+				},
+				{
+					id: "the-branch",
+					branch: {
+						when: "ctx.state.old.ok === true",
+						then: [{ id: "br-then", use: "n", inputs: {} }],
+					},
+				},
+			],
+		};
+	}
+
+	// (a) downstream input ref ctx.state.old.field → ctx.state.new.field
+	it("propagates a downstream input ref (preserving the trailing path)", () => {
+		const after = renameStep(renameFixture(), "old", "new") as ReturnType<typeof renameFixture>;
+		expect(findStepLocation(after, "old")).toBeNull();
+		expect(findStepLocation(after, "new")).not.toBeNull();
+		const ds = findStepLocation(after, "downstream")?.step as { inputs: Record<string, unknown> };
+		expect(ds.inputs.a).toBe("js/ctx.state.new.field");
+		expect(ds.inputs.d).toBe('js/ctx.state["new"]');
+		expect(ds.inputs.nested).toEqual({ deep: ["js/ctx.state.new.items", "literal"] });
+	});
+
+	// (b) rename a loop step propagates its counter ctx.state.oldIndex → newIndex
+	it("propagates the loop counter <oldId>Index → <newId>Index", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "theLoop", loop: { while: "true", do: [{ id: "inner", use: "n", inputs: {} }] } },
+				{ id: "reader", use: "n", inputs: { i: "js/ctx.state.theLoopIndex" } },
+			],
+		};
+		const after = renameStep(ir, "theLoop", "renamedLoop") as typeof ir;
+		const reader = findStepLocation(after, "reader")?.step as { inputs: { i: string } };
+		expect(reader.inputs.i).toBe("js/ctx.state.renamedLoopIndex");
+	});
+
+	// (c) OVER/UNDER-MATCH guard — prefix siblings left untouched
+	it("leaves prefix-sibling refs (old2, oldFoo) UNCHANGED when renaming `old`", () => {
+		const after = renameStep(renameFixture(), "old", "new") as ReturnType<typeof renameFixture>;
+		const ds = findStepLocation(after, "downstream")?.step as { inputs: Record<string, unknown> };
+		expect(ds.inputs.b).toBe("js/ctx.state.old2.x");
+		expect(ds.inputs.c).toBe("js/ctx.state.oldFoo");
+		// the sibling steps' own ids are untouched too
+		expect(findStepLocation(after, "old2")).not.toBeNull();
+		expect(findStepLocation(after, "oldFoo")).not.toBeNull();
+	});
+
+	// (d) rename inside branch.when / loop.while raw condition strings
+	it("rewrites the ref inside branch.when and loop.while conditions", () => {
+		const after = renameStep(renameFixture(), "old", "new") as ReturnType<typeof renameFixture>;
+		const branch = findStepLocation(after, "the-branch")?.step as { branch: { when: string } };
+		const loop = findStepLocation(after, "the-loop")?.step as { loop: { while: string } };
+		expect(branch.branch.when).toBe("ctx.state.new.ok === true");
+		expect(loop.loop.while).toBe("ctx.state.new.count > 0");
+	});
+
+	// (e) bracket form ctx.state["old"] (covered in (a)); single-quote variant here
+	it("rewrites both single- and double-quote bracket forms", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "old", use: "n", inputs: {} },
+				{ id: "r", use: "n", inputs: { a: "js/ctx.state['old'].x", b: 'js/ctx.state["old"]' } },
+			],
+		};
+		const after = renameStep(ir, "old", "new") as typeof ir;
+		const r = findStepLocation(after, "r")?.step as { inputs: { a: string; b: string } };
+		expect(r.inputs.a).toBe("js/ctx.state['new'].x");
+		expect(r.inputs.b).toBe('js/ctx.state["new"]');
+	});
+
+	// (f) newId collision throws
+	it("throws when newId already exists anywhere in the tree", () => {
+		expect(() => renameStep(renameFixture(), "old", "old2")).toThrow(/already exists/i);
+	});
+
+	it("throws when oldId is not found", () => {
+		expect(() => renameStep(renameFixture(), "nope", "x")).toThrow(/no step with id/i);
+	});
+
+	// (g) id with a regex metacharacter renames safely
+	it("renames an id containing a regex metacharacter (a-b) without over-matching", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "a-b", use: "n", inputs: {} },
+				// `a-b` must match; `axb` must NOT (the `-` is a literal, not a regex range)
+				{ id: "axb", use: "n", inputs: {} },
+				{ id: "r", use: "n", inputs: { hit: "js/ctx.state.a-b.x", miss: "js/ctx.state.axb.y" } },
+			],
+		};
+		const after = renameStep(ir, "a-b", "c-d") as typeof ir;
+		const r = findStepLocation(after, "r")?.step as { inputs: { hit: string; miss: string } };
+		expect(r.inputs.hit).toBe("js/ctx.state.c-d.x");
+		expect(r.inputs.miss).toBe("js/ctx.state.axb.y");
+		expect(findStepLocation(after, "c-d")).not.toBeNull();
+	});
+
+	// (h) input not mutated (structuredClone)
+	it("does not mutate the input IR", () => {
+		const before = renameFixture();
+		const snapshot = JSON.stringify(before);
+		renameStep(before, "old", "new");
+		expect(JSON.stringify(before)).toBe(snapshot);
+	});
+
+	it("rename survives a buildWorkflowDag round-trip", () => {
+		const after = renameStep(renameFixture(), "old", "new");
+		expect(dagStepIds(after)).toContain("new");
+		expect(dagStepIds(after)).not.toContain("old");
+	});
+
+	// no-op rename (oldId === newId) is a clean pass-through
+	it("returns a clone unchanged when oldId === newId", () => {
+		const after = renameStep(renameFixture(), "old", "old") as ReturnType<typeof renameFixture>;
+		expect(findStepLocation(after, "old")).not.toBeNull();
 	});
 });
