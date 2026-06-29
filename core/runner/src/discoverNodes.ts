@@ -14,16 +14,25 @@ import type { NodeBase } from "@blokjs/shared";
  * it under its own `node.name` (the canonical `use:` ref per ADR 0002), so the
  * `NodeMap` collision guard catches any two nodes claiming the same ref.
  *
+ * Two default-export shapes register (#360 / #383):
+ *   - a single `defineNode(...)` instance (default export has a string `name`);
+ *   - a MAP-EXPORT barrel — `export default { "<ref>": node, ... }` — whose
+ *     values are nodes. Each node value is registered (the dev app's
+ *     `examples/`/`eval/` bundles and re-export maps). A barrel whose values
+ *     are NOT node-shaped (a plain helper/util module) is skipped.
+ *
  * Deliberately shallow + convention-bound, NOT a recursive scan of arbitrary
- * files: the dev app's irregular example bundle (multiple nodes per dir, mixed
- * helper files) stays explicitly registered. A missing dir is not an error — a
- * project with no local nodes simply gets `[]`.
+ * files. A missing dir is not an error — a project with no local nodes gets `[]`.
  *
  * ponytail: one-level `<name>/index.*` glob, instances used directly (no `new` —
- * defineNode already returns an instance, matching how Nodes.ts uses the
- * defaults). Upgrade path if nested node layouts are needed: recurse + accept a
- * configurable entry glob.
+ * defineNode already returns an instance). Upgrade path if nested node layouts
+ * are needed: recurse + accept a configurable entry glob.
  */
+const looksLikeNode = (v: unknown): v is NodeBase =>
+	!!v &&
+	typeof v === "object" &&
+	typeof (v as { name?: unknown }).name === "string" &&
+	(v as { name: string }).name.length > 0;
 export async function discoverNodes(dir: string): Promise<NodeBase[]> {
 	const base = isAbsolute(dir) ? dir : resolve(process.cwd(), dir);
 	if (!existsSync(base) || !statSync(base).isDirectory()) return [];
@@ -37,13 +46,17 @@ export async function discoverNodes(dir: string): Promise<NodeBase[]> {
 		if (!file) continue;
 
 		const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
-		const node = mod.default as (NodeBase & { name?: unknown }) | undefined;
-		// Only register a default export that looks like a node (has a string
-		// `name`). A barrel/helper index (e.g. an `examples/index.ts` re-export
-		// map) is silently skipped — it's registered explicitly elsewhere, and a
-		// genuinely-broken user node surfaces as "Node <ref> not found" at use time.
-		if (node && typeof node.name === "string" && node.name.length > 0) {
-			found.push(node);
+		const def = mod.default;
+		if (looksLikeNode(def)) {
+			// Single node per dir — the `blokctl create node` convention.
+			found.push(def);
+		} else if (def && typeof def === "object") {
+			// Map-export barrel: register every node-shaped value (#360 / #383).
+			// Non-node values (helper exports) are ignored, so a plain util
+			// module default-exporting `{}`-of-non-nodes registers nothing.
+			for (const v of Object.values(def as Record<string, unknown>)) {
+				if (looksLikeNode(v)) found.push(v);
+			}
 		}
 	}
 	return found;
