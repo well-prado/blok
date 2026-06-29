@@ -292,10 +292,11 @@ export default class HttpTrigger extends TriggerBase {
 	loadNodes() {
 		this.nodeMap.nodes = new NodeMap();
 		// Register every node under its OWN `node.name` (the canonical `use:` ref
-		// per ADR 0002) — the `Nodes.ts` map keys are now cosmetic and the
-		// collision guard (NodeMap.addNode) catches two nodes claiming one ref.
-		// `Nodes.ts` may auto-discover local `src/nodes/` (top-level await +
-		// `discoverNodes`), so the map values are the single source of truth.
+		// per ADR 0002) — the `Nodes.ts` map keys are cosmetic and the collision
+		// guard (NodeMap.addNode) catches two nodes claiming one ref. `Nodes.ts`
+		// auto-discovers local `src/nodes/` (top-level await + `discoverNodes`,
+		// #360) and only hand-lists the third-party npm nodes, so the map values
+		// are the single source of truth. HMR re-runs THIS same keying path.
 		this.nodeMap.nodes.addNodes(Object.values(nodes) as unknown as NodeBase[]);
 	}
 
