@@ -325,6 +325,36 @@ describe("migrateWorkflows — already-v2 detection", () => {
 		const after = await fsp.readFile(path.join(dir, "already-v2.json"), "utf8");
 		expect(after).toBe(before);
 	});
+
+	it.each([
+		["worker", { worker: { queue: "jobs" } }],
+		["pubsub", { pubsub: { topic: "orders.created" } }],
+		["webhook", { webhook: { source: "github", events: ["push"] } }],
+	])("leaves already-v2 %s @blokjs/expr workflows byte-identical", async (filename, trigger) => {
+		const workflow = {
+			name: `${filename} Expr`,
+			version: "1.0.0",
+			trigger,
+			steps: [
+				{
+					id: "expr",
+					use: "@blokjs/expr",
+					inputs: {
+						expression: "({ literal: 'state.value', body: ctx.request.body, state: ctx.state.ready })",
+					},
+				},
+			],
+		};
+		const dir = path.join(tmpDir, "workflows", "json");
+		await fsp.mkdir(dir, { recursive: true });
+		const file = path.join(dir, `${filename}.json`);
+		const before = `${JSON.stringify(workflow, null, "\t")}\n`;
+		await fsp.writeFile(file, before);
+
+		await migrateWorkflows({ backup: false });
+
+		expect(await fsp.readFile(file, "utf8")).toBe(before);
+	});
 });
 
 describe("migrateWorkflows — set_var scrub on already-v2 input", () => {
