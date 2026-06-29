@@ -2,6 +2,7 @@ import Configuration from "./Configuration";
 import ConfigurationResolver from "./ConfigurationResolver";
 import DefaultLogger from "./DefaultLogger";
 import LocalStorage from "./LocalStorage";
+import ManualTrigger from "./ManualTrigger";
 import ResolverBase from "./ResolverBase";
 import Runner from "./Runner";
 import TriggerBase from "./TriggerBase";
@@ -196,6 +197,7 @@ export {
 	ConfigurationResolver,
 	DefaultLogger,
 	LocalStorage,
+	ManualTrigger,
 	ResolverBase,
 	TriggerBase,
 	// Runtime adapters

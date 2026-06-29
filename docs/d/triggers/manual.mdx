@@ -11,16 +11,37 @@ workflow via a [sub-workflow](/d/composition/sub-workflows) step. Use it
 for shared logic you want addressable by name but never reachable from
 the network.
 
-<Warning>
-The typed `args` entry handle (the author-facing surface this page
-documents) is **shipped**. The programmatic dispatch runtime — a
-`ManualTrigger` / `blokctl invoke` path and a non-null config schema —
-is still an open item ([#434](https://github.com/well-prado/blok/issues/434)).
-Until it lands, invoke a manual workflow through a
-[sub-workflow](/d/composition/sub-workflows) step or the
-`WorkflowTestRunner` test harness (from `@blokjs/runner`). Authoring
-against `args` works today; the standalone invoke surface is in progress.
-</Warning>
+Both halves are **shipped**: the typed `args` entry handle (the
+author-facing surface this page documents) and the programmatic dispatch
+runtime — `ManualTrigger.dispatch()` from `@blokjs/runner`
+([#434](https://github.com/well-prado/blok/issues/434)). You can also
+invoke a manual workflow through a
+[sub-workflow](/d/composition/sub-workflows) step when calling from
+inside another workflow.
+
+## Dispatching from host code
+
+`ManualTrigger` is the push entrypoint — it never binds a socket. Give it
+your nodes, `listen()` to register its workflows, then `dispatch(name, args)`:
+
+```ts
+import { ManualTrigger } from "@blokjs/runner";
+
+const manual = new ManualTrigger();
+manual.setNodeMap(nodeMap);        // your { nodes, workflows }
+await manual.listen();             // registers the manual workflows (no port)
+
+// args land at ctx.request.body → the typed `args` entry handle.
+const result = await manual.dispatch("recalc-totals", { invoiceId: "inv_42" });
+```
+
+`dispatch` runs the workflow through the full runner — tracing,
+persistence, retries, idempotency, concurrency — so the run shows up in
+Blok Studio like any HTTP run, and returns the final step's
+`ctx.response.data`. Each call uses a fresh `Configuration`, so
+overlapping dispatches are isolated. Dispatching a name no workflow
+claims throws loudly (the no-listener guarantee) rather than dropping the
+call silently.
 
 ## Quickstart
 
@@ -63,10 +84,10 @@ called.
 | `middleware` | `string[]` | Per-trigger middleware chain run before the workflow body. |
 
 <Note>
-`manual` currently carries **no validated config schema** — it's a
-placeholder marker. A real schema is part of the open dispatch-runtime
-work ([#434](https://github.com/well-prado/blok/issues/434)); for now keep
-the config block empty.
+`manual` carries **no validated config schema** — it's a marker kind, so
+keep the config block empty. There's nothing per-trigger to configure:
+dispatch behavior is controlled by the `dispatch()` call, not the trigger
+block.
 </Note>
 
 ## The `args` handle
@@ -109,11 +130,11 @@ A manual workflow has no listener, so something else dispatches it:
   — i.e. the manual workflow's `args.body`. This works today.
 - **The test harness** — `WorkflowTestRunner` (from `@blokjs/runner`) runs
   the workflow with a supplied body.
-- **Application code / `blokctl invoke`** — the dedicated programmatic
-  + CLI invoke surface is the open dispatch-runtime item
-  ([#434](https://github.com/well-prado/blok/issues/434)); the recommended
-  shape is in-process invocation by name with an args object, no network
-  hop.
+- **Application code** — `ManualTrigger.dispatch(name, args)` from
+  `@blokjs/runner` (see [Dispatching from host code](#dispatching-from-host-code)
+  above). In-process invocation by name with an args object, no network
+  hop, full runner semantics. A `blokctl invoke` CLI wrapper over the same
+  surface is a possible follow-up.
 
 ## Composition
 
