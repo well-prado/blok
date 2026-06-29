@@ -391,6 +391,8 @@ export type {
 	WorkerEntry,
 	PubSubEntry,
 	GrpcEntry,
+	SseEntry,
+	WsEntry,
 	BranchCondition,
 	BranchArms,
 	ForEachOptions,
