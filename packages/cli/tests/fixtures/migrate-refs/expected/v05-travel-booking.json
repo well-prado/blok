@@ -1,0 +1,232 @@
+{
+	"name": "v05-travel-booking",
+	"version": "1.0.0",
+	"description": "Travel-booking saga with manual compensation chain in catch. Try arm: book flight → book hotel → book car → respond success. If any step fails, the catch arm reads ctx.state to know which steps succeeded and conditionally undoes them in reverse order — cancel-car if hotel-booked-then-car-failed, cancel-hotel if any later step failed, cancel-flight if anything after the flight failed. The classic saga pattern done declaratively rather than with imperative code. Demonstrates: tryCatch with manual compensation chain in catch, branch guards on each compensation so we don't try to cancel things that never got booked, $.error.stepId surfacing which step blew up. External fixtures via httpbin: pass `flightUrl: https://httpbin.org/status/500` to fail the flight, etc.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/v05-travel-booking",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-body",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["flightUrl", "hotelUrl", "carUrl"],
+					"properties": {
+						"flightUrl": {
+							"type": "string"
+						},
+						"hotelUrl": {
+							"type": "string"
+						},
+						"carUrl": {
+							"type": "string"
+						}
+					}
+				},
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"id": "saga",
+			"tryCatch": {
+				"try": [
+					{
+						"id": "book-flight",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "flightUrl"]
+								}
+							},
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Op": "book-flight"
+							},
+							"body": {
+								"passenger": "js/ctx.request.body.passenger || 'unknown'"
+							},
+							"responseType": "application/json"
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression)"
+						}
+					},
+					{
+						"id": "book-hotel",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "hotelUrl"]
+								}
+							},
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Op": "book-hotel"
+							},
+							"body": {
+								"passenger": "js/ctx.request.body.passenger || 'unknown'"
+							},
+							"responseType": "application/json"
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression)"
+						}
+					},
+					{
+						"id": "book-car",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "carUrl"]
+								}
+							},
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Op": "book-car"
+							},
+							"body": {
+								"passenger": "js/ctx.request.body.passenger || 'unknown'"
+							},
+							"responseType": "application/json"
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression)"
+						}
+					}
+				],
+				"catch": [
+					{
+						"id": "compensate-car",
+						"branch": {
+							"when": "ctx.state['book-car'] !== undefined",
+							"then": [
+								{
+									"id": "cancel-car",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"inputs": {
+										"url": "https://httpbin.org/post",
+										"method": "POST",
+										"headers": {
+											"Content-Type": "application/json",
+											"X-Op": "cancel-car"
+										},
+										"body": {
+											"reason": "saga-rollback"
+										},
+										"responseType": "application/json"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "compensate-hotel",
+						"branch": {
+							"when": "ctx.state['book-hotel'] !== undefined",
+							"then": [
+								{
+									"id": "cancel-hotel",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"inputs": {
+										"url": "https://httpbin.org/post",
+										"method": "POST",
+										"headers": {
+											"Content-Type": "application/json",
+											"X-Op": "cancel-hotel"
+										},
+										"body": {
+											"reason": "saga-rollback"
+										},
+										"responseType": "application/json"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "compensate-flight",
+						"branch": {
+							"when": "ctx.state['book-flight'] !== undefined",
+							"then": [
+								{
+									"id": "cancel-flight",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"inputs": {
+										"url": "https://httpbin.org/post",
+										"method": "POST",
+										"headers": {
+											"Content-Type": "application/json",
+											"X-Op": "cancel-flight"
+										},
+										"body": {
+											"reason": "saga-rollback"
+										},
+										"responseType": "application/json"
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "respond-failed",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Booking saga failed",
+							"code": 500,
+							"name": "BookingSagaFailedError",
+							"body": {
+								"outcome": "failed",
+								"failedAt": "js/ctx.error.stepId",
+								"reason": "js/ctx.error.message",
+								"compensated": {
+									"flight": "js/ctx.state['cancel-flight'] !== undefined",
+									"hotel": "js/ctx.state['cancel-hotel'] !== undefined",
+									"car": "js/ctx.state['cancel-car'] !== undefined"
+								}
+							}
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression)"
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond-booked",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ outcome: 'booked', flight: !!ctx.state['book-flight'], hotel: !!ctx.state['book-hotel'], car: !!ctx.state['book-car'] })"
+			}
+		}
+	]
+}
