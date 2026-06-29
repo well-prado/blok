@@ -393,6 +393,7 @@ export type {
 	GrpcEntry,
 	SseEntry,
 	WsEntry,
+	McpEntry,
 	BranchCondition,
 	BranchArms,
 	ForEachOptions,

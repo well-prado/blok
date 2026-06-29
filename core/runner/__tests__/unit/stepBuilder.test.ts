@@ -32,6 +32,7 @@ import {
 	type CronEntry,
 	type GrpcEntry,
 	type HttpEntry,
+	type McpEntry,
 	type PubSubEntry,
 	type SseEntry,
 	type TriggerHandle,
@@ -535,6 +536,43 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 				void conn.params;
 				void conn.headers;
 			});
+			// mcp with NO declared input → typed `unknown` body (the McpEntry default).
+			await workflowCallback("T-mcp", { version: "1.0.0", trigger: { mcp: { tool: "echo" } } }, (call) => {
+				assert<Expect<typeof call, McpEntry>>();
+				void call.body;
+			});
+			// #436 — the null-schema triggers (webhook/grpc/mcp) type their `body`
+			// from the workflow's declared `input` Zod, `unknown` otherwise.
+			await workflowCallback(
+				"T-webhook-typed",
+				{
+					version: "1.0.0",
+					input: z.object({ amount: z.number() }),
+					trigger: { webhook: { provider: "stripe" as const } },
+				},
+				(event) => {
+					const amount: number = event.body.amount;
+					void amount;
+					// @ts-expect-error — body is typed from input; `nope` is not a field.
+					void event.body.nope;
+				},
+			);
+			await workflowCallback(
+				"T-grpc-typed",
+				{ version: "1.0.0", input: z.object({ id: z.string() }), trigger: { grpc: { service: "S", method: "M" } } },
+				(rpc) => {
+					const id: string = rpc.body.id;
+					void id;
+				},
+			);
+			await workflowCallback(
+				"T-mcp-typed",
+				{ version: "1.0.0", input: z.object({ query: z.string() }), trigger: { mcp: { tool: "search" } } },
+				(call) => {
+					const query: string = call.body.query;
+					void query;
+				},
+			);
 			// Unrecognized / out-of-scope kind (manual, #362) falls back to the loose handle.
 			await workflowCallback("T-manual", { version: "1.0.0", trigger: { manual: {} } }, (args) => {
 				assert<Expect<typeof args, TriggerHandle>>();

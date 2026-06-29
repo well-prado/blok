@@ -432,7 +432,33 @@ export default class McpTrigger extends TriggerBase {
 				span.setAttribute("workflow_name", workflowName);
 				span.setAttribute("mcp_label", spanLabel);
 				span.setStatus({ code: SpanStatusCode.OK });
-				return ctx.response?.data;
+
+				const data = ctx.response?.data;
+				// #436 — when BLOK_VALIDATE_WORKFLOW_OUTPUT is on, validate the result
+				// against the workflow's declared `output` Zod (reached via `_config`,
+				// same as the tool inputSchema derivation). A failure THROWS, which
+				// dispatchTool turns into a proper MCP error result (isError:true) —
+				// never a raw 500 / transport crash. No declared output → pass through.
+				const validateOutput =
+					process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT === "1" || process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT === "true";
+				if (validateOutput) {
+					const wf = (entry.workflow as { _config?: unknown })?._config ?? entry.workflow;
+					const outputZod = (wf as { output?: { safeParse?: (d: unknown) => unknown } } | undefined)?.output;
+					if (outputZod && typeof outputZod.safeParse === "function") {
+						const parsed = outputZod.safeParse(data) as {
+							success: boolean;
+							data?: unknown;
+							error?: { message: string };
+						};
+						if (!parsed.success) {
+							throw new Error(
+								`workflow "${workflowName}" output failed validation against workflow.output: ${parsed.error?.message ?? "invalid output"}`,
+							);
+						}
+						return parsed.data;
+					}
+				}
+				return data;
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				span.recordException(err as Error);
