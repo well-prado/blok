@@ -18,6 +18,12 @@ const LEVEL_RANK: Record<string, number> = {
 };
 
 /**
+ * Cap on the in-memory `logs` buffer so a long-running process can't grow it
+ * unbounded — keep the most recent N lines (mirrors `StructuredLogger`).
+ */
+const MAX_LOG_BUFFER = 1000;
+
+/**
  * DefaultLogger class extends GlobalLogger to provide logging functionality
  * with additional metadata such as workflow name, workflow path, request ID,
  * environment, and application name.
@@ -103,7 +109,21 @@ export default class DefaultLogger extends GlobalLogger {
 	 */
 	log(message: string) {
 		if (!this.shouldEmit("info")) return;
-		console.log(this.injectMetadata(message));
+		this.record(this.injectMetadata(message));
+	}
+
+	/**
+	 * Emit a fully-formatted line to the console AND append it to the in-memory
+	 * `logs` buffer so `getLogs()`/`getLogsAsText()`/`getLogsAsBase64()` reflect
+	 * exactly what was written to stdout. Callers gate on {@link shouldEmit}
+	 * first, so SUPPRESSED lines are never buffered — the buffer stays
+	 * consistent with stdout. Bounded to the most recent {@link MAX_LOG_BUFFER}.
+	 */
+	private record(line: string, isError = false): void {
+		if (isError) console.error(line);
+		else console.log(line);
+		this.logs.push(line);
+		if (this.logs.length > MAX_LOG_BUFFER) this.logs = this.logs.slice(-MAX_LOG_BUFFER);
 	}
 
 	/**
@@ -114,7 +134,7 @@ export default class DefaultLogger extends GlobalLogger {
 	 */
 	logLevel(level: string, message: string): void {
 		if (!this.shouldEmit(level)) return;
-		console.log(this.injectMetadata(message, level));
+		this.record(this.injectMetadata(message, level));
 	}
 
 	/**
@@ -125,7 +145,7 @@ export default class DefaultLogger extends GlobalLogger {
 	 */
 	error(message: string, stack = ""): void {
 		if (!this.shouldEmit("error")) return;
-		console.error(this.injectMetadata(message, "error", stack));
+		this.record(this.injectMetadata(message, "error", stack), true);
 	}
 
 	/**
