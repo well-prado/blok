@@ -193,6 +193,9 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		assertNoDuplicateStepIds(wf.steps as unknown[], sourcePath);
 		assertNoForEachStateKeyCollisions(wf.steps as unknown[], sourcePath);
 	}
+	// Reject genuine DSL conflicts (two fields fighting for one slot, or a
+	// half-migrated v2 envelope) — but NOT the canonical `{id, node}` hybrid.
+	assertNoConflictingStepDsl(wf, sourcePath);
 	const name = typeof wf.name === "string" ? wf.name : "";
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
@@ -1309,6 +1312,60 @@ function childStepBlocks(step: Record<string, unknown>, stepPath: string): Array
 		if (Array.isArray(tc.finally)) blocks.push({ steps: tc.finally, path: `${stepPath}.tryCatch.finally` });
 	}
 	return blocks;
+}
+
+/**
+ * Reject only GENUINE DSL conflicts — never the canonical `{id, node}` hybrid
+ * (id = step identity, node = a v1 ref the normalizer maps to `use`), which the
+ * whole corpus + real workflows freely mix. A conflict is two fields on the
+ * SAME axis competing for one slot:
+ *   - `name` AND `id`  → two identities (which one is the step id?)
+ *   - `node` AND `use` → two node refs (which node actually runs?)
+ * Plus the envelope-level contradiction: an explicit `schemaVersion: "2"` (a v2
+ * file) still carrying the legacy top-level `nodes{}` map (half-migrated).
+ *
+ * This is the narrow successor to the reverted #391 `assertWorkflowDslMode`,
+ * which wrongly flagged `{id, node}` as "mixed mode" and broke every
+ * SSE/WS/HTTP/MCP trigger workflow (green→red across 4 suites). See #391/#392.
+ */
+function assertNoConflictingStepDsl(wf: Record<string, unknown>, sourcePath?: string): void {
+	const isExplicitV2 = wf.schemaVersion === "2" || wf.schemaVersion === 2;
+	if (isExplicitV2 && isPlainObject(wf.nodes) && Object.keys(wf.nodes).length > 0) {
+		throwDslConflict(
+			'`schemaVersion: "2"` workflow carries the legacy top-level `nodes{}` map — inline the node inputs onto each step and drop `nodes{}`',
+			sourcePath,
+		);
+	}
+	const steps = Array.isArray(wf.steps) ? (wf.steps as unknown[]) : [];
+	assertNoConflictingStepDslInSteps(steps, "steps", sourcePath);
+}
+
+function assertNoConflictingStepDslInSteps(steps: unknown[], path: string, sourcePath?: string): void {
+	for (let i = 0; i < steps.length; i++) {
+		const raw = steps[i];
+		if (!isPlainObject(raw)) continue;
+		const step = raw as Record<string, unknown>;
+		const stepPath = `${path}[${i}]`;
+		if (step.name !== undefined && step.id !== undefined) {
+			throwDslConflict(
+				`step at ${stepPath} sets BOTH \`name\` (v1 identity) and \`id\` (v2 identity) — keep one`,
+				sourcePath,
+			);
+		}
+		if (step.node !== undefined && step.use !== undefined) {
+			throwDslConflict(`step at ${stepPath} sets BOTH \`node\` (v1 ref) and \`use\` (v2 ref) — keep one`, sourcePath);
+		}
+		for (const block of childStepBlocks(step, stepPath)) {
+			assertNoConflictingStepDslInSteps(block.steps, block.path, sourcePath);
+		}
+	}
+}
+
+function throwDslConflict(reason: string, sourcePath?: string): never {
+	const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
+	throw new Error(
+		`[blok] WorkflowNormalizer: conflicting workflow DSL fields: ${reason}. A step may freely use the \`{id, node}\` hybrid (v2 id + v1 ref), but must not set two fields competing for the same slot.${suffix}`,
+	);
 }
 
 function assertNoSetVar(steps: unknown[], sourcePath?: string): void {

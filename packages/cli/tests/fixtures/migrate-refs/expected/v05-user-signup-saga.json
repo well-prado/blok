@@ -1,0 +1,237 @@
+{
+	"name": "v05-user-signup-saga",
+	"version": "1.0.0",
+	"description": "v0.5 tryCatch with conditional rollback inside the catch arm. Try arm: POST signupUrl (account create), POST httpbin (welcome email), POST profileUrl (profile create). Catch arm: branches on whether `ctx.state['create-account']` exists — only rolls back if the account actually got created. Finally: emits an audit event regardless. Demonstrates: tryCatch with all three arms; branch INSIDE catch to make rollback conditional; @blokjs/throw inside catch to surface a structured 500 with the failure reason. External fixtures: httpbin.org (set signupUrl=/status/500 to fail before account-create — no rollback; set profileUrl=/status/500 to fail AFTER account-create — rollback fires).",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/v05-user-signup-saga",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "validate-input",
+			"use": "@blokjs/json-schema",
+			"type": "module",
+			"inputs": {
+				"schema": {
+					"type": "object",
+					"required": ["email", "password", "displayName", "signupUrl"],
+					"properties": {
+						"email": {
+							"type": "string"
+						},
+						"password": {
+							"type": "string"
+						},
+						"displayName": {
+							"type": "string"
+						},
+						"signupUrl": {
+							"type": "string"
+						}
+					}
+				},
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
+			}
+		},
+		{
+			"id": "signup-saga",
+			"tryCatch": {
+				"try": [
+					{
+						"id": "create-account",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "signupUrl"]
+								}
+							},
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "create-account"
+							},
+							"body": {
+								"email": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
+								"displayName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "displayName"]
+									}
+								}
+							},
+							"responseType": "application/json"
+						}
+					},
+					{
+						"id": "send-welcome",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "https://httpbin.org/post",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "send-welcome"
+							},
+							"body": {
+								"to": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
+								"template": "welcome"
+							},
+							"responseType": "application/json"
+						}
+					},
+					{
+						"id": "create-profile",
+						"use": "@blokjs/api-call",
+						"type": "module",
+						"inputs": {
+							"url": "js/ctx.request.body.profileUrl || ctx.request.body.signupUrl",
+							"method": "POST",
+							"headers": {
+								"Content-Type": "application/json",
+								"X-Step": "create-profile"
+							},
+							"body": {
+								"email": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "email"]
+									}
+								},
+								"displayName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "displayName"]
+									}
+								}
+							},
+							"responseType": "application/json"
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression / branch.when not handle-safe)"
+						}
+					}
+				],
+				"catch": [
+					{
+						"id": "decide-rollback",
+						"branch": {
+							"when": "ctx.state[\"create-account\"] !== undefined",
+							"then": [
+								{
+									"id": "rollback-account",
+									"use": "@blokjs/api-call",
+									"type": "module",
+									"inputs": {
+										"url": "https://httpbin.org/post",
+										"method": "POST",
+										"headers": {
+											"Content-Type": "application/json",
+											"X-Step": "rollback-account"
+										},
+										"body": {
+											"reason": "signup-saga-rollback",
+											"email": {
+												"$ref": {
+													"step": "@trigger",
+													"path": ["body", "email"]
+												}
+											}
+										},
+										"responseType": "application/json"
+									}
+								},
+								{
+									"id": "mark-rolled-back",
+									"use": "@blokjs/ctx-publish",
+									"type": "module",
+									"inputs": {
+										"name": "rolledBack",
+										"value": true
+									}
+								}
+							],
+							"else": [
+								{
+									"id": "mark-no-rollback",
+									"use": "@blokjs/ctx-publish",
+									"type": "module",
+									"inputs": {
+										"name": "rolledBack",
+										"value": false
+									}
+								}
+							]
+						}
+					},
+					{
+						"id": "respond-failed",
+						"use": "@blokjs/throw",
+						"type": "module",
+						"inputs": {
+							"message": "Signup failed",
+							"code": 500,
+							"name": "SignupFailedError",
+							"body": {
+								"outcome": "failed",
+								"rolledBack": "js/ctx.state.rolledBack === true",
+								"reason": "js/ctx.error.message",
+								"errorName": "js/ctx.error.name",
+								"failedAt": "js/ctx.error.stepId",
+								"upstreamCode": "js/ctx.error.code || null"
+							}
+						},
+						"ui": {
+							"notes": "blok-migrate: hand-migrate (dynamic expression / branch.when not handle-safe)"
+						}
+					}
+				],
+				"finally": [
+					{
+						"id": "metric",
+						"use": "@blokjs/audit-log",
+						"type": "module",
+						"inputs": {
+							"event": "signup-attempt",
+							"email": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "email"]
+								}
+							}
+						}
+					}
+				]
+			}
+		},
+		{
+			"id": "respond-success",
+			"use": "@blokjs/expr",
+			"type": "module",
+			"inputs": {
+				"expression": "({ outcome: 'success', userId: ctx.request.body.email, email: ctx.request.body.email, displayName: ctx.request.body.displayName })"
+			}
+		}
+	]
+}
