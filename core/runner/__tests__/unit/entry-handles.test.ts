@@ -108,6 +108,27 @@ const CASES = [
 		ctx: { body: { field: "x" } },
 		value: "x",
 	},
+	{
+		// #431 — sse `conn` is a READ-ONLY ctx.request-rooted entry handle (no body;
+		// real-time emit stays in the helper nodes).
+		kind: "sse (conn) — read-only params/query/headers",
+		trigger: { sse: {} },
+		read: (e: TriggerHandle) => e.params.roomId,
+		path: ["params", "roomId"],
+		lowered: "js/ctx.request.params.roomId",
+		ctx: { params: { roomId: "general" } },
+		value: "general",
+	},
+	{
+		// #431 — websocket `conn.body` is the parsed message; lowers like the rest.
+		kind: "websocket (conn) — message body + params",
+		trigger: { websocket: {} },
+		read: (e: TriggerHandle) => e.body.text,
+		path: ["body", "text"],
+		lowered: "js/ctx.request.body.text",
+		ctx: { body: { text: "hi" } },
+		value: "hi",
+	},
 ] as const;
 
 describe("entry handles — all unary triggers root at ctx.request and lower like step() handles (#430)", () => {

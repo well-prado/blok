@@ -16,6 +16,7 @@ export {
 	switchOn,
 	tryCatch,
 	tpl,
+	js,
 	eq,
 	ne,
 	gt,

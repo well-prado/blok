@@ -33,6 +33,7 @@ import {
 	type WorkflowV2Opts as WorkflowOpts,
 	workflow as objectWorkflow,
 } from "@blokjs/helper";
+import { lowerRefs } from "@blokjs/shared";
 import type { z } from "zod";
 import type { EphemeralHandle, ErrorHandle, Handle, OutputOf, SpreadHandle } from "./handles";
 
@@ -228,6 +229,46 @@ export function tpl(strings: TemplateStringsArray, ...values: unknown[]): Struct
 		}
 	}
 	return { $tpl: segments };
+}
+
+/**
+ * `js` tagged template (#461 / ADR 0008) — the explicit escape hatch for the
+ * non-structural expressions the handle model can't encode (defaults `?? x`,
+ * ternaries, `.map`, `Date.now()`, env reads). Author-only SUGAR: it lowers to a
+ * bare `js/<expr>` STRING at authoring time — NOT a new IR member, no lowerRefs
+ * branch, no Mapper change. Interpolated handles become their bare ctx path
+ * (via the canonical {@link lowerRefs}, so there is no second path-encoder to
+ * drift); the resulting `js/` string passes through lowerRefs unchanged (strings
+ * are left alone) and the existing Mapper resolves it with full fidelity.
+ *
+ * Use sparingly — the expression is OPAQUE to the canvas / AI / static analysis.
+ * That is the honest cost of an escape hatch, and exactly why structural handles
+ * (`step.field`, `tpl`, comparators) are preferred for everything they can express.
+ *
+ * @example js`${order.total} > 100 ? "big" : "small"`
+ *   → "js/ctx.state.order.total > 100 ? \"big\" : \"small\""
+ */
+export function js(strings: TemplateStringsArray, ...values: unknown[]): string {
+	let out = strings[0] ?? "";
+	for (let i = 0; i < values.length; i++) {
+		out += jsOperand(values[i]) + (strings[i + 1] ?? "");
+	}
+	return `js/${out}`;
+}
+
+/** A handle → its bare ctx expression (via the canonical lowerRefs); any other value → its JSON. */
+function jsOperand(value: unknown): string {
+	const meta = readHandleMeta(value);
+	if (!meta) return JSON.stringify(value);
+	if (meta.ephemeral) throw ephemeralReadError(meta.step);
+	if (meta.spread) throw spreadWholeReadError(meta.step);
+	// Reuse the one canonical {$ref} → wire-string encoding, then drop its `js/`
+	// prefix: inside a JS expression we want the bare ctx path, and the whole
+	// `js` template gets exactly ONE `js/` prefix prepended above.
+	// lowerRefs is typed <T>(v: T): T (same shape), but at runtime it rewrites
+	// {$ref} → a `js/ctx...` string — so cast through unknown to the wire type.
+	const lowered = lowerRefs({ v: { $ref: { step: meta.step, path: meta.path } } }) as unknown as { v: string };
+	return lowered.v.slice("js/".length);
 }
 
 function readHandleMeta(value: unknown): HandleMeta | undefined {
@@ -993,11 +1034,15 @@ export type TriggerHandle = Handle<unknown> & Record<string, Handle<unknown>>;
 // TYPED author-facing surface: the entry-handle NAME (`req`/`event`/`tick`/…)
 // and the SHAPE of fields each kind exposes.
 //
-// SCOPE: request-shaped triggers only. Out of scope (follow-ups, NOT built):
+// SCOPE: request-shaped triggers, INCLUDING sse/websocket `conn` (#431). Both
+// funnel their connection payload into ctx.request (SSETrigger/WebSocketTrigger
+// set ctx.request.{body,params,query,headers}), so `conn` is a read-only
+// ctx.request-rooted entry handle exactly like the rest — the only difference is
+// the TYPE. Real-time EMIT stays imperative in the helper nodes (@blokjs/sse-
+// stream, @blokjs/ws-reply, …) by design, NOT a method on this read-only handle.
+// Out of scope (follow-ups, NOT built):
 //   - the greenfield `manual` trigger (#362) — its `args` handle has no
 //     ctx.request payload yet; falls back to the loose TriggerHandle below.
-//   - sse/websocket `conn`/`stream` — imperative surfaces (ctx.connection /
-//     ctx.stream), not a declarative `ctx.request`-rooted entry handle.
 //   - per-trigger SIDE-CHANNEL typing (ctx.vars._cron_context Date-vs-ISO,
 //     _worker_job, _pubsub_message) — a separate typing task.
 
@@ -1034,6 +1079,28 @@ export type WorkerEntry = Handle<{
 export type PubSubEntry = Handle<RequestShape>;
 /** gRPC entry handle (`rpc`). The request message is `body`; metadata in headers. */
 export type GrpcEntry = Handle<RequestShape>;
+/**
+ * SSE entry handle (`conn`). An SSE connection carries NO inbound body — the
+ * handle exposes the upgrade request's path `params`, `query`, and `headers`.
+ * Real-time emit is the helper nodes (@blokjs/sse-stream / sse-subscribe /
+ * sse-emit), never a method on this READ-ONLY handle (#431).
+ */
+export type SseEntry = Handle<{
+	params: Record<string, string>;
+	query: Record<string, string>;
+	headers: Record<string, string>;
+}>;
+/**
+ * WebSocket entry handle (`conn`). The parsed message is `body`; path params in
+ * `params`; upgrade-request headers in `headers`. Emit/broadcast/close are the
+ * helper nodes (@blokjs/ws-reply / ws-broadcast / ws-close), never handle
+ * methods (#431).
+ */
+export type WsEntry = Handle<{
+	body: unknown;
+	params: Record<string, string>;
+	headers: Record<string, string>;
+}>;
 
 /**
  * Map a workflow `opts.trigger` shape to the entry handle its callback receives.
@@ -1053,7 +1120,11 @@ type EntryFor<T> = T extends { http: unknown }
 					? PubSubEntry
 					: T extends { grpc: unknown }
 						? GrpcEntry
-						: TriggerHandle;
+						: T extends { sse: unknown }
+							? SseEntry
+							: T extends { websocket: unknown }
+								? WsEntry
+								: TriggerHandle;
 
 /**
  * Callback-style `workflow()` overload. Runs `build` inside a fresh builder
