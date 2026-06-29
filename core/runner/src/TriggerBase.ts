@@ -11,7 +11,7 @@ import { QueueExpiredError } from "./concurrency/QueueExpiredError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import type { HMREvent } from "./hmr/FileWatcher";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
-import { resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
+import { resolveConcurrencyKey, resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { CircuitBreaker } from "./monitoring/CircuitBreaker";
 import type { CircuitBreakerConfig } from "./monitoring/CircuitBreaker";
 import { ConcurrencyMetrics } from "./monitoring/ConcurrencyMetrics";
@@ -980,7 +980,26 @@ export default abstract class TriggerBase extends Trigger {
 			if (traceRunId && process.env.BLOK_CONCURRENCY_DISABLED !== "1") {
 				const concCfg = readConcurrencyConfig(cfg.trigger as Record<string, unknown> | undefined);
 				if (concCfg) {
-					const resolvedKey = resolveIdempotencyKey(concCfg.keyExpression, ctx);
+					const { key: resolvedKey, threw } = resolveConcurrencyKey(concCfg.keyExpression, ctx);
+					// A THROWING key expression must not silently disable the rate
+					// limit (a typo or attacker-shaped payload would bypass it). Honor
+					// BLOK_MAPPER_MODE: `strict` (default) fails the run fast, `warn`
+					// logs + falls open, `silent` falls open quietly. A legitimately
+					// null/absent key (threw === false) still falls open in every mode.
+					if (threw) {
+						const mode = (process.env.BLOK_MAPPER_MODE ?? "strict").toLowerCase();
+						if (mode === "strict") {
+							throw new Error(
+								`[blok][concurrency] key expression \`${concCfg.keyExpression}\` threw while resolving the concurrency limit for workflow "${cfg.name || ctx.workflow_name || "unknown"}". Failing the run instead of silently bypassing the limit. Fix the expression, or set BLOK_MAPPER_MODE=warn to fall open.`,
+							);
+						}
+						if (mode === "warn") {
+							ctx.logger?.logLevel?.(
+								"warn",
+								`[blok][concurrency] key expression \`${concCfg.keyExpression}\` threw; failing open (BLOK_MAPPER_MODE=warn). The concurrency limit is NOT enforced for this run.`,
+							);
+						}
+					}
 					if (resolvedKey !== null) {
 						const workflowName = cfg.name || ctx.workflow_name || "unknown";
 						const now = Date.now();
