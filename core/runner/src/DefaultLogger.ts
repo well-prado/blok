@@ -1,6 +1,23 @@
 import { GlobalLogger } from "@blokjs/shared";
 
 /**
+ * Severity ranking for `BLOK_LOG_LEVEL` filtering. Higher = more severe.
+ * A message is emitted only when its level ranks at or above the configured
+ * threshold, so `BLOK_LOG_LEVEL=warn` suppresses `info`/`debug` but keeps
+ * `warn`/`error`. Unknown levels rank as `info` (the default channel).
+ * Mirrors `StructuredLogger`'s ordering — kept local to avoid coupling the
+ * runtime logger to the structured-logging module.
+ */
+const LEVEL_RANK: Record<string, number> = {
+	debug: 0,
+	info: 1,
+	warn: 2,
+	warning: 2,
+	error: 3,
+	fatal: 4,
+};
+
+/**
  * DefaultLogger class extends GlobalLogger to provide logging functionality
  * with additional metadata such as workflow name, workflow path, request ID,
  * environment, and application name.
@@ -69,12 +86,23 @@ export default class DefaultLogger extends GlobalLogger {
 	}
 
 	/**
+	 * Whether a message at `level` should be emitted given `BLOK_LOG_LEVEL`.
+	 * Read per-call so the threshold honors env changes at runtime; defaults
+	 * to `info` when the env var is unset or names an unknown level.
+	 */
+	private shouldEmit(level: string): boolean {
+		if (process.env.CONSOLE_LOG_ACTIVE === "false") return false;
+		const threshold = LEVEL_RANK[(process.env.BLOK_LOG_LEVEL ?? "info").toLowerCase()] ?? LEVEL_RANK.info;
+		return (LEVEL_RANK[level.toLowerCase()] ?? LEVEL_RANK.info) >= threshold;
+	}
+
+	/**
 	 * Logs a message to the console with metadata.
 	 *
 	 * @param message - The message to log.
 	 */
 	log(message: string) {
-		if (process.env.CONSOLE_LOG_ACTIVE === "false") return;
+		if (!this.shouldEmit("info")) return;
 		console.log(this.injectMetadata(message));
 	}
 
@@ -85,7 +113,7 @@ export default class DefaultLogger extends GlobalLogger {
 	 * @param message - The message to log.
 	 */
 	logLevel(level: string, message: string): void {
-		if (process.env.CONSOLE_LOG_ACTIVE === "false") return;
+		if (!this.shouldEmit(level)) return;
 		console.log(this.injectMetadata(message, level));
 	}
 
@@ -96,7 +124,7 @@ export default class DefaultLogger extends GlobalLogger {
 	 * @param stack - The stack trace (optional).
 	 */
 	error(message: string, stack = ""): void {
-		if (process.env.CONSOLE_LOG_ACTIVE === "false") return;
+		if (!this.shouldEmit("error")) return;
 		console.error(this.injectMetadata(message, "error", stack));
 	}
 
