@@ -4,7 +4,7 @@ import type { OptionValues } from "commander";
 import color from "picocolors";
 import ts from "typescript";
 
-const MARKER = "blok-migrate: hand-migrate (dynamic expression)";
+const MARKER = "blok-migrate: hand-migrate (dynamic expression / branch.when not handle-safe)";
 
 type PathSegment = string | number;
 
@@ -44,6 +44,11 @@ export interface RefMigrationResult<T> {
 }
 
 type ParsedRef = { kind: "ref"; ref: StructuralRef } | { kind: "tpl"; tpl: StructuralTpl } | { kind: "dynamic" };
+type HelperName = "$" | "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
+type BranchWhenMigration =
+	| { kind: "convert"; rawWhen: string; tsExpr: string; helpers: HelperName[] }
+	| { kind: "mark" }
+	| { kind: "none" };
 
 /** CLI entrypoint for Codemod 1: field-aware input refs only. */
 export async function migrateRefs(opts: OptionValues): Promise<void> {
@@ -112,11 +117,12 @@ export function migrateTsSource(source: string, fileName = "workflow.ts"): RefMi
 	const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const replacements: TextReplacement[] = [];
 	const markerPositions = new Set<number>();
+	const helperImports = new Set<HelperName>();
 	const stats = emptyStats();
 
 	function visit(node: ts.Node): void {
 		if (ts.isArrayLiteralExpression(node) && isStepArray(node)) {
-			migrateTsStepArray(node, source, replacements, markerPositions, stats);
+			migrateTsStepArray(node, source, replacements, markerPositions, helperImports, stats);
 		}
 		ts.forEachChild(node, visit);
 	}
@@ -131,7 +137,8 @@ export function migrateTsSource(source: string, fileName = "workflow.ts"): RefMi
 		start: r.start + insertedBefore(markerPositions, r.start, source),
 		end: r.end + insertedBefore(markerPositions, r.end, source),
 	}));
-	const value = applyReplacements(withMarkers, adjusted);
+	const rewritten = applyReplacements(withMarkers, adjusted);
+	const value = helperImports.size > 0 ? ensureHelperImports(rewritten, helperImports) : rewritten;
 	return { value, changed: value !== source, stats };
 }
 
@@ -145,11 +152,16 @@ function migrateJsonStepArray(rawSteps: unknown[], stats: MigrationStats): void 
 		const info = infos[i];
 		const previous = previousConcreteInfo(infos, i);
 		const ctx = { previous, stepsByStateKey: byStateKey };
+		let marked = false;
+		const alreadyMarkedStep = jsonStepMarked(step);
 
 		if (isPlainObject(step.inputs)) {
-			const marked = migrateJsonInputs(step.inputs, info?.use, ctx, stats, !jsonStepMarked(step));
-			if (marked) markJsonStep(step);
+			marked ||= migrateJsonInputs(step.inputs, info?.use, ctx, stats, !alreadyMarkedStep);
 		}
+		if (isPlainObject(step.branch)) {
+			marked ||= migrateJsonBranchWhen(step.branch, stats, !alreadyMarkedStep);
+		}
+		if (marked) markJsonStep(step);
 		recurseJsonControlFlow(step, stats);
 	}
 }
@@ -236,11 +248,27 @@ function recurseJsonControlFlow(step: Record<string, unknown>, stats: MigrationS
 		migrateJsonStepArray(step.switch.default, stats);
 }
 
+function migrateJsonBranchWhen(branch: Record<string, unknown>, stats: MigrationStats, canMark: boolean): boolean {
+	if (typeof branch.when !== "string") return false;
+	const result = analyzeBranchWhen(branch.when);
+	if (result.kind === "convert") {
+		if (branch.when !== result.rawWhen) {
+			branch.when = result.rawWhen;
+			stats.migrated += 1;
+		}
+		return false;
+	}
+	if (result.kind !== "mark" || !canMark) return false;
+	stats.marked += 1;
+	return true;
+}
+
 function migrateTsStepArray(
 	array: ts.ArrayLiteralExpression,
 	source: string,
 	replacements: TextReplacement[],
 	markerPositions: Set<number>,
+	helperImports: Set<HelperName>,
 	stats: MigrationStats,
 ): void {
 	const elements = array.elements.filter(ts.isObjectLiteralExpression);
@@ -250,14 +278,41 @@ function migrateTsStepArray(
 	for (let i = 0; i < elements.length; i++) {
 		const step = elements[i];
 		const info = infos[i];
-		const inputs = getProperty(step, "inputs");
-		if (!inputs || !ts.isObjectLiteralExpression(inputs.initializer)) continue;
 		const previous = previousConcreteInfo(infos, i);
 		const ctx = { previous, stepsByStateKey: byStateKey };
 		const beforeMarked = stats.marked;
 		const alreadyMarkedStep = alreadyMarked(source, step.getStart());
-		migrateTsInputs(inputs.initializer, info?.use, ctx, source, replacements, stats, !alreadyMarkedStep);
+		migrateTsBranchWhen(step, source, replacements, helperImports, stats, !alreadyMarkedStep);
+		const inputs = getProperty(step, "inputs");
+		if (inputs && ts.isObjectLiteralExpression(inputs.initializer)) {
+			migrateTsInputs(inputs.initializer, info?.use, ctx, source, replacements, stats, !alreadyMarkedStep);
+		}
 		if (stats.marked > beforeMarked && !alreadyMarkedStep) markerPositions.add(step.getStart());
+	}
+}
+
+function migrateTsBranchWhen(
+	step: ts.ObjectLiteralExpression,
+	source: string,
+	replacements: TextReplacement[],
+	helperImports: Set<HelperName>,
+	stats: MigrationStats,
+	canMark: boolean,
+): void {
+	const branch = getProperty(step, "branch");
+	if (!branch || !ts.isObjectLiteralExpression(branch.initializer)) return;
+	const when = getProperty(branch.initializer, "when");
+	if (!when) return;
+	const init = when.initializer;
+	if (isDollarPath(init)) return;
+	if (ts.isCallExpression(init) || !ts.isStringLiteralLike(init)) return;
+	const result = analyzeBranchWhen(init.text);
+	if (result.kind === "convert") {
+		replacements.push({ start: init.getStart(), end: init.getEnd(), text: result.tsExpr });
+		for (const helper of result.helpers) helperImports.add(helper);
+		stats.migrated += 1;
+	} else if (result.kind === "mark" && canMark) {
+		stats.marked += 1;
 	}
 }
 
@@ -325,6 +380,114 @@ function parseRefValue(value: string, ctx: StepContext): ParsedRef | null {
 		return ref ? { kind: "ref", ref } : { kind: "dynamic" };
 	}
 	return null;
+}
+
+function analyzeBranchWhen(value: string): BranchWhenMigration {
+	const expr = value.trim();
+	if (expr.length === 0) return { kind: "none" };
+	if (expr.startsWith("$.") || expr.startsWith("js/")) return { kind: "mark" };
+
+	const parsed = parseExpression(expr);
+	if (!parsed) return referencesRuntimeExpression(expr) ? { kind: "mark" } : { kind: "none" };
+
+	const path = expressionToBranchPath(parsed);
+	if (path) return { kind: "convert", rawWhen: path.raw, tsExpr: path.proxy, helpers: ["$"] };
+
+	if (!ts.isBinaryExpression(parsed)) return referencesRuntimeExpression(expr) ? { kind: "mark" } : { kind: "none" };
+	const op = binaryOperator(parsed.operatorToken.kind);
+	if (!op) return { kind: "mark" };
+
+	const leftPath = expressionToBranchPath(parsed.left);
+	const rightPath = expressionToBranchPath(parsed.right);
+	if (!leftPath || rightPath) return { kind: "mark" };
+
+	const literal = literalExpression(parsed.right);
+	if (!literal) return { kind: "mark" };
+
+	if (op === "===" && literal.raw === "true") {
+		return { kind: "convert", rawWhen: leftPath.raw, tsExpr: leftPath.proxy, helpers: ["$"] };
+	}
+
+	const helper = helperForOperator(op);
+	return {
+		kind: "convert",
+		rawWhen: `${leftPath.raw} ${op} ${literal.raw}`,
+		tsExpr: `${helper}(${leftPath.proxy}, ${literal.ts})`,
+		helpers: ["$", helper],
+	};
+}
+
+function binaryOperator(kind: ts.SyntaxKind): "===" | "!==" | ">" | ">=" | "<" | "<=" | null {
+	switch (kind) {
+		case ts.SyntaxKind.EqualsEqualsEqualsToken:
+			return "===";
+		case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+			return "!==";
+		case ts.SyntaxKind.GreaterThanToken:
+			return ">";
+		case ts.SyntaxKind.GreaterThanEqualsToken:
+			return ">=";
+		case ts.SyntaxKind.LessThanToken:
+			return "<";
+		case ts.SyntaxKind.LessThanEqualsToken:
+			return "<=";
+		default:
+			return null;
+	}
+}
+
+function helperForOperator(op: "===" | "!==" | ">" | ">=" | "<" | "<="): Exclude<HelperName, "$"> {
+	switch (op) {
+		case "===":
+			return "eq";
+		case "!==":
+			return "ne";
+		case ">":
+			return "gt";
+		case ">=":
+			return "gte";
+		case "<":
+			return "lt";
+		case "<=":
+			return "lte";
+	}
+}
+
+function literalExpression(expr: ts.Expression): { raw: string; ts: string } | null {
+	if (
+		ts.isStringLiteralLike(expr) ||
+		ts.isNumericLiteral(expr) ||
+		expr.kind === ts.SyntaxKind.TrueKeyword ||
+		expr.kind === ts.SyntaxKind.FalseKeyword ||
+		expr.kind === ts.SyntaxKind.NullKeyword ||
+		(ts.isIdentifier(expr) && expr.text === "undefined")
+	) {
+		const raw = expr.getText();
+		return { raw, ts: raw };
+	}
+	return null;
+}
+
+function expressionToBranchPath(expr: ts.Expression): { raw: string; proxy: string } | null {
+	const path = expressionPath(expr);
+	if (!path) return null;
+	const [root, ...rest] = path;
+	if (root !== "ctx") return null;
+	const [field, ...tail] = rest;
+	if (field === "request" || field === "req") return branchPath("ctx.request", "$.request", tail);
+	if (field === "state" || field === "vars") return branchPath("ctx.state", "$.state", tail);
+	if (field === "response" || field === "prev") return branchPath("ctx.response", "$.prev", tail);
+	return null;
+}
+
+function branchPath(rawRoot: string, proxyRoot: string, tail: PathSegment[]): { raw: string; proxy: string } {
+	const suffix = tail.map(accessSegment).join("");
+	return { raw: `${rawRoot}${suffix}`, proxy: `${proxyRoot}${suffix}` };
+}
+
+function accessSegment(seg: PathSegment): string {
+	if (typeof seg === "number") return `[${seg}]`;
+	return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(seg) ? `.${seg}` : `[${JSON.stringify(seg)}]`;
 }
 
 function parseTemplate(expr: string, ctx: StepContext): ParsedRef | null {
@@ -546,6 +709,33 @@ function insertedBefore(positions: Set<number>, offset: number, source: string):
 		if (pos < offset) inserted += markerFor(source, pos).length;
 	}
 	return inserted;
+}
+
+function ensureHelperImports(source: string, helpers: Set<HelperName>): string {
+	const ordered = (["$", "eq", "ne", "gt", "gte", "lt", "lte"] as const).filter((name) => helpers.has(name));
+	if (ordered.length === 0) return source;
+
+	const namedImport = /import\s*{([^}]*)}\s*from\s*["'](@blokjs\/(?:helper|core))["'];?/m;
+	const match = namedImport.exec(source);
+	if (!match) return `import { ${ordered.join(", ")} } from "@blokjs/helper";\n${source}`;
+
+	const existing = new Set(
+		match[1]
+			.split(",")
+			.map((part) =>
+				part
+					.trim()
+					.split(/\s+as\s+/)[0]
+					?.trim(),
+			)
+			.filter(Boolean),
+	);
+	const missing = ordered.filter((name) => !existing.has(name));
+	if (missing.length === 0) return source;
+
+	const current = match[1].trim();
+	const next = current ? `${current}, ${missing.join(", ")}` : missing.join(", ");
+	return `${source.slice(0, match.index)}import { ${next} } from "${match[2]}";${source.slice(match.index + match[0].length)}`;
 }
 
 function refToTs(ref: StructuralRef): string {

@@ -144,6 +144,66 @@ describe("migrateRefs — JSON workflows", () => {
 		expect(twice.value).toEqual(once.value);
 		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
 	});
+
+	it("canonicalizes safe branch.when strings and marks unsafe branch conditions", () => {
+		const input = {
+			name: "Branches",
+			version: "1.0.0",
+			trigger: { http: { method: "POST" } },
+			steps: [
+				{
+					id: "method",
+					branch: {
+						when: 'ctx.req.method === "GET"',
+						then: [],
+					},
+				},
+				{
+					id: "available",
+					branch: {
+						when: "ctx.state.stock.inStock === true",
+						then: [],
+					},
+				},
+				{
+					id: "undefined-check",
+					branch: {
+						when: "ctx.state.missing === undefined",
+						then: [],
+					},
+				},
+				{
+					id: "compound",
+					branch: {
+						when: 'ctx.request.method.toLowerCase() === "get" && ctx.request.params.function === undefined',
+						then: [],
+					},
+				},
+				{
+					id: "dollar-footgun",
+					branch: {
+						when: '$.req.method === "GET"',
+						then: [],
+					},
+				},
+			],
+		};
+
+		const once = migrateJsonWorkflow(input);
+		const steps = (once.value as typeof input).steps;
+		expect(steps[0].branch.when).toBe('ctx.request.method === "GET"');
+		expect(steps[1].branch.when).toBe("ctx.state.stock.inStock");
+		expect(steps[2].branch.when).toBe("ctx.state.missing === undefined");
+		expect(steps[3].branch.when).toBe(input.steps[3].branch.when);
+		expect((steps[3].ui as { notes: string }).notes).toContain("branch.when not handle-safe");
+		expect(steps[4].branch.when).toBe(input.steps[4].branch.when);
+		expect((steps[4].ui as { notes: string }).notes).toContain("branch.when not handle-safe");
+		expect(once.stats).toEqual({ migrated: 2, marked: 2 });
+
+		const twice = migrateJsonWorkflow(once.value);
+		expect(twice.value).toEqual(once.value);
+		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
+	});
 });
 
 describe("migrateRefs — TypeScript workflows", () => {
@@ -192,12 +252,53 @@ export default workflow({
 		expect(once.value).toContain('a: { $ref: { step: "load-history", path: ["value"] } }');
 		expect(once.value).toContain('b: { $ref: { step: "load-history", path: ["value"] } }');
 		expect(once.value).toContain('c: { $tpl: ["user:", { $ref: { step: "load-history", path: ["value"] } }, ""] }');
-		expect(once.value).toContain("// blok-migrate: hand-migrate (dynamic expression)");
+		expect(once.value).toContain("// blok-migrate: hand-migrate");
 		expect(once.value).toContain('d: "js/ctx.state.missing?.value"');
 		expect(once.value).toContain('item: { $ref: { step: "item", path: [] } }');
 		expect(once.value).toContain('in: "js/ctx.request.body.items"');
 		expect(once.value).toContain('idempotencyKey: "js/ctx.request.body.id"');
 		expect(once.value).toContain('inputs: { expression: "ctx.state.load.value" }');
+
+		const twice = migrateTsSource(once.value);
+		expect(twice.value).toBe(once.value);
+		expect(twice.stats).toEqual({ migrated: 0, marked: 0 });
+	});
+
+	it("rewrites safe branch.when string literals to helper expressions and marks unsafe whens", () => {
+		const input = `import { workflow } from "@blokjs/helper";
+
+export default workflow({
+	name: "Branches",
+	version: "1.0.0",
+	trigger: { http: { method: "POST" } },
+	steps: [
+		{ id: "method", branch: { when: "ctx.req.method === \\"GET\\"", then: [] } },
+		{ id: "available", branch: { when: "ctx.state.stock.inStock === true", then: [] } },
+		{ id: "big", branch: { when: "ctx.state.order.total > 10", then: [] } },
+		{ id: "missing", branch: { when: "ctx.state.missing === undefined", then: [] } },
+		{
+			id: "compound",
+			branch: {
+				when: "ctx.request.method.toLowerCase() === \\"get\\" && ctx.request.params.function === undefined",
+				then: [],
+			},
+		},
+		{ id: "dollar-footgun", branch: { when: "$.req.method === \\"GET\\"", then: [] } },
+	],
+});`;
+
+		const once = migrateTsSource(input);
+		expect(once.value).toContain('import { workflow, $, eq, gt } from "@blokjs/helper";');
+		expect(once.value).toContain('when: eq($.request.method, "GET")');
+		expect(once.value).toContain("when: $.state.stock.inStock");
+		expect(once.value).toContain("when: gt($.state.order.total, 10)");
+		expect(once.value).toContain("when: eq($.state.missing, undefined)");
+		expect(once.value).toContain("// blok-migrate: hand-migrate (dynamic expression / branch.when not handle-safe)");
+		expect(once.value).toContain(
+			'when: "ctx.request.method.toLowerCase() === \\"get\\" && ctx.request.params.function === undefined"',
+		);
+		expect(once.value).toContain('when: "$.req.method === \\"GET\\""');
+		expect(once.stats).toEqual({ migrated: 4, marked: 2 });
 
 		const twice = migrateTsSource(once.value);
 		expect(twice.value).toBe(once.value);
