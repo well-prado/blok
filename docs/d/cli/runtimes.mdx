@@ -107,24 +107,8 @@ After a successful add you'll see exactly what changed:
 
 ### Use it in a workflow
 
-A step runs on a sidecar when you pass it a `runtimeNode(name, "runtime.<lang>")`
-stub. Write your node under `runtimes/<lang>/nodes/`, then declare it by name and
-runtime:
-
-<CodeGroup>
-```ts TypeScript workflow
-import { workflow, step, runtimeNode, http } from "@blokjs/core";
-
-// A typed stub for a node that lives in runtimes/python3/nodes/
-const resizeImage = runtimeNode<{ image: string }, { url: string }>(
-  "image-resizer",
-  "runtime.python3",   // ← run this step on the Python sidecar
-);
-
-export default workflow("Resize Image", { version: "1.0.0", trigger: http.post("/resize") }, (req) => {
-  step("resize", resizeImage, { image: req.body.image });
-});
-```
+A step runs on a sidecar when you reference a node by name and tag it with its
+runtime. Write your node under `runtimes/<lang>/nodes/`, then declare the step:
 
 ```json JSON workflow
 {
@@ -134,7 +118,30 @@ export default workflow("Resize Image", { version: "1.0.0", trigger: http.post("
   "inputs": { "image": "$.req.body.image" }
 }
 ```
-</CodeGroup>
+
+<Note>
+**`runtimeNode` is a type-only stub today.** `@blokjs/core` exports
+`runtimeNode<In, Out>(name, "runtime.<lang>")` as a *type-only* declaration
+(issue #424) — it gives you typed inputs/outputs for a cross-runtime node when
+you sketch a workflow, but it has no runtime value yet, so calling it in
+executable TypeScript throws `runtimeNode is not a function`. Until the
+lowering ships, author cross-runtime steps with the JSON form above (or a v2
+object step with `type: "runtime.<lang>"`). The intended typed form will read:
+
+```ts
+import { workflow, step, runtimeNode, http } from "@blokjs/core";
+
+// typed stub — does NOT execute yet (issue #424)
+const resizeImage = runtimeNode<{ image: string }, { url: string }>(
+  "image-resizer",
+  "runtime.python3",
+);
+
+export default workflow("Resize Image", { version: "1.0.0", trigger: http.post("/resize") }, (req) => {
+  step("resize", resizeImage, { image: req.body.image });
+});
+```
+</Note>
 
 Then start everything together:
 

@@ -21,15 +21,19 @@ results from the original).
 <CodeGroup>
 ```ts TypeScript
 import { workflow, step, http } from "@blokjs/core";
-import openai from "@blokjs/openai";
-import { RespondNode } from "@blokjs/helpers";
+import { LlmAgentNode, RespondNode } from "@blokjs/helpers";
 
 export default workflow("ai-content-pipeline", { version: "1.0.0", trigger: http.post("/generate") }, (req) => {
-  const draft = step("draft", openai, { prompt: req.body.prompt, model: "gpt-4o" }, {
+  const draft = step("draft", LlmAgentNode, {
+    channel: "generate",
+    apiKey: process.env.OPENROUTER_API_KEY,
+    model: "openai/gpt-4o-mini",
+    messages: [{ role: "user", content: req.body.prompt }],
+  }, {
     idempotencyKey: req.body.requestId,
   });
 
-  step("respond", RespondNode, { body: draft }, { ephemeral: true });
+  step("respond", RespondNode, { body: draft.fullText }, { ephemeral: true });
 });
 ```
 
@@ -41,14 +45,19 @@ export default workflow("ai-content-pipeline", { version: "1.0.0", trigger: http
   "steps": [
     {
       "id": "draft",
-      "use": "@blokjs/openai",
-      "inputs": { "prompt": "$.req.body.prompt", "model": "gpt-4o" },
+      "use": "@blokjs/llm-agent",
+      "inputs": {
+        "channel": "generate",
+        "apiKey": "js/process.env.OPENROUTER_API_KEY",
+        "model": "openai/gpt-4o-mini",
+        "messages": [{ "role": "user", "content": "$.req.body.prompt" }]
+      },
       "idempotencyKey": "$.req.body.requestId"
     },
     {
       "id": "respond",
       "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.draft" }
+      "inputs": { "body": "$.state.draft.fullText" }
     }
   ]
 }
