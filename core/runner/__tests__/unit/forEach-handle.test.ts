@@ -158,6 +158,31 @@ describe("forEach — per-item handle is body-scoped (cornerstone canRead)", () 
 			}),
 		).rejects.toThrow(/forEach state key "row(Index)?".*collides/);
 	});
+
+	it("rejects a nested forEach whose `as` collides with the surrounding forEach `as`", async () => {
+		// Inner loop iterates over a field of the OUTER item handle (so the
+		// iterable read is in-scope), but reuses the outer's `as` name — the
+		// load-time `assertNoForEachStateKeyCollisions` guard rejects it because
+		// nested item handles share the one flat ctx.state namespace.
+		await expect(
+			workflowCallback("NestedCollision", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				const validate = step("validate", noop, {});
+				forEach(
+					validate.rows,
+					(row) => {
+						forEach(
+							row.items,
+							(inner) => {
+								step("process", noop, { v: inner.v });
+							},
+							{ id: "innerLoop", as: "row" },
+						);
+					},
+					{ id: "outerLoop", as: "row" },
+				);
+			}),
+		).rejects.toThrow(/forEach state key "row".*surrounding forEach state key/);
+	});
 });
 
 // ───────────────────── (c): real Configuration + ForEachNode + Runner ───────
@@ -370,6 +395,123 @@ describe("forEach — real Configuration + ForEachNode + Runner", () => {
 			{ name: "perItem", value: { id: "C", original: "charlie", shadow: "C:2", index: 2 } },
 			{ name: "perItem", value: { id: "D", original: "delta", shadow: "D:3", index: 3 } },
 		]);
+		expect(state.row).toBeUndefined();
+		expect(state.rowIndex).toBeUndefined();
+	});
+
+	it.each([
+		{ label: "at the cap", count: 10, concurrency: 10 },
+		{ label: "one over the cap", count: 11, concurrency: 10 },
+		{ label: "large stress, capped", count: 100, concurrency: 10 },
+	])(
+		"parallel over many items ($label) has no per-item state tearing — every iteration resolves its OWN item/index",
+		async ({ count, concurrency }) => {
+			// Author with the handle DSL so the {$ref} lowering is exercised, then
+			// run THAT IR. The shadow field interpolates `${item.id}:${index}`
+			// from ctx.state[<as>] / ctx.state[<as>Index] — if any iteration's
+			// child ctx leaked a sibling's item or index, the shadow would mismatch.
+			const wf = await workflowCallback("Stress", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				const validate = step("validate", noop, {});
+				forEach(
+					validate.items,
+					(item, index) => {
+						step("echo", noop, { id: item.id, index }, { as: "echoed" });
+					},
+					{ id: "loop", as: "row", mode: "parallel", concurrency },
+				);
+			});
+			const authored = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.forEach) as {
+				forEach: { in: string; as: string };
+			};
+
+			const items = Array.from({ length: count }, (_v, i) => ({ id: `item-${i}` }));
+			const state = await bootAndRun({
+				name: `stress-${count}`,
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [
+					{
+						id: "seed",
+						use: "@blokjs/ctx-publish",
+						type: "module",
+						inputs: { name: "validate", value: { items } },
+					},
+					{
+						id: "loop",
+						forEach: {
+							in: authored.forEach.in,
+							as: authored.forEach.as,
+							mode: "parallel",
+							concurrency,
+							do: [
+								{
+									id: "echo",
+									use: "@blokjs/ctx-publish",
+									type: "module",
+									inputs: {
+										name: "perItem",
+										value: { shadow: "js/`${ctx.state.row.id}:${ctx.state.rowIndex}`" },
+									},
+								},
+							],
+						},
+					},
+				],
+			});
+
+			// Aggregate order MUST match input order (slot k ⇒ item-k) and each
+			// slot's shadow MUST pair its own id with its own index — no tearing.
+			expect(state.loop).toEqual(items.map((it, i) => ({ name: "perItem", value: { shadow: `${it.id}:${i}` } })));
+			expect(state.row).toBeUndefined();
+			expect(state.rowIndex).toBeUndefined();
+		},
+	);
+
+	it("processes a single-element array with the correct per-item handle and index", async () => {
+		const wf = await workflowCallback("Single", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+			const validate = step("validate", noop, {});
+			forEach(
+				validate.items,
+				(item, index) => {
+					step("echo", noop, { id: item.id, index }, { as: "echoed" });
+				},
+				{ id: "loop", as: "row" },
+			);
+		});
+		const authored = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.forEach) as {
+			forEach: { in: string; as: string };
+		};
+
+		const state = await bootAndRun({
+			name: "single-loop",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "seed",
+					use: "@blokjs/ctx-publish",
+					type: "module",
+					inputs: { name: "validate", value: { items: [{ id: "only" }] } },
+				},
+				{
+					id: "loop",
+					forEach: {
+						in: authored.forEach.in,
+						as: authored.forEach.as,
+						do: [
+							{
+								id: "echo",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "perItem", value: { id: "js/ctx.state.row.id", index: "js/ctx.state.rowIndex" } },
+							},
+						],
+					},
+				},
+			],
+		});
+
+		expect(state.loop).toEqual([{ name: "perItem", value: { id: "only", index: 0 } }]);
 		expect(state.row).toBeUndefined();
 		expect(state.rowIndex).toBeUndefined();
 	});
