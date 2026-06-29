@@ -3,7 +3,7 @@ import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NodeEntry } from "./listNodes.js";
-import { diffStubs, generateRuntimeStubs, jsonSchemaToTs, regenRuntimeStubs } from "./syncNodes.js";
+import { diffStubs, generateRuntimeStubs, jsonSchemaToTs, regenRuntimeStubs, syncNodes } from "./syncNodes.js";
 
 describe("jsonSchemaToTs", () => {
 	it("degrades null / empty / unknown schema to unknown", () => {
@@ -159,5 +159,287 @@ describe("diffStubs (--check)", () => {
 		// write only one of the two expected files → the other is missing
 		await fsp.writeFile(path.join(outDir, "runtime.rust.ts"), files.get("runtime.rust.ts") ?? "", "utf8");
 		expect(await diffStubs(files, outDir)).toEqual(["runtime.python3.ts"]);
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #367 — stub codegen across bad names + JSON-Schema dialect quirks
+// ─────────────────────────────────────────────────────────────────────────────
+
+const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * A "safe" degraded type literal is one that compiles as valid TypeScript and
+ * never claims more type information than the schema provided. The printer is
+ * contracted (syncNodes.ts:23-28) to emit ONE of these for any construct it
+ * can't model precisely — never invalid TS, never a throw. We accept `unknown`,
+ * the base primitives, `Record<string, unknown>`, `null`, unions of those, and
+ * structurally-balanced object/array literals.
+ */
+function isSafeTypeLiteral(ts: string): boolean {
+	if (ts.length === 0) return false;
+	// balanced braces/brackets/angles → not a truncated/garbled literal
+	const balanced = (open: string, close: string) => {
+		let depth = 0;
+		for (const ch of ts) {
+			if (ch === open) depth++;
+			else if (ch === close && --depth < 0) return false;
+		}
+		return depth === 0;
+	};
+	if (!balanced("{", "}") || !balanced("<", ">") || !balanced("[", "]")) return false;
+	// must not contain a literal `undefined`/`any`/`$ref`/`#/` leak — those would
+	// be the silent-erosion smells the dialect spike (#364) flagged.
+	return !/\bany\b|\$ref|#\//.test(ts);
+}
+
+describe("#367 — bad node names produce safe identifiers", () => {
+	it("emits valid TS identifiers for names that are not valid identifiers, preserving the original name", () => {
+		const go =
+			generateRuntimeStubs([
+				{
+					name: "weird name!",
+					ref: "runtime.go:weird name!",
+					runtime: "runtime.go",
+					inputSchema: null,
+					outputSchema: null,
+				},
+				{ name: "123start", ref: "runtime.go:123start", runtime: "runtime.go", inputSchema: null, outputSchema: null },
+				{ name: "a-b.c", ref: "runtime.go:a-b.c", runtime: "runtime.go", inputSchema: null, outputSchema: null },
+			]).get("runtime.go.ts") ?? "";
+
+		// every emitted export ident is a syntactically-valid TS identifier …
+		const idents = [...go.matchAll(/export const (\S+) =/g)].map((m) => m[1]);
+		expect(idents.length).toBe(3);
+		for (const ident of idents) expect(ident).toMatch(IDENT_RE);
+
+		// … and the ORIGINAL (unsafe) name string is preserved verbatim in the
+		// factory args, so the runtime still resolves the real catalog node.
+		expect(go).toContain('runtimeNode<unknown, unknown>("weird name!", "runtime.go:weird name!")');
+		expect(go).toContain('runtimeNode<unknown, unknown>("123start", "runtime.go:123start")');
+		expect(go).toContain('runtimeNode<unknown, unknown>("a-b.c", "runtime.go:a-b.c")');
+		// a leading-digit name must not produce an ident starting with a digit
+		expect(go).not.toMatch(/export const 1/);
+	});
+});
+
+describe("#367 — JSON-Schema dialect quirks degrade safely (grounded in #364 spike)", () => {
+	// Each fixture mirrors a construct the listnodes-dialect-analysis.md spike
+	// flagged as silently degraded by the 35-line `jsonSchemaToTs` printer. The
+	// CONTRACT under test is graceful degradation: a SAFE type literal, never a
+	// throw, never invalid TS — NOT that the type is precise.
+	const dialectCases: Array<{ label: string; schema: unknown }> = [
+		{
+			// Pydantic / schemars / NJsonSchema nested model → $ref + $defs (no `type`)
+			label: "$ref + $defs (Rust/C#/Python nested model)",
+			schema: {
+				type: "object",
+				properties: { user: { $ref: "#/$defs/User" }, tags: { type: "array", items: { type: "string" } } },
+				required: ["user"],
+				$defs: { User: { type: "object", properties: { id: { type: "string" } } } },
+			},
+		},
+		{
+			// Pydantic Optional[str] → anyOf: [T, {type:null}]
+			label: "anyOf nullable (Pydantic Optional)",
+			schema: { type: "object", properties: { nickname: { anyOf: [{ type: "string" }, { type: "null" }] } } },
+		},
+		{
+			// Rust adjacently-tagged enum → oneOf
+			label: "oneOf union (Rust enum)",
+			schema: { oneOf: [{ type: "object", properties: { a: { type: "string" } } }, { type: "string" }] },
+		},
+		{
+			// Pydantic / C# branded string → format: date-time
+			label: "format: date-time string",
+			schema: { type: "string", format: "date-time" },
+		},
+		{
+			// C# / schemars nullable → type-array ["string","null"]
+			label: "type-array nullable [string, null]",
+			schema: { type: ["string", "null"] },
+		},
+	];
+
+	for (const { label, schema } of dialectCases) {
+		it(`degrades ${label} to a safe type without throwing`, () => {
+			let out = "";
+			expect(() => {
+				out = jsonSchemaToTs(schema);
+			}).not.toThrow();
+			expect(isSafeTypeLiteral(out)).toBe(true);
+		});
+	}
+
+	it("format: date-time preserves the base `string` type (lossless degrade)", () => {
+		// the one quirk the printer handles well — format is dropped but the base
+		// type survives, so the handle stays as precise as the source allowed.
+		expect(jsonSchemaToTs({ type: "string", format: "date-time" })).toBe("string");
+	});
+
+	it("type-array nullable degrades to `unknown` (most-conservative safe type)", () => {
+		// `s.type` being an array hits the printer's `default:` arm.
+		expect(jsonSchemaToTs({ type: ["string", "null"] })).toBe("unknown");
+	});
+
+	it("a whole dialect catalog compiles to valid stub TS without throwing", () => {
+		// end-to-end: feed every dialect fixture through the full stub generator and
+		// assert the emitted file is one factory line per node, structurally valid,
+		// and free of the silent-erosion smells (#364) — never `$ref`/`#/`/`any`.
+		const nodes: NodeEntry[] = dialectCases.map((c, i) => ({
+			name: `n${i}`,
+			ref: `runtime.python3:n${i}`,
+			runtime: "runtime.python3",
+			inputSchema: c.schema,
+			outputSchema: null,
+		}));
+		const src = generateRuntimeStubs(nodes).get("runtime.python3.ts") ?? "";
+		const factoryLines = src.split("\n").filter((l) => l.startsWith("export const "));
+		expect(factoryLines.length).toBe(dialectCases.length);
+		// the printer must not leak unresolved refs / `any` into any factory line
+		for (const line of factoryLines) expect(line).not.toMatch(/\bany\b|\$ref|#\//);
+		// the whole emitted source is structurally balanced (no truncated literals)
+		expect(isSafeTypeLiteral(src)).toBe(true);
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #371 — drift detection true/false positives + unreachable-runtime safety
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("#371 — `--check` drift detection (CLI flow)", () => {
+	const catalog: NodeEntry[] = [
+		{ name: "ask", ref: "runtime.python3:ask", runtime: "runtime.python3", inputSchema: null, outputSchema: null },
+		{ name: "fast", ref: "runtime.rust:fast", runtime: "runtime.rust", inputSchema: null, outputSchema: null },
+	];
+
+	let outDir: string;
+	let exitSpy: ReturnType<typeof vi.spyOn>;
+	beforeEach(async () => {
+		outDir = await fsp.mkdtemp(path.join(tmpdir(), "blok-check-cli-"));
+		// process.exit must not kill the test runner — capture the code instead.
+		exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => undefined) as never);
+		vi.spyOn(console, "log").mockImplementation(() => undefined);
+	});
+	afterEach(async () => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+		await fsp.rm(outDir, { recursive: true, force: true });
+	});
+
+	function stubFetch(impl: () => Promise<Response> | Response) {
+		vi.stubGlobal("fetch", vi.fn(impl));
+	}
+	const okCatalog = () => new Response(JSON.stringify({ nodes: catalog }), { status: 200 });
+
+	it("(a) in-sync stubs → no drift, never exits non-zero", async () => {
+		// seed outDir with the exact generated stubs → on-disk matches catalog.
+		stubFetch(okCatalog);
+		for (const [filename, source] of generateRuntimeStubs(catalog)) {
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+
+		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
+
+		// no exit at all, or only exit(0) — never a non-zero failure code.
+		for (const call of exitSpy.mock.calls) expect(call[0]).not.toBe(1);
+	});
+
+	it("(b) stale on-disk stub → exits non-zero", async () => {
+		stubFetch(okCatalog);
+		// one of the two expected files is hand-edited stale; the other matches.
+		await fsp.writeFile(path.join(outDir, "runtime.python3.ts"), "// stale\n", "utf8");
+		for (const [filename, source] of generateRuntimeStubs(catalog)) {
+			if (filename === "runtime.python3.ts") continue;
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+
+		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
+
+		expect(exitSpy).toHaveBeenCalledWith(1);
+	});
+
+	it("(c) UNREACHABLE runtime → exits 1, NEVER a false 'in sync' (key safety case)", async () => {
+		// fetch throws → fetchCatalog returns null → cannot verify drift.
+		stubFetch(() => {
+			throw new Error("ECONNREFUSED");
+		});
+		// even with PERFECTLY in-sync stubs on disk, an unreachable server must
+		// NOT be reported as "in sync" — it exits 1 before diffing.
+		for (const [filename, source] of generateRuntimeStubs(catalog)) {
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+
+		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
+
+		expect(exitSpy).toHaveBeenCalledWith(1);
+		// no "in sync" green message — the diff path was never reached.
+		const logged = (console.log as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+		expect(logged).not.toMatch(/in sync/i);
+	});
+
+	it("(c') non-ok HTTP (server up, endpoint errors) → exits 1, no false 'in sync'", async () => {
+		// fetch resolves but res.ok is false → fetchCatalog returns null too.
+		stubFetch(() => new Response("boom", { status: 500 }));
+		for (const [filename, source] of generateRuntimeStubs(catalog)) {
+			await fsp.writeFile(path.join(outDir, filename), source, "utf8");
+		}
+
+		await syncNodes({ url: "http://localhost:4000", out: outDir, check: true });
+
+		expect(exitSpy).toHaveBeenCalledWith(1);
+		const logged = (console.log as unknown as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+		expect(logged).not.toMatch(/in sync/i);
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #369 — dev-loop regen: empty-catalog no-clobber + missing-runtime
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("#369 — regen does not clobber good stubs on an empty catalog", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	function stubFetch(impl: () => Promise<Response> | Response) {
+		vi.stubGlobal("fetch", vi.fn(impl));
+	}
+
+	it("module-only / empty catalog returns 0 and leaves pre-existing stub files untouched", async () => {
+		const outDir = await fsp.mkdtemp(path.join(tmpdir(), "blok-noclobber-"));
+		// a previously-good run wrote a real stub file …
+		const goodStub = generateRuntimeStubs([
+			{ name: "ask", ref: "runtime.python3:ask", runtime: "runtime.python3", inputSchema: null, outputSchema: null },
+		]).get("runtime.python3.ts");
+		if (!goodStub) throw new Error("expected a good stub fixture");
+		const goodPath = path.join(outDir, "runtime.python3.ts");
+		await fsp.writeFile(goodPath, goodStub, "utf8");
+
+		// … now the catalog comes back module-only (a transient dev-loop state
+		// where runtimes haven't re-registered yet).
+		stubFetch(
+			() =>
+				new Response(
+					JSON.stringify({
+						nodes: [
+							{
+								name: "@blokjs/respond",
+								ref: "@blokjs/respond",
+								runtime: "module",
+								inputSchema: null,
+								outputSchema: null,
+							},
+						],
+					}),
+					{ status: 200 },
+				),
+		);
+
+		const count = await regenRuntimeStubs("http://localhost:4000", outDir);
+
+		// 0 files written, AND the previously-good stub is byte-for-byte intact —
+		// regen never deletes/empties on a degenerate catalog.
+		expect(count).toBe(0);
+		expect(await fsp.readFile(goodPath, "utf8")).toBe(goodStub);
+		await fsp.rm(outDir, { recursive: true, force: true });
 	});
 });
