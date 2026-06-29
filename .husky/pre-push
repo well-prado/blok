@@ -8,7 +8,20 @@
 #   bun run ci:all      # + the 7-language cross-runtime lane
 # Or opt into the full integration lane on this push:
 #   BLOK_PREPUSH_CI=1 git push
-bun run lint:check && bunx nx run-many -t build
+# Lint is deterministic — a hard gate, no retry.
+bun run lint:check || exit 1
+
+# `nx run-many -t build` runs up to 3 tasks in parallel and can TRANSIENTLY
+# fail a single task under cold-cache resource contention (the same flake that
+# hits the parallel test gate). A rejected push here is dangerous: the branch
+# is already pushed, so `gh pr merge` can still merge a stale head. So retry
+# once, SERIALLY (--parallel=1): nx replays the cached successes and re-runs
+# only the failed task with no contention, so a flake recovers — while a REAL
+# (reproducible) failure fails both times and still blocks the push.
+bunx nx run-many -t build || {
+  echo "[pre-push] build failed — retrying once serially (nx replays cache, re-runs only failures)…"
+  bunx nx run-many -t build --parallel=1
+} || exit 1
 
 if [ "${BLOK_PREPUSH_CI:-0}" = "1" ]; then
   echo "[pre-push] BLOK_PREPUSH_CI=1 → running full local integration lane (bun run ci)"
