@@ -47,7 +47,7 @@ function makeCtx(body: unknown = { tenantId: "tenant-x" }): Context {
 			error: null,
 		} as Context["response"],
 		error: { message: [] } as Context["error"],
-		logger: { log: () => {}, error: () => {} } as unknown as Context["logger"],
+		logger: { log: () => {}, logLevel: () => {}, error: () => {} } as unknown as Context["logger"],
 		config: {} as unknown as Context["config"],
 		vars: {},
 		env: {} as unknown as Context["env"],
@@ -60,6 +60,8 @@ function makeCtx(body: unknown = { tenantId: "tenant-x" }): Context {
 }
 
 describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
+	const prevMapperMode = process.env.BLOK_MAPPER_MODE;
+
 	beforeEach(() => {
 		RunTracker.resetInstance();
 		process.env.BLOK_CONCURRENCY_DISABLED = undefined;
@@ -68,6 +70,9 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 	afterEach(() => {
 		RunTracker.resetInstance();
 		process.env.BLOK_CONCURRENCY_DISABLED = undefined;
+		// biome-ignore lint/performance/noDelete: restore literal absence (default mode)
+		if (prevMapperMode === undefined) delete process.env.BLOK_MAPPER_MODE;
+		else process.env.BLOK_MAPPER_MODE = prevMapperMode;
 	});
 
 	it("zero overhead when no concurrencyKey is configured", async () => {
@@ -204,20 +209,57 @@ describe("TriggerBase — concurrency gate (Tier 2 #6)", () => {
 		expect(result.ctx).toBeDefined();
 	});
 
-	it("fails open when key resolution returns null (e.g. js/expr throws)", async () => {
+	it("strict mode (default): a THROWING key expression fails the run, never silently bypasses the limit", async () => {
+		// biome-ignore lint/performance/noDelete: exercise the default (strict) mode
+		delete process.env.BLOK_MAPPER_MODE;
 		const t = new TestTrigger();
-		// `js/ctx.nonexistent.path` will throw → resolveIdempotencyKey returns null
+		// `ctx.nonexistent` is undefined → `.path` throws → threw === true.
 		t.setTriggerConfig({
 			http: { method: "POST", concurrencyKey: "js/ctx.nonexistent.path.userId", concurrencyLimit: 1 },
 		});
 
-		// No slot held. With a key, it would acquire one — but since
-		// resolution failed, the gate is skipped entirely.
+		await expect(t.run(makeCtx())).rejects.toThrow(/key expression .* threw/);
+
+		// The run is marked "failed" (a misconfig surfaced), NOT silently completed.
+		const tracker = RunTracker.getInstance();
+		const failed = tracker
+			.getStore()
+			.getRuns({ status: "failed" })
+			.runs.find((r) => r.workflowName === "test-wf");
+		expect(failed).toBeDefined();
+	});
+
+	it("warn mode: a THROWING key expression falls open (limit not enforced) instead of failing", async () => {
+		process.env.BLOK_MAPPER_MODE = "warn";
+		const t = new TestTrigger();
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "js/ctx.nonexistent.path.userId", concurrencyLimit: 1 },
+		});
+
+		// Falls open — the gate is skipped, the run completes.
 		const result = await t.run(makeCtx());
 		expect(result.ctx).toBeDefined();
 	});
 
-	it("fails open when concurrencyKey references state only a later step could create", async () => {
+	it("a key that resolves to undefined WITHOUT throwing falls open in every mode (absence is not an error)", async () => {
+		// biome-ignore lint/performance/noDelete: default (strict) mode — proves only THROWS fail-fast
+		delete process.env.BLOK_MAPPER_MODE;
+		const t = new TestTrigger();
+		// body has no `absent` field → `ctx.request.body.absent` is undefined,
+		// no throw → threw === false → fall-open even under strict.
+		t.setTriggerConfig({
+			http: { method: "POST", concurrencyKey: "js/ctx.request.body.absent", concurrencyLimit: 1 },
+		});
+
+		const result = await t.run(makeCtx({ tenantId: "tenant-x" }));
+		expect(result.ctx).toBeDefined();
+	});
+
+	it("warn mode: concurrencyKey referencing state only a later step could create falls open", async () => {
+		// A key that depends on step output can never resolve at gate entry (the
+		// gate runs before any step). In strict mode that's a surfaced misconfig;
+		// in warn mode it falls open.
+		process.env.BLOK_MAPPER_MODE = "warn";
 		const t = new TestTrigger();
 		t.setTriggerConfig({
 			http: { method: "POST", concurrencyKey: "js/ctx.state.after.tenantId", concurrencyLimit: 1 },
