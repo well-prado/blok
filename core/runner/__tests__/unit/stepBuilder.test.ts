@@ -32,6 +32,7 @@ import {
 	type CronEntry,
 	type GrpcEntry,
 	type HttpEntry,
+	type ManualEntry,
 	type McpEntry,
 	type PubSubEntry,
 	type SseEntry,
@@ -573,11 +574,20 @@ describe("handle-DSL e2e: per-trigger entry handles (#336)", () => {
 					void query;
 				},
 			);
-			// Unrecognized / out-of-scope kind (manual, #362) falls back to the loose handle.
+			// Manual trigger: typed `args` entry handle (#434) — dispatch args land at
+			// ctx.request.body, typed `unknown` when no input is declared.
 			await workflowCallback("T-manual", { version: "1.0.0", trigger: { manual: {} } }, (args) => {
-				assert<Expect<typeof args, TriggerHandle>>();
-				void args.anything;
+				assert<Expect<typeof args, ManualEntry>>();
+				void args.body;
 			});
+			await workflowCallback(
+				"T-manual-typed",
+				{ version: "1.0.0", input: z.object({ jobId: z.string() }), trigger: { manual: {} } },
+				(args) => {
+					const jobId: string = args.body.jobId;
+					void jobId;
+				},
+			);
 		}
 		void _typeAssertions; // referenced for tsc; never invoked at runtime
 		expect(typeof _typeAssertions).toBe("function");

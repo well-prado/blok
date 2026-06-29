@@ -1131,9 +1131,15 @@ export type WsEntry = Handle<{
  * the workflow's declared `input` Zod when present, `unknown` otherwise (#436).
  */
 export type McpEntry = Handle<RequestShape>;
+/**
+ * Manual entry handle (`args`). A programmatically-dispatched workflow receives
+ * its dispatch arguments at `ctx.request.body`. Its `body` is typed from the
+ * workflow's declared `input` Zod when present, `unknown` otherwise (#434).
+ */
+export type ManualEntry = Handle<RequestShape>;
 
 /**
- * The entry-handle `body` type for the null-schema triggers (webhook/grpc/mcp):
+ * The entry-handle `body` type for the null-schema triggers (webhook/grpc/mcp/manual):
  * the workflow's declared `input` Zod inferred, or `unknown` when none is
  * declared — one consistent rule (#436). Keyed off the PRESENCE of `input`, not
  * `InferOr<I>`, because `z.infer<z.ZodTypeAny>` widens an undeclared schema to
@@ -1169,7 +1175,9 @@ type EntryFor<T, Body = unknown> = T extends { http: unknown }
 								? WsEntry
 								: T extends { mcp: unknown }
 									? Handle<RequestShape<Body>>
-									: TriggerHandle;
+									: T extends { manual: unknown }
+										? Handle<RequestShape<Body>>
+										: TriggerHandle;
 
 /**
  * Callback-style `workflow()` overload. Runs `build` inside a fresh builder

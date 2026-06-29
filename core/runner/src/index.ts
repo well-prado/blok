@@ -394,6 +394,7 @@ export type {
 	SseEntry,
 	WsEntry,
 	McpEntry,
+	ManualEntry,
 	BranchCondition,
 	BranchArms,
 	ForEachOptions,
