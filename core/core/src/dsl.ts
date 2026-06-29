@@ -11,6 +11,7 @@ export {
 	workflowCallback as workflow,
 	step,
 	subworkflow,
+	state,
 	branch,
 	forEach,
 	switchOn,

@@ -204,6 +204,28 @@ export function makeHandle<T = unknown>(rootKey: string): Handle<T> {
 }
 
 /**
+ * Read-only escape hatch to a DYNAMICALLY-published state key (#333). Cross-runtime
+ * nodes merge runtime-decided keys via `vars_delta`, and `ctx.publish(name, value)`
+ * writes arbitrary named keys — neither is in any node's Zod output, so no
+ * structural handle can see them. `state("name")` mints an UNTYPED `Handle<unknown>`
+ * rooted at that key (cast it yourself if you know the shape): it lowers to
+ * `js/ctx.state.<name>` exactly like a normal step-output ref. Non-identifier
+ * names lower to bracket form — `state("user:123")` → `js/ctx.state["user:123"]` —
+ * because the SAME canonical `lowerRefs` path encodes the root via `encodeSegment`.
+ *
+ * Prefer a typed step-output handle whenever the key IS in a node's output; reach
+ * for `state()` only for keys the type system never saw.
+ *
+ * @example const tax = state("tax_rate"); step("price", priceNode, { rate: tax });
+ */
+export function state(name: string): Handle<unknown> {
+	if (typeof name !== "string" || name.length === 0) {
+		throw new Error("state() requires a non-empty string key name.");
+	}
+	return buildHandle(name, undefined, []) as Handle<unknown>;
+}
+
+/**
  * `tpl` tagged template (#425). Captures the static string parts + the
  * interpolated handles as a STRUCTURAL template node — `{$tpl: [str, {$ref}, …]}`
  * — WITHOUT coercing the handles to strings (the poison toString would throw).
