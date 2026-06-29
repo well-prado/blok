@@ -63,6 +63,28 @@ describe("migrateRefs — JSON workflows", () => {
 					},
 				},
 				{
+					id: "switcher",
+					switch: {
+						on: "js/(ctx.request.headers['x-kind'] || '').toLowerCase()",
+						cases: [
+							{
+								when: "a",
+								do: [
+									{
+										id: "switch-do",
+										use: "sink",
+										inputs: {
+											event: "js/ctx.request.headers['x-event']",
+											value: "js/ctx.request.body.value || null",
+										},
+									},
+								],
+							},
+						],
+						default: [{ id: "switch-default", use: "sink", inputs: { body: "js/ctx.request.body" } }],
+					},
+				},
+				{
 					id: "dispatch",
 					subworkflow: "js/ctx.request.body.type",
 					inputs: {
@@ -98,7 +120,23 @@ describe("migrateRefs — JSON workflows", () => {
 		expect(loop.forEach.in).toBe("js/Array.isArray(ctx.request.body.items) ? ctx.request.body.items : []");
 		expect(loop.forEach.do[0].inputs.item).toEqual({ $ref: { step: "item", path: [] } });
 
-		const dispatch = steps[7] as Record<string, Record<string, unknown>>;
+		const switcher = steps[7] as Record<
+			string,
+			{
+				on: string;
+				cases: Array<{ do: Array<Record<string, Record<string, unknown>>> }>;
+				default: Array<Record<string, Record<string, unknown>>>;
+			}
+		>;
+		expect(switcher.switch.on).toBe("js/(ctx.request.headers['x-kind'] || '').toLowerCase()");
+		expect(switcher.switch.cases[0].do[0].inputs.event).toEqual({
+			$ref: { step: "@trigger", path: ["headers", "x-event"] },
+		});
+		expect(switcher.switch.cases[0].do[0].inputs.value).toBe("js/ctx.request.body.value || null");
+		expect((switcher.switch.cases[0].do[0].ui as { notes: string }).notes).toContain("blok-migrate: hand-migrate");
+		expect(switcher.switch.default[0].inputs.body).toEqual({ $ref: { step: "@trigger", path: ["body"] } });
+
+		const dispatch = steps[8] as Record<string, Record<string, unknown>>;
 		expect(dispatch.subworkflow).toBe("js/ctx.request.body.type");
 		expect(dispatch.inputs.event).toEqual({ $ref: { step: "@trigger", path: ["body"] } });
 

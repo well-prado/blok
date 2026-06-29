@@ -227,9 +227,13 @@ function recurseJsonControlFlow(step: Record<string, unknown>, stats: MigrationS
 	}
 	if (isPlainObject(step.switch) && Array.isArray(step.switch.cases)) {
 		for (const c of step.switch.cases) {
-			if (isPlainObject(c) && Array.isArray(c.steps)) migrateJsonStepArray(c.steps, stats);
+			if (!isPlainObject(c)) continue;
+			if (Array.isArray(c.steps)) migrateJsonStepArray(c.steps, stats);
+			if (Array.isArray(c.do)) migrateJsonStepArray(c.do, stats);
 		}
 	}
+	if (isPlainObject(step.switch) && Array.isArray(step.switch.default))
+		migrateJsonStepArray(step.switch.default, stats);
 }
 
 function migrateTsStepArray(
