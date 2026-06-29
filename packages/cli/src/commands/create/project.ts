@@ -1357,7 +1357,7 @@ export default nodes;
 /**
  * Generate shared Workflows.ts that imports workflows from all trigger directories.
  */
-function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: string[] = [], examples = false): string {
+export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: string[] = [], examples = false): string {
 	const imports: string[] = [];
 	const workflowEntries: string[] = [];
 
@@ -1368,10 +1368,18 @@ function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: string[] 
 	// on-message.ts`). Now matches what the copy step actually produces.
 	for (const trigger of triggers) {
 		if (trigger === "http") {
-			// HTTP trigger source doesn't ship TS workflow files — example
-			// JSON workflows come in via the file-based router under
-			// `workflows/json/`. Skip.
-			imports.push("// HTTP workflows are auto-discovered from workflows/json/");
+			// HTTP JSON workflows come in via the file-based router under
+			// `workflows/json/` (auto-discovered, not listed here). But the HTTP
+			// scaffold ALSO ships one `@blokjs/core` typed-handle-DSL example
+			// (src/workflows/http/countries-handle-dsl.ts) so a fresh project has
+			// a runnable sample of Blok's lead TS authoring surface — every other
+			// shipped workflow is the object/JSON form. The callback DSL resolves
+			// async (`workflow(name, opts, build)` returns a Promise), so register
+			// the awaited builder; the generated file already uses top-level await
+			// in Nodes.ts, so this is consistent.
+			imports.push("// HTTP JSON workflows are auto-discovered from workflows/json/");
+			imports.push('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl";');
+			workflowEntries.push('\t"countries-dsl": await CountriesHandleDsl,');
 		} else if (trigger === "sse") {
 			// v0.6.7 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
 			// (copied via the scaffold to `src/workflows/sse/events/...`). The
