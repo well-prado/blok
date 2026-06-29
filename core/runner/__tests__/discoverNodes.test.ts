@@ -22,19 +22,41 @@ beforeAll(() => {
 	// Underscore-prefixed dir → skipped (drafts/utilities).
 	mkdirSync(join(root, "_wip"), { recursive: true });
 	writeFileSync(join(root, "_wip", "index.mjs"), nodeFile("wip"));
-	// A barrel dir (default export is a re-export MAP, not a node) → skipped
-	// silently. This is the scaffold's `examples/index.ts` case.
+	// A MAP-EXPORT barrel (default export is a `{ ref: node }` map) → every
+	// node-shaped value is registered (#360 / #383). The dev app's
+	// `examples/`/`eval/` bundles. Non-node values in the map are ignored.
 	mkdirSync(join(root, "examples"), { recursive: true });
 	writeFileSync(join(root, "examples", "index.mjs"), "export default { 'ex-a': { name: 'ex-a' } };\n");
+	mkdirSync(join(root, "bundle"), { recursive: true });
+	writeFileSync(
+		join(root, "bundle", "index.mjs"),
+		"export default { x: { name: 'node-x' }, y: { name: 'node-y' }, util: { notANode: true } };\n",
+	);
+	// A plain util barrel (no node-shaped values) → registers nothing.
+	mkdirSync(join(root, "utils-only"), { recursive: true });
+	writeFileSync(join(root, "utils-only", "index.mjs"), "export default { helperA: () => 1, helperB: 2 };\n");
 });
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("discoverNodes", () => {
-	it("discovers <name>/index.* nodes by their default export's name", async () => {
+	it("discovers single-node dirs AND map-export barrels (node-shaped values only)", async () => {
 		const nodes = await discoverNodes(root);
 		const names = nodes.map((n) => (n as { name: string }).name).sort();
-		expect(names).toEqual(["@my/beta", "alpha"]); // no-index + _wip skipped
+		// alpha + @my/beta (single nodes); ex-a, node-x, node-y (barrel values);
+		// no-index + _wip dirs skipped; util/helper non-node values skipped.
+		expect(names).toEqual(["@my/beta", "alpha", "ex-a", "node-x", "node-y"]);
+	});
+
+	it("a map-export barrel registers each node value; a non-node util barrel registers nothing", async () => {
+		const map = new NodeMap();
+		map.addNodes(await discoverNodes(root));
+		expect(map.getNode("node-x")).toBeDefined();
+		expect(map.getNode("node-y")).toBeDefined();
+		expect(map.getNode("ex-a")).toBeDefined();
+		// `utils-only` (helperA/helperB) and the barrel's `util` value contribute none.
+		expect(map.getNode("helperA")).toBeUndefined();
+		expect(map.getNode("util")).toBeUndefined();
 	});
 
 	it("returns [] for a missing directory (project with no local nodes)", async () => {
