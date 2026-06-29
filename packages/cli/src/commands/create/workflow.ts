@@ -101,6 +101,14 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 
 		const workflow_json = JSON.parse(workflow_template);
 		workflow_json.name = workflowName;
+		// Give the HTTP trigger an explicit `path` derived from the name so the
+		// created workflow is REACHABLE: explicit-path-only routing is the default
+		// (since v0.4), so a pathless workflow registers but 404s. Slug mirrors the
+		// filename (`workflowName` kebab-cased).
+		const slug = workflowName.replaceAll(" ", "-").toLowerCase();
+		if (workflow_json.trigger?.http && !workflow_json.trigger.http.path) {
+			workflow_json.trigger.http.path = `/${slug}`;
+		}
 		fsExtra.writeFileSync(dirPath, JSON.stringify(workflow_json, null, 2));
 
 		if (!skipPrompts) s.stop(`Node "${workflowName}" created successfully.`);

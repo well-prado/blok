@@ -1311,24 +1311,29 @@ export async function createProject(opts: OptionValues, version: string, current
 /**
  * Generate shared Nodes.ts that combines nodes from all selected triggers.
  */
-function generateSharedNodesFile(triggers: string[], _repoSource: string): string {
+export function generateSharedNodesFile(_triggers: string[], _repoSource: string): string {
 	const imports = [
 		'import { dirname, join } from "node:path";',
 		'import { fileURLToPath } from "node:url";',
 		'import ApiCall from "@blokjs/api-call";',
 		'import IfElse from "@blokjs/if-else";',
+		'import { HELPER_NODES } from "@blokjs/helpers";',
 		'import { discoverNodes } from "@blokjs/runner";',
 		'import type { NodeBase } from "@blokjs/shared";',
 	];
 
-	// SSE/WebSocket workflows need helper nodes from @blokjs/helpers (sse-*/ws-*
-	// + the general reliability helpers). Spread the whole registry — cost is
-	// negligible (zero-side-effect imports).
-	const explicit = ["ApiCall as unknown as NodeBase", "IfElse as unknown as NodeBase"];
-	if (triggers.includes("sse") || triggers.includes("websocket")) {
-		imports.push('import { HELPER_NODES } from "@blokjs/helpers";');
-		explicit.push("...(Object.values(HELPER_NODES) as unknown as NodeBase[])");
-	}
+	// @blokjs/helpers ships the reliability + control helpers EVERY project needs —
+	// @blokjs/respond, @blokjs/throw, @blokjs/log, @blokjs/expr, @blokjs/ctx-publish,
+	// @blokjs/audit-log (plus the sse-*/ws-* streaming helpers). Register the whole
+	// registry UNCONDITIONALLY: `blokctl create workflow` emits a `@blokjs/respond`
+	// step, so even a default HTTP scaffold must have it (otherwise the generated
+	// workflow 500s with "Node @blokjs/respond not found"). Cost is negligible —
+	// zero-side-effect imports.
+	const explicit = [
+		"ApiCall as unknown as NodeBase",
+		"IfElse as unknown as NodeBase",
+		"...(Object.values(HELPER_NODES) as unknown as NodeBase[])",
+	];
 
 	return `${imports.join("\n")}
 
