@@ -12,3 +12,9 @@
  */
 export * from "@blokjs/runner";
 export * from "@blokjs/shared";
+// Both barrels export a DIFFERENT `Trigger`: runner's is the public workflow
+// trigger-CONFIG type (`{ [k]: TriggerHttp }`), shared's is the internal base
+// CLASS only `TriggerBase` extends. Re-export runner's explicitly to resolve the
+// `export *` ambiguity (TS2308) — the config type is the name authors reference;
+// shared's base class is internal (trigger authors extend `TriggerBase`).
+export { Trigger } from "@blokjs/runner";
