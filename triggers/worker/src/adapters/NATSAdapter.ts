@@ -162,12 +162,22 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 		// Ensure stream exists with worker subjects
 		await this.ensureStream(streamName, [subject]);
 
+		// v0.7 — `ack: false` selects at-most-once delivery. JetStream PULL
+		// consumers reject AckPolicy.None ("consumer in pull mode requires ack
+		// policy"), so at-most-once is implemented as AckPolicy.Explicit +
+		// max_deliver:1 with the message ACKed on receipt (before the handler
+		// runs). The broker then treats the message as delivered+done, so a
+		// handler that throws is NOT redelivered — exactly-once delivery even
+		// on failure. The manual ack/nak/term path below is a no-op in this mode.
+		const atMostOnce = config.ack === false;
+
 		// Create or update durable pull consumer with worker semantics
 		const ackWaitNs = ((config.timeout ?? 30000) + 5000) * 1_000_000; // timeout + 5s buffer, in nanoseconds
 		await this.jsm.consumers.add(streamName, {
 			durable_name: durableName,
 			ack_policy: nats.AckPolicy.Explicit,
-			max_deliver: (config.retries ?? 3) + 1, // +1 because first attempt counts
+			// at-most-once: deliver exactly once, never redeliver.
+			max_deliver: atMostOnce ? 1 : (config.retries ?? 3) + 1, // +1 because first attempt counts
 			ack_wait: ackWaitNs,
 			filter_subjects: [subject],
 		});
@@ -239,18 +249,31 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 							timeout: timeout || config.timeout || undefined,
 							raw: msg,
 							complete: async () => {
-								msg.ack();
+								// Already ACKed on receipt under at-most-once; a second ack errors.
+								if (!atMostOnce) msg.ack();
 							},
 							fail: async (error: Error, requeue?: boolean) => {
 								if (requeue) {
-									// nak() tells the server to redeliver
-									msg.nak();
+									// nak() tells the server to redeliver. No-op under
+									// at-most-once — the message was already ACKed on receipt.
+									if (!atMostOnce) msg.nak();
 								} else {
-									// term() terminates delivery — no more retries
-									msg.term();
+									// Terminal failure (retries exhausted / non-requeue).
+									// v0.7 — dead-letter the original payload+headers to
+									// `worker.${deadLetterQueue}` before terminating so the
+									// message isn't silently dropped. No-op when DLQ is unset.
+									await this.deadLetter(config.deadLetterQueue, msg.data, msg.headers);
+									// term() terminates delivery — no more retries. Already
+									// ACKed under at-most-once, so term() is skipped there.
+									if (!atMostOnce) msg.term();
 								}
 							},
 						};
+
+						// at-most-once — ACK before running the handler so the broker
+						// considers the message done. max_deliver:1 already prevents
+						// redelivery; this also releases the ack_wait timer immediately.
+						if (atMostOnce) msg.ack();
 
 						// Tier 2 polish — enforce `x-delay` header on the consumer side.
 						// NATS JetStream stores `x-delay` as opaque metadata; the broker
@@ -268,7 +291,9 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 					} catch (error) {
 						console.error(`[NATSWorkerAdapter] Error processing job from ${queue}: ${(error as Error).message}`);
 						try {
-							msg.nak();
+							// Under at-most-once there's nothing to nak — the broker isn't
+							// tracking delivery, so a handler throw must NOT trigger redelivery.
+							if (!atMostOnce) msg.nak();
 						} catch {
 							// Already acked/nacked
 						}
@@ -385,6 +410,32 @@ export class NATSWorkerAdapter implements WorkerAdapter {
 			};
 		} catch {
 			return { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 };
+		}
+	}
+
+	/**
+	 * v0.7 — dead-letter an exhausted message. Publishes the ORIGINAL payload
+	 * and headers to the `worker.${deadLetterQueue}` subject so a downstream
+	 * consumer can inspect/replay it. Plain core publish (not JetStream): the
+	 * DLQ is a notification subject, not part of the workqueue stream, so we
+	 * avoid coupling it to stream-subject management. No-op when DLQ is unset.
+	 *
+	 * ponytail: core publish, not a persisted DLQ stream. Upgrade to a
+	 * dedicated DLQ JetStream stream if durable dead-letter storage is needed.
+	 */
+	private async deadLetter(
+		deadLetterQueue: string | undefined,
+		data: Uint8Array,
+		// biome-ignore lint/suspicious/noExplicitAny: NATS MsgHdrs type is dynamically imported
+		headers: any,
+	): Promise<void> {
+		if (!deadLetterQueue) return;
+		try {
+			this.nc.publish(`worker.${deadLetterQueue}`, data, headers ? { headers } : undefined);
+		} catch (error) {
+			console.error(
+				`[NATSWorkerAdapter] Failed to dead-letter to worker.${deadLetterQueue}: ${(error as Error).message}`,
+			);
 		}
 	}
 
