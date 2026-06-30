@@ -9,8 +9,9 @@
  *   - Retries via `nack` with requeue=true until `retries` is hit, then
  *     drop or DLQ-route based on `deadLetterQueue` config.
  *   - Priorities via the `x-max-priority` queue arg (AMQP standard).
- *   - Delayed delivery via the `x-delayed-message` plugin when
- *     available; falls back to immediate dispatch otherwise.
+ *   - Delayed delivery requires the `rabbitmq_delayed_message_exchange`
+ *     plugin; `opts.delay` throws a clear config error when used against a
+ *     broker without it rather than silently delivering immediately.
  *
  * Requires `amqplib` as a peer dependency:
  *
@@ -28,6 +29,23 @@ import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigge
 export interface RabbitMQConfig {
 	url: string;
 	vhost?: string;
+}
+
+// AMQP priority queues cap at 255 (x-max-priority is a uint8). Pin the
+// declared ceiling so any caller-supplied priority is honoured without the
+// queue needing per-call re-declaration.
+const MAX_PRIORITY = 255;
+
+/**
+ * Inject a vhost into an AMQP connection string. amqplib reads the vhost from
+ * the URL path for string URLs, so the configured vhost has to live there.
+ * The default vhost "/" must be percent-encoded (`%2F`) — a literal slash in
+ * the path would be parsed as a sub-path, not the root vhost.
+ */
+function withVhost(url: string, vhost: string): string {
+	const u = new URL(url);
+	u.pathname = `/${encodeURIComponent(vhost)}`;
+	return u.toString();
 }
 
 interface RabbitChannel {
@@ -86,7 +104,13 @@ export class RabbitMQAdapter implements WorkerAdapter {
 		try {
 			// biome-ignore lint/suspicious/noExplicitAny: amqplib's connect returns a loose ConnectionLike.
 			const amqp: any = await import("amqplib");
-			this.conn = (await amqp.connect(this.config.url, { vhost: this.config.vhost })) as RabbitConnection;
+			// amqplib reads the vhost from the URL PATH for string URLs; the
+			// second arg is socket options only (vhost there is silently
+			// dropped). Encode the configured vhost into the path so it
+			// actually takes effect. The default vhost "/" must be encoded as
+			// %2F or it parses as an empty path.
+			const url = this.config.vhost ? withVhost(this.config.url, this.config.vhost) : this.config.url;
+			this.conn = (await amqp.connect(url)) as RabbitConnection;
 			this.connected = true;
 		} catch (err) {
 			throw new Error(
@@ -126,7 +150,7 @@ export class RabbitMQAdapter implements WorkerAdapter {
 			queueArgs["x-dead-letter-routing-key"] = config.deadLetterQueue;
 			await channel.assertQueue(config.deadLetterQueue, { durable: true });
 		}
-		await channel.assertQueue(config.queue, { durable: true, arguments: queueArgs });
+		await channel.assertQueue(config.queue, { durable: true, maxPriority: MAX_PRIORITY, arguments: queueArgs });
 
 		this.stats.set(config.queue, { completed: 0, failed: 0, active: 0 });
 		const stats = this.stats.get(config.queue) as QueueStatsCounters;
@@ -212,14 +236,23 @@ export class RabbitMQAdapter implements WorkerAdapter {
 		opts?: { priority?: number; delay?: number; retries?: number; timeout?: number; jobId?: string },
 	): Promise<string> {
 		if (!this.connected || !this.conn) throw new Error("[blok][rabbitmq] not connected. Call connect() first.");
+		// Delayed delivery requires the rabbitmq_delayed_message_exchange
+		// plugin (x-delay header → x-delayed-message exchange). Stock
+		// rabbitmq images do not ship it, so silently dropping the delay
+		// would deliver the job immediately and lie to the caller. Reject
+		// loudly instead.
+		if (typeof opts?.delay === "number" && opts.delay > 0) {
+			throw new Error(
+				"[blok][rabbitmq] delayed delivery (opts.delay) requires the rabbitmq_delayed_message_exchange plugin, which is not enabled on this broker. Enable the plugin or remove the delay.",
+			);
+		}
 		let channel = this.channels.get(queue)?.channel;
 		if (!channel) {
 			channel = await this.conn.createChannel();
-			await channel.assertQueue(queue, { durable: true });
+			await channel.assertQueue(queue, { durable: true, maxPriority: MAX_PRIORITY });
 		}
 		const messageId = opts?.jobId ?? uuid();
 		const headers: Record<string, unknown> = {};
-		if (typeof opts?.delay === "number") headers["x-delay"] = opts.delay;
 		const ok = channel.sendToQueue(queue, Buffer.from(typeof data === "string" ? data : JSON.stringify(data)), {
 			persistent: true,
 			messageId,
