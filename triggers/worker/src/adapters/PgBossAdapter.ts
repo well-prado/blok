@@ -117,18 +117,24 @@ export class PgBossAdapter implements WorkerAdapter {
 		// pg-boss v10 requires explicit queue creation before send/work.
 		// The call is idempotent — succeeds whether the queue exists or
 		// not — so this is safe to repeat across re-entries.
-		await this.ensureQueue(config.queue);
+		await this.ensureQueue(config.queue, config);
 
 		// pg-boss v10's handler receives an ARRAY of jobs (batch); the
-		// `batchSize` option controls the max. We keep `batchSize: 1` so
-		// the iteration is a single-job loop (matches pre-v10 semantics
-		// the adapter was written against). `pollingIntervalSeconds`
-		// defaults to 2s which adds ~2s latency on the happy path —
-		// tighten it for low-latency workloads via the worker config.
+		// `batchSize` option caps how many jobs one poll fetches. pg-boss
+		// has no per-job `concurrency`/`teamSize` knob — its unit of
+		// parallelism is the batch the handler is handed — so we map
+		// `config.concurrency` (the requested parallelism) to `batchSize`.
+		// The handler loop below processes the batch; jobs within it run
+		// sequentially in this process, but a larger batch means more jobs
+		// drained per poll (= higher effective throughput). `concurrency`
+		// defaults to 1 in the worker schema → single-job fetch, matching
+		// the prior behaviour. `pollingIntervalSeconds` defaults to 2s
+		// which adds ~2s latency on the happy path — tighten via config.
+		const batchSize = config.concurrency && config.concurrency > 0 ? config.concurrency : 1;
 		const id = await this.boss.work(
 			config.queue,
 			{
-				batchSize: 1,
+				batchSize,
 				includeMetadata: true,
 			},
 			async (jobOrBatch) => {
@@ -200,10 +206,30 @@ export class PgBossAdapter implements WorkerAdapter {
 		}
 	}
 
-	private async ensureQueue(queue: string): Promise<void> {
+	private async ensureQueue(queue: string, config?: WorkerTriggerOpts): Promise<void> {
+		if (!this.boss) return;
+		// Per-queue routing/retry policy. pg-boss 10 applies these at the
+		// QUEUE level (the `createQueue` options), not on `work()` — a
+		// failed job is retried `retryLimit` times then routed to the
+		// `deadLetter` queue automatically. The DLQ is itself a queue, so
+		// it must exist before it can receive dead-lettered jobs.
+		const queueOpts: Record<string, unknown> = { name: queue };
+		const dlq = config?.deadLetterQueue;
+		if (typeof dlq === "string" && dlq.length > 0) {
+			queueOpts.deadLetter = dlq;
+			await this.createQueueIdempotent(dlq, { name: dlq });
+		}
+		if (typeof config?.retries === "number") queueOpts.retryLimit = config.retries;
+		if (typeof config?.timeout === "number" && config.timeout > 0) {
+			queueOpts.expireInSeconds = Math.ceil(config.timeout / 1000);
+		}
+		await this.createQueueIdempotent(queue, queueOpts);
+	}
+
+	private async createQueueIdempotent(queue: string, opts: Record<string, unknown>): Promise<void> {
 		if (!this.boss) return;
 		try {
-			await this.boss.createQueue(queue);
+			await this.boss.createQueue(queue, opts);
 		} catch (err) {
 			// pg-boss v10's createQueue is idempotent but may throw on
 			// race conditions when multiple processes call it concurrently
