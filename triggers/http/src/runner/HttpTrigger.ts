@@ -795,6 +795,24 @@ export default class HttpTrigger extends TriggerBase {
 	}
 
 	async listen(): Promise<number> {
+		// Metrics opt-out gate. ON by default; `BLOK_METRICS_DISABLED=1` skips the
+		// exporter + global MeterProvider entirely (every blok_* instrument then
+		// no-ops) and the `/metrics` route below is not registered. Previously the
+		// exporter installed itself at module-import + via a Dockerfile --preload,
+		// so it could never be turned off.
+		//
+		// MUST run BEFORE maybeBootstrapTracing(): `metrics.setGlobalMeterProvider`
+		// is first-registration-wins, and bootstrapping the OTel trace SDK touches
+		// the global meter provider — if tracing goes first, the Prometheus
+		// MeterProvider never wins the global slot, so blok_* instruments (created
+		// via `metrics.getMeter(...)`) record into a no-op meter and `/metrics`
+		// shows "# no registered metrics" whenever OTLP tracing is enabled. Setting
+		// the metrics provider first lets metrics + tracing coexist.
+		const metricsBootstrap = await bootstrapMetrics();
+		if (!metricsBootstrap) {
+			this.logger.log("[blok][metrics] disabled (BLOK_METRICS_DISABLED=1) — no /metrics endpoint, instruments no-op.");
+		}
+
 		// OBS-02 — opt-in distributed tracing. When OTEL_EXPORTER_OTLP_ENDPOINT
 		// is set, install an OTel SDK so the spans created throughout the runner
 		// (every trigger handler, gRPC runtime call, etc. via `startActiveSpan` /
@@ -802,16 +820,6 @@ export default class HttpTrigger extends TriggerBase {
 		// global tracer is a no-op: spans run but go nowhere. No-op + zero
 		// overhead when the env var is unset.
 		await this.maybeBootstrapTracing();
-
-		// Metrics opt-out gate. ON by default; `BLOK_METRICS_DISABLED=1` skips the
-		// exporter + global MeterProvider entirely (every blok_* instrument then
-		// no-ops) and the `/metrics` route below is not registered. Previously the
-		// exporter installed itself at module-import + via a Dockerfile --preload,
-		// so it could never be turned off.
-		const metricsBootstrap = await bootstrapMetrics();
-		if (!metricsBootstrap) {
-			this.logger.log("[blok][metrics] disabled (BLOK_METRICS_DISABLED=1) — no /metrics endpoint, instruments no-op.");
-		}
 
 		try {
 			this.nodeMap.workflows = (await resolveManualWorkflowMap(
