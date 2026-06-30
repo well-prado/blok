@@ -7,10 +7,17 @@
  * message (fan-out). When `consumerGroup` is explicitly set on the
  * workflow, all subscribers in the group compete (1 of N gets each).
  *
- * Replay cursors:
- *   - `"earliest"` / unset → `$` (only new messages by default).
- *   - `"earliest"` with explicit intent → `0` (replay full stream).
+ * Replay cursors (`startFrom`):
+ *   - unset / `"latest"` → `$` (only new messages).
+ *   - `"earliest"` → `0` (replay full retained stream).
  *   - `{seq: N}` → resume from stream id `N-0`.
+ *   - `{timestamp: ms}` → resume from id `ms-0` (time cursor).
+ * When the consumer group already exists, `startFrom` is applied via
+ * `XGROUP SETID` so a reconnect / second subscribe still repositions it.
+ *
+ * Group lifecycle: an explicit `consumerGroup` (competing-consumer) or
+ * `durable: true` persists the group; an auto-generated fan-out group is
+ * non-durable and torn down (`XGROUP DESTROY`) on unsubscribe/disconnect.
  *
  * Requires `ioredis` as a peer dependency.
  *
@@ -45,6 +52,8 @@ interface RedisClient {
 
 interface ActiveSubscription {
 	stop: () => void;
+	/** non-durable auto fan-out groups are torn down on unsubscribe/disconnect */
+	cleanup: () => Promise<void>;
 }
 
 export class RedisStreamsPubSubAdapter implements PubSubAdapter {
@@ -90,6 +99,8 @@ export class RedisStreamsPubSubAdapter implements PubSubAdapter {
 	async disconnect(): Promise<void> {
 		if (!this.connected) return;
 		for (const sub of this.subscriptions.values()) sub.stop();
+		// Tear down transient fan-out groups while the client is still alive.
+		for (const sub of this.subscriptions.values()) await sub.cleanup();
 		this.subscriptions.clear();
 		try {
 			await this.client?.quit();
@@ -108,25 +119,44 @@ export class RedisStreamsPubSubAdapter implements PubSubAdapter {
 		// Competing-consumer: explicit `consumerGroup` makes all subscribers
 		// share work.
 		const group = config.consumerGroup ?? `blok-fanout-${this.consumerName}-${stream.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		// An auto-generated fan-out group (no consumerGroup) that is non-durable
+		// is torn down when the subscription stops; an explicit consumerGroup or
+		// `durable: true` persists the group across (re)connects.
+		const transientGroup = config.consumerGroup === undefined && config.durable !== true;
+		const startFrom = config.startFrom;
 		const startId =
-			config.startFrom === "earliest"
+			startFrom === "earliest"
 				? "0"
-				: config.startFrom === "latest" || config.startFrom === undefined
+				: startFrom === "latest" || startFrom === undefined
 					? "$"
-					: typeof config.startFrom === "object" && "seq" in config.startFrom
-						? `${config.startFrom.seq}-0`
-						: "$";
+					: "seq" in startFrom
+						? `${startFrom.seq}-0`
+						: // {timestamp}: stream ids are `<ms>-<seq>`; a bare ms-0 is a valid
+							// id, so the group resumes from that millisecond.
+							`${startFrom.timestamp}-0`;
 
 		try {
 			await client.xgroup("CREATE", stream, group, startId, "MKSTREAM");
 		} catch (err) {
 			if (!/BUSYGROUP/i.test((err as Error).message)) throw err;
+			// Group already exists (reconnect / second subscribe). XGROUP CREATE
+			// keeps the OLD cursor, so an explicit startFrom would be silently
+			// ignored — reposition the existing group with SETID.
+			if (startFrom !== undefined) await client.xgroup("SETID", stream, group, startId);
 		}
 
 		let stopped = false;
 		const sub: ActiveSubscription = {
 			stop: () => {
 				stopped = true;
+			},
+			cleanup: async () => {
+				if (!transientGroup) return;
+				try {
+					await client.xgroup("DESTROY", stream, group);
+				} catch {
+					/* group already gone / connection closing */
+				}
 			},
 		};
 		this.subscriptions.set(`${stream}#${group}`, sub);
@@ -200,6 +230,7 @@ export class RedisStreamsPubSubAdapter implements PubSubAdapter {
 		const sub = this.subscriptions.get(subscription);
 		if (!sub) return;
 		sub.stop();
+		await sub.cleanup();
 		this.subscriptions.delete(subscription);
 	}
 
