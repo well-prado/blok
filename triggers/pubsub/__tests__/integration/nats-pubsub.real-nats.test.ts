@@ -24,6 +24,14 @@ const d = NATS_SERVERS ? describe : describe.skip;
 // a cold container. Override the default 5s timeout so CI doesn't flake.
 const TEST_TIMEOUT_MS = 30_000;
 const SUBSCRIPTION_WARMUP_MS = 500;
+// Durable subscriptions also create a JetStream stream + consumer, which
+// takes longer to install than a Core subscription — give it more headroom.
+const DURABLE_WARMUP_MS = 1_000;
+
+function newAdapter(): NATSPubSubAdapter {
+	return new NATSPubSubAdapter({ servers: NATS_SERVERS?.split(",").map((s) => s.trim()) ?? [] });
+}
+const rndGroup = (p: string) => `${p}-${Math.random().toString(36).slice(2)}`;
 
 d("NATSPubSubAdapter — real NATS", () => {
 	let producer: NATSPubSubAdapter;
@@ -123,6 +131,88 @@ d("NATSPubSubAdapter — real NATS", () => {
 		async () => {
 			const topic = `blok-test-pubsub-orphan-${Math.random().toString(36).slice(2)}`;
 			await expect(producer.publish(topic, { dropped: true })).resolves.toBeUndefined();
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"durable: replays retained history from `earliest` and from a `{seq}` cursor",
+		async () => {
+			const topic = `blok-test-pubsub-durable-replay-${Math.random().toString(36).slice(2)}`;
+			const live = newAdapter();
+			const replay = newAdapter();
+			const seqCons = newAdapter();
+			await Promise.all([live.connect(), replay.connect(), seqCons.connect()]);
+			try {
+				// Live durable consumer — captures the stream sequence numbers
+				// (message.id is `stream:seq`) so we can replay from a cursor.
+				const liveRecv: PubSubMessage[] = [];
+				await live.subscribe({ topic, durable: true, consumerGroup: rndGroup("g-live") }, async (m) => {
+					liveRecv.push(m);
+				});
+				await new Promise((r) => setTimeout(r, DURABLE_WARMUP_MS));
+
+				for (let i = 0; i < 3; i++) await producer.publish(topic, { n: i });
+				await waitFor(() => liveRecv.length === 3, TEST_TIMEOUT_MS - 5_000);
+				expect(liveRecv.length).toBe(3);
+
+				// Fresh durable consumer, startFrom "earliest" → full history.
+				const replayRecv: PubSubMessage[] = [];
+				await replay.subscribe(
+					{ topic, durable: true, consumerGroup: rndGroup("g-replay"), startFrom: "earliest" },
+					async (m) => {
+						replayRecv.push(m);
+					},
+				);
+				await waitFor(() => replayRecv.length === 3, TEST_TIMEOUT_MS - 5_000);
+				expect(replayRecv.map((m) => (m.body as { n: number }).n).sort()).toEqual([0, 1, 2]);
+
+				// Fresh durable consumer, startFrom the 2nd stream sequence →
+				// only the tail (2 of 3 messages).
+				const seqs = liveRecv.map((m) => Number(m.id.split(":")[1])).sort((a, b) => a - b);
+				const seqRecv: PubSubMessage[] = [];
+				await seqCons.subscribe(
+					{ topic, durable: true, consumerGroup: rndGroup("g-seq"), startFrom: { seq: seqs[1] } },
+					async (m) => {
+						seqRecv.push(m);
+					},
+				);
+				await waitFor(() => seqRecv.length === 2, TEST_TIMEOUT_MS - 5_000);
+				expect(seqRecv.length).toBe(2);
+			} finally {
+				await Promise.all([live.disconnect(), replay.disconnect(), seqCons.disconnect()]);
+			}
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"durable: a thrown handler nacks and JetStream redelivers",
+		async () => {
+			const topic = `blok-test-pubsub-durable-redeliver-${Math.random().toString(36).slice(2)}`;
+			const cons = newAdapter();
+			await cons.connect();
+			try {
+				const redeliveryCounts: number[] = [];
+				let failFirst = true;
+				await cons.subscribe({ topic, durable: true, consumerGroup: rndGroup("g-rd") }, async (m) => {
+					redeliveryCounts.push((m.raw as { info: { redeliveryCount: number } }).info.redeliveryCount);
+					if (failFirst) {
+						failFirst = false;
+						throw new Error("forced failure → nack");
+					}
+				});
+				await new Promise((r) => setTimeout(r, DURABLE_WARMUP_MS));
+
+				await producer.publish(topic, { evt: "redeliver-me" });
+				await waitFor(() => redeliveryCounts.length >= 2, TEST_TIMEOUT_MS - 5_000);
+
+				expect(redeliveryCounts.length).toBeGreaterThanOrEqual(2);
+				// JetStream increments redeliveryCount on each re-delivery.
+				expect(redeliveryCounts[1]).toBeGreaterThan(redeliveryCounts[0]);
+			} finally {
+				await cons.disconnect();
+			}
 		},
 		TEST_TIMEOUT_MS,
 	);
