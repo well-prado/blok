@@ -167,28 +167,35 @@ export class NATSPubSubAdapter implements PubSubAdapter {
 				}
 			}
 			const js = this.conn.jetstream();
-			const startSeq =
-				typeof config.startFrom === "object" && config.startFrom && "seq" in config.startFrom
-					? config.startFrom.seq
-					: undefined;
-			const deliverPolicy =
-				config.startFrom === "earliest"
-					? "all"
-					: config.startFrom === "latest"
-						? "new"
-						: startSeq !== undefined
-							? "by_start_sequence"
-							: "all";
-			const sub = await js.subscribe(config.topic, {
-				config: {
-					durable_name:
-						config.consumerGroup ??
-						`blok-${(config.subscription ?? config.topic ?? "default").replace(/[^a-zA-Z0-9_]/g, "_")}`,
-					deliver_policy: deliverPolicy,
-					opt_start_seq: startSeq,
-					ack_policy: config.ack === false ? "none" : "explicit",
-				},
-			});
+			// nats.js `js.subscribe` needs a ConsumerOptsBuilder, NOT a raw
+			// `{ config }` object — only the builder installs the push
+			// `deliver_subject` JetStream requires. A raw config throws
+			// "push consumer requires deliver_subject" at runtime (the typed
+			// API accepts it, so tsc never catches this).
+			// biome-ignore lint/suspicious/noExplicitAny: nats is a runtime peer dep.
+			const nats: any = await import("nats");
+			const durableName =
+				config.consumerGroup ??
+				`blok-${(config.subscription ?? config.topic ?? "default").replace(/[^a-zA-Z0-9_]/g, "_")}`;
+			const opts = nats.consumerOpts();
+			opts.durable(durableName);
+			opts.deliverTo(nats.createInbox());
+			opts.manualAck(); // dispatchJsMessage ack/naks explicitly
+			if (config.ack === false) opts.ackNone();
+			else opts.ackExplicit();
+			// Replay position: `earliest` = full retained history; `{seq}` /
+			// `{timestamp}` resume from a cursor; `latest` (and the default,
+			// per the schema) = new messages only.
+			if (config.startFrom === "earliest") {
+				opts.deliverAll();
+			} else if (typeof config.startFrom === "object" && config.startFrom && "seq" in config.startFrom) {
+				opts.startSequence(config.startFrom.seq);
+			} else if (typeof config.startFrom === "object" && config.startFrom && "timestamp" in config.startFrom) {
+				opts.startTime(new Date(config.startFrom.timestamp));
+			} else {
+				opts.deliverNew();
+			}
+			const sub = await js.subscribe(config.topic, opts);
 			this.subscriptions.set(subKey, { unsubscribe: () => sub.unsubscribe() });
 			// Drive the async iterator in a background loop.
 			void (async () => {
