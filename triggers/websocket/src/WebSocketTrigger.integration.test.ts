@@ -59,11 +59,9 @@ vi.mock("@opentelemetry/api", () => {
 
 import WebSocketTriggerClass, { _setActiveWebSocketTrigger } from "./WebSocketTrigger";
 
-// Use a non-default port so the test doesn't clash with whatever's
-// listening on 4000. Ports are namespaced so a concurrent trigger test
-// on the same host doesn't collide.
-const ECHO_PORT = 4901;
-const LIFECYCLE_PORT = 4903;
+// Bind to an EPHEMERAL port (0) and read the OS-assigned port back from the
+// serve() callback. A fixed port flakes with EADDRINUSE when a concurrent
+// suite (or a leftover process) holds it under `nx run-many`.
 
 /**
  * Tiny echo node — bypasses applyStepOutput like the wait-inside-*
@@ -159,8 +157,10 @@ describe("WebSocketTrigger — v0.7 PR 2 integration (real socket)", () => {
 
 		// Start the http.Server, then manually call injectWebSocket since
 		// we didn't wire it through HttpTrigger's addServerHook.
+		let echoPort = 0;
 		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: ECHO_PORT }, () => {
+			httpServer = serve({ fetch: app.fetch, port: 0 }, (info) => {
+				echoPort = info.port;
 				resolve();
 			}) as Server;
 		});
@@ -173,7 +173,7 @@ describe("WebSocketTrigger — v0.7 PR 2 integration (real socket)", () => {
 		// Connect a real WS client and round-trip a message.
 		const messages: Array<unknown> = [];
 		await new Promise<void>((resolve, reject) => {
-			const ws = new WebSocket(`ws://localhost:${ECHO_PORT}/ws/echo`);
+			const ws = new WebSocket(`ws://localhost:${echoPort}/ws/echo`);
 			const timer = setTimeout(() => reject(new Error("WS test timeout")), 5000);
 
 			ws.on("open", () => {
@@ -276,8 +276,12 @@ describe("WebSocketTrigger — v0.7 PR 2 integration (real socket)", () => {
 		trigger.setNodeMap({ nodes });
 		await trigger.listen();
 
+		let lifecyclePort = 0;
 		await new Promise<void>((resolve) => {
-			httpServer = serve({ fetch: app.fetch, port: LIFECYCLE_PORT }, () => resolve()) as Server;
+			httpServer = serve({ fetch: app.fetch, port: 0 }, (info) => {
+				lifecyclePort = info.port;
+				resolve();
+			}) as Server;
 		});
 		(trigger as unknown as { injectWebSocket: (s: Server) => void }).injectWebSocket(httpServer);
 
@@ -289,7 +293,7 @@ describe("WebSocketTrigger — v0.7 PR 2 integration (real socket)", () => {
 		let clientClose: { code: number; reason: string } | null = null;
 
 		await new Promise<void>((resolve, reject) => {
-			const ws = new WebSocket(`ws://localhost:${LIFECYCLE_PORT}/ws/life`);
+			const ws = new WebSocket(`ws://localhost:${lifecyclePort}/ws/life`);
 			const timer = setTimeout(() => reject(new Error("WS lifecycle timeout")), 6000);
 
 			ws.on("message", (raw) => {
