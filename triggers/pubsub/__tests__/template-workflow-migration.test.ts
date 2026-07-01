@@ -1,9 +1,10 @@
 /**
- * Guards the CLI-delivered pub/sub scaffold workflow after its migration to the
- * `@blokjs/core` typed-handle DSL. Loads the actual template file and runs it
- * through the REAL engine (the fixed WorkflowTestRunner), asserting the entry
- * handle refs (`msg.body`, `msg.params.*`) resolve and the step lands on
- * `state["log-message"]`.
+ * Guards the CLI-delivered pub/sub scaffold workflow (the verifiable NATS
+ * consumer). Loads the actual template file and runs it through the REAL engine
+ * (the fixed WorkflowTestRunner), asserting the entry handle refs resolve: the
+ * `tpl` message reads `msg.params.topic`, and the `attrs` read `msg.params.messageId`
+ * + `msg.body`. The log step is ephemeral (no state slot), so we capture the
+ * resolved inputs via the node mock.
  */
 import { WorkflowTestRunner } from "@blokjs/runner/testing";
 import { describe, expect, it } from "vitest";
@@ -13,8 +14,12 @@ describe("pubsub template workflow — @blokjs/core typed-handle migration", () 
 	it("runs through the real engine; msg.body + msg.params refs resolve", async () => {
 		const wf = await onMessage;
 		const runner = new WorkflowTestRunner();
-		// The published node is referenced by node("@blokjs/api-call"); mock it.
-		runner.mockNode("@blokjs/api-call", async (input) => input);
+		// The consumer logs via node("@blokjs/log"); capture its resolved inputs.
+		let captured: { level?: string; message?: string; attrs?: Record<string, unknown> } | undefined;
+		runner.mockNode("@blokjs/log", async (input) => {
+			captured = input as typeof captured;
+			return input;
+		});
 		runner.loadWorkflow(wf as unknown as object);
 
 		const result = await runner.execute(
@@ -23,11 +28,11 @@ describe("pubsub template workflow — @blokjs/core typed-handle migration", () 
 		);
 
 		expect(result.success).toBe(true);
-		const slot = result.state?.["log-message"] as { body?: Record<string, unknown> } | undefined;
-		expect(slot?.body).toEqual({
-			message: { hello: "world" }, // msg.body
-			topic: "my-topic", // msg.params.topic
+		expect(captured?.level).toBe("info");
+		expect(captured?.message).toBe("pubsub consumed a message on my-topic"); // tpl reads msg.params.topic
+		expect(captured?.attrs).toEqual({
 			messageId: "m-1", // msg.params.messageId
+			body: { hello: "world" }, // msg.body
 		});
 	});
 });
