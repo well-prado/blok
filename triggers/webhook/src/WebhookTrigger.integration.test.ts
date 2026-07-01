@@ -2,10 +2,25 @@
  * v0.7 PR 4 — full end-to-end webhook trigger integration test.
  *
  * Spins up a real Hono app + `@hono/node-server` with a real
- * WebhookTrigger configured for a GitHub-style provider. Sends a
- * signed POST via native `fetch` and asserts the workflow ran. A
- * second POST with the same delivery id exercises the replay-cache
- * dedup path and expects `{ status: "duplicate" }`.
+ * WebhookTrigger configured for a GitHub-style provider. Sends signed
+ * POSTs via native `fetch` — signatures are computed with the real
+ * `node:crypto` HMAC, and requests cross the real wire into the real
+ * trigger + verifier + workflow runner. Nothing about verify/dispatch
+ * is mocked (only OTel is stubbed, to avoid an exporter).
+ *
+ * The fixture node records each execution into a module-level array
+ * (`EXECUTIONS`) so the tests assert an OBSERVABLE side effect of the
+ * workflow actually running — not just a 200 status. This is what
+ * distinguishes "the signature was accepted" from "the response looked
+ * fine but nothing ran".
+ *
+ * HMAC matrix (each proves the verify logic, not just the HTTP path):
+ *   1. VALID   signature -> 200 + the workflow executed exactly once.
+ *   2. TAMPERED body (valid-looking sig over DIFFERENT bytes) -> 401
+ *      + the workflow did NOT execute.
+ *   3. MISSING signature header -> 401 + the workflow did NOT execute.
+ * Plus the replay-cache dedup path (same delivery id -> duplicate,
+ * second run does not execute).
  *
  * Complements `WebhookTrigger.test.ts` + `verifiers.test.ts` (unit
  * coverage of the public surface).
@@ -53,6 +68,17 @@ import WebhookTriggerClass, { _setActiveWebhookTrigger } from "./WebhookTrigger"
 
 const TEST_PORT = 4903;
 const SECRET = "shhh-its-a-secret-1234567890";
+// Namespace the mount path + env var per run so a concurrent target on
+// the same box never collides on the route or the process env slot.
+const SUFFIX = Math.random().toString(36).slice(2);
+const WEBHOOK_PATH = `/webhooks/github-${SUFFIX}`;
+const SECRET_ENV = `GH_SECRET_${SUFFIX}`;
+
+// Observable side effect of a real workflow run. The fixture node
+// pushes here inside `execute`; tests assert on it to prove the node
+// body actually ran (a mounted-but-not-dispatched path would leave it
+// empty even while returning a healthy-looking 200).
+const EXECUTIONS: Array<{ eventId: string }> = [];
 
 function hmacHex(body: string): string {
 	return createHmac("sha256", SECRET).update(body).digest("hex");
@@ -65,7 +91,9 @@ const handleNode = defineNode({
 	output: z.object({ handled: z.boolean(), eventId: z.string() }),
 	async execute(ctx) {
 		const body = (ctx.request?.body as { delivery_id?: string } | undefined) ?? {};
-		return { handled: true, eventId: body.delivery_id ?? "" };
+		const eventId = body.delivery_id ?? "";
+		EXECUTIONS.push({ eventId });
+		return { handled: true, eventId };
 	},
 });
 
@@ -74,35 +102,13 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 	let trigger: InstanceType<typeof WebhookTriggerClass>;
 	let httpServer: Server | null = null;
 
-	beforeEach(() => {
+	beforeEach(async () => {
+		EXECUTIONS.length = 0;
 		WorkflowRegistry.resetInstance();
 		_setActiveWebhookTrigger(null);
-		process.env.GH_SECRET = SECRET;
+		process.env[SECRET_ENV] = SECRET;
 		app = new Hono();
-	});
 
-	afterEach(
-		() =>
-			new Promise<void>((resolve) => {
-				if (trigger) void trigger.stop();
-				if (httpServer) {
-					httpServer.close(() => {
-						httpServer = null;
-						WorkflowRegistry.resetInstance();
-						_setActiveWebhookTrigger(null);
-						process.env.GH_SECRET = undefined;
-						resolve();
-					});
-				} else {
-					WorkflowRegistry.resetInstance();
-					_setActiveWebhookTrigger(null);
-					process.env.GH_SECRET = undefined;
-					resolve();
-				}
-			}),
-	);
-
-	it("verifies a signed GitHub-style POST, runs the workflow, and dedups replays", async () => {
 		const nodes = new NodeMap();
 		nodes.addNode("handle-event", handleNode);
 
@@ -115,8 +121,8 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 				trigger: {
 					webhook: {
 						provider: "github",
-						path: "/webhooks/github",
-						secretEnv: "GH_SECRET",
+						path: WEBHOOK_PATH,
+						secretEnv: SECRET_ENV,
 						idempotencyKey: "js/ctx.request.headers['x-github-delivery']",
 					},
 				},
@@ -132,34 +138,112 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 		await new Promise<void>((resolve) => {
 			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
 		});
+	});
 
+	afterEach(
+		() =>
+			new Promise<void>((resolve) => {
+				if (trigger) void trigger.stop();
+				if (httpServer) {
+					httpServer.close(() => {
+						httpServer = null;
+						WorkflowRegistry.resetInstance();
+						_setActiveWebhookTrigger(null);
+						process.env[SECRET_ENV] = undefined;
+						resolve();
+					});
+				} else {
+					WorkflowRegistry.resetInstance();
+					_setActiveWebhookTrigger(null);
+					process.env[SECRET_ENV] = undefined;
+					resolve();
+				}
+			}),
+	);
+
+	const url = () => `http://localhost:${TEST_PORT}${WEBHOOK_PATH}`;
+	// Each test restarts a fresh server on the same TEST_PORT. `connection:
+	// close` stops undici from pooling a socket onto the previous (now-closed)
+	// server, which otherwise surfaces as a flaky ECONNRESET on the 2nd test.
+	const baseHeaders = { "content-type": "application/json", connection: "close" };
+
+	it("VALID HMAC — runs the workflow (observable effect) and dedups replays", async () => {
 		const body = JSON.stringify({ ref: "refs/heads/main", delivery_id: "delivery-uuid-9" });
-		const sig = `sha256=${hmacHex(body)}`;
 		const reqInit = {
 			method: "POST",
 			headers: {
-				"content-type": "application/json",
-				"x-hub-signature-256": sig,
+				...baseHeaders,
+				"x-hub-signature-256": `sha256=${hmacHex(body)}`,
 				"x-github-event": "push",
 				"x-github-delivery": "delivery-uuid-9",
 			},
 			body,
 		};
 
-		// First delivery — should run the workflow.
-		const first = await fetch(`http://localhost:${TEST_PORT}/webhooks/github`, reqInit);
+		// First delivery — verified, runs the workflow.
+		const first = await fetch(url(), reqInit);
 		expect(first.status).toBe(200);
 		const firstJson = (await first.json()) as { status?: string; eventId?: string };
 		expect(firstJson.status).toBe("ok");
 		expect(firstJson.eventId).toBe("delivery-uuid-9");
+		// Observable proof the node body actually ran — exactly once.
+		expect(EXECUTIONS).toEqual([{ eventId: "delivery-uuid-9" }]);
 
-		// Second delivery with the same delivery id — replay cache should
-		// short-circuit with `duplicate` and NOT run the workflow.
-		const second = await fetch(`http://localhost:${TEST_PORT}/webhooks/github`, reqInit);
+		// Second delivery, same delivery id — replay cache short-circuits
+		// with `duplicate` and does NOT run the workflow again.
+		const second = await fetch(url(), reqInit);
 		expect(second.status).toBe(200);
 		const secondJson = (await second.json()) as { status?: string; eventId?: string };
 		expect(secondJson.status).toBe("duplicate");
 		expect(secondJson.eventId).toBe("delivery-uuid-9");
+		// Still exactly one execution — the replay did not dispatch.
+		expect(EXECUTIONS).toEqual([{ eventId: "delivery-uuid-9" }]);
+	}, 15_000);
+
+	it("TAMPERED body — a valid sig over DIFFERENT bytes is rejected (401), workflow does not run", async () => {
+		const signedBody = JSON.stringify({ ref: "refs/heads/main", delivery_id: "tamper-1" });
+		const sig = `sha256=${hmacHex(signedBody)}`; // real HMAC over signedBody…
+		const tamperedBody = JSON.stringify({ ref: "refs/heads/evil", delivery_id: "tamper-1" }); // …but ship different bytes
+
+		const res = await fetch(url(), {
+			method: "POST",
+			headers: {
+				...baseHeaders,
+				"x-hub-signature-256": sig,
+				"x-github-event": "push",
+				"x-github-delivery": "tamper-1",
+			},
+			body: tamperedBody,
+		});
+
+		expect(res.status).toBe(401);
+		const json = (await res.json()) as { error?: string; reason?: string };
+		expect(json.error).toBe("Unauthorized");
+		expect(json.reason).toBe("signature_mismatch");
+		// The whole point: verification ran on the wire bytes, so the
+		// mismatch stopped dispatch. Nothing executed.
+		expect(EXECUTIONS).toEqual([]);
+	}, 15_000);
+
+	it("MISSING signature header — rejected (401), workflow does not run", async () => {
+		const body = JSON.stringify({ ref: "refs/heads/main", delivery_id: "missing-1" });
+
+		const res = await fetch(url(), {
+			method: "POST",
+			headers: {
+				...baseHeaders,
+				// no x-hub-signature-256
+				"x-github-event": "push",
+				"x-github-delivery": "missing-1",
+			},
+			body,
+		});
+
+		expect(res.status).toBe(401);
+		const json = (await res.json()) as { error?: string; reason?: string };
+		expect(json.error).toBe("Unauthorized");
+		expect(json.reason).toBe("missing_signature");
+		expect(EXECUTIONS).toEqual([]);
 	}, 15_000);
 });
 
