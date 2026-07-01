@@ -135,6 +135,13 @@ export class KafkaPubSubAdapter implements PubSubAdapter {
 				if (message.headers) {
 					for (const [k, v] of Object.entries(message.headers)) attributes[k] = v?.toString("utf8") ?? "";
 				}
+				// kafkajs has no per-message nack; the ONLY way to suppress the
+				// auto-commit of a failed offset is to throw out of eachMessage.
+				// PubSubTrigger.handleMessage catches handler errors and calls
+				// nack() (it never re-throws), so without this flag the offset
+				// would auto-commit and the failed message would be lost. We set
+				// a flag on nack() and throw after the handler returns.
+				let nacked = false;
 				const msg: PubSubMessage = {
 					id: `${config.topic}:${message.offset}`,
 					body,
@@ -147,13 +154,17 @@ export class KafkaPubSubAdapter implements PubSubAdapter {
 						/* autoCommit handles ack */
 					},
 					nack: async () => {
-						/* kafkajs has no per-message nack; the offset commit is suppressed by throwing */
+						nacked = true;
 					},
 				};
-				// On handler failure: re-throw so kafkajs suppresses the
-				// offset commit; the consumer will re-poll the message
-				// on the next cycle. The throw is intentional.
 				await handler(msg);
+				// At-least-once (default): a nacked message must NOT be
+				// committed — throw so kafkajs redelivers it. At-most-once
+				// (ack:false) never commits per-message anyway, so a nack is a
+				// no-op there (the message is considered consumed once).
+				if (nacked && config.ack !== false) {
+					throw new Error(`[blok][pubsub-kafka] message ${msg.id} nacked — suppressing offset commit for redelivery`);
+				}
 			},
 		});
 	}
