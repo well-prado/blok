@@ -26,6 +26,7 @@
 	},
 	"dependencies": {
 		"@blokjs/api-call": "^1.1.0",
+		"@blokjs/core": "^1.1.0",
 		"@blokjs/helper": "^1.1.0",
 		"@blokjs/if-else": "^1.1.0",
 		"@blokjs/runner": "^1.1.0",
