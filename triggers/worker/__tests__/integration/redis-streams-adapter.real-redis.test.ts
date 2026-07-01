@@ -20,6 +20,12 @@ import { RedisStreamsAdapter } from "../../src/adapters/RedisStreamsAdapter";
  *   3. deadLetterQueue: an exhausted job is XADDed to the DLQ stream then
  *      XACKed on the source (source PEL == 0, DLQ holds the payload).
  *   4. reject: `delay` / `priority` throw a clear config error at addJob.
+ *   5. REDRIVE (#616): a stuck pending entry (dead consumer, never acked) is
+ *      reclaimed by the in-process periodic XAUTOCLAIM and processed; XPENDING
+ *      drains. With the bug (no redrive loop) it stays stuck forever.
+ *   6. CONCURRENCY (#616): concurrency=K slow jobs finish in ~1×SLEEP (dedicated
+ *      ioredis connection per loop), not K× as when loops serialize on one
+ *      shared blocking connection.
  */
 
 const REDIS = process.env.BLOK_INTEGRATION_REDIS;
@@ -153,6 +159,99 @@ d("RedisStreamsAdapter — real Redis Streams", () => {
 			const queue = `blok-test-redis-reject-${sfx()}`;
 			await expect(adapter.addJob(queue, { x: 1 }, { delay: 1000 })).rejects.toThrow(/no native delayed delivery/i);
 			await expect(adapter.addJob(queue, { x: 1 }, { priority: 5 })).rejects.toThrow(/no native priority/i);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"REDRIVE: a stuck pending entry (dead consumer) is reclaimed by the periodic XAUTOCLAIM and processed",
+		async () => {
+			const queue = `blok-test-redis-redrive-${sfx()}`;
+			const group = `${queue}-group`;
+
+			// Create the group at 0 (sees the whole stream) and enqueue a job,
+			// then read it into a THROWAWAY consumer WITHOUT acking — this is a
+			// consumer that died mid-processing: the entry is stuck in the PEL.
+			await probe.xgroup("CREATE", queue, group, "0", "MKSTREAM");
+			const jobId = await probe.xadd(queue, "*", "data", JSON.stringify({ stuck: true }), "jobId", "");
+			await probe.xreadgroup("GROUP", group, "dead-consumer", "COUNT", "10", "STREAMS", queue, ">");
+
+			// The entry is pending under the dead consumer and will NEVER be
+			// redelivered via XREADGROUP `>` (already delivered). Only redrive
+			// reclaims it. Sanity: it's stuck right now.
+			expect(await pendingCount(probe, queue, group)).toBe(1);
+
+			const received: WorkerJob[] = [];
+			// `timeout` is the redrive idle threshold. Small so the test is fast;
+			// blockMs is 300 (from beforeAll) so the redrive interval fires quickly.
+			await adapter.process({ queue, timeout: 500, retries: 3 }, async (job) => {
+				received.push(job);
+				await job.complete();
+			});
+
+			// The live XREADGROUP loop can't see the already-delivered entry — it
+			// only surfaces via the periodic XAUTOCLAIM redrive after idle > 500ms.
+			await waitFor(() => received.length === 1, TEST_TIMEOUT_MS - 2_000);
+
+			expect(received).toHaveLength(1);
+			expect(received[0].id).toBe(jobId);
+			expect(received[0].data).toEqual({ stuck: true });
+
+			// Redrive reclaimed AND the handler acked → PEL drains to 0. With the
+			// bug (no in-process XAUTOCLAIM) the entry stays stuck forever → the
+			// waitFor above times out (received stays empty) → this test FAILS.
+			await waitFor(async () => (await pendingCount(probe, queue, group)) === 0, TEST_TIMEOUT_MS - 2_000);
+			expect(await pendingCount(probe, queue, group)).toBe(0);
+
+			await adapter.stopProcessing(queue);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"CONCURRENCY: with concurrency=K, K slow jobs finish in ~1×SLEEP, not K× (dedicated connection per loop)",
+		async () => {
+			const K = 3;
+			const SLEEP_MS = 1_200;
+			const queue = `blok-test-redis-concurrency-${sfx()}`;
+
+			// Dedicated adapter with COUNT=1 so no single read can hog all K jobs
+			// (fan-out fairness) and a short BLOCK so idle loops re-read quickly.
+			// If the K consumer loops shared ONE ioredis connection, their blocking
+			// XREADGROUP calls serialize on the socket and total throughput collapses
+			// toward K×SLEEP; with a DEDICATED connection per loop they truly overlap
+			// and total wall time is ~1×SLEEP.
+			const local = new RedisStreamsAdapter({ host: HOST, port: PORT, blockMs: 200, count: 1 });
+			await local.connect();
+			try {
+				let started = 0;
+				let finishedAt = 0;
+				const t0 = Date.now();
+
+				await local.process({ queue, concurrency: K }, async (job) => {
+					started++;
+					await new Promise((r) => setTimeout(r, SLEEP_MS));
+					await job.complete();
+					finishedAt = Date.now();
+				});
+
+				// Enqueue K jobs back-to-back; they arrive while all K loops block.
+				for (let i = 0; i < K; i++) await local.addJob(queue, { n: i });
+
+				await waitFor(() => started === K, TEST_TIMEOUT_MS - 5_000);
+				// Wait until all K completed.
+				await waitFor(async () => (await local.getQueueStats(queue)).completed === K, TEST_TIMEOUT_MS - 5_000);
+
+				const total = finishedAt - t0;
+				// Real parallelism finishes in ~1×SLEEP (+ overhead). Serialized-on-
+				// one-socket needs multiples of SLEEP. Bar at 2×SLEEP: fixed passes
+				// (~1×), the shared-connection bug fails (measured ~2.7× for K=3).
+				expect(total).toBeLessThan(2 * SLEEP_MS);
+
+				await local.stopProcessing(queue);
+			} finally {
+				await local.disconnect();
+			}
 		},
 		TEST_TIMEOUT_MS,
 	);
