@@ -81,6 +81,8 @@ interface FixtureOpts {
 	runtimes?: FixtureRuntime[];
 	workflowRef?: boolean;
 	userNode?: boolean;
+	/** Lay down the --examples layout: src/workflows/examples/ + a generated-shape src/Workflows.ts. */
+	examples?: boolean;
 }
 
 const goRuntime: FixtureRuntime = {
@@ -160,6 +162,17 @@ async function makeProject(opts: FixtureOpts = {}): Promise<string> {
 	if (opts.userNode) {
 		await fsp.mkdir(path.join(dir, "runtimes", "go", "nodes"), { recursive: true });
 		await fsp.writeFile(path.join(dir, "runtimes", "go", "nodes", "my-node.go"), "package nodes\n");
+	}
+	if (opts.examples) {
+		await fsp.mkdir(path.join(dir, "src", "workflows", "examples"), { recursive: true });
+		await fsp.writeFile(
+			path.join(dir, "src", "Workflows.ts"),
+			'import type { WorkflowV2Builder } from "@blokjs/helper";\n\n' +
+				'import McpGreeter from "./workflows/examples/mcp-greeter";\n\n' +
+				"const workflows: Record<string, WorkflowV2Builder> = {\n" +
+				'\t"mcp-greeter": McpGreeter,\n' +
+				"};\n\nexport default workflows;\n",
+		);
 	}
 	return dir;
 }
@@ -242,6 +255,60 @@ describe("runtime add", () => {
 		expect(php.grpcPort).toBe(10105);
 		expect(php.grpcStartCmd).toContain("10105");
 		expect(php.grpcStartCmd).not.toContain("10005"); // the default port is gone
+	});
+
+	it("ships + registers the hello example when the project has the --examples layout", async () => {
+		const dir = await makeProject({ examples: true });
+		await fsp.mkdir(path.join(fakeSrc, "examples", "ts-workflows"), { recursive: true });
+		await fsp.writeFile(
+			path.join(fakeSrc, "examples", "ts-workflows", "runtime-go-hello.ts"),
+			"export default { name: 'runtime-go-hello' };\n",
+		);
+
+		await runtimeAdd("go", { directory: dir, local: fakeSrc, yes: true });
+
+		expect(fs.existsSync(path.join(dir, "src", "workflows", "examples", "runtime-go-hello.ts"))).toBe(true);
+		const workflowsTs = fs.readFileSync(path.join(dir, "src", "Workflows.ts"), "utf8");
+		expect(workflowsTs).toContain('import RuntimeGoHello from "./workflows/examples/runtime-go-hello";');
+		expect(workflowsTs).toContain('\t"runtime-go-hello": RuntimeGoHello,');
+		// The generated shape survives: existing entries + closing record intact.
+		expect(workflowsTs).toContain('"mcp-greeter": McpGreeter,');
+		expect(workflowsTs).toContain("export default workflows;");
+
+		// Idempotent — a --force reinstall must not duplicate the registration.
+		await runtimeAdd("go", { directory: dir, local: fakeSrc, yes: true, force: true });
+		expect(fs.readFileSync(path.join(dir, "src", "Workflows.ts"), "utf8")).toBe(workflowsTs);
+	});
+
+	it("skips the hello example when the project was scaffolded without --examples", async () => {
+		const dir = await makeProject();
+		await fsp.mkdir(path.join(fakeSrc, "examples", "ts-workflows"), { recursive: true });
+		await fsp.writeFile(
+			path.join(fakeSrc, "examples", "ts-workflows", "runtime-go-hello.ts"),
+			"export default { name: 'runtime-go-hello' };\n",
+		);
+
+		await runtimeAdd("go", { directory: dir, local: fakeSrc, yes: true });
+
+		expect(readConfig(dir).runtimes.go).toBeDefined(); // the add itself still lands
+		expect(fs.existsSync(path.join(dir, "src", "workflows", "examples"))).toBe(false);
+		expect(fs.existsSync(path.join(dir, "src", "Workflows.ts"))).toBe(false);
+	});
+
+	it("warns without corrupting a hand-reshaped Workflows.ts", async () => {
+		const dir = await makeProject({ examples: true });
+		const custom = "// custom file — no generated record\nexport default {};\n";
+		await fsp.writeFile(path.join(dir, "src", "Workflows.ts"), custom);
+		await fsp.mkdir(path.join(fakeSrc, "examples", "ts-workflows"), { recursive: true });
+		await fsp.writeFile(
+			path.join(fakeSrc, "examples", "ts-workflows", "runtime-go-hello.ts"),
+			"export default { name: 'runtime-go-hello' };\n",
+		);
+
+		await runtimeAdd("go", { directory: dir, local: fakeSrc, yes: true });
+
+		expect(fs.readFileSync(path.join(dir, "src", "Workflows.ts"), "utf8")).toBe(custom);
+		expect(fs.existsSync(path.join(dir, "src", "workflows", "examples", "runtime-go-hello.ts"))).toBe(false);
 	});
 
 	it("errors (no crash) when no runtime is given non-interactively", async () => {
