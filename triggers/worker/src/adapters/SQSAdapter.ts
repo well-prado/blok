@@ -253,6 +253,14 @@ export class SQSAdapter implements WorkerAdapter {
 			params.MessageDeduplicationId = messageId;
 		}
 		if (typeof opts?.delay === "number" && opts.delay > 0) {
+			// SQS rejects per-message DelaySeconds on FIFO queues (they only
+			// support a queue-level delay). Fail fast with a clear message
+			// instead of letting the SDK surface a cryptic AWS validation error.
+			if (isFifo) {
+				throw new Error(
+					"[blok][sqs] per-message delay is not supported on FIFO queues; set a queue-level DelaySeconds attribute instead.",
+				);
+			}
 			params.DelaySeconds = Math.min(900, Math.ceil(opts.delay / 1000));
 		}
 		const result = await this.client.send(new this.commands.SendMessageCommand(params));

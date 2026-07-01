@@ -36,7 +36,7 @@ interface SqsTestClient {
 
 interface SqsCommands {
 	SQSClient: new (opts: { region: string; endpoint?: string }) => SqsTestClient;
-	CreateQueueCommand: new (opts: { QueueName: string }) => unknown;
+	CreateQueueCommand: new (opts: { QueueName: string; Attributes?: Record<string, string> }) => unknown;
 	DeleteQueueCommand: new (opts: { QueueUrl: string }) => unknown;
 }
 
@@ -54,6 +54,20 @@ d("SQSAdapter — real LocalStack SQS", () => {
 	async function createQueue(name: string): Promise<string> {
 		if (!testClient || !sqsCommands) throw new Error("test client not initialised — beforeAll didn't run");
 		const result = await testClient.send(new sqsCommands.CreateQueueCommand({ QueueName: name }));
+		const url = result.QueueUrl;
+		if (!url) throw new Error(`CreateQueue returned no QueueUrl for ${name}`);
+		createdQueues.push(url);
+		return url;
+	}
+
+	async function createFifoQueue(name: string): Promise<string> {
+		if (!testClient || !sqsCommands) throw new Error("test client not initialised — beforeAll didn't run");
+		const result = await testClient.send(
+			new sqsCommands.CreateQueueCommand({
+				QueueName: name.endsWith(".fifo") ? name : `${name}.fifo`,
+				Attributes: { FifoQueue: "true", ContentBasedDeduplication: "true" },
+			}),
+		);
 		const url = result.QueueUrl;
 		if (!url) throw new Error(`CreateQueue returned no QueueUrl for ${name}`);
 		createdQueues.push(url);
@@ -206,6 +220,42 @@ d("SQSAdapter — real LocalStack SQS", () => {
 			// verifying fail() doesn't crash and doesn't auto-ack.
 			expect(acks).toBe(0);
 
+			await adapter.stopProcessing(queueUrl);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"FIFO queue: addJob with a per-message delay throws a clear config error (SQS rejects it)",
+		async () => {
+			const fifoUrl = await createFifoQueue(`blok-test-sqs-fifo-${Math.random().toString(36).slice(2)}`);
+			// SQS forbids per-message DelaySeconds on FIFO queues; the adapter
+			// must fail fast with a clear message rather than emit a cryptic
+			// AWS validation error (or silently send an invalid request).
+			await expect(adapter.addJob(fifoUrl, { will_fail: true }, { delay: 5000 })).rejects.toThrow(
+				/per-message delay is not supported on FIFO/i,
+			);
+			// A FIFO job WITHOUT delay still works.
+			const jobId = await adapter.addJob(fifoUrl, { ok: true }, { jobId: `g-${Math.random().toString(36).slice(2)}` });
+			expect(typeof jobId).toBe("string");
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"standard queue: a per-message delay is still applied and the job is delivered",
+		async () => {
+			const queueUrl = await createQueue(`blok-test-sqs-delay-${Math.random().toString(36).slice(2)}`);
+			const received: WorkerJob[] = [];
+			await adapter.process({ queue: queueUrl }, async (job) => {
+				received.push(job);
+				await job.complete();
+			});
+			// delay is honored on standard queues (DelaySeconds set) — the job
+			// must still arrive (proves the FIFO guard didn't break this path).
+			await adapter.addJob(queueUrl, { delayed: true }, { delay: 1000 });
+			await waitFor(() => received.length === 1, TEST_TIMEOUT_MS - 5_000);
+			expect(received[0].data).toEqual({ delayed: true });
 			await adapter.stopProcessing(queueUrl);
 		},
 		TEST_TIMEOUT_MS,
