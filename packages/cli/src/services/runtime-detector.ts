@@ -73,8 +73,14 @@ export interface RuntimeInfo {
 export function detectRr(): string | null {
 	for (const bin of ["/opt/homebrew/bin/rr", "rr"]) {
 		try {
-			child_process.execSync(`${bin} --version`, { stdio: "ignore" });
-			return bin;
+			const out = child_process
+				.execSync(`${bin} --version`, { stdio: ["ignore", "pipe", "ignore"] })
+				.toString()
+				.trim();
+			// The SERVER binary prints "rr version 2025.x". spiral/roadrunner-cli's
+			// composer shim prints "RoadRunner CLI 2025.x" and has no `serve`
+			// command — accepting it boots a sidecar that dies instantly.
+			if (/^rr version/i.test(out)) return bin;
 		} catch {
 			// keep trying
 		}

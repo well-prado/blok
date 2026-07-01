@@ -106,13 +106,16 @@ jobs:
           tools: composer
 
       # PHP's gRPC server is RoadRunner — a separate binary the CLI boots via
-      # `rr serve` (grpcStartCmd). vendor/bin/rr from spiral/roadrunner-cli is
-      # project-local; the smoke needs `rr` on $PATH like a brew install.
+      # `rr serve` (grpcStartCmd). get-binary downloads the SERVER binary to
+      # /usr/local/bin; then remove the composer package so its `rr` shim
+      # ("RoadRunner CLI", no `serve` command) can't shadow the real binary
+      # on $PATH — setup-php puts the composer bin dir ahead of /usr/local/bin.
       - name: Install RoadRunner
         run: |
           composer global require spiral/roadrunner-cli --quiet
-          ~/.composer/vendor/bin/rr get-binary --location /usr/local/bin --quiet || \
-            ~/.config/composer/vendor/bin/rr get-binary --location /usr/local/bin --quiet
+          "$(composer global config bin-dir --absolute --quiet)/rr" get-binary --location /usr/local/bin --quiet
+          composer global remove spiral/roadrunner-cli --quiet
+          command -v rr
           rr --version
 
       - name: Set up Ruby
