@@ -698,10 +698,21 @@ function assertLiteralWhen(when: unknown, id: string, ci: number): void {
  *     default: () => { step("fallback", nodeD, { ... }); },
  *   }, { id: "route" });
  */
-export function switchOn(discriminant: Handle<unknown>, arms: SwitchArms, opts?: { id?: string }): void {
-	const meta = readHandleMeta(discriminant);
-	if (!meta) {
-		throw new Error("switchOn() requires a handle as its discriminant (a step output field or a trigger field).");
+export function switchOn(discriminant: Handle<unknown> | string, arms: SwitchArms, opts?: { id?: string }): void {
+	// The discriminant is normally a handle (a step-output / trigger field). It
+	// may ALSO be a js`…` escape — a raw `js/…` expression string — for a
+	// COMPUTED discriminant no bare handle can express (e.g. case-folding a
+	// webhook `type` before matching the case labels). `switch.on` is
+	// mapper-resolved by the runner, so the `js/…` form is exactly what it wants.
+	const jsExpr = typeof discriminant === "string" ? discriminant : undefined;
+	if (jsExpr !== undefined && !jsExpr.startsWith("js/")) {
+		throw new Error("switchOn() string discriminant must come from the js`…` tagged template.");
+	}
+	const meta = jsExpr === undefined ? readHandleMeta(discriminant) : undefined;
+	if (jsExpr === undefined && !meta) {
+		throw new Error(
+			"switchOn() requires a handle or a js`…` expression as its discriminant (a step output field or a trigger field).",
+		);
 	}
 	if (!arms || !Array.isArray(arms.cases) || arms.cases.length === 0) {
 		throw new Error("switchOn() requires `cases` to be a non-empty array.");
@@ -711,23 +722,28 @@ export function switchOn(discriminant: Handle<unknown>, arms: SwitchArms, opts?:
 	}
 	const parent = currentBuilder();
 
-	// Cross-arm guard: the discriminant must be readable from the switch's scope.
-	if (meta.owner && !canRead(meta.owner, parent)) {
+	// Cross-arm guard: a handle discriminant must be readable from the switch's scope.
+	if (meta?.owner && !canRead(meta.owner, parent)) {
 		throw new Error(
 			`switchOn() discriminant from step "${meta.step}" is read outside its scope — a handle produced inside one control-flow arm is not readable from a sibling arm or after the flow step.`,
 		);
 	}
 
-	// Derive a stable id (visible in traces, root of the switch's state slot).
-	const id = opts?.id ?? `${deriveName(meta)}Switch`;
+	// Derive a stable id (visible in traces, root of the switch's state slot). A
+	// js`…` discriminant has no name to derive from, so it must pass an explicit id.
+	const id = opts?.id ?? (meta ? `${deriveName(meta)}Switch` : undefined);
+	if (!id) {
+		throw new Error('switchOn() with a js`…` discriminant requires an explicit { id }, e.g. { id: "route" }.');
+	}
 	const ids = parent.root.ids;
 	if (ids.has(id)) {
 		throw new Error(`Duplicate step id "${id}". Step ids are flat per workflow — every step needs a unique id.`);
 	}
 	ids.add(id);
 
-	// `on` lowers EXACTLY like forEach's `in` — a `js/ctx....` wire string.
-	const on = lowerHandleToInExpr(meta);
+	// `on` lowers EXACTLY like forEach's `in` — a `js/ctx....` wire string. A
+	// js`…` escape already IS that wire string, so use it verbatim.
+	const on = jsExpr ?? lowerHandleToInExpr(meta as HandleMeta);
 
 	const cases = arms.cases.map((c, ci) => {
 		if (!c || typeof c !== "object" || typeof c.do !== "function") {
