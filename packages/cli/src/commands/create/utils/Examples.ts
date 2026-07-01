@@ -464,7 +464,7 @@ Regardless of kind, every trigger populates \`ctx.request.{body,headers,params,q
 
 ## 2. THE 9 TRIGGERS
 
-Each trigger below: one-line purpose, USE-WHEN / DON'T, config shape, and a canonical \`workflow({...})\` example.
+Each trigger below: one-line purpose, USE-WHEN / DON'T, config shape, and a canonical typed-handle \`workflow(name, { trigger }, (entry) => { ... })\` example.
 
 ### 2.1 HTTP — \`trigger: { http: {...} }\`
 
@@ -484,16 +484,11 @@ trigger: { http: {
 \`\`\`
 
 \`\`\`ts
-import { workflow, $ } from "@blokjs/helper";
+import { http, node, step, tpl, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Get User", version: "1.0.0",
-  trigger: { http: { method: "GET", path: "/users/:id" } },
-  steps: [
-    { id: "lookup", use: "@blokjs/api-call",
-      inputs: { url: "js/\`https://internal/users/\${ctx.request.params.id}\`" } },
-    { id: "respond", use: "@blokjs/respond", inputs: { body: $.state.lookup }, ephemeral: true },
-  ],
+export default workflow("Get User", { version: "1.0.0", trigger: http.get("/users/:id") }, (req) => {
+  const user = step("lookup", node("@blokjs/api-call"), { url: tpl\`https://internal/users/\${req.params.id}\` });
+  step("respond", node("@blokjs/respond"), { body: user }, { ephemeral: true });
 });
 \`\`\`
 
@@ -517,15 +512,10 @@ trigger: { worker: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Process Background Job", version: "1.0.0",
-  trigger: { worker: { queue: "background-jobs" } },
-  steps: [
-    { id: "process-job", use: "@blokjs/api-call", type: "module",
-      inputs: { url: "https://example.com/process", method: "POST", body: "js/ctx.request.body" } },
-  ],
+export default workflow("Process Background Job", { version: "1.0.0", trigger: { worker: { queue: "background-jobs" } } }, (job) => {
+  step("process-job", node("@blokjs/api-call"), { url: "https://example.com/process", method: "POST", body: job.body });
 });
 \`\`\`
 
@@ -547,15 +537,10 @@ trigger: { cron: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Daily Cleanup", version: "1.0.0",
-  trigger: { cron: { schedule: "0 2 * * *", timezone: "America/New_York" } },
-  steps: [
-    { id: "purge-stale", use: "@blokjs/api-call",
-      inputs: { url: "https://api.example.com/cleanup", method: "POST" } },
-  ],
+export default workflow("Daily Cleanup", { version: "1.0.0", trigger: { cron: { schedule: "0 2 * * *", timezone: "America/New_York" } } }, () => {
+  step("purge-stale", node("@blokjs/api-call"), { url: "https://api.example.com/cleanup", method: "POST" });
 });
 \`\`\`
 
@@ -582,16 +567,12 @@ trigger: { pubsub: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "On Order Placed", version: "1.0.0",
-  trigger: { pubsub: { provider: "gcp", topic: "orders.placed", subscription: "fulfillment-svc" } },
-  steps: [
-    { id: "fulfill", use: "@blokjs/api-call",
-      idempotencyKey: "js/ctx.request.params.messageId",   // dedup redeliveries
-      inputs: { url: "https://fulfillment.internal/api/orders", method: "POST", body: "js/ctx.request.body" } },
-  ],
+export default workflow("On Order Placed", { version: "1.0.0", trigger: { pubsub: { provider: "gcp", topic: "orders.placed", subscription: "fulfillment-svc" } } }, (msg) => {
+  step("fulfill", node("@blokjs/api-call"),
+    { url: "https://fulfillment.internal/api/orders", method: "POST", body: msg.body },
+    { idempotencyKey: msg.params.messageId });   // dedup redeliveries
 });
 \`\`\`
 
@@ -616,15 +597,11 @@ trigger: { sse: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Clock Stream", version: "1.0.0",
-  trigger: { sse: { path: "/sse/clock", heartbeatInterval: 15000 } },
-  steps: [
-    { id: "sub", use: "@blokjs/sse-subscribe", inputs: { channels: ["clock"] } },
-    { id: "stream", use: "@blokjs/sse-stream", inputs: { source: "js/ctx.state.sub" } },
-  ],
+export default workflow("Clock Stream", { version: "1.0.0", trigger: { sse: { path: "/sse/clock", heartbeatInterval: 15000 } } }, () => {
+  const sub = step("sub", node("@blokjs/sse-subscribe"), { channels: ["clock"] });
+  step("stream", node("@blokjs/sse-stream"), { source: sub });
 });
 \`\`\`
 
@@ -649,15 +626,11 @@ trigger: { websocket: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { js, node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "WS Echo", version: "1.0.0",
-  trigger: { websocket: { path: "/ws/echo", events: ["message", "open", "close"] } },
-  steps: [
-    { id: "reply", use: "@blokjs/ws-reply",
-      inputs: { message: "js/({ echo: ctx.request.body, at: Date.now() })" } },
-  ],
+export default workflow("WS Echo", { version: "1.0.0", trigger: { websocket: { path: "/ws/echo", events: ["message", "open", "close"] } } }, (conn) => {
+  // \`js\` is the escape hatch for a non-structural expression (Date.now()).
+  step("reply", node("@blokjs/ws-reply"), { message: js\`({ echo: \${conn.body}, at: Date.now() })\` });
 });
 \`\`\`
 
@@ -688,18 +661,14 @@ trigger: { webhook: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { subworkflow, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "Stripe Webhook", version: "1.0.0",
-  trigger: { webhook: {
-    provider: "stripe", namespace: "stripe",
-    secretEnv: "STRIPE_WEBHOOK_SECRET", idempotencyKey: "js/ctx.request.body.id",
-  }},
-  steps: [
-    { id: "dispatch", subworkflow: "js/ctx.request.body.type",   // "invoice.paid" → "stripe.invoice.paid"
-      inputs: { stripeEvent: "js/ctx.request.body" } },
-  ],
+export default workflow("Stripe Webhook", { version: "1.0.0", trigger: { webhook: {
+  provider: "stripe", namespace: "stripe",
+  secretEnv: "STRIPE_WEBHOOK_SECRET", idempotencyKey: "js/ctx.request.body.id",
+} } }, (event) => {
+  // polymorphic dispatch: "invoice.paid" → "stripe.invoice.paid" (namespace prefix from the trigger)
+  subworkflow("dispatch", event.body.type, { stripeEvent: event.body });
 });
 \`\`\`
 
@@ -726,15 +695,16 @@ trigger: { mcp: {
 **Requires a workflow-level \`input:\` Zod schema** — that becomes the tool's \`inputSchema\`:
 
 \`\`\`ts
-import { workflow, $ } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 import { z } from "zod";
 
-export default workflow({
-  name: "search_code", version: "1.0.0",
+export default workflow("search_code", {
+  version: "1.0.0",
   input: z.object({ query: z.string(), limit: z.number().optional() }),  // → tool inputSchema
   trigger: { mcp: { path: "/mcp", serverName: "my-platform",
                     tool: { description: "Full-text search the indexed code" } } },
-  steps: [ { id: "search", use: "@my/search", inputs: { query: $.req.body.query } } ],
+}, (call) => {
+  step("search", node("@my/search"), { query: call.body.query });
 });
 \`\`\`
 
@@ -766,15 +736,10 @@ trigger: { grpc: {
 \`\`\`
 
 \`\`\`ts
-import { workflow } from "@blokjs/helper";
+import { node, step, tpl, workflow } from "@blokjs/core";
 
-export default workflow({
-  name: "GetUser", version: "1.0.0",
-  trigger: { grpc: { service: "UserService", method: "GetUser", proto: "users.proto" } },
-  steps: [
-    { id: "lookup", use: "@blokjs/api-call",
-      inputs: { url: "js/\`https://internal/users/\${ctx.request.body.userId}\`", method: "GET" } },
-  ],
+export default workflow("GetUser", { version: "1.0.0", trigger: { grpc: { service: "UserService", method: "GetUser", proto: "users.proto" } } }, (rpc) => {
+  step("lookup", node("@blokjs/api-call"), { url: tpl\`https://internal/users/\${rpc.body.userId}\`, method: "GET" });
 });
 \`\`\`
 
@@ -784,9 +749,9 @@ The request decodes into \`ctx.request.body\`; the final step output becomes the
 
 ---
 
-## 3. AUTHORING WORKFLOWS (v2 DSL)
+## 3. AUTHORING WORKFLOWS — object-style & JSON (legacy; see §0 for the canonical typed-handle DSL)
 
-Import from \`@blokjs/helper\`: \`{ workflow, $, branch, switchOn, forEach, loop, tryCatch }\`. The default export is \`workflow({...})\` — a single object literal, no chaining, no separate \`nodes{}\` map.
+§0 covers the canonical typed-handle DSL (\`workflow(name, { trigger }, (entry) => { ... })\`). This section documents the **equivalent object-style form** (\`@blokjs/helper\`, one \`workflow({...})\` object literal with \`$\` reads) and JSON — both still fully supported for migrating and maintaining existing workflows; all three compile to the same IR. The persistence knobs and control-flow semantics below apply to every form.
 
 \`\`\`ts
 import { workflow, $ } from "@blokjs/helper";
@@ -916,10 +881,14 @@ For HTTP, \`ttl\` requires \`delay\`. Debounce modes: \`trailing\` (default — 
    \`\`\`ts
    trigger: { http: { method: "GET", middleware: ["auth-check", "request-id"] } }
    \`\`\`
-2. *Defining a middleware workflow* — \`workflow({ middleware: true })\`. \`trigger\` becomes optional; it gets no public route and is referenced by \`name\`:
+2. *Defining a middleware workflow* — \`workflow(name, { middleware: true }, cb)\`. \`trigger\` becomes optional; it gets no public route and is referenced by \`name\`:
    \`\`\`ts
-   export default workflow({ name: "auth-check", version: "1.0.0", middleware: true,
-     steps: [ /* sets ctx.state.identity; may stop:true to short-circuit */ ] });
+   import { node, step, workflow } from "@blokjs/core";
+
+   export default workflow("auth-check", { version: "1.0.0", middleware: true }, () => {
+     // populate ctx.state.identity; a step may return stop:true to short-circuit the chain
+     step("identity", node("@my/verify-auth"), {});
+   });
    \`\`\`
 
 Process-global middleware: \`WorkflowRegistry.getInstance().setGlobalMiddleware([...])\` or \`BLOK_GLOBAL_MIDDLEWARE=a,b\`.
@@ -1320,9 +1289,9 @@ expect(result.success).toBe(true);
 **Do:**
 - Read \`.blok/config.json\` and existing \`src/workflows/\` to learn which triggers + runtimes this project uses; author for those.
 - Start every workflow from the **trigger decision table** in §1, not from HTTP.
-- Use \`workflow({ name, version, trigger, steps })\` from \`@blokjs/helper\`.
+- Author with the typed-handle DSL — \`workflow(name, { version, trigger }, (entry) => { step("id", node("@pkg"), inputs) })\` from \`@blokjs/core\` (§0). Object-style \`workflow({...})\` and JSON stay valid for legacy/migration.
 - Use the typed node contract in every runtime (\`defineNode\` / \`DefineNode\` / \`TypedNode\` / \`@node\`).
-- Reference cross-step outputs with \`$.state.<id>\`; use \`as:\`/\`spread:\`/\`ephemeral:\` to shape persistence.
+- Reference cross-step outputs via the handle \`step()\` returns (not \`$.state.<id>\`); use the 4th-arg \`as:\`/\`spread:\`/\`ephemeral:\` knobs to shape persistence.
 - Set \`type: "runtime.<lang>"\` on every sidecar step and register the node by name.
 
 **Do NOT:**
