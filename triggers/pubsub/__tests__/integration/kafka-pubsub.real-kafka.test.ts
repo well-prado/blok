@@ -16,6 +16,7 @@ interface KafkaAdminClient {
 		waitForLeaders?: boolean;
 		topics: Array<{ topic: string; numPartitions: number; replicationFactor: number }>;
 	}): Promise<boolean>;
+	fetchTopicOffsets(topic: string): Promise<Array<{ partition: number; offset: string; high: string; low: string }>>;
 	fetchTopicMetadata(opts: { topics: string[] }): Promise<unknown>;
 }
 
@@ -292,6 +293,91 @@ d("KafkaPubSubAdapter — real Kafka", { retry: 2 }, () => {
 	);
 
 	it(
+		"startFrom {timestamp} replays only messages at or after the broker timestamp cursor",
+		async () => {
+			const topic = `blok-test-pubsub-seek-ts-${Math.random().toString(36).slice(2)}`;
+			await createTopic(topic, 1);
+
+			for (const n of [1, 2, 3]) await producer.publish(topic, { n, phase: "old" });
+			await sleep(250);
+			const cursorMs = Date.now();
+			await sleep(250);
+			for (const n of [4, 5, 6]) await producer.publish(topic, { n, phase: "new" });
+
+			const seeker = new KafkaPubSubAdapter({ brokers: brokerList(), clientId: "blok-test-seek-ts" });
+			const received: PubSubMessage[] = [];
+			await seeker.connect();
+			try {
+				await seeker.subscribe(
+					{
+						topic,
+						consumerGroup: `blok-seek-ts-${Math.random().toString(36).slice(2)}`,
+						durable: false,
+						startFrom: { timestamp: cursorMs },
+					},
+					async (msg) => {
+						received.push(msg);
+					},
+				);
+
+				await waitFor(() => received.length >= 3, TEST_TIMEOUT_MS - 15_000);
+				await sleep(1_000);
+			} finally {
+				await seeker.disconnect().catch(() => {});
+			}
+
+			expect(received.map((m) => (m.body as { n: number }).n).sort((a, b) => a - b)).toEqual([4, 5, 6]);
+			for (const msg of received) {
+				expect((msg.body as { phase: string }).phase).toBe("new");
+				expect(Number((msg.raw as { timestamp: string }).timestamp)).toBeGreaterThanOrEqual(cursorMs);
+			}
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"startFrom {seq} seeks a single-partition topic to offset N",
+		async () => {
+			const topic = `blok-test-pubsub-seek-seq-${Math.random().toString(36).slice(2)}`;
+			await createTopic(topic, 1);
+
+			for (const n of [1, 2, 3, 4, 5, 6]) await producer.publish(topic, { n });
+
+			if (!admin) throw new Error("admin not initialised");
+			const p0 = (await admin.fetchTopicOffsets(topic)).find((offset) => offset.partition === 0);
+			expect(p0?.offset).toBe("6");
+
+			const seeker = new KafkaPubSubAdapter({ brokers: brokerList(), clientId: "blok-test-seek-seq" });
+			const received: PubSubMessage[] = [];
+			await seeker.connect();
+			try {
+				await seeker.subscribe(
+					{
+						topic,
+						consumerGroup: `blok-seek-seq-${Math.random().toString(36).slice(2)}`,
+						durable: false,
+						startFrom: { seq: 3 },
+					},
+					async (msg) => {
+						received.push(msg);
+					},
+				);
+
+				await waitFor(() => received.length >= 3, TEST_TIMEOUT_MS - 15_000);
+				await sleep(1_000);
+			} finally {
+				await seeker.disconnect().catch(() => {});
+			}
+
+			expect(received.map((m) => (m.body as { n: number }).n).sort((a, b) => a - b)).toEqual([4, 5, 6]);
+			expect(received.map((m) => Number((m.raw as { offset: string }).offset)).sort((a, b) => a - b)).toEqual([
+				3, 4, 5,
+			]);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"publish to a topic with no subscribers does not throw",
 		async () => {
 			// Note: kafkajs's auto.create.topics.enable is true on the test
@@ -304,6 +390,14 @@ d("KafkaPubSubAdapter — real Kafka", { retry: 2 }, () => {
 		TEST_TIMEOUT_MS,
 	);
 });
+
+function brokerList(): string[] {
+	return KAFKA_BROKERS?.split(",").map((s) => s.trim()) ?? [];
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
 	const start = Date.now();

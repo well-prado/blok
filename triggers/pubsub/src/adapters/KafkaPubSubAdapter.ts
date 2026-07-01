@@ -10,10 +10,8 @@
  * Replay cursors via `startFrom`:
  *   - `"earliest"` → `fromBeginning: true` on first subscribe.
  *   - `"latest"` (default) → only new messages.
- *   - `{seq: N}` / `{timestamp: ms}` — provider-specific. Cleanest
- *     long-term path is Kafka's `admin.seek({offset|timestamp})` post-
- *     subscribe; v1 honors `earliest` / `latest` and `{seq}` via
- *     `auto.offset.reset` only.
+ *   - `{seq: N}` → `consumer.seek()` every assigned partition to offset N.
+ *   - `{timestamp: ms}` → resolve broker offsets at that timestamp, then seek.
  *
  * Requires `kafkajs` as a peer dependency.
  *
@@ -36,9 +34,32 @@ export interface KafkaPubSubConfig {
 	ssl: boolean;
 }
 
+type KafkaSeekCursor = Extract<PubSubTriggerOpts["startFrom"], { seq: number } | { timestamp: number }>;
+
 interface KafkaConsumerHandle {
+	connect: () => Promise<void>;
 	disconnect: () => Promise<void>;
+	run: (opts: {
+		autoCommit: boolean;
+		eachMessage: (payload: {
+			message: { key?: Buffer; value?: Buffer; offset: string; timestamp: string; headers?: Record<string, Buffer> };
+		}) => Promise<void>;
+	}) => Promise<void>;
+	seek: (opts: { topic: string; partition: number; offset: string }) => void;
 	stop: () => Promise<void>;
+	subscribe: (opts: { topic: string; fromBeginning: boolean }) => Promise<void>;
+}
+
+interface KafkaAdminClient {
+	connect: () => Promise<void>;
+	disconnect: () => Promise<void>;
+	fetchTopicMetadata: (opts: { topics: string[] }) => Promise<{
+		topics: Array<{ partitions: Array<{ partitionId: number }> }>;
+	}>;
+	fetchTopicOffsetsByTimestamp: (
+		topic: string,
+		timestamp: number,
+	) => Promise<Array<{ partition: number; offset: string }>>;
 }
 
 export class KafkaPubSubAdapter implements PubSubAdapter {
@@ -111,8 +132,9 @@ export class KafkaPubSubAdapter implements PubSubAdapter {
 		// consumer: explicit consumerGroup shared across all subscribers.
 		const groupId =
 			config.consumerGroup ?? `blok-fanout-${uuid().slice(0, 8)}-${config.topic.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-		const consumer = this.kafka.consumer({ groupId });
+		const consumer = this.kafka.consumer({ groupId }) as KafkaConsumerHandle;
 		await consumer.connect();
+		const seekCursor = typeof config.startFrom === "object" ? config.startFrom : undefined;
 		const fromBeginning = config.startFrom === "earliest";
 		await consumer.subscribe({ topic: config.topic, fromBeginning });
 		this.consumers.set(`${config.topic}#${groupId}`, consumer);
@@ -167,6 +189,26 @@ export class KafkaPubSubAdapter implements PubSubAdapter {
 				}
 			},
 		});
+		if (seekCursor) await this.applyStartFrom(consumer, config.topic, seekCursor);
+	}
+
+	private async applyStartFrom(consumer: KafkaConsumerHandle, topic: string, cursor: KafkaSeekCursor): Promise<void> {
+		const admin = this.kafka.admin() as KafkaAdminClient;
+		await admin.connect();
+		try {
+			if ("seq" in cursor) {
+				const offset = String(cursor.seq);
+				const metadata = await admin.fetchTopicMetadata({ topics: [topic] });
+				for (const partition of metadata.topics[0]?.partitions ?? []) {
+					consumer.seek({ topic, partition: partition.partitionId, offset });
+				}
+				return;
+			}
+			const offsets = await admin.fetchTopicOffsetsByTimestamp(topic, cursor.timestamp);
+			for (const { partition, offset } of offsets) consumer.seek({ topic, partition, offset });
+		} finally {
+			await admin.disconnect().catch(() => {});
+		}
 	}
 
 	async unsubscribe(subscription: string): Promise<void> {
