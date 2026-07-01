@@ -1,4 +1,4 @@
-import { $, forEach, workflow } from "@blokjs/helper";
+import { http, forEach, node, step, subworkflow, workflow } from "@blokjs/core";
 
 /**
  * Parent eval workflow — the tetrix-blok shape:
@@ -14,44 +14,26 @@ import { $, forEach, workflow } from "@blokjs/helper";
  * nested inside a `forEach`, run in a process that ALSO has an unrelated
  * workflow (foreign.auth) carrying a `js/ctx.state.uid.userId` expression.
  */
-export default workflow({
-	name: "eval.run",
-	version: "1.0.0",
-	description: "Eval harness — load, retrieve per item via subworkflow, score, aggregate",
-	trigger: { http: { method: "POST", path: "/eval/run" } },
-	steps: [
-		{ id: "load", use: "eval-load-items", inputs: {} },
-		forEach({
-			id: "scoreItems",
-			in: $.state.load.items,
-			as: "item",
-			mode: "sequential",
-			do: [
-				{
-					id: "retrieve",
-					subworkflow: "eval-retrieve",
-					wait: true,
-					inputs: { query: $.state.item.query },
-				},
-				{
-					id: "normalize",
-					use: "@blokjs/expr",
-					inputs: {
-						expression: "({ id: ctx.state.item.id, hitCount: (ctx.state.retrieve?.data?.hits || []).length })",
-					},
-				},
-				{
-					id: "score",
-					use: "eval-score",
-					inputs: { id: $.state.normalize.id, hitCount: $.state.normalize.hitCount },
-				},
-			],
-		}),
-		{
-			id: "respond",
-			use: "@blokjs/respond",
-			inputs: { body: { results: $.state.scoreItems } },
-			ephemeral: true,
-		},
-	],
-});
+export default workflow(
+	"eval.run",
+	{
+		version: "1.0.0",
+		description: "Eval harness — load, retrieve per item via subworkflow, score, aggregate",
+		trigger: http.post("/eval/run"),
+	},
+	() => {
+		const load = step("load", node<{ items: { query: string }[] }>("eval-load-items"), {});
+		const scoreItems = forEach(
+			load.items,
+			(item) => {
+				subworkflow("retrieve", "eval-retrieve", { query: item.query }, { wait: true });
+				const normalize = step("normalize", node<{ id: unknown; hitCount: number }>("@blokjs/expr"), {
+					expression: "({ id: ctx.state.item.id, hitCount: (ctx.state.retrieve?.data?.hits || []).length })",
+				});
+				step("score", node("eval-score"), { id: normalize.id, hitCount: normalize.hitCount });
+			},
+			{ as: "item", mode: "sequential" },
+		);
+		step("respond", node("@blokjs/respond"), { body: { results: scoreItems } }, { ephemeral: true });
+	},
+);

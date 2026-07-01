@@ -1,12 +1,13 @@
 /**
- * The typed-handle DSL from `@blokjs/core` — Blok's lead TypeScript authoring
- * surface. Every other workflow this scaffold ships uses the object form
- * (`workflow({ steps: [...] })` from `@blokjs/helper`); this one showcases the
- * handle DSL so a fresh project has a runnable example to copy from.
+ * The typed-handle DSL from `@blokjs/core` — Blok's canonical TypeScript
+ * authoring surface. This example imports a node's VALUE (`apiCall`,
+ * `RespondNode`) and passes it to `step()`; the sibling `countries-helper` /
+ * `countries-cats-helper` use the name-only `node("@blokjs/api-call")` form.
  *
  * `step(id, node, inputs)` runs the node and returns a TYPED handle. Pass that
  * handle straight into a later step — no `$`, no `js/`, no raw `ctx` strings;
- * the runner resolves it. Same engine, same IR as the object/JSON forms.
+ * the runner resolves it. Object-style `workflow({ steps: [...] })` from
+ * `@blokjs/helper` and JSON remain supported (same engine, same IR).
  */
 import apiCall from "@blokjs/api-call";
 import { http, step, workflow } from "@blokjs/core";

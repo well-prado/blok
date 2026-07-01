@@ -1,22 +1,16 @@
-import { branch, workflow } from "@blokjs/helper";
+import { http, branch, eq, workflow } from "@blokjs/core";
 
-export default workflow({
-	name: "Empty",
-	version: "1.0.0",
-	description: "Workflow for load testing",
-	trigger: {
-		http: {
-			method: "GET",
-			path: "/empty-helper",
-			accept: "application/json",
-		},
+export default workflow(
+	"Empty",
+	{
+		version: "1.0.0",
+		description: "Workflow for load testing",
+		trigger: http.get("/empty-helper", { accept: "application/json" }),
 	},
-	steps: [
-		branch({
-			id: "filter-request",
-			when: 'ctx.request.query.countries === "true"',
-			then: [],
-			else: [],
-		}),
-	],
-});
+	(req) => {
+		branch("filter-request", eq(req.query.countries, "true"), {
+			then: () => {},
+			else: () => {},
+		});
+	},
+);

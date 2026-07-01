@@ -1,4 +1,5 @@
-import { $, workflow } from "@blokjs/helper";
+import { http, node, step, workflow } from "@blokjs/core";
+import type { Handle } from "@blokjs/core";
 
 /**
  * SSE publish demo — companion to `stream-demo`. Accepts an HTTP POST
@@ -21,26 +22,19 @@ import { $, workflow } from "@blokjs/helper";
  *                            -d '{"event":"tick","data":{"count":1}}'
  *   3. The first terminal prints `event: tick\ndata: {"count":1}` instantly.
  */
-export default workflow({
-	name: "SSE Publish Demo",
-	version: "1.0.0",
-	description: "Publish one event to the SSE bus channel `sse-demo`. Every connected `/sse/demo` client receives it.",
-	trigger: {
-		http: {
-			method: "POST",
-			path: "/v07-sse-publish",
-			accept: "application/json",
-		},
+export default workflow(
+	"SSE Publish Demo",
+	{
+		version: "1.0.0",
+		description: "Publish one event to the SSE bus channel `sse-demo`. Every connected `/sse/demo` client receives it.",
+		trigger: http.post("/v07-sse-publish", { accept: "application/json" }),
 	},
-	steps: [
-		{
-			id: "publish",
-			use: "@blokjs/sse-publish",
-			inputs: {
-				channel: "sse-demo",
-				event: $.req.body.event,
-				data: $.req.body.data,
-			},
-		},
-	],
-});
+	(req) => {
+		const body = req.body as Handle<{ event: string; data: unknown }>;
+		step("publish", node("@blokjs/sse-publish"), {
+			channel: "sse-demo",
+			event: body.event,
+			data: body.data,
+		});
+	},
+);

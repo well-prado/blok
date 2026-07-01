@@ -1,27 +1,27 @@
-import { workflow } from "@blokjs/helper";
+import { subworkflow, workflow } from "@blokjs/core";
+import type { Handle } from "@blokjs/core";
 
-export default workflow({
-	name: "webhook-stripe",
-	version: "1.0.0",
-	description:
-		"Stripe webhook receiver. Trigger verifies the Stripe-Signature header (HMAC-SHA256 over `<ts>.<rawBody>` with 5min tolerance) against STRIPE_WEBHOOK_SECRET. Replay protection caches `body.id` for 5 minutes so retries return 200 without re-running. The dispatch step uses POLYMORPHIC sub-workflow resolution: `subworkflow: 'js/ctx.request.body.type'` evaluates against the verified body, and the `namespace: 'stripe'` prefix turns `body.type === 'invoice.paid'` into a lookup for sub-workflow `stripe.invoice.paid`. Add a handler workflow named `stripe.<event-type>` for every event you want to handle. Needs `--triggers http,webhook --examples` at scaffold time and STRIPE_WEBHOOK_SECRET set in .env.local.",
-	trigger: {
-		webhook: {
-			provider: "stripe",
-			path: "/webhooks/stripe",
-			secretEnv: "STRIPE_WEBHOOK_SECRET",
-			tolerance: 300,
-			namespace: "stripe",
-			idempotencyKey: "js/ctx.request.body.id",
-		},
-	},
-	steps: [
-		{
-			id: "dispatch",
-			subworkflow: "js/ctx.request.body.type",
-			inputs: {
-				stripeEvent: "js/ctx.request.body",
+export default workflow(
+	"webhook-stripe",
+	{
+		version: "1.0.0",
+		description:
+			"Stripe webhook receiver. Trigger verifies the Stripe-Signature header (HMAC-SHA256 over `<ts>.<rawBody>` with 5min tolerance) against STRIPE_WEBHOOK_SECRET. Replay protection caches `body.id` for 5 minutes so retries return 200 without re-running. The dispatch step uses POLYMORPHIC sub-workflow resolution: `subworkflow: 'js/ctx.request.body.type'` evaluates against the verified body, and the `namespace: 'stripe'` prefix turns `body.type === 'invoice.paid'` into a lookup for sub-workflow `stripe.invoice.paid`. Add a handler workflow named `stripe.<event-type>` for every event you want to handle. Needs `--triggers http,webhook --examples` at scaffold time and STRIPE_WEBHOOK_SECRET set in .env.local.",
+		trigger: {
+			webhook: {
+				provider: "stripe",
+				path: "/webhooks/stripe",
+				secretEnv: "STRIPE_WEBHOOK_SECRET",
+				tolerance: 300,
+				namespace: "stripe",
+				idempotencyKey: "js/ctx.request.body.id",
 			},
 		},
-	],
-});
+	},
+	(event) => {
+		const body = event.body as Handle<{ type: string }>;
+		subworkflow("dispatch", body.type, {
+			stripeEvent: event.body,
+		});
+	},
+);

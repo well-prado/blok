@@ -1,53 +1,38 @@
-import { workflow } from "@blokjs/helper";
+import { http, forEach, js, node, step, workflow } from "@blokjs/core";
+import type { Handle } from "@blokjs/core";
 
-export default workflow({
-	name: "fanout-enqueue",
-	version: "1.0.0",
-	description:
-		"v0.6.10 — Fan-out producer. POST `{items:[...], tenantId?: '...'}` and each item gets enqueued as a separate worker job on queue `fanout-jobs`. The forEach uses `mode: parallel + concurrency: 5` so 1000 items don't serialize 1000 RPCs. Each enqueue uses `dedupId: <tenantId>:<itemId>` so accidental re-submission of the same set is a no-op (BullMQ/NATS/SQS-level dedup, NOT workflow-step idempotency). Set BLOK_WORKER_ADAPTER=nats/redis/bullmq + the matching connection env vars when deploying; in-memory adapter works for single-process dev. Needs --triggers http,worker --examples at scaffold time.",
-	trigger: {
-		http: {
-			method: "POST",
-			path: "/fanout/jobs",
-			accept: "application/json",
-		},
+export default workflow(
+	"fanout-enqueue",
+	{
+		version: "1.0.0",
+		description:
+			"v0.6.10 — Fan-out producer. POST `{items:[...], tenantId?: '...'}` and each item gets enqueued as a separate worker job on queue `fanout-jobs`. The forEach uses `mode: parallel + concurrency: 5` so 1000 items don't serialize 1000 RPCs. Each enqueue uses `dedupId: <tenantId>:<itemId>` so accidental re-submission of the same set is a no-op (BullMQ/NATS/SQS-level dedup, NOT workflow-step idempotency). Set BLOK_WORKER_ADAPTER=nats/redis/bullmq + the matching connection env vars when deploying; in-memory adapter works for single-process dev. Needs --triggers http,worker --examples at scaffold time.",
+		trigger: http.post("/fanout/jobs", { accept: "application/json" }),
 	},
-	steps: [
-		{
-			id: "fan-out",
-			forEach: {
-				in: "js/Array.isArray(ctx.request.body.items) ? ctx.request.body.items : []",
-				as: "item",
-				mode: "parallel",
-				concurrency: 5,
-				do: [
-					{
-						id: "enqueue",
-						use: "@blokjs/worker-publish",
-						type: "module",
-						inputs: {
-							queue: "fanout-jobs",
-							payload: {
-								item: "js/ctx.state.item",
-								index: "js/ctx.state.itemIndex",
-								tenantId: "js/ctx.request.body.tenantId || 'default'",
-								enqueuedAt: "js/Date.now()",
-							},
-							dedupId:
-								"js/`${ctx.request.body.tenantId || 'default'}:${ctx.state.item && ctx.state.item.id ? ctx.state.item.id : ctx.state.itemIndex}`",
-						},
+	(req) => {
+		const body = req.body as Handle<{
+			items: { id: unknown }[];
+			tenantId: unknown;
+		}>;
+		forEach(
+			body.items,
+			(item, index) => {
+				step("enqueue", node("@blokjs/worker-publish"), {
+					queue: "fanout-jobs",
+					payload: {
+						item,
+						index,
+						tenantId: js`${body.tenantId} || 'default'`,
+						enqueuedAt: js`Date.now()`,
 					},
-				],
+					dedupId: js`\`$\{${body.tenantId} || 'default'}:$\{${item} && ${item}.id ? ${item}.id : ${index}}\``,
+				});
 			},
-		},
-		{
-			id: "respond",
-			use: "@blokjs/expr",
-			type: "module",
-			inputs: {
-				expression:
-					"({ ok: true, queued: (ctx.state['fan-out'] || []).length, tenantId: ctx.request.body.tenantId || 'default', jobIds: (ctx.state['fan-out'] || []).map(r => r && r.data && r.data.jobId).filter(Boolean) })",
-			},
-		},
-	],
-});
+			{ id: "fan-out", as: "item", mode: "parallel", concurrency: 5 },
+		);
+		step("respond", node("@blokjs/expr"), {
+			expression:
+				"({ ok: true, queued: (ctx.state['fan-out'] || []).length, tenantId: ctx.request.body.tenantId || 'default', jobIds: (ctx.state['fan-out'] || []).map(r => r && r.data && r.data.jobId).filter(Boolean) })",
+		});
+	},
+);

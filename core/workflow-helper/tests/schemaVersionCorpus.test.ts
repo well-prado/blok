@@ -1,14 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-// Representative real TS workflows (imported statically so vitest resolves the
-// path at transform time — a runtime template-literal import() doesn't resolve
-// in this package's test env). Each is a `workflow({...})` envelope; we assert
-// its `_config` validates under the schemaVersion-carrying schema.
-import countriesCats from "../../../triggers/http/src/workflows/countries-cats-helper";
-import countries from "../../../triggers/http/src/workflows/countries-helper";
-import emptyTs from "../../../triggers/http/src/workflows/empty";
-import { WORKFLOW_IR_VERSION, WorkflowIRSchema, workflow } from "../src/index";
+import { WORKFLOW_IR_VERSION, WorkflowIRSchema, branch, workflow } from "../src/index";
 
 /**
  * Issue #299 (TEST-ONLY) — prove PR #454 (added `schemaVersion` to
@@ -182,16 +175,41 @@ describe("schemaVersion — existing-workflow corpus regression (#299)", () => {
 // triggers/http/src/workflows and for inline factory calls.
 
 describe("schemaVersion — TS workflow() envelopes validate (#299)", () => {
-	// Statically imported above (not a glob) so we don't drag the whole examples
-	// tree — with its node-package imports — into this package's test env.
+	// Inline object-style `workflow({...})` shapes mirroring the real default
+	// scaffold workflows (a plain step + branch variants). Kept INLINE rather
+	// than imported from triggers/http: those TS scaffolds now use the
+	// @blokjs/core typed-handle DSL, and importing them would pull the engine UP
+	// into this base package's test env (helper sits below core). The real
+	// scaffold files are covered by @blokjs/runner's scaffold-workflows test.
 	const TS_SAMPLES: Array<readonly [string, { _config: unknown }]> = [
-		["countries-helper", countries],
-		["countries-cats-helper", countriesCats],
-		["empty", emptyTs],
+		["single-step", workflow({ ...base, name: "countries.list" })],
+		[
+			"branch-arms",
+			workflow({
+				...base,
+				name: "countries.withCats",
+				steps: [
+					branch({
+						id: "filter-request",
+						when: 'ctx.request.query.countries === "true"',
+						then: [{ id: "get-countries", use: "@blokjs/api-call", inputs: { url: "https://example.com/a" } }],
+						else: [{ id: "get-facts", use: "@blokjs/api-call", inputs: { url: "https://example.com/b" } }],
+					}),
+				],
+			}),
+		],
+		[
+			"empty-branch",
+			workflow({
+				...base,
+				name: "Empty",
+				steps: [branch({ id: "filter-request", when: 'ctx.request.query.countries === "true"', then: [], else: [] })],
+			}),
+		],
 	];
 
 	for (const [name, wf] of TS_SAMPLES) {
-		it(`_config of triggers/http/src/workflows/${name} validates`, () => {
+		it(`${name} workflow() envelope validates`, () => {
 			const parsed = WorkflowIRSchema.safeParse(wf._config);
 			expect(parsed.success).toBe(true);
 			if (parsed.success) expect(parsed.data.schemaVersion).toBe("2");
