@@ -94,7 +94,10 @@ export async function createProject(opts: OptionValues, version: string, current
 	let examples: boolean = opts.examples ?? false;
 	let selectedRuntimeKinds: string[] = opts.runtimes ? parseCommaSeparated(opts.runtimes) : ["node"];
 	let selectedManager: string = opts.packageManager || "npm";
-	let pubsubProvider: string = opts.pubsubProvider || "gcp";
+	// Default to NATS — the only pub/sub provider that runs with zero cloud
+	// setup (mirrors the worker trigger's in-memory default), so a scaffolded
+	// pubsub trigger is verifiable out of the box against a local broker.
+	let pubsubProvider: string = opts.pubsubProvider || "nats";
 	let queueProvider: string = opts.queueProvider || "kafka";
 	// Whether the user EXPLICITLY chose a worker/queue broker (a --queue-provider
 	// flag, or an interactive prompt that actually ran and resolved). When false,
@@ -222,6 +225,7 @@ export async function createProject(opts: OptionValues, version: string, current
 							? p.select({
 									message: "Select Pub/Sub provider",
 									options: [
+										{ label: "NATS (local, zero cloud setup)", value: "nats" },
 										{ label: "Google Cloud Pub/Sub", value: "gcp" },
 										{ label: "AWS SNS/SQS", value: "aws" },
 										{ label: "Azure Service Bus", value: "azure" },
@@ -287,7 +291,7 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		projectName = blokctlProject.projectName;
 		selectedTriggers = blokctlProject.triggers;
-		pubsubProvider = (blokctlProject.pubsubProvider as string) || "gcp";
+		pubsubProvider = (blokctlProject.pubsubProvider as string) || "nats";
 		// The queueProvider prompt only runs (and resolves to a non-null value)
 		// when a `queue` trigger was selected or --queue-provider was passed; a
 		// worker-only run never prompts, so it stays implicitly in-memory.
@@ -1424,11 +1428,14 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// and HTTP-only triggers ignore the SSE one. Keeps the file
 			// generation simple + lets a future http-only scaffold opt in
 			// to the publish workflow as a learning example.
+			// `await`: these are @blokjs/core callback-form workflows (async, like
+			// countries-dsl). Without it the unresolved Promise carries no readable
+			// `_config.trigger`, so SSEServer skips it and the /sse route never mounts.
 			imports.push('import SSEStreamDemo from "./workflows/sse/events/stream-demo";');
-			workflowEntries.push('\t"sse-stream-demo": SSEStreamDemo,');
+			workflowEntries.push('\t"sse-stream-demo": await SSEStreamDemo,');
 			if (triggers.includes("http")) {
 				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo";');
-				workflowEntries.push('\t"sse-publish-demo": SSEPublishDemo,');
+				workflowEntries.push('\t"sse-publish-demo": await SSEPublishDemo,');
 			}
 		} else if (trigger === "websocket") {
 			// v0.6.7 — WebSocket source ships `src/workflows/events/echo-demo.ts`
@@ -1438,14 +1445,27 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// when HTTP is also selected, it mounts on the shared port
 			// alongside HTTP routes via WebSocketTrigger(app, httpTrigger).
 			imports.push('import WSEchoDemo from "./workflows/websocket/events/echo-demo";');
-			workflowEntries.push('\t"ws-echo-demo": WSEchoDemo,');
+			// `await` — callback-form async workflow (see the sse/pubsub notes).
+			workflowEntries.push('\t"ws-echo-demo": await WSEchoDemo,');
 		} else if (trigger === "pubsub") {
 			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
-			workflowEntries.push('\t"on-pubsub-message": OnPubSubMessage,');
+			// `await`: the @blokjs/core callback-form workflow() resolves async (same
+			// as countries-dsl). Registering the unresolved Promise means the pubsub
+			// trigger reads no `_config.trigger.pubsub` off it and logs "No workflows
+			// with pub/sub triggers found" — the exact symptom this fixes.
+			workflowEntries.push('\t"on-pubsub-message": await OnPubSubMessage,');
+			// The paired HTTP producer (`POST /orders` → publish to the topic) is
+			// only useful when an HTTP trigger is also present to serve it, so a
+			// pubsub-only project skips it. Gives a curl-able produce→consume loop.
+			if (triggers.includes("http")) {
+				imports.push('import PublishOrder from "./workflows/pubsub/publish-order";');
+				workflowEntries.push('\t"publish-order": await PublishOrder,');
+			}
 		} else if (trigger === "queue" || trigger === "worker") {
 			// Worker template ships `workflows/jobs/process-job.ts`.
 			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job";`);
-			workflowEntries.push('\t"process-job": ProcessJob,');
+			// `await` — callback-form async workflow (see the sse/pubsub notes).
+			workflowEntries.push('\t"process-job": await ProcessJob,');
 		} else if (trigger === "cron") {
 			// Cron discovers its workflows from THIS map (the HTTP JSON auto-scan
 			// does not apply to non-HTTP triggers), so the scaffold ships a
@@ -2387,7 +2407,22 @@ function updatePubSubProvider(triggerDestDir: string, provider: string): void {
 	};
 
 	const config = adapterConfigs[provider];
-	if (!config) return;
+	if (!config) {
+		// Providers without a managed-SDK adapter (nats, redis-streams, kafka)
+		// resolve at runtime via the workflow's `provider` field / BLOK_PUBSUB_ADAPTER
+		// / the "nats" fallback. But the template hardcodes `protected adapter = new
+		// GCPPubSubAdapter(...)`, and an ACTIVE `this.adapter` SHORT-CIRCUITS that
+		// resolution (PubSubTrigger.resolveAdapterForWorkflow rung 1). So for these
+		// providers, drop the GCP default — leave `this.adapter` undefined — exactly
+		// like the worker template leaves it undefined for the in-memory default.
+		content = content.replace(
+			/import \{ GCPPubSubAdapter, PubSubTrigger \} from ["']@blokjs\/trigger-pubsub["'];/,
+			'import { PubSubTrigger } from "@blokjs/trigger-pubsub";',
+		);
+		content = content.replace(/\n\tprotected adapter = new GCPPubSubAdapter\(\{[\s\S]*?\}\);\n/, "");
+		fsExtra.writeFileSync(serverPath, content);
+		return;
+	}
 
 	// Replace import (handles both orders: {Adapter, PubSubTrigger} or {PubSubTrigger, Adapter})
 	content = content.replace(
@@ -2501,6 +2536,7 @@ export function getProviderDependencies(
 	const deps: Record<string, string> = {};
 
 	const pubsubProviderDeps: Record<string, Record<string, string>> = {
+		nats: { nats: "^2.28.0" },
 		gcp: { "@google-cloud/pubsub": "^5.0.0" },
 		aws: { "@aws-sdk/client-sns": "^3.980.0", "@aws-sdk/client-sqs": "^3.980.0" },
 		azure: { "@azure/service-bus": "^7.9.5" },
@@ -2546,6 +2582,10 @@ export function getProviderEnvVars(
 	const lines: string[] = [];
 
 	const pubsubEnvVars: Record<string, string> = {
+		nats: `
+# NATS (local pub/sub broker — zero cloud setup)
+NATS_SERVERS=localhost:4222
+BLOK_PUBSUB_ADAPTER=nats`,
 		gcp: `
 # Google Cloud Pub/Sub
 GCP_PROJECT_ID=my-project
