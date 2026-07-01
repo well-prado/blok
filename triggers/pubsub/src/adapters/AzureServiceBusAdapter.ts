@@ -37,6 +37,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 	private receivers: Map<string, ServiceBusReceiver> = new Map();
 	private connected = false;
 	private config: AzureServiceBusConfig;
+	private healthTarget: { topic: string; subscription?: string } | undefined;
 
 	/**
 	 * Type-narrowing accessor for `this.client`. Field is undefined until
@@ -47,6 +48,35 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			throw new Error("[AzureServiceBusAdapter] client is not initialised — call connect() first");
 		}
 		return this.client;
+	}
+
+	private receiverKey(topic: string, subscription?: string): string {
+		return subscription ? `${topic}/${subscription}` : topic;
+	}
+
+	private rejectUnsupportedOptions(config: PubSubTriggerOpts): void {
+		if (config.consumerGroup) {
+			throw new Error(
+				"[AzureServiceBusAdapter] `consumerGroup` is not supported for provider 'azure' — use the Service Bus subscription name as the competing-consumer group.",
+			);
+		}
+		if (config.durable === false) {
+			throw new Error("[AzureServiceBusAdapter] `durable: false` is not supported for provider 'azure'.");
+		}
+		if (config.startFrom !== undefined) {
+			throw new Error("[AzureServiceBusAdapter] `startFrom` is not supported for provider 'azure'.");
+		}
+		if (config.deadLetterTopic) {
+			throw new Error(
+				"[AzureServiceBusAdapter] `deadLetterTopic` is not supported for provider 'azure' — use the entity's native dead-letter subqueue.",
+			);
+		}
+		if (config.maxMessages !== undefined && config.maxMessages !== 10) {
+			throw new Error("[AzureServiceBusAdapter] `maxMessages` is not supported for streaming Azure subscriptions.");
+		}
+		if (config.ackDeadline !== undefined && config.ackDeadline !== 30) {
+			throw new Error("[AzureServiceBusAdapter] `ackDeadline` is not supported for provider 'azure'.");
+		}
 	}
 
 	constructor(config?: AzureServiceBusConfig) {
@@ -113,6 +143,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 		if (!this.connected) {
 			throw new Error("Not connected to Azure Service Bus. Call connect() first.");
 		}
+		this.rejectUnsupportedOptions(config);
 
 		const client = this.requireClient();
 		let receiver: ServiceBusReceiver;
@@ -130,7 +161,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 			});
 		}
 
-		const subscriptionKey = `${config.topic}/${config.subscription}`;
+		const subscriptionKey = this.receiverKey(config.topic, config.subscription);
 
 		// Message handler
 		const processMessage = async (sbMessage: ServiceBusReceivedMessage) => {
@@ -193,6 +224,7 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 		});
 
 		this.receivers.set(subscriptionKey, receiver);
+		this.healthTarget = { topic: config.topic, subscription: config.subscription };
 
 		console.log(`[AzureServiceBusAdapter] Subscribed to: ${subscriptionKey}`);
 	}
@@ -219,8 +251,9 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 	/**
 	 * v0.7 PR 6 — publish to an Azure Service Bus topic.
 	 *
-	 * `partitionKey` maps to Service Bus's `partitionKey`; `orderingKey`
-	 * maps to `sessionId` (for session-enabled topics).
+	 * `partitionKey` maps to Service Bus's `partitionKey`. `orderingKey`
+	 * would require session receivers, so it is rejected until sessions are
+	 * implemented end to end.
 	 */
 	async publish(
 		topic: string,
@@ -228,12 +261,16 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 		opts?: { partitionKey?: string; orderingKey?: string },
 	): Promise<void> {
 		if (!this.connected) throw new Error("[blok][pubsub-azure] not connected. Call connect() first.");
+		if (opts?.orderingKey) {
+			throw new Error(
+				"[blok][pubsub-azure] `orderingKey` requires Azure Service Bus sessions, which this adapter does not support yet.",
+			);
+		}
 		const sender = this.requireClient().createSender(topic);
 		try {
 			await sender.sendMessages({
 				body: payload,
 				partitionKey: opts?.partitionKey,
-				sessionId: opts?.orderingKey,
 			});
 		} finally {
 			await sender.close();
@@ -247,15 +284,18 @@ export class AzureServiceBusAdapter implements PubSubAdapter {
 		if (!this.connected) return false;
 
 		try {
-			// Create a temporary receiver to test connectivity
-			const testReceiver = this.requireClient().createReceiver("$default", {
-				receiveMode: "peekLock",
-			});
-			await testReceiver.close();
+			if (!this.healthTarget) return true;
+			const testReceiver = this.healthTarget.subscription
+				? this.requireClient().createReceiver(this.healthTarget.topic, this.healthTarget.subscription)
+				: this.requireClient().createReceiver(this.healthTarget.topic);
+			try {
+				await testReceiver.peekMessages(1);
+			} finally {
+				await testReceiver.close();
+			}
 			return true;
 		} catch {
-			// Queue might not exist but connection is healthy if we got here
-			return this.connected;
+			return false;
 		}
 	}
 }
