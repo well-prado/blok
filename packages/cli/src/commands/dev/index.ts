@@ -289,6 +289,10 @@ export async function devProject(opts: OptionValues) {
 		for (const [, trigger] of Object.entries(config.triggers)) {
 			if (brokerConsumerKinds.has(trigger.kind)) {
 				console.log(`  ${trigger.label}: consumes from broker (no HTTP endpoint)`);
+			} else if (trigger.kind === "cron") {
+				// Cron is a portless scheduler — it binds no HTTP server, so a
+				// /health-check URL would point at connection-refused.
+				console.log(`  ${trigger.label}: scheduled (no HTTP endpoint)`);
 			} else {
 				console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
 			}
