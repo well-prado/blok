@@ -1,0 +1,42 @@
+# Azure Service Bus emulator for Blok integration tests.
+# Usage:
+#   docker compose -f infra/testing/azure-servicebus.docker-compose.yml up -d
+#   BLOK_INTEGRATION_AZURE_SB=1 bunx vitest run triggers/pubsub/__tests__/integration/azure-servicebus-emulator.real-azure.test.ts --root triggers/pubsub
+#
+# RabbitMQ commonly owns host 5672 in the broader test stack, so AMQP is exposed
+# on localhost:5674 while the emulator still listens on 5672 inside Docker.
+
+services:
+  azure-servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    platform: linux/amd64
+    container_name: blok-test-azure-servicebus
+    volumes:
+      - ./azure-servicebus/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+    ports:
+      - "5674:5672"
+      - "5300:5300"
+    environment:
+      ACCEPT_EULA: "Y"
+      SQL_SERVER: azure-servicebus-sql
+      MSSQL_SA_PASSWORD: "Blok_StrongPassw0rd_2026!"
+      EMULATOR_HTTP_PORT: 5300
+      SQL_WAIT_INTERVAL: 30
+    depends_on:
+      - azure-servicebus-sql
+    networks:
+      - azure-servicebus
+
+  azure-servicebus-sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: blok-test-azure-servicebus-sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Blok_StrongPassw0rd_2026!"
+    networks:
+      - azure-servicebus
+
+networks:
+  azure-servicebus:
+    driver: bridge

@@ -1,0 +1,102 @@
+{
+	"UserConfig": {
+		"Namespaces": [
+			{
+				"Name": "sbemulatorns",
+				"Queues": [
+					{
+						"Name": "blok-queue",
+						"Properties": {
+							"DeadLetteringOnMessageExpiration": false,
+							"DefaultMessageTimeToLive": "PT1H",
+							"DuplicateDetectionHistoryTimeWindow": "PT20S",
+							"ForwardDeadLetteredMessagesTo": "",
+							"ForwardTo": "",
+							"LockDuration": "PT1M",
+							"MaxDeliveryCount": 3,
+							"RequiresDuplicateDetection": false,
+							"RequiresSession": false
+						}
+					},
+					{
+						"Name": "blok-deadletter-queue",
+						"Properties": {
+							"DeadLetteringOnMessageExpiration": false,
+							"DefaultMessageTimeToLive": "PT1H",
+							"DuplicateDetectionHistoryTimeWindow": "PT20S",
+							"ForwardDeadLetteredMessagesTo": "",
+							"ForwardTo": "",
+							"LockDuration": "PT1M",
+							"MaxDeliveryCount": 2,
+							"RequiresDuplicateDetection": false,
+							"RequiresSession": false
+						}
+					}
+				],
+				"Topics": [
+					{
+						"Name": "blok-topic",
+						"Properties": {
+							"DefaultMessageTimeToLive": "PT1H",
+							"DuplicateDetectionHistoryTimeWindow": "PT20S",
+							"RequiresDuplicateDetection": false
+						},
+						"Subscriptions": [
+							{
+								"Name": "fanout-a",
+								"Properties": {
+									"DeadLetteringOnMessageExpiration": false,
+									"DefaultMessageTimeToLive": "PT1H",
+									"LockDuration": "PT1M",
+									"MaxDeliveryCount": 3,
+									"ForwardDeadLetteredMessagesTo": "",
+									"ForwardTo": "",
+									"RequiresSession": false
+								}
+							},
+							{
+								"Name": "fanout-b",
+								"Properties": {
+									"DeadLetteringOnMessageExpiration": false,
+									"DefaultMessageTimeToLive": "PT1H",
+									"LockDuration": "PT1M",
+									"MaxDeliveryCount": 3,
+									"ForwardDeadLetteredMessagesTo": "",
+									"ForwardTo": "",
+									"RequiresSession": false
+								}
+							},
+							{
+								"Name": "competing",
+								"Properties": {
+									"DeadLetteringOnMessageExpiration": false,
+									"DefaultMessageTimeToLive": "PT1H",
+									"LockDuration": "PT1M",
+									"MaxDeliveryCount": 3,
+									"ForwardDeadLetteredMessagesTo": "",
+									"ForwardTo": "",
+									"RequiresSession": false
+								}
+							},
+							{
+								"Name": "deadletter-sub",
+								"Properties": {
+									"DeadLetteringOnMessageExpiration": false,
+									"DefaultMessageTimeToLive": "PT1H",
+									"LockDuration": "PT1M",
+									"MaxDeliveryCount": 2,
+									"ForwardDeadLetteredMessagesTo": "",
+									"ForwardTo": "",
+									"RequiresSession": false
+								}
+							}
+						]
+					}
+				]
+			}
+		],
+		"Logging": {
+			"Type": "File"
+		}
+	}
+}
