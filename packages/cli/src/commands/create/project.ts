@@ -725,33 +725,15 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.copySync(`${repoSource}/infra/development`, `${dirPath}/infra/postgresql`);
 			fsExtra.copySync(`${repoSource}/infra/milvus`, `${dirPath}/infra/milvus`);
 
-			// v0.6.7 — `--examples` overrides the generated Nodes.ts with
-			// the static `node_file` template (api-call + if-else + the
-			// chain-init / chain-verify / runtime-bridge / examples nodes).
-			// Pre-v0.6.7 that template was final. But when SSE, WebSocket, or
-			// MCP are also selected, their workflow templates reference helper
-			// nodes from @blokjs/helpers (sse-publish, ws-reply, and the MCP
-			// greeter's @blokjs/expr) — without the HELPER_NODES spread, the
-			// runner fails with "Node @blokjs/<name> not found". Merge the
-			// helper registry into the examples template when any of those
-			// triggers are present so both the example workflows AND the
-			// SSE/WS/MCP demos resolve their dependencies. Cheap (helper nodes
-			// are zero-side-effect imports) and consistent with the
-			// non-examples branch.
-			const needsHelpers =
-				selectedTriggers.includes("sse") || selectedTriggers.includes("websocket") || selectedTriggers.includes("mcp");
-			const examplesNodesContent = needsHelpers
-				? node_file
-						.replace(
-							`import type { NodeBase } from "@blokjs/shared";`,
-							`import type { NodeBase } from "@blokjs/shared";\nimport { HELPER_NODES } from "@blokjs/helpers";`,
-						)
-						.replace(
-							`} = {\n\t"@blokjs/api-call": ApiCall,`,
-							`} = {\n\t...HELPER_NODES,\n\t"@blokjs/api-call": ApiCall,`,
-						)
-				: node_file;
-			fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, examplesNodesContent);
+			// `--examples` overrides the generated Nodes.ts with the static
+			// `node_file` template, which registers api-call + if-else + the
+			// whole @blokjs/helpers registry (HELPER_NODES) + the example nodes.
+			// HELPER_NODES is unconditional: the example workflows and the
+			// SSE/WS/MCP demos reference helper nodes (@blokjs/respond,
+			// @blokjs/sse-publish, @blokjs/ws-reply, @blokjs/expr, …) — without
+			// them the runner fails with "Node @blokjs/<name> not found". This
+			// mirrors the non-examples branch (generateSharedNodesFile).
+			fsExtra.writeFileSync(`${dirPath}/src/Nodes.ts`, node_file);
 			fsExtra.copySync(`${repoSource}/sdk`, `${dirPath}/public/sdk`);
 
 			// Ship TS example workflows that register via the generated

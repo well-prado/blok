@@ -1,6 +1,7 @@
 const node_file = `import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ApiCall from "@blokjs/api-call";
+import { HELPER_NODES } from "@blokjs/helpers";
 import IfElse from "@blokjs/if-else";
 import { discoverNodes } from "@blokjs/runner";
 import type { NodeBase } from "@blokjs/shared";
@@ -12,7 +13,12 @@ import ExampleNodes from "./nodes/examples/index";
 const here = dirname(fileURLToPath(import.meta.url));
 const local = await discoverNodes(join(here, "nodes"));
 
-const explicit: NodeBase[] = [ApiCall, IfElse, ...(Object.values(ExampleNodes) as NodeBase[])];
+const explicit: NodeBase[] = [
+	ApiCall,
+	IfElse,
+	...(Object.values(HELPER_NODES) as unknown as NodeBase[]),
+	...(Object.values(ExampleNodes) as NodeBase[]),
+];
 
 // Map keys are cosmetic — the runner registers each node under its own node.name
 // (the canonical 'use:' ref). Duplicate refs throw at startup.
