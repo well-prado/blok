@@ -257,6 +257,41 @@ describe("runtime add", () => {
 		await runtimeAdd("go", { directory: dir, yes: true, skipToolchainCheck: true, local: fakeSrc });
 		expect(process.exitCode).toBe(1); // RuntimeCommandError, not an unhandled SyntaxError
 	});
+
+	// #646 — `--enable` wires an already-scaffolded runtime into config without
+	// re-copying/re-installing the SDK.
+	it("--enable wires an on-disk runtime into config WITHOUT reinstalling", async () => {
+		const dir = await makeProject(); // http trigger, no go runtime in config
+		// A runtime dir already exists on disk but is missing from config.json.
+		const goDir = path.join(dir, ".blok", "runtimes", "go");
+		await fsp.mkdir(goDir, { recursive: true });
+		await fsp.writeFile(path.join(goDir, "sentinel.txt"), "prebuilt");
+
+		await runtimeAdd("go", { directory: dir, enable: true });
+
+		const config = readConfig(dir);
+		expect(config.runtimes.go).toBeDefined();
+		expect(config.runtimes.go.cwd).toBe(".blok/runtimes/go");
+		expect(config.triggers.http).toBeDefined(); // preserved
+		// The pre-existing dir contents must survive — enable does not re-copy.
+		expect(fs.readFileSync(path.join(goDir, "sentinel.txt"), "utf8")).toBe("prebuilt");
+		expect(readEnv(dir)).toContain("RUNTIME_GO_GRPC_PORT=10001");
+		expect(readSup(dir)).toContain("[program:go_runtime]");
+	});
+
+	it("--enable is a no-op when the runtime is already in config", async () => {
+		const dir = await makeProject({ runtimes: [goRuntime] });
+		await runtimeAdd("go", { directory: dir, enable: true });
+		expect(Object.keys(readConfig(dir).runtimes)).toEqual(["go"]); // untouched
+		expect(process.exitCode).toBe(0);
+	});
+
+	it("--enable errors when the runtime isn't scaffolded on disk", async () => {
+		const dir = await makeProject();
+		await runtimeAdd("rust", { directory: dir, enable: true });
+		expect(process.exitCode).toBe(1);
+		expect(readConfig(dir).runtimes?.rust).toBeUndefined();
+	});
 });
 
 describe("runtime remove", () => {

@@ -19,6 +19,7 @@ runtime
 	.option("--local <path>", "Use a local blok repo for SDK source instead of fetching by version")
 	.option("--grpc-port <port>", "Override the gRPC port for this runtime")
 	.option("--force", "Reinstall if the runtime is already present")
+	.option("--enable", "Wire an already-scaffolded runtime (SDK dir on disk) into config.json without reinstalling")
 	.option("--skip-toolchain-check", "Add even if the language toolchain isn't detected")
 	.option("-y, --yes", "Skip prompts (non-interactive)")
 	.action(async (runtimeArg: string | undefined, options: OptionValues) => {
