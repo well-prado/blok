@@ -1,6 +1,8 @@
-import type { Context } from "@blokjs/shared";
+import type { Context, NodeBase } from "@blokjs/shared";
 import BlokService from "../Blok";
 import BlokResponse, { type IBlokResponse } from "../BlokResponse";
+import Configuration from "../Configuration";
+import Runner from "../Runner";
 import type { FunctionNode } from "../defineNode";
 import type Condition from "../types/Condition";
 import type JsonLikeObject from "../types/JsonLikeObject";
@@ -35,6 +37,16 @@ export interface WorkflowTestResult {
 	/** Per-node results keyed by node name */
 	// biome-ignore lint/suspicious/noExplicitAny: test utility handles arbitrary data
 	nodeResults: Map<string, TestResult<any>>;
+	/**
+	 * Final `ctx.state` after the run — per-step persisted outputs keyed by step
+	 * id (`state[<id>]`). Populated when the workflow runs through the REAL
+	 * engine (v2 / DSL builders / flow constructs). A step that did not run (an
+	 * untaken branch arm) is absent, and a step that threw writes nothing — so
+	 * `state[id] === undefined` is a truthful "did this step succeed?" check.
+	 * Undefined on the legacy sequential path.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: state slots hold arbitrary data
+	state?: Record<string, any>;
 }
 
 /**
@@ -181,6 +193,15 @@ export class WorkflowTestRunner {
 	// biome-ignore lint/suspicious/noExplicitAny: node registry holds heterogeneous node types
 	private nodes: Map<string, BlokService<any>>;
 	private workflow: WorkflowDefinition | null;
+	/**
+	 * The real v2 workflow model (a DSL builder's `_config`, or a v2 JSON
+	 * workflow using `use`/`type` steps and/or flow constructs). When set,
+	 * execute() runs it through the real Configuration + Runner instead of the
+	 * legacy sequential executor, so branch/forEach/switchOn/tryCatch, the
+	 * Mapper, and `ctx.state` persistence behave exactly as in production.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: workflow IR is loosely typed
+	private v2Model: Record<string, any> | null;
 	private trace: ExecutionTrace[];
 	// biome-ignore lint/suspicious/noExplicitAny: test results hold arbitrary data
 	private nodeResults: Map<string, TestResult<any>>;
@@ -193,6 +214,7 @@ export class WorkflowTestRunner {
 		};
 		this.nodes = new Map();
 		this.workflow = null;
+		this.v2Model = null;
 		this.trace = [];
 		this.nodeResults = new Map();
 	}
@@ -244,20 +266,39 @@ export class WorkflowTestRunner {
 	 * @param workflow - Workflow definition object or JSON string
 	 */
 	loadWorkflow(workflow: object | string): void {
-		if (typeof workflow === "string") {
-			this.workflow = JSON.parse(workflow) as WorkflowDefinition;
-		} else {
-			this.workflow = workflow as WorkflowDefinition;
-		}
+		// biome-ignore lint/suspicious/noExplicitAny: workflow shapes are heterogeneous (legacy / v2 JSON / DSL builder)
+		let parsed: any = typeof workflow === "string" ? JSON.parse(workflow) : workflow;
+		// A @blokjs/core DSL builder carries its lowered v2 IR on `_config`.
+		if (parsed && typeof parsed === "object" && parsed._config) parsed = parsed._config;
 
-		if (!this.workflow.steps || !Array.isArray(this.workflow.steps)) {
+		if (!parsed?.steps || !Array.isArray(parsed.steps)) {
 			throw new Error("Workflow must have a 'steps' array");
 		}
 
+		// Discriminate legacy vs real-v2. The legacy sequential executor only
+		// understands `{ name, node }` steps; anything using `id`/`use`/`type`
+		// or a flow construct (branch/forEach/switchOn/tryCatch, or a nested
+		// `steps` pipeline) is a real v2 workflow and must run through the real
+		// engine so control flow + `ctx.state` persistence behave as in production.
+		const isLegacy = parsed.steps.every(
+			// biome-ignore lint/suspicious/noExplicitAny: heterogeneous step shapes
+			(s: any) =>
+				s &&
+				typeof s === "object" &&
+				"node" in s &&
+				!("use" in s) &&
+				!("type" in s) &&
+				!("id" in s) &&
+				!Array.isArray(s.steps),
+		);
+
+		this.workflow = parsed as WorkflowDefinition;
+		this.v2Model = isLegacy ? null : (parsed as Record<string, unknown>);
+
 		if (this.config.verbose) {
 			console.log(
-				`[WorkflowTestRunner] Loaded workflow: ${this.workflow.name ?? "(unnamed)"} ` +
-					`with ${this.workflow.steps.length} steps`,
+				`[WorkflowTestRunner] Loaded ${isLegacy ? "legacy" : "v2"} workflow: ${parsed.name ?? "(unnamed)"} ` +
+					`with ${parsed.steps.length} steps`,
 			);
 		}
 	}
@@ -278,6 +319,13 @@ export class WorkflowTestRunner {
 	async execute(input: any, options?: WorkflowExecuteOptions): Promise<WorkflowTestResult> {
 		if (!this.workflow) {
 			throw new Error("No workflow loaded. Call loadWorkflow() first.");
+		}
+
+		// Real v2 workflows (flow constructs / DSL builders) run through the real
+		// engine so branch/forEach/switchOn/tryCatch + ctx.state behave as in
+		// production. Legacy `{ name, node }` workflows keep the simple executor.
+		if (this.v2Model) {
+			return this.executeV2(input, options);
 		}
 
 		// Reset trace for this execution
@@ -348,6 +396,111 @@ export class WorkflowTestRunner {
 	}
 
 	/**
+	 * Run the loaded v2 workflow through the REAL Configuration + Runner. This
+	 * exercises the production flow-node machinery (branch/forEach/switchOn/
+	 * tryCatch), the Mapper, and `ctx.state` persistence — unlike the legacy
+	 * sequential executor. Registered/mocked nodes are resolved via `getNode`.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: test utility accepts arbitrary input data
+	private async executeV2(input: any, options?: WorkflowExecuteOptions): Promise<WorkflowTestResult> {
+		this.trace = [];
+		this.nodeResults = new Map();
+		const logger = options?.contextOverrides?.logger ?? new TestLogger();
+		const startTime = performance.now();
+
+		const config = new Configuration();
+		const nodes = this.nodes;
+		const mockAllNodes = this.config.mockAllNodes;
+		// biome-ignore lint/suspicious/noExplicitAny: GlobalOptions is an internal runner shape
+		const globalOptions: any = {
+			nodes: {
+				getNode: (name: string) => {
+					let node = nodes.get(name);
+					if (!node && mockAllNodes) {
+						node = new AutoMockNode(name);
+						nodes.set(name, node);
+					}
+					return node ?? null;
+				},
+			},
+		};
+
+		// biome-ignore lint/suspicious/noExplicitAny: v2 model is loosely typed
+		const model = this.v2Model as Record<string, any>;
+		await config.init((model.name as string) ?? "test-workflow", globalOptions, model);
+
+		const state: Record<string, unknown> = {};
+		const ctx = {
+			id: options?.contextOverrides?.id ?? `test-workflow-${Date.now()}`,
+			workflow_name: (model.name as string) ?? "test-workflow",
+			workflow_path: options?.contextOverrides?.workflow_path ?? "/test",
+			request: {
+				body: input ?? {},
+				headers: options?.headers ?? options?.contextOverrides?.request?.headers ?? {},
+				query: options?.query ?? options?.contextOverrides?.request?.query ?? {},
+				params: options?.params ?? options?.contextOverrides?.request?.params ?? {},
+			},
+			response: { data: null, error: null, success: true, contentType: "application/json" },
+			error: options?.contextOverrides?.error ?? { message: [] },
+			logger,
+			config: config.nodes,
+			vars: state,
+			state,
+			env: options?.contextOverrides?.env ?? {},
+			eventLogger: logger,
+			_PRIVATE_: {},
+		} as unknown as Context;
+
+		let workflowSuccess = true;
+		// biome-ignore lint/suspicious/noExplicitAny: error can be any type
+		let workflowError: any = null;
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(
+				() => reject(new Error(`Workflow execution timed out after ${this.config.timeout}ms`)),
+				this.config.timeout,
+			);
+		});
+		try {
+			await Promise.race([new Runner(config.steps as NodeBase[]).run(ctx), timeoutPromise]);
+		} catch (error: unknown) {
+			workflowSuccess = false;
+			workflowError = error;
+			if (this.config.verbose) {
+				console.log(`[WorkflowTestRunner] Workflow failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+
+		const durationMs = performance.now() - startTime;
+
+		// Derive a per-step trace + nodeResults from the REAL ctx.state. A step
+		// that ran and succeeded persists to `state[<id>]`; an untaken branch arm
+		// or a thrown step is absent — exactly the truthful signal authors assert.
+		const logs = (logger as TestLogger).getLogs?.() ?? [];
+		let stepIndex = 0;
+		for (const [key, value] of Object.entries(state)) {
+			this.nodeResults.set(key, { success: true, data: value, error: null, context: ctx, durationMs: 0, logs });
+			this.trace.push({
+				nodeName: key,
+				stepIndex: stepIndex++,
+				input: null,
+				output: value,
+				durationMs: 0,
+				success: true,
+				timestamp: Date.now(),
+			});
+		}
+
+		return {
+			success: workflowSuccess,
+			output: workflowSuccess ? ctx.response?.data : workflowError,
+			trace: [...this.trace],
+			durationMs,
+			nodeResults: new Map(this.nodeResults),
+			state,
+		};
+	}
+
+	/**
 	 * Get the execution trace from the most recent workflow run.
 	 *
 	 * @returns Array of ExecutionTrace entries in execution order
@@ -362,6 +515,7 @@ export class WorkflowTestRunner {
 	 */
 	reset(): void {
 		this.workflow = null;
+		this.v2Model = null;
 		this.trace = [];
 		this.nodeResults = new Map();
 	}
