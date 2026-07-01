@@ -179,10 +179,24 @@ export async function setupRuntime(
 
 	spinner.message(`${runtime.label} runtime setup complete.`);
 
+	return buildRuntimeConfig(runtime, projectDir, startCmdOverride || runtime.startCmd);
+}
+
+/**
+ * Build the `.blok/config.json` RuntimeConfig for a runtime WITHOUT copying or
+ * installing its SDK — the pure config-shape half of setupRuntime. Used both by
+ * setupRuntime (after the copy/install) and by `runtime add --enable`, which
+ * wires an already-scaffolded runtime into config without reinstalling. Keeping
+ * the shape in one place stops the two paths from drifting (e.g. the requiredVersion
+ * floor). `startCmd` overrides the definition default (Java/Ruby resolve a real
+ * binary during setup); enable passes none and uses the definition's startCmd.
+ */
+export function buildRuntimeConfig(runtime: RuntimeInfo, projectDir: string, startCmd?: string): RuntimeConfig {
+	const blokctlRuntimeDir = path.join(projectDir, ".blok", "runtimes", runtime.kind);
 	return {
 		port: runtime.defaultPort,
 		grpcPort: runtime.defaultGrpcPort,
-		startCmd: startCmdOverride || runtime.startCmd,
+		startCmd: startCmd ?? runtime.startCmd,
 		grpcStartCmd: runtime.grpcStartCmd,
 		cwd: path.relative(projectDir, blokctlRuntimeDir),
 		kind: runtime.kind,

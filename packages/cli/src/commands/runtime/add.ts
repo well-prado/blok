@@ -12,7 +12,12 @@ import {
 	runtimeEnvKey,
 	withRuntime,
 } from "../../services/runtime-mutations.js";
-import { type RuntimeConfig, setupRuntime } from "../../services/runtime-setup.js";
+import {
+	type ProjectConfig,
+	type RuntimeConfig,
+	buildRuntimeConfig,
+	setupRuntime,
+} from "../../services/runtime-setup.js";
 import {
 	RuntimeCommandError,
 	assertGrpcPortFree,
@@ -84,6 +89,39 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 
 		p.intro(color.inverse(` Add ${def.label} runtime `));
 
+		// 0. `--enable`: wire an ALREADY-scaffolded runtime (SDK dir on disk) into
+		// .blok/config.json WITHOUT re-copying or re-installing it — for a dir that
+		// exists but is missing from config (hand-copied, or a lost config write).
+		// No clone, no install, no toolchain sweep.
+		if (options.enable === true) {
+			if (config.runtimes?.[kind]) {
+				p.outro(color.dim(`${def.label} is already wired into .blok/config.json.`));
+				return;
+			}
+			if (!fs.existsSync(sdkDir)) {
+				throw new RuntimeCommandError(
+					`${def.label} isn't scaffolded at ${path.relative(root, sdkDir)}. Run \`blokctl runtime add ${kind}\` (without --enable) to install it first.`,
+				);
+			}
+			const rt = (detected ?? (await detectRuntimes())).find((d) => d.kind === kind);
+			if (!rt) throw new RuntimeCommandError(`Unknown runtime "${kind}".`);
+			const grpcPort = grpcPortOverride ?? rt.defaultGrpcPort;
+			const clash = Object.values(config.runtimes ?? {}).find((rc) => rc.kind !== kind && rc.grpcPort === grpcPort);
+			if (clash) {
+				throw new RuntimeCommandError(
+					`gRPC port ${grpcPort} is already used by the ${clash.label} runtime. Pass --grpc-port <n> to pick another.`,
+				);
+			}
+			const rc = buildRuntimeConfig(rt, root);
+			if (grpcPortOverride !== undefined) {
+				rc.grpcPort = grpcPortOverride;
+				if (rc.grpcStartCmd)
+					rc.grpcStartCmd = rc.grpcStartCmd.split(String(rt.defaultGrpcPort)).join(String(grpcPortOverride));
+			}
+			finalizeRuntime(root, config, rc, kind, def.label);
+			return;
+		}
+
 		// 1. Idempotency — short-circuit BEFORE the multi-toolchain detection sweep.
 		if (alreadyInstalled && options.force !== true) {
 			if (nonInteractive) {
@@ -153,50 +191,56 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		}
 		s.stop(`${def.label} runtime ready`);
 
-		// 6. Persist — config (merge, preserving triggers + siblings), env, supervisord, gitignore.
-		const nextConfig = withRuntime(config, rc);
-		const remaining = Object.values(nextConfig.runtimes ?? {});
-
-		fs.mkdirSync(path.join(root, ".blok"), { recursive: true });
-		fs.writeFileSync(path.join(root, ".blok", "config.json"), `${JSON.stringify(nextConfig, null, 2)}\n`);
-
-		const envPath = path.join(root, ".env.local");
-		const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
-		fs.writeFileSync(envPath, rewriteRuntimeEnvBlock(envContent, remaining));
-
-		const supervisordPath = path.join(root, "supervisord.conf");
-		if (fs.existsSync(supervisordPath)) {
-			fs.writeFileSync(
-				supervisordPath,
-				rewriteSupervisordRuntimes(fs.readFileSync(supervisordPath, "utf8"), remaining),
-			);
-		}
-
-		const gitignorePath = path.join(root, ".gitignore");
-		if (fs.existsSync(gitignorePath)) {
-			const before = fs.readFileSync(gitignorePath, "utf8");
-			const after = ensureRuntimeGitignore(before);
-			if (after !== before) fs.writeFileSync(gitignorePath, after);
-		}
-
-		// 7. Friendly summary + next step.
-		p.note(
-			[
-				`${color.green("✓")} .blok/config.json   ${color.dim(`runtimes.${kind}`)}`,
-				`${color.green("✓")} .env.local          ${color.dim(`RUNTIME_${runtimeEnvKey(kind)}_GRPC_PORT=${rc.grpcPort}`)}`,
-				fs.existsSync(supervisordPath)
-					? `${color.green("✓")} supervisord.conf    ${color.dim(`[program:${kind}_runtime]`)}`
-					: "",
-				`${color.green("✓")} runtimes/${kind}/nodes/  ${color.dim("(your runtime nodes go here)")}`,
-			]
-				.filter(Boolean)
-				.join("\n"),
-			`${def.label} added`,
-		);
-		p.outro(
-			`Run ${color.cyan("blokctl dev")} to start it, then add ${color.cyan(`type: "runtime.${kind}"`)} steps to your workflows.`,
-		);
+		// 6 + 7. Persist (config/env/supervisord/gitignore) + summary.
+		finalizeRuntime(root, config, rc, kind, def.label);
 	} catch (err) {
 		reportRuntimeError(err);
 	}
+}
+
+/**
+ * Persist a resolved RuntimeConfig into the project — config.json (merge,
+ * preserving triggers + sibling runtimes), .env.local, supervisord.conf,
+ * .gitignore — then print the summary. Shared by the install path and the
+ * `--enable` path so the two never drift.
+ */
+function finalizeRuntime(root: string, config: ProjectConfig, rc: RuntimeConfig, kind: string, label: string): void {
+	const nextConfig = withRuntime(config, rc);
+	const remaining = Object.values(nextConfig.runtimes ?? {});
+
+	fs.mkdirSync(path.join(root, ".blok"), { recursive: true });
+	fs.writeFileSync(path.join(root, ".blok", "config.json"), `${JSON.stringify(nextConfig, null, 2)}\n`);
+
+	const envPath = path.join(root, ".env.local");
+	const envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+	fs.writeFileSync(envPath, rewriteRuntimeEnvBlock(envContent, remaining));
+
+	const supervisordPath = path.join(root, "supervisord.conf");
+	if (fs.existsSync(supervisordPath)) {
+		fs.writeFileSync(supervisordPath, rewriteSupervisordRuntimes(fs.readFileSync(supervisordPath, "utf8"), remaining));
+	}
+
+	const gitignorePath = path.join(root, ".gitignore");
+	if (fs.existsSync(gitignorePath)) {
+		const before = fs.readFileSync(gitignorePath, "utf8");
+		const after = ensureRuntimeGitignore(before);
+		if (after !== before) fs.writeFileSync(gitignorePath, after);
+	}
+
+	p.note(
+		[
+			`${color.green("✓")} .blok/config.json   ${color.dim(`runtimes.${kind}`)}`,
+			`${color.green("✓")} .env.local          ${color.dim(`RUNTIME_${runtimeEnvKey(kind)}_GRPC_PORT=${rc.grpcPort}`)}`,
+			fs.existsSync(supervisordPath)
+				? `${color.green("✓")} supervisord.conf    ${color.dim(`[program:${kind}_runtime]`)}`
+				: "",
+			`${color.green("✓")} runtimes/${kind}/nodes/  ${color.dim("(your runtime nodes go here)")}`,
+		]
+			.filter(Boolean)
+			.join("\n"),
+		`${label} added`,
+	);
+	p.outro(
+		`Run ${color.cyan("blokctl dev")} to start it, then add ${color.cyan(`type: "runtime.${kind}"`)} steps to your workflows.`,
+	);
 }
