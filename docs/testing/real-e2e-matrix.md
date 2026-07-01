@@ -29,6 +29,8 @@ bun run build && bun run http:dev   # or: cd triggers/http && PORT=4000 bun run 
 docker network create shared-network 2>/dev/null || true
 docker compose -f infra/testing/docker-compose.yml up -d nats redis kafka gcp-pubsub-emulator localstack
 # host ports: NATS 4223, Redis 6380, Kafka 9094, GCP emu 8086, LocalStack 4567
+docker compose -f infra/testing/azure-servicebus.docker-compose.yml up -d
+# Azure Service Bus emulator: AMQP 5674, health/management 5300
 ```
 
 **C. Cross-runtime gRPC sidecars** — `tests/e2e/cross-runtime/docker-compose.yml` (ports 10001–10007):
