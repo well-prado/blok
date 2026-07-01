@@ -112,6 +112,39 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Unwrap a step result to the bare value that `applyStepOutput` persists to
+ * `state[<id>]`.
+ *
+ * A step leaves EITHER a raw value (a hand-rolled `RunnerNode` / runtime
+ * adapter, whose `model.data` is already the bare payload) OR a `BlokResponse`
+ * envelope (`{ data, contentType, success, error, steps }` — the `defineNode`
+ * / module-node shape, where `Blok.run` sets `response.data = <envelope>`). On
+ * the FRESH path each node calls `applyStepOutput(ctx, this, result)` with the
+ * UNWRAPPED `.data`, so the state slot holds the bare value. The idempotency
+ * cache, however, stores `model.data` — which for a `defineNode` step is the
+ * whole envelope. Replaying the envelope straight into `applyStepOutput` on a
+ * cache HIT would persist a `BlokResponse` object at `state[<id>]` (and merge
+ * `{data, steps, success, …}` into state under `spread`) — a shape mismatch
+ * versus the fresh run it's supposed to be equivalent to.
+ *
+ * Unwrapping here restores the invariant: a cache HIT persists the SAME bare
+ * value a fresh run did. Uses the codebase's established envelope discriminator
+ * (`"data" in x && "contentType" in x`, the same `hasWrapper` check the HTTP
+ * `responseEmitter` and `ForEachNode.unwrapIterationResult` use). `ctx.response`
+ * is still restored to the raw cached value (envelope included) so the trigger's
+ * final-response resolution matches a fresh run too.
+ */
+function unwrapPersistedData(cached: unknown): unknown {
+	return cached !== null &&
+		typeof cached === "object" &&
+		!Array.isArray(cached) &&
+		"data" in cached &&
+		"contentType" in cached
+		? (cached as { data: unknown }).data
+		: cached;
+}
+
+/**
  * Tier 2 quick-wins — wrap a Promise in a setTimeout-based timeout
  * race. On timeout, rejects with `StepTimeoutError`. The underlying
  * `fn()` continues to run (no AbortSignal cancellation in v1) but
@@ -548,7 +581,12 @@ export default abstract class RunnerSteps {
 					if (cacheStore && resolvedIdemKey && nodeRunId) {
 						const hit = cacheStore.getIdempotencyCache(workflowName, step.name, resolvedIdemKey);
 						if (hit) {
-							applyStepOutput(ctx, step, { data: hit.data });
+							// Persist the UNWRAPPED value so a cache HIT lands the
+							// same bare `state[<id>]` shape a fresh run did (defineNode
+							// steps cache the full BlokResponse envelope; state stores
+							// its `.data`). `ctx.response` keeps the raw cached value
+							// so the trigger's final-response resolution is unchanged.
+							applyStepOutput(ctx, step, { data: unwrapPersistedData(hit.data) });
 							ctx.response = hit.data as BlokResponse;
 							tracker?.markNodeCached(
 								nodeRunId,
