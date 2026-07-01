@@ -293,6 +293,9 @@ export async function devProject(opts: OptionValues) {
 				// Cron is a portless scheduler — it binds no HTTP server, so a
 				// /health-check URL would point at connection-refused.
 				console.log(`  ${trigger.label}: scheduled (no HTTP endpoint)`);
+			} else if (trigger.kind === "grpc") {
+				// gRPC binds a port but speaks HTTP/2 gRPC (no GET /health-check).
+				console.log(`  ${trigger.label}: gRPC 127.0.0.1:${trigger.port}`);
 			} else {
 				console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
 			}

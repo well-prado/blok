@@ -7,6 +7,11 @@ import GRpcTrigger from "./GRpcTrigger";
 export type GrpcServerOptions = {
 	host: string;
 	port: number;
+	// Optional node/workflow maps to run instead of the package's built-ins —
+	// a scaffolded project passes its own src/Nodes.ts + src/Workflows.ts so
+	// `blokctl dev` serves the user's nodes/workflows over gRPC.
+	nodes?: Record<string, unknown>;
+	workflows?: Record<string, unknown>;
 };
 
 export default class GrpcServer {
@@ -37,7 +42,7 @@ export default class GrpcServer {
 
 	async start() {
 		this.tracer.startActiveSpan("initialization", async (span: Span) => {
-			const trigger = new GRpcTrigger();
+			const trigger = new GRpcTrigger({ nodes: this.opts.nodes, workflows: this.opts.workflows });
 			const server = trigger.getApp();
 			const host = process.env.GRPC_HOST || this.opts.host;
 			let port: string | number = process.env.GRPC_PORT || this.opts.port;

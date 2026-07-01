@@ -46,9 +46,16 @@ export default class GRpcTrigger extends TriggerBase {
 		process.env.PROJECT_VERSION || "0.0.1",
 	);
 	private logger = new DefaultLogger();
+	// Node/workflow maps injected by the host (e.g. a scaffolded project passing
+	// its own src/Nodes.ts + src/Workflows.ts). When omitted, the package's
+	// built-in Nodes/Workflows are used, so existing callers are unaffected.
+	private injectedNodes?: Record<string, unknown>;
+	private injectedWorkflows?: Record<string, unknown>;
 
-	constructor() {
+	constructor(injected?: { nodes?: Record<string, unknown>; workflows?: Record<string, unknown> }) {
 		super();
+		this.injectedNodes = injected?.nodes;
+		this.injectedWorkflows = injected?.workflows;
 		this.loadNodes();
 		this.loadWorkflows();
 	}
@@ -65,11 +72,11 @@ export default class GRpcTrigger extends TriggerBase {
 		this.nodeMap.nodes = new NodeMap();
 		// Register each node under its own node.name (the canonical use: ref, ADR
 		// 0002) — the Nodes.ts map keys are cosmetic; the collision guard catches dups.
-		this.nodeMap.nodes.addNodes(Object.values(nodes) as unknown as NodeBase[]);
+		this.nodeMap.nodes.addNodes(Object.values(this.injectedNodes ?? nodes) as unknown as NodeBase[]);
 	}
 
 	loadWorkflows() {
-		this.nodeMap.workflows = workflows;
+		this.nodeMap.workflows = (this.injectedWorkflows ?? workflows) as typeof workflows;
 	}
 
 	processRequest(router: ConnectRouter, trigger: GRpcTrigger) {

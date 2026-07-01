@@ -978,6 +978,13 @@ export async function createProject(opts: OptionValues, version: string, current
 				? `file:${path.resolve(repoSource, "triggers/cron")}`
 				: BLOKJS_DEP_RANGE;
 		}
+		// The grpc scaffold's generated src/triggers/grpc/index.ts boots
+		// @blokjs/trigger-grpc's GrpcServer with the project's Nodes/Workflows.
+		if (selectedTriggers.includes("grpc")) {
+			triggerPackageDeps["@blokjs/trigger-grpc"] = localRepoPath
+				? `file:${path.resolve(repoSource, "triggers/grpc")}`
+				: BLOKJS_DEP_RANGE;
+		}
 		// v0.6.7 — SSE scaffolds need deps the trigger-sse npm package
 		// doesn't list in its production dependencies because the
 		// package itself only needs them at dev/test time. When SSE is
@@ -1909,6 +1916,27 @@ export default class App {
 
 if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 	new App().run();
+}
+`;
+	}
+
+	if (triggerKind === "grpc") {
+		// The gRPC trigger serves this project's nodes + workflows over HTTP/2
+		// (h2c) via the package's GrpcServer, which runs its own tracer span +
+		// cold-start metric internally (so no App wrapper here). Pass the
+		// scaffold's Nodes/Workflows so clients can invoke the project's nodes —
+		// GrpcServer defaults to the package's built-ins when none are injected.
+		// GrpcServer reads GRPC_PORT/GRPC_HOST; blokctl dev sets PORT to the
+		// trigger's configured port, so fall back through PORT.
+		return `import { GrpcServer } from "@blokjs/trigger-grpc";
+import nodes from "../../Nodes";
+import workflows from "../../Workflows";
+
+const host = process.env.GRPC_HOST || "0.0.0.0";
+const port = Number(process.env.GRPC_PORT || process.env.PORT || 4003);
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new GrpcServer({ host, port, nodes, workflows }).start();
 }
 `;
 	}
