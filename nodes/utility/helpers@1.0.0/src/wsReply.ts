@@ -57,6 +57,14 @@ export default defineNode({
 		} else {
 			body = JSON.stringify(input.payload);
 		}
+		// JSON.stringify(undefined) is undefined, not a string — the trigger's
+		// send would then reject with a cryptic "send requires a non-empty
+		// message". This happens when the step's inputs miss `payload` (e.g.
+		// the pre-#650 examples passed a `message` key that isn't in the
+		// schema). Fail with the actual problem instead.
+		if (body === undefined) {
+			throw new Error("@blokjs/ws-reply: nothing to send — set `payload` (and optionally `event`).");
+		}
 		ctx.connection.send(body);
 		return { sent: true, connectionId: ctx.connection.id };
 	},
