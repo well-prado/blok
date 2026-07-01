@@ -251,6 +251,47 @@ d("KafkaPubSubAdapter — real Kafka", { retry: 2 }, () => {
 	);
 
 	it(
+		"nack (handler failure) suppresses the offset commit and the message is redelivered",
+		async () => {
+			// A failing handler nacks the message; the adapter must throw out
+			// of eachMessage so kafkajs does NOT auto-commit the offset and
+			// redelivers. Before the fix the nack() was a no-op and the offset
+			// auto-committed — the failed message was lost.
+			const topic = `blok-test-pubsub-redeliver-${Math.random().toString(36).slice(2)}`;
+			await createTopic(topic, 1);
+			const deliveries: number[] = [];
+			let failFirst = true;
+
+			await consumerA.subscribe(
+				{
+					topic,
+					consumerGroup: `blok-rd-${Math.random().toString(36).slice(2)}`,
+					durable: false,
+					startFrom: "earliest",
+				},
+				async (msg) => {
+					deliveries.push((msg.body as { n: number }).n);
+					if (failFirst) {
+						failFirst = false;
+						await msg.nack(); // first delivery fails → must redeliver
+					}
+					// redelivery: no nack → offset commits, loop moves on
+				},
+			);
+
+			await new Promise((r) => setTimeout(r, SUBSCRIPTION_WARMUP_MS));
+			await producer.publish(topic, { n: 7 });
+
+			await waitFor(() => deliveries.length >= 2, TEST_TIMEOUT_MS - 10_000);
+
+			expect(deliveries.length).toBeGreaterThanOrEqual(2);
+			// Every delivery is the SAME message (redelivered, not a new one).
+			expect(deliveries.every((n) => n === 7)).toBe(true);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"publish to a topic with no subscribers does not throw",
 		async () => {
 			// Note: kafkajs's auto.create.topics.enable is true on the test
