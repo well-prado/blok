@@ -1,0 +1,78 @@
+name: Scaffold smoke E2E
+
+# The "scaffold → boot → curl" gate: create a real project with the local
+# blokctl (every trigger + Go & Python3 runtimes + --examples), boot it under
+# `blokctl dev`, and curl every endpoint. Catches the class of bug unit tests
+# miss — a shipped scaffold whose trigger/runtime/helper-node silently doesn't
+# work. BLOK_SMOKE_REQUIRE_ALL=1 fails the run if any applicable check fails, so
+# a trigger/runtime that stops booting can't pass as a skip.
+#
+# Go + Python3 cover both codepaths (compiled + interpreted-with-venv, exercising
+# #641/#644). The full 7-language polyglot matrix is the cross-runtime.yml lane.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/helm/**'
+      - 'infra/metrics/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: scaffold-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-smoke:
+    name: Scaffold → boot → curl (all triggers + Go/Python3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    # NATS backs the pubsub trigger's produce → consume loop.
+    services:
+      nats:
+        image: nats:2.10
+        ports:
+          - 4222:4222
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Scaffold smoke (Go + Python3, all applicable triggers, all required)
+        env:
+          SMOKE_RUNTIMES: go,python3
+          NATS_SERVERS: localhost:4222
+          BLOK_SMOKE_REQUIRE_ALL: '1'
+        run: bash tests/e2e/scaffold-smoke/run.sh

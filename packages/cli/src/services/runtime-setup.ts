@@ -143,7 +143,7 @@ export async function setupRuntime(
 	let startCmdOverride: string | undefined;
 	switch (runtime.kind) {
 		case "python3":
-			await setupPython3(blokctlRuntimeDir, spinner);
+			startCmdOverride = await setupPython3(blokctlRuntimeDir, spinner);
 			break;
 		case "go":
 			await setupGo(blokctlRuntimeDir, spinner);
@@ -212,10 +212,13 @@ export function buildRuntimeConfig(runtime: RuntimeInfo, projectDir: string, sta
 }
 
 /**
- * Python3: create venv, install requirements, symlink nodes/core.
- * Mirrors the existing logic in project.ts:262-308.
+ * Python3: create venv, install requirements (grpcio lives HERE, not in the
+ * system interpreter — see #641). Returns the boot startCmd that runs the
+ * sidecar with the VENV python, so `blokctl dev` doesn't fall back to a system
+ * `python3` that lacks grpcio (PEP 668 blocks installing it there anyway) and
+ * fail with GRPC_UNAVAILABLE. Relative to the runtime cwd (.blok/runtimes/python3).
  */
-async function setupPython3(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
+async function setupPython3(sdkDir: string, spinner: SpinnerHandler): Promise<string> {
 	// Create virtual environment
 	spinner.message("Creating Python3 virtual environment...");
 	await createPythonVenv(sdkDir);
@@ -233,6 +236,9 @@ async function setupPython3(sdkDir: string, spinner: SpinnerHandler): Promise<vo
 	// User nodes live in projectRuntimeDir/nodes/<name>/node.py and are
 	// discovered at boot via BLOK_NODES_DIR (set by dev/index.ts + supervisord).
 	// No symlinks needed — the live SDK has no nodes/ or core/ dirs to link.
+
+	// Boot with the venv python (where grpcio was installed), NOT system python3.
+	return "python3_runtime/bin/python3 bin/serve.py";
 }
 
 async function createPythonVenv(sdkDir: string): Promise<void> {
