@@ -161,7 +161,7 @@ export async function setupRuntime(
 			await setupPhp(blokctlRuntimeDir, spinner);
 			break;
 		case "ruby":
-			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner, runtime.defaultPort);
+			startCmdOverride = await setupRuby(blokctlRuntimeDir, spinner);
 			break;
 	}
 
@@ -703,7 +703,7 @@ async function setupPhp(sdkDir: string, spinner: SpinnerHandler): Promise<void> 
  * Ruby: install Bundler dependencies.
  * Returns an override startCmd if the system `bundle` is too old (e.g., macOS ships Ruby 2.6).
  */
-async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number): Promise<string> {
+async function setupRuby(sdkDir: string, spinner: SpinnerHandler): Promise<string> {
 	// Resolve the correct bundle binary (macOS ships Ruby 2.6 + Bundler 1.x)
 	const bundleCandidates = ["bundle", "/opt/homebrew/opt/ruby/bin/bundle"];
 	let resolvedBundle = "bundle";
@@ -727,9 +727,13 @@ async function setupRuby(sdkDir: string, spinner: SpinnerHandler, port: number):
 	await exec(`"${resolvedBundle}" install`, { cwd: sdkDir, timeout: 120000 });
 	spinner.message("Ruby dependencies installed.");
 
-	// Always return the startCmd with explicit -p flag because rackup
-	// does not reliably read the PORT env var across versions.
-	return `${resolvedBundle} exec rackup --host 0.0.0.0 -p ${port} config.ru`;
+	// bin/serve.rb honors BLOK_TRANSPORT/PORT/GRPC_PORT env (rackup would boot
+	// the HTTP-only Rack app and never start the gRPC server blokctl expects).
+	// Exec the SAME installation's ruby as the resolved bundle: a bare `ruby`
+	// re-resolves from $PATH, and brew Bundler + macOS system ruby 2.6 dies
+	// with `uninitialized constant Gem::Resolver::APISet::GemParser`.
+	const resolvedRuby = resolvedBundle.includes("/") ? path.join(path.dirname(resolvedBundle), "ruby") : "ruby";
+	return `${resolvedBundle} exec ${resolvedRuby} bin/serve.rb`;
 }
 
 /**

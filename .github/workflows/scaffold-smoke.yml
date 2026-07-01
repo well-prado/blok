@@ -1,14 +1,16 @@
 name: Scaffold smoke E2E
 
 # The "scaffold → boot → curl" gate: create a real project with the local
-# blokctl (every trigger + Go & Python3 runtimes + --examples), boot it under
+# blokctl (every trigger + all 7 language runtimes + --examples), boot it under
 # `blokctl dev`, and curl every endpoint. Catches the class of bug unit tests
 # miss — a shipped scaffold whose trigger/runtime/helper-node silently doesn't
 # work. BLOK_SMOKE_REQUIRE_ALL=1 fails the run if any applicable check fails, so
 # a trigger/runtime that stops booting can't pass as a skip.
 #
-# Go + Python3 cover both codepaths (compiled + interpreted-with-venv, exercising
-# #641/#644). The full 7-language polyglot matrix is the cross-runtime.yml lane.
+# All 7 runtimes boot inside ONE scaffolded project under one `blokctl dev` —
+# that's the shipped user experience this gate protects (found e.g. the Rust
+# sidecar compiling its gRPC server out, and the java-launcher spawn mismatch).
+# Per-language SDK unit/conformance coverage is the cross-runtime.yml lane.
 
 on:
   push:
@@ -38,9 +40,9 @@ permissions:
 
 jobs:
   scaffold-smoke:
-    name: Scaffold → boot → curl (all triggers + Go/Python3)
+    name: Scaffold → boot → curl (all triggers + 7 runtimes)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
 
     # NATS backs the pubsub trigger's produce → consume loop.
     services:
@@ -67,12 +69,61 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The scaffold vendors the Rust SDK into a fresh dir each run; run.sh
+      # points CARGO_TARGET_DIR at ~/.cache/blok-smoke/cargo-target so this
+      # cache turns the cold multi-minute tonic/axum build into an incremental one.
+      - name: Cache cargo (registry + shared smoke target dir)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/blok-smoke/cargo-target
+          key: smoke-cargo-${{ runner.os }}-${{ hashFiles('sdks/rust/Cargo.toml') }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: sdks/java/pom.xml
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      # PHP's gRPC server is RoadRunner — a separate binary the CLI boots via
+      # `rr serve` (grpcStartCmd). vendor/bin/rr from spiral/roadrunner-cli is
+      # project-local; the smoke needs `rr` on $PATH like a brew install.
+      - name: Install RoadRunner
+        run: |
+          composer global require spiral/roadrunner-cli --quiet
+          ~/.composer/vendor/bin/rr get-binary --location /usr/local/bin --quiet || \
+            ~/.config/composer/vendor/bin/rr get-binary --location /usr/local/bin --quiet
+          rr --version
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Scaffold smoke (Go + Python3, all applicable triggers, all required)
+      - name: Scaffold smoke (7 runtimes, all applicable triggers, all required)
         env:
-          SMOKE_RUNTIMES: go,python3
+          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
           NATS_SERVERS: localhost:4222
           BLOK_SMOKE_REQUIRE_ALL: '1'
         run: bash tests/e2e/scaffold-smoke/run.sh

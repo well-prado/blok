@@ -5,7 +5,7 @@ import util from "node:util";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
 import { waitForGrpcPort } from "../../services/health-probe.js";
-import { detectRr } from "../../services/runtime-detector.js";
+import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	generateCSharpNodeRegistry,
 	generateGoNodeRegistry,
@@ -172,6 +172,16 @@ export async function devProject(opts: OptionValues) {
 				const rrBin = detectRr();
 				if (rrBin && rrBin !== "rr") {
 					bootCmd = `${rrBin}${bootCmd.slice(2)}`;
+				}
+			}
+
+			// Same for Java: the macOS `/usr/bin/java` stub dies unless a JDK is
+			// system-linked, while detection accepts brew's keg-only openjdk —
+			// resolve the launcher the same way detection did.
+			if (rt.kind === "java" && bootCmd.startsWith("java ")) {
+				const javaBin = detectJava();
+				if (javaBin && javaBin !== "java") {
+					bootCmd = `${javaBin}${bootCmd.slice(4)}`;
 				}
 			}
 

@@ -61,10 +61,9 @@ impl ServerConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10002),
-            enable_grpc: env::var("ENABLE_GRPC")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(false),
+            // Honor the standard BLOK_TRANSPORT selector every other Blok SDK +
+            // `blokctl dev` set (=grpc); fall back to the legacy ENABLE_GRPC bool.
+            enable_grpc: resolve_grpc_enabled(env::var("BLOK_TRANSPORT").ok(), env::var("ENABLE_GRPC").ok()),
             log_level: match env::var("LOG_LEVEL")
                 .unwrap_or_else(|_| "INFO".into())
                 .as_str()
@@ -98,9 +97,42 @@ impl ServerConfig {
     }
 }
 
+/// Resolve whether to start the gRPC server.
+///
+/// Honors the standard `BLOK_TRANSPORT` selector (`http` | `grpc` | `both`)
+/// that every other Blok SDK and `blokctl dev` use — `blokctl dev` sets
+/// `BLOK_TRANSPORT=grpc`. Falls back to the legacy `ENABLE_GRPC` boolean when
+/// `BLOK_TRANSPORT` is unset or unrecognized (back-compat with older callers +
+/// the cross-runtime harness). Without honoring `BLOK_TRANSPORT`, `blokctl dev`
+/// left the Rust sidecar in HTTP-only mode and the runner got ECONNREFUSED on
+/// the gRPC port.
+fn resolve_grpc_enabled(transport: Option<String>, legacy_enable: Option<String>) -> bool {
+    match transport.map(|t| t.to_ascii_lowercase()).as_deref() {
+        Some("grpc") | Some("both") => true,
+        Some("http") => false,
+        _ => legacy_enable.and_then(|v| v.parse().ok()).unwrap_or(false),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_grpc_enabled() {
+        // BLOK_TRANSPORT is the primary selector (matches every other SDK).
+        assert!(resolve_grpc_enabled(Some("grpc".into()), None));
+        assert!(resolve_grpc_enabled(Some("both".into()), None));
+        assert!(resolve_grpc_enabled(Some("GRPC".into()), None)); // case-insensitive
+        // Explicit http wins over a stale legacy flag.
+        assert!(!resolve_grpc_enabled(Some("http".into()), Some("true".into())));
+        // Legacy ENABLE_GRPC still works when BLOK_TRANSPORT is unset/unknown.
+        assert!(resolve_grpc_enabled(None, Some("true".into())));
+        assert!(resolve_grpc_enabled(Some("weird".into()), Some("true".into())));
+        // Default off.
+        assert!(!resolve_grpc_enabled(None, None));
+        assert!(!resolve_grpc_enabled(Some("weird".into()), None));
+    }
 
     #[test]
     fn test_default_config() {

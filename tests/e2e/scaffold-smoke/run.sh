@@ -35,6 +35,11 @@ DEV_PID=""
 # brew-installed toolchains (go/rust/java) aren't always on the default PATH.
 [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
 
+# Share one cargo target dir across scaffolds: each scaffold vendors the Rust
+# SDK into a fresh dir, so without this every run cold-compiles the whole dep
+# tree (~minutes). Also the cache key for CI. Override with CARGO_TARGET_DIR.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/blok-smoke/cargo-target}"
+
 log() { echo "[smoke] $*"; }
 
 cleanup() {
@@ -50,6 +55,13 @@ trap cleanup EXIT
 
 port_open() { nc -z "${1%%:*}" "${1##*:}" 2>/dev/null; }
 
+# Functional java launcher — same candidates as the CLI's detectJava():
+# the macOS /usr/bin/java stub fails unless a JDK is linked; brew openjdk is
+# keg-only, so probe its keg path too.
+have_java() {
+  java --version >/dev/null 2>&1 || /opt/homebrew/opt/openjdk/bin/java --version >/dev/null 2>&1
+}
+
 have_ruby_31() {
   local c
   for c in ruby /opt/homebrew/opt/ruby/bin/ruby /opt/homebrew/opt/ruby@3.4/bin/ruby /opt/homebrew/opt/ruby@3.3/bin/ruby; do
@@ -63,7 +75,7 @@ detect_runtimes() {
   local rts=()
   command -v go >/dev/null 2>&1 && rts+=(go)
   command -v cargo >/dev/null 2>&1 && rts+=(rust)
-  { [ -n "$(/usr/libexec/java_home 2>/dev/null || echo "${JAVA_HOME:-}")" ] && command -v mvn >/dev/null 2>&1; } && rts+=(java)
+  { have_java && command -v mvn >/dev/null 2>&1; } && rts+=(java)
   command -v dotnet >/dev/null 2>&1 && rts+=(csharp)
   { command -v php >/dev/null 2>&1 && command -v composer >/dev/null 2>&1 && command -v rr >/dev/null 2>&1; } && rts+=(php)
   have_ruby_31 && rts+=(ruby)
