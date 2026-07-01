@@ -644,6 +644,24 @@ export async function createProject(opts: OptionValues, version: string, current
 			fsExtra.writeFileSync(`${wsServerDir}/WSServer.ts`, generateWSServerFile());
 		}
 
+		// Cron scaffold: CronTrigger is an abstract TriggerBase subclass that
+		// consumes `protected nodes`/`protected workflows` and does its own
+		// NodeMap + WorkflowRegistry wiring in listen() — the same declarative
+		// ABI as WorkerServer/PubSubServer (minus the broker adapter). No
+		// template/ ships in triggers/cron, so the thin wrapper is generated
+		// inline here (like SSEServer/WSServer) with the scaffold's own
+		// `../../../Nodes` import depth.
+		if (selectedTriggers.includes("cron")) {
+			const cronServerDir = `${dirPath}/src/triggers/cron/runner`;
+			fsExtra.ensureDirSync(cronServerDir);
+			fsExtra.writeFileSync(`${cronServerDir}/CronServer.ts`, generateCronServerFile());
+			// Ship one runnable cron workflow so the trigger has something to
+			// schedule out of the box (registered in Workflows.ts below).
+			const cronWorkflowDir = `${dirPath}/src/workflows/cron`;
+			fsExtra.ensureDirSync(cronWorkflowDir);
+			fsExtra.writeFileSync(`${cronWorkflowDir}/heartbeat.ts`, generateCronExampleWorkflowFile());
+		}
+
 		// Copy trigger-specific nodes to shared src/nodes/
 		for (const triggerKind of selectedTriggers) {
 			const triggerNodesDir = `${repoSource}/triggers/${triggerKind}/src/nodes`;
@@ -949,6 +967,15 @@ export async function createProject(opts: OptionValues, version: string, current
 		if (needsTriggerWorker) {
 			triggerPackageDeps["@blokjs/trigger-worker"] = localRepoPath
 				? `file:${path.resolve(repoSource, "triggers/worker")}`
+				: BLOKJS_DEP_RANGE;
+		}
+		// The cron scaffold's generated runner/CronServer.ts extends CronTrigger
+		// from this package. Unlike sse/ws/pubsub/worker it was never added here,
+		// so a `--triggers cron` scaffold couldn't resolve the import and
+		// `blokctl dev` fell back to the "not yet implemented" stub.
+		if (selectedTriggers.includes("cron")) {
+			triggerPackageDeps["@blokjs/trigger-cron"] = localRepoPath
+				? `file:${path.resolve(repoSource, "triggers/cron")}`
 				: BLOKJS_DEP_RANGE;
 		}
 		// v0.6.7 — SSE scaffolds need deps the trigger-sse npm package
@@ -1395,6 +1422,14 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// Worker template ships `workflows/jobs/process-job.ts`.
 			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job";`);
 			workflowEntries.push('\t"process-job": ProcessJob,');
+		} else if (trigger === "cron") {
+			// Cron discovers its workflows from THIS map (the HTTP JSON auto-scan
+			// does not apply to non-HTTP triggers), so the scaffold ships a
+			// runnable heartbeat at src/workflows/cron/heartbeat.ts and registers
+			// it here. Without it, CronServer.listen() finds no cron workflows and
+			// the process exits immediately.
+			imports.push('import CronHeartbeat from "./workflows/cron/heartbeat";');
+			workflowEntries.push('\t"cron-heartbeat": await CronHeartbeat,');
 		}
 	}
 
@@ -1441,7 +1476,7 @@ export default workflows;
  * Generate trigger entry point that imports shared nodes/workflows.
  * Matches the pattern of the original trigger index.ts files.
  */
-function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[] = [triggerKind]): string {
+export function generateTriggerEntryFile(triggerKind: string, selectedTriggers: string[] = [triggerKind]): string {
 	if (triggerKind === "http") {
 		// v0.6.7 — when SSE is ALSO selected, mount SSETrigger on HTTP's
 		// shared Hono app instead of spawning a separate SSE process.
@@ -1829,6 +1864,55 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 `;
 	}
 
+	if (triggerKind === "cron") {
+		// Cron is a portless scheduler: CronServer.listen() reads the
+		// cron-triggered workflows, schedules a CronJob per workflow, and
+		// returns — the job timers keep the event loop alive. Mirrors the
+		// pubsub/worker entry shape (no HTTP listener to bind).
+		return `import { DefaultLogger } from "@blokjs/runner";
+import { type Span, metrics, trace } from "@opentelemetry/api";
+import CronServer from "./runner/CronServer";
+
+export default class App {
+	private cronServer: CronServer = <CronServer>{};
+	protected trigger_initializer = 0;
+	protected initializer = 0;
+	protected tracer = trace.getTracer(
+		process.env.PROJECT_NAME || "trigger-cron-server",
+		process.env.PROJECT_VERSION || "0.0.1",
+	);
+	private logger = new DefaultLogger();
+	protected app_cold_start = metrics.getMeter("default").createGauge("initialization", {
+		description: "Application cold start",
+	});
+
+	constructor() {
+		this.initializer = performance.now();
+		this.cronServer = new CronServer();
+	}
+
+	async run() {
+		this.tracer.startActiveSpan("initialization", async (span: Span) => {
+			await this.cronServer.listen();
+			this.initializer = performance.now() - this.initializer;
+
+			this.logger.log(\`Cron trigger initialized in \${(this.initializer).toFixed(2)}ms\`);
+			this.app_cold_start.record(this.initializer, {
+				pid: process.pid,
+				env: process.env.NODE_ENV,
+				app: process.env.APP_NAME,
+			});
+			span.end();
+		});
+	}
+}
+
+if (process.env.DISABLE_TRIGGER_RUN !== "true") {
+	new App().run();
+}
+`;
+	}
+
 	// Generic fallback for other triggers
 	return `// Entry point for ${triggerKind} trigger
 // Implement trigger-specific initialization here
@@ -1853,6 +1937,66 @@ console.log("${triggerKind} trigger not yet implemented");
  * same shared Workflows.ts get registered by the HTTP server process
  * (when a multi-trigger scaffold includes HTTP).
  */
+/**
+ * Generate src/triggers/cron/runner/CronServer.ts — the thin wrapper that
+ * bootstraps the cron trigger. CronTrigger (from @blokjs/trigger-cron) is an
+ * abstract TriggerBase subclass that consumes `protected nodes`/`protected
+ * workflows` and does all NodeMap + WorkflowRegistry wiring + CronJob
+ * scheduling itself inside listen(). So the wrapper is purely declarative —
+ * identical to the pubsub/worker Server templates, minus the broker adapter.
+ * Generated inline (not copied) because triggers/cron ships no template/ dir;
+ * the `../../../Nodes` depth matches its home at src/triggers/cron/runner/.
+ */
+/**
+ * Generate src/workflows/cron/heartbeat.ts — a runnable cron workflow so a
+ * fresh `--triggers cron` scaffold has something to schedule out of the box
+ * (otherwise CronServer.listen() finds no cron workflows and the process
+ * exits immediately, looking like a dead trigger). Cron discovers workflows
+ * from src/Workflows.ts, NOT the HTTP JSON auto-scan, so this is registered
+ * in generateSharedWorkflowsFile's cron branch. Uses @blokjs/expr (a
+ * HELPER_NODE, always registered) so it runs locally with no network.
+ */
+export function generateCronExampleWorkflowFile(): string {
+	return `import { node, step, workflow } from "@blokjs/core";
+
+/**
+ * Cron heartbeat — fires on a schedule, NOT on an HTTP request. \`blokctl dev\`
+ * boots it via src/triggers/cron/index.ts and it fires every minute. The
+ * schedule accepts an optional leading seconds field (e.g. \`* * * * * *\` for
+ * every second). Add more cron workflows by exporting them and registering
+ * them in src/Workflows.ts.
+ */
+export default workflow(
+	"Cron Heartbeat",
+	{ version: "1.0.0", trigger: { cron: { schedule: "* * * * *", timezone: "UTC" } } },
+	() => {
+		step("heartbeat", node("@blokjs/expr"), { expression: "({ ok: true, at: Date.now() })" }, { ephemeral: true });
+	},
+);
+`;
+}
+
+export function generateCronServerFile(): string {
+	return `import { CronTrigger } from "@blokjs/trigger-cron";
+import nodes from "../../../Nodes";
+import workflows from "../../../Workflows";
+
+/**
+ * CronServer — the cron trigger for this project.
+ *
+ * CronTrigger.listen() populates the NodeMap, registers workflows with the
+ * WorkflowRegistry, then schedules a CronJob for every workflow whose trigger
+ * is \`{ cron: { schedule, timezone? } }\`. There is no port to bind — the
+ * scheduled job timers keep the process alive. Non-cron workflows sharing this
+ * Workflows.ts are ignored by the scheduler (they run under their own trigger).
+ */
+export default class CronServer extends CronTrigger {
+	protected nodes: Record<string, import("@blokjs/runner").BlokService<unknown>> = nodes;
+	protected workflows: Record<string, import("@blokjs/helper").WorkflowV2Builder> = workflows;
+}
+`;
+}
+
 function generateSSEServerFile(): string {
 	return `import { serve } from "@hono/node-server";
 import { DefaultLogger, NodeMap, WorkflowRegistry } from "@blokjs/runner";
