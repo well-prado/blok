@@ -94,6 +94,22 @@ const agentsNode = defineNode({
 	},
 });
 
+/**
+ * Returns a payload that violates its workflow's declared `output` Zod (the
+ * workflow demands `count: number`; this returns a string). The node's OWN
+ * output schema is loose so the violation survives to the trigger's
+ * workflow-output check rather than being caught node-side.
+ */
+const badShapeNode = defineNode({
+	name: "bad-shape-node",
+	description: "test fixture — returns a payload that violates the declared workflow.output",
+	input: z.object({}).passthrough(),
+	output: z.object({}).passthrough(),
+	async execute() {
+		return { count: "not-a-number" };
+	},
+});
+
 function registerWorkflows(): void {
 	const reg = WorkflowRegistry.getInstance();
 	reg.register({
@@ -144,12 +160,43 @@ function registerWorkflows(): void {
 			nodes: { a: { inputs: {} } },
 		},
 	});
+	// Echo whose declared `output` the result SATISFIES — exercises the
+	// validation PASS branch (`return parsed.data`) when the flag is ON.
+	reg.register({
+		name: "validated_echo",
+		source: "/test/validated-echo.ts",
+		workflow: {
+			name: "validated_echo",
+			version: "1.0.0",
+			trigger: { mcp: { path: "/mcp", serverName: "test-mcp", tool: { description: "Echo with a validated output" } } },
+			input: z.object({ msg: z.string() }),
+			output: z.object({ echoed: z.string(), upper: z.string() }),
+			steps: [{ id: "echo", node: "echo-node", type: "module", inputs: { msg: "js/ctx.request.body.msg" } }],
+			nodes: { echo: { inputs: { msg: "js/ctx.request.body.msg" } } },
+		},
+	});
+	// Output VIOLATES the declared `output` — drives the validation-error path
+	// over the SSE transport (Streamable-HTTP is covered in the sibling file).
+	reg.register({
+		name: "bad_output_tool",
+		source: "/test/bad-output.ts",
+		workflow: {
+			name: "bad_output_tool",
+			version: "1.0.0",
+			trigger: { mcp: { path: "/mcp", serverName: "test-mcp", tool: { description: "Returns a bad count" } } },
+			input: z.object({}).passthrough(),
+			output: z.object({ count: z.number() }),
+			steps: [{ id: "count", node: "bad-shape-node", type: "module", inputs: {} }],
+			nodes: { count: { inputs: {} } },
+		},
+	});
 }
 
 describe("McpTrigger — integration (real MCP SDK client over SSE + Streamable-HTTP)", () => {
 	let app: Hono;
 	let trigger: InstanceType<typeof McpTriggerClass>;
 	let httpServer: Server | null = null;
+	const priorFlag = process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT;
 
 	beforeEach(async () => {
 		WorkflowRegistry.resetInstance();
@@ -160,6 +207,7 @@ describe("McpTrigger — integration (real MCP SDK client over SSE + Streamable-
 		nodes.addNode("echo-node", echoNode);
 		nodes.addNode("whoami-node", whoamiNode);
 		nodes.addNode("agents-node", agentsNode);
+		nodes.addNode("bad-shape-node", badShapeNode);
 		registerWorkflows();
 
 		trigger = new McpTriggerClass(app);
@@ -176,6 +224,11 @@ describe("McpTrigger — integration (real MCP SDK client over SSE + Streamable-
 	afterEach(
 		() =>
 			new Promise<void>((resolve) => {
+				// Restore the validation flag so it never leaks across tests. `delete`
+				// (not `= undefined`) — assigning undefined stores the literal string.
+				// biome-ignore lint/performance/noDelete: env-var cleanup needs real deletion
+				if (priorFlag === undefined) delete process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT;
+				else process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT = priorFlag;
 				if (trigger) void trigger.stop();
 				if (httpServer) {
 					httpServer.close(() => {
@@ -278,6 +331,44 @@ describe("McpTrigger — integration (real MCP SDK client over SSE + Streamable-
 		};
 		const payload = JSON.parse(result.content[0].text) as { userId?: string; email?: string };
 		expect(payload).toEqual({ userId: "u-1", email: "dev@tetrix.io" });
+
+		await client.close();
+	}, 20_000);
+
+	it("flag ON: output that SATISFIES workflow.output passes through (validated data returned)", async () => {
+		process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT = "1";
+		const client = new Client({ name: "test-client-valid", version: "1.0.0" }, { capabilities: {} });
+		const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`));
+		await client.connect(transport);
+
+		// echo → { echoed, upper } exactly matches the declared output Zod, so the
+		// call succeeds and the caller sees the validated payload (not an isError).
+		const result = (await client.callTool({ name: "validated_echo", arguments: { msg: "ok" } })) as {
+			content: Array<{ type: string; text: string }>;
+			isError?: boolean;
+		};
+		expect(result.isError).toBeFalsy();
+		const payload = JSON.parse(result.content[0].text) as { echoed: string; upper: string };
+		expect(payload).toEqual({ echoed: "ok", upper: "OK" });
+
+		await client.close();
+	}, 20_000);
+
+	it("flag ON over SSE: output violating workflow.output is errored, not returned", async () => {
+		process.env.BLOK_VALIDATE_WORKFLOW_OUTPUT = "1";
+		const client = new Client({ name: "test-client-badout-sse", version: "1.0.0" }, { capabilities: {} });
+		const transport = new SSEClientTransport(new URL(`${BASE}/mcp/sse`));
+		await client.connect(transport);
+
+		const result = (await client.callTool({ name: "bad_output_tool", arguments: {} })) as {
+			content: Array<{ type: string; text: string }>;
+			isError?: boolean;
+		};
+		// The validation gate fires transport-agnostically: the SSE caller gets a
+		// structured tool error, and the invalid payload is NOT echoed back.
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toMatch(/output failed validation against workflow\.output/i);
+		expect(result.content[0].text).not.toMatch(/"count":\s*"not-a-number"/);
 
 		await client.close();
 	}, 20_000);

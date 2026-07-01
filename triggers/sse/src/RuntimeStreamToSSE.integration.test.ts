@@ -238,6 +238,102 @@ describe("runtime → SSE live streaming (G3 / Route A1, real HTTP/SSE)", () => 
 		]);
 	}, 15_000);
 
+	it("delivers the first runtime partial LIVE before the run's terminal frame lands", async () => {
+		// Liveness guard: the "forwards output live" contract means a partial
+		// must reach the client WHILE the node is still streaming — not batched
+		// at close. If hono buffered every frame until stream.close(), the
+		// order-of-arrival test above would still pass. Here we read exactly one
+		// frame off the wire and assert it's the FIRST partial — proving it was
+		// flushed incrementally, ahead of the later partials + the `complete`
+		// finalize frame. The adapter sleeps 5ms between partials, so a batched
+		// flush could not surface only the first frame.
+		RuntimeRegistry.getInstance().replace(
+			makeFakeAgentAdapter(
+				[
+					{ event: "text", data: { delta: "first" }, id: "1" },
+					{ event: "text", data: { delta: "second" }, id: "2" },
+					{ event: "text", data: { delta: "third" }, id: "3" },
+				],
+				{ answer: "first second third" },
+			),
+		);
+
+		const nodes = new NodeMap();
+		nodes.addNode("finalize", finalizeNode);
+
+		WorkflowRegistry.getInstance().register({
+			name: "agent-chat-live",
+			source: "/test/agent-chat-live.json",
+			workflow: {
+				name: "agent-chat-live",
+				version: "1.0.0",
+				trigger: { sse: { path: "/sse/chat-live" } },
+				steps: [
+					{ id: "agent", node: "agent", type: "runtime.python3", streamTo: "sse", inputs: {} },
+					{ id: "finalize", node: "finalize", type: "module", inputs: { answer: "js/ctx.state.agent.answer" } },
+				],
+				nodes: {
+					agent: { inputs: {} },
+					finalize: { inputs: { answer: "js/ctx.state.agent.answer" } },
+				},
+			},
+		});
+
+		trigger = new SSETriggerClass(app);
+		trigger.setNodeMap({ nodes });
+		await trigger.listen();
+		await new Promise<void>((resolve) => {
+			httpServer = serve({ fetch: app.fetch, port: TEST_PORT }, () => resolve()) as Server;
+		});
+
+		const controller = new AbortController();
+		const response = await fetch(`http://localhost:${TEST_PORT}/sse/chat-live`, {
+			headers: { Accept: "text/event-stream" },
+			signal: controller.signal,
+		});
+		const reader = response.body!.getReader();
+		const decoder = new TextDecoder();
+
+		// Pull frames off the wire until the FIRST partial (`event: text`,
+		// `delta: "first"`) surfaces. The initial `retry:`/heartbeat frames
+		// carry no `event:`, so we skip them. If delivery were batched at
+		// close, this loop would only ever see everything at once AFTER the
+		// run finished — but here we assert the first data frame is exactly
+		// the first partial, and that we saw it before `complete`.
+		let firstDataFrame: { event?: string; data?: unknown } | null = null;
+		let sawComplete = false;
+		let buf = "";
+		const deadline = Date.now() + 5000;
+		while (Date.now() < deadline && !firstDataFrame) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			buf += decoder.decode(value, { stream: true });
+			for (const block of buf.split("\n\n")) {
+				const lines = block.split("\n");
+				const event = lines
+					.find((l) => l.startsWith("event:"))
+					?.slice("event:".length)
+					.trim();
+				const dataLine = lines
+					.find((l) => l.startsWith("data:"))
+					?.slice("data:".length)
+					.trim();
+				if (event === "complete") sawComplete = true;
+				if (event && dataLine && !firstDataFrame) {
+					firstDataFrame = { event, data: JSON.parse(dataLine) };
+					break;
+				}
+			}
+		}
+		controller.abort();
+		await reader.cancel().catch(() => {});
+
+		// The first framed event on the wire is the first runtime partial —
+		// arrived live, ahead of the terminal `complete` frame.
+		expect(firstDataFrame).toEqual({ event: "text", data: { delta: "first" } });
+		expect(sawComplete).toBe(false);
+	}, 15_000);
+
 	it("stops client writes on disconnect mid-stream but the run still completes", async () => {
 		const seen: string[] = [];
 		// A finalize node that records it ran — proving the run reached the end
