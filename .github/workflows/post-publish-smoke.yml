@@ -1,0 +1,112 @@
+name: Post-publish smoke
+
+# The RELEASE gate (epic #648): scaffold a project with the PUBLISHED
+# blokctl@<version> from npm — no --local, no monorepo build — boot it under
+# `blokctl dev`, and curl every trigger + every /runtimes/<lang>/hello with
+# BLOK_SMOKE_REQUIRE_ALL=1. Proves the bits users actually install work, not
+# just the repo dist. Run it manually after each npm publish:
+#
+#   gh workflow run post-publish-smoke.yml -f version=<just-published>
+#
+# Same toolchain matrix as scaffold-smoke.yml — keep the two in lock-step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published blokctl version to smoke (e.g. 1.3.0, or latest)"
+        required: true
+        default: "latest"
+
+permissions:
+  contents: read
+
+jobs:
+  post-publish-smoke:
+    name: Published blokctl@${{ inputs.version }} → scaffold → boot → curl
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    services:
+      nats:
+        image: nats:2.10
+        ports:
+          - 4222:4222
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned: keep in lock-step with scaffold-smoke.yml (bunfig linker +
+      # lockfile are validated with this version).
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/blok-smoke/cargo-target
+          key: post-publish-smoke-cargo-${{ runner.os }}-${{ inputs.version }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up PHP + Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      # PHP's gRPC server is RoadRunner — get-binary downloads the SERVER
+      # binary; remove the composer package after so its `rr` shim
+      # ("RoadRunner CLI", no `serve`) can't shadow the real binary on $PATH.
+      - name: Install RoadRunner
+        run: |
+          composer global require spiral/roadrunner-cli --quiet
+          "$(composer global config bin-dir --absolute --quiet)/rr" get-binary --location /usr/local/bin --quiet
+          composer global remove spiral/roadrunner-cli --quiet
+          command -v rr
+          rr --version
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The smoke DRIVER (smoke.ts) runs from the repo and needs its deps;
+      # the scaffold itself installs published packages from npm.
+      - name: Install driver dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Post-publish smoke (published CLI, all triggers + 7 runtimes, all required)
+        env:
+          SMOKE_PUBLISHED_VERSION: ${{ inputs.version }}
+          SMOKE_RUNTIMES: go,rust,java,csharp,php,ruby,python3
+          NATS_SERVERS: localhost:4222
+          BLOK_SMOKE_REQUIRE_ALL: '1'
+        run: bash tests/e2e/scaffold-smoke/run.sh

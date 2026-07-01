@@ -23,10 +23,25 @@
 #   SMOKE_KEEP=1                keep the scaffolded project dir for inspection
 #   BLOK_SMOKE_REQUIRE_ALL=1    fail unless every applicable check passes (CI)
 #   NATS_SERVERS=host:port      NATS for the pubsub trigger (default localhost:4222)
+#   SMOKE_PUBLISHED_VERSION=x.y.z  post-publish mode: scaffold with the PUBLISHED
+#                               blokctl@<version> from npm (no --local, no
+#                               monorepo build) — the release gate.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 CLI="$ROOT/packages/cli/dist/index.js"
+PUBLISHED="${SMOKE_PUBLISHED_VERSION:-}"
+
+# All blokctl invocations route through here so local-dist vs published-npm
+# is decided in exactly one place.
+run_cli() {
+  if [ -n "$PUBLISHED" ]; then bunx --yes "blokctl@$PUBLISHED" "$@"; else bun "$CLI" "$@"; fi
+}
+# `exec` variant for the dev boot — replaces the subshell so the process-group
+# kill in cleanup() reaches the whole trigger/sidecar tree.
+exec_dev() {
+  if [ -n "$PUBLISHED" ]; then exec bunx --yes "blokctl@$PUBLISHED" dev; else exec bun "$CLI" dev; fi
+}
 NATS_SERVERS="${NATS_SERVERS:-localhost:4222}"
 STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_test}"
 WORKDIR=""
@@ -100,23 +115,29 @@ log "triggers: $TRIGGERS"
 log "runtimes: ${RUNTIMES:-(none detected — TypeScript/node only)}"
 
 # ── 3. build (so the --local scaffold links current dist) ─────────────────────
-if [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
+if [ -n "$PUBLISHED" ]; then
+  log "post-publish mode: scaffolding with published blokctl@$PUBLISHED (no local build)"
+elif [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
   log "building the monorepo (SMOKE_SKIP_BUILD=1 to skip)…"
   (cd "$ROOT" && bun run build) >/tmp/blok-smoke-build.log 2>&1 || {
     log "build failed — tail of /tmp/blok-smoke-build.log:"; tail -60 /tmp/blok-smoke-build.log; exit 1;
   }
 fi
-[ -f "$CLI" ] || { log "blokctl dist not found at $CLI (run a build first)"; exit 1; }
+[ -n "$PUBLISHED" ] || [ -f "$CLI" ] || { log "blokctl dist not found at $CLI (run a build first)"; exit 1; }
 
-# ── 4. scaffold with the local CLI ────────────────────────────────────────────
+# ── 4. scaffold (local dist, or published npm in post-publish mode) ───────────
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/blok-smoke.XXXXXX")"
 PROJECT="$WORKDIR/smoke"
 RUNTIME_ARG=()
 [ -n "$RUNTIMES" ] && RUNTIME_ARG=(--runtimes "$RUNTIMES")
+LOCAL_ARG=(--local "$ROOT")
+[ -n "$PUBLISHED" ] && LOCAL_ARG=()
 log "scaffolding at $PROJECT …"
-if ! (cd "$WORKDIR" && bun "$CLI" create project \
-      --name smoke --local "$ROOT" \
-      --triggers "$TRIGGERS" "${RUNTIME_ARG[@]}" \
+# ${arr[@]+…} — bash-3.2 (macOS) treats an EMPTY array expansion as unbound
+# under `set -u`; the + idiom expands to nothing instead of dying.
+if ! (cd "$WORKDIR" && run_cli create project \
+      --name smoke ${LOCAL_ARG[@]+"${LOCAL_ARG[@]}"} \
+      --triggers "$TRIGGERS" ${RUNTIME_ARG[@]+"${RUNTIME_ARG[@]}"} \
       --examples --package-manager bun --non-interactive </dev/null) >"$WORKDIR/scaffold.log" 2>&1; then
   log "scaffold failed — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
 fi
@@ -129,7 +150,7 @@ log "booting blokctl dev …"
   NATS_SERVERS="$NATS_SERVERS" BLOK_PUBSUB_ADAPTER=nats \
   BLOK_WORKER_ADAPTER=in-memory \
   STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" LINEAR_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
-  exec bun "$CLI" dev ) >"$DEV_LOG" 2>&1 &
+  exec_dev ) >"$DEV_LOG" 2>&1 &
 DEV_PID=$!
 
 # ── 6. wait for the HTTP trigger, then let sidecars warm up ───────────────────
