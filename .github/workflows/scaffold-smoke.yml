@@ -54,10 +54,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned: the lockfile + bunfig linker are generated/validated with this
+      # version; "latest" drifted the linker default mid-flight (1.3.14).
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: '1.3.14'
 
       - name: Set up Go
         uses: actions/setup-go@v5
