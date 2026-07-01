@@ -198,3 +198,34 @@ export type RuntimeNode<Input, Output> = {
 export function runtimeNode<In = unknown, Out = unknown>(name: string, runtime: string): RuntimeNode<In, Out> {
 	return { kind: "runtimeNode", name, runtime };
 }
+
+/**
+ * Type-level reference to a MODULE node identified by its registered name — a
+ * published package (`@blokjs/api-call`) or any NodeJS node the runtime resolves
+ * by `use`. Like `RuntimeNode`, it carries the `OutputOf` witness so a `step()`
+ * handle is typed, but it emits NO `type` (the normalizer infers `"module"`).
+ */
+export type ModuleNode<Output = unknown> = {
+	readonly name: string;
+	readonly [nodeTypesBrand]?: { input: unknown; output: Output };
+};
+
+/**
+ * Declare a typed reference to a MODULE node by its registered name. Returns a
+ * real value `step()` lowers to a `{ use: <name> }` module step (no `type`) — the
+ * typed-handle counterpart of a bare `use: "<name>"` string in the object DSL.
+ *
+ * Prefer a `defineNode` node VALUE where you have one (it carries full
+ * input/output types); use `node()` for a published package or any name-only
+ * reference. With no explicit `Out` the handle is `Handle<unknown>` — never `any`.
+ *
+ * @example
+ * const fetched = step("fetch", node<{ status: number }>("@blokjs/api-call"), { url });
+ * step("respond", node("@blokjs/respond"), { body: fetched });
+ */
+export function node<Output = unknown>(name: string): ModuleNode<Output> {
+	if (typeof name !== "string" || name.length === 0) {
+		throw new Error('node() requires a non-empty node name, e.g. node("@blokjs/api-call").');
+	}
+	return { name };
+}

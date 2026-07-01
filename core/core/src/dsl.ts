@@ -28,9 +28,11 @@ export {
 } from "@blokjs/runner/stepBuilder";
 
 export type { SubworkflowOptions, TriggerHandle } from "@blokjs/runner/stepBuilder";
-export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode } from "@blokjs/runner/handles";
-// `runtimeNode` is a REAL value (#424) — `step()` lowers it to a runtime step.
-export { runtimeNode } from "@blokjs/runner/handles";
+export type { Handle, EphemeralHandle, ErrorHandle, Refable, RuntimeNode, ModuleNode } from "@blokjs/runner/handles";
+// `runtimeNode` / `node` are REAL values — `step()` lowers them to runtime /
+// module steps respectively (#424; node() = the typed-handle counterpart of a
+// bare `use: "<name>"` string for published/named nodes).
+export { runtimeNode, node } from "@blokjs/runner/handles";
 
 export { $ } from "@blokjs/helper";
 export { http } from "./http";

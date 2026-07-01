@@ -45,10 +45,13 @@ export type {
 	ErrorHandle,
 	Refable,
 	RuntimeNode,
+	ModuleNode,
 	TriggerHandle,
 	SubworkflowOptions,
 } from "./dsl";
 // `runtimeNode` is a REAL value (#424) — the `blokctl nodes sync` stubs import
 // it from here and pass it to `step()`, which lowers it to a runtime step.
-export { runtimeNode } from "./dsl";
+// `node("@blokjs/api-call")` is the typed-handle counterpart of a bare
+// `use: "<name>"` string — a name-only reference to a published/module node.
+export { runtimeNode, node } from "./dsl";
 export type { HttpTriggerBlock } from "./http";
