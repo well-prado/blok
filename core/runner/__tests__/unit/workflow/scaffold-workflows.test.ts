@@ -134,10 +134,16 @@ describe("scaffold TS workflows — v2 shape regression", () => {
 				expect(src).not.toMatch(/\.addCondition\(/);
 			});
 
-			it("uses the v2 `trigger:` config shape", () => {
+			it("declares its trigger — a raw `trigger: { <kind>: {} }` block or the typed-handle `http.<method>()` helper", () => {
 				const src = readSource(path.join(REPO_ROOT, wf.relPath));
-				expect(src).toMatch(/\btrigger\s*:\s*\{/);
-				expect(src).toMatch(new RegExp(`\\b${wf.expectedTrigger}\\s*:\\s*\\{`));
+				// Raw-block form (object-style, and typed-handle worker/pubsub/etc.).
+				const rawBlock = /\btrigger\s*:\s*\{/.test(src) && new RegExp(`\\b${wf.expectedTrigger}\\s*:\\s*\\{`).test(src);
+				// Typed-handle HTTP helper: `trigger: http.get("/path")`.
+				const httpHelper = wf.expectedTrigger === "http" && /\bhttp\.(?:get|post|put|delete|patch|any)\s*\(/.test(src);
+				expect(
+					rawBlock || httpHelper,
+					`no trigger config for '${wf.expectedTrigger}' (raw block or http.<method>()) found`,
+				).toBe(true);
 			});
 
 			it("uses a v2 step shape — object-style `id:`/`use:` or typed-handle `step()`/`node()` (not v1 `name:`/`node:`)", () => {
@@ -148,8 +154,12 @@ describe("scaffold TS workflows — v2 shape regression", () => {
 					/\bbranch\s*:\s*\{/.test(src) ||
 					/\bsubworkflow\s*:\s*["']/.test(src) ||
 					/\bwait\s*:\s*\{/.test(src);
-				// Typed-handle v2 (@blokjs/core): `step("id", node("@pkg"), ...)`.
-				const typedHandle = /\bstep\s*\(\s*["']/.test(src) || /\bnode\s*\(\s*["']/.test(src);
+				// Typed-handle v2 (@blokjs/core): `step("id", node("@pkg"), ...)` or a
+				// control-flow call (`branch(...)`, `forEach(...)`, etc.).
+				const typedHandle =
+					/\bstep\s*\(\s*["']/.test(src) ||
+					/\bnode\s*\(\s*["']/.test(src) ||
+					/\b(?:branch|forEach|switchOn|tryCatch|subworkflow)\s*\(/.test(src);
 				expect(
 					objectStyle || typedHandle,
 					"no v2 step shape (object id:/use: or typed-handle step()/node()) found",
