@@ -35,6 +35,7 @@
 		}
 	},
 	"devDependencies": {
+		"@blokjs/core": "^1.2.0",
 		"@types/node": "^22.15.21",
 		"@types/uuid": "^11.0.0",
 		"@types/ws": "^8.18.1",
