@@ -1,4 +1,5 @@
-import { $, branch, workflow } from "@blokjs/helper";
+import { branch, eq, node, step, workflow } from "@blokjs/core";
+import type { Handle } from "@blokjs/core";
 
 /**
  * WebSocket echo demo — open `ws://localhost:4000/ws/echo` (or 4002 if
@@ -26,37 +27,30 @@ import { $, branch, workflow } from "@blokjs/helper";
  * workflow (plus the implicit `connect` / `disconnect` lifecycle
  * events). Omit the field to accept any event name.
  */
-export default workflow({
-	name: "WebSocket Echo Demo",
-	version: "1.0.0",
-	description: "Echoes received WebSocket messages back to the sender. Demonstrates the connect + message lifecycle.",
-	trigger: {
-		websocket: {
-			path: "/ws/echo",
-			events: ["hello", "ping"],
+export default workflow(
+	"WebSocket Echo Demo",
+	{
+		version: "1.0.0",
+		description: "Echoes received WebSocket messages back to the sender. Demonstrates the connect + message lifecycle.",
+		trigger: {
+			websocket: {
+				path: "/ws/echo",
+				events: ["hello", "ping"],
+			},
 		},
 	},
-	steps: [
-		branch({
-			id: "route",
-			when: "ctx.request.body.event === 'connect'",
-			then: [
-				{
-					id: "greet",
-					use: "@blokjs/ws-reply",
-					inputs: { event: "connected", payload: { ok: true } },
-				},
-			],
-			else: [
-				{
-					id: "echo",
-					use: "@blokjs/ws-reply",
-					inputs: {
-						event: "echo",
-						payload: { original: $.req.body },
-					},
-				},
-			],
-		}),
-	],
-});
+	(conn) => {
+		const msg = conn.body as Handle<{ event: string }>;
+		branch("route", eq(msg.event, "connect"), {
+			then: () => {
+				step("greet", node("@blokjs/ws-reply"), { event: "connected", payload: { ok: true } });
+			},
+			else: () => {
+				step("echo", node("@blokjs/ws-reply"), {
+					event: "echo",
+					payload: { original: conn.body },
+				});
+			},
+		});
+	},
+);

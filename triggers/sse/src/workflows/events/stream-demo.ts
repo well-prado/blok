@@ -1,4 +1,4 @@
-import { $, workflow } from "@blokjs/helper";
+import { node, step, workflow } from "@blokjs/core";
 
 /**
  * SSE stream demo — open `GET /sse/demo` from any EventSource-style
@@ -23,27 +23,21 @@ import { $, workflow } from "@blokjs/helper";
  *   retryInterval     — ms emitted as the SSE `retry:` field (default 3000)
  *   maxConnections    — hard cap on concurrent streams per process (default 10000)
  */
-export default workflow({
-	name: "SSE Stream Demo",
-	version: "1.0.0",
-	description: "Subscribe an SSE stream to the in-process bus channel `sse-demo` and pump events as SSE frames.",
-	trigger: {
-		sse: {
-			path: "/sse/demo",
-			heartbeatInterval: 15000,
-			retryInterval: 3000,
+export default workflow(
+	"SSE Stream Demo",
+	{
+		version: "1.0.0",
+		description: "Subscribe an SSE stream to the in-process bus channel `sse-demo` and pump events as SSE frames.",
+		trigger: {
+			sse: {
+				path: "/sse/demo",
+				heartbeatInterval: 15000,
+				retryInterval: 3000,
+			},
 		},
 	},
-	steps: [
-		{
-			id: "sub",
-			use: "@blokjs/sse-subscribe",
-			inputs: { channels: ["sse-demo"] },
-		},
-		{
-			id: "stream",
-			use: "@blokjs/sse-stream",
-			inputs: { source: $.state.sub, eventName: "message" },
-		},
-	],
-});
+	() => {
+		const sub = step("sub", node("@blokjs/sse-subscribe"), { channels: ["sse-demo"] });
+		step("stream", node("@blokjs/sse-stream"), { source: sub, eventName: "message" });
+	},
+);

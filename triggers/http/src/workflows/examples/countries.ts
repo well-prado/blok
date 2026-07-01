@@ -1,29 +1,20 @@
-import { workflow } from "@blokjs/helper";
+import { http, node, step, workflow } from "@blokjs/core";
 
-export default workflow({
-	name: "countries.listRoot",
-	version: "1.0.0",
-	description: "Returns a list of world countries from the public CountriesNow API.",
-	trigger: {
-		http: {
-			method: "GET",
-			path: "/countries",
-			accept: "application/json",
-		},
+export default workflow(
+	"countries.listRoot",
+	{
+		version: "1.0.0",
+		description: "Returns a list of world countries from the public CountriesNow API.",
+		trigger: http.get("/countries", { accept: "application/json" }),
 	},
-	steps: [
-		{
-			id: "get-countries-api",
-			use: "@blokjs/api-call",
-			type: "module",
-			inputs: {
-				url: "https://countriesnow.space/api/v0.1/countries/capital",
-				method: "GET",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				responseType: "application/json",
+	() => {
+		step("get-countries-api", node("@blokjs/api-call"), {
+			url: "https://countriesnow.space/api/v0.1/countries/capital",
+			method: "GET",
+			headers: {
+				"Content-Type": "application/json",
 			},
-		},
-	],
-});
+			responseType: "application/json",
+		});
+	},
+);
