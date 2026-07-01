@@ -246,20 +246,17 @@ async function run(): Promise<void> {
 		});
 	}
 
-	// WebSocket — connect + send a frame; assert the WS workflow dispatched a
-	// step (the @blokjs/ws-reply node ran). We assert the trigger dispatched
-	// rather than requiring an echo frame back — the shipped example has a
-	// separate delivery bug (#650) that doesn't affect trigger/node resolution.
+	// WebSocket — real frame round-trip against the shipped echo demo (#650):
+	// on connect the workflow must deliver the `connected` greeting, and a
+	// `hello` frame (in the demo's event allowlist) must come back as `echo`.
 	if (triggers.has("websocket")) {
-		await check("websocket", "/ws/echo dispatch (@blokjs/ws-reply)", async () => {
-			const { opened } = await wsRoundtrip("/ws/echo", { event: "ping", data: { hi: "smoke" } }, 2500);
+		await check("websocket", "/ws/echo greeting + echo round-trip (@blokjs/ws-reply)", async () => {
+			const { opened, frames } = await wsRoundtrip("/ws/echo", { event: "hello", data: { hi: "smoke" } }, 3000);
 			if (!opened) return FAIL("WebSocket did not open");
-			const ran =
-				(await logMatches(/WebSocket Echo.*(reply|echo).*(started|completed|Running node)/i, 2000)) ||
-				(await logMatches(/workflow_name":"WebSocket Echo/i, 500));
-			return ran
-				? PASS("connected; WS workflow dispatched a step")
-				: FAIL("connected but no WS workflow step in the dev log");
+			const greeted = frames.some((f) => f.includes('"connected"'));
+			const echoed = frames.some((f) => f.includes('"echo"') && f.includes("smoke"));
+			if (greeted && echoed) return PASS("connected greeting + echo frame delivered");
+			return FAIL(`frames=${frames.length} greeting=${greeted} echo=${echoed} — ${frames.join(" | ").slice(0, 80)}`);
 		});
 	}
 
