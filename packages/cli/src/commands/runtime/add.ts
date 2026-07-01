@@ -30,10 +30,12 @@ import {
 
 /**
  * `blokctl runtime add [lang]` — add a language sidecar runtime to an existing
- * project. Pure config/SDK-dir work: copies the version-matched SDK into
- * `.blok/runtimes/<lang>/`, installs/builds it, and merges the runtime into
- * `.blok/config.json` + `.env.local` + `supervisord.conf`. No runner changes —
- * the framework already resolves all seven `runtime.<lang>` step types. When
+ * project. Copies the version-matched SDK into `.blok/runtimes/<lang>/`,
+ * installs/builds it, and merges the runtime into `.blok/config.json` +
+ * `.env.local` + `supervisord.conf`. Projects scaffolded with `--examples`
+ * also get the runtime's hello example workflow (copied + registered in
+ * src/Workflows.ts, same as `create project`). No runner changes — the
+ * framework already resolves all seven `runtime.<lang>` step types. When
  * `lang` is omitted in interactive mode, an availability-aware picker is shown.
  */
 export async function runtimeAdd(kindArg: string | undefined, options: OptionValues): Promise<void> {
@@ -191,11 +193,68 @@ export async function runtimeAdd(kindArg: string | undefined, options: OptionVal
 		}
 		s.stop(`${def.label} runtime ready`);
 
+		// 5.5. Projects scaffolded with --examples get the same hello-over-gRPC
+		// example workflow `create project` ships for this runtime.
+		if (stampHelloExample(root, source, kind)) {
+			p.log.success(
+				`Shipped the ${def.label} hello example — ${color.cyan(`POST /runtimes/${kind}/hello`)} (registered in src/Workflows.ts)`,
+			);
+		}
+
 		// 6 + 7. Persist (config/env/supervisord/gitignore) + summary.
 		finalizeRuntime(root, config, rc, kind, def.label);
 	} catch (err) {
 		reportRuntimeError(err);
 	}
+}
+
+/**
+ * Ship the per-runtime hello example workflow into a project that carries the
+ * `--examples` layout (src/workflows/examples/ + the generated src/Workflows.ts):
+ * copy `examples/ts-workflows/runtime-<kind>-hello.ts` from the SDK source and
+ * register it (import + record entry), mirroring the create-time stamping in
+ * create/project.ts. Idempotent — re-adding (or --force reinstalls) never
+ * duplicates the registration. Returns true only when the example is shipped
+ * AND registered; projects without the examples layout are silently skipped,
+ * and a hand-reshaped Workflows.ts gets a warning instead of a corrupt write.
+ */
+function stampHelloExample(root: string, source: string, kind: string): boolean {
+	const file = `runtime-${kind}-hello.ts`;
+	const srcFile = path.join(source, "examples", "ts-workflows", file);
+	const examplesDir = path.join(root, "src", "workflows", "examples");
+	const workflowsTs = path.join(root, "src", "Workflows.ts");
+	if (!fs.existsSync(srcFile) || !fs.existsSync(examplesDir) || !fs.existsSync(workflowsTs)) return false;
+
+	const importName = `Runtime${kind.charAt(0).toUpperCase()}${kind.slice(1)}Hello`;
+	const importLine = `import ${importName} from "./workflows/examples/runtime-${kind}-hello";`;
+	// No `await`: the hello examples are object-form workflow({…}) — sync,
+	// unlike the callback-form trigger demos (see create/project.ts notes).
+	const entryLine = `\t"runtime-${kind}-hello": ${importName},`;
+
+	const content = fs.readFileSync(workflowsTs, "utf8");
+	if (content.includes(`./workflows/examples/runtime-${kind}-hello`)) {
+		fs.copyFileSync(srcFile, path.join(examplesDir, file)); // refresh the file on --force reinstalls
+		return true;
+	}
+
+	const lines = content.split("\n");
+	const openIdx = lines.findIndex((l) => /^const workflows\b.*=\s*\{\s*$/.test(l));
+	let lastImport = -1;
+	for (let i = 0; i < (openIdx === -1 ? lines.length : openIdx); i++) {
+		if (/^import /.test(lines[i])) lastImport = i;
+	}
+	if (openIdx === -1 || lastImport === -1) {
+		p.log.warn(
+			`src/Workflows.ts doesn't look generated — register the ${kind} hello example yourself:\n  ${importLine}\n  ${entryLine.trim()}`,
+		);
+		return false;
+	}
+
+	lines.splice(openIdx + 1, 0, entryLine); // openIdx > lastImport, so insert here first
+	lines.splice(lastImport + 1, 0, importLine);
+	fs.copyFileSync(srcFile, path.join(examplesDir, file));
+	fs.writeFileSync(workflowsTs, lines.join("\n"));
+	return true;
 }
 
 /**
