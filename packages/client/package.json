@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/client",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"files": ["dist"],
 	"description": "Fully-typed, tRPC-style client SDK for calling Blok workflows from a frontend.",
 	"type": "module",
@@ -16,7 +16,7 @@
 	"author": "Deskree Inc",
 	"license": "MIT",
 	"peerDependencies": {
-		"@blokjs/helper": "^1.1.0"
+		"@blokjs/helper": "^1.2.0"
 	},
 	"peerDependenciesMeta": {
 		"@blokjs/helper": {
@@ -24,7 +24,7 @@
 		}
 	},
 	"devDependencies": {
-		"@blokjs/helper": "^1.1.0",
+		"@blokjs/helper": "^1.2.0",
 		"@types/node": "^22.15.21",
 		"typescript": "^5.8.3",
 		"vitest": "^4.0.18",

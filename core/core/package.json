@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/core",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"description": "Blok's typed-handle authoring DSL — the published author import surface (workflow/step/branch/http/tpl/comparators).",
 	"engines": {
 		"node": ">=18.0.0"
@@ -48,9 +48,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/helper": "^1.1.0",
-		"@blokjs/runner": "^1.1.0",
-		"@blokjs/shared": "^1.1.0",
+		"@blokjs/helper": "^1.2.0",
+		"@blokjs/runner": "^1.2.0",
+		"@blokjs/shared": "^1.2.0",
 		"zod": "^3.24.2"
 	},
 	"private": false,
