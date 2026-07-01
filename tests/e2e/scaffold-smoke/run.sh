@@ -102,7 +102,9 @@ log "runtimes: ${RUNTIMES:-(none detected — TypeScript/node only)}"
 # ── 3. build (so the --local scaffold links current dist) ─────────────────────
 if [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
   log "building the monorepo (SMOKE_SKIP_BUILD=1 to skip)…"
-  (cd "$ROOT" && bun run build) >/tmp/blok-smoke-build.log 2>&1 || { log "build failed — see /tmp/blok-smoke-build.log"; exit 1; }
+  (cd "$ROOT" && bun run build) >/tmp/blok-smoke-build.log 2>&1 || {
+    log "build failed — tail of /tmp/blok-smoke-build.log:"; tail -60 /tmp/blok-smoke-build.log; exit 1;
+  }
 fi
 [ -f "$CLI" ] || { log "blokctl dist not found at $CLI (run a build first)"; exit 1; }
 
