@@ -121,9 +121,9 @@ describe("scaffold TS workflows — v2 shape regression", () => {
 				expect(existsSync(abs), `expected ${abs} to exist`).toBe(true);
 			});
 
-			it("imports the v2 `workflow` function from @blokjs/helper", () => {
+			it("imports the `workflow` DSL from @blokjs/core (typed-handle) or @blokjs/helper (object-style)", () => {
 				const src = readSource(path.join(REPO_ROOT, wf.relPath));
-				expect(src).toMatch(/import\s+\{[^}]*\bworkflow\b[^}]*\}\s+from\s+"@blokjs\/helper"/);
+				expect(src).toMatch(/import\s+\{[^}]*\bworkflow\b[^}]*\}\s+from\s+"@blokjs\/(?:core|helper)"/);
 			});
 
 			it("does NOT use the v1 builder DSL", () => {
@@ -140,16 +140,22 @@ describe("scaffold TS workflows — v2 shape regression", () => {
 				expect(src).toMatch(new RegExp(`\\b${wf.expectedTrigger}\\s*:\\s*\\{`));
 			});
 
-			it("uses the v2 `id:` / `use:` step shape (not v1 `name:` / `node:`)", () => {
+			it("uses a v2 step shape — object-style `id:`/`use:` or typed-handle `step()`/`node()` (not v1 `name:`/`node:`)", () => {
 				const src = readSource(path.join(REPO_ROOT, wf.relPath));
-				const stepHas =
+				// Object-style v2: `{ id: "...", use: "..." }` (or a control-flow step).
+				const objectStyle =
 					/\bid\s*:\s*["']/.test(src) ||
 					/\bbranch\s*:\s*\{/.test(src) ||
 					/\bsubworkflow\s*:\s*["']/.test(src) ||
 					/\bwait\s*:\s*\{/.test(src);
-				expect(stepHas, "no v2 step (id / branch / subworkflow / wait) found").toBe(true);
+				// Typed-handle v2 (@blokjs/core): `step("id", node("@pkg"), ...)`.
+				const typedHandle = /\bstep\s*\(\s*["']/.test(src) || /\bnode\s*\(\s*["']/.test(src);
+				expect(
+					objectStyle || typedHandle,
+					"no v2 step shape (object id:/use: or typed-handle step()/node()) found",
+				).toBe(true);
 				const v1StepShape = /\bnode\s*:\s*"@blokjs/.test(src);
-				expect(v1StepShape, "v1 `node:` step shape detected — should be `use:` in v2").toBe(false);
+				expect(v1StepShape, "v1 `node:` step shape detected — should be `use:` or `node()` in v2").toBe(false);
 			});
 		});
 	}
