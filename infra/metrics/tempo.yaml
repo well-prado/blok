@@ -4,15 +4,6 @@ server:
   log_level: info
 
 
-cache:
-  background:
-    writeback_goroutines: 5
-  caches:
-  - roles:
-    - frontend-search  
-    memcached: 
-      host: memcached:11211
-
 query_frontend:
   search:
     duration_slo: 5s
@@ -88,4 +79,3 @@ overrides:
     metrics_generator:
       processors: [service-graphs, span-metrics, local-blocks] # enables metrics generator
       generate_native_histograms: both
-      
