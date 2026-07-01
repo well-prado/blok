@@ -25,7 +25,7 @@ import {
 	setupRuntime,
 	writeProjectConfig,
 } from "../../services/runtime-setup.js";
-import { computeDefaultConstraint } from "../../services/semver-utils.js";
+import { computeDefaultConstraint, formatVersionMismatch, satisfiesConstraint } from "../../services/semver-utils.js";
 import { resolveObservabilitySelection } from "../observability/apply.js";
 import {
 	OBSERVABILITY_MODULE_IDS,
@@ -1077,6 +1077,23 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const kind of nonNodeRuntimes) {
 				const rt = detectedRuntimes.find((r) => r.kind === kind);
 				if (!rt) continue;
+
+				// Gate on the SDK's minimum toolchain version (e.g. Ruby >=3.1 for
+				// the native grpc gem, PHP >=8.2 for roadrunner-grpc). Surfacing an
+				// actionable message here beats a cryptic native-build failure deep
+				// inside `bundle install` / `composer install`.
+				if (rt.minVersion) {
+					const constraint = computeDefaultConstraint(rt.minVersion);
+					if (!rt.version || !satisfiesConstraint(rt.version, constraint)) {
+						console.log(`\n${formatVersionMismatch(rt.label, rt.version, constraint, rt.installHint)}`);
+						console.log(
+							color.yellow(
+								`  Skipping ${rt.label} setup. After upgrading, add it with \`blokctl runtime add ${rt.kind}\`.\n`,
+							),
+						);
+						continue;
+					}
+				}
 
 				try {
 					const config = await setupRuntime(rt, repoSource, dirPath, s);

@@ -188,7 +188,11 @@ export async function setupRuntime(
 		kind: runtime.kind,
 		label: runtime.label,
 		version: runtime.version,
-		requiredVersion: runtime.version ? computeDefaultConstraint(runtime.version) : undefined,
+		requiredVersion: runtime.minVersion
+			? computeDefaultConstraint(runtime.minVersion)
+			: runtime.version
+				? computeDefaultConstraint(runtime.version)
+				: undefined,
 		transport: "grpc",
 	};
 }
