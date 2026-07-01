@@ -1,9 +1,17 @@
 # Blok Blok Python3 SDK
-# Core runtime uses the Python standard library; the only base dependency is
-# pydantic, which powers the typed `@node` authoring contract (SPEC-B P2).
-# Legacy Dict-based NodeHandler nodes work without it, but the runtime image
-# ships it so projects can author typed nodes out of the box.
+# pydantic powers the typed `@node` authoring contract (SPEC-B P2). Legacy
+# Dict-based NodeHandler nodes work without it, but the runtime ships it so
+# projects can author typed nodes out of the box.
 pydantic>=2.0
+#
+# gRPC transport. Since v0.5 the runner speaks ONLY gRPC (the HTTP
+# `POST /execute` path was removed), so the sidecar always boots in gRPC mode
+# and `bin/serve.py` requires grpcio at startup. These MUST be in the base
+# requirements so `blokctl`'s scaffold venv (`pip install -r requirements.txt`)
+# can start the runtime — mirrors the `[grpc]` extra in pyproject.toml and the
+# Dockerfile. Without them the python3 sidecar fails "requires grpcio".
+grpcio>=1.60
+protobuf>=4.25
 #
 # For worker mode (NATS JetStream background jobs), install:
 #   pip install nats-py>=2.9.0
