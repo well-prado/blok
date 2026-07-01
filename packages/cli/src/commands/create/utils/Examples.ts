@@ -85,31 +85,28 @@ Examples:
 For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
 `;
 
-// v2 workflow template — LLM- and human-friendly. Every step's output
-// auto-persists to ctx.state[id]. Reference earlier outputs via
-// $.state.<id> in inputs (compiles to "js/ctx.state.<id>" at runtime).
-// Opt out of persistence with "ephemeral": true.
-const workflow_template = `
-{
-	"name": "My Workflow",
-	"description": "What this workflow does",
-	"version": "1.0.0",
-	"trigger": {
-		"http": {
-			"method": "GET",
-			"accept": "application/json"
-		}
+// v2 workflow template — the typed-handle DSL from @blokjs/core. `create workflow`
+// scaffolds this as a `.ts` file with {{WORKFLOW_NAME}} / {{WORKFLOW_PATH}} filled
+// in from the workflow name. Every step() auto-persists to state["id"]; read the
+// returned handle downstream. Reference a published node by node("@pkg/name").
+const workflow_template = `import { http, node, step, workflow } from "@blokjs/core";
+
+/**
+ * {{WORKFLOW_NAME}}
+ *
+ * Add steps with step("id", node, inputs). Read a step's output downstream via
+ * the handle it returns (const user = step(...); ... user.name). Control flow:
+ * branch / forEach / switchOn / tryCatch — all from @blokjs/core.
+ */
+export default workflow(
+	"{{WORKFLOW_NAME}}",
+	{ version: "1.0.0", trigger: http.get("{{WORKFLOW_PATH}}") },
+	(req) => {
+		// Echo the request body back. @blokjs/respond writes the HTTP response,
+		// so mark it ephemeral (no state slot needed).
+		step("echo", node("@blokjs/respond"), { body: req.body }, { ephemeral: true });
 	},
-	"steps": [
-		{
-			"id": "echo",
-			"use": "@blokjs/respond",
-			"inputs": {
-				"body": "$.req.body"
-			}
-		}
-	]
-}
+);
 `;
 
 const supervisord_nodejs = `

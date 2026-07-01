@@ -78,7 +78,7 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 			if (!nodeProjectDirExists) throw new Error("ops1");
 
 			// Prepare the workflow
-			const currentWorkflowsDir = `${dirPath}/workflows/json`;
+			const currentWorkflowsDir = `${dirPath}/workflows`;
 			if (!skipPrompts) {
 				fsExtra.ensureDirSync(currentWorkflowsDir);
 			} else {
@@ -86,9 +86,9 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 				if (!workflowDirExists) throw new Error("ops1");
 			}
 
-			dirPath = path.join(currentWorkflowsDir, `${workflowName.replaceAll(" ", "-").toLowerCase()}.json`);
+			dirPath = path.join(currentWorkflowsDir, `${workflowName.replaceAll(" ", "-").toLowerCase()}.ts`);
 		} else {
-			dirPath = path.join(dirPath, `${workflowName.replaceAll(" ", "-").toLowerCase()}.json`);
+			dirPath = path.join(dirPath, `${workflowName.replaceAll(" ", "-").toLowerCase()}.ts`);
 		}
 
 		if (!skipPrompts) s.message("Creating workflow...");
@@ -99,17 +99,15 @@ export async function createWorkflow(opts: OptionValues, currentPath = false) {
 			if (workflowDirExists) throw new Error("ops2");
 		}
 
-		const workflow_json = JSON.parse(workflow_template);
-		workflow_json.name = workflowName;
-		// Give the HTTP trigger an explicit `path` derived from the name so the
-		// created workflow is REACHABLE: explicit-path-only routing is the default
-		// (since v0.4), so a pathless workflow registers but 404s. Slug mirrors the
-		// filename (`workflowName` kebab-cased).
+		// Scaffold the typed-handle DSL workflow (.ts). Give the HTTP trigger an
+		// explicit `path` derived from the name so the workflow is REACHABLE:
+		// explicit-path-only routing is the default (since v0.4), so a pathless
+		// workflow registers but 404s. Slug mirrors the filename (kebab-cased name).
 		const slug = workflowName.replaceAll(" ", "-").toLowerCase();
-		if (workflow_json.trigger?.http && !workflow_json.trigger.http.path) {
-			workflow_json.trigger.http.path = `/${slug}`;
-		}
-		fsExtra.writeFileSync(dirPath, JSON.stringify(workflow_json, null, 2));
+		const workflow_ts = workflow_template
+			.replaceAll("{{WORKFLOW_NAME}}", workflowName)
+			.replaceAll("{{WORKFLOW_PATH}}", `/${slug}`);
+		fsExtra.writeFileSync(dirPath, workflow_ts);
 
 		if (!skipPrompts) s.stop(`Node "${workflowName}" created successfully.`);
 		if (!currentPath) console.log("\nNavigate to the workflow directory by running: cd workflows/json");
