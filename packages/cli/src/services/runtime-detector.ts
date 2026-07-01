@@ -73,6 +73,31 @@ export interface RuntimeInfo {
 export function detectRr(): string | null {
 	for (const bin of ["/opt/homebrew/bin/rr", "rr"]) {
 		try {
+			const out = child_process
+				.execSync(`${bin} --version`, { stdio: ["ignore", "pipe", "ignore"] })
+				.toString()
+				.trim();
+			// The SERVER binary prints "rr version 2025.x". spiral/roadrunner-cli's
+			// composer shim prints "RoadRunner CLI 2025.x" and has no `serve`
+			// command — accepting it boots a sidecar that dies instantly.
+			if (/^rr version/i.test(out)) return bin;
+		} catch {
+			// keep trying
+		}
+	}
+	return null;
+}
+
+/**
+ * Locate a working `java` launcher. macOS ships a `/usr/bin/java` stub that
+ * fails with "Unable to locate a Java Runtime" unless a JDK is system-linked —
+ * brew's openjdk is keg-only, so detection can succeed via the keg path while
+ * a bare `java -jar …` spawn dies. Keep the candidate list in lock-step with
+ * the java entry's `commands` below.
+ */
+export function detectJava(): string | null {
+	for (const bin of ["java", "/opt/homebrew/opt/openjdk/bin/java"]) {
+		try {
 			child_process.execSync(`${bin} --version`, { stdio: "ignore" });
 			return bin;
 		} catch {
@@ -115,8 +140,12 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		defaultGrpcPort: 10002,
 		commands: ["rustc --version"],
 		toolchain: "rustc + cargo",
-		installDeps: "cargo build --release",
+		installDeps: "cargo build --features grpc",
 		startCmd: "cargo run",
+		// The SDK's gRPC server is behind a cargo feature (default = ["http"]),
+		// so a plain `cargo run` compiles it OUT and the sidecar silently boots
+		// HTTP-only — the runner then gets ECONNREFUSED on GRPC_PORT.
+		grpcStartCmd: "cargo run --features grpc",
 		sdkDir: "rust",
 	},
 	{
@@ -192,7 +221,11 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		commands: ["ruby --version", "/opt/homebrew/opt/ruby/bin/ruby --version"],
 		toolchain: "ruby + bundler",
 		installDeps: "bundle install",
-		startCmd: "bundle exec rackup --host 0.0.0.0 config.ru",
+		// bin/serve.rb honors BLOK_TRANSPORT (http|grpc|both) + PORT/GRPC_PORT.
+		// `rackup config.ru` boots the Rack HTTP app only — no gRPC server —
+		// so under `blokctl dev` (BLOK_TRANSPORT=grpc) the runner would get
+		// ECONNREFUSED on GRPC_PORT.
+		startCmd: "bundle exec ruby bin/serve.rb",
 		sdkDir: "ruby",
 		secondaryTool: {
 			name: "Bundler",

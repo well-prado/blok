@@ -23,6 +23,7 @@
 		"uuid": "^11.1.0"
 	},
 	"devDependencies": {
+		"@blokjs/core": "^1.2.0",
 		"@hono/node-server": "^1.19.9",
 		"@types/node": "^22.15.21",
 		"@types/uuid": "^11.0.0",

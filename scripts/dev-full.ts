@@ -147,8 +147,13 @@ function detectJava(): string | null {
 function detectRr(): string | null {
 	for (const bin of ["/opt/homebrew/bin/rr", "rr"]) {
 		try {
-			execSync(`${bin} --version`, { stdio: "ignore" });
-			return bin;
+			const out = execSync(`${bin} --version`, { stdio: ["ignore", "pipe", "ignore"] })
+				.toString()
+				.trim();
+			// Server binary prints "rr version …"; spiral/roadrunner-cli's shim
+			// prints "RoadRunner CLI …" and can't `serve`. Mirrors the CLI's
+			// detectRr() in packages/cli/src/services/runtime-detector.ts.
+			if (/^rr version/i.test(out)) return bin;
 		} catch {
 			// keep trying
 		}
