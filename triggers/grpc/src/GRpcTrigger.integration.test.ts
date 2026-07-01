@@ -214,7 +214,13 @@ function encodeRequest(
 }
 
 RUN("GRpcTrigger — #600 live integration (real gRPC wire)", () => {
-	let server: FastifyInstance;
+	// http2 instance — its RawServer/Request/Reply differ from the http1 default,
+	// so the generics must be the node:http2 types (matches `fastify({ http2: true })`).
+	let server: FastifyInstance<
+		import("node:http2").Http2Server,
+		import("node:http2").Http2ServerRequest,
+		import("node:http2").Http2ServerResponse
+	>;
 	let client: GrpcClient;
 	const decoder = new MessageDecode();
 
