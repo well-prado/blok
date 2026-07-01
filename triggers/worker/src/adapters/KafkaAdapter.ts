@@ -9,10 +9,18 @@
  *   - **Ordering**: per-partition, not per-topic. Set the partition
  *     key via the `dedupId` field on `addJob` to keep related
  *     messages on the same partition.
- *   - **Retries**: Kafka doesn't have a broker-side retry concept.
- *     The adapter re-throws on handler failure; offset commit is
- *     suppressed so the consumer re-polls the message on the next
- *     cycle. For real retry semantics, layer a dead-letter topic.
+ *   - **Retries / DLQ**: Kafka has no broker-side retry or dead-letter
+ *     concept. The adapter emulates both at the application layer: on
+ *     handler failure it re-produces the payload to the SOURCE topic
+ *     with an incremented `x-blok-attempt` header (up to `config.retries`),
+ *     then routes the exhausted payload to `config.deadLetterQueue`. The
+ *     source offset always commits (the handler never re-throws), so a
+ *     single poison message can never crash-loop the consumer and block
+ *     every later job behind it.
+ *   - **No native priority / delay**: Kafka is an ordered log, not a
+ *     priority queue or a scheduler. `process` and `addJob` THROW a clear
+ *     config error when `priority` or `delay` is set rather than silently
+ *     dropping it — use a scheduler trigger for delayed work.
  *   - **Stats**: KafkaJS exposes consumer-group lag via its admin
  *     client; the lag count is reported as `waiting`. Other stats
  *     are tracked locally per consumer.
@@ -144,6 +152,17 @@ export class KafkaAdapter implements WorkerAdapter {
 
 	async process(config: WorkerTriggerOpts, handler: (job: WorkerJob) => Promise<void>): Promise<void> {
 		if (!this.connected) throw new Error("[blok][kafka] not connected. Call connect() first.");
+		// Kafka is an ordered log — no native priority or delayed delivery.
+		// Reject at startup rather than accepting config that silently does
+		// nothing (the pre-fix behavior: validated, logged, zero effect).
+		if (config.priority) {
+			throw new Error(
+				"[blok][kafka] Kafka has no native message priority — drop `priority`; messages are ordered per partition.",
+			);
+		}
+		if (config.delay) {
+			throw new Error("[blok][kafka] Kafka has no native delayed delivery — drop `delay` or use a scheduler trigger.");
+		}
 		const groupId = config.consumerGroup ?? `${config.queue}-group`;
 		const consumer = this.kafka.consumer({ groupId });
 		await consumer.connect();
@@ -176,13 +195,33 @@ export class KafkaAdapter implements WorkerAdapter {
 				if (message.headers) {
 					for (const [k, v] of Object.entries(message.headers)) headers[k] = v?.toString("utf8") ?? "";
 				}
+				// Retry attempt rides on the message header (Kafka has no
+				// broker-side attempt counter). A re-produced retry carries
+				// `x-blok-attempt`; the first delivery has none → attempt 0.
+				const attempts = Number.parseInt(headers["x-blok-attempt"] ?? "0", 10) || 0;
+				const key = message.key?.toString("utf8") ?? `${config.queue}:${message.offset}`;
+				// Terminal (retries exhausted → DLQ) vs. retry (re-produce to
+				// source with attempt+1). Both COMMIT the source offset — the
+				// handler never re-throws, so one poison message can't crash-loop
+				// the consumer and starve every job queued behind it.
+				const settleFailure = async (requeue: boolean): Promise<void> => {
+					const willRetry = requeue && attempts < (config.retries ?? 0);
+					if (willRetry) {
+						await this.produce(config.queue, key, payloadString, { "x-blok-attempt": String(attempts + 1) });
+					} else if (config.deadLetterQueue) {
+						await this.produce(config.deadLetterQueue, key, payloadString, {
+							"x-blok-attempt": String(attempts),
+							"x-blok-source-topic": config.queue,
+						});
+					}
+				};
 				const job: WorkerJob = {
-					id: message.key?.toString("utf8") ?? `${config.queue}:${message.offset}`,
+					id: key,
 					data,
 					headers,
 					queue: config.queue,
-					priority: config.priority ?? 0,
-					attempts: 0,
+					priority: 0,
+					attempts,
 					maxRetries: config.retries ?? 0,
 					createdAt: new Date(Number.parseInt(message.timestamp, 10)),
 					timeout: config.timeout,
@@ -190,23 +229,41 @@ export class KafkaAdapter implements WorkerAdapter {
 					complete: async () => {
 						stats.completed += 1;
 					},
-					fail: async (_err: Error) => {
+					fail: async (_err: Error, requeue?: boolean) => {
 						stats.failed += 1;
-						throw _err;
+						await settleFailure(requeue === true);
 					},
 				};
 				stats.active += 1;
 				try {
 					await handler(job);
 					stats.completed += 1;
-				} catch (err) {
+				} catch {
+					// A handler that THROWS (rather than calling job.fail) must not
+					// re-throw out of eachMessage — that suppresses the offset commit
+					// and kafkajs redelivers the SAME message forever, blocking the
+					// partition. Route the raw throw through the same retry/DLQ path
+					// and let the offset commit. ponytail: this is the crash-loop fix.
 					stats.failed += 1;
-					throw err;
+					try {
+						await settleFailure(attempts < (config.retries ?? 0));
+					} catch {
+						/* DLQ/retry produce failed — still commit; don't crash-loop */
+					}
 				} finally {
 					stats.active = Math.max(0, stats.active - 1);
 				}
 			},
 		});
+	}
+
+	/**
+	 * Produce a single message to `topic` with optional string headers.
+	 * Used for retry re-produce (to the source topic) and dead-lettering.
+	 */
+	private async produce(topic: string, key: string, value: string, headers?: Record<string, string>): Promise<void> {
+		if (!this.handle.producer) throw new Error("[blok][kafka] producer not initialized");
+		await this.handle.producer.send({ topic, messages: [{ key, value, headers }] });
 	}
 
 	async addJob(
@@ -216,18 +273,20 @@ export class KafkaAdapter implements WorkerAdapter {
 	): Promise<string> {
 		if (!this.connected) throw new Error("[blok][kafka] not connected. Call connect() first.");
 		if (!this.handle.producer) throw new Error("[blok][kafka] producer not initialized");
+		// Kafka is an ordered log — no native priority or delayed delivery.
+		// Reject rather than silently drop the option (the pre-fix behavior
+		// stuffed `delay` into a header no consumer ever honored).
+		if (opts?.priority) {
+			throw new Error(
+				"[blok][kafka] Kafka has no native message priority — drop `priority`; messages are ordered per partition.",
+			);
+		}
+		if (opts?.delay) {
+			throw new Error("[blok][kafka] Kafka has no native delayed delivery — drop `delay` or use a scheduler trigger.");
+		}
 		const key = opts?.jobId ?? uuid();
 		const payload = typeof data === "string" ? data : JSON.stringify(data);
-		await this.handle.producer.send({
-			topic: queue,
-			messages: [
-				{
-					key,
-					value: payload,
-					headers: opts?.delay ? { "x-blok-delay-ms": String(opts.delay) } : undefined,
-				},
-			],
-		});
+		await this.produce(queue, key, payload);
 		return key;
 	}
 
