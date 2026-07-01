@@ -27,7 +27,7 @@ import Configuration from "../../src/Configuration";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
 import { defineNode } from "../../src/defineNode";
-import { type TriggerHandle, step, switchOn, workflowCallback } from "../../src/stepBuilder";
+import { type TriggerHandle, js, step, switchOn, workflowCallback } from "../../src/stepBuilder";
 import type GlobalOptions from "../../src/types/GlobalOptions";
 
 const noop = defineNode({
@@ -115,6 +115,76 @@ describe("switchOn — IR lowering (#319)", () => {
 		};
 		expect(sw.switch.on).toBe("js/ctx.request.body.kind");
 		expect(sw.id).toBe("kindSwitch");
+	});
+
+	// #647 — a js`…` escape lets the discriminant be a COMPUTED expression no bare
+	// handle can express (case-fold, defaulting, method calls). It lowers to the
+	// same `js/…` wire string the runner's Mapper resolves for `on`.
+	it("accepts a js`…` computed discriminant, lowering `on` verbatim (#647)", async () => {
+		const wf = await workflowCallback(
+			"Route",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				switchOn(
+					js`(${req.body.type} || 'unknown').toLowerCase()`,
+					{
+						cases: [
+							{
+								when: "issue",
+								do: () => {
+									step("doIssue", noop, {});
+								},
+							},
+						],
+						default: () => {
+							step("fallback", noop, {});
+						},
+					},
+					{ id: "route-by-type" },
+				);
+			},
+		);
+		const sw = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.switch) as {
+			id: string;
+			switch: { on: string; cases: Array<{ when: unknown }> };
+		};
+		expect(sw.switch.on).toBe("js/(ctx.request.body.type || 'unknown').toLowerCase()");
+		expect(sw.id).toBe("route-by-type");
+		expect(sw.switch.cases[0].when).toBe("issue");
+	});
+
+	it("rejects a js`…` discriminant without an explicit { id } (#647)", async () => {
+		await expect(
+			workflowCallback("NoId", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (req: TriggerHandle) => {
+				switchOn(js`(${req.body.type} || '').toLowerCase()`, {
+					cases: [
+						{
+							when: "x",
+							do: () => {
+								step("x", noop, {});
+							},
+						},
+					],
+				});
+			}),
+		).rejects.toThrow(/requires an explicit \{ id \}/);
+	});
+
+	it("rejects a raw string discriminant that isn't from js`…` (#647)", async () => {
+		await expect(
+			workflowCallback("BadStr", { version: "1.0.0", trigger: { http: { method: "POST" } } }, () => {
+				switchOn("ctx.request.body.type" as unknown as string, {
+					cases: [
+						{
+							when: "x",
+							do: () => {
+								step("x", noop, {});
+							},
+						},
+					],
+				});
+			}),
+		).rejects.toThrow(/must come from the js/);
 	});
 });
 
@@ -335,5 +405,96 @@ describe("switchOn — real Configuration + SwitchNode + Runner", () => {
 	it("runs the default when no case matches", async () => {
 		const state = await bootAndRun(await authoredDef(), "zzz");
 		expect(state.ran).toBe("DEFAULT");
+	});
+
+	// #647 — a js`…` COMPUTED discriminant routes correctly at run time: the
+	// Mapper resolves the case-fold expression, so a capitalized "Issue" from the
+	// webhook body matches the lowercase "issue" case — impossible with a bare
+	// handle (which would carry the raw "Issue" and never `=== "issue"`).
+	async function computedDef(): Promise<unknown> {
+		const wf = await workflowCallback(
+			"Route",
+			{ version: "1.0.0", trigger: { http: { method: "POST" } } },
+			(req: TriggerHandle) => {
+				switchOn(
+					js`(${req.body.kind} || 'unknown').toLowerCase()`,
+					{
+						cases: [
+							{
+								when: "issue",
+								do: () => {
+									step("markIssue", noop, {});
+								},
+							},
+							{
+								when: "comment",
+								do: () => {
+									step("markComment", noop, {});
+								},
+							},
+						],
+						default: () => {
+							step("markDefault", noop, {});
+						},
+					},
+					{ id: "route-by-type" },
+				);
+			},
+		);
+		const sw = (wf._config.steps as Array<Record<string, unknown>>).find((s) => s.switch) as {
+			switch: { on: string };
+		};
+		expect(sw.switch.on).toBe("js/(ctx.request.body.kind || 'unknown').toLowerCase()");
+		return {
+			name: "switch-e2e",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{
+					id: "route",
+					switch: {
+						on: sw.switch.on,
+						cases: [
+							{
+								when: "issue",
+								do: [
+									{
+										id: "markIssue",
+										use: "@blokjs/ctx-publish",
+										type: "module",
+										inputs: { name: "ran", value: "ISSUE" },
+									},
+								],
+							},
+							{
+								when: "comment",
+								do: [
+									{
+										id: "markComment",
+										use: "@blokjs/ctx-publish",
+										type: "module",
+										inputs: { name: "ran", value: "COMMENT" },
+									},
+								],
+							},
+						],
+						default: [
+							{
+								id: "markDefault",
+								use: "@blokjs/ctx-publish",
+								type: "module",
+								inputs: { name: "ran", value: "DEFAULT" },
+							},
+						],
+					},
+				},
+			],
+		};
+	}
+
+	it("case-folds a capitalized discriminant to match a lowercase case (#647)", async () => {
+		expect((await bootAndRun(await computedDef(), "Issue")).ran).toBe("ISSUE");
+		expect((await bootAndRun(await computedDef(), "Comment")).ran).toBe("COMMENT");
+		expect((await bootAndRun(await computedDef(), "Project")).ran).toBe("DEFAULT");
 	});
 });
