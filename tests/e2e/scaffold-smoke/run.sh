@@ -151,5 +151,10 @@ SMOKE_PROJECT_DIR="$PROJECT" SMOKE_DEV_LOG="$DEV_LOG" SMOKE_TRIGGERS="$TRIGGERS"
   bun "$ROOT/tests/e2e/scaffold-smoke/smoke.ts"
 CODE=$?
 
+# A failed check without the boot log is undiagnosable in CI — dump it.
+if [ "$CODE" -ne 0 ]; then
+  log "smoke failed — tail of dev.log:"; tail -n 150 "$DEV_LOG"
+fi
+
 [ -n "${SMOKE_KEEP:-}" ] && log "kept scaffold at $PROJECT (dev.log alongside)"
 exit $CODE

@@ -369,16 +369,22 @@ async function run(): Promise<void> {
 	}
 
 	// Runtimes — POST /runtimes/<lang>/hello for each scaffolded sidecar.
-	// A 503 (GRPC_UNAVAILABLE) means the sidecar isn't registered YET — compiled
-	// runtimes (rust/java/csharp) cold-build for minutes under `blokctl dev`, so
-	// poll until the shared deadline instead of false-failing on the first 503.
+	// "Still warming" comes in two shapes, both retried until the shared
+	// deadline instead of false-failing (compiled runtimes cold-build for
+	// minutes under `blokctl dev`):
+	//   503 GRPC_UNAVAILABLE          — sidecar not reachable yet
+	//   502 GRPC_RUNTIME_UNAVAILABLE  — the runner's circuit breaker opened on
+	//       early health-probe failures; it's retryable:true and self-recovers
+	//       on the next successful probe once the sidecar is up.
+	const stillWarming = (r: HttpResp) =>
+		r.status === 503 || (r.status === 502 && r.text.includes("GRPC_RUNTIME_UNAVAILABLE"));
 	const runtimeDeadline = Date.now() + Number(process.env.SMOKE_RUNTIME_WAIT_MS ?? 300_000);
 	for (const kind of runtimeKinds) {
 		if (kind === "node") continue; // node is in-process, no /runtimes route
 		const label = RUNTIME_LABEL[kind] ?? cap(kind);
 		await check("runtime", `POST /runtimes/${kind}/hello`, async () => {
 			let r = await http("POST", `/runtimes/${kind}/hello`, { body: { name: "Blok" }, retries: 40 });
-			while (r.status === 503 && Date.now() < runtimeDeadline) {
+			while (stillWarming(r) && Date.now() < runtimeDeadline) {
 				await sleep(3000);
 				r = await http("POST", `/runtimes/${kind}/hello`, { body: { name: "Blok" }, retries: 3 });
 			}
