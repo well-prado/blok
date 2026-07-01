@@ -1,5 +1,6 @@
 import type { PubSubMessage } from "@blokjs/runner";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { Subscription } from "@google-cloud/pubsub";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { GCPPubSubAdapter } from "../../src/adapters/GCPPubSubAdapter";
 
 /**
@@ -37,10 +38,17 @@ interface GcpTopic {
 	createSubscription(name: string): Promise<unknown>;
 	delete(): Promise<unknown>;
 	get(opts?: { autoCreate?: boolean }): Promise<unknown>;
+	readonly name: string;
+}
+
+interface GcpSubscriptionMetadata {
+	filter?: string | null;
+	deadLetterPolicy?: { deadLetterTopic?: string | null } | null;
 }
 
 interface GcpSubscription {
 	delete(): Promise<unknown>;
+	getMetadata(): Promise<[GcpSubscriptionMetadata]>;
 }
 
 interface GcpPubSubClient {
@@ -85,6 +93,16 @@ d("GCPPubSubAdapter — real GCP Pub/Sub emulator", () => {
 		createdTopics.push(topicName);
 		await topic.createSubscription(subscriptionName);
 		createdSubscriptions.push(subscriptionName);
+	}
+
+	// Create the topic but NOT the subscription — used by the filter /
+	// dead-letter tests, where the adapter itself is expected to provision
+	// the subscription with the requested resource-level config.
+	async function createTopicOnly(topicName: string): Promise<GcpTopic> {
+		if (!testClient) throw new Error("test client not initialised — beforeAll didn't run");
+		const [topic] = await testClient.createTopic(topicName);
+		createdTopics.push(topicName);
+		return topic;
 	}
 
 	afterEach(async () => {
@@ -214,6 +232,148 @@ d("GCPPubSubAdapter — real GCP Pub/Sub emulator", () => {
 
 			await adapter.unsubscribe(subA);
 			await adapter.unsubscribe(subB);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"startFrom 'earliest' issues subscription.seek(epoch) before attaching listeners",
+		async () => {
+			const topic = `blok-test-gcp-replay-${Math.random().toString(36).slice(2)}`;
+			const subscription = `${topic}-sub`;
+			// Sub must exist BEFORE the publish so GCP retains the messages
+			// against it; the adapter then seeks to epoch before delivering.
+			await createTopicAndSub(topic, subscription);
+
+			// Publish 3 messages, then consume + ack all 3 FIRST so the ack
+			// cursor is advanced past them. This defeats the false-positive
+			// the prior review flagged: GCP delivers retained UNACKED messages
+			// on the first pull regardless of any seek, so a never-pulled
+			// subscription would "pass" even with the seek neutered. By acking
+			// first, the only way to see these bytes again is a real rewind of
+			// the cursor.
+			for (let i = 0; i < 3; i++) {
+				await adapter.publish(topic, { n: i });
+			}
+			const drained: number[] = [];
+			await adapter.subscribe({ topic, subscription, durable: true }, async (msg) => {
+				drained.push((msg.body as { n: number }).n);
+				await msg.ack();
+			});
+			await waitFor(() => drained.length === 3, TEST_TIMEOUT_MS - 20_000);
+			await adapter.unsubscribe(subscription);
+			// Let the acks settle in the emulator before we rewind.
+			await new Promise((r) => setTimeout(r, 500));
+
+			// Now spy on the REAL client's seek and re-subscribe with
+			// startFrom 'earliest'. The adapter must call
+			// subscription.seek(new Date(0)) BEFORE attaching the message
+			// listener. This spy is the load-bearing assertion: when the
+			// `await subscription.seek(new Date(0))` line is reverted to a
+			// no-op, seek is never invoked and this test fails.
+			const seekSpy = vi.spyOn(Subscription.prototype, "seek");
+			try {
+				const replayed: number[] = [];
+				await adapter.subscribe({ topic, subscription, durable: true, startFrom: "earliest" }, async (msg) => {
+					replayed.push((msg.body as { n: number }).n);
+					await msg.ack();
+				});
+
+				// The adapter issued a seek to the epoch (retention floor).
+				expect(seekSpy).toHaveBeenCalled();
+				const seekArg = seekSpy.mock.calls[0][0];
+				expect(seekArg).toBeInstanceOf(Date);
+				expect((seekArg as Date).getTime()).toBe(0);
+
+				// Emulator-limitation note (verified live 2026-06-30 against
+				// the emulator at localhost:8085): the GCP emulator ACCEPTS
+				// seek(new Date(0)) — the RPC succeeds — but does NOT rewind
+				// the ack cursor, so already-acked messages are NOT replayed
+				// (second pull returns []). On real GCP Pub/Sub the same call
+				// replays everything still within the retention window. Per
+				// the campaign's partial-support rule we therefore assert the
+				// adapter ISSUES the correct API call rather than faking a
+				// redelivery the emulator cannot produce. `replayed` is left
+				// unasserted for that reason.
+				void replayed;
+
+				await adapter.unsubscribe(subscription);
+			} finally {
+				seekSpy.mockRestore();
+			}
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"startFrom {seq} is rejected — GCP has no sequence-number cursor",
+		async () => {
+			const topic = `blok-test-gcp-seq-${Math.random().toString(36).slice(2)}`;
+			const subscription = `${topic}-sub`;
+			await createTopicAndSub(topic, subscription);
+
+			await expect(
+				adapter.subscribe({ topic, subscription, durable: true, startFrom: { seq: 0 } }, async () => {}),
+			).rejects.toThrow(/seq.*not supported|not supported.*seq/i);
+
+			// The subscription must NOT have been wired up after the reject.
+			// Reach the adapter's private registry via a typed boundary cast
+			// (no `any`, no bracket-key access).
+			const registry = (adapter as unknown as { subscriptions: Map<string, unknown> }).subscriptions;
+			expect(registry.has(subscription)).toBe(false);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"filter provisions the subscription resource with the requested filter",
+		async () => {
+			const topicName = `blok-test-gcp-filter-${Math.random().toString(36).slice(2)}`;
+			const subscription = `${topicName}-sub`;
+			await createTopicOnly(topicName);
+			// The adapter provisions the subscription (it does not pre-exist).
+			createdSubscriptions.push(subscription);
+
+			const filter = 'attributes.type = "urgent"';
+			await adapter.subscribe({ topic: topicName, subscription, durable: true, filter }, async (msg) => {
+				await msg.ack();
+			});
+
+			// Assert the real wire state: the filter round-trips through the
+			// emulator's subscription metadata.
+			if (!testClient) throw new Error("test client not initialised");
+			const [metadata] = await testClient.subscription(subscription).getMetadata();
+			expect(metadata.filter).toBe(filter);
+
+			await adapter.unsubscribe(subscription);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"deadLetterTopic provisions the subscription resource with a dead-letter policy",
+		async () => {
+			const topicName = `blok-test-gcp-dlt-${Math.random().toString(36).slice(2)}`;
+			const dlqName = `blok-test-gcp-dlq-${Math.random().toString(36).slice(2)}`;
+			const subscription = `${topicName}-sub`;
+			await createTopicOnly(topicName);
+			const dlqTopic = await createTopicOnly(dlqName);
+			createdSubscriptions.push(subscription);
+
+			await adapter.subscribe(
+				{ topic: topicName, subscription, durable: true, deadLetterTopic: dlqName },
+				async (msg) => {
+					await msg.ack();
+				},
+			);
+
+			// Assert the real wire state: the dead-letter policy points at the
+			// fully-qualified DLQ topic path.
+			if (!testClient) throw new Error("test client not initialised");
+			const [metadata] = await testClient.subscription(subscription).getMetadata();
+			expect(metadata.deadLetterPolicy?.deadLetterTopic).toBe(dlqTopic.name);
+
+			await adapter.unsubscribe(subscription);
 		},
 		TEST_TIMEOUT_MS,
 	);
