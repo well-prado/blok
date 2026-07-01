@@ -43,7 +43,7 @@ open http://localhost:4000/metrics      # raw Prometheus scrape
 
 What you get out of the box:
 
-- **Prometheus** (`:9090`) scrapes `blok-http:4000`, `blok-grpc:9091`, and
+- **Prometheus** (`:9090`) scrapes `blok-http:4000`, `blok-grpc:9464`, and
   other triggers on `:9464` (see `infra/metrics/prometheus.yml`), and loads
   the alert rules from `/etc/prometheus/rules/`.
 - **Grafana** (`:3000`) is pre-provisioned with the Prometheus, Loki, and Tempo

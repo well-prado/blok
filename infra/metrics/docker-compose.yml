@@ -172,7 +172,6 @@ services:
   #     dockerfile: Dockerfile
   #   ports:
   #     - "4000:4000"
-  #     - "9091:9091"
   #   restart: unless-stopped
   #   logging: # Log to Loki. Enable this to see logs in Grafana.
   #     driver: loki
