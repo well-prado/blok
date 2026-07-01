@@ -134,7 +134,7 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 		defaultGrpcPort: 10002,
 		commands: ["rustc --version"],
 		toolchain: "rustc + cargo",
-		installDeps: "cargo build --release",
+		installDeps: "cargo build --features grpc",
 		startCmd: "cargo run",
 		// The SDK's gRPC server is behind a cargo feature (default = ["http"]),
 		// so a plain `cargo run` compiles it OUT and the sidecar silently boots

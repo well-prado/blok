@@ -649,10 +649,15 @@ function collectFilesRecursive(dir: string, ext: string): string[] {
 
 /**
  * Rust: build the project (this also downloads dependencies).
+ *
+ * Debug profile + grpc feature — the exact configuration `blokctl dev` boots
+ * (`cargo run --features grpc`), so the long cold build happens HERE behind
+ * the spinner instead of inside dev's runtime-readiness window. A release
+ * build would warm nothing dev uses.
  */
 async function setupRust(sdkDir: string, spinner: SpinnerHandler): Promise<void> {
 	spinner.message("Building Rust project (this may take a few minutes on first build)...");
-	await exec("cargo build --release", { cwd: sdkDir, timeout: 600000 });
+	await exec("cargo build --features grpc", { cwd: sdkDir, timeout: 600000 });
 	spinner.message("Rust project built.");
 }
 
