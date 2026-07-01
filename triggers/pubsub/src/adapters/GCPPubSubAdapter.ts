@@ -126,6 +126,19 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 			maxAckDeadline: Duration.from({ seconds: config.ackDeadline || 30 }),
 		});
 
+		// `deadLetterTopic` / `filter` are set at the GCP subscription
+		// resource level — they can only be provisioned at create time (or
+		// via setMetadata for the dead-letter policy). Reconcile them here:
+		// create the subscription with the requested policy, or if it
+		// already exists, verify it matches and throw on a mismatch rather
+		// than silently ignoring the author's intent.
+		await this.reconcileSubscriptionConfig(subscription, subscriptionName, config);
+
+		// Translate `startFrom` into a GCP seek BEFORE attaching listeners,
+		// so replay happens before the streaming pull starts delivering.
+		// GCP seeks by timestamp/snapshot; there is no sequence-number seek.
+		await this.applyStartFrom(subscription, config.startFrom);
+
 		// Message handler
 		const messageHandler = async (gcpMessage: Message) => {
 			// Parse message data
@@ -175,6 +188,84 @@ export class GCPPubSubAdapter implements PubSubAdapter {
 		this.subscriptions.set(subscriptionName, subscription);
 
 		console.log(`[GCPPubSubAdapter] Subscribed to: ${subscriptionName}`);
+	}
+
+	/**
+	 * Translate `startFrom` into a GCP `subscription.seek()`.
+	 *
+	 * - `"latest"` / unset → no-op (streaming pull already delivers only
+	 *   messages published after the subscriber attaches).
+	 * - `"earliest"` → seek to the epoch; GCP clamps to the retention floor
+	 *   and replays everything still retained.
+	 * - `{ timestamp }` (unix seconds) → seek to that wall-clock instant.
+	 * - `{ seq }` → rejected: GCP Pub/Sub has no sequence-number cursor.
+	 */
+	private async applyStartFrom(subscription: Subscription, startFrom: PubSubTriggerOpts["startFrom"]): Promise<void> {
+		if (startFrom === undefined || startFrom === "latest") return;
+		if (startFrom === "earliest") {
+			await subscription.seek(new Date(0));
+			return;
+		}
+		if ("timestamp" in startFrom) {
+			await subscription.seek(new Date(startFrom.timestamp * 1000));
+			return;
+		}
+		// { seq } — GCP Pub/Sub seeks by timestamp or snapshot only; there is
+		// no offset/sequence cursor. Reject loudly instead of silently
+		// dropping the author's replay intent.
+		throw new Error(
+			"[GCPPubSubAdapter] startFrom `{seq}` is not supported — GCP Pub/Sub seeks by timestamp or snapshot only. Use `{timestamp}`, `earliest`, or `latest`.",
+		);
+	}
+
+	/**
+	 * Provision `deadLetterTopic` / `filter` on the subscription resource.
+	 *
+	 * These are create-time properties in GCP. When the subscription does
+	 * not yet exist we create it with the requested policy/filter. When it
+	 * already exists we verify the live metadata matches — `filter` is
+	 * immutable so a mismatch throws; a dead-letter mismatch is patched via
+	 * `setMetadata` (the one field GCP lets you change after creation).
+	 */
+	private async reconcileSubscriptionConfig(
+		subscription: Subscription,
+		subscriptionName: string,
+		config: PubSubTriggerOpts,
+	): Promise<void> {
+		if (!config.deadLetterTopic && !config.filter) return;
+
+		const deadLetterPolicy = config.deadLetterTopic
+			? { deadLetterTopic: this.requireClient().topic(config.deadLetterTopic).name }
+			: undefined;
+
+		const [exists] = await subscription.exists();
+		if (!exists) {
+			// A subscription obtained via `client.subscription(name)` is
+			// detached from its topic and the SDK refuses to `.create()` it
+			// ("Subscriptions can only be created when accessed through
+			// Topics"). Create through the topic instead.
+			await this.requireClient()
+				.topic(config.topic)
+				.createSubscription(subscriptionName, {
+					...(config.filter ? { filter: config.filter } : {}),
+					...(deadLetterPolicy ? { deadLetterPolicy } : {}),
+				});
+			return;
+		}
+
+		const [metadata] = await subscription.getMetadata();
+
+		// `filter` is immutable after creation — a mismatch means the caller
+		// asked for a filter the pre-existing subscription can't honor.
+		if (config.filter && (metadata.filter || "") !== config.filter) {
+			throw new Error(
+				`[GCPPubSubAdapter] subscription "${subscriptionName}" already exists with filter "${metadata.filter || ""}" which differs from the requested filter "${config.filter}". GCP filters are immutable; delete and recreate the subscription.`,
+			);
+		}
+
+		if (deadLetterPolicy && metadata.deadLetterPolicy?.deadLetterTopic !== deadLetterPolicy.deadLetterTopic) {
+			await subscription.setMetadata({ deadLetterPolicy });
+		}
 	}
 
 	/**
