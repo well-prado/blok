@@ -1,5 +1,6 @@
 import child_process from "node:child_process";
 import util from "node:util";
+import { compareSemver } from "./semver-utils.js";
 
 const exec = util.promisify(child_process.exec);
 
@@ -8,6 +9,16 @@ export interface RuntimeInfo {
 	label: string;
 	available: boolean;
 	version?: string;
+	/**
+	 * Minimum toolchain version this SDK's gRPC transport requires, as a bare
+	 * semver (e.g. "3.1.0"). Independent of the detected `version` — it is a
+	 * SEMANTIC floor, not a pin to whatever is installed. Interpreted runtimes
+	 * set it because their gRPC library is a native-build dependency with a
+	 * hard floor (the Ruby `grpc` gem needs Ruby 3.x; PHP's RoadRunner gRPC
+	 * needs PHP 8.2+). Feeds `requiredVersion` in .blok/config.json and gates
+	 * scaffold-time setup with an actionable message.
+	 */
+	minVersion?: string;
 	installHint: string;
 	/**
 	 * Default port retained for back-compat with `.blok/config.json` files
@@ -144,6 +155,10 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 	{
 		kind: "php",
 		label: "PHP",
+		// PHP's gRPC transport is RoadRunner (spiral/roadrunner-grpc, pulled by
+		// `composer install`) + the `rr` binary — NOT the pecl `grpc` extension.
+		// roadrunner-grpc requires PHP 8.2+.
+		minVersion: "8.2.0",
 		installHint: "Install PHP 8.2+ + RoadRunner: https://php.net/downloads (rr: brew install roadrunner)",
 		defaultPort: 9005,
 		defaultGrpcPort: 10005,
@@ -166,7 +181,12 @@ const RUNTIME_DEFINITIONS: Omit<RuntimeInfo, "available" | "version">[] = [
 	{
 		kind: "ruby",
 		label: "Ruby",
-		installHint: "Install Ruby 3.2+: https://ruby-lang.org/en/downloads/",
+		// The Ruby `grpc` gem (in the SDK gemspec, installed by `bundle install`)
+		// is a native build that requires Ruby 3.x — grpc ~> 1.69 dropped 2.x.
+		// macOS ships an EOL system Ruby 2.6, so a floor + clear message avoids a
+		// cryptic gem-compile failure.
+		minVersion: "3.1.0",
+		installHint: "Install Ruby 3.1+: https://ruby-lang.org/en/downloads/ (macOS: brew install ruby)",
 		defaultPort: 9006,
 		defaultGrpcPort: 10006,
 		commands: ["ruby --version", "/opt/homebrew/opt/ruby/bin/ruby --version"],
@@ -253,13 +273,17 @@ export async function detectRuntimes(): Promise<RuntimeInfo[]> {
 			version: undefined,
 		};
 
-		// Check primary command (try all alternatives until one succeeds)
+		// Probe every alternative and keep the HIGHEST version, not the first.
+		// Ruby lists both the system `ruby` (an EOL 2.6 on macOS) and a Homebrew
+		// path; the sidecar runs under the newer one (see setupRuby), so the
+		// higher version is the truthful "what will run" answer.
 		for (const cmd of def.commands) {
 			const output = await tryExec(cmd);
-			if (output) {
-				info.available = true;
-				info.version = parseVersion(output, def.kind);
-				break;
+			if (!output) continue;
+			info.available = true;
+			const parsed = parseVersion(output, def.kind);
+			if (parsed && (!info.version || compareSemver(parsed, info.version) > 0)) {
+				info.version = parsed;
 			}
 		}
 
@@ -294,14 +318,16 @@ export async function detectRuntimeVersion(kind: string): Promise<string | undef
 	const def = RUNTIME_DEFINITIONS.find((r) => r.kind === kind);
 	if (!def) return undefined;
 
+	// Return the HIGHEST version across all probe commands (see detectRuntimes)
+	// so a Homebrew Ruby 3.x is picked over the EOL system Ruby 2.6.
+	let best: string | undefined;
 	for (const cmd of def.commands) {
 		const output = await tryExec(cmd);
-		if (output) {
-			return parseVersion(output, def.kind);
-		}
+		if (!output) continue;
+		const parsed = parseVersion(output, def.kind);
+		if (parsed && (!best || compareSemver(parsed, best) > 0)) best = parsed;
 	}
-
-	return undefined;
+	return best;
 }
 
 /**
