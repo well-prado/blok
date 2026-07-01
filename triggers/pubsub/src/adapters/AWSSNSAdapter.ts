@@ -10,6 +10,7 @@
  * - AWS_REGION: AWS region (default: us-east-1)
  * - AWS_ACCESS_KEY_ID: AWS access key (optional if using IAM roles)
  * - AWS_SECRET_ACCESS_KEY: AWS secret key (optional if using IAM roles)
+ * - AWS_ENDPOINT_URL: override endpoint for both SNS + SQS (LocalStack / ElasticMQ)
  * - SQS_WAIT_TIME_SECONDS: Long polling wait time (default: 20)
  * - SQS_MAX_MESSAGES: Max messages per receive (default: 10)
  */
@@ -40,6 +41,8 @@ interface SNSNotificationEnvelope {
  */
 export interface AWSSNSConfig {
 	region: string;
+	/** Override endpoint for both SNS + SQS (LocalStack / ElasticMQ). */
+	endpoint?: string;
 	waitTimeSeconds?: number;
 	maxNumberOfMessages?: number;
 }
@@ -70,6 +73,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 	constructor(config?: Partial<AWSSNSConfig>) {
 		this.config = {
 			region: config?.region || process.env.AWS_REGION || "us-east-1",
+			endpoint: config?.endpoint ?? process.env.AWS_ENDPOINT_URL,
 			waitTimeSeconds: config?.waitTimeSeconds ?? Number.parseInt(process.env.SQS_WAIT_TIME_SECONDS || "20", 10),
 			maxNumberOfMessages: config?.maxNumberOfMessages ?? Number.parseInt(process.env.SQS_MAX_MESSAGES || "10", 10),
 		};
@@ -87,6 +91,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 
 			this.sqsClient = new SQSClient({
 				region: this.config.region,
+				endpoint: this.config.endpoint,
 			});
 
 			this.connected = true;
@@ -132,6 +137,27 @@ export class AWSSNSAdapter implements PubSubAdapter {
 		}
 		const queueUrl = config.subscription;
 
+		// SQS has no replay: a message is gone once deleted, and a queue only
+		// holds what was delivered after the SNS subscription existed. There is
+		// no earliest/latest/seq/timestamp cursor to honor, so `startFrom` would
+		// be a silent lie. Reject at startup rather than pretend.
+		if (config.startFrom !== undefined) {
+			throw new Error(
+				"[AWSSNSAdapter] `startFrom` is not supported for provider 'aws' — SQS cannot replay retained history. Remove `startFrom` (or use a broker with a durable log such as Kafka / Redis Streams / NATS JetStream).",
+			);
+		}
+
+		// SNS->SQS topology is fan-out at the SNS layer (each subscribed queue
+		// gets its own copy) and competing-consumer WITHIN a single queue (many
+		// pollers share one queue). There is no Kafka-style group rebalancing to
+		// join, so `consumerGroup` has no effect here. Warn so authors don't
+		// expect partition assignment / group semantics.
+		if (config.consumerGroup) {
+			console.warn(
+				`[AWSSNSAdapter] \`consumerGroup\` ("${config.consumerGroup}") has no effect for provider 'aws'. SNS->SQS fan-out is per-subscribed-queue; competing consumers share one SQS queue URL. There is no Kafka-style group rebalancing.`,
+			);
+		}
+
 		// Start polling the SQS queue
 		this.poll(queueUrl, config, handler);
 
@@ -155,6 +181,10 @@ export class AWSSNSAdapter implements PubSubAdapter {
 				QueueUrl: queueUrl,
 				MaxNumberOfMessages: config.maxMessages || this.config.maxNumberOfMessages,
 				WaitTimeSeconds: this.config.waitTimeSeconds,
+				// `ackDeadline` (seconds) → SQS per-receive VisibilityTimeout: how
+				// long a received message is hidden before it reappears if not
+				// deleted. Omitted → SQS falls back to the queue-level default.
+				...(typeof config.ackDeadline === "number" ? { VisibilityTimeout: config.ackDeadline } : {}),
 				MessageAttributeNames: ["All"],
 				AttributeNames: ["All"],
 			});
@@ -285,7 +315,7 @@ export class AWSSNSAdapter implements PubSubAdapter {
 		const moduleName = "@aws-sdk/client-sns";
 		// biome-ignore lint/suspicious/noExplicitAny: SDK loaded at runtime as a peer dep.
 		const sns: any = await import(moduleName);
-		const client = new sns.SNSClient({ region: this.config.region });
+		const client = new sns.SNSClient({ region: this.config.region, endpoint: this.config.endpoint });
 		const isFifo = topic.endsWith(".fifo");
 		const params: Record<string, unknown> = {
 			TopicArn: topic,
