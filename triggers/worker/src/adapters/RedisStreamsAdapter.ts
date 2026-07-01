@@ -18,19 +18,24 @@
  *     in `XPENDING`) for redrive.
  *   - **ack:false**: the consumer reads with NOACK, so Redis never
  *     adds entries to the group's PEL — at-most-once, no leaked pending.
- *   - **Redrive**: there is NO periodic XAUTOCLAIM loop yet. Entries
- *     left pending by a crashed consumer (or a requeue `fail`) are only
- *     reclaimed if an operator runs XAUTOCLAIM out of band.
- *     // ponytail: add a periodic XAUTOCLAIM redrive loop (claim entries
- *     // idle > config.timeout, re-deliver to a live consumer) if
- *     // crash-recovery without operator intervention is needed.
+ *   - **Redrive**: an in-process periodic XAUTOCLAIM loop reclaims stale
+ *     pending entries (idle > `config.timeout`) — left by a crashed
+ *     consumer or a requeue `fail(err, true)` — and re-runs them through
+ *     the handler. Redis bumps each entry's delivery count on every
+ *     claim; once it exceeds `retries + 1` the entry is dead-lettered
+ *     (when `deadLetterQueue` is set) and XACKed. The redrive loop only
+ *     runs when `config.timeout` is set (it IS the idle threshold — with
+ *     no timeout a slow-but-alive handler is indistinguishable from a
+ *     dead one) and NOT under `ack:false` (nothing lands in the PEL).
  *   - **No native delay / priority**: Redis Streams has neither. `addJob`
  *     THROWS on `opts.delay` / `opts.priority` rather than silently
  *     dropping them — use a scheduler trigger for delayed work.
- *   - **Concurrency**: the `concurrency` consumer loops currently share
- *     ONE connection. // ponytail: give each loop its own ioredis
- *     connection if a single blocking XREADGROUP becomes a throughput
- *     bottleneck.
+ *   - **Concurrency**: each of the `concurrency` consumer loops owns a
+ *     DEDICATED ioredis connection (`client.duplicate()`) so their
+ *     blocking XREADGROUP calls run in parallel instead of serializing on
+ *     one shared socket — ioredis requires a separate client per blocking
+ *     command. The shared `this.client` handles non-blocking ops
+ *     (XADD / XACK / XGROUP / XAUTOCLAIM).
  *
  * Requires `ioredis` as a peer dependency:
  *
@@ -56,20 +61,32 @@ export interface RedisStreamsConfig {
 	count: number;
 }
 
+/** One reclaimed/pending entry as `[id, fields, deliveryCount]`. */
+type StreamMessage = [string, string[]];
+
 interface RedisClient {
 	xadd(stream: string, ...args: string[]): Promise<string>;
-	xreadgroup(...args: string[]): Promise<Array<[string, Array<[string, string[]]>]> | null>;
+	xreadgroup(...args: string[]): Promise<Array<[string, Array<StreamMessage>]> | null>;
 	xgroup(...args: string[]): Promise<string>;
 	xack(stream: string, group: string, ...ids: string[]): Promise<number>;
 	xlen(stream: string): Promise<number>;
-	xpending(stream: string, group: string): Promise<unknown>;
+	xpending(stream: string, group: string, ...args: (string | number)[]): Promise<unknown>;
+	// XAUTOCLAIM key group consumer min-idle-time start [COUNT n] →
+	// [cursor, entries[[id, fields]], deletedIds[]].
+	xautoclaim(...args: (string | number)[]): Promise<[string, Array<StreamMessage>, string[]]>;
 	ping(): Promise<string>;
 	quit(): Promise<string>;
+	// Dedicated connection for a blocking consumer loop — ioredis requires a
+	// separate client per concurrent blocking command.
+	duplicate(): RedisClient;
 }
 
 interface QueueRunner {
 	stop: boolean;
 	loops: number;
+	/** Per-loop dedicated connections + the redrive timer, torn down on stop. */
+	conns: RedisClient[];
+	redrive?: ReturnType<typeof setInterval>;
 }
 
 interface QueueStatsCounters {
@@ -121,7 +138,10 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 
 	async disconnect(): Promise<void> {
 		if (!this.connected) return;
-		for (const runner of this.runners.values()) runner.stop = true;
+		for (const runner of this.runners.values()) {
+			runner.stop = true;
+			if (runner.redrive) clearInterval(runner.redrive);
+		}
 		// Wait for in-flight loops to drain.
 		const drainDeadline = Date.now() + 2000;
 		while (Date.now() < drainDeadline) {
@@ -129,6 +149,16 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 			for (const r of this.runners.values()) active += r.loops;
 			if (active === 0) break;
 			await new Promise((r) => setTimeout(r, 50));
+		}
+		// Close each loop's dedicated blocking connection.
+		for (const runner of this.runners.values()) {
+			for (const conn of runner.conns) {
+				try {
+					await conn.quit();
+				} catch {
+					/* ignore */
+				}
+			}
 		}
 		this.runners.clear();
 		try {
@@ -154,18 +184,35 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 			if (!/BUSYGROUP/i.test((err as Error).message)) throw err;
 		}
 
-		const runner: QueueRunner = { stop: false, loops: 0 };
+		const runner: QueueRunner = { stop: false, loops: 0, conns: [] };
 		this.runners.set(stream, runner);
 		this.stats.set(stream, { completed: 0, failed: 0, active: 0 });
 		const stats = this.stats.get(stream) as QueueStatsCounters;
 
 		const concurrency = Math.max(1, config.concurrency ?? 1);
 		for (let i = 0; i < concurrency; i += 1) {
-			void this.runConsumerLoop(stream, group, config, handler, runner, stats);
+			// Each blocking XREADGROUP loop needs its OWN connection — ioredis
+			// serializes commands on a single socket, so N loops sharing one
+			// client would take turns on the BLOCK, giving zero real parallelism.
+			const conn = this.client.duplicate();
+			runner.conns.push(conn);
+			void this.runConsumerLoop(conn, stream, group, config, handler, runner, stats);
+		}
+
+		// Redrive: reclaim entries left pending by a crashed consumer or a
+		// requeue `fail(err, true)`. Gated on `config.timeout` (the idle
+		// threshold) and off under NOACK (nothing lands in the PEL).
+		const noAck = config.ack === false;
+		if (config.timeout && config.timeout > 0 && !noAck) {
+			const minIdle = config.timeout;
+			runner.redrive = setInterval(() => {
+				void this.redriveOnce(stream, group, config, handler, runner, stats, minIdle);
+			}, minIdle);
 		}
 	}
 
 	private async runConsumerLoop(
+		conn: RedisClient,
 		stream: string,
 		group: string,
 		config: WorkerTriggerOpts,
@@ -173,7 +220,6 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 		runner: QueueRunner,
 		stats: QueueStatsCounters,
 	): Promise<void> {
-		if (!this.client) return;
 		// ack:false → at-most-once. NOACK tells Redis to deliver WITHOUT
 		// adding the entry to the group's pending-entries list, so a handler
 		// throw never leaves a leaked pending entry to redrive. NOACK sits
@@ -182,7 +228,7 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 		runner.loops += 1;
 		try {
 			while (!runner.stop) {
-				let entries: Array<[string, Array<[string, string[]]>]> | null = null;
+				let entries: Array<[string, Array<StreamMessage>]> | null = null;
 				try {
 					const readArgs = [
 						"GROUP",
@@ -195,8 +241,10 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 					];
 					if (noAck) readArgs.push("NOACK");
 					readArgs.push("STREAMS", stream, ">");
-					entries = await this.client.xreadgroup(...readArgs);
-				} catch (err) {
+					// Blocking read on this loop's OWN connection so `concurrency`
+					// loops don't serialize on a single shared socket.
+					entries = await conn.xreadgroup(...readArgs);
+				} catch {
 					await new Promise((r) => setTimeout(r, 1000));
 					continue;
 				}
@@ -204,84 +252,164 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 				for (const [, msgs] of entries) {
 					for (const [id, fields] of msgs) {
 						if (runner.stop) break;
-						stats.active += 1;
-						try {
-							const payload = this.fieldsToObject(fields);
-							const dataString = typeof payload.data === "string" ? payload.data : "";
-							let data: unknown;
-							try {
-								data = dataString.length > 0 ? JSON.parse(dataString) : null;
-							} catch {
-								data = dataString;
-							}
-							// ACK exactly once. complete() and fail() both route through
-							// this guard so a handler that calls job.complete() AND
-							// returns (or fails after completing) never double-ACKs or
-							// double-counts. Under NOACK there's nothing in the PEL to
-							// ACK, but the guard still keeps the counters honest.
-							let acked = false;
-							const ackOnce = async (): Promise<void> => {
-								if (acked) return;
-								acked = true;
-								if (!noAck) await this.client?.xack(stream, group, id);
-							};
-							const job: WorkerJob = {
-								id,
-								data,
-								headers: {},
-								queue: stream,
-								priority: config.priority ?? 0,
-								attempts: 0,
-								maxRetries: config.retries ?? 0,
-								createdAt: new Date(Number.parseInt(id.split("-")[0] ?? String(Date.now()), 10)),
-								timeout: config.timeout,
-								raw: { id, fields },
-								complete: async () => {
-									if (acked) return;
-									await ackOnce();
-									stats.completed += 1;
-								},
-								fail: async (_err: Error, requeue?: boolean) => {
-									if (acked) return;
-									stats.failed += 1;
-									if (requeue) {
-										// Leave the entry pending (in the PEL) for redrive.
-										// No-op under NOACK — nothing was tracked.
-										return;
-									}
-									// Terminal failure: dead-letter the original payload to
-									// the DLQ stream, then ACK the source so it isn't
-									// redelivered. No-op DLQ when unset.
-									if (config.deadLetterQueue) {
-										const raw = this.fieldsToObject(fields);
-										await this.client?.xadd(
-											config.deadLetterQueue,
-											"*",
-											"data",
-											raw.data ?? "",
-											"jobId",
-											raw.jobId ?? id,
-										);
-									}
-									await ackOnce();
-								},
-							};
-							await handler(job);
-							// handler (WorkerTrigger.handleJob) owns ACK via complete()/
-							// fail(). The loop no longer ACKs or counts here — doing so
-							// double-ACKed and double-counted every completed job.
-						} catch {
-							stats.failed += 1;
-							// ponytail: entry left pending; no auto-redrive loop yet
-							// (see header). Operator XAUTOCLAIM reclaims it.
-						} finally {
-							stats.active = Math.max(0, stats.active - 1);
-						}
+						await this.processMessage(id, fields, stream, group, config, handler, stats, noAck);
 					}
 				}
 			}
 		} finally {
 			runner.loops -= 1;
+		}
+	}
+
+	/**
+	 * Run one delivered/reclaimed entry through the handler, building the
+	 * `WorkerJob` with the ACK-once guard. Shared by the main consumer loop
+	 * and the redrive loop so both paths ACK / DLQ / count identically.
+	 *
+	 * `attempts` seeds `job.attempts` (0 on first delivery, the redrive
+	 * delivery-count on reclaim) so `WorkerTrigger.handleJob` routes to the DLQ
+	 * once retries are exhausted instead of requeueing forever.
+	 */
+	private async processMessage(
+		id: string,
+		fields: string[],
+		stream: string,
+		group: string,
+		config: WorkerTriggerOpts,
+		handler: (job: WorkerJob) => Promise<void>,
+		stats: QueueStatsCounters,
+		noAck: boolean,
+		attempts = 0,
+	): Promise<void> {
+		stats.active += 1;
+		try {
+			const payload = this.fieldsToObject(fields);
+			const dataString = typeof payload.data === "string" ? payload.data : "";
+			let data: unknown;
+			try {
+				data = dataString.length > 0 ? JSON.parse(dataString) : null;
+			} catch {
+				data = dataString;
+			}
+			// ACK exactly once. complete() and fail() both route through this
+			// guard so a handler that calls job.complete() AND returns (or fails
+			// after completing) never double-ACKs or double-counts. Under NOACK
+			// there's nothing in the PEL to ACK, but the guard still keeps the
+			// counters honest.
+			let acked = false;
+			const ackOnce = async (): Promise<void> => {
+				if (acked) return;
+				acked = true;
+				if (!noAck) await this.client?.xack(stream, group, id);
+			};
+			const dlq = async (): Promise<void> => {
+				if (config.deadLetterQueue) {
+					const raw = this.fieldsToObject(fields);
+					await this.client?.xadd(config.deadLetterQueue, "*", "data", raw.data ?? "", "jobId", raw.jobId ?? id);
+				}
+				await ackOnce();
+			};
+			const job: WorkerJob = {
+				id,
+				data,
+				headers: {},
+				queue: stream,
+				priority: config.priority ?? 0,
+				attempts,
+				maxRetries: config.retries ?? 0,
+				createdAt: new Date(Number.parseInt(id.split("-")[0] ?? String(Date.now()), 10)),
+				timeout: config.timeout,
+				raw: { id, fields },
+				complete: async () => {
+					if (acked) return;
+					await ackOnce();
+					stats.completed += 1;
+				},
+				fail: async (_err: Error, requeue?: boolean) => {
+					if (acked) return;
+					stats.failed += 1;
+					if (requeue) {
+						// Leave the entry pending (in the PEL) — the redrive loop
+						// reclaims it once it's idle > timeout. No-op under NOACK.
+						return;
+					}
+					// Terminal failure: dead-letter then ACK the source. No-op DLQ
+					// when unset.
+					await dlq();
+				},
+			};
+			await handler(job);
+			// handler (WorkerTrigger.handleJob) owns ACK via complete()/fail().
+		} catch {
+			stats.failed += 1;
+			// Handler threw without settling — leave the entry pending; the
+			// redrive loop reclaims and retries it.
+		} finally {
+			stats.active = Math.max(0, stats.active - 1);
+		}
+	}
+
+	/**
+	 * One redrive pass: XAUTOCLAIM entries idle longer than `minIdle` (a
+	 * crashed consumer or a requeue `fail`) back to this consumer, then re-run
+	 * each. Redis bumps each entry's delivery count on every claim; once it
+	 * exceeds `retries + 1` the entry is dead-lettered and ACKed rather than
+	 * reclaimed again forever.
+	 */
+	private async redriveOnce(
+		stream: string,
+		group: string,
+		config: WorkerTriggerOpts,
+		handler: (job: WorkerJob) => Promise<void>,
+		runner: QueueRunner,
+		stats: QueueStatsCounters,
+		minIdle: number,
+	): Promise<void> {
+		if (runner.stop || !this.client) return;
+		try {
+			// XAUTOCLAIM key group consumer min-idle-time start [COUNT n].
+			const [, claimed] = await this.client.xautoclaim(
+				stream,
+				group,
+				this.consumerName,
+				minIdle,
+				"0",
+				"COUNT",
+				this.config.count,
+			);
+			if (!claimed || claimed.length === 0) return;
+			// Delivery counts for exactly the claimed ids. Bracket XPENDING by
+			// the min/max claimed id (XAUTOCLAIM returns them id-ascending) so
+			// the window can't miss any (XPENDING extended row:
+			// [id, consumer, idleMs, deliveryCount]).
+			const minId = claimed[0][0];
+			const maxId = claimed[claimed.length - 1][0];
+			const pending = (await this.client.xpending(stream, group, minId, maxId, claimed.length)) as Array<
+				[string, string, number, number]
+			>;
+			const deliveries = new Map<string, number>();
+			for (const p of pending) deliveries.set(p[0], Number(p[3] ?? 1));
+			const maxDeliveries = (config.retries ?? 0) + 1;
+			for (const [id, fields] of claimed) {
+				if (runner.stop) break;
+				const count = deliveries.get(id) ?? 1;
+				if (count > maxDeliveries) {
+					// Exhausted: dead-letter (when configured) then ACK so it stops
+					// being reclaimed. Mirrors processMessage's terminal path.
+					if (config.deadLetterQueue) {
+						const raw = this.fieldsToObject(fields);
+						await this.client.xadd(config.deadLetterQueue, "*", "data", raw.data ?? "", "jobId", raw.jobId ?? id);
+					}
+					await this.client.xack(stream, group, id);
+					stats.failed += 1;
+					continue;
+				}
+				// attempts = deliveries so far minus this one, so handleJob's
+				// `attempts < maxRetries` budget is honored across redrives.
+				await this.processMessage(id, fields, stream, group, config, handler, stats, false, Math.max(0, count - 1));
+			}
+		} catch {
+			// A transient claim failure (e.g. NOGROUP mid-teardown) — next tick retries.
 		}
 	}
 
@@ -346,7 +474,10 @@ export class RedisStreamsAdapter implements WorkerAdapter {
 
 	async stopProcessing(queue: string): Promise<void> {
 		const runner = this.runners.get(queue);
-		if (runner) runner.stop = true;
+		if (runner) {
+			runner.stop = true;
+			if (runner.redrive) clearInterval(runner.redrive);
+		}
 	}
 
 	isConnected(): boolean {
