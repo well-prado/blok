@@ -348,7 +348,16 @@ export class SqliteRunStore implements RunStore {
 			this.db = new Database(dbPath);
 		}
 
-		// Use exec for pragmas — works in both bun:sqlite and better-sqlite3
+		// Use exec for pragmas — works in both bun:sqlite and better-sqlite3.
+		// `blokctl dev` runs several trigger PROCESSES against one runs.db.
+		// WAL only helps readers — a concurrent WRITER (or the WAL-mode switch
+		// below, which itself takes a write lock at boot) fails instantly with
+		// SQLITE_BUSY ("database is locked") unless told to wait, and that
+		// error bubbles up and fails user workflow runs (seen live: MCP tool
+		// calls + pubsub consumers dying under modest parallel load; janitor/
+		// crash-autoflip setup racing at boot). busy_timeout FIRST — it is
+		// connection-local and takes no lock.
+		this.db.exec("PRAGMA busy_timeout = 5000");
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA synchronous = NORMAL");
 		this.db.exec("PRAGMA foreign_keys = ON");
