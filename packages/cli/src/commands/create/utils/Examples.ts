@@ -88,7 +88,7 @@ Examples:
 9- Worker fan-out: POST /fanout/jobs with body '{items:[...], tenantId?:"..."}' to enqueue N worker jobs (needs --triggers worker; BLOK_WORKER_ADAPTER=in-memory works single-process)
 10- Trigger references (NOT http): workflows/json/{cron-heartbeat,pubsub-on-order}.json demonstrate the cron and pubsub triggers; src/workflows/websocket/events/echo-demo.ts demonstrates websocket — read AGENTS.md "Choosing a trigger" to pick the right one by intent instead of defaulting to HTTP.
 
-For more documentation, visit src/nodes/examples/README.md. The first three examples require a PostgreSQL database to function.
+For more documentation, visit src/nodes/examples/README.md.
 `;
 
 // v2 workflow template — the typed-handle DSL from @blokjs/core. `create workflow`
