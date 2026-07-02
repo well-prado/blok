@@ -52,6 +52,11 @@ const EXCLUDE = new Set([
 function excluded(entryName: string, relDir: string): boolean {
 	if (EXCLUDE.has(entryName)) return true;
 	if (entryName === "bin" && relDir.startsWith("sdks/csharp")) return true;
+	// Never ship key material or real env files (.env.example is fine) —
+	// a stray dev cert in the tarball is scanner bait at best (an inherited
+	// mkcert localhost pem shipped in ≤1.4.1 this way).
+	if (/\.(pem|key|p12|pfx)$/.test(entryName)) return true;
+	if (/^\.env(\.local|\.production)?$/.test(entryName)) return true;
 	return /\.(test|spec)\.[cm]?[jt]sx?$/.test(entryName);
 }
 

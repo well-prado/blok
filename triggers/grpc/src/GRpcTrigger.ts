@@ -36,8 +36,8 @@ export default class GRpcTrigger extends TriggerBase {
 	private server = fastify({
 		http2: true,
 		// https: {
-		//     key: readFileSync("localhost+2-key.pem", "utf8"),
-		//     cert: readFileSync("localhost+2.pem", "utf8"),
+		//     key: readFileSync("server-key.pem", "utf8"),   // e.g. generated with mkcert
+		//     cert: readFileSync("server-cert.pem", "utf8"),
 		// }
 	});
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
