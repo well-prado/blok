@@ -10,8 +10,6 @@ import QueryGeneratorNode from "./db-manager/QueryGeneratorNode";
 import DatabaseUI from "./db-manager/ui";
 import FeedbackUI from "./feedback-ui";
 import ImageCaptureUI from "./image-capture";
-import MastraAgent from "./mastra-agent";
-import WeatherUI from "./mastra-agent/ui";
 import MongoQuery from "./mongodb-query";
 import PostgresQuery from "./postgres-query";
 import SaveImageBase64 from "./save-base64-image";
@@ -36,8 +34,6 @@ const ExampleNodes = {
 	"array-map": ArrayMapNode,
 	"dashboard-charts-generator": DashboardChartsGenerator,
 	"memory-storage": MemoryStorage,
-	"weather-ui": WeatherUI,
-	"mastra-agent": MastraAgent,
 	"mongodb-query": MongoQuery,
 	"feedback-ui": FeedbackUI,
 	"base64-pdf": Base64ToPDF,
