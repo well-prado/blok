@@ -29,10 +29,11 @@ const ASSET_DIRS = [
 	"sdks", // runtime SDK sources vendored into .blok/runtimes/<lang>
 ];
 
-/** Build junk that must never ship (per-language build output + deps). */
+/** Build junk that must never ship (per-language build output + deps + tests). */
 const EXCLUDE = new Set([
 	"node_modules",
 	"dist",
+	"__tests__", // test suites pollute the consumer's test glob + bloat the tarball
 	"target", // rust/java build output
 	"vendor", // php composer
 	".venv",
@@ -48,6 +49,7 @@ function copyDir(src: string, dest: string): void {
 	fs.mkdirSync(dest, { recursive: true });
 	for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
 		if (EXCLUDE.has(entry.name)) continue;
+		if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) continue;
 		const s = path.join(src, entry.name);
 		const d = path.join(dest, entry.name);
 		if (entry.isDirectory()) copyDir(s, d);

@@ -174,8 +174,7 @@ export default workflow("orders.get", { version: "1.0.0",
 ### Wildcard method
 
 `http.any()` matches every verb. Route per-method via a `branch` step on `req.method`
-(use the typed comparator `eq(req.method, "post")`). The [DB Manager example](/d/examples/db-manager)
-uses exactly this shape.
+(use the typed comparator `eq(req.method, "post")`).
 
 ### HTML UI from one workflow
 

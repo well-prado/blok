@@ -131,7 +131,7 @@ describe("HttpTrigger boots with NO hand-listed local nodes (#360/#361)", () => 
 		// Third-party (api-call) + discovered local (eval-load-items) both present.
 		expect(moduleNodes?.has("@blokjs/api-call")).toBe(true);
 		expect(moduleNodes?.has("eval-load-items")).toBe(true);
-		expect(moduleNodes?.has("base64-pdf")).toBe(true); // examples barrel flattened
+		expect(moduleNodes?.has("chat-ui")).toBe(true); // examples barrel flattened
 
 		// (1)+(2): TS workflow — `@blokjs/api-call` (third-party module) resolves
 		// at load, the discovered eval node executes, and its output is the body.
@@ -161,7 +161,9 @@ describe("HttpTrigger boots with NO hand-listed local nodes (#360/#361)", () => 
 		const catalogRes = await app.fetch(new Request("http://localhost/__blok/nodes"));
 		expect(catalogRes.status).toBe(200);
 		const catalog = (await catalogRes.json()) as { nodes: Array<{ name: string; ref: string }>; count: number };
-		expect(catalog.count).toBeGreaterThanOrEqual(50);
+		// Sanity floor, not an exact count — 33 after the 2026-07 dead-example
+		// purge (was ≥50 when the orphaned demo bundles still registered).
+		expect(catalog.count).toBeGreaterThanOrEqual(30);
 		const moduleRefs = catalog.nodes.filter((n) => !n.ref.startsWith("runtime."));
 		expect(moduleRefs.length).toBeGreaterThan(0);
 		for (const entry of moduleRefs) {

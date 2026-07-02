@@ -592,7 +592,13 @@ export async function createProject(opts: OptionValues, version: string, current
 						fsExtra.copySync(`${triggerSrcDir}/AppRoutes.ts`, `${triggerDestDir}/AppRoutes.ts`);
 					}
 					if (fsExtra.existsSync(`${triggerSrcDir}/workflows`)) {
-						fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`);
+						// Exclude the trigger's OWN dev/test fixtures (registered only by the
+						// trigger's in-repo Workflows.ts, which scaffolds don't ship). Copied
+						// verbatim they look like working examples but never register (#669).
+						const devFixtures = /\/(countries-helper|countries-cats-helper|empty)\.ts$|\/workflows\/eval(\/|$)/;
+						fsExtra.copySync(`${triggerSrcDir}/workflows`, `${dirPath}/src/workflows/${triggerKind}`, {
+							filter: (src: string) => !devFixtures.test(src),
+						});
 					}
 				}
 			}
