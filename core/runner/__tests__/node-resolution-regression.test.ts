@@ -65,8 +65,9 @@ describe("node-resolution regression net (#352)", () => {
 	});
 
 	it("registers a non-trivial corpus (guards against an empty/partial import)", () => {
-		// 26 helper nodes + api-call + if-else + 3 local + 3 eval + 20 examples.
-		expect(corpusKeys.length).toBeGreaterThanOrEqual(50);
+		// 26 helper nodes + api-call + if-else + 3 local + 3 eval + 1 example
+		// (chat-ui — the 2026-07 purge removed the 17 orphaned demo nodes).
+		expect(corpusKeys.length).toBeGreaterThanOrEqual(30);
 		// Every HELPER_NODES key + every ExampleNodes name is present in the
 		// shipped corpus — the spreads in Nodes.ts didn't silently drop any.
 		for (const key of Object.keys(HELPER_NODES)) {
@@ -100,12 +101,15 @@ describe("node-resolution regression net (#352)", () => {
 			await expect(config.resolve(step("api-call"))).rejects.toThrow(/Node api-call not found/);
 		});
 
-		it("(c) arbitrary divergence  →  base64-pdf and save-image", async () => {
-			// folder base64-pdf / import Base64ToPDF, folder save-base64-image / import SaveImageBase64.
-			const pdf = await config.resolve(step("base64-pdf"));
-			expect((pdf as RunnerNode).node).toBe("base64-pdf");
-			const img = await config.resolve(step("save-image"));
-			expect((img as RunnerNode).node).toBe("save-image");
+		it("(c) arbitrary divergence  →  chat-ui and eval-load-items", async () => {
+			// Import name diverges from the registered key: import ChatUI →
+			// "chat-ui" (examples barrel); the eval barrel's map keys diverge from
+			// their file names too. (Was base64-pdf/save-image before the 2026-07
+			// purge removed those orphaned demo nodes.)
+			const ui = await config.resolve(step("chat-ui"));
+			expect((ui as RunnerNode).node).toBe("chat-ui");
+			const evalNode = await config.resolve(step("eval-load-items"));
+			expect((evalNode as RunnerNode).node).toBe("eval-load-items");
 		});
 	});
 
