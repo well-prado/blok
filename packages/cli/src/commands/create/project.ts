@@ -46,7 +46,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v1.2.0";
+const GITHUB_REPO_RELEASE_TAG = "v1.3.0";
 
 /**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
@@ -832,7 +832,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^1.2.0";
+		const BLOKJS_DEP_RANGE = "^1.3.0";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
