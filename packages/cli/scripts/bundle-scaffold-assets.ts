@@ -38,21 +38,30 @@ const EXCLUDE = new Set([
 	"vendor", // php composer
 	".venv",
 	"__pycache__",
-	"obj", // dotnet
-	"bin", // dotnet/go build output
+	"obj", // dotnet build output
 	".gradle",
 	"coverage",
 	".nx",
 ]);
 
-function copyDir(src: string, dest: string): void {
+// `bin/` must ONLY be excluded as dotnet build output under sdks/csharp —
+// the interpreted SDKs ship their ENTRYPOINTS there (python3 bin/serve.py,
+// ruby bin/serve.rb, php bin/serve.php). A blanket "bin" exclusion shipped
+// sidecars that could not start (v1.4.0 post-publish gate: php/ruby/python3
+// all 502 breaker-open).
+function excluded(entryName: string, relDir: string): boolean {
+	if (EXCLUDE.has(entryName)) return true;
+	if (entryName === "bin" && relDir.startsWith("sdks/csharp")) return true;
+	return /\.(test|spec)\.[cm]?[jt]sx?$/.test(entryName);
+}
+
+function copyDir(src: string, dest: string, relDir: string): void {
 	fs.mkdirSync(dest, { recursive: true });
 	for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-		if (EXCLUDE.has(entry.name)) continue;
-		if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) continue;
+		if (excluded(entry.name, relDir)) continue;
 		const s = path.join(src, entry.name);
 		const d = path.join(dest, entry.name);
-		if (entry.isDirectory()) copyDir(s, d);
+		if (entry.isDirectory()) copyDir(s, d, `${relDir}/${entry.name}`);
 		else if (entry.isFile()) fs.copyFileSync(s, d);
 		// symlinks skipped — none of the asset dirs should contain any
 	}
@@ -65,7 +74,7 @@ for (const rel of ASSET_DIRS) {
 		console.error(`bundle-scaffold-assets: missing asset dir ${rel} — asset list out of date?`);
 		process.exit(1);
 	}
-	copyDir(src, path.join(DEST, rel));
+	copyDir(src, path.join(DEST, rel), rel);
 }
 
 const sizeKb = (() => {
