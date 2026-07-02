@@ -117,6 +117,12 @@ log "runtimes: ${RUNTIMES:-(none detected — TypeScript/node only)}"
 # ── 3. build (so the --local scaffold links current dist) ─────────────────────
 if [ -n "$PUBLISHED" ]; then
   log "post-publish mode: scaffolding with published blokctl@$PUBLISHED (no local build)"
+  # The smoke DRIVER (smoke.ts) still runs from the repo and imports
+  # @blokjs/trigger-grpc — build just that client dep (its workspace link
+  # has no dist on a fresh checkout).
+  (cd "$ROOT" && bunx nx run @blokjs/trigger-grpc:build) >/tmp/blok-smoke-grpc-build.log 2>&1 || {
+    log "driver dep build failed — tail of /tmp/blok-smoke-grpc-build.log:"; tail -20 /tmp/blok-smoke-grpc-build.log; exit 1;
+  }
 elif [ -z "${SMOKE_SKIP_BUILD:-}" ]; then
   log "building the monorepo (SMOKE_SKIP_BUILD=1 to skip)…"
   (cd "$ROOT" && bun run build) >/tmp/blok-smoke-build.log 2>&1 || {
