@@ -76,11 +76,8 @@ const JSON_WORKFLOWS: ScaffoldWorkflow[] = [
 		relPath: "workflows/json/countries-vs-facts.json",
 		expectedTrigger: "http",
 	},
-	{
-		label: "Root / weather.json (--examples)",
-		relPath: "workflows/json/weather.json",
-		expectedTrigger: "http",
-	},
+	// weather.json (Mastra demo) was removed in #670 — it shipped without its
+	// @mastra/core dep and never worked.
 ];
 
 function loadJsonWorkflow(absPath: string): unknown {
