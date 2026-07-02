@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import simpleGit, { type SimpleGit } from "simple-git";
@@ -105,9 +106,12 @@ export function readFrameworkTag(projectRoot: string): string | null {
  * project's framework version so the SDK's gRPC proto is compatible.
  *
  * - `localOverride` (from `--local`) wins; validated to contain `sdks/`.
- * - Otherwise the project's pinned version tag is cloned (shallow) into a
- *   per-version cache under `~/.blok/sdk-src/<tag>` and reused on subsequent
- *   adds. A missing/unreleased tag throws with `--local` guidance.
+ * - Then the assets bundled into the built package (dist/scaffold-repo) —
+ *   version-matched by construction, no network, no repo access needed.
+ * - Last resort (running from source without a build): the project's pinned
+ *   version tag is cloned (shallow) into a per-version cache under
+ *   `~/.blok/sdk-src/<tag>`. A missing/unreleased tag throws with `--local`
+ *   guidance.
  */
 export async function resolveSdkSource(
 	projectRoot: string,
@@ -121,6 +125,11 @@ export async function resolveSdkSource(
 		}
 		return resolved;
 	}
+
+	// dist/commands/runtime/shared.js → dist/scaffold-repo (see
+	// scripts/bundle-scaffold-assets.ts).
+	const bundled = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../scaffold-repo");
+	if (fs.existsSync(path.join(bundled, "sdks"))) return bundled;
 
 	const tag = readFrameworkTag(projectRoot);
 	if (!tag) {

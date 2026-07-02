@@ -1,6 +1,7 @@
 import child_process from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import util from "node:util";
 import * as p from "@clack/prompts";
 import type { OptionValues } from "commander";
@@ -47,6 +48,11 @@ const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
 const GITHUB_REPO_RELEASE_TAG = "v1.3.0";
+// Scaffold assets bundled into the built package by scripts/
+// bundle-scaffold-assets.ts — repo-relative layout, so it substitutes for a
+// repo checkout. Compiled location: dist/commands/create/project.js →
+// dist/scaffold-repo.
+const BUNDLED_SCAFFOLD_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../scaffold-repo");
 
 /**
  * Cross-runtime hello-world example workflows shipped with `--examples`, keyed
@@ -373,15 +379,23 @@ export async function createProject(opts: OptionValues, version: string, current
 
 		if (!skipPrompts) s.message("Gathering project files");
 
-		// Determine the repo source: local path or cloned remote
-		const repoSource = localRepoPath ? path.resolve(localRepoPath) : GITHUB_REPO_LOCAL;
-
+		// Determine the repo source: --local path > assets bundled into the
+		// built package (dist/scaffold-repo, see scripts/bundle-scaffold-assets.ts)
+		// > git clone (only reachable when running the CLI from source without a
+		// build — a published blokctl always carries the bundle). The clone made
+		// `create` require network + repo access and broke every machine without
+		// it (caught by the v1.3.0 post-publish gate).
+		let repoSource: string;
 		if (localRepoPath) {
+			repoSource = path.resolve(localRepoPath);
 			if (!fsExtra.existsSync(repoSource)) {
 				throw new Error(`Local repo path not found: ${repoSource}`);
 			}
 			console.log(color.dim(`  Using local repo: ${repoSource}`));
+		} else if (fsExtra.existsSync(BUNDLED_SCAFFOLD_REPO)) {
+			repoSource = BUNDLED_SCAFFOLD_REPO;
 		} else {
+			repoSource = GITHUB_REPO_LOCAL;
 			const githubLocalExists = fsExtra.existsSync(GITHUB_REPO_LOCAL);
 			if (githubLocalExists) {
 				fsExtra.removeSync(GITHUB_REPO_LOCAL);

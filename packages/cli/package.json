@@ -24,7 +24,7 @@
 		"install:local": "npm link",
 		"uninstall:local": "npm rm --global blokctl",
 		"dev": "npm run uninstall:local && npm run install:local && npm run build:dev && blokctl --help",
-		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/ && if [ -d ../../apps/studio/dist ]; then cp -r ../../apps/studio/dist ./dist/studio-dist; fi",
+		"postbuild": "cp -r ./src/commands/monitor/static ./dist/commands/monitor/ && bun scripts/bundle-scaffold-assets.ts && if [ -d ../../apps/studio/dist ]; then cp -r ../../apps/studio/dist ./dist/studio-dist; fi",
 		"build:studio": "bun run --filter @blokjs/studio build && cp -r ../../apps/studio/dist ./dist/studio-dist"
 	},
 	"keywords": ["blokctl", "cli", "blok", "blok"],
