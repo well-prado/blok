@@ -1338,6 +1338,10 @@ export async function createProject(opts: OptionValues, version: string, current
 	} catch (error) {
 		if (!skipPrompts) s.stop((error as Error).message);
 		if (skipPrompts) console.log((error as Error).message);
+		// A failed scaffold must FAIL the process — this catch used to swallow
+		// everything (clone 404s, registry lag, install failures) and exit 0,
+		// which let CI boot a project that was never created (#648 gate run 1).
+		process.exitCode = 1;
 	}
 }
 

@@ -141,6 +141,11 @@ if ! (cd "$WORKDIR" && run_cli create project \
       --examples --package-manager bun --non-interactive </dev/null) >"$WORKDIR/scaffold.log" 2>&1; then
   log "scaffold failed — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
 fi
+# Belt for CLIs that swallow scaffold failures with exit 0 (pre-1.3.1 create
+# did exactly that): no project dir = failed scaffold, whatever the exit code.
+if [ ! -d "$PROJECT" ]; then
+  log "scaffold exited 0 but produced no project — tail of scaffold.log:"; tail -20 "$WORKDIR/scaffold.log"; exit 1
+fi
 
 # ── 5. boot `blokctl dev` (own process group so cleanup kills the tree) ───────
 DEV_LOG="$WORKDIR/dev.log"
