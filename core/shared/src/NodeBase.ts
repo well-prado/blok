@@ -83,6 +83,13 @@ export default abstract class NodeBase {
 		minTimeoutInMs?: number;
 		maxTimeoutInMs?: number;
 		factor?: number;
+		/**
+		 * Error names that never retry. When a thrown or soft error (or any
+		 * wrapped `cause`) carries one of these names — `Error.name` or
+		 * `GlobalError.context.name` — the step fails on the current attempt
+		 * without further retries or backoff.
+		 */
+		nonRetryableErrorNames?: string[];
 	};
 
 	/**

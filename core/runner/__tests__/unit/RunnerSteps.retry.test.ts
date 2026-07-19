@@ -1,4 +1,4 @@
-import type { Context, ResponseContext } from "@blokjs/shared";
+import { type Context, GlobalError, type ResponseContext } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Runner from "../../src/Runner";
 import RunnerNode from "../../src/RunnerNode";
@@ -232,5 +232,129 @@ describe("RunTracker — replay lineage", () => {
 
 		// The original carries no replayOf — it was triggered, not replayed.
 		expect(tracker.getRun(original.id)?.replayOf).toBeUndefined();
+	});
+});
+
+class NamedThrowNode extends RunnerNode {
+	public attempts = 0;
+	constructor(
+		name: string,
+		private readonly buildError: () => unknown,
+	) {
+		super();
+		this.name = name;
+		this.node = name;
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		this.attempts += 1;
+		throw this.buildError();
+	}
+}
+
+class SoftNamedErrorNode extends RunnerNode {
+	public attempts = 0;
+	constructor(name: string) {
+		super();
+		this.name = name;
+		this.node = name;
+		this.type = "module";
+		this.active = true;
+	}
+	async run(_ctx: Context): Promise<ResponseContext> {
+		this.attempts += 1;
+		return {
+			success: false,
+			data: null,
+			error: { name: "VALIDATION_FAILED", message: "soft 400" } as unknown as ResponseContext["error"],
+		};
+	}
+}
+
+describe("RunnerSteps — selective retry (nonRetryableErrorNames)", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		vi.useFakeTimers({ toFake: ["setTimeout"] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		RunTracker.resetInstance();
+	});
+
+	const NON_RETRYABLE = {
+		maxAttempts: 3,
+		minTimeoutInMs: 1,
+		factor: 1,
+		nonRetryableErrorNames: ["VALIDATION_FAILED", "SNAPSHOT_CHANGED"],
+	};
+
+	async function runToRejection(node: NamedThrowNode | SoftNamedErrorNode): Promise<void> {
+		const runner = new Runner([node]);
+		const promise = runner.run(ctxWithTracing(`wf-${node.name}`).ctx);
+		promise.catch(() => {});
+		await vi.runAllTimersAsync();
+		await expect(promise).rejects.toBeDefined();
+	}
+
+	it("a thrown GlobalError whose context name is declared non-retryable gets exactly one attempt", async () => {
+		const node = new NamedThrowNode("global-409", () => {
+			const error = new GlobalError("immutable conflict");
+			error.setCode(409);
+			error.setName("SNAPSHOT_CHANGED");
+			return error;
+		});
+		node.retry = NON_RETRYABLE;
+		await runToRejection(node);
+		expect(node.attempts).toBe(1);
+	});
+
+	it("a plain Error carrying a declared non-retryable name gets exactly one attempt", async () => {
+		const node = new NamedThrowNode("plain-400", () => {
+			const error = new Error("bad input");
+			error.name = "VALIDATION_FAILED";
+			return error;
+		});
+		node.retry = NON_RETRYABLE;
+		await runToRejection(node);
+		expect(node.attempts).toBe(1);
+	});
+
+	it("inspects wrapped causes so an enriched error cannot hide the classification", async () => {
+		const node = new NamedThrowNode("wrapped-409", () => {
+			const inner = new GlobalError("conflict");
+			inner.setName("SNAPSHOT_CHANGED");
+			return new Error("adapter wrapper", { cause: inner });
+		});
+		node.retry = NON_RETRYABLE;
+		await runToRejection(node);
+		expect(node.attempts).toBe(1);
+	});
+
+	it("a soft error (response error object) with a declared name gets exactly one attempt", async () => {
+		const node = new SoftNamedErrorNode("soft-400");
+		node.retry = NON_RETRYABLE;
+		await runToRejection(node);
+		expect(node.attempts).toBe(1);
+	});
+
+	it("errors with undeclared names keep the normal bounded retry/backoff behaviour", async () => {
+		const node = new NamedThrowNode("retryable-503", () => {
+			const error = new GlobalError("dependency down");
+			error.setCode(503);
+			error.setName("KNOWLEDGE_UNAVAILABLE");
+			return error;
+		});
+		node.retry = NON_RETRYABLE;
+		await runToRejection(node);
+		expect(node.attempts).toBe(3);
+	});
+
+	it("normal retry exhaustion is unchanged when the option is absent", async () => {
+		const node = new NamedThrowNode("exhaust", () => new Error("transient"));
+		node.retry = { maxAttempts: 3, minTimeoutInMs: 1, factor: 1 };
+		await runToRejection(node);
+		expect(node.attempts).toBe(3);
 	});
 });

@@ -52,6 +52,7 @@ interface RetryConfig {
 	minTimeoutInMs?: number;
 	maxTimeoutInMs?: number;
 	factor?: number;
+	nonRetryableErrorNames?: string[];
 }
 
 interface InternalStep {

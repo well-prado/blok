@@ -215,6 +215,16 @@
 										"type": "number",
 										"minimum": 1,
 										"description": "Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."
+									},
+									"nonRetryableErrorNames": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 64
+										},
+										"maxItems": 32,
+										"description": "Error names that never retry: when a thrown/soft error (or any wrapped cause) carries one of these names — Error.name or GlobalError.context.name — the step fails on the current attempt without further retries."
 									}
 								},
 								"required": [
@@ -787,6 +797,16 @@
 										"type": "number",
 										"minimum": 1,
 										"description": "Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."
+									},
+									"nonRetryableErrorNames": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 64
+										},
+										"maxItems": 32,
+										"description": "Error names that never retry: when a thrown/soft error (or any wrapped cause) carries one of these names — Error.name or GlobalError.context.name — the step fails on the current attempt without further retries."
 									}
 								},
 								"required": [
