@@ -44,6 +44,32 @@ function computeBackoff(
 }
 
 /**
+ * Selective retry — decide whether an error is declared non-retryable by the
+ * step's `retry.nonRetryableErrorNames`. Inspects the original error name
+ * through wrapped causes: both plain `Error.name` and `GlobalError.context.name`
+ * count, and `cause` chains are walked to a bounded depth so an enriched or
+ * re-thrown error cannot hide a non-retryable classification.
+ */
+function isNonRetryableError(error: unknown, names: string[] | undefined): boolean {
+	if (!names || names.length === 0) return false;
+	let current: unknown = error;
+	for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
+		const candidate = current as { name?: unknown; context?: { name?: unknown }; cause?: unknown };
+		if (typeof candidate.name === "string" && names.includes(candidate.name)) return true;
+		if (
+			candidate.context &&
+			typeof candidate.context === "object" &&
+			typeof candidate.context.name === "string" &&
+			names.includes(candidate.context.name)
+		) {
+			return true;
+		}
+		current = candidate.cause;
+	}
+	return false;
+}
+
+/**
  * Default cap on the JSON-serialized `ctx.state` snapshot taken before
  * a `WaitDispatchRequest` throw. 1 MB matches the existing
  * `BLOK_DISPATCH_PAYLOAD_MAX_BYTES` cap used by the durable scheduler
@@ -730,7 +756,11 @@ export default abstract class RunnerSteps {
 								if (nodeErr instanceof WaitDispatchRequest || nodeErr instanceof RunCancelledError) {
 									throw nodeErr;
 								}
-								if (attempt < maxAttempts && retryConfig) {
+								if (
+									attempt < maxAttempts &&
+									retryConfig &&
+									!isNonRetryableError(nodeErr, retryConfig.nonRetryableErrorNames)
+								) {
 									// More attempts remain — record this as a soft
 									// failure and back off before retrying. The node
 									// stays in `running` status; failNode is the

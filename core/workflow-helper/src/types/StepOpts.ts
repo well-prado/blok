@@ -144,6 +144,13 @@ export const RetryConfigSchema = z
 			.min(1)
 			.optional()
 			.describe("Exponential backoff factor: delay = min(maxTimeout, minTimeout * factor^(attempt-1)). Default 2."),
+		nonRetryableErrorNames: z
+			.array(z.string().min(1).max(64))
+			.max(32)
+			.optional()
+			.describe(
+				"Error names that never retry: when a thrown/soft error (or any wrapped cause) carries one of these names — Error.name or GlobalError.context.name — the step fails on the current attempt without further retries.",
+			),
 	})
 	.refine(
 		(r) => r.minTimeoutInMs === undefined || r.maxTimeoutInMs === undefined || r.minTimeoutInMs <= r.maxTimeoutInMs,
