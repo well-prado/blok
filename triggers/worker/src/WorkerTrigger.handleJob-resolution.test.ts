@@ -16,6 +16,7 @@
 
 import { type WorkflowV2Builder, workflow } from "@blokjs/helper";
 import { type BlokService, Configuration, type TriggerResponse, defineNode } from "@blokjs/runner";
+import { GlobalError, WORKFLOW_INPUT_VALIDATION } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type WorkerJob, WorkerTrigger } from "./WorkerTrigger";
@@ -204,5 +205,37 @@ describe("WorkerTrigger.getWorkerWorkflows — multi-trigger discovery (F11)", (
 		const trigger = new TestWorkerTrigger({ "http-only": httpOnly });
 
 		expect(trigger.discover()).toHaveLength(0);
+	});
+});
+
+/**
+ * ADR 0015 — a deterministic input-validation failure must go straight to
+ * DLQ/terminal (`job.fail(err, false)`), NOT burn the retry budget. We simulate
+ * the gate rejecting by throwing its tagged GlobalError from `run`.
+ */
+class ValidationFailingWorkerTrigger extends TestWorkerTrigger {
+	override async run(): Promise<never> {
+		const err = new GlobalError("Input validation failed: query (Required)");
+		err.setCode(400);
+		err.setName(WORKFLOW_INPUT_VALIDATION);
+		throw err;
+	}
+}
+
+describe("WorkerTrigger.handleJob — validation 400 → DLQ (ADR 0015)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it("routes a tagged validation failure to job.fail(err, false) — terminal, no retry", async () => {
+		const wf = makeWorkerWorkflow("v.wf", "publish");
+		const trigger = new ValidationFailingWorkerTrigger({ "v.wf": wf });
+		const model = trigger.discover()[0];
+
+		// A retry budget EXISTS (maxRetries 3) — the fix must NOT use it.
+		const job = fakeJob({ maxRetries: 3, attempts: 0 });
+		await trigger.callHandleJob(job, model as never);
+
+		expect(job.fail).toHaveBeenCalledTimes(1);
+		expect(job.fail).toHaveBeenCalledWith(expect.any(Error), false); // requeue=false → DLQ/terminal
+		expect(job.complete).not.toHaveBeenCalled();
 	});
 });

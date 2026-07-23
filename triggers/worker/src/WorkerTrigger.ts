@@ -39,7 +39,7 @@ import {
 	WorkflowRegistry,
 	bootstrapTracing,
 } from "@blokjs/runner";
-import type { Context, NodeBase, RequestContext } from "@blokjs/shared";
+import { type Context, type NodeBase, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -192,6 +192,18 @@ interface WorkerWorkflowModel {
  * - Queue statistics and monitoring
  */
 export abstract class WorkerTrigger extends TriggerBase {
+	/**
+	 * ADR 0015 — a worker job's `job.data` IS the producer-supplied input the
+	 * workflow's `input` schema describes, so it is validated. A malformed job
+	 * fails with a deterministic 400 that `handleJob` routes to DLQ (no retry) via
+	 * `isNonRetryableValidationError` — bad jobs don't silently run with undefined
+	 * fields, nor loop. Declare `input` with `.passthrough()` to keep `job.data`
+	 * fields outside the schema.
+	 */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	protected nodeMap: GlobalOptions = {} as GlobalOptions;
 	protected readonly tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-worker-workflow",
@@ -818,6 +830,28 @@ export abstract class WorkerTrigger extends TriggerBase {
 					);
 
 					await job.complete();
+					return;
+				}
+
+				// ADR 0015 — a deterministic input-validation failure (the gate's
+				// tagged GlobalError, or a node's BlokError.validation) will fail
+				// identically on every redelivery. Route it straight to DLQ/terminal
+				// WITHOUT burning the retry budget (which would just replay the same
+				// 400 N times). `job.fail(error, false)` is the terminal contract every
+				// adapter implements (BullMQ moveToFailed, NATS/Kafka/Redis/Rabbit
+				// deadLetterQueue, SQS/pg-boss native DLQ).
+				if (isNonRetryableValidationError(error)) {
+					span.setAttribute("success", false);
+					span.setAttribute("non_retryable", true);
+					span.setStatus({ code: SpanStatusCode.ERROR, message: "validation_failed" });
+					workerErrors.add(1, {
+						env: process.env.NODE_ENV,
+						queue: config.queue,
+						workflow_name: configuration?.name || "unknown",
+						reason: "validation",
+					});
+					this.logger.error(`Job ${jobId} failed input validation (400) → DLQ, no retry: ${errorMessage}`);
+					await job.fail(error as Error, false);
 					return;
 				}
 

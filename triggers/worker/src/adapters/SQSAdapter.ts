@@ -202,14 +202,29 @@ export class SQSAdapter implements WorkerAdapter {
 								stats.completed += 1;
 								settled = true;
 							},
-							fail: async (_err: Error) => {
+							fail: async (_err: Error, requeue?: boolean) => {
 								if (settled) return;
 								stats.failed += 1;
-								// No DeleteMessage call — visibility timeout
-								// expires and SQS returns the message to the
-								// queue automatically. DLQ takeover happens via
-								// the queue's RedrivePolicy + MaxReceiveCount.
 								settled = true;
+								if (requeue === false && m.ReceiptHandle) {
+									// Terminal (non-retryable, e.g. an ADR-0015 validation 400):
+									// route to the configured DLQ, then DELETE so it does not
+									// redeliver until MaxReceiveCount (which would burn the budget).
+									if (config.deadLetterQueue) {
+										await this.client.send(
+											new this.commands.SendMessageCommand({
+												QueueUrl: config.deadLetterQueue,
+												MessageBody: typeof m.Body === "string" ? m.Body : JSON.stringify(m.Body ?? {}),
+											}),
+										);
+									}
+									await this.client.send(
+										new this.commands.DeleteMessageCommand({ QueueUrl: config.queue, ReceiptHandle: m.ReceiptHandle }),
+									);
+									return;
+								}
+								// requeue !== false: leave in flight — the visibility timeout
+								// expires and SQS returns the message (RedrivePolicy → DLQ).
 							},
 						};
 						await handler(job);

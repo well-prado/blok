@@ -72,6 +72,9 @@ const SECRET = "shhh-its-a-secret-1234567890";
 // the same box never collides on the route or the process env slot.
 const SUFFIX = Math.random().toString(36).slice(2);
 const WEBHOOK_PATH = `/webhooks/github-${SUFFIX}`;
+// ADR 0015 — a second workflow declaring a required-field `input` schema, to
+// prove a signed-but-schema-invalid delivery returns a real 400 (not a 200).
+const VALIDATED_PATH = `/webhooks/validated-${SUFFIX}`;
 const SECRET_ENV = `GH_SECRET_${SUFFIX}`;
 
 // Observable side effect of a real workflow run. The fixture node
@@ -126,6 +129,26 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 						idempotencyKey: "js/ctx.request.headers['x-github-delivery']",
 					},
 				},
+				steps: [{ id: "handle", node: "handle-event", type: "module", inputs: {} }],
+				nodes: { handle: { inputs: {} } },
+			},
+		});
+
+		WorkflowRegistry.getInstance().register({
+			name: "gh-validated",
+			source: "/test/gh-validated.json",
+			workflow: {
+				name: "gh-validated",
+				version: "1.0.0",
+				trigger: {
+					webhook: {
+						provider: "github",
+						path: VALIDATED_PATH,
+						secretEnv: SECRET_ENV,
+						idempotencyKey: "js/ctx.request.headers['x-github-delivery']",
+					},
+				},
+				input: z.object({ orderId: z.string() }), // required — a body without it 400s
 				steps: [{ id: "handle", node: "handle-event", type: "module", inputs: {} }],
 				nodes: { handle: { inputs: {} } },
 			},
@@ -198,6 +221,35 @@ describe("WebhookTrigger — v0.7 PR 4 integration (real HTTP)", () => {
 		expect(secondJson.eventId).toBe("delivery-uuid-9");
 		// Still exactly one execution — the replay did not dispatch.
 		expect(EXECUTIONS).toEqual([{ eventId: "delivery-uuid-9" }]);
+	}, 15_000);
+
+	it("ADR 0015 — signed but schema-invalid body → 400 validation_errors, workflow NOT run, delivery NOT cached", async () => {
+		const vUrl = `http://localhost:${TEST_PORT}${VALIDATED_PATH}`;
+		const body = JSON.stringify({ notOrderId: "x" }); // missing required `orderId`
+		const reqInit = {
+			method: "POST",
+			headers: {
+				...baseHeaders,
+				"x-hub-signature-256": `sha256=${hmacHex(body)}`, // valid signature — passes auth, reaches the gate
+				"x-github-event": "push",
+				"x-github-delivery": "bad-delivery-1",
+			},
+			body,
+		};
+
+		const res = await fetch(vUrl, reqInit);
+		// Surfaced as a real 400 with the structured body — NOT swallowed to 200 {ok}.
+		expect(res.status).toBe(400);
+		const json = (await res.json()) as { validation_errors?: Array<{ path: unknown[] }> };
+		expect(json.validation_errors?.some((e) => e.path.join(".") === "orderId")).toBe(true);
+		// The workflow body never ran.
+		expect(EXECUTIONS).toEqual([]);
+
+		// Resend the SAME delivery id — must 400 again (NOT a cached "duplicate"),
+		// proving the validation-failed delivery was not marked processed, so the
+		// sender can retry after correcting the payload.
+		const res2 = await fetch(vUrl, reqInit);
+		expect(res2.status).toBe(400);
 	}, 15_000);
 
 	it("TAMPERED body — a valid sig over DIFFERENT bytes is rejected (401), workflow does not run", async () => {

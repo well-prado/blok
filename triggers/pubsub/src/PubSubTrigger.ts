@@ -27,7 +27,7 @@ import {
 	TriggerBase,
 	type TriggerResponse,
 } from "@blokjs/runner";
-import type { Context, NodeBase, RequestContext } from "@blokjs/shared";
+import { type Context, type NodeBase, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
 
@@ -113,6 +113,17 @@ interface PubSubWorkflowModel {
  * PubSubTrigger - Abstract base class for pub/sub-based triggers
  */
 export abstract class PubSubTrigger extends TriggerBase {
+	/**
+	 * ADR 0015 — a pub/sub message body IS producer-supplied input the workflow's
+	 * `input` schema describes, so it is validated. A malformed message fails a
+	 * deterministic 400 that `handleMessage` dead-letters/drops (never nacks into
+	 * a poison loop) via `isNonRetryableValidationError`. Use `.passthrough()` to
+	 * keep message fields outside the schema.
+	 */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	protected nodeMap: GlobalOptions = {} as GlobalOptions;
 	protected readonly tracer = trace.getTracer(
 		process.env.PROJECT_NAME || "trigger-pubsub-workflow",
@@ -407,12 +418,45 @@ export abstract class PubSubTrigger extends TriggerBase {
 					workflow_name: this.configuration?.name || "unknown",
 				});
 
-				this.logger.error(`Failed to process message ${id}: ${errorMessage}`, (error as Error).stack);
+				// ADR 0015 — a deterministic input-validation failure (the gate's
+				// tagged GlobalError, or a node's BlokError.validation) fails
+				// identically on every redelivery. Nacking it forever is a
+				// poison-message loop — NATS/Redis/Kafka have no built-in delivery
+				// cap. ACK to stop redelivery; route to the configured
+				// deadLetterTopic first when set, else drop with a warning.
+				const nonRetryable = isNonRetryableValidationError(error);
+				if (nonRetryable) {
+					if (config.deadLetterTopic) {
+						try {
+							const dlqAdapter = await this.resolveAdapterForWorkflow(config);
+							await dlqAdapter.publish(config.deadLetterTopic, message.body);
+							this.logger.error(
+								`Message ${id} failed input validation (400) → dead-lettered to ${config.deadLetterTopic}: ${errorMessage}`,
+							);
+						} catch (dlqErr) {
+							this.logger.error(
+								`Message ${id} DLQ publish to ${config.deadLetterTopic} failed; dropping to avoid a poison loop: ${(dlqErr as Error).message}`,
+							);
+						}
+					} else {
+						this.logger.error(
+							`Message ${id} failed input validation (400) → dropped, no retry (set trigger.pubsub.deadLetterTopic to retain): ${errorMessage}`,
+						);
+					}
+				} else {
+					this.logger.error(`Failed to process message ${id}: ${errorMessage}`, (error as Error).stack);
+				}
 
-				// Nack message
 				if (config.ack !== false) {
-					await message.nack();
-					this.logger.log(`Message nacked: ${id}`);
+					if (nonRetryable) {
+						// ACK a non-retryable message → consume/commit so the broker
+						// stops redelivering it (also unblocks Kafka's partition head).
+						await message.ack();
+						this.logger.log(`Message ack-dropped (non-retryable validation): ${id}`);
+					} else {
+						await message.nack();
+						this.logger.log(`Message nacked: ${id}`);
+					}
 				}
 			} finally {
 				span.end();

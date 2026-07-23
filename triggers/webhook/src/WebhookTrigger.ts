@@ -61,7 +61,7 @@ import {
 	TriggerBase,
 	WorkflowRegistry,
 } from "@blokjs/runner";
-import type { Context, RequestContext } from "@blokjs/shared";
+import { type Context, type GlobalError, type RequestContext, isNonRetryableValidationError } from "@blokjs/shared";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import type { Hono, Context as HonoContext } from "hono";
 import { v4 as uuid } from "uuid";
@@ -108,6 +108,17 @@ const REPLAY_NAMESPACE = "__webhook__";
 // -----------------------------------------------------------------------------
 
 export default class WebhookTrigger extends TriggerBase {
+	/**
+	 * ADR 0015 — a webhook POST body IS caller-supplied input the workflow's
+	 * `input` schema describes, so it is validated (after signature verification).
+	 * A malformed payload returns a real 4xx with `validation_errors` and is NOT
+	 * cached as processed, so the sender can retry after correcting it. Use
+	 * `.passthrough()` to keep body fields outside the schema.
+	 */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	protected nodeMap: RunnerGlobalOptions = {} as RunnerGlobalOptions;
 	protected readonly logger = new DefaultLogger();
 	protected readonly tracer = trace.getTracer(
@@ -286,19 +297,32 @@ export default class WebhookTrigger extends TriggerBase {
 		// 7. Verified + new event — dispatch the workflow.
 		this.counterAccepted.add(1, { workflow_name: workflowName });
 		const requestId = uuid();
-		const dispatchOutcome = await this.dispatchWorkflow({
-			workflowName,
-			path,
-			config,
-			requestId,
-			headers,
-			body: parsedBody,
-			rawBody,
-			pathParams,
-			queryParams,
-			eventId: result.eventId,
-			eventType: result.eventType,
-		});
+		let dispatchOutcome: unknown;
+		try {
+			dispatchOutcome = await this.dispatchWorkflow({
+				workflowName,
+				path,
+				config,
+				requestId,
+				headers,
+				body: parsedBody,
+				rawBody,
+				pathParams,
+				queryParams,
+				eventId: result.eventId,
+				eventType: result.eventType,
+			});
+		} catch (err) {
+			// ADR 0015 — a deterministic input-validation failure. Reached only
+			// AFTER signature verification, so no unauthenticated exposure. Return a
+			// real 4xx with the structured `validation_errors` body, and DO NOT fall
+			// through to the dedup-cache write below — so the sender may retry the
+			// same delivery after correcting the payload.
+			const ge = err as GlobalError;
+			const code = (ge.context?.code as number | undefined) ?? 400;
+			this.counterRejected.add(1, { workflow_name: workflowName, reason: "validation" });
+			return c.json(ge.hasJson?.() ? (ge.context.json as object) : { error: ge.message }, code as 400);
+		}
 
 		// 8. Cache event id AFTER successful dispatch so retries on the
 		//    same delivery are deduped. We cache even on workflow failure
@@ -412,6 +436,12 @@ export default class WebhookTrigger extends TriggerBase {
 				span.recordException(err as Error);
 				span.setStatus({ code: SpanStatusCode.ERROR, message: msg });
 				this.logger.error(`[blok][webhook] workflow ${workflowName} failed: ${msg}`);
+				// ADR 0015 — surface a deterministic input-validation failure to the
+				// caller as a real 4xx (handled in `handleRequest`) instead of
+				// swallowing it into a 200 body and caching the delivery as processed.
+				// Runtime/other failures keep the "delivery received, the workflow owns
+				// its own retry/DLQ" contract → 200.
+				if (isNonRetryableValidationError(err)) throw err;
 				return { error: msg };
 			} finally {
 				span.end();

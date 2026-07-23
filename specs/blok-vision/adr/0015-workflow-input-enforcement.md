@@ -146,29 +146,59 @@ two real defects — both fixed by the pure predicate `shouldRunInputGate`
    side and not when a job fires it. Any trigger kind, present or future,
    defaults to not-validating until it opts in.
 
-### Why the scope is http/mcp/grpc — and NOT the other triggers
+### Scope: which triggers validate, and why
 
-An attempt to extend validation to *every* request-carrying trigger was
-adversarially audited and **reverted**: for a trigger to safely body-validate,
-its `ctx.request.body` must genuinely be the caller/producer payload the schema
-describes **and** a thrown 400 must surface as a real rejection. Only http / mcp
-/ grpc satisfy both. The others fail one or the other — validating them is a
-regression, not a feature:
+For a trigger to safely body-validate, its `ctx.request.body` must genuinely be
+the caller/producer payload the schema describes **and** a thrown 400 must reach
+a real rejection rather than a retry loop or a swallowed 200. An initial attempt
+to switch this on for *every* request-carrying trigger was adversarially audited
+and reverted; the failure modes it surfaced were then **fixed**, which is what
+lets worker/pubsub/webhook join the scope safely.
+
+**IN — validates declared `input`:**
+
+| Trigger | Body is caller input | What makes a 400 safe |
+|---|---|---|
+| **http / mcp / grpc** | request body / tool args / message | transports already render a 400 / `isError` / error status |
+| **worker** | `job.data` | validation 400 is terminal → DLQ **without** burning the retry budget |
+| **pubsub** | `message.body` | validation 400 → dead-letter (or ack-drop), never an unbounded nack loop |
+| **webhook** | POST body (post-signature) | validation 400 → real 4xx + the delivery is **not** cached as processed |
+
+**OUT — body is not caller input (validating would break them):**
 
 | Trigger | Why excluded |
 |---|---|
-| **cron** | `ctx.request.body` is framework tick metadata (`{ jobId, scheduledTime, … }`), never caller input — a required-field schema would 400 **every tick**. |
-| **sse** | Sets `ctx.request.body = {}` (hardcoded); the caller's data is in query/headers. A required-field schema 400s **every connection**. |
-| **websocket** | One workflow handles connect/message/disconnect, each a *different* framework-shaped body; only `message` carries caller data (and it's enveloped). A single flag can't distinguish them, so a schema fitting one 400s the others — and a 400 on `connect` aborts the auth handler while the socket stays open. |
-| **worker** | `job.data` *is* producer input, but a deterministic validation 400 burns the retry budget before DLQ — a new poison-message failure mode. Safe inclusion needs non-retryable-error → immediate-DLQ discrimination. |
-| **pubsub** | `message.body` *is* producer input, but the base catch nacks unconditionally with no DLQ/attempt-cap → **unbounded redelivery loop** on NATS/Redis. Same fix needed as worker, plus per-adapter DLQ. |
-| **webhook** | POST body *is* caller input, but the trigger's catch turns a thrown 400 into `200 {status:"ok"}` and marks the delivery processed — validation would silently drop the run. Needs error-surfacing first. |
+| **cron** | body is framework tick metadata (`{ jobId, scheduledTime, … }`) — a required-field schema would 400 **every tick**. Permanently out; a tick has no caller input. |
+| **sse** | body is a hardcoded `{}`; the caller's data is in query/headers. A required-field schema would 400 **every connection**. Needs a *different* surface (validate query/params). |
+| **websocket** | one workflow handles connect/message/disconnect, each a different framework-shaped body; only `message` carries caller data (enveloped). A single flag can't distinguish them, and a 400 on `connect` aborts the auth handler while the socket stays open. Needs per-event schemas. |
 
-**Follow-up (separate, deliberate feature):** worker/pubsub/webhook can join the
-scope once (a) a validation 400 is classified non-retryable and routed to
-DLQ/drop instead of redelivered, and (b) webhook surfaces the 400. SSE/WebSocket
-need a *different* surface (validate query/params for SSE; per-event schemas for
-WS), not body validation. Cron is permanently out — a tick has no caller input.
+### Making worker/pubsub/webhook safe (the enabling work)
+
+A shared classifier marks the gate's failure terminal, and each trigger routes it
+instead of looping/swallowing:
+
+- **`WORKFLOW_INPUT_VALIDATION` tag + `isNonRetryableValidationError`**
+  (`core/shared/src/BlokError.ts`). The gate stamps `context.name` with the tag;
+  the classifier matches **only** that. Deliberately narrow — a node's own
+  `BlokError.validation()` keeps its existing retry/nack/200 handling, so this
+  changes no pre-existing error semantics (and never surfaces a node error's
+  stack/contextSnapshot through the webhook 4xx).
+- **Worker** — `handleJob` routes a tagged failure to `job.fail(err, false)`
+  (terminal) instead of the attempt-counter path. That contract was only honoured
+  by some adapters, so three were fixed: **BullMQ** (`discard()` + re-throw, so
+  BullMQ's own handler records the *real* error with its correct lock token —
+  `moveToFailed` here always threw `Lock mismatch` because `job.token` is never
+  set), **SQS** (DLQ-send then `DeleteMessage` instead of letting the visibility
+  timeout redeliver), **pg-boss** (resolve instead of throw, so pg-boss does not
+  retry). InMemory/NATS/RabbitMQ/Kafka/Redis were already terminal.
+- **Pub/Sub** — `handleMessage` publishes to `deadLetterTopic` when configured,
+  then **ACKs** (universally stops redelivery, incl. unblocking Kafka's partition
+  head) rather than nacking into an unbounded loop. Non-validation errors still
+  nack (at-least-once preserved).
+- **Webhook** — `dispatchWorkflow` re-throws the tagged failure; `handleRequest`
+  renders a real 4xx with `validation_errors` and returns **before** the
+  dedup-cache write, so a corrected resend is not deduped. Other errors keep the
+  "delivery received, the workflow owns its retry" 200 contract.
 
 ### Other edge cases
 

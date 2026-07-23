@@ -25,11 +25,30 @@ packages on npm version independently within each release line.
   A workflow that declares `input` on `workflow({ input })` now has each request
   validated in `TriggerBase.run` before the body reaches any step: the body is
   `safeParse`d and **replaced with the parsed value**, so declared `.default()`s
-  and coercions apply and unknown keys are stripped. A malformed request returns
-  `400` (HTTP), an `isError` result (MCP), or an error status (gRPC) — instead of
-  running with `undefined` fields. Workflows that declared a schema *and* relied
-  on undeclared body fields must switch to `z.object({...}).passthrough()`. Kill
-  switch: `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Undeclared `input` → unchanged.
+  and coercions apply and unknown keys are stripped. Workflows that declared a
+  schema *and* relied on undeclared body fields must switch to
+  `z.object({...}).passthrough()`. Kill switch:
+  `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Undeclared `input` → unchanged.
+
+  Enforced for **http, mcp, grpc, worker, pubsub, and webhook** — the triggers
+  whose body is the caller/producer payload the schema describes. A malformed
+  payload yields `400` (HTTP/webhook), an `isError` result (MCP), an error status
+  (gRPC), a **DLQ'd job with no retries burned** (worker), or a
+  **dead-lettered/dropped message** (pub/sub) — never a poison-message loop.
+  `cron`, `sse`, and `websocket` are excluded: their `ctx.request.body` is
+  framework-generated, not caller input.
+
+- **Non-retryable failures are now terminal on worker/pub-sub.** A validation
+  failure carries a `WORKFLOW_INPUT_VALIDATION` tag; worker routes it straight to
+  DLQ instead of exhausting the retry budget, and pub/sub dead-letters (or ACK-
+  drops) it instead of nacking forever. Three worker adapters were fixed to honour
+  the terminal `job.fail(err, false)` contract they previously ignored: **BullMQ**
+  (a discarded job now lands in the failed set with the real error — previously
+  `moveToFailed` threw `Lock mismatch` because the lock token was never captured),
+  **SQS** (deletes, optionally after a DLQ send, instead of waiting out the
+  visibility timeout), and **pg-boss** (no longer re-throws, so it does not retry).
+  A webhook validation failure now returns a real 4xx and is **not** recorded as a
+  processed delivery, so the sender can retry after correcting the payload.
 
 ## [v0.6.0] — 2026-05-14
 

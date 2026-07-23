@@ -15,7 +15,7 @@
  * object's top-level `input`).
  */
 
-import { GlobalError } from "@blokjs/shared";
+import { GlobalError, WORKFLOW_INPUT_VALIDATION } from "@blokjs/shared";
 import { WorkflowRegistry } from "./WorkflowRegistry";
 
 /** A duck-typed Zod schema — anything with a `safeParse`. */
@@ -96,6 +96,10 @@ export function parseWorkflowInput(schema: SafeParseable | undefined, body: unkn
 	const summary = issues.map((i) => `${i.path.join(".") || "(root)"} (${i.message})`).join(", ");
 	const err = new GlobalError(`Input validation failed: ${summary}`);
 	err.setCode(400);
+	// ADR 0015 — stable tag so triggers (worker/pubsub/webhook) recognize this as
+	// a deterministic validation failure and route it to DLQ / a 4xx response
+	// instead of a poison-message retry loop. See `isNonRetryableValidationError`.
+	err.setName(WORKFLOW_INPUT_VALIDATION);
 	err.setJson({
 		validation_errors: issues.map((i) => ({ path: i.path, message: i.message, code: i.code })),
 	});
