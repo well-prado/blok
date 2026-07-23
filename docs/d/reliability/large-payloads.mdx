@@ -1,0 +1,69 @@
+---
+title: "Large payloads across the runtime boundary"
+description: "Non-NodeJS runtime nodes (Python, Rust, Go, …) run as gRPC sidecars. Data crosses that boundary inline, fully buffered on both ends, under a message-size limit. How to stay under it and what the fail-fast error tells you."
+icon: "weight-hanging"
+---
+
+Blok runs non-NodeJS nodes (`runtime.python3`, `runtime.rust`,
+`runtime.go`, …) as **gRPC sidecar processes**. When a workflow calls one,
+the runner serializes the step's data and sends it over gRPC. That data is
+**fully buffered in memory on both ends** of a single unary message — there
+is no streaming — so a hard message-size limit protects both processes from
+unbounded memory use.
+
+<Note>
+This applies **only** to nodes that run in another runtime. In-process
+NodeJS/TypeScript nodes pass data by reference with no boundary and no limit.
+</Note>
+
+## The limit
+
+| Setting | Default | Ceiling |
+|---|---|---|
+| `BLOK_GRPC_MAX_MESSAGE_BYTES` | 16 MiB | 256 MiB |
+
+The limit is **symmetric** and **not negotiated over the wire** — the runner
+and every sidecar read the same env var independently. If you raise it, you
+must set the **same value on both the runner and the sidecar**, or the
+under-configured side rejects oversized messages with a gRPC
+`RESOURCE_EXHAUSTED`.
+
+## What counts toward the limit
+
+Each remote node call inlines four things into one message:
+
+- **inputs** — the step's mapped inputs.
+- **accumulated state** — every prior step's output (`ctx.state`). This grows
+  as the workflow progresses, so late steps carry more than early ones.
+- **previous output** — the immediately preceding step's result.
+- **trigger body** — the original request/job payload.
+
+The accumulated-state term is the usual surprise: a workflow that fans a
+large array through several `runtime.*` steps re-ships that array on **every**
+call.
+
+## The fail-fast error
+
+When the encoded request would exceed the limit, the runner fails the step
+**before dispatch** with a `GRPC_REQUEST_TOO_LARGE` error naming the node and
+a per-blob byte breakdown — instead of the opaque `RESOURCE_EXHAUSTED` the
+sidecar would otherwise raise mid-flight. Read the breakdown to see which of
+the four blobs is the offender.
+
+## Staying under the limit
+
+1. **Don't inline bulk data.** Pass a **reference** (an id, an object-store
+   key, a file path both sides can reach) and have the node fetch the bytes
+   itself — the claim-check pattern. This is the structural fix for genuinely
+   large data.
+2. **Keep bulk values out of accumulated state.** Mark steps whose large
+   output isn't needed downstream as `ephemeral: true` so they never enter
+   `ctx.state` and stop re-shipping on later calls. To drop the accumulated
+   state and previous-step output from **every** runtime call at once, set
+   `BLOK_GRPC_STATE_DIET=1` — but only when your runtime nodes follow the v2
+   ABI (they read their mapped `inputs`, never `ctx.vars` or
+   `ctx.response.data`), since the diet makes both empty on the node side.
+3. **Split the pipeline** so no single boundary crossing carries everything.
+4. **Raise the limit** as a last resort: set `BLOK_GRPC_MAX_MESSAGE_BYTES` (up
+   to 256 MiB) on **both** the runner and the sidecar, accepting that peak
+   memory ≈ `forEach`-concurrency × message size on each side.

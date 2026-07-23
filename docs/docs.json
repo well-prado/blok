@@ -60,7 +60,8 @@
 							"d/reliability/replay",
 							"d/reliability/concurrency-keys",
 							"d/reliability/max-duration",
-							"d/reliability/cancellation"
+							"d/reliability/cancellation",
+							"d/reliability/large-payloads"
 						]
 					},
 					{

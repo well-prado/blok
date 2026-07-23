@@ -147,6 +147,51 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		});
 	}
 
+	/**
+	 * ADR 0014 Phase 1 — preflight size guard. Returns a typed error when the
+	 * encoded request exceeds the channel's `maxMessageBytes`, so the call fails
+	 * fast with a step-attributed, per-blob breakdown instead of the opaque gRPC
+	 * `RESOURCE_EXHAUSTED` the sidecar would raise mid-flight. Returns `null` when
+	 * the request fits.
+	 *
+	 * `approximateRequestBytes` sums only the payload buffers (no proto framing),
+	 * so it strictly UNDER-counts the wire size — `approx > limit` therefore
+	 * guarantees the real message is also over. No false positives, so this needs
+	 * no kill switch: it only sharpens the error on a call that was already
+	 * doomed. (A request that fits the approximation but not the wire still fails
+	 * downstream exactly as before.)
+	 */
+	private oversizedRequestError(
+		node: RunnerNode,
+		request: ExecuteRequestProto,
+		requestBytes: number,
+	): BlokError | null {
+		const limit = this.config.maxMessageBytes;
+		if (requestBytes <= limit) return null;
+		const mib = (n: number) => (n / (1024 * 1024)).toFixed(1);
+		const inputs = request.inputs.length;
+		const state = request.state.vars.length;
+		const previousOutput = request.state.previousOutput.length;
+		const triggerBody = request.trigger.body.length;
+		return BlokError.validation({
+			code: "GRPC_REQUEST_TOO_LARGE",
+			message: `Node "${node.name}" (runtime.${this.kind}) request is ${mib(requestBytes)} MiB, over the ${mib(limit)} MiB gRPC message limit`,
+			description: `Data crosses the runtime boundary inline, fully buffered in memory on both ends. Per-blob: inputs ${mib(inputs)} MiB, accumulated state ${mib(state)} MiB, previous output ${mib(previousOutput)} MiB, trigger body ${mib(triggerBody)} MiB.`,
+			remediation: `Reduce what crosses the runtime boundary (see docs/d/reliability/large-payloads): pass a reference/claim-check instead of inlining bulk data, split the pipeline, or mark upstream steps \`ephemeral: true\` to keep them out of accumulated state. Alternatively raise BLOK_GRPC_MAX_MESSAGE_BYTES on BOTH the runner and the ${this.kind} sidecar (max 256 MiB), accepting the per-call memory cost.`,
+			retryable: false,
+			contextSnapshot: {
+				kind: this.kind,
+				node: node.name,
+				requestBytes,
+				limit,
+				inputs,
+				state,
+				previousOutput,
+				triggerBody,
+			},
+		});
+	}
+
 	/** Build a typed `BlokError(category=DEPENDENCY)` for short-circuited calls. */
 	private circuitOpenError(node: RunnerNode): BlokError {
 		return BlokError.dependency({
@@ -186,6 +231,21 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 
 		const request = encodeExecuteRequest(node, ctx, stepInfo.index, stepInfo.total, stepInfo.depth, deadlineMs);
 		const requestBytes = approximateRequestBytes(request);
+
+		// ADR 0014 Phase 1 — fail fast before dispatch on an oversized request.
+		const tooBig = this.oversizedRequestError(node, request, requestBytes);
+		if (tooBig) {
+			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, true, "request_too_large");
+			return {
+				success: false,
+				data: null,
+				errors: tooBig,
+				metrics: {
+					duration_ms: performance.now() - startTime,
+					request_bytes: requestBytes,
+				} as ExecutionResult["metrics"],
+			};
+		}
 
 		const client = this.pool.get(this.config);
 
@@ -335,6 +395,31 @@ export class GrpcRuntimeAdapter implements RuntimeAdapter {
 		// Opt the SDK into emitting log frames (proto ExecuteOptions.stream_logs).
 		request.options = { ...request.options, streamLogs: true };
 		const requestBytes = approximateRequestBytes(request);
+
+		// ADR 0014 Phase 1 — fail fast before dispatch on an oversized request.
+		// Mirrors the circuit-breaker early return: empty iterable + resolved
+		// failure so `for await` and `await result` both terminate at once.
+		const tooBig = this.oversizedRequestError(node, request, requestBytes);
+		if (tooBig) {
+			this.recordRuntimeMetrics(node, ctx, performance.now() - startTime, true, "request_too_large");
+			const empty: AsyncIterable<DecodedExecuteEvent> = {
+				[Symbol.asyncIterator]: async function* () {
+					/* nothing to yield */
+				},
+			};
+			return {
+				events: empty,
+				result: Promise.resolve({
+					success: false,
+					data: null,
+					errors: tooBig,
+					metrics: {
+						duration_ms: performance.now() - startTime,
+						request_bytes: requestBytes,
+					} as ExecutionResult["metrics"],
+				}),
+			};
+		}
 
 		const client = this.pool.get(this.config);
 

@@ -645,6 +645,33 @@ describe("GrpcRuntimeAdapter (integration with mock server)", () => {
 		});
 	});
 
+	describe("preflight size guard (ADR 0014 Phase 1)", () => {
+		it("execute() fails fast with GRPC_REQUEST_TOO_LARGE before dispatch when the request exceeds maxMessageBytes", async () => {
+			// Tiny limit + unreachable port (1): if the guard did NOT short-circuit,
+			// the call would reach the network and surface a DEPENDENCY/TIMEOUT.
+			// A VALIDATION/GRPC_REQUEST_TOO_LARGE proves it returned before dispatch.
+			const isolated = new GrpcRuntimeAdapter(makeAdapterConfig(1, { maxMessageBytes: 64, defaultDeadlineMs: 500 }));
+			try {
+				const bigState = { blob: "x".repeat(4096) }; // ~4 KiB accumulated state, well over 64 B
+				const result = await isolated.execute(makeNode(), makeCtx({ vars: bigState }));
+				expect(result.success).toBe(false);
+				expect(result.errors).toBeInstanceOf(BlokError);
+				const err = result.errors as BlokError;
+				expect(err.category).toBe(ErrorCategory.VALIDATION);
+				expect(err.errorCode).toBe("GRPC_REQUEST_TOO_LARGE");
+				expect(err.message).toMatch(/echo/); // names the offending node
+			} finally {
+				isolated.close();
+			}
+		});
+
+		it("execute() proceeds normally when the request fits the limit", async () => {
+			// Default (16 MiB) limit + reachable mock server → the guard is a no-op.
+			const result = await adapter.execute(makeNode(), makeCtx());
+			expect(result.success).toBe(true);
+		});
+	});
+
 	describe("circuit breaker (health-check integration)", () => {
 		// Tests that opt the adapter INTO the background health loop. Each
 		// test owns its adapter instance + cleans up on teardown.

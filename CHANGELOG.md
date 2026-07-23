@@ -6,6 +6,31 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 the monorepo's git tag (`vX.Y.Z`) is the canonical version. Individual
 packages on npm version independently within each release line.
 
+## [Unreleased]
+
+### Added
+
+- **Runtime-boundary payload safety (ADR 0014).** Non-NodeJS runtime nodes now
+  fail fast with a `GRPC_REQUEST_TOO_LARGE` error naming the node and a per-blob
+  byte breakdown when a request would exceed the gRPC message limit — instead of
+  an opaque `RESOURCE_EXHAUSTED`. New opt-in `BLOK_GRPC_STATE_DIET=1` stops
+  shipping the accumulated workflow state + previous-step output on every remote
+  call (keeps `env` + trigger body); use it only when runtime nodes follow the
+  v2 ABI and never read `ctx.vars` / `ctx.response.data`. New docs page:
+  *Reliability → Large payloads across the runtime boundary*.
+
+### Behavior changes
+
+- **Workflow `input` Zod is now enforced at the trigger boundary (ADR 0015).**
+  A workflow that declares `input` on `workflow({ input })` now has each request
+  validated in `TriggerBase.run` before the body reaches any step: the body is
+  `safeParse`d and **replaced with the parsed value**, so declared `.default()`s
+  and coercions apply and unknown keys are stripped. A malformed request returns
+  `400` (HTTP), an `isError` result (MCP), or an error status (gRPC) — instead of
+  running with `undefined` fields. Workflows that declared a schema *and* relied
+  on undeclared body fields must switch to `z.object({...}).passthrough()`. Kill
+  switch: `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Undeclared `input` → unchanged.
+
 ## [v0.6.0] — 2026-05-14
 
 The headline shift since v0.4.0. Adds the reliability primitives that
