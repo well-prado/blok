@@ -29,7 +29,6 @@ export default class WorkflowGenerator {
 		existingWorkflowPath?: string,
 	): Promise<WorkflowInformation> {
 		const openai = createOpenAI({
-			compatibility: "strict",
 			apiKey: apiKey,
 		});
 

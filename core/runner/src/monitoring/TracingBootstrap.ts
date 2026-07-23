@@ -26,6 +26,7 @@
  */
 
 import { trace } from "@opentelemetry/api";
+import { buildOtelResource } from "./otelResource";
 
 export type TracingExporterType = "otlp" | "console";
 
@@ -91,16 +92,13 @@ export async function bootstrapTracing(config: TracingBootstrapConfig): Promise<
 		]);
 
 		const { NodeTracerProvider, BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter } = sdkMod;
-		const { Resource } = resourceMod;
 		const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = semconvMod;
 
-		// Build resource
-		const resource = Resource.default().merge(
-			new Resource({
-				[ATTR_SERVICE_NAME]: config.serviceName,
-				[ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.0.1",
-			}),
-		);
+		// Build resource (1.x class vs 2.x factory — see otelResource.ts)
+		const resource = buildOtelResource(resourceMod, {
+			[ATTR_SERVICE_NAME]: config.serviceName,
+			[ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.0.1",
+		});
 
 		// Create the appropriate exporter
 		let spanExporter: unknown;
@@ -146,8 +144,17 @@ export async function bootstrapTracing(config: TracingBootstrapConfig): Promise<
 			providerConfig.sampler = new TraceIdRatioBasedSampler(config.samplingRatio);
 		}
 
-		const provider = new NodeTracerProvider(providerConfig);
-		provider.addSpanProcessor(spanProcessor);
+		// OTel 2.x removed `addSpanProcessor()` in favour of a `spanProcessors`
+		// ctor option. These SDK packages are OPTIONAL dynamic imports, so a user
+		// project may still be on 1.x — detect and use whichever exists.
+		const provider =
+			typeof NodeTracerProvider.prototype?.addSpanProcessor === "function"
+				? (() => {
+						const p = new NodeTracerProvider(providerConfig);
+						p.addSpanProcessor(spanProcessor);
+						return p;
+					})()
+				: new NodeTracerProvider({ ...providerConfig, spanProcessors: [spanProcessor] });
 
 		// Register globally so `trace.getTracer()` picks up this provider
 		provider.register();
@@ -155,8 +162,27 @@ export async function bootstrapTracing(config: TracingBootstrapConfig): Promise<
 
 		return {
 			shutdown: async () => {
-				await provider.shutdown();
-				initialized = false;
+				// `provider.shutdown()` force-flushes queued spans through the OTLP
+				// exporter. Against an unreachable collector the exporter retries, so
+				// an unbounded await blocks graceful shutdown (SIGTERM) indefinitely —
+				// the process never exits. Cap the flush and move on; dropping a few
+				// unexported spans beats hanging the deployment. Tune via
+				// BLOK_TRACING_SHUTDOWN_TIMEOUT_MS.
+				const timeoutMs = Number.parseInt(process.env.BLOK_TRACING_SHUTDOWN_TIMEOUT_MS || "2000", 10);
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				try {
+					await Promise.race([
+						provider.shutdown(),
+						new Promise<void>((resolve) => {
+							timer = setTimeout(resolve, timeoutMs);
+						}),
+					]);
+				} catch {
+					// Exporter failures on shutdown are non-fatal — never block exit.
+				} finally {
+					if (timer) clearTimeout(timer);
+					initialized = false;
+				}
 			},
 			forceFlush: async () => {
 				await provider.forceFlush();

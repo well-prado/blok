@@ -1,5 +1,5 @@
 // import { DiagConsoleLogger, DiagLogLevel, diag } from "@opentelemetry/api";
-import { Resource } from "@opentelemetry/resources";
+import { defaultResource, resourceFromAttributes } from "@opentelemetry/resources";
 import {
 	BatchSpanProcessor,
 	ConsoleSpanExporter,
@@ -12,8 +12,8 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic
 // For troubleshooting, set the log level to DiagLogLevel.DEBUG
 // diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ALL);
 
-const resource = Resource.default().merge(
-	new Resource({
+const resource = defaultResource().merge(
+	resourceFromAttributes({
 		[ATTR_SERVICE_NAME]: "trigger-http",
 		[ATTR_SERVICE_VERSION]: "0.0.8",
 	}),

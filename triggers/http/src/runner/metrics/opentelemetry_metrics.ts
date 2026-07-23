@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DefaultLogger } from "@blokjs/runner";
 import { type Meter, metrics } from "@opentelemetry/api";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
-import { Resource } from "@opentelemetry/resources";
+import { defaultResource, resourceFromAttributes } from "@opentelemetry/resources";
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
@@ -54,15 +54,15 @@ export async function bootstrapMetrics(): Promise<MetricsBootstrap | null> {
 		new DefaultLogger().log("Metrics endpoint: http://localhost:4000/metrics"),
 	);
 
-	const resource = Resource.default().merge(
-		new Resource({
+	const resource = defaultResource().merge(
+		resourceFromAttributes({
 			[ATTR_SERVICE_NAME]: "trigger-http",
 			[ATTR_SERVICE_VERSION]: "0.0.8",
 		}),
 	);
 
-	const meterProvider = new MeterProvider({ resource: resource });
-	meterProvider.addMetricReader(prometheusExporter);
+	// OTel 2.x: readers are supplied to the ctor (`addMetricReader` was removed).
+	const meterProvider = new MeterProvider({ resource, readers: [prometheusExporter] });
 	metrics.setGlobalMeterProvider(meterProvider);
 
 	// Local consts (non-undefined) for the returned bootstrap; the module-level

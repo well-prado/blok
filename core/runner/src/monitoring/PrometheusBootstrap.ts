@@ -7,6 +7,7 @@
  */
 
 import { metrics } from "@opentelemetry/api";
+import { buildOtelResource } from "./otelResource";
 
 export interface PrometheusBootstrapConfig {
 	serviceName: string;
@@ -55,7 +56,6 @@ export async function bootstrapPrometheus(
 
 		const { PrometheusExporter } = exporterMod;
 		const { MeterProvider } = sdkMod;
-		const { Resource } = resourceMod;
 		const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = semconvMod;
 
 		const port = config.port ?? Number.parseInt(process.env.BLOK_METRICS_PORT || "9464", 10);
@@ -63,15 +63,22 @@ export async function bootstrapPrometheus(
 
 		const exporter = new PrometheusExporter({ port, endpoint });
 
-		const resource = Resource.default().merge(
-			new Resource({
-				[ATTR_SERVICE_NAME]: config.serviceName,
-				[ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.0.1",
-			}),
-		);
+		const resource = buildOtelResource(resourceMod, {
+			[ATTR_SERVICE_NAME]: config.serviceName,
+			[ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.0.1",
+		});
 
-		const meterProvider = new MeterProvider({ resource });
-		meterProvider.addMetricReader(exporter);
+		// OTel 2.x removed `addMetricReader()` in favour of a `readers` ctor
+		// option. These SDK packages are OPTIONAL dynamic imports, so a user
+		// project may still be on 1.x — detect and use whichever exists.
+		const meterProvider =
+			typeof MeterProvider.prototype?.addMetricReader === "function"
+				? (() => {
+						const mp = new MeterProvider({ resource });
+						mp.addMetricReader(exporter);
+						return mp;
+					})()
+				: new MeterProvider({ resource, readers: [exporter] });
 		metrics.setGlobalMeterProvider(meterProvider);
 
 		initialized = true;

@@ -160,7 +160,6 @@ export default class NodeFileWriter {
 
 				// Generate the config.json using AI
 				const openai = createOpenAI({
-					compatibility: "strict",
 					apiKey: apiKey,
 				});
 

@@ -8,6 +8,37 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
+### Security
+
+- **Scaffolded projects now audit clean (was 34 vulnerabilities: 13 high, 17
+  moderate, 4 low).** `npx blokctl create project` shipped a dependency tree with
+  seven root advisories; everything else was cascade. Fixed by upgrading:
+  - `@opentelemetry/*` **1.x → 2.10.0** and the exporters to **0.221.0** —
+    clears the two HIGHs (`exporter-prometheus` crash-via-malformed-request
+    GHSA-q7rr-3cgh-j5r3, `propagator-jaeger` DoS GHSA-45rx-2jwx-cxfr) plus
+    `@opentelemetry/core` unbounded W3C-baggage allocation GHSA-8988-4f7v-96qf.
+  - `@hono/node-server` **1.19.9 → 2.0.11** — `serve-static` path traversal
+    (GHSA-frvp-7c67-39w9). This one was reachable: the HTTP trigger serves
+    `/public/*` via `serveStatic`.
+  - `ai` **4.x → 7.0.36** (+ `@ai-sdk/openai` **4.0.19**) — clears the AI SDK
+    filetype-whitelist bypass, `@ai-sdk/provider-utils` resource consumption, and
+    drops `jsondiffpatch` (XSS) from the tree entirely.
+
+  The template also pins `overrides["@hono/node-server"]`: `@hono/node-ws@1.3.1`
+  (latest) still declares a peer on node-server `^1.19.11` despite never
+  importing it at runtime, and without the pin npm reinstalls the vulnerable 1.x
+  nested. `blokctl` now MERGES rather than replaces `overrides` when scaffolding
+  from a local repo, so that pin survives.
+
+### Fixed
+
+- **Graceful shutdown could hang forever when an OTLP collector was
+  unreachable.** `TracingBootstrap`'s `shutdown()` awaited `provider.shutdown()`
+  unbounded; that force-flushes queued spans through the OTLP exporter, which
+  retries against a dead endpoint — so SIGTERM never completed. The flush is now
+  bounded (`BLOK_TRACING_SHUTDOWN_TIMEOUT_MS`, default `2000`). Surfaced by the
+  OpenTelemetry 2.x upgrade, but the hang was latent before it.
+
 ### Added
 
 - **Runtime-boundary payload safety (ADR 0014).** Non-NodeJS runtime nodes now

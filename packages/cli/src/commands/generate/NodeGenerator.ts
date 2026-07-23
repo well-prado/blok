@@ -32,7 +32,6 @@ export default class NodeGenerator {
 		nodeStyle = "function",
 	): Promise<NodeInformation> {
 		const openai = createOpenAI({
-			compatibility: "strict",
 			apiKey: apiKey,
 		});
 

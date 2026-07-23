@@ -22,7 +22,6 @@ export default class RegisterNode {
 
 		// Generate the import statement for the new node using openai
 		const openai = createOpenAI({
-			compatibility: "strict",
 			apiKey: apiKey,
 		});
 

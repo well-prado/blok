@@ -108,7 +108,8 @@ describe("HttpTrigger — OBS-02 B2.1 inbound traceparent extraction", () => {
 		expect(span).toBeDefined();
 		// Same trace as the caller, and parented under the inbound span.
 		expect(span?.spanContext().traceId).toBe(INBOUND_TRACE_ID);
-		expect(span?.parentSpanId).toBe(INBOUND_SPAN_ID);
+		// OTel 2.x replaced ReadableSpan.parentSpanId with parentSpanContext.
+		expect(span?.parentSpanContext?.spanId).toBe(INBOUND_SPAN_ID);
 	});
 
 	it("starts a fresh root trace when no traceparent header is present", async () => {
@@ -125,7 +126,7 @@ describe("HttpTrigger — OBS-02 B2.1 inbound traceparent extraction", () => {
 		const span = workflowSpan();
 		expect(span).toBeDefined();
 		// No inbound context → a brand-new root span (no parent).
-		expect(span?.parentSpanId).toBeUndefined();
+		expect(span?.parentSpanContext?.spanId).toBeUndefined();
 		expect(span?.spanContext().traceId).not.toBe(INBOUND_TRACE_ID);
 	});
 });
