@@ -36,7 +36,7 @@ import type GlobalOptions from "./types/GlobalOptions";
 import type TriggerResponse from "./types/TriggerResponse";
 import { getEnvForCtx } from "./utils/envAllowlist";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
-import { parseWorkflowInput, resolveDeclaredInputSchema } from "./workflow/validateWorkflowInput";
+import { parseWorkflowInput, resolveDeclaredInputSchema, shouldRunInputGate } from "./workflow/validateWorkflowInput";
 
 /**
  * Tier 2 quick-wins follow-up · structural logger interface used by
@@ -915,6 +915,18 @@ export default abstract class TriggerBase extends Trigger {
 		return traceRunId;
 	}
 
+	/**
+	 * ADR 0015 — whether THIS trigger drives declared-`input` validation. The
+	 * gate keys on the invoking trigger (this method), not the workflow's
+	 * declared trigger config, so a multi-trigger workflow (`{ http, worker }`)
+	 * is validated on its http side but not when fired via worker. Overridden to
+	 * `true` only by the request-shaped triggers whose `ctx.request.body` is the
+	 * caller payload the schema describes: HTTP, MCP, gRPC. Default `false`.
+	 */
+	protected validatesDeclaredInput(): boolean {
+		return false;
+	}
+
 	async run(ctx: Context, configuration: Configuration = this.configuration): Promise<TriggerResponse> {
 		this.inFlightRequests++;
 		const runStart = performance.now();
@@ -953,16 +965,29 @@ export default abstract class TriggerBase extends Trigger {
 			// Enforce the workflow's declared `input` Zod against the request
 			// body. Runs BEFORE the scheduling/concurrency gates so a malformed
 			// request never consumes a debounce window or a concurrency slot.
-			// Keyed on `ctx.request` presence — scopes to request-shaped triggers
-			// (http/mcp/grpc); worker/cron entry payloads are out of scope.
 			// On success the body is REPLACED with the parsed value so Zod
 			// defaults + coercions apply (matching the advertised schema and the
 			// compile-time entry-handle types). Failure throws a GlobalError(400)
-			// the transports already render. Kill switch:
+			// the transports already render.
+			//
+			// `shouldRunInputGate` scopes this to the INVOKING trigger being
+			// http/mcp/grpc (via `validatesDeclaredInput()`, so a multi-trigger
+			// `{ http, worker }` workflow fired via its worker side is NOT
+			// validated against job.data) and SKIPS deferred re-entry (the body
+			// was already validated + normalized on the first pass; re-parsing
+			// would double-apply a `.transform()` or 400 a type-changing one after
+			// the client already got 202). Kill switch:
 			// BLOK_VALIDATE_WORKFLOW_INPUT=0. No declared schema → no-op.
-			if (ctx.request && process.env.BLOK_VALIDATE_WORKFLOW_INPUT !== "0") {
+			if (
+				shouldRunInputGate({
+					hasRequest: !!ctx.request,
+					isReentry: isReentryAtTrace,
+					killSwitch: process.env.BLOK_VALIDATE_WORKFLOW_INPUT,
+					invokingTriggerValidates: this.validatesDeclaredInput(),
+				})
+			) {
 				const inputSchema = resolveDeclaredInputSchema(cfg.name || ctx.workflow_name);
-				if (inputSchema) {
+				if (inputSchema && ctx.request) {
 					ctx.request.body = parseWorkflowInput(inputSchema, ctx.request.body) as typeof ctx.request.body;
 				}
 			}

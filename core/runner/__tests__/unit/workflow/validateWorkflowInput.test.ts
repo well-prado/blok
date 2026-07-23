@@ -1,7 +1,7 @@
 import { GlobalError } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { parseWorkflowInput } from "../../../src/workflow/validateWorkflowInput";
+import { parseWorkflowInput, shouldRunInputGate } from "../../../src/workflow/validateWorkflowInput";
 
 describe("parseWorkflowInput (ADR 0015)", () => {
 	const schema = z.object({
@@ -37,5 +37,31 @@ describe("parseWorkflowInput (ADR 0015)", () => {
 			expect(paths).toContain("query"); // missing required
 			expect(paths).toContain("page"); // wrong type
 		}
+	});
+});
+
+describe("shouldRunInputGate (ADR 0015 gate decision)", () => {
+	// invokingTriggerValidates comes from the INVOKING trigger's
+	// validatesDeclaredInput() (true only for http/mcp/grpc), NOT the declared
+	// trigger config — so a multi-trigger `{ http, worker }` workflow fired via
+	// worker passes false here and is not validated against job.data.
+	const base = { hasRequest: true, isReentry: false, killSwitch: undefined, invokingTriggerValidates: true };
+
+	it("runs for a first-pass request from a validating trigger with the kill switch off", () => {
+		expect(shouldRunInputGate(base)).toBe(true);
+	});
+
+	it("SKIPS on deferred re-entry (body already validated on the first pass)", () => {
+		// The MAJOR audit defect: re-parsing a transformed body double-applies or 400s post-202.
+		expect(shouldRunInputGate({ ...base, isReentry: true })).toBe(false);
+	});
+
+	it("SKIPS when the invoking trigger does not validate (worker/cron/pubsub, or worker side of a multi-trigger)", () => {
+		expect(shouldRunInputGate({ ...base, invokingTriggerValidates: false })).toBe(false);
+	});
+
+	it("SKIPS when there is no request, or the kill switch is set", () => {
+		expect(shouldRunInputGate({ ...base, hasRequest: false })).toBe(false);
+		expect(shouldRunInputGate({ ...base, killSwitch: "0" })).toBe(false);
 	});
 });

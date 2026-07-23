@@ -63,7 +63,8 @@ patch, not root cause.
 
 **B — One shared gate in `TriggerBase.run()`, enforce-by-default when a schema
 is declared.** `Configuration.init` starts carrying `_config.input`; the gate
-runs once, at the top of `run()`, for every trigger that exists or will exist.
+runs once, at the top of `run()`, shared by every trigger — but *applies* only
+to the request-shaped kinds whose body the schema describes (see **Scope** below).
 Declaring a schema *means* enforcement — that is what MCP already advertises
 and what the TS types already claim. **Chosen.**
 
@@ -112,12 +113,42 @@ MCP end-to-end test (`McpTrigger.input-validation.test.ts`: malformed → `isErr
 valid → defaults applied, kill switch → passthrough); doc-comment fix on
 `workflowV2.ts`, MCP trigger doc note, CHANGELOG `Unreleased` entry.
 
-### Edge cases
+### Scope (corrected after the ctx-integrity audit)
+
+The gate is **not** "every trigger." An adversarial audit of the first cut found
+two real defects — both fixed by the pure predicate `shouldRunInputGate`
+(`validateWorkflowInput.ts`), unit-tested in `validateWorkflowInput.test.ts`:
+
+1. **Re-entry double-parse (MAJOR).** The gate mutates `ctx.request.body` in
+   place. The first cut keyed only on `ctx.request` presence, so a deferred
+   re-entry (delay / debounce / `onLimit:queue` / durable recovery — all
+   re-enter `run(ctx)` with `_blokDispatchReentry=true` on the *same* ctx)
+   re-parsed the already-parsed body. A non-idempotent `.transform()` then
+   double-applied, and a *type-changing* transform threw 400 on the second
+   pass — silently `failRun`-ing a run the client had already been told 202 for.
+   **Fix:** skip the gate when `isReentryAtTrace` (the body was validated +
+   normalized on the first pass). Mirrors the sibling scheduling gate, which was
+   already re-entry-guarded.
+
+2. **Wrong scope (MAJOR, fixed in two rounds).** Keying on `ctx.request`
+   presence did **not** exclude worker/cron/pubsub — they all set `ctx.request`.
+   A cron workflow declaring `input` would 400 every tick (its body is
+   framework-generated `{ jobId, scheduledTime, … }`, never the schema's
+   subject); a worker would silently strip `job.data` fields or hard-fail poison
+   jobs. A first fix scoped by the workflow's *declared* trigger config
+   (`"http" in cfg.trigger`) — but a second audit pass caught that this still
+   mis-fires for a **multi-trigger** workflow (e.g. `{ http, worker }`, a
+   supported pattern): fired via its worker side, `cfg.trigger` still contains
+   `http`, so the gate would validate `job.data`. **Fix:** scope by the
+   **invoking trigger**, not the declared config — `TriggerBase.validatesDeclaredInput()`
+   (default `false`, overridden `true` only in HTTP/MCP/gRPC) reflects which
+   trigger actually fired. A `{ http, worker }` workflow is validated on its HTTP
+   side and not when a job fires it. Any trigger kind, present or future,
+   defaults to not-validating until it opts in.
+
+### Other edge cases
 
 - **No schema declared** → gate is a no-op; zero behavior change and zero cost.
-- **Non-request triggers** (worker/cron/etc.): gate keys on `ctx.request`
-  presence; their entry payloads are out of scope here (their handles have
-  their own shapes — future ADR if wanted).
 - **Sub-workflows** bypass `TriggerBase.run()` by design
   (`SubworkflowNode` direct dispatch); child inputs are author-mapped and
   compile-time typed. Out of scope.
@@ -139,8 +170,8 @@ valid → defaults applied, kill switch → passthrough); doc-comment fix on
   and gRPC.
 - The advertised MCP `inputSchema`, the TS entry-handle types, and runtime
   behavior become one contract instead of three.
-- One gate covers all current and future triggers; MCP's output gate gains a
-  symmetric, shared home over time.
+- One shared gate, scoped to the request-shaped triggers (http/mcp/grpc); other
+  kinds opt in later by name. MCP's output gate gains a symmetric home over time.
 - **Behavior change** (the point): schema-declaring workflows that previously
   "worked" on non-conforming payloads now 400. Ship in a minor with a
   prominent changelog note; `BLOK_VALIDATE_WORKFLOW_INPUT=0` is the escape

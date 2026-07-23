@@ -177,6 +177,11 @@ function toInputJsonSchema(inputZod: any | undefined): { type: "object"; [k: str
 // -----------------------------------------------------------------------------
 
 export default class McpTrigger extends TriggerBase {
+	/** ADR 0015 — MCP tool-call arguments are the caller input the `input` schema describes. */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	protected nodeMap: RunnerGlobalOptions = {} as RunnerGlobalOptions;
 	protected readonly logger = new DefaultLogger();
 	protected readonly tracer = trace.getTracer(

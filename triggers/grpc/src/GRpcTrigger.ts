@@ -33,6 +33,11 @@ enum NodeTypes {
 }
 
 export default class GRpcTrigger extends TriggerBase {
+	/** ADR 0015 — gRPC request messages are the caller input the `input` schema describes. */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	private server = fastify({
 		http2: true,
 		// https: {

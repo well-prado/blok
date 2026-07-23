@@ -4,8 +4,10 @@
  * The `input` schema on `workflow({ input })` was advertised (MCP tool
  * `inputSchema`) and used for TS inference, but never validated at runtime — so
  * malformed calls ran with raw/undefined fields and declared `.default()`s were
- * never applied. This closes the gap once, for every trigger, from the single
- * `TriggerBase.run()` chokepoint.
+ * never applied. This closes the gap from the single `TriggerBase.run()`
+ * chokepoint, scoped to the request-shaped triggers (http/mcp/grpc) — see
+ * `shouldRunInputGate` for why worker/cron/pubsub and deferred re-entry are
+ * excluded.
  *
  * The live Zod object only survives on the `WorkflowRegistry` entry — a schema
  * dies in `Configuration`'s `JSON.parse(JSON.stringify(...))` clone — so we read
@@ -29,6 +31,35 @@ interface ZodIssueLike {
 
 function isSafeParseable(v: unknown): v is SafeParseable {
 	return !!v && typeof (v as { safeParse?: unknown }).safeParse === "function";
+}
+
+/**
+ * Decide whether the ADR 0015 input gate should run for this invocation.
+ * Encodes the fixes the ctx-integrity audit surfaced:
+ *
+ *  - **Skip on deferred re-entry.** The gate mutates `ctx.request.body` in place;
+ *    on the first pass the body is already validated + normalized. Re-running on
+ *    a delay/debounce/queue/durable-recovery re-entry would re-parse the parsed
+ *    value — double-applying a non-idempotent `.transform()`, or throwing 400 on
+ *    a type-changing one *after* the client already received 202.
+ *  - **Scope by the INVOKING trigger, not the declared config.** Only http / mcp
+ *    / grpc drive validation — the triggers whose `ctx.request.body` IS the
+ *    caller payload the schema describes. `invokingTriggerValidates` comes from
+ *    `TriggerBase.validatesDeclaredInput()` (overridden true only in those three),
+ *    so it reflects which trigger actually fired. Keying on the workflow's
+ *    *declared* trigger config would mis-fire for a multi-trigger workflow (e.g.
+ *    `{ http, worker }`) invoked via its worker/cron/pubsub side, validating a
+ *    job/cron/message payload the schema was never written against.
+ */
+export function shouldRunInputGate(opts: {
+	hasRequest: boolean;
+	isReentry: boolean;
+	/** `process.env.BLOK_VALIDATE_WORKFLOW_INPUT` — "0" disables the gate. */
+	killSwitch: string | undefined;
+	/** `this.validatesDeclaredInput()` — true only for http/mcp/grpc triggers. */
+	invokingTriggerValidates: boolean;
+}): boolean {
+	return opts.hasRequest && !opts.isReentry && opts.killSwitch !== "0" && opts.invokingTriggerValidates;
 }
 
 /**

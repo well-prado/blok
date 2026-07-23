@@ -146,3 +146,13 @@ describe("WorkerTrigger.seedGlobalMiddlewareFromEnv (F14)", () => {
 		expect(WorkflowRegistry.getInstance().getGlobalMiddleware()).toEqual([]);
 	});
 });
+
+describe("WorkerTrigger — ADR 0015 input-gate scope", () => {
+	it("does NOT validate declared workflow input (job.data is not the schema's subject)", () => {
+		// The invoking-trigger scope fix: a `{ http, worker }` workflow fired via
+		// worker must not run the http-side `input` gate against job.data.
+		// `validatesDeclaredInput` is protected and stateless — assert on the prototype.
+		const flag = (WorkerTrigger.prototype as unknown as { validatesDeclaredInput(): boolean }).validatesDeclaredInput();
+		expect(flag).toBe(false);
+	});
+});
