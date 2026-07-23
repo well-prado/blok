@@ -1,5 +1,25 @@
 # @blokjs/runner
 
+## 1.6.1
+
+### Patch Changes
+
+- Security: clear all 34 vulnerabilities reported by `npm audit` in a freshly scaffolded project (13 high, 17 moderate, 4 low).
+
+  The findings collapsed to seven root advisories; everything else was cascade through `@blokjs/runner` and the OpenTelemetry SDK packages.
+
+  - **OpenTelemetry 1.x → 2.10.0** (exporters → `0.221.0`). Clears both HIGHs — `exporter-prometheus` process crash via malformed HTTP request (GHSA-q7rr-3cgh-j5r3) and `propagator-jaeger` denial of service (GHSA-45rx-2jwx-cxfr) — plus `@opentelemetry/core`'s unbounded W3C baggage allocation (GHSA-8988-4f7v-96qf).
+  - **`@hono/node-server` 1.19.9 → 2.0.11** for the `serve-static` path traversal (GHSA-frvp-7c67-39w9). Reachable rather than theoretical: the HTTP trigger serves `/public/*` through `serveStatic`.
+  - **`ai` 4.x → 7.0.36** and **`@ai-sdk/openai` → 4.0.19**. Fixes the AI SDK filetype-whitelist bypass and `@ai-sdk/provider-utils` uncontrolled resource consumption, and removes `jsondiffpatch` (XSS) from the dependency tree entirely.
+
+  The runner's OpenTelemetry bootstraps are optional dynamic imports and now detect BOTH the 1.x class API and the 2.x factory API, so existing projects that have not upgraded their own OpenTelemetry dependencies keep working.
+
+  Also fixes a latent hang the upgrade exposed: `TracingBootstrap.shutdown()` awaited `provider.shutdown()` unbounded, which force-flushes queued spans through the OTLP exporter and retries indefinitely against an unreachable collector — so graceful shutdown (SIGTERM) never completed. The flush is now bounded via `BLOK_TRACING_SHUTDOWN_TIMEOUT_MS` (default `2000`).
+
+- Updated dependencies
+  - @blokjs/shared@1.6.1
+  - @blokjs/helper@1.6.1
+
 ## 1.6.0
 
 ### Minor Changes

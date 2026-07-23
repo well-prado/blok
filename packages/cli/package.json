@@ -1,6 +1,6 @@
 {
 	"name": "blokctl",
-	"version": "1.6.0",
+	"version": "1.6.1",
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"description": "cli for blok",
@@ -30,8 +30,8 @@
 	"keywords": ["blokctl", "cli", "blok", "blok"],
 	"dependencies": {
 		"@ai-sdk/openai": "^4.0.19",
-		"@blokjs/helper": "^1.6.0",
-		"@blokjs/runner": "^1.6.0",
+		"@blokjs/helper": "^1.6.1",
+		"@blokjs/runner": "^1.6.1",
 		"@clack/prompts": "^1.0.0",
 		"ai": "^7.0.36",
 		"better-sqlite3": "^12.6.2",
