@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-sse",
-	"version": "1.5.0",
+	"version": "1.6.0",
 	"files": ["dist"],
 	"description": "Server-Sent Events (SSE) trigger for Blok workflows — real-time server push on the shared Hono port.",
 	"type": "module",
@@ -15,15 +15,15 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^1.5.0",
-		"@blokjs/runner": "^1.5.0",
-		"@blokjs/shared": "^1.5.0",
+		"@blokjs/helper": "^1.6.0",
+		"@blokjs/runner": "^1.6.0",
+		"@blokjs/shared": "^1.6.0",
 		"@opentelemetry/api": "^1.9.0",
 		"hono": "^4.11.7",
 		"uuid": "^11.1.0"
 	},
 	"devDependencies": {
-		"@blokjs/core": "^1.5.0",
+		"@blokjs/core": "^1.6.0",
 		"@hono/node-server": "^1.19.9",
 		"@types/node": "^22.15.21",
 		"@types/uuid": "^11.0.0",

@@ -1,4 +1,4 @@
-# @blokjs/trigger-sse
+# @blokjs/helpers
 
 ## 1.6.0
 
@@ -17,15 +17,4 @@
 - Updated dependencies
   - @blokjs/shared@1.6.0
   - @blokjs/runner@1.6.0
-  - @blokjs/helper@1.6.0
-
-## 0.1.1
-
-### Patch Changes
-
-- Updated dependencies
-  - @blokjs/shared@0.2.0
-  - @blokjs/helper@0.2.0
-  - @blokjs/runner@0.2.0
-  - @blokjs/api-call@0.2.0
-  - @blokjs/if-else@0.2.0
+  - @blokjs/trigger-sse@1.6.0
