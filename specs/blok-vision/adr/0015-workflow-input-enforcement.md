@@ -146,6 +146,30 @@ two real defects — both fixed by the pure predicate `shouldRunInputGate`
    side and not when a job fires it. Any trigger kind, present or future,
    defaults to not-validating until it opts in.
 
+### Why the scope is http/mcp/grpc — and NOT the other triggers
+
+An attempt to extend validation to *every* request-carrying trigger was
+adversarially audited and **reverted**: for a trigger to safely body-validate,
+its `ctx.request.body` must genuinely be the caller/producer payload the schema
+describes **and** a thrown 400 must surface as a real rejection. Only http / mcp
+/ grpc satisfy both. The others fail one or the other — validating them is a
+regression, not a feature:
+
+| Trigger | Why excluded |
+|---|---|
+| **cron** | `ctx.request.body` is framework tick metadata (`{ jobId, scheduledTime, … }`), never caller input — a required-field schema would 400 **every tick**. |
+| **sse** | Sets `ctx.request.body = {}` (hardcoded); the caller's data is in query/headers. A required-field schema 400s **every connection**. |
+| **websocket** | One workflow handles connect/message/disconnect, each a *different* framework-shaped body; only `message` carries caller data (and it's enveloped). A single flag can't distinguish them, so a schema fitting one 400s the others — and a 400 on `connect` aborts the auth handler while the socket stays open. |
+| **worker** | `job.data` *is* producer input, but a deterministic validation 400 burns the retry budget before DLQ — a new poison-message failure mode. Safe inclusion needs non-retryable-error → immediate-DLQ discrimination. |
+| **pubsub** | `message.body` *is* producer input, but the base catch nacks unconditionally with no DLQ/attempt-cap → **unbounded redelivery loop** on NATS/Redis. Same fix needed as worker, plus per-adapter DLQ. |
+| **webhook** | POST body *is* caller input, but the trigger's catch turns a thrown 400 into `200 {status:"ok"}` and marks the delivery processed — validation would silently drop the run. Needs error-surfacing first. |
+
+**Follow-up (separate, deliberate feature):** worker/pubsub/webhook can join the
+scope once (a) a validation 400 is classified non-retryable and routed to
+DLQ/drop instead of redelivered, and (b) webhook surfaces the 400. SSE/WebSocket
+need a *different* surface (validate query/params for SSE; per-event schemas for
+WS), not body validation. Cron is permanently out — a tick has no caller input.
+
 ### Other edge cases
 
 - **No schema declared** → gate is a no-op; zero behavior change and zero cost.
