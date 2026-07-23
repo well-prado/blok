@@ -12,6 +12,13 @@ automatically from the workflow's Zod `input`, and every call runs
 through the normal runner, so retries, idempotency, middleware, and
 [Studio](/d/studio/index) tracing all apply.
 
+The declared `input` schema is also **enforced** on every call: a malformed
+tool call returns an `isError` result naming the bad field (never a silent run
+with missing args), and a valid call has Zod `.default()`s applied before the
+workflow sees the body. This is framework-wide — HTTP returns `400`, gRPC an
+error status. Opt out with `BLOK_VALIDATE_WORKFLOW_INPUT=0`; use
+`z.object({...}).passthrough()` to keep undeclared fields.
+
 It [mounts on the HTTP server](./http.mdx) (same port, same Hono app,
 single process) — no separate listener. A workflow opts in with a
 `trigger.mcp` block; everything else is a normal v2 workflow.

@@ -79,8 +79,14 @@ export interface WorkflowOpts<
 	 * Optional Zod schema describing the workflow's input (request body).
 	 * Used by the `mcp` trigger to generate the exposed tool's `inputSchema`
 	 * (via zod-to-json-schema) and by `@blokjs/client` to type each call's
-	 * argument. Carried verbatim on `_config.input`; not validated or
-	 * serialized by the runner.
+	 * argument. Carried verbatim on `_config.input`.
+	 *
+	 * ADR 0015 — when declared, the runner ENFORCES it at the trigger boundary
+	 * (`TriggerBase.run`): the request body is `safeParse`d, replaced with the
+	 * parsed value (so `.default()`s and coercions apply, and unknown keys are
+	 * stripped), and a failure returns a 400 / MCP `isError` / gRPC error
+	 * status. Kill switch: `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Use
+	 * `z.object({...}).passthrough()` to keep undeclared body fields.
 	 */
 	input?: I;
 	/**

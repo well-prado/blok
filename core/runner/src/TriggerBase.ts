@@ -36,6 +36,7 @@ import type GlobalOptions from "./types/GlobalOptions";
 import type TriggerResponse from "./types/TriggerResponse";
 import { getEnvForCtx } from "./utils/envAllowlist";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
+import { parseWorkflowInput, resolveDeclaredInputSchema } from "./workflow/validateWorkflowInput";
 
 /**
  * Tier 2 quick-wins follow-up · structural logger interface used by
@@ -948,6 +949,24 @@ export default abstract class TriggerBase extends Trigger {
 		}
 
 		try {
+			// --- Input validation gate (ADR 0015) ---
+			// Enforce the workflow's declared `input` Zod against the request
+			// body. Runs BEFORE the scheduling/concurrency gates so a malformed
+			// request never consumes a debounce window or a concurrency slot.
+			// Keyed on `ctx.request` presence — scopes to request-shaped triggers
+			// (http/mcp/grpc); worker/cron entry payloads are out of scope.
+			// On success the body is REPLACED with the parsed value so Zod
+			// defaults + coercions apply (matching the advertised schema and the
+			// compile-time entry-handle types). Failure throws a GlobalError(400)
+			// the transports already render. Kill switch:
+			// BLOK_VALIDATE_WORKFLOW_INPUT=0. No declared schema → no-op.
+			if (ctx.request && process.env.BLOK_VALIDATE_WORKFLOW_INPUT !== "0") {
+				const inputSchema = resolveDeclaredInputSchema(cfg.name || ctx.workflow_name);
+				if (inputSchema) {
+					ctx.request.body = parseWorkflowInput(inputSchema, ctx.request.body) as typeof ctx.request.body;
+				}
+			}
+
 			// --- Scheduling gates (Tier 2 #5 + #7) ---
 			// Run BEFORE the concurrency gate. Order: debounce → delay.
 			// Each gate may throw `DeferredDispatchSignal` to short-circuit

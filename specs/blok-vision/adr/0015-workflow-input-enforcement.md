@@ -1,0 +1,151 @@
+# ADR 0015 — Enforce `workflow.input` at the trigger boundary (one gate in TriggerBase)
+
+- **Status:** Accepted — implemented (unit + MCP end-to-end tests green)
+- **Date:** 2026-07-21
+- **Resolves:** [#678](https://github.com/well-prado/blok/issues/678)
+- **Origin:** tetrix-blok ADR-003 — MCP tool calls with malformed/missing args executed anyway and failed deep in nodes (or silently ran with `undefined` fields) instead of returning a validation error.
+
+## Context
+
+A workflow's `input` Zod schema is declaration-only. The type doc says so
+explicitly (`core/workflow-helper/src/components/workflowV2.ts:78-83`): used by
+the `mcp` trigger to *generate* the advertised `inputSchema` and for TS
+inference, "carried verbatim on `_config.input`; **not validated or serialized
+by the runner**."
+
+The result is a systemic gap, worst on MCP because MCP *advertises* the schema:
+
+- **MCP** (`triggers/mcp/src/McpTrigger.ts`): `tools/list` advertises
+  `inputSchema` via `zodToJsonSchema` (`:331`, `:155-173`), but `tools/call`
+  extracts `req.params.arguments ?? {}` (`:341`) and passes it straight through
+  `dispatchTool` (`:372-388`) into `ctx.request.body` (`:421-426`). No
+  `safeParse` ever runs. The MCP SDK validates only the JSON-RPC envelope, not
+  the per-tool schema. Advertise-but-don't-enforce is a correctness bug: a
+  machine caller that honored the schema contract gets no protection from one
+  that didn't.
+- **HTTP** (`triggers/http/src/runner/HttpTrigger.ts`): body parsed and set as
+  `ctx.request.body` with no schema check; the only entry validation is
+  required *headers* (`:1317-1343`). Same gap for the `/__blok/rpc/:name`
+  mount (`:1013-1030`).
+- **gRPC** (`triggers/grpc/src/GRpcTrigger.ts:157-167`): decoded message
+  assigned to `ctx.request`, no schema check.
+- **Consequences of the miss:** Zod `.default()` values promised by the
+  advertised JSON Schema — and by the compile-time entry-handle type
+  (`EntryBodyOf` at `core/runner/src/stepBuilder.ts:1204` infers
+  `z.infer<S>`) — are **never applied**, so the static types lie at runtime.
+  Malformed calls either run to completion with `undefined` fields or die
+  deep in a node with an opaque error (under `BLOK_MAPPER_MODE=strict`, a
+  `MapperResolutionError` naming a mapper path, not the caller's mistake).
+
+Everything needed to close the gap already exists:
+
+- The enforcement pattern: the **output** gate in `McpTrigger.runWorkflow`
+  (`:437-460`, `BLOK_VALIDATE_WORKFLOW_OUTPUT`). There is no input analogue
+  anywhere in the codebase.
+- The error shape: `zodErrorToGlobalError`
+  (`core/runner/src/defineNode.ts:238-257`) → `GlobalError` with code 400 and
+  structured `validation_errors: [{path, message, code}]`.
+- The transport translation: HTTP renders `GlobalError` as a 400 JSON body;
+  MCP's `dispatchTool` catch renders any throw as `{isError: true}`
+  (`McpTrigger.ts:382-387`, already exercised by
+  `McpTrigger.output-validation.test.ts`); gRPC maps to an error status.
+- The hook point: every trigger funnels through `TriggerBase.run()`
+  (`core/runner/src/TriggerBase.ts:917`) *after* its middleware chain — but
+  `Configuration` currently drops `_config.input` on the floor, which is why
+  no shared gate exists.
+
+## Options
+
+**A — Patch MCP only (`safeParse` in `dispatchTool`).** Fixes the reported
+symptom, leaves HTTP/gRPC/rpc and every future trigger with the identical gap,
+and duplicates the gate the day a second trigger wants it. Rejected — symptom
+patch, not root cause.
+
+**B — One shared gate in `TriggerBase.run()`, enforce-by-default when a schema
+is declared.** `Configuration.init` starts carrying `_config.input`; the gate
+runs once, at the top of `run()`, for every trigger that exists or will exist.
+Declaring a schema *means* enforcement — that is what MCP already advertises
+and what the TS types already claim. **Chosen.**
+
+**C — Opt-in env gate mirroring `BLOK_VALIDATE_WORKFLOW_OUTPUT` (off by
+default).** Preserves today's behavior, but the default then remains
+"advertise a contract and don't honor it," and every schema-declaring workflow
+keeps silently accepting garbage. Rejected; an env var survives only as the
+kill switch.
+
+## Decision — Option B
+
+1. **Resolve the schema from the live registry, not `Configuration`.**
+   *Implementation deviation from the original plan, forced by a fact found
+   while building:* `Configuration.init` deep-clones the workflow via
+   `JSON.parse(JSON.stringify(...))` on the boot-scan path, which **destroys a
+   Zod object** — so `Configuration` cannot carry the real schema. The live Zod
+   only survives on the `WorkflowRegistry` entry (`entry.workflow._config.input
+   ?? entry.workflow.input`), which is exactly where the MCP trigger already
+   reads it to advertise the tool `inputSchema`. The gate resolves the schema
+   the same way, by workflow name — one source of truth, no `Configuration`
+   change. Unregistered workflow or no `input` → `undefined` → no-op.
+   (`core/runner/src/workflow/validateWorkflowInput.ts`.)
+2. **One gate in `TriggerBase.run()`.** At the top of the `try` block (before
+   the scheduling/concurrency gates — a malformed request must not consume a
+   debounce window or a concurrency slot), when `ctx.request` exists and the
+   kill switch is off:
+   - `schema.safeParse(ctx.request.body)`.
+   - Failure → throw a `GlobalError` with code 400 and the same structured
+     `validation_errors` body the node-level Zod gate produces. Rather than
+     extract the *private* `zodErrorToGlobalError` off `FunctionNode` across a
+     module boundary, the ~6-line builder is inlined in the helper (lazier,
+     same shape). The run traces as failed through the normal catch path.
+   - Success → **`ctx.request.body = parsed.data`**. Defaults and coercions
+     apply; runtime behavior finally matches both the advertised JSON Schema
+     and the compile-time `z.infer` types.
+3. **Kill switch, not opt-in:** `BLOK_VALIDATE_WORKFLOW_INPUT=0` disables the
+   gate globally (mirrors the naming of the output gate). No new per-workflow
+   API surface.
+4. **Transports change nothing.** HTTP → 400 JSON, MCP → `isError: true` with
+   the validation detail in the text content, gRPC → error status: all via the
+   existing `GlobalError` handling.
+
+**Delivered:** `parseWorkflowInput` / `resolveDeclaredInputSchema` +
+`TriggerBase.run` wire-in; unit test (`validateWorkflowInput.test.ts`) and
+MCP end-to-end test (`McpTrigger.input-validation.test.ts`: malformed → `isError`,
+valid → defaults applied, kill switch → passthrough); doc-comment fix on
+`workflowV2.ts`, MCP trigger doc note, CHANGELOG `Unreleased` entry.
+
+### Edge cases
+
+- **No schema declared** → gate is a no-op; zero behavior change and zero cost.
+- **Non-request triggers** (worker/cron/etc.): gate keys on `ctx.request`
+  presence; their entry payloads are out of scope here (their handles have
+  their own shapes — future ADR if wanted).
+- **Sub-workflows** bypass `TriggerBase.run()` by design
+  (`SubworkflowNode` direct dispatch); child inputs are author-mapped and
+  compile-time typed. Out of scope.
+- **Unknown-key stripping:** Zod object schemas strip unknown keys on parse,
+  so replacing the body drops undeclared fields. This is the security-correct
+  trust-boundary behavior, but it is a behavior change for workflows that
+  declared a schema *and* read undeclared body fields via raw `ctx` paths —
+  called out in the changelog; `.passthrough()` schemas opt out per workflow.
+- **Middleware ordering:** triggers run `applyMiddlewareChain` before
+  `this.run(ctx)` (e.g. `McpTrigger.ts:429-430`), so middleware that rewrites
+  the body runs *before* validation — the gate validates what the workflow
+  will actually see.
+
+## Consequences
+
+- Malformed MCP calls return `isError: true` with named fields immediately —
+  no more silent runs with `undefined` inputs and no more opaque
+  mapper/node-level failures for what is a caller error. Same for HTTP (400)
+  and gRPC.
+- The advertised MCP `inputSchema`, the TS entry-handle types, and runtime
+  behavior become one contract instead of three.
+- One gate covers all current and future triggers; MCP's output gate gains a
+  symmetric, shared home over time.
+- **Behavior change** (the point): schema-declaring workflows that previously
+  "worked" on non-conforming payloads now 400. Ship in a minor with a
+  prominent changelog note; `BLOK_VALIDATE_WORKFLOW_INPUT=0` is the escape
+  hatch. Per-request cost is one `safeParse`, only when a schema is declared.
+- Tests to land with it: MCP malformed-args → `isError` + `validation_errors`;
+  HTTP 400 body shape; defaults applied on success; kill switch; no-schema
+  no-op. Docs: fix the `workflowV2.ts:78-83` doc comment, update
+  `docs/d/triggers/mcp` + http, changelog entry.
