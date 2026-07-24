@@ -62,5 +62,6 @@ readIn(elseScope, { nested: thenHandle });
 readIn(root, thenHandle);
 
 // `any` still bypasses the proof, which is why this cannot be the only guard.
-// biome-ignore lint/suspicious/noExplicitAny: this line demonstrates the exact type escape hatch.
+// This line demonstrates the exact type escape hatch.
+// (No biome-ignore needed — biome.json turns noExplicitAny off under specs/.)
 readIn(root, thenHandle as any);
