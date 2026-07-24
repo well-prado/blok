@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/react",
-	"version": "1.6.1",
+	"version": "1.6.2",
 	"files": ["dist"],
 	"description": "",
 	"type": "module",
@@ -31,9 +31,9 @@
 		"babel-minify": "^0.5.2"
 	},
 	"dependencies": {
-		"@blokjs/shared": "^1.6.1",
-		"@blokjs/runner": "^1.6.1",
-		"@blokjs/helper": "^1.6.1",
+		"@blokjs/shared": "^1.6.2",
+		"@blokjs/runner": "^1.6.2",
+		"@blokjs/helper": "^1.6.2",
 		"ejs": "^3.1.10",
 		"zod": "^3.24.2"
 	},

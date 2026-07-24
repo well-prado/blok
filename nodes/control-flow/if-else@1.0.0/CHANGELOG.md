@@ -1,5 +1,25 @@
 # @blokjs/if-else
 
+## 1.6.2
+
+### Patch Changes
+
+- CLI and observability fixes:
+
+  - `blokctl dev` now honours `--port` and the `PORT` env var instead of forcing
+    the config port (precedence: `--port` > `PORT` > project config). Previously
+    it always spawned on the config port (4000 by default) and failed whenever
+    that port was taken.
+  - The HTTP trigger's metrics boot log now reports the real endpoints (app
+    `/metrics` on the actual resolved port, plus the Prometheus exporter port,
+    configurable via `BLOK_METRICS_PORT`) instead of a hardcoded
+    `http://localhost:4000/metrics`.
+
+- Updated dependencies
+  - @blokjs/shared@1.6.2
+  - @blokjs/helper@1.6.2
+  - @blokjs/runner@1.6.2
+
 ## 1.6.1
 
 ### Patch Changes

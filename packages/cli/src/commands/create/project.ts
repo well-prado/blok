@@ -47,7 +47,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v1.6.1";
+const GITHUB_REPO_RELEASE_TAG = "v1.6.2";
 // Scaffold assets bundled into the built package by scripts/
 // bundle-scaffold-assets.ts — repo-relative layout, so it substitutes for a
 // repo checkout. Compiled location: dist/commands/create/project.js →
@@ -852,7 +852,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^1.6.1";
+		const BLOKJS_DEP_RANGE = "^1.6.2";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
