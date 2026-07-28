@@ -45,7 +45,7 @@ if [ "$SKIP_UP" = "0" ]; then
   deadline=$(( $(date +%s) + 120 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
     unhealthy=$(docker compose -f "$COMPOSE_FILE" ps --format json 2>/dev/null | \
-      grep -E '"Health":\s*"(starting|unhealthy)"' | wc -l | tr -d ' ' || echo "0")
+      grep -Ec '"Health":\s*"(starting|unhealthy)"' || true)
     if [ "$unhealthy" = "0" ]; then
       echo "==> All services healthy."
       break
