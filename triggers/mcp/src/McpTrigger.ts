@@ -53,8 +53,14 @@ import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
 import { Server as McpSdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
 import {
 	CallToolRequestSchema,
+	type CallToolResult,
+	GetPromptRequestSchema,
+	type GetPromptResult,
+	ListPromptsRequestSchema,
+	ListResourceTemplatesRequestSchema,
 	ListResourcesRequestSchema,
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
@@ -79,6 +85,12 @@ type McpTransportKind = "sse" | "streamable-http";
 interface McpToolMeta {
 	name?: string;
 	description?: string;
+	annotations?: {
+		readOnlyHint?: boolean;
+		destructiveHint?: boolean;
+		idempotentHint?: boolean;
+		openWorldHint?: boolean;
+	};
 }
 interface McpResourceMeta {
 	uri: string;
@@ -86,15 +98,21 @@ interface McpResourceMeta {
 	description?: string;
 	mimeType?: string;
 }
+interface McpPromptMeta {
+	name?: string;
+	description?: string;
+}
 
 /** Loosely-read `trigger.mcp` config (validated at workflow load by the helper). */
 interface McpTriggerConfig {
 	path: string;
 	serverName?: string;
 	serverVersion?: string;
+	instructions?: string;
 	transports?: McpTransportKind[];
 	tool?: McpToolMeta;
 	resource?: McpResourceMeta;
+	prompt?: McpPromptMeta;
 	middleware?: string[];
 }
 
@@ -107,6 +125,7 @@ interface ToolEntry {
 	workflowName: string;
 	toolName: string;
 	description: string;
+	annotations?: McpToolMeta["annotations"];
 	// biome-ignore lint/suspicious/noExplicitAny: workflow `input` is an opaque ZodType
 	inputZod: any | undefined;
 }
@@ -118,6 +137,15 @@ interface ResourceEntry {
 	name: string;
 	description?: string;
 	mimeType: string;
+	template?: UriTemplate;
+}
+
+/** A workflow exposed as an MCP prompt. */
+interface PromptEntry {
+	workflowName: string;
+	promptName: string;
+	description?: string;
+	arguments: Array<{ name: string; description?: string; required?: boolean }>;
 }
 
 /** All workflows that share a (path, serverName) form one MCP server. */
@@ -125,9 +153,11 @@ interface ServerGroup {
 	path: string;
 	serverName: string;
 	serverVersion: string;
+	instructions?: string;
 	transports: McpTransportKind[];
 	tools: ToolEntry[];
 	resources: ResourceEntry[];
+	prompts: PromptEntry[];
 }
 
 const DEFAULT_SERVER_NAME = "blok-mcp";
@@ -170,6 +200,38 @@ function toInputJsonSchema(inputZod: any | undefined): { type: "object"; [k: str
 	} catch {
 		return empty;
 	}
+}
+
+function toPromptArguments(inputZod: unknown): PromptEntry["arguments"] {
+	const schema = toInputJsonSchema(inputZod);
+	const properties =
+		schema.properties && typeof schema.properties === "object"
+			? (schema.properties as Record<string, { description?: unknown }>)
+			: {};
+	const required = new Set(
+		Array.isArray(schema.required) ? schema.required.filter((name): name is string => typeof name === "string") : [],
+	);
+	return Object.keys(properties)
+		.sort()
+		.map((name) => ({
+			name,
+			...(typeof properties[name]?.description === "string" ? { description: properties[name].description } : {}),
+			...(required.has(name) ? { required: true } : {}),
+		}));
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function toToolResult(data: unknown): CallToolResult {
+	const custom = objectRecord(data);
+	if (custom && Array.isArray(custom.content)) return custom as CallToolResult;
+	const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+	return {
+		content: [{ type: "text", text: text ?? "null" }],
+		...(custom ? { structuredContent: custom } : {}),
+	};
 }
 
 // -----------------------------------------------------------------------------
@@ -290,20 +352,33 @@ export default class McpTrigger extends TriggerBase {
 					path,
 					serverName: cfg.serverName || DEFAULT_SERVER_NAME,
 					serverVersion: cfg.serverVersion || DEFAULT_SERVER_VERSION,
+					instructions: cfg.instructions,
 					transports: Array.isArray(cfg.transports) && cfg.transports.length > 0 ? cfg.transports : DEFAULT_TRANSPORTS,
 					tools: [],
 					resources: [],
+					prompts: [],
 				};
 				byPath.set(path, group);
 			}
+			if (!group.instructions && cfg.instructions) group.instructions = cfg.instructions;
 
 			if (cfg.resource && typeof cfg.resource.uri === "string") {
+				const template = UriTemplate.isTemplate(cfg.resource.uri) ? new UriTemplate(cfg.resource.uri) : undefined;
 				group.resources.push({
 					workflowName: entry.name,
 					uri: cfg.resource.uri,
 					name: cfg.resource.name || entry.name,
 					description: cfg.resource.description,
 					mimeType: cfg.resource.mimeType || "application/json",
+					template,
+				});
+			} else if (cfg.prompt) {
+				const inputZod = (wf as { input?: unknown })?.input;
+				group.prompts.push({
+					workflowName: entry.name,
+					promptName: cfg.prompt.name || entry.name,
+					description: cfg.prompt.description,
+					arguments: toPromptArguments(inputZod),
 				});
 			} else {
 				const inputZod = (wf as { input?: unknown })?.input;
@@ -311,12 +386,20 @@ export default class McpTrigger extends TriggerBase {
 					workflowName: entry.name,
 					toolName: cfg.tool?.name || entry.name,
 					description: cfg.tool?.description || `Run the "${entry.name}" workflow.`,
+					annotations: cfg.tool?.annotations,
 					inputZod,
 				});
 			}
 		}
 
-		return [...byPath.values()];
+		return [...byPath.values()]
+			.sort((a, b) => a.path.localeCompare(b.path))
+			.map((group) => ({
+				...group,
+				tools: group.tools.sort((a, b) => a.toolName.localeCompare(b.toolName)),
+				resources: group.resources.sort((a, b) => a.uri.localeCompare(b.uri)),
+				prompts: group.prompts.sort((a, b) => a.promptName.localeCompare(b.promptName)),
+			}));
 	}
 
 	// ---------------------------------------------------------------------------
@@ -326,7 +409,14 @@ export default class McpTrigger extends TriggerBase {
 	private buildServer(group: ServerGroup, getUserContext: () => McpUserContext | null): McpSdkServer {
 		const server = new McpSdkServer(
 			{ name: group.serverName, version: group.serverVersion },
-			{ capabilities: { tools: {}, resources: {} } },
+			{
+				capabilities: {
+					tools: {},
+					...(group.resources.length > 0 ? { resources: {} } : {}),
+					...(group.prompts.length > 0 ? { prompts: {} } : {}),
+				},
+				instructions: group.instructions,
+			},
 		);
 
 		server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -334,6 +424,7 @@ export default class McpTrigger extends TriggerBase {
 				name: t.toolName,
 				description: t.description,
 				inputSchema: toInputJsonSchema(t.inputZod),
+				annotations: t.annotations,
 			})),
 		}));
 
@@ -348,22 +439,48 @@ export default class McpTrigger extends TriggerBase {
 		});
 
 		if (group.resources.length > 0) {
+			const staticResources = group.resources.filter((resource) => !resource.template);
+			const templates = group.resources.filter((resource) => resource.template);
 			server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-				resources: group.resources.map((r) => ({
+				resources: staticResources.map((r) => ({
 					uri: r.uri,
 					name: r.name,
 					description: r.description,
 					mimeType: r.mimeType,
 				})),
 			}));
+			server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+				resourceTemplates: templates.map((resource) => ({
+					uriTemplate: resource.uri,
+					name: resource.name,
+					description: resource.description,
+					mimeType: resource.mimeType,
+				})),
+			}));
 
 			server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
 				const uri = req.params.uri;
-				const resource = group.resources.find((r) => r.uri === uri);
+				const resource = group.resources.find((candidate) => candidate.uri === uri || candidate.template?.match(uri));
 				if (!resource) throw new Error(`Unknown resource: ${uri}`);
-				const result = await this.dispatchResource(resource, getUserContext());
+				const variables = resource.template?.match(uri) ?? {};
+				const result = await this.dispatchResource(resource, variables, getUserContext());
 				const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-				return { contents: [{ uri: resource.uri, mimeType: resource.mimeType, text }] };
+				return { contents: [{ uri, mimeType: resource.mimeType, text }] };
+			});
+		}
+
+		if (group.prompts.length > 0) {
+			server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+				prompts: group.prompts.map((prompt) => ({
+					name: prompt.promptName,
+					description: prompt.description,
+					arguments: prompt.arguments,
+				})),
+			}));
+			server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+				const prompt = group.prompts.find((candidate) => candidate.promptName === req.params.name);
+				if (!prompt) throw new Error(`Unknown prompt: ${req.params.name}`);
+				return this.dispatchPrompt(prompt, req.params.arguments ?? {}, getUserContext());
 			});
 		}
 
@@ -378,12 +495,11 @@ export default class McpTrigger extends TriggerBase {
 		tool: ToolEntry,
 		args: Record<string, unknown>,
 		userContext: McpUserContext | null,
-	): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+	): Promise<CallToolResult> {
 		this.counterToolCalls.add(1, { tool: tool.toolName });
 		try {
 			const data = await this.runWorkflow(tool.workflowName, args, userContext, `mcp.tool:${tool.toolName}`);
-			const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
-			return { content: [{ type: "text", text }] };
+			return toToolResult(data);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this.logger.error(`[blok][mcp] tool "${tool.toolName}" failed: ${msg}`);
@@ -392,8 +508,21 @@ export default class McpTrigger extends TriggerBase {
 		}
 	}
 
-	private async dispatchResource(resource: ResourceEntry, userContext: McpUserContext | null): Promise<unknown> {
-		return this.runWorkflow(resource.workflowName, {}, userContext, `mcp.resource:${resource.uri}`);
+	private async dispatchResource(
+		resource: ResourceEntry,
+		args: Record<string, unknown>,
+		userContext: McpUserContext | null,
+	): Promise<unknown> {
+		return this.runWorkflow(resource.workflowName, args, userContext, `mcp.resource:${resource.uri}`);
+	}
+
+	private async dispatchPrompt(
+		prompt: PromptEntry,
+		args: Record<string, string>,
+		userContext: McpUserContext | null,
+	): Promise<GetPromptResult> {
+		const result = await this.runWorkflow(prompt.workflowName, args, userContext, `mcp.prompt:${prompt.promptName}`);
+		return result as GetPromptResult;
 	}
 
 	/**
@@ -481,7 +610,7 @@ export default class McpTrigger extends TriggerBase {
 
 	private registerGroupRoutes(group: ServerGroup): void {
 		this.logger.log(
-			`[blok][mcp] server "${group.serverName}" at ${group.path} — ${group.tools.length} tool(s), ${group.resources.length} resource(s), transports=[${group.transports.join(",")}]`,
+			`[blok][mcp] server "${group.serverName}" at ${group.path} — ${group.tools.length} tool(s), ${group.resources.length} resource(s), ${group.prompts.length} prompt(s), transports=[${group.transports.join(",")}]`,
 		);
 
 		if (group.transports.includes("sse")) {

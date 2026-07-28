@@ -771,6 +771,15 @@ export type McpTransport = z.infer<typeof McpTransportSchema>;
 export const McpToolMetaSchema = z.object({
 	name: z.string().min(1).optional().describe("Tool name exposed to MCP clients. Defaults to the workflow name."),
 	description: z.string().optional().describe("Human-readable tool description shown to MCP clients."),
+	annotations: z
+		.object({
+			readOnlyHint: z.boolean().optional(),
+			destructiveHint: z.boolean().optional(),
+			idempotentHint: z.boolean().optional(),
+			openWorldHint: z.boolean().optional(),
+		})
+		.optional()
+		.describe("Truthful MCP behavior hints advertised with the tool."),
 });
 
 /** Resource metadata when a workflow is exposed as an MCP resource instead of a tool. */
@@ -779,6 +788,12 @@ export const McpResourceMetaSchema = z.object({
 	name: z.string().min(1).optional().describe("Resource display name. Defaults to the workflow name."),
 	description: z.string().optional(),
 	mimeType: z.string().default("application/json").describe("MIME type of the resource body."),
+});
+
+/** Prompt metadata; arguments are derived from the workflow input schema. */
+export const McpPromptMetaSchema = z.object({
+	name: z.string().min(1).optional().describe("Prompt name exposed to MCP clients. Defaults to the workflow name."),
+	description: z.string().optional().describe("Human-readable prompt description shown to MCP clients."),
 });
 
 /**
@@ -793,6 +808,7 @@ export const McpTriggerOptsSchema = z.object({
 	path: z.string().min(1).default("/mcp").describe("Base path the MCP server mounts on (e.g. '/mcp')."),
 	serverName: z.string().min(1).default("blok-mcp").describe("MCP server name advertised to clients."),
 	serverVersion: z.string().default("1.0.0").describe("MCP server version advertised to clients."),
+	instructions: z.string().min(1).optional().describe("MCP initialization instructions advertised by the server."),
 	transports: z
 		.array(McpTransportSchema)
 		.min(1)
@@ -800,8 +816,9 @@ export const McpTriggerOptsSchema = z.object({
 		.describe(
 			"Transports to serve: legacy SSE (GET <path>/sse + POST <path>/messages) and/or Streamable-HTTP (<path>).",
 		),
-	tool: McpToolMetaSchema.optional().describe("Tool metadata. Ignored when `resource` is set."),
+	tool: McpToolMetaSchema.optional().describe("Tool metadata. Ignored when `resource` or `prompt` is set."),
 	resource: McpResourceMetaSchema.optional().describe("When set, the workflow is exposed as a resource, not a tool."),
+	prompt: McpPromptMetaSchema.optional().describe("When set, the workflow is exposed as a prompt, not a tool."),
 	middleware: z.array(z.string()).optional().describe("Trigger-level middleware chain."),
 });
 export type McpTriggerOpts = z.input<typeof McpTriggerOptsSchema>;
