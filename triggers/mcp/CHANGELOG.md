@@ -1,5 +1,17 @@
 # @blokjs/trigger-mcp
 
+## 1.7.0
+
+### Minor Changes
+
+- Add MCP server instructions, truthful tool annotations, structured tool output,
+  URI-template resources, prompts, and deterministic discovery ordering.
+
+- Updated dependencies
+  - @blokjs/shared@1.7.0
+  - @blokjs/helper@1.7.0
+  - @blokjs/runner@1.7.0
+
 ## 1.6.2
 
 ### Patch Changes

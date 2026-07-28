@@ -1,5 +1,16 @@
 # blokctl
 
+## 1.7.0
+
+### Patch Changes
+
+- Fail fast when a configured runtime gRPC port is already occupied instead of
+  mistaking another project's sidecar for the runtime just spawned.
+
+- Updated dependencies
+  - @blokjs/helper@1.7.0
+  - @blokjs/runner@1.7.0
+
 ## 1.6.2
 
 ### Patch Changes
