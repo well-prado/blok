@@ -102,7 +102,9 @@ jobs:
 
       - name: Run integration tests
         env:
-          BLOK_INTEGRATION_REDIS_URL: redis://localhost:6380
+          BLOK_INTEGRATION_REDIS: "1"
+          REDIS_HOST: localhost
+          REDIS_PORT: "6380"
           BLOK_INTEGRATION_NATS_SERVERS: nats://localhost:4223
           BLOK_INTEGRATION_KAFKA_BROKERS: localhost:9094
           BLOK_INTEGRATION_RABBITMQ_URL: amqp://blok:blok_test@localhost:5673

@@ -270,7 +270,7 @@ d("RabbitMQAdapter — real RabbitMQ", () => {
 });
 
 // --- RabbitMQ management HTTP API helpers (test setup only) ---------------
-// The management API runs on :15672 with the same creds as the broker. We
+// The test fixture maps the management API to :15673 with the same creds as the broker. We
 // derive its base URL from BLOK_INTEGRATION_RABBITMQ_URL so the test follows
 // whatever host/creds the broker uses. Creating/deleting a vhost via this API
 // is allowed test SETUP — it never starts/stops the broker container.
@@ -278,7 +278,7 @@ d("RabbitMQAdapter — real RabbitMQ", () => {
 function managementBase(): { base: string; auth: string } {
 	const u = new URL(RABBITMQ_URL as string);
 	const auth = `Basic ${Buffer.from(`${u.username || "guest"}:${u.password || "guest"}`).toString("base64")}`;
-	return { base: `http://${u.hostname}:15672/api`, auth };
+	return { base: `http://${u.hostname}:15673/api`, auth };
 }
 
 async function createVhost(name: string): Promise<void> {
