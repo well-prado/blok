@@ -6,8 +6,8 @@ icon: "robot"
 
 The MCP trigger turns a workflow into a [Model Context Protocol](https://modelcontextprotocol.io)
 server. Any MCP client — Claude Code, Cursor, Claude Desktop, your own
-agent — connects over HTTP, discovers your workflows as **tools** (or
-**resources**), and calls them. The tool's input schema is generated
+agent — connects over HTTP, discovers your workflows as **tools**,
+**resources**, or **prompts**, and calls them. The tool's input schema is generated
 automatically from the workflow's Zod `input`, and every call runs
 through the normal runner, so retries, idempotency, middleware, and
 [Studio](/d/studio/index) tracing all apply.
@@ -70,8 +70,16 @@ export default workflow("mcp-greeter", {
 });
 ```
 
-The build callback receives the call handle (`call`) — for a tool, the call's `arguments` arrive
-as `call.body`; for a resource, `call.body` is always `{}`.
+The build callback receives the call handle (`call`). Tool and prompt arguments
+arrive as `call.body`; static resources receive `{}`, while RFC 6570 resource
+template variables arrive by name.
+
+Object tool results are returned as both JSON text and MCP
+`structuredContent`. To supply a shorter text rendering, return an MCP result
+object with explicit `structuredContent` and `content`. Set
+`tool.annotations` for truthful read-only/destructive/idempotent/open-world
+hints, and `instructions` for server initialization guidance. Registration is
+sorted deterministically.
 
 Scaffold a project that includes this exact example with:
 
