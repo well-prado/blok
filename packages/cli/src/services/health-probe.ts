@@ -25,6 +25,17 @@ export function tryConnect(host: string, port: number, timeoutMs: number): Promi
 	});
 }
 
+/** Return configured gRPC ports that already have a loopback listener. */
+export async function findOccupiedGrpcPorts(ports: readonly number[], timeoutMs = 200): Promise<number[]> {
+	const occupied: number[] = [];
+	for (const port of new Set(ports)) {
+		if ((await tryConnect("127.0.0.1", port, timeoutMs)) || (await tryConnect("::1", port, timeoutMs))) {
+			occupied.push(port);
+		}
+	}
+	return occupied;
+}
+
 /**
  * Poll IPv4 + IPv6 loopback for a TCP listener on `port` until connection
  * succeeds, the optional `proc` exits, or `timeoutMs` elapses.

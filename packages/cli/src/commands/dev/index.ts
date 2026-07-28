@@ -4,7 +4,7 @@ import path from "node:path";
 import util from "node:util";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
-import { waitForGrpcPort } from "../../services/health-probe.js";
+import { findOccupiedGrpcPorts, waitForGrpcPort } from "../../services/health-probe.js";
 import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	generateCSharpNodeRegistry,
@@ -324,6 +324,16 @@ export async function devProject(opts: OptionValues) {
 				name: "Python3 Runner (legacy)",
 			});
 		}
+	}
+
+	// Never mistake somebody else's listener for a runtime we just spawned.
+	const occupiedRuntimePorts = await findOccupiedGrpcPorts(
+		runtimeDefs.flatMap((def) => (def.port === undefined ? [] : [def.port])),
+	);
+	if (occupiedRuntimePorts.length > 0) {
+		console.error(`\nRuntime gRPC port(s) already in use: ${occupiedRuntimePorts.join(", ")}`);
+		console.error("Stop the existing runtime(s), or choose unused ports in .blok/config.json and .env.local.\n");
+		process.exit(1);
 	}
 
 	// 1. Start all runtime processes
