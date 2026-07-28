@@ -13,8 +13,8 @@
 #   bun run test:integration --no-up      # assume services already up
 #
 # Local use: docker compose -f infra/testing/docker-compose.yml up -d
-# then `BLOK_INTEGRATION_REDIS_URL=redis://localhost:6380 bun run test`
-# runs everything.
+# then `BLOK_INTEGRATION_REDIS=1 REDIS_PORT=6380 bun run test`
+# runs the Redis integration suites.
 
 set -euo pipefail
 
@@ -62,7 +62,9 @@ fi
 # activate. Each var maps to a service in the compose file (using the
 # host-mapped test ports — 5433, 6380, etc.).
 export BLOK_INTEGRATION_POSTGRES_URL="${BLOK_INTEGRATION_POSTGRES_URL:-postgres://blok:blok_test@localhost:5433/blok_test}"
-export BLOK_INTEGRATION_REDIS_URL="${BLOK_INTEGRATION_REDIS_URL:-redis://localhost:6380}"
+export BLOK_INTEGRATION_REDIS="${BLOK_INTEGRATION_REDIS:-1}"
+export REDIS_HOST="${REDIS_HOST:-localhost}"
+export REDIS_PORT="${REDIS_PORT:-6380}"
 export BLOK_INTEGRATION_NATS_SERVERS="${BLOK_INTEGRATION_NATS_SERVERS:-nats://localhost:4223}"
 export BLOK_INTEGRATION_KAFKA_BROKERS="${BLOK_INTEGRATION_KAFKA_BROKERS:-localhost:9094}"
 export BLOK_INTEGRATION_RABBITMQ_URL="${BLOK_INTEGRATION_RABBITMQ_URL:-amqp://blok:blok_test@localhost:5673}"
