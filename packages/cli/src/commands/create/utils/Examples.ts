@@ -31,8 +31,8 @@ export default nodes;
 `;
 
 const package_dependencies = {
-	ai: "^4.1.50",
-	"@ai-sdk/openai": "^1.2.0",
+	ai: "^7.0.36",
+	"@ai-sdk/openai": "^4.0.19",
 	ejs: "^3.1.10",
 	pg: "^8.13.3",
 	mongodb: "^6.14.2",

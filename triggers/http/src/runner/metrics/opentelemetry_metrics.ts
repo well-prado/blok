@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DefaultLogger } from "@blokjs/runner";
 import { type Meter, metrics } from "@opentelemetry/api";
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
-import { Resource } from "@opentelemetry/resources";
+import { defaultResource, resourceFromAttributes } from "@opentelemetry/resources";
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
@@ -50,19 +50,30 @@ export async function bootstrapMetrics(): Promise<MetricsBootstrap | null> {
 		return null;
 	}
 
-	const prometheusExporter = new PrometheusExporter({}, () =>
-		new DefaultLogger().log("Metrics endpoint: http://localhost:4000/metrics"),
+	// Two endpoints actually exist, and the old log named neither:
+	//   1. This exporter binds its OWN HTTP server (OTel default :9464, override
+	//      with BLOK_METRICS_PORT — same var the runner's PrometheusBootstrap uses).
+	//   2. HttpTrigger additionally mounts `/metrics` on the APP port via
+	//      `getMetricsRequestHandler`.
+	// The message used to hardcode `http://localhost:4000/metrics`, which was only
+	// correct by coincidence when PORT happened to be 4000.
+	const exporterPort = Number.parseInt(process.env.BLOK_METRICS_PORT || "", 10) || 9464;
+	const appPort = process.env.PORT || process.env.TRIGGER_HTTP_PORT || "4000";
+	const prometheusExporter = new PrometheusExporter({ port: exporterPort }, () =>
+		new DefaultLogger().log(
+			`Metrics endpoint: http://localhost:${appPort}/metrics (Prometheus exporter also listening on :${exporterPort})`,
+		),
 	);
 
-	const resource = Resource.default().merge(
-		new Resource({
+	const resource = defaultResource().merge(
+		resourceFromAttributes({
 			[ATTR_SERVICE_NAME]: "trigger-http",
 			[ATTR_SERVICE_VERSION]: "0.0.8",
 		}),
 	);
 
-	const meterProvider = new MeterProvider({ resource: resource });
-	meterProvider.addMetricReader(prometheusExporter);
+	// OTel 2.x: readers are supplied to the ctor (`addMetricReader` was removed).
+	const meterProvider = new MeterProvider({ resource, readers: [prometheusExporter] });
 	metrics.setGlobalMeterProvider(meterProvider);
 
 	// Local consts (non-undefined) for the returned bootstrap; the module-level

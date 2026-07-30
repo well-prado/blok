@@ -1,7 +1,7 @@
 # @blokjs/trigger-mcp
 
 Model Context Protocol (MCP) trigger for [Blok](https://github.com/well-prado/blok)
-workflows. Expose a workflow as an MCP **tool** or **resource** so AI
+workflows. Expose a workflow as an MCP **tool**, **resource**, or **prompt** so AI
 clients — Claude Code, Cursor, Claude Desktop, or your own agent — can
 discover and call it. Serves both transports (Streamable-HTTP + legacy
 SSE) on the shared Hono HTTP port.
@@ -14,7 +14,7 @@ SSE) on the shared Hono HTTP port.
   exposes each one to MCP clients.
 - Generates each tool's JSON `inputSchema` from the workflow's Zod `input`
   (via `zod-to-json-schema`).
-- Runs `tools/call` / `resources/read` through the normal Blok runner — so
+- Runs tool, resource, and prompt requests through the normal Blok runner — so
   retries, idempotency, middleware, cancellation, and Studio tracing all
   apply.
 - Mounts on the HTTP trigger's Hono app (same port, same process). No
@@ -113,10 +113,17 @@ curl -sS http://localhost:4000/mcp \
 | `path` | `string` | `"/mcp"` | Base path; workflows sharing a path aggregate into one server. |
 | `serverName` | `string` | `"blok-mcp"` | Advertised to clients — set something project-specific. |
 | `serverVersion` | `string` | `"1.0.0"` | Advertised server version. |
+| `instructions` | `string` | — | Initialization instructions shared by the server. |
 | `transports` | `("sse" \| "streamable-http")[]` | both | At least one required. |
-| `tool` | `{ name?, description? }` | — | Tool mode (default). `name` defaults to the workflow name. |
-| `resource` | `{ uri, name?, description?, mimeType? }` | — | Resource mode. `uri` required; `mimeType` defaults to `application/json`. |
+| `tool` | `{ name?, description?, annotations? }` | — | Tool mode (default). Object results are also returned as `structuredContent`. |
+| `resource` | `{ uri, name?, description?, mimeType? }` | — | Static or RFC 6570 templated resource; template variables become workflow input. |
+| `prompt` | `{ name?, description? }` | — | Prompt mode. Arguments are derived from the workflow input schema. |
 | `middleware` | `string[]` | — | Trigger-level middleware chain. |
+
+Tools, resources, templates, and prompts are listed deterministically by name/URI.
+For custom compact tool text, return an MCP result object containing both
+`structuredContent` and `content`; ordinary object results get JSON text plus
+the object as `structuredContent` automatically.
 
 ## Identity is not authorization
 

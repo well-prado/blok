@@ -29,7 +29,6 @@ export default class TriggerGenerator {
 		existingTriggerPath?: string,
 	): Promise<TriggerInformation> {
 		const openai = createOpenAI({
-			compatibility: "strict",
 			apiKey: apiKey,
 		});
 

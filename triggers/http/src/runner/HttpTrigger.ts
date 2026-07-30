@@ -169,6 +169,11 @@ export function _resetBootErrorCounterForTests(): void {
 }
 
 export default class HttpTrigger extends TriggerBase {
+	/** ADR 0015 — HTTP request bodies are the caller input the `input` schema describes. */
+	protected validatesDeclaredInput(): boolean {
+		return true;
+	}
+
 	private app: Hono<AppBindings>;
 	private port: string | number = process.env.PORT || 4000;
 	private initializer = 0;

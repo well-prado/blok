@@ -232,8 +232,18 @@ export function encodeExecuteRequest(
 	deadlineMs: number,
 ): ExecuteRequestProto {
 	const resolvedInputs = extractResolvedInputs(ctx, node.name);
-	const previousOutput = ctx.response?.data ?? null;
-	const vars = ctx.vars ?? {};
+	// ADR 0014 Phase 0 — opt-in "state diet". By default the full accumulated
+	// workflow state (`ctx.vars`, which grows with every step) and the previous
+	// step's output ride along on every remote call. `BLOK_GRPC_STATE_DIET=1`
+	// stops sending both — cutting the monotonic-growth term for pipelines whose
+	// runtime nodes follow the v2 ABI (mapped `inputs` only, no `ctx.vars` /
+	// `ctx.response.data` reads). Opt-in because all 7 SDKs surface these to node
+	// code, so dropping them is observable to any node that reads them. `env` and
+	// `trigger.body` are always sent (kept ABI). State still flows BACK via the
+	// response `vars_delta` — unaffected.
+	const diet = process.env.BLOK_GRPC_STATE_DIET === "1" || process.env.BLOK_GRPC_STATE_DIET === "true";
+	const previousOutput = diet ? null : (ctx.response?.data ?? null);
+	const vars = diet ? {} : (ctx.vars ?? {});
 	const env = stringEnv(ctx.env as Record<string, unknown> | undefined);
 
 	const request = ctx.request ?? ({} as Context["request"]);

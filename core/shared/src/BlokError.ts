@@ -434,3 +434,30 @@ export default class BlokError extends GlobalError {
 		};
 	}
 }
+
+/**
+ * ADR 0015 — stable tag stamped on the input-validation gate's `GlobalError`
+ * (via `context.name`) so triggers can recognize a deterministic validation
+ * failure without matching bare 4xx codes. It rides on `context.name`, the same
+ * field `RunnerSteps.isNonRetryableError` already walks, so authors may also
+ * list it in a step's `retry.nonRetryableErrorNames`.
+ */
+export const WORKFLOW_INPUT_VALIDATION = "WORKFLOW_INPUT_VALIDATION";
+
+/**
+ * True when `err` is the ADR-0015 **input-validation gate's** deterministic
+ * failure — a `GlobalError` carrying the {@link WORKFLOW_INPUT_VALIDATION} tag.
+ *
+ * Triggers consult this to route the error to DLQ / drop / a 4xx response
+ * instead of a poison-message loop (worker burning its retry budget, pub/sub
+ * nacking forever, webhook swallowing to 200).
+ *
+ * Deliberately NARROW — it matches ONLY the gate's tagged error, NOT a node's
+ * `BlokError.validation()` or any other 4xx. Node-thrown validation errors keep
+ * their existing retry/nack/response handling (changing that is a separate,
+ * broader decision), and a node error's serialized stack/contextSnapshot is
+ * never surfaced by the webhook 4xx path.
+ */
+export function isNonRetryableValidationError(err: unknown): boolean {
+	return err instanceof GlobalError && err.context.name === WORKFLOW_INPUT_VALIDATION;
+}

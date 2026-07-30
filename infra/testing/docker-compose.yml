@@ -152,22 +152,6 @@ services:
     networks:
       - blok-test
 
-  # --- Python Runtime (gRPC) ---
-  python-runtime:
-    build:
-      context: ../../runtimes/python3
-      dockerfile: Dockerfile
-    container_name: blok-test-python
-    ports:
-      - "50052:50051"
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import grpc; ch = grpc.insecure_channel(\"localhost:50051\"); grpc.channel_ready_future(ch).result(timeout=2)' || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    networks:
-      - blok-test
-
 networks:
   blok-test:
     driver: bridge

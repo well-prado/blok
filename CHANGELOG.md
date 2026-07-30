@@ -6,6 +6,81 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 the monorepo's git tag (`vX.Y.Z`) is the canonical version. Individual
 packages on npm version independently within each release line.
 
+## [Unreleased]
+
+### Security
+
+- **Scaffolded projects now audit clean (was 34 vulnerabilities: 13 high, 17
+  moderate, 4 low).** `npx blokctl create project` shipped a dependency tree with
+  seven root advisories; everything else was cascade. Fixed by upgrading:
+  - `@opentelemetry/*` **1.x → 2.10.0** and the exporters to **0.221.0** —
+    clears the two HIGHs (`exporter-prometheus` crash-via-malformed-request
+    GHSA-q7rr-3cgh-j5r3, `propagator-jaeger` DoS GHSA-45rx-2jwx-cxfr) plus
+    `@opentelemetry/core` unbounded W3C-baggage allocation GHSA-8988-4f7v-96qf.
+  - `@hono/node-server` **1.19.9 → 2.0.11** — `serve-static` path traversal
+    (GHSA-frvp-7c67-39w9). This one was reachable: the HTTP trigger serves
+    `/public/*` via `serveStatic`.
+  - `ai` **4.x → 7.0.36** (+ `@ai-sdk/openai` **4.0.19**) — clears the AI SDK
+    filetype-whitelist bypass, `@ai-sdk/provider-utils` resource consumption, and
+    drops `jsondiffpatch` (XSS) from the tree entirely.
+
+  The template also pins `overrides["@hono/node-server"]`: `@hono/node-ws@1.3.1`
+  (latest) still declares a peer on node-server `^1.19.11` despite never
+  importing it at runtime, and without the pin npm reinstalls the vulnerable 1.x
+  nested. `blokctl` now MERGES rather than replaces `overrides` when scaffolding
+  from a local repo, so that pin survives.
+
+### Fixed
+
+- **Graceful shutdown could hang forever when an OTLP collector was
+  unreachable.** `TracingBootstrap`'s `shutdown()` awaited `provider.shutdown()`
+  unbounded; that force-flushes queued spans through the OTLP exporter, which
+  retries against a dead endpoint — so SIGTERM never completed. The flush is now
+  bounded (`BLOK_TRACING_SHUTDOWN_TIMEOUT_MS`, default `2000`). Surfaced by the
+  OpenTelemetry 2.x upgrade, but the hang was latent before it.
+
+### Added
+
+- **Runtime-boundary payload safety (ADR 0014).** Non-NodeJS runtime nodes now
+  fail fast with a `GRPC_REQUEST_TOO_LARGE` error naming the node and a per-blob
+  byte breakdown when a request would exceed the gRPC message limit — instead of
+  an opaque `RESOURCE_EXHAUSTED`. New opt-in `BLOK_GRPC_STATE_DIET=1` stops
+  shipping the accumulated workflow state + previous-step output on every remote
+  call (keeps `env` + trigger body); use it only when runtime nodes follow the
+  v2 ABI and never read `ctx.vars` / `ctx.response.data`. New docs page:
+  *Reliability → Large payloads across the runtime boundary*.
+
+### Behavior changes
+
+- **Workflow `input` Zod is now enforced at the trigger boundary (ADR 0015).**
+  A workflow that declares `input` on `workflow({ input })` now has each request
+  validated in `TriggerBase.run` before the body reaches any step: the body is
+  `safeParse`d and **replaced with the parsed value**, so declared `.default()`s
+  and coercions apply and unknown keys are stripped. Workflows that declared a
+  schema *and* relied on undeclared body fields must switch to
+  `z.object({...}).passthrough()`. Kill switch:
+  `BLOK_VALIDATE_WORKFLOW_INPUT=0`. Undeclared `input` → unchanged.
+
+  Enforced for **http, mcp, grpc, worker, pubsub, and webhook** — the triggers
+  whose body is the caller/producer payload the schema describes. A malformed
+  payload yields `400` (HTTP/webhook), an `isError` result (MCP), an error status
+  (gRPC), a **DLQ'd job with no retries burned** (worker), or a
+  **dead-lettered/dropped message** (pub/sub) — never a poison-message loop.
+  `cron`, `sse`, and `websocket` are excluded: their `ctx.request.body` is
+  framework-generated, not caller input.
+
+- **Non-retryable failures are now terminal on worker/pub-sub.** A validation
+  failure carries a `WORKFLOW_INPUT_VALIDATION` tag; worker routes it straight to
+  DLQ instead of exhausting the retry budget, and pub/sub dead-letters (or ACK-
+  drops) it instead of nacking forever. Three worker adapters were fixed to honour
+  the terminal `job.fail(err, false)` contract they previously ignored: **BullMQ**
+  (a discarded job now lands in the failed set with the real error — previously
+  `moveToFailed` threw `Lock mismatch` because the lock token was never captured),
+  **SQS** (deletes, optionally after a DLQ send, instead of waiting out the
+  visibility timeout), and **pg-boss** (no longer re-throws, so it does not retry).
+  A webhook validation failure now returns a real 4xx and is **not** recorded as a
+  processed delivery, so the sender can retry after correcting the payload.
+
 ## [v0.6.0] — 2026-05-14
 
 The headline shift since v0.4.0. Adds the reliability primitives that

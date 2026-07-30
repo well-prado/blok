@@ -154,6 +154,7 @@ export class BullMQAdapter implements WorkerAdapter {
 						timestamp: number;
 						token?: string;
 						moveToFailed: (err: Error, token: string, fetchNext: boolean) => Promise<void>;
+						discard?: () => Promise<void>;
 					};
 					const workerJob: WorkerJob = {
 						id: job.id || `job-${Date.now()}`,
@@ -171,11 +172,30 @@ export class BullMQAdapter implements WorkerAdapter {
 							// BullMQ auto-completes when processor resolves
 						},
 						fail: async (error: Error, requeue?: boolean) => {
+							// BOTH paths re-throw so BullMQ's own failure handler moves the
+							// job, using the lock token it holds internally. Calling
+							// `moveToFailed` here cannot work: BullMQ passes the token as the
+							// processor's SECOND argument (never as a Job property), so
+							// `job.token` is always undefined and the move throws "Lock
+							// mismatch" — which then gets recorded as the failure reason,
+							// masking the real error.
+							//
+							// `discard()` on the terminal path clears the job's remaining
+							// attempts (BullMQ's `shouldRetryJob` honours `discarded`), so the
+							// job goes straight to the failed set instead of retrying. Without
+							// it a non-retryable error (e.g. an ADR-0015 validation 400) would
+							// burn every configured attempt.
 							if (!requeue) {
-								await job.moveToFailed(error, job.token || "", true);
-							} else {
-								throw error; // BullMQ will auto-retry
+								if (typeof job.discard !== "function") {
+									// Fail loudly rather than silently degrading a terminal failure
+									// back into a retry loop if this BullMQ API ever moves.
+									console.warn(
+										"[BullMQAdapter] job.discard() unavailable — a non-retryable failure may still be retried.",
+									);
+								}
+								await job.discard?.();
 							}
+							throw error;
 						},
 					};
 					return handler(workerJob);

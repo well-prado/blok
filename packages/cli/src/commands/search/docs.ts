@@ -127,7 +127,6 @@ export class SearchService {
 
 		try {
 			const openai = createOpenAI({
-				compatibility: "strict",
 				apiKey: process.env.OPENAI_API_KEY,
 			});
 

@@ -130,6 +130,7 @@ describe("RunnerSteps — OBS-02 B4 per-step spans", () => {
 		// Same trace, child parented under the step span — the exact mechanism
 		// that lets a gRPC runtime span (B2.2) nest under its step.
 		expect(child?.spanContext().traceId).toBe(step?.spanContext().traceId);
-		expect(child?.parentSpanId).toBe(step?.spanContext().spanId);
+		// OTel 2.x replaced ReadableSpan.parentSpanId with parentSpanContext.
+		expect(child?.parentSpanContext?.spanId).toBe(step?.spanContext().spanId);
 	});
 });

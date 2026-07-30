@@ -70,7 +70,8 @@ function captureStreamHandler(tracker: FakeTracker) {
 			if (path === "/runs/:runId/stream") handler = h;
 		},
 	};
-	// biome-ignore lint/suspicious/noExplicitAny: minimal router/tracker fakes for the handler under test
+	// `as any`: minimal router/tracker fakes for the handler under test.
+	// (No biome-ignore needed — biome.json turns noExplicitAny off under __tests__.)
 	registerTraceRoutes(router as any, tracker as any, { authorize: () => true });
 	if (!handler) throw new Error("stream route not registered");
 	return handler;

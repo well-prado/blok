@@ -1,6 +1,6 @@
 import * as net from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { tryConnect, waitForGrpcPort } from "../../src/services/health-probe.js";
+import { findOccupiedGrpcPorts, tryConnect, waitForGrpcPort } from "../../src/services/health-probe.js";
 
 let servers: net.Server[] = [];
 
@@ -50,6 +50,17 @@ describe("tryConnect", () => {
 		const elapsed = Date.now() - start;
 		expect(result).toBe(false);
 		expect(elapsed).toBeLessThan(2000);
+	});
+});
+
+describe("findOccupiedGrpcPorts", () => {
+	it("reports an existing listener once even when the port is repeated", async () => {
+		const { port } = await startServer("127.0.0.1");
+		expect(await findOccupiedGrpcPorts([port, port])).toEqual([port]);
+	});
+
+	it("ignores an unbound port", async () => {
+		expect(await findOccupiedGrpcPorts([1])).toEqual([]);
 	});
 });
 

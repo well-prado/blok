@@ -4,7 +4,7 @@ import path from "node:path";
 import util from "node:util";
 import type { OptionValues } from "commander";
 import fsExtra from "fs-extra";
-import { waitForGrpcPort } from "../../services/health-probe.js";
+import { findOccupiedGrpcPorts, waitForGrpcPort } from "../../services/health-probe.js";
 import { detectJava, detectRr } from "../../services/runtime-detector.js";
 import {
 	generateCSharpNodeRegistry,
@@ -15,6 +15,44 @@ import {
 	validateProjectRuntimes,
 } from "../../services/runtime-setup.js";
 import { regenRuntimeStubs } from "../nodes/syncNodes.js";
+
+/**
+ * Resolve the HTTP-trigger port override for `blokctl dev`.
+ *
+ * Precedence: `--port` > an explicit `PORT` in the environment > (caller falls
+ * back to the project config).
+ *
+ * Why this exists: the config port used to be passed as `PORT` on every spawn,
+ * which OVERWROTE the operator's own `PORT`. And because an explicitly-passed
+ * env var beats bun's dotenv loading, `.env.local`'s `PORT` lost too — so the
+ * config value (4000 by default) always won and `blokctl dev` died with
+ * "Failed to start server. Is port 4000 in use?" whenever 4000 was taken, with
+ * no flag to work around it.
+ *
+ * Returns `{ port: undefined }` when nothing is set (use the config), or
+ * `{ error }` for a non-numeric / out-of-range value.
+ */
+export function resolveDevPortOverride(
+	flagPort: string | undefined,
+	envPort: string | undefined,
+): { port?: number; error?: string } {
+	const raw = flagPort ?? envPort;
+	if (raw === undefined || String(raw).trim() === "") return {};
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+		return { error: `Invalid port "${raw}" — expected an integer between 1 and 65535.` };
+	}
+	return { port };
+}
+
+/**
+ * Apply a port override to a single trigger. ONLY the HTTP trigger honours it —
+ * forcing one port onto every trigger in a multi-trigger project would make them
+ * collide on bind.
+ */
+export function resolveTriggerPort(trigger: { kind?: string; port: number }, override: number | undefined): number {
+	return trigger.kind === "http" && override !== undefined ? override : trigger.port;
+}
 
 const exec = util.promisify(child_process.exec);
 
@@ -111,6 +149,13 @@ export async function devProject(opts: OptionValues) {
 
 	// Read project runtime config
 	const config = readProjectConfig(currentPath);
+
+	const override = resolveDevPortOverride(opts.port as string | undefined, process.env.PORT);
+	if (override.error) {
+		console.error(override.error);
+		process.exit(1);
+	}
+	const portFor = (trigger: { kind?: string; port: number }): number => resolveTriggerPort(trigger, override.port);
 
 	// Validate runtime versions unless --skip-version-check is set
 	const skipVersionCheck = opts.skipVersionCheck === true;
@@ -281,6 +326,16 @@ export async function devProject(opts: OptionValues) {
 		}
 	}
 
+	// Never mistake somebody else's listener for a runtime we just spawned.
+	const occupiedRuntimePorts = await findOccupiedGrpcPorts(
+		runtimeDefs.flatMap((def) => (def.port === undefined ? [] : [def.port])),
+	);
+	if (occupiedRuntimePorts.length > 0) {
+		console.error(`\nRuntime gRPC port(s) already in use: ${occupiedRuntimePorts.join(", ")}`);
+		console.error("Stop the existing runtime(s), or choose unused ports in .blok/config.json and .env.local.\n");
+		process.exit(1);
+	}
+
 	// 1. Start all runtime processes
 	const healthChecks: Array<{ port: number; proc: ChildProcess }> = [];
 	for (const def of runtimeDefs) {
@@ -307,7 +362,7 @@ export async function devProject(opts: OptionValues) {
 				// gRPC binds a port but speaks HTTP/2 gRPC (no GET /health-check).
 				console.log(`  ${trigger.label}: gRPC 127.0.0.1:${trigger.port}`);
 			} else {
-				console.log(`  ${trigger.label}: http://localhost:${trigger.port}/health-check`);
+				console.log(`  ${trigger.label}: http://localhost:${portFor(trigger)}/health-check`);
 			}
 		}
 	}
@@ -374,8 +429,9 @@ export async function devProject(opts: OptionValues) {
 			if (cmd === "bun" && !args.includes("--watch")) {
 				args.unshift("--watch");
 			}
-			spawnProcess(cmd, args, `${trigger.label} (port ${trigger.port})`, currentPath, undefined, {
-				PORT: String(trigger.port),
+			const triggerPort = portFor(trigger);
+			spawnProcess(cmd, args, `${trigger.label} (port ${triggerPort})`, currentPath, undefined, {
+				PORT: String(triggerPort),
 				...triggerEnv,
 			});
 		}
@@ -391,7 +447,7 @@ export async function devProject(opts: OptionValues) {
 	// keep-alive loop — failures warn and continue (never crash dev).
 	const httpTrigger = config?.triggers?.http;
 	if (httpTrigger && healthChecks.length > 0) {
-		const baseUrl = `http://localhost:${httpTrigger.port}`;
+		const baseUrl = `http://localhost:${portFor(httpTrigger)}`;
 		const outDir = path.join(currentPath, "nodes-gen");
 		void regenStubsWhenReady(baseUrl, outDir);
 	}

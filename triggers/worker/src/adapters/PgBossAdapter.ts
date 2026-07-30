@@ -178,14 +178,21 @@ export class PgBossAdapter implements WorkerAdapter {
 				stats.completed += 1;
 				settled = true;
 			},
-			fail: async (err: Error) => {
+			fail: async (err: Error, requeue?: boolean) => {
 				if (settled) return;
 				stats.failed += 1;
 				settled = true;
-				// Re-throw so pg-boss's `boss.work` sees the handler
-				// failure and schedules a retry / drops to DLQ per
-				// the queue config — the contract is "handler throws
-				// => job failed".
+				if (requeue === false) {
+					// Terminal (non-retryable, e.g. an ADR-0015 validation 400).
+					// pg-boss retries whenever the handler throws, so DON'T throw:
+					// resolve instead so the job completes and is not retried
+					// `retryLimit` times against a deterministic failure. (pg-boss
+					// has no immediate-dead-letter primitive; the row is consumed.)
+					return;
+				}
+				// Re-throw so pg-boss's `boss.work` sees the handler failure and
+				// schedules a retry / drops to DLQ per the queue config — the
+				// contract is "handler throws => job failed".
 				throw err;
 			},
 		};

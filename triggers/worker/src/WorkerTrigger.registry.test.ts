@@ -146,3 +146,13 @@ describe("WorkerTrigger.seedGlobalMiddlewareFromEnv (F14)", () => {
 		expect(WorkflowRegistry.getInstance().getGlobalMiddleware()).toEqual([]);
 	});
 });
+
+describe("WorkerTrigger — ADR 0015 input-gate scope", () => {
+	it("DOES validate declared workflow input (job.data is producer-supplied input)", () => {
+		// job.data IS the payload the `input` schema describes; a malformed job
+		// fails a deterministic 400 that handleJob routes to DLQ without retry.
+		// `validatesDeclaredInput` is protected and stateless — assert on the prototype.
+		const flag = (WorkerTrigger.prototype as unknown as { validatesDeclaredInput(): boolean }).validatesDeclaredInput();
+		expect(flag).toBe(true);
+	});
+});

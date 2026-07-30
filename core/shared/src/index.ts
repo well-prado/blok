@@ -12,7 +12,9 @@ import BlokError, {
 	DEFAULT_RETRYABLE,
 	ErrorCategory,
 	ErrorSeverity,
+	isNonRetryableValidationError,
 	type NodeErrorPayload,
+	WORKFLOW_INPUT_VALIDATION,
 } from "./BlokError";
 import GlobalError from "./GlobalError";
 import GlobalLogger from "./GlobalLogger";
@@ -69,6 +71,8 @@ export {
 	ErrorSeverity,
 	DEFAULT_HTTP_STATUS,
 	DEFAULT_RETRYABLE,
+	isNonRetryableValidationError,
+	WORKFLOW_INPUT_VALIDATION,
 	Metrics,
 	MemoryUsage,
 	type MetricsType,

@@ -34,7 +34,6 @@ export default class RuntimeGenerator {
 		existingPath?: string,
 	): Promise<RuntimeInformation> {
 		const openai = createOpenAI({
-			compatibility: "strict",
 			apiKey: apiKey,
 		});
 

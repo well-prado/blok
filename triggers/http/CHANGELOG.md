@@ -1,5 +1,22 @@
 # @blokjs/trigger-http
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @blokjs/shared@1.6.0
+  - @blokjs/runner@1.6.0
+  - @blokjs/helper@1.6.0
+  - @blokjs/core@1.6.0
+  - @blokjs/api-call@1.6.0
+  - @blokjs/if-else@1.6.0
+  - @blokjs/helpers@2.0.0
+  - @blokjs/trigger-webhook@1.6.0
+  - @blokjs/trigger-mcp@1.6.0
+  - @blokjs/trigger-sse@1.6.0
+  - @blokjs/trigger-websocket@2.0.0
+
 ## 0.1.1
 
 ### Patch Changes

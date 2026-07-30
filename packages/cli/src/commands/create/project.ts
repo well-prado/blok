@@ -47,7 +47,7 @@ const exec = util.promisify(child_process.exec);
 const HOME_DIR = `${os.homedir()}/.blok`;
 const GITHUB_REPO_LOCAL = `${HOME_DIR}/blok`;
 const GITHUB_REPO_REMOTE = "https://github.com/well-prado/blok.git";
-const GITHUB_REPO_RELEASE_TAG = "v1.5.0";
+const GITHUB_REPO_RELEASE_TAG = "v1.7.0";
 // Scaffold assets bundled into the built package by scripts/
 // bundle-scaffold-assets.ts — repo-relative layout, so it substitutes for a
 // repo checkout. Compiled location: dist/commands/create/project.js →
@@ -852,7 +852,7 @@ export async function createProject(opts: OptionValues, version: string, current
 		// Bumped alongside major framework releases (0.4 was the
 		// explicit-path-only routing release; 0.5 will drop the
 		// BLOK_ROUTING_LEGACY escape hatch).
-		const BLOKJS_DEP_RANGE = "^1.5.0";
+		const BLOKJS_DEP_RANGE = "^1.7.0";
 
 		for (const depGroup of ["dependencies", "devDependencies", "peerDependencies"]) {
 			const deps = packageJsonContent[depGroup];
@@ -909,9 +909,13 @@ export async function createProject(opts: OptionValues, version: string, current
 			for (const [pkg, relativePath] of Object.entries(workspacePackageMap)) {
 				fileLinks[pkg] = `file:${path.resolve(repoSource, relativePath)}`;
 			}
-			// npm/pnpm use "overrides", yarn/bun use "resolutions"
-			packageJsonContent.overrides = fileLinks;
-			packageJsonContent.resolutions = fileLinks;
+			// npm/pnpm use "overrides", yarn/bun use "resolutions".
+			// MERGE rather than replace — the template ships security-motivated
+			// overrides (e.g. forcing @hono/node-server to 2.x so a stale peer
+			// range can't pull the vulnerable 1.x back in) that must survive
+			// local-repo scaffolding too.
+			packageJsonContent.overrides = { ...packageJsonContent.overrides, ...fileLinks };
+			packageJsonContent.resolutions = { ...packageJsonContent.resolutions, ...fileLinks };
 		}
 
 		// Get the package manager

@@ -227,6 +227,7 @@ async function main() {
 			.command("dev")
 			.description("Start the development server")
 			.option("--skip-version-check", "Skip runtime version validation")
+			.option("--port <port>", "Port for the HTTP trigger (overrides PORT and the project config)")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "dev",

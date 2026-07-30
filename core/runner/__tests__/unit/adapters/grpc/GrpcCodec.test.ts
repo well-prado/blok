@@ -1,5 +1,5 @@
 import type { Context } from "@blokjs/shared";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
 import {
 	NodeRuntimeService,
@@ -126,6 +126,35 @@ describe("encodeExecuteRequest", () => {
 	it("populates state.vars from ctx.vars", () => {
 		const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
 		expect(bufferToJson(req.state.vars)).toEqual({ fetch: { id: "v" } });
+	});
+
+	describe("state diet (ADR 0014 Phase 0, BLOK_GRPC_STATE_DIET)", () => {
+		const prior = process.env.BLOK_GRPC_STATE_DIET;
+		afterEach(() => {
+			// biome-ignore lint/performance/noDelete: env-var cleanup needs real deletion
+			if (prior === undefined) delete process.env.BLOK_GRPC_STATE_DIET;
+			else process.env.BLOK_GRPC_STATE_DIET = prior;
+		});
+
+		it("drops vars + previous_output but keeps env, inputs, and trigger.body when enabled", () => {
+			process.env.BLOK_GRPC_STATE_DIET = "1";
+			const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
+			// Diet: the growth terms are empty...
+			expect(bufferToJson(req.state.vars)).toEqual({});
+			expect(bufferToJson(req.state.previousOutput)).toBeNull();
+			// ...but the kept-ABI fields still ride along.
+			expect(req.state.env).toEqual({ NODE_ENV: "test" });
+			expect(bufferToJson(req.trigger.body)).toBeTruthy();
+			expect(bufferToJson(req.inputs)).toBeTruthy();
+		});
+
+		it("is off by default — full state is sent when unset", () => {
+			// biome-ignore lint/performance/noDelete: must fully unset, not store "undefined"
+			delete process.env.BLOK_GRPC_STATE_DIET;
+			const req = encodeExecuteRequest(makeNode(), makeCtx(), 0, 1, 0, 30_000);
+			expect(bufferToJson(req.state.vars)).toEqual({ fetch: { id: "v" } });
+			expect(bufferToJson(req.state.previousOutput)).toEqual({ previous: 1 });
+		});
 	});
 
 	it("filters non-string env entries out of state.env", () => {
