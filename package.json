@@ -55,7 +55,8 @@
 		"sdks:build": "bash scripts/sdks-build.sh",
 		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
-		"build": "bunx nx run-many -t build"
+		"build": "bunx nx run-many -t build",
+		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts"
 	},
 	"devDependencies": {
 		"@aws-sdk/client-sns": "^3.981.0",
@@ -64,6 +65,7 @@
 		"@biomejs/biome": "1.9.4",
 		"@changesets/cli": "^2.29.8",
 		"@google-cloud/pubsub": "^5.2.2",
+		"@types/ws": "^8.18.1",
 		"amqplib": "^0.10.9",
 		"bullmq": "^5.67.2",
 		"husky": "^9.1.7",
@@ -72,8 +74,10 @@
 		"lint-staged": "^16.2.7",
 		"nats": "^2.29.3",
 		"nx": "20.8.4",
+		"playwright": "^1.62.1",
 		"typedoc": "^0.28.16",
-		"typedoc-plugin-markdown": "^4.9.0"
+		"typedoc-plugin-markdown": "^4.9.0",
+		"ws": "^8.21.0"
 	},
 	"lint-staged": {
 		"*": [

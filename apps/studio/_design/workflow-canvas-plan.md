@@ -818,6 +818,14 @@ Exit criteria:
 
 #### 0.2 CDP screencast spike
 
+Status: proven on 2026-08-03 by `apps/studio/_spikes/cdp-screencast`.
+
+- Headless Playwright Chromium streamed real JPEG frames through CDP into a browser panel.
+- The automated run completed `goto`, `fill`, and `click`, then captured target and panel screenshots.
+- A deliberately delayed viewer acknowledgement produced frame dropping while retaining only the latest frame.
+- Browser context, CDP session, WebSocket server, and HTTP server all closed cleanly.
+- Decision: proceed with CDP at a 10 FPS ceiling and one unacknowledged frame per viewer; keep action-boundary screenshots as the durable replay artifact.
+
 - Launch Chromium through Playwright.
 - Stream a local test page at a bounded frame rate.
 - Demonstrate navigation, fill, click, and screenshot.

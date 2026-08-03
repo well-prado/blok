@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Dashboard fixture</title>
+		<style>
+			* { box-sizing: border-box; } body { margin: 0; min-height: 100vh; padding: 54px; font-family: system-ui, sans-serif; background: #11150e; color: white; }
+			.top { display: flex; justify-content: space-between; align-items: center; } .badge { color: #a8ff60; }
+			h1 { margin-top: 100px; font-size: 56px; max-width: 760px; line-height: 1.02; animation: enter .6s ease-out; }
+			.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 46px; }
+			.card { min-height: 150px; padding: 22px; border: 1px solid #303a2b; border-radius: 16px; background: #181e15; } strong { display: block; font-size: 32px; color: #a8ff60; margin-top: 24px; }
+			@keyframes enter { from { opacity: 0; transform: translateY(24px); } }
+		</style>
+	</head>
+	<body>
+		<div class="top"><b>BLOK</b><span class="badge">Workflow completed</span></div>
+		<h1>Welcome, Alice. Your browser workflow is live.</h1>
+		<div class="grid"><div class="card">Runs<strong>128</strong></div><div class="card">Passed<strong>100%</strong></div><div class="card">Duration<strong>1.2s</strong></div></div>
+	</body>
+</html>
