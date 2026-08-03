@@ -197,6 +197,19 @@ function wrapWithTimeout<T>(fn: () => Promise<T>, ms: number, stepName: string):
 
 export default abstract class RunnerSteps {
 	/**
+	 * Test-only seam for proving debugger lifecycle at the real execution
+	 * boundary. Production runners inherit the no-op. A future debug controller
+	 * can override this without moving pause logic into individual nodes.
+	 */
+	protected beforeStep(
+		_ctx: Context,
+		_step: NodeBase,
+		_index: number,
+		_total: number,
+		_deep: boolean,
+	): void | Promise<void> {}
+
+	/**
 	 * Executes a series of steps in the given context.
 	 *
 	 * @param ctx - The context in which the steps are executed.
@@ -272,6 +285,14 @@ export default abstract class RunnerSteps {
 					continue;
 				}
 				if (step.stop) break;
+
+				const pause = this.beforeStep(ctx, step, i, steps.length, deep);
+				if (pause) await pause;
+				// Cancellation may have arrived while a debugger held the step.
+				if (ctx.signal?.aborted) {
+					throw new RunCancelledError(traceRunId);
+				}
+
 				// Stamp the step's declared content-type onto the rolling
 				// response, but ONLY when `ctx.response` is a `BlokResponse`
 				// envelope — i.e. it already carries its own `contentType` key.

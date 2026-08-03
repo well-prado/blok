@@ -839,6 +839,13 @@ Exit criteria:
 
 #### 0.3 Debug gate spike
 
+Status: proven on 2026-08-03 at `RunnerSteps.beforeStep`, after inactive/stop checks and before tracing or execution.
+
+- Breakpoint mode paused immediately before a browser click and resumed to completion.
+- Step mode released exactly one executable step before pausing at the next.
+- AbortSignal cancellation released the pending controller, raised `RunCancelledError`, and left no waiting resource.
+- Decision: keep the integration at this boundary; the production controller will attach per run and emit pause/resume events without changing node implementations.
+
 - Add a test-only runner hook that pauses before one step and resumes through a promise controller.
 - Verify cancellation releases the wait and leaves no active resource.
 
