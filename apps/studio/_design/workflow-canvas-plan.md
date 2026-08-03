@@ -858,6 +858,13 @@ Exit criteria:
 
 #### 1.1 Schema and pure utilities
 
+Status: implemented on 2026-08-03.
+
+- `WorkflowStudioConfigV1Schema` validates the versioned sidecar while preserving unknown future keys.
+- Canonical `.ts`, `.js`, and `.json` workflow sources resolve by extension replacement to `.studio.json`; display provenance and unsupported formats fail.
+- Position precedence is sidecar → inline `step.ui` → auto-layout.
+- Orphan node entries survive parsing and ordinary saves; cleanup is a separate pure operation.
+
 - Add a small Zod `WorkflowStudioConfigV1` schema.
 - Add source → sidecar path resolution.
 - Add merge precedence: sidecar → inline `ui` → auto-layout.
