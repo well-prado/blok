@@ -178,6 +178,7 @@ export default class HttpTrigger extends TriggerBase {
 	private port: string | number = process.env.PORT || 4000;
 	private initializer = 0;
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
+	private workflowSourcePaths = new Map<unknown, string>();
 	private server: Server | null = null;
 
 	/**
@@ -408,28 +409,42 @@ export default class HttpTrigger extends TriggerBase {
 			return [];
 		}
 
-		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
+		const workflowsRoot = path.resolve(
+			process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || path.join(process.cwd(), "workflows"),
+		);
 
 		// JSON workflows live under WORKFLOWS_PATH/json/<nested>.json.
 		// stripLeadingSegments=1 elides the `json/` segment from URLs.
-		const scannedJson = await scanWorkflows(
-			[
+		const [scannedJson, scannedTs] = await Promise.all([
+			scanWorkflows(
+				[
+					{
+						dir: path.join(workflowsRoot, "json"),
+						kind: "json",
+						stripLeadingSegments: 0,
+					},
+				],
 				{
-					dir: path.join(workflowsRoot, "json"),
-					kind: "json",
-					stripLeadingSegments: 0,
+					onLoadError: (file, err) => {
+						this.logger.error(`[blok] workflow load error in ${file}: ${err.message}`);
+					},
 				},
-			],
-			{
+			),
+			scanWorkflows([{ dir: path.join(process.cwd(), "src", "workflows"), kind: "ts" }], {
 				onLoadError: (file, err) => {
 					this.logger.error(`[blok] workflow load error in ${file}: ${err.message}`);
 				},
-			},
-		);
+			}),
+		]);
+
+		// Match by the imported object itself. Keys and workflow names are display
+		// identifiers and must never be promoted into filesystem write targets.
+		this.workflowSourcePaths = new Map(scannedTs.map((entry) => [entry.workflow, entry.source]));
 
 		const manual = Object.keys(this.nodeMap.workflows ?? {}).map((key) => ({
 			key,
 			workflow: (this.nodeMap.workflows as Record<string, unknown>)[key],
+			sourcePath: this.workflowSourcePaths.get((this.nodeMap.workflows as Record<string, unknown>)[key]),
 		}));
 
 		// Boot is tolerant of route-table collisions: a single bad
@@ -505,6 +520,7 @@ export default class HttpTrigger extends TriggerBase {
 			registry.register({
 				name: wfName,
 				source: r.source,
+				sourcePath: r.sourcePath,
 				workflow: r.workflow,
 				// Bug 01 — derive the middleware marker from the workflow object.
 				// `buildRouteTable` already excludes middleware, so in practice
@@ -533,6 +549,7 @@ export default class HttpTrigger extends TriggerBase {
 			registry.register({
 				name: wfName,
 				source: sw.source,
+				sourcePath: sw.source,
 				workflow: sw.workflow,
 				isMiddleware: true,
 			});
@@ -574,6 +591,7 @@ export default class HttpTrigger extends TriggerBase {
 			registry.register({
 				name: wfName,
 				source,
+				sourcePath: this.workflowSourcePaths.get(wf),
 				workflow: wf,
 				isMiddleware: true,
 			});
@@ -606,7 +624,9 @@ export default class HttpTrigger extends TriggerBase {
 	 * as registration errors per `WorkflowRegistry.register`.
 	 */
 	private async scanAndRegisterMiddleware(): Promise<void> {
-		const workflowsRoot = process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || `${process.cwd()}/workflows`;
+		const workflowsRoot = path.resolve(
+			process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || path.join(process.cwd(), "workflows"),
+		);
 		const scanned = await scanWorkflows(
 			[
 				{
@@ -644,6 +664,7 @@ export default class HttpTrigger extends TriggerBase {
 				registry.register({
 					name: wfName,
 					source: sw.source,
+					sourcePath: sw.source,
 					workflow: sw.workflow,
 					isMiddleware: true,
 				});
@@ -656,6 +677,7 @@ export default class HttpTrigger extends TriggerBase {
 				registry.register({
 					name: wfName,
 					source: sw.source,
+					sourcePath: sw.source,
 					workflow: sw.workflow,
 				});
 				subworkflowCount++;

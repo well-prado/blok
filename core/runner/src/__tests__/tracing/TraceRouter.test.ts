@@ -454,7 +454,8 @@ describe("TraceRouter", () => {
 			it("`/workflows/:name` returns 200 + definition for a registry-only workflow", () => {
 				WorkflowRegistry.getInstance().register({
 					name: "never-run-http",
-					source: "<test>",
+					source: 'Workflows.ts["never-run-http"]',
+					sourcePath: "/project/src/workflows/never-run-http.ts",
 					workflow: {
 						name: "never-run-http",
 						version: "1.0.0",
@@ -473,6 +474,33 @@ describe("TraceRouter", () => {
 				expect(body.totalRuns).toBe(0);
 				expect(body.definition).toBeDefined();
 				expect((body.definition as any).steps).toHaveLength(1);
+				expect(body.source).toEqual({
+					displaySource: 'Workflows.ts["never-run-http"]',
+					sourcePath: "/project/src/workflows/never-run-http.ts",
+					writable: true,
+				});
+			});
+
+			it("reports map-only workflows as read-only without inventing a path", () => {
+				WorkflowRegistry.getInstance().register({
+					name: "inline-http",
+					source: 'Workflows.ts["inline-http"]',
+					workflow: {
+						name: "inline-http",
+						trigger: { http: { method: "GET", path: "/inline" } },
+						steps: [],
+					},
+				});
+
+				const req = new MockRequest({ params: { name: "inline-http" } });
+				const res = new MockResponse();
+				router.findHandler("GET", "/workflows/:name")!(req, res);
+
+				const body = res.jsonBody as any;
+				expect(body.source.displaySource).toBe('Workflows.ts["inline-http"]');
+				expect(body.source.sourcePath).toBeUndefined();
+				expect(body.source.writable).toBe(false);
+				expect(body.source.readOnlyReason).toMatch(/canonical workflow file/i);
 			});
 		});
 	});

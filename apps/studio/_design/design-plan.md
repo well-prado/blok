@@ -3,6 +3,12 @@
 > Author: Claude (Huashu-Design pass) · 2026-04-29
 > Scope: Studio at `apps/studio/`. Bring product depth and visual coherence to trigger.dev v4 quality without changing core architecture (React 19 + TanStack + @xyflow + Tailwind v4).
 > Companion docs: `brand-spec.md` (palette + tokens), `run-detail-v2.html` (hi-fi prototype of the run-detail screen).
+>
+> **2026-08-03 update:** this document remains the operator/observability plan. Its
+> earlier decision to exclude workflow authoring is superseded by
+> [`workflow-canvas-plan.md`](./workflow-canvas-plan.md), which defines the
+> E2E-first editable canvas, Playwright browser workflows, debug execution, and
+> per-workflow `*.studio.json` layout sidecar.
 
 ---
 
@@ -368,7 +374,9 @@ The keyboard layer is the cheapest way to feel "operator-grade." The full map be
 
 ## 9 · What this plan deliberately doesn't try to do
 
-- **No workflow authoring UI.** Studio stays read-only for trace observability. Authoring lives in code (TS workflows in `triggers/http/src/workflows/`) per `CLAUDE.md` policy.
+- **Workflow authoring is specified separately.** See `workflow-canvas-plan.md`.
+  This operator plan does not duplicate its canvas, browser, or persistence
+  architecture.
 - **No AI-generated dashboards** like trigger.dev's "describe what you want, AI generates a chart." Cool, not load-bearing, can ship later.
 - **No bundled OpenTelemetry exporter UI.** Trigger.dev's whole observability story is OTEL-native; ours is its own protocol. We can make our trace viewer just as good without OTEL parity.
 - **No multi-tenant org/project picker.** Blok is single-tenant per deployment today. Don't introduce multi-tenancy chrome until the runtime supports it.

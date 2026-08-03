@@ -53,6 +53,7 @@ describe("buildRouteTable", () => {
 		expect(out).toHaveLength(1);
 		expect(out[0].method).toBe("GET");
 		expect(out[0].path).toBe("/users/list");
+		expect(out[0].sourcePath).toBe("/wf/users/list.json");
 	});
 
 	it("explicit path is the URL — file location is not consulted (v0.4+)", () => {
@@ -140,6 +141,7 @@ describe("buildRouteTable", () => {
 			[
 				{
 					key: "legacy",
+					sourcePath: "/project/src/workflows/legacy.ts",
 					workflow: {
 						name: "Legacy",
 						version: "1.0.0",
@@ -150,6 +152,26 @@ describe("buildRouteTable", () => {
 		);
 		expect(out).toHaveLength(1);
 		expect(out[0].path).toBe("/legacy/url");
+		expect(out[0].source).toBe('Workflows.ts["legacy"]');
+		expect(out[0].sourcePath).toBe("/project/src/workflows/legacy.ts");
+	});
+
+	it("does not turn map provenance into a filesystem path", () => {
+		const [route] = buildRouteTable(
+			[],
+			[
+				{
+					key: "inline-only",
+					workflow: {
+						name: "Inline",
+						trigger: { http: { method: "GET", path: "/inline" } },
+					},
+				},
+			],
+		);
+
+		expect(route.source).toBe('Workflows.ts["inline-only"]');
+		expect(route.sourcePath).toBeUndefined();
 	});
 
 	it("manual registration without explicit path throws MissingExplicitPathError in strict mode", () => {

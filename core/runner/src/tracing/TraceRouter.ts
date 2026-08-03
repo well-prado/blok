@@ -451,6 +451,17 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			nodeNames: Array.from(nodeNames),
 			runtimes: Array.from(runtimes),
 			definition: registered?.workflow,
+			source: registered
+				? {
+						displaySource: registered.source,
+						sourcePath: registered.sourcePath,
+						writable: registered.sourcePath !== undefined,
+						readOnlyReason:
+							registered.sourcePath === undefined
+								? "No canonical workflow file was observed during registration."
+								: undefined,
+					}
+				: undefined,
 			examples,
 		});
 	});

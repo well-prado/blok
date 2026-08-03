@@ -45,8 +45,10 @@ export type WorkflowAuthorizeFn = (parentName: string, childName: string, ctx: C
 export interface RegisteredWorkflow {
 	/** The workflow's `name:` field. Sub-workflow steps reference this. */
 	readonly name: string;
-	/** Filesystem path or `"<inline>"` for builder-constructed workflows. */
+	/** Human-readable registration provenance; not necessarily a writable path. */
 	readonly source: string;
+	/** Canonical filesystem path, present only when the loader observed the file. */
+	readonly sourcePath?: string;
 	/**
 	 * Raw workflow object (pre-normalization). The `SubworkflowNode`
 	 * passes this to `Configuration.init(name, opts, preloaded)` which

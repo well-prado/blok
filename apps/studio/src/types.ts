@@ -326,6 +326,12 @@ export interface SavedFilter {
 
 export interface WorkflowDetail extends WorkflowSummary {
 	definition?: unknown;
+	source?: {
+		displaySource: string;
+		sourcePath?: string;
+		writable: boolean;
+		readOnlyReason?: string;
+	};
 	nodeNames: string[];
 	runtimes: string[];
 	/**

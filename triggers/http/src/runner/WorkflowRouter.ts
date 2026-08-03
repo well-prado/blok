@@ -59,6 +59,8 @@ export interface RouteEntry {
 	readonly path: string;
 	readonly workflowKey: string;
 	readonly source: string;
+	/** Canonical filesystem path when this route was loaded from a file. */
+	readonly sourcePath?: string;
 	readonly kind: "ts" | "json";
 	/** The workflow object (raw, pre-normalization). */
 	readonly workflow: unknown;
@@ -68,6 +70,8 @@ export interface RouteEntry {
 export interface ManualRegistration {
 	readonly key: string;
 	readonly workflow: unknown;
+	/** Set only when the workflow object was matched to a scanned module. */
+	readonly sourcePath?: string;
 }
 
 /** Errors raised during route-table construction. */
@@ -182,6 +186,7 @@ export function buildRouteTable(
 			path: finalPath,
 			workflowKey,
 			source: sw.source,
+			sourcePath: sw.source,
 			kind: sw.kind,
 			workflow: sw.workflow,
 		};
@@ -224,6 +229,7 @@ export function buildRouteTable(
 			path: explicitPath,
 			workflowKey: mr.key,
 			source: `Workflows.ts[${JSON.stringify(mr.key)}]`,
+			sourcePath: mr.sourcePath,
 			kind: "ts",
 			workflow: mr.workflow,
 		};
