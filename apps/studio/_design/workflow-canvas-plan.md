@@ -1092,9 +1092,25 @@ Tests:
 
 #### 3.5 Activity drawer
 
+Status: implemented on 2026-08-04; cooperative Stop remains part of the Phase 4 controller work.
+
 - Reuse live logs and node data.
 - Add Assertions and Artifacts tabs.
 - Clicking an artifact selects its node and frame.
+
+Implemented:
+
+- Added a persistent Details, Logs, Assertions, and Artifacts drawer beneath the Canvas/Browser workspace.
+- Reused the existing node detail inspector for live status, duration, inputs, outputs, structured errors, logs, and screenshots.
+- Clicking an executed static canvas node selects its latest node-run instance without leaving the workflow page.
+- Assertions are identified from the static DAG's stable node reference and show expected/actual results for both passing and failed checks.
+- Artifact selection also selects its owning node, switches to Split mode, and replays the recorded screenshot in the browser panel with a Show live return action.
+
+Tests:
+
+- Assertion results and artifact-to-node selection are covered in the drawer.
+- Browser artifact replay and return-to-live behavior are covered in the frame panel.
+- Real Studio smoke selected a failed canvas node and rendered its live inspector in place.
 
 Phase 3 acceptance scenario:
 

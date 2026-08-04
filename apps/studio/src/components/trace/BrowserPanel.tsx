@@ -1,11 +1,13 @@
 import { cn } from "@/lib/utils";
-import type { RunDetail, RunEvent } from "@/types";
+import type { BrowserArtifact, RunDetail, RunEvent } from "@/types";
 import { CheckCircle2, Globe2, Loader2, Monitor, MousePointerClick, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 interface BrowserPanelProps {
 	session: NonNullable<RunDetail["browserSession"]>;
 	events: RunEvent[];
+	selectedArtifact?: BrowserArtifact;
+	onShowLive?: () => void;
 	className?: string;
 }
 
@@ -23,7 +25,7 @@ interface ActionPayload {
 	error?: string;
 }
 
-export function BrowserPanel({ session, events, className }: BrowserPanelProps) {
+export function BrowserPanel({ session, events, selectedArtifact, onShowLive, className }: BrowserPanelProps) {
 	const [frameUrl, setFrameUrl] = useState("");
 	const [frame, setFrame] = useState<FrameMeta>();
 	const [connection, setConnection] = useState<"connecting" | "live" | "closed" | "error">("connecting");
@@ -74,39 +76,57 @@ export function BrowserPanel({ session, events, className }: BrowserPanelProps) 
 	const actions = useMemo(() => events.filter((event) => event.type === "BROWSER_ACTION").slice(-8), [events]);
 	const currentAction = actions.at(-1)?.payload as ActionPayload | undefined;
 	const box = currentAction?.box;
+	const displayUrl = selectedArtifact?.url || frameUrl;
 
 	return (
 		<section className={cn("flex min-h-0 flex-col overflow-hidden bg-zinc-950", className)} aria-label="Live browser">
 			<header className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
 				<Monitor className="h-4 w-4 text-cyan-300" />
 				<div className="min-w-0 flex-1">
-					<div className="text-xs font-semibold text-zinc-200">Browser</div>
+					<div className="truncate text-xs font-semibold text-zinc-200">{selectedArtifact?.name || "Browser"}</div>
 					<div className="flex items-center gap-1 truncate text-[10px] text-zinc-500">
 						<Globe2 className="h-2.5 w-2.5 shrink-0" /> {session.url || "about:blank"}
 					</div>
 				</div>
-				<span
-					className={cn(
-						"inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
-						connection === "live" && "bg-cyan-400/10 text-cyan-300",
-						connection === "connecting" && "bg-blue-400/10 text-blue-300",
-						connection === "closed" && "bg-zinc-500/10 text-zinc-400",
-						connection === "error" && "bg-red-400/10 text-red-300",
-					)}
-				>
-					{connection === "connecting" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
-					{connection}
-				</span>
+				{selectedArtifact ? (
+					<button
+						type="button"
+						onClick={onShowLive}
+						className="rounded-full bg-cyan-400/10 px-2 py-0.5 text-[10px] font-medium text-cyan-300 hover:bg-cyan-400/20"
+					>
+						Show live
+					</button>
+				) : (
+					<span
+						className={cn(
+							"inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
+							connection === "live" && "bg-cyan-400/10 text-cyan-300",
+							connection === "connecting" && "bg-blue-400/10 text-blue-300",
+							connection === "closed" && "bg-zinc-500/10 text-zinc-400",
+							connection === "error" && "bg-red-400/10 text-red-300",
+						)}
+					>
+						{connection === "connecting" && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+						{connection}
+					</span>
+				)}
 			</header>
 
 			<div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
-				{frameUrl ? (
+				{displayUrl ? (
 					<div
 						className="relative max-h-full max-w-full overflow-hidden"
-						style={{ aspectRatio: frame ? `${frame.width} / ${frame.height}` : undefined, width: "100%" }}
+						style={{
+							aspectRatio: !selectedArtifact && frame ? `${frame.width} / ${frame.height}` : "16 / 9",
+							width: "100%",
+						}}
 					>
-						<img src={frameUrl} alt="Live browser frame" className="absolute inset-0 h-full w-full object-contain" />
-						{box && frame && (
+						<img
+							src={displayUrl}
+							alt={selectedArtifact ? `Browser artifact: ${selectedArtifact.name}` : "Live browser frame"}
+							className="absolute inset-0 h-full w-full object-contain"
+						/>
+						{!selectedArtifact && box && frame && (
 							<div
 								className="pointer-events-none absolute border-2 border-cyan-300 bg-cyan-300/10 shadow-[0_0_14px_rgba(103,232,249,0.5)]"
 								style={{

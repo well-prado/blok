@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
@@ -6,7 +7,7 @@ import { ApiError, startTestRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
-import type { NodeRun, NodeRunStatus, WorkflowStudioConfig } from "@/types";
+import type { BrowserArtifact, NodeRun, NodeRunStatus, WorkflowStudioConfig } from "@/types";
 import { Link } from "@tanstack/react-router";
 import {
 	Background,
@@ -84,10 +85,22 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [dirty, setDirty] = useState(false);
 	const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
 	const [workspaceMode, setWorkspaceMode] = useState<"canvas" | "split" | "browser">("canvas");
+	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+	const [selectedArtifact, setSelectedArtifact] = useState<BrowserArtifact>();
 	const canvasRef = useRef<HTMLDivElement>(null);
 	const writable = studioQuery.data?.writable === true;
 	const autoOpenBrowser = runQuery.data?.browserSession?.autoOpen ? runQuery.data.browserSession.sessionId : undefined;
 	const liveStatuses = useMemo(() => projectNodeStatuses(runQuery.data?.nodes ?? []), [runQuery.data?.nodes]);
+	const stepUses = useMemo(
+		() =>
+			Object.fromEntries(
+				committed.nodes.flatMap((node) => {
+					const data = node.data as unknown as DagNode["data"];
+					return data.meta?.stepId && data.meta.nodeRef ? [[data.meta.stepId, data.meta.nodeRef]] : [];
+				}),
+			),
+		[committed.nodes],
+	);
 	const renderedNodes = useMemo(
 		() =>
 			flowNodes.map((node) => {
@@ -201,6 +214,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const run = async () => {
 		setStartingRun(true);
 		setRunError("");
+		setSelectedNodeId(null);
+		setSelectedArtifact(undefined);
 		try {
 			setActiveRunId((await startTestRun(workflowName)).runId);
 		} catch (error) {
@@ -211,6 +226,17 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	};
 	const fitActive = () => {
 		if (activeNode) flowInstance?.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
+	};
+	const selectCanvasNode = (node: Node) => {
+		const stepId = flowNodeStepId(node);
+		if (!stepId) return;
+		const nodeRun = [...(runQuery.data?.nodes ?? [])]
+			.sort((a, b) => b.startedAt - a.startedAt)
+			.find((candidate) => candidate.nodeName === stepId);
+		if (nodeRun) {
+			setSelectedNodeId(nodeRun.id);
+			setSelectedArtifact(undefined);
+		}
 	};
 
 	return (
@@ -368,6 +394,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						edges={renderedEdges}
 						onInit={setFlowInstance}
 						onNodesChange={onNodesChange}
+						onNodeClick={(_event, node) => selectCanvasNode(node)}
 						onNodeDragStop={(_event, node) => {
 							if (editing && flowNodeStepId(node)) setDirty(true);
 						}}
@@ -398,10 +425,27 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					<BrowserPanel
 						session={runQuery.data.browserSession}
 						events={runQuery.data.browserEvents ?? []}
+						selectedArtifact={selectedArtifact}
+						onShowLive={() => setSelectedArtifact(undefined)}
 						className="h-[600px] min-w-0 border-l border-zinc-800"
 					/>
 				)}
 			</div>
+			{runQuery.data && (
+				<ActivityDrawer
+					nodes={runQuery.data.nodes}
+					logs={runQuery.data.logs}
+					stepUses={stepUses}
+					selectedNodeId={selectedNodeId}
+					selectedArtifactId={selectedArtifact?.id}
+					onSelectNode={setSelectedNodeId}
+					onSelectArtifact={(artifact, nodeId) => {
+						setSelectedNodeId(nodeId);
+						setSelectedArtifact(artifact);
+						if (runQuery.data.browserSession) setWorkspaceMode("split");
+					}}
+				/>
+			)}
 		</div>
 	);
 }

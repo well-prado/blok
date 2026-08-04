@@ -79,6 +79,7 @@ describe("WorkflowGraph layout editor", () => {
 		mocks.runData = {
 			run: { status: "completed" },
 			nodes: [],
+			logs: [],
 			browserSession: {
 				sessionId: "session-1",
 				pageId: "page-1",

@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "./BrowserPanel";
 
@@ -65,5 +66,37 @@ describe("BrowserPanel", () => {
 
 		expect(screen.getByAltText("Live browser frame")).toHaveAttribute("src", "blob:frame");
 		expect(MockWebSocket.instance.send).toHaveBeenCalledWith(JSON.stringify({ type: "ack", frameId: 7 }));
+	});
+
+	it("replays a selected artifact and returns to the live frame", async () => {
+		const onShowLive = vi.fn();
+		const user = userEvent.setup();
+		render(
+			<BrowserPanel
+				session={{
+					sessionId: "session-1",
+					pageId: "page-1",
+					stream: "/stream",
+					status: "closed",
+					autoOpen: true,
+				}}
+				events={[]}
+				selectedArtifact={{
+					id: "artifact-1",
+					runId: "run-1",
+					kind: "screenshot",
+					name: "click-after",
+					mimeType: "image/png",
+					size: 100,
+					createdAt: 1,
+					url: "/artifact.png",
+				}}
+				onShowLive={onShowLive}
+			/>,
+		);
+
+		expect(screen.getByAltText("Browser artifact: click-after")).toHaveAttribute("src", "/artifact.png");
+		await user.click(screen.getByRole("button", { name: /show live/i }));
+		expect(onShowLive).toHaveBeenCalledOnce();
 	});
 });
