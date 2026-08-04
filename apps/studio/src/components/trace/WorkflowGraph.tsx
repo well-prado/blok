@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
 import { ApiError, startTestRun } from "@/lib/api";
@@ -82,8 +83,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [editing, setEditing] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+	const [workspaceMode, setWorkspaceMode] = useState<"canvas" | "split" | "browser">("canvas");
 	const canvasRef = useRef<HTMLDivElement>(null);
 	const writable = studioQuery.data?.writable === true;
+	const autoOpenBrowser = runQuery.data?.browserSession?.autoOpen ? runQuery.data.browserSession.sessionId : undefined;
 	const liveStatuses = useMemo(() => projectNodeStatuses(runQuery.data?.nodes ?? []), [runQuery.data?.nodes]);
 	const renderedNodes = useMemo(
 		() =>
@@ -136,6 +139,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			top <= canvasRef.current.clientHeight - margin;
 		if (!visible) flowInstance.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
 	}, [activeNode, flowInstance]);
+
+	useEffect(() => {
+		if (autoOpenBrowser) setWorkspaceMode("split");
+	}, [autoOpenBrowser]);
 
 	const nodeTypes = useMemo(
 		() => ({
@@ -228,6 +235,23 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					<Link to="/runs/$runId" params={{ runId: activeRunId }} title="Open run details">
 						<StatusBadge status={runStatus} />
 					</Link>
+				)}
+				{runQuery.data?.browserSession && (
+					<div className="flex rounded-md border border-zinc-700 p-0.5" aria-label="Workspace focus">
+						{(["canvas", "split", "browser"] as const).map((mode) => (
+							<button
+								type="button"
+								key={mode}
+								onClick={() => setWorkspaceMode(mode)}
+								className={cn(
+									"rounded px-2 py-1 text-[10px] font-medium capitalize text-zinc-500 hover:text-zinc-200",
+									workspaceMode === mode && "bg-zinc-700 text-zinc-100",
+								)}
+							>
+								{mode}
+							</button>
+						))}
+					</div>
 				)}
 				{editing ? (
 					<div className="flex items-center gap-1.5">
@@ -337,37 +361,46 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					)}
 				</div>
 			)}
-			<div ref={canvasRef} className="h-[600px]">
-				<ReactFlow
-					nodes={renderedNodes}
-					edges={renderedEdges}
-					onInit={setFlowInstance}
-					onNodesChange={onNodesChange}
-					onNodeDragStop={(_event, node) => {
-						if (editing && flowNodeStepId(node)) setDirty(true);
-					}}
-					nodeTypes={nodeTypes}
-					fitView
-					fitViewOptions={{ padding: 0.25 }}
-					proOptions={{ hideAttribution: true }}
-					minZoom={0.25}
-					maxZoom={2}
-					nodesDraggable={editing && writable}
-					nodesConnectable={false}
-					elementsSelectable={true}
-				>
-					<Background color="#27272a" gap={16} size={1} />
-					<Controls
-						showInteractive={false}
-						className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+			<div className={cn("grid", workspaceMode === "split" && "lg:grid-cols-2")}>
+				<div ref={canvasRef} className={cn("h-[600px] min-w-0", workspaceMode === "browser" && "hidden")}>
+					<ReactFlow
+						nodes={renderedNodes}
+						edges={renderedEdges}
+						onInit={setFlowInstance}
+						onNodesChange={onNodesChange}
+						onNodeDragStop={(_event, node) => {
+							if (editing && flowNodeStepId(node)) setDirty(true);
+						}}
+						nodeTypes={nodeTypes}
+						fitView
+						fitViewOptions={{ padding: 0.25 }}
+						proOptions={{ hideAttribution: true }}
+						minZoom={0.25}
+						maxZoom={2}
+						nodesDraggable={editing && writable}
+						nodesConnectable={false}
+						elementsSelectable={true}
+					>
+						<Background color="#27272a" gap={16} size={1} />
+						<Controls
+							showInteractive={false}
+							className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+						/>
+						<MiniMap
+							nodeStrokeColor="#3f3f46"
+							nodeColor={(node) => MINIMAP_COLORS[(node.data as { kind: DagNodeKind }).kind] ?? "#52525b"}
+							maskColor="rgba(0,0,0,0.6)"
+							className="bg-zinc-900! border-zinc-700! rounded-md!"
+						/>
+					</ReactFlow>
+				</div>
+				{runQuery.data?.browserSession && workspaceMode !== "canvas" && (
+					<BrowserPanel
+						session={runQuery.data.browserSession}
+						events={runQuery.data.browserEvents ?? []}
+						className="h-[600px] min-w-0 border-l border-zinc-800"
 					/>
-					<MiniMap
-						nodeStrokeColor="#3f3f46"
-						nodeColor={(node) => MINIMAP_COLORS[(node.data as { kind: DagNodeKind }).kind] ?? "#52525b"}
-						maskColor="rgba(0,0,0,0.6)"
-						className="bg-zinc-900! border-zinc-700! rounded-md!"
-					/>
-				</ReactFlow>
+				)}
 			</div>
 		</div>
 	);

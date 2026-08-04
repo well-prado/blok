@@ -32,6 +32,7 @@
 	"dependencies": {
 		"@ai-sdk/openai": "^4.0.19",
 		"@blokjs/api-call": "^1.6.0",
+		"@blokjs/browser": "^1.7.0",
 		"@blokjs/core": "^1.6.0",
 		"@blokjs/helper": "^1.6.0",
 		"@blokjs/helpers": "^1.6.0",

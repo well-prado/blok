@@ -1067,10 +1067,28 @@ Tests:
 
 #### 3.4 Live browser panel
 
+Status: implemented on 2026-08-04; artifact selection and the broader activity drawer remain Phase 3.5 work.
+
 - Real frame renderer with aspect-ratio preservation.
 - URL/title/status header.
 - Locator box, pointer, click ripple, and textual action feed.
 - Focus Browser/Canvas/Split modes.
+
+Implemented:
+
+- Added a coalesced binary JPEG renderer with explicit frame acknowledgements, object-URL cleanup, and source aspect-ratio preservation.
+- Added the current sanitized URL, connection state, locator highlight, click ripple, and a capped semantic browser action feed without fill values.
+- Added Canvas, Split, and Browser focus modes; a newly opened browser session automatically selects Split.
+- Registered browser semantic event names in Studio SSE and WebSocket upgrades in the Vite development proxy.
+- Registered the browser node package in the HTTP trigger's canonical node map so normal Studio test runs can resolve browser workflows.
+- Added safe locator/box metadata to completed browser action events for the visual overlay.
+
+Tests:
+
+- Browser frame metadata/binary pairing sends the required acknowledgement and renders the frame.
+- Browser semantic SSE subscriptions and all workspace focus modes are covered.
+- HTTP node registration, browser node tests, and the full Studio suite pass.
+- Real Studio smoke streamed `example.com` beside a simultaneously updating Launch → Navigate → Wait canvas.
 
 #### 3.5 Activity drawer
 

@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import ApiCall from "@blokjs/api-call";
+import { BROWSER_NODES } from "@blokjs/browser";
 import { HELPER_NODES } from "@blokjs/helpers";
 import IfElse from "@blokjs/if-else";
 import { discoverNodes } from "@blokjs/runner";
@@ -13,6 +14,7 @@ import type { NodeBase } from "@blokjs/shared";
 const thirdParty: Record<string, BlokService<unknown>> = {
 	"@blokjs/api-call": ApiCall,
 	"@blokjs/if-else": IfElse,
+	...(BROWSER_NODES as unknown as Record<string, BlokService<unknown>>),
 	// v0.5 generic helpers: expr, ctx-publish, throw, log, audit-log,
 	// in-memory-kv, json-schema, etc. Registered globally so any workflow
 	// can use them via `use: "@blokjs/<name>"`.

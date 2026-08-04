@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	mutate: vi.fn(),
 	refetch: vi.fn(),
 	reset: vi.fn(),
+	runData: undefined as undefined | Record<string, unknown>,
 	startTestRun: vi.fn(),
 	studioData: {
 		config: { schemaVersion: 1 as const, workflow: "checkout", nodes: { open: { x: 10, y: 20 } } },
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/useRunDetail", () => ({
-	useRunDetail: () => ({ data: undefined }),
+	useRunDetail: () => ({ data: mocks.runData }),
 	useTraceStream: () => undefined,
 }));
 
@@ -70,7 +71,31 @@ const definition = {
 describe("WorkflowGraph layout editor", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mocks.runData = undefined;
 		mocks.startTestRun.mockResolvedValue({ runId: "run-123", stream: "/runs/run-123/stream" });
+	});
+
+	it("switches between canvas, split, and browser focus modes", async () => {
+		mocks.runData = {
+			run: { status: "completed" },
+			nodes: [],
+			browserSession: {
+				sessionId: "session-1",
+				pageId: "page-1",
+				stream: "/stream",
+				status: "closed",
+				autoOpen: true,
+			},
+			browserEvents: [],
+		};
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		expect(screen.getByRole("region", { name: "Live browser" })).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: /canvas/i }));
+		expect(screen.queryByRole("region", { name: "Live browser" })).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: /browser/i }));
+		expect(screen.getByRole("region", { name: "Live browser" })).toBeInTheDocument();
 	});
 
 	it("starts a workflow run from the canvas", async () => {

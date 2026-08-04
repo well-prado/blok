@@ -32,6 +32,7 @@ export default defineConfig({
 			"/__blok": {
 				target: "http://localhost:4000",
 				changeOrigin: true,
+				ws: true,
 				// Prevent proxy from timing out long-lived SSE connections
 				timeout: 0,
 				configure: (proxy) => {

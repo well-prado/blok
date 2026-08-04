@@ -74,6 +74,7 @@ export async function withActionScreenshot<T extends object>(
 					phase: "completed",
 					...session,
 					url: sanitizeUrl(page.url()),
+					...browserActionOverlay(result),
 				},
 				nodeRunId,
 			);
@@ -113,4 +114,13 @@ export async function withActionScreenshot<T extends object>(
 		}
 		throw error;
 	}
+}
+
+function browserActionOverlay(result: object): Record<string, unknown> {
+	const value = result as { locator?: unknown; box?: unknown; masked?: unknown };
+	return {
+		...(value.locator && typeof value.locator === "object" ? { locator: value.locator } : {}),
+		...(value.box && typeof value.box === "object" ? { box: value.box } : {}),
+		...(typeof value.masked === "boolean" ? { masked: value.masked } : {}),
+	};
 }

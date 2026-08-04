@@ -13,4 +13,9 @@ describe("Nodes", () => {
 	it("should have @blokjs/if-else key", () => {
 		expect(nodes["@blokjs/if-else"]).toBeDefined();
 	});
+
+	it("registers the browser workflow nodes", () => {
+		expect(nodes["@blokjs/browser-launch"]).toBeDefined();
+		expect(nodes["@blokjs/browser-click"]).toBeDefined();
+	});
 });
