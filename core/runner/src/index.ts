@@ -41,6 +41,8 @@ import {
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS } from "./adapters/grpc/types";
 import { assertGrpcOnlyTransport } from "./adapters/transport";
+import { browserArtifactFilePath, saveBrowserScreenshot } from "./browserArtifacts";
+import type { BrowserScreenshotArtifact } from "./browserArtifacts";
 import {
 	registerContextCleanup,
 	registerShutdownCleanup,
@@ -218,6 +220,8 @@ export {
 	// Runtime adapters
 	RuntimeRegistry,
 	RuntimeAdapterNode,
+	browserArtifactFilePath,
+	saveBrowserScreenshot,
 	registerContextCleanup,
 	runContextCleanups,
 	registerShutdownCleanup,
@@ -388,6 +392,8 @@ export {
 
 // Export types
 export type { RuntimeAdapter, RuntimeKind, ExecutionResult, FnNodeDefinition };
+export type { BrowserArtifact } from "./tracing/types";
+export type { BrowserScreenshotArtifact };
 
 // Typed-handle type foundation (ADR 0006 / 0007). TYPES ONLY — `step()` (#421)
 // and the `{$ref}` recorder ship the runtime that consumes these.

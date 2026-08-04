@@ -101,6 +101,19 @@ export interface NodeRunErrorDetail {
 	causes?: ReadonlyArray<Record<string, unknown>>;
 }
 
+export interface BrowserArtifact {
+	id: string;
+	runId: string;
+	nodeRunId?: string;
+	kind: "screenshot" | "console" | "page-error";
+	name: string;
+	mimeType: string;
+	size: number;
+	createdAt: number;
+	url: string;
+	metadata?: Record<string, unknown>;
+}
+
 export interface NodeRun {
 	id: string;
 	runId: string;
@@ -121,6 +134,7 @@ export interface NodeRun {
 	 * and `stack`.
 	 */
 	error?: NodeRunErrorDetail;
+	artifacts?: BrowserArtifact[];
 	/**
 	 * Latest streaming `Progress` frame from the SDK (master plan §17
 	 * Phase 5 follow-up). Studio renders it as a live progress bar

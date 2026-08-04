@@ -885,6 +885,13 @@ export class PostgresRunStore implements RunStore {
 			setClauses.push(`metrics_json = $${paramIdx++}`);
 			values.push(JSON.stringify(updates.metrics));
 		}
+		if (updates.artifacts !== undefined) {
+			const current = this.memory.getNodeRun(nodeRunId);
+			if (current) {
+				setClauses.push(`flags_json = $${paramIdx++}`);
+				values.push(encodeNodeRunFlagsForPg(current));
+			}
+		}
 
 		if (setClauses.length === 0) return;
 
@@ -1599,6 +1606,7 @@ export class PostgresRunStore implements RunStore {
 					subworkflowDepth?: number;
 					middleware?: string;
 					iterationIndex?: number;
+					artifacts?: NodeRun["artifacts"];
 			  }
 			| undefined;
 		return {
@@ -1623,6 +1631,7 @@ export class PostgresRunStore implements RunStore {
 			subworkflowDepth: flags?.subworkflowDepth,
 			middleware: flags?.middleware,
 			iterationIndex: flags?.iterationIndex,
+			artifacts: flags?.artifacts,
 		};
 	}
 
@@ -1691,6 +1700,7 @@ function encodeNodeRunFlagsForPg(nodeRun: NodeRun): string | null {
 	if (nodeRun.subworkflowDepth !== undefined) flags.subworkflowDepth = nodeRun.subworkflowDepth;
 	if (nodeRun.middleware !== undefined) flags.middleware = nodeRun.middleware;
 	if (nodeRun.iterationIndex !== undefined) flags.iterationIndex = nodeRun.iterationIndex;
+	if (nodeRun.artifacts !== undefined) flags.artifacts = nodeRun.artifacts;
 	if (Object.keys(flags).length === 0) return null;
 	return JSON.stringify(flags);
 }

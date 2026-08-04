@@ -5,10 +5,11 @@
  * and invoking them with mock Request/Response objects. This validates
  * the full API surface without needing Express or an HTTP server.
  */
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { browserArtifactFilePath } from "../../browserArtifacts";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
 import { RoutingDiagnostics } from "../../tracing/RoutingDiagnostics";
 import { RunTracker } from "../../tracing/RunTracker";
@@ -91,7 +92,7 @@ class MockResponse {
 	statusCode = 200;
 	headersMap = new Map<string, string>();
 	jsonBody: unknown = undefined;
-	writtenChunks: string[] = [];
+	writtenChunks: Array<string | Uint8Array> = [];
 	ended = false;
 	flushed = false;
 	sentStatus: number | undefined = undefined;
@@ -109,7 +110,7 @@ class MockResponse {
 		this.jsonBody = body;
 	}
 
-	write(chunk: string): boolean {
+	write(chunk: string | Uint8Array): boolean {
 		this.writtenChunks.push(chunk);
 		return true;
 	}
@@ -1195,6 +1196,43 @@ describe("TraceRouter", () => {
 			router.findHandler("GET", "/runs/:runId")!(req, res);
 
 			expect(res.statusCode).toBe(404);
+		});
+	});
+
+	describe("GET /runs/:runId/artifacts/:artifactId", () => {
+		it("serves only an artifact recorded on the requested run", async () => {
+			const previousRoot = process.env.BLOK_PROJECT_ROOT;
+			const root = await mkdtemp(join(tmpdir(), "blok-trace-artifact-"));
+			process.env.BLOK_PROJECT_ROOT = root;
+			try {
+				const node = tracker.getNodeRuns(runs.run1.id)[0];
+				tracker.recordNodeArtifact(node.id, {
+					id: "artifact_test",
+					runId: runs.run1.id,
+					nodeRunId: node.id,
+					kind: "screenshot",
+					name: "after-click",
+					mimeType: "image/png",
+					size: 3,
+					createdAt: 1,
+					url: `/__blok/runs/${runs.run1.id}/artifacts/artifact_test`,
+				});
+				const path = browserArtifactFilePath(runs.run1.id, "artifact_test");
+				await mkdir(dirname(path), { recursive: true });
+				await writeFile(path, new Uint8Array([1, 2, 3]));
+
+				const req = new MockRequest({ params: { runId: runs.run1.id, artifactId: "artifact_test" } });
+				const res = new MockResponse();
+				await router.findHandler("GET", "/runs/:runId/artifacts/:artifactId")!(req, res);
+
+				expect(res.headersMap.get("Content-Type")).toBe("image/png");
+				expect(Array.from(res.writtenChunks[0] as Uint8Array)).toEqual([1, 2, 3]);
+				expect(res.ended).toBe(true);
+			} finally {
+				if (previousRoot === undefined) Reflect.deleteProperty(process.env, "BLOK_PROJECT_ROOT");
+				else process.env.BLOK_PROJECT_ROOT = previousRoot;
+				await rm(root, { recursive: true, force: true });
+			}
 		});
 	});
 

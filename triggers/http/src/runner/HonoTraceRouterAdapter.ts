@@ -31,7 +31,7 @@ interface TraceResponse {
 	setHeader(name: string, value: string): void;
 	status(code: number): TraceResponse;
 	json(body: unknown): void;
-	write(chunk: string): boolean;
+	write(chunk: string | Uint8Array): boolean;
 	end(): void;
 	sendStatus(code: number): void;
 	flushHeaders(): void;
@@ -82,7 +82,7 @@ function buildTraceResponse(outgoing: ServerResponse): TraceResponse {
 			}
 			outgoing.end(JSON.stringify(body));
 		},
-		write(chunk: string) {
+		write(chunk: string | Uint8Array) {
 			return outgoing.write(chunk);
 		},
 		end() {

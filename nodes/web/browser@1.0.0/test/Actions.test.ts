@@ -1,11 +1,19 @@
 import type { Context, IBlokResponse } from "@blokjs/core/runtime";
 import type { Locator, Page } from "playwright";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserSessionManager } from "../src/BrowserSessionManager";
 import { BrowserFillNode, BrowserGotoNode } from "../src/actions";
 import { resolveLocator, resolveStrictLocator, sanitizeUrl } from "../src/locator";
 
 const session = { sessionId: "bs_test", pageId: "bp_test" };
+let artifactRoot: string;
+let previousProjectRoot: string | undefined;
+
+beforeEach(async () => {
+	previousProjectRoot = process.env.BLOK_PROJECT_ROOT;
+	artifactRoot = await mkdtemp(join(tmpdir(), "blok-browser-actions-"));
+	process.env.BLOK_PROJECT_ROOT = artifactRoot;
+});
 
 function context(signal?: AbortSignal): Context {
 	const state: Record<string, unknown> = {};
@@ -50,11 +58,17 @@ function fakePage(matchCount = 1) {
 		waitForURL: vi.fn().mockResolvedValue(undefined),
 		waitForLoadState: vi.fn().mockResolvedValue(undefined),
 		url: vi.fn().mockReturnValue("https://example.com/dashboard"),
+		screenshot: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
 	} as unknown as Page;
 	return { page, target };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+	vi.restoreAllMocks();
+	if (previousProjectRoot === undefined) Reflect.deleteProperty(process.env, "BLOK_PROJECT_ROOT");
+	else process.env.BLOK_PROJECT_ROOT = previousProjectRoot;
+	await rm(artifactRoot, { recursive: true, force: true });
+});
 
 describe("browser locator resolution", () => {
 	it("routes role, label, test-id, and CSS locators through Playwright", () => {
@@ -136,3 +150,6 @@ describe("browser action nodes", () => {
 		);
 	});
 });
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";

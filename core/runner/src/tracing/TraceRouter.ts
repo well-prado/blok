@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import http from "node:http";
+import { browserArtifactFilePath } from "../browserArtifacts";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import {
@@ -238,7 +240,7 @@ interface TraceResponse {
 	setHeader(name: string, value: string): void;
 	status(code: number): TraceResponse;
 	json(body: unknown): void;
-	write(chunk: string): boolean;
+	write(chunk: string | Uint8Array): boolean;
 	end(): void;
 	sendStatus(code: number): void;
 	flushHeaders(): void;
@@ -1174,6 +1176,27 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		const logs = t.getLogs(runId);
 
 		res.json({ run, nodes, logs });
+	});
+
+	router.get("/runs/:runId/artifacts/:artifactId", async (req: TraceRequest, res: TraceResponse) => {
+		const { runId, artifactId } = req.params;
+		const artifact = t
+			.getNodeRuns(runId)
+			.flatMap((node) => node.artifacts ?? [])
+			.find((candidate) => candidate.id === artifactId);
+		if (!artifact) {
+			res.status(404).json({ error: "Artifact not found" });
+			return;
+		}
+		try {
+			const data = await readFile(browserArtifactFilePath(runId, artifactId));
+			res.setHeader("Content-Type", artifact.mimeType);
+			res.setHeader("Content-Length", String(data.byteLength));
+			res.write(data);
+			res.end();
+		} catch {
+			res.status(404).json({ error: "Artifact file not found" });
+		}
 	});
 
 	router.get("/runs/:runId/events", (req: TraceRequest, res: TraceResponse) => {

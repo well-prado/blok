@@ -3,6 +3,12 @@ import { registerContextCleanup, registerShutdownCleanup } from "@blokjs/runner/
 import { z } from "zod";
 import { browserSessionManager } from "./BrowserSessionManager";
 import { BrowserClickNode, BrowserFillNode, BrowserGotoNode, BrowserWaitNode } from "./actions";
+import {
+	BrowserAssertTextNode,
+	BrowserAssertUrlNode,
+	BrowserAssertVisibleNode,
+	BrowserScreenshotNode,
+} from "./assertions";
 import { browserHandleSchema } from "./locator";
 
 export const BrowserLaunchNode = defineNode({
@@ -33,6 +39,12 @@ registerShutdownCleanup(() => browserSessionManager.closeAll());
 export { BrowserSessionManager, browserSessionManager } from "./BrowserSessionManager";
 export type { BrowserHandle, BrowserSessionRecord } from "./BrowserSessionManager";
 export { BrowserClickNode, BrowserFillNode, BrowserGotoNode, BrowserWaitNode } from "./actions";
+export {
+	BrowserAssertTextNode,
+	BrowserAssertUrlNode,
+	BrowserAssertVisibleNode,
+	BrowserScreenshotNode,
+} from "./assertions";
 export { browserHandleSchema, browserLocatorSchema } from "./locator";
 export type { BrowserLocator } from "./locator";
 
@@ -43,6 +55,10 @@ export const BROWSER_NODES = {
 	"@blokjs/browser-click": BrowserClickNode,
 	"@blokjs/browser-fill": BrowserFillNode,
 	"@blokjs/browser-wait": BrowserWaitNode,
+	"@blokjs/browser-assert-visible": BrowserAssertVisibleNode,
+	"@blokjs/browser-assert-text": BrowserAssertTextNode,
+	"@blokjs/browser-assert-url": BrowserAssertUrlNode,
+	"@blokjs/browser-screenshot": BrowserScreenshotNode,
 } as const;
 
 export default BROWSER_NODES;

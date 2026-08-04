@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 import { browserSessionManager } from "./BrowserSessionManager";
+import { browserArtifactSchema, withActionScreenshot } from "./artifacts";
 import {
 	abortable,
 	browserHandleSchema,
@@ -21,6 +22,7 @@ const actionOutputSchema = z.object({
 	box: boxSchema,
 	url: z.string(),
 	durationMs: z.number().nonnegative(),
+	artifact: browserArtifactSchema,
 });
 const httpUrlSchema = z
 	.string()
@@ -39,19 +41,26 @@ export const BrowserGotoNode = defineNode({
 		waitUntil: z.enum(["load", "domcontentloaded", "networkidle"]).default("domcontentloaded"),
 		timeoutMs: timeoutSchema,
 	}),
-	output: z.object({ url: z.string(), status: z.number().int().nullable(), durationMs: z.number().nonnegative() }),
+	output: z.object({
+		url: z.string(),
+		status: z.number().int().nullable(),
+		durationMs: z.number().nonnegative(),
+		artifact: browserArtifactSchema,
+	}),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		const started = performance.now();
-		ctx.logger.log(`[blok][browser] goto ${sanitizeUrl(input.url)}`);
-		const response = await abortable(ctx.signal, () =>
-			page.goto(input.url, { waitUntil: input.waitUntil, timeout: input.timeoutMs }),
-		);
-		return {
-			url: sanitizeUrl(page.url()),
-			status: response?.status() ?? null,
-			durationMs: performance.now() - started,
-		};
+		return withActionScreenshot(ctx, page, "goto", async () => {
+			const started = performance.now();
+			ctx.logger.log(`[blok][browser] goto ${sanitizeUrl(input.url)}`);
+			const response = await abortable(ctx.signal, () =>
+				page.goto(input.url, { waitUntil: input.waitUntil, timeout: input.timeoutMs }),
+			);
+			return {
+				url: sanitizeUrl(page.url()),
+				status: response?.status() ?? null,
+				durationMs: performance.now() - started,
+			};
+		});
 	},
 });
 
@@ -62,18 +71,20 @@ export const BrowserClickNode = defineNode({
 	output: actionOutputSchema,
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		const started = performance.now();
-		const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
-		const box = await abortable(ctx.signal, () => target.boundingBox());
-		ctx.logger.log(`[blok][browser] click ${JSON.stringify(input.locator)}`);
-		await abortable(ctx.signal, () => target.click({ timeout: input.timeoutMs }));
-		return {
-			locator: input.locator,
-			matchCount,
-			box,
-			url: sanitizeUrl(page.url()),
-			durationMs: performance.now() - started,
-		};
+		return withActionScreenshot(ctx, page, "click", async () => {
+			const started = performance.now();
+			const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
+			const box = await abortable(ctx.signal, () => target.boundingBox());
+			ctx.logger.log(`[blok][browser] click ${JSON.stringify(input.locator)}`);
+			await abortable(ctx.signal, () => target.click({ timeout: input.timeoutMs }));
+			return {
+				locator: input.locator,
+				matchCount,
+				box,
+				url: sanitizeUrl(page.url()),
+				durationMs: performance.now() - started,
+			};
+		});
 	},
 });
 
@@ -90,20 +101,22 @@ export const BrowserFillNode = defineNode({
 	output: actionOutputSchema.extend({ masked: z.boolean() }),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		const started = performance.now();
-		const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
-		const box = await abortable(ctx.signal, () => target.boundingBox());
-		const masked = input.sensitive ?? isSensitiveLocator(input.locator);
-		ctx.logger.log(`[blok][browser] fill ${JSON.stringify(input.locator)}${masked ? " [value redacted]" : ""}`);
-		await abortable(ctx.signal, () => target.fill(input.value, { timeout: input.timeoutMs }));
-		return {
-			locator: input.locator,
-			matchCount,
-			box,
-			url: sanitizeUrl(page.url()),
-			durationMs: performance.now() - started,
-			masked,
-		};
+		return withActionScreenshot(ctx, page, "fill", async () => {
+			const started = performance.now();
+			const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
+			const box = await abortable(ctx.signal, () => target.boundingBox());
+			const masked = input.sensitive ?? isSensitiveLocator(input.locator);
+			ctx.logger.log(`[blok][browser] fill ${JSON.stringify(input.locator)}${masked ? " [value redacted]" : ""}`);
+			await abortable(ctx.signal, () => target.fill(input.value, { timeout: input.timeoutMs }));
+			return {
+				locator: input.locator,
+				matchCount,
+				box,
+				url: sanitizeUrl(page.url()),
+				durationMs: performance.now() - started,
+				masked,
+			};
+		});
 	},
 });
 
@@ -127,35 +140,38 @@ export const BrowserWaitNode = defineNode({
 		url: z.string(),
 		durationMs: z.number().nonnegative(),
 		matchCount: z.literal(1).optional(),
+		artifact: browserArtifactSchema,
 	}),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		const started = performance.now();
-		const condition = input.condition;
-		let matchCount: 1 | undefined;
-		switch (condition.for) {
-			case "url":
-				await abortable(ctx.signal, () => page.waitForURL(condition.value, { timeout: condition.timeoutMs }));
-				break;
-			case "loadState":
-				await abortable(ctx.signal, () => page.waitForLoadState(condition.state, { timeout: condition.timeoutMs }));
-				break;
-			case "visible": {
-				const target = resolveLocator(page, condition.locator);
-				await abortable(ctx.signal, () => target.waitFor({ state: "visible", timeout: condition.timeoutMs }));
-				({ matchCount } = await resolveStrictLocator(page, condition.locator, ctx.signal));
-				break;
+		return withActionScreenshot(ctx, page, "wait", async () => {
+			const started = performance.now();
+			const condition = input.condition;
+			let matchCount: 1 | undefined;
+			switch (condition.for) {
+				case "url":
+					await abortable(ctx.signal, () => page.waitForURL(condition.value, { timeout: condition.timeoutMs }));
+					break;
+				case "loadState":
+					await abortable(ctx.signal, () => page.waitForLoadState(condition.state, { timeout: condition.timeoutMs }));
+					break;
+				case "visible": {
+					const target = resolveLocator(page, condition.locator);
+					await abortable(ctx.signal, () => target.waitFor({ state: "visible", timeout: condition.timeoutMs }));
+					({ matchCount } = await resolveStrictLocator(page, condition.locator, ctx.signal));
+					break;
+				}
+				case "duration":
+					await delay(condition.durationMs, undefined, { signal: ctx.signal });
+					break;
 			}
-			case "duration":
-				await delay(condition.durationMs, undefined, { signal: ctx.signal });
-				break;
-		}
-		ctx.logger.log(`[blok][browser] wait ${condition.for}`);
-		return {
-			condition: condition.for === "url" ? { ...condition, value: sanitizeUrl(condition.value) } : condition,
-			url: sanitizeUrl(page.url()),
-			durationMs: performance.now() - started,
-			...(matchCount ? { matchCount } : {}),
-		};
+			ctx.logger.log(`[blok][browser] wait ${condition.for}`);
+			return {
+				condition: condition.for === "url" ? { ...condition, value: sanitizeUrl(condition.value) } : condition,
+				url: sanitizeUrl(page.url()),
+				durationMs: performance.now() - started,
+				...(matchCount ? { matchCount } : {}),
+			};
+		});
 	},
 });

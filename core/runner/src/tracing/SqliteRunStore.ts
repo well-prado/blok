@@ -188,6 +188,7 @@ interface NodeRunFlags {
 	subworkflowDepth?: number;
 	middleware?: string;
 	iterationIndex?: number;
+	artifacts?: NodeRun["artifacts"];
 }
 
 function encodeNodeRunFlags(nodeRun: NodeRun): string | null {
@@ -197,6 +198,7 @@ function encodeNodeRunFlags(nodeRun: NodeRun): string | null {
 	if (nodeRun.subworkflowDepth !== undefined) flags.subworkflowDepth = nodeRun.subworkflowDepth;
 	if (nodeRun.middleware !== undefined) flags.middleware = nodeRun.middleware;
 	if (nodeRun.iterationIndex !== undefined) flags.iterationIndex = nodeRun.iterationIndex;
+	if (nodeRun.artifacts !== undefined) flags.artifacts = nodeRun.artifacts;
 	const empty = Object.keys(flags).length === 0;
 	return empty ? null : JSON.stringify(flags);
 }
@@ -1083,6 +1085,13 @@ export class SqliteRunStore implements RunStore {
 		if (updates.iterationContext !== undefined) {
 			setClauses.push("iteration_context = ?");
 			values.push(JSON.stringify(updates.iterationContext));
+		}
+		if (updates.artifacts !== undefined) {
+			const current = this.getNodeRun(nodeRunId);
+			if (current) {
+				setClauses.push("flags_json = ?");
+				values.push(encodeNodeRunFlags({ ...current, ...updates }));
+			}
 		}
 
 		if (setClauses.length === 0) return;
@@ -2159,6 +2168,7 @@ export class SqliteRunStore implements RunStore {
 			subworkflowDepth: flags.subworkflowDepth,
 			middleware: flags.middleware,
 			iterationIndex: flags.iterationIndex,
+			artifacts: flags.artifacts,
 		};
 	}
 

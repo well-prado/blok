@@ -121,6 +121,35 @@ export function NodeDetail({ node, logs, onClose }: NodeDetailProps) {
 					</Section>
 				)}
 
+				{node.artifacts && node.artifacts.length > 0 && (
+					<Section title={`Artifacts (${node.artifacts.length})`}>
+						<div className="grid gap-2 sm:grid-cols-2">
+							{node.artifacts.map((artifact) => (
+								<a
+									key={artifact.id}
+									href={artifact.url}
+									target="_blank"
+									rel="noreferrer noopener"
+									className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 transition-colors hover:border-zinc-700"
+								>
+									{artifact.kind === "screenshot" && (
+										<img
+											src={artifact.url}
+											alt={`Browser screenshot: ${artifact.name}`}
+											loading="lazy"
+											className="aspect-video w-full object-cover object-top"
+										/>
+									)}
+									<div className="flex items-center justify-between gap-2 px-2 py-1.5 font-mono text-[10px]">
+										<span className="truncate text-zinc-300">{artifact.name}</span>
+										<span className="shrink-0 text-zinc-600">{formatBytes(artifact.size)}</span>
+									</div>
+								</a>
+							))}
+						</div>
+					</Section>
+				)}
+
 				{/* Logs */}
 				{nodeLogs.length > 0 && (
 					<Section title={`Logs (${nodeLogs.length})`}>

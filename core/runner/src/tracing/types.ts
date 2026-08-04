@@ -216,6 +216,19 @@ export interface WorkflowRun {
 
 export type NodeRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
+export interface BrowserArtifact {
+	id: string;
+	runId: string;
+	nodeRunId?: string;
+	kind: "screenshot" | "console" | "page-error";
+	name: string;
+	mimeType: string;
+	size: number;
+	createdAt: number;
+	url: string;
+	metadata?: Record<string, unknown>;
+}
+
 export interface NodeRun {
 	id: string;
 	runId: string;
@@ -229,6 +242,8 @@ export interface NodeRun {
 	inputs?: unknown;
 	outputs?: unknown;
 	error?: RunErrorDetail;
+	/** Browser artifacts captured while this node was running. */
+	artifacts?: BrowserArtifact[];
 	/**
 	 * Latest streaming progress hint emitted via the proto `Progress`
 	 * event during `ExecuteStream` (master plan §17 Phase 5

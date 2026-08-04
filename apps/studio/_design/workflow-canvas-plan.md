@@ -971,16 +971,27 @@ Tests:
 
 #### 2.3 Assertion and artifact nodes
 
+Status: implemented on 2026-08-04; live browser streaming and Canvas run overlays remain Phase 3 work.
+
 - Assert visible/text/URL.
 - Automatic failure screenshot and after-action screenshot.
 - Explicit screenshot and close nodes.
 - Artifact metadata in run detail.
+
+Implemented:
+
+- Added visible, text, and URL assertion nodes with typed expected/actual failure details and exact, contains, and regular-expression modes.
+- Added automatic PNG capture after goto, click, fill, wait, and assertion nodes, plus best-effort failure capture before the original error propagates.
+- Added the explicit screenshot node; browser close continues to use the session-owned close node delivered in Phase 2.1.
+- Stored server-generated artifact metadata on the active node run using the existing run-store flags field, with SQLite/Postgres parity and no new database migration.
+- Added a recorded-artifact-only Studio route and screenshot cards in the node detail inspector; filesystem paths never enter trace metadata or node output.
 
 Tests:
 
 - Expected/actual details survive run-store round-trip.
 - Screenshot linked to the correct node-run id.
 - Failed assertion closes browser only after failure capture completes.
+- Real Chromium login-style smoke completed goto, fill, click, and text assertion with one persisted screenshot per action.
 
 Acceptance for Phase 2:
 

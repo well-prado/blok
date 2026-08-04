@@ -9,6 +9,7 @@ import type { RunStore } from "./RunStore";
 import { createStore } from "./createStore";
 import { sanitize } from "./sanitize";
 import type {
+	BrowserArtifact,
 	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
@@ -875,6 +876,12 @@ export class RunTracker extends EventEmitter {
 			durationMs,
 			error: errorDetail,
 		});
+	}
+
+	recordNodeArtifact(nodeRunId: string, artifact: BrowserArtifact): void {
+		const nodeRun = this.store.getNodeRun(nodeRunId);
+		if (!nodeRun) return;
+		this.store.updateNodeRun(nodeRunId, { artifacts: [...(nodeRun.artifacts ?? []), artifact].slice(-100) });
 	}
 
 	skipNode(runId: string, nodeName: string, stepIndex: number, reason?: string): void {
