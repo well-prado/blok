@@ -948,10 +948,19 @@ Tests:
 
 #### 2.2 Minimal action nodes
 
+Status: implemented on 2026-08-04; action events and Canvas visualization remain Phase 3 work.
+
 - Launch, goto, click, fill, wait.
 - Shared structured locator resolver.
 - Zod input/output schemas and `defineNode()` for every node.
 - Structured logs with sensitive-value masking.
+
+Implemented:
+
+- Added `@blokjs/browser-goto`, `@blokjs/browser-click`, `@blokjs/browser-fill`, and `@blokjs/browser-wait` to the browser package and node map.
+- Added the structured test-id, role, label, placeholder, text, and CSS locator contract with strict one-match enforcement before actions.
+- Added bounded per-action timeouts, AbortSignal races, HTTP(S)-only navigation, sanitized reported URLs, locator metadata, match count, bounding box, and duration outputs.
+- Fill values never appear in node logs or outputs; password/passcode/secret/token-like locators default to masked metadata.
 
 Tests:
 
