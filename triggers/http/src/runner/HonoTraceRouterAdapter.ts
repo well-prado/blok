@@ -105,7 +105,7 @@ function buildTraceResponse(outgoing: ServerResponse): TraceResponse {
 	return traceRes;
 }
 
-type TraceHandler = (req: TraceRequest, res: TraceResponse) => void;
+type TraceHandler = (req: TraceRequest, res: TraceResponse) => void | Promise<void>;
 type TraceMiddleware = (req: TraceRequest, res: TraceResponse, next: () => void) => void;
 
 /**
@@ -154,23 +154,36 @@ export function createTraceRouterAdapter() {
 
 			// Run middleware chain
 			let middlewareIndex = 0;
-			const runMiddleware = (): Promise<void> => {
-				return new Promise<void>((resolve) => {
+			const runMiddleware = (): Promise<boolean> => {
+				return new Promise<boolean>((resolve) => {
 					if (middlewareIndex >= middlewares.length) {
-						resolve();
+						resolve(true);
 						return;
 					}
+					let settled = false;
+					const finish = (shouldHandle: boolean) => {
+						if (settled) return;
+						settled = true;
+						outgoing.off("finish", onFinish);
+						resolve(shouldHandle);
+					};
+					const onFinish = () => finish(false);
+					outgoing.once("finish", onFinish);
 					const mw = middlewares[middlewareIndex++];
 					mw(traceReq, traceRes, () => {
+						if (settled) return;
+						settled = true;
+						outgoing.off("finish", onFinish);
 						runMiddleware().then(resolve);
 					});
+					if (outgoing.writableEnded) finish(false);
 				});
 			};
 
-			await runMiddleware();
+			if (!(await runMiddleware())) return RESPONSE_ALREADY_SENT;
 
 			// Call the route handler
-			handler(traceReq, traceRes);
+			await handler(traceReq, traceRes);
 
 			// The handler writes directly to outgoing — tell Hono not to send its own response
 			return RESPONSE_ALREADY_SENT;

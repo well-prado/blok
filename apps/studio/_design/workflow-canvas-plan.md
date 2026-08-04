@@ -879,6 +879,15 @@ Tests:
 
 #### 1.2 Read/write API
 
+Status: implemented on 2026-08-04.
+
+- `GET` and `PUT /__blok/workflows/:name/studio` resolve only the registry's canonical file source and return read-only provenance for inline workflows.
+- `BLOK_PROJECT_ROOT` selects the authoring boundary (default: runner working directory); `realpath`, containment checks, and no-follow file opens reject traversal and symlink escapes.
+- SHA-256 etags guard every save; first save uses `baseEtag: null`, and stale saves return `409` before touching the valid sidecar.
+- Validated JSON is written to a unique sibling file, flushed, and atomically renamed over the sidecar.
+- Production writes require both `BLOK_STUDIO_AUTHORING_ENABLED=1` and the existing trace authorize hook; trace-auth opt-out alone cannot enable authoring.
+- The Hono trace adapter now awaits asynchronous route handlers and stops routing when middleware has already sent a response.
+
 - Implement GET/PUT layout routes with realpath/project-root protection.
 - Add etag and atomic sibling-file rename.
 - Add production authoring gate.

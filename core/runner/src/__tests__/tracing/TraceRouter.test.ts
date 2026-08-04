@@ -5,6 +5,9 @@
  * and invoking them with mock Request/Response objects. This validates
  * the full API surface without needing Express or an HTTP server.
  */
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
 import { RoutingDiagnostics } from "../../tracing/RoutingDiagnostics";
@@ -14,7 +17,7 @@ import { WorkflowRegistry } from "../../workflow/WorkflowRegistry";
 
 // --- Mock infrastructure ---
 
-type HandlerFn = (req: MockRequest, res: MockResponse) => void;
+type HandlerFn = (req: MockRequest, res: MockResponse) => void | Promise<void>;
 type MiddlewareFn = (req: MockRequest, res: MockResponse, next: () => void) => void;
 
 interface RegisteredRoute {
@@ -257,6 +260,7 @@ describe("TraceRouter", () => {
 
 			expect(res.headersMap.get("Access-Control-Allow-Origin")).toBe("*");
 			expect(res.headersMap.get("Access-Control-Allow-Methods")).toContain("GET");
+			expect(res.headersMap.get("Access-Control-Allow-Methods")).toContain("PUT");
 			expect(nextCalled).toBe(true);
 		});
 
@@ -841,6 +845,99 @@ describe("TraceRouter", () => {
 			expect(body.diagnostics).toHaveLength(2);
 			expect(body.diagnostics[0].kind).toBe("duplicate");
 			expect(body.diagnostics[1].kind).toBe("any-shadows-specific");
+		});
+	});
+
+	describe("Workflow Studio sidecar API", () => {
+		let projectRoot: string;
+		let sourcePath: string;
+
+		beforeEach(async () => {
+			WorkflowRegistry.resetInstance();
+			projectRoot = await mkdtemp(join(tmpdir(), "blok-studio-route-"));
+			sourcePath = join(projectRoot, "visual-test.ts");
+			await writeFile(sourcePath, "export default {};\n");
+			vi.stubEnv("BLOK_PROJECT_ROOT", projectRoot);
+			vi.stubEnv("NODE_ENV", "");
+			vi.stubEnv("BLOK_STUDIO_AUTHORING_ENABLED", "");
+			vi.stubEnv("BLOK_TRACE_AUTH_DISABLED", "");
+			WorkflowRegistry.getInstance().register({
+				name: "visual-test",
+				source: sourcePath,
+				sourcePath,
+				workflow: { name: "visual-test", trigger: { http: { method: "GET", path: "/visual" } }, steps: [] },
+			});
+		});
+
+		afterEach(async () => {
+			WorkflowRegistry.resetInstance();
+			await rm(projectRoot, { recursive: true, force: true });
+			vi.unstubAllEnvs();
+		});
+
+		it("creates and returns a layout through PUT then GET", async () => {
+			const putResponse = new MockResponse();
+			await router.findHandler("PUT", "/workflows/:name/studio")!(
+				new MockRequest({
+					method: "PUT",
+					params: { name: "visual-test" },
+					body: {
+						config: { schemaVersion: 1, workflow: "visual-test", nodes: { open: { x: 10, y: 20 } } },
+						baseEtag: null,
+					},
+				}),
+				putResponse,
+			);
+
+			expect(putResponse.statusCode).toBe(200);
+			expect((putResponse.jsonBody as any).etag).toMatch(/^[a-f0-9]{64}$/);
+			expect(JSON.parse(await readFile(join(projectRoot, "visual-test.studio.json"), "utf8"))).toMatchObject({
+				workflow: "visual-test",
+			});
+
+			const getResponse = new MockResponse();
+			await router.findHandler("GET", "/workflows/:name/studio")!(
+				new MockRequest({ params: { name: "visual-test" } }),
+				getResponse,
+			);
+			expect(getResponse.jsonBody).toEqual(putResponse.jsonBody);
+		});
+
+		it("reports workflows without a canonical file as read-only", async () => {
+			WorkflowRegistry.getInstance().register({
+				name: "inline-layout",
+				source: "<inline>",
+				workflow: { name: "inline-layout", trigger: { http: {} }, steps: [] },
+			});
+			const response = new MockResponse();
+			await router.findHandler("GET", "/workflows/:name/studio")!(
+				new MockRequest({ params: { name: "inline-layout" } }),
+				response,
+			);
+			expect(response.jsonBody).toMatchObject({ config: null, writable: false, etag: null });
+		});
+
+		it("keeps production writes disabled unless authoring and trace auth are both configured", async () => {
+			vi.stubEnv("NODE_ENV", "production");
+			const disabledRouter = new MockRouter();
+			registerTraceRoutes(disabledRouter as any, tracker, { authorize: () => true });
+			const disabledResponse = new MockResponse();
+			await disabledRouter.findHandler("PUT", "/workflows/:name/studio")!(
+				new MockRequest({ method: "PUT", params: { name: "visual-test" } }),
+				disabledResponse,
+			);
+			expect(disabledResponse.statusCode).toBe(403);
+
+			vi.stubEnv("BLOK_STUDIO_AUTHORING_ENABLED", "1");
+			vi.stubEnv("BLOK_TRACE_AUTH_DISABLED", "1");
+			const unprotectedRouter = new MockRouter();
+			registerTraceRoutes(unprotectedRouter as any, tracker);
+			const unprotectedResponse = new MockResponse();
+			await unprotectedRouter.findHandler("PUT", "/workflows/:name/studio")!(
+				new MockRequest({ method: "PUT", params: { name: "visual-test" } }),
+				unprotectedResponse,
+			);
+			expect(unprotectedResponse.statusCode).toBe(503);
 		});
 	});
 
@@ -2552,6 +2649,8 @@ describe("TraceRouter", () => {
 
 			// Workflows
 			expect(routePaths).toContain("GET /workflows");
+			expect(routePaths).toContain("GET /workflows/:name/studio");
+			expect(routePaths).toContain("PUT /workflows/:name/studio");
 			expect(routePaths).toContain("GET /workflows/:name");
 			expect(routePaths).toContain("GET /workflows/:name/runs");
 

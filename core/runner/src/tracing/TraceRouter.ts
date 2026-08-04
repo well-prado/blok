@@ -1,6 +1,11 @@
 import http from "node:http";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
+import {
+	WorkflowStudioStoreError,
+	readWorkflowStudioConfig,
+	writeWorkflowStudioConfig,
+} from "../studio/WorkflowStudioStore";
 import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
 import { inferSampleBody } from "../workflow/sampleBody";
 import { RoutingDiagnostics } from "./RoutingDiagnostics";
@@ -241,10 +246,10 @@ interface TraceResponse {
 
 interface TraceRouter {
 	use(handler: (req: TraceRequest, res: TraceResponse, next: () => void) => void): void;
-	get(path: string, handler: (req: TraceRequest, res: TraceResponse) => void): void;
-	post(path: string, handler: (req: TraceRequest, res: TraceResponse) => void): void;
-	put(path: string, handler: (req: TraceRequest, res: TraceResponse) => void): void;
-	delete(path: string, handler: (req: TraceRequest, res: TraceResponse) => void): void;
+	get(path: string, handler: (req: TraceRequest, res: TraceResponse) => void | Promise<void>): void;
+	post(path: string, handler: (req: TraceRequest, res: TraceResponse) => void | Promise<void>): void;
+	put(path: string, handler: (req: TraceRequest, res: TraceResponse) => void | Promise<void>): void;
+	delete(path: string, handler: (req: TraceRequest, res: TraceResponse) => void | Promise<void>): void;
 }
 
 /**
@@ -301,7 +306,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 
 	router.use((req: TraceRequest, res: TraceResponse, next: () => void) => {
 		res.setHeader("Access-Control-Allow-Origin", corsOrigin);
-		res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+		res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 		res.setHeader("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID");
 		if (req.method === "OPTIONS") {
 			res.sendStatus(204);
@@ -464,6 +469,92 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 				: undefined,
 			examples,
 		});
+	});
+
+	const sendStudioStoreError = (res: TraceResponse, error: unknown): void => {
+		if (error instanceof WorkflowStudioStoreError) {
+			res.status(error.statusCode).json({ error: error.message, code: error.code });
+			return;
+		}
+		console.error("[blok][studio-config]", error);
+		res.status(500).json({ error: "Unable to access Workflow Studio config" });
+	};
+
+	router.get("/workflows/:name/studio", async (req: TraceRequest, res: TraceResponse) => {
+		const registered = WorkflowRegistry.getInstance().get(req.params.name);
+		if (!registered) {
+			res.status(404).json({ error: `Workflow '${req.params.name}' not found` });
+			return;
+		}
+		if (!registered.sourcePath) {
+			res.json({
+				config: null,
+				sourcePath: undefined,
+				writable: false,
+				etag: null,
+				readOnlyReason: "No canonical workflow file was observed during registration.",
+			});
+			return;
+		}
+
+		try {
+			const result = await readWorkflowStudioConfig(
+				registered.sourcePath,
+				process.env.BLOK_PROJECT_ROOT || process.cwd(),
+				registered.name,
+			);
+			res.json({ ...result, writable: true });
+		} catch (error) {
+			sendStudioStoreError(res, error);
+		}
+	});
+
+	router.put("/workflows/:name/studio", async (req: TraceRequest, res: TraceResponse) => {
+		if (isProd && process.env.BLOK_STUDIO_AUTHORING_ENABLED !== "1") {
+			res.status(403).json({
+				error: "Workflow Studio authoring is disabled in production",
+				hint: "Set BLOK_STUDIO_AUTHORING_ENABLED=1 and register a trace authorize hook to enable it.",
+			});
+			return;
+		}
+		if (isProd && !authorize) {
+			res.status(503).json({ error: "Workflow Studio authoring requires trace auth in production" });
+			return;
+		}
+
+		const body = req.body;
+		if (!body || typeof body !== "object" || Array.isArray(body) || !("config" in body) || !("baseEtag" in body)) {
+			res.status(400).json({ error: "Expected { config, baseEtag }" });
+			return;
+		}
+		const { config, baseEtag } = body as { config: unknown; baseEtag: unknown };
+		if (baseEtag !== null && typeof baseEtag !== "string") {
+			res.status(400).json({ error: "baseEtag must be a string or null" });
+			return;
+		}
+
+		const registered = WorkflowRegistry.getInstance().get(req.params.name);
+		if (!registered) {
+			res.status(404).json({ error: `Workflow '${req.params.name}' not found` });
+			return;
+		}
+		if (!registered.sourcePath) {
+			res.status(409).json({ error: "Workflow has no canonical file and is read-only in Studio" });
+			return;
+		}
+
+		try {
+			const result = await writeWorkflowStudioConfig(
+				registered.sourcePath,
+				process.env.BLOK_PROJECT_ROOT || process.cwd(),
+				registered.name,
+				config,
+				baseEtag,
+			);
+			res.json({ ...result, writable: true });
+		} catch (error) {
+			sendStudioStoreError(res, error);
+		}
 	});
 
 	// E4 follow-up — surface boot-time route-build errors (collisions,
