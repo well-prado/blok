@@ -1004,10 +1004,20 @@ This is the first founder-facing product milestone.
 
 #### 3.1 General Studio test-run endpoint
 
+Status: implemented on 2026-08-04; Canvas controls consume this endpoint in Phase 3.3.
+
 - Add `/workflows/:name/test-runs` using the existing runner materialization path.
 - Accept validated input and artifact policy.
 - Return the run id immediately.
 - Record `triggerType: "studio"` and normal run metadata.
+
+Implemented:
+
+- Added `POST /__blok/workflows/:name/test-runs` behind the existing trace authorization middleware.
+- Reused `ManualTrigger` materialization through a request-validating `StudioTrigger`; no Studio-only runner path was added.
+- Validated workflow input through the declared input schema and accepted the current durable policy: after-browser-action screenshots with Playwright trace ZIP capture off until that later artifact type is implemented.
+- Returned `202` with the run id and SSE stream URL on the matching Studio `RUN_STARTED` event, while execution continues through normal tracing and cleanup.
+- Added the typed Studio API client. Debug/step requests are rejected until the Phase 4 controller exists so they cannot silently run as normal executions.
 
 #### 3.2 Browser semantic events and stream
 

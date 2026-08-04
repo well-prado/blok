@@ -294,6 +294,29 @@ export function clearRuns(): Promise<{ deleted: number }> {
 	return fetchJson("/runs", { method: "DELETE" });
 }
 
+export interface StartTestRunRequest {
+	input?: Record<string, unknown>;
+	mode?: "run";
+	breakpoints?: [];
+	artifactPolicy?: {
+		screenshot?: "after-browser-action";
+		trace?: "off";
+	};
+}
+
+export interface StartTestRunResponse {
+	runId: string;
+	stream: string;
+}
+
+export function startTestRun(workflowName: string, request: StartTestRunRequest = {}): Promise<StartTestRunResponse> {
+	return fetchJson(`/workflows/${encodeURIComponent(workflowName)}/test-runs`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request),
+	});
+}
+
 // === Replay ===
 
 export interface ReplayResponse {

@@ -310,6 +310,57 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	describe("POST /workflows/:name/test-runs", () => {
+		afterEach(() => WorkflowRegistry.resetInstance());
+
+		it("returns the Studio run id as soon as execution starts", async () => {
+			WorkflowRegistry.resetInstance();
+			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			const testRouter = new MockRouter();
+			const startTestRun = vi.fn(async (workflowName: string) => {
+				tracker.startRun({
+					workflowName,
+					workflowPath: "login.ts",
+					triggerType: "studio",
+					triggerSummary: "studio",
+					nodeCount: 2,
+				});
+			});
+			registerTraceRoutes(testRouter as any, tracker, { startTestRun });
+			const req = new MockRequest({
+				method: "POST",
+				params: { name: "login" },
+				body: { input: { email: "alice@example.com" } },
+			});
+			const res = new MockResponse();
+
+			await testRouter.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
+
+			expect(res.statusCode).toBe(202);
+			expect(res.jsonBody).toMatchObject({ runId: expect.stringMatching(/^run_/), stream: expect.any(String) });
+			expect(startTestRun).toHaveBeenCalledWith(
+				"login",
+				expect.objectContaining({
+					input: { email: "alice@example.com" },
+					mode: "run",
+					artifactPolicy: { screenshot: "after-browser-action", trace: "off" },
+				}),
+			);
+		});
+
+		it("rejects debug controls before Phase 4 instead of silently running them", async () => {
+			WorkflowRegistry.resetInstance();
+			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			const req = new MockRequest({ params: { name: "login" }, body: { mode: "debug", breakpoints: ["submit"] } });
+			const res = new MockResponse();
+
+			await router.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
+
+			expect(res.statusCode).toBe(400);
+			expect(res.jsonBody).toMatchObject({ error: "Invalid Studio test-run request" });
+		});
+	});
+
 	// === Workflows ===
 
 	describe("GET /workflows", () => {

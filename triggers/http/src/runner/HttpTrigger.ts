@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
-import { TriggerBase } from "@blokjs/runner";
+import { ManualTrigger, TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
@@ -166,6 +166,12 @@ function recordBootError(phase: "configuration_init" | "middleware", err: unknow
 /** Test-only: drop the cached counter so a fresh MeterProvider is picked up. */
 export function _resetBootErrorCounterForTests(): void {
 	_bootErrorCounter = null;
+}
+
+class StudioTrigger extends ManualTrigger {
+	protected override validatesDeclaredInput(): boolean {
+		return true;
+	}
 }
 
 export default class HttpTrigger extends TriggerBase {
@@ -1075,11 +1081,16 @@ export default class HttpTrigger extends TriggerBase {
 			// as workflow lookups.
 			if (process.env.BLOK_TRACE_ENABLED !== "false") {
 				const { traceAdapter, traceApp } = createTraceRouterAdapter();
+				const studioTrigger = new StudioTrigger();
+				studioTrigger.setNodeMap(this.nodeMap);
 				// Security review FW-1 — thread the operator-registered
 				// authorize hook (if any) into the trace router. Production
 				// without `setTraceAuth(...)` returns 503 from inside the
 				// trace router middleware.
-				registerTraceRoutes(traceAdapter, undefined, { authorize: this.traceAuthFn });
+				registerTraceRoutes(traceAdapter, undefined, {
+					authorize: this.traceAuthFn,
+					startTestRun: (name, request) => studioTrigger.dispatch(name, request.input),
+				});
 				this.app.route("/__blok", traceApp);
 			}
 

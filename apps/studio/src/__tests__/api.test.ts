@@ -220,6 +220,22 @@ describe("API client", () => {
 		});
 	});
 
+	describe("startTestRun", () => {
+		it("starts a named workflow with input and the default artifact policy", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ runId: "run_123", stream: "/__blok/runs/run_123/stream" }));
+
+			await api.startTestRun("Login flow", { input: { email: "alice@example.com" } });
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/__blok/workflows/Login%20flow/test-runs",
+				expect.objectContaining({
+					method: "POST",
+					body: JSON.stringify({ input: { email: "alice@example.com" } }),
+				}),
+			);
+		});
+	});
+
 	describe("tags", () => {
 		it("addRunTags sends tags array", async () => {
 			mockFetch.mockResolvedValueOnce(jsonResponse({ tags: ["prod", "v2"] }));

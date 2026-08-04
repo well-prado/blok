@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import http from "node:http";
+import { z } from "zod";
 import { browserArtifactFilePath } from "../browserArtifacts";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
@@ -272,7 +273,34 @@ export interface TraceRouterOptions {
 	 * Required in production unless `BLOK_TRACE_AUTH_DISABLED=1` is set.
 	 */
 	authorize?: TraceAuthorizeFn;
+	/** Dispatch a registered workflow through the host trigger as a Studio run. */
+	startTestRun?: (workflowName: string, request: StudioTestRunRequest) => Promise<void>;
 }
+
+export interface StudioTestRunRequest {
+	input: Record<string, unknown>;
+	mode: "run";
+	breakpoints: string[];
+	artifactPolicy: {
+		screenshot: "after-browser-action";
+		trace: "off";
+	};
+}
+
+const studioTestRunRequestSchema = z
+	.object({
+		input: z.record(z.unknown()).default({}),
+		mode: z.literal("run").default("run"),
+		breakpoints: z.array(z.string().min(1)).max(100).length(0).default([]),
+		artifactPolicy: z
+			.object({
+				screenshot: z.literal("after-browser-action").default("after-browser-action"),
+				trace: z.literal("off").default("off"),
+			})
+			.strict()
+			.default({ screenshot: "after-browser-action", trace: "off" }),
+	})
+	.strict();
 
 /**
  * Register trace API routes on an Express-compatible router.
@@ -470,6 +498,49 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 					}
 				: undefined,
 			examples,
+		});
+	});
+
+	router.post("/workflows/:name/test-runs", (req: TraceRequest, res: TraceResponse) => {
+		const { name } = req.params;
+		if (!WorkflowRegistry.getInstance().get(name)) {
+			res.status(404).json({ error: `Workflow '${name}' not found` });
+			return;
+		}
+		const parsed = studioTestRunRequestSchema.safeParse(req.body ?? {});
+		if (!parsed.success) {
+			res.status(400).json({ error: "Invalid Studio test-run request", issues: parsed.error.flatten() });
+			return;
+		}
+		if (!options?.startTestRun) {
+			res.status(501).json({ error: "Studio test runs are unavailable for this trace server" });
+			return;
+		}
+
+		let settled = false;
+		const cleanup = () => {
+			clearTimeout(timeout);
+			t.removeListener("RUN_STARTED", onRunStarted);
+		};
+		const onRunStarted = (event: RunEvent) => {
+			const payload = event.payload as Record<string, unknown> | undefined;
+			if (event.workflowName !== name || payload?.triggerType !== "studio") return;
+			settled = true;
+			cleanup();
+			res.status(202).json({ runId: event.runId, stream: `/__blok/runs/${event.runId}/stream` });
+		};
+		const timeout = setTimeout(() => {
+			settled = true;
+			cleanup();
+			res.status(504).json({ error: "Studio test run timed out before starting" });
+		}, 10_000);
+
+		t.on("RUN_STARTED", onRunStarted);
+		void options.startTestRun(name, parsed.data).catch((error) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			res.status(400).json({ error: error instanceof Error ? error.message : "Studio test run failed to start" });
 		});
 	});
 
