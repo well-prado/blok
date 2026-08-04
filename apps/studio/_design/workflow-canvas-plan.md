@@ -901,6 +901,14 @@ Tests:
 
 #### 1.3 Studio layout editing
 
+Status: implemented on 2026-08-04; live browser visual acceptance remains pending.
+
+- Studio loads and saves the workflow sidecar through React Query using the server etag contract.
+- `layoutDag()` now resolves sidecar positions before legacy inline `step.ui`, with dagre as the final fallback and sidecar canvas direction honored.
+- A compact canvas toolbar exposes an explicit layout-edit mode, Auto layout, Discard, Save, read-only provenance, and unsaved state without enabling structural editing.
+- Only real stable step ids are draggable/persisted; synthetic graph nodes remain auto-managed, while orphan and unknown sidecar metadata survives saves.
+- Dirty drafts install an unload guard. A stale-etag response keeps the draft visible and offers an explicit reload instead of overwriting disk state.
+
 - Feed sidecar positions into `layoutDag()`.
 - Enable drag only in edit mode.
 - Save drag-end positions and auto-layout pins.

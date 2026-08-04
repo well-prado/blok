@@ -13,6 +13,8 @@ import type {
 	Webhook,
 	WebhooksResponse,
 	WorkflowDetail,
+	WorkflowStudioConfig,
+	WorkflowStudioResponse,
 	WorkflowSummary,
 } from "@/types";
 
@@ -61,6 +63,22 @@ export function fetchWorkflows(): Promise<WorkflowSummary[]> {
 
 export function fetchWorkflowDetail(name: string): Promise<WorkflowDetail> {
 	return fetchJson(`/workflows/${encodeURIComponent(name)}`);
+}
+
+export function fetchWorkflowStudio(name: string): Promise<WorkflowStudioResponse> {
+	return fetchJson(`/workflows/${encodeURIComponent(name)}/studio`);
+}
+
+export function saveWorkflowStudio(
+	name: string,
+	config: WorkflowStudioConfig,
+	baseEtag: string | null,
+): Promise<WorkflowStudioResponse> {
+	return fetchJson(`/workflows/${encodeURIComponent(name)}/studio`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ config, baseEtag }),
+	});
 }
 
 /**

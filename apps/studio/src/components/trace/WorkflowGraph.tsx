@@ -1,5 +1,9 @@
+import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
+import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
+import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
+import type { WorkflowStudioConfig } from "@/types";
 import { Link } from "@tanstack/react-router";
 import {
 	Background,
@@ -11,22 +15,29 @@ import {
 	type NodeProps,
 	Position,
 	ReactFlow,
+	useNodesState,
 } from "@xyflow/react";
 import dagre from "dagre";
 import {
+	AlertTriangle,
 	ArrowRightFromLine,
 	CheckCircle2,
 	Clock,
 	GitBranch,
+	Loader2,
+	Pencil,
 	Play,
 	Repeat,
+	RotateCcw,
 	RotateCw,
+	Save,
 	Shield,
 	ShieldX,
 	Split,
+	WandSparkles,
 	Wrench,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 interface WorkflowGraphProps {
@@ -36,6 +47,7 @@ interface WorkflowGraphProps {
 	 * intentionally open — `buildWorkflowDag` narrows defensively.
 	 */
 	definition: unknown;
+	workflowName: string;
 }
 
 const NODE_WIDTH = 200;
@@ -49,8 +61,29 @@ const TERMINAL_DIAMETER = 80; // trigger / end pills
  * branches, back-edges for forEach/loop, and dedicated lanes for
  * tryCatch. Live runs use `TraceGraph` instead.
  */
-export function WorkflowGraph({ definition }: WorkflowGraphProps) {
-	const { nodes: flowNodes, edges: flowEdges } = useMemo(() => layoutDag(definition), [definition]);
+export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) {
+	const studioQuery = useWorkflowStudio(workflowName);
+	const saveStudio = useSaveWorkflowStudio(workflowName);
+	const committed = useMemo(
+		() => layoutDag(definition, studioQuery.data?.config),
+		[definition, studioQuery.data?.config],
+	);
+	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(committed.nodes);
+	const [editing, setEditing] = useState(false);
+	const [dirty, setDirty] = useState(false);
+	const writable = studioQuery.data?.writable === true;
+
+	useEffect(() => {
+		setFlowNodes(committed.nodes);
+		setDirty(false);
+	}, [committed.nodes, setFlowNodes]);
+
+	useEffect(() => {
+		if (!dirty) return;
+		const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+		window.addEventListener("beforeunload", warn);
+		return () => window.removeEventListener("beforeunload", warn);
+	}, [dirty]);
 
 	const nodeTypes = useMemo(
 		() => ({
@@ -75,33 +108,150 @@ export function WorkflowGraph({ definition }: WorkflowGraphProps) {
 		return null;
 	}
 
+	const discard = () => {
+		setFlowNodes(committed.nodes);
+		setDirty(false);
+		setEditing(false);
+		saveStudio.reset();
+	};
+	const autoLayout = () => {
+		setFlowNodes(layoutDag(definition, studioQuery.data?.config, { ignorePositions: true }).nodes);
+		setDirty(true);
+	};
+	const save = () => {
+		if (!studioQuery.data || !dirty) return;
+		const config = withWorkflowNodePositions(
+			studioQuery.data.config,
+			workflowName,
+			flowNodes.map((node) => ({ stepId: flowNodeStepId(node), position: node.position })),
+		);
+		saveStudio.mutate(
+			{ config, baseEtag: studioQuery.data.etag },
+			{
+				onSuccess: () => {
+					setDirty(false);
+					setEditing(false);
+				},
+			},
+		);
+	};
+	const conflict = saveStudio.error instanceof ApiError && saveStudio.error.status === 409;
+
 	return (
-		<div className="h-[600px] rounded-lg border border-zinc-800 overflow-hidden bg-canvas">
-			<ReactFlow
-				nodes={flowNodes}
-				edges={flowEdges}
-				nodeTypes={nodeTypes}
-				fitView
-				fitViewOptions={{ padding: 0.25 }}
-				proOptions={{ hideAttribution: true }}
-				minZoom={0.25}
-				maxZoom={2}
-				nodesDraggable={false}
-				nodesConnectable={false}
-				elementsSelectable={true}
-			>
-				<Background color="#27272a" gap={16} size={1} />
-				<Controls
-					showInteractive={false}
-					className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
-				/>
-				<MiniMap
-					nodeStrokeColor="#3f3f46"
-					nodeColor={(node) => MINIMAP_COLORS[(node.data as { kind: DagNodeKind }).kind] ?? "#52525b"}
-					maskColor="rgba(0,0,0,0.6)"
-					className="bg-zinc-900! border-zinc-700! rounded-md!"
-				/>
-			</ReactFlow>
+		<div className="rounded-lg border border-zinc-800 overflow-hidden bg-canvas">
+			<div className="min-h-12 flex items-center gap-3 border-b border-zinc-800 bg-zinc-950/90 px-3 py-2">
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-2">
+						<span className="text-xs font-semibold text-zinc-200">Canvas layout</span>
+						{dirty && <span className="text-[10px] font-medium text-amber-300">● Unsaved</span>}
+						{studioQuery.isLoading && <Loader2 className="h-3 w-3 animate-spin text-zinc-500" />}
+					</div>
+					<p className="truncate text-[10px] text-zinc-500">
+						{editing
+							? "Drag workflow steps, then save their positions beside the workflow source."
+							: studioQuery.data?.sourcePath ||
+								studioQuery.data?.readOnlyReason ||
+								studioQuery.error?.message ||
+								"Loading layout source…"}
+					</p>
+				</div>
+				{editing ? (
+					<div className="flex items-center gap-1.5">
+						<button
+							type="button"
+							onClick={autoLayout}
+							className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+						>
+							<WandSparkles className="h-3.5 w-3.5" /> Auto layout
+						</button>
+						<button
+							type="button"
+							onClick={discard}
+							className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+						>
+							<RotateCcw className="h-3.5 w-3.5" /> Discard
+						</button>
+						<button
+							type="button"
+							onClick={save}
+							disabled={!dirty || saveStudio.isPending}
+							className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							{saveStudio.isPending ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<Save className="h-3.5 w-3.5" />
+							)}
+							Save
+						</button>
+					</div>
+				) : (
+					<button
+						type="button"
+						onClick={() => setEditing(true)}
+						disabled={!writable || studioQuery.isLoading}
+						title={studioQuery.data?.readOnlyReason}
+						className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+					>
+						<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
+					</button>
+				)}
+			</div>
+			{saveStudio.error && (
+				<div
+					role="alert"
+					className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+				>
+					<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+					<span className="flex-1">
+						{conflict ? "This layout changed on disk after you opened it." : saveStudio.error.message}
+					</span>
+					{conflict && (
+						<button
+							type="button"
+							onClick={() => {
+								studioQuery.refetch();
+								setEditing(false);
+								saveStudio.reset();
+							}}
+							className="rounded px-2 py-1 font-medium hover:bg-amber-500/15"
+						>
+							Reload layout
+						</button>
+					)}
+				</div>
+			)}
+			<div className="h-[600px]">
+				<ReactFlow
+					nodes={flowNodes}
+					edges={committed.edges}
+					onNodesChange={onNodesChange}
+					onNodeDragStop={(_event, node) => {
+						if (editing && flowNodeStepId(node)) setDirty(true);
+					}}
+					nodeTypes={nodeTypes}
+					fitView
+					fitViewOptions={{ padding: 0.25 }}
+					proOptions={{ hideAttribution: true }}
+					minZoom={0.25}
+					maxZoom={2}
+					nodesDraggable={editing && writable}
+					nodesConnectable={false}
+					elementsSelectable={true}
+				>
+					<Background color="#27272a" gap={16} size={1} />
+					<Controls
+						showInteractive={false}
+						className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+					/>
+					<MiniMap
+						nodeStrokeColor="#3f3f46"
+						nodeColor={(node) => MINIMAP_COLORS[(node.data as { kind: DagNodeKind }).kind] ?? "#52525b"}
+						maskColor="rgba(0,0,0,0.6)"
+						className="bg-zinc-900! border-zinc-700! rounded-md!"
+					/>
+				</ReactFlow>
+			</div>
 		</div>
 	);
 }
@@ -153,17 +303,34 @@ export function pinnedPosition(node: DagNode): { x: number; y: number } | undefi
 	return { x, y };
 }
 
-export function layoutDag(definition: unknown): { nodes: Node[]; edges: Edge[] } {
+function flowNodeStepId(node: Pick<Node, "data">): string | undefined {
+	const stepId = (node.data as unknown as DagNode["data"]).meta?.stepId;
+	return typeof stepId === "string" ? stepId : undefined;
+}
+
+function persistedPosition(
+	node: DagNode,
+	config: WorkflowStudioConfig | null | undefined,
+): { x: number; y: number } | undefined {
+	const stepId = node.data.meta?.stepId;
+	return workflowNodePosition(typeof stepId === "string" ? config?.nodes[stepId] : undefined) ?? pinnedPosition(node);
+}
+
+export function layoutDag(
+	definition: unknown,
+	config?: WorkflowStudioConfig | null,
+	options?: { ignorePositions?: boolean },
+): { nodes: Node[]; edges: Edge[] } {
 	const dag = buildWorkflowDag(definition);
 
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
-	g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 60, acyclicer: "greedy" });
+	g.setGraph({ rankdir: config?.canvas?.direction ?? "TB", nodesep: 40, ranksep: 60, acyclicer: "greedy" });
 
 	const pins = new Map<string, { x: number; y: number }>();
 	for (const n of dag.nodes) {
 		const { width, height } = nodeSize(n.data.kind);
-		const pin = pinnedPosition(n);
+		const pin = options?.ignorePositions ? undefined : persistedPosition(n, config);
 		if (pin) {
 			pins.set(n.id, pin);
 			// Seed dagre with the pinned center so neighbouring auto nodes
@@ -193,7 +360,7 @@ export function layoutDag(definition: unknown): { nodes: Node[]; edges: Edge[] }
 			type: n.data.kind,
 			position: pin ? { x: pin.x, y: pin.y } : { x: pos.x - width / 2, y: pos.y - height / 2 },
 			data: n.data as unknown as Record<string, unknown>,
-			draggable: false,
+			draggable: typeof n.data.meta?.stepId === "string" ? undefined : false,
 		};
 	});
 

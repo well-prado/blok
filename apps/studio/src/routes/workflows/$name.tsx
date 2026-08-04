@@ -185,7 +185,7 @@ function WorkflowDetailPage() {
 
 			{activeTab === "graph" &&
 				(detail.definition ? (
-					<WorkflowGraph definition={detail.definition} />
+					<WorkflowGraph definition={detail.definition} workflowName={name} />
 				) : (
 					<EmptyState
 						icon={<GitBranch className="w-10 h-10" />}

@@ -77,6 +77,27 @@ describe("layoutDag seed + pin", () => {
 		expect(findById(nodes, "pinned").position).toEqual(PINNED);
 	});
 
+	it("prefers the sidecar over inline ui", () => {
+		const sidecarPin = { x: 12, y: 34 };
+		const { nodes } = layoutDag(definition(), {
+			schemaVersion: 1,
+			workflow: "test",
+			nodes: { pinned: sidecarPin },
+		});
+		expect(findById(nodes, "pinned").position).toEqual(sidecarPin);
+	});
+
+	it("can ignore persisted positions for an explicit auto-layout", () => {
+		const sidecarPin = { x: 12, y: 34 };
+		const { nodes } = layoutDag(
+			definition(),
+			{ schemaVersion: 1, workflow: "test", nodes: { pinned: sidecarPin } },
+			{ ignorePositions: true },
+		);
+		expect(findById(nodes, "pinned").position).not.toEqual(sidecarPin);
+		expect(findById(nodes, "pinned").position).not.toEqual(PINNED);
+	});
+
 	// (b) an orphan step (no ui) gets a non-trivial auto position.
 	it("auto-lays-out an orphan step (no ui)", () => {
 		const { nodes } = layoutDag(definition());

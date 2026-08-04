@@ -1,4 +1,11 @@
-import { deleteWorkflowSample, fetchWorkflowDetail, fetchWorkflows } from "@/lib/api";
+import {
+	deleteWorkflowSample,
+	fetchWorkflowDetail,
+	fetchWorkflowStudio,
+	fetchWorkflows,
+	saveWorkflowStudio,
+} from "@/lib/api";
+import type { WorkflowStudioConfig } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function useWorkflows() {
@@ -14,6 +21,23 @@ export function useWorkflowDetail(name: string) {
 		queryKey: ["workflow", name],
 		queryFn: () => fetchWorkflowDetail(name),
 		enabled: !!name,
+	});
+}
+
+export function useWorkflowStudio(name: string) {
+	return useQuery({
+		queryKey: ["workflow-studio", name],
+		queryFn: () => fetchWorkflowStudio(name),
+		enabled: !!name,
+	});
+}
+
+export function useSaveWorkflowStudio(name: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ config, baseEtag }: { config: WorkflowStudioConfig; baseEtag: string | null }) =>
+			saveWorkflowStudio(name, config, baseEtag),
+		onSuccess: (saved) => queryClient.setQueryData(["workflow-studio", name], saved),
 	});
 }
 

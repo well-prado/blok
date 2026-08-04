@@ -52,6 +52,29 @@ describe("API client", () => {
 		});
 	});
 
+	describe("workflow Studio layout", () => {
+		it("fetches the encoded workflow sidecar endpoint", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ config: null, writable: true, etag: null }));
+			await api.fetchWorkflowStudio("checkout flow");
+			expect(mockFetch.mock.calls[0]![0]).toBe("/__blok/workflows/checkout%20flow/studio");
+		});
+
+		it("saves config with its base etag", async () => {
+			const config = { schemaVersion: 1 as const, workflow: "checkout", nodes: { pay: { x: 10, y: 20 } } };
+			mockFetch.mockResolvedValueOnce(jsonResponse({ config, writable: true, etag: "next" }));
+			await api.saveWorkflowStudio("checkout", config, "base");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/__blok/workflows/checkout/studio",
+				expect.objectContaining({
+					method: "PUT",
+					headers: expect.objectContaining({ "Content-Type": "application/json" }),
+					body: JSON.stringify({ config, baseEtag: "base" }),
+				}),
+			);
+		});
+	});
+
 	describe("fetchRuns", () => {
 		it("constructs query params correctly", async () => {
 			mockFetch.mockResolvedValueOnce(jsonResponse({ runs: [], total: 0, page: 1 }));

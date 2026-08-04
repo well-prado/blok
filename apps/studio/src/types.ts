@@ -348,6 +348,37 @@ export interface WorkflowDetail extends WorkflowSummary {
 	};
 }
 
+export interface WorkflowStudioNodeLayout {
+	x: number;
+	y: number;
+	collapsed?: boolean;
+	notes?: string;
+	[key: string]: unknown;
+}
+
+export interface WorkflowStudioConfig {
+	$schema?: string;
+	schemaVersion: 1;
+	workflow: string;
+	canvas?: {
+		direction?: "TB" | "LR" | "BT" | "RL";
+		defaultViewport?: { x: number; y: number; zoom: number; [key: string]: unknown };
+		[key: string]: unknown;
+	};
+	nodes: Record<string, WorkflowStudioNodeLayout>;
+	groups?: Record<string, unknown>;
+	annotations?: unknown[];
+	[key: string]: unknown;
+}
+
+export interface WorkflowStudioResponse {
+	config: WorkflowStudioConfig | null;
+	sourcePath?: string;
+	writable: boolean;
+	etag: string | null;
+	readOnlyReason?: string;
+}
+
 export interface RunDetail {
 	run: WorkflowRun;
 	nodes: NodeRun[];
