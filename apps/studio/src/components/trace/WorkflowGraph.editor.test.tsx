@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	mutate: vi.fn(),
 	refetch: vi.fn(),
 	reset: vi.fn(),
+	startTestRun: vi.fn(),
 	studioData: {
 		config: { schemaVersion: 1 as const, workflow: "checkout", nodes: { open: { x: 10, y: 20 } } },
 		sourcePath: "/project/checkout.ts",
@@ -14,6 +15,16 @@ const mocks = vi.hoisted(() => ({
 		etag: "v1",
 	},
 }));
+
+vi.mock("@/hooks/useRunDetail", () => ({
+	useRunDetail: () => ({ data: undefined }),
+	useTraceStream: () => undefined,
+}));
+
+vi.mock("@/lib/api", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/api")>();
+	return { ...actual, startTestRun: mocks.startTestRun };
+});
 
 vi.mock("@/hooks/useWorkflows", () => ({
 	useWorkflowStudio: () => ({
@@ -57,7 +68,19 @@ const definition = {
 };
 
 describe("WorkflowGraph layout editor", () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.startTestRun.mockResolvedValue({ runId: "run-123", stream: "/runs/run-123/stream" });
+	});
+
+	it("starts a workflow run from the canvas", async () => {
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mocks.startTestRun).toHaveBeenCalledWith("checkout");
+	});
 
 	it("keeps dragging actions behind an explicit edit mode and supports discard", async () => {
 		const user = userEvent.setup();

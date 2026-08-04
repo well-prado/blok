@@ -1044,10 +1044,26 @@ Tests:
 
 #### 3.3 Canvas live overlay
 
+Status: implemented on 2026-08-04; the browser workspace remains Phase 3.4 work.
+
 - Project node-run state onto the static DAG by stable step id.
 - Animate only active edges and state transitions.
 - Preserve manual viewport unless active node leaves view.
 - Add Fit active/Fit workflow.
+
+Implemented:
+
+- Added Run directly to the workflow Graph tab using the general Studio test-run endpoint and existing SSE trace cache.
+- Projected the latest node-run state onto persisted static nodes by `stepId`, including repeated loop executions.
+- Highlighted completed and failed paths while animating only the currently running node and incoming edge.
+- Kept the manual viewport stable while the active node is visible, with automatic reveal only when it leaves view.
+- Added separate Fit active and Fit workflow controls plus a linked live run-status badge.
+
+Tests:
+
+- Canvas Run calls the workflow test-run endpoint.
+- Repeated node executions project their latest state onto one static step.
+- Full Studio test suite, production build, and an in-browser failed-run overlay smoke pass.
 
 #### 3.4 Live browser panel
 

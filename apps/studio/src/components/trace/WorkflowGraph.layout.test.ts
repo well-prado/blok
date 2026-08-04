@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DagNode } from "@/lib/workflowDag";
-import { layoutDag, pinnedPosition } from "./WorkflowGraph";
+import { layoutDag, pinnedPosition, projectNodeStatuses } from "./WorkflowGraph";
 
 /**
  * Inline-layout seed/pin + orphan tolerance (#410/#411).
@@ -56,6 +56,18 @@ describe("pinnedPosition", () => {
 		expect(pinnedPosition(node("step-a", "a", { x: "1", y: 2 }))).toBeUndefined();
 		expect(pinnedPosition(node("step-a", "a", { x: 1 }))).toBeUndefined();
 		expect(pinnedPosition(node("step-a", "a", { x: Number.NaN, y: 2 }))).toBeUndefined();
+	});
+});
+
+describe("projectNodeStatuses", () => {
+	it("projects the latest loop execution onto its static step id", () => {
+		expect(
+			projectNodeStatuses([
+				{ nodeName: "open", status: "completed", startedAt: 10 },
+				{ nodeName: "open", status: "running", startedAt: 20 },
+				{ nodeName: "assert", status: "failed", startedAt: 30 },
+			] as Parameters<typeof projectNodeStatuses>[0]),
+		).toEqual({ open: "running", assert: "failed" });
 	});
 });
 

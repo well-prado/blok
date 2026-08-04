@@ -1,9 +1,11 @@
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
-import { ApiError } from "@/lib/api";
+import { ApiError, startTestRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
-import type { WorkflowStudioConfig } from "@/types";
+import type { NodeRun, NodeRunStatus, WorkflowStudioConfig } from "@/types";
 import { Link } from "@tanstack/react-router";
 import {
 	Background,
@@ -15,6 +17,7 @@ import {
 	type NodeProps,
 	Position,
 	ReactFlow,
+	type ReactFlowInstance,
 	useNodesState,
 } from "@xyflow/react";
 import dagre from "dagre";
@@ -23,8 +26,10 @@ import {
 	ArrowRightFromLine,
 	CheckCircle2,
 	Clock,
+	Focus,
 	GitBranch,
 	Loader2,
+	Maximize2,
 	Pencil,
 	Play,
 	Repeat,
@@ -37,7 +42,7 @@ import {
 	WandSparkles,
 	Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 interface WorkflowGraphProps {
@@ -64,6 +69,11 @@ const TERMINAL_DIAMETER = 80; // trigger / end pills
 export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) {
 	const studioQuery = useWorkflowStudio(workflowName);
 	const saveStudio = useSaveWorkflowStudio(workflowName);
+	const [activeRunId, setActiveRunId] = useState("");
+	const [startingRun, setStartingRun] = useState(false);
+	const [runError, setRunError] = useState("");
+	const runQuery = useRunDetail(activeRunId);
+	useTraceStream(activeRunId);
 	const committed = useMemo(
 		() => layoutDag(definition, studioQuery.data?.config),
 		[definition, studioQuery.data?.config],
@@ -71,7 +81,33 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(committed.nodes);
 	const [editing, setEditing] = useState(false);
 	const [dirty, setDirty] = useState(false);
+	const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
+	const canvasRef = useRef<HTMLDivElement>(null);
 	const writable = studioQuery.data?.writable === true;
+	const liveStatuses = useMemo(() => projectNodeStatuses(runQuery.data?.nodes ?? []), [runQuery.data?.nodes]);
+	const renderedNodes = useMemo(
+		() =>
+			flowNodes.map((node) => {
+				const status = liveStatuses[flowNodeStepId(node) ?? ""];
+				return status ? { ...node, data: { ...node.data, liveStatus: status } } : node;
+			}),
+		[flowNodes, liveStatuses],
+	);
+	const renderedEdges = useMemo(
+		() => projectEdgeStatuses(committed.edges, renderedNodes),
+		[committed.edges, renderedNodes],
+	);
+	const activeStepId = useMemo(
+		() =>
+			[...(runQuery.data?.nodes ?? [])]
+				.filter((node) => node.status === "running")
+				.sort((a, b) => b.startedAt - a.startedAt)[0]?.nodeName,
+		[runQuery.data?.nodes],
+	);
+	const activeNode = useMemo(
+		() => renderedNodes.find((node) => flowNodeStepId(node) === activeStepId),
+		[activeStepId, renderedNodes],
+	);
 
 	useEffect(() => {
 		setFlowNodes(committed.nodes);
@@ -84,6 +120,22 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		window.addEventListener("beforeunload", warn);
 		return () => window.removeEventListener("beforeunload", warn);
 	}, [dirty]);
+
+	useEffect(() => {
+		if (!activeNode || !flowInstance || !canvasRef.current) return;
+		const { x, y, zoom } = flowInstance.getViewport();
+		const width = activeNode.measured?.width ?? nodeSize((activeNode.data as unknown as LiveDagNodeData).kind).width;
+		const height = activeNode.measured?.height ?? nodeSize((activeNode.data as unknown as LiveDagNodeData).kind).height;
+		const left = activeNode.position.x * zoom + x;
+		const top = activeNode.position.y * zoom + y;
+		const margin = 24;
+		const visible =
+			left + width * zoom >= margin &&
+			top + height * zoom >= margin &&
+			left <= canvasRef.current.clientWidth - margin &&
+			top <= canvasRef.current.clientHeight - margin;
+		if (!visible) flowInstance.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
+	}, [activeNode, flowInstance]);
 
 	const nodeTypes = useMemo(
 		() => ({
@@ -136,6 +188,23 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		);
 	};
 	const conflict = saveStudio.error instanceof ApiError && saveStudio.error.status === 409;
+	const runStatus = runQuery.data?.run.status;
+	const runActive =
+		runStatus === "pending" || runStatus === "queued" || runStatus === "delayed" || runStatus === "running";
+	const run = async () => {
+		setStartingRun(true);
+		setRunError("");
+		try {
+			setActiveRunId((await startTestRun(workflowName)).runId);
+		} catch (error) {
+			setRunError(error instanceof Error ? error.message : "Could not start workflow");
+		} finally {
+			setStartingRun(false);
+		}
+	};
+	const fitActive = () => {
+		if (activeNode) flowInstance?.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
+	};
 
 	return (
 		<div className="rounded-lg border border-zinc-800 overflow-hidden bg-canvas">
@@ -155,6 +224,11 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								"Loading layout source…"}
 					</p>
 				</div>
+				{activeRunId && runStatus && (
+					<Link to="/runs/$runId" params={{ runId: activeRunId }} title="Open run details">
+						<StatusBadge status={runStatus} />
+					</Link>
+				)}
 				{editing ? (
 					<div className="flex items-center gap-1.5">
 						<button
@@ -186,17 +260,59 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						</button>
 					</div>
 				) : (
-					<button
-						type="button"
-						onClick={() => setEditing(true)}
-						disabled={!writable || studioQuery.isLoading}
-						title={studioQuery.data?.readOnlyReason}
-						className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-					>
-						<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
-					</button>
+					<div className="flex items-center gap-1.5">
+						<button
+							type="button"
+							onClick={fitActive}
+							disabled={!activeNode}
+							title="Fit active node"
+							aria-label="Fit active node"
+							className="inline-flex items-center rounded-md border border-zinc-700 p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							<Focus className="h-3.5 w-3.5" />
+						</button>
+						<button
+							type="button"
+							onClick={() => flowInstance?.fitView({ padding: 0.25, duration: 300 })}
+							title="Fit workflow"
+							aria-label="Fit workflow"
+							className="inline-flex items-center rounded-md border border-zinc-700 p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+						>
+							<Maximize2 className="h-3.5 w-3.5" />
+						</button>
+						<button
+							type="button"
+							onClick={() => setEditing(true)}
+							disabled={!writable || studioQuery.isLoading || runActive}
+							title={studioQuery.data?.readOnlyReason}
+							className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
+						</button>
+						<button
+							type="button"
+							onClick={run}
+							disabled={startingRun || runActive}
+							className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+						>
+							{startingRun || runActive ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<Play className="h-3.5 w-3.5" />
+							)}
+							{runActive ? "Running" : "Run"}
+						</button>
+					</div>
 				)}
 			</div>
+			{runError && (
+				<div
+					role="alert"
+					className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+				>
+					<AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {runError}
+				</div>
+			)}
 			{saveStudio.error && (
 				<div
 					role="alert"
@@ -221,10 +337,11 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					)}
 				</div>
 			)}
-			<div className="h-[600px]">
+			<div ref={canvasRef} className="h-[600px]">
 				<ReactFlow
-					nodes={flowNodes}
-					edges={committed.edges}
+					nodes={renderedNodes}
+					edges={renderedEdges}
+					onInit={setFlowInstance}
 					onNodesChange={onNodesChange}
 					onNodeDragStop={(_event, node) => {
 						if (editing && flowNodeStepId(node)) setDirty(true);
@@ -306,6 +423,36 @@ export function pinnedPosition(node: DagNode): { x: number; y: number } | undefi
 function flowNodeStepId(node: Pick<Node, "data">): string | undefined {
 	const stepId = (node.data as unknown as DagNode["data"]).meta?.stepId;
 	return typeof stepId === "string" ? stepId : undefined;
+}
+
+type LiveDagNodeData = DagNode["data"] & { liveStatus?: NodeRunStatus };
+
+/** Collapse repeated loop executions to the latest state for each static step. */
+export function projectNodeStatuses(nodes: NodeRun[]): Record<string, NodeRunStatus> {
+	const latest = new Map<string, NodeRun>();
+	for (const node of nodes) {
+		const current = latest.get(node.nodeName);
+		if (!current || node.startedAt >= current.startedAt) latest.set(node.nodeName, node);
+	}
+	return Object.fromEntries([...latest].map(([stepId, node]) => [stepId, node.status]));
+}
+
+function projectEdgeStatuses(edges: Edge[], nodes: Node[]): Edge[] {
+	const statusByNode = new Map(nodes.map((node) => [node.id, (node.data as unknown as LiveDagNodeData).liveStatus]));
+	return edges.map((edge) => {
+		const targetStatus = statusByNode.get(edge.target);
+		const active = targetStatus === "running";
+		const stroke = targetStatus === "failed" ? "#f87171" : targetStatus === "completed" ? "#4ade80" : undefined;
+		return {
+			...edge,
+			animated: active,
+			style: active
+				? { ...edge.style, stroke: "#60a5fa", strokeWidth: 2 }
+				: stroke
+					? { ...edge.style, stroke }
+					: edge.style,
+		};
+	});
 }
 
 function persistedPosition(
@@ -401,19 +548,38 @@ interface NodeShellProps {
 	title: string;
 	subtitle?: string;
 	accent: string;
+	status?: NodeRunStatus;
 }
 
-function NodeShell({ icon: Icon, iconClass, title, subtitle, accent }: NodeShellProps) {
+function NodeShell({ icon: Icon, iconClass, title, subtitle, accent, status }: NodeShellProps) {
 	return (
 		<div
 			className={cn(
 				"rounded-md border bg-zinc-900 px-3 py-2 min-w-[180px] max-w-[220px] transition-colors hover:border-zinc-600",
 				accent,
+				status === "running" &&
+					"border-blue-400 shadow-[0_0_0_1px_#60a5fa,0_0_20px_rgba(96,165,250,0.3)] animate-pulse",
+				status === "completed" && "border-green-400/80 bg-green-500/10",
+				status === "failed" && "border-red-400 bg-red-500/10",
+				status === "skipped" && "opacity-50",
 			)}
 		>
 			<div className="flex items-center gap-2">
 				<Icon className={cn("w-3.5 h-3.5 shrink-0", iconClass)} />
 				<span className="text-xs font-medium text-zinc-100 truncate">{title}</span>
+				{status && (
+					<span
+						className={cn(
+							"ml-auto h-2 w-2 shrink-0 rounded-full",
+							status === "running" && "bg-blue-400",
+							status === "completed" && "bg-green-400",
+							status === "failed" && "bg-red-400",
+							status === "skipped" && "bg-zinc-500",
+							status === "pending" && "bg-zinc-400",
+						)}
+						title={status}
+					/>
+				)}
 			</div>
 			{subtitle && <div className="text-[10px] text-zinc-500 mt-1 truncate font-mono">{subtitle}</div>}
 		</div>
@@ -430,8 +596,8 @@ function withHandles(content: React.ReactNode) {
 	);
 }
 
-function asData(props: NodeProps): DagNode["data"] {
-	return props.data as unknown as DagNode["data"];
+function asData(props: NodeProps): LiveDagNodeData {
+	return props.data as unknown as LiveDagNodeData;
 }
 
 function TriggerNode(props: NodeProps) {
@@ -473,6 +639,7 @@ function RegularNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-zinc-700"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -496,6 +663,7 @@ function SubworkflowNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-indigo-500/40"
+			status={data.liveStatus}
 		/>
 	);
 	return withHandles(
@@ -518,6 +686,7 @@ function WaitNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-amber-500/40"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -531,6 +700,7 @@ function DecisionNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-yellow-500/50"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -544,6 +714,7 @@ function SwitchNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-orange-500/50"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -557,6 +728,7 @@ function IterationNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-violet-500/50"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -570,6 +742,7 @@ function LoopNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-violet-500/50"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -583,6 +756,7 @@ function TryNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-red-500/40"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -596,6 +770,7 @@ function CatchNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-red-500/60"
+			status={data.liveStatus}
 		/>,
 	);
 }
@@ -609,6 +784,7 @@ function FinallyNode(props: NodeProps) {
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-orange-500/40"
+			status={data.liveStatus}
 		/>,
 	);
 }
