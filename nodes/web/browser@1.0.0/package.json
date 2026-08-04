@@ -1,0 +1,36 @@
+{
+	"name": "@blokjs/browser",
+	"version": "1.7.0",
+	"files": ["dist"],
+	"description": "Playwright browser lifecycle nodes for BLOK workflows",
+	"type": "module",
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"license": "Apache-2.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "rimraf ./dist && tsc",
+		"build:dev": "tsc --watch",
+		"test": "vitest run",
+		"test:dev": "vitest --watch",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"rimraf": "^6.1.2",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.18"
+	},
+	"dependencies": {
+		"@blokjs/core": "^1.7.0",
+		"@blokjs/runner": "^1.7.0",
+		"playwright": "^1.62.1",
+		"zod": "^3.24.2"
+	},
+	"private": false,
+	"publishConfig": {
+		"access": "public"
+	}
+}

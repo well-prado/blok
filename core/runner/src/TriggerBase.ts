@@ -9,6 +9,7 @@ import { WaitDispatchRequest } from "./WaitDispatchRequest";
 import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
 import { QueueExpiredError } from "./concurrency/QueueExpiredError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
+import { runContextCleanups, runShutdownCleanups } from "./contextCleanup";
 import type { HMREvent } from "./hmr/FileWatcher";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
 import { resolveConcurrencyKey, resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
@@ -421,6 +422,9 @@ export default abstract class TriggerBase extends Trigger {
 				} catch {
 					// Best-effort.
 				}
+
+				// 4. Close process-owned resources registered by runtime nodes.
+				await runShutdownCleanups();
 
 				logger?.log?.("[blok][shutdown] graceful shutdown complete");
 			} catch (err) {
@@ -938,6 +942,7 @@ export default abstract class TriggerBase extends Trigger {
 		// step list / name / trigger config another job's `init()` overwrote.
 		const cfg = configuration;
 		let runSuccess = true;
+		let terminal = true;
 		// Tier 2 #6 — concurrency lock claim, populated when the gate grants
 		// a slot. Released in the `finally` block. Null when the workflow has
 		// no concurrency gate or the gate failed open (key resolution).
@@ -1366,6 +1371,7 @@ export default abstract class TriggerBase extends Trigger {
 			};
 		} catch (err) {
 			runSuccess = false;
+			if (err instanceof DeferredDispatchSignal || err instanceof WaitDispatchRequest) terminal = false;
 
 			// PR 4 — wait.for / wait.until step requesting deferred dispatch.
 			// Translate to the existing scheduling pipeline:
@@ -1462,6 +1468,8 @@ export default abstract class TriggerBase extends Trigger {
 
 			throw err;
 		} finally {
+			if (terminal) await runContextCleanups(ctx);
+
 			// Release the concurrency slot if the gate granted one. Idempotent
 			// at the store layer — a double-release (gate granted but then
 			// crash + lazy-purge) is a no-op. `releaseConcurrencySlot` is async

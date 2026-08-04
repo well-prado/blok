@@ -224,6 +224,22 @@
         "vitest": "^4.0.18",
       },
     },
+    "nodes/web/browser@1.0.0": {
+      "name": "@blokjs/browser",
+      "version": "1.7.0",
+      "dependencies": {
+        "@blokjs/core": "^1.7.0",
+        "@blokjs/runner": "^1.7.0",
+        "playwright": "^1.62.1",
+        "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/node": "^22.15.21",
+        "rimraf": "^6.1.2",
+        "typescript": "^5.8.3",
+        "vitest": "^4.0.18",
+      },
+    },
     "nodes/web/react@1.0.0": {
       "name": "@blokjs/react",
       "version": "1.7.0",
@@ -968,6 +984,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@1.9.4", "", { "os": "win32", "cpu": "x64" }, "sha512-8Y5wMhVIPaWe6jw2H+KlEm4wP/f7EW3810ZLmDlrEEy5KvBsb9ECEfu/kMWD484ijfQ8+nIi0giMgu9g1UAuuA=="],
 
     "@blokjs/api-call": ["@blokjs/api-call@workspace:nodes/web/api-call@1.0.0"],
+
+    "@blokjs/browser": ["@blokjs/browser@workspace:nodes/web/browser@1.0.0"],
 
     "@blokjs/client": ["@blokjs/client@workspace:packages/client"],
 

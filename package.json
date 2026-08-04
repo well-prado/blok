@@ -53,7 +53,7 @@
 		"v05:smoke": "bun run build && bun run scripts/v05-smoke.ts",
 		"e2e:smoke": "bash tests/e2e/scaffold-smoke/run.sh",
 		"sdks:build": "bash scripts/sdks-build.sh",
-		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
+		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/browser --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
 		"build": "bunx nx run-many -t build",
 		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts"

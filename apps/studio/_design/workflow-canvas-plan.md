@@ -924,10 +924,20 @@ Acceptance:
 
 #### 2.1 BrowserSessionManager and lifecycle
 
+Status: implemented on 2026-08-04; live Canvas/browser presentation remains Phase 3 work.
+
 - Add Playwright/Chromium to one dedicated browser-node package.
 - Implement session/page token ownership.
 - Implement cleanup registry integration, limits, and TTL.
 - Honor `ctx.signal` in every action.
+
+Implemented:
+
+- Added `@blokjs/browser` with concrete Playwright Chromium session ownership and `@blokjs/browser-launch` / `@blokjs/browser-close` nodes.
+- Initial launch creates exactly one isolated browser context and one page, returning only opaque session/page ids.
+- Enforced one session per run, a bounded process-wide session count, foreign/closed-handle rejection, cancellation cleanup, and configurable idle TTL.
+- Added a private context cleanup registry used by terminal trigger runs and in-process sub-workflows; deferred runs retain their resources until terminal re-entry.
+- Added graceful-shutdown cleanup without letting cleanup failures mask the workflow result or skip remaining resource cleanup.
 
 Tests:
 

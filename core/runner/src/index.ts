@@ -41,6 +41,12 @@ import {
 import { GrpcRuntimeAdapter } from "./adapters/grpc/GrpcRuntimeAdapter";
 import { DEFAULT_GRPC_PORTS, GRPC_DEFAULTS } from "./adapters/grpc/types";
 import { assertGrpcOnlyTransport } from "./adapters/transport";
+import {
+	registerContextCleanup,
+	registerShutdownCleanup,
+	runContextCleanups,
+	runShutdownCleanups,
+} from "./contextCleanup";
 
 // Function-first node API
 import { type FnNodeDefinition, FunctionNode, defineNode } from "./defineNode";
@@ -212,6 +218,10 @@ export {
 	// Runtime adapters
 	RuntimeRegistry,
 	RuntimeAdapterNode,
+	registerContextCleanup,
+	runContextCleanups,
+	registerShutdownCleanup,
+	runShutdownCleanups,
 	NodeJsRuntimeAdapter,
 	DockerRuntimeAdapter,
 	BunRuntimeAdapter,

@@ -2,6 +2,7 @@ import type { Context, ResponseContext } from "@blokjs/shared";
 import { context, propagation } from "@opentelemetry/api";
 import Configuration from "./Configuration";
 import RunnerNode from "./RunnerNode";
+import { runContextCleanups } from "./contextCleanup";
 import { SubworkflowMetrics } from "./monitoring/SubworkflowMetrics";
 import { RunTracker } from "./tracing/RunTracker";
 import type GlobalOptions from "./types/GlobalOptions";
@@ -269,6 +270,7 @@ export class SubworkflowNode extends RunnerNode {
 			if (childRunId) tracker.failRun(childRunId, err);
 			throw err;
 		} finally {
+			await runContextCleanups(childCtx);
 			// PR 1 follow-up · A3 fix. Abort the listener-cleanup signal so
 			// the parent.signal listener (registered in createChildContext)
 			// auto-removes. Without this, listeners accumulate on long-lived
@@ -544,6 +546,7 @@ export class SubworkflowNode extends RunnerNode {
 						err instanceof Error ? err.stack || err.message : err,
 					);
 				} finally {
+					await runContextCleanups(childCtx);
 					// PR 1 follow-up · A3 fix. Same listener-cleanup hook as the
 					// sync path so async sub-workflows also auto-remove the
 					// parent.signal listener on completion.
