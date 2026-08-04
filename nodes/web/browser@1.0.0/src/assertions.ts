@@ -45,7 +45,7 @@ export const BrowserAssertVisibleNode = defineNode({
 	output: assertionOutputSchema,
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "assert-visible", async () => {
+		return withActionScreenshot(ctx, page, "assert-visible", input.session, async () => {
 			const { target } = await resolveStrictLocator(page, input.locator, ctx.signal);
 			let actual = true;
 			try {
@@ -74,7 +74,7 @@ export const BrowserAssertTextNode = defineNode({
 	output: assertionOutputSchema,
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "assert-text", async () => {
+		return withActionScreenshot(ctx, page, "assert-text", input.session, async () => {
 			const { target } = await resolveStrictLocator(page, input.locator, ctx.signal);
 			const actual = (await abortable(ctx.signal, () => target.textContent({ timeout: input.timeoutMs }))) ?? "";
 			if (!matches(actual, input.expected, input.mode)) {
@@ -96,7 +96,7 @@ export const BrowserAssertUrlNode = defineNode({
 	output: assertionOutputSchema,
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "assert-url", async () => {
+		return withActionScreenshot(ctx, page, "assert-url", input.session, async () => {
 			const actual = sanitizeUrl(page.url());
 			if (!matches(actual, input.expected, input.mode)) {
 				throw assertionFailed("URL", input.expected, actual, { mode: input.mode });

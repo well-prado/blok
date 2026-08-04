@@ -285,7 +285,12 @@ export type RunEventType =
 	/** Tier 2 quick-wins: runner crashed. Payload `{durationMs, error}`. */
 	| "RUN_CRASHED"
 	/** Tier 2 quick-wins: step's final retry attempt timed out. Payload `{durationMs, stepId, maxDurationMs, attemptsExhausted}`. */
-	| "RUN_TIMED_OUT";
+	| "RUN_TIMED_OUT"
+	| "BROWSER_SESSION_OPENED"
+	| "BROWSER_PAGE_UPDATED"
+	| "BROWSER_ACTION"
+	| "BROWSER_ARTIFACT"
+	| "BROWSER_SESSION_CLOSED";
 
 export interface RunEvent {
 	id: string;
@@ -397,6 +402,15 @@ export interface RunDetail {
 	run: WorkflowRun;
 	nodes: NodeRun[];
 	logs: TraceLogEntry[];
+	browserSession?: {
+		sessionId: string;
+		pageId: string;
+		stream: string;
+		url?: string;
+		status: "live" | "closed";
+		autoOpen: boolean;
+	};
+	browserEvents?: RunEvent[];
 }
 
 export interface RunListResponse {

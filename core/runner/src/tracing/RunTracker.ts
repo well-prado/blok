@@ -10,6 +10,7 @@ import { createStore } from "./createStore";
 import { sanitize } from "./sanitize";
 import type {
 	BrowserArtifact,
+	BrowserRunEventType,
 	ConcurrencySlotResult,
 	Dashboard,
 	MetricsResult,
@@ -882,6 +883,13 @@ export class RunTracker extends EventEmitter {
 		const nodeRun = this.store.getNodeRun(nodeRunId);
 		if (!nodeRun) return;
 		this.store.updateNodeRun(nodeRunId, { artifacts: [...(nodeRun.artifacts ?? []), artifact].slice(-100) });
+	}
+
+	recordBrowserEvent(runId: string, type: BrowserRunEventType, payload: unknown, nodeRunId?: string): void {
+		const run = this.store.getRun(runId);
+		if (!run) return;
+		const node = nodeRunId ? this.store.getNodeRun(nodeRunId) : undefined;
+		this.emitEvent(runId, run.workflowName, type, node?.nodeName, nodeRunId, payload);
 	}
 
 	skipNode(runId: string, nodeName: string, stepIndex: number, reason?: string): void {

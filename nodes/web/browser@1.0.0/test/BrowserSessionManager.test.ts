@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserSessionManager } from "../src/BrowserSessionManager";
 
@@ -85,5 +85,33 @@ describe("BrowserSessionManager", () => {
 		const handle = await secondManager.launch("run-b");
 		await expect(secondManager.close("run-b", handle.sessionId)).rejects.toThrow("context close failed");
 		expect(cleanupFailure.browser.close).toHaveBeenCalledOnce();
+	});
+
+	it("streams coalescable CDP frames only to the owning trace run", async () => {
+		const fake = fakeBrowser();
+		let onFrame: ((event: { data: string; sessionId: number; metadata: Record<string, number> }) => void) | undefined;
+		const cdp = {
+			on: vi.fn((_name, callback) => {
+				onFrame = callback;
+			}),
+			send: vi.fn().mockResolvedValue(undefined),
+			detach: vi.fn().mockResolvedValue(undefined),
+		} as unknown as CDPSession;
+		Object.assign(fake.context, { newCDPSession: vi.fn().mockResolvedValue(cdp) });
+		const manager = new BrowserSessionManager({ launchBrowser: async () => fake.browser });
+		const handle = await manager.launch("context-run", undefined, "trace-run");
+		const frames: Uint8Array[] = [];
+
+		await expect(manager.subscribeScreencast("other-run", handle.sessionId, () => {})).rejects.toThrow("another run");
+		const unsubscribe = await manager.subscribeScreencast("trace-run", handle.sessionId, (frame) =>
+			frames.push(frame.data),
+		);
+		onFrame?.({ data: Buffer.from([1, 2, 3]).toString("base64"), sessionId: 1, metadata: {} });
+
+		expect(Array.from(frames[0] ?? [])).toEqual([1, 2, 3]);
+		expect(cdp.send).toHaveBeenCalledWith("Page.startScreencast", expect.any(Object));
+		await unsubscribe();
+		expect(cdp.send).toHaveBeenCalledWith("Page.stopScreencast");
+		await manager.closeAll();
 	});
 });

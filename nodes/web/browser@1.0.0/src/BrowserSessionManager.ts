@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { type Browser, type BrowserContext, type Page, chromium } from "playwright";
+import { RunTracker } from "@blokjs/core/runtime";
+import { type Browser, type BrowserContext, type CDPSession, type Page, chromium } from "playwright";
 
 export type BrowserHandle = {
 	sessionId: string;
@@ -9,6 +10,7 @@ export type BrowserHandle = {
 export type BrowserSessionRecord = {
 	sessionId: string;
 	runId: string;
+	traceRunId?: string;
 	browser: Browser;
 	context: BrowserContext;
 	pages: Map<string, Page>;
@@ -16,6 +18,19 @@ export type BrowserSessionRecord = {
 	lastActivityAt: number;
 	status: "live" | "closing" | "closed";
 	removeAbortListener?: () => void;
+	screencast?: BrowserScreencast;
+	screencastPromise?: Promise<BrowserScreencast>;
+};
+
+export interface BrowserFrame {
+	data: Uint8Array;
+	width: number;
+	height: number;
+}
+
+type BrowserScreencast = {
+	cdp: CDPSession;
+	subscribers: Set<(frame: BrowserFrame) => void>;
 };
 
 type Options = {
@@ -48,7 +63,7 @@ export class BrowserSessionManager {
 		return this.sessions.size;
 	}
 
-	async launch(runId: string, signal?: AbortSignal): Promise<BrowserHandle> {
+	async launch(runId: string, signal?: AbortSignal, traceRunId?: string): Promise<BrowserHandle> {
 		if (!runId) throw new Error("Browser session requires a run id");
 		signal?.throwIfAborted();
 		if (this.launchingRuns.has(runId) || [...this.sessions.values()].some((session) => session.runId === runId)) {
@@ -75,6 +90,7 @@ export class BrowserSessionManager {
 			const record: BrowserSessionRecord = {
 				sessionId,
 				runId,
+				traceRunId,
 				browser,
 				context,
 				pages: new Map([[pageId, page]]),
@@ -105,6 +121,23 @@ export class BrowserSessionManager {
 		} finally {
 			this.launchingRuns.delete(runId);
 		}
+	}
+
+	async subscribeScreencast(
+		traceRunId: string,
+		sessionId: string,
+		onFrame: (frame: BrowserFrame) => void,
+	): Promise<() => Promise<void>> {
+		const record = this.sessions.get(sessionId);
+		if (!record || record.status !== "live" || record.traceRunId !== traceRunId) {
+			throw new Error("Browser stream session is invalid or belongs to another run");
+		}
+		const stream = await this.ensureScreencast(record);
+		stream.subscribers.add(onFrame);
+		return async () => {
+			stream.subscribers.delete(onFrame);
+			if (stream.subscribers.size === 0 && record.screencast === stream) await this.stopScreencast(record);
+		};
 	}
 
 	getPage(runId: string, handle: BrowserHandle, signal?: AbortSignal): Page {
@@ -154,6 +187,14 @@ export class BrowserSessionManager {
 		this.sessions.delete(record.sessionId);
 
 		let firstError: unknown;
+		if (record.screencastPromise) {
+			await record.screencastPromise.catch((error) => {
+				firstError = error;
+			});
+			await this.stopScreencast(record).catch((error) => {
+				firstError ??= error;
+			});
+		}
 		try {
 			await record.context.close();
 		} catch (error) {
@@ -167,7 +208,56 @@ export class BrowserSessionManager {
 		record.pages.clear();
 		record.status = "closed";
 		this.stopReaperIfIdle();
+		if (record.traceRunId) {
+			RunTracker.getInstance().recordBrowserEvent(record.traceRunId, "BROWSER_SESSION_CLOSED", {
+				sessionId: record.sessionId,
+			});
+		}
 		if (firstError) throw firstError;
+	}
+
+	private async ensureScreencast(record: BrowserSessionRecord): Promise<BrowserScreencast> {
+		if (record.screencast) return record.screencast;
+		if (record.screencastPromise) return record.screencastPromise;
+		record.screencastPromise = (async () => {
+			const page = record.pages.values().next().value as Page | undefined;
+			if (!page) throw new Error("Browser stream page is closed");
+			const cdp = await record.context.newCDPSession(page);
+			const stream: BrowserScreencast = { cdp, subscribers: new Set() };
+			cdp.on("Page.screencastFrame", (event) => {
+				void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => undefined);
+				const viewport = event.metadata.deviceWidth && event.metadata.deviceHeight ? event.metadata : undefined;
+				const frame = {
+					data: Buffer.from(event.data, "base64"),
+					width: viewport?.deviceWidth ?? 1280,
+					height: viewport?.deviceHeight ?? 720,
+				};
+				for (const subscriber of stream.subscribers) subscriber(frame);
+			});
+			await cdp.send("Page.startScreencast", {
+				format: "jpeg",
+				quality: 72,
+				maxWidth: 1280,
+				maxHeight: 720,
+				everyNthFrame: 1,
+			});
+			record.screencast = stream;
+			return stream;
+		})().catch((error) => {
+			record.screencastPromise = undefined;
+			throw error;
+		});
+		return record.screencastPromise;
+	}
+
+	private async stopScreencast(record: BrowserSessionRecord): Promise<void> {
+		const stream = record.screencast;
+		if (!stream) return;
+		record.screencast = undefined;
+		record.screencastPromise = undefined;
+		stream.subscribers.clear();
+		await stream.cdp.send("Page.stopScreencast").catch(() => undefined);
+		await stream.cdp.detach().catch(() => undefined);
 	}
 
 	private startReaper(): void {

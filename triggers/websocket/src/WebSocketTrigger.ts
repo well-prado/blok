@@ -104,6 +104,14 @@ interface ConnectionState {
 interface HttpTriggerLike {
 	addServerHook(cb: (server: Server) => void | Promise<void>): void;
 	addPreCatchAllHook(cb: () => void | Promise<void>): void;
+	authorizeTraceRequest(request: {
+		method: string;
+		params: Record<string, string>;
+		query: Record<string, string | undefined>;
+		headers: Record<string, string | string[] | undefined>;
+		body?: unknown;
+		on(event: string, listener: () => void): void;
+	}): Promise<boolean>;
 }
 
 // -----------------------------------------------------------------------------
@@ -296,6 +304,7 @@ export default class WebSocketTrigger extends TriggerBase {
 		//      injectWebSocket(server) to attach the upgrade listener.
 		if (this.httpTrigger) {
 			this.httpTrigger.addPreCatchAllHook(() => {
+				this.registerBrowserStreamRoute();
 				const workflows = this.getWebSocketWorkflows();
 				if (workflows.length === 0) {
 					this.logger.log("[blok][ws] no workflows with trigger.websocket found");
@@ -326,6 +335,100 @@ export default class WebSocketTrigger extends TriggerBase {
 		}
 
 		return this.endCounter(startTime);
+	}
+
+	private registerBrowserStreamRoute(): void {
+		if (!this.upgradeWebSocket || !this.httpTrigger) return;
+		this.app.get(
+			"/__blok/browser/sessions/:sessionId/stream",
+			this.upgradeWebSocket((c) => {
+				const sessionId = c.req.param("sessionId") as string;
+				const query = Object.fromEntries(new URL(c.req.url).searchParams);
+				const runId = query.runId;
+				const headers = Object.fromEntries(c.req.raw.headers);
+				let stop: (() => Promise<void>) | undefined;
+				let timer: ReturnType<typeof setInterval> | undefined;
+				let latest: { data: Uint8Array; width: number; height: number } | undefined;
+				let awaitingAck = false;
+				let frameId = 0;
+
+				const cleanup = () => {
+					if (timer) clearInterval(timer);
+					timer = undefined;
+					void stop?.();
+					stop = undefined;
+				};
+
+				return {
+					onOpen: (_event, ws) => {
+						void (async () => {
+							const streamRunId = runId;
+							if (
+								!streamRunId ||
+								!(await this.httpTrigger?.authorizeTraceRequest({
+									method: "GET",
+									params: { sessionId },
+									query,
+									headers,
+									on: () => {},
+								}))
+							) {
+								ws.close(1008, "Unauthorized");
+								return;
+							}
+
+							try {
+								const packageName = "@blokjs/browser";
+								const browser = (await import(packageName)) as {
+									browserSessionManager: {
+										subscribeScreencast(
+											runId: string,
+											sessionId: string,
+											onFrame: (frame: { data: Uint8Array; width: number; height: number }) => void,
+										): Promise<() => Promise<void>>;
+									};
+								};
+								stop = await browser.browserSessionManager.subscribeScreencast(streamRunId, sessionId, (frame) => {
+									latest = frame;
+								});
+								timer = setInterval(() => {
+									if (!latest || awaitingAck || ws.readyState !== 1) return;
+									const raw = ws.raw as { bufferedAmount?: number } | undefined;
+									if ((raw?.bufferedAmount ?? 0) > 1_000_000) return;
+									const frame = latest;
+									latest = undefined;
+									awaitingAck = true;
+									frameId++;
+									ws.send(
+										JSON.stringify({
+											type: "frame",
+											frameId,
+											mimeType: "image/jpeg",
+											width: frame.width,
+											height: frame.height,
+										}),
+									);
+									ws.send(new Uint8Array(frame.data));
+								}, 100);
+							} catch (error) {
+								ws.close(1011, error instanceof Error ? error.message.slice(0, 100) : "Browser stream unavailable");
+							}
+						})();
+					},
+					onMessage: (event) => {
+						if (typeof event.data !== "string") return;
+						try {
+							const message = JSON.parse(event.data) as { type?: string; frameId?: number };
+							if (message.type === "ack" && message.frameId === frameId) awaitingAck = false;
+						} catch {
+							// Ignore malformed viewer messages; they never reach workflow execution.
+						}
+					},
+					onClose: cleanup,
+					onError: cleanup,
+				};
+			}),
+		);
 	}
 
 	async stop(): Promise<void> {

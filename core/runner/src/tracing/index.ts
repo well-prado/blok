@@ -17,6 +17,7 @@ export type {
 	NodeRunStatus,
 	RunEvent,
 	RunEventType,
+	BrowserRunEventType,
 	TraceLogEntry,
 	WorkflowSummary,
 	WorkflowDetail,

@@ -1,4 +1,5 @@
 import { defineNode } from "@blokjs/core";
+import { RunTracker } from "@blokjs/core/runtime";
 import { registerContextCleanup, registerShutdownCleanup } from "@blokjs/runner/contextCleanup";
 import { z } from "zod";
 import { browserSessionManager } from "./BrowserSessionManager";
@@ -17,8 +18,18 @@ export const BrowserLaunchNode = defineNode({
 	input: z.object({}),
 	output: browserHandleSchema,
 	async execute(ctx) {
-		const handle = await browserSessionManager.launch(ctx.id, ctx.signal);
+		const privateCtx = ctx as unknown as Record<string, unknown>;
+		const traceRunId = privateCtx._traceRunId as string | undefined;
+		const handle = await browserSessionManager.launch(ctx.id, ctx.signal, traceRunId);
 		registerContextCleanup(ctx, () => browserSessionManager.closeRun(ctx.id));
+		if (traceRunId) {
+			RunTracker.getInstance().recordBrowserEvent(
+				traceRunId,
+				"BROWSER_SESSION_OPENED",
+				{ ...handle, stream: `/__blok/browser/sessions/${handle.sessionId}/stream?runId=${traceRunId}` },
+				privateCtx._traceNodeId as string | undefined,
+			);
+		}
 		return handle;
 	},
 });

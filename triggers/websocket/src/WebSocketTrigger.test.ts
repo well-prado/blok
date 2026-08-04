@@ -75,7 +75,8 @@ describe("WebSocketTrigger — v0.7 PR 2", () => {
 			const app = new Hono();
 			const addServerHook = vi.fn();
 			const addPreCatchAllHook = vi.fn();
-			const httpTrigger = { addServerHook, addPreCatchAllHook };
+			const authorizeTraceRequest = vi.fn().mockResolvedValue(true);
+			const httpTrigger = { addServerHook, addPreCatchAllHook, authorizeTraceRequest };
 
 			const trigger = new WebSocketTrigger(app, httpTrigger);
 			expect(trigger).toBeDefined();
@@ -139,7 +140,8 @@ describe("WebSocketTrigger — v0.7 PR 2", () => {
 			const app = new Hono();
 			const addServerHook = vi.fn();
 			const addPreCatchAllHook = vi.fn();
-			const httpTrigger = { addServerHook, addPreCatchAllHook };
+			const authorizeTraceRequest = vi.fn().mockResolvedValue(true);
+			const httpTrigger = { addServerHook, addPreCatchAllHook, authorizeTraceRequest };
 			WorkflowRegistry.getInstance().register({
 				name: "chat-handler",
 				source: "/test/chat.json",
@@ -158,6 +160,9 @@ describe("WebSocketTrigger — v0.7 PR 2", () => {
 			expect(addPreCatchAllHook).toHaveBeenCalledWith(expect.any(Function));
 			expect(addServerHook).toHaveBeenCalledTimes(1);
 			expect(addServerHook).toHaveBeenCalledWith(expect.any(Function));
+
+			await addPreCatchAllHook.mock.calls[0]?.[0]?.();
+			expect(app.routes.some((route) => route.path === "/__blok/browser/sessions/:sessionId/stream")).toBe(true);
 		});
 
 		it("is idempotent (second listen() call is a no-op)", async () => {

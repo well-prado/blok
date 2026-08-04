@@ -49,7 +49,7 @@ export const BrowserGotoNode = defineNode({
 	}),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "goto", async () => {
+		return withActionScreenshot(ctx, page, "goto", input.session, async () => {
 			const started = performance.now();
 			ctx.logger.log(`[blok][browser] goto ${sanitizeUrl(input.url)}`);
 			const response = await abortable(ctx.signal, () =>
@@ -71,7 +71,7 @@ export const BrowserClickNode = defineNode({
 	output: actionOutputSchema,
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "click", async () => {
+		return withActionScreenshot(ctx, page, "click", input.session, async () => {
 			const started = performance.now();
 			const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
 			const box = await abortable(ctx.signal, () => target.boundingBox());
@@ -101,7 +101,7 @@ export const BrowserFillNode = defineNode({
 	output: actionOutputSchema.extend({ masked: z.boolean() }),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "fill", async () => {
+		return withActionScreenshot(ctx, page, "fill", input.session, async () => {
 			const started = performance.now();
 			const { target, matchCount } = await resolveStrictLocator(page, input.locator, ctx.signal);
 			const box = await abortable(ctx.signal, () => target.boundingBox());
@@ -144,7 +144,7 @@ export const BrowserWaitNode = defineNode({
 	}),
 	async execute(ctx, input) {
 		const page = browserSessionManager.getPage(ctx.id, input.session, ctx.signal);
-		return withActionScreenshot(ctx, page, "wait", async () => {
+		return withActionScreenshot(ctx, page, "wait", input.session, async () => {
 			const started = performance.now();
 			const condition = input.condition;
 			let matchCount: 1 | undefined;

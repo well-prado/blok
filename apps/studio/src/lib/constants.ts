@@ -78,6 +78,11 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 	RUN_CANCELLED: "Run Cancelled",
 	RUN_CRASHED: "Run Crashed",
 	RUN_TIMED_OUT: "Run Timed Out",
+	BROWSER_SESSION_OPENED: "Browser Opened",
+	BROWSER_PAGE_UPDATED: "Browser Page Updated",
+	BROWSER_ACTION: "Browser Action",
+	BROWSER_ARTIFACT: "Browser Artifact",
+	BROWSER_SESSION_CLOSED: "Browser Closed",
 };
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
@@ -102,6 +107,11 @@ export const EVENT_COLORS: Record<RunEventType, string> = {
 	RUN_CANCELLED: "text-purple-400 bg-purple-400/10",
 	RUN_CRASHED: "text-red-500 bg-red-500/10",
 	RUN_TIMED_OUT: "text-orange-400 bg-orange-400/10",
+	BROWSER_SESSION_OPENED: "text-sky-400 bg-sky-400/10",
+	BROWSER_PAGE_UPDATED: "text-sky-300 bg-sky-300/10",
+	BROWSER_ACTION: "text-cyan-400 bg-cyan-400/10",
+	BROWSER_ARTIFACT: "text-violet-400 bg-violet-400/10",
+	BROWSER_SESSION_CLOSED: "text-zinc-400 bg-zinc-400/10",
 };
 
 export const LOG_LEVEL_COLORS = {

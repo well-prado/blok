@@ -1021,10 +1021,26 @@ Implemented:
 
 #### 3.2 Browser semantic events and stream
 
+Status: implemented on 2026-08-04; the visual renderer and focus modes remain Phase 3.4 work.
+
 - Add the browser event types to runner and Studio unions/listeners.
 - Add authenticated/coalesced browser WebSocket.
 - Tie session-open to browser-panel auto-open.
 - Persist action-boundary artifact events.
+
+Implemented:
+
+- Added persisted session-open, page-update, action, artifact, and session-close events on the normal RunTracker/SSE path.
+- Browser actions emit running/completed/failed state without including fill values, while screenshot artifacts stay linked to their active node run.
+- Added the authenticated `/__blok/browser/sessions/:sessionId/stream?runId=...` WebSocket on the existing shared HTTP server.
+- Streams lazy CDP JPEG screencast frames at a 10 FPS ceiling with latest-frame coalescing, one unacknowledged frame per viewer, and a 1 MB socket backpressure guard.
+- Studio now retains the live browser session, capped browser activity, current URL, artifact updates, and an `autoOpen` signal for the Phase 3.4 panel.
+
+Tests:
+
+- CDP streams reject foreign run ids and start/stop with the first/last viewer.
+- Browser action and artifact events persist on the run event stream.
+- Real Chromium/WebSocket smoke delivered and acknowledged a binary JPEG frame, then closed the browser, CDP session, socket, trigger, and server.
 
 #### 3.3 Canvas live overlay
 

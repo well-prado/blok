@@ -235,6 +235,51 @@ export function useTraceStream(runId: string) {
 						);
 						break;
 					}
+
+					case "BROWSER_SESSION_OPENED": {
+						const payload = event.payload as Record<string, string>;
+						if (!payload.sessionId || !payload.pageId || !payload.stream) break;
+						updated.browserSession = {
+							sessionId: payload.sessionId,
+							pageId: payload.pageId,
+							stream: payload.stream,
+							url: payload.url,
+							status: "live",
+							autoOpen: true,
+						};
+						updated.browserEvents = [...(updated.browserEvents ?? []), event].slice(-100);
+						break;
+					}
+
+					case "BROWSER_PAGE_UPDATED": {
+						const payload = event.payload as Record<string, string>;
+						if (updated.browserSession) updated.browserSession = { ...updated.browserSession, url: payload.url };
+						updated.browserEvents = [...(updated.browserEvents ?? []), event].slice(-100);
+						break;
+					}
+
+					case "BROWSER_ARTIFACT": {
+						const artifact = (event.payload as { artifact?: NonNullable<NodeRun["artifacts"]>[number] } | undefined)
+							?.artifact;
+						if (artifact && event.nodeId) {
+							updated.nodes = updated.nodes.map((node) =>
+								node.id === event.nodeId && !node.artifacts?.some((existing) => existing.id === artifact.id)
+									? { ...node, artifacts: [...(node.artifacts ?? []), artifact] }
+									: node,
+							);
+						}
+						updated.browserEvents = [...(updated.browserEvents ?? []), event].slice(-100);
+						break;
+					}
+
+					case "BROWSER_ACTION":
+						updated.browserEvents = [...(updated.browserEvents ?? []), event].slice(-100);
+						break;
+
+					case "BROWSER_SESSION_CLOSED":
+						if (updated.browserSession) updated.browserSession = { ...updated.browserSession, status: "closed" };
+						updated.browserEvents = [...(updated.browserEvents ?? []), event].slice(-100);
+						break;
 				}
 
 				return updated;

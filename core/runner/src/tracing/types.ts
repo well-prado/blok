@@ -688,7 +688,14 @@ export type RunEventType =
 	 * timeout fires on the last attempt. Run status flips to
 	 * `"timedOut"`.
 	 */
-	| "RUN_TIMED_OUT";
+	| "RUN_TIMED_OUT"
+	| "BROWSER_SESSION_OPENED"
+	| "BROWSER_PAGE_UPDATED"
+	| "BROWSER_ACTION"
+	| "BROWSER_ARTIFACT"
+	| "BROWSER_SESSION_CLOSED";
+
+export type BrowserRunEventType = Extract<RunEventType, `BROWSER_${string}`>;
 
 export interface RunEvent {
 	id: string;

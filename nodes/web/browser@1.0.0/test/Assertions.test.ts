@@ -102,6 +102,9 @@ describe("browser assertions and artifacts", () => {
 		expect(response.success).toBe(false);
 		expect(stored?.error?.details).toMatchObject({ expected: "Expected title", actual: "Actual title" });
 		expect(stored?.artifacts?.[0]).toMatchObject({ nodeRunId: node.id, runId: run.id, kind: "screenshot" });
+		expect(tracker.getEvents(run.id).map((event) => event.type)).toEqual(
+			expect.arrayContaining(["BROWSER_ACTION", "BROWSER_ARTIFACT"]),
+		);
 		expect(order).toEqual(["capture", "close"]);
 	});
 

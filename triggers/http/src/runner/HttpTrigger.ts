@@ -246,6 +246,17 @@ export default class HttpTrigger extends TriggerBase {
 		this.traceAuthFn = authorize;
 	}
 
+	public async authorizeTraceRequest(request: Parameters<TraceAuthorizeFn>[0]): Promise<boolean> {
+		const isProd = process.env.BLOK_ENV === "production" || process.env.NODE_ENV === "production";
+		if (!isProd || process.env.BLOK_TRACE_AUTH_DISABLED === "1") return true;
+		if (!this.traceAuthFn) return false;
+		try {
+			return await this.traceAuthFn(request);
+		} catch {
+			return false;
+		}
+	}
+
 	/**
 	 * v0.7 — register a callback to run after the HTTP server is ready
 	 * (after `serve()` resolves). The callback receives the underlying
