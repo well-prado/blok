@@ -3,6 +3,7 @@ import type { NodeRunStatus, RunEventType, WorkflowRunStatus } from "@/types";
 export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
 	pending: "text-zinc-400 bg-zinc-400/10",
 	running: "text-blue-400 bg-blue-400/10",
+	paused: "text-amber-300 bg-amber-300/10",
 	completed: "text-green-400 bg-green-400/10",
 	failed: "text-red-400 bg-red-400/10",
 	cancelled: "text-purple-400 bg-purple-400/10",
@@ -19,6 +20,7 @@ export const STATUS_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = 
 export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
 	pending: "bg-zinc-400",
 	running: "bg-blue-400",
+	paused: "bg-amber-300",
 	completed: "bg-green-400",
 	failed: "bg-red-400",
 	cancelled: "bg-purple-400",
@@ -35,6 +37,7 @@ export const STATUS_DOT_COLORS: Record<WorkflowRunStatus | NodeRunStatus, string
 export const STATUS_LABELS: Record<WorkflowRunStatus | NodeRunStatus, string> = {
 	pending: "Pending",
 	running: "Running",
+	paused: "Paused",
 	completed: "Completed",
 	failed: "Failed",
 	cancelled: "Cancelled",
@@ -58,6 +61,8 @@ export const TIMELINE_BAR_COLORS: Record<NodeRunStatus, string> = {
 
 export const EVENT_LABELS: Record<RunEventType, string> = {
 	RUN_STARTED: "Run Started",
+	RUN_PAUSED: "Run Paused",
+	RUN_RESUMED: "Run Resumed",
 	RUN_COMPLETED: "Run Completed",
 	RUN_FAILED: "Run Failed",
 	NODE_STARTED: "Node Started",
@@ -87,6 +92,8 @@ export const EVENT_LABELS: Record<RunEventType, string> = {
 
 export const EVENT_COLORS: Record<RunEventType, string> = {
 	RUN_STARTED: "text-blue-400 bg-blue-400/10",
+	RUN_PAUSED: "text-amber-300 bg-amber-300/10",
+	RUN_RESUMED: "text-blue-400 bg-blue-400/10",
 	RUN_COMPLETED: "text-green-400 bg-green-400/10",
 	RUN_FAILED: "text-red-400 bg-red-400/10",
 	NODE_STARTED: "text-blue-300 bg-blue-300/10",

@@ -1126,9 +1126,27 @@ Phase 3 acceptance scenario:
 
 #### 4.1 Runner DebugController
 
+Status: implemented on 2026-08-04; Studio toolbar controls and paused-input inspection remain Phase 4.2 work.
+
 - Add paused status, controller map, before-step hook, and run-control endpoint.
 - Add pause TTL and cancellation integration.
 - Keep debug path entirely bypassed for normal runs.
+
+Implemented:
+
+- Added opt-in `run` and `debug` Studio test-run modes; normal runs retain the existing execution path and reject breakpoint payloads.
+- Added a process-local controller at the shared pre-step execution boundary. Debug runs pause before their first executable node, Continue resumes to the next breakpoint, and Step pauses before the next executable node, including nested flow steps.
+- Added persisted `paused` run status plus `RUN_PAUSED` and `RUN_RESUMED` events across runner tracing, SSE, and Studio status rendering.
+- Added authenticated `POST /runs/:runId/control` operations for Continue, Step, and Stop.
+- Reused the existing cooperative `AbortController` cancellation path for Stop and ordinary cancel requests while paused.
+- Added a configurable pause TTL through `BLOK_DEBUG_PAUSE_TTL_MS` (15 minutes by default); expiry cancels the run and releases the waiting runner.
+- Counted paused runs as active, protected them from eviction, and included them in orphan crash recovery.
+
+Tests:
+
+- Controller tests cover first-node pause, single-step progression, Continue, Stop, lifecycle events, and TTL cancellation.
+- Trace route tests cover debug-run request validation and authenticated run control.
+- Runner typecheck, focused runner/route tests, Studio production build, and Biome checks pass.
 
 #### 4.2 Studio controls
 

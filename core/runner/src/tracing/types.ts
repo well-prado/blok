@@ -5,6 +5,7 @@
  *
  * - `pending`: created but not yet started.
  * - `running`: currently executing.
+ * - `paused`: a Studio debug run is waiting before an executable step.
  * - `completed`: finished successfully.
  * - `failed`: a step threw or the run aborted with an error.
  * - `cancelled`: stopped externally before completion.
@@ -36,6 +37,7 @@
 export type WorkflowRunStatus =
 	| "pending"
 	| "running"
+	| "paused"
 	| "completed"
 	| "failed"
 	| "cancelled"
@@ -604,6 +606,8 @@ export interface Webhook {
 
 export type RunEventType =
 	| "RUN_STARTED"
+	| "RUN_PAUSED"
+	| "RUN_RESUMED"
 	| "RUN_COMPLETED"
 	| "RUN_FAILED"
 	| "NODE_STARTED"

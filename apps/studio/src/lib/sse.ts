@@ -45,6 +45,8 @@ export function connectGlobalStream(options: SSEConnectionOptions, workflows?: s
 // never saw a run that ended in any state other than completed/failed.
 const EVENT_TYPES = [
 	"RUN_STARTED",
+	"RUN_PAUSED",
+	"RUN_RESUMED",
 	"RUN_COMPLETED",
 	"RUN_FAILED",
 	"RUN_THROTTLED",

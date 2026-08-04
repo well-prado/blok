@@ -14,6 +14,7 @@ import ManualTrigger from "./ManualTrigger";
 import ResolverBase from "./ResolverBase";
 import Runner from "./Runner";
 import TriggerBase from "./TriggerBase";
+import { DebugController } from "./debug/DebugController";
 
 import { RuntimeAdapterNode } from "./RuntimeAdapterNode";
 // Runtime adapters
@@ -215,6 +216,7 @@ export {
 	DefaultLogger,
 	LocalStorage,
 	ManualTrigger,
+	DebugController,
 	ResolverBase,
 	TriggerBase,
 	// Runtime adapters
@@ -562,6 +564,7 @@ export type {
 	ExecutionTrace,
 	WorkflowExecuteOptions,
 } from "./testing/WorkflowTestRunner";
+export type { DebugAction, DebugControlResult, DebugSessionHandle } from "./debug/DebugController";
 
 // Tracing types (Blok Studio)
 export type {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { z } from "zod";
 import { browserArtifactFilePath } from "../browserArtifacts";
+import { DebugController } from "../debug/DebugController";
 import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import {
@@ -279,7 +280,7 @@ export interface TraceRouterOptions {
 
 export interface StudioTestRunRequest {
 	input: Record<string, unknown>;
-	mode: "run";
+	mode: "run" | "debug";
 	breakpoints: string[];
 	artifactPolicy: {
 		screenshot: "after-browser-action";
@@ -290,8 +291,8 @@ export interface StudioTestRunRequest {
 const studioTestRunRequestSchema = z
 	.object({
 		input: z.record(z.unknown()).default({}),
-		mode: z.literal("run").default("run"),
-		breakpoints: z.array(z.string().min(1)).max(100).length(0).default([]),
+		mode: z.enum(["run", "debug"]).default("run"),
+		breakpoints: z.array(z.string().min(1)).max(100).default([]),
 		artifactPolicy: z
 			.object({
 				screenshot: z.literal("after-browser-action").default("after-browser-action"),
@@ -300,7 +301,12 @@ const studioTestRunRequestSchema = z
 			.strict()
 			.default({ screenshot: "after-browser-action", trace: "off" }),
 	})
-	.strict();
+	.strict()
+	.superRefine((request, ctx) => {
+		if (request.mode === "run" && request.breakpoints.length > 0) {
+			ctx.addIssue({ code: "custom", path: ["breakpoints"], message: "Breakpoints require debug mode" });
+		}
+	});
 
 /**
  * Register trace API routes on an Express-compatible router.
@@ -542,6 +548,27 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			cleanup();
 			res.status(400).json({ error: error instanceof Error ? error.message : "Studio test run failed to start" });
 		});
+	});
+
+	const debugControlSchema = z.object({ action: z.enum(["continue", "step", "stop"]) }).strict();
+	router.post("/runs/:runId/control", (req: TraceRequest, res: TraceResponse) => {
+		const { runId } = req.params;
+		if (!t.getRun(runId)) {
+			res.status(404).json({ error: `Run '${runId}' not found` });
+			return;
+		}
+		const parsed = debugControlSchema.safeParse(req.body ?? {});
+		if (!parsed.success) {
+			res.status(400).json({ error: "Invalid debug control request", issues: parsed.error.flatten() });
+			return;
+		}
+
+		const result = DebugController.getInstance().control(runId, parsed.data.action);
+		if (!result.ok) {
+			res.status(409).json({ error: result.reason, runId, status: t.getRun(runId)?.status });
+			return;
+		}
+		res.json({ runId, action: parsed.data.action, status: result.status });
 	});
 
 	const sendStudioStoreError = (res: TraceResponse, error: unknown): void => {
@@ -1556,10 +1583,10 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		// `tracker.abortRunningRun(runId)`. Other terminal states
 		// (completed/failed/throttled/expired/crashed/timedOut) remain
 		// non-cancellable.
-		const cancellable = ["delayed", "debounced", "queued", "running"];
+		const cancellable = ["delayed", "debounced", "queued", "running", "paused"];
 		if (!cancellable.includes(run.status)) {
 			res.status(400).json({
-				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', 'queued', or 'running' state can be cancelled.`,
+				error: `Cannot cancel run in '${run.status}' state. Only runs in 'delayed', 'debounced', 'queued', 'running', or 'paused' state can be cancelled.`,
 				runId,
 				status: run.status,
 			});
@@ -1573,7 +1600,7 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		// `abortRunningRun` fires the controller AND flips status via
 		// cancelRun in one atomic-feeling call. Returns 200 — the
 		// in-flight step's between-step check will throw shortly.
-		if (run.status === "running") {
+		if (run.status === "running" || run.status === "paused") {
 			const aborted = t.abortRunningRun(runId);
 			if (!aborted) {
 				// No registered controller — likely a stale state where

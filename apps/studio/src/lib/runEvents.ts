@@ -21,6 +21,8 @@ export const TERMINAL_RUN_EVENT_STATUS: Partial<Record<RunEvent["type"], Workflo
 export const TRANSIENT_RUN_EVENT_STATUS: Partial<Record<RunEvent["type"], WorkflowRunStatus>> = {
 	RUN_QUEUED: "queued",
 	RUN_DELAYED: "delayed",
+	RUN_PAUSED: "paused",
+	RUN_RESUMED: "running",
 };
 
 export interface RunToast {

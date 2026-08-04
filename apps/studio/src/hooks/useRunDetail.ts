@@ -68,7 +68,9 @@ export function useTraceStream(runId: string) {
 					// Transient run events — status changes but the run is NOT finished
 					// (queued/delayed resume to running later; no finishedAt).
 					case "RUN_QUEUED":
-					case "RUN_DELAYED": {
+					case "RUN_DELAYED":
+					case "RUN_PAUSED":
+					case "RUN_RESUMED": {
 						const status = TRANSIENT_RUN_EVENT_STATUS[event.type];
 						if (status) updated.run = { ...updated.run, status };
 						break;

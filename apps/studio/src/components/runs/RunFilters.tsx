@@ -22,6 +22,7 @@ interface RunFiltersProps {
 const STATUS_OPTIONS: { value: string; label: string }[] = [
 	{ value: "", label: "All" },
 	{ value: "running", label: "Running" },
+	{ value: "paused", label: "Paused" },
 	{ value: "completed", label: "Completed" },
 	{ value: "failed", label: "Failed" },
 	{ value: "cancelled", label: "Cancelled" },

@@ -193,8 +193,8 @@ function RunTracePage() {
 					<span className="text-sm font-mono text-zinc-400">{run.id.slice(0, 12)}</span>
 					<StatusBadge status={run.status} />
 					<DurationBadge
-						ms={run.status === "running" ? run.startedAt : run.durationMs}
-						running={run.status === "running"}
+						ms={run.status === "running" || run.status === "paused" ? run.startedAt : run.durationMs}
+						running={run.status === "running" || run.status === "paused"}
 					/>
 					{run.replayOf && (
 						<Link

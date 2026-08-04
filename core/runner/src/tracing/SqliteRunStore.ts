@@ -1374,9 +1374,9 @@ export class SqliteRunStore implements RunStore {
 	}
 
 	getActiveRunCount(): number {
-		const row = this.db.prepare("SELECT COUNT(*) as count FROM workflow_runs WHERE status = 'running'").get() as
-			| { count: number }
-			| undefined;
+		const row = this.db
+			.prepare("SELECT COUNT(*) as count FROM workflow_runs WHERE status IN ('running', 'paused')")
+			.get() as { count: number } | undefined;
 		return row?.count ?? 0;
 	}
 

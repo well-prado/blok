@@ -3,6 +3,7 @@
 export type WorkflowRunStatus =
 	| "pending"
 	| "running"
+	| "paused"
 	| "completed"
 	| "failed"
 	| "cancelled"
@@ -239,6 +240,8 @@ export interface NodeRun {
 
 export type RunEventType =
 	| "RUN_STARTED"
+	| "RUN_PAUSED"
+	| "RUN_RESUMED"
 	| "RUN_COMPLETED"
 	| "RUN_FAILED"
 	| "NODE_STARTED"

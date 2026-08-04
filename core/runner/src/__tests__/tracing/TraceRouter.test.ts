@@ -8,8 +8,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { Context, NodeBase } from "@blokjs/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserArtifactFilePath } from "../../browserArtifacts";
+import { DebugController } from "../../debug/DebugController";
 import { InMemoryRunStore } from "../../tracing/InMemoryRunStore";
 import { RoutingDiagnostics } from "../../tracing/RoutingDiagnostics";
 import { RunTracker } from "../../tracing/RunTracker";
@@ -348,16 +350,80 @@ describe("TraceRouter", () => {
 			);
 		});
 
-		it("rejects debug controls before Phase 4 instead of silently running them", async () => {
+		it("accepts opt-in debug runs with breakpoints", async () => {
 			WorkflowRegistry.resetInstance();
 			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			const testRouter = new MockRouter();
+			const startTestRun = vi.fn(async (workflowName: string) => {
+				tracker.startRun({
+					workflowName,
+					workflowPath: "login.ts",
+					triggerType: "studio",
+					triggerSummary: "studio",
+					nodeCount: 2,
+				});
+			});
+			registerTraceRoutes(testRouter as any, tracker, { startTestRun });
 			const req = new MockRequest({ params: { name: "login" }, body: { mode: "debug", breakpoints: ["submit"] } });
+			const res = new MockResponse();
+
+			await testRouter.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
+
+			expect(res.statusCode).toBe(202);
+			expect(startTestRun).toHaveBeenCalledWith(
+				"login",
+				expect.objectContaining({ mode: "debug", breakpoints: ["submit"] }),
+			);
+		});
+
+		it("rejects breakpoints on a normal run", async () => {
+			WorkflowRegistry.resetInstance();
+			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			const req = new MockRequest({ params: { name: "login" }, body: { mode: "run", breakpoints: ["submit"] } });
 			const res = new MockResponse();
 
 			await router.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
 
 			expect(res.statusCode).toBe(400);
 			expect(res.jsonBody).toMatchObject({ error: "Invalid Studio test-run request" });
+		});
+	});
+
+	describe("POST /runs/:runId/control", () => {
+		it("continues a paused debug run", async () => {
+			RunTracker.resetInstance();
+			DebugController.resetInstance();
+			const debugTracker = RunTracker.getInstance();
+			const debugRouter = new MockRouter();
+			registerTraceRoutes(debugRouter as any, debugTracker);
+			const run = debugTracker.startRun({
+				workflowName: "login",
+				workflowPath: "login.ts",
+				triggerType: "studio",
+				triggerSummary: "studio",
+				nodeCount: 1,
+			});
+			const session = DebugController.getInstance().attach([]);
+			const pause = session.beforeStep(
+				{ _traceRunId: run.id } as unknown as Context,
+				{ name: "submit" } as unknown as NodeBase,
+				0,
+				1,
+				false,
+			);
+			await vi.waitFor(() => expect(debugTracker.getRun(run.id)?.status).toBe("paused"));
+
+			const req = new MockRequest({ params: { runId: run.id }, body: { action: "continue" } });
+			const res = new MockResponse();
+			debugRouter.findHandler("POST", "/runs/:runId/control")!(req, res);
+			await pause;
+
+			expect(res.statusCode).toBe(200);
+			expect(res.jsonBody).toEqual({ runId: run.id, action: "continue", status: "running" });
+			expect(debugTracker.getRun(run.id)?.status).toBe("running");
+			session.dispose();
+			DebugController.resetInstance();
+			RunTracker.resetInstance();
 		});
 	});
 

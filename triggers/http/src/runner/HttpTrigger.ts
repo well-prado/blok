@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper";
 import type { GlobalOptions, HMREvent, ParamsDictionary, TriggerResponse } from "@blokjs/runner";
-import { ManualTrigger, TriggerBase } from "@blokjs/runner";
+import { DebugController, ManualTrigger, TriggerBase } from "@blokjs/runner";
 import { NodeMap } from "@blokjs/runner";
 import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
@@ -1100,7 +1100,18 @@ export default class HttpTrigger extends TriggerBase {
 				// trace router middleware.
 				registerTraceRoutes(traceAdapter, undefined, {
 					authorize: this.traceAuthFn,
-					startTestRun: (name, request) => studioTrigger.dispatch(name, request.input),
+					startTestRun: async (name, request) => {
+						if (request.mode === "run") {
+							await studioTrigger.dispatch(name, request.input);
+							return;
+						}
+						const session = DebugController.getInstance().attach(request.breakpoints);
+						try {
+							await studioTrigger.dispatch(name, request.input, { beforeStep: session.beforeStep });
+						} finally {
+							session.dispose();
+						}
+					},
 				});
 				this.app.route("/__blok", traceApp);
 			}

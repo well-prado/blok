@@ -505,7 +505,7 @@ export class RunTracker extends EventEmitter {
 		for (let page = 0; page < MAX_PAGES; page++) {
 			// Snapshot the runs first — markRunCrashed mutates the store and
 			// could perturb iteration if we read+update inline.
-			const { runs } = this.store.getRuns({ status: "running" });
+			const runs = (["running", "paused"] as const).flatMap((status) => this.store.getRuns({ status }).runs);
 			const candidates =
 				opts?.maxStartedAt !== undefined ? runs.filter((r) => r.startedAt <= (opts.maxStartedAt as number)) : runs;
 
@@ -584,6 +584,22 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
+	pauseRun(runId: string, payload: { stepId: string; index: number; total: number; deep: boolean }): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || run.status !== "running") return false;
+		this.store.updateRun(runId, { status: "paused" });
+		this.emitEvent(runId, run.workflowName, "RUN_PAUSED", payload.stepId, undefined, payload);
+		return true;
+	}
+
+	resumeRun(runId: string, payload: { action: "continue" | "step" }): boolean {
+		const run = this.store.getRun(runId);
+		if (!run || run.status !== "paused") return false;
+		this.store.updateRun(runId, { status: "running" });
+		this.emitEvent(runId, run.workflowName, "RUN_RESUMED", undefined, undefined, payload);
+		return true;
+	}
+
 	/**
 	 * Tier 2 polish — cancel a pending (delayed/debounced/queued) run.
 	 * Idempotent. Returns true when the run existed AND was in a cancellable
@@ -605,7 +621,7 @@ export class RunTracker extends EventEmitter {
 		// cancellation can flip status to "cancelled" before the in-flight
 		// step throws `RunCancelledError`. The tracker's `abortRunningRun`
 		// calls this method right after firing the AbortController.
-		const cancellable = ["delayed", "debounced", "queued", "running"];
+		const cancellable = ["delayed", "debounced", "queued", "running", "paused"];
 		if (!cancellable.includes(run.status)) return false;
 
 		const previousStatus = run.status;
@@ -679,7 +695,7 @@ export class RunTracker extends EventEmitter {
 	 */
 	abortRunningRun(runId: string): boolean {
 		const run = this.store.getRun(runId);
-		if (!run || run.status !== "running") return false;
+		if (!run || (run.status !== "running" && run.status !== "paused")) return false;
 
 		const controller = this.abortControllers.get(runId);
 		if (controller) {

@@ -1,6 +1,7 @@
 import type { Context, RequestContext } from "@blokjs/shared";
 import { v4 as uuid } from "uuid";
 import Configuration from "./Configuration";
+import type { BeforeStepHook } from "./RunnerSteps";
 import TriggerBase from "./TriggerBase";
 import type GlobalOptions from "./types/GlobalOptions";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
@@ -61,7 +62,11 @@ export default class ManualTrigger extends TriggerBase {
 	 * claims throws a clear error rather than silently dropping the call — the
 	 * push-model analogue of "an event with no listener".
 	 */
-	async dispatch<T = unknown>(workflowName: string, args: Record<string, unknown> = {}): Promise<T> {
+	async dispatch<T = unknown>(
+		workflowName: string,
+		args: Record<string, unknown> = {},
+		options?: { beforeStep?: BeforeStepHook },
+	): Promise<T> {
 		if (!workflowName || typeof workflowName !== "string") {
 			throw new Error("[blok][manual] dispatch() requires a non-empty workflow name.");
 		}
@@ -87,6 +92,9 @@ export default class ManualTrigger extends TriggerBase {
 		const requestId = uuid();
 		const ctx: Context = this.createContext(undefined, workflowName, requestId, config);
 		ctx.request = { body: args, headers: {}, params: {}, query: {} } as unknown as RequestContext;
+		if (options?.beforeStep) {
+			(ctx as Context & { _blokBeforeStep?: BeforeStepHook })._blokBeforeStep = options.beforeStep;
+		}
 
 		await this.applyMiddlewareChain(ctx, this.nodeMap);
 		await this.run(ctx, config);

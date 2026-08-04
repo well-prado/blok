@@ -248,7 +248,7 @@ export class InMemoryRunStore implements RunStore {
 	getActiveRunCount(): number {
 		let count = 0;
 		for (const run of this.runs.values()) {
-			if (run.status === "running") count++;
+			if (run.status === "running" || run.status === "paused") count++;
 		}
 		return count;
 	}
@@ -480,7 +480,7 @@ export class InMemoryRunStore implements RunStore {
 
 		for (const [runId] of toRemove) {
 			const run = this.runs.get(runId);
-			if (run?.status === "running") continue;
+			if (run?.status === "running" || run?.status === "paused") continue;
 			this.deleteRun(runId);
 		}
 	}

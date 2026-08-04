@@ -234,6 +234,30 @@ describe("API client", () => {
 				}),
 			);
 		});
+
+		it("starts a debug run with breakpoints", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ runId: "run_123", stream: "/__blok/runs/run_123/stream" }));
+
+			await api.startTestRun("Login flow", { mode: "debug", breakpoints: ["submit"] });
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/__blok/workflows/Login%20flow/test-runs",
+				expect.objectContaining({ body: JSON.stringify({ mode: "debug", breakpoints: ["submit"] }) }),
+			);
+		});
+	});
+
+	describe("controlDebugRun", () => {
+		it("posts a run-control action", async () => {
+			mockFetch.mockResolvedValueOnce(jsonResponse({ runId: "run_123", action: "step", status: "running" }));
+
+			await api.controlDebugRun("run_123", "step");
+
+			expect(mockFetch).toHaveBeenCalledWith(
+				"/__blok/runs/run_123/control",
+				expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "step" }) }),
+			);
+		});
 	});
 
 	describe("tags", () => {

@@ -296,8 +296,8 @@ export function clearRuns(): Promise<{ deleted: number }> {
 
 export interface StartTestRunRequest {
 	input?: Record<string, unknown>;
-	mode?: "run";
-	breakpoints?: [];
+	mode?: "run" | "debug";
+	breakpoints?: string[];
 	artifactPolicy?: {
 		screenshot?: "after-browser-action";
 		trace?: "off";
@@ -314,6 +314,19 @@ export function startTestRun(workflowName: string, request: StartTestRunRequest 
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(request),
+	});
+}
+
+export type DebugControlAction = "continue" | "step" | "stop";
+
+export function controlDebugRun(
+	runId: string,
+	action: DebugControlAction,
+): Promise<{ runId: string; action: DebugControlAction; status: "running" | "cancelled" }> {
+	return fetchJson(`/runs/${encodeURIComponent(runId)}/control`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ action }),
 	});
 }
 

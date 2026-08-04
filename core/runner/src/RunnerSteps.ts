@@ -10,6 +10,14 @@ import { RunTracker } from "./tracing/RunTracker";
 import { sanitize } from "./tracing/sanitize";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
+export type BeforeStepHook = (
+	ctx: Context,
+	step: NodeBase,
+	index: number,
+	total: number,
+	deep: boolean,
+) => void | Promise<void>;
+
 /**
  * Default TTL for idempotency cache entries when the step author does not
  * pass `idempotencyKeyTTL` explicitly. 24 hours, matching Trigger.dev's
@@ -197,17 +205,18 @@ function wrapWithTimeout<T>(fn: () => Promise<T>, ms: number, stepName: string):
 
 export default abstract class RunnerSteps {
 	/**
-	 * Test-only seam for proving debugger lifecycle at the real execution
-	 * boundary. Production runners inherit the no-op. A future debug controller
-	 * can override this without moving pause logic into individual nodes.
+	 * Debugger seam at the real execution boundary. Normal contexts have no hook,
+	 * so the production path remains a single optional-property check.
 	 */
 	protected beforeStep(
-		_ctx: Context,
-		_step: NodeBase,
-		_index: number,
-		_total: number,
-		_deep: boolean,
-	): void | Promise<void> {}
+		ctx: Context,
+		step: NodeBase,
+		index: number,
+		total: number,
+		deep: boolean,
+	): void | Promise<void> {
+		return (ctx as Context & { _blokBeforeStep?: BeforeStepHook })._blokBeforeStep?.(ctx, step, index, total, deep);
+	}
 
 	/**
 	 * Executes a series of steps in the given context.
