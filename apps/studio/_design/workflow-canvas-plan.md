@@ -1150,10 +1150,30 @@ Tests:
 
 #### 4.2 Studio controls
 
+Status: implemented on 2026-08-04; browser-aware Run to here remains Phase 4.3 work.
+
 - Run/Debug/Step-through menu.
 - Toggle transient breakpoints on executable nodes.
 - Continue, Step, Stop with keyboard shortcuts and visible focus.
 - Inspector shows pre-execution resolved inputs while paused.
+
+Implemented:
+
+- Added native Run, Debug, and Step-through modes to the canvas launch control without changing the default Run request.
+- Added transient breakpoint chips with keyboard focus and `aria-pressed`, plus double-click toggles and red markers directly on executable canvas nodes.
+- Added an amber paused-node focus ring and automatic fit-to-node behavior before execution.
+- Added an in-canvas debug toolbar with Continue (`F8`), Step (`F10`), and Stop (`Shift+F5`) actions, visible shortcut labels, keyboard handlers, pending/error states, and focus rings.
+- Added a collapsible resolved-input preview populated by the controller's sanitized, copy-only pre-execution mapper pass.
+- Kept pause/resume events in the live run-detail cache so controls and node focus update without leaving the canvas.
+
+Tests:
+
+- Canvas tests cover normal Run compatibility, Debug launch with a transient breakpoint, resolved paused inputs, and Step control dispatch.
+- Debug-controller coverage verifies the paused event carries sanitized pre-execution inputs.
+- Full Studio tests, Studio production build, runner typecheck, and focused runner route/controller tests pass.
+- Live HTTP smoke started a real Studio debug run, read the paused step and inputs from run detail, then stopped it through the control endpoint and confirmed `cancelled`.
+- Live browser acceptance (2026-08-05): Step-through pause before first step, resolved-input preview, Step button, Continue via `F8`, breakpoint chip + red node marker, Debug launch paused at the breakpoint with the amber ring, and Stop via `Shift+F5` → `cancelled` — all verified against a running Studio.
+- Fixed in passing: dagre 0.8.5 NaNs the x-coordinate pass when an edge has weight 0, so every workflow with a forEach/loop back-edge rendered its nodes stacked at the origin since E4 (#98). Back-edges are now excluded from the layout graph (they still render); regression covered by `WorkflowGraph.layout.test.tsx`.
 
 #### 4.3 Browser-aware run-to-node
 

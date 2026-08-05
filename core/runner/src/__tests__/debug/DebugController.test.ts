@@ -32,6 +32,7 @@ describe("DebugController", () => {
 		const ctx = {
 			_traceRunId: run.id,
 			signal: abortController.signal,
+			config: { first: { inputs: { url: "https://example.com" } } },
 		} as unknown as Context;
 		return { run, ctx, abortController };
 	}
@@ -40,7 +41,11 @@ describe("DebugController", () => {
 		const { run, ctx } = startDebugRun();
 		const session = DebugController.getInstance().attach([]);
 
-		const firstPause = session.beforeStep(ctx, { name: "first" } as unknown as NodeBase, 0, 2, false);
+		const firstStep = {
+			name: "first",
+			blueprintMapper: () => ({ url: "https://resolved.example.com" }),
+		} as unknown as NodeBase;
+		const firstPause = session.beforeStep(ctx, firstStep, 0, 2, false);
 		await vi.waitFor(() => expect(tracker.getRun(run.id)?.status).toBe("paused"));
 		expect(DebugController.getInstance().control(run.id, "step")).toMatchObject({ ok: true, status: "running" });
 		await firstPause;
@@ -57,6 +62,10 @@ describe("DebugController", () => {
 			"RUN_PAUSED",
 			"RUN_RESUMED",
 		]);
+		expect(tracker.getEvents(run.id).find((event) => event.type === "RUN_PAUSED")?.payload).toMatchObject({
+			stepId: "first",
+			inputs: { url: "https://resolved.example.com" },
+		});
 		session.dispose();
 	});
 

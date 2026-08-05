@@ -1,6 +1,7 @@
 import type { Context, NodeBase } from "@blokjs/shared";
 import type { BeforeStepHook } from "../RunnerSteps";
 import { RunTracker } from "../tracing/RunTracker";
+import { sanitize } from "../tracing/sanitize";
 
 export type DebugAction = "continue" | "step" | "stop";
 
@@ -97,6 +98,7 @@ export class DebugController {
 			index,
 			total,
 			deep,
+			inputs: this.resolveInputs(ctx, step),
 		});
 		if (!paused) return;
 		await new Promise<void>((resolve) => {
@@ -113,6 +115,22 @@ export class DebugController {
 			session.timer.unref?.();
 			if (ctx.signal?.aborted) this.release(session);
 		});
+	}
+
+	private resolveInputs(ctx: Context, step: NodeBase): unknown {
+		const config = (ctx.config as unknown as Record<string, Record<string, unknown>>)?.[step.name];
+		const raw = config?.inputs ?? config?.conditions ?? (step as unknown as { config?: unknown }).config;
+		try {
+			const copy = structuredClone(raw);
+			const mapped = step.blueprintMapper(
+				copy as Parameters<NodeBase["blueprintMapper"]>[0],
+				ctx,
+				(ctx.response?.data ?? ctx.request?.body) as Parameters<NodeBase["blueprintMapper"]>[2],
+			);
+			return sanitize(mapped);
+		} catch {
+			return sanitize(raw);
+		}
 	}
 
 	private release(session: DebugSession): void {

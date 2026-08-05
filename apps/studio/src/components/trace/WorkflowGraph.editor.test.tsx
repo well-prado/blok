@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 	reset: vi.fn(),
 	runData: undefined as undefined | Record<string, unknown>,
 	startTestRun: vi.fn(),
+	controlDebugRun: vi.fn(),
 	studioData: {
 		config: { schemaVersion: 1 as const, workflow: "checkout", nodes: { open: { x: 10, y: 20 } } },
 		sourcePath: "/project/checkout.ts",
@@ -24,7 +25,7 @@ vi.mock("@/hooks/useRunDetail", () => ({
 
 vi.mock("@/lib/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/api")>();
-	return { ...actual, startTestRun: mocks.startTestRun };
+	return { ...actual, startTestRun: mocks.startTestRun, controlDebugRun: mocks.controlDebugRun };
 });
 
 vi.mock("@/hooks/useWorkflows", () => ({
@@ -50,7 +51,31 @@ vi.mock("@xyflow/react", async () => {
 		Handle: () => null,
 		MiniMap: () => null,
 		Position: { Top: "top", Bottom: "bottom" },
-		ReactFlow: ({ children }: { children: React.ReactNode }) => <div data-testid="workflow-canvas">{children}</div>,
+		ReactFlow: ({
+			children,
+			nodes,
+			onNodeDoubleClick,
+		}: {
+			children: React.ReactNode;
+			nodes: Array<{ id: string; data: { meta?: { stepId?: string } } }>;
+			onNodeDoubleClick?: (event: React.MouseEvent, node: unknown) => void;
+		}) => (
+			<div data-testid="workflow-canvas">
+				{nodes.flatMap((node) =>
+					node.data.meta?.stepId ? (
+						<button
+							type="button"
+							key={node.id}
+							aria-label={`Canvas node ${node.data.meta.stepId}`}
+							onDoubleClick={(event) => onNodeDoubleClick?.(event, node)}
+						/>
+					) : (
+						[]
+					),
+				)}
+				{children}
+			</div>
+		),
 		useNodesState: <T,>(initial: T[]) => {
 			const [nodes, setNodes] = ReactModule.useState(initial);
 			return [nodes, setNodes, () => {}] as const;
@@ -73,6 +98,7 @@ describe("WorkflowGraph layout editor", () => {
 		vi.clearAllMocks();
 		mocks.runData = undefined;
 		mocks.startTestRun.mockResolvedValue({ runId: "run-123", stream: "/runs/run-123/stream" });
+		mocks.controlDebugRun.mockResolvedValue({ runId: "run-123", action: "step", status: "running" });
 	});
 
 	it("switches between canvas, split, and browser focus modes", async () => {
@@ -93,7 +119,7 @@ describe("WorkflowGraph layout editor", () => {
 		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
 
 		expect(screen.getByRole("region", { name: "Live browser" })).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: /canvas/i }));
+		await user.click(screen.getByRole("button", { name: /^canvas$/i }));
 		expect(screen.queryByRole("region", { name: "Live browser" })).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: /browser/i }));
 		expect(screen.getByRole("region", { name: "Live browser" })).toBeInTheDocument();
@@ -106,6 +132,43 @@ describe("WorkflowGraph layout editor", () => {
 		await user.click(screen.getByRole("button", { name: /^run$/i }));
 
 		expect(mocks.startTestRun).toHaveBeenCalledWith("checkout");
+	});
+
+	it("starts debug mode with transient canvas breakpoints", async () => {
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.selectOptions(screen.getByRole("combobox", { name: "Run mode" }), "debug");
+		await user.dblClick(screen.getByRole("button", { name: "Canvas node open" }));
+		expect(screen.getByText(/1 set/i)).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: /^debug$/i }));
+
+		expect(mocks.startTestRun).toHaveBeenCalledWith("checkout", {
+			mode: "debug",
+			breakpoints: ["open"],
+		});
+	});
+
+	it("shows paused inputs and sends Step from the debug toolbar", async () => {
+		mocks.runData = {
+			run: { id: "run-123", status: "paused" },
+			nodes: [],
+			logs: [],
+			events: [
+				{
+					id: "event-1",
+					type: "RUN_PAUSED",
+					payload: { stepId: "open", inputs: { url: "https://example.com" } },
+				},
+			],
+		};
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+		await user.click(screen.getByText("Resolved inputs"));
+		expect(screen.getByText(/example\.com/)).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: /stepf10/i }));
+
+		expect(mocks.controlDebugRun).toHaveBeenCalledWith("run-123", "step");
 	});
 
 	it("keeps dragging actions behind an explicit edit mode and supports discard", async () => {

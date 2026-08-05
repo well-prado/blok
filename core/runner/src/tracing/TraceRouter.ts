@@ -1272,8 +1272,12 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 
 		const nodes = t.getNodeRuns(runId);
 		const logs = t.getLogs(runId);
+		const debugPause =
+			run.status === "paused"
+				? [...t.getEvents(runId)].reverse().find((event) => event.type === "RUN_PAUSED")?.payload
+				: undefined;
 
-		res.json({ run, nodes, logs });
+		res.json({ run, nodes, logs, ...(debugPause ? { debugPause } : {}) });
 	});
 
 	router.get("/runs/:runId/artifacts/:artifactId", async (req: TraceRequest, res: TraceResponse) => {

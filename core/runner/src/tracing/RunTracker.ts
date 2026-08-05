@@ -584,7 +584,10 @@ export class RunTracker extends EventEmitter {
 		});
 	}
 
-	pauseRun(runId: string, payload: { stepId: string; index: number; total: number; deep: boolean }): boolean {
+	pauseRun(
+		runId: string,
+		payload: { stepId: string; index: number; total: number; deep: boolean; inputs?: unknown },
+	): boolean {
 		const run = this.store.getRun(runId);
 		if (!run || run.status !== "running") return false;
 		this.store.updateRun(runId, { status: "paused" });

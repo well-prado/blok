@@ -1307,6 +1307,24 @@ describe("TraceRouter", () => {
 			expect(body.logs.length).toBe(2);
 		});
 
+		it("includes the active debug pause payload", () => {
+			tracker.pauseRun(runs.run3.id, {
+				stepId: "submit",
+				index: 1,
+				total: 3,
+				deep: false,
+				inputs: { email: "alice@example.com" },
+			});
+			const req = new MockRequest({ params: { runId: runs.run3.id } });
+			const res = new MockResponse();
+			router.findHandler("GET", "/runs/:runId")!(req, res);
+
+			expect(res.jsonBody).toMatchObject({
+				run: { status: "paused" },
+				debugPause: { stepId: "submit", inputs: { email: "alice@example.com" } },
+			});
+		});
+
 		it("returns 404 for unknown run", () => {
 			const req = new MockRequest({ params: { runId: "run_nonexistent" } });
 			const res = new MockResponse();

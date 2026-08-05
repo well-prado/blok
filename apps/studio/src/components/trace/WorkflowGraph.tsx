@@ -3,7 +3,7 @@ import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
-import { ApiError, startTestRun } from "@/lib/api";
+import { ApiError, controlDebugRun, startTestRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -26,6 +26,7 @@ import dagre from "dagre";
 import {
 	AlertTriangle,
 	ArrowRightFromLine,
+	Bug,
 	CheckCircle2,
 	Clock,
 	Focus,
@@ -40,11 +41,13 @@ import {
 	Save,
 	Shield,
 	ShieldX,
+	SkipForward,
 	Split,
+	Square,
 	WandSparkles,
 	Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 interface WorkflowGraphProps {
@@ -74,6 +77,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [activeRunId, setActiveRunId] = useState("");
 	const [startingRun, setStartingRun] = useState(false);
 	const [runError, setRunError] = useState("");
+	const [launchMode, setLaunchMode] = useState<"run" | "debug" | "step">("run");
+	const [breakpoints, setBreakpoints] = useState<Set<string>>(() => new Set());
+	const [controlPending, setControlPending] = useState(false);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -91,6 +97,17 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const writable = studioQuery.data?.writable === true;
 	const autoOpenBrowser = runQuery.data?.browserSession?.autoOpen ? runQuery.data.browserSession.sessionId : undefined;
 	const liveStatuses = useMemo(() => projectNodeStatuses(runQuery.data?.nodes ?? []), [runQuery.data?.nodes]);
+	const runStatus = runQuery.data?.run.status;
+	const controlledRunId = activeRunId || runQuery.data?.run.id || "";
+	const pausedEvent = useMemo(
+		() =>
+			runStatus === "paused"
+				? [...(runQuery.data?.events ?? [])].reverse().find((event) => event.type === "RUN_PAUSED")
+				: undefined,
+		[runQuery.data?.events, runStatus],
+	);
+	const pausedPayload =
+		(pausedEvent?.payload as { stepId?: string; inputs?: unknown } | undefined) ?? runQuery.data?.debugPause;
 	const stepUses = useMemo(
 		() =>
 			Object.fromEntries(
@@ -104,10 +121,21 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const renderedNodes = useMemo(
 		() =>
 			flowNodes.map((node) => {
-				const status = liveStatuses[flowNodeStepId(node) ?? ""];
-				return status ? { ...node, data: { ...node.data, liveStatus: status } } : node;
+				const stepId = flowNodeStepId(node);
+				const status = liveStatuses[stepId ?? ""];
+				return {
+					...node,
+					className: cn(
+						node.className,
+						stepId &&
+							breakpoints.has(stepId) &&
+							"after:absolute after:-left-1 after:-top-1 after:h-3 after:w-3 after:rounded-full after:border-2 after:border-zinc-950 after:bg-red-500",
+						stepId === pausedPayload?.stepId && "rounded-lg ring-2 ring-amber-300 ring-offset-4 ring-offset-zinc-950",
+					),
+					data: status ? { ...node.data, liveStatus: status } : node.data,
+				};
 			}),
-		[flowNodes, liveStatuses],
+		[breakpoints, flowNodes, liveStatuses, pausedPayload?.stepId],
 	);
 	const renderedEdges = useMemo(
 		() => projectEdgeStatuses(committed.edges, renderedNodes),
@@ -117,8 +145,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		() =>
 			[...(runQuery.data?.nodes ?? [])]
 				.filter((node) => node.status === "running")
-				.sort((a, b) => b.startedAt - a.startedAt)[0]?.nodeName,
-		[runQuery.data?.nodes],
+				.sort((a, b) => b.startedAt - a.startedAt)[0]?.nodeName ?? pausedPayload?.stepId,
+		[pausedPayload?.stepId, runQuery.data?.nodes],
 	);
 	const activeNode = useMemo(
 		() => renderedNodes.find((node) => flowNodeStepId(node) === activeStepId),
@@ -176,10 +204,6 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		[],
 	);
 
-	if (flowNodes.length === 0) {
-		return null;
-	}
-
 	const discard = () => {
 		setFlowNodes(committed.nodes);
 		setDirty(false);
@@ -208,21 +232,75 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		);
 	};
 	const conflict = saveStudio.error instanceof ApiError && saveStudio.error.status === 409;
-	const runStatus = runQuery.data?.run.status;
 	const runActive =
-		runStatus === "pending" || runStatus === "queued" || runStatus === "delayed" || runStatus === "running";
+		runStatus === "pending" ||
+		runStatus === "queued" ||
+		runStatus === "delayed" ||
+		runStatus === "running" ||
+		runStatus === "paused";
 	const run = async () => {
 		setStartingRun(true);
 		setRunError("");
 		setSelectedNodeId(null);
 		setSelectedArtifact(undefined);
 		try {
-			setActiveRunId((await startTestRun(workflowName)).runId);
+			const request =
+				launchMode === "run"
+					? undefined
+					: { mode: "debug" as const, breakpoints: launchMode === "debug" ? [...breakpoints] : [] };
+			setActiveRunId((await (request ? startTestRun(workflowName, request) : startTestRun(workflowName))).runId);
 		} catch (error) {
 			setRunError(error instanceof Error ? error.message : "Could not start workflow");
 		} finally {
 			setStartingRun(false);
 		}
+	};
+	const sendControl = useCallback(
+		async (action: "continue" | "step" | "stop") => {
+			if (!controlledRunId || runStatus !== "paused" || controlPending) return;
+			setControlPending(true);
+			setRunError("");
+			try {
+				await controlDebugRun(controlledRunId, action);
+			} catch (error) {
+				setRunError(error instanceof Error ? error.message : `Could not ${action} workflow`);
+			} finally {
+				setControlPending(false);
+			}
+		},
+		[controlledRunId, controlPending, runStatus],
+	);
+	useEffect(() => {
+		if (runStatus !== "paused") return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+			const action =
+				event.key === "F8"
+					? "continue"
+					: event.key === "F10"
+						? "step"
+						: event.shiftKey && event.key === "F5"
+							? "stop"
+							: null;
+			if (!action) return;
+			event.preventDefault();
+			void sendControl(action);
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [runStatus, sendControl]);
+	const toggleBreakpointId = (stepId: string) => {
+		setBreakpoints((current) => {
+			const next = new Set(current);
+			if (next.has(stepId)) next.delete(stepId);
+			else next.add(stepId);
+			return next;
+		});
+	};
+	const toggleBreakpoint = (node: Node) => {
+		if (editing) return;
+		const stepId = flowNodeStepId(node);
+		if (stepId) toggleBreakpointId(stepId);
 	};
 	const fitActive = () => {
 		if (activeNode) flowInstance?.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
@@ -238,6 +316,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			setSelectedArtifact(undefined);
 		}
 	};
+	if (flowNodes.length === 0) return null;
 
 	return (
 		<div className="rounded-lg border border-zinc-800 overflow-hidden bg-canvas">
@@ -249,12 +328,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						{studioQuery.isLoading && <Loader2 className="h-3 w-3 animate-spin text-zinc-500" />}
 					</div>
 					<p className="truncate text-[10px] text-zinc-500">
-						{editing
-							? "Drag workflow steps, then save their positions beside the workflow source."
-							: studioQuery.data?.sourcePath ||
-								studioQuery.data?.readOnlyReason ||
-								studioQuery.error?.message ||
-								"Loading layout source…"}
+						{!editing && launchMode === "debug"
+							? `Double-click executable nodes to toggle breakpoints · ${breakpoints.size} set`
+							: editing
+								? "Drag workflow steps, then save their positions beside the workflow source."
+								: studioQuery.data?.sourcePath ||
+									studioQuery.data?.readOnlyReason ||
+									studioQuery.error?.message ||
+									"Loading layout source…"}
 					</p>
 				</div>
 				{activeRunId && runStatus && (
@@ -339,28 +420,118 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						>
 							<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
 						</button>
-						<button
-							type="button"
-							onClick={run}
-							disabled={startingRun || runActive}
-							className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							{startingRun || runActive ? (
-								<Loader2 className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Play className="h-3.5 w-3.5" />
-							)}
-							{runActive ? "Running" : "Run"}
-						</button>
+						<div className="flex overflow-hidden rounded-md border border-blok-green-500/50">
+							<select
+								aria-label="Run mode"
+								value={launchMode}
+								onChange={(event) => setLaunchMode(event.target.value as typeof launchMode)}
+								disabled={startingRun || runActive}
+								className="border-r border-blok-green-500/40 bg-zinc-900 px-2 text-[10px] font-medium text-zinc-300 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400 focus-visible:ring-inset disabled:opacity-40"
+							>
+								<option value="run">Run</option>
+								<option value="debug">Debug</option>
+								<option value="step">Step-through</option>
+							</select>
+							<button
+								type="button"
+								onClick={run}
+								disabled={startingRun || runActive}
+								className="inline-flex items-center gap-1.5 bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								{startingRun || runActive ? (
+									<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								) : launchMode === "run" ? (
+									<Play className="h-3.5 w-3.5" />
+								) : (
+									<Bug className="h-3.5 w-3.5" />
+								)}
+								{runActive
+									? "Running"
+									: launchMode === "step"
+										? "Step-through"
+										: launchMode === "debug"
+											? "Debug"
+											: "Run"}
+							</button>
+						</div>
 					</div>
 				)}
 			</div>
+			{launchMode === "debug" && !editing && !runActive && (
+				<fieldset className="flex flex-wrap items-center gap-1.5 border-x-0 border-t-0 border-b border-zinc-800 bg-zinc-950/70 px-3 py-1.5">
+					<legend className="sr-only">Workflow breakpoints</legend>
+					<span aria-hidden="true" className="mr-1 text-[10px] font-medium text-zinc-500">
+						Breakpoints
+					</span>
+					{committed.nodes.flatMap((node) => {
+						const stepId = flowNodeStepId(node);
+						if (!stepId) return [];
+						return (
+							<button
+								type="button"
+								key={stepId}
+								aria-pressed={breakpoints.has(stepId)}
+								onClick={() => toggleBreakpointId(stepId)}
+								className={cn(
+									"rounded-full border px-2 py-0.5 font-mono text-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300",
+									breakpoints.has(stepId)
+										? "border-red-400/50 bg-red-500/15 text-red-200"
+										: "border-zinc-700 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300",
+								)}
+							>
+								{stepId}
+							</button>
+						);
+					})}
+				</fieldset>
+			)}
 			{runError && (
 				<div
 					role="alert"
 					className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200"
 				>
 					<AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {runError}
+				</div>
+			)}
+			{runStatus === "paused" && (
+				<div
+					role="toolbar"
+					aria-label="Debug controls"
+					className="flex flex-wrap items-center gap-2 border-b border-amber-400/20 bg-amber-400/10 px-3 py-2"
+				>
+					<div className="mr-auto min-w-0">
+						<div className="text-xs font-semibold text-amber-200">
+							Paused before {pausedPayload?.stepId ?? "next step"}
+						</div>
+						<details className="text-[10px] text-zinc-400">
+							<summary className="cursor-pointer hover:text-zinc-200">Resolved inputs</summary>
+							<pre className="mt-1 max-h-32 max-w-xl overflow-auto rounded bg-zinc-950/70 p-2 font-mono text-zinc-300">
+								{JSON.stringify(pausedPayload?.inputs ?? {}, null, 2)}
+							</pre>
+						</details>
+					</div>
+					<DebugButton
+						label="Continue"
+						shortcut="F8"
+						icon={Play}
+						disabled={controlPending}
+						onClick={() => void sendControl("continue")}
+					/>
+					<DebugButton
+						label="Step"
+						shortcut="F10"
+						icon={SkipForward}
+						disabled={controlPending}
+						onClick={() => void sendControl("step")}
+					/>
+					<DebugButton
+						label="Stop"
+						shortcut="⇧F5"
+						icon={Square}
+						disabled={controlPending}
+						onClick={() => void sendControl("stop")}
+						danger
+					/>
 				</div>
 			)}
 			{saveStudio.error && (
@@ -395,6 +566,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						onInit={setFlowInstance}
 						onNodesChange={onNodesChange}
 						onNodeClick={(_event, node) => selectCanvasNode(node)}
+						onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
 						onNodeDragStop={(_event, node) => {
 							if (editing && flowNodeStepId(node)) setDirty(true);
 						}}
@@ -447,6 +619,40 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				/>
 			)}
 		</div>
+	);
+}
+
+function DebugButton({
+	label,
+	shortcut,
+	icon: Icon,
+	disabled,
+	onClick,
+	danger = false,
+}: {
+	label: string;
+	shortcut: string;
+	icon: IconComponent;
+	disabled: boolean;
+	onClick: () => void;
+	danger?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			disabled={disabled}
+			onClick={onClick}
+			className={cn(
+				"inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:opacity-40",
+				danger
+					? "border-red-400/30 text-red-200 hover:bg-red-400/10"
+					: "border-zinc-600 bg-zinc-900/80 text-zinc-200 hover:bg-zinc-800",
+			)}
+		>
+			<Icon className="h-3.5 w-3.5" />
+			{label}
+			<kbd className="rounded border border-zinc-700 px-1 font-mono text-[9px] text-zinc-500">{shortcut}</kbd>
+		</button>
 	);
 }
 
@@ -565,7 +771,12 @@ export function layoutDag(
 		}
 	}
 	for (const e of dag.edges) {
-		g.setEdge(e.source, e.target, { weight: e.backEdge ? 0 : 1 });
+		// Back-edges (forEach/loop returns) must not influence ranking, and
+		// dagre 0.8.5 NaNs the x-coordinate pass when an edge has weight 0 —
+		// so keep them out of the layout graph entirely. They still render:
+		// flowEdges below is built from dag.edges, not from g.
+		if (e.backEdge) continue;
+		g.setEdge(e.source, e.target, { weight: 1 });
 	}
 	dagre.layout(g);
 

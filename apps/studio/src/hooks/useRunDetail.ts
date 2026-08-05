@@ -42,7 +42,11 @@ export function useTraceStream(runId: string) {
 		(event: RunEvent) => {
 			queryClient.setQueryData<RunDetail>(["run", runId], (old) => {
 				if (!old) return old;
-				const updated = { ...old };
+				const events = old.events ?? [];
+				const updated = {
+					...old,
+					events: events.some((existing) => existing.id === event.id) ? events : [...events, event],
+				};
 
 				switch (event.type) {
 					// Terminal run events — the run is finished (set finishedAt + duration).

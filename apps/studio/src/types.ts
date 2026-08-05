@@ -405,6 +405,8 @@ export interface RunDetail {
 	run: WorkflowRun;
 	nodes: NodeRun[];
 	logs: TraceLogEntry[];
+	events?: RunEvent[];
+	debugPause?: { stepId?: string; inputs?: unknown };
 	browserSession?: {
 		sessionId: string;
 		pageId: string;
