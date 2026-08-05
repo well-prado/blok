@@ -1196,10 +1196,12 @@ Tests:
 - Canvas: selecting a node reveals the button and dispatches the entry-skipping debug request.
 - Live acceptance (2026-08-05): API run with valid input executed 9 nodes with no entry pause, paused exactly at `respond` with resolved inputs, and completed on Continue; in the UI, `Run to per-item-pipeline` skipped the entry pause (first step executed immediately), and `Run to validate-body` paused before the target with the debug toolbar.
 
-Acceptance (remaining, needs a registered browser E2E workflow — Phase 6 login slice):
+Browser acceptance (completed 2026-08-05 against the `e2e-login` slice, §17): `Run to sign-in` paused before the click with the fixture login page live in the Browser panel — email filled, password masked, session intact; Step executed the click and paused before `assert-dashboard-url` with the dashboard visible; Continue ran both assertions to completion.
 
-- Pause before Submit, inspect the login page, change a non-secret input in the debug draft, execute the click, and see the assertion run next.
-- Let the pause expire and confirm a clear cancelled/expired explanation plus cleanup.
+Acceptance (remaining):
+
+- Change a non-secret input in the debug draft while paused, then execute the step (debug-draft editing is unbuilt).
+- Let the pause expire and confirm a clear cancelled/expired explanation in the UI plus cleanup (runner TTL cancel is tested; the Studio-side explanation is unpolished).
 
 ### Phase 5 — General workflow authoring UI
 
@@ -1270,6 +1272,8 @@ Do not promise visual regression thresholds or cross-browser matrices before the
 - Visual QA against the supplied prototype and BLOK brand spec.
 
 ## 17. First vertical slice: exact scope
+
+Status: implemented on 2026-08-05. `e2e-login` + `fixture-login`/`fixture-dashboard` workflows (triggers/http/workflows/json/) drive real Chromium against a BLOK-served deterministic fixture site (`login-fixture-ui` example node — plain HTML, no JS, no network). Live acceptance: canvas Run completed 8/8 nodes in under a second with one screenshot per browser action/assertion persisted; wrong-password input fails at `assert-welcome` (URL assertion still passes); `Run to sign-in` + Step + Continue exercised the full debug loop with the live Browser panel. The password check lives in `fixture-dashboard`'s inputs (`hunter2`), so the fixture node stays a dumb renderer.
 
 The first implementation target is deliberately narrow and complete.
 

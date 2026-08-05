@@ -1,0 +1,88 @@
+{
+	"name": "e2e-login",
+	"version": "1.0.0",
+	"description": "Browser E2E demo (workflow-canvas plan §17): real Chromium signs in to the local fixture site and asserts the dashboard. Runs on empty input (defaults to alice@example.com / hunter2); POST {\"password\": \"wrong\"} to exercise the assertion-failure path — the URL assertion still passes but assert-welcome fails with a screenshot. Requires the trigger to be reachable at 127.0.0.1:4000 (fixture pages are served by this same process).",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/e2e-login",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "launch",
+			"use": "@blokjs/browser-launch",
+			"type": "module",
+			"inputs": {}
+		},
+		{
+			"id": "open-login",
+			"use": "@blokjs/browser-goto",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"url": "http://127.0.0.1:4000/fixtures/login"
+			}
+		},
+		{
+			"id": "fill-email",
+			"use": "@blokjs/browser-fill",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"locator": { "by": "label", "value": "Email" },
+				"value": "js/String((ctx.request.body && ctx.request.body.email) || 'alice@example.com')"
+			}
+		},
+		{
+			"id": "fill-password",
+			"use": "@blokjs/browser-fill",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"locator": { "by": "label", "value": "Password" },
+				"value": "js/String((ctx.request.body && ctx.request.body.password) || 'hunter2')",
+				"sensitive": true
+			}
+		},
+		{
+			"id": "sign-in",
+			"use": "@blokjs/browser-click",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"locator": { "by": "role", "role": "button", "name": "Sign in" }
+			}
+		},
+		{
+			"id": "assert-dashboard-url",
+			"use": "@blokjs/browser-assert-url",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"expected": "/fixtures/dashboard",
+				"mode": "contains"
+			}
+		},
+		{
+			"id": "assert-welcome",
+			"use": "@blokjs/browser-assert-text",
+			"type": "module",
+			"inputs": {
+				"session": "js/ctx.state.launch",
+				"locator": { "by": "testId", "value": "welcome" },
+				"expected": "Welcome",
+				"mode": "contains"
+			}
+		},
+		{
+			"id": "close",
+			"use": "@blokjs/browser-close",
+			"type": "module",
+			"inputs": {
+				"sessionId": "js/ctx.state.launch.sessionId"
+			}
+		}
+	]
+}

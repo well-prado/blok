@@ -1,0 +1,22 @@
+{
+	"name": "fixture-login",
+	"version": "1.0.0",
+	"description": "Deterministic local login page for the browser E2E demo. Serves a plain HTML email/password form that POSTs to /fixtures/dashboard. Pair with fixture-dashboard and drive it with the e2e-login workflow.",
+	"trigger": {
+		"http": {
+			"method": "GET",
+			"path": "/fixtures/login",
+			"accept": "text/html"
+		}
+	},
+	"steps": [
+		{
+			"id": "render",
+			"use": "login-fixture-ui",
+			"type": "module",
+			"inputs": {
+				"page": "login"
+			}
+		}
+	]
+}

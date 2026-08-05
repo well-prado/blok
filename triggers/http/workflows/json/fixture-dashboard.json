@@ -1,0 +1,24 @@
+{
+	"name": "fixture-dashboard",
+	"version": "1.0.0",
+	"description": "Deterministic post-login page for the browser E2E demo. The login form POSTs here; the password check lives in this workflow's inputs so the fixture stays a dumb renderer. Correct password: hunter2 — anything else renders the invalid-credentials state (URL still contains /dashboard, so only the text assertion fails).",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/fixtures/dashboard",
+			"accept": "text/html"
+		}
+	},
+	"steps": [
+		{
+			"id": "render",
+			"use": "login-fixture-ui",
+			"type": "module",
+			"inputs": {
+				"page": "dashboard",
+				"email": "js/String(ctx.request.body.email || '')",
+				"authed": "js/ctx.request.body.password === 'hunter2'"
+			}
+		}
+	]
+}

@@ -1,4 +1,5 @@
 import ChatUI from "./chat-ui";
+import LoginFixtureUI from "./login-fixture-ui";
 
 // The example-node bundle registered into --examples scaffolds (via the
 // generated src/Nodes.ts) and auto-discovered by the trigger's own boot.
@@ -9,6 +10,7 @@ import ChatUI from "./chat-ui";
 // registered workflow).
 const ExampleNodes = {
 	"chat-ui": ChatUI,
+	"login-fixture-ui": LoginFixtureUI,
 };
 
 export default ExampleNodes;
