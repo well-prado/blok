@@ -1103,6 +1103,121 @@ describe("TraceRouter", () => {
 		});
 	});
 
+	describe("Workflow definition API (Phase 5.4)", () => {
+		let projectRoot: string;
+		let sourcePath: string;
+		const definition = () => ({
+			name: "editable",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/editable" } },
+			steps: [
+				{ id: "first", use: "@blokjs/expr", type: "module", inputs: { expression: "1" } },
+				{ id: "second", use: "@blokjs/expr", type: "module", inputs: { expression: "js/ctx.state.first + 1" } },
+			],
+		});
+
+		beforeEach(async () => {
+			WorkflowRegistry.resetInstance();
+			projectRoot = await mkdtemp(join(tmpdir(), "blok-definition-route-"));
+			sourcePath = join(projectRoot, "editable.json");
+			await writeFile(sourcePath, `${JSON.stringify(definition(), null, "\t")}\n`);
+			vi.stubEnv("BLOK_PROJECT_ROOT", projectRoot);
+			vi.stubEnv("NODE_ENV", "");
+			WorkflowRegistry.getInstance().register({
+				name: "editable",
+				source: sourcePath,
+				sourcePath,
+				workflow: definition(),
+			});
+		});
+
+		afterEach(async () => {
+			WorkflowRegistry.resetInstance();
+			await rm(projectRoot, { recursive: true, force: true });
+			vi.unstubAllEnvs();
+		});
+
+		const getDefinition = async () => {
+			const res = new MockResponse();
+			await router.findHandler("GET", "/workflows/:name/definition")!(
+				new MockRequest({ params: { name: "editable" } }),
+				res,
+			);
+			return res;
+		};
+
+		const putDefinition = async (body: unknown) => {
+			const res = new MockResponse();
+			await router.findHandler("PUT", "/workflows/:name/definition")!(
+				new MockRequest({ method: "PUT", params: { name: "editable" }, body }),
+				res,
+			);
+			return res;
+		};
+
+		it("returns the on-disk definition with its etag", async () => {
+			const res = await getDefinition();
+			expect(res.statusCode).toBe(200);
+			expect((res.jsonBody as any).definition.name).toBe("editable");
+			expect((res.jsonBody as any).etag).toMatch(/^[a-f0-9]{64}$/);
+		});
+
+		it("saves a valid definition atomically and refreshes the registry in place", async () => {
+			const { etag } = (await getDefinition()).jsonBody as { etag: string };
+			const renamed = definition();
+			renamed.steps[0].id = "start";
+			renamed.steps[1].inputs.expression = "js/ctx.state.start + 1";
+
+			const res = await putDefinition({ definition: renamed, baseEtag: etag });
+			expect(res.statusCode).toBe(200);
+			expect((res.jsonBody as any).etag).not.toBe(etag);
+			expect(JSON.parse(await readFile(sourcePath, "utf8")).steps[0].id).toBe("start");
+			expect(
+				(WorkflowRegistry.getInstance().get("editable")?.workflow as { steps: Array<{ id: string }> }).steps[0].id,
+			).toBe("start");
+		});
+
+		it("rejects a definition the runner would refuse to load (duplicate step ids)", async () => {
+			const { etag } = (await getDefinition()).jsonBody as { etag: string };
+			const broken = definition();
+			broken.steps[1].id = "first";
+			const res = await putDefinition({ definition: broken, baseEtag: etag });
+			expect(res.statusCode).toBe(400);
+			expect((res.jsonBody as any).error).toMatch(/duplicate step id/);
+		});
+
+		it("rejects a stale etag with 409", async () => {
+			const res = await putDefinition({ definition: definition(), baseEtag: "0".repeat(64) });
+			expect(res.statusCode).toBe(409);
+			expect((res.jsonBody as any).code).toBe("stale_etag");
+		});
+
+		it("rejects renaming the workflow itself", async () => {
+			const { etag } = (await getDefinition()).jsonBody as { etag: string };
+			const res = await putDefinition({ definition: { ...definition(), name: "other" }, baseEtag: etag });
+			expect(res.statusCode).toBe(400);
+			expect((res.jsonBody as any).code).toBe("definition_name_mismatch");
+		});
+
+		it("keeps TypeScript-sourced workflows read-only", async () => {
+			const tsPath = join(projectRoot, "coded.ts");
+			await writeFile(tsPath, "export default {};\n");
+			WorkflowRegistry.getInstance().register({
+				name: "coded",
+				source: tsPath,
+				sourcePath: tsPath,
+				workflow: { name: "coded", trigger: { http: {} }, steps: [] },
+			});
+			const res = new MockResponse();
+			await router.findHandler("GET", "/workflows/:name/definition")!(
+				new MockRequest({ params: { name: "coded" } }),
+				res,
+			);
+			expect(res.statusCode).toBe(409);
+			expect((res.jsonBody as any).code).toBe("definition_not_json");
+		});
+	});
+
 	describe("GET /workflows/:name/runs", () => {
 		it("returns paginated runs for a workflow", () => {
 			const req = new MockRequest({

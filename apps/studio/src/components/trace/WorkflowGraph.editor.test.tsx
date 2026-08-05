@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
 	mutate: vi.fn(),
 	refetch: vi.fn(),
 	reset: vi.fn(),
+	editMutate: vi.fn(),
+	editReset: vi.fn(),
 	runData: undefined as undefined | Record<string, unknown>,
 	startTestRun: vi.fn(),
 	controlDebugRun: vi.fn(),
@@ -38,6 +40,12 @@ vi.mock("@/hooks/useWorkflows", () => ({
 	useSaveWorkflowStudio: () => ({
 		mutate: mocks.mutate,
 		reset: mocks.reset,
+		isPending: false,
+		error: null,
+	}),
+	useEditWorkflowDefinition: () => ({
+		mutate: mocks.editMutate,
+		reset: mocks.editReset,
 		isPending: false,
 		error: null,
 	}),
@@ -108,6 +116,7 @@ describe("WorkflowGraph layout editor", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.runData = undefined;
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.ts" };
 		mocks.startTestRun.mockResolvedValue({ runId: "run-123", stream: "/runs/run-123/stream" });
 		mocks.controlDebugRun.mockResolvedValue({ runId: "run-123", action: "step", status: "running" });
 	});
@@ -158,6 +167,49 @@ describe("WorkflowGraph layout editor", () => {
 			mode: "debug",
 			breakpoints: ["open"],
 		});
+	});
+
+	it("renames a step from the canvas and rewrites downstream references (Phase 5.4)", async () => {
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.json" };
+		let transform: ((definition: Record<string, unknown>) => Record<string, unknown>) | undefined;
+		mocks.editMutate.mockImplementation((fn, opts) => {
+			transform = fn;
+			opts?.onSuccess?.();
+		});
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		await user.click(screen.getByRole("button", { name: /rename/i }));
+		const input = screen.getByLabelText(/rename/i);
+		await user.clear(input);
+		await user.type(input, "launch-browser");
+		await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+		expect(transform).toBeDefined();
+		const before = {
+			name: "checkout",
+			steps: [
+				{ id: "open", use: "@blokjs/browser-open", type: "module", inputs: {} },
+				{
+					id: "assert",
+					use: "@blokjs/browser-assert",
+					type: "module",
+					inputs: { session: "js/ctx.state.open" },
+				},
+			],
+		};
+		const after = transform?.(before) as typeof before;
+		expect(after.steps[0]?.id).toBe("launch-browser");
+		expect(after.steps[1]?.inputs.session).toBe('js/ctx.state["launch-browser"]');
+	});
+
+	it("hides Rename for TypeScript-sourced workflows", async () => {
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		expect(screen.getByRole("button", { name: /run to open/i })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument();
 	});
 
 	it("runs to the selected node with a fresh entry-skipping debug run (Run to here)", async () => {

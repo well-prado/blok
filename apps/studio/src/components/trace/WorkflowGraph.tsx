@@ -2,8 +2,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
-import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
+import { useEditWorkflowDefinition, useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
 import { ApiError, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
+import { renameStep } from "@/lib/irEditOps";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -75,12 +76,15 @@ const TERMINAL_DIAMETER = 80; // trigger / end pills
 export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) {
 	const studioQuery = useWorkflowStudio(workflowName);
 	const saveStudio = useSaveWorkflowStudio(workflowName);
+	const editDefinition = useEditWorkflowDefinition(workflowName);
 	const [activeRunId, setActiveRunId] = useState("");
 	const [startingRun, setStartingRun] = useState(false);
 	const [runError, setRunError] = useState("");
 	const [launchMode, setLaunchMode] = useState<"run" | "debug" | "step">("run");
 	const [breakpoints, setBreakpoints] = useState<Set<string>>(() => new Set());
 	const [controlPending, setControlPending] = useState(false);
+	const [renamingStepId, setRenamingStepId] = useState<string | null>(null);
+	const [renameValue, setRenameValue] = useState("");
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -96,6 +100,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [selectedArtifact, setSelectedArtifact] = useState<BrowserArtifact>();
 	const canvasRef = useRef<HTMLDivElement>(null);
 	const writable = studioQuery.data?.writable === true;
+	// Phase 5.4 — structural edits only apply to Studio-saveable v2 JSON
+	// workflows; TS sources stay layout/run/debug-only.
+	const definitionEditable = writable && (studioQuery.data?.sourcePath?.endsWith(".json") ?? false);
 	const autoOpenBrowser = runQuery.data?.browserSession?.autoOpen ? runQuery.data.browserSession.sessionId : undefined;
 	const liveStatuses = useMemo(() => projectNodeStatuses(runQuery.data?.nodes ?? []), [runQuery.data?.nodes]);
 	const runStatus = runQuery.data?.run.status;
@@ -313,6 +320,32 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const fitActive = () => {
 		if (activeNode) flowInstance?.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
 	};
+	const startRename = (stepId: string) => {
+		editDefinition.reset();
+		setRenamingStepId(stepId);
+		setRenameValue(stepId);
+	};
+	const submitRename = () => {
+		const oldId = renamingStepId;
+		const newId = renameValue.trim();
+		if (!oldId) return;
+		if (newId === oldId || newId === "") {
+			setRenamingStepId(null);
+			return;
+		}
+		editDefinition.mutate((definition) => renameStep(definition, oldId, newId), {
+			onSuccess: () => {
+				setRenamingStepId(null);
+				setBreakpoints((current) => {
+					if (!current.has(oldId)) return current;
+					const next = new Set(current);
+					next.delete(oldId);
+					next.add(newId);
+					return next;
+				});
+			},
+		});
+	};
 	const selectCanvasNode = (node: Node) => {
 		const stepId = flowNodeStepId(node);
 		if (!stepId) return;
@@ -429,16 +462,29 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
 						</button>
 						{selectedCanvasStepId && !runActive && (
-							<button
-								type="button"
-								onClick={() => runToNode(selectedCanvasStepId)}
-								disabled={startingRun}
-								title={`Start a debug run and pause before ${selectedCanvasStepId}`}
-								className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-amber-400/50 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-							>
-								<FastForward className="h-3.5 w-3.5 shrink-0" />
-								<span className="truncate">Run to {selectedCanvasStepId}</span>
-							</button>
+							<>
+								{definitionEditable && (
+									<button
+										type="button"
+										onClick={() => startRename(selectedCanvasStepId)}
+										disabled={editDefinition.isPending}
+										title={`Rename step ${selectedCanvasStepId} and rewrite downstream references`}
+										className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+									>
+										<Pencil className="h-3.5 w-3.5 shrink-0" /> Rename
+									</button>
+								)}
+								<button
+									type="button"
+									onClick={() => runToNode(selectedCanvasStepId)}
+									disabled={startingRun}
+									title={`Start a debug run and pause before ${selectedCanvasStepId}`}
+									className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-amber-400/50 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									<FastForward className="h-3.5 w-3.5 shrink-0" />
+									<span className="truncate">Run to {selectedCanvasStepId}</span>
+								</button>
+							</>
 						)}
 						<div className="flex overflow-hidden rounded-md border border-blok-green-500/50">
 							<select
@@ -477,6 +523,44 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					</div>
 				)}
 			</div>
+			{renamingStepId && (
+				<form
+					className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-950/70 px-3 py-2"
+					onSubmit={(event) => {
+						event.preventDefault();
+						submitRename();
+					}}
+				>
+					<label htmlFor="rename-step-input" className="text-xs font-medium text-zinc-300">
+						Rename <span className="font-mono">{renamingStepId}</span> to
+					</label>
+					<input
+						id="rename-step-input"
+						value={renameValue}
+						onChange={(event) => setRenameValue(event.target.value)}
+						// biome-ignore lint/a11y/noAutofocus: focus follows the explicit Rename action
+						autoFocus
+						spellCheck={false}
+						className="w-56 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
+					/>
+					<button
+						type="submit"
+						disabled={editDefinition.isPending}
+						className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-2.5 py-1 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+					>
+						{editDefinition.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Save
+					</button>
+					<button
+						type="button"
+						onClick={() => setRenamingStepId(null)}
+						className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+					>
+						Cancel
+					</button>
+					<span className="text-[10px] text-zinc-500">Downstream references update automatically.</span>
+					{editDefinition.error && <span className="text-xs text-red-300">{editDefinition.error.message}</span>}
+				</form>
+			)}
 			{launchMode === "debug" && !editing && !runActive && (
 				<fieldset className="flex flex-wrap items-center gap-1.5 border-x-0 border-t-0 border-b border-zinc-800 bg-zinc-950/70 px-3 py-1.5">
 					<legend className="sr-only">Workflow breakpoints</legend>

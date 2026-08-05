@@ -451,6 +451,45 @@ describe("renameStep — id rewrite + boundary-safe reference propagation (#408/
 		expect(reader.inputs.i).toBe("js/ctx.state.renamedLoopIndex");
 	});
 
+	// (b2) a dashed newId cannot live after a dot (`ctx.state.launch-browser`
+	// parses as subtraction) — dot-form refs must MIGRATE to bracket form.
+	it("migrates dot-form refs to bracket form when the new id is not a valid identifier", () => {
+		const after = renameStep(renameFixture(), "old", "launch-browser") as ReturnType<typeof renameFixture>;
+		const ds = findStepLocation(after, "downstream")?.step as { inputs: Record<string, unknown> };
+		expect(ds.inputs.a).toBe('js/ctx.state["launch-browser"].field');
+		expect(ds.inputs.d).toBe('js/ctx.state["launch-browser"]');
+		expect(ds.inputs.nested).toEqual({ deep: ['js/ctx.state["launch-browser"].items', "literal"] });
+		// prefix siblings still untouched
+		expect(ds.inputs.b).toBe("js/ctx.state.old2.x");
+		expect(ds.inputs.c).toBe("js/ctx.state.oldFoo");
+		const loop = findStepLocation(after, "the-loop")?.step as { loop: { while: string } };
+		expect(loop.loop.while).toBe('ctx.state["launch-browser"].count > 0');
+		const branch = findStepLocation(after, "the-branch")?.step as { branch: { when: string } };
+		expect(branch.branch.when).toBe('ctx.state["launch-browser"].ok === true');
+	});
+
+	// (b3) the loop counter folds inside the bracket key for a dashed newId,
+	// in BOTH dot and bracket source forms.
+	it("folds the Index counter into the bracket key for a dashed newId", () => {
+		const ir = {
+			name: "W",
+			version: "1.0.0",
+			trigger: { http: { method: "ANY" } },
+			steps: [
+				{ id: "theLoop", loop: { while: "true", do: [{ id: "inner", use: "n", inputs: {} }] } },
+				{
+					id: "reader",
+					use: "n",
+					inputs: { i: "js/ctx.state.theLoopIndex", j: 'js/ctx.state["theLoopIndex"]' },
+				},
+			],
+		};
+		const after = renameStep(ir, "theLoop", "the-loop-2") as typeof ir;
+		const reader = findStepLocation(after, "reader")?.step as { inputs: { i: string; j: string } };
+		expect(reader.inputs.i).toBe('js/ctx.state["the-loop-2Index"]');
+		expect(reader.inputs.j).toBe('js/ctx.state["the-loop-2Index"]');
+	});
+
 	// (c) OVER/UNDER-MATCH guard — prefix siblings left untouched
 	it("leaves prefix-sibling refs (old2, oldFoo) UNCHANGED when renaming `old`", () => {
 		const after = renameStep(renameFixture(), "old", "new") as ReturnType<typeof renameFixture>;
@@ -512,7 +551,9 @@ describe("renameStep — id rewrite + boundary-safe reference propagation (#408/
 		};
 		const after = renameStep(ir, "a-b", "c-d") as typeof ir;
 		const r = findStepLocation(after, "r")?.step as { inputs: { hit: string; miss: string } };
-		expect(r.inputs.hit).toBe("js/ctx.state.c-d.x");
+		// `c-d` is not a valid dot-key, so the rewritten ref migrates to
+		// bracket form (a bare `ctx.state.c-d` would parse as subtraction).
+		expect(r.inputs.hit).toBe('js/ctx.state["c-d"].x');
 		expect(r.inputs.miss).toBe("js/ctx.state.axb.y");
 		expect(findStepLocation(after, "c-d")).not.toBeNull();
 	});

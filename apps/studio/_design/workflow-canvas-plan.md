@@ -1227,9 +1227,18 @@ Acceptance (remaining):
 
 #### 5.4 Definition save
 
+Status: implemented on 2026-08-05 (server + first structural edit). Remaining: `Open source` action for TS workflows.
+
 - Studio-owned v2 JSON workflows only.
 - Server-side Zod validation, duplicate-id validation, etag, atomic write.
 - TS workflows present a clear `Open source` action for logic while retaining full layout/run/debug capability.
+
+Implemented:
+
+- `GET/PUT /workflows/:name/definition` — the on-disk definition with its etag; saves run the runner's own `normalizeWorkflow` (schema shape, duplicate ids, set_var, forEach collisions) so Studio can never persist a definition the runner would refuse to boot. Etag optimistic concurrency, atomic tmp+rename write, project-root/symlink protection and the production authoring gate shared with the sidecar store. TS-sourced workflows are rejected (`definition_not_json`) and hide the edit affordances.
+- On save the registry entry refreshes in place, so Studio test-runs and the detail endpoint use the new definition immediately (HTTP route bindings still refresh on next boot).
+- First structural edit — Rename (5.5 acceptance bullet): selecting a step on an idle canvas offers Rename; `renameStep` rewrites every downstream `ctx.state` reference. Fixed in passing: the ref rewriter emitted invalid JS (`ctx.state.new-id` parses as subtraction) when the new id was not a valid identifier — dot-form refs now migrate to bracket form, with the loop `Index` counter folding into the bracket key.
+- Live acceptance: renamed `launch` → `start-browser` on `e2e-login` from the canvas — all seven downstream refs rewritten on disk — then ran it green (8/8, real Chromium) against the hot-refreshed registry, and renamed back.
 
 #### 5.5 Structural canvas interactions
 

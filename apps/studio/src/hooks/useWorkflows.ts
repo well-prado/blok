@@ -1,8 +1,10 @@
 import {
 	deleteWorkflowSample,
+	fetchWorkflowDefinition,
 	fetchWorkflowDetail,
 	fetchWorkflowStudio,
 	fetchWorkflows,
+	saveWorkflowDefinition,
 	saveWorkflowStudio,
 } from "@/lib/api";
 import type { WorkflowStudioConfig } from "@/types";
@@ -38,6 +40,25 @@ export function useSaveWorkflowStudio(name: string) {
 		mutationFn: ({ config, baseEtag }: { config: WorkflowStudioConfig; baseEtag: string | null }) =>
 			saveWorkflowStudio(name, config, baseEtag),
 		onSuccess: (saved) => queryClient.setQueryData(["workflow-studio", name], saved),
+	});
+}
+
+/**
+ * Phase 5.4 — apply a structural edit to the workflow definition. The
+ * mutation fn re-reads the on-disk definition for a fresh etag, transforms
+ * it, and saves; on success the workflow detail (definition → canvas DAG)
+ * refetches.
+ */
+export function useEditWorkflowDefinition(name: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (transform: (definition: Record<string, unknown>) => Record<string, unknown>) => {
+			const current = await fetchWorkflowDefinition(name);
+			return saveWorkflowDefinition(name, transform(current.definition), current.etag);
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["workflow", name] });
+		},
 	});
 }
 

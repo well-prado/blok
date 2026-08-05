@@ -7,9 +7,12 @@ import { DebounceCoordinator } from "../scheduling/DebounceCoordinator";
 import { DeferredRunScheduler } from "../scheduling/DeferredRunScheduler";
 import {
 	WorkflowStudioStoreError,
+	readWorkflowDefinition,
 	readWorkflowStudioConfig,
+	writeWorkflowDefinition,
 	writeWorkflowStudioConfig,
 } from "../studio/WorkflowStudioStore";
+import { normalizeWorkflow } from "../workflow/WorkflowNormalizer";
 import { WorkflowRegistry } from "../workflow/WorkflowRegistry";
 import { inferSampleBody } from "../workflow/sampleBody";
 import { RoutingDiagnostics } from "./RoutingDiagnostics";
@@ -663,6 +666,82 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 				baseEtag,
 			);
 			res.json({ ...result, writable: true });
+		} catch (error) {
+			sendStudioStoreError(res, error);
+		}
+	});
+
+	// Phase 5.4 — the workflow definition FILE with its etag, the authoring
+	// baseline for structural edits (the detail endpoint's `definition` is the
+	// registry copy, which can drift from disk between saves).
+	router.get("/workflows/:name/definition", async (req: TraceRequest, res: TraceResponse) => {
+		const registered = WorkflowRegistry.getInstance().get(req.params.name);
+		if (!registered) {
+			res.status(404).json({ error: `Workflow '${req.params.name}' not found` });
+			return;
+		}
+		if (!registered.sourcePath) {
+			res.status(409).json({ error: "Workflow has no canonical file and is read-only in Studio" });
+			return;
+		}
+		try {
+			res.json(await readWorkflowDefinition(registered.sourcePath, process.env.BLOK_PROJECT_ROOT || process.cwd()));
+		} catch (error) {
+			sendStudioStoreError(res, error);
+		}
+	});
+
+	// Phase 5.4 — save a v2 JSON workflow definition: normalizer validation
+	// (schema, duplicate ids), etag optimistic concurrency, atomic write.
+	// On success the registry entry is refreshed in place, so Studio
+	// test-runs and the detail endpoint pick up the new definition
+	// immediately; HTTP route BINDINGS (path/method) still refresh on the
+	// next boot.
+	router.put("/workflows/:name/definition", async (req: TraceRequest, res: TraceResponse) => {
+		if (isProd && process.env.BLOK_STUDIO_AUTHORING_ENABLED !== "1") {
+			res.status(403).json({
+				error: "Workflow Studio authoring is disabled in production",
+				hint: "Set BLOK_STUDIO_AUTHORING_ENABLED=1 and register a trace authorize hook to enable it.",
+			});
+			return;
+		}
+		if (isProd && !authorize) {
+			res.status(503).json({ error: "Workflow Studio authoring requires trace auth in production" });
+			return;
+		}
+
+		const body = req.body;
+		if (!body || typeof body !== "object" || Array.isArray(body) || !("definition" in body) || !("baseEtag" in body)) {
+			res.status(400).json({ error: "Expected { definition, baseEtag }" });
+			return;
+		}
+		const { definition, baseEtag } = body as { definition: unknown; baseEtag: unknown };
+		if (typeof baseEtag !== "string") {
+			res.status(400).json({ error: "baseEtag must be the etag returned by GET /workflows/:name/definition" });
+			return;
+		}
+
+		const registered = WorkflowRegistry.getInstance().get(req.params.name);
+		if (!registered) {
+			res.status(404).json({ error: `Workflow '${req.params.name}' not found` });
+			return;
+		}
+		if (!registered.sourcePath) {
+			res.status(409).json({ error: "Workflow has no canonical file and is read-only in Studio" });
+			return;
+		}
+
+		try {
+			const result = await writeWorkflowDefinition(
+				registered.sourcePath,
+				process.env.BLOK_PROJECT_ROOT || process.cwd(),
+				registered.name,
+				definition,
+				baseEtag,
+				(raw, sourcePath) => void normalizeWorkflow(raw, sourcePath),
+			);
+			WorkflowRegistry.getInstance().register({ ...registered, workflow: result.definition });
+			res.json(result);
 		} catch (error) {
 			sendStudioStoreError(res, error);
 		}

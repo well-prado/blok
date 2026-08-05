@@ -335,16 +335,39 @@ function escapeRegExp(s: string): string {
  * `state.old2`, `state.oldFoo`, `state.olds`. A naive string replace would hit
  * those false positives — hence the explicit boundary class.
  */
+const DOT_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
 function makeRefRewriter(oldId: string, newId: string): (s: string) => string {
 	const o = escapeRegExp(oldId);
-	// Dot form: ctx.state.<oldId>  — boundary is `Index` suffix, a key-ending
-	// char, or end-of-string. The lookahead consumes nothing so the trailing
-	// path / counter is preserved verbatim.
-	const dot = new RegExp(`(ctx\\.state\\.)${o}(?=Index|[.\\[\\])"'\\s+\\-*/%<>=!&|,?:;}]|$)`, "g");
-	// Bracket form: ctx.state["<oldId>"] or ctx.state['<oldId>'] (quote matched).
+	// Bracket form: ctx.state["<oldId>"] / ctx.state['<oldId>'] (+ the
+	// `<oldId>Index` loop counter as a bracket key). Any newId is legal here.
 	const bracket = new RegExp(`(ctx\\.state\\[)(["'])${o}\\2(\\])`, "g");
+	const bracketIndex = new RegExp(`(ctx\\.state\\[)(["'])${o}Index\\2(\\])`, "g");
+	const rewriteBrackets = (s: string) =>
+		s
+			.replace(bracketIndex, (_m, pre, q, post) => `${pre}${q}${newId}Index${q}${post}`)
+			.replace(bracket, (_m, pre, q, post) => `${pre}${q}${newId}${q}${post}`);
+
+	if (DOT_KEY.test(newId)) {
+		// Dot form: ctx.state.<oldId>  — boundary is `Index` suffix, a key-ending
+		// char, or end-of-string. The lookahead consumes nothing so the trailing
+		// path / counter is preserved verbatim.
+		const dot = new RegExp(`(ctx\\.state\\.)${o}(?=Index|[.\\[\\])"'\\s+\\-*/%<>=!&|,?:;}]|$)`, "g");
+		return (s: string) => rewriteBrackets(s.replace(dot, `$1${newId}`));
+	}
+
+	// newId is not a valid dot-key (e.g. "launch-browser" — a dash would parse
+	// as subtraction), so dot-form references must MIGRATE to bracket form.
+	// The Index counter is part of the key, so it folds inside the brackets.
+	const boundary = `[.\\[\\])"'\\s+\\-*/%<>=!&|,?:;}]|$`;
+	const dotIndex = new RegExp(`ctx\\.state\\.${o}Index(?=${boundary})`, "g");
+	const dot = new RegExp(`ctx\\.state\\.${o}(?=${boundary})`, "g");
 	return (s: string) =>
-		s.replace(dot, `$1${newId}`).replace(bracket, (_m, pre, q, post) => `${pre}${q}${newId}${q}${post}`);
+		rewriteBrackets(
+			s
+				.replace(dotIndex, `ctx.state[${JSON.stringify(`${newId}Index`)}]`)
+				.replace(dot, `ctx.state[${JSON.stringify(newId)}]`),
+		);
 }
 
 /** Deep-rewrite every string in a value (objects/arrays/strings) in place. */

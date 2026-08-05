@@ -120,6 +120,113 @@ export async function readWorkflowStudioConfig(
 	}
 }
 
+export interface WorkflowDefinitionStoreResult {
+	definition: Record<string, unknown>;
+	etag: string;
+	sourcePath: string;
+}
+
+function assertJsonSource(sourcePath: string): void {
+	if (!sourcePath.endsWith(".json")) {
+		throw new WorkflowStudioStoreError(
+			"Only JSON workflow definitions can be saved from Studio. Edit the TypeScript source directly.",
+			409,
+			"definition_not_json",
+		);
+	}
+}
+
+/** Read the workflow definition FILE (not the registry copy) with its etag — the authoring baseline. */
+export async function readWorkflowDefinition(
+	sourcePath: string,
+	projectRoot: string,
+): Promise<WorkflowDefinitionStoreResult> {
+	assertJsonSource(sourcePath);
+	const paths = await resolvePaths(sourcePath, projectRoot);
+	const stored = await readSidecar(paths.sourcePath);
+	if (!stored) {
+		throw new WorkflowStudioStoreError("Workflow definition file no longer exists.", 409, "missing_definition");
+	}
+	try {
+		return {
+			definition: JSON.parse(stored.content) as Record<string, unknown>,
+			etag: stored.etag,
+			sourcePath: paths.sourcePath,
+		};
+	} catch (error) {
+		throw new WorkflowStudioStoreError(
+			`Workflow definition file is not valid JSON: ${(error as Error).message}`,
+			422,
+			"invalid_definition_file",
+		);
+	}
+}
+
+/**
+ * Phase 5.4 — atomically save a v2 JSON workflow definition. `validate` runs
+ * the runner's own load-time checks (normalizer: schema shape, duplicate step
+ * ids, set_var, forEach collisions) so Studio can never persist a definition
+ * the runner would refuse to boot.
+ */
+export async function writeWorkflowDefinition(
+	sourcePath: string,
+	projectRoot: string,
+	workflowName: string,
+	input: unknown,
+	baseEtag: string | null,
+	validate: (raw: unknown, sourcePath: string) => void,
+): Promise<WorkflowDefinitionStoreResult> {
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		throw new WorkflowStudioStoreError("Workflow definition must be a JSON object.", 400, "invalid_definition");
+	}
+	const definition = input as Record<string, unknown>;
+	if (definition.name !== workflowName) {
+		throw new WorkflowStudioStoreError(
+			`Workflow definition name must stay "${workflowName}" — renaming the workflow is not supported from Studio.`,
+			400,
+			"definition_name_mismatch",
+		);
+	}
+	assertJsonSource(sourcePath);
+	const paths = await resolvePaths(sourcePath, projectRoot);
+	try {
+		validate(definition, paths.sourcePath);
+	} catch (error) {
+		throw new WorkflowStudioStoreError(
+			`Workflow definition failed validation: ${(error as Error).message}`,
+			400,
+			"invalid_definition",
+		);
+	}
+
+	return serializeWrite(paths.sourcePath, async () => {
+		const stored = await readSidecar(paths.sourcePath);
+		if ((stored?.etag ?? null) !== baseEtag) {
+			throw new WorkflowStudioStoreError("Workflow definition changed since it was loaded.", 409, "stale_etag");
+		}
+
+		// Tabs + trailing newline — matches the repo's Biome JSON style.
+		const content = `${JSON.stringify(definition, null, "\t")}\n`;
+		const tempPath = `${paths.sourcePath}.${randomUUID()}.tmp`;
+		let temp: Awaited<ReturnType<typeof open>> | undefined;
+		try {
+			temp = await open(tempPath, "wx", 0o600);
+			await temp.writeFile(content, "utf8");
+			await temp.sync();
+			await temp.close();
+			temp = undefined;
+			await rename(tempPath, paths.sourcePath);
+		} finally {
+			await temp?.close();
+			await unlink(tempPath).catch((error: NodeJS.ErrnoException) => {
+				if (error.code !== "ENOENT") throw error;
+			});
+		}
+
+		return { definition, etag: etag(content), sourcePath: paths.sourcePath };
+	});
+}
+
 export async function writeWorkflowStudioConfig(
 	sourcePath: string,
 	projectRoot: string,

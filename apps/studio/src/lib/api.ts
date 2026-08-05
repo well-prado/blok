@@ -81,6 +81,30 @@ export function saveWorkflowStudio(
 	});
 }
 
+// Phase 5.4 — the on-disk workflow definition with its etag, the authoring
+// baseline for structural edits.
+export interface WorkflowDefinitionResponse {
+	definition: Record<string, unknown>;
+	etag: string;
+	sourcePath: string;
+}
+
+export function fetchWorkflowDefinition(name: string): Promise<WorkflowDefinitionResponse> {
+	return fetchJson(`/workflows/${encodeURIComponent(name)}/definition`);
+}
+
+export function saveWorkflowDefinition(
+	name: string,
+	definition: Record<string, unknown>,
+	baseEtag: string,
+): Promise<WorkflowDefinitionResponse> {
+	return fetchJson(`/workflows/${encodeURIComponent(name)}/definition`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ definition, baseEtag }),
+	});
+}
+
 /**
  * #103 follow-up — operator escape hatch for the first-record-wins
  * semantic. Deleting the recorded sample lets the next successful run
