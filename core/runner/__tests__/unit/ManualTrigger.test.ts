@@ -85,6 +85,52 @@ describe("ManualTrigger (#435)", () => {
 		await expect(trigger.dispatch("", {})).rejects.toThrow(/non-empty workflow name/);
 	});
 
+	it("runs workflow-level middleware on dispatch (F2 hazard regression)", async () => {
+		// Regression: dispatch() built a fresh per-call Configuration but let
+		// applyMiddlewareChain default to the never-initialized shared one, so
+		// `middleware: ["stamp-mw"]` was silently dropped and the main step saw
+		// an empty ctx.state (Studio test-runs of v05-hello-with-mw hit this).
+		const stamp = defineNode({
+			name: "stamp",
+			description: "middleware step whose output persists to ctx.state",
+			input: z.object({}),
+			output: z.object({ via: z.string() }),
+			execute: () => ({ via: "stamp-mw" }),
+		});
+		const echoVia = defineNode({
+			name: "echo-via",
+			description: "read the middleware-written state slot",
+			input: z.object({ via: z.string() }),
+			output: z.object({ via: z.string() }),
+			execute: (_ctx, input) => ({ via: input.via }),
+		});
+		const nodes = new NodeMap();
+		nodes.addNode("stamp", stamp);
+		nodes.addNode("echo-via", echoVia);
+		const mwTrigger = new ManualTrigger();
+		mwTrigger.setNodeMap({
+			nodes,
+			workflows: {
+				"stamp-mw": {
+					name: "stamp-mw",
+					version: "1.0.0",
+					middleware: true,
+					steps: [{ id: "mw-stamp", use: "stamp", type: "module", inputs: {} }],
+				},
+				"hello-mw": {
+					name: "hello-mw",
+					version: "1.0.0",
+					middleware: ["stamp-mw"],
+					trigger: { manual: {} },
+					steps: [{ id: "respond", use: "echo-via", type: "module", inputs: { via: "js/ctx.state['mw-stamp'].via" } }],
+				},
+			} as never,
+		});
+		await mwTrigger.listen();
+		const result = await mwTrigger.dispatch<{ via: string }>("hello-mw", {});
+		expect(result).toEqual({ via: "stamp-mw" });
+	});
+
 	it("isolates overlapping dispatches (fresh Configuration per call)", async () => {
 		const [a, b] = await Promise.all([
 			trigger.dispatch<{ tenant: string }>("reindex-tenant", { tenantId: "alpha" }),

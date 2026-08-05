@@ -96,7 +96,10 @@ export default class ManualTrigger extends TriggerBase {
 			(ctx as Context & { _blokBeforeStep?: BeforeStepHook })._blokBeforeStep = options.beforeStep;
 		}
 
-		await this.applyMiddlewareChain(ctx, this.nodeMap);
+		// Pass the per-dispatch `config` — reading the shared `this.configuration`
+		// (the default) would silently drop workflow-level middleware (F2 hazard,
+		// see TriggerBase.applyMiddlewareChain).
+		await this.applyMiddlewareChain(ctx, this.nodeMap, config);
 		await this.run(ctx, config);
 		return ctx.response?.data as T;
 	}
