@@ -49,6 +49,17 @@ vi.mock("@/hooks/useWorkflows", () => ({
 		isPending: false,
 		error: null,
 	}),
+	useNodeCatalog: () => ({
+		data: {
+			nodes: [
+				{ name: "@blokjs/expr", ref: "@blokjs/expr", description: "Evaluate a JavaScript expression" },
+				{ name: "@blokjs/api-call", ref: "@blokjs/api-call", description: "Call an HTTP API" },
+			],
+			count: 2,
+		},
+		isLoading: false,
+		error: null,
+	}),
 }));
 
 vi.mock("@xyflow/react", async () => {
@@ -202,6 +213,60 @@ describe("WorkflowGraph layout editor", () => {
 		const after = transform?.(before) as typeof before;
 		expect(after.steps[0]?.id).toBe("launch-browser");
 		expect(after.steps[1]?.inputs.session).toBe('js/ctx.state["launch-browser"]');
+	});
+
+	it("inserts a catalog node after the selected step (Phase 5.2)", async () => {
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.json" };
+		let transform: ((definition: Record<string, unknown>) => Record<string, unknown>) | undefined;
+		mocks.editMutate.mockImplementation((fn, opts) => {
+			transform = fn;
+			opts?.onSuccess?.();
+		});
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		await user.click(screen.getByRole("button", { name: /add step/i }));
+		await user.type(screen.getByLabelText("Search nodes"), "expr");
+		expect(screen.queryByText("@blokjs/api-call")).not.toBeInTheDocument();
+		await user.click(screen.getByText("@blokjs/expr"));
+
+		const before = {
+			name: "checkout",
+			steps: [
+				{ id: "open", use: "@blokjs/browser-open", type: "module", inputs: {} },
+				{ id: "assert", use: "@blokjs/browser-assert", type: "module", inputs: {} },
+			],
+		};
+		const after = transform?.(before) as { steps: Array<{ id: string; use: string }> };
+		expect(after.steps.map((step) => step.id)).toEqual(["open", "expr-1", "assert"]);
+		expect(after.steps[1]?.use).toBe("@blokjs/expr");
+	});
+
+	it("deletes the selected step only after an explicit confirm (Phase 5.2)", async () => {
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.json" };
+		let transform: ((definition: Record<string, unknown>) => Record<string, unknown>) | undefined;
+		mocks.editMutate.mockImplementation((fn, opts) => {
+			transform = fn;
+			opts?.onSuccess?.();
+		});
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		await user.click(screen.getByRole("button", { name: /^delete$/i }));
+		expect(mocks.editMutate).not.toHaveBeenCalled();
+		await user.click(screen.getByRole("button", { name: /confirm delete/i }));
+
+		const before = {
+			name: "checkout",
+			steps: [
+				{ id: "open", use: "@blokjs/browser-open", type: "module", inputs: {} },
+				{ id: "assert", use: "@blokjs/browser-assert", type: "module", inputs: {} },
+			],
+		};
+		const after = transform?.(before) as { steps: Array<{ id: string }> };
+		expect(after.steps.map((step) => step.id)).toEqual(["assert"]);
 	});
 
 	it("hides Rename for TypeScript-sourced workflows", async () => {

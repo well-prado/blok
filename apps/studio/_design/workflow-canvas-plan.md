@@ -1213,10 +1213,20 @@ Acceptance (remaining):
 
 #### 5.2 Node palette
 
+Status: first slice implemented on 2026-08-05 (toolbar palette + top-level insert + delete). Remaining: edge-click contextual insertion (the ATOMIC "intermediate socket" pattern), arm-targeted inserts, category/runtime filter chips, control-flow templates.
+
 - Consume existing node catalog.
 - Search/category/runtime filters.
 - Contextual picker from an insertion/connection point.
 - Control-flow templates use the current v2 IR fields and stable ids.
+
+Implemented:
+
+- `Add step` toolbar button (idle, JSON-sourced workflows) opens a search-first palette fed by `GET /__blok/nodes` (name, description, resolvable `use` ref). Informed by atomic-canvas's Node Library (via Tetrix): type-to-search, click-to-insert.
+- Insert lands after the selected top-level step, else appends; ids minted with `nextId`; the step is written as `{id, use, inputs: {}}` (type inferred by the normalizer). Inputs stay empty until the 5.3 inspector.
+- `Delete` with an explicit two-click confirm on the selected step.
+- Both edits flow through the 5.4 definition save (validation, etag, atomic write, hot registry refresh).
+- Live acceptance: inserted `@blokjs/expr` into `e2e-login` from the palette, ran it — all browser steps green, the run failed exactly at the unconfigured new step — then deleted it through the confirm flow; file returned to 8 steps.
 
 #### 5.3 Schema-driven inspector
 

@@ -81,6 +81,21 @@ export function saveWorkflowStudio(
 	});
 }
 
+// Phase 5.2 — the runner's node catalog (`GET /__blok/nodes`): every
+// resolvable node across module + runtime registries, with reflected schemas.
+export interface NodeCatalogEntry {
+	name: string;
+	/** The resolvable `use` ref for a step (registry key or `runtime.<kind>:<name>`). */
+	ref: string;
+	description?: string;
+	inputSchema?: unknown;
+	outputSchema?: unknown;
+}
+
+export function fetchNodeCatalog(): Promise<{ nodes: NodeCatalogEntry[]; count: number }> {
+	return fetchJson("/nodes");
+}
+
 // Phase 5.4 — the on-disk workflow definition with its etag, the authoring
 // baseline for structural edits.
 export interface WorkflowDefinitionResponse {

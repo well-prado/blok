@@ -2,9 +2,14 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
-import { useEditWorkflowDefinition, useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
-import { ApiError, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
-import { renameStep } from "@/lib/irEditOps";
+import {
+	useEditWorkflowDefinition,
+	useNodeCatalog,
+	useSaveWorkflowStudio,
+	useWorkflowStudio,
+} from "@/hooks/useWorkflows";
+import { ApiError, type NodeCatalogEntry, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
+import { deleteStep, findStepLocation, insertStep, nextId, renameStep } from "@/lib/irEditOps";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -37,6 +42,7 @@ import {
 	Maximize2,
 	Pencil,
 	Play,
+	Plus,
 	Repeat,
 	RotateCcw,
 	RotateCw,
@@ -46,6 +52,7 @@ import {
 	SkipForward,
 	Split,
 	Square,
+	Trash2,
 	WandSparkles,
 	Wrench,
 } from "lucide-react";
@@ -85,6 +92,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [controlPending, setControlPending] = useState(false);
 	const [renamingStepId, setRenamingStepId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
+	const [paletteOpen, setPaletteOpen] = useState(false);
+	const [paletteSearch, setPaletteSearch] = useState("");
+	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+	const catalog = useNodeCatalog(paletteOpen);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -325,6 +336,31 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setRenamingStepId(stepId);
 		setRenameValue(stepId);
 	};
+	// Phase 5.2 — insert the picked catalog node as a fresh step. Lands after
+	// the selected step when that step is top-level; otherwise appends at the
+	// end. Arm-targeted insertion arrives with edge-click insertion.
+	const insertNode = (entry: NodeCatalogEntry) => {
+		const anchor = selectedCanvasStepId;
+		editDefinition.mutate(
+			(definition) => {
+				const steps = Array.isArray(definition.steps) ? (definition.steps as unknown[]) : [];
+				const loc = anchor ? findStepLocation(definition, anchor) : null;
+				const index = loc && loc.parentArray === steps ? loc.index + 1 : steps.length;
+				const base = entry.name.includes("/") ? (entry.name.split("/").pop() as string) : entry.name;
+				return insertStep(definition, { topLevel: true }, index, {
+					id: nextId(definition, base),
+					use: entry.ref,
+					inputs: {},
+				});
+			},
+			{ onSuccess: () => setPaletteOpen(false) },
+		);
+	};
+	const removeStep = (stepId: string) => {
+		editDefinition.mutate((definition) => deleteStep(definition, stepId), {
+			onSuccess: () => setConfirmingDelete(null),
+		});
+	};
 	const submitRename = () => {
 		const oldId = renamingStepId;
 		const newId = renameValue.trim();
@@ -461,18 +497,55 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						>
 							<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
 						</button>
+						{definitionEditable && !runActive && (
+							<button
+								type="button"
+								onClick={() => {
+									editDefinition.reset();
+									setPaletteOpen((open) => !open);
+								}}
+								disabled={editDefinition.isPending}
+								title={
+									selectedCanvasStepId ? `Insert a step after ${selectedCanvasStepId}` : "Append a step to the workflow"
+								}
+								className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								<Plus className="h-3.5 w-3.5 shrink-0" /> Add step
+							</button>
+						)}
 						{selectedCanvasStepId && !runActive && (
 							<>
 								{definitionEditable && (
-									<button
-										type="button"
-										onClick={() => startRename(selectedCanvasStepId)}
-										disabled={editDefinition.isPending}
-										title={`Rename step ${selectedCanvasStepId} and rewrite downstream references`}
-										className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-									>
-										<Pencil className="h-3.5 w-3.5 shrink-0" /> Rename
-									</button>
+									<>
+										<button
+											type="button"
+											onClick={() => startRename(selectedCanvasStepId)}
+											disabled={editDefinition.isPending}
+											title={`Rename step ${selectedCanvasStepId} and rewrite downstream references`}
+											className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+										>
+											<Pencil className="h-3.5 w-3.5 shrink-0" /> Rename
+										</button>
+										<button
+											type="button"
+											onClick={() =>
+												confirmingDelete === selectedCanvasStepId
+													? removeStep(selectedCanvasStepId)
+													: setConfirmingDelete(selectedCanvasStepId)
+											}
+											disabled={editDefinition.isPending}
+											title={`Delete step ${selectedCanvasStepId}`}
+											className={cn(
+												"inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40",
+												confirmingDelete === selectedCanvasStepId
+													? "border-red-400/60 bg-red-500/15 text-red-200 hover:bg-red-500/25"
+													: "border-zinc-700 text-zinc-300 hover:bg-zinc-800",
+											)}
+										>
+											<Trash2 className="h-3.5 w-3.5 shrink-0" />
+											{confirmingDelete === selectedCanvasStepId ? "Confirm delete" : "Delete"}
+										</button>
+									</>
 								)}
 								<button
 									type="button"
@@ -523,6 +596,58 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					</div>
 				)}
 			</div>
+			{paletteOpen && !runActive && (
+				<div className="border-b border-zinc-800 bg-zinc-950/70 px-3 py-2">
+					<div className="flex items-center gap-2">
+						<input
+							aria-label="Search nodes"
+							placeholder="Search nodes…"
+							value={paletteSearch}
+							onChange={(event) => setPaletteSearch(event.target.value)}
+							// biome-ignore lint/a11y/noAutofocus: focus follows the explicit Add step action
+							autoFocus
+							spellCheck={false}
+							className="w-72 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
+						/>
+						<span className="text-[10px] text-zinc-500">
+							{selectedCanvasStepId ? `Inserts after ${selectedCanvasStepId}` : "Appends at the end"}
+						</span>
+						<button
+							type="button"
+							onClick={() => setPaletteOpen(false)}
+							className="ml-auto rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+						>
+							Close
+						</button>
+					</div>
+					{catalog.isLoading && <p className="mt-2 text-xs text-zinc-500">Loading node catalog…</p>}
+					{catalog.error && <p className="mt-2 text-xs text-red-300">{catalog.error.message}</p>}
+					{editDefinition.error && <p className="mt-2 text-xs text-red-300">{editDefinition.error.message}</p>}
+					{catalog.data && (
+						<ul className="mt-2 grid max-h-56 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
+							{catalog.data.nodes
+								.filter((entry) => {
+									const q = paletteSearch.trim().toLowerCase();
+									if (!q) return true;
+									return `${entry.ref} ${entry.name} ${entry.description ?? ""}`.toLowerCase().includes(q);
+								})
+								.map((entry) => (
+									<li key={entry.ref}>
+										<button
+											type="button"
+											onClick={() => insertNode(entry)}
+											disabled={editDefinition.isPending}
+											className="w-full rounded-md border border-zinc-800 px-2.5 py-1.5 text-left hover:border-zinc-600 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+										>
+											<span className="block truncate font-mono text-xs text-zinc-200">{entry.name}</span>
+											<span className="block truncate text-[10px] text-zinc-500">{entry.description || entry.ref}</span>
+										</button>
+									</li>
+								))}
+						</ul>
+					)}
+				</div>
+			)}
 			{renamingStepId && (
 				<form
 					className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-950/70 px-3 py-2"

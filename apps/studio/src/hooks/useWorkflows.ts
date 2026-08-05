@@ -1,5 +1,6 @@
 import {
 	deleteWorkflowSample,
+	fetchNodeCatalog,
 	fetchWorkflowDefinition,
 	fetchWorkflowDetail,
 	fetchWorkflowStudio,
@@ -40,6 +41,19 @@ export function useSaveWorkflowStudio(name: string) {
 		mutationFn: ({ config, baseEtag }: { config: WorkflowStudioConfig; baseEtag: string | null }) =>
 			saveWorkflowStudio(name, config, baseEtag),
 		onSuccess: (saved) => queryClient.setQueryData(["workflow-studio", name], saved),
+	});
+}
+
+/**
+ * Phase 5.2 — the node catalog for the palette. The catalog only changes on
+ * deploys, so cache it for the session.
+ */
+export function useNodeCatalog(enabled: boolean) {
+	return useQuery({
+		queryKey: ["node-catalog"],
+		queryFn: fetchNodeCatalog,
+		enabled,
+		staleTime: 5 * 60 * 1000,
 	});
 }
 
