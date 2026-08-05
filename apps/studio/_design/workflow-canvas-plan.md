@@ -1177,11 +1177,26 @@ Tests:
 
 #### 4.3 Browser-aware run-to-node
 
+Status: implemented on 2026-08-05; paused-input editing (the "debug draft") remains future work.
+
 - `Run to here` starts a fresh debug run and automatically continues until the selected node.
 - It pauses before the selected action with browser state intact.
 - `Run this step` then executes once and pauses at the next node.
 
-Acceptance:
+Implemented:
+
+- Added `stopOnEntry` through the stack: `DebugController.attach(breakpoints, { stopOnEntry })`, the Studio test-run schema (rejected outside debug mode or without breakpoints), and the HTTP trigger's session attach.
+- Selecting an executable canvas node while idle reveals an amber `Run to <step>` toolbar button that launches `{ mode: "debug", breakpoints: [step], stopOnEntry: false }` — the run flows straight to the target and pauses before it with the full Phase 4.2 toolbar (Continue/Step/Stop, resolved inputs).
+- `Run this step` is the existing Step control at the resulting pause.
+
+Tests:
+
+- Controller: no entry pause with `stopOnEntry: false`, pause at the breakpoint, continue to completion.
+- Trace route: run-to request forwards `stopOnEntry`; `stopOnEntry: false` without breakpoints or outside debug mode is rejected.
+- Canvas: selecting a node reveals the button and dispatches the entry-skipping debug request.
+- Live acceptance (2026-08-05): API run with valid input executed 9 nodes with no entry pause, paused exactly at `respond` with resolved inputs, and completed on Continue; in the UI, `Run to per-item-pipeline` skipped the entry pause (first step executed immediately), and `Run to validate-body` paused before the target with the debug toolbar.
+
+Acceptance (remaining, needs a registered browser E2E workflow — Phase 6 login slice):
 
 - Pause before Submit, inspect the login page, change a non-secret input in the debug draft, execute the click, and see the assertion run next.
 - Let the pause expire and confirm a clear cancelled/expired explanation plus cleanup.

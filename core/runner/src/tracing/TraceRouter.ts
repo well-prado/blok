@@ -282,6 +282,8 @@ export interface StudioTestRunRequest {
 	input: Record<string, unknown>;
 	mode: "run" | "debug";
 	breakpoints: string[];
+	/** Phase 4.3 — false = "Run to here": no pause on the first node, only at breakpoints. */
+	stopOnEntry: boolean;
 	artifactPolicy: {
 		screenshot: "after-browser-action";
 		trace: "off";
@@ -293,6 +295,7 @@ const studioTestRunRequestSchema = z
 		input: z.record(z.unknown()).default({}),
 		mode: z.enum(["run", "debug"]).default("run"),
 		breakpoints: z.array(z.string().min(1)).max(100).default([]),
+		stopOnEntry: z.boolean().default(true),
 		artifactPolicy: z
 			.object({
 				screenshot: z.literal("after-browser-action").default("after-browser-action"),
@@ -305,6 +308,14 @@ const studioTestRunRequestSchema = z
 	.superRefine((request, ctx) => {
 		if (request.mode === "run" && request.breakpoints.length > 0) {
 			ctx.addIssue({ code: "custom", path: ["breakpoints"], message: "Breakpoints require debug mode" });
+		}
+		if (!request.stopOnEntry && request.mode !== "debug") {
+			ctx.addIssue({ code: "custom", path: ["stopOnEntry"], message: "stopOnEntry: false requires debug mode" });
+		}
+		if (!request.stopOnEntry && request.breakpoints.length === 0) {
+			// A debug run with no entry pause and no breakpoints would never
+			// pause — reject rather than silently degrade to a normal run.
+			ctx.addIssue({ code: "custom", path: ["stopOnEntry"], message: "stopOnEntry: false requires breakpoints" });
 		}
 	});
 

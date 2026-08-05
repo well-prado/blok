@@ -43,10 +43,13 @@ export class DebugController {
 		DebugController.instance = null;
 	}
 
-	attach(breakpoints: string[]): DebugSessionHandle {
+	attach(breakpoints: string[], options?: { stopOnEntry?: boolean }): DebugSessionHandle {
 		const session: DebugSession = {
 			breakpoints: new Set(breakpoints),
-			firstStep: true,
+			// "Run to here" (Phase 4.3) launches with stopOnEntry:false so the
+			// run flows straight to the first breakpoint instead of pausing on
+			// the first executable node.
+			firstStep: options?.stopOnEntry !== false,
 			pauseNext: false,
 		};
 		return {

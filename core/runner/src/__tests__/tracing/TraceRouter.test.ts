@@ -387,6 +387,50 @@ describe("TraceRouter", () => {
 			expect(res.statusCode).toBe(400);
 			expect(res.jsonBody).toMatchObject({ error: "Invalid Studio test-run request" });
 		});
+
+		it("accepts a Run-to-here request and forwards stopOnEntry", async () => {
+			WorkflowRegistry.resetInstance();
+			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			const testRouter = new MockRouter();
+			const startTestRun = vi.fn(async (workflowName: string) => {
+				tracker.startRun({
+					workflowName,
+					workflowPath: "login.ts",
+					triggerType: "studio",
+					triggerSummary: "studio",
+					nodeCount: 2,
+				});
+			});
+			registerTraceRoutes(testRouter as any, tracker, { startTestRun });
+			const req = new MockRequest({
+				params: { name: "login" },
+				body: { mode: "debug", breakpoints: ["submit"], stopOnEntry: false },
+			});
+			const res = new MockResponse();
+
+			await testRouter.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
+
+			expect(res.statusCode).toBe(202);
+			expect(startTestRun).toHaveBeenCalledWith(
+				"login",
+				expect.objectContaining({ mode: "debug", breakpoints: ["submit"], stopOnEntry: false }),
+			);
+		});
+
+		it("rejects stopOnEntry: false without breakpoints or outside debug mode", async () => {
+			WorkflowRegistry.resetInstance();
+			WorkflowRegistry.getInstance().register({ name: "login", source: "test", workflow: {} });
+			for (const body of [
+				{ mode: "debug", stopOnEntry: false },
+				{ mode: "run", stopOnEntry: false },
+			]) {
+				const req = new MockRequest({ params: { name: "login" }, body });
+				const res = new MockResponse();
+				await router.findHandler("POST", "/workflows/:name/test-runs")!(req, res);
+				expect(res.statusCode).toBe(400);
+				expect(res.jsonBody).toMatchObject({ error: "Invalid Studio test-run request" });
+			}
+		});
 	});
 
 	describe("POST /runs/:runId/control", () => {

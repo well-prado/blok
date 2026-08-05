@@ -69,6 +69,33 @@ describe("DebugController", () => {
 		session.dispose();
 	});
 
+	it("runs to a breakpoint without an entry pause when stopOnEntry is false (Run to here)", async () => {
+		const { run, ctx } = startDebugRun();
+		const session = DebugController.getInstance().attach(["third"], { stopOnEntry: false });
+
+		// Earlier steps flow through without pausing.
+		await session.beforeStep(ctx, { name: "first" } as unknown as NodeBase, 0, 3, false);
+		await session.beforeStep(ctx, { name: "second" } as unknown as NodeBase, 1, 3, false);
+		expect(tracker.getRun(run.id)?.status).toBe("running");
+		expect(tracker.getEvents(run.id).some((event) => event.type === "RUN_PAUSED")).toBe(false);
+
+		// The breakpoint step pauses.
+		const pause = session.beforeStep(
+			ctx,
+			{ name: "third", blueprintMapper: () => ({ ok: true }) } as unknown as NodeBase,
+			2,
+			3,
+			false,
+		);
+		await vi.waitFor(() => expect(tracker.getRun(run.id)?.status).toBe("paused"));
+		expect(tracker.getEvents(run.id).find((event) => event.type === "RUN_PAUSED")?.payload).toMatchObject({
+			stepId: "third",
+		});
+		expect(DebugController.getInstance().control(run.id, "continue")).toMatchObject({ ok: true });
+		await pause;
+		session.dispose();
+	});
+
 	it("stops a paused run through the existing abort controller", async () => {
 		const { run, ctx, abortController } = startDebugRun();
 		const session = DebugController.getInstance().attach([]);

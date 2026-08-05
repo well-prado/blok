@@ -1105,7 +1105,9 @@ export default class HttpTrigger extends TriggerBase {
 							await studioTrigger.dispatch(name, request.input);
 							return;
 						}
-						const session = DebugController.getInstance().attach(request.breakpoints);
+						const session = DebugController.getInstance().attach(request.breakpoints, {
+							stopOnEntry: request.stopOnEntry,
+						});
 						try {
 							await studioTrigger.dispatch(name, request.input, { beforeStep: session.beforeStep });
 						} finally {

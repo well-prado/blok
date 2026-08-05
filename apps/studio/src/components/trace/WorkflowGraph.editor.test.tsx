@@ -55,10 +55,12 @@ vi.mock("@xyflow/react", async () => {
 			children,
 			nodes,
 			onNodeDoubleClick,
+			onNodesChange,
 		}: {
 			children: React.ReactNode;
 			nodes: Array<{ id: string; data: { meta?: { stepId?: string } } }>;
 			onNodeDoubleClick?: (event: React.MouseEvent, node: unknown) => void;
+			onNodesChange?: (changes: Array<{ id: string; type: "select"; selected: boolean }>) => void;
 		}) => (
 			<div data-testid="workflow-canvas">
 				{nodes.flatMap((node) =>
@@ -67,6 +69,7 @@ vi.mock("@xyflow/react", async () => {
 							type="button"
 							key={node.id}
 							aria-label={`Canvas node ${node.data.meta.stepId}`}
+							onClick={() => onNodesChange?.([{ id: node.id, type: "select", selected: true }])}
 							onDoubleClick={(event) => onNodeDoubleClick?.(event, node)}
 						/>
 					) : (
@@ -76,9 +79,17 @@ vi.mock("@xyflow/react", async () => {
 				{children}
 			</div>
 		),
-		useNodesState: <T,>(initial: T[]) => {
+		useNodesState: <T extends { id: string }>(initial: T[]) => {
 			const [nodes, setNodes] = ReactModule.useState(initial);
-			return [nodes, setNodes, () => {}] as const;
+			// Minimal applyNodeChanges: selection only, which is all these tests need.
+			const onNodesChange = (changes: Array<{ id: string; type: string; selected?: boolean }>) =>
+				setNodes((current) =>
+					current.map((node) => {
+						const change = changes.find((c) => c.type === "select" && c.id === node.id);
+						return change ? { ...node, selected: change.selected } : node;
+					}),
+				);
+			return [nodes, setNodes, onNodesChange] as const;
 		},
 	};
 });
@@ -146,6 +157,21 @@ describe("WorkflowGraph layout editor", () => {
 		expect(mocks.startTestRun).toHaveBeenCalledWith("checkout", {
 			mode: "debug",
 			breakpoints: ["open"],
+		});
+	});
+
+	it("runs to the selected node with a fresh entry-skipping debug run (Run to here)", async () => {
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		expect(screen.queryByRole("button", { name: /run to/i })).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Canvas node assert" }));
+		await user.click(screen.getByRole("button", { name: /run to assert/i }));
+
+		expect(mocks.startTestRun).toHaveBeenCalledWith("checkout", {
+			mode: "debug",
+			breakpoints: ["assert"],
+			stopOnEntry: false,
 		});
 	});
 

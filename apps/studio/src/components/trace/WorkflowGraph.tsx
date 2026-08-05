@@ -3,7 +3,7 @@ import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import { useSaveWorkflowStudio, useWorkflowStudio } from "@/hooks/useWorkflows";
-import { ApiError, controlDebugRun, startTestRun } from "@/lib/api";
+import { ApiError, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -29,6 +29,7 @@ import {
 	Bug,
 	CheckCircle2,
 	Clock,
+	FastForward,
 	Focus,
 	GitBranch,
 	Loader2,
@@ -152,6 +153,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		() => renderedNodes.find((node) => flowNodeStepId(node) === activeStepId),
 		[activeStepId, renderedNodes],
 	);
+	const selectedCanvasStepId = useMemo(() => {
+		const selected = flowNodes.find((node) => node.selected);
+		return selected ? flowNodeStepId(selected) : undefined;
+	}, [flowNodes]);
 
 	useEffect(() => {
 		setFlowNodes(committed.nodes);
@@ -238,16 +243,12 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		runStatus === "delayed" ||
 		runStatus === "running" ||
 		runStatus === "paused";
-	const run = async () => {
+	const launch = async (request?: StartTestRunRequest) => {
 		setStartingRun(true);
 		setRunError("");
 		setSelectedNodeId(null);
 		setSelectedArtifact(undefined);
 		try {
-			const request =
-				launchMode === "run"
-					? undefined
-					: { mode: "debug" as const, breakpoints: launchMode === "debug" ? [...breakpoints] : [] };
 			setActiveRunId((await (request ? startTestRun(workflowName, request) : startTestRun(workflowName))).runId);
 		} catch (error) {
 			setRunError(error instanceof Error ? error.message : "Could not start workflow");
@@ -255,6 +256,13 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			setStartingRun(false);
 		}
 	};
+	const run = () =>
+		launch(
+			launchMode === "run" ? undefined : { mode: "debug", breakpoints: launchMode === "debug" ? [...breakpoints] : [] },
+		);
+	// Phase 4.3 "Run to here" — fresh debug run that flows straight to the
+	// selected node (no entry pause) and pauses before it executes.
+	const runToNode = (stepId: string) => launch({ mode: "debug", breakpoints: [stepId], stopOnEntry: false });
 	const sendControl = useCallback(
 		async (action: "continue" | "step" | "stop") => {
 			if (!controlledRunId || runStatus !== "paused" || controlPending) return;
@@ -420,6 +428,18 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						>
 							<Pencil className="h-3.5 w-3.5" /> {writable ? "Edit layout" : "Read only"}
 						</button>
+						{selectedCanvasStepId && !runActive && (
+							<button
+								type="button"
+								onClick={() => runToNode(selectedCanvasStepId)}
+								disabled={startingRun}
+								title={`Start a debug run and pause before ${selectedCanvasStepId}`}
+								className="inline-flex max-w-56 items-center gap-1.5 rounded-md border border-amber-400/50 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								<FastForward className="h-3.5 w-3.5 shrink-0" />
+								<span className="truncate">Run to {selectedCanvasStepId}</span>
+							</button>
+						)}
 						<div className="flex overflow-hidden rounded-md border border-blok-green-500/50">
 							<select
 								aria-label="Run mode"

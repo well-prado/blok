@@ -298,6 +298,8 @@ export interface StartTestRunRequest {
 	input?: Record<string, unknown>;
 	mode?: "run" | "debug";
 	breakpoints?: string[];
+	/** false = "Run to here": skip the entry pause, pause only at breakpoints. */
+	stopOnEntry?: boolean;
 	artifactPolicy?: {
 		screenshot?: "after-browser-action";
 		trace?: "off";
