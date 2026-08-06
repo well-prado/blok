@@ -1232,7 +1232,7 @@ Implemented:
 
 #### 5.3 Schema-driven inspector
 
-Status: first slice implemented on 2026-08-06 (inputs editor from catalog schemas). Remaining: control-flow editors (branch/forEach/switch/tryCatch/wait/subworkflow), the handle/value picker with upstream schemas and last-run samples, and Settings (as/spread/retry/idempotency).
+Status: first slice implemented on 2026-08-06 (inputs editor from catalog schemas); handle/value picker added same day. Remaining: control-flow editors (branch/forEach/switch/tryCatch/wait/subworkflow) and Settings (as/spread/retry/idempotency).
 
 - Common Inputs/Output/Settings UI from catalog schemas.
 - Dedicated editors for branch, forEach, switch, tryCatch, wait, and subworkflow.
@@ -1245,6 +1245,7 @@ Implemented:
 - Typing rules: numbers parse (invalid input blocks save), `js/...` values stay strings for the runtime mapper everywhere, blank fields unset, JSON fields fall back to string for expressions. Inputs the schema doesn't describe are preserved untouched (and editable via the Raw JSON escape hatch, which is also the fallback when reflection returned no schema).
 - Saves flow through the 5.4 definition pipeline.
 - Live acceptance: palette-inserted `@blokjs/expr` into `e2e-login`, set its required `expression` through the schema form, ran green 9/9 (output `{"authored":"from-studio",...}` visible on the node run), then deleted the step through the confirm flow.
+- Upstream handle/value picker (n8n/BuildShip signature interaction): a `SquareFunction` icon button next to every input field opens a small menu (trigger + every step strictly before the one being edited, in `walkSteps` document order; nested-arm steps count as upstream, the target and anything after don't). Each source expands to its output fields — union of the catalog `outputSchema`'s top-level properties and the latest matching `NodeRun`'s sample output keys, so a field with no reflected schema (or a dynamically-added key) still shows up once the workflow has run once. Clicking a source or field writes its `js/ctx.state...` expression into the field, reusing the existing raw-string/`js/` passthrough — no new save-path needed. `apps/studio/src/lib/upstreamSources.ts` is the pure source-list builder (unit-tested on its own); it encodes non-identifier state keys (dashed step ids, the common case from `nextId`) in bracket form `ctx.state["foo-bar"]`, mirroring `core/shared/src/utils/lowerRefs.ts`'s `encodeSegment`, and honors `as` (state slot alias) and `spread` (fields hang off the state root instead of a per-step slot) — both real raw-step knobs in `WorkflowNormalizer`.
 
 #### 5.4 Definition save
 

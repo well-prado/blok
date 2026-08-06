@@ -980,6 +980,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								}
 								pending={editDefinition.isPending}
 								error={editDefinition.error?.message}
+								definition={definition}
+								catalog={catalog.data?.nodes}
+								lastRunNodes={runQuery.data?.nodes}
 								onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
 								onClose={() => setEditingInputsStepId(null)}
 							/>

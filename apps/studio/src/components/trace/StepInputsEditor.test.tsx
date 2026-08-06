@@ -114,3 +114,81 @@ describe("StepInputsEditor", () => {
 		expect(onSave).toHaveBeenCalledWith({ expression: "2" });
 	});
 });
+
+describe("upstream picker", () => {
+	const definition = {
+		trigger: { http: { method: "POST", path: "/x" } },
+		steps: [
+			{ id: "fetch-user", use: "pkg/fetch-user", inputs: {} },
+			{ id: "respond", use: "pkg/respond", inputs: {} },
+		],
+	};
+	const catalog = [
+		{
+			name: "Fetch user",
+			ref: "pkg/fetch-user",
+			outputSchema: { properties: { email: { type: "string" } } },
+		},
+	];
+
+	function renderWithPicker() {
+		const onSave = vi.fn();
+		render(
+			<StepInputsEditor
+				stepId="respond"
+				schema={schema}
+				inputs={{}}
+				pending={false}
+				onSave={onSave}
+				onClose={vi.fn()}
+				definition={definition}
+				catalog={catalog}
+			/>,
+		);
+		return onSave;
+	}
+
+	/** The first field's picker button — opens/closes that field's popover. */
+	function firstPickerButton(): HTMLElement {
+		const [button] = screen.getAllByTitle("Insert a value from an upstream step");
+		if (!button) throw new Error("expected at least one picker button");
+		return button;
+	}
+
+	it("renders a picker button per field", () => {
+		renderWithPicker();
+		expect(screen.getAllByTitle("Insert a value from an upstream step")).toHaveLength(buildFields(schema).length);
+	});
+
+	it("opening the picker lists the trigger and every upstream step", async () => {
+		const user = userEvent.setup();
+		renderWithPicker();
+
+		await user.click(firstPickerButton());
+
+		expect(screen.getByRole("button", { name: /^trigger/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^fetch-user/ })).toBeInTheDocument();
+	});
+
+	it("clicking a field entry writes the expression into the field's value", async () => {
+		const user = userEvent.setup();
+		renderWithPicker();
+
+		await user.click(firstPickerButton());
+		await user.click(screen.getByRole("button", { name: "Expand fetch-user" }));
+		await user.click(screen.getByRole("button", { name: "email · string" }));
+
+		expect(screen.getByLabelText(/expression/)).toHaveValue('js/ctx.state["fetch-user"].email');
+	});
+
+	it("closes on Escape", async () => {
+		const user = userEvent.setup();
+		renderWithPicker();
+
+		await user.click(firstPickerButton());
+		expect(screen.getByRole("menu")).toBeInTheDocument();
+
+		await user.keyboard("{Escape}");
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+	});
+});

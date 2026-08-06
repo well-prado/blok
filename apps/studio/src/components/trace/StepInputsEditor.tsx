@@ -1,6 +1,9 @@
+import type { NodeCatalogEntry } from "@/lib/api";
+import { type UpstreamSource, upstreamSources } from "@/lib/upstreamSources";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import type { NodeRun } from "@/types";
+import { ChevronRight, Loader2, SquareFunction } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Phase 5.3 — schema-driven step-inputs editor. Renders a form from the
@@ -32,6 +35,14 @@ export interface StepInputsEditorProps {
 	error?: string;
 	/** Drawer layout: single-column fields, no bottom border. */
 	narrow?: boolean;
+	/**
+	 * Upstream handle/value picker inputs (Phase 5.3). All optional — when
+	 * `definition` is absent the picker button still renders but every field
+	 * shows only the trigger source (no step is known to be upstream).
+	 */
+	definition?: unknown;
+	catalog?: NodeCatalogEntry[];
+	lastRunNodes?: NodeRun[];
 	onSave: (inputs: Record<string, unknown>) => void;
 	onClose: () => void;
 }
@@ -82,10 +93,18 @@ export function StepInputsEditor({
 	pending,
 	error,
 	narrow,
+	definition,
+	catalog,
+	lastRunNodes,
 	onSave,
 	onClose,
 }: StepInputsEditorProps) {
 	const fields = useMemo(() => buildFields(schema), [schema]);
+	const sources = useMemo(
+		() => upstreamSources(definition, stepId, catalog, lastRunNodes),
+		[definition, stepId, catalog, lastRunNodes],
+	);
+	const [pickerFor, setPickerFor] = useState<string | null>(null);
 	const knownFieldNames = useMemo(() => new Set(fields.map((field) => field.name)), [fields]);
 	// Inputs the schema doesn't describe (or when reflection failed) are only
 	// editable through the raw JSON panel, which also serves as the escape
@@ -100,6 +119,11 @@ export function StepInputsEditor({
 		Object.fromEntries(fields.map((field) => [field.name, initialText(field.kind, inputs[field.name])])),
 	);
 	const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+	const insertValue = (fieldName: string, expr: string) => {
+		setValues((current) => ({ ...current, [fieldName]: expr }));
+		setPickerFor(null);
+	};
 
 	const submit = () => {
 		if (raw) {
@@ -211,16 +235,33 @@ export function StepInputsEditor({
 						const onChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
 							setValues((current) => ({ ...current, [field.name]: event.target.value }));
 						return (
-							<div key={field.name} className="text-xs">
-								<label htmlFor={controlId} className="mb-0.5 flex items-baseline gap-1.5">
-									<span className="font-mono text-zinc-200">{field.name}</span>
-									{field.required && <span className="text-[10px] text-amber-300">required</span>}
-									{field.description && (
-										<span className="truncate text-[10px] text-zinc-500" title={field.description}>
-											{field.description}
-										</span>
-									)}
-								</label>
+							<div key={field.name} className="relative text-xs">
+								<div className="mb-0.5 flex items-center gap-1.5">
+									<label htmlFor={controlId} className="flex min-w-0 items-baseline gap-1.5">
+										<span className="font-mono text-zinc-200">{field.name}</span>
+										{field.required && <span className="text-[10px] text-amber-300">required</span>}
+										{field.description && (
+											<span className="truncate text-[10px] text-zinc-500" title={field.description}>
+												{field.description}
+											</span>
+										)}
+									</label>
+									<button
+										type="button"
+										title="Insert a value from an upstream step"
+										onClick={() => setPickerFor((current) => (current === field.name ? null : field.name))}
+										className="ml-auto shrink-0 text-zinc-500 hover:text-blok-green-400"
+									>
+										<SquareFunction className="h-3.5 w-3.5" />
+									</button>
+								</div>
+								{pickerFor === field.name && (
+									<UpstreamPicker
+										sources={sources}
+										onPick={(expr) => insertValue(field.name, expr)}
+										onClose={() => setPickerFor(null)}
+									/>
+								)}
 								{field.kind === "enum" ? (
 									<select id={controlId} value={values[field.name] ?? ""} onChange={onChange} className={controlClass}>
 										<option value="">— unset —</option>
@@ -264,5 +305,128 @@ export function StepInputsEditor({
 				</div>
 			)}
 		</form>
+	);
+}
+
+/** Truncated one-line JSON preview for a sample value (~40 chars). */
+function previewSample(sample: unknown): string {
+	let text: string;
+	try {
+		text = JSON.stringify(sample) ?? String(sample);
+	} catch {
+		text = String(sample);
+	}
+	return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+}
+
+interface UpstreamPickerProps {
+	sources: UpstreamSource[];
+	onPick: (expr: string) => void;
+	onClose: () => void;
+}
+
+/**
+ * The n8n/BuildShip-style handle picker (Phase 5.3): trigger + every
+ * upstream step, expandable to their output fields. A field click writes
+ * its `js/ctx.state...` expr into the field; a source-row click writes the
+ * whole-output expr. No portal — absolutely positioned inside the field's
+ * `relative` wrapper, closed on outside click or Escape.
+ */
+function UpstreamPicker({ sources, onPick, onClose }: UpstreamPickerProps) {
+	const ref = useRef<HTMLDivElement>(null);
+	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") onClose();
+		};
+		const onPointerDown = (event: MouseEvent) => {
+			if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		window.addEventListener("mousedown", onPointerDown);
+		return () => {
+			window.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("mousedown", onPointerDown);
+		};
+	}, [onClose]);
+
+	const toggle = (id: string) =>
+		setExpanded((current) => {
+			const next = new Set(current);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+
+	return (
+		// `menu`, not `listbox` — click-to-dispatch (inserts an expression and
+		// closes) rather than a `<select>`-style persisted selection. Mirrors
+		// the same choice in EnvChip.
+		<div
+			ref={ref}
+			role="menu"
+			aria-label="Insert a value from an upstream step"
+			className="absolute right-0 top-full z-20 mt-1 max-h-64 w-72 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-900 p-1 text-left shadow-xl shadow-black/40"
+		>
+			{sources.length === 0 && <p className="px-2 py-1 text-[10px] text-zinc-500">No upstream sources</p>}
+			{sources.map((source) => {
+				const isOpen = expanded.has(source.id);
+				return (
+					<div key={source.id}>
+						<div className="flex items-center gap-1 rounded hover:bg-zinc-800">
+							<button
+								type="button"
+								onClick={() => toggle(source.id)}
+								aria-label={isOpen ? `Collapse ${source.id}` : `Expand ${source.id}`}
+								className="p-1 text-zinc-500"
+							>
+								<ChevronRight className={cn("h-3 w-3 transition-transform", isOpen && "rotate-90")} />
+							</button>
+							<button
+								type="button"
+								onClick={() => onPick(source.expr)}
+								className="flex-1 truncate py-1 pr-1 text-left text-[11px] text-zinc-200"
+							>
+								{source.id}
+								{source.ref && (
+									<>
+										{" · "}
+										<span className="ml-1.5 text-[10px] text-zinc-500">{source.ref}</span>
+									</>
+								)}
+							</button>
+						</div>
+						{isOpen && (
+							<div className="ml-4 border-l border-zinc-800 pl-2">
+								{source.fields.length === 0 && <p className="px-1 py-0.5 text-[10px] text-zinc-600">no known fields</p>}
+								{source.fields.map((field) => (
+									<button
+										key={field.path}
+										type="button"
+										onClick={() => onPick(field.expr)}
+										className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-zinc-800"
+									>
+										<span className="font-mono text-[11px] text-zinc-200">{field.path}</span>
+										{field.type && (
+											<>
+												{" · "}
+												<span className="text-[10px] text-zinc-500">{field.type}</span>
+											</>
+										)}
+										{field.sample !== undefined && (
+											<>
+												{" · "}
+												<span className="truncate text-[10px] text-zinc-600">{previewSample(field.sample)}</span>
+											</>
+										)}
+									</button>
+								))}
+							</div>
+						)}
+					</div>
+				);
+			})}
+		</div>
 	);
 }
