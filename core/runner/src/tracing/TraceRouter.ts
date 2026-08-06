@@ -585,13 +585,13 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 		res.json({ runId, action: parsed.data.action, status: result.status });
 	});
 
-	const sendStudioStoreError = (res: TraceResponse, error: unknown): void => {
+	const sendStudioStoreError = (res: TraceResponse, error: unknown, extra?: Record<string, unknown>): void => {
 		if (error instanceof WorkflowStudioStoreError) {
-			res.status(error.statusCode).json({ error: error.message, code: error.code });
+			res.status(error.statusCode).json({ error: error.message, code: error.code, ...extra });
 			return;
 		}
 		console.error("[blok][studio-config]", error);
-		res.status(500).json({ error: "Unable to access Workflow Studio config" });
+		res.status(500).json({ error: "Unable to access Workflow Studio config", ...extra });
 	};
 
 	router.get("/workflows/:name/studio", async (req: TraceRequest, res: TraceResponse) => {
@@ -697,6 +697,9 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 	// test-runs and the detail endpoint pick up the new definition
 	// immediately; HTTP route BINDINGS (path/method) still refresh on the
 	// next boot.
+	// `dryRun: true` in the body runs the same validation + etag check
+	// without writing the file or refreshing the registry — a deploy guard
+	// so Studio can flag a broken workflow before the user hits deploy.
 	router.put("/workflows/:name/definition", async (req: TraceRequest, res: TraceResponse) => {
 		if (isProd && process.env.BLOK_STUDIO_AUTHORING_ENABLED !== "1") {
 			res.status(403).json({
@@ -715,11 +718,16 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 			res.status(400).json({ error: "Expected { definition, baseEtag }" });
 			return;
 		}
-		const { definition, baseEtag } = body as { definition: unknown; baseEtag: unknown };
+		const { definition, baseEtag, dryRun } = body as { definition: unknown; baseEtag: unknown; dryRun?: unknown };
 		if (typeof baseEtag !== "string") {
 			res.status(400).json({ error: "baseEtag must be the etag returned by GET /workflows/:name/definition" });
 			return;
 		}
+		if (dryRun !== undefined && typeof dryRun !== "boolean") {
+			res.status(400).json({ error: "dryRun must be a boolean" });
+			return;
+		}
+		const isDryRun = dryRun === true;
 
 		const registered = WorkflowRegistry.getInstance().get(req.params.name);
 		if (!registered) {
@@ -739,11 +747,16 @@ export function registerTraceRoutes(router: TraceRouter, tracker?: RunTracker, o
 				definition,
 				baseEtag,
 				(raw, sourcePath) => void normalizeWorkflow(raw, sourcePath),
+				isDryRun,
 			);
+			if (isDryRun) {
+				res.json({ valid: true, etag: result.etag });
+				return;
+			}
 			WorkflowRegistry.getInstance().register({ ...registered, workflow: result.definition });
 			res.json(result);
 		} catch (error) {
-			sendStudioStoreError(res, error);
+			sendStudioStoreError(res, error, isDryRun ? { valid: false } : undefined);
 		}
 	});
 

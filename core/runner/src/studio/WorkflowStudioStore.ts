@@ -167,6 +167,11 @@ export async function readWorkflowDefinition(
  * the runner's own load-time checks (normalizer: schema shape, duplicate step
  * ids, set_var, forEach collisions) so Studio can never persist a definition
  * the runner would refuse to boot.
+ *
+ * `dryRun` runs the identical validation + etag-conflict check (so a stale
+ * baseEtag still 409s) but early-exits before the write — no file touched,
+ * no registry refresh. Callers should skip their own post-write registry
+ * refresh too when `dryRun` is true.
  */
 export async function writeWorkflowDefinition(
 	sourcePath: string,
@@ -175,6 +180,7 @@ export async function writeWorkflowDefinition(
 	input: unknown,
 	baseEtag: string | null,
 	validate: (raw: unknown, sourcePath: string) => void,
+	dryRun = false,
 ): Promise<WorkflowDefinitionStoreResult> {
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
 		throw new WorkflowStudioStoreError("Workflow definition must be a JSON object.", 400, "invalid_definition");
@@ -203,6 +209,15 @@ export async function writeWorkflowDefinition(
 		const stored = await readSidecar(paths.sourcePath);
 		if ((stored?.etag ?? null) !== baseEtag) {
 			throw new WorkflowStudioStoreError("Workflow definition changed since it was loaded.", 409, "stale_etag");
+		}
+
+		if (dryRun) {
+			const currentEtag = stored?.etag ?? baseEtag;
+			if (currentEtag === null) {
+				// Race: file existed when resolvePaths() stat'd it but vanished before this read.
+				throw new WorkflowStudioStoreError("Workflow definition file no longer exists.", 409, "missing_definition");
+			}
+			return { definition, etag: currentEtag, sourcePath: paths.sourcePath };
 		}
 
 		// Tabs + trailing newline — matches the repo's Biome JSON style.

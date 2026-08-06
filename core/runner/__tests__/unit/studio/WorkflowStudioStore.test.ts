@@ -1,8 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readWorkflowStudioConfig, writeWorkflowStudioConfig } from "../../../src/studio/WorkflowStudioStore";
+import {
+	readWorkflowDefinition,
+	readWorkflowStudioConfig,
+	writeWorkflowDefinition,
+	writeWorkflowStudioConfig,
+} from "../../../src/studio/WorkflowStudioStore";
+import { normalizeWorkflow } from "../../../src/workflow/WorkflowNormalizer";
 
 describe("WorkflowStudioStore", () => {
 	let projectRoot: string;
@@ -106,5 +112,118 @@ describe("WorkflowStudioStore", () => {
 			),
 		).rejects.toMatchObject({ statusCode: 400, code: "invalid_config" });
 		expect(await readFile(sidecarPath, "utf8")).toBe(before);
+	});
+});
+
+// Studio deploy guard — `writeWorkflowDefinition(..., dryRun: true)` runs the
+// same normalizer validation + etag conflict check as a real save but never
+// writes, so the UI can show "workflow broken" before the user hits deploy.
+describe("writeWorkflowDefinition dry-run", () => {
+	let projectRoot: string;
+	let definitionPath: string;
+
+	const validate = (raw: unknown, path: string) => void normalizeWorkflow(raw, path);
+
+	const validDefinition = (path = "/orders") => ({
+		name: "order-intake",
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path } },
+		steps: [{ id: "validate", use: "@blokjs/respond", inputs: {} }],
+	});
+
+	const brokenDefinition = () => ({
+		name: "order-intake",
+		version: "1.0.0",
+		trigger: { http: { method: "POST", path: "/orders" } },
+		steps: [
+			{ id: "dup", use: "@blokjs/respond", inputs: {} },
+			{ id: "dup", use: "@blokjs/respond", inputs: {} },
+		],
+	});
+
+	beforeEach(async () => {
+		projectRoot = await mkdtemp(join(tmpdir(), "blok-studio-definition-"));
+		definitionPath = join(projectRoot, "order-intake.json");
+		await writeFile(definitionPath, `${JSON.stringify(validDefinition(), null, "\t")}\n`);
+	});
+
+	afterEach(async () => {
+		await rm(projectRoot, { recursive: true, force: true });
+	});
+
+	it("valid definition: resolves with the current etag and leaves the file untouched", async () => {
+		const baseline = await readWorkflowDefinition(definitionPath, projectRoot);
+		const before = await readFile(definitionPath, "utf8");
+		const beforeMtime = (await stat(definitionPath)).mtimeMs;
+
+		const result = await writeWorkflowDefinition(
+			definitionPath,
+			projectRoot,
+			"order-intake",
+			validDefinition("/orders-v2"),
+			baseline.etag,
+			validate,
+			true,
+		);
+
+		expect(result.etag).toBe(baseline.etag);
+		expect(await readFile(definitionPath, "utf8")).toBe(before);
+		expect((await stat(definitionPath)).mtimeMs).toBe(beforeMtime);
+
+		// A real save with the same input DOES change the file — proves the
+		// dry-run truly skipped the write rather than the input being a no-op.
+		const saved = await writeWorkflowDefinition(
+			definitionPath,
+			projectRoot,
+			"order-intake",
+			validDefinition("/orders-v2"),
+			baseline.etag,
+			validate,
+		);
+		expect(saved.etag).not.toBe(baseline.etag);
+	});
+
+	it("broken definition (duplicate step ids): rejects with the same error a real save would throw, file unchanged", async () => {
+		const baseline = await readWorkflowDefinition(definitionPath, projectRoot);
+		const before = await readFile(definitionPath, "utf8");
+
+		const dryRunError = await writeWorkflowDefinition(
+			definitionPath,
+			projectRoot,
+			"order-intake",
+			brokenDefinition(),
+			baseline.etag,
+			validate,
+			true,
+		).catch((e) => e);
+		const realSaveError = await writeWorkflowDefinition(
+			definitionPath,
+			projectRoot,
+			"order-intake",
+			brokenDefinition(),
+			baseline.etag,
+			validate,
+		).catch((e) => e);
+
+		expect(dryRunError).toMatchObject({ statusCode: 400, code: "invalid_definition" });
+		expect(realSaveError).toMatchObject({ statusCode: 400, code: "invalid_definition" });
+		expect(await readFile(definitionPath, "utf8")).toBe(before);
+	});
+
+	it("stale baseEtag: rejects 409 in dry-run too, file unchanged", async () => {
+		const before = await readFile(definitionPath, "utf8");
+
+		await expect(
+			writeWorkflowDefinition(
+				definitionPath,
+				projectRoot,
+				"order-intake",
+				validDefinition("/orders-v2"),
+				"stale-etag",
+				validate,
+				true,
+			),
+		).rejects.toMatchObject({ statusCode: 409, code: "stale_etag" });
+		expect(await readFile(definitionPath, "utf8")).toBe(before);
 	});
 });
