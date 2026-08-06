@@ -1,7 +1,9 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
+import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
 import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
+import { TriggerEditor } from "@/components/trace/TriggerEditor";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import {
 	useEditWorkflowDefinition,
@@ -95,10 +97,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [renamingStepId, setRenamingStepId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 	const [paletteOpen, setPaletteOpen] = useState(false);
-	const [paletteSearch, setPaletteSearch] = useState("");
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
-	const catalog = useNodeCatalog(paletteOpen || editingInputsStepId !== null);
+	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
+	const catalog = useNodeCatalog(editingInputsStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -421,7 +423,18 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			},
 		});
 	};
+	const saveTrigger = (trigger: Record<string, unknown>) => {
+		editDefinition.mutate((def) => ({ ...structuredClone(def), trigger }), {
+			onSuccess: () => setTriggerEditorOpen(false),
+		});
+	};
 	const selectCanvasNode = (node: Node) => {
+		// Clicking the trigger pill opens the trigger drawer (ATOMIC pattern).
+		if ((node.data as unknown as DagNode["data"]).kind === "trigger" && definitionEditable && !runActive) {
+			editDefinition.reset();
+			setTriggerEditorOpen(true);
+			return;
+		}
 		const stepId = flowNodeStepId(node);
 		if (!stepId) return;
 		const nodeRun = [...(runQuery.data?.nodes ?? [])]
@@ -644,58 +657,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					</div>
 				)}
 			</div>
-			{paletteOpen && !runActive && (
-				<div className="border-b border-zinc-800 bg-zinc-950/70 px-3 py-2">
-					<div className="flex items-center gap-2">
-						<input
-							aria-label="Search nodes"
-							placeholder="Search nodes…"
-							value={paletteSearch}
-							onChange={(event) => setPaletteSearch(event.target.value)}
-							// biome-ignore lint/a11y/noAutofocus: focus follows the explicit Add step action
-							autoFocus
-							spellCheck={false}
-							className="w-72 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
-						/>
-						<span className="text-[10px] text-zinc-500">
-							{selectedCanvasStepId ? `Inserts after ${selectedCanvasStepId}` : "Appends at the end"}
-						</span>
-						<button
-							type="button"
-							onClick={() => setPaletteOpen(false)}
-							className="ml-auto rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-						>
-							Close
-						</button>
-					</div>
-					{catalog.isLoading && <p className="mt-2 text-xs text-zinc-500">Loading node catalog…</p>}
-					{catalog.error && <p className="mt-2 text-xs text-red-300">{catalog.error.message}</p>}
-					{editDefinition.error && <p className="mt-2 text-xs text-red-300">{editDefinition.error.message}</p>}
-					{catalog.data && (
-						<ul className="mt-2 grid max-h-56 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
-							{catalog.data.nodes
-								.filter((entry) => {
-									const q = paletteSearch.trim().toLowerCase();
-									if (!q) return true;
-									return `${entry.ref} ${entry.name} ${entry.description ?? ""}`.toLowerCase().includes(q);
-								})
-								.map((entry) => (
-									<li key={entry.ref}>
-										<button
-											type="button"
-											onClick={() => insertNode(entry)}
-											disabled={editDefinition.isPending}
-											className="w-full rounded-md border border-zinc-800 px-2.5 py-1.5 text-left hover:border-zinc-600 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
-										>
-											<span className="block truncate font-mono text-xs text-zinc-200">{entry.name}</span>
-											<span className="block truncate text-[10px] text-zinc-500">{entry.description || entry.ref}</span>
-										</button>
-									</li>
-								))}
-						</ul>
-					)}
-				</div>
-			)}
+			<NodeLibraryDialog
+				open={paletteOpen && !runActive}
+				insertHint={selectedCanvasStepId ? `Inserts after ${selectedCanvasStepId}` : "Appends at the end"}
+				pending={editDefinition.isPending}
+				error={editDefinition.error?.message}
+				onAdd={insertNode}
+				onClose={() => setPaletteOpen(false)}
+			/>
 			{editingInputsStepId && !runActive && catalog.data && (
 				<StepInputsEditor
 					key={editingInputsStepId}
@@ -850,33 +819,46 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				</div>
 			)}
 			<div className={cn("grid", workspaceMode === "split" && "lg:grid-cols-2")}>
-				<div ref={canvasRef} className={cn("h-[600px] min-w-0", workspaceMode === "browser" && "hidden")}>
-					<ReactFlow
-						nodes={renderedNodes}
-						edges={renderedEdges}
-						onInit={setFlowInstance}
-						onNodesChange={onNodesChange}
-						onNodeClick={(_event, node) => selectCanvasNode(node)}
-						onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
-						onNodeDragStop={(_event, node) => {
-							if (editing && flowNodeStepId(node)) setDirty(true);
-						}}
-						nodeTypes={nodeTypes}
-						fitView
-						fitViewOptions={{ padding: 0.25 }}
-						proOptions={{ hideAttribution: true }}
-						minZoom={0.1}
-						maxZoom={2}
-						nodesDraggable={editing && writable}
-						nodesConnectable={false}
-						elementsSelectable={true}
-					>
-						<Background color="#27272a" gap={16} size={1} />
-						<Controls
-							showInteractive={false}
-							className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+				<div className={cn("flex h-[600px] min-w-0", workspaceMode === "browser" && "hidden")}>
+					<div ref={canvasRef} className="h-full min-w-0 flex-1">
+						<ReactFlow
+							nodes={renderedNodes}
+							edges={renderedEdges}
+							onInit={setFlowInstance}
+							onNodesChange={onNodesChange}
+							onNodeClick={(_event, node) => selectCanvasNode(node)}
+							onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
+							onNodeDragStop={(_event, node) => {
+								if (editing && flowNodeStepId(node)) setDirty(true);
+							}}
+							nodeTypes={nodeTypes}
+							fitView
+							fitViewOptions={{ padding: 0.25 }}
+							proOptions={{ hideAttribution: true }}
+							minZoom={0.1}
+							maxZoom={2}
+							nodesDraggable={editing && writable}
+							nodesConnectable={false}
+							elementsSelectable={true}
+						>
+							<Background color="#27272a" gap={16} size={1} />
+							<Controls
+								showInteractive={false}
+								className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+							/>
+						</ReactFlow>
+					</div>
+					{triggerEditorOpen && !runActive && (
+						<TriggerEditor
+							trigger={
+								((definition as { trigger?: Record<string, unknown> })?.trigger ?? {}) as Record<string, unknown>
+							}
+							pending={editDefinition.isPending}
+							error={editDefinition.error?.message}
+							onSave={saveTrigger}
+							onClose={() => setTriggerEditorOpen(false)}
 						/>
-					</ReactFlow>
+					)}
 				</div>
 				{runQuery.data?.browserSession && workspaceMode !== "canvas" && (
 					<BrowserPanel

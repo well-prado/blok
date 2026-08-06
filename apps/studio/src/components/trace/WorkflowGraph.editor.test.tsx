@@ -240,7 +240,8 @@ describe("WorkflowGraph layout editor", () => {
 		await user.click(screen.getByRole("button", { name: /add step/i }));
 		await user.type(screen.getByLabelText("Search nodes"), "expr");
 		expect(screen.queryByText("@blokjs/api-call")).not.toBeInTheDocument();
-		await user.click(screen.getByText("@blokjs/expr"));
+		// The dialog preselects the first filtered entry; confirm via Add node.
+		await user.click(screen.getByRole("button", { name: /add node/i }));
 
 		const before = {
 			name: "checkout",
