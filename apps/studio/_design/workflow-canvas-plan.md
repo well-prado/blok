@@ -1288,6 +1288,17 @@ Add only after the Phase 3/4 E2E loop is excellent.
 
 Do not promise visual regression thresholds or cross-browser matrices before the screenshot/artifact foundation is measured in real use.
 
+### Canvas visual redesign (2026-08-06, BuildShip-informed)
+
+First visual pass toward the founder's BuildShip-style mockups, with ATOMIC interaction research captured in [ion-atomic-canvas-notes.md](./ion-atomic-canvas-notes.md):
+
+- Node cards rebuilt: 260px rounded-xl cards on `#151518`, icon-tile header, divider, and BuildShip-style config rows summarizing step inputs (`ƒx` chips for `js/` expressions, `{}` for objects). Control-flow cards go dashed; trigger/end are solid pills; hollow-circle ports; edge arrowheads; wider dagre spacing.
+- ATOMIC's single-accent selection: blue 2px inset outline on selected cards.
+- Canvas-first IA: the workflow page now opens on the Canvas tab (renamed from Graph, moved first).
+- Fixed in passing: (a) the trigger pill wore the amber "paused" ring permanently (`undefined === undefined` on synthetic nodes); (b) the mount-time `fitView` raced page layout once Canvas became the default tab — an explicit double-rAF re-fit now runs when the instance/graph is ready, and `minZoom` dropped to 0.1 so large graphs can fit.
+
+Next visual/interaction candidates are ranked at the end of the research notes (edge midpoint "+" splice first — it also completes 5.2's contextual insertion).
+
 ### Phase 7 — Polish, performance, and resilience
 
 - Keyboard command map and cheat sheet.

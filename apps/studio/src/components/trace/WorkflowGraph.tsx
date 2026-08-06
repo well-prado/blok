@@ -21,6 +21,7 @@ import {
 	Controls,
 	type Edge,
 	Handle,
+	MarkerType,
 	MiniMap,
 	type Node,
 	type NodeProps,
@@ -70,8 +71,9 @@ interface WorkflowGraphProps {
 	workflowName: string;
 }
 
-const NODE_WIDTH = 200;
-const NODE_HEIGHT = 60;
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 104; // step cards with config rows
+const FLOW_NODE_HEIGHT = 64; // dashed control-flow cards (header + condition)
 const MERGE_DIAMETER = 14;
 const TERMINAL_DIAMETER = 80; // trigger / end pills
 
@@ -151,7 +153,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						stepId &&
 							breakpoints.has(stepId) &&
 							"after:absolute after:-left-1 after:-top-1 after:h-3 after:w-3 after:rounded-full after:border-2 after:border-zinc-950 after:bg-red-500",
-						stepId === pausedPayload?.stepId && "rounded-lg ring-2 ring-amber-300 ring-offset-4 ring-offset-zinc-950",
+						stepId !== undefined &&
+							stepId === pausedPayload?.stepId &&
+							"rounded-lg ring-2 ring-amber-300 ring-offset-4 ring-offset-zinc-950",
 					),
 					data: status ? { ...node.data, liveStatus: status } : node.data,
 				};
@@ -182,6 +186,19 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setFlowNodes(committed.nodes);
 		setDirty(false);
 	}, [committed.nodes, setFlowNodes]);
+
+	// The `fitView` prop fires once at mount, which races page layout now
+	// that Canvas is the default tab (a degenerate container yields a ~1:1
+	// viewport on large graphs). Re-fit explicitly once the instance exists
+	// and whenever the committed graph changes, after layout has settled.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: committed.nodes intentionally re-fires the fit on graph changes
+	useEffect(() => {
+		if (!flowInstance) return;
+		const frame = requestAnimationFrame(() => {
+			requestAnimationFrame(() => void flowInstance.fitView({ padding: 0.2 }));
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [flowInstance, committed.nodes]);
 
 	useEffect(() => {
 		if (!dirty) return;
@@ -849,7 +866,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						fitView
 						fitViewOptions={{ padding: 0.25 }}
 						proOptions={{ hideAttribution: true }}
-						minZoom={0.25}
+						minZoom={0.1}
 						maxZoom={2}
 						nodesDraggable={editing && writable}
 						nodesConnectable={false}
@@ -952,7 +969,11 @@ const MINIMAP_COLORS: Partial<Record<DagNodeKind, string>> = {
 function nodeSize(kind: DagNodeKind): { width: number; height: number } {
 	if (kind === "merge") return { width: MERGE_DIAMETER, height: MERGE_DIAMETER };
 	if (kind === "trigger" || kind === "end") return { width: TERMINAL_DIAMETER, height: 40 };
-	return { width: NODE_WIDTH, height: NODE_HEIGHT };
+	// Step cards carry config rows; control-flow cards are header + condition.
+	if (kind === "regular" || kind === "subworkflow" || kind === "wait") {
+		return { width: NODE_WIDTH, height: NODE_HEIGHT };
+	}
+	return { width: NODE_WIDTH, height: FLOW_NODE_HEIGHT };
 }
 
 /**
@@ -1030,7 +1051,7 @@ export function layoutDag(
 
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
-	g.setGraph({ rankdir: config?.canvas?.direction ?? "TB", nodesep: 40, ranksep: 60, acyclicer: "greedy" });
+	g.setGraph({ rankdir: config?.canvas?.direction ?? "TB", nodesep: 48, ranksep: 72, acyclicer: "greedy" });
 
 	const pins = new Map<string, { x: number; y: number }>();
 	for (const n of dag.nodes) {
@@ -1091,9 +1112,15 @@ function toFlowEdge(edge: DagEdge): Edge {
 		labelBgPadding: [4, 2],
 		labelBgBorderRadius: 4,
 		style: {
-			stroke: edge.backEdge ? "#a78bfa" : "#3f3f46",
+			stroke: edge.backEdge ? "#a78bfa" : "#52525b",
 			strokeWidth: 1.5,
 			strokeDasharray: dashed ? "4 4" : undefined,
+		},
+		markerEnd: {
+			type: MarkerType.ArrowClosed,
+			width: 14,
+			height: 14,
+			color: edge.backEdge ? "#a78bfa" : "#52525b",
 		},
 		type: edge.backEdge ? "default" : "smoothstep",
 	};
@@ -1105,56 +1132,121 @@ function toFlowEdge(edge: DagEdge): Edge {
 // loosely (LucideIcon) and cap consumers to the icons we import above.
 type IconComponent = typeof Play;
 
+/** One key/value config row on a node card (the BuildShip-style summary). */
+interface ConfigRow {
+	label: string;
+	value: string;
+	kind: "text" | "fx" | "obj";
+}
+
+const MAX_CONFIG_ROWS = 3;
+
+/**
+ * Summarize a step's raw `inputs` into card rows: `js/` expressions render
+ * as ƒx chips, objects/arrays as {} chips, primitives verbatim. Purely
+ * presentational — the inspector remains the write path.
+ */
+function configRows(raw: unknown): ConfigRow[] {
+	if (typeof raw !== "object" || raw === null) return [];
+	const inputs = (raw as { inputs?: unknown }).inputs;
+	if (typeof inputs !== "object" || inputs === null || Array.isArray(inputs)) return [];
+	return Object.entries(inputs as Record<string, unknown>)
+		.slice(0, MAX_CONFIG_ROWS)
+		.map(([label, value]) => {
+			if (typeof value === "string") {
+				return value.startsWith("js/")
+					? { label, value: value.slice(3), kind: "fx" as const }
+					: { label, value, kind: "text" as const };
+			}
+			if (typeof value === "object" && value !== null) {
+				return { label, value: JSON.stringify(value), kind: "obj" as const };
+			}
+			return { label, value: String(value), kind: "text" as const };
+		});
+}
+
 interface NodeShellProps {
 	icon: IconComponent;
 	iconClass: string;
+	/** Tailwind bg for the header icon tile, e.g. "bg-emerald-500/15". */
+	iconTile: string;
 	title: string;
 	subtitle?: string;
 	accent: string;
 	status?: NodeRunStatus;
+	/** Dashed border — control-flow cards, matching the BuildShip design. */
+	dashed?: boolean;
+	rows?: ConfigRow[];
+	selected?: boolean;
 }
 
-function NodeShell({ icon: Icon, iconClass, title, subtitle, accent, status }: NodeShellProps) {
+function NodeShell({
+	icon: Icon,
+	iconClass,
+	iconTile,
+	title,
+	subtitle,
+	accent,
+	status,
+	dashed,
+	rows,
+	selected,
+}: NodeShellProps) {
+	const hasBody = Boolean(subtitle) || (rows?.length ?? 0) > 0;
 	return (
 		<div
 			className={cn(
-				"rounded-md border bg-zinc-900 px-3 py-2 min-w-[180px] max-w-[220px] transition-colors hover:border-zinc-600",
+				"w-[260px] rounded-xl border bg-[#151518] shadow-lg shadow-black/30 transition-colors hover:border-zinc-500",
 				accent,
-				status === "running" &&
-					"border-blue-400 shadow-[0_0_0_1px_#60a5fa,0_0_20px_rgba(96,165,250,0.3)] animate-pulse",
-				status === "completed" && "border-green-400/80 bg-green-500/10",
-				status === "failed" && "border-red-400 bg-red-500/10",
+				dashed && "border-dashed",
+				// ATOMIC's single-accent selection: a 2px inset blue outline.
+				selected && "outline outline-2 -outline-offset-2 outline-blue-400",
+				status === "running" && "border-blue-400 shadow-[0_0_0_1px_#60a5fa,0_0_24px_rgba(96,165,250,0.25)]",
+				status === "completed" && "border-emerald-500/60",
+				status === "failed" && "border-red-500/70",
 				status === "skipped" && "opacity-50",
 			)}
 		>
-			<div className="flex items-center gap-2">
-				<Icon className={cn("w-3.5 h-3.5 shrink-0", iconClass)} />
-				<span className="text-xs font-medium text-zinc-100 truncate">{title}</span>
-				{status && (
-					<span
-						className={cn(
-							"ml-auto h-2 w-2 shrink-0 rounded-full",
-							status === "running" && "bg-blue-400",
-							status === "completed" && "bg-green-400",
-							status === "failed" && "bg-red-400",
-							status === "skipped" && "bg-zinc-500",
-							status === "pending" && "bg-zinc-400",
-						)}
-						title={status}
-					/>
+			<div className={cn("flex items-center gap-2 px-3 py-2", hasBody && "border-b border-zinc-800/70")}>
+				<span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", iconTile)}>
+					<Icon className={cn("h-3.5 w-3.5", iconClass)} />
+				</span>
+				<span className="truncate text-xs font-semibold text-zinc-100">{title}</span>
+				{status === "running" && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-blue-400" />}
+				{status === "completed" && <CheckCircle2 className="ml-auto h-3 w-3 shrink-0 text-emerald-400" />}
+				{status === "failed" && <AlertTriangle className="ml-auto h-3 w-3 shrink-0 text-red-400" />}
+				{(status === "skipped" || status === "pending") && (
+					<span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-zinc-500" title={status} />
 				)}
 			</div>
-			{subtitle && <div className="text-[10px] text-zinc-500 mt-1 truncate font-mono">{subtitle}</div>}
+			{hasBody && (
+				<div className="space-y-1 px-3 py-2">
+					{subtitle && <div className="truncate font-mono text-[10px] text-zinc-500">{subtitle}</div>}
+					{rows?.map((row) => (
+						<div key={row.label} className="flex items-center gap-2">
+							<span className="w-20 shrink-0 truncate text-[10px] text-zinc-400">{row.label}</span>
+							<span className="min-w-0 flex-1 truncate rounded-md bg-zinc-800/70 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+								{row.kind === "fx" && <span className="mr-1 text-blue-300">ƒx</span>}
+								{row.kind === "obj" && <span className="mr-1 text-violet-300">{"{}"}</span>}
+								{row.value}
+							</span>
+						</div>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }
 
+const PORT_CLASS =
+	"w-2.5! h-2.5! rounded-full! bg-zinc-950! border-2! border-zinc-500! transition-colors hover:border-blue-400!";
+
 function withHandles(content: React.ReactNode) {
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-2! h-2! border-0!" />
+			<Handle type="target" position={Position.Top} className={PORT_CLASS} />
 			{content}
-			<Handle type="source" position={Position.Bottom} className="bg-zinc-600! w-2! h-2! border-0!" />
+			<Handle type="source" position={Position.Bottom} className={PORT_CLASS} />
 		</>
 	);
 }
@@ -1166,13 +1258,15 @@ function asData(props: NodeProps): LiveDagNodeData {
 function TriggerNode(props: NodeProps) {
 	const data = asData(props);
 	return withHandles(
-		<div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 min-w-[120px] text-center">
+		<div className="min-w-[130px] rounded-full border border-emerald-500/50 bg-[#151518] px-4 py-1.5 text-center shadow-lg shadow-emerald-500/10">
 			<div className="flex items-center justify-center gap-1.5">
-				<Play className="w-3 h-3 text-emerald-400" />
-				<span className="text-[11px] font-semibold text-emerald-200 truncate">{data.label}</span>
+				<span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20">
+					<Play className="h-2.5 w-2.5 text-emerald-400" />
+				</span>
+				<span className="truncate text-[11px] font-semibold text-emerald-200">{data.label}</span>
 			</div>
 			{data.sublabel && (
-				<div className="text-[10px] text-emerald-400/70 mt-0.5 truncate font-mono">{data.sublabel}</div>
+				<div className="mt-0.5 truncate font-mono text-[10px] text-emerald-400/70">{data.sublabel}</div>
 			)}
 		</div>,
 	);
@@ -1183,9 +1277,9 @@ function EndNode(props: NodeProps) {
 	return (
 		<>
 			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-2! h-2! border-0!" />
-			<div className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 min-w-[80px] text-center">
+			<div className="min-w-[90px] rounded-full border border-zinc-700 bg-[#151518] px-4 py-1.5 text-center shadow-lg shadow-black/30">
 				<div className="flex items-center justify-center gap-1.5">
-					<CheckCircle2 className="w-3 h-3 text-zinc-400" />
+					<CheckCircle2 className="h-3 w-3 text-zinc-400" />
 					<span className="text-[11px] font-semibold text-zinc-300">{data.label}</span>
 				</div>
 			</div>
@@ -1198,11 +1292,14 @@ function RegularNode(props: NodeProps) {
 	return withHandles(
 		<NodeShell
 			icon={Wrench}
-			iconClass="text-zinc-400"
+			iconClass="text-zinc-300"
+			iconTile="bg-zinc-700/60"
 			title={data.label}
 			subtitle={data.sublabel}
-			accent="border-zinc-700"
+			accent="border-zinc-800"
 			status={data.liveStatus}
+			selected={props.selected}
+			rows={configRows(data.meta?.raw)}
 		/>,
 	);
 }
@@ -1222,11 +1319,14 @@ function SubworkflowNode(props: NodeProps) {
 	const inner = (
 		<NodeShell
 			icon={ArrowRightFromLine}
-			iconClass="text-indigo-400"
+			iconClass="text-indigo-300"
+			iconTile="bg-indigo-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-indigo-500/40"
 			status={data.liveStatus}
+			selected={props.selected}
+			rows={configRows(data.meta?.raw)}
 		/>
 	);
 	return withHandles(
@@ -1246,10 +1346,13 @@ function WaitNode(props: NodeProps) {
 		<NodeShell
 			icon={Clock}
 			iconClass="text-amber-300"
+			iconTile="bg-amber-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-amber-500/40"
 			status={data.liveStatus}
+			selected={props.selected}
+			rows={configRows(data.meta?.raw)}
 		/>,
 	);
 }
@@ -1260,10 +1363,13 @@ function DecisionNode(props: NodeProps) {
 		<NodeShell
 			icon={GitBranch}
 			iconClass="text-yellow-300"
+			iconTile="bg-yellow-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-yellow-500/50"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1274,10 +1380,13 @@ function SwitchNode(props: NodeProps) {
 		<NodeShell
 			icon={Split}
 			iconClass="text-orange-300"
+			iconTile="bg-orange-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-orange-500/50"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1288,10 +1397,13 @@ function IterationNode(props: NodeProps) {
 		<NodeShell
 			icon={Repeat}
 			iconClass="text-violet-300"
+			iconTile="bg-violet-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-violet-500/50"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1302,10 +1414,13 @@ function LoopNode(props: NodeProps) {
 		<NodeShell
 			icon={RotateCw}
 			iconClass="text-violet-300"
+			iconTile="bg-violet-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-violet-500/50"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1316,10 +1431,13 @@ function TryNode(props: NodeProps) {
 		<NodeShell
 			icon={Shield}
 			iconClass="text-red-300"
+			iconTile="bg-red-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-red-500/40"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1330,10 +1448,13 @@ function CatchNode(props: NodeProps) {
 		<NodeShell
 			icon={ShieldX}
 			iconClass="text-red-400"
+			iconTile="bg-red-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-red-500/60"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1344,10 +1465,13 @@ function FinallyNode(props: NodeProps) {
 		<NodeShell
 			icon={Shield}
 			iconClass="text-orange-300"
+			iconTile="bg-orange-500/15"
 			title={data.label}
 			subtitle={data.sublabel}
 			accent="border-orange-500/40"
 			status={data.liveStatus}
+			selected={props.selected}
+			dashed
 		/>,
 	);
 }
@@ -1356,7 +1480,7 @@ function MergeNode(_props: NodeProps) {
 	return (
 		<>
 			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-1.5! h-1.5! border-0!" />
-			<div className="w-3 h-3 rounded-full bg-zinc-600 border border-zinc-500" />
+			<div className="h-3 w-3 rounded-full border-2 border-zinc-500 bg-zinc-950" />
 			<Handle type="source" position={Position.Bottom} className="bg-zinc-600! w-1.5! h-1.5! border-0!" />
 		</>
 	);

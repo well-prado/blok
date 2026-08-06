@@ -22,7 +22,9 @@ function WorkflowDetailPage() {
 	const { name } = Route.useParams();
 	const [statusFilter, setStatusFilter] = useState("");
 	const [page, setPage] = useState(1);
-	const [activeTab, setActiveTab] = useState<"runs" | "graph" | "definition" | "metrics">("runs");
+	// Canvas-first: the Graph IS the workflow's main view (BuildShip-style);
+	// runs/definition/metrics are the supporting tabs.
+	const [activeTab, setActiveTab] = useState<"runs" | "graph" | "definition" | "metrics">("graph");
 	const limit = 25;
 
 	const { data: detail, isLoading: detailLoading } = useWorkflowDetail(name);
@@ -66,8 +68,8 @@ function WorkflowDetailPage() {
 	}
 
 	const tabs = [
+		{ key: "graph" as const, label: "Canvas" },
 		{ key: "runs" as const, label: "Runs" },
-		{ key: "graph" as const, label: "Graph" },
 		{ key: "definition" as const, label: "Definition" },
 		{ key: "metrics" as const, label: "Metrics" },
 	];
