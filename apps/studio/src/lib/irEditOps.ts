@@ -234,6 +234,32 @@ export function insertStep<T>(ir: T, target: InsertTarget, index: number, newSte
  * valid (possibly empty) array — never `undefined`. Throws if the id is not
  * found. Returns a new IR; input untouched.
  */
+/**
+ * Insert `newStep` directly BEFORE the step with `targetStepId`, wherever it
+ * lives (top level or any nested arm). This powers edge-splice insertion —
+ * an edge's target step pins the position without the caller needing to
+ * reconstruct an InsertTarget for the owning arm. Same duplicate-id guard
+ * as insertStep. Returns a new IR; input untouched.
+ */
+export function insertStepBefore<T>(ir: T, targetStepId: string, newStep: Step): T {
+	const draft = structuredClone(ir);
+	const id = newStep.id;
+	if (typeof id !== "string" || id.length === 0) {
+		throw new Error("[irEditOps] insertStepBefore: newStep.id must be a non-empty string");
+	}
+	if (collectIds(draft).has(id)) {
+		throw new Error(
+			`[irEditOps] cannot insert step "${id}": a step with this id already exists in the workflow — ids must be globally unique across all arms (the runner throws at load time). Use nextId() to mint a fresh one.`,
+		);
+	}
+	const loc = findStepLocation(draft, targetStepId);
+	if (!loc) {
+		throw new Error(`[irEditOps] insertStepBefore: no step with id "${targetStepId}"`);
+	}
+	loc.parentArray.splice(loc.index, 0, newStep);
+	return draft;
+}
+
 export function deleteStep<T>(ir: T, id: string): T {
 	const draft = structuredClone(ir);
 	const loc = findStepLocation(draft, id);

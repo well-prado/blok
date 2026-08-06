@@ -5,6 +5,7 @@ import {
 	deleteStep,
 	findStepLocation,
 	insertStep,
+	insertStepBefore,
 	nextId,
 	renameStep,
 	reorderStep,
@@ -223,6 +224,43 @@ describe("insertStep — lands in the correct arm, lossless round-trip", () => {
 		expect(() =>
 			insertStep(fixture(), { topLevel: true }, 0, { id: "unique-new", as: "top-a", use: "n" }),
 		).not.toThrow();
+	});
+});
+
+describe("insertStepBefore — edge-splice insertion at any depth", () => {
+	const fixture = () => ({
+		name: "W",
+		version: "1.0.0",
+		trigger: { http: { method: "ANY" } },
+		steps: [
+			{ id: "first", use: "n", inputs: {} },
+			{
+				id: "br",
+				branch: { when: "true", then: [{ id: "inner", use: "n", inputs: {} }] },
+			},
+			{ id: "last", use: "n", inputs: {} },
+		],
+	});
+
+	it("inserts before a top-level step", () => {
+		const after = insertStepBefore(fixture(), "last", { id: "mid", use: "n", inputs: {} }) as ReturnType<
+			typeof fixture
+		>;
+		expect(after.steps.map((s) => s.id)).toEqual(["first", "br", "mid", "last"]);
+	});
+
+	it("inserts before a step nested inside an arm", () => {
+		const after = insertStepBefore(fixture(), "inner", { id: "pre", use: "n", inputs: {} }) as ReturnType<
+			typeof fixture
+		>;
+		const br = findStepLocation(after, "br")?.step as { branch: { then: Array<{ id: string }> } };
+		expect(br.branch.then.map((s) => s.id)).toEqual(["pre", "inner"]);
+		expect(after.steps.map((s) => s.id)).toEqual(["first", "br", "last"]);
+	});
+
+	it("rejects duplicate ids and unknown targets", () => {
+		expect(() => insertStepBefore(fixture(), "last", { id: "first", use: "n" })).toThrow(/already exists/);
+		expect(() => insertStepBefore(fixture(), "nope", { id: "x", use: "n" })).toThrow(/no step with id/);
 	});
 });
 

@@ -2,6 +2,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
+import { SpliceContext, SpliceEdge } from "@/components/trace/SpliceEdge";
 import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
 import { TriggerEditor } from "@/components/trace/TriggerEditor";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
@@ -12,7 +13,7 @@ import {
 	useWorkflowStudio,
 } from "@/hooks/useWorkflows";
 import { ApiError, type NodeCatalogEntry, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
-import { deleteStep, findStepLocation, insertStep, nextId, renameStep } from "@/lib/irEditOps";
+import { deleteStep, findStepLocation, insertStep, insertStepBefore, nextId, renameStep } from "@/lib/irEditOps";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -104,6 +105,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
+	const [spliceBeforeStepId, setSpliceBeforeStepId] = useState<string | null>(null);
 	const [fullscreen, setFullscreen] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(true);
 	const catalog = useNodeCatalog(editingInputsStepId !== null);
@@ -234,6 +236,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		if (autoOpenBrowser) setWorkspaceMode("split");
 	}, [autoOpenBrowser]);
 
+	const edgeTypes = useMemo(() => ({ splice: SpliceEdge }), []);
 	const nodeTypes = useMemo(
 		() => ({
 			trigger: TriggerNode,
@@ -399,20 +402,35 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	// end. Arm-targeted insertion arrives with edge-click insertion.
 	const insertNode = (entry: NodeCatalogEntry) => {
 		const anchor = selectedCanvasStepId;
+		const before = spliceBeforeStepId;
 		editDefinition.mutate(
 			(definition) => {
+				const base = entry.name.includes("/") ? (entry.name.split("/").pop() as string) : entry.name;
+				const newStep = { id: nextId(definition, base), use: entry.ref, inputs: {} };
+				// Edge splice pins the position to "before the edge's target",
+				// wherever that step lives (top level or a nested arm).
+				if (before) return insertStepBefore(definition, before, newStep);
 				const steps = Array.isArray(definition.steps) ? (definition.steps as unknown[]) : [];
 				const loc = anchor ? findStepLocation(definition, anchor) : null;
 				const index = loc && loc.parentArray === steps ? loc.index + 1 : steps.length;
-				const base = entry.name.includes("/") ? (entry.name.split("/").pop() as string) : entry.name;
-				return insertStep(definition, { topLevel: true }, index, {
-					id: nextId(definition, base),
-					use: entry.ref,
-					inputs: {},
-				});
+				return insertStep(definition, { topLevel: true }, index, newStep);
 			},
-			{ onSuccess: () => setPaletteOpen(false) },
+			{
+				onSuccess: () => {
+					setPaletteOpen(false);
+					setSpliceBeforeStepId(null);
+				},
+			},
 		);
+	};
+	// Edge "+" (atomic-canvas splice): open the library targeting the edge.
+	const openSplice = (targetStepId: string) => {
+		editDefinition.reset();
+		setRenamingStepId(null);
+		setEditingInputsStepId(null);
+		setTriggerEditorOpen(false);
+		setSpliceBeforeStepId(targetStepId);
+		setPaletteOpen(true);
 	};
 	const removeStep = (stepId: string) => {
 		editDefinition.mutate((definition) => deleteStep(definition, stepId), {
@@ -688,11 +706,20 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			</div>
 			<NodeLibraryDialog
 				open={paletteOpen && !runActive}
-				insertHint={selectedCanvasStepId ? `Inserts after ${selectedCanvasStepId}` : "Appends at the end"}
+				insertHint={
+					spliceBeforeStepId
+						? `Inserts before ${spliceBeforeStepId}`
+						: selectedCanvasStepId
+							? `Inserts after ${selectedCanvasStepId}`
+							: "Appends at the end"
+				}
 				pending={editDefinition.isPending}
 				error={editDefinition.error?.message}
 				onAdd={insertNode}
-				onClose={() => setPaletteOpen(false)}
+				onClose={() => {
+					setPaletteOpen(false);
+					setSpliceBeforeStepId(null);
+				}}
 			/>
 			{renamingStepId && (
 				<form
@@ -838,32 +865,35 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					className={cn("flex min-w-0", fullscreen ? "h-full" : "h-[600px]", workspaceMode === "browser" && "hidden")}
 				>
 					<div ref={canvasRef} className="h-full min-w-0 flex-1">
-						<ReactFlow
-							nodes={renderedNodes}
-							edges={renderedEdges}
-							onInit={setFlowInstance}
-							onNodesChange={onNodesChange}
-							onNodeClick={(_event, node) => selectCanvasNode(node)}
-							onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
-							onNodeDragStop={(_event, node) => {
-								if (editing && flowNodeStepId(node)) setDirty(true);
-							}}
-							nodeTypes={nodeTypes}
-							fitView
-							fitViewOptions={{ padding: 0.25 }}
-							proOptions={{ hideAttribution: true }}
-							minZoom={0.1}
-							maxZoom={2}
-							nodesDraggable={editing && writable}
-							nodesConnectable={false}
-							elementsSelectable={true}
-						>
-							<Background color="#27272a" gap={16} size={1} />
-							<Controls
-								showInteractive={false}
-								className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
-							/>
-						</ReactFlow>
+						<SpliceContext.Provider value={definitionEditable && !runActive ? openSplice : null}>
+							<ReactFlow
+								nodes={renderedNodes}
+								edges={renderedEdges}
+								onInit={setFlowInstance}
+								onNodesChange={onNodesChange}
+								onNodeClick={(_event, node) => selectCanvasNode(node)}
+								onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
+								onNodeDragStop={(_event, node) => {
+									if (editing && flowNodeStepId(node)) setDirty(true);
+								}}
+								nodeTypes={nodeTypes}
+								edgeTypes={edgeTypes}
+								fitView
+								fitViewOptions={{ padding: 0.25 }}
+								proOptions={{ hideAttribution: true }}
+								minZoom={0.1}
+								maxZoom={2}
+								nodesDraggable={editing && writable}
+								nodesConnectable={false}
+								elementsSelectable={true}
+							>
+								<Background color="#27272a" gap={16} size={1} />
+								<Controls
+									showInteractive={false}
+									className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+								/>
+							</ReactFlow>
+						</SpliceContext.Provider>
 					</div>
 					{editingInputsStepId && !runActive && catalog.data && (
 						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
@@ -1124,14 +1154,21 @@ export function layoutDag(
 		};
 	});
 
-	const flowEdges: Edge[] = dag.edges.map((e) => toFlowEdge(e));
+	const stepIdByNodeId = new Map(dag.nodes.map((n) => [n.id, n.data.meta?.stepId]));
+	const flowEdges: Edge[] = dag.edges.map((e) => toFlowEdge(e, stepIdByNodeId));
 
 	return { nodes: flowNodes, edges: flowEdges };
 }
 
-function toFlowEdge(edge: DagEdge): Edge {
+function toFlowEdge(edge: DagEdge, stepIdByNodeId?: Map<string, unknown>): Edge {
 	const dashed = edge.style === "dashed" || edge.style === "dotted";
+	// Splice "+" only where insert-before is well-defined: a forward,
+	// unlabeled edge whose target is a real step (labels mark arm entries
+	// rendered by the default edge; back-edges are loop returns).
+	const targetStepId = stepIdByNodeId?.get(edge.target);
+	const splicable = !edge.backEdge && !edge.label && typeof targetStepId === "string";
 	return {
+		data: splicable ? { spliceTargetStepId: targetStepId } : undefined,
 		id: edge.id,
 		source: edge.source,
 		target: edge.target,
@@ -1151,7 +1188,7 @@ function toFlowEdge(edge: DagEdge): Edge {
 			height: 14,
 			color: edge.backEdge ? "#a78bfa" : "#52525b",
 		},
-		type: edge.backEdge ? "default" : "smoothstep",
+		type: edge.backEdge ? "default" : splicable ? "splice" : "smoothstep",
 	};
 }
 
