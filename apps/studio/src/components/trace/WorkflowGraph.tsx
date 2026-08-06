@@ -1,5 +1,6 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
+import { BranchEditor, type RawBranch } from "@/components/trace/BranchEditor";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
 import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
 import { SpliceContext, SpliceEdge } from "@/components/trace/SpliceEdge";
@@ -24,8 +25,9 @@ import {
 	toggleStepSkip,
 	toggleStepStop,
 } from "@/lib/irEditOps";
+import { upstreamSources } from "@/lib/upstreamSources";
 import { cn } from "@/lib/utils";
-import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
+import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag, classifyStep } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
 import type { BrowserArtifact, NodeRun, NodeRunStatus, WorkflowStudioConfig } from "@/types";
 import { Link } from "@tanstack/react-router";
@@ -116,6 +118,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
+	const [editingBranchStepId, setEditingBranchStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
 	const [spliceBeforeStepId, setSpliceBeforeStepId] = useState<string | null>(null);
 	// Drag-from-socket (ATOMIC/BuildShip onConnectEnd pattern): dropping a
@@ -128,7 +131,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	} | null>(null);
 	const [fullscreen, setFullscreen] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(true);
-	const catalog = useNodeCatalog(editingInputsStepId !== null);
+	const catalog = useNodeCatalog(editingInputsStepId !== null || editingBranchStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -364,17 +367,18 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [runStatus, sendControl]);
-	// ESC closes whichever right drawer is open (trigger or step inputs).
+	// ESC closes whichever right drawer is open (trigger, step inputs, or branch condition).
 	useEffect(() => {
-		if (!triggerEditorOpen && editingInputsStepId === null) return;
+		if (!triggerEditorOpen && editingInputsStepId === null && editingBranchStepId === null) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
 			setTriggerEditorOpen(false);
 			setEditingInputsStepId(null);
+			setEditingBranchStepId(null);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [triggerEditorOpen, editingInputsStepId]);
+	}, [triggerEditorOpen, editingInputsStepId, editingBranchStepId]);
 	const toggleBreakpointId = (stepId: string) => {
 		setBreakpoints((current) => {
 			const next = new Set(current);
@@ -395,6 +399,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		editDefinition.reset();
 		setPaletteOpen(false);
 		setEditingInputsStepId(null);
+		setEditingBranchStepId(null);
 		setRenamingStepId(stepId);
 		setRenameValue(stepId);
 	};
@@ -403,7 +408,16 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		editDefinition.reset();
 		setPaletteOpen(false);
 		setRenamingStepId(null);
+		setEditingBranchStepId(null);
 		setEditingInputsStepId(stepId);
+	};
+	// Phase 5.3 — open the structural branch condition editor for a `branch` step.
+	const startEditBranch = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		setRenamingStepId(null);
+		setEditingInputsStepId(null);
+		setEditingBranchStepId(stepId);
 	};
 	const saveInputs = (stepId: string, inputs: Record<string, unknown>) => {
 		editDefinition.mutate(
@@ -415,6 +429,18 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				return draft;
 			},
 			{ onSuccess: () => setEditingInputsStepId(null) },
+		);
+	};
+	const saveBranch = (stepId: string, branch: RawBranch) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				loc.step.branch = branch;
+				return draft;
+			},
+			{ onSuccess: () => setEditingBranchStepId(null) },
 		);
 	};
 	// Phase 5.2 — insert the picked catalog node as a fresh step. Lands after
@@ -464,6 +490,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		editDefinition.reset();
 		setRenamingStepId(null);
 		setEditingInputsStepId(null);
+		setEditingBranchStepId(null);
 		setTriggerEditorOpen(false);
 		setSpliceBeforeStepId(targetStepId);
 		setPaletteOpen(true);
@@ -517,8 +544,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		}
 		const stepId = flowNodeStepId(node);
 		if (!stepId) return;
-		// ION/ATOMIC pattern: clicking a step opens its config drawer.
-		if (definitionEditable && !runActive) startEditInputs(stepId);
+		// ION/ATOMIC pattern: clicking a step opens its config drawer. A `branch`
+		// step has no `use` (no catalog schema), so it gets the structural
+		// condition editor instead of the schema-driven inputs form.
+		if (definitionEditable && !runActive) {
+			const rawStep = findStepLocation(definition, stepId)?.step;
+			if (classifyStep(rawStep) === "branch") startEditBranch(stepId);
+			else startEditInputs(stepId);
+		}
 		const nodeRun = [...(runQuery.data?.nodes ?? [])]
 			.sort((a, b) => b.startedAt - a.startedAt)
 			.find((candidate) => candidate.nodeName === stepId);
@@ -942,6 +975,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 										editDefinition.reset();
 										setRenamingStepId(null);
 										setEditingInputsStepId(null);
+										setEditingBranchStepId(null);
 										setTriggerEditorOpen(false);
 										setSpliceBeforeStepId(null);
 										setSocketDrop({ fromStepId: result.fromStepId, position });
@@ -985,6 +1019,20 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								lastRunNodes={runQuery.data?.nodes}
 								onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
 								onClose={() => setEditingInputsStepId(null)}
+							/>
+						</div>
+					)}
+					{editingBranchStepId && !runActive && catalog.data && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<BranchEditor
+								key={editingBranchStepId}
+								stepId={editingBranchStepId}
+								branch={(findStepLocation(definition, editingBranchStepId)?.step.branch as RawBranch | undefined) ?? {}}
+								sources={upstreamSources(definition, editingBranchStepId, catalog.data?.nodes, runQuery.data?.nodes)}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(branch) => saveBranch(editingBranchStepId, branch)}
+								onClose={() => setEditingBranchStepId(null)}
 							/>
 						</div>
 					)}
