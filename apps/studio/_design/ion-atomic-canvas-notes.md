@@ -49,3 +49,25 @@ immediate outgoing edges dash.
 2. Zoom-percentage controls + Recenter-on-trigger.
 3. Hover tooltip on config rows showing full values.
 4. Onboarding micro-tutorial panel.
+
+## BuildShip deploy-bar reference (buildship.com/n8n, captured 2026-08-06)
+
+The embedded editor screenshot on the page shows their canvas chrome:
+
+- Top bar, left: segmented mode tabs `Build | Connect | Preview` — active segment is a
+  lighter pill, inactive segments dim text on the dark bar.
+- Top bar, center: the workflow title, small and quiet.
+- Top bar, right cluster (in order): `▷ Test` as a dark ghost button with a subtle
+  border; version-history and share icon buttons; then `🚀 Ship` — the ONLY filled
+  accent control on the whole bar. Compact pill (rounded-md, ~24px tall), accent fill
+  (their indigo; ours should stay blok-green for brand), rocket icon + label.
+- Ship = deploy. Test = run without deploying. The visual hierarchy IS the message:
+  running is routine (ghost), shipping is the commitment (filled accent).
+- Right drawer "Test" panel: `Form | JSON` toggle for the input, a filled accent
+  `▷ Test Flow` button, then a `Result` section with the JSON output inline. Escape
+  hatches (copy, expand) as small icons on the result block.
+
+Translation for BLOK Studio: keep the toolbar ghost-dark (current zinc idiom), make
+Deploy the single filled blok-green pill with a rocket icon, demote Run to a ghost
+button beside it, and surface the deploy guard state ON the Deploy button (amber dot =
+undeployed changes, red + disabled = validation failing, spinner while deploying).

@@ -67,6 +67,7 @@ import {
 	Play,
 	Plus,
 	Repeat,
+	Rocket,
 	RotateCcw,
 	RotateCw,
 	Save,
@@ -143,9 +144,16 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const catalog = useNodeCatalog(editingInputsStepId !== null || editingBranchStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
+	// Deploy draft (feat/studio-deploy-ux): render the accumulated draft when
+	// one exists, falling back to the deployed `definition` prop otherwise.
+	// The draft is the RAW definition (same pre-normalization shape the
+	// runner returns from both `GET .../workflows/:name` and
+	// `GET .../workflows/:name/definition` — no client-side normalization
+	// needed, see useEditWorkflowDefinition).
+	const workingDefinition = editDefinition.draft ?? definition;
 	const committed = useMemo(
-		() => layoutDag(definition, studioQuery.data?.config),
-		[definition, studioQuery.data?.config],
+		() => layoutDag(workingDefinition, studioQuery.data?.config),
+		[workingDefinition, studioQuery.data?.config],
 	);
 	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(committed.nodes);
 	const [editing, setEditing] = useState(false);
@@ -310,7 +318,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		saveStudio.reset();
 	};
 	const autoLayout = () => {
-		setFlowNodes(layoutDag(definition, studioQuery.data?.config, { ignorePositions: true }).nodes);
+		setFlowNodes(layoutDag(workingDefinition, studioQuery.data?.config, { ignorePositions: true }).nodes);
 		setDirty(true);
 	};
 	const save = () => {
@@ -572,7 +580,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		// step has no `use` (no catalog schema), so it gets the structural
 		// condition editor instead of the schema-driven inputs form.
 		if (definitionEditable && !runActive) {
-			const rawStep = findStepLocation(definition, stepId)?.step;
+			const rawStep = findStepLocation(workingDefinition, stepId)?.step;
 			if (classifyStep(rawStep) === "branch") startEditBranch(stepId);
 			else startEditInputs(stepId);
 		}
@@ -769,6 +777,56 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								</button>
 							</>
 						)}
+						{/* Deploy draft guard (feat/studio-deploy-ux, ION/ATOMIC/BuildShip pattern):
+						    structural edits accumulate in a local draft; Deploy is the only thing
+						    that writes, and it's disabled until the background dry-run validation
+						    says the workflow is valid — see useEditWorkflowDefinition. */}
+						{editDefinition.hasDraft ? (
+							<div className="flex items-center gap-1.5">
+								<button
+									type="button"
+									onClick={editDefinition.discard}
+									disabled={editDefinition.deploying}
+									title="Discard undeployed changes and go back to the deployed definition"
+									className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									<RotateCcw className="h-3.5 w-3.5" /> Discard
+								</button>
+								<button
+									type="button"
+									onClick={() => editDefinition.deploy()}
+									disabled={editDefinition.deploying || editDefinition.validation.status !== "valid"}
+									title={
+										editDefinition.validation.status === "invalid" || editDefinition.validation.status === "stale"
+											? editDefinition.validation.message
+											: editDefinition.validation.status === "pending"
+												? "Validating…"
+												: "Deploy your changes to the running workflow"
+									}
+									className="inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									{editDefinition.deploying || editDefinition.validation.status === "pending" ? (
+										<Loader2 className="h-3.5 w-3.5 animate-spin" />
+									) : (
+										<Rocket className="h-3.5 w-3.5" />
+									)}
+									Deploy
+									{editDefinition.validation.status === "valid" && !editDefinition.deploying && (
+										<span
+											aria-hidden="true"
+											title="Undeployed changes"
+											className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+										/>
+									)}
+								</button>
+							</div>
+						) : (
+							editDefinition.justDeployed && (
+								<span className="inline-flex items-center gap-1 text-xs text-blok-green-300">
+									<CheckCircle2 className="h-3.5 w-3.5" /> Deployed
+								</span>
+							)
+						)}
 						<div className="flex overflow-hidden rounded-md border border-blok-green-500/50">
 							<select
 								aria-label="Run mode"
@@ -785,6 +843,11 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								type="button"
 								onClick={run}
 								disabled={startingRun || runActive}
+								title={
+									editDefinition.hasDraft
+										? "Runs the last deployed version — Deploy to include your changes"
+										: undefined
+								}
 								className="inline-flex items-center gap-1.5 bg-blok-green-500 px-3 py-1.5 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
 							>
 								{startingRun || runActive ? (
@@ -806,6 +869,26 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					</div>
 				)}
 			</div>
+			{editDefinition.hasDraft &&
+				(editDefinition.validation.status === "invalid" || editDefinition.validation.status === "stale") && (
+					<div className="flex items-center gap-2 border-b border-zinc-800 bg-red-500/5 px-3 py-1.5 text-xs text-red-300">
+						<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+						<span className="min-w-0 flex-1 truncate" title={editDefinition.validation.message}>
+							{editDefinition.validation.status === "stale"
+								? "Definition changed on disk since this draft was loaded. Discard to reload before deploying."
+								: editDefinition.validation.message}
+						</span>
+						{editDefinition.validation.status === "stale" && (
+							<button
+								type="button"
+								onClick={editDefinition.discard}
+								className="shrink-0 rounded-md border border-red-400/40 px-2 py-0.5 text-[10px] font-medium text-red-200 hover:bg-red-500/15"
+							>
+								Discard &amp; reload
+							</button>
+						)}
+					</div>
+				)}
 			<NodeLibraryDialog
 				open={paletteOpen && !runActive}
 				insertHint={
@@ -1031,12 +1114,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								stepId={editingInputsStepId}
 								schema={catalog.data.nodes.find((entry) => entry.ref === stepUses[editingInputsStepId])?.inputSchema}
 								inputs={
-									((findStepLocation(definition, editingInputsStepId)?.step.inputs ?? {}) as Record<string, unknown>) ??
-									{}
+									((findStepLocation(workingDefinition, editingInputsStepId)?.step.inputs ?? {}) as Record<
+										string,
+										unknown
+									>) ?? {}
 								}
 								pending={editDefinition.isPending}
 								error={editDefinition.error?.message}
-								definition={definition}
+								definition={workingDefinition}
 								catalog={catalog.data?.nodes}
 								lastRunNodes={runQuery.data?.nodes}
 								onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
@@ -1049,8 +1134,15 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							<BranchEditor
 								key={editingBranchStepId}
 								stepId={editingBranchStepId}
-								branch={(findStepLocation(definition, editingBranchStepId)?.step.branch as RawBranch | undefined) ?? {}}
-								sources={upstreamSources(definition, editingBranchStepId, catalog.data?.nodes, runQuery.data?.nodes)}
+								branch={
+									(findStepLocation(workingDefinition, editingBranchStepId)?.step.branch as RawBranch | undefined) ?? {}
+								}
+								sources={upstreamSources(
+									workingDefinition,
+									editingBranchStepId,
+									catalog.data?.nodes,
+									runQuery.data?.nodes,
+								)}
 								pending={editDefinition.isPending}
 								error={editDefinition.error?.message}
 								onSave={(branch) => saveBranch(editingBranchStepId, branch)}
@@ -1061,7 +1153,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					{triggerEditorOpen && !runActive && (
 						<TriggerEditor
 							trigger={
-								((definition as { trigger?: Record<string, unknown> })?.trigger ?? {}) as Record<string, unknown>
+								((workingDefinition as { trigger?: Record<string, unknown> })?.trigger ?? {}) as Record<string, unknown>
 							}
 							pending={editDefinition.isPending}
 							error={editDefinition.error?.message}

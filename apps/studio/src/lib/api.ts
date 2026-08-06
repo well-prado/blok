@@ -121,6 +121,45 @@ export function saveWorkflowDefinition(
 }
 
 /**
+ * feat/studio-deploy-ux — the Deploy guard. Same route + body as
+ * `saveWorkflowDefinition`, plus `dryRun: true`: the runner validates the
+ * definition (normalizer — duplicate ids, malformed branch/forEach/etc.)
+ * WITHOUT writing to disk. 200 `{valid:true, etag}` on success; a failing
+ * dry run throws `ApiError` via `fetchJson` — 400 (`code: "invalid_definition"`)
+ * or 409 (`code: "stale_etag"`, someone else changed the file) — callers
+ * branch on `error.status`, mirroring the existing `saveStudio` 409 check.
+ */
+export interface DryRunValidationResponse {
+	valid: true;
+	etag: string;
+}
+
+export async function dryRunWorkflowDefinition(
+	name: string,
+	definition: Record<string, unknown>,
+	baseEtag: string,
+): Promise<DryRunValidationResponse> {
+	const response = await fetchJson<DryRunValidationResponse>(`/workflows/${encodeURIComponent(name)}/definition`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ definition, baseEtag, dryRun: true }),
+	});
+	// Version-skew guard: a runner that predates dryRun IGNORES the flag and
+	// performs a REAL save, then answers with the save result — which has no
+	// `valid` field. Treating that as "valid" would keep silently deploying
+	// every draft edit ~500ms after it's made. Surface it loudly instead.
+	if (response.valid !== true) {
+		throw new DryRunUnsupportedError(
+			"This runner is too old for draft validation (its response has no `valid` field) — the validation request was treated as a REAL save. Update the runner; canvas edits may have been deployed directly.",
+		);
+	}
+	return response;
+}
+
+/** The connected runner predates dryRun support — see dryRunWorkflowDefinition. */
+export class DryRunUnsupportedError extends Error {}
+
+/**
  * #103 follow-up — operator escape hatch for the first-record-wins
  * semantic. Deleting the recorded sample lets the next successful run
  * re-record (assuming `recordSample: true` is still set on the trigger).
