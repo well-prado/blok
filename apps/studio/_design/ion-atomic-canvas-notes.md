@@ -35,13 +35,14 @@ NodeHeader (step-name small + node-title large, colored; right icon strip: Debug
 
 Selected-node blue inset outline; hollow ports; dashed control-flow cards; config rows on cards
 (BuildShip flavor of "schema-as-card-body"); edge arrowheads; canvas-first default tab.
+Edge midpoint "+" → palette splice (2026-08-06). Drag-from-socket → palette with drop-position
+node creation via `onConnectEnd` (2026-08-06): source sockets only (`isConnectableStart={false}`
+on targets), drop pins `step.ui.{x,y}` at the cursor, trigger-origin drops insert at the start.
 
 ## Next candidates (ranked)
 
-1. Edge midpoint "+" → palette splice (also solves 5.2's edge-click contextual insertion).
-2. Drag-from-socket → palette with drop-position node creation.
-3. Skip / Stop-after toggles on the node header with dashed downstream edges.
-4. Drawer-open camera choreography for the inputs editor (setCenter + viewport restore).
-5. Zoom-percentage controls + Recenter-on-trigger.
-6. Hover tooltip on config rows showing full values.
-7. Onboarding micro-tutorial panel.
+1. Skip / Stop-after toggles on the node header with dashed downstream edges.
+2. Drawer-open camera choreography for the inputs editor (setCenter + viewport restore).
+3. Zoom-percentage controls + Recenter-on-trigger.
+4. Hover tooltip on config rows showing full values.
+5. Onboarding micro-tutorial panel.

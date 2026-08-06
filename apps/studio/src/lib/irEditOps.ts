@@ -260,6 +260,33 @@ export function insertStepBefore<T>(ir: T, targetStepId: string, newStep: Step):
 	return draft;
 }
 
+/**
+ * Insert `newStep` directly AFTER the step with `targetStepId`, wherever it
+ * lives (top level or any nested arm). This powers drag-from-socket
+ * insertion — dragging off a node's source handle onto empty canvas opens the
+ * Node Library, and the picked node is wired in right after that source step,
+ * in the same arm. Same duplicate-id guard as insertStep. Returns a new IR;
+ * input untouched.
+ */
+export function insertStepAfter<T>(ir: T, targetStepId: string, newStep: Step): T {
+	const draft = structuredClone(ir);
+	const id = newStep.id;
+	if (typeof id !== "string" || id.length === 0) {
+		throw new Error("[irEditOps] insertStepAfter: newStep.id must be a non-empty string");
+	}
+	if (collectIds(draft).has(id)) {
+		throw new Error(
+			`[irEditOps] cannot insert step "${id}": a step with this id already exists in the workflow — ids must be globally unique across all arms (the runner throws at load time). Use nextId() to mint a fresh one.`,
+		);
+	}
+	const loc = findStepLocation(draft, targetStepId);
+	if (!loc) {
+		throw new Error(`[irEditOps] insertStepAfter: no step with id "${targetStepId}"`);
+	}
+	loc.parentArray.splice(loc.index + 1, 0, newStep);
+	return draft;
+}
+
 export function deleteStep<T>(ir: T, id: string): T {
 	const draft = structuredClone(ir);
 	const loc = findStepLocation(draft, id);

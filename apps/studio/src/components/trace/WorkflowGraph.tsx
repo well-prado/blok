@@ -13,7 +13,15 @@ import {
 	useWorkflowStudio,
 } from "@/hooks/useWorkflows";
 import { ApiError, type NodeCatalogEntry, type StartTestRunRequest, controlDebugRun, startTestRun } from "@/lib/api";
-import { deleteStep, findStepLocation, insertStep, insertStepBefore, nextId, renameStep } from "@/lib/irEditOps";
+import {
+	deleteStep,
+	findStepLocation,
+	insertStep,
+	insertStepAfter,
+	insertStepBefore,
+	nextId,
+	renameStep,
+} from "@/lib/irEditOps";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
 import { withWorkflowNodePositions, workflowNodePosition } from "@/lib/workflowLayout";
@@ -106,6 +114,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
 	const [spliceBeforeStepId, setSpliceBeforeStepId] = useState<string | null>(null);
+	// Drag-from-socket (ATOMIC/BuildShip onConnectEnd pattern): dropping a
+	// connection on empty canvas opens the library, then wires the picked node
+	// in after `fromStepId` at `position`. `fromStepId: null` = dragged off the
+	// trigger, so the new step lands at the very start.
+	const [socketDrop, setSocketDrop] = useState<{
+		fromStepId: string | null;
+		position: { x: number; y: number };
+	} | null>(null);
 	const [fullscreen, setFullscreen] = useState(false);
 	const [terminalOpen, setTerminalOpen] = useState(true);
 	const catalog = useNodeCatalog(editingInputsStepId !== null);
@@ -403,9 +419,24 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const insertNode = (entry: NodeCatalogEntry) => {
 		const anchor = selectedCanvasStepId;
 		const before = spliceBeforeStepId;
+		const drop = socketDrop;
 		editDefinition.mutate(
 			(definition) => {
 				const base = entry.name.includes("/") ? (entry.name.split("/").pop() as string) : entry.name;
+				// Drag-from-socket (takes priority over edge-splice and the
+				// toolbar anchor): pin the drop point and wire in right after the
+				// source step, or at the start when dragged off the trigger.
+				if (drop) {
+					const newStep = {
+						id: nextId(definition, base),
+						use: entry.ref,
+						inputs: {},
+						ui: { x: Math.round(drop.position.x - NODE_WIDTH / 2), y: Math.round(drop.position.y) },
+					};
+					return drop.fromStepId
+						? insertStepAfter(definition, drop.fromStepId, newStep)
+						: insertStep(definition, { topLevel: true }, 0, newStep);
+				}
 				const newStep = { id: nextId(definition, base), use: entry.ref, inputs: {} };
 				// Edge splice pins the position to "before the edge's target",
 				// wherever that step lives (top level or a nested arm).
@@ -419,6 +450,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				onSuccess: () => {
 					setPaletteOpen(false);
 					setSpliceBeforeStepId(null);
+					setSocketDrop(null);
 				},
 			},
 		);
@@ -707,11 +739,15 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			<NodeLibraryDialog
 				open={paletteOpen && !runActive}
 				insertHint={
-					spliceBeforeStepId
-						? `Inserts before ${spliceBeforeStepId}`
-						: selectedCanvasStepId
-							? `Inserts after ${selectedCanvasStepId}`
-							: "Appends at the end"
+					socketDrop
+						? socketDrop.fromStepId
+							? `Inserts after ${socketDrop.fromStepId} at the drop point`
+							: "Inserts at the start, at the drop point"
+						: spliceBeforeStepId
+							? `Inserts before ${spliceBeforeStepId}`
+							: selectedCanvasStepId
+								? `Inserts after ${selectedCanvasStepId}`
+								: "Appends at the end"
 				}
 				pending={editDefinition.isPending}
 				error={editDefinition.error?.message}
@@ -719,6 +755,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				onClose={() => {
 					setPaletteOpen(false);
 					setSpliceBeforeStepId(null);
+					setSocketDrop(null);
 				}}
 			/>
 			{renamingStepId && (
@@ -876,6 +913,24 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								onNodeDragStop={(_event, node) => {
 									if (editing && flowNodeStepId(node)) setDirty(true);
 								}}
+								onConnectEnd={(event, connectionState) => {
+									if (!(definitionEditable && !runActive)) return;
+									const result = socketDropSource(connectionState);
+									if (!result) return;
+									const point = "changedTouches" in event ? event.changedTouches[0] : event;
+									if (!point) return;
+									const { clientX, clientY } = point;
+									const position = flowInstance?.screenToFlowPosition({ x: clientX, y: clientY });
+									if (!position) return;
+									// Mirror openSplice's drawer hygiene before opening the library.
+									editDefinition.reset();
+									setRenamingStepId(null);
+									setEditingInputsStepId(null);
+									setTriggerEditorOpen(false);
+									setSpliceBeforeStepId(null);
+									setSocketDrop({ fromStepId: result.fromStepId, position });
+									setPaletteOpen(true);
+								}}
 								nodeTypes={nodeTypes}
 								edgeTypes={edgeTypes}
 								fitView
@@ -884,7 +939,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								minZoom={0.1}
 								maxZoom={2}
 								nodesDraggable={editing && writable}
-								nodesConnectable={false}
+								nodesConnectable={definitionEditable && !runActive}
 								elementsSelectable={true}
 							>
 								<Background color="#27272a" gap={16} size={1} />
@@ -1061,6 +1116,33 @@ export function pinnedPosition(node: DagNode): { x: number; y: number } | undefi
 function flowNodeStepId(node: Pick<Node, "data">): string | undefined {
 	const stepId = (node.data as unknown as DagNode["data"]).meta?.stepId;
 	return typeof stepId === "string" ? stepId : undefined;
+}
+
+/**
+ * Drag-from-socket decision (ATOMIC/BuildShip `onConnectEnd` pattern): given
+ * an xyflow connection-drag's final state, decide whether the drop should
+ * open the Node Library and, if so, which step the new node wires in after.
+ * Pure so it's unit-testable — xyflow drags can't be simulated in jsdom.
+ *
+ * Returns `null` (ignore the drop) when the drag landed on a real handle
+ * (`isValid`), didn't start from a source (bottom) socket, or has no
+ * originating node. Otherwise resolves the source step id: `null` for a drag
+ * off the trigger (new step lands at the start), a step id for a regular
+ * step, or `null`-returning (ignored) for a synthetic node with no step id
+ * (merge/end can't originate a drag anyway, but this stays defensive).
+ */
+export function socketDropSource(state: {
+	isValid: boolean | null;
+	fromHandle?: { type?: string | null } | null;
+	fromNode?: { data?: unknown } | null;
+}): { fromStepId: string | null } | null {
+	if (state.isValid) return null;
+	if (state.fromHandle?.type !== "source") return null;
+	if (!state.fromNode) return null;
+	const data = state.fromNode.data as unknown as DagNode["data"] | undefined;
+	if (data?.kind === "trigger") return { fromStepId: null };
+	const stepId = flowNodeStepId(state.fromNode as unknown as Pick<Node, "data">);
+	return typeof stepId === "string" ? { fromStepId: stepId } : null;
 }
 
 type LiveDagNodeData = DagNode["data"] & { liveStatus?: NodeRunStatus };
@@ -1310,7 +1392,8 @@ const PORT_CLASS =
 function withHandles(content: React.ReactNode) {
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className={PORT_CLASS} />
+			{/* Connection drags may only START from a source (bottom) socket. */}
+			<Handle type="target" position={Position.Top} isConnectableStart={false} className={PORT_CLASS} />
 			{content}
 			<Handle type="source" position={Position.Bottom} className={PORT_CLASS} />
 		</>
@@ -1342,7 +1425,12 @@ function EndNode(props: NodeProps) {
 	const data = asData(props);
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-2! h-2! border-0!" />
+			<Handle
+				type="target"
+				position={Position.Top}
+				isConnectableStart={false}
+				className="bg-zinc-600! w-2! h-2! border-0!"
+			/>
 			<div className="min-w-[90px] rounded-full border border-zinc-700 bg-[#151518] px-4 py-1.5 text-center shadow-lg shadow-black/30">
 				<div className="flex items-center justify-center gap-1.5">
 					<CheckCircle2 className="h-3 w-3 text-zinc-400" />
@@ -1545,7 +1633,12 @@ function FinallyNode(props: NodeProps) {
 function MergeNode(_props: NodeProps) {
 	return (
 		<>
-			<Handle type="target" position={Position.Top} className="bg-zinc-600! w-1.5! h-1.5! border-0!" />
+			<Handle
+				type="target"
+				position={Position.Top}
+				isConnectableStart={false}
+				className="bg-zinc-600! w-1.5! h-1.5! border-0!"
+			/>
 			<div className="h-3 w-3 rounded-full border-2 border-zinc-500 bg-zinc-950" />
 			<Handle type="source" position={Position.Bottom} className="bg-zinc-600! w-1.5! h-1.5! border-0!" />
 		</>

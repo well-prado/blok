@@ -129,7 +129,7 @@ vi.mock("@xyflow/react", async () => {
 	};
 });
 
-import { WorkflowGraph } from "./WorkflowGraph";
+import { WorkflowGraph, socketDropSource } from "./WorkflowGraph";
 
 const definition = {
 	trigger: { http: { method: "POST", path: "/checkout" } },
@@ -419,5 +419,61 @@ describe("WorkflowGraph layout editor", () => {
 			}),
 			expect.objectContaining({ onSuccess: expect.any(Function) }),
 		);
+	});
+});
+
+// Drag-from-socket (ATOMIC/BuildShip onConnectEnd pattern) — pure decision
+// logic. xyflow connection drags can't be simulated in jsdom, so this
+// exercises `socketDropSource` directly against structurally-shaped
+// `FinalConnectionState`-like fixtures.
+describe("socketDropSource", () => {
+	it("resolves the source step id for a drag off a regular step's source handle", () => {
+		expect(
+			socketDropSource({
+				isValid: false,
+				fromHandle: { type: "source" },
+				fromNode: { data: { kind: "regular", label: "Open", meta: { stepId: "open" } } },
+			}),
+		).toEqual({ fromStepId: "open" });
+	});
+
+	it("resolves fromStepId: null for a drag off the trigger node", () => {
+		expect(
+			socketDropSource({
+				isValid: false,
+				fromHandle: { type: "source" },
+				fromNode: { data: { kind: "trigger", label: "Trigger" } },
+			}),
+		).toEqual({ fromStepId: null });
+	});
+
+	it("ignores the drop when it landed on a real handle (isValid)", () => {
+		expect(
+			socketDropSource({
+				isValid: true,
+				fromHandle: { type: "source" },
+				fromNode: { data: { kind: "regular", label: "Open", meta: { stepId: "open" } } },
+			}),
+		).toBeNull();
+	});
+
+	it("ignores a drag started from a target handle", () => {
+		expect(
+			socketDropSource({
+				isValid: false,
+				fromHandle: { type: "target" },
+				fromNode: { data: { kind: "regular", label: "Open", meta: { stepId: "open" } } },
+			}),
+		).toBeNull();
+	});
+
+	it("ignores a synthetic node with no step id and a non-trigger kind", () => {
+		expect(
+			socketDropSource({
+				isValid: false,
+				fromHandle: { type: "source" },
+				fromNode: { data: { kind: "merge", label: "" } },
+			}),
+		).toBeNull();
 	});
 });

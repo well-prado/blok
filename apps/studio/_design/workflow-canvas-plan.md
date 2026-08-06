@@ -1213,7 +1213,7 @@ Acceptance (remaining):
 
 #### 5.2 Node palette
 
-Status: first slice implemented on 2026-08-05 (toolbar palette + top-level insert + delete). Remaining: edge-click contextual insertion (the ATOMIC "intermediate socket" pattern), arm-targeted inserts, category/runtime filter chips, control-flow templates.
+Status: contextual insertion complete as of 2026-08-06 (toolbar palette + top-level insert + delete on 2026-08-05; edge midpoint "+" splice and drag-from-socket on 2026-08-06). Remaining: category/runtime filter chips, control-flow templates.
 
 - Consume existing node catalog.
 - Search/category/runtime filters.
@@ -1227,6 +1227,8 @@ Implemented:
 - `Delete` with an explicit two-click confirm on the selected step.
 - Both edits flow through the 5.4 definition save (validation, etag, atomic write, hot registry refresh).
 - Live acceptance: inserted `@blokjs/expr` into `e2e-login` from the palette, ran it — all browser steps green, the run failed exactly at the unconfigured new step — then deleted it through the confirm flow; file returned to 8 steps.
+- Edge midpoint "+" splice (ATOMIC intermediate socket): hovering any edge shows a "+" that opens the palette targeting that edge; the picked node is inserted before the edge's target at any arm depth via `insertStepBefore`.
+- Drag-from-socket (ATOMIC `onConnectEnd`): dragging off a source socket onto empty canvas opens the palette; the picked node is wired in right after the source step via `insertStepAfter` (trigger-origin drops insert at index 0) with `step.ui.{x,y}` pinned to the drop point. Target sockets set `isConnectableStart={false}`; drops on synthetic nodes (merge/end) are ignored via the pure `socketDropSource` helper. Live acceptance 2026-08-06: dragged off `launch` in `e2e-login`, added `@blokjs/audit-log` — file gained `audit-log-1` after `launch` with a `ui` pin at the drop point, canvas rendered it there; demo edit reverted.
 
 #### 5.3 Schema-driven inspector
 
@@ -1297,7 +1299,7 @@ First visual pass toward the founder's BuildShip-style mockups, with ATOMIC inte
 - Canvas-first IA: the workflow page now opens on the Canvas tab (renamed from Graph, moved first).
 - Fixed in passing: (a) the trigger pill wore the amber "paused" ring permanently (`undefined === undefined` on synthetic nodes); (b) the mount-time `fitView` raced page layout once Canvas became the default tab — an explicit double-rAF re-fit now runs when the instance/graph is ready, and `minZoom` dropped to 0.1 so large graphs can fit.
 
-Next visual/interaction candidates are ranked at the end of the research notes (edge midpoint "+" splice first — it also completes 5.2's contextual insertion).
+Next visual/interaction candidates are ranked at the end of the research notes (Skip / Stop-after node-header toggles first; edge splice and drag-from-socket shipped 2026-08-06).
 
 Follow-up 2 (2026-08-06): the **full workspace mode** — a Full screen toggle on the canvas toolbar expands the canvas over the whole content area (app sidebar stays), with the ION/ATOMIC IDE shape: canvas center, right config drawer, and a collapsible **Terminal** bar at the bottom (the run activity drawer docked). Clicking any step now opens its inputs form in the right drawer (same surface as the trigger drawer, ION/ATOMIC's click-to-configure), the inline inputs bar is gone, and **Escape closes whichever drawer is open**.
 
