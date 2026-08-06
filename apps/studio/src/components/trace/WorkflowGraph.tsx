@@ -205,8 +205,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				.sort((a, b) => b.startedAt - a.startedAt)[0]?.nodeName ?? pausedPayload?.stepId,
 		[pausedPayload?.stepId, runQuery.data?.nodes],
 	);
+	// Guard `activeStepId === undefined` (no run active): flowNodeStepId is
+	// also undefined for the trigger/end/merge pseudo-nodes, so an
+	// unguarded `find` matched the trigger as "active" on every render and
+	// re-fired the auto-scroll-into-view effect below (which recenters the
+	// camera on it) any time renderedNodes got a new reference — e.g. on a
+	// plain node click, which reselects and rebuilds renderedNodes.
 	const activeNode = useMemo(
-		() => renderedNodes.find((node) => flowNodeStepId(node) === activeStepId),
+		() => (activeStepId ? renderedNodes.find((node) => flowNodeStepId(node) === activeStepId) : undefined),
 		[activeStepId, renderedNodes],
 	);
 	const selectedCanvasStepId = useMemo(() => {
@@ -219,18 +225,27 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setDirty(false);
 	}, [committed.nodes, setFlowNodes]);
 
-	// The `fitView` prop fires once at mount, which races page layout now
-	// that Canvas is the default tab (a degenerate container yields a ~1:1
-	// viewport on large graphs). Re-fit explicitly once the instance exists
-	// and whenever the committed graph changes, after layout has settled.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: committed.nodes intentionally re-fires the fit on graph changes
+	// Fit the viewport exactly once per workflow's canvas, after the studio
+	// layout config has loaded (persisted node positions can still shift
+	// `committed.nodes` post-mount — see layoutDag's `persistedPosition`).
+	// The `<ReactFlow>` `fitView` prop fires on every (re)initialization, so
+	// if anything ever remounts the canvas (e.g. a sibling drawer or a
+	// context identity change), it would silently re-fit and yank the
+	// camera back to the whole graph — which reads as "jumping to the
+	// trigger" when a step node is clicked. Doing this fit imperatively and
+	// guarding it with a ref (instead of the declarative prop) makes that
+	// class of bug impossible: nothing but this effect, the "Fit workflow"
+	// button, and Auto layout may call `fitView`.
+	const firstFitRef = useRef<string | null>(null);
 	useEffect(() => {
-		if (!flowInstance) return;
+		if (!flowInstance || studioQuery.isLoading) return;
+		if (firstFitRef.current === workflowName) return;
+		firstFitRef.current = workflowName;
 		const frame = requestAnimationFrame(() => {
 			requestAnimationFrame(() => void flowInstance.fitView({ padding: 0.2 }));
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [flowInstance, committed.nodes]);
+	}, [flowInstance, workflowName, studioQuery.isLoading]);
 
 	useEffect(() => {
 		if (!dirty) return;
@@ -983,8 +998,6 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 									}}
 									nodeTypes={nodeTypes}
 									edgeTypes={edgeTypes}
-									fitView
-									fitViewOptions={{ padding: 0.25 }}
 									proOptions={{ hideAttribution: true }}
 									minZoom={0.1}
 									maxZoom={2}
