@@ -1,6 +1,7 @@
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
+import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import {
 	useEditWorkflowDefinition,
@@ -95,7 +96,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [paletteSearch, setPaletteSearch] = useState("");
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
-	const catalog = useNodeCatalog(paletteOpen);
+	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
+	const catalog = useNodeCatalog(paletteOpen || editingInputsStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	const committed = useMemo(
@@ -333,8 +335,29 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	};
 	const startRename = (stepId: string) => {
 		editDefinition.reset();
+		setPaletteOpen(false);
+		setEditingInputsStepId(null);
 		setRenamingStepId(stepId);
 		setRenameValue(stepId);
+	};
+	// Phase 5.3 — open the schema-driven inputs editor for the selected step.
+	const startEditInputs = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		setRenamingStepId(null);
+		setEditingInputsStepId(stepId);
+	};
+	const saveInputs = (stepId: string, inputs: Record<string, unknown>) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				loc.step.inputs = inputs;
+				return draft;
+			},
+			{ onSuccess: () => setEditingInputsStepId(null) },
+		);
 	};
 	// Phase 5.2 — insert the picked catalog node as a fresh step. Lands after
 	// the selected step when that step is top-level; otherwise appends at the
@@ -519,6 +542,15 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 									<>
 										<button
 											type="button"
+											onClick={() => startEditInputs(selectedCanvasStepId)}
+											disabled={editDefinition.isPending}
+											title={`Edit the inputs of ${selectedCanvasStepId}`}
+											className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+										>
+											<Wrench className="h-3.5 w-3.5 shrink-0" /> Edit inputs
+										</button>
+										<button
+											type="button"
 											onClick={() => startRename(selectedCanvasStepId)}
 											disabled={editDefinition.isPending}
 											title={`Rename step ${selectedCanvasStepId} and rewrite downstream references`}
@@ -647,6 +679,20 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						</ul>
 					)}
 				</div>
+			)}
+			{editingInputsStepId && !runActive && catalog.data && (
+				<StepInputsEditor
+					key={editingInputsStepId}
+					stepId={editingInputsStepId}
+					schema={catalog.data.nodes.find((entry) => entry.ref === stepUses[editingInputsStepId])?.inputSchema}
+					inputs={
+						((findStepLocation(definition, editingInputsStepId)?.step.inputs ?? {}) as Record<string, unknown>) ?? {}
+					}
+					pending={editDefinition.isPending}
+					error={editDefinition.error?.message}
+					onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
+					onClose={() => setEditingInputsStepId(null)}
+				/>
 			)}
 			{renamingStepId && (
 				<form

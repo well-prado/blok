@@ -1230,10 +1230,19 @@ Implemented:
 
 #### 5.3 Schema-driven inspector
 
+Status: first slice implemented on 2026-08-06 (inputs editor from catalog schemas). Remaining: control-flow editors (branch/forEach/switch/tryCatch/wait/subworkflow), the handle/value picker with upstream schemas and last-run samples, and Settings (as/spread/retry/idempotency).
+
 - Common Inputs/Output/Settings UI from catalog schemas.
 - Dedicated editors for branch, forEach, switch, tryCatch, wait, and subworkflow.
 - Handle/value picker using upstream output schemas and last-run samples.
 - Advanced raw JSON panel only for fields the form cannot represent.
+
+Implemented:
+
+- `Edit inputs` on the selected step opens `StepInputsEditor`, a form generated from the catalog's reflected `inputSchema` — modeled on atomic-canvas's DrawerConfig/`groupProperties` (via Tetrix) flattened to one level: strings/numbers get typed fields, booleans and enums get selects, objects/arrays/unions get per-field JSON textareas. Required markers and descriptions come from the schema.
+- Typing rules: numbers parse (invalid input blocks save), `js/...` values stay strings for the runtime mapper everywhere, blank fields unset, JSON fields fall back to string for expressions. Inputs the schema doesn't describe are preserved untouched (and editable via the Raw JSON escape hatch, which is also the fallback when reflection returned no schema).
+- Saves flow through the 5.4 definition pipeline.
+- Live acceptance: palette-inserted `@blokjs/expr` into `e2e-login`, set its required `expression` through the schema form, ran green 9/9 (output `{"authored":"from-studio",...}` visible on the node run), then deleted the step through the confirm flow.
 
 #### 5.4 Definition save
 

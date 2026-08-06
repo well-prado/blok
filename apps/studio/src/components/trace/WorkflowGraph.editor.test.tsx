@@ -54,8 +54,18 @@ vi.mock("@/hooks/useWorkflows", () => ({
 			nodes: [
 				{ name: "@blokjs/expr", ref: "@blokjs/expr", description: "Evaluate a JavaScript expression" },
 				{ name: "@blokjs/api-call", ref: "@blokjs/api-call", description: "Call an HTTP API" },
+				{
+					name: "@blokjs/browser-open",
+					ref: "@blokjs/browser-open",
+					description: "Open a page",
+					inputSchema: {
+						type: "object",
+						properties: { url: { type: "string", description: "Page URL" } },
+						required: ["url"],
+					},
+				},
 			],
-			count: 2,
+			count: 3,
 		},
 		isLoading: false,
 		error: null,
@@ -267,6 +277,34 @@ describe("WorkflowGraph layout editor", () => {
 		};
 		const after = transform?.(before) as { steps: Array<{ id: string }> };
 		expect(after.steps.map((step) => step.id)).toEqual(["assert"]);
+	});
+
+	it("edits step inputs through the schema-driven form (Phase 5.3)", async () => {
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.json" };
+		let transform: ((definition: Record<string, unknown>) => Record<string, unknown>) | undefined;
+		mocks.editMutate.mockImplementation((fn, opts) => {
+			transform = fn;
+			opts?.onSuccess?.();
+		});
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		await user.click(screen.getByRole("button", { name: /edit inputs/i }));
+		// Schema-driven field from the catalog's inputSchema, not raw JSON.
+		await user.type(screen.getByLabelText(/url/), "https://fixture.test/login");
+		await user.click(screen.getByRole("button", { name: /save inputs/i }));
+
+		const before = {
+			name: "checkout",
+			steps: [
+				{ id: "open", use: "@blokjs/browser-open", type: "module", inputs: {} },
+				{ id: "assert", use: "@blokjs/browser-assert", type: "module", inputs: {} },
+			],
+		};
+		const after = transform?.(before) as { steps: Array<{ id: string; inputs: Record<string, unknown> }> };
+		expect(after.steps[0]?.inputs).toEqual({ url: "https://fixture.test/login" });
+		expect(after.steps[1]?.inputs).toEqual({});
 	});
 
 	it("hides Rename for TypeScript-sourced workflows", async () => {

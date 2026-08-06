@@ -1,0 +1,254 @@
+import { cn } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
+import { useMemo, useState } from "react";
+
+/**
+ * Phase 5.3 — schema-driven step-inputs editor. Renders a form from the
+ * node's reflected JSON Schema (the catalog's `inputSchema`), following
+ * atomic-canvas's DrawerConfig/groupProperties model flattened to one level:
+ * top-level primitives get typed fields, everything else (objects, arrays,
+ * unions) gets a per-field JSON textarea. Any string field may hold a
+ * `js/...` expression — the runner's mapper resolves it at run time.
+ */
+
+interface SchemaProperty {
+	type?: string;
+	description?: string;
+	enum?: unknown[];
+	default?: unknown;
+}
+
+interface InputsSchema {
+	type?: string;
+	properties?: Record<string, SchemaProperty>;
+	required?: string[];
+}
+
+export interface StepInputsEditorProps {
+	stepId: string;
+	schema: unknown;
+	inputs: Record<string, unknown>;
+	pending: boolean;
+	error?: string;
+	onSave: (inputs: Record<string, unknown>) => void;
+	onClose: () => void;
+}
+
+type FieldKind = "string" | "number" | "boolean" | "enum" | "json";
+
+interface Field {
+	name: string;
+	kind: FieldKind;
+	required: boolean;
+	description?: string;
+	options?: unknown[];
+}
+
+function fieldKind(prop: SchemaProperty): FieldKind {
+	if (Array.isArray(prop.enum) && prop.enum.length > 0) return "enum";
+	if (prop.type === "string") return "string";
+	if (prop.type === "number" || prop.type === "integer") return "number";
+	if (prop.type === "boolean") return "boolean";
+	return "json";
+}
+
+/** Initial editor text for a field from the current inputs value. */
+function initialText(kind: FieldKind, value: unknown): string {
+	if (value === undefined) return "";
+	if (kind === "json") return JSON.stringify(value, null, 2);
+	if (kind === "boolean") return String(value);
+	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+export function buildFields(schema: unknown): Field[] {
+	const s = (schema ?? {}) as InputsSchema;
+	const properties = s.properties ?? {};
+	const required = new Set(s.required ?? []);
+	return Object.entries(properties).map(([name, prop]) => ({
+		name,
+		kind: fieldKind(prop ?? {}),
+		required: required.has(name),
+		description: prop?.description,
+		options: prop?.enum,
+	}));
+}
+
+export function StepInputsEditor({ stepId, schema, inputs, pending, error, onSave, onClose }: StepInputsEditorProps) {
+	const fields = useMemo(() => buildFields(schema), [schema]);
+	const knownFieldNames = useMemo(() => new Set(fields.map((field) => field.name)), [fields]);
+	// Inputs the schema doesn't describe (or when reflection failed) are only
+	// editable through the raw JSON panel, which also serves as the escape
+	// hatch the plan calls for.
+	const extraInputs = useMemo(
+		() => Object.fromEntries(Object.entries(inputs).filter(([key]) => !knownFieldNames.has(key))),
+		[inputs, knownFieldNames],
+	);
+	const [raw, setRaw] = useState(fields.length === 0);
+	const [rawText, setRawText] = useState(() => JSON.stringify(inputs, null, 2));
+	const [values, setValues] = useState<Record<string, string>>(() =>
+		Object.fromEntries(fields.map((field) => [field.name, initialText(field.kind, inputs[field.name])])),
+	);
+	const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+	const submit = () => {
+		if (raw) {
+			try {
+				const parsed = JSON.parse(rawText || "{}");
+				if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("must be an object");
+				onSave(parsed as Record<string, unknown>);
+			} catch (parseError) {
+				setFieldErrors({ __raw: `Invalid JSON: ${(parseError as Error).message}` });
+			}
+			return;
+		}
+
+		const next: Record<string, unknown> = { ...extraInputs };
+		const errors: Record<string, string> = {};
+		for (const field of fields) {
+			const text = values[field.name] ?? "";
+			if (text.trim() === "") continue; // blank = unset; use raw JSON for literal empty strings
+			if (field.kind === "number") {
+				// A js/ expression stays a string for the runtime mapper.
+				if (text.startsWith("js/")) {
+					next[field.name] = text;
+					continue;
+				}
+				const parsed = Number(text);
+				if (Number.isNaN(parsed)) {
+					errors[field.name] = "Not a number (or js/ expression)";
+					continue;
+				}
+				next[field.name] = parsed;
+			} else if (field.kind === "boolean") {
+				if (text === "true" || text === "false") next[field.name] = text === "true";
+				else next[field.name] = text; // js/ expression or mapper string
+			} else if (field.kind === "json") {
+				try {
+					next[field.name] = JSON.parse(text);
+				} catch {
+					// Not JSON — keep as a string so `js/...` expressions work.
+					next[field.name] = text;
+				}
+			} else {
+				next[field.name] = text;
+			}
+		}
+		if (Object.keys(errors).length > 0) {
+			setFieldErrors(errors);
+			return;
+		}
+		setFieldErrors({});
+		onSave(next);
+	};
+
+	return (
+		<form
+			aria-label={`Inputs for ${stepId}`}
+			className="border-b border-zinc-800 bg-zinc-950/70 px-3 py-2"
+			onSubmit={(event) => {
+				event.preventDefault();
+				submit();
+			}}
+		>
+			<div className="flex items-center gap-2">
+				<span className="text-xs font-medium text-zinc-300">
+					Inputs for <span className="font-mono">{stepId}</span>
+				</span>
+				<button
+					type="button"
+					onClick={() => setRaw((current) => !current)}
+					className="rounded-md border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+				>
+					{raw ? "Form" : "Raw JSON"}
+				</button>
+				<span className="text-[10px] text-zinc-500">Values starting with js/ are evaluated at run time.</span>
+				<button
+					type="submit"
+					disabled={pending}
+					className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blok-green-500 px-2.5 py-1 text-xs font-semibold text-[#00231b] hover:bg-blok-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					{pending ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Save inputs
+				</button>
+				<button
+					type="button"
+					onClick={onClose}
+					className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+				>
+					Cancel
+				</button>
+			</div>
+			{error && <p className="mt-2 text-xs text-red-300">{error}</p>}
+			{fieldErrors.__raw && <p className="mt-2 text-xs text-red-300">{fieldErrors.__raw}</p>}
+			{raw ? (
+				<textarea
+					aria-label="Raw inputs JSON"
+					value={rawText}
+					onChange={(event) => setRawText(event.target.value)}
+					rows={8}
+					spellCheck={false}
+					className="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
+				/>
+			) : (
+				<div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+					{fields.map((field) => {
+						const controlId = `step-input-${stepId}-${field.name}`;
+						const controlClass =
+							"w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400";
+						const onChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+							setValues((current) => ({ ...current, [field.name]: event.target.value }));
+						return (
+							<div key={field.name} className="text-xs">
+								<label htmlFor={controlId} className="mb-0.5 flex items-baseline gap-1.5">
+									<span className="font-mono text-zinc-200">{field.name}</span>
+									{field.required && <span className="text-[10px] text-amber-300">required</span>}
+									{field.description && (
+										<span className="truncate text-[10px] text-zinc-500" title={field.description}>
+											{field.description}
+										</span>
+									)}
+								</label>
+								{field.kind === "enum" ? (
+									<select id={controlId} value={values[field.name] ?? ""} onChange={onChange} className={controlClass}>
+										<option value="">— unset —</option>
+										{(field.options ?? []).map((option) => (
+											<option key={String(option)} value={String(option)}>
+												{String(option)}
+											</option>
+										))}
+									</select>
+								) : field.kind === "boolean" ? (
+									<select id={controlId} value={values[field.name] ?? ""} onChange={onChange} className={controlClass}>
+										<option value="">— unset —</option>
+										<option value="true">true</option>
+										<option value="false">false</option>
+									</select>
+								) : field.kind === "json" ? (
+									<textarea
+										id={controlId}
+										value={values[field.name] ?? ""}
+										onChange={onChange}
+										rows={3}
+										spellCheck={false}
+										placeholder="JSON or js/ expression"
+										className={cn(controlClass, "p-2 font-mono")}
+									/>
+								) : (
+									<input
+										id={controlId}
+										value={values[field.name] ?? ""}
+										onChange={onChange}
+										spellCheck={false}
+										className={cn(controlClass, "font-mono", fieldErrors[field.name] && "border-red-400/60")}
+									/>
+								)}
+								{fieldErrors[field.name] && (
+									<span className="mt-0.5 block text-[10px] text-red-300">{fieldErrors[field.name]}</span>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</form>
+	);
+}
