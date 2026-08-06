@@ -6,6 +6,7 @@ import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
 import { SpliceContext, SpliceEdge } from "@/components/trace/SpliceEdge";
 import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
 import { TriggerEditor } from "@/components/trace/TriggerEditor";
+import { usePersistentState } from "@/hooks/usePersistentState";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import {
 	useEditWorkflowDefinition,
@@ -129,7 +130,15 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		fromStepId: string | null;
 		position: { x: number; y: number };
 	} | null>(null);
-	const [fullscreen, setFullscreen] = useState(false);
+	// Persisted per-browser (the closest thing Studio has to a user profile —
+	// no server-side profile store exists here). Expanding writes "1",
+	// closing writes "0"; a returning "1" opens the canvas already expanded.
+	const [fullscreen, setFullscreen] = usePersistentState<boolean>(
+		"blok-studio.canvas.fullscreen",
+		false,
+		(value) => (value ? "1" : "0"),
+		(raw) => raw === "1",
+	);
 	const [terminalOpen, setTerminalOpen] = useState(true);
 	const catalog = useNodeCatalog(editingInputsStepId !== null || editingBranchStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
