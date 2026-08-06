@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DagNode } from "@/lib/workflowDag";
-import { layoutDag, pinnedPosition, projectNodeStatuses } from "./WorkflowGraph";
+import { layoutDag, pinnedPosition, projectNodeStatuses, stepFlags } from "./WorkflowGraph";
 
 /**
  * Inline-layout seed/pin + orphan tolerance (#410/#411).
@@ -163,5 +163,87 @@ describe("layoutDag seed + pin", () => {
 		).not.toThrow();
 		const { nodes } = layoutDag({ trigger: {}, steps: [{ id: "s", use: "@blokjs/respond", ui: { x: "bad" } }] });
 		expect(findById(nodes, "step-s").position).not.toEqual(PINNED);
+	});
+});
+
+describe("stepFlags — reads Skip/Stop debug flags off a raw step", () => {
+	it("reads active:false as skipped", () => {
+		expect(stepFlags({ id: "a", active: false })).toEqual({ skipped: true, stopFlag: false });
+	});
+
+	it("reads stop:true as stopFlag", () => {
+		expect(stepFlags({ id: "a", stop: true })).toEqual({ skipped: false, stopFlag: true });
+	});
+
+	it("defaults to false/false when neither flag is present", () => {
+		expect(stepFlags({ id: "a" })).toEqual({ skipped: false, stopFlag: false });
+	});
+
+	it("treats a non-boolean or absent raw step as neither flag set", () => {
+		expect(stepFlags(undefined)).toEqual({ skipped: false, stopFlag: false });
+		expect(stepFlags(null)).toEqual({ skipped: false, stopFlag: false });
+		expect(stepFlags("not-an-object")).toEqual({ skipped: false, stopFlag: false });
+	});
+});
+
+describe("layoutDag — stop:true dashes the step's outgoing edge(s)", () => {
+	function findNodeIdByStepId(nodes: { id: string; data: unknown }[], stepId: string): string {
+		const found = nodes.find((n) => (n.data as { meta?: { stepId?: string } }).meta?.stepId === stepId);
+		if (!found) throw new Error(`no node for step "${stepId}"`);
+		return found.id;
+	}
+
+	it("dashes the edge leaving a step with stop:true", () => {
+		const def = {
+			trigger: { http: { method: "POST", path: "/s" } },
+			steps: [
+				{ id: "a", use: "@blokjs/respond" },
+				{ id: "b", use: "@blokjs/respond", stop: true },
+				{ id: "c", use: "@blokjs/respond" },
+			],
+		};
+		const { nodes, edges } = layoutDag(def);
+		const bId = findNodeIdByStepId(nodes, "b");
+		const outgoing = edges.filter((e) => e.source === bId);
+		expect(outgoing.length).toBeGreaterThan(0);
+		for (const e of outgoing) {
+			expect((e.style as { strokeDasharray?: string } | undefined)?.strokeDasharray).toBe("4 4");
+		}
+	});
+
+	it("leaves a normal step's outgoing edge solid", () => {
+		const def = {
+			trigger: { http: { method: "POST", path: "/s" } },
+			steps: [
+				{ id: "a", use: "@blokjs/respond" },
+				{ id: "b", use: "@blokjs/respond" },
+			],
+		};
+		const { nodes, edges } = layoutDag(def);
+		const aId = findNodeIdByStepId(nodes, "a");
+		const outgoing = edges.filter((e) => e.source === aId);
+		expect(outgoing.length).toBeGreaterThan(0);
+		for (const e of outgoing) {
+			expect((e.style as { strokeDasharray?: string } | undefined)?.strokeDasharray).toBeUndefined();
+		}
+	});
+
+	// A skipped (active:false) step's own edges stay solid — the flow
+	// continues PAST it, unlike stop which halts BEFORE the step.
+	it("does not dash a skipped (active:false) step's outgoing edge", () => {
+		const def = {
+			trigger: { http: { method: "POST", path: "/s" } },
+			steps: [
+				{ id: "a", use: "@blokjs/respond", active: false },
+				{ id: "b", use: "@blokjs/respond" },
+			],
+		};
+		const { nodes, edges } = layoutDag(def);
+		const aId = findNodeIdByStepId(nodes, "a");
+		const outgoing = edges.filter((e) => e.source === aId);
+		expect(outgoing.length).toBeGreaterThan(0);
+		for (const e of outgoing) {
+			expect((e.style as { strokeDasharray?: string } | undefined)?.strokeDasharray).toBeUndefined();
+		}
 	});
 });

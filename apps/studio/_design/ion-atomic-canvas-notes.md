@@ -38,11 +38,14 @@ Selected-node blue inset outline; hollow ports; dashed control-flow cards; confi
 Edge midpoint "+" → palette splice (2026-08-06). Drag-from-socket → palette with drop-position
 node creation via `onConnectEnd` (2026-08-06): source sockets only (`isConnectableStart={false}`
 on targets), drop pins `step.ui.{x,y}` at the cursor, trigger-origin drops insert at the start.
+Skip / Stop header toggles (2026-08-06): flip `active: false` / `stop: true` on the raw step —
+the engine already honored both in `RunnerSteps.runSteps` (skip continues past, stop halts
+BEFORE the step). Skipped card dims + dashes; stop card gets an amber dashed outline and its
+immediate outgoing edges dash.
 
 ## Next candidates (ranked)
 
-1. Skip / Stop-after toggles on the node header with dashed downstream edges.
-2. Drawer-open camera choreography for the inputs editor (setCenter + viewport restore).
-3. Zoom-percentage controls + Recenter-on-trigger.
-4. Hover tooltip on config rows showing full values.
-5. Onboarding micro-tutorial panel.
+1. Drawer-open camera choreography for the inputs editor (setCenter + viewport restore).
+2. Zoom-percentage controls + Recenter-on-trigger.
+3. Hover tooltip on config rows showing full values.
+4. Onboarding micro-tutorial panel.

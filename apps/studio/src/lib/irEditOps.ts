@@ -298,6 +298,45 @@ export function deleteStep<T>(ir: T, id: string): T {
 }
 
 /**
+ * Toggle `active: false` on a step — the runner's `runSteps` loop skips a
+ * step with `active === false` (flow continues to the next step; the
+ * skipped step writes no `ctx.state` slot). Toggling back OFF deletes the
+ * key entirely rather than writing `active: true`, keeping the persisted
+ * JSON minimal (the implicit default is already `true`). Throws if the id
+ * is not found. Returns a new IR; input untouched.
+ */
+export function toggleStepSkip<T>(ir: T, id: string): T {
+	const draft = structuredClone(ir);
+	const loc = findStepLocation(draft, id);
+	if (!loc) {
+		throw new Error(`[irEditOps] cannot toggle skip: no step with id "${id}"`);
+	}
+	// biome-ignore lint/performance/noDelete: must remove the key, not null it — `"active" in step` / JSON round-trip both need it gone, an undefined-assignment leaves the key present
+	if (loc.step.active === false) delete loc.step.active;
+	else loc.step.active = false;
+	return draft;
+}
+
+/**
+ * Toggle `stop: true` on a step — the runner's `runSteps` loop breaks
+ * BEFORE a step with `stop === true` runs, so this step and everything
+ * after it (in the same arm) never execute. Toggling back OFF deletes the
+ * key rather than writing `stop: false` (the implicit default). Throws if
+ * the id is not found. Returns a new IR; input untouched.
+ */
+export function toggleStepStop<T>(ir: T, id: string): T {
+	const draft = structuredClone(ir);
+	const loc = findStepLocation(draft, id);
+	if (!loc) {
+		throw new Error(`[irEditOps] cannot toggle stop: no step with id "${id}"`);
+	}
+	// biome-ignore lint/performance/noDelete: must remove the key, not null it — `"stop" in step` / JSON round-trip both need it gone, an undefined-assignment leaves the key present
+	if (loc.step.stop === true) delete loc.step.stop;
+	else loc.step.stop = true;
+	return draft;
+}
+
+/**
  * Move the step with `id` to `newIndex` WITHIN its own arm. Cross-arm moves
  * are NOT supported here — they change the step's semantic scope (a `try` step
  * is not a `catch` step) and need a delete+insert with an explicit target.

@@ -21,6 +21,8 @@ import {
 	insertStepBefore,
 	nextId,
 	renameStep,
+	toggleStepSkip,
+	toggleStepStop,
 } from "@/lib/irEditOps";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag } from "@/lib/workflowDag";
@@ -50,12 +52,14 @@ import {
 	ChevronUp,
 	Clock,
 	Expand,
+	EyeOff,
 	FastForward,
 	Focus,
 	GitBranch,
 	Loader2,
 	Maximize2,
 	Minimize2,
+	OctagonPause,
 	Pencil,
 	Play,
 	Plus,
@@ -72,7 +76,7 @@ import {
 	WandSparkles,
 	Wrench,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 interface WorkflowGraphProps {
@@ -468,6 +472,15 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		editDefinition.mutate((definition) => deleteStep(definition, stepId), {
 			onSuccess: () => setConfirmingDelete(null),
 		});
+	};
+	// ATOMIC/BuildShip-style header toggles — flip `active: false` / `stop: true`
+	// on the raw step. The engine already honors both (RunnerSteps.runSteps);
+	// this is purely the authoring write-path.
+	const toggleSkip = (stepId: string) => {
+		editDefinition.mutate((definition) => toggleStepSkip(definition, stepId));
+	};
+	const toggleStop = (stepId: string) => {
+		editDefinition.mutate((definition) => toggleStepStop(definition, stepId));
 	};
 	const submitRename = () => {
 		const oldId = renamingStepId;
@@ -903,51 +916,55 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				>
 					<div ref={canvasRef} className="h-full min-w-0 flex-1">
 						<SpliceContext.Provider value={definitionEditable && !runActive ? openSplice : null}>
-							<ReactFlow
-								nodes={renderedNodes}
-								edges={renderedEdges}
-								onInit={setFlowInstance}
-								onNodesChange={onNodesChange}
-								onNodeClick={(_event, node) => selectCanvasNode(node)}
-								onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
-								onNodeDragStop={(_event, node) => {
-									if (editing && flowNodeStepId(node)) setDirty(true);
-								}}
-								onConnectEnd={(event, connectionState) => {
-									if (!(definitionEditable && !runActive)) return;
-									const result = socketDropSource(connectionState);
-									if (!result) return;
-									const point = "changedTouches" in event ? event.changedTouches[0] : event;
-									if (!point) return;
-									const { clientX, clientY } = point;
-									const position = flowInstance?.screenToFlowPosition({ x: clientX, y: clientY });
-									if (!position) return;
-									// Mirror openSplice's drawer hygiene before opening the library.
-									editDefinition.reset();
-									setRenamingStepId(null);
-									setEditingInputsStepId(null);
-									setTriggerEditorOpen(false);
-									setSpliceBeforeStepId(null);
-									setSocketDrop({ fromStepId: result.fromStepId, position });
-									setPaletteOpen(true);
-								}}
-								nodeTypes={nodeTypes}
-								edgeTypes={edgeTypes}
-								fitView
-								fitViewOptions={{ padding: 0.25 }}
-								proOptions={{ hideAttribution: true }}
-								minZoom={0.1}
-								maxZoom={2}
-								nodesDraggable={editing && writable}
-								nodesConnectable={definitionEditable && !runActive}
-								elementsSelectable={true}
+							<NodeControlsContext.Provider
+								value={definitionEditable && !runActive ? { onToggleSkip: toggleSkip, onToggleStop: toggleStop } : null}
 							>
-								<Background color="#27272a" gap={16} size={1} />
-								<Controls
-									showInteractive={false}
-									className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
-								/>
-							</ReactFlow>
+								<ReactFlow
+									nodes={renderedNodes}
+									edges={renderedEdges}
+									onInit={setFlowInstance}
+									onNodesChange={onNodesChange}
+									onNodeClick={(_event, node) => selectCanvasNode(node)}
+									onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
+									onNodeDragStop={(_event, node) => {
+										if (editing && flowNodeStepId(node)) setDirty(true);
+									}}
+									onConnectEnd={(event, connectionState) => {
+										if (!(definitionEditable && !runActive)) return;
+										const result = socketDropSource(connectionState);
+										if (!result) return;
+										const point = "changedTouches" in event ? event.changedTouches[0] : event;
+										if (!point) return;
+										const { clientX, clientY } = point;
+										const position = flowInstance?.screenToFlowPosition({ x: clientX, y: clientY });
+										if (!position) return;
+										// Mirror openSplice's drawer hygiene before opening the library.
+										editDefinition.reset();
+										setRenamingStepId(null);
+										setEditingInputsStepId(null);
+										setTriggerEditorOpen(false);
+										setSpliceBeforeStepId(null);
+										setSocketDrop({ fromStepId: result.fromStepId, position });
+										setPaletteOpen(true);
+									}}
+									nodeTypes={nodeTypes}
+									edgeTypes={edgeTypes}
+									fitView
+									fitViewOptions={{ padding: 0.25 }}
+									proOptions={{ hideAttribution: true }}
+									minZoom={0.1}
+									maxZoom={2}
+									nodesDraggable={editing && writable}
+									nodesConnectable={definitionEditable && !runActive}
+									elementsSelectable={true}
+								>
+									<Background color="#27272a" gap={16} size={1} />
+									<Controls
+										showInteractive={false}
+										className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+									/>
+								</ReactFlow>
+							</NodeControlsContext.Provider>
 						</SpliceContext.Provider>
 					</div>
 					{editingInputsStepId && !runActive && catalog.data && (
@@ -1119,6 +1136,19 @@ function flowNodeStepId(node: Pick<Node, "data">): string | undefined {
 }
 
 /**
+ * Read the Skip / Stop debug-control flags off a step's raw JSON.
+ * `active === false` → the runner skips this step (flow continues, no
+ * `ctx.state` slot). `stop === true` → the runner halts BEFORE this step
+ * (nothing at or after it runs). Pure — drives both card styling and edge
+ * dashing, so it's exported for direct unit testing.
+ */
+export function stepFlags(raw: unknown): { skipped: boolean; stopFlag: boolean } {
+	if (typeof raw !== "object" || raw === null) return { skipped: false, stopFlag: false };
+	const r = raw as { active?: unknown; stop?: unknown };
+	return { skipped: r.active === false, stopFlag: r.stop === true };
+}
+
+/**
  * Drag-from-socket decision (ATOMIC/BuildShip `onConnectEnd` pattern): given
  * an xyflow connection-drag's final state, decide whether the drop should
  * open the Node Library and, if so, which step the new node wires in after.
@@ -1237,13 +1267,20 @@ export function layoutDag(
 	});
 
 	const stepIdByNodeId = new Map(dag.nodes.map((n) => [n.id, n.data.meta?.stepId]));
-	const flowEdges: Edge[] = dag.edges.map((e) => toFlowEdge(e, stepIdByNodeId));
+	// A step with `stop: true` halts the run BEFORE it executes — nothing
+	// leaving it (or after it) ever runs. Dash its immediate outgoing
+	// edge(s) so the canvas shows where the run dead-ends.
+	// ponytail: immediate outgoing edges only, not the full downstream
+	// reachability (a branch's post-merge edge stays solid) — upgrade if
+	// founders want the whole tail dimmed.
+	const stopSourceIds = new Set(dag.nodes.filter((n) => stepFlags(n.data.meta?.raw).stopFlag).map((n) => n.id));
+	const flowEdges: Edge[] = dag.edges.map((e) => toFlowEdge(e, stepIdByNodeId, stopSourceIds));
 
 	return { nodes: flowNodes, edges: flowEdges };
 }
 
-function toFlowEdge(edge: DagEdge, stepIdByNodeId?: Map<string, unknown>): Edge {
-	const dashed = edge.style === "dashed" || edge.style === "dotted";
+function toFlowEdge(edge: DagEdge, stepIdByNodeId?: Map<string, unknown>, stopSourceIds?: Set<string>): Edge {
+	const dashed = edge.style === "dashed" || edge.style === "dotted" || stopSourceIds?.has(edge.source) === true;
 	// Splice "+" only where insert-before is well-defined: a forward,
 	// unlabeled edge whose target is a real step (labels mark arm entries
 	// rendered by the default edge; back-edges are loop returns).
@@ -1313,6 +1350,16 @@ function configRows(raw: unknown): ConfigRow[] {
 		});
 }
 
+/**
+ * Node-level Skip/Stop toggle actions — mirrors `SpliceContext` (edges) but
+ * for per-node header buttons. Set by `WorkflowGraph` when the definition is
+ * editable and no run is active; `null` hides the header controls entirely.
+ */
+export const NodeControlsContext = createContext<{
+	onToggleSkip: (stepId: string) => void;
+	onToggleStop: (stepId: string) => void;
+} | null>(null);
+
 interface NodeShellProps {
 	icon: IconComponent;
 	iconClass: string;
@@ -1326,9 +1373,15 @@ interface NodeShellProps {
 	dashed?: boolean;
 	rows?: ConfigRow[];
 	selected?: boolean;
+	/** Real step id — gates the Skip/Stop header controls (synthetic nodes have none). */
+	stepId?: string;
+	/** `active === false` on the raw step — the runner skips it, flow continues. */
+	skipped?: boolean;
+	/** `stop === true` on the raw step — the runner halts BEFORE this step. */
+	stopFlag?: boolean;
 }
 
-function NodeShell({
+export function NodeShell({
 	icon: Icon,
 	iconClass,
 	iconTile,
@@ -1339,14 +1392,24 @@ function NodeShell({
 	dashed,
 	rows,
 	selected,
+	stepId,
+	skipped,
+	stopFlag,
 }: NodeShellProps) {
+	const controls = useContext(NodeControlsContext);
+	const showControls = Boolean(controls && stepId);
 	const hasBody = Boolean(subtitle) || (rows?.length ?? 0) > 0;
 	return (
 		<div
 			className={cn(
-				"w-[260px] rounded-xl border bg-[#151518] shadow-lg shadow-black/30 transition-colors hover:border-zinc-500",
+				"group w-[260px] rounded-xl border bg-[#151518] shadow-lg shadow-black/30 transition-colors hover:border-zinc-500",
 				accent,
-				dashed && "border-dashed",
+				(dashed || skipped) && "border-dashed",
+				skipped && "opacity-50",
+				// Amber dashed outline — a real `outline-style: dashed`, distinct
+				// from the card's own (solid) border so it reads as "run halts
+				// here" rather than "this card is inactive" (that's `skipped`).
+				stopFlag && "outline outline-2 outline-offset-2 outline-dashed outline-amber-400/70",
 				// ATOMIC's single-accent selection: a 2px inset blue outline.
 				selected && "outline outline-2 -outline-offset-2 outline-blue-400",
 				status === "running" && "border-blue-400 shadow-[0_0_0_1px_#60a5fa,0_0_24px_rgba(96,165,250,0.25)]",
@@ -1360,12 +1423,54 @@ function NodeShell({
 					<Icon className={cn("h-3.5 w-3.5", iconClass)} />
 				</span>
 				<span className="truncate text-xs font-semibold text-zinc-100">{title}</span>
-				{status === "running" && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-blue-400" />}
-				{status === "completed" && <CheckCircle2 className="ml-auto h-3 w-3 shrink-0 text-emerald-400" />}
-				{status === "failed" && <AlertTriangle className="ml-auto h-3 w-3 shrink-0 text-red-400" />}
-				{(status === "skipped" || status === "pending") && (
-					<span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-zinc-500" title={status} />
-				)}
+				<div className="ml-auto flex shrink-0 items-center gap-1">
+					{showControls && stepId && controls && (
+						<>
+							<button
+								type="button"
+								className={cn(
+									"nodrag rounded p-0.5 transition-opacity",
+									skipped
+										? "text-zinc-300 opacity-100"
+										: "text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100",
+								)}
+								title="Skip this step (active: false)"
+								aria-label={skipped ? `Unskip ${stepId}` : `Skip ${stepId}`}
+								aria-pressed={skipped}
+								onClick={(event) => {
+									event.stopPropagation();
+									controls.onToggleSkip(stepId);
+								}}
+							>
+								<EyeOff className="h-3 w-3" />
+							</button>
+							<button
+								type="button"
+								className={cn(
+									"nodrag rounded p-0.5 transition-opacity",
+									stopFlag
+										? "text-amber-400 opacity-100"
+										: "text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100",
+								)}
+								title="Stop the run before this step (stop: true)"
+								aria-label={stopFlag ? `Remove stop before ${stepId}` : `Stop the run before ${stepId}`}
+								aria-pressed={stopFlag}
+								onClick={(event) => {
+									event.stopPropagation();
+									controls.onToggleStop(stepId);
+								}}
+							>
+								<OctagonPause className="h-3 w-3" />
+							</button>
+						</>
+					)}
+					{status === "running" && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-400" />}
+					{status === "completed" && <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" />}
+					{status === "failed" && <AlertTriangle className="h-3 w-3 shrink-0 text-red-400" />}
+					{(status === "skipped" || status === "pending") && (
+						<span className="h-2 w-2 shrink-0 rounded-full bg-zinc-500" title={status} />
+					)}
+				</div>
 			</div>
 			{hasBody && (
 				<div className="space-y-1 px-3 py-2">
@@ -1443,6 +1548,7 @@ function EndNode(props: NodeProps) {
 
 function RegularNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={Wrench}
@@ -1454,6 +1560,9 @@ function RegularNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			rows={configRows(data.meta?.raw)}
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
@@ -1461,6 +1570,7 @@ function RegularNode(props: NodeProps) {
 function SubworkflowNode(props: NodeProps) {
 	const data = asData(props);
 	const target = data.meta?.expression;
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	// Only link out when the target is a literal workflow name, not a
 	// $-expression or `js/...` resolved at runtime. The polymorphic case
 	// can't navigate at design time.
@@ -1481,6 +1591,9 @@ function SubworkflowNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			rows={configRows(data.meta?.raw)}
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>
 	);
 	return withHandles(
@@ -1496,6 +1609,7 @@ function SubworkflowNode(props: NodeProps) {
 
 function WaitNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={Clock}
@@ -1507,12 +1621,16 @@ function WaitNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			rows={configRows(data.meta?.raw)}
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
 
 function DecisionNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={GitBranch}
@@ -1524,12 +1642,16 @@ function DecisionNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			dashed
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
 
 function SwitchNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={Split}
@@ -1541,12 +1663,16 @@ function SwitchNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			dashed
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
 
 function IterationNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={Repeat}
@@ -1558,12 +1684,16 @@ function IterationNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			dashed
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
 
 function LoopNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={RotateCw}
@@ -1575,12 +1705,16 @@ function LoopNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			dashed
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }
 
 function TryNode(props: NodeProps) {
 	const data = asData(props);
+	const { skipped, stopFlag } = stepFlags(data.meta?.raw);
 	return withHandles(
 		<NodeShell
 			icon={Shield}
@@ -1592,6 +1726,9 @@ function TryNode(props: NodeProps) {
 			status={data.liveStatus}
 			selected={props.selected}
 			dashed
+			stepId={data.meta?.stepId}
+			skipped={skipped}
+			stopFlag={stopFlag}
 		/>,
 	);
 }

@@ -10,6 +10,8 @@ import {
 	nextId,
 	renameStep,
 	reorderStep,
+	toggleStepSkip,
+	toggleStepStop,
 	walkSteps,
 } from "./irEditOps";
 import { buildWorkflowDag } from "./workflowDag";
@@ -323,6 +325,44 @@ describe("deleteStep — removes from owning arm, leaves valid array", () => {
 
 	it("throws on an unknown id", () => {
 		expect(() => deleteStep(fixture(), "nope")).toThrow(/no step with id/i);
+	});
+});
+
+describe("toggleStepSkip / toggleStepStop — active:false / stop:true flags", () => {
+	it("sets active:false on a step with no active field", () => {
+		const after = toggleStepSkip(fixture(), "then-1") as ReturnType<typeof fixture>;
+		expect(findStepLocation(after, "then-1")?.step.active).toBe(false);
+	});
+
+	it("toggling again removes the active key entirely (not active:true)", () => {
+		const once = toggleStepSkip(fixture(), "then-1");
+		const twice = toggleStepSkip(once, "then-1") as ReturnType<typeof fixture>;
+		const step = findStepLocation(twice, "then-1")?.step ?? {};
+		expect("active" in step).toBe(false);
+	});
+
+	it("sets stop:true on a nested step (switch case)", () => {
+		const after = toggleStepStop(fixture(), "case-a-1") as ReturnType<typeof fixture>;
+		expect(findStepLocation(after, "case-a-1")?.step.stop).toBe(true);
+	});
+
+	it("toggling again removes the stop key entirely (not stop:false)", () => {
+		const once = toggleStepStop(fixture(), "case-a-1");
+		const twice = toggleStepStop(once, "case-a-1") as ReturnType<typeof fixture>;
+		const step = findStepLocation(twice, "case-a-1")?.step ?? {};
+		expect("stop" in step).toBe(false);
+	});
+
+	it("does not touch the input (pure)", () => {
+		const before = fixture();
+		toggleStepSkip(before, "then-1");
+		toggleStepStop(before, "then-1");
+		expect(JSON.stringify(before)).toBe(JSON.stringify(fixture()));
+	});
+
+	it("throws on an unknown id", () => {
+		expect(() => toggleStepSkip(fixture(), "nope")).toThrow(/no step with id/i);
+		expect(() => toggleStepStop(fixture(), "nope")).toThrow(/no step with id/i);
 	});
 });
 

@@ -120,3 +120,64 @@ describe("WorkflowTestRunner — real v2 control flow", () => {
 		expect(result.state?.standard).toBeUndefined();
 	});
 });
+
+// =============================================================================
+// Studio Skip/Stop debug controls (canvas header toggles: `active: false` /
+// `stop: true`). WorkflowTestRunner's v2 path (`executeV2`) delegates to the
+// REAL `Configuration` + `Runner` → `RunnerSteps.runSteps` — the exact loop
+// production runs — so these flags are honored with ZERO changes to
+// WorkflowTestRunner itself (VERIFIED here, not assumed): `Runner.run` calls
+// `this.runSteps(...)` (RunnerSteps.ts), whose per-step loop checks
+// `if (!step.active) { …skip…; continue; }` BEFORE `if (step.stop) break;`
+// (see core/runner/CLAUDE.md "Step Execution Flow"). The legacy toy
+// executor (`executeSteps`/`executeStep`, used only for `{name, node}`
+// steps with no `id`/`use`/`type`) does NOT check either flag — these tests
+// use v2-shaped steps (`id`/`use`) specifically to route through the real
+// engine, not the toy loop.
+// =============================================================================
+describe("WorkflowTestRunner — Studio Skip/Stop debug controls (active:false / stop:true)", () => {
+	it("skips a step with active:false — flow continues, the skipped step writes no state", async () => {
+		const runner = makeRunner();
+		runner.loadWorkflow({
+			schemaVersion: "2",
+			name: "wtr-v2-active-false",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{ id: "a", use: "echo", inputs: { n: 1 } },
+				{ id: "b", use: "echo", inputs: { n: 2 }, active: false },
+				{ id: "c", use: "echo", inputs: { n: 3 } },
+			],
+		});
+
+		const result = await runner.execute({});
+
+		expect(result.success).toBe(true);
+		expect(result.state?.a).toEqual({ n: 1 });
+		expect(result.state?.b).toBeUndefined();
+		expect(result.state?.c).toEqual({ n: 3 });
+	});
+
+	it("halts the run before a step with stop:true — nothing at or after it runs", async () => {
+		const runner = makeRunner();
+		runner.loadWorkflow({
+			schemaVersion: "2",
+			name: "wtr-v2-stop",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/x" } },
+			steps: [
+				{ id: "a", use: "echo", inputs: { n: 1 } },
+				{ id: "b", use: "echo", inputs: { n: 2 } },
+				{ id: "c", use: "echo", inputs: { n: 3 }, stop: true },
+			],
+		});
+
+		const result = await runner.execute({});
+
+		// The run completes normally (stop breaks the loop, it does not error).
+		expect(result.success).toBe(true);
+		expect(result.state?.a).toEqual({ n: 1 });
+		expect(result.state?.b).toEqual({ n: 2 });
+		expect(result.state?.c).toBeUndefined();
+	});
+});

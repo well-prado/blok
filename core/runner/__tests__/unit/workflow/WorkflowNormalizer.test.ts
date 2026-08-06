@@ -774,3 +774,102 @@ describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
 		expect("ui" in out.steps[0]).toBe(false);
 	});
 });
+
+// =============================================================================
+// Studio debug controls — active:false (Skip) / stop:true (Stop) survive
+// normalization. Unlike `ui` (copyUi — optional passthrough, omitted when
+// absent), active/stop are NOT optional passthrough fields: every
+// InternalStep constructor already stamps a default (`active: true`,
+// `stop: false`) even when the raw step declares neither — see the
+// `active: step.active === undefined ? true : Boolean(step.active)` /
+// `stop: step.stop === true` lines repeated across every step-kind builder
+// in WorkflowNormalizer.ts. That predates the Studio canvas work, so no
+// normalizer change was needed for the Skip/Stop toggles — this is
+// regression coverage proving it, per RunnerSteps.runSteps' loop
+// (core/runner/CLAUDE.md "Step Execution Flow"): `if (!step.active) …
+// continue` runs BEFORE `if (step.stop) break`.
+// =============================================================================
+describe("WorkflowNormalizer — active:false / stop:true survive normalization", () => {
+	it("keeps active:false on a regular step", () => {
+		const out = normalizeWorkflow(
+			{
+				name: "ActiveFalse",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [{ id: "a", use: "@blokjs/respond", inputs: {}, active: false }],
+			},
+			"active-false.json",
+		);
+		expect(out.steps[0].active).toBe(false);
+	});
+
+	it("keeps stop:true on a regular step", () => {
+		const out = normalizeWorkflow(
+			{
+				name: "StopTrue",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/x" } },
+				steps: [{ id: "a", use: "@blokjs/respond", inputs: {}, stop: true }],
+			},
+			"stop-true.json",
+		);
+		expect(out.steps[0].stop).toBe(true);
+	});
+
+	it("defaults to active:true / stop:false when neither is declared", () => {
+		const out = normalizeWorkflow(
+			{
+				name: "Defaults",
+				version: "1.0.0",
+				trigger: { http: { method: "GET", path: "/d" } },
+				steps: [{ id: "a", use: "@blokjs/respond", inputs: {} }],
+			},
+			"defaults.json",
+		);
+		expect(out.steps[0].active).toBe(true);
+		expect(out.steps[0].stop).toBe(false);
+	});
+
+	it("keeps the flags on branch/forEach container steps (per-step, not just leaf steps)", () => {
+		const out = normalizeWorkflow(
+			{
+				name: "ContainersFlags",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/c" } },
+				steps: [
+					{
+						id: "br",
+						branch: {
+							when: "ctx.req.method === 'POST'",
+							then: [{ id: "t1", use: "@blokjs/respond", inputs: {} }],
+						},
+						active: false,
+					},
+					{
+						id: "fe",
+						forEach: { in: "$.state.br", as: "row", do: [{ id: "feBody", use: "@blokjs/respond", inputs: {} }] },
+						stop: true,
+					},
+				],
+			},
+			"containers-flags.json",
+		);
+		expect(out.steps.find((s) => s.name === "br")?.active).toBe(false);
+		expect(out.steps.find((s) => s.name === "fe")?.stop).toBe(true);
+	});
+
+	// The Studio definition-PUT endpoint (`writeWorkflowDefinition`) calls
+	// `normalizeWorkflow` purely as a load-time validation gate before
+	// persisting the RAW definition verbatim — it never rejects unknown-but-
+	// typed step fields. Same tolerance `ui` already relies on.
+	it("does not reject a step carrying active/stop/ui together (PUT-validation tolerance)", () => {
+		expect(() =>
+			normalizeWorkflow({
+				name: "Tolerated",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/t" } },
+				steps: [{ id: "a", use: "@blokjs/respond", inputs: {}, active: false, stop: false, ui: { x: 1, y: 2 } }],
+			}),
+		).not.toThrow();
+	});
+});
