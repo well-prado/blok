@@ -22,7 +22,6 @@ import {
 	type Edge,
 	Handle,
 	MarkerType,
-	MiniMap,
 	type Node,
 	type NodeProps,
 	Position,
@@ -877,12 +876,6 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							showInteractive={false}
 							className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
 						/>
-						<MiniMap
-							nodeStrokeColor="#3f3f46"
-							nodeColor={(node) => MINIMAP_COLORS[(node.data as { kind: DagNodeKind }).kind] ?? "#52525b"}
-							maskColor="rgba(0,0,0,0.6)"
-							className="bg-zinc-900! border-zinc-700! rounded-md!"
-						/>
 					</ReactFlow>
 				</div>
 				{runQuery.data?.browserSession && workspaceMode !== "canvas" && (
@@ -950,30 +943,30 @@ function DebugButton({
 
 // === Layout ===
 
-const MINIMAP_COLORS: Partial<Record<DagNodeKind, string>> = {
-	trigger: "#22c55e",
-	end: "#71717a",
-	regular: "#94a3b8",
-	subworkflow: "#818cf8",
-	wait: "#fbbf24",
-	branch: "#fbbf24",
-	switch: "#fb923c",
-	forEach: "#a78bfa",
-	loop: "#a78bfa",
-	tryEnter: "#f87171",
-	catchEnter: "#ef4444",
-	finallyEnter: "#fb923c",
-	merge: "#52525b",
-};
-
 function nodeSize(kind: DagNodeKind): { width: number; height: number } {
 	if (kind === "merge") return { width: MERGE_DIAMETER, height: MERGE_DIAMETER };
-	if (kind === "trigger" || kind === "end") return { width: TERMINAL_DIAMETER, height: 40 };
+	if (kind === "trigger") return { width: TERMINAL_DIAMETER, height: 48 };
+	if (kind === "end") return { width: TERMINAL_DIAMETER, height: 32 };
 	// Step cards carry config rows; control-flow cards are header + condition.
 	if (kind === "regular" || kind === "subworkflow" || kind === "wait") {
 		return { width: NODE_WIDTH, height: NODE_HEIGHT };
 	}
 	return { width: NODE_WIDTH, height: FLOW_NODE_HEIGHT };
+}
+
+/**
+ * Per-node layout size for dagre. Card height varies with content (ref
+ * subtitle + up to MAX_CONFIG_ROWS input rows), and a flat estimate makes
+ * tall cards swallow the rank gap — so compute it from the same data the
+ * renderer uses. Calibrated against measured render heights: header ≈ 41,
+ * body padding ≈ 14, each body line ≈ 22.
+ */
+function measuredNodeSize(node: DagNode): { width: number; height: number } {
+	const kind = node.data.kind;
+	if (kind === "merge" || kind === "trigger" || kind === "end") return nodeSize(kind);
+	const isStep = kind === "regular" || kind === "subworkflow" || kind === "wait";
+	const bodyLines = (node.data.sublabel ? 1 : 0) + (isStep ? configRows(node.data.meta?.raw).length : 0);
+	return { width: NODE_WIDTH, height: 41 + (bodyLines > 0 ? 14 + bodyLines * 22 : 0) };
 }
 
 /**
@@ -1051,11 +1044,11 @@ export function layoutDag(
 
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
-	g.setGraph({ rankdir: config?.canvas?.direction ?? "TB", nodesep: 48, ranksep: 72, acyclicer: "greedy" });
+	g.setGraph({ rankdir: config?.canvas?.direction ?? "TB", nodesep: 56, ranksep: 88, acyclicer: "greedy" });
 
 	const pins = new Map<string, { x: number; y: number }>();
 	for (const n of dag.nodes) {
-		const { width, height } = nodeSize(n.data.kind);
+		const { width, height } = measuredNodeSize(n);
 		const pin = options?.ignorePositions ? undefined : persistedPosition(n, config);
 		if (pin) {
 			pins.set(n.id, pin);
@@ -1077,7 +1070,7 @@ export function layoutDag(
 	dagre.layout(g);
 
 	const flowNodes: Node[] = dag.nodes.map((n) => {
-		const { width, height } = nodeSize(n.data.kind);
+		const { width, height } = measuredNodeSize(n);
 		const pin = pins.get(n.id);
 		// Pin wins over dagre's computed position so a structural edit
 		// (insert/delete upstream → dagre re-runs) does not snap a
