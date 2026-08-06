@@ -37,12 +37,16 @@ import {
 	ArrowRightFromLine,
 	Bug,
 	CheckCircle2,
+	ChevronDown,
+	ChevronUp,
 	Clock,
+	Expand,
 	FastForward,
 	Focus,
 	GitBranch,
 	Loader2,
 	Maximize2,
+	Minimize2,
 	Pencil,
 	Play,
 	Plus,
@@ -100,6 +104,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
+	const [fullscreen, setFullscreen] = useState(false);
+	const [terminalOpen, setTerminalOpen] = useState(true);
 	const catalog = useNodeCatalog(editingInputsStepId !== null);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
@@ -335,6 +341,17 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [runStatus, sendControl]);
+	// ESC closes whichever right drawer is open (trigger or step inputs).
+	useEffect(() => {
+		if (!triggerEditorOpen && editingInputsStepId === null) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			setTriggerEditorOpen(false);
+			setEditingInputsStepId(null);
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [triggerEditorOpen, editingInputsStepId]);
 	const toggleBreakpointId = (stepId: string) => {
 		setBreakpoints((current) => {
 			const next = new Set(current);
@@ -437,6 +454,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		}
 		const stepId = flowNodeStepId(node);
 		if (!stepId) return;
+		// ION/ATOMIC pattern: clicking a step opens its config drawer.
+		if (definitionEditable && !runActive) startEditInputs(stepId);
 		const nodeRun = [...(runQuery.data?.nodes ?? [])]
 			.sort((a, b) => b.startedAt - a.startedAt)
 			.find((candidate) => candidate.nodeName === stepId);
@@ -448,7 +467,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	if (flowNodes.length === 0) return null;
 
 	return (
-		<div className="rounded-lg border border-zinc-800 overflow-hidden bg-canvas">
+		<div
+			className={cn(
+				"overflow-hidden bg-canvas",
+				fullscreen
+					? "fixed inset-y-0 left-56 right-0 z-40 flex flex-col border-l border-zinc-800"
+					: "rounded-lg border border-zinc-800",
+			)}
+		>
 			<div className="min-h-12 flex items-center gap-3 border-b border-zinc-800 bg-zinc-950/90 px-3 py-2">
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
@@ -542,6 +568,18 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						</button>
 						<button
 							type="button"
+							onClick={() => setFullscreen((current) => !current)}
+							title={fullscreen ? "Exit full screen" : "Full screen"}
+							aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+							className={cn(
+								"inline-flex items-center rounded-md border p-1.5 hover:bg-zinc-800 hover:text-zinc-200",
+								fullscreen ? "border-blok-green-500/50 text-blok-green-300" : "border-zinc-700 text-zinc-400",
+							)}
+						>
+							{fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
+						</button>
+						<button
+							type="button"
 							onClick={() => setEditing(true)}
 							disabled={!writable || studioQuery.isLoading || runActive}
 							title={studioQuery.data?.readOnlyReason}
@@ -569,15 +607,6 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							<>
 								{definitionEditable && (
 									<>
-										<button
-											type="button"
-											onClick={() => startEditInputs(selectedCanvasStepId)}
-											disabled={editDefinition.isPending}
-											title={`Edit the inputs of ${selectedCanvasStepId}`}
-											className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-										>
-											<Wrench className="h-3.5 w-3.5 shrink-0" /> Edit inputs
-										</button>
 										<button
 											type="button"
 											onClick={() => startRename(selectedCanvasStepId)}
@@ -665,20 +694,6 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				onAdd={insertNode}
 				onClose={() => setPaletteOpen(false)}
 			/>
-			{editingInputsStepId && !runActive && catalog.data && (
-				<StepInputsEditor
-					key={editingInputsStepId}
-					stepId={editingInputsStepId}
-					schema={catalog.data.nodes.find((entry) => entry.ref === stepUses[editingInputsStepId])?.inputSchema}
-					inputs={
-						((findStepLocation(definition, editingInputsStepId)?.step.inputs ?? {}) as Record<string, unknown>) ?? {}
-					}
-					pending={editDefinition.isPending}
-					error={editDefinition.error?.message}
-					onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
-					onClose={() => setEditingInputsStepId(null)}
-				/>
-			)}
 			{renamingStepId && (
 				<form
 					className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-950/70 px-3 py-2"
@@ -818,8 +833,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 					)}
 				</div>
 			)}
-			<div className={cn("grid", workspaceMode === "split" && "lg:grid-cols-2")}>
-				<div className={cn("flex h-[600px] min-w-0", workspaceMode === "browser" && "hidden")}>
+			<div className={cn("grid", workspaceMode === "split" && "lg:grid-cols-2", fullscreen && "min-h-0 flex-1")}>
+				<div
+					className={cn("flex min-w-0", fullscreen ? "h-full" : "h-[600px]", workspaceMode === "browser" && "hidden")}
+				>
 					<div ref={canvasRef} className="h-full min-w-0 flex-1">
 						<ReactFlow
 							nodes={renderedNodes}
@@ -848,6 +865,24 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							/>
 						</ReactFlow>
 					</div>
+					{editingInputsStepId && !runActive && catalog.data && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<StepInputsEditor
+								key={editingInputsStepId}
+								narrow
+								stepId={editingInputsStepId}
+								schema={catalog.data.nodes.find((entry) => entry.ref === stepUses[editingInputsStepId])?.inputSchema}
+								inputs={
+									((findStepLocation(definition, editingInputsStepId)?.step.inputs ?? {}) as Record<string, unknown>) ??
+									{}
+								}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
+								onClose={() => setEditingInputsStepId(null)}
+							/>
+						</div>
+					)}
 					{triggerEditorOpen && !runActive && (
 						<TriggerEditor
 							trigger={
@@ -866,11 +901,30 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						events={runQuery.data.browserEvents ?? []}
 						selectedArtifact={selectedArtifact}
 						onShowLive={() => setSelectedArtifact(undefined)}
-						className="h-[600px] min-w-0 border-l border-zinc-800"
+						className={cn("min-w-0 border-l border-zinc-800", fullscreen ? "h-full" : "h-[600px]")}
 					/>
 				)}
 			</div>
-			{runQuery.data && (
+			{fullscreen && (
+				<div className="border-t border-zinc-800 bg-zinc-950">
+					<button
+						type="button"
+						onClick={() => setTerminalOpen((current) => !current)}
+						aria-expanded={terminalOpen}
+						className="flex h-9 w-full items-center gap-2 px-3 text-left hover:bg-zinc-900"
+					>
+						<span className="text-xs font-semibold text-zinc-300">Terminal</span>
+						{runStatus && <StatusBadge status={runStatus} />}
+						{!runQuery.data && <span className="text-[10px] text-zinc-500">no run yet — hit Run to see activity</span>}
+						{terminalOpen ? (
+							<ChevronDown className="ml-auto h-3.5 w-3.5 text-zinc-500" />
+						) : (
+							<ChevronUp className="ml-auto h-3.5 w-3.5 text-zinc-500" />
+						)}
+					</button>
+				</div>
+			)}
+			{(!fullscreen || terminalOpen) && runQuery.data && (
 				<ActivityDrawer
 					nodes={runQuery.data.nodes}
 					logs={runQuery.data.logs}

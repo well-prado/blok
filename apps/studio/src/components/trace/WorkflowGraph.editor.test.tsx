@@ -84,11 +84,13 @@ vi.mock("@xyflow/react", async () => {
 		ReactFlow: ({
 			children,
 			nodes,
+			onNodeClick,
 			onNodeDoubleClick,
 			onNodesChange,
 		}: {
 			children: React.ReactNode;
 			nodes: Array<{ id: string; data: { meta?: { stepId?: string } } }>;
+			onNodeClick?: (event: React.MouseEvent, node: unknown) => void;
 			onNodeDoubleClick?: (event: React.MouseEvent, node: unknown) => void;
 			onNodesChange?: (changes: Array<{ id: string; type: "select"; selected: boolean }>) => void;
 		}) => (
@@ -99,7 +101,10 @@ vi.mock("@xyflow/react", async () => {
 							type="button"
 							key={node.id}
 							aria-label={`Canvas node ${node.data.meta.stepId}`}
-							onClick={() => onNodesChange?.([{ id: node.id, type: "select", selected: true }])}
+							onClick={(event) => {
+								onNodesChange?.([{ id: node.id, type: "select", selected: true }]);
+								onNodeClick?.(event, node);
+							}}
 							onDoubleClick={(event) => onNodeDoubleClick?.(event, node)}
 						/>
 					) : (
@@ -291,8 +296,8 @@ describe("WorkflowGraph layout editor", () => {
 		const user = userEvent.setup();
 		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
 
+		// Clicking a step node opens its inputs drawer directly (ION/ATOMIC pattern).
 		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
-		await user.click(screen.getByRole("button", { name: /edit inputs/i }));
 		// Schema-driven field from the catalog's inputSchema, not raw JSON.
 		await user.type(screen.getByLabelText(/url/), "https://fixture.test/login");
 		await user.click(screen.getByRole("button", { name: /save inputs/i }));
@@ -307,6 +312,31 @@ describe("WorkflowGraph layout editor", () => {
 		const after = transform?.(before) as { steps: Array<{ id: string; inputs: Record<string, unknown> }> };
 		expect(after.steps[0]?.inputs).toEqual({ url: "https://fixture.test/login" });
 		expect(after.steps[1]?.inputs).toEqual({});
+	});
+
+	it("closes the step drawer with Escape", async () => {
+		mocks.studioData = { ...mocks.studioData, sourcePath: "/project/checkout.json" };
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: "Canvas node open" }));
+		expect(screen.getByLabelText(/url/)).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByLabelText(/url/)).not.toBeInTheDocument();
+	});
+
+	it("enters full screen with a collapsible terminal", async () => {
+		const user = userEvent.setup();
+		render(<WorkflowGraph definition={definition} workflowName="checkout" />);
+
+		await user.click(screen.getByRole("button", { name: /^full screen$/i }));
+		expect(screen.getByRole("button", { name: /exit full screen/i })).toBeInTheDocument();
+		const terminal = screen.getByRole("button", { name: /terminal/i });
+		expect(terminal).toHaveAttribute("aria-expanded", "true");
+		await user.click(terminal);
+		expect(screen.getByRole("button", { name: /terminal/i })).toHaveAttribute("aria-expanded", "false");
+		await user.click(screen.getByRole("button", { name: /exit full screen/i }));
+		expect(screen.getByRole("button", { name: /^full screen$/i })).toBeInTheDocument();
 	});
 
 	it("hides Rename for TypeScript-sourced workflows", async () => {

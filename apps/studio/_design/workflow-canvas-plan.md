@@ -1299,6 +1299,8 @@ First visual pass toward the founder's BuildShip-style mockups, with ATOMIC inte
 
 Next visual/interaction candidates are ranked at the end of the research notes (edge midpoint "+" splice first — it also completes 5.2's contextual insertion).
 
+Follow-up 2 (2026-08-06): the **full workspace mode** — a Full screen toggle on the canvas toolbar expands the canvas over the whole content area (app sidebar stays), with the ION/ATOMIC IDE shape: canvas center, right config drawer, and a collapsible **Terminal** bar at the bottom (the run activity drawer docked). Clicking any step now opens its inputs form in the right drawer (same surface as the trigger drawer, ION/ATOMIC's click-to-configure), the inline inputs bar is gone, and **Escape closes whichever drawer is open**.
+
 Follow-up (same day): the inline palette row grew into a proper **Node Library dialog** (atomic-canvas's two-pane NodeLibrary: search + group chips incl. discovered runtime groups on the left, description + input-schema details with required markers on the right, double-click or Add node to insert). And clicking the trigger pill now opens a **Trigger drawer** (atomic-canvas's TriggerForm): kind select across all 10 trigger kinds, typed fields for http/cron/worker/manual, Raw JSON for the rest and for unrendered knobs (which the form preserves on save — middleware arrays etc. survive). Saves flow through the definition pipeline; route bindings refresh on next boot, noted in the drawer.
 
 ### Phase 7 — Polish, performance, and resilience

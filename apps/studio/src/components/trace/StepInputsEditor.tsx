@@ -30,6 +30,8 @@ export interface StepInputsEditorProps {
 	inputs: Record<string, unknown>;
 	pending: boolean;
 	error?: string;
+	/** Drawer layout: single-column fields, no bottom border. */
+	narrow?: boolean;
 	onSave: (inputs: Record<string, unknown>) => void;
 	onClose: () => void;
 }
@@ -73,7 +75,16 @@ export function buildFields(schema: unknown): Field[] {
 	}));
 }
 
-export function StepInputsEditor({ stepId, schema, inputs, pending, error, onSave, onClose }: StepInputsEditorProps) {
+export function StepInputsEditor({
+	stepId,
+	schema,
+	inputs,
+	pending,
+	error,
+	narrow,
+	onSave,
+	onClose,
+}: StepInputsEditorProps) {
 	const fields = useMemo(() => buildFields(schema), [schema]);
 	const knownFieldNames = useMemo(() => new Set(fields.map((field) => field.name)), [fields]);
 	// Inputs the schema doesn't describe (or when reflection failed) are only
@@ -144,13 +155,16 @@ export function StepInputsEditor({ stepId, schema, inputs, pending, error, onSav
 	return (
 		<form
 			aria-label={`Inputs for ${stepId}`}
-			className="border-b border-zinc-800 bg-zinc-950/70 px-3 py-2"
+			className={cn(
+				"bg-zinc-950/70 px-3 py-2",
+				narrow ? "flex min-h-0 flex-1 flex-col overflow-y-auto" : "border-b border-zinc-800",
+			)}
 			onSubmit={(event) => {
 				event.preventDefault();
 				submit();
 			}}
 		>
-			<div className="flex items-center gap-2">
+			<div className={cn("flex items-center gap-2", narrow && "flex-wrap")}>
 				<span className="text-xs font-medium text-zinc-300">
 					Inputs for <span className="font-mono">{stepId}</span>
 				</span>
@@ -189,7 +203,7 @@ export function StepInputsEditor({ stepId, schema, inputs, pending, error, onSav
 					className="mt-2 w-full rounded-md border border-zinc-700 bg-zinc-900 p-2 font-mono text-xs text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-blok-green-400"
 				/>
 			) : (
-				<div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+				<div className={cn("mt-2 grid grid-cols-1 gap-2", !narrow && "md:grid-cols-2")}>
 					{fields.map((field) => {
 						const controlId = `step-input-${stepId}-${field.name}`;
 						const controlClass =
