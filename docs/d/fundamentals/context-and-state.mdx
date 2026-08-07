@@ -251,6 +251,26 @@ outputs. Pick `as` names that cannot collide with step ids or outer loops.
 See [Control-flow handles & footguns](/d/primitives/handles-and-footguns) for
 the full scope rules.
 
+## Checked before they run
+
+TypeScript catches all of this at compile time, because `step()` hands back a
+typed handle. **JSON, Studio-authored and AI-generated workflows get the same
+protection statically**: every `{$ref}` / `ctx.state.…` read is checked against
+the declared `output` schema of the producing step's node, so a mapping to a
+field the node never declares is an error rather than a silent `null`.
+
+That check reports footguns 1, 2 and 4 above (arm escape, ephemeral read,
+forEach key collisions) plus a read of a step that does not exist. It runs in
+three places:
+
+- `blokctl check` — the CI gate, exits non-zero. See [check](/d/cli/check).
+- Boot — `BLOK_VALIDATE_REFS`, advisory by default, `strict` refuses to boot.
+- Studio — live on the canvas and the Definition tab while you edit.
+
+A node that advertises no `output` schema is *unchecked*: its reads are never
+errors, just counted. Keeping Zod `output` schemas on your nodes is what turns
+the check on.
+
 ## Legacy mapping
 
 The runner still understands object-style workflows and JSON workflows after

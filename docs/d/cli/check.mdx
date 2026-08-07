@@ -1,0 +1,86 @@
+---
+title: Check
+icon: "circle-check"
+description: Validate runtime versions and every step-output reference in your JSON workflows before they run.
+---
+
+`blokctl check` is the CI gate. It runs two checks and exits non-zero if either fails:
+
+1. **Runtime versions** — every language runtime pinned in `.blok/config.json` is installed and satisfies its constraint.
+2. **Step-output references** — every `{$ref}` / `ctx.state.…` read in your JSON workflows resolves to a step that
+   actually writes it, and to a field the producing node's **declared output schema** actually declares.
+
+```bash
+blokctl check
+blokctl check --url http://localhost:4000     # take node schemas from a running server
+blokctl check --nodes .blok/nodes.json        # …or from a saved catalog (CI)
+blokctl check --json                          # machine-readable report
+```
+
+## Why reference checking
+
+A mapping to a field the node never declares does not crash. It resolves to `undefined` and ships a silent `null`
+downstream — through green tests, into production. The typed-handle DSL closes this for TypeScript workflows at compile
+time. `blokctl check` closes it for everything `tsc` cannot see: **JSON workflows, Studio-authored workflows, and
+AI-generated workflows.**
+
+What it reports:
+
+| Problem | Meaning |
+|---|---|
+| `unknown-field` | The field is absent from the producing node's output schema, and the schema is closed. The message lists the fields the node **does** declare. |
+| `dangling-step` | No step in the workflow writes that state key. Mirrors the runtime `NamedMissingStateError` (#345), but before the run. |
+| `ephemeral-read` | The producing step declares `ephemeral: true` — it writes no state slot, so its handle is unreadable. |
+| `arm-escape` | Producer and reader sit in mutually exclusive control-flow arms (`branch.then` vs `branch.else`, two `switch` cases) and never run together. |
+| `unprovable-field` (warning) | The field is undeclared but the schema is open (`additionalProperties`), so absence cannot be proven. |
+| `unchecked-node` (warning) | The producing node advertises no output schema, so the field cannot be checked at all. |
+
+Only errors fail the build. Warnings are informational.
+
+## Where node schemas come from
+
+Field checking needs the node catalog — the same one `GET /__blok/nodes` and `blokctl nodes list` serve.
+
+<Steps>
+  <Step title="From a running server">
+    `blokctl check --url http://localhost:4000` fetches the live catalog, including every connected language runtime.
+  </Step>
+  <Step title="From a file (CI)">
+    Save the catalog once and commit it:
+
+    ```bash
+    blokctl nodes list --json > .blok/nodes.json
+    blokctl check --nodes .blok/nodes.json
+    ```
+  </Step>
+  <Step title="Neither">
+    Every step is **unchecked**. Dangling / ephemeral / arm-escape problems are still reported — those need no schema —
+    and the summary tells you how many steps went unchecked. The command stays useful instead of noisy.
+  </Step>
+</Steps>
+
+A node that advertises no output schema is always unchecked, never an error. Which SDKs advertise schemas, and when, is
+documented in the runtime catalog reference — typed-node APIs emit them, legacy/raw handlers do not.
+
+## The same check at boot and in Studio
+
+The identical pass runs in two more places, so a bad reference has three chances to surface before it reaches a stack:
+
+- **At boot** — `BLOK_VALIDATE_REFS` (see [environment variables](/d/operations/env-vars)). `advisory` by default (logs
+  and boots), `strict` refuses to boot, `off` skips it.
+- **In Studio** — the canvas marks the reading step, and the Definition tab lists each problem against its document
+  path with the producer's declared fields as the suggestion list. Diagnostics run on your *draft*, so a bad reference
+  shows up while you edit rather than after you deploy.
+
+## Options
+
+| Flag | Purpose |
+|---|---|
+| `--json` | Emit one machine-readable object instead of the human report. |
+| `--nodes <file>` | Node catalog JSON to check output schemas against. |
+| `--url <baseUrl>` | Fetch the node catalog from a running server instead of a file. |
+
+<Note>
+TypeScript workflows are not scanned — the typed-handle DSL already gives `tsc` the same guarantee at compile time, and
+`blokctl` cannot import your project's TypeScript sources. Run `tsc` for those; run `blokctl check` for the rest.
+</Note>

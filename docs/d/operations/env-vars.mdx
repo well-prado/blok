@@ -35,6 +35,7 @@ store).
 | `BLOK_ROUTING_LEGACY` | unset | Full legacy escape hatch. When `=1` / `=true`, file-based routing is disabled AND workflows without an explicit `trigger.http.path` get the filename-derived URL instead of throwing `MissingExplicitPathError`. Will be removed in a future release. |
 | `BLOK_HMR` | `true` (dev) | Hot-reload workflows on file change. Triggers re-scan and `WorkflowRegistry.clear()` + `registerAll()`. |
 | `BLOK_MAPPER_MODE` | `strict` | Input expression resolution failure mode. `strict` (default) throws `MapperResolutionError` on a failed expression, `warn` logs + passes the literal through (old v1 behavior), `silent` suppresses. See [debugging workflows](/d/introduction/workflows#debugging). |
+| `BLOK_VALIDATE_REFS` | `advisory` | Boot-time schema-aware step-output reference checking. Every workflow's `{$ref}` / `ctx.state.…` reads are validated against the declared output schema of the producing step's node (the same catalog `GET /__blok/nodes` serves). `advisory` (default) logs errors and boots anyway; `strict` refuses to boot; `off` skips the pass. A node with no advertised output schema is "unchecked" — its reads never error. Run the same check in CI with `blokctl check`. |
 
 ## Sub-workflows
 
