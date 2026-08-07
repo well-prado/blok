@@ -11,10 +11,10 @@ import type { ConnectRouter } from "@connectrpc/connect";
 import { type Span, SpanStatusCode, metrics, trace } from "@opentelemetry/api";
 import fastify from "fastify";
 import { v4 as uuid } from "uuid";
-import MessageDecode from "./MessageDecode";
-import nodes from "./Nodes";
-import workflows from "./Workflows";
-import type RuntimeWorkflow from "./types/RuntimeWorkflow";
+import MessageDecode from "./MessageDecode.js";
+import nodes from "./Nodes.js";
+import workflows from "./Workflows.js";
+import type RuntimeWorkflow from "./types/RuntimeWorkflow.js";
 
 import { workflow } from "@blokjs/helper";
 import type { TriggerOpts } from "@blokjs/helper";
@@ -24,7 +24,7 @@ import {
 	type WorkflowRequest,
 	type WorkflowResponse,
 	WorkflowService,
-} from "./gen/workflow_pb";
+} from "./gen/workflow_pb.js";
 
 enum NodeTypes {
 	MODULE = "module",

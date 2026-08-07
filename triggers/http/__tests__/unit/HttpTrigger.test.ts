@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock external dependencies before imports.
 // Shared complete OTel double (OBS-02 B2 propagation surface).
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -42,7 +42,7 @@ vi.mock("@hono/node-server/utils/response", () => ({
 }));
 
 import { Hono } from "hono";
-import HttpTrigger, { type AppBindings } from "../../src/runner/HttpTrigger";
+import HttpTrigger, { type AppBindings } from "../../src/runner/HttpTrigger.js";
 
 describe("HttpTrigger", () => {
 	let trigger: HttpTrigger;

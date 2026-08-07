@@ -69,17 +69,17 @@ export {
 	type WorkerAdapter,
 	type WorkerJob,
 	type WorkerQueueStats,
-} from "./WorkerTrigger";
+} from "./WorkerTrigger.js";
 
 // Adapters
-export { BullMQAdapter, type BullMQConfig } from "./adapters/BullMQAdapter";
-export { InMemoryAdapter } from "./adapters/InMemoryAdapter";
-export { KafkaAdapter, type KafkaConfig } from "./adapters/KafkaAdapter";
-export { NATSWorkerAdapter, type NATSWorkerConfig } from "./adapters/NATSAdapter";
-export { PgBossAdapter, type PgBossConfig } from "./adapters/PgBossAdapter";
-export { RabbitMQAdapter, type RabbitMQConfig } from "./adapters/RabbitMQAdapter";
-export { RedisStreamsAdapter, type RedisStreamsConfig } from "./adapters/RedisStreamsAdapter";
-export { SQSAdapter, type SQSConfig } from "./adapters/SQSAdapter";
+export { BullMQAdapter, type BullMQConfig } from "./adapters/BullMQAdapter.js";
+export { InMemoryAdapter } from "./adapters/InMemoryAdapter.js";
+export { KafkaAdapter, type KafkaConfig } from "./adapters/KafkaAdapter.js";
+export { NATSWorkerAdapter, type NATSWorkerConfig } from "./adapters/NATSAdapter.js";
+export { PgBossAdapter, type PgBossConfig } from "./adapters/PgBossAdapter.js";
+export { RabbitMQAdapter, type RabbitMQConfig } from "./adapters/RabbitMQAdapter.js";
+export { RedisStreamsAdapter, type RedisStreamsConfig } from "./adapters/RedisStreamsAdapter.js";
+export { SQSAdapter, type SQSConfig } from "./adapters/SQSAdapter.js";
 
 // v0.7 PR 5 — factory + pool. Used by WorkerTrigger and exposed for
 // helper nodes (`@blokjs/worker-publish`) that need to enqueue jobs
@@ -89,7 +89,7 @@ export {
 	createWorkerAdapter,
 	getOrCreateAdapter,
 	resolveProvider,
-} from "./adapters/factory";
+} from "./adapters/factory.js";
 
 // Re-export types from helper for convenience
 export type { WorkerProvider, WorkerTriggerOpts } from "@blokjs/helper";

@@ -1,6 +1,6 @@
 import type { WorkerJob } from "@blokjs/runner";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { SQSAdapter } from "../../src/adapters/SQSAdapter";
+import { SQSAdapter } from "../../src/adapters/SQSAdapter.js";
 
 /**
  * Real-LocalStack-SQS integration test for `SQSAdapter` (closes Phase 2.1

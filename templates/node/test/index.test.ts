@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import Node from "../index";
-import ctx from "./helper";
+import Node from "../index.js";
+import ctx from "./helper.js";
 
 // Validate Hello World from Node
 test("Hello World from Node", async () => {

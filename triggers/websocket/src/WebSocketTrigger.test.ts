@@ -15,7 +15,7 @@
 import { WorkflowRegistry } from "@blokjs/runner";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import WebSocketTrigger, { _getActiveWebSocketTrigger, _setActiveWebSocketTrigger } from "./WebSocketTrigger";
+import WebSocketTrigger, { _getActiveWebSocketTrigger, _setActiveWebSocketTrigger } from "./WebSocketTrigger.js";
 
 // Mock @opentelemetry/api so the trigger's tracer + meter constructors don't
 // require a real exporter. Matches the pattern used by the HTTP trigger test.

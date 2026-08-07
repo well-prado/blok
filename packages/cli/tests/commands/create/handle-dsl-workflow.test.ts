@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateSharedWorkflowsFile } from "../../../src/commands/create/project";
+import { generateSharedWorkflowsFile } from "../../../src/commands/create/project.js";
 
 /**
  * Audit fix: a fresh `blokctl create project` (HTTP) used to ship ZERO
@@ -18,7 +18,7 @@ describe("HTTP scaffold ships a runnable @blokjs/core handle-DSL workflow", () =
 	it("registers the handle-DSL example in the generated Workflows.ts", () => {
 		const out = generateSharedWorkflowsFile(["http"], [], false);
 		// Imported from the copied src/workflows/http/ source.
-		expect(out).toContain('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl";');
+		expect(out).toContain('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl.js";');
 		// The callback DSL resolves async → registered via top-level await so the
 		// resolved builder lands in the synchronous Record<string, WorkflowV2Builder>.
 		expect(out).toContain('"countries-dsl": await CountriesHandleDsl,');

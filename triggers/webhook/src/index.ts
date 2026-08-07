@@ -33,11 +33,11 @@
  * for the full design.
  */
 
-import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger";
+import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger.js";
 
 export default WebhookTrigger;
 export { WebhookTrigger, _getActiveWebhookTrigger, _setActiveWebhookTrigger };
-export type { WebhookTriggerConfig } from "./WebhookTrigger";
+export type { WebhookTriggerConfig } from "./WebhookTrigger.js";
 export type { WebhookTriggerOpts } from "@blokjs/helper";
 export {
 	BUILTIN_VERIFIERS,
@@ -47,5 +47,5 @@ export {
 	slackVerifier,
 	stripeVerifier,
 	svixVerifier,
-} from "./verifiers";
-export type { CustomSignatureConfig, VerifyError, VerifyInput, VerifyOk, VerifyResult, Verifier } from "./verifiers";
+} from "./verifiers.js";
+export type { CustomSignatureConfig, VerifyError, VerifyInput, VerifyOk, VerifyResult, Verifier } from "./verifiers.js";

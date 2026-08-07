@@ -1,6 +1,6 @@
 import type { PubSubMessage } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NATSPubSubAdapter } from "../../src/adapters/NATSPubSubAdapter";
+import { NATSPubSubAdapter } from "../../src/adapters/NATSPubSubAdapter.js";
 
 /**
  * Real-NATS integration test for `NATSPubSubAdapter` (closes the

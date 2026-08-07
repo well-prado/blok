@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateTriggerEntryFile } from "../../../src/commands/create/project";
+import { generateTriggerEntryFile } from "../../../src/commands/create/project.js";
 
 /**
  * Regression (#643): a `--triggers grpc` scaffold used to hit the generic
@@ -13,8 +13,8 @@ describe("grpc trigger scaffold (#643)", () => {
 		const out = generateTriggerEntryFile("grpc");
 		expect(out).not.toContain("not yet implemented");
 		expect(out).toContain('import { GrpcServer } from "@blokjs/trigger-grpc"');
-		expect(out).toContain('import nodes from "../../Nodes"');
-		expect(out).toContain('import workflows from "../../Workflows"');
+		expect(out).toContain('import nodes from "../../Nodes.js"');
+		expect(out).toContain('import workflows from "../../Workflows.js"');
 		expect(out).toContain("new GrpcServer({ host, port, nodes, workflows }).start()");
 		expect(out).toContain('if (process.env.DISABLE_TRIGGER_RUN !== "true")');
 	});

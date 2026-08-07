@@ -1,7 +1,7 @@
 import type { WorkerJob } from "@blokjs/runner";
 import IORedis from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RedisStreamsAdapter } from "../../src/adapters/RedisStreamsAdapter";
+import { RedisStreamsAdapter } from "../../src/adapters/RedisStreamsAdapter.js";
 
 /**
  * Real-Redis integration test for `RedisStreamsAdapter` (issue #589).

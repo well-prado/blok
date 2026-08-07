@@ -1,6 +1,6 @@
 import type { WorkerJob } from "@blokjs/runner";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NATSWorkerAdapter } from "../../src/adapters/NATSAdapter";
+import { NATSWorkerAdapter } from "../../src/adapters/NATSAdapter.js";
 
 /**
  * Real-NATS integration test for `NATSWorkerAdapter` (closes the

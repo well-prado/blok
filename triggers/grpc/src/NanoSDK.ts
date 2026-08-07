@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { JsonLikeObject } from "@blokjs/runner";
-import GrpcClient, { type RpcOptions, type WorkflowRequest, HttpVersionEnum, TransportEnum } from "./GrpcClient";
-import MessageDecode from "./MessageDecode";
+import GrpcClient, { type RpcOptions, type WorkflowRequest, HttpVersionEnum, TransportEnum } from "./GrpcClient.js";
+import MessageDecode from "./MessageDecode.js";
 
 export default class NanoSDK {
 	public createClient(host?: string, token?: string) {

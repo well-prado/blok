@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import MessageDecode from "../../src/runner/MessageDecode";
+import MessageDecode from "../../src/runner/MessageDecode.js";
 
 describe("MessageDecode", () => {
 	const coder = new MessageDecode();

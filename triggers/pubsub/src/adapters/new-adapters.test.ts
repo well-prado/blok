@@ -10,12 +10,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { AWSSNSAdapter } from "./AWSSNSAdapter";
-import { AzureServiceBusAdapter } from "./AzureServiceBusAdapter";
-import { GCPPubSubAdapter } from "./GCPPubSubAdapter";
-import { KafkaPubSubAdapter } from "./KafkaPubSubAdapter";
-import { NATSPubSubAdapter } from "./NATSPubSubAdapter";
-import { RedisStreamsPubSubAdapter } from "./RedisStreamsPubSubAdapter";
+import { AWSSNSAdapter } from "./AWSSNSAdapter.js";
+import { AzureServiceBusAdapter } from "./AzureServiceBusAdapter.js";
+import { GCPPubSubAdapter } from "./GCPPubSubAdapter.js";
+import { KafkaPubSubAdapter } from "./KafkaPubSubAdapter.js";
+import { NATSPubSubAdapter } from "./NATSPubSubAdapter.js";
+import { RedisStreamsPubSubAdapter } from "./RedisStreamsPubSubAdapter.js";
 
 describe("NATSPubSubAdapter — v0.7 PR 6", () => {
 	it("reports provider 'nats'", () => {

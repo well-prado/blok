@@ -44,7 +44,7 @@
 
 import type { WorkerTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
-import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "../WorkerTrigger.js";
 
 export interface KafkaConfig {
 	brokers: string[];

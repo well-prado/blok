@@ -31,7 +31,7 @@ vi.mock("../../src/MessageDecode", () => {
 	return { default: MockMessageDecode };
 });
 
-import NanoSDK, { NanoSDKClient } from "../../src/NanoSDK";
+import NanoSDK, { NanoSDKClient } from "../../src/NanoSDK.js";
 
 describe("NanoSDK", () => {
 	let sdk: NanoSDK;

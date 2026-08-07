@@ -40,8 +40,8 @@ vi.mock("@opentelemetry/api", () => {
 
 import type { TriggerResponse } from "@blokjs/runner";
 import { GlobalError, WORKFLOW_INPUT_VALIDATION } from "@blokjs/shared";
-import { PubSubTrigger } from "../src/PubSubTrigger";
-import type { PubSubAdapter, PubSubMessage } from "../src/PubSubTrigger";
+import { PubSubTrigger } from "../src/PubSubTrigger.js";
+import type { PubSubAdapter, PubSubMessage } from "../src/PubSubTrigger.js";
 
 /** Drives handleMessage with a `run` that throws the ADR-0015 tagged validation error. */
 class ValidationFailingTrigger extends PubSubTrigger {

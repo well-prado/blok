@@ -38,7 +38,7 @@
  * for the full design.
  */
 
-import WebSocketTrigger, { _getActiveWebSocketTrigger, _setActiveWebSocketTrigger } from "./WebSocketTrigger";
+import WebSocketTrigger, { _getActiveWebSocketTrigger, _setActiveWebSocketTrigger } from "./WebSocketTrigger.js";
 
 // Re-export under both default AND named names. Consumer code that does
 // `import WebSocketTrigger from "@blokjs/trigger-websocket"` (HTTP

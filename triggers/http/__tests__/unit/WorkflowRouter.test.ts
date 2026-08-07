@@ -6,8 +6,8 @@ import {
 	buildRouteTable,
 	readMiddlewareFlag,
 	scorePathSpecificity,
-} from "../../src/runner/WorkflowRouter";
-import type { ScannedWorkflow } from "../../src/runner/scanWorkflows";
+} from "../../src/runner/WorkflowRouter.js";
+import type { ScannedWorkflow } from "../../src/runner/scanWorkflows.js";
 
 /**
  * Build a ScannedWorkflow fixture. `explicitPath` defaults to

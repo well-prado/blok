@@ -1,6 +1,6 @@
 import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import PubSubServer from "./runner/PubSubServer";
+import PubSubServer from "./runner/PubSubServer.js";
 
 export default class App {
 	private pubsubServer: PubSubServer = <PubSubServer>{};

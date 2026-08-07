@@ -6,9 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "./WorkerTrigger";
-import { InMemoryAdapter } from "./adapters/InMemoryAdapter";
-import { computeXDelayHoldMs } from "./adapters/NATSAdapter";
+import type { WorkerAdapter, WorkerJob, WorkerQueueStats } from "./WorkerTrigger.js";
+import { InMemoryAdapter } from "./adapters/InMemoryAdapter.js";
+import { computeXDelayHoldMs } from "./adapters/NATSAdapter.js";
 
 // ============================================================================
 // WorkerJob Interface Tests

@@ -13,7 +13,7 @@
 import type { PubSubTriggerOpts } from "@blokjs/helper";
 import type { Message, PubSub, Subscription } from "@google-cloud/pubsub";
 import { v4 as uuid } from "uuid";
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger.js";
 
 /**
  * GCP Pub/Sub configuration

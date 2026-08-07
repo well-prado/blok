@@ -64,7 +64,7 @@ import {
 	encodeEnvelope,
 	newSenderId,
 	resolveBackplaneConfig,
-} from "./Backplane";
+} from "./Backplane.js";
 
 // -----------------------------------------------------------------------------
 // Types

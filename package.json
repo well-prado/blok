@@ -60,7 +60,8 @@
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
 		"build": "bunx nx run-many -t build && bun run scripts/fix-esm-extensions.ts",
 		"check:packaging": "bun run scripts/check-packed-exports.ts",
-		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts"
+		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts",
+		"check:template-esm": "bun run scripts/fix-esm-extensions-src.ts --check"
 	},
 	"devDependencies": {
 		"@arethetypeswrong/cli": "0.18.5",

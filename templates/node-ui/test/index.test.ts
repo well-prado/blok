@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "vitest";
-import Node from "../index";
-import ctx from "./helper";
+import Node from "../index.js";
+import ctx from "./helper.js";
 
 const rootDir = path.resolve(__dirname, ".");
 

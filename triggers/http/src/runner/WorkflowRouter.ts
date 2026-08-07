@@ -1,4 +1,4 @@
-import type { ScannedWorkflow } from "./scanWorkflows";
+import type { ScannedWorkflow } from "./scanWorkflows.js";
 
 /**
  * WorkflowRouter — builds the explicit route table from scanned workflows

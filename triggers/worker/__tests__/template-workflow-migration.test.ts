@@ -6,7 +6,7 @@
  */
 import { WorkflowTestRunner } from "@blokjs/runner/testing";
 import { describe, expect, it } from "vitest";
-import processJob from "../template/src/workflows/jobs/process-job";
+import processJob from "../template/src/workflows/jobs/process-job.js";
 
 describe("worker template workflow — @blokjs/core typed-handle migration", () => {
 	it("runs through the real engine; job.body + job.params refs resolve", async () => {

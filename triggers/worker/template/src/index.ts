@@ -1,6 +1,6 @@
 import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import WorkerServer from "./runner/WorkerServer";
+import WorkerServer from "./runner/WorkerServer.js";
 
 export default class App {
 	private workerServer: WorkerServer = <WorkerServer>{};

@@ -46,7 +46,7 @@ vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() })
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 
 import { WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 // A known, valid W3C traceparent: version-traceId-parentSpanId-flags.
 const INBOUND_TRACE_ID = "0af7651916cd43dd8448eb211c80319c";

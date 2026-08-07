@@ -41,15 +41,15 @@ export {
 	PubSubTrigger,
 	type PubSubAdapter,
 	type PubSubMessage,
-} from "./PubSubTrigger";
+} from "./PubSubTrigger.js";
 
 // Adapters
-export { AWSSNSAdapter, type AWSSNSConfig } from "./adapters/AWSSNSAdapter";
-export { AzureServiceBusAdapter, type AzureServiceBusConfig } from "./adapters/AzureServiceBusAdapter";
-export { GCPPubSubAdapter, type GCPPubSubConfig } from "./adapters/GCPPubSubAdapter";
-export { KafkaPubSubAdapter, type KafkaPubSubConfig } from "./adapters/KafkaPubSubAdapter";
-export { NATSPubSubAdapter, type NATSPubSubConfig } from "./adapters/NATSPubSubAdapter";
-export { RedisStreamsPubSubAdapter, type RedisStreamsPubSubConfig } from "./adapters/RedisStreamsPubSubAdapter";
+export { AWSSNSAdapter, type AWSSNSConfig } from "./adapters/AWSSNSAdapter.js";
+export { AzureServiceBusAdapter, type AzureServiceBusConfig } from "./adapters/AzureServiceBusAdapter.js";
+export { GCPPubSubAdapter, type GCPPubSubConfig } from "./adapters/GCPPubSubAdapter.js";
+export { KafkaPubSubAdapter, type KafkaPubSubConfig } from "./adapters/KafkaPubSubAdapter.js";
+export { NATSPubSubAdapter, type NATSPubSubConfig } from "./adapters/NATSPubSubAdapter.js";
+export { RedisStreamsPubSubAdapter, type RedisStreamsPubSubConfig } from "./adapters/RedisStreamsPubSubAdapter.js";
 
 // v0.7 PR 6 — factory + pool used by PubSubTrigger and exposed for
 // helper nodes (`@blokjs/pubsub-publish`).
@@ -58,7 +58,7 @@ export {
 	createPubSubAdapter,
 	getOrCreateAdapter,
 	resolveProvider,
-} from "./adapters/factory";
+} from "./adapters/factory.js";
 
 // Re-export types from helper for convenience
 export type {

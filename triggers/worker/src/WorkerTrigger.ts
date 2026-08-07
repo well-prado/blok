@@ -527,7 +527,7 @@ export abstract class WorkerTrigger extends TriggerBase {
 
 		// Lazy-import the factory so the worker package doesn't pull in
 		// every adapter on import — only the ones actually exercised.
-		const { resolveProvider, createWorkerAdapter } = await import("./adapters/factory");
+		const { resolveProvider, createWorkerAdapter } = await import("./adapters/factory.js");
 		const provider = resolveProvider(config.provider);
 		let adapter = this.adapterPool.get(provider);
 		if (!adapter) {

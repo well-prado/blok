@@ -12,7 +12,7 @@ import {
 } from "@blokjs/runner";
 import type { Context } from "@blokjs/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type ScannedWorkflow, scanWorkflows } from "../../src/runner/scanWorkflows";
+import { type ScannedWorkflow, scanWorkflows } from "../../src/runner/scanWorkflows.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from "../../src/runner/validateRefsAtBoot";
+import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from "../../src/runner/validateRefsAtBoot.js";
 
 // #691 — boot-time schema-aware `$ref` validation. Advisory by default,
 // `BLOK_VALIDATE_REFS=strict` fails boot, `=off` silences it.

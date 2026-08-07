@@ -1,6 +1,6 @@
 import type { Context } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
-import LoginFixtureUI from "../../src/nodes/examples/login-fixture-ui";
+import LoginFixtureUI from "../../src/nodes/examples/login-fixture-ui/index.js";
 
 const ctx = {} as Context;
 const run = async (input: { page: "login" | "dashboard"; email?: string; authed?: boolean }) => {

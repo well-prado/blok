@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import nodes from "../../src/Nodes";
+import nodes from "../../src/Nodes.js";
 
 describe("Nodes", () => {
 	it("should export an object with node keys", () => {

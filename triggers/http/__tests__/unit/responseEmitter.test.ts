@@ -8,7 +8,7 @@
 import { RESPOND_BRAND } from "@blokjs/shared";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { emitWorkflowResponse, normalizeResponseEnvelope } from "../../src/runner/responseEmitter";
+import { emitWorkflowResponse, normalizeResponseEnvelope } from "../../src/runner/responseEmitter.js";
 
 /** Build an app whose GET /x route emits `ctxResponse` via the real emitter. */
 function appFor(ctxResponse: unknown): Hono {

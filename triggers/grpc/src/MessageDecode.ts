@@ -1,7 +1,7 @@
 import type { JsonLikeObject } from "@blokjs/runner";
 import type { Context } from "@blokjs/shared";
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
-import { MessageEncoding, MessageType, type WorkflowRequest, type WorkflowResponse } from "./gen/workflow_pb";
+import { MessageEncoding, MessageType, type WorkflowRequest, type WorkflowResponse } from "./gen/workflow_pb.js";
 
 export default class MessageDecode {
 	requestDecode(request: WorkflowRequest): Context {

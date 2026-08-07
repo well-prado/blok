@@ -5,7 +5,7 @@ import WebhookTrigger from "@blokjs/trigger-webhook";
 import WebSocketTrigger from "@blokjs/trigger-websocket";
 import { type Span, metrics, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
-import HttpTrigger, { type AppBindings } from "./runner/HttpTrigger";
+import HttpTrigger, { type AppBindings } from "./runner/HttpTrigger.js";
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};

@@ -269,7 +269,7 @@ export abstract class PubSubTrigger extends TriggerBase {
 			this.adapterPool.set(this.adapter.provider, this.adapter);
 			return this.adapter;
 		}
-		const { resolveProvider, createPubSubAdapter } = await import("./adapters/factory");
+		const { resolveProvider, createPubSubAdapter } = await import("./adapters/factory.js");
 		const provider = resolveProvider(config.provider);
 		let adapter = this.adapterPool.get(provider);
 		if (!adapter) {

@@ -47,8 +47,8 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import type { BackplaneAdapter } from "./Backplane";
-import WebSocketTriggerClass, { _setActiveWebSocketTrigger } from "./WebSocketTrigger";
+import type { BackplaneAdapter } from "./Backplane.js";
+import WebSocketTriggerClass, { _setActiveWebSocketTrigger } from "./WebSocketTrigger.js";
 
 /**
  * In-memory mock pub/sub bus. Every adapter instance registered

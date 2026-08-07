@@ -23,7 +23,7 @@ import { type BlokService, Configuration, type GlobalOptions, defineNode } from 
 import type { Context } from "@blokjs/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { WorkerTrigger } from "./WorkerTrigger";
+import { WorkerTrigger } from "./WorkerTrigger.js";
 
 const echoNode = defineNode({
 	name: "echo",

@@ -928,6 +928,14 @@ export async function createProject(opts: OptionValues, version: string, current
 		for (const tc of triggerConfigs) {
 			triggerScripts[`start:${tc.kind}`] = tc.startCmd;
 		}
+		// #709 — the base package.json is copied from the primary trigger's own
+		// manifest, whose `start` points at the PACKAGE entry (`dist/index.js`).
+		// A generated project's build lays entries at
+		// `dist/triggers/<kind>/index.js`, so the inherited script dangles. Point
+		// `start` at the real primary entry, under Node: the production path
+		// (containers, serverless) is Node, and as of v2.0.x the template
+		// source compiles to Node-runnable ESM.
+		triggerScripts.start = `node dist/triggers/${primaryTrigger}/index.js`;
 		packageJsonContent.scripts = {
 			...packageJsonContent.scripts,
 			...triggerScripts,
@@ -948,6 +956,22 @@ export async function createProject(opts: OptionValues, version: string, current
 			...packageJsonContent.dependencies,
 			"@blokjs/core": localRepoPath ? `file:${path.resolve(repoSource, "core/core")}` : BLOKJS_DEP_RANGE,
 		};
+
+		// #709 — the base tsconfig is copied from the primary trigger package,
+		// which builds under `moduleResolution: "bundler"`. A generated project
+		// compiles with ITS OWN tsc and must emit Node-runnable ESM, so flip it
+		// to NodeNext: extensionless relative imports become a COMPILE error at
+		// the user's desk instead of an ERR_MODULE_NOT_FOUND in their deploy.
+		const tsconfigPath = `${dirPath}/tsconfig.json`;
+		if (fsExtra.existsSync(tsconfigPath)) {
+			const tsconfig = JSON.parse(fsExtra.readFileSync(tsconfigPath, "utf8"));
+			tsconfig.compilerOptions = {
+				...tsconfig.compilerOptions,
+				module: "nodenext",
+				moduleResolution: "nodenext",
+			};
+			fsExtra.writeFileSync(tsconfigPath, `${JSON.stringify(tsconfig, null, "\t")}\n`);
+		}
 
 		// ponytail: strip the framework's internal test setup so it doesn't bleed
 		// into the user's project — no `test`/`test:dev` scripts, no vitest dep.
@@ -1443,7 +1467,7 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// the awaited builder; the generated file already uses top-level await
 			// in Nodes.ts, so this is consistent.
 			imports.push("// HTTP JSON workflows are auto-discovered from workflows/json/");
-			imports.push('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl";');
+			imports.push('import CountriesHandleDsl from "./workflows/http/countries-handle-dsl.js";');
 			workflowEntries.push('\t"countries-dsl": await CountriesHandleDsl,');
 		} else if (trigger === "sse") {
 			// v0.6.7 — SSE source ships `src/workflows/events/{stream,publish}-demo.ts`
@@ -1459,10 +1483,10 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// `await`: these are @blokjs/core callback-form workflows (async, like
 			// countries-dsl). Without it the unresolved Promise carries no readable
 			// `_config.trigger`, so SSEServer skips it and the /sse route never mounts.
-			imports.push('import SSEStreamDemo from "./workflows/sse/events/stream-demo";');
+			imports.push('import SSEStreamDemo from "./workflows/sse/events/stream-demo.js";');
 			workflowEntries.push('\t"sse-stream-demo": await SSEStreamDemo,');
 			if (triggers.includes("http")) {
-				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo";');
+				imports.push('import SSEPublishDemo from "./workflows/sse/events/publish-demo.js";');
 				workflowEntries.push('\t"sse-publish-demo": await SSEPublishDemo,');
 			}
 		} else if (trigger === "websocket") {
@@ -1472,11 +1496,11 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// scaffold ships this regardless of whether HTTP is selected;
 			// when HTTP is also selected, it mounts on the shared port
 			// alongside HTTP routes via WebSocketTrigger(app, httpTrigger).
-			imports.push('import WSEchoDemo from "./workflows/websocket/events/echo-demo";');
+			imports.push('import WSEchoDemo from "./workflows/websocket/events/echo-demo.js";');
 			// `await` — callback-form async workflow (see the sse/pubsub notes).
 			workflowEntries.push('\t"ws-echo-demo": await WSEchoDemo,');
 		} else if (trigger === "pubsub") {
-			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
+			imports.push('import OnPubSubMessage from "./workflows/pubsub/messages/on-message.js";');
 			// `await`: the @blokjs/core callback-form workflow() resolves async (same
 			// as countries-dsl). Registering the unresolved Promise means the pubsub
 			// trigger reads no `_config.trigger.pubsub` off it and logs "No workflows
@@ -1486,12 +1510,12 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// only useful when an HTTP trigger is also present to serve it, so a
 			// pubsub-only project skips it. Gives a curl-able produce→consume loop.
 			if (triggers.includes("http")) {
-				imports.push('import PublishOrder from "./workflows/pubsub/publish-order";');
+				imports.push('import PublishOrder from "./workflows/pubsub/publish-order.js";');
 				workflowEntries.push('\t"publish-order": await PublishOrder,');
 			}
 		} else if (trigger === "queue" || trigger === "worker") {
 			// Worker template ships `workflows/jobs/process-job.ts`.
-			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job";`);
+			imports.push(`import ProcessJob from "./workflows/${trigger}/jobs/process-job.js";`);
 			// `await` — callback-form async workflow (see the sse/pubsub notes).
 			workflowEntries.push('\t"process-job": await ProcessJob,');
 		} else if (trigger === "cron") {
@@ -1500,7 +1524,7 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			// runnable heartbeat at src/workflows/cron/heartbeat.ts and registers
 			// it here. Without it, CronServer.listen() finds no cron workflows and
 			// the process exits immediately.
-			imports.push('import CronHeartbeat from "./workflows/cron/heartbeat";');
+			imports.push('import CronHeartbeat from "./workflows/cron/heartbeat.js";');
 			workflowEntries.push('\t"cron-heartbeat": await CronHeartbeat,');
 		}
 	}
@@ -1512,7 +1536,7 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 	if (examples) {
 		// MCP greeter — exposed as the `greet` MCP tool. Needs the mcp trigger.
 		if (triggers.includes("mcp")) {
-			imports.push('import McpGreeter from "./workflows/examples/mcp-greeter";');
+			imports.push('import McpGreeter from "./workflows/examples/mcp-greeter.js";');
 			workflowEntries.push('\t"mcp-greeter": McpGreeter,');
 		}
 		// One hello-world-over-gRPC workflow per selected non-node runtime.
@@ -1521,7 +1545,7 @@ export function generateSharedWorkflowsFile(triggers: string[], runtimeKinds: st
 			if (!file) continue;
 			const fileBase = file.replace(/\.ts$/, "");
 			const importName = `Runtime${kind.charAt(0).toUpperCase()}${kind.slice(1)}Hello`;
-			imports.push(`import ${importName} from "./workflows/examples/${fileBase}";`);
+			imports.push(`import ${importName} from "./workflows/examples/${fileBase}.js";`);
 			workflowEntries.push(`\t"${fileBase}": ${importName},`);
 		}
 	}
@@ -1579,7 +1603,7 @@ export function generateTriggerEntryFile(triggerKind: string, selectedTriggers: 
 		// separate singletons — events would never cross.
 		const needsShared = sseAlsoSelected || wsAlsoSelected || webhookAlsoSelected || mcpAlsoSelected;
 		const sharedHelperImports = needsShared
-			? `\nimport { NodeMap, WorkflowRegistry } from "@blokjs/runner";\nimport sharedNodes from "../../Nodes";\nimport sharedWorkflows from "../../Workflows";`
+			? `\nimport { NodeMap, WorkflowRegistry } from "@blokjs/runner";\nimport sharedNodes from "../../Nodes.js";\nimport sharedWorkflows from "../../Workflows.js";`
 			: "";
 		const sseImports = sseAlsoSelected ? `\nimport SSETrigger from "@blokjs/trigger-sse";` : "";
 		const wsImports = wsAlsoSelected ? `\nimport WebSocketTrigger from "@blokjs/trigger-websocket";` : "";
@@ -1692,7 +1716,7 @@ export function generateTriggerEntryFile(triggerKind: string, selectedTriggers: 
 		const fullBootstrap = `${sharedBootstrapPrelude}${sseBootstrap}${wsBootstrap}${webhookBootstrap}${mcpBootstrap}`;
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import HttpTrigger from "./runner/HttpTrigger";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}${mcpImports}
+import HttpTrigger from "./runner/HttpTrigger.js";${sharedHelperImports}${sseImports}${wsImports}${webhookImports}${mcpImports}
 
 export default class App {
 	private httpTrigger: HttpTrigger = <HttpTrigger>{};
@@ -1943,7 +1967,7 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 		// pubsub/worker entry shape (no HTTP listener to bind).
 		return `import { DefaultLogger } from "@blokjs/runner";
 import { type Span, metrics, trace } from "@opentelemetry/api";
-import CronServer from "./runner/CronServer";
+import CronServer from "./runner/CronServer.js";
 
 export default class App {
 	private cronServer: CronServer = <CronServer>{};
@@ -1994,8 +2018,8 @@ if (process.env.DISABLE_TRIGGER_RUN !== "true") {
 		// GrpcServer reads GRPC_PORT/GRPC_HOST; blokctl dev sets PORT to the
 		// trigger's configured port, so fall back through PORT.
 		return `import { GrpcServer } from "@blokjs/trigger-grpc";
-import nodes from "../../Nodes";
-import workflows from "../../Workflows";
+import nodes from "../../Nodes.js";
+import workflows from "../../Workflows.js";
 
 const host = process.env.GRPC_HOST || "0.0.0.0";
 const port = Number(process.env.GRPC_PORT || process.env.PORT || 4003);
@@ -2071,8 +2095,8 @@ export default workflow(
 
 export function generateCronServerFile(): string {
 	return `import { CronTrigger } from "@blokjs/trigger-cron";
-import nodes from "../../../Nodes";
-import workflows from "../../../Workflows";
+import nodes from "../../../Nodes.js";
+import workflows from "../../../Workflows.js";
 
 /**
  * CronServer — the cron trigger for this project.
@@ -2102,8 +2126,8 @@ import { Hono } from "hono";
 // as separate modules with separate bus singletons — events from the
 // helper would never reach subscribers on this trigger.
 import SSETrigger from "@blokjs/trigger-sse";
-import nodes from "../../../Nodes";
-import workflows from "../../../Workflows";
+import nodes from "../../../Nodes.js";
+import workflows from "../../../Workflows.js";
 
 type HonoServer = ReturnType<typeof serve>;
 
@@ -2231,8 +2255,8 @@ import { Hono } from "hono";
 // package. Using the local copy would create a separate module instance
 // with a separate singleton — helpers would broadcast into a void.
 import WebSocketTrigger from "@blokjs/trigger-websocket";
-import nodes from "../../../Nodes";
-import workflows from "../../../Workflows";
+import nodes from "../../../Nodes.js";
+import workflows from "../../../Workflows.js";
 
 type HonoServer = ReturnType<typeof serve>;
 
@@ -2398,8 +2422,12 @@ function fixRunnerImportPaths(triggerDestDir: string, triggerKind: string): void
 		if (!fsExtra.existsSync(file)) continue;
 
 		let content = fsExtra.readFileSync(file, "utf8");
-		content = content.replace(/from ["']\.\.\/Nodes["']/g, `from "${up}Nodes"`);
-		content = content.replace(/from ["']\.\.\/Workflows["']/g, `from "${up}Workflows"`);
+		// #709 — template source now carries explicit NodeNext specifiers
+		// (`../Nodes.js`), so match the extension as optional-and-preserved.
+		// A bare match would leave `../Workflows.js` un-rewritten, pointing one
+		// directory short in the copied layout.
+		content = content.replace(/from ["']\.\.\/Nodes(\.js)?["']/g, (_m, ext) => `from "${up}Nodes${ext ?? ""}"`);
+		content = content.replace(/from ["']\.\.\/Workflows(\.js)?["']/g, (_m, ext) => `from "${up}Workflows${ext ?? ""}"`);
 		fsExtra.writeFileSync(file, content);
 	}
 }

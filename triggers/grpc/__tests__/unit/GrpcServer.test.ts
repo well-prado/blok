@@ -77,7 +77,7 @@ vi.mock("@blokjs/runner", () => ({
 	},
 }));
 
-import GrpcServer from "../../src/GrpcServer";
+import GrpcServer from "../../src/GrpcServer.js";
 
 describe("GrpcServer", () => {
 	beforeEach(() => {

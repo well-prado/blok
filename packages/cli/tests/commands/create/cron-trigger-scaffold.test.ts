@@ -4,7 +4,7 @@ import {
 	generateCronServerFile,
 	generateSharedWorkflowsFile,
 	generateTriggerEntryFile,
-} from "../../../src/commands/create/project";
+} from "../../../src/commands/create/project.js";
 
 /**
  * Regression (#642): `blokctl dev` for a cron scaffold used to fall through to
@@ -17,7 +17,7 @@ describe("cron trigger scaffold (#642)", () => {
 	it("generateTriggerEntryFile('cron') emits a real entry, not the not-implemented stub", () => {
 		const out = generateTriggerEntryFile("cron");
 		expect(out).not.toContain("not yet implemented");
-		expect(out).toContain('import CronServer from "./runner/CronServer"');
+		expect(out).toContain('import CronServer from "./runner/CronServer.js"');
 		expect(out).toContain("new CronServer()");
 		expect(out).toContain("this.cronServer.listen()");
 		expect(out).toContain('if (process.env.DISABLE_TRIGGER_RUN !== "true")');
@@ -30,8 +30,8 @@ describe("cron trigger scaffold (#642)", () => {
 	it("generateCronServerFile() is a declarative CronTrigger subclass with nodes + workflows", () => {
 		const out = generateCronServerFile();
 		expect(out).toContain('import { CronTrigger } from "@blokjs/trigger-cron"');
-		expect(out).toContain('import nodes from "../../../Nodes"');
-		expect(out).toContain('import workflows from "../../../Workflows"');
+		expect(out).toContain('import nodes from "../../../Nodes.js"');
+		expect(out).toContain('import workflows from "../../../Workflows.js"');
 		expect(out).toContain("export default class CronServer extends CronTrigger");
 		expect(out).toContain("protected nodes");
 		expect(out).toContain("protected workflows");
@@ -45,7 +45,7 @@ describe("cron trigger scaffold (#642)", () => {
 		// generateSharedWorkflowsFile registers it (cron reads Workflows.ts, not
 		// the HTTP JSON auto-scan).
 		const registry = generateSharedWorkflowsFile(["cron"]);
-		expect(registry).toContain('import CronHeartbeat from "./workflows/cron/heartbeat"');
+		expect(registry).toContain('import CronHeartbeat from "./workflows/cron/heartbeat.js"');
 		expect(registry).toContain('"cron-heartbeat": await CronHeartbeat');
 	});
 });

@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the OTel + Hono server bits like HttpTrigger.test.ts does.
 // Shared complete OTel double (OBS-02 B2 propagation surface).
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -29,7 +29,7 @@ vi.mock("../../src/AppRoutes", () => {
 });
 
 import { PayloadTooLargeError } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 class TestHttpTrigger extends HttpTrigger {
 	// Test-only accessor for the protected method.

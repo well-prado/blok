@@ -8,7 +8,7 @@
 import { resetTracingBootstrap } from "@blokjs/runner";
 import { trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WorkerTrigger } from "./WorkerTrigger";
+import { WorkerTrigger } from "./WorkerTrigger.js";
 
 // Minimal concrete trigger — no nodes/workflows, so listen() boots and returns
 // without connecting any broker adapter.

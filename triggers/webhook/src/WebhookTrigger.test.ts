@@ -43,7 +43,7 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger";
+import WebhookTrigger, { _getActiveWebhookTrigger, _setActiveWebhookTrigger } from "./WebhookTrigger.js";
 
 const SECRET = "shhh-its-a-secret-1234567890";
 

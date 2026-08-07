@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock external dependencies before imports (mirrors HttpTrigger.test.ts).
 // Complete OTel API double lives in a shared helper so the propagation surface
 // (OBS-02 B2) stays in lockstep across every HTTP-trigger unit suite.
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -52,7 +52,7 @@ vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() })
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 
 import { WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 describe("HttpTrigger — required-header validation (F15)", () => {
 	beforeEach(() => {

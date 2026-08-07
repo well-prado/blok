@@ -3,7 +3,7 @@ import {
 	generateSharedWorkflowsFile,
 	getProviderDependencies,
 	getProviderEnvVars,
-} from "../../../src/commands/create/project";
+} from "../../../src/commands/create/project.js";
 
 /**
  * Regression (#645): the pubsub trigger had nothing verifiable to consume — the
@@ -23,11 +23,11 @@ describe("pubsub scaffold — NATS verifiable consumer + producer (#645)", () =>
 
 	it("registers the consumer AND the HTTP producer when http + pubsub are selected", () => {
 		const out = generateSharedWorkflowsFile(["http", "pubsub"]);
-		expect(out).toContain('import OnPubSubMessage from "./workflows/pubsub/messages/on-message";');
+		expect(out).toContain('import OnPubSubMessage from "./workflows/pubsub/messages/on-message.js";');
 		// awaited — the callback-form workflow() is async; the unresolved Promise
 		// would carry no readable trigger config and the consumer would be dropped.
 		expect(out).toContain('"on-pubsub-message": await OnPubSubMessage');
-		expect(out).toContain('import PublishOrder from "./workflows/pubsub/publish-order";');
+		expect(out).toContain('import PublishOrder from "./workflows/pubsub/publish-order.js";');
 		expect(out).toContain('"publish-order": await PublishOrder');
 	});
 

@@ -56,8 +56,8 @@ vi.mock("../../src/Nodes", () => ({ default: {} }));
 vi.mock("../../src/Workflows", () => ({ default: {} }));
 
 import type { TriggerResponse } from "@blokjs/runner";
-import GRpcTrigger from "../../src/GRpcTrigger";
-import { MessageEncoding, MessageType, type WorkflowRequest } from "../../src/gen/workflow_pb";
+import GRpcTrigger from "../../src/GRpcTrigger.js";
+import { MessageEncoding, MessageType, type WorkflowRequest } from "../../src/gen/workflow_pb.js";
 
 class TestGRpcTrigger extends GRpcTrigger {
 	public callOrder: string[] = [];

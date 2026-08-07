@@ -28,7 +28,7 @@ import { workflow } from "@blokjs/helper";
 import { NodeMap, defineNode } from "@blokjs/runner";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { CronTrigger } from "./CronTrigger";
+import { CronTrigger } from "./CronTrigger.js";
 
 // Silence the operational handlers (crash-autoflip / janitor / graceful
 // shutdown) that TriggerBase installs at listen(): they attach process-level

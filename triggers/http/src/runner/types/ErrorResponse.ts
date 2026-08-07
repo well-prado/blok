@@ -1,3 +1,3 @@
-type ErrorResponse = {
+export type ErrorResponse = {
 	error: string;
 };

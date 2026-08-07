@@ -28,11 +28,11 @@
  * for the full design.
  */
 
-import SSETrigger, { _getActiveSSETrigger, _setActiveSSETrigger } from "./SSETrigger";
+import SSETrigger, { _getActiveSSETrigger, _setActiveSSETrigger } from "./SSETrigger.js";
 
 export default SSETrigger;
 export { SSETrigger, _getActiveSSETrigger, _setActiveSSETrigger };
-export { getBus as _getSSEBus, _resetBusForTests } from "./bus";
-export type { BusEvent } from "./bus";
+export { getBus as _getSSEBus, _resetBusForTests } from "./bus.js";
+export type { BusEvent } from "./bus.js";
 export type { StreamContext } from "@blokjs/shared";
 export type { SSETriggerOpts } from "@blokjs/helper";

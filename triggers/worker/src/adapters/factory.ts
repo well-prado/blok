@@ -18,15 +18,15 @@
  */
 
 import type { WorkerProvider } from "@blokjs/helper";
-import type { WorkerAdapter } from "../WorkerTrigger";
-import { BullMQAdapter } from "./BullMQAdapter";
-import { InMemoryAdapter } from "./InMemoryAdapter";
-import { KafkaAdapter } from "./KafkaAdapter";
-import { NATSWorkerAdapter } from "./NATSAdapter";
-import { PgBossAdapter } from "./PgBossAdapter";
-import { RabbitMQAdapter } from "./RabbitMQAdapter";
-import { RedisStreamsAdapter } from "./RedisStreamsAdapter";
-import { SQSAdapter } from "./SQSAdapter";
+import type { WorkerAdapter } from "../WorkerTrigger.js";
+import { BullMQAdapter } from "./BullMQAdapter.js";
+import { InMemoryAdapter } from "./InMemoryAdapter.js";
+import { KafkaAdapter } from "./KafkaAdapter.js";
+import { NATSWorkerAdapter } from "./NATSAdapter.js";
+import { PgBossAdapter } from "./PgBossAdapter.js";
+import { RabbitMQAdapter } from "./RabbitMQAdapter.js";
+import { RedisStreamsAdapter } from "./RedisStreamsAdapter.js";
+import { SQSAdapter } from "./SQSAdapter.js";
 
 /**
  * Resolve the effective provider for a workflow. The trigger's

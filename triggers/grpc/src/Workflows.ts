@@ -1,4 +1,4 @@
-import type Workflows from "./types/Workflows";
+import type Workflows from "./types/Workflows.js";
 
 const workflows: Workflows = {};
 

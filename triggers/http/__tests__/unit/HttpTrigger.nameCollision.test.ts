@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock external dependencies before imports (mirrors HttpTrigger.test.ts).
 // Shared complete OTel double (OBS-02 B2 propagation surface).
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
@@ -52,7 +52,7 @@ vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() })
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 
 import { RoutingDiagnostics, WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 describe("HttpTrigger — workflow name collision detection (F7)", () => {
 	beforeEach(() => {

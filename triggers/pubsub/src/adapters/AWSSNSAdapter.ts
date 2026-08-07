@@ -18,7 +18,7 @@
 import type { MessageAttributeValue, SQSClient } from "@aws-sdk/client-sqs";
 import type { PubSubTriggerOpts } from "@blokjs/helper";
 import { v4 as uuid } from "uuid";
-import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger";
+import type { PubSubAdapter, PubSubMessage } from "../PubSubTrigger.js";
 
 /**
  * Shape of an SNS notification when delivered to an SQS subscription.

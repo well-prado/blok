@@ -25,7 +25,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock"));
+const { makeOtelApiMock } = await vi.hoisted(() => import("../helpers/otel-api-mock.js"));
 vi.mock("@opentelemetry/api", () => makeOtelApiMock());
 vi.mock("../../src/runner/metrics/opentelemetry_metrics", () => ({
 	bootstrapMetrics: async () => ({ meter: {}, metricsHandler: () => {} }),
@@ -49,7 +49,7 @@ vi.mock("@hono/node-server/serve-static", () => ({ serveStatic: () => vi.fn() })
 vi.mock("@hono/node-server/utils/response", () => ({ RESPONSE_ALREADY_SENT: new Response(null) }));
 
 import { RoutingDiagnostics, WorkflowRegistry } from "@blokjs/runner";
-import HttpTrigger from "../../src/runner/HttpTrigger";
+import HttpTrigger from "../../src/runner/HttpTrigger.js";
 
 // The scratch project lives INSIDE the package so the generated node file can
 // resolve `@blokjs/runner` through the workspace's node_modules. `__tests__/` is

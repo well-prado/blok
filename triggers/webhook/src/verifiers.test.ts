@@ -15,7 +15,7 @@ import {
 	slackVerifier,
 	stripeVerifier,
 	svixVerifier,
-} from "./verifiers";
+} from "./verifiers.js";
 
 const SECRET = "shhh-its-a-secret-1234567890";
 

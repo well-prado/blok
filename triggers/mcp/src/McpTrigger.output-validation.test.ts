@@ -58,7 +58,7 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import McpTriggerClass, { _setActiveMcpTrigger } from "./McpTrigger";
+import McpTriggerClass, { _setActiveMcpTrigger } from "./McpTrigger.js";
 
 let nextPort = 4951;
 let BASE = `http://localhost:${nextPort}`;

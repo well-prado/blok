@@ -1,6 +1,6 @@
 import { Configuration, NodeMap } from "@blokjs/runner";
 import { describe, expect, it } from "vitest";
-import { type NodeCatalogEntry, buildNodeCatalog, reflectModuleNode } from "../../src/runner/nodeCatalog";
+import { type NodeCatalogEntry, buildNodeCatalog, reflectModuleNode } from "../../src/runner/nodeCatalog.js";
 
 /** A defineNode-style node exposing real reflection schemas. */
 function fnNode(name: string, description: string) {

@@ -2,7 +2,7 @@ import { type Transport, createClient } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { createGrpcWebTransport } from "@connectrpc/connect-node";
-import { type WorkflowRequest, type WorkflowResponse, WorkflowService } from "./gen/workflow_pb";
+import { type WorkflowRequest, type WorkflowResponse, WorkflowService } from "./gen/workflow_pb.js";
 
 export type RpcOptions = {
 	host: string;

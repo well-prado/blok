@@ -1,4 +1,4 @@
-import GrpcServer from "./GrpcServer";
+import GrpcServer from "./GrpcServer.js";
 
 const server = new GrpcServer({
 	host: "0.0.0.0",

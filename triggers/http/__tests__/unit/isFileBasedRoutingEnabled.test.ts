@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isFileBasedRoutingEnabled } from "../../src/runner/HttpTrigger";
+import { isFileBasedRoutingEnabled } from "../../src/runner/HttpTrigger.js";
 
 /**
  * v0.6 — file-based routing is the framework default. These tests pin

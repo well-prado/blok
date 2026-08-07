@@ -17,7 +17,7 @@ import {
 	encodeEnvelope,
 	newSenderId,
 	resolveBackplaneConfig,
-} from "./Backplane";
+} from "./Backplane.js";
 
 describe("Backplane — envelope encoding", () => {
 	it("encodes a text frame with kind='text' and value verbatim", () => {

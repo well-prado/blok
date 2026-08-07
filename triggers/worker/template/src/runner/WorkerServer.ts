@@ -1,6 +1,6 @@
 import { WorkerTrigger } from "@blokjs/trigger-worker";
-import nodes from "../Nodes";
-import workflows from "../Workflows";
+import nodes from "../Nodes.js";
+import workflows from "../Workflows.js";
 
 /**
  * WorkerServer - Concrete Worker trigger implementation

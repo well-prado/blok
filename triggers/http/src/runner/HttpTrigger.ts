@@ -42,27 +42,27 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { v4 as uuid } from "uuid";
-import apps from "../AppRoutes";
-import nodes from "../Nodes";
-import workflows from "../Workflows";
-import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter";
-import MessageDecode from "./MessageDecode";
-import { handleDynamicRoute, validateRoute } from "./Util";
+import apps from "../AppRoutes.js";
+import nodes from "../Nodes.js";
+import workflows from "../Workflows.js";
+import { createTraceRouterAdapter } from "./HonoTraceRouterAdapter.js";
+import MessageDecode from "./MessageDecode.js";
+import { handleDynamicRoute, validateRoute } from "./Util.js";
 import {
 	type ManualRegistration,
 	type RouteCollision,
 	type RouteEntry,
 	buildRouteTable,
 	readMiddlewareFlag,
-} from "./WorkflowRouter";
-import { bootstrapMetrics } from "./metrics/opentelemetry_metrics";
-import { buildNodeCatalog } from "./nodeCatalog";
-import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter";
-import { scanWorkflows } from "./scanWorkflows";
-import NodeTypes from "./types/NodeTypes";
-import type RuntimeWorkflow from "./types/RuntimeWorkflow";
-import type WorkflowRequest from "./types/WorkflowRequest";
-import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from "./validateRefsAtBoot";
+} from "./WorkflowRouter.js";
+import { bootstrapMetrics } from "./metrics/opentelemetry_metrics.js";
+import { buildNodeCatalog } from "./nodeCatalog.js";
+import { emitWorkflowResponse, normalizeResponseEnvelope } from "./responseEmitter.js";
+import { scanWorkflows } from "./scanWorkflows.js";
+import NodeTypes from "./types/NodeTypes.js";
+import type RuntimeWorkflow from "./types/RuntimeWorkflow.js";
+import type WorkflowRequest from "./types/WorkflowRequest.js";
+import { collectBootRefErrors, readRefValidationMode, reportRefsAtBoot } from "./validateRefsAtBoot.js";
 
 /**
  * v0.7 — exported so sibling triggers (WebSocket / SSE / Webhook) can

@@ -97,9 +97,9 @@ vi.mock("@opentelemetry/api", () => {
 	};
 });
 
-import GRpcTrigger from "./GRpcTrigger";
-import GrpcClient, { HttpVersionEnum, TransportEnum, type WorkflowRequest } from "./GrpcClient";
-import MessageDecode from "./MessageDecode";
+import GRpcTrigger from "./GRpcTrigger.js";
+import GrpcClient, { HttpVersionEnum, TransportEnum, type WorkflowRequest } from "./GrpcClient.js";
+import MessageDecode from "./MessageDecode.js";
 
 const RUN = process.env.RUN_GRPC_IT ? describe : describe.skip;
 
