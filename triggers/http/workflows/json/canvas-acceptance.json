@@ -1,0 +1,29 @@
+{
+	"name": "canvas-acceptance",
+	"version": "1.0.0",
+	"description": "Phase 5 acceptance: starts as a trigger with ZERO steps and is authored entirely on the Studio canvas.",
+	"trigger": {
+		"http": {
+			"method": "POST",
+			"path": "/canvas-acceptance",
+			"accept": "application/json"
+		}
+	},
+	"steps": [
+		{
+			"id": "expr-1",
+			"use": "@blokjs/expr",
+			"inputs": {
+				"expression": "({ ok: true, greeting: \"authored on canvas\", echo: (ctx.request.body && ctx.request.body.name) || \"world\" })"
+			}
+		},
+		{
+			"id": "respond-1",
+			"use": "@blokjs/respond",
+			"inputs": {
+				"body": "js/ctx.state[\"expr-1\"]",
+				"status": 200
+			}
+		}
+	]
+}

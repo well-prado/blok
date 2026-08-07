@@ -6,8 +6,11 @@ import { ForEachEditor, type RawForEach } from "@/components/trace/ForEachEditor
 import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
 import { SpliceContext, SpliceEdge } from "@/components/trace/SpliceEdge";
 import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
+import { type RawSubworkflowStep, SubworkflowEditor } from "@/components/trace/SubworkflowEditor";
 import { type RawSwitch, SwitchEditor } from "@/components/trace/SwitchEditor";
 import { TriggerEditor } from "@/components/trace/TriggerEditor";
+import { type RawTryCatch, TryCatchEditor } from "@/components/trace/TryCatchEditor";
+import { type RawWait, WaitEditor } from "@/components/trace/WaitEditor";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
 import {
@@ -68,6 +71,7 @@ import {
 	Pencil,
 	Play,
 	Plus,
+	Redo2,
 	Repeat,
 	Rocket,
 	RotateCcw,
@@ -79,6 +83,7 @@ import {
 	Split,
 	Square,
 	Trash2,
+	Undo2,
 	WandSparkles,
 	Wrench,
 } from "lucide-react";
@@ -126,6 +131,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	// Phase 5.3 — forEach/switch structural editors, siblings of editingBranchStepId.
 	const [editingForEachStepId, setEditingForEachStepId] = useState<string | null>(null);
 	const [editingSwitchStepId, setEditingSwitchStepId] = useState<string | null>(null);
+	// Phase 5.3 (final trio) — tryCatch/wait/subworkflow structural editors.
+	const [editingTryCatchStepId, setEditingTryCatchStepId] = useState<string | null>(null);
+	const [editingWaitStepId, setEditingWaitStepId] = useState<string | null>(null);
+	const [editingSubworkflowStepId, setEditingSubworkflowStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
 	const [spliceBeforeStepId, setSpliceBeforeStepId] = useState<string | null>(null);
 	// Drag-from-socket (ATOMIC/BuildShip onConnectEnd pattern): dropping a
@@ -409,14 +418,20 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [runStatus, sendControl]);
-	// ESC closes whichever right drawer is open (trigger, step inputs, branch/forEach/switch).
+	// ESC closes whichever right drawer is open (trigger, step inputs,
+	// branch/forEach/switch/tryCatch/wait/subworkflow). Deliberately does NOT
+	// reset `renamingStepId` — the inline rename form never closed on ESC
+	// before this trio shipped, and that's preserved here.
 	useEffect(() => {
 		if (
 			!triggerEditorOpen &&
 			editingInputsStepId === null &&
 			editingBranchStepId === null &&
 			editingForEachStepId === null &&
-			editingSwitchStepId === null
+			editingSwitchStepId === null &&
+			editingTryCatchStepId === null &&
+			editingWaitStepId === null &&
+			editingSubworkflowStepId === null
 		)
 			return;
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -426,10 +441,45 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			setEditingBranchStepId(null);
 			setEditingForEachStepId(null);
 			setEditingSwitchStepId(null);
+			setEditingTryCatchStepId(null);
+			setEditingWaitStepId(null);
+			setEditingSubworkflowStepId(null);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [triggerEditorOpen, editingInputsStepId, editingBranchStepId, editingForEachStepId, editingSwitchStepId]);
+	}, [
+		triggerEditorOpen,
+		editingInputsStepId,
+		editingBranchStepId,
+		editingForEachStepId,
+		editingSwitchStepId,
+		editingTryCatchStepId,
+		editingWaitStepId,
+		editingSubworkflowStepId,
+	]);
+	// Phase 5.1 — ⌘Z / ⇧⌘Z (Ctrl on non-Mac) over the draft history. Ignored
+	// while typing in a drawer field so it never steals the browser's own
+	// text undo, and while a run is active (the draft isn't editable then).
+	const { undo, redo, canUndo, canRedo } = editDefinition;
+	useEffect(() => {
+		if (!definitionEditable || runActive) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key.toLowerCase() !== "z" || !(event.metaKey || event.ctrlKey)) return;
+			const target = event.target as HTMLElement | null;
+			if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "")) return;
+			if (event.shiftKey) {
+				if (!canRedo) return;
+				event.preventDefault();
+				redo();
+			} else {
+				if (!canUndo) return;
+				event.preventDefault();
+				undo();
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [definitionEditable, runActive, undo, redo, canUndo, canRedo]);
 	const toggleBreakpointId = (stepId: string) => {
 		setBreakpoints((current) => {
 			const next = new Set(current);
@@ -446,13 +496,26 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const fitActive = () => {
 		if (activeNode) flowInstance?.fitView({ nodes: [{ id: activeNode.id }], padding: 1, duration: 300, maxZoom: 1.2 });
 	};
-	const startRename = (stepId: string) => {
-		editDefinition.reset();
-		setPaletteOpen(false);
+	// Phase 5.3 (final trio) — every drawer-opening action must close every
+	// OTHER drawer first (rename, inputs, branch, forEach, switch, tryCatch,
+	// wait, subworkflow, trigger) so only one is ever open at once.
+	// Centralized so a new drawer kind only needs one new line here instead
+	// of one more `setXStepId(null)` at every call site below.
+	const closeAllDrawers = () => {
+		setRenamingStepId(null);
 		setEditingInputsStepId(null);
 		setEditingBranchStepId(null);
 		setEditingForEachStepId(null);
 		setEditingSwitchStepId(null);
+		setEditingTryCatchStepId(null);
+		setEditingWaitStepId(null);
+		setEditingSubworkflowStepId(null);
+		setTriggerEditorOpen(false);
+	};
+	const startRename = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		closeAllDrawers();
 		setRenamingStepId(stepId);
 		setRenameValue(stepId);
 	};
@@ -460,41 +523,50 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const startEditInputs = (stepId: string) => {
 		editDefinition.reset();
 		setPaletteOpen(false);
-		setRenamingStepId(null);
-		setEditingBranchStepId(null);
-		setEditingForEachStepId(null);
-		setEditingSwitchStepId(null);
+		closeAllDrawers();
 		setEditingInputsStepId(stepId);
 	};
 	// Phase 5.3 — open the structural branch condition editor for a `branch` step.
 	const startEditBranch = (stepId: string) => {
 		editDefinition.reset();
 		setPaletteOpen(false);
-		setRenamingStepId(null);
-		setEditingInputsStepId(null);
-		setEditingForEachStepId(null);
-		setEditingSwitchStepId(null);
+		closeAllDrawers();
 		setEditingBranchStepId(stepId);
 	};
 	// Phase 5.3 — open the structural forEach editor for a `forEach` step.
 	const startEditForEach = (stepId: string) => {
 		editDefinition.reset();
 		setPaletteOpen(false);
-		setRenamingStepId(null);
-		setEditingInputsStepId(null);
-		setEditingBranchStepId(null);
-		setEditingSwitchStepId(null);
+		closeAllDrawers();
 		setEditingForEachStepId(stepId);
 	};
 	// Phase 5.3 — open the structural switch editor for a `switch` step.
 	const startEditSwitch = (stepId: string) => {
 		editDefinition.reset();
 		setPaletteOpen(false);
-		setRenamingStepId(null);
-		setEditingInputsStepId(null);
-		setEditingBranchStepId(null);
-		setEditingForEachStepId(null);
+		closeAllDrawers();
 		setEditingSwitchStepId(stepId);
+	};
+	// Phase 5.3 (final trio) — open the informative tryCatch panel for a `tryCatch` step.
+	const startEditTryCatch = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		closeAllDrawers();
+		setEditingTryCatchStepId(stepId);
+	};
+	// Phase 5.3 (final trio) — open the structural wait editor for a `wait` step.
+	const startEditWait = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		closeAllDrawers();
+		setEditingWaitStepId(stepId);
+	};
+	// Phase 5.3 (final trio) — open the structural subworkflow editor for a `subworkflow` step.
+	const startEditSubworkflow = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		closeAllDrawers();
+		setEditingSubworkflowStepId(stepId);
 	};
 	const saveInputs = (stepId: string, inputs: Record<string, unknown>) => {
 		editDefinition.mutate(
@@ -503,6 +575,26 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				const loc = findStepLocation(draft, stepId);
 				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
 				loc.step.inputs = inputs;
+				return draft;
+			},
+			{ onSuccess: () => setEditingInputsStepId(null) },
+		);
+	};
+	// Phase 5.3 Settings — step-LEVEL knobs (as/spread/ephemeral/idempotencyKey/
+	// retry/maxDuration), distinct from `inputs`. The editor hands back only the
+	// keys the author actually set, so anything it omits is deleted here rather
+	// than left stale from a previous save.
+	const SETTINGS_KEYS = ["as", "spread", "ephemeral", "idempotencyKey", "retry", "maxDuration"] as const;
+	const saveSettings = (stepId: string, settings: Record<string, unknown>) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				for (const key of SETTINGS_KEYS) {
+					if (key in settings) loc.step[key] = settings[key];
+					else delete loc.step[key];
+				}
 				return draft;
 			},
 			{ onSuccess: () => setEditingInputsStepId(null) },
@@ -542,6 +634,35 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				return draft;
 			},
 			{ onSuccess: () => setEditingSwitchStepId(null) },
+		);
+	};
+	const saveWait = (stepId: string, wait: RawWait) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				loc.step.wait = wait;
+				return draft;
+			},
+			{ onSuccess: () => setEditingWaitStepId(null) },
+		);
+	};
+	// Subworkflow's editable fields (`subworkflow`/`inputs`/`wait`/`dispatch`)
+	// are TOP-LEVEL on the step, not nested under a `step.subworkflow` config
+	// object (unlike branch/forEach/switch/wait) — so the editor hands back
+	// the WHOLE updated step and this merges it onto the existing step object
+	// rather than replacing one nested field.
+	const saveSubworkflow = (stepId: string, step: RawSubworkflowStep) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				Object.assign(loc.step, step);
+				return draft;
+			},
+			{ onSuccess: () => setEditingSubworkflowStepId(null) },
 		);
 	};
 	// Phase 5.2 — insert the picked catalog node as a fresh step. Lands after
@@ -589,12 +710,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	// Edge "+" (atomic-canvas splice): open the library targeting the edge.
 	const openSplice = (targetStepId: string) => {
 		editDefinition.reset();
-		setRenamingStepId(null);
-		setEditingInputsStepId(null);
-		setEditingBranchStepId(null);
-		setEditingForEachStepId(null);
-		setEditingSwitchStepId(null);
-		setTriggerEditorOpen(false);
+		closeAllDrawers();
 		setSpliceBeforeStepId(targetStepId);
 		setPaletteOpen(true);
 	};
@@ -657,6 +773,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 			if (kind === "branch") startEditBranch(stepId);
 			else if (kind === "forEach") startEditForEach(stepId);
 			else if (kind === "switch") startEditSwitch(stepId);
+			else if (kind === "tryCatch") startEditTryCatch(stepId);
+			else if (kind === "wait") startEditWait(stepId);
+			else if (kind === "subworkflow") startEditSubworkflow(stepId);
 			else startEditInputs(stepId);
 		}
 		const nodeRun = [...(runQuery.data?.nodes ?? [])]
@@ -859,6 +978,32 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 						    deploy-bar hierarchy (2026-08-06): Deploy is the ONE filled accent
 						    control and always renders (disabled + "No undeployed changes" with no
 						    draft) so the bar never jumps; Run is demoted to a ghost control. */}
+						{/* Phase 5.1 undo/redo over the draft history. Icon-only: the bar is
+						    already crowded, and ⌘Z/⇧⌘Z are the muscle-memory path anyway. */}
+						{(editDefinition.canUndo || editDefinition.canRedo) && (
+							<div className="flex items-center">
+								<button
+									type="button"
+									onClick={editDefinition.undo}
+									disabled={!editDefinition.canUndo || editDefinition.deploying}
+									title="Undo (⌘Z)"
+									aria-label="Undo"
+									className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+								>
+									<Undo2 className="h-3.5 w-3.5" />
+								</button>
+								<button
+									type="button"
+									onClick={editDefinition.redo}
+									disabled={!editDefinition.canRedo || editDefinition.deploying}
+									title="Redo (⇧⌘Z)"
+									aria-label="Redo"
+									className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-30"
+								>
+									<Redo2 className="h-3.5 w-3.5" />
+								</button>
+							</div>
+						)}
 						{editDefinition.hasDraft && (
 							<button
 								type="button"
@@ -1159,12 +1304,7 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 										if (!position) return;
 										// Mirror openSplice's drawer hygiene before opening the library.
 										editDefinition.reset();
-										setRenamingStepId(null);
-										setEditingInputsStepId(null);
-										setEditingBranchStepId(null);
-										setEditingForEachStepId(null);
-										setEditingSwitchStepId(null);
-										setTriggerEditorOpen(false);
+										closeAllDrawers();
 										setSpliceBeforeStepId(null);
 										setSocketDrop({ fromStepId: result.fromStepId, position });
 										setPaletteOpen(true);
@@ -1205,6 +1345,13 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								definition={workingDefinition}
 								catalog={catalog.data?.nodes}
 								lastRunNodes={runQuery.data?.nodes}
+								settings={Object.fromEntries(
+									SETTINGS_KEYS.flatMap((key) => {
+										const step = findStepLocation(workingDefinition, editingInputsStepId)?.step;
+										return step && key in step ? [[key, step[key]] as const] : [];
+									}),
+								)}
+								onSaveSettings={(settings) => saveSettings(editingInputsStepId, settings)}
 								onSave={(inputs) => saveInputs(editingInputsStepId, inputs)}
 								onClose={() => setEditingInputsStepId(null)}
 							/>
@@ -1272,6 +1419,51 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								error={editDefinition.error?.message}
 								onSave={(switchConfig) => saveSwitch(editingSwitchStepId, switchConfig)}
 								onClose={() => setEditingSwitchStepId(null)}
+							/>
+						</div>
+					)}
+					{editingTryCatchStepId && !runActive && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<TryCatchEditor
+								key={editingTryCatchStepId}
+								stepId={editingTryCatchStepId}
+								tryCatch={
+									(findStepLocation(workingDefinition, editingTryCatchStepId)?.step.tryCatch as
+										| RawTryCatch
+										| undefined) ?? {}
+								}
+								onClose={() => setEditingTryCatchStepId(null)}
+							/>
+						</div>
+					)}
+					{editingWaitStepId && !runActive && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<WaitEditor
+								key={editingWaitStepId}
+								stepId={editingWaitStepId}
+								wait={(findStepLocation(workingDefinition, editingWaitStepId)?.step.wait as RawWait | undefined) ?? {}}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(wait) => saveWait(editingWaitStepId, wait)}
+								onClose={() => setEditingWaitStepId(null)}
+							/>
+						</div>
+					)}
+					{editingSubworkflowStepId && !runActive && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<SubworkflowEditor
+								key={editingSubworkflowStepId}
+								stepId={editingSubworkflowStepId}
+								step={
+									(findStepLocation(workingDefinition, editingSubworkflowStepId)?.step as
+										| RawSubworkflowStep
+										| undefined) ?? {}
+								}
+								currentWorkflowName={workflowName}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(step) => saveSubworkflow(editingSubworkflowStepId, step)}
+								onClose={() => setEditingSubworkflowStepId(null)}
 							/>
 						</div>
 					)}
