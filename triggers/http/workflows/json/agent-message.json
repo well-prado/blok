@@ -22,10 +22,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						":history"
@@ -44,10 +41,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						""
@@ -68,9 +62,7 @@
 									"description": "City name, e.g. 'San Francisco'"
 								}
 							},
-							"required": [
-								"city"
-							]
+							"required": ["city"]
 						},
 						"endpoint": "http://localhost:4000/tools/weather"
 					},
@@ -85,9 +77,7 @@
 									"description": "Arithmetic expression, e.g. '17 * 23' or '(120 + 45) / 3'"
 								}
 							},
-							"required": [
-								"expression"
-							]
+							"required": ["expression"]
 						},
 						"endpoint": "http://localhost:4000/tools/calculator"
 					}
@@ -107,10 +97,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						":history"

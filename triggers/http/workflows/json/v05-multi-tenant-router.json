@@ -25,27 +25,19 @@
 									"order": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"order"
-											]
+											"path": ["body", "order"]
 										}
 									},
 									"customer": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"customer"
-											]
+											"path": ["body", "customer"]
 										}
 									},
 									"originalBody": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}
@@ -62,27 +54,19 @@
 									"order": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"order"
-											]
+											"path": ["body", "order"]
 										}
 									},
 									"customer": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"customer"
-											]
+											"path": ["body", "customer"]
 										}
 									},
 									"originalBody": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}
@@ -99,27 +83,19 @@
 									"order": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"order"
-											]
+											"path": ["body", "order"]
 										}
 									},
 									"customer": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"customer"
-											]
+											"path": ["body", "customer"]
 										}
 									},
 									"originalBody": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}

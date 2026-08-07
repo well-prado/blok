@@ -22,10 +22,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						":history"
@@ -44,10 +41,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						""
@@ -70,10 +64,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						":history"

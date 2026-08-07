@@ -6,11 +6,7 @@
 		"http": {
 			"method": "DELETE",
 			"path": "/admin/users/:id",
-			"middleware": [
-				"auth-check",
-				"admin-only",
-				"audit-log"
-			]
+			"middleware": ["auth-check", "admin-only", "audit-log"]
 		}
 	},
 	"steps": [
@@ -24,18 +20,13 @@
 				"userId": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"params",
-							"id"
-						]
+						"path": ["params", "id"]
 					}
 				},
 				"deletedBy": {
 					"$ref": {
 						"step": "identity",
-						"path": [
-							"sub"
-						]
+						"path": ["sub"]
 					}
 				}
 			}

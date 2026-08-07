@@ -42,9 +42,7 @@
 								"Retry-After": {
 									"$ref": {
 										"step": "check-bucket",
-										"path": [
-											"retryAfterSec"
-										]
+										"path": ["retryAfterSec"]
 									}
 								},
 								"X-RateLimit-Limit": "100",
@@ -52,9 +50,7 @@
 								"X-RateLimit-Reset": {
 									"$ref": {
 										"step": "check-bucket",
-										"path": [
-											"resetAt"
-										]
+										"path": ["resetAt"]
 									}
 								}
 							},
@@ -63,9 +59,7 @@
 								"retryAfterSec": {
 									"$ref": {
 										"step": "check-bucket",
-										"path": [
-											"retryAfterSec"
-										]
+										"path": ["retryAfterSec"]
 									}
 								}
 							}

@@ -5,10 +5,7 @@
 	"trigger": {
 		"websocket": {
 			"path": "/ws/echo",
-			"events": [
-				"hello",
-				"ping"
-			]
+			"events": ["hello", "ping"]
 		}
 	},
 	"steps": [
@@ -40,9 +37,7 @@
 								"original": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body"
-										]
+										"path": ["body"]
 									}
 								}
 							}

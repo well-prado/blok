@@ -6,9 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/signup",
-			"middleware": [
-				"rate-limit"
-			]
+			"middleware": ["rate-limit"]
 		}
 	},
 	"steps": [
@@ -19,18 +17,12 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"email",
-						"password",
-						"displayName"
-					]
+					"required": ["email", "password", "displayName"]
 				},
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -48,19 +40,13 @@
 							"email": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"email"
-									]
+									"path": ["body", "email"]
 								}
 							},
 							"password": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"password"
-									]
+									"path": ["body", "password"]
 								}
 							}
 						}
@@ -78,19 +64,14 @@
 							"to": {
 								"$ref": {
 									"step": "create-account",
-									"path": [
-										"email"
-									]
+									"path": ["email"]
 								}
 							},
 							"variables": {
 								"displayName": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"displayName"
-										]
+										"path": ["body", "displayName"]
 									}
 								},
 								"verifyUrl": "js/`${ctx.env.APP_URL}/verify/${ctx.state['create-account'].verificationToken}`"
@@ -105,18 +86,13 @@
 							"userId": {
 								"$ref": {
 									"step": "create-account",
-									"path": [
-										"id"
-									]
+									"path": ["id"]
 								}
 							},
 							"displayName": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"displayName"
-									]
+									"path": ["body", "displayName"]
 								}
 							}
 						}
@@ -131,17 +107,13 @@
 								"userId": {
 									"$ref": {
 										"step": "create-account",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								},
 								"email": {
 									"$ref": {
 										"step": "create-account",
-										"path": [
-											"email"
-										]
+										"path": ["email"]
 									}
 								}
 							}
@@ -162,9 +134,7 @@
 										"userId": {
 											"$ref": {
 												"step": "create-account",
-												"path": [
-													"id"
-												]
+												"path": ["id"]
 											}
 										},
 										"reason": "signup-saga-rollback"
@@ -184,17 +154,13 @@
 								"reason": {
 									"$ref": {
 										"step": "@error",
-										"path": [
-											"message"
-										]
+										"path": ["message"]
 									}
 								},
 								"step": {
 									"$ref": {
 										"step": "@error",
-										"path": [
-											"name"
-										]
+										"path": ["name"]
 									}
 								}
 							}

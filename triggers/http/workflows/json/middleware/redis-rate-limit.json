@@ -62,26 +62,20 @@
 					"count": {
 						"$ref": {
 							"step": "next-state",
-							"path": [
-								"count"
-							]
+							"path": ["count"]
 						}
 					},
 					"expiresAt": {
 						"$ref": {
 							"step": "next-state",
-							"path": [
-								"expiresAt"
-							]
+							"path": ["expiresAt"]
 						}
 					}
 				},
 				"ttlMs": {
 					"$ref": {
 						"step": "next-state",
-						"path": [
-							"ttlMs"
-						]
+						"path": ["ttlMs"]
 					}
 				}
 			}
@@ -106,9 +100,7 @@
 								"retryAfterSec": {
 									"$ref": {
 										"step": "next-state",
-										"path": [
-											"retryAfterSec"
-										]
+										"path": ["retryAfterSec"]
 									}
 								}
 							}

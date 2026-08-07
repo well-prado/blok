@@ -41,41 +41,31 @@
 					"sub": {
 						"$ref": {
 							"step": "verify",
-							"path": [
-								"subject"
-							]
+							"path": ["subject"]
 						}
 					},
 					"iss": {
 						"$ref": {
 							"step": "verify",
-							"path": [
-								"issuer"
-							]
+							"path": ["issuer"]
 						}
 					},
 					"aud": {
 						"$ref": {
 							"step": "verify",
-							"path": [
-								"audience"
-							]
+							"path": ["audience"]
 						}
 					},
 					"exp": {
 						"$ref": {
 							"step": "verify",
-							"path": [
-								"expiresAt"
-							]
+							"path": ["expiresAt"]
 						}
 					},
 					"claims": {
 						"$ref": {
 							"step": "verify",
-							"path": [
-								"claims"
-							]
+							"path": ["claims"]
 						}
 					},
 					"via": "jwt-auth"

@@ -19,19 +19,13 @@
 				"event": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"event"
-						]
+						"path": ["body", "event"]
 					}
 				},
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"data"
-						]
+						"path": ["body", "data"]
 					}
 				}
 			}

@@ -6,9 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/travel/book",
-			"middleware": [
-				"auth-check"
-			]
+			"middleware": ["auth-check"]
 		}
 	},
 	"steps": [
@@ -26,36 +24,25 @@
 							"from": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"from"
-									]
+									"path": ["body", "from"]
 								}
 							},
 							"to": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"to"
-									]
+									"path": ["body", "to"]
 								}
 							},
 							"date": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"date"
-									]
+									"path": ["body", "date"]
 								}
 							},
 							"passenger": {
 								"$ref": {
 									"step": "identity",
-									"path": [
-										"sub"
-									]
+									"path": ["sub"]
 								}
 							}
 						}
@@ -70,36 +57,25 @@
 							"city": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"to"
-									]
+									"path": ["body", "to"]
 								}
 							},
 							"checkIn": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"date"
-									]
+									"path": ["body", "date"]
 								}
 							},
 							"nights": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"nights"
-									]
+									"path": ["body", "nights"]
 								}
 							},
 							"guest": {
 								"$ref": {
 									"step": "identity",
-									"path": [
-										"sub"
-									]
+									"path": ["sub"]
 								}
 							}
 						}
@@ -114,19 +90,13 @@
 							"city": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"to"
-									]
+									"path": ["body", "to"]
 								}
 							},
 							"pickup": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"date"
-									]
+									"path": ["body", "date"]
 								}
 							},
 							"return": {
@@ -135,20 +105,14 @@
 									{
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"date"
-											]
+											"path": ["body", "date"]
 										}
 									},
 									" + ",
 									{
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"nights"
-											]
+											"path": ["body", "nights"]
 										}
 									},
 									" days"
@@ -157,9 +121,7 @@
 							"driver": {
 								"$ref": {
 									"step": "identity",
-									"path": [
-										"sub"
-									]
+									"path": ["sub"]
 								}
 							}
 						}
@@ -174,34 +136,25 @@
 								"bookingId": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"bookingId"
-										]
+										"path": ["body", "bookingId"]
 									}
 								},
 								"flight": {
 									"$ref": {
 										"step": "book-flight",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								},
 								"hotel": {
 									"$ref": {
 										"step": "book-hotel",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								},
 								"car": {
 									"$ref": {
 										"step": "book-car",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								}
 							}
@@ -223,9 +176,7 @@
 										"id": {
 											"$ref": {
 												"step": "book-car",
-												"path": [
-													"id"
-												]
+												"path": ["id"]
 											}
 										},
 										"reason": "saga-rollback"
@@ -248,9 +199,7 @@
 										"id": {
 											"$ref": {
 												"step": "book-hotel",
-												"path": [
-													"id"
-												]
+												"path": ["id"]
 											}
 										},
 										"reason": "saga-rollback"
@@ -273,9 +222,7 @@
 										"id": {
 											"$ref": {
 												"step": "book-flight",
-												"path": [
-													"id"
-												]
+												"path": ["id"]
 											}
 										},
 										"reason": "saga-rollback"
@@ -295,26 +242,19 @@
 								"failedAt": {
 									"$ref": {
 										"step": "@error",
-										"path": [
-											"name"
-										]
+										"path": ["name"]
 									}
 								},
 								"reason": {
 									"$ref": {
 										"step": "@error",
-										"path": [
-											"message"
-										]
+										"path": ["message"]
 									}
 								},
 								"bookingId": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"bookingId"
-										]
+										"path": ["body", "bookingId"]
 									}
 								}
 							}

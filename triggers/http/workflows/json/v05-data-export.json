@@ -17,9 +17,7 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"pages"
-					],
+					"required": ["pages"],
 					"properties": {
 						"pages": {
 							"type": "array"
@@ -29,9 +27,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -61,9 +57,7 @@
 										"url": {
 											"$ref": {
 												"step": "page",
-												"path": [
-													"url"
-												]
+												"path": ["url"]
 											}
 										},
 										"method": "GET",
@@ -84,17 +78,13 @@
 										"page": {
 											"$ref": {
 												"step": "page",
-												"path": [
-													"number"
-												]
+												"path": ["number"]
 											}
 										},
 										"url": {
 											"$ref": {
 												"step": "page",
-												"path": [
-													"url"
-												]
+												"path": ["url"]
 											}
 										},
 										"reason": "js/ctx.error.message"

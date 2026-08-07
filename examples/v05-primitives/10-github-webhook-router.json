@@ -6,9 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/webhooks/github",
-			"middleware": [
-				"github-signature-verify"
-			]
+			"middleware": ["github-signature-verify"]
 		}
 	},
 	"steps": [
@@ -27,18 +25,13 @@
 									"event": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									},
 									"deliveryId": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-delivery"
-											]
+											"path": ["headers", "x-github-delivery"]
 										}
 									}
 								}
@@ -59,18 +52,13 @@
 									"event": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									},
 									"action": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"action"
-											]
+											"path": ["body", "action"]
 										}
 									}
 								}
@@ -78,10 +66,7 @@
 						]
 					},
 					{
-						"when": [
-							"issues",
-							"issue_comment"
-						],
+						"when": ["issues", "issue_comment"],
 						"do": [
 							{
 								"id": "handle",
@@ -90,9 +75,7 @@
 									"event": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}
@@ -109,9 +92,7 @@
 									"event": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}
@@ -128,9 +109,7 @@
 									"event": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body"
-											]
+											"path": ["body"]
 										}
 									}
 								}
@@ -148,19 +127,13 @@
 							"eventType": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"headers",
-										"x-github-event"
-									]
+									"path": ["headers", "x-github-event"]
 								}
 							},
 							"deliveryId": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"headers",
-										"x-github-delivery"
-									]
+									"path": ["headers", "x-github-delivery"]
 								}
 							}
 						}

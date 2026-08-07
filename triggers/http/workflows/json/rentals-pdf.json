@@ -31,9 +31,7 @@
 				"array": {
 					"$ref": {
 						"step": "get-rentals",
-						"path": [
-							"data"
-						]
+						"path": ["data"]
 					}
 				},
 				"map": "{ product: data.product, quantity: parseInt(data.quantity), total: parseInt(data.total), price: parseInt(data.price), rental_month: data.rental_month }"

@@ -127,9 +127,7 @@
 				"sessionId": {
 					"$ref": {
 						"step": "launch",
-						"path": [
-							"sessionId"
-						]
+						"path": ["sessionId"]
 					}
 				}
 			}

@@ -20,9 +20,7 @@
 				"body": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -50,9 +48,7 @@
 									{
 										"$ref": {
 											"step": "submit-job",
-											"path": [
-												"id"
-											]
+											"path": ["id"]
 										}
 									},
 									""
@@ -81,9 +77,7 @@
 									"body": {
 										"$ref": {
 											"step": "check-status",
-											"path": [
-												"result"
-											]
+											"path": ["result"]
 										}
 									}
 								}
@@ -104,9 +98,7 @@
 										"reason": {
 											"$ref": {
 												"step": "check-status",
-												"path": [
-													"error"
-												]
+												"path": ["error"]
 											}
 										}
 									}
@@ -127,9 +119,7 @@
 								"jobId": {
 									"$ref": {
 										"step": "submit-job",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								}
 							}

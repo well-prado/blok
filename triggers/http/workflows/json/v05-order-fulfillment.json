@@ -7,10 +7,7 @@
 			"method": "POST",
 			"path": "/v05-order-fulfillment",
 			"accept": "application/json",
-			"middleware": [
-				"auth-check",
-				"rate-limit"
-			]
+			"middleware": ["auth-check", "rate-limit"]
 		}
 	},
 	"steps": [
@@ -53,9 +50,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -66,10 +61,7 @@
 				"on": "js/ctx.request.body.type",
 				"cases": [
 					{
-						"when": [
-							"physical",
-							"subscription"
-						],
+						"when": ["physical", "subscription"],
 						"do": [
 							{
 								"id": "process-items",
@@ -94,17 +86,13 @@
 													"sku": {
 														"$ref": {
 															"step": "item",
-															"path": [
-																"sku"
-															]
+															"path": ["sku"]
 														}
 													},
 													"qty": {
 														"$ref": {
 															"step": "item",
-															"path": [
-																"quantity"
-															]
+															"path": ["quantity"]
 														}
 													}
 												},
@@ -143,19 +131,13 @@
 										"orderId": {
 											"$ref": {
 												"step": "@trigger",
-												"path": [
-													"body",
-													"id"
-												]
+												"path": ["body", "id"]
 											}
 										},
 										"items": {
 											"$ref": {
 												"step": "@trigger",
-												"path": [
-													"body",
-													"items"
-												]
+												"path": ["body", "items"]
 											}
 										}
 									},
@@ -204,10 +186,7 @@
 							"url": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"paymentUrl"
-									]
+									"path": ["body", "paymentUrl"]
 								}
 							},
 							"method": "POST",
@@ -219,28 +198,19 @@
 								"orderId": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"id"
-										]
+										"path": ["body", "id"]
 									}
 								},
 								"amount": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"total"
-										]
+										"path": ["body", "total"]
 									}
 								},
 								"currency": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"currency"
-										]
+										"path": ["body", "currency"]
 									}
 								}
 							},
@@ -269,19 +239,13 @@
 							"orderId": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"id"
-									]
+									"path": ["body", "id"]
 								}
 							},
 							"total": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"total"
-									]
+									"path": ["body", "total"]
 								}
 							},
 							"identity": {

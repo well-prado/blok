@@ -17,9 +17,7 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"rows"
-					],
+					"required": ["rows"],
 					"properties": {
 						"rows": {
 							"type": "array"
@@ -29,9 +27,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -54,10 +50,7 @@
 									"inputs": {
 										"schema": {
 											"type": "object",
-											"required": [
-												"id",
-												"value"
-											],
+											"required": ["id", "value"],
 											"properties": {
 												"id": {
 													"type": "string"
@@ -90,17 +83,13 @@
 											"rowId": {
 												"$ref": {
 													"step": "row",
-													"path": [
-														"id"
-													]
+													"path": ["id"]
 												}
 											},
 											"value": {
 												"$ref": {
 													"step": "row",
-													"path": [
-														"value"
-													]
+													"path": ["value"]
 												}
 											}
 										},

@@ -6,9 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/events/dispatch",
-			"middleware": [
-				"auth-check"
-			]
+			"middleware": ["auth-check"]
 		}
 	},
 	"steps": [
@@ -20,10 +18,7 @@
 				"eventType": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"type"
-						]
+						"path": ["body", "type"]
 					}
 				}
 			}
@@ -52,9 +47,7 @@
 							"url": {
 								"$ref": {
 									"step": "subscriber",
-									"path": [
-										"url"
-									]
+									"path": ["url"]
 								}
 							},
 							"method": "POST",
@@ -63,27 +56,20 @@
 								"X-Webhook-Signature": {
 									"$ref": {
 										"step": "subscriber",
-										"path": [
-											"signature"
-										]
+										"path": ["signature"]
 									}
 								},
 								"X-Event-Id": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"id"
-										]
+										"path": ["body", "id"]
 									}
 								}
 							},
 							"body": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body"
-									]
+									"path": ["body"]
 								}
 							}
 						}
@@ -101,18 +87,13 @@
 					"eventId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"id"
-							]
+							"path": ["body", "id"]
 						}
 					},
 					"dispatched": {
 						"$ref": {
 							"step": "dispatch-to-each",
-							"path": [
-								"length"
-							]
+							"path": ["length"]
 						}
 					},
 					"subscriberIds": "js/ctx.state['load-subscribers'].map(s => s.id)"

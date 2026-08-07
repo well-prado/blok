@@ -45,10 +45,7 @@
 									"eventType": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
+											"path": ["headers", "x-github-event"]
 										}
 									}
 								}
@@ -56,10 +53,7 @@
 						]
 					},
 					{
-						"when": [
-							"issues",
-							"issue_comment"
-						],
+						"when": ["issues", "issue_comment"],
 						"do": [
 							{
 								"id": "dispatch-issues",
@@ -70,10 +64,7 @@
 									"eventType": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
+											"path": ["headers", "x-github-event"]
 										}
 									}
 								}

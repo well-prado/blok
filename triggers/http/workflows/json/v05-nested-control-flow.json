@@ -7,9 +7,7 @@
 			"method": "POST",
 			"path": "/v05-nested-control-flow",
 			"accept": "application/json",
-			"middleware": [
-				"auth-check"
-			]
+			"middleware": ["auth-check"]
 		}
 	},
 	"steps": [
@@ -20,10 +18,7 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"id",
-						"items"
-					],
+					"required": ["id", "items"],
 					"properties": {
 						"id": {
 							"type": "string"
@@ -36,9 +31,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -70,9 +63,7 @@
 															"url": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"handlerUrl"
-																	]
+																	"path": ["handlerUrl"]
 																}
 															},
 															"method": "POST",
@@ -84,9 +75,7 @@
 																"sku": {
 																	"$ref": {
 																		"step": "item",
-																		"path": [
-																			"sku"
-																		]
+																		"path": ["sku"]
 																	}
 																},
 																"type": "physical"
@@ -107,9 +96,7 @@
 															"url": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"handlerUrl"
-																	]
+																	"path": ["handlerUrl"]
 																}
 															},
 															"method": "POST",
@@ -121,9 +108,7 @@
 																"sku": {
 																	"$ref": {
 																		"step": "item",
-																		"path": [
-																			"sku"
-																		]
+																		"path": ["sku"]
 																	}
 																},
 																"type": "digital"
@@ -144,9 +129,7 @@
 															"url": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"handlerUrl"
-																	]
+																	"path": ["handlerUrl"]
 																}
 															},
 															"method": "POST",
@@ -158,9 +141,7 @@
 																"sku": {
 																	"$ref": {
 																		"step": "item",
-																		"path": [
-																			"sku"
-																		]
+																		"path": ["sku"]
 																	}
 																},
 																"type": "service"
@@ -196,9 +177,7 @@
 										"sku": {
 											"$ref": {
 												"step": "item",
-												"path": [
-													"sku"
-												]
+												"path": ["sku"]
 											}
 										},
 										"reason": "js/ctx.error.message"

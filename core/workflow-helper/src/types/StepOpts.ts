@@ -244,7 +244,7 @@ export const V2RegularStepSchema = z
 			.record(z.unknown())
 			.optional()
 			.describe(
-				'Inputs passed to the node. Static values, or a structural reference to an upstream step\'s output: ' +
+				"Inputs passed to the node. Static values, or a structural reference to an upstream step's output: " +
 					'{"$ref": {"step": "fetch", "path": ["data", "items"]}}. Use step "@trigger" for the trigger payload ' +
 					'and "@error" inside a tryCatch catch arm; {"$tpl": ["text", {"$ref": …}]} for a string that embeds one. ' +
 					"In the TS DSL these are typed step/trigger handles. The load-boundary lowering pass compiles them to " +

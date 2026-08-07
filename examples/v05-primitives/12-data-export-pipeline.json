@@ -6,10 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/exports/users",
-			"middleware": [
-				"auth-check",
-				"admin-only"
-			]
+			"middleware": ["auth-check", "admin-only"]
 		}
 	},
 	"steps": [
@@ -76,10 +73,7 @@
 											"exportId": {
 												"$ref": {
 													"step": "@trigger",
-													"path": [
-														"body",
-														"exportId"
-													]
+													"path": ["body", "exportId"]
 												}
 											},
 											"page": {
@@ -91,17 +85,13 @@
 											"error": {
 												"$ref": {
 													"step": "@error",
-													"path": [
-														"message"
-													]
+													"path": ["message"]
 												}
 											},
 											"errorCode": {
 												"$ref": {
 													"step": "@error",
-													"path": [
-														"code"
-													]
+													"path": ["code"]
 												}
 											},
 											"failedAt": "new Date().toISOString()"
@@ -124,10 +114,7 @@
 				"exportId": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"exportId"
-						]
+						"path": ["body", "exportId"]
 					}
 				},
 				"pages": "js/ctx.state['fetch-pages'].filter(p => p['fetch'] !== undefined)",
@@ -141,10 +128,7 @@
 							{
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"exportId"
-									]
+									"path": ["body", "exportId"]
 								}
 							},
 							".csv"
@@ -163,34 +147,25 @@
 					"exportId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"exportId"
-							]
+							"path": ["body", "exportId"]
 						}
 					},
 					"url": {
 						"$ref": {
 							"step": "assemble",
-							"path": [
-								"s3Url"
-							]
+							"path": ["s3Url"]
 						}
 					},
 					"rowCount": {
 						"$ref": {
 							"step": "assemble",
-							"path": [
-								"totalRows"
-							]
+							"path": ["totalRows"]
 						}
 					},
 					"failedPages": {
 						"$ref": {
 							"step": "assemble",
-							"path": [
-								"failedPageCount"
-							]
+							"path": ["failedPageCount"]
 						}
 					},
 					"dlqUrl": {
@@ -199,10 +174,7 @@
 							{
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"exportId"
-									]
+									"path": ["body", "exportId"]
 								}
 							},
 							"/failures"

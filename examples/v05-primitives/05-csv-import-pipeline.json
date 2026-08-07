@@ -7,10 +7,7 @@
 			"method": "POST",
 			"path": "/imports/csv",
 			"accept": "text/csv",
-			"middleware": [
-				"auth-check",
-				"admin-only"
-			]
+			"middleware": ["auth-check", "admin-only"]
 		}
 	},
 	"steps": [
@@ -22,9 +19,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				},
 				"headers": true,
@@ -101,10 +96,7 @@
 											"importId": {
 												"$ref": {
 													"step": "@trigger",
-													"path": [
-														"body",
-														"importId"
-													]
+													"path": ["body", "importId"]
 												}
 											},
 											"rowNumber": {
@@ -122,17 +114,13 @@
 											"error": {
 												"$ref": {
 													"step": "@error",
-													"path": [
-														"message"
-													]
+													"path": ["message"]
 												}
 											},
 											"errorCode": {
 												"$ref": {
 													"step": "@error",
-													"path": [
-														"code"
-													]
+													"path": ["code"]
 												}
 											},
 											"failedAt": "new Date().toISOString()"
@@ -159,10 +147,7 @@
 				"importId": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"importId"
-						]
+						"path": ["body", "importId"]
 					}
 				}
 			}
@@ -177,35 +162,25 @@
 					"importId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"importId"
-							]
+							"path": ["body", "importId"]
 						}
 					},
 					"totalRows": {
 						"$ref": {
 							"step": "parse-csv",
-							"path": [
-								"rows",
-								"length"
-							]
+							"path": ["rows", "length"]
 						}
 					},
 					"succeeded": {
 						"$ref": {
 							"step": "summarize",
-							"path": [
-								"succeeded"
-							]
+							"path": ["succeeded"]
 						}
 					},
 					"failed": {
 						"$ref": {
 							"step": "summarize",
-							"path": [
-								"failed"
-							]
+							"path": ["failed"]
 						}
 					},
 					"dlqUrl": {
@@ -214,10 +189,7 @@
 							{
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"importId"
-									]
+									"path": ["body", "importId"]
 								}
 							},
 							"/failures"

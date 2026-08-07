@@ -7,10 +7,7 @@
 			"method": "POST",
 			"path": "/orders",
 			"accept": "application/json",
-			"middleware": [
-				"auth-check",
-				"rate-limit"
-			]
+			"middleware": ["auth-check", "rate-limit"]
 		}
 	},
 	"steps": [
@@ -21,19 +18,12 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"type",
-						"items",
-						"total",
-						"currency"
-					]
+					"required": ["type", "items", "total", "currency"]
 				},
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -44,10 +34,7 @@
 				"on": "js/ctx.request.body.type",
 				"cases": [
 					{
-						"when": [
-							"physical",
-							"subscription"
-						],
+						"when": ["physical", "subscription"],
 						"do": [
 							{
 								"id": "process-items",
@@ -65,17 +52,13 @@
 												"sku": {
 													"$ref": {
 														"step": "item",
-														"path": [
-															"sku"
-														]
+														"path": ["sku"]
 													}
 												},
 												"qty": {
 													"$ref": {
 														"step": "item",
-														"path": [
-															"quantity"
-														]
+														"path": ["quantity"]
 													}
 												}
 											}
@@ -89,26 +72,19 @@
 												"sku": {
 													"$ref": {
 														"step": "item",
-														"path": [
-															"sku"
-														]
+														"path": ["sku"]
 													}
 												},
 												"qty": {
 													"$ref": {
 														"step": "item",
-														"path": [
-															"quantity"
-														]
+														"path": ["quantity"]
 													}
 												},
 												"orderId": {
 													"$ref": {
 														"step": "@trigger",
-														"path": [
-															"body",
-															"id"
-														]
+														"path": ["body", "id"]
 													}
 												}
 											}
@@ -129,18 +105,13 @@
 									"productId": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"body",
-												"productId"
-											]
+											"path": ["body", "productId"]
 										}
 									},
 									"userId": {
 										"$ref": {
 											"step": "identity",
-											"path": [
-												"sub"
-											]
+											"path": ["sub"]
 										}
 									}
 								}
@@ -183,27 +154,19 @@
 							"amount": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"total"
-									]
+									"path": ["body", "total"]
 								}
 							},
 							"currency": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"currency"
-									]
+									"path": ["body", "currency"]
 								}
 							},
 							"customerId": {
 								"$ref": {
 									"step": "identity",
-									"path": [
-										"stripeCustomerId"
-									]
+									"path": ["stripeCustomerId"]
 								}
 							}
 						}
@@ -233,18 +196,13 @@
 								"orderId": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"id"
-										]
+										"path": ["body", "id"]
 									}
 								},
 								"reason": {
 									"$ref": {
 										"step": "@error",
-										"path": [
-											"message"
-										]
+										"path": ["message"]
 									}
 								}
 							}
@@ -262,27 +220,19 @@
 							"orderId": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"id"
-									]
+									"path": ["body", "id"]
 								}
 							},
 							"userId": {
 								"$ref": {
 									"step": "identity",
-									"path": [
-										"sub"
-									]
+									"path": ["sub"]
 								}
 							},
 							"total": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"total"
-									]
+									"path": ["body", "total"]
 								}
 							}
 						}
@@ -300,18 +250,13 @@
 					"orderId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"id"
-							]
+							"path": ["body", "id"]
 						}
 					},
 					"chargeId": {
 						"$ref": {
 							"step": "stripe-charge",
-							"path": [
-								"id"
-							]
+							"path": ["id"]
 						}
 					}
 				}

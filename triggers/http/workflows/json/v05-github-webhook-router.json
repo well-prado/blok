@@ -7,9 +7,7 @@
 			"method": "POST",
 			"path": "/v05-github-webhook-router",
 			"accept": "application/json",
-			"middleware": [
-				"github-webhook-verify"
-			]
+			"middleware": ["github-webhook-verify"]
 		}
 	},
 	"steps": [
@@ -48,10 +46,7 @@
 									"_eventType": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
+											"path": ["headers", "x-github-event"]
 										}
 									}
 								}
@@ -59,10 +54,7 @@
 						]
 					},
 					{
-						"when": [
-							"issues",
-							"issue_comment"
-						],
+						"when": ["issues", "issue_comment"],
 						"do": [
 							{
 								"id": "dispatch-issues",
@@ -73,10 +65,7 @@
 									"_eventType": {
 										"$ref": {
 											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
+											"path": ["headers", "x-github-event"]
 										}
 									}
 								}

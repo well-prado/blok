@@ -19,9 +19,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				},
 				"id": "${ctx.request.params.id}"

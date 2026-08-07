@@ -48,10 +48,7 @@
 							"url": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"url"
-									]
+									"path": ["body", "url"]
 								}
 							},
 							"method": "GET"
@@ -66,9 +63,7 @@
 								"lastStatus": {
 									"$ref": {
 										"step": "check",
-										"path": [
-											"status"
-										]
+										"path": ["status"]
 									}
 								},
 								"attempt": "js/ctx.state.attempt + 1"

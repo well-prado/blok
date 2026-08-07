@@ -6,9 +6,7 @@
 		"http": {
 			"method": "POST",
 			"path": "/orders/process",
-			"middleware": [
-				"auth-check"
-			]
+			"middleware": ["auth-check"]
 		}
 	},
 	"steps": [
@@ -39,17 +37,13 @@
 															"sku": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"sku"
-																	]
+																	"path": ["sku"]
 																}
 															},
 															"qty": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"qty"
-																	]
+																	"path": ["qty"]
 																}
 															}
 														}
@@ -62,18 +56,13 @@
 															"address": {
 																"$ref": {
 																	"step": "@trigger",
-																	"path": [
-																		"body",
-																		"shipTo"
-																	]
+																	"path": ["body", "shipTo"]
 																}
 															},
 															"sku": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"sku"
-																	]
+																	"path": ["sku"]
 																}
 															}
 														}
@@ -91,17 +80,13 @@
 															"productId": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"productId"
-																	]
+																	"path": ["productId"]
 																}
 															},
 															"userId": {
 																"$ref": {
 																	"step": "identity",
-																	"path": [
-																		"sub"
-																	]
+																	"path": ["sub"]
 																}
 															}
 														}
@@ -119,25 +104,19 @@
 															"kind": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"serviceKind"
-																	]
+																	"path": ["serviceKind"]
 																}
 															},
 															"date": {
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"scheduledFor"
-																	]
+																	"path": ["scheduledFor"]
 																}
 															},
 															"customerId": {
 																"$ref": {
 																	"step": "identity",
-																	"path": [
-																		"sub"
-																	]
+																	"path": ["sub"]
 																}
 															}
 														}
@@ -157,9 +136,7 @@
 															{
 																"$ref": {
 																	"step": "item",
-																	"path": [
-																		"type"
-																	]
+																	"path": ["type"]
 																}
 															},
 															""
@@ -187,9 +164,7 @@
 										"error": {
 											"$ref": {
 												"step": "@error",
-												"path": [
-													"message"
-												]
+												"path": ["message"]
 											}
 										}
 									}
@@ -237,18 +212,13 @@
 					"orderId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"id"
-							]
+							"path": ["body", "id"]
 						}
 					},
 					"itemsProcessed": {
 						"$ref": {
 							"step": "per-item-pipeline",
-							"path": [
-								"length"
-							]
+							"path": ["length"]
 						}
 					}
 				}

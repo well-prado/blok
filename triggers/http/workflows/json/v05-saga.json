@@ -30,10 +30,7 @@
 								"user": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"user"
-										]
+										"path": ["body", "user"]
 									}
 								}
 							},
@@ -48,10 +45,7 @@
 							"url": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"middleUrl"
-									]
+									"path": ["body", "middleUrl"]
 								}
 							},
 							"method": "POST",

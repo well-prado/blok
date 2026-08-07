@@ -17,12 +17,7 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"email",
-						"password",
-						"displayName",
-						"signupUrl"
-					],
+					"required": ["email", "password", "displayName", "signupUrl"],
 					"properties": {
 						"email": {
 							"type": "string"
@@ -41,9 +36,7 @@
 				"data": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body"
-						]
+						"path": ["body"]
 					}
 				}
 			}
@@ -60,10 +53,7 @@
 							"url": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"signupUrl"
-									]
+									"path": ["body", "signupUrl"]
 								}
 							},
 							"method": "POST",
@@ -75,19 +65,13 @@
 								"email": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"email"
-										]
+										"path": ["body", "email"]
 									}
 								},
 								"displayName": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"displayName"
-										]
+										"path": ["body", "displayName"]
 									}
 								}
 							},
@@ -109,10 +93,7 @@
 								"to": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"email"
-										]
+										"path": ["body", "email"]
 									}
 								},
 								"template": "welcome"
@@ -135,19 +116,13 @@
 								"email": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"email"
-										]
+										"path": ["body", "email"]
 									}
 								},
 								"displayName": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"displayName"
-										]
+										"path": ["body", "displayName"]
 									}
 								}
 							},
@@ -177,10 +152,7 @@
 											"email": {
 												"$ref": {
 													"step": "@trigger",
-													"path": [
-														"body",
-														"email"
-													]
+													"path": ["body", "email"]
 												}
 											}
 										},
@@ -239,10 +211,7 @@
 							"email": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"email"
-									]
+									"path": ["body", "email"]
 								}
 							}
 						}

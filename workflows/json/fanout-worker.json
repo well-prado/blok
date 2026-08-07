@@ -21,55 +21,37 @@
 					"jobId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"params",
-								"jobId"
-							]
+							"path": ["params", "jobId"]
 						}
 					},
 					"queue": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"params",
-								"queue"
-							]
+							"path": ["params", "queue"]
 						}
 					},
 					"attempt": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"params",
-								"attempt"
-							]
+							"path": ["params", "attempt"]
 						}
 					},
 					"tenantId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"tenantId"
-							]
+							"path": ["body", "tenantId"]
 						}
 					},
 					"itemIndex": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"index"
-							]
+							"path": ["body", "index"]
 						}
 					},
 					"item": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"item"
-							]
+							"path": ["body", "item"]
 						}
 					}
 				}

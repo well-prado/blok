@@ -60,10 +60,7 @@
 					"X-Request-Id": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"requestId"
-							]
+							"path": ["body", "requestId"]
 						}
 					}
 				},
@@ -71,10 +68,7 @@
 					"order": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"order"
-							]
+							"path": ["body", "order"]
 						}
 					},
 					"rates": {
@@ -96,28 +90,19 @@
 					"requestId": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"requestId"
-							]
+							"path": ["body", "requestId"]
 						}
 					},
 					"tenant": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"tenant"
-							]
+							"path": ["body", "tenant"]
 						}
 					},
 					"order": {
 						"$ref": {
 							"step": "@trigger",
-							"path": [
-								"body",
-								"order"
-							]
+							"path": ["body", "order"]
 						}
 					},
 					"slip": {

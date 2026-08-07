@@ -44,9 +44,7 @@
 								"reason": {
 									"$ref": {
 										"step": "verify-jwt",
-										"path": [
-											"reason"
-										]
+										"path": ["reason"]
 									}
 								}
 							}
@@ -65,9 +63,7 @@
 				"value": {
 					"$ref": {
 						"step": "verify-jwt",
-						"path": [
-							"claims"
-						]
+						"path": ["claims"]
 					}
 				}
 			}

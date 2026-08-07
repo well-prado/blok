@@ -34,10 +34,7 @@
 										"payload": {
 											"$ref": {
 												"step": "@trigger",
-												"path": [
-													"body",
-													"payload"
-												]
+												"path": ["body", "payload"]
 											}
 										}
 									},
@@ -47,11 +44,7 @@
 						]
 					},
 					{
-						"when": [
-							"order.created",
-							"order.paid",
-							"order.refunded"
-						],
+						"when": ["order.created", "order.paid", "order.refunded"],
 						"do": [
 							{
 								"id": "order-handler",
@@ -69,19 +62,13 @@
 										"event": {
 											"$ref": {
 												"step": "@trigger",
-												"path": [
-													"body",
-													"event"
-												]
+												"path": ["body", "event"]
 											}
 										},
 										"payload": {
 											"$ref": {
 												"step": "@trigger",
-												"path": [
-													"body",
-													"payload"
-												]
+												"path": ["body", "payload"]
 											}
 										}
 									},
@@ -108,10 +95,7 @@
 								"event": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"event"
-										]
+										"path": ["body", "event"]
 									}
 								}
 							},

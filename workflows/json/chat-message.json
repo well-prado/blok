@@ -21,10 +21,7 @@
 						{
 							"$ref": {
 								"step": "@trigger",
-								"path": [
-									"params",
-									"sessionId"
-								]
+								"path": ["params", "sessionId"]
 							}
 						},
 						""
@@ -35,10 +32,7 @@
 				"messages": {
 					"$ref": {
 						"step": "@trigger",
-						"path": [
-							"body",
-							"messages"
-						]
+						"path": ["body", "messages"]
 					}
 				}
 			}

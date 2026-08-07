@@ -26,9 +26,7 @@
 							"url": {
 								"$ref": {
 									"step": "subscriber",
-									"path": [
-										"url"
-									]
+									"path": ["url"]
 								}
 							},
 							"method": "POST",
@@ -37,29 +35,20 @@
 								"X-Webhook-Subscriber": {
 									"$ref": {
 										"step": "subscriber",
-										"path": [
-											"id"
-										]
+										"path": ["id"]
 									}
 								},
 								"X-Event-Id": {
 									"$ref": {
 										"step": "@trigger",
-										"path": [
-											"body",
-											"event",
-											"id"
-										]
+										"path": ["body", "event", "id"]
 									}
 								}
 							},
 							"body": {
 								"$ref": {
 									"step": "@trigger",
-									"path": [
-										"body",
-										"event"
-									]
+									"path": ["body", "event"]
 								}
 							},
 							"responseType": "application/json"
