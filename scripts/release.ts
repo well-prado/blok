@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Lockstep publish for the 16 Blok public packages (8 pre-v0.6, plus 7
+ * Lockstep publish for the 20 Blok public packages (8 pre-v0.6, plus 7
  * added in v0.6.0 to support the new trigger surface — sse, websocket,
- * webhook, pubsub, cron, grpc, plus the helpers node — and `trigger-mcp`,
- * added post-v0.6 and folded into the lockstep list here).
+ * webhook, pubsub, cron, grpc, plus the helpers node — `trigger-mcp`,
+ * added post-v0.6 and folded into the lockstep list here, and
+ * `@blokjs/syntax` + `@blokjs/lsp-server`, brought back into the gate by
+ * #697 after drifting out of it for several releases — see the
+ * PUBLISHABLE comment below).
  *
  * Pre-flight: lockstep version, cross-package dep alignment, CLI scaffold
  * constants, git tag, clean tree. Then ordered npm publish with a single
@@ -53,14 +56,29 @@ export interface Publishable {
  * `@blokjs/trigger-websocket`, and `@blokjs/helpers` — scaffolded
  * projects can't `bun install` if any of those four isn't on npm.
  * `@blokjs/trigger-{cron, grpc, pubsub}` are part of the v0.6 surface
- * too and published alongside for parity. `@blokjs/syntax` /
- * `@blokjs/lsp-server` remain off npm until they grow user-visible
- * docs (CLI / IDE support only).
+ * too and published alongside for parity.
+ *
+ * `@blokjs/syntax` and `@blokjs/lsp-server` (#697): NOT new additions —
+ * both actually shipped to npm at 0.2.0/0.2.1 (the changesets-era "initial
+ * public release"), then fell out of this list when it was rewritten for
+ * lockstep publishing and were never brought back, despite staying
+ * `private: false` and advancing to 0.6.0 in-repo. `packages/lsp-server/
+ * editors/{neovim.lua,emacs-lsp.el,helix-languages.toml,sublime-lsp.json}`
+ * tell users to `npm install -g @blokjs/lsp-server` for LSP support in
+ * their editor of choice — real, already-shipped user-facing docs — so
+ * those npm installs have been stuck on a 4-minor-version-stale registry
+ * copy with zero gate coverage this whole time. Both are relisted here to
+ * close that gap; `@blokjs/syntax` ships alongside since `lsp-server`'s
+ * diagnostics are the grammar's only other consumer-facing half.
  */
 export const PUBLISHABLE: readonly Publishable[] = [
 	// Foundation — no internal deps.
 	{ dir: "core/shared", name: "@blokjs/shared" },
 	{ dir: "core/workflow-helper", name: "@blokjs/helper" },
+	// Editor tooling (#697) — no internal deps, and nothing else in this list
+	// depends on them either, so their position here is arbitrary.
+	{ dir: "packages/syntax", name: "@blokjs/syntax" },
+	{ dir: "packages/lsp-server", name: "@blokjs/lsp-server" },
 	// Node packages (depend on shared + helper).
 	{ dir: "nodes/web/api-call@1.0.0", name: "@blokjs/api-call" },
 	{ dir: "nodes/control-flow/if-else@1.0.0", name: "@blokjs/if-else" },
@@ -98,7 +116,7 @@ interface CliFlags {
 
 const HELP = `Usage: bun run release [flags]
 
-Publishes the 18 Blok public packages to npm in dependency order using a
+Publishes the 20 Blok public packages to npm in dependency order using a
 single batched OTP. Runs pre-flight checks before publishing.
 
 Flags:

@@ -6,9 +6,11 @@ import { discoverNodes } from "@blokjs/runner";
 import type { BlokService } from "@blokjs/runner";
 import type { NodeBase } from "@blokjs/shared";
 
-// @blokjs/browser is OPTIONAL: it pulls Playwright (browser binaries), so a
-// scaffolded project doesn't get it by default. Install it to enable the
-// browser nodes. Non-literal specifier keeps TS/bundlers from requiring it.
+// @blokjs/browser is OPTIONAL and INTERNAL (private, never published to npm,
+// #697): it pulls Playwright (browser binaries), so a scaffolded project
+// can't depend on it even if it wanted to. Link it manually inside this
+// monorepo to enable the browser nodes. Non-literal specifier keeps
+// TS/bundlers from requiring it.
 const browserPkg = "@blokjs/browser";
 let browserNodes: Record<string, BlokService<unknown>> = {};
 try {

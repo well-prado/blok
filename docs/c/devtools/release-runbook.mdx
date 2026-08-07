@@ -10,7 +10,7 @@ The release script at [scripts/release.ts](https://github.com/deskree-inc/blok/b
 
 ## The 15 publishable packages
 
-Pre-1.0 Blok publishes 15 packages to npm. Every other package in the monorepo (the `templates/*` SDKs, `@blokjs/studio`, `@blokjs/syntax`, `@blokjs/lsp-server`, `@blokjs/trigger-http`, the scaffold private packages) is `private: true` and stays off npm.
+Pre-1.0 Blok publishes packages to npm (see `PUBLISHABLE` in [scripts/release.ts](https://github.com/deskree-inc/blok/blob/main/scripts/release.ts) for the current, authoritative list — this table lags it). Every other package in the monorepo (the `templates/*` SDKs, `@blokjs/studio`, `blok-vscode`, `@blokjs/trigger-http`, the scaffold private packages) is `private: true` and stays off npm. `@blokjs/syntax` and `@blokjs/lsp-server` publish too — they're consumed by editor integrations (Neovim/Emacs/Helix/Sublime configs under `packages/lsp-server/editors/`), not by the VS Code extension bundle.
 
 | npm name | Path on disk | Added |
 |---|---|---|

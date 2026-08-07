@@ -326,7 +326,7 @@
     },
     "packages/lsp-server": {
       "name": "@blokjs/lsp-server",
-      "version": "0.6.0",
+      "version": "2.0.1",
       "bin": {
         "blok-lsp": "./dist/server.js",
       },
@@ -342,7 +342,7 @@
     },
     "packages/syntax": {
       "name": "@blokjs/syntax",
-      "version": "0.6.0",
+      "version": "2.0.1",
     },
     "packages/vscode-extension": {
       "name": "blok-vscode",
