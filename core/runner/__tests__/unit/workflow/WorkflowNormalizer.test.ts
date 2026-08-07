@@ -926,8 +926,9 @@ describe("WorkflowNormalizer — per-step description round-trip (#713)", () => 
 
 // =============================================================================
 // Studio debug controls — active:false (Skip) / stop:true (Stop) survive
-// normalization. Unlike `ui` (copyUi — optional passthrough, omitted when
-// absent), active/stop are NOT optional passthrough fields: every
+// normalization. Unlike `ui` / `description` (copyStepMeta — optional
+// passthrough, omitted when absent), active/stop are NOT optional
+// passthrough fields: every
 // InternalStep constructor already stamps a default (`active: true`,
 // `stop: false`) even when the raw step declares neither — see the
 // `active: step.active === undefined ? true : Boolean(step.active)` /
