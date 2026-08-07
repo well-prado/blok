@@ -39,6 +39,10 @@ gates() {
   step "Proto drift check"; bun run proto:check
   step "No \$ proxy check"; bun run check:no-dollar-proxy
   step "No legacy expression strings check"; bun run check:no-legacy-expr
+  # #702 — every publishable package's SOURCE entry must import cleanly under
+  # Bun's per-file loader (`bun -e`, in-monorepo scripts, bundler source-
+  # aliasing), not just its built dist/ (that's check:packaging, #687/#696).
+  step "Source-under-Bun import check"; bun run check:source-imports
   # #709 — template SOURCE must carry explicit ESM extensions: scaffolded
   # projects compile it with their own tsc, which never rewrites specifiers.
   step "Template-source ESM extensions check"; bun run check:template-esm

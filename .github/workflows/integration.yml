@@ -67,6 +67,13 @@ jobs:
       - name: No $ proxy check
         run: bun run check:no-dollar-proxy
 
+      # Sibling of the packaging gate (#687/#696, dist-under-Node): proves
+      # every publishable package's SOURCE entry also imports cleanly under
+      # Bun's per-file loader. No build needed — pure source, so it runs
+      # early and cheap, before Docker fixtures come up (#702).
+      - name: Source-under-Bun import check
+        run: bun run check:source-imports
+
       - name: Bring up test fixtures
         run: docker compose -f infra/testing/docker-compose.yml up -d
           postgres redis nats kafka rabbitmq localstack gcp-pubsub-emulator
