@@ -94,7 +94,22 @@ export type DefinitionValidationState =
  * version — every caller (insertNode, removeStep, saveInputs, saveBranch,
  * saveTrigger, submitRename, toggleSkip/toggleStop) keeps calling
  * `mutate(transform, { onSuccess })` exactly as before.
+ *
+ * Phase 5.1 — undo/redo rides the same draft seam: every successful
+ * `mutate()` pushes a `{draft, etag}` snapshot of what the draft WAS (right
+ * before this edit) onto `past`, and clears `future`. The baseline (no
+ * draft yet, i.e. the deployed definition) is itself a valid snapshot
+ * (`{draft: null, etag: null}`), so undoing the very first edit lands back
+ * on `hasDraft === false` — not on a draft that merely equals the deployed
+ * definition. `undo`/`redo` just walk the two stacks and reuse `setDraft`,
+ * so they replay through the same debounced dry-run effect as a normal
+ * edit (the effect keys on the `draft` object reference, which a
+ * stack pop always changes).
  */
+const HISTORY_CAP = 50; // matches the plan's "capped snapshots" decision (_design/workflow-canvas-plan.md §11)
+
+type DraftSnapshot = { draft: Record<string, unknown> | null; etag: string | null };
+
 export function useEditWorkflowDefinition(name: string) {
 	const queryClient = useQueryClient();
 	const draftRef = useRef<Record<string, unknown> | null>(null);
@@ -104,6 +119,19 @@ export function useEditWorkflowDefinition(name: string) {
 	const [validation, setValidation] = useState<DefinitionValidationState>({ status: "idle" });
 	const [justDeployed, setJustDeployed] = useState(false);
 	const dryRunUnsupportedRef = useRef(false);
+	// Undo/redo stacks. Snapshots hold the object reference every irEditOps
+	// transform already returns (each op `structuredClone`s its input and
+	// never mutates it — see irEditOps.ts), so no PAST draft is ever
+	// mutated out from under a stored snapshot. That means pushing here is
+	// just an array append, not another structuredClone: the whole-history
+	// memory cost is "up to HISTORY_CAP definition objects already produced
+	// by normal edits", not "2x that from re-cloning". `past`/`future`
+	// live in refs (mutated synchronously in undo/redo/onSuccess) with a
+	// pair of booleans mirrored into state so components re-render.
+	const pastRef = useRef<DraftSnapshot[]>([]);
+	const futureRef = useRef<DraftSnapshot[]>([]);
+	const [canUndo, setCanUndo] = useState(false);
+	const [canRedo, setCanRedo] = useState(false);
 
 	const setDraft = useCallback((next: Record<string, unknown> | null, etag: string | null) => {
 		draftRef.current = next;
@@ -111,6 +139,17 @@ export function useEditWorkflowDefinition(name: string) {
 		setDraftState(next);
 		setBaseEtagState(etag);
 	}, []);
+
+	const syncHistoryFlags = useCallback(() => {
+		setCanUndo(pastRef.current.length > 0);
+		setCanRedo(futureRef.current.length > 0);
+	}, []);
+
+	const clearHistory = useCallback(() => {
+		pastRef.current = [];
+		futureRef.current = [];
+		syncHistoryFlags();
+	}, [syncHistoryFlags]);
 
 	const editMutation = useMutation({
 		mutationFn: async (transform: (definition: Record<string, unknown>) => Record<string, unknown>) => {
@@ -127,8 +166,35 @@ export function useEditWorkflowDefinition(name: string) {
 			// one). `.error` on the returned mutation surfaces the message.
 			return { next: transform(base), etag };
 		},
-		onSuccess: ({ next, etag }) => setDraft(next, etag),
+		onSuccess: ({ next, etag }) => {
+			// The state BEFORE this edit (possibly the `{null, null}`
+			// baseline) becomes the new undo target; a fresh edit always
+			// discards whatever redo branch existed.
+			pastRef.current.push({ draft: draftRef.current, etag: baseEtagRef.current });
+			if (pastRef.current.length > HISTORY_CAP) pastRef.current.shift();
+			futureRef.current = [];
+			syncHistoryFlags();
+			setDraft(next, etag);
+		},
 	});
+
+	const undo = useCallback(() => {
+		if (pastRef.current.length === 0) return;
+		const previous = pastRef.current.pop() as DraftSnapshot;
+		futureRef.current.push({ draft: draftRef.current, etag: baseEtagRef.current });
+		if (futureRef.current.length > HISTORY_CAP) futureRef.current.shift();
+		syncHistoryFlags();
+		setDraft(previous.draft, previous.etag);
+	}, [setDraft, syncHistoryFlags]);
+
+	const redo = useCallback(() => {
+		if (futureRef.current.length === 0) return;
+		const nextSnapshot = futureRef.current.pop() as DraftSnapshot;
+		pastRef.current.push({ draft: draftRef.current, etag: baseEtagRef.current });
+		if (pastRef.current.length > HISTORY_CAP) pastRef.current.shift();
+		syncHistoryFlags();
+		setDraft(nextSnapshot.draft, nextSnapshot.etag);
+	}, [setDraft, syncHistoryFlags]);
 
 	const deployMutation = useMutation({
 		mutationFn: async () => {
@@ -140,6 +206,9 @@ export function useEditWorkflowDefinition(name: string) {
 		onSuccess: () => {
 			setDraft(null, null);
 			setValidation({ status: "idle" });
+			// The deployed draft is now the on-disk truth — nothing upstream
+			// of it is left to undo back to.
+			clearHistory();
 			queryClient.invalidateQueries({ queryKey: ["workflow", name] });
 			setJustDeployed(true);
 		},
@@ -157,10 +226,11 @@ export function useEditWorkflowDefinition(name: string) {
 		setDraft(null, null);
 		setValidation({ status: "idle" });
 		editMutation.reset();
+		clearHistory();
 		// Covers the stale-etag "reload" affordance too: dropping the draft
 		// and refetching in one action means Discard IS Reload.
 		queryClient.invalidateQueries({ queryKey: ["workflow", name] });
-	}, [setDraft, queryClient, name, editMutation.reset]);
+	}, [setDraft, queryClient, name, editMutation.reset, clearHistory]);
 
 	// Background validation guard: debounce ~500ms after every draft change,
 	// then dry-run the definition against the runner's normalizer. `requested`
@@ -228,6 +298,14 @@ export function useEditWorkflowDefinition(name: string) {
 		deployError: deployMutation.error,
 		/** True for ~1.5s right after a successful deploy — drives a brief success state. */
 		justDeployed,
+		/** Step back one draft edit. At the oldest edit, lands on `hasDraft === false` (the deployed baseline), not a draft equal to it. No-op past that. */
+		undo,
+		/** Step forward one draft edit undone via `undo()`. No-op if there's nothing to redo. */
+		redo,
+		/** True once at least one edit can be undone. */
+		canUndo,
+		/** True once at least one undone edit can be redone. */
+		canRedo,
 	};
 }
 

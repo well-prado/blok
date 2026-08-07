@@ -1207,6 +1207,8 @@ Acceptance (remaining):
 
 #### 5.1 Editor store and shell
 
+Status: draft state + capped undo/redo implemented 2026-08-06/07 inside `useEditWorkflowDefinition` (no separate store — the hook IS the seam every edit already flows through). History is 50 snapshots per the cap below; undoing past the first edit returns to NO draft (not a draft that merely equals the deployed definition) so the Deploy button and undeployed-changes dot stay truthful, and undo/redo re-fire the dry-run validation like any other edit. Not done: recovering an unsaved draft from session storage — the draft is component-lifetime and is lost on navigation.
+
 - Published/draft definition + Studio config.
 - Capped snapshots, undo/redo, validation problems.
 - Recover unsaved draft from session storage.
@@ -1232,7 +1234,15 @@ Implemented:
 
 #### 5.3 Schema-driven inspector
 
-Status: inputs editor from catalog schemas, handle/value picker, and the branch condition editor all implemented on 2026-08-06. Remaining: tryCatch/wait/subworkflow editors and Settings (as/spread/retry/idempotency).
+Status: inputs editor from catalog schemas, handle/value picker, and the branch condition editor all implemented on 2026-08-06. **Phase 5.3 COMPLETE (2026-08-07).** All six control-flow editors ship (branch, forEach, switch, tryCatch, wait, subworkflow) plus the step Settings panel.
+
+tryCatch exposes no scalar config in the IR — no error-variable name; the caught error is always `ctx.error` — so its drawer is an arm overview (try/catch/finally counts) with the semantics spelled out, replacing what used to be a dead-end inputs form.
+
+wait: `for` and `until` are **literal-only** — no `js/`, no `$.`. `normalizeWaitStep` reads them at workflow LOAD time, before any request `ctx` exists, and `RunnerSteps.computeDeadline` only does `Number()`/`Date.parse()` on the stored value. The schema `.refine` requires EXACTLY ONE of `for`/`until` (both or neither is a hard error), so the editor validates that before save and offers no value picker. Note: `examples/v05-primitives/09-polling-with-backoff.json` writes `"for": "$.state['compute-delay']"`, which cannot resolve — that file is a docs-only example and is NOT loaded by the runner, so it's stale sample text rather than a live breakage, but it should be corrected.
+
+subworkflow: `subworkflow`/`inputs`/`wait`/`dispatch`/`allowList` are top-level sibling fields on the step (the `subworkflow` key IS the discriminator), unlike the other five kinds which nest under their own key. Its `inputs` use the `js/` mapper convention; the target name may be a literal or a per-request expression. The editor picks the child workflow from the live workflow list and warns on self-reference (a warning, not a block — the runner has a real recursion-depth guard).
+
+Settings panel: `as`, `spread` (mutually exclusive with `as` — enforced in the Zod refine AND again by a normalizer throw, so the UI blocks the combination), `ephemeral` (with the unreadable-handle warning), `idempotencyKey`, `retry` (maxAttempts/factor/min/max timeouts), `maxDuration`. Blank fields are omitted rather than written as empty values.
 
 forEach + switch editors (2026-08-06): same structural pattern as the branch editor, reusing `UpstreamPicker`. CRITICAL convention difference, verified in the runner rather than assumed: `forEach.in` and `switch.on` go through the SAME blueprint mapper as regular step `inputs` — they keep the `js/` prefix (`Configuration.ts` preserves the expression; `NodeBase.process()` runs `blueprintMapper` before `ForEachNode`/`SwitchNode` read the resolved value). That is the OPPOSITE of branch `when`, which is raw `ctx.*` per ADR 0004. So these two editors use the picker WITHOUT its `raw` prop. Two more IR facts confirmed against `StepOpts.ts`: forEach has no `asIndex` field (`as` is required, and the index is auto-derived at runtime as `${as}Index`), and a switch case's match key is `when`, not `case`. The forEach editor warns inline when `as` (or the derived `${as}Index`) collides with an existing step id, since they share one state namespace and a collision silently shadows the step. Live acceptance: opened `per-item-pipeline` and `by-type` in `v05-nested-control-flow` — both parsed correctly, the collision warning fired for a real step id, and a case-literal edit flowed into the draft and armed Deploy after validation.
 
@@ -1470,6 +1480,20 @@ The full n8n source becomes useful only if we later need to study one exact inte
 - How it virtualizes very large execution-data panels.
 
 Those are later targeted questions, not blockers.
+
+## 22.5 Phase 5 acceptance — PASSED 2026-08-07
+
+The stated bar was: author a working workflow from an EMPTY document entirely on the canvas.
+
+Run on `canvas-acceptance` (a trigger-only workflow with `steps: []`):
+1. Added `@blokjs/expr` from the Node Library — landed in the draft, disk untouched.
+2. Configured its `expression` in the schema-driven drawer.
+3. Added `@blokjs/respond` the same way and set its `body` to `js/ctx.state["expr-1"]`.
+4. Exercised Undo (respond's body reverted, Redo armed) and Redo (restored) — history behaved.
+5. Deploy — enabled only after the background dry run passed — wrote both steps to disk and refreshed the registry.
+6. The workflow then ran green: `expr-1` and `respond-1` both completed, and after a runner restart the real HTTP route returned `{"ok":true,"greeting":"authored on canvas","echo":"Wellington"}`.
+
+Caveat worth knowing: the definition PUT hot-refreshes the registry (so Studio test-runs see changes immediately), but HTTP route BINDINGS still bind at boot — a brand-new workflow's public route needs a runner restart. Adding/removing steps on an already-routed workflow does not.
 
 ## 23. Definition of success
 

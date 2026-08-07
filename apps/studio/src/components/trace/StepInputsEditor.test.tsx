@@ -115,6 +115,135 @@ describe("StepInputsEditor", () => {
 	});
 });
 
+describe("Settings tab", () => {
+	function renderWithSettings(settings: Record<string, unknown> = {}, onSaveSettings = vi.fn(), onSave = vi.fn()) {
+		render(
+			<StepInputsEditor
+				stepId="respond"
+				schema={schema}
+				inputs={{}}
+				pending={false}
+				onSave={onSave}
+				onClose={vi.fn()}
+				settings={settings}
+				onSaveSettings={onSaveSettings}
+			/>,
+		);
+		return { onSave, onSaveSettings };
+	}
+
+	it("does not render when settings/onSaveSettings are absent", () => {
+		renderEditor();
+		expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument();
+	});
+
+	it("switches to the Settings tab and shows the reliability/state fields", async () => {
+		const user = userEvent.setup();
+		renderWithSettings();
+
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		expect(screen.getByLabelText("as")).toBeInTheDocument();
+		expect(screen.getByLabelText("spread")).toBeInTheDocument();
+		expect(screen.getByLabelText("ephemeral")).toBeInTheDocument();
+		expect(screen.getByLabelText("idempotencyKey")).toBeInTheDocument();
+		expect(screen.getByLabelText("maxAttempts")).toBeInTheDocument();
+		expect(screen.getByLabelText("maxDuration")).toBeInTheDocument();
+	});
+
+	it("setting `as` clears and disables `spread`, and vice versa, with the reason shown", async () => {
+		const user = userEvent.setup();
+		renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		await user.type(screen.getByLabelText("as"), "users");
+		expect(screen.getByLabelText("spread")).toBeDisabled();
+		expect(screen.getByText(/mutually exclusive with `as`/)).toBeInTheDocument();
+
+		await user.clear(screen.getByLabelText("as"));
+		await user.click(screen.getByLabelText("spread"));
+		expect(screen.getByLabelText("spread")).toBeChecked();
+		expect(screen.getByLabelText("as")).toBeDisabled();
+		expect(screen.getByLabelText("as")).toHaveValue("");
+		expect(screen.getByText(/mutually exclusive with `spread`/)).toBeInTheDocument();
+	});
+
+	it("shows the ephemeral footgun warning only when ephemeral is on", async () => {
+		const user = userEvent.setup();
+		renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		expect(screen.queryByText(/downstream steps cannot read this step's handle/)).not.toBeInTheDocument();
+		await user.click(screen.getByLabelText("ephemeral"));
+		expect(screen.getByText(/downstream steps cannot read this step's handle/)).toBeInTheDocument();
+	});
+
+	it("omits blank/default fields from the saved settings object", async () => {
+		const user = userEvent.setup();
+		const { onSaveSettings } = renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+		expect(onSaveSettings).toHaveBeenCalledWith({});
+	});
+
+	it("saves only the set knobs, typed per schema", async () => {
+		const user = userEvent.setup();
+		const { onSaveSettings } = renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		await user.type(screen.getByLabelText("as"), "users");
+		await user.click(screen.getByLabelText("ephemeral"));
+		await user.type(screen.getByLabelText("idempotencyKey"), "js/ctx.request.body.requestId");
+		await user.type(screen.getByLabelText("maxAttempts"), "3");
+		await user.type(screen.getByLabelText("maxDuration"), "30s");
+		await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+		expect(onSaveSettings).toHaveBeenCalledWith({
+			as: "users",
+			ephemeral: true,
+			idempotencyKey: "js/ctx.request.body.requestId",
+			retry: { maxAttempts: 3 },
+			maxDuration: "30s",
+		});
+	});
+
+	it("blocks save on an invalid maxDuration and shows the message", async () => {
+		const user = userEvent.setup();
+		const { onSaveSettings } = renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		await user.type(screen.getByLabelText("maxDuration"), "thirty-seconds");
+		await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+		expect(onSaveSettings).not.toHaveBeenCalled();
+		expect(screen.getByText(/maxDuration must be/)).toBeInTheDocument();
+	});
+
+	it("blocks save on an invalid retry shape and shows the message", async () => {
+		const user = userEvent.setup();
+		const { onSaveSettings } = renderWithSettings();
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		await user.type(screen.getByLabelText("minTimeoutInMs"), "1000");
+		await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+		expect(onSaveSettings).not.toHaveBeenCalled();
+		expect(screen.getByText(/retry.maxAttempts is required/)).toBeInTheDocument();
+	});
+
+	it("hydrates fields from the current settings prop", async () => {
+		const user = userEvent.setup();
+		renderWithSettings({ spread: true, retry: { maxAttempts: 5, factor: 2 } });
+		await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+		expect(screen.getByLabelText("spread")).toBeChecked();
+		expect(screen.getByLabelText("maxAttempts")).toHaveValue("5");
+		expect(screen.getByLabelText("factor")).toHaveValue("2");
+	});
+});
+
 describe("upstream picker", () => {
 	const definition = {
 		trigger: { http: { method: "POST", path: "/x" } },
