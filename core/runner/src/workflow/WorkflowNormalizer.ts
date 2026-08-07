@@ -46,6 +46,7 @@ import { lowerRefs } from "@blokjs/shared";
 const IF_ELSE_NODE_REF = "@blokjs/if-else";
 
 let _wildcardWarnedFiles = new Set<string>();
+let _legacyExprWarnedFiles = new Set<string>();
 
 interface RetryConfig {
 	maxAttempts: number;
@@ -198,6 +199,10 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	// half-migrated v2 envelope) — but NOT the canonical `{id, node}` hybrid.
 	assertNoConflictingStepDsl(wf, sourcePath);
 	const name = typeof wf.name === "string" ? wf.name : "";
+	// #690 — nag once per workflow about hand-written `js/` step inputs. Runs on
+	// the RAW steps, before `lowerRefs` compiles any `{$ref}` into the same
+	// string form, so a structural workflow never trips it.
+	if (Array.isArray(wf.steps)) warnLegacyExpressionsOnce(wf.steps as unknown[], name, sourcePath);
 	const version = typeof wf.version === "string" ? wf.version : "1.0.0";
 	const description = typeof wf.description === "string" ? wf.description : undefined;
 	// v0.7 — typed-client metadata. Carried verbatim (Zod schema for TS
@@ -1114,6 +1119,118 @@ function copyUi(step: Record<string, unknown>): { ui?: Record<string, unknown> }
  */
 export function _resetWildcardWarningCache(): void {
 	_wildcardWarnedFiles = new Set<string>();
+}
+
+/**
+ * Test-only — reset the per-process legacy-expression warning cache.
+ *
+ * @internal
+ */
+export function _resetLegacyExprWarningCache(): void {
+	_legacyExprWarnedFiles = new Set<string>();
+}
+
+/**
+ * A step input written as a bare `js/` path with an exact structural
+ * equivalent — `js/ctx.state.<key>…`, `js/ctx.request…`, `js/ctx.prev…`,
+ * `js/ctx.error…` and their `vars`/`req`/`response` aliases, with only
+ * `.ident`, `[0]` and `["quoted"]` accessors after the root.
+ *
+ * Deliberately NARROW. Anything with an operator, a call, a fallback or a
+ * template literal is the sanctioned `js` escape hatch (ADR 0008) and has no
+ * structural form, so nagging about it would be noise. This regex matches
+ * exactly the set the field-aware ref codemod can rewrite, which is what makes
+ * the warning's "run `blokctl migrate refs`" advice true.
+ */
+const PURE_PATH_EXPR =
+	/^js\/(?:ctx|\$)\.(?:state|vars|request|req|prev|response|error)(?:\.[A-Za-z_$][\w$]*|\[\d+\]|\['[^']*'\]|\["[^"]*"\])*$/;
+
+/** Recursively count pure-path `js/` strings inside one step's `inputs`. */
+function countLegacyInputExprs(value: unknown): number {
+	if (typeof value === "string") return PURE_PATH_EXPR.test(value) ? 1 : 0;
+	if (Array.isArray(value)) return value.reduce<number>((n, v) => n + countLegacyInputExprs(v), 0);
+	if (!isPlainObject(value)) return 0;
+	return Object.values(value).reduce<number>((n, v) => n + countLegacyInputExprs(v), 0);
+}
+
+/**
+ * Walk the raw step tree collecting `{ stepId, count }` for every step whose
+ * `inputs` still carry pure-path `js/` strings. Descends into every
+ * sub-pipeline so a legacy input nested three arms deep is still reported.
+ */
+function collectLegacyExprSteps(steps: readonly unknown[], out: { id: string; count: number }[]): void {
+	for (const raw of steps) {
+		if (!isPlainObject(raw)) continue;
+		const step = raw as Record<string, unknown>;
+		const count = countLegacyInputExprs(step.inputs);
+		if (count > 0) out.push({ id: pickString(step.id) ?? pickString(step.name) ?? "(unnamed)", count });
+
+		if (isPlainObject(step.branch)) {
+			const b = step.branch as Record<string, unknown>;
+			if (Array.isArray(b.then)) collectLegacyExprSteps(b.then, out);
+			if (Array.isArray(b.else)) collectLegacyExprSteps(b.else, out);
+		}
+		for (const key of ["forEach", "loop"] as const) {
+			const block = step[key];
+			if (isPlainObject(block) && Array.isArray((block as Record<string, unknown>).do)) {
+				collectLegacyExprSteps((block as Record<string, unknown>).do as unknown[], out);
+			}
+		}
+		if (isPlainObject(step.tryCatch)) {
+			const tc = step.tryCatch as Record<string, unknown>;
+			for (const arm of ["try", "catch", "finally"] as const) {
+				if (Array.isArray(tc[arm])) collectLegacyExprSteps(tc[arm] as unknown[], out);
+			}
+		}
+		if (isPlainObject(step.switch)) {
+			const sw = step.switch as Record<string, unknown>;
+			if (Array.isArray(sw.default)) collectLegacyExprSteps(sw.default, out);
+			if (Array.isArray(sw.cases)) {
+				for (const c of sw.cases) {
+					if (!isPlainObject(c)) continue;
+					const cc = c as Record<string, unknown>;
+					if (Array.isArray(cc.steps)) collectLegacyExprSteps(cc.steps, out);
+					if (Array.isArray(cc.do)) collectLegacyExprSteps(cc.do, out);
+				}
+			}
+		}
+	}
+}
+
+/**
+ * #690 — one structured deprecation warning per workflow when its step inputs
+ * still hold hand-written `js/` path strings instead of structural `{$ref}`
+ * handles. Fires at LOAD time (once per workflow, keyed like the `"*"`-method
+ * warning), never per request, and is silent for a workflow whose inputs are
+ * already structural — `{$ref}` / `{$tpl}` nodes are objects, not strings.
+ *
+ * Silence with `BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` (CI escape hatch).
+ * Removal target for the accepted-but-deprecated form: next major.
+ */
+function warnLegacyExpressionsOnce(steps: readonly unknown[], name: string, sourcePath?: string): void {
+	const suppress = process.env.BLOK_SUPPRESS_LEGACY_EXPR_WARNING;
+	if (suppress === "1" || suppress === "true") return;
+
+	const key = sourcePath ?? name ?? "<unknown>";
+	if (_legacyExprWarnedFiles.has(key)) return;
+
+	const offenders: { id: string; count: number }[] = [];
+	collectLegacyExprSteps(steps, offenders);
+	if (offenders.length === 0) return;
+
+	_legacyExprWarnedFiles.add(key);
+	const total = offenders.reduce((n, o) => n + o.count, 0);
+	const stepList = offenders.map((o) => `${o.id} (${o.count})`).join(", ");
+	const where = sourcePath ? ` (${sourcePath})` : "";
+	console.warn(
+		[
+			`[blok][deprecated] workflow "${name || key}"${where} has ${total} step input(s) written as legacy \`js/\` expression strings across ${offenders.length} step(s): ${stepList}.`,
+			'These are the runtime wire format, not an authoring form — use structural `{"$ref": {"step", "path"}}` handles instead.',
+			"Run `blokctl migrate refs` to rewrite them. See docs/c/migration-guides/legacy-expression-strings.mdx.",
+			"Support for hand-written `js/` inputs will be removed in the next major.",
+			"Set BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1 to silence.",
+		].join(" "),
+	);
 }
 
 /**
