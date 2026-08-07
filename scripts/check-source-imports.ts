@@ -42,12 +42,16 @@ function readPkg(dir: string): PackageJson {
 }
 
 /** `src/index.ts` is the convention; the handful of flat-layout node packages fall back to a root `index.ts`. */
-function resolveEntry(dir: string): string {
+function resolveEntry(dir: string): string | null {
 	const nested = join(ROOT, dir, "src", "index.ts");
 	if (existsSync(nested)) return nested;
 	const flat = join(ROOT, dir, "index.ts");
 	if (existsSync(flat)) return flat;
-	throw new Error(`No src/index.ts or index.ts found under ${dir}`);
+	// Asset-only packages (no TS at all — e.g. @blokjs/syntax ships TextMate
+	// grammars, added to PUBLISHABLE by #697) have no source entry to import.
+	// Skip with a note rather than fail: the packed-artifact gate (#696) still
+	// covers whatever such a package DOES ship.
+	return null;
 }
 
 async function main(): Promise<void> {
@@ -67,6 +71,10 @@ async function main(): Promise<void> {
 		}
 
 		const entry = resolveEntry(dir);
+		if (entry === null) {
+			skipped++;
+			continue;
+		}
 		try {
 			await import(entry);
 			checked++;
