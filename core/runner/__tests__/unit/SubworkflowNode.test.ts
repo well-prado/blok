@@ -209,6 +209,20 @@ describe("SubworkflowNode — dispatch", () => {
 		await expect(node.run(parentCtx)).rejects.toThrow(/not found in WorkflowRegistry/);
 	});
 
+	it("#693 · suggests the nearest-registered name on a typo (shared nearestMatches helper)", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "send-receipt-email",
+			source: "/child.ts",
+			workflow: makeChildWorkflowDef("send-receipt-email"),
+		});
+		// One-character-off from the registered name.
+		const node = makeSubworkflowNode({ stepName: "call-typo", subworkflowName: "send-receipt-emai" });
+		const parentCtx = makeParentCtx();
+		parentCtx.config = { "call-typo": { inputs: {} } } as unknown as Context["config"];
+
+		await expect(node.run(parentCtx)).rejects.toThrow(/did you mean "send-receipt-email"/i);
+	});
+
 	it("F12 · not-found error enumerates all registration paths (JSON, TS Workflows.ts, worker/cron/grpc)", async () => {
 		const node = makeSubworkflowNode({ stepName: "call-missing", subworkflowName: "no-such-workflow" });
 		const parentCtx = makeParentCtx();

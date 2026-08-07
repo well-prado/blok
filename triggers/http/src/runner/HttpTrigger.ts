@@ -9,6 +9,7 @@ import { DefaultLogger } from "@blokjs/runner";
 import { registerTraceRoutes } from "@blokjs/runner";
 import { RoutingDiagnostics } from "@blokjs/runner";
 import { RuntimeRegistry, WorkflowRegistry } from "@blokjs/runner";
+import { type MatchCandidate, nearestMatches } from "@blokjs/runner";
 import { ConcurrencyLimitError } from "@blokjs/runner";
 import { QueueExpiredError } from "@blokjs/runner";
 import { ConcurrencyMetrics } from "@blokjs/runner";
@@ -126,6 +127,53 @@ function hasHttpTrigger(wf: unknown): boolean {
 	return !!http && typeof http === "object";
 }
 
+/**
+ * #693 — every trigger kind a workflow object declares (root `trigger` OR
+ * `_config.trigger`). Used only for the boot-time route table's "non-HTTP
+ * triggers this boot" summary — never gates dispatch.
+ */
+function extractTriggerKinds(wf: unknown): string[] {
+	if (!wf || typeof wf !== "object") return [];
+	const obj = wf as { trigger?: unknown; _config?: { trigger?: unknown } };
+	const trigger = (obj.trigger ?? obj._config?.trigger) as Record<string, unknown> | undefined;
+	if (!trigger || typeof trigger !== "object") return [];
+	return Object.keys(trigger);
+}
+
+/**
+ * #693 — one URL, everywhere a diagnostic points at "the routing rules":
+ * the unknown-route 404, the boot log, and the zero-route info line.
+ */
+const DOCS_ROUTING_URL = "https://blok.build/docs/d/triggers/http#file-based-routing";
+
+/**
+ * #693 — the shared dev-mode gate for rich diagnostics (unknown-route 404
+ * body, boot route table). Matches the exact condition already used 4x in
+ * this repo to gate HMR (`HttpTrigger.ts`, `PubSubTrigger.ts`,
+ * `WorkerTrigger.ts`, `CronTrigger.ts`) so "dev mode" means the same thing
+ * everywhere. `BLOK_ROUTE_TABLE=true` additionally forces the route table
+ * on in production (CI / `blokctl routes`) without flipping full dev mode.
+ */
+function isDevMode(): boolean {
+	return process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development";
+}
+
+/** One scan root's contribution to the boot-time route table / 404 diagnostics. */
+interface ScanRootSummary {
+	readonly dir: string;
+	readonly kind: "ts" | "json";
+	readonly filesScanned: number;
+	readonly routesRegistered: number;
+}
+
+/** Boot-time registration-source snapshot — the "where did routes come from" half of #693. */
+interface BootRoutingInfo {
+	readonly scanRoots: readonly ScanRootSummary[];
+	readonly manualCount: number;
+	readonly legacyFlags: readonly string[];
+	readonly nonHttpTriggerCounts: Readonly<Record<string, number>>;
+}
+
 async function resolveManualRegistrations(workflowsMap: Record<string, unknown>): Promise<ManualRegistration[]> {
 	return Promise.all(
 		Object.keys(workflowsMap ?? {}).map(async (key) => ({
@@ -186,6 +234,16 @@ export default class HttpTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
 	private workflowSourcePaths = new Map<unknown, string>();
 	private server: Server | null = null;
+
+	/**
+	 * #693 — the last-built route table + its registration-source snapshot.
+	 * Populated by `buildFileBasedRoutes()` at boot (and on every HMR
+	 * re-scan). Read by the unknown-route 404 handler and the RPC mount to
+	 * build "here's what IS registered + here's the nearest miss"
+	 * diagnostics without re-scanning the filesystem per request.
+	 */
+	private routeTable: RouteEntry[] = [];
+	private bootRouting: BootRoutingInfo | undefined;
 
 	/**
 	 * v0.7 — callbacks registered by sibling same-port triggers (e.g.
@@ -417,12 +475,29 @@ export default class HttpTrigger extends TriggerBase {
 	 * both will be removed in a future release. The boot log warns
 	 * loudly when the legacy path is active so operators notice.
 	 */
+	/** #693 — legacy routing opt-outs active this boot, formatted for diagnostics. */
+	private activeLegacyFlags(): string[] {
+		const flags: string[] = [];
+		if (process.env.BLOK_FILE_BASED_ROUTING === "false") flags.push("BLOK_FILE_BASED_ROUTING=false");
+		if (process.env.BLOK_ROUTING_LEGACY === "1" || process.env.BLOK_ROUTING_LEGACY === "true") {
+			flags.push(`BLOK_ROUTING_LEGACY=${process.env.BLOK_ROUTING_LEGACY}`);
+		}
+		return flags;
+	}
+
 	private async buildFileBasedRoutes(): Promise<RouteEntry[]> {
 		const enabled = isFileBasedRoutingEnabled();
 		if (!enabled) {
 			this.logger.log(
 				"[blok][routing] file-based routing is DISABLED — every request will go through the legacy catch-all `/<workflow-key>/<sub>` dispatch. Unset `BLOK_FILE_BASED_ROUTING=false` / `BLOK_ROUTING_LEGACY=1` to re-enable. The legacy mode will be removed in a future release.",
 			);
+			this.routeTable = [];
+			this.bootRouting = {
+				scanRoots: [],
+				manualCount: 0,
+				legacyFlags: this.activeLegacyFlags(),
+				nonHttpTriggerCounts: {},
+			};
 			return [];
 		}
 
@@ -494,10 +569,70 @@ export default class HttpTrigger extends TriggerBase {
 			);
 		}
 
-		if (table.length > 0) {
+		// #693 — registration-source snapshot for the boot table + the unknown-route
+		// 404 diagnostics. `routesRegistered` per root is what tells "I created the
+		// file, where's my route?" apart from "the scan never saw it".
+		const nonHttpTriggerCounts: Record<string, number> = {};
+		for (const sw of [...scannedJson, ...scannedTs]) {
+			for (const kind of extractTriggerKinds(sw.workflow)) {
+				if (kind === "http") continue;
+				nonHttpTriggerCounts[kind] = (nonHttpTriggerCounts[kind] ?? 0) + 1;
+			}
+		}
+		const jsonRouteCount = table.filter((r) => r.kind === "json").length;
+		const tsRoutedSourcePaths = new Set(table.filter((r) => r.sourcePath).map((r) => r.sourcePath));
+		const tsRouteCount = scannedTs.filter((sw) => tsRoutedSourcePaths.has(sw.source)).length;
+		this.routeTable = table;
+		this.bootRouting = {
+			scanRoots: [
+				{
+					dir: path.join(workflowsRoot, "json"),
+					kind: "json",
+					filesScanned: scannedJson.length,
+					routesRegistered: jsonRouteCount,
+				},
+				{
+					dir: path.join(process.cwd(), "src", "workflows"),
+					kind: "ts",
+					filesScanned: scannedTs.length,
+					routesRegistered: tsRouteCount,
+				},
+			],
+			manualCount: manual.length,
+			legacyFlags: this.activeLegacyFlags(),
+			nonHttpTriggerCounts,
+		};
+
+		// #693 — boot-time route table. Dev default; `BLOK_ROUTE_TABLE=true` forces
+		// it anywhere (production, CI, `blokctl routes`). Mirrors the MCP trigger's
+		// existing boot-log style: one summary line + one line per entry.
+		const showRouteTable = isDevMode() || process.env.BLOK_ROUTE_TABLE === "true";
+		if (showRouteTable && table.length > 0) {
 			this.logger.log(`[blok] file-based routing — ${table.length} route(s) registered:`);
 			for (const r of table) {
-				this.logger.log(`[blok]   ${r.method.padEnd(7)} ${r.path}  ←  ${r.workflowKey}`);
+				const src = r.sourcePath ? ` (${r.sourcePath})` : "";
+				this.logger.log(`[blok]   ${r.method.padEnd(7)} ${r.path}  ←  ${r.workflowKey}${src}`);
+			}
+			const nonHttpSummary = Object.entries(nonHttpTriggerCounts)
+				.map(([kind, count]) => `${kind}=${count}`)
+				.join(", ");
+			if (nonHttpSummary) {
+				this.logger.log(`[blok]   non-HTTP triggers this boot: ${nonHttpSummary}`);
+			}
+		}
+
+		// #693 — a TS file under the scan root that DECLARES an http trigger but
+		// produced no route. Unlike JSON, TS workflows aren't auto-routed by
+		// file-scan alone — they still need a `src/Workflows.ts` entry (the one
+		// manual-registration step file-based routing didn't remove for TS). This
+		// answers "I created the file, where's my route?" instead of a silent 404.
+		if (showRouteTable) {
+			for (const sw of scannedTs) {
+				if (tsRoutedSourcePaths.has(sw.source)) continue;
+				if (!hasHttpTrigger(sw.workflow)) continue;
+				this.logger.log(
+					`[blok][routing] ${sw.source} declares an HTTP trigger but produced no route — TypeScript workflows aren't auto-routed by file-scan; add it to \`src/Workflows.ts\` (see ${DOCS_ROUTING_URL}).`,
+				);
 			}
 		}
 
@@ -577,6 +712,68 @@ export default class HttpTrigger extends TriggerBase {
 		}
 
 		return table;
+	}
+
+	/**
+	 * #693 — build the rich unknown-route diagnostic payload: which
+	 * registration sources were active this boot + the nearest-miss
+	 * suggestions (shared `nearestMatches` helper — the same one the RPC
+	 * mount and `subworkflow:` lookup use). Cheap: ranks the in-memory
+	 * route table, no I/O. Callers decide whether to put it on the wire
+	 * (dev-mode only) or just the log line (both modes).
+	 */
+	private buildRouteMissDiagnostics(method: string, requestedPath: string) {
+		const candidates: MatchCandidate[] = this.routeTable.map((r) => ({
+			key: `${r.method} ${r.path}`,
+			label: `${r.method} ${r.path}`,
+			source: r.sourcePath ?? r.source,
+		}));
+		const suggestions = nearestMatches(`${method} ${requestedPath}`, candidates, 3);
+		return {
+			requested: { method, path: requestedPath },
+			registrationSources: {
+				fileScanRoots: (this.bootRouting?.scanRoots ?? []).map((r) => ({
+					dir: r.dir,
+					kind: r.kind,
+					filesScanned: r.filesScanned,
+					routesRegistered: r.routesRegistered,
+				})),
+				manualMap: { count: this.bootRouting?.manualCount ?? 0 },
+				legacyFlags: this.bootRouting?.legacyFlags ?? [],
+			},
+			suggestions: suggestions.map((s) => ({ route: s.label, source: s.source, distance: s.distance })),
+			docs: DOCS_ROUTING_URL,
+		};
+	}
+
+	/**
+	 * #693 — server-side log line for an unmatched route. Always emitted
+	 * (dev AND production) — this never leaves the process, so it carries
+	 * the full diagnostic even when the HTTP response itself stays terse
+	 * in production.
+	 */
+	private logUnknownRoute(
+		method: string,
+		requestedPath: string,
+		diagnostics: ReturnType<HttpTrigger["buildRouteMissDiagnostics"]>,
+	): void {
+		const roots = diagnostics.registrationSources.fileScanRoots
+			.map((r) => `${r.dir} (${r.kind}, ${r.routesRegistered}/${r.filesScanned} routed)`)
+			.join("; ");
+		const lines = [
+			`[blok][routing] 404 ${method} ${requestedPath} — no matching route.`,
+			`  scan roots: ${roots || "(none scanned)"}`,
+			`  manual map: ${diagnostics.registrationSources.manualMap.count} workflow(s)`,
+		];
+		if (diagnostics.registrationSources.legacyFlags.length > 0) {
+			lines.push(`  legacy flags active: ${diagnostics.registrationSources.legacyFlags.join(", ")} (deprecated)`);
+		}
+		if (diagnostics.suggestions.length > 0) {
+			const top = diagnostics.suggestions[0];
+			lines.push(`  did you mean: ${top.route}${top.source ? ` (from ${top.source})` : ""}?`);
+		}
+		lines.push(`  docs: ${diagnostics.docs}`);
+		this.logger.error(lines.join("\n"));
 	}
 
 	/**
@@ -838,7 +1035,42 @@ export default class HttpTrigger extends TriggerBase {
 		return { body: rawBody, rawBody };
 	}
 
+	/**
+	 * #693 — `blokctl routes` / CI offline mode. Computes + prints the boot
+	 * route table (via the SAME `buildFileBasedRoutes()` the real boot uses —
+	 * one implementation, not a reimplementation for the offline case) and
+	 * exits WITHOUT booting metrics, tracing, or the HTTP server, so it's
+	 * safe to run alongside a live `blokctl dev`. `BLOK_ROUTE_TABLE=true` is
+	 * also set by the CLI so the table prints even outside dev mode. Exit
+	 * code: 0 with at least one route registered, 1 otherwise (CI gate).
+	 */
+	private async printRoutesAndExit(): Promise<never> {
+		try {
+			this.nodeMap.workflows = (await resolveManualWorkflowMap(
+				(workflows as Record<string, unknown>) ?? {},
+			)) as GlobalOptions["workflows"];
+		} catch (err) {
+			this.logger.error(`[blok] TS workflow registration failed: ${(err as Error).message}`);
+		}
+		let routes: RouteEntry[] = [];
+		try {
+			routes = await this.buildFileBasedRoutes();
+		} catch (err) {
+			this.logger.error(`[blok] file-based routing setup failed: ${(err as Error).message}`);
+		}
+		if (routes.length === 0) {
+			this.logger.log("[blok] file-based routing — 0 routes registered.");
+		}
+		process.exit(routes.length > 0 ? 0 : 1);
+	}
+
 	async listen(): Promise<number> {
+		// #693 — offline route-table mode (`blokctl routes`). Short-circuits
+		// BEFORE any server/metrics/tracing bootstrap.
+		if (process.env.BLOK_ROUTES_ONLY === "1") {
+			return this.printRoutesAndExit();
+		}
+
 		// Metrics opt-out gate. ON by default; `BLOK_METRICS_DISABLED=1` skips the
 		// exporter + global MeterProvider entirely (every blok_* instrument then
 		// no-ops) and the `/metrics` route below is not registered. Previously the
@@ -1012,7 +1244,34 @@ export default class HttpTrigger extends TriggerBase {
 				// its middleware against the wrong (`http`) trigger kind, silently
 				// dropping the worker/cron middleware chain (e.g. auth).
 				if (!entry || entry.isMiddleware === true || !hasHttpTrigger(entry.workflow)) {
-					return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
+					// #693 — same nearest-miss helper as the catch-all + subworkflow
+					// lookup. The structured log line carries the suggestion in both
+					// modes; the response body only gets it in dev (never enumerate
+					// registered workflow names in a production response).
+					const rpcCallable = WorkflowRegistry.getInstance()
+						.list()
+						.filter((w) => !w.isMiddleware && hasHttpTrigger(w.workflow));
+					const suggestions = nearestMatches(
+						name,
+						rpcCallable.map((w) => ({ key: w.name, label: w.name, source: w.sourcePath ?? w.source })),
+					);
+					const top = suggestions[0];
+					const suggestionText = top ? ` Did you mean "${top.label}"${top.source ? ` (from ${top.source})` : ""}?` : "";
+					this.logger.error(
+						`[blok][routing] 404 POST /__blok/rpc/${name} — not registered for RPC (${rpcCallable.length} RPC-callable workflow(s) registered).${suggestionText} docs: ${DOCS_ROUTING_URL}`,
+					);
+					if (!isDevMode()) {
+						return c.json({ error: `Workflow "${name}" is not registered for RPC.` }, 404);
+					}
+					return c.json(
+						{
+							error: `Workflow "${name}" is not registered for RPC.`,
+							available: rpcCallable.length,
+							suggestions: suggestions.map((s) => ({ name: s.label, source: s.source, distance: s.distance })),
+							docs: DOCS_ROUTING_URL,
+						},
+						404,
+					);
 				}
 
 				// Mount-level auth gate. The RPC surface is in the /__blok/
@@ -1852,6 +2111,29 @@ export default class HttpTrigger extends TriggerBase {
 						span.setStatus({ code: SpanStatusCode.ERROR, message: error_context.message });
 						this.logger.error(`${error_context.message}`, error_context.stack?.replace(/\n/g, " "));
 						return c.json({ error: error_context.message }, code as 500);
+					}
+
+					// #693 — unknown route: the catch-all fell through to
+					// `Configuration.init`'s on-disk lookup and it found nothing —
+					// no file-based route matched this method+path, and there's no
+					// legacy workflow registered under that key either. This is the
+					// "bare 404 / Workflow not found" pain from #693's field
+					// evidence. Status corrected to 404 (this is resource-not-found,
+					// not a server error) in BOTH modes; only the BODY differs —
+					// dev gets scan roots + nearest-miss suggestions, production
+					// keeps today's terse `{ error: message }` shape (never
+					// enumerate registered routes in a production response body).
+					// The structured log line carries the full diagnostic in both.
+					if (e instanceof Error && e.message.startsWith("Workflow not found:")) {
+						const method = c.req.method;
+						const requestedPath = c.req.path;
+						const diagnostics = this.buildRouteMissDiagnostics(method, requestedPath);
+						this.logUnknownRoute(method, requestedPath, diagnostics);
+						span.setStatus({ code: SpanStatusCode.ERROR, message: "workflow_not_found" });
+						if (!isDevMode()) {
+							return c.json({ error: e.message }, 404);
+						}
+						return c.json({ error: "Workflow not found", ...diagnostics }, 404);
 					}
 
 					workflow_runner_errors.add(1, {

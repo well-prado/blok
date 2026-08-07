@@ -121,6 +121,10 @@ import { redactSensitive as traceRedactSensitive, sanitize as traceSanitize } fr
 // Workflow registry (Tier 2 sub-workflow primitive)
 import { type RegisteredWorkflow, type WorkflowAuthorizeFn, WorkflowRegistry } from "./workflow/WorkflowRegistry";
 
+// Nearest-miss "did you mean…?" helper, shared by every by-name/by-route
+// lookup that can fail (#693): HTTP catch-all, RPC mount, subworkflow lookup.
+import { type MatchCandidate, type RankedMatch, levenshteinDistance, nearestMatches } from "./workflow/NearestMatch";
+
 // Concurrency gate (Tier 2 #6)
 import {
 	ConcurrencyLimitError,
@@ -314,6 +318,11 @@ export {
 	WorkflowRegistry,
 	type RegisteredWorkflow,
 	type WorkflowAuthorizeFn,
+	// Nearest-miss "did you mean…?" helper (#693)
+	nearestMatches,
+	levenshteinDistance,
+	type MatchCandidate,
+	type RankedMatch,
 	// Concurrency gate (Tier 2 #6)
 	ConcurrencyLimitError,
 	type ConcurrencyLimitInfo,
