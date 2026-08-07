@@ -27,10 +27,10 @@ import { WasmRuntimeAdapter } from "./adapters/WasmRuntimeAdapter";
 import { DEFAULT_HEALTH_SERVICE_CONFIG, buildChannelOptions } from "./adapters/grpc/GrpcChannelOptions";
 import { GrpcClientPool, buildCredentials } from "./adapters/grpc/GrpcClientPool";
 import {
-	NodeRuntimeService,
 	bufferToJson,
 	decodeExecuteResponse,
 	encodeExecuteRequest,
+	getNodeRuntimeService,
 	jsonToBuffer,
 } from "./adapters/grpc/GrpcCodec";
 import {
@@ -237,7 +237,7 @@ export {
 	GrpcClientPool,
 	buildCredentials,
 	buildChannelOptions,
-	NodeRuntimeService,
+	getNodeRuntimeService,
 	encodeExecuteRequest,
 	decodeExecuteResponse,
 	jsonToBuffer,
