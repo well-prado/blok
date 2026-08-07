@@ -81,6 +81,39 @@ packages on npm version independently within each release line.
   A webhook validation failure now returns a real 4xx and is **not** recorded as a
   processed delivery, so the sender can retry after correcting the payload.
 
+### Breaking changes
+
+- **The `$` proxy is deleted.** `import { $ } from "@blokjs/core"` and
+  `import { $ } from "@blokjs/helper"` are now compile errors — there is no
+  flag to bring it back. `$` compiled `$.state.foo` / `$.request.body` /
+  `$.prev.x` / `$.error.message` straight to `"js/ctx.*"` strings at
+  definition time, bypassing the typed `step()` handles, the structural
+  `{$ref}` IR, and `validateWorkflow`'s static ref checking — the exact
+  stringly-typed failure mode the core redesign exists to kill. Everything it
+  did is covered by an existing, better-typed mechanism:
+  - New TypeScript workflows: the producing step's typed handle (`h`/`h.field`)
+    replaces `$.state.<id>`; the trigger entry handle (`req`/`job`/`event`/…)
+    replaces `$.request`; `tpl` replaces string interpolation; `eq/ne/gt/gte/
+    lt/lte/not` (operating on handles) replace `$`-based branch/loop
+    conditions; a typed `ErrorHandle` inside `tryCatch`'s `catch` arm replaces
+    `$.error`.
+  - Legacy object-style / JSON workflows: write the literal `"js/ctx.*"`
+    string directly — it's the same string `$` always compiled to.
+  - `blokctl migrate refs` mechanically rewrites both shapes (step inputs to
+    typed handles / structural `{$ref}`, `branch`/`loop` conditions to raw
+    `ctx.*` strings) and marks non-mechanical sites for hand migration.
+  - `@blokjs/helper`'s `eq/ne/gt/gte/lt/lte/not` comparators remain exported
+    (back-compat) but now take a raw ctx-path **string** (e.g.
+    `eq("ctx.request.method", "POST")`) instead of a `$` value.
+  - Full before/after table: [`$` proxy removal migration
+    guide](docs/c/migration-guides/dollar-proxy-removal.mdx).
+  - A CI gate (`bun run check:no-dollar-proxy`, `.github/workflows/no-dollar-proxy.yml`)
+    fails the build if `proxy/$`, `unwrapProxies`, or `$.state`/`$.request`/`$.vars`
+    reappear anywhere outside this changelog entry and the migration guide.
+  - Workflows **serialized** by old versions (JSON files or step trees
+    already containing `"js/ctx.*"` wire strings) still load and run
+    unchanged — only the `$` **authoring** surface is gone.
+
 ## [v0.6.0] — 2026-05-14
 
 The headline shift since v0.4.0. Adds the reliability primitives that
