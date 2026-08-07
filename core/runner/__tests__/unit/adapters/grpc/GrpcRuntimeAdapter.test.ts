@@ -24,8 +24,8 @@ import {
 	type ExecuteEventProto,
 	type ExecuteRequestProto,
 	type ExecuteResponseProto,
-	NodeRuntimeService,
 	bufferToJson,
+	getNodeRuntimeService,
 	jsonToBuffer,
 } from "../../../../src/adapters/grpc/GrpcCodec";
 import { GrpcRuntimeAdapter, _resetRuntimeInstrumentsForTests } from "../../../../src/adapters/grpc/GrpcRuntimeAdapter";
@@ -98,7 +98,8 @@ async function startMockServer(behavior: MockServerBehavior): Promise<{
 }> {
 	const server: Server = new ServerCtor();
 
-	server.addService((NodeRuntimeService as unknown as { service: Parameters<typeof server.addService>[0] }).service, {
+	const service = getNodeRuntimeService() as unknown as { service: Parameters<typeof server.addService>[0] };
+	server.addService(service.service, {
 		Execute: (
 			call: { request: ExecuteRequestProto; metadata: Metadata },
 			callback: (err: ServiceError | null, response?: ExecuteResponseProto) => void,

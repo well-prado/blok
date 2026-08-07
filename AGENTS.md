@@ -363,11 +363,18 @@ bun run lint:check
 bun run ci:fast
 ```
 
-Testing utilities:
+Testing utilities — all from `@blokjs/core/testing`, no server and no config:
 
-- `NodeTestHarness` for individual nodes.
-- `WorkflowTestRunner` for workflow integration tests.
-- `@blokjs/core/testing` re-exports the public test surface.
+- `runNode(node, input, opts?)` — one node, Zod-validated in and out, returns
+  its typed output (rejects on failure).
+- `runWorkflow(wf, input, opts?)` — takes the `workflow()` export directly and
+  runs it through the real engine. `run.ok`, `run.response`, `run.state(id)`,
+  `run.step(id)` (resolved `inputs`, `output`, `executed`), `run.steps`.
+  `opts.mock` replaces nodes by ref, validated against that node's output schema.
+- `NodeTestHarness` / `WorkflowTestRunner` — the classes underneath, when you
+  need the raw result envelope or manual node registration.
+
+Author docs: `docs/d/fundamentals/testing.mdx`.
 
 ## Blok Studio
 
@@ -384,7 +391,7 @@ import { eq, ne, gt, gte, lt, lte, not } from "@blokjs/core";
 
 // Runtime/testing internals when needed
 import { Configuration, Runner } from "@blokjs/core/runtime";
-import { NodeTestHarness, WorkflowTestRunner } from "@blokjs/core/testing";
+import { runNode, runWorkflow, NodeTestHarness, WorkflowTestRunner } from "@blokjs/core/testing";
 
 // Shared runtime types
 import type { Context, RequestContext, ResponseContext } from "@blokjs/shared";

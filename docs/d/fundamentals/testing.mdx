@@ -1,0 +1,216 @@
+---
+title: Testing
+description: Unit-test a node and a typed-handle workflow under vitest or bun test — no server, no Docker, no config workarounds.
+icon: "flask-conical"
+---
+
+Blok's test surface is two functions. `runNode` runs one node in isolation.
+`runWorkflow` runs a `workflow()` export through the real engine and tells you
+what every step did.
+
+```bash
+npm i -D vitest    # or use `bun test` — both work, unchanged
+```
+
+```ts
+import { runNode, runWorkflow } from "@blokjs/core/testing";
+```
+
+<Tip>
+No server boots, no Docker starts, nothing is imported that reads the
+filesystem. A single-node test file cold-starts in well under a second.
+</Tip>
+
+## Recipe 1 — unit-test a node
+
+`runNode` validates the input against the node's Zod schema, runs `execute`,
+validates the output, and returns it. A failure — bad input or a throw inside
+the node — rejects, so failure paths read naturally.
+
+```ts src/nodes/order-validator.ts
+import { defineNode } from "@blokjs/core";
+import { z } from "zod";
+
+export const orderValidator = defineNode({
+  name: "order-validator",
+  description: "Normalizes an incoming order payload.",
+  input: z.object({ body: z.object({ id: z.string(), total: z.number() }) }),
+  output: z.object({ id: z.string(), total: z.number() }),
+  execute: (_ctx, input) => ({ id: input.body.id, total: input.body.total }),
+});
+```
+
+```ts src/nodes/order-validator.test.ts
+import { runNode } from "@blokjs/core/testing";
+import { describe, expect, it } from "vitest";
+import { orderValidator } from "./order-validator";
+
+describe("order-validator", () => {
+  it("normalizes the incoming order", async () => {
+    const out = await runNode(orderValidator, { body: { id: "o-1", total: 120 } });
+
+    expect(out).toEqual({ id: "o-1", total: 120 });
+  });
+
+  it("rejects a payload its input schema does not accept", async () => {
+    await expect(runNode(orderValidator, { body: { id: "o-1" } } as never)).rejects.toThrow(/total/);
+  });
+});
+```
+
+Anything the node reads off `ctx` is supplied by the third argument:
+
+```ts
+await runNode(fetchUser, { userId: "u-1" }, {
+  env: { API_KEY: "test" },
+  request: { headers: { authorization: "Bearer t" } },
+});
+```
+
+## Recipe 2 — a workflow with mocked side effects
+
+`runWorkflow` takes the `workflow()` export directly — including the promise it
+returns, so no `await` at the import site. Nodes the workflow imports resolve on
+their own; you only name the ones you want replaced.
+
+```ts src/workflows/process-order.ts
+import { branch, gt, http, step, workflow } from "@blokjs/core";
+import type { Handle } from "@blokjs/core";
+import { chargeCard, flagVip, orderValidator } from "../nodes";
+
+export default workflow("process-order", { version: "1.0.0", trigger: http.post("/orders") }, (req) => {
+  const body = req.body as { id: Handle<string>; total: Handle<number> };
+
+  const order = step("validate", orderValidator, { body });
+  step("charge", chargeCard, { orderId: order.id, amount: order.total });
+  branch("large-order", gt(order.total, 100), {
+    then: () => {
+      step("flag", flagVip, { id: order.id });
+    },
+  });
+});
+```
+
+```ts src/workflows/process-order.test.ts
+import { runWorkflow } from "@blokjs/core/testing";
+import { describe, expect, it } from "vitest";
+import orderFlow from "./process-order";
+
+const chargeOk = { "charge-card": async () => ({ receipt: "rc_123" }) };
+
+describe("process-order", () => {
+  it("passes resolved inputs from step to step", async () => {
+    const run = await runWorkflow(orderFlow, { id: "o-1", total: 120 }, { mock: chargeOk });
+
+    expect(run.ok).toBe(true);
+    expect(run.state("validate")).toEqual({ id: "o-1", total: 120 });
+    expect(run.step("charge")?.inputs).toEqual({ orderId: "o-1", amount: 120 });
+    expect(run.response).toEqual({ vip: true });
+  });
+
+  it("skips the arm a small order does not take", async () => {
+    const run = await runWorkflow(orderFlow, { id: "o-2", total: 10 }, { mock: chargeOk });
+
+    expect(run.step("flag")?.executed).toBe(false);
+    expect(run.state("flag")).toBeUndefined();
+  });
+});
+```
+
+<Warning>
+**A mock cannot lie about the contract.** Mocks are keyed by node ref, so Blok
+knows which node they stand in for — and validates the return value against that
+node's declared `output` schema. A mock that returns a field the schema never
+declares fails the test, naming the node and the field:
+
+```
+Mock for node "charge-card" returned data its declared output schema rejects:
+  - field(s) not in the output schema: chargedAt
+```
+
+That is the point. A mock free to invent fields lets a wiring bug pass a green
+suite and reach production.
+</Warning>
+
+## Recipe 3 — a workflow with real nodes and a fake trigger
+
+Drop `mock` and every node runs for real. The second argument is the trigger
+payload — for HTTP that is the request body; headers, query, and path params go
+in the options.
+
+```ts
+const run = await runWorkflow(reportFlow, { from: "2026-01-01" }, {
+  headers: { "x-tenant": "acme" },
+  params: { reportId: "r-9" },
+  env: { DATABASE_URL: process.env.TEST_DATABASE_URL ?? "" },
+});
+
+expect(run.ok).toBe(true);
+expect(run.steps.map((s) => s.id)).toEqual(["load", "aggregate", "render"]);
+```
+
+Cross-runtime steps (Python, Go, Rust, …) need a live sidecar, so mock them by
+key like any other external dependency — `{ mock: { "score-model": async () => ({ score: 0.9 }) } }`.
+
+## What a run tells you
+
+| | |
+|---|---|
+| `run.ok` | Did the run finish without a step throwing? |
+| `run.response` | The final step's output — what the trigger would return. |
+| `run.error` | The failure that ended the run, or `null`. |
+| `run.state(id)` | A step's persisted output. `undefined` means it was skipped or threw. |
+| `run.step(id)` | One step's record: `executed`, resolved `inputs`, `output`, `calls`. |
+| `run.steps` | Every declared step in authoring order, executed or not. |
+
+`executed: false` on a step inside a `branch` / `switchOn` arm is how you assert
+the arm was skipped. `calls` counts iterations inside a `forEach` (`inputs` and
+`output` hold the last one).
+
+## What not to do
+
+<AccordionGroup>
+<Accordion title="Do not boot a server to test a workflow">
+`runWorkflow` drives the same `Configuration` + `Runner` the HTTP trigger drives.
+Booting a trigger to exercise a workflow tests the trigger's routing, which the
+framework already covers. Keep an HTTP-level test only for HTTP-level concerns
+(status codes, middleware, auth headers).
+</Accordion>
+
+<Accordion title="Do not add `server.deps.inline` to vitest.config">
+```ts
+// ❌ not needed — and it hides real packaging bugs
+export default defineConfig({ server: { deps: { inline: [/@blokjs\//] } } });
+```
+`@blokjs/*` packages load under Node's ESM loader as published. If a `@blokjs`
+import ever fails without this, that is a bug in Blok — please file it rather
+than working around it.
+</Accordion>
+
+<Accordion title="Do not move logic out of nodes to make it testable">
+The historical workaround was keeping nodes thin and pushing real logic into a
+`lib/` folder because the runner could not be imported under vitest. That is no
+longer true, and the pattern costs you coverage of exactly the layer where
+wiring bugs live: which step ran, with which inputs.
+</Accordion>
+
+<Accordion title="Do not test a workflow through its JSON copy">
+`runWorkflow` accepts the TypeScript export, so the types stay live. Passing a
+path to a `.json` workflow still works for JSON-authored workflows and for
+migration, but a TS workflow tested through JSON silently drifts.
+</Accordion>
+</AccordionGroup>
+
+## Lower-level harnesses
+
+`runNode` and `runWorkflow` are thin wrappers. When you need the raw result
+envelope, execution metrics, captured logs, or manual node registration, the
+classes underneath are exported from the same subpath:
+
+```ts
+import { NodeTestHarness, WorkflowTestRunner, TestLogger } from "@blokjs/core/testing";
+
+const harness = new NodeTestHarness(orderValidator);
+const result = await harness.execute({ body: { id: "o-1", total: 1 } });
+result.success; result.durationMs; result.logs;
+```

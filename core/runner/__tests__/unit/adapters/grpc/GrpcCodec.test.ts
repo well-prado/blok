@@ -2,10 +2,10 @@ import type { Context } from "@blokjs/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import RunnerNode from "../../../../src/RunnerNode";
 import {
-	NodeRuntimeService,
 	bufferToJson,
 	decodeExecuteResponse,
 	encodeExecuteRequest,
+	getNodeRuntimeService,
 	jsonToBuffer,
 } from "../../../../src/adapters/grpc/GrpcCodec";
 import type { ExecuteResponseProto } from "../../../../src/adapters/grpc/GrpcCodec";
@@ -53,12 +53,14 @@ function makeCtx(overrides: Partial<Context> = {}): Context {
 	};
 }
 
-describe("NodeRuntimeService", () => {
-	it("loads from runtime.proto and exposes the service constructor", () => {
-		expect(NodeRuntimeService).toBeDefined();
-		expect(typeof NodeRuntimeService).toBe("function");
+describe("getNodeRuntimeService", () => {
+	it("lazily loads runtime.proto and exposes the service constructor", () => {
+		const ctor = getNodeRuntimeService();
+		expect(typeof ctor).toBe("function");
+		// Memoized — the proto is parsed once, not on every call.
+		expect(getNodeRuntimeService()).toBe(ctor);
 		// proto-loader attaches a `service` descriptor to the constructor.
-		const service = (NodeRuntimeService as unknown as { service: Record<string, unknown> }).service;
+		const service = (ctor as unknown as { service: Record<string, unknown> }).service;
 		expect(service).toBeDefined();
 		expect(service).toHaveProperty("Execute");
 		expect(service).toHaveProperty("ExecuteStream");

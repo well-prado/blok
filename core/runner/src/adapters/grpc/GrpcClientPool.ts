@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { type ChannelCredentials, type Client, credentials as grpcCredentials } from "@grpc/grpc-js";
 import { buildChannelOptions } from "./GrpcChannelOptions";
-import { NodeRuntimeService } from "./GrpcCodec";
+import { getNodeRuntimeService } from "./GrpcCodec";
 import type { GrpcAdapterConfig, TlsConfig } from "./types";
 
 /**
@@ -31,7 +31,7 @@ export class GrpcClientPool {
 
 		const creds = buildCredentials(config.tls);
 		const options = buildChannelOptions(config);
-		const ServiceCtor = NodeRuntimeService as unknown as new (
+		const ServiceCtor = getNodeRuntimeService() as unknown as new (
 			endpoint: string,
 			credentials: ChannelCredentials,
 			options: ReturnType<typeof buildChannelOptions>,

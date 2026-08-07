@@ -20,7 +20,7 @@ export {
 	toBlokError,
 } from "./GrpcErrors";
 export {
-	NodeRuntimeService,
+	getNodeRuntimeService,
 	bufferToJson,
 	decodeExecuteEvent,
 	decodeExecuteResponse,

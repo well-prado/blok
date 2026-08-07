@@ -30,19 +30,32 @@ const PROTO_LOADER_OPTIONS: Options = {
 	includeDirs: [],
 };
 
-/** Loaded once at module init; reused for every encode/decode. */
-const PROTO_PATH = resolveProtoPath();
-const PACKAGE_DEFINITION = loadSync(PROTO_PATH, PROTO_LOADER_OPTIONS);
-const PROTO_DESCRIPTOR = loadPackageDefinition(PACKAGE_DEFINITION) as unknown as GrpcObject;
-
-/** Path to the `NodeRuntime` service constructor inside the loaded proto. */
-const NODE_RUNTIME_NAMESPACE = ((PROTO_DESCRIPTOR.blok as GrpcObject).runtime as GrpcObject).v1 as GrpcObject;
+/** Memoized service constructor. `null` until the first gRPC call needs it. */
+let nodeRuntimeService: ServiceClientConstructor | null = null;
 
 /**
- * The {@link NodeRuntime} service client constructor — used by
+ * The `NodeRuntime` service client constructor — used by
  * {@link GrpcClientPool} to instantiate clients.
+ *
+ * Loads + parses `runtime.proto` on FIRST CALL, not at module init (#688). The
+ * proto load is filesystem I/O resolved through `import.meta.url`, and this
+ * module sits on the import chain of `@blokjs/core/testing`
+ * (WorkflowTestRunner → Configuration → GrpcRuntimeAdapter → here). Doing it
+ * eagerly charged every consumer's unit test for a proto parse it never uses,
+ * and hard-failed in bundled/sandboxed environments where the `.proto` is not
+ * where `import.meta.url` says it is — even when the workflow under test has no
+ * cross-runtime step at all.
  */
-export const NodeRuntimeService = NODE_RUNTIME_NAMESPACE.NodeRuntime as unknown as ServiceClientConstructor;
+export function getNodeRuntimeService(): ServiceClientConstructor {
+	if (nodeRuntimeService === null) {
+		const descriptor = loadPackageDefinition(
+			loadSync(resolveProtoPath(), PROTO_LOADER_OPTIONS),
+		) as unknown as GrpcObject;
+		const namespace = ((descriptor.blok as GrpcObject).runtime as GrpcObject).v1 as GrpcObject;
+		nodeRuntimeService = namespace.NodeRuntime as unknown as ServiceClientConstructor;
+	}
+	return nodeRuntimeService;
+}
 
 // =============================================================================
 // Wire types — hand-written to mirror the proto in `runtime.proto`.

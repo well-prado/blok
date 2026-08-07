@@ -273,6 +273,17 @@ export class FunctionNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodType
 	}
 
 	/**
+	 * The node's declared Zod schemas. Read by the testing helpers (#688) to
+	 * validate a mock's return value against the contract the real node
+	 * publishes — a mock that can lie about the output shape reintroduces
+	 * exactly the missing-output-mapping bug class the harness exists to catch.
+	 * Exposed read-only; the definition itself stays private.
+	 */
+	get schemas(): { input: TInput; output: TOutput } {
+		return { input: this.definition.input, output: this.definition.output };
+	}
+
+	/**
 	 * Real JSON Schema (draft-7) for this node's Zod input/output — for the node
 	 * catalog (`/__blok/nodes`) and gRPC `ListNodes` reflection ONLY. This is
 	 * deliberately SEPARATE from `inputSchema`/`outputSchema` (which stay `{}`):
@@ -353,6 +364,34 @@ export function defineNode<TInput extends z.ZodTypeAny, TOutput extends z.ZodTyp
 	definition: FnNodeDefinition<TInput, TOutput>,
 ): FunctionNode<TInput, TOutput> & NodeTypeWitness<z.infer<TInput>, z.infer<TOutput>> {
 	// Runtime-identical: the witness is a phantom type, never a real property.
-	return new FunctionNode(definition) as FunctionNode<TInput, TOutput> &
+	const node = new FunctionNode(definition) as FunctionNode<TInput, TOutput> &
 		NodeTypeWitness<z.infer<TInput>, z.infer<TOutput>>;
+	definedNodes.set(definition.name, node as unknown as FunctionNode<z.ZodTypeAny, z.ZodTypeAny>);
+	return node;
+}
+
+/**
+ * Every node `defineNode()` has built in this process, keyed by its canonical
+ * `use:` ref (ADR 0002).
+ *
+ * This is NOT a runtime registry — the runner still resolves nodes through
+ * `NodeMap` / `GlobalOptions.nodes`, and nothing on the execution path reads
+ * this map. It exists so the testing helpers (#688) can answer two questions
+ * without the author hand-registering anything: "what implements this `use:`
+ * key?" and "what output schema is this mock claiming to satisfy?".
+ *
+ * It is sound for tests precisely because the typed-handle DSL takes the node
+ * VALUE: `step("validate", orderValidator, …)` cannot compile without importing
+ * `orderValidator`, so importing a workflow always constructs every node that
+ * workflow uses. Nodes referenced only by string (`node("@blokjs/…")`) or by a
+ * cross-runtime stub are absent by design — mock those by key.
+ *
+ * ponytail: last-write-wins on a duplicate name (what HMR re-import wants), no
+ * conflict guard — `NodeMap.addNode` owns that check on the path that matters.
+ */
+const definedNodes = new Map<string, FunctionNode<z.ZodTypeAny, z.ZodTypeAny>>();
+
+/** Look up a `defineNode()`-built node by its canonical `use:` ref. */
+export function getDefinedNode(name: string): FunctionNode<z.ZodTypeAny, z.ZodTypeAny> | undefined {
+	return definedNodes.get(name);
 }

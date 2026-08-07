@@ -34,6 +34,7 @@
 							"d/introduction/nodes",
 							"d/introduction/workflows",
 							"d/fundamentals/context-and-state",
+							"d/fundamentals/testing",
 							"d/introduction/triggers"
 						]
 					},
