@@ -32,6 +32,7 @@ step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 gates() {
   step "Lint (Biome)"; bun run lint:check
   step "Proto drift check"; bun run proto:check
+  step "No \$ proxy check"; bun run check:no-dollar-proxy
   step "Build all workspace packages (nx, cached)"; bunx nx run-many -t build
 }
 
