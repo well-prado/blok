@@ -8,7 +8,36 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **Packaging gate now covers every publishable-looking package; `blokctl`'s
+  tarball no longer ships its own test suite** (#697). Follow-up to #687/#696:
+  four `private: false` packages sat outside `PUBLISHABLE` (`scripts/release.ts`)
+  and so outside the packed-artifact gate entirely.
+  - `@blokjs/syntax` and `@blokjs/lsp-server` are **added back to
+    `PUBLISHABLE`**. Both actually shipped to npm at `0.2.0`/`0.2.1` during the
+    changesets era, then fell out of the lockstep publish list without ever
+    being marked `private`. Their in-repo version kept advancing (currently
+    `0.6.0` locally vs. `0.2.1` on the registry) while `packages/lsp-server/
+    editors/*` (Neovim, Emacs, Helix, Sublime) kept telling users to
+    `npm install -g @blokjs/lsp-server` — real, already-published, stale
+    tooling with zero gate coverage. Both are bumped to `2.0.1` to rejoin
+    lockstep and will publish on the next release.
+  - `@blokjs/browser` is set **`private: true`**. It carries a lockstep-looking
+    version (`2.0.1`) but has never actually been published (`npm view
+    @blokjs/browser` 404s), has no user-facing docs instructing an install, and
+    is reached by `@blokjs/trigger-http` only via an optional `try { await
+    import(...) }` with no manifest dependency — so there was no live breakage,
+    just a misleading manifest state.
+  - `blok-vscode` is set **`private: true`** — it publishes to the VS Code
+    Marketplace via `vsce`, not npm.
+  - The packaging gate (`scripts/check-packed-exports.ts`) now fails fast if
+    any workspace package is neither `private: true` nor listed in
+    `PUBLISHABLE` — the four packages above can't silently drift out of gate
+    coverage again.
+  - `blokctl`'s published tarball no longer contains `dist/__tests__/`
+    (`packages/cli/tsconfig.json` now excludes test files from the build, same
+    pattern `core/runner` already used).
 
 ## [2.0.1] — 2026-08-07
 
