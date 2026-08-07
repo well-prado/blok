@@ -50,6 +50,9 @@ gates() {
   # workspace PACKAGES, whose exports maps resolve to dist/ — untracked since
   # the v2 packaging work, so a fresh checkout has none until a build runs.
   step "Source-under-Bun import check"; bun run check:source-imports
+  # After the build on purpose: it typechecks the AI-facing skills doc's samples
+  # against the built @blokjs/core .d.ts (#708).
+  step "Skill-doc samples typecheck"; bun run check:skill-samples
 }
 
 run_fast() {

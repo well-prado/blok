@@ -98,14 +98,13 @@ INCLUDE_PATHS=(
 	"README.md"
 	"CLAUDE.md"
 	"AGENTS.md"
+	# The AI-facing skills doc (#708). Covered since its v2 rewrite. It is the
+	# highest-leverage entry in this list: whatever it teaches, agents emit at
+	# scale, so a regression here reproduces the legacy forms across many repos
+	# rather than in one file. Its TypeScript samples are additionally compiled
+	# against the real `@blokjs/core` by scripts/check-skill-samples.ts.
+	".claude/skills"
 )
-# NOT covered yet: .claude/skills/blok-framework.md. It is the single largest
-# remaining source of `js/ctx....` teaching (~50 sites) and the most damaging
-# one, since it is read by AI agents — but it is a 1376-line v1-era document
-# (`set_var`, `BlokService`, `"node":` steps, `ctx.vars['step-name']`), so
-# purging the expressions without rewriting the rest would leave it
-# self-inconsistent. Issue #690's scope list does not include it. Rewrite it
-# against the current authoring surface, then add it here.
 
 ALLOWED_FILES=(
 	# The internals / wire-format page. Its whole subject is these strings, and

@@ -110,6 +110,16 @@ jobs:
         # go through `bun run build`, never bare `nx run-many -t build`.
         run: bun run build
 
+      # #708 — the AI-facing skills doc's TypeScript samples must still compile
+      # against @blokjs/core. Placed after the build because it typechecks
+      # against the built .d.ts. Catches the regression vector that matters
+      # here: a change to the authoring surface silently invalidating what every
+      # agent is taught. (A markdown-ONLY edit skips this workflow entirely via
+      # paths-ignore; the legacy-expression gate, which has no paths filter,
+      # still covers that case for the dangerous forms.)
+      - name: Skill-doc samples typecheck
+        run: bun run check:skill-samples
+
       # Informational only — never gates the merge (continue-on-error). Prints
       # current coverage for the framework packages that have honest, current-
       # state thresholds in their vitest config. Ratchet those floors up as

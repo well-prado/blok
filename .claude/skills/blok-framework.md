@@ -1,1376 +1,667 @@
-# Blok Framework — Complete Development Guide
+# Blok Framework — authoring guide
 
-You are working with the **Blok Framework**, a TypeScript-first workflow orchestration system. It is NOT a standard application framework. You MUST understand its architecture before writing any code.
+Blok is a TypeScript-first workflow orchestration framework. You will be asked
+to write **nodes** and **workflows**. This file is the authoring contract; it is
+consistent with `AGENTS.md`, `CLAUDE.md` and
+`docs/d/fundamentals/context-and-state.mdx` and does not repeat them.
 
-## CRITICAL: How Blok Works (Read This First)
-
-Blok has TWO fundamental building blocks:
-
-1. **Nodes** — Small, single-responsibility functions that do ONE thing (fetch data, validate input, transform data, call an API, etc.)
-2. **Workflows** — Declarative pipelines that CHAIN nodes together in sequence, with conditional branching
-
-**THE GOLDEN RULE: Nodes are NEVER imported inside other Nodes. Nodes are ALWAYS composed through Workflows.**
-
-A Node does not know about other Nodes. A Node receives input, processes it, and returns output. The Workflow is what connects Node A's output to Node B's input. If you need Node A's result in Node B, you build a Workflow that runs A then B and passes data via context expressions.
-
-```
-WRONG:  Node A imports Node B and calls it directly
-RIGHT:  Workflow runs Node A → passes output via js/ expression → Node B receives it as input
-```
+Everything below describes the **current** surface (v2). If you have seen older
+Blok code — `Workflow().addStep()`, `Nodes.ts` registries, `set_var`,
+`ctx.vars`, `$` proxies, `"js/ctx…"` input strings — do not write it. Some of it
+still loads for compatibility; none of it is how you author.
 
 ---
 
-## Architecture Overview
+## 1. The model
 
-```
-                    Trigger (HTTP, Worker, Cron, gRPC, etc.)
-                         |
-                         v
-                    Workflow Definition (TypeScript or JSON)
-                         |
-              +----------+----------+----------+
-              |          |          |          |
-              v          v          v          v
-           Step 1     Step 2     Step 3     Step 4
-          (Node A)   (Node B)   (Node C)   (Node D)
-          module     module    runtime.go  runtime.python3
-              |          |          |          |
-              v          v          v          v
-         In-process  In-process  Go SDK    Python SDK
-         (Bun/Node)  (Bun/Node) (port 9001)(port 9007)
-```
+Two building blocks:
 
-### Key Concepts
+- **Node** — one small typed function. Validates input with Zod, does one thing,
+  returns output.
+- **Workflow** — a declarative pipeline that chains nodes and moves data between
+  them.
 
-| Concept | What It Is | Where It Lives |
-|---------|-----------|----------------|
-| **Node** | A single-purpose function with typed input/output | `triggers/http/src/nodes/{category}/{name}/index.ts` |
-| **Workflow** | A pipeline chaining nodes together | `triggers/http/src/workflows/{domain}/{name}.ts` |
-| **Trigger** | The entry point that starts a workflow | HTTP, Worker, Cron, gRPC, WebSocket, SSE, Queue, PubSub, Webhook |
-| **Context (ctx)** | The shared state object passed through every step | Created by trigger, flows through all nodes |
-| **Runtime** | A language SDK server that executes non-TS nodes | Go(:9001), Rust(:9002), Java(:9003), C#(:9004), PHP(:9005), Ruby(:9006), Python3(:9007) |
+**Golden rule: a node never imports or calls another node.** A node does not
+know other nodes exist. If B needs A's result, write a workflow that runs A then
+B and passes A's handle into B's inputs.
+
+Data flow: every step that succeeds has its output persisted at
+`ctx.state[<step id>]`. A step that throws writes nothing. `step()` hands you a
+typed **handle** to that slot — that handle is the only read path you author.
 
 ---
 
-## Part 1: Creating Nodes
+## 2. Nodes — `defineNode`
 
-### Always Use `defineNode()`
-
-Every node MUST use the `defineNode()` function. NEVER create class-based nodes extending BlokService.
-
-```typescript
-import { defineNode } from "@blokjs/runner";
+```ts
+// file: nodes.ts
+import { defineNode } from "@blokjs/core";
 import { z } from "zod";
 
-export default defineNode({
-  name: "node-name",
-  description: "What this node does",
+const OrderSchema = z.object({
+  id: z.string(),
+  total: z.number(),
+  customer: z.object({ email: z.string().email() }),
+  items: z.array(z.object({ sku: z.string(), qty: z.number() })),
+});
 
-  input: z.object({
-    // ALL expected inputs with Zod types
-  }),
-
-  output: z.object({
-    // EXACT shape of what execute() returns
-  }),
-
+export const validateOrder = defineNode({
+  name: "validate-order",
+  description: "Parses and validates an incoming order payload",
+  input: z.object({ body: z.unknown() }),
+  output: OrderSchema.extend({ inStock: z.boolean() }),
   async execute(ctx, input) {
-    // input is validated and type-safe
-    // Return MUST match output schema
-    return { /* matches output schema */ };
+    const order = OrderSchema.parse(input.body);
+    ctx.logger.log(`validating order ${order.id}`);
+    return { ...order, inStock: order.items.length > 0 };
+  },
+});
+
+export const chargeCard = defineNode({
+  name: "charge-card",
+  description: "Charges a card for an order total",
+  input: z.object({ orderId: z.string(), amount: z.number() }),
+  output: z.object({ receipt: z.string() }),
+  async execute(ctx, input) {
+    const res = await fetch("https://payments.example/charge", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal: ctx.signal,
+    });
+    if (!res.ok) throw new Error(`charge failed: ${res.status}`);
+    return { receipt: `rc_${input.orderId}` };
+  },
+});
+
+export const reserveInventory = defineNode({
+  name: "reserve-inventory",
+  description: "Reserves one SKU",
+  input: z.object({ sku: z.string(), index: z.number() }),
+  output: z.object({ reserved: z.boolean() }),
+  async execute(_ctx, input) {
+    return { reserved: input.sku.length > 0 };
+  },
+});
+
+export const notify = defineNode({
+  name: "notify",
+  description: "Sends a notification",
+  input: z.object({ message: z.string(), code: z.number().optional() }),
+  output: z.object({ sent: z.boolean() }),
+  async execute(_ctx, input) {
+    return { sent: input.message.length > 0 };
+  },
+});
+
+export const summarizeReservations = defineNode({
+  name: "summarize-reservations",
+  description: "Counts reservation results",
+  input: z.object({ results: z.array(z.unknown()) }),
+  output: z.object({ count: z.number() }),
+  async execute(_ctx, input) {
+    return { count: input.results.length };
+  },
+});
+
+export const refundOrder = defineNode({
+  name: "refund-order",
+  description: "Refunds a charge",
+  input: z.object({ reason: z.string() }),
+  output: z.object({ refunded: z.boolean() }),
+  async execute(_ctx, input) {
+    return { refunded: input.reason.length > 0 };
   },
 });
 ```
 
-### Node Rules
+Hard rules:
 
-1. **One node = one responsibility.** A node that fetches users should NOT also format them.
-2. **Never import other nodes.** If you need another node's logic, create a workflow that chains them.
-3. **Never call external services AND process data in the same node.** Split into fetch + transform nodes.
-4. **Always define both input and output Zod schemas.** No `any` types. Use `z.unknown()` for truly dynamic data.
-5. **Always `export default defineNode(...)`.** This is the required pattern.
-6. **Node name must be 5+ characters** and match what workflows reference.
-7. **Errors should throw.** Thrown errors are auto-wrapped to GlobalError with 500 status.
+1. `defineNode()` only. Never a class extending `BlokService`.
+2. Keep both Zod `input` and `output` schemas. The `output` schema is what makes
+   handles typed and what `blokctl check` validates references against — a node
+   with no `output` schema silently opts out of that checking.
+3. One node, one responsibility. Fetching and formatting are two nodes.
+4. Never import another node.
+5. No `any`. Use `unknown` and narrow (`z.unknown()` + `parse`).
+6. Throw on failure. A thrown step writes no state and fails the run.
+7. **Never assign to `ctx.state` or `ctx.vars`.** Return the value; the runner
+   persists it.
 
-### Node Organization — Category Folders
+The node-side `ctx` is for runtime concerns only:
 
-Organize nodes in category folders for clarity. Every node gets its own subfolder.
+| Field | Use |
+|---|---|
+| `ctx.request` | Trigger payload in runtime form. |
+| `ctx.logger` | Structured logs that appear in traces and Studio. |
+| `ctx.env` | Environment variables. |
+| `ctx.signal` | Cooperative cancellation — pass it to `fetch`/long work. |
+| `ctx.publish(name, value)` | Rare side-channel publication. Prefer returning data. |
+| `ctx.connection` | WebSocket-only. Prefer helper nodes. |
+| `ctx.stream` | SSE-only. Prefer helper nodes. |
 
-```
-triggers/http/src/nodes/
-├── auth/
-│   ├── validate-token/
-│   │   └── index.ts
-│   └── check-permissions/
-│       └── index.ts
-├── users/
-│   ├── fetch-user/
-│   │   └── index.ts
-│   ├── create-user/
-│   │   └── index.ts
-│   └── update-user/
-│       └── index.ts
-├── orders/
-│   ├── validate-order/
-│   │   └── index.ts
-│   └── calculate-total/
-│       └── index.ts
-├── integrations/
-│   ├── send-email/
-│   │   └── index.ts
-│   └── notify-slack/
-│       └── index.ts
-└── transforms/
-    ├── format-response/
-    │   └── index.ts
-    └── merge-data/
-        └── index.ts
-```
+Nodes live in `src/nodes/<category>/<name>/index.ts` (`auth/`, `users/`,
+`orders/`, `integrations/`, `transforms/`, `db/`, …). There is **no node
+registry file** — a `defineNode()` node registers itself when its module is
+imported, and published nodes are referenced by package name (`@blokjs/api-call`).
 
-**Category naming conventions:**
-- `auth/` — Authentication and authorization
-- `users/`, `orders/`, `products/` — Domain-specific CRUD
-- `integrations/` — Third-party service calls
-- `transforms/` — Data transformation and formatting
-- `validation/` — Input validation and sanitization
-- `db/` — Database operations
-- `ai/` — AI/ML operations
-- `files/` — File processing
+---
 
-### Registering Nodes
+## 3. Workflows — the typed-handle DSL
 
-After creating a node, register it in `triggers/http/src/Nodes.ts`:
-
-```typescript
-import ApiCall from "@blokjs/api-call";
-import IfElse from "@blokjs/if-else";
-import type { BlokService } from "@blokjs/runner";
-
-// Import your nodes by category
-import ValidateToken from "./nodes/auth/validate-token/index";
-import FetchUser from "./nodes/users/fetch-user/index";
-import CreateUser from "./nodes/users/create-user/index";
-import ValidateOrder from "./nodes/orders/validate-order/index";
-import SendEmail from "./nodes/integrations/send-email/index";
-import FormatResponse from "./nodes/transforms/format-response/index";
-
-const nodes: Record<string, BlokService<unknown>> = {
-  // Built-in nodes
-  "@blokjs/api-call": ApiCall,
-  "@blokjs/if-else": IfElse,
-
-  // Auth nodes
-  "validate-token": ValidateToken,
-
-  // User nodes
-  "fetch-user": FetchUser,
-  "create-user": CreateUser,
-
-  // Order nodes
-  "validate-order": ValidateOrder,
-
-  // Integration nodes
-  "send-email": SendEmail,
-
-  // Transform nodes
-  "format-response": FormatResponse,
-};
-
-export default nodes;
-```
-
-### Bulk Registration Pattern
-
-For categories with many nodes, use an index file:
-
-```typescript
-// triggers/http/src/nodes/users/index.ts
-import FetchUser from "./fetch-user/index";
-import CreateUser from "./create-user/index";
-import UpdateUser from "./update-user/index";
-import DeleteUser from "./delete-user/index";
-
-export default {
-  "fetch-user": FetchUser,
-  "create-user": CreateUser,
-  "update-user": UpdateUser,
-  "delete-user": DeleteUser,
-};
-```
-
-Then in Nodes.ts:
-```typescript
-import UserNodes from "./nodes/users/index";
-
-const nodes: Record<string, BlokService<unknown>> = {
-  "@blokjs/api-call": ApiCall,
-  "@blokjs/if-else": IfElse,
-  ...UserNodes,
-};
-```
-
-### Complete Node Examples
-
-**Simple data processing node:**
-
-```typescript
-import { defineNode } from "@blokjs/runner";
+```ts
+// file: order-intake.ts
+import { branch, gt, http, step, tpl, workflow } from "@blokjs/core";
 import { z } from "zod";
+import { chargeCard, notify, validateOrder } from "./nodes";
 
-export default defineNode({
-  name: "calculate-order-total",
-  description: "Calculates order total with tax and discount",
-
-  input: z.object({
-    items: z.array(z.object({
-      price: z.number(),
-      quantity: z.number(),
-    })),
-    taxRate: z.number().default(0.1),
-    discountPercent: z.number().default(0),
-  }),
-
-  output: z.object({
-    subtotal: z.number(),
-    tax: z.number(),
-    discount: z.number(),
-    total: z.number(),
-  }),
-
-  async execute(ctx, input) {
-    const subtotal = input.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const discount = subtotal * (input.discountPercent / 100);
-    const taxable = subtotal - discount;
-    const tax = taxable * input.taxRate;
-    const total = taxable + tax;
-
-    return { subtotal, tax, discount, total };
+export default workflow(
+  "order-intake",
+  {
+    version: "1.0.0",
+    trigger: http.post("/orders"),
+    input: z.object({ id: z.string(), total: z.number() }),
   },
-});
-```
+  (req) => {
+    const order = step("validate", validateOrder, { body: req.body });
 
-**Node that uses context for logging:**
+    const charge = step("charge", chargeCard, {
+      orderId: order.id,
+      amount: order.total,
+    });
 
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
+    step("summary", notify, {
+      message: tpl`order ${order.id} charged (${charge.receipt})`,
+    });
 
-export default defineNode({
-  name: "fetch-user-profile",
-  description: "Fetches a user profile from the database",
-
-  input: z.object({
-    userId: z.string().uuid(),
-  }),
-
-  output: z.object({
-    user: z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string(),
-    }),
-  }),
-
-  async execute(ctx, input) {
-    ctx.logger.log(`Fetching user: ${input.userId}`);
-
-    // Your database call here
-    const user = await db.users.findById(input.userId);
-
-    if (!user) {
-      throw new Error(`User not found: ${input.userId}`);
-    }
-
-    return { user: { id: user.id, name: user.name, email: user.email } };
-  },
-});
-```
-
-**Node with optional inputs and defaults:**
-
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
-
-export default defineNode({
-  name: "paginate-results",
-  description: "Applies pagination to a list of items",
-
-  input: z.object({
-    items: z.array(z.unknown()),
-    page: z.number().int().positive().default(1),
-    pageSize: z.number().int().positive().max(100).default(20),
-  }),
-
-  output: z.object({
-    data: z.array(z.unknown()),
-    pagination: z.object({
-      page: z.number(),
-      pageSize: z.number(),
-      total: z.number(),
-      totalPages: z.number(),
-    }),
-  }),
-
-  async execute(ctx, input) {
-    const start = (input.page - 1) * input.pageSize;
-    const data = input.items.slice(start, start + input.pageSize);
-    const total = input.items.length;
-
-    return {
-      data,
-      pagination: {
-        page: input.page,
-        pageSize: input.pageSize,
-        total,
-        totalPages: Math.ceil(total / input.pageSize),
+    branch("big-order", gt(order.total, 100), {
+      then: () => {
+        step("vip", notify, { message: tpl`VIP order ${order.id}` });
       },
-    };
+      else: () => {
+        step("standard", notify, { message: tpl`standard order ${order.id}` });
+      },
+    });
   },
+);
+```
+
+The whole authoring rule:
+
+- `workflow(name, opts, build)` defines it. `opts` carries `version`, `trigger`,
+  and optionally `input`/`output` Zod schemas (an `input` schema types the entry
+  handle's `body`).
+- `build(entry)` receives the **entry handle** for the trigger payload.
+- `step(id, node, inputs, opts?)` runs a node and returns a typed output handle.
+- Pass handles straight into later step inputs — `order`, `order.id`,
+  `order.items[0].sku`.
+- `tpl` for strings that embed handles.
+- `eq`/`ne`/`gt`/`gte`/`lt`/`lte`/`not`, or a boolean handle, for conditions.
+- `js` tagged template **only** for what handles cannot express.
+
+Import surface:
+
+```ts
+import {
+  workflow, step, subworkflow,
+  branch, forEach, switchOn, tryCatch,
+  tpl, js,
+  eq, ne, gt, gte, lt, lte, not,
+  http, node, runtimeNode,
+  defineNode,
+} from "@blokjs/core";
+import { runNode, runWorkflow } from "@blokjs/core/testing";
+// `state()` (§3) is only on the light DSL subpath, not the root barrel.
+import { state } from "@blokjs/core/dsl";
+```
+
+### Entry handles
+
+Name the callback argument by trigger kind. All of them lower to the same
+trigger payload; the name and type are for clarity and inference.
+
+| Trigger | Handle | Common reads |
+|---|---|---|
+| `http` | `req` | `req.body`, `req.params.id`, `req.query.q`, `req.headers.authorization` |
+| `worker` | `job` | `job.body`, `job.params.queue`, `job.params.jobId`, `job.params.attempt` |
+| `webhook` | `event` | `event.body`, `event.headers`, `event.params` |
+| `pubsub` | `msg` | `msg.body`, `msg.headers`, `msg.params` |
+| `cron` | `tick` | `tick.params`, `tick.headers` |
+| `grpc` | `rpc` | `rpc.body`, `rpc.params`, `rpc.headers` |
+| `sse` | `stream` | `stream.params`, `stream.query`, `stream.headers` |
+| `websocket` | `conn` | `conn.body`, `conn.params`, `conn.headers` |
+| `mcp` | `call` | `call.body`, `call.headers` |
+
+### Strings and the escape hatch
+
+```ts
+import { http, js, step, tpl, workflow } from "@blokjs/core";
+import { notify, validateOrder } from "./nodes";
+
+export default workflow("strings", { version: "1.0.0", trigger: http.post("/strings") }, (req) => {
+  const order = step("validate", validateOrder, { body: req.body });
+
+  // Structural — preferred. Survives static analysis, Studio, and blokctl check.
+  step("notify", notify, { message: tpl`order ${order.id} totals ${order.total}` });
+
+  // Escape hatch — opaque to all of the above. Use only when nothing else fits:
+  // ternaries, `??` defaults, `.map`, `Date.now()`, env reads.
+  step("classify", notify, {
+    message: js`${order.total} > 100 ? "premium" : "standard"`,
+  });
 });
 ```
 
----
+`@blokjs/expr` is the one exception to every rule here: its `expression` input
+is plain JavaScript that node evaluates. Do not prefix it.
 
-## Part 2: Creating TypeScript Workflows (Preferred)
+### Persistence knobs (fourth argument)
 
-TypeScript workflows live in `triggers/http/src/workflows/` organized by domain.
+| Knob | Effect |
+|---|---|
+| none | Store at `ctx.state[id]`. |
+| `{ as: "name" }` | Store at `ctx.state[name]`; the handle roots there. |
+| `{ spread: true }` | Shallow-merge the output's keys into top-level state; read per key. |
+| `{ ephemeral: true }` | Store nothing. The handle is deliberately unreadable. |
 
-### Workflow File Structure
+`as` and `spread` are mutually exclusive. `ephemeral` is for side effects only —
+logging, audit, response helpers, emitters.
 
-```
-triggers/http/src/workflows/
-├── users/
-│   ├── create-user.ts
-│   ├── get-user.ts
-│   └── list-users.ts
-├── orders/
-│   ├── create-order.ts
-│   └── process-payment.ts
-├── admin/
-│   └── dashboard-stats.ts
-└── health/
-    └── health-check.ts
-```
+### The four footguns
 
-### Simple Workflow
+1. **Arm-scoped handles do not escape their arm.** A handle made inside
+   `then`/`else`/`case`/`try`/`catch` is readable only there. To use a value
+   afterwards: use the primitive's own returned handle (`forEach` results), or
+   have every arm write to one shared `as` key with distinct step ids.
+2. **Ephemeral handles are unreadable.** Reading one is a compile error and a
+   runtime throw.
+3. **Step ids are one flat namespace**, including ids in mutually exclusive
+   arms. Duplicates throw at authoring time.
+4. **`forEach` `as`/`asIndex` keys share that same namespace.** `forEach` writes
+   the item to `ctx.state[as]` and the index to `ctx.state[as + "Index"]`. Never
+   name them after a step id or an outer loop key.
 
-```typescript
-import { type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "Get User Profile",
-  version: "1.0.0",
-  description: "Fetches a user profile by ID",
-})
-  .addTrigger("http", {
-    method: "GET",
-    path: "/users/:id",
-    accept: "application/json",
-  })
-  .addStep({
-    name: "fetch-user",
-    node: "fetch-user-profile",
-    type: "module",
-    inputs: {
-      userId: "js/ctx.request.params.id",
-    },
-  });
-
-export default step;
-```
-
-### Multi-Step Workflow with Data Flow
-
-```typescript
-import { type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "Create Order",
-  version: "1.0.0",
-  description: "Validates and creates a new order",
-})
-  .addTrigger("http", {
-    method: "POST",
-    path: "/orders",
-    accept: "application/json",
-  })
-  // Step 1: Validate the incoming order data
-  .addStep({
-    name: "validate",
-    node: "validate-order",
-    type: "module",
-    inputs: {
-      order: "js/ctx.request.body",
-    },
-  })
-  // Step 2: Calculate totals — uses Step 1's output via ctx.response.data
-  .addStep({
-    name: "calculate",
-    node: "calculate-order-total",
-    type: "module",
-    inputs: {
-      items: "js/ctx.response.data.items",
-      taxRate: 0.08,
-    },
-  })
-  // Step 3: Save to database — uses Step 2's output
-  .addStep({
-    name: "save-order",
-    node: "save-to-db",
-    type: "module",
-    inputs: {
-      data: "js/ctx.response.data",
-    },
-  })
-  // Step 4: Send confirmation email — uses Step 3's output
-  .addStep({
-    name: "send-confirmation",
-    node: "send-email",
-    type: "module",
-    inputs: {
-      to: "js/ctx.response.data.customerEmail",
-      subject: "Order Confirmed",
-      template: "order-confirmation",
-      data: "js/ctx.response.data",
-    },
-  });
-
-export default step;
-```
-
-### Conditional Workflow (if-else)
-
-```typescript
-import { AddElse, AddIf, type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "Route Request",
-  version: "1.0.0",
-})
-  .addTrigger("http", {
-    method: "ANY",
-    path: "/api/route",
-    accept: "application/json",
-  })
-  .addCondition({
-    node: {
-      name: "router",
-      node: "@blokjs/if-else",
-      type: "module",
-    },
-    conditions: () => [
-      new AddIf('ctx.request.query.action === "create"')
-        .addStep({
-          name: "create-item",
-          node: "create-item",
-          type: "module",
-          inputs: { data: "js/ctx.request.body" },
-        })
-        .build(),
-      new AddIf('ctx.request.query.action === "update"')
-        .addStep({
-          name: "update-item",
-          node: "update-item",
-          type: "module",
-          inputs: { id: "js/ctx.request.query.id", data: "js/ctx.request.body" },
-        })
-        .build(),
-      new AddElse()
-        .addStep({
-          name: "list-items",
-          node: "list-items",
-          type: "module",
-          inputs: {
-            page: "js/parseInt(ctx.request.query.page || '1')",
-            limit: "js/parseInt(ctx.request.query.limit || '20')",
-          },
-        })
-        .build(),
-    ],
-  });
-
-export default step;
-```
-
-### Cross-Runtime Workflow
-
-Use nodes written in different languages within the same workflow:
-
-```typescript
-import { type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "ML Pipeline",
-  version: "1.0.0",
-  description: "Process data through multiple language runtimes",
-})
-  .addTrigger("http", {
-    method: "POST",
-    path: "/ml/predict",
-    accept: "application/json",
-  })
-  // Step 1: Validate input (TypeScript — in-process)
-  .addStep({
-    name: "validate",
-    node: "validate-ml-input",
-    type: "module",
-    inputs: { data: "js/ctx.request.body" },
-  })
-  // Step 2: Preprocess with Python (port 9007)
-  .addStep({
-    name: "preprocess",
-    node: "data-preprocessor",
-    type: "runtime.python3",
-    inputs: { rawData: "js/ctx.response.data" },
-  })
-  // Step 3: Run inference with Rust (port 9002)
-  .addStep({
-    name: "inference",
-    node: "ml-inference",
-    type: "runtime.rust",
-    inputs: { processedData: "js/ctx.response.data" },
-  })
-  // Step 4: Format response (TypeScript)
-  .addStep({
-    name: "format",
-    node: "format-response",
-    type: "module",
-    inputs: { prediction: "js/ctx.response.data" },
-  });
-
-export default step;
-```
-
-### Registering Workflows
-
-Every workflow MUST be registered in `triggers/http/src/Workflows.ts`:
-
-```typescript
-import type Workflows from "./runner/types/Workflows";
-// Import by domain
-import createUser from "./workflows/users/create-user";
-import getUser from "./workflows/users/get-user";
-import listUsers from "./workflows/users/list-users";
-import createOrder from "./workflows/orders/create-order";
-import healthCheck from "./workflows/health/health-check";
-
-const workflows: Workflows = {
-  "create-user": createUser,
-  "get-user": getUser,
-  "list-users": listUsers,
-  "create-order": createOrder,
-  "health-check": healthCheck,
-};
-
-export default workflows;
-```
-
-The key (e.g., `"create-user"`) becomes the route identifier in the URL.
+`state("key")` (from `@blokjs/core/dsl`) mints an untyped `Handle<unknown>` for
+a state key no node's output declares — a `ctx.publish` key, a cross-runtime
+`vars_delta`. Reach for it only then; prefer the typed step handle.
 
 ---
 
-## Part 3: Context (ctx) — How Data Flows Between Steps
+## 4. Control flow
 
-This is the MOST important concept. Understanding context is essential to building working workflows.
+```ts
+import { type Handle, branch, forEach, http, step, subworkflow, switchOn, tpl, tryCatch, workflow } from "@blokjs/core";
+import { chargeCard, notify, refundOrder, reserveInventory, summarizeReservations, validateOrder } from "./nodes";
 
-### The Context Object
+export default workflow("control-flow-tour", { version: "1.0.0", trigger: http.post("/tour") }, (req) => {
+  const order = step("validate", validateOrder, { body: req.body });
 
-```typescript
-type Context = {
-  id: string;                    // Unique request ID (UUID)
-  workflow_name?: string;        // Name of the executing workflow
-  request: {                     // IMMUTABLE — set by trigger, never changes
-    method: string;              // HTTP method
-    path: string;                // URL path
-    url: string;                 // Full URL
-    body: object;                // Request body (parsed JSON/form)
-    headers: object;             // Request headers
-    params: object;              // Path params (e.g., :id from /users/:id)
-    query: object;               // Query string params (?key=value)
-  };
-  response: {                    // OVERWRITTEN after EVERY step
-    data: unknown;               // Current step's output
-    success: boolean;
-    error: unknown;
-    contentType?: string;
-  };
-  vars?: {                       // PERSISTS across entire workflow
-    [stepName: string]: unknown; // Stored outputs from previous steps
-  };
-  logger: LoggerContext;         // Logging methods
-  env?: object;                  // process.env
-};
+  // A boolean handle is a truthiness check; `else` is optional.
+  branch("stock", order.inStock, {
+    then: () => {
+      step("reserve-all", notify, { message: "reserving" });
+    },
+  });
+
+  // `results` is readable after the loop; `item`/`index` are not.
+  const results = forEach(
+    order.items,
+    (item, index) => {
+      step("reserve", reserveInventory, { sku: item.sku, index });
+    },
+    { as: "line" },
+  );
+  step("summarize", summarizeReservations, { results });
+
+  // `when` values are STATIC LITERALS — never a handle. First match wins.
+  switchOn(
+    order.customer.email,
+    {
+      cases: [
+        { when: "vip@example.com", do: () => step("vip", notify, { message: "vip" }) },
+        { when: ["a@example.com", "b@example.com"], do: () => step("known", notify, { message: "known" }) },
+      ],
+      default: () => step("unknown-customer", notify, { message: "unknown" }, { ephemeral: true }),
+    },
+    { id: "route-customer" },
+  );
+
+  // `error` models the catch envelope: message/name always, stack/code/stepId optional.
+  tryCatch("payment", {
+    try: () => {
+      step("charge", chargeCard, { orderId: order.id, amount: order.total });
+    },
+    catch: (error) => {
+      step("refund", refundOrder, { reason: error.message });
+      step("alert", notify, { message: error.message, code: error.code });
+    },
+    finally: () => {
+      step("metric", notify, { message: "payment attempted" }, { ephemeral: true });
+    },
+  });
+
+  // Another named workflow as a step. Inputs become the child's request body.
+  // `subworkflow()` returns an UNTYPED `Handle<unknown>` (no node schema to
+  // infer from), so passing it whole is fine but a field read needs a cast.
+  const receipt = subworkflow("receipt", "send-receipt", { orderId: order.id }) as Handle<{ data: string }>;
+  step("respond", notify, { message: tpl`receipt ${receipt.data}` }, { ephemeral: true });
+});
 ```
 
-### The Three Critical Rules
+Notes that bite:
 
-**Rule 1: `ctx.request` is IMMUTABLE.** It is set once by the trigger and never changes. Every step can always read the original request.
+- `switchOn` matches `case.when` literally with no resolution. A handle there
+  would never match.
+- `branch` conditions come from the comparators or a boolean handle. Do not
+  hand-write condition strings.
+- `forEach` derives its ids: the results land at `<as>Results` (here
+  `lineResults`) and the item/index at `<as>` / `<as>Index`. All three share the
+  step-id namespace — footgun 4.
+- `subworkflow(id, name, inputs, opts?)` defaults to `wait: true`. With
+  `wait: false` the parent gets dispatch metadata, not the child's result. A
+  handle as `name` gives polymorphic dispatch — pair it with `allowList`
+  whenever the value comes from the caller.
+- `wait` (a mid-flight pause) is **not** in this DSL. It is an object/JSON step
+  shape — see §5 and §8.
 
-**Rule 2: `ctx.response.data` is OVERWRITTEN after EVERY step.** After Step 2 runs, Step 1's output is GONE from `ctx.response.data`. You can ONLY read the immediately previous step's output from `ctx.response.data`.
+---
 
-**Rule 3: `ctx.vars` PERSISTS across the entire workflow.** Once data is stored in `ctx.vars`, it stays there for all subsequent steps.
+## 5. Fields that fail silently — read this before using them
 
-### How Data Flows — Visual Model
+Two field families do **not** behave like step inputs. Getting the form wrong
+produces no error, no warning, and wrong behaviour that looks like success.
 
-```
-HTTP POST /orders { items: [...], customer: "alice" }
-                   |
-                   v
-        ctx.request.body = { items: [...], customer: "alice" }
-        ctx.response.data = null
-        ctx.vars = {}
-                   |
-    +--------------+------------------+
-    |              Step 1: validate   |
-    |  input: js/ctx.request.body     |
-    |  output: { valid: true, ... }   |
-    +--------------+------------------+
-                   |
-        ctx.request.body = { items: [...], customer: "alice" }  // UNCHANGED
-        ctx.response.data = { valid: true, ... }                // Step 1 output
-        ctx.vars = {}
-                   |
-    +--------------+------------------+
-    |              Step 2: calculate  |
-    |  input: js/ctx.response.data    |
-    |  output: { total: 99.50 }       |
-    +--------------+------------------+
-                   |
-        ctx.request.body = { items: [...], customer: "alice" }  // UNCHANGED
-        ctx.response.data = { total: 99.50 }                    // Step 2 output
-        ctx.vars = {}
-        // Step 1 output is GONE from ctx.response.data!
-                   |
-    +--------------+------------------+
-    |              Step 3: save       |
-    |  input: js/ctx.response.data    |  // Gets Step 2 output
-    |  CANNOT access Step 1 output!   |
-    +--------------+------------------+
+### 5.1 Literal-only: `wait.for` / `wait.until`
+
+A `wait` step's duration is parsed at workflow **load** time, before any request
+context exists, and no Mapper pass ever runs over it. An expression there — a
+handle, a `{$ref}`, a `tpl`, a `"js/…"` string — is stored verbatim and then
+fails to parse (or waits for a nonsense deadline). **Dynamic delays are not
+expressible today** (issue #704).
+
+```json
+{ "id": "throttle", "wait": { "for": "500ms" } }
+{ "id": "until-midnight", "wait": { "until": "2026-01-01T00:00:00Z" } }
 ```
 
-### Accessing Data Between Steps
+`for` takes a duration string (`"500ms"`, `"30s"`, `"5m"`, `"3h"`) or a number
+of milliseconds; `until` takes an ISO timestamp or epoch millis. Set exactly
+one. If you need a computed delay, split the workflow and put `delay` on the
+continuation's trigger, or sleep inside a node and accept that it burns a worker
+slot.
 
-**Adjacent steps (Step N reads Step N-1):**
-```typescript
-// In workflow .addStep():
-inputs: {
-  data: "js/ctx.response.data",                // Entire previous output
-  total: "js/ctx.response.data.total",          // Specific field
-  name: "js/ctx.response.data.user.name",       // Nested field
-}
+### 5.2 Expression-required: `idempotencyKey`, `concurrencyKey`, `debounce.key`
+
+These resolve a key per request. The resolver evaluates the value **only** if it
+is a `js/`-prefixed string; anything else is taken as a **literal key** (issue
+#706). So a plain string that looks like an expression becomes one constant key
+shared by every request:
+
+- `idempotencyKey` constant ⇒ the cache namespace
+  `(workflow, stepId, key)` is identical for everyone, so the first response is
+  replayed to every later caller for the 24h TTL. On a payment or order step
+  that is cross-customer data bleed.
+- `concurrencyKey` constant ⇒ every tenant collapses into one bucket, so a
+  per-tenant limit of N becomes a global limit of N.
+
+In the TS DSL, pass a **handle** for a step's `idempotencyKey` — `step()` lowers
+it to the correct form for you:
+
+```ts
+import { http, step, workflow } from "@blokjs/core";
+import { chargeCard, validateOrder } from "./nodes";
+
+export default workflow(
+  "reliable-charge",
+  {
+    version: "1.0.0",
+    trigger: http.post("/charge", {
+      // Trigger config is resolved at run-entry, before any handle exists, so
+      // these two are strings — and they MUST carry the `js/` prefix.
+      concurrencyKey: "js/ctx.request.body.tenantId",
+      concurrencyLimit: 5,
+    }),
+  },
+  (req) => {
+    const order = step("validate", validateOrder, { body: req.body });
+    step(
+      "charge",
+      chargeCard,
+      { orderId: order.id, amount: order.total },
+      // A handle — lowered for you. A deliberate literal ("nightly-batch") is
+      // also valid. What is NOT valid is an expression without the prefix.
+      { idempotencyKey: order.id },
+    );
+  },
+);
 ```
 
-**Original request (any step can read):**
-```typescript
-inputs: {
-  body: "js/ctx.request.body",                  // Full request body
-  userId: "js/ctx.request.params.id",           // Path parameter
-  page: "js/ctx.request.query.page",            // Query parameter
-  token: "js/ctx.request.headers.authorization", // Header
-  method: "js/ctx.request.method",              // HTTP method
-}
+Rule of thumb: **step** `idempotencyKey` → pass a handle. **Trigger config**
+(`concurrencyKey`, `debounce.key`, trigger-level `idempotencyKey`) → a
+`js/`-prefixed string, or a literal you actually meant to be constant.
+
+### 5.3 The other control positions
+
+`branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
+`forEach.in`, `subworkflow` — in JSON these are path strings, not structural
+refs. In the TS DSL you never write them: `branch`, `switchOn`, `forEach` and
+`subworkflow` take handles and emit the right form.
+
+---
+
+## 6. Testing
+
+`runNode` / `runWorkflow` from `@blokjs/core/testing`. No server, no Docker, no
+vitest config, no manual node registration. Write tests this way.
+
+```ts
+import { runNode, runWorkflow } from "@blokjs/core/testing";
+import orderIntake from "./order-intake";
+import { validateOrder } from "./nodes";
+
+declare function test(name: string, fn: () => Promise<void>): void;
+declare function expect(value: unknown): { toBe(v: unknown): void; toEqual(v: unknown): void };
+
+test("validate-order accepts a well-formed order", async () => {
+  const out = await runNode(validateOrder, {
+    body: { id: "o-1", total: 120, customer: { email: "a@b.co" }, items: [{ sku: "x", qty: 1 }] },
+  });
+  expect(out.inStock).toBe(true);
+});
+
+test("order-intake charges and takes the VIP arm", async () => {
+  const run = await runWorkflow(
+    orderIntake,
+    { id: "o-1", total: 120, customer: { email: "a@b.co" }, items: [{ sku: "x", qty: 1 }] },
+    { mock: { "charge-card": async () => ({ receipt: "rc_1" }) } },
+  );
+
+  expect(run.ok).toBe(true);
+  expect(run.state("charge")).toEqual({ receipt: "rc_1" });
+  expect(run.step("vip")?.executed).toBe(true);
+  expect(run.step("standard")?.executed).toBe(false);
+});
 ```
 
-**Non-adjacent steps (Step 3 needs Step 1's output):**
+- `runNode(node, input, opts?)` runs one node through its real Zod-validated
+  path and returns its typed output. A Zod violation or a throw **rejects** —
+  assert failures with `await expect(runNode(...)).rejects.toThrow(...)`.
+- `runWorkflow(wf, input, opts?)` takes the `workflow()` export directly and
+  runs the real engine. `run.ok`, `run.response`, `run.error`, `run.state(id)`,
+  `run.step(id)` (`inputs` after the Mapper resolved them, `output`, `executed`,
+  `calls`), `run.steps`, `run.stateAll`.
+- `opts.mock` replaces nodes **by node key** and validates each mock's return
+  against that node's real Zod output schema — a mock cannot promise a field the
+  node never returns. Also `opts.nodes`, `opts.env`, `opts.timeout`.
+- `NodeTestHarness` / `WorkflowTestRunner` are the classes underneath. Reach for
+  them only when you need the raw result envelope.
 
-v2 default-stores every step's output at `ctx.state[<step-id>]`. Reference it from any later step's inputs via the producing step's typed handle (TS DSL, canonical) or `"js/ctx.state.<id>"` (object-style/JSON). The legacy `set_var` field was removed in v0.5 — the runner rejects it at workflow load with a migration hint.
+Author docs: `docs/d/fundamentals/testing.mdx`.
 
-**Typed-handle DSL example (canonical):**
+---
 
-```typescript
+## 7. Triggers and runtimes
+
+| Trigger | Key config |
+|---|---|
+| `http` | `method`, `path`, `accept` |
+| `worker` | `queue`, `concurrency`, `retries`, `provider` |
+| `cron` | `schedule`, `timezone` |
+| `pubsub` | `provider`, `topic`, `subscription` |
+| `webhook` | `source`, `events`, `secret` |
+| `websocket` | `events`, `path` |
+| `sse` | `events`, `channels`, `path` |
+| `grpc` | `service`, `method`, `proto` |
+| `mcp` | `path`, `serverName`, `tool` or `resource`, `transports` |
+
+There is no `queue` trigger — use `worker`. For an HTTP wildcard use `"ANY"` or
+`http.any()`, never `"*"`. `http.get/post/put/patch/delete/any(path?, opts?)`
+builds the trigger block; omit `path` for file-based routing.
+
+A worker workflow is the same DSL with `job` as the entry handle:
+
+```ts
 import { step, workflow } from "@blokjs/core";
+import { notify } from "./nodes";
 
-export default workflow("Multi-step pipeline", { version: "1.0.0", trigger: { http: { method: "POST" } } }, (req) => {
-  const step1 = step("step-1", fetchUser, { id: req.body.userId });
-  const step2 = step("step-2", fetchOrders, { userId: step1.id });
-  step("step-3", generateReport, { user: step1, orders: step2 });
+export default workflow(
+  "process-background-job",
+  { version: "1.0.0", trigger: { worker: { queue: "background-jobs", concurrency: 5, retries: 3 } } },
+  (job) => {
+    step("process", notify, { message: job.params.jobId });
+  },
+);
+```
+
+TypeScript nodes run in-process. Other languages run as gRPC sidecars; a step
+targets them with `type: "runtime.<lang>"`, which `runtimeNode()` emits for you.
+
+| Runtime | Step type | Default port |
+|---|---|---|
+| Go | `runtime.go` | 9001 |
+| Rust | `runtime.rust` | 9002 |
+| Java | `runtime.java` | 9003 |
+| C# | `runtime.csharp` | 9004 |
+| PHP | `runtime.php` | 9005 |
+| Ruby | `runtime.ruby` | 9006 |
+| Python3 | `runtime.python3` | 9007 |
+
+```ts
+import { http, runtimeNode, step, workflow } from "@blokjs/core";
+
+// `blokctl nodes sync` generates these stubs; hand-writing one is fine too.
+const classify = runtimeNode<{ text: string }, { label: string }>("classify", "runtime.python3");
+
+export default workflow("classify-text", { version: "1.0.0", trigger: http.post("/classify") }, (req) => {
+  step("classify", classify, { text: req.body });
 });
 ```
 
-**Object-style / JSON equivalent (legacy):**
+Hosts/ports come from `RUNTIME_<LANG>_HOST` / `RUNTIME_<LANG>_PORT`. Never
+hardcode them. Your runtime nodes live in `runtimes/<lang>/nodes/`; never edit
+the generated SDK under `.blok/runtimes/`.
+
+---
+
+## 8. JSON workflows
+
+JSON has no `step()` call to return a handle, so it carries the same references
+**structurally** in step `inputs`:
 
 ```json
 {
+  "name": "order-intake",
+  "version": "1.0.0",
+  "trigger": { "http": { "method": "POST", "path": "/orders" } },
   "steps": [
-    { "id": "step-1", "use": "fetch-user",   "inputs": { "id": "js/ctx.request.body.userId" } },
-    { "id": "step-2", "use": "fetch-orders", "inputs": { "userId": "js/ctx.state.step-1.id" } },
-    { "id": "step-3", "use": "generate-report",
-      "inputs": { "user": "js/ctx.state.step-1", "orders": "js/ctx.state.step-2" } }
+    { "id": "validate", "use": "validate-order",
+      "inputs": { "body": { "$ref": { "step": "@trigger", "path": ["body"] } } } },
+    { "id": "charge", "use": "charge-card",
+      "inputs": {
+        "orderId": { "$ref": { "step": "validate", "path": ["id"] } },
+        "amount":  { "$ref": { "step": "validate", "path": ["total"] } }
+      },
+      "idempotencyKey": "js/ctx.state.validate.id" },
+    { "id": "summary", "use": "notify",
+      "inputs": { "message": { "$tpl": ["order ", { "$ref": { "step": "validate", "path": ["id"] } }, " charged"] } } }
   ]
 }
 ```
 
-To skip persistence for a side-effect-only step, add `ephemeral: true`. To rename the state key, add `as: "<name>"`. To shallow-merge a multi-output node's keys into state, add `spread: true`.
+- `{"$ref": {"step": "<id>", "path": [...]}}` — `path: []` is the whole output.
+- `"@trigger"` is the trigger payload; `"@error"` is the caught error envelope
+  inside a `tryCatch` catch arm.
+- `{"$tpl": ["text", {"$ref": …}, "more"]}` for a string embedding a reference.
+- A load-boundary pass compiles these to the runtime wire format. You never
+  write that wire format.
 
-### Runtime Nodes and ctx.state
+Hand-written `"js/ctx…"` step inputs still load, but warn once per workflow at
+boot (`BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` silences) and are removed next
+major. **`blokctl migrate refs` rewrites them** — run it instead of editing by
+hand. See `docs/c/migration-guides/legacy-expression-strings.mdx`.
 
-Important: `runtime.*` step types (Go, Rust, Python, etc.) route through the same `PersistenceHelper.applyStepOutput` as module nodes — `result.data` lands at `ctx.state[<id>]` by default. The `ephemeral` / `as` / `spread` knobs apply uniformly.
-
-### Available `js/` Expressions
-
-The Blueprint Mapper resolves `js/` expressions BEFORE the node executes. The node receives already-resolved values.
-
-```typescript
-// Direct access
-"js/ctx.request.body"                     // Request body object
-"js/ctx.request.body.email"               // Nested property
-"js/ctx.response.data"                    // Previous step output
-"js/ctx.response.data.users[0].name"      // Array access
-"js/ctx.vars['step-name']"               // Stored step output
-"js/ctx.vars['step-name'].field"          // Nested var access
-
-// JavaScript operations
-"js/ctx.request.body.items.length"         // Array length
-"js/parseInt(ctx.request.query.page || '1')"  // Parse with default
-"js/JSON.stringify(ctx.vars['data'])"      // Stringify
-"js/Object.keys(ctx.request.body)"         // Object methods
-"js/ctx.request.body.items.map(i => i.id)" // Array methods
-"js/Date.now()"                            // Current timestamp
-"js/ctx.request.query.type === 'admin'"    // Boolean expression
-
-// Ternary and logic
-"js/ctx.request.body.discount ? ctx.request.body.discount : 0"
-"js/ctx.vars['auth'] && ctx.vars['auth'].isAdmin"
-
-// Static values (no js/ prefix)
-"hello"                                    // String literal
-42                                         // Number literal
-true                                       // Boolean literal
-```
+Control and trigger-config positions are not step inputs and keep their own
+forms — see §5.
 
 ---
 
-## Part 4: Multi-Language Runtime System
-
-Blok supports 8 language runtimes. TypeScript nodes run in-process. All other languages run as HTTP servers.
-
-### Runtime Ports
-
-| Runtime | Port | Step Type | Node Location |
-|---------|------|-----------|---------------|
-| TypeScript | In-process | `module` or `local` | `triggers/http/src/nodes/` |
-| Go | 9001 | `runtime.go` | `runtimes/go/nodes/` |
-| Rust | 9002 | `runtime.rust` | `runtimes/rust/nodes/` (src/) |
-| Java | 9003 | `runtime.java` | `runtimes/java/nodes/` |
-| C# | 9004 | `runtime.csharp` | `runtimes/csharp/nodes/` |
-| PHP | 9005 | `runtime.php` | `runtimes/php/nodes/` |
-| Ruby | 9006 | `runtime.ruby` | `runtimes/ruby/nodes/` |
-| Python3 | 9007 | `runtime.python3` | `runtimes/python3/nodes/` |
-
-### How Runtime Nodes Work
-
-1. TypeScript runner resolves `type: "runtime.go"` to the Go HttpRuntimeAdapter
-2. Adapter sends HTTP POST to `http://localhost:9001/execute` with node name and inputs
-3. Go SDK finds the registered node handler, executes it, returns result
-4. Runner receives result, stores it in `ctx.vars[stepName]` and `ctx.response.data`
-
-### Environment Variables
-
-```
-RUNTIME_GO_HOST=localhost       RUNTIME_GO_PORT=9001
-RUNTIME_RUST_HOST=localhost     RUNTIME_RUST_PORT=9002
-RUNTIME_JAVA_HOST=localhost     RUNTIME_JAVA_PORT=9003
-RUNTIME_CSHARP_HOST=localhost   RUNTIME_CSHARP_PORT=9004
-RUNTIME_PHP_HOST=localhost      RUNTIME_PHP_PORT=9005
-RUNTIME_RUBY_HOST=localhost     RUNTIME_RUBY_PORT=9006
-RUNTIME_PYTHON3_HOST=localhost  RUNTIME_PYTHON3_PORT=9007
-```
-
-### Using Runtime Nodes in Workflows
-
-```typescript
-.addStep({
-  name: "process-data",
-  node: "my-go-node",       // Node name registered in Go SDK
-  type: "runtime.go",       // Routes to Go runtime
-  inputs: {
-    data: "js/ctx.request.body",
-  },
-})
-.addStep({
-  name: "analyze",
-  node: "sentiment-analysis",
-  type: "runtime.python3",   // Routes to Python runtime
-  inputs: {
-    text: "js/ctx.response.data.processedText",
-  },
-})
-```
-
-### Go Node Example
-
-```go
-// runtimes/go/nodes/my_node.go
-package nodes
-
-import blok "blok-runtime"
-
-func MyGoNode(ctx *blok.Context, input map[string]interface{}) (*blok.ExecutionResult, error) {
-    data := input["data"]
-    // Process data...
-    return &blok.ExecutionResult{
-        Success: true,
-        Data:    map[string]interface{}{"result": processed},
-    }, nil
-}
-
-// Register in main.go
-registry.Register("my-go-node", MyGoNode)
-```
-
-### Python Node Example
-
-```python
-# runtimes/python3/nodes/my_node/node.py
-from core.blok import NanoService
-
-class MyPythonNode(NanoService):
-    async def handle(self, ctx, inputs):
-        data = inputs.get("data")
-        # Process data...
-        response = self.create_response()
-        response.setSuccess({"result": processed})
-        return response
-```
-
-### Rust Node Example
-
-```rust
-// runtimes/rust/src/nodes/my_node.rs
-use blok_runtime::{Context, ExecutionResult, NodeHandler};
-
-pub struct MyRustNode;
-
-impl NodeHandler for MyRustNode {
-    async fn execute(&self, ctx: &Context, input: serde_json::Value) -> ExecutionResult {
-        let data = input.get("data");
-        // Process data...
-        ExecutionResult::success(json!({"result": processed}))
-    }
-}
-```
-
----
-
-## Part 5: CLI Commands (blokctl)
-
-### Project Scaffolding
+## 9. blokctl
 
 ```bash
-# Create new project with specific runtimes and triggers
-blokctl create project my-app \
-  -r go,python3,rust \           # Include Go, Python3, and Rust runtimes
-  -T http \                       # HTTP trigger
-  -m bun                          # Package manager
+blokctl create project --name my-app --triggers http --runtimes node,python3 --examples
+blokctl create node --style function --runtime typescript
+blokctl create workflow
 
-# Create in current directory
-blokctl create project . -r go -T http -m bun
-
-# Scaffold a new node
-blokctl create node my-node \
-  -s function \                   # function (defineNode) or class
-  -r typescript                   # typescript, python3, go, java, rust, csharp, php, ruby
-
-# Scaffold a new workflow
-blokctl create workflow my-workflow
+blokctl dev              # runtimes + triggers, health-checked, one process tree
+blokctl check            # static validation: refs, schemas, footguns 1/2/4
+blokctl nodes sync       # regenerate typed cross-runtime node stubs
+blokctl migrate refs     # "js/ctx…" inputs → structural {$ref}/{$tpl}
+blokctl migrate workflows # v1 shapes (set_var, name/node steps) → v2
 ```
 
-### Development
+Repo commands: `bun install`, `bun run build` (never a bare
+`nx run-many -t build` — the root script appends the Node-ESM fixup),
+`bun run test`, `bun run lint`, `bun run ci:fast`.
 
-```bash
-# Start full dev server (all runtimes + HTTP trigger)
-blokctl dev
-
-# Open Blok Studio (trace visualization UI)
-blokctl trace
-```
-
-### What `blokctl dev` Does
-
-1. Reads `.blok/config.json` for runtime and trigger configurations
-2. Spawns each runtime process (Go, Python, Rust, etc.) as child processes
-3. Health-checks each runtime by polling `GET /health` (up to 120s timeout)
-4. Once all runtimes are healthy, starts the trigger (HTTP server on port 4000)
-5. Monitors all processes, gracefully shuts down on SIGINT/SIGTERM
-
-### Project Structure After `blokctl create project`
-
-```
-my-project/
-├── .blok/
-│   ├── config.json                 # Runtime & trigger config
-│   └── runtimes/
-│       ├── go/                     # Go SDK (auto-managed)
-│       ├── python3/                # Python SDK (auto-managed)
-│       └── rust/                   # Rust SDK (auto-managed)
-├── runtimes/
-│   ├── go/nodes/                   # YOUR Go nodes go here
-│   ├── python3/nodes/              # YOUR Python nodes go here
-│   └── rust/nodes/                 # YOUR Rust nodes go here
-├── triggers/
-│   └── http/
-│       ├── src/
-│       │   ├── index.ts            # Entry point
-│       │   ├── Nodes.ts            # Node registry
-│       │   ├── Workflows.ts        # Workflow registry
-│       │   ├── nodes/              # YOUR TypeScript nodes
-│       │   │   └── {category}/
-│       │   │       └── {name}/
-│       │   │           └── index.ts
-│       │   └── workflows/          # YOUR TypeScript workflows
-│       │       └── {domain}/
-│       │           └── {name}.ts
-│       └── workflows/
-│           └── json/               # JSON workflows (alternative)
-├── package.json
-├── tsconfig.json
-└── biome.json
-```
+Scaffolded layout: `src/nodes/<category>/<name>/index.ts`,
+`src/workflows/<trigger>/<name>.ts`, JSON workflows under `workflows/json/`.
+Routing is file-based — there is no `Nodes.ts` and no `Workflows.ts` to update.
 
 ---
 
-## Part 6: Worker Workflows (Background Jobs)
+## 10. Do NOT
 
-Workers process jobs from a queue instead of HTTP requests.
-
-```typescript
-import { type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "Process Background Job",
-  version: "1.0.0",
-})
-  .addTrigger("worker", {
-    queue: "background-jobs",
-    concurrency: 5,           // Max concurrent jobs
-    retries: 3,               // Max retry attempts
-    timeout: 30000,           // Job timeout in ms
-  })
-  .addStep({
-    name: "process",
-    node: "job-processor",
-    type: "module",
-    inputs: {
-      payload: "js/ctx.request.body",           // Job data
-      jobId: "js/ctx.request.params.jobId",     // Job ID
-      attempt: "js/ctx.request.params.attempt",  // Current attempt (0-based)
-      queue: "js/ctx.request.params.queue",      // Queue name
-    },
-  });
-
-export default step;
-```
-
-### Worker Context Mapping
-
-| Context Property | Worker Value |
-|-----------------|-------------|
-| `ctx.request.body` | Job payload data |
-| `ctx.request.params.queue` | Queue name |
-| `ctx.request.params.jobId` | Unique job ID |
-| `ctx.request.params.attempt` | Current attempt (0-based) |
-| `ctx.vars._worker_job` | Full job metadata |
-
-### Worker Adapters
-
-| Adapter | Backend | Best For |
-|---------|---------|----------|
-| NATSWorkerAdapter | NATS JetStream | Production (durable, distributed) |
-| BullMQAdapter | Redis via BullMQ | Priority queues, delayed jobs |
-| InMemoryAdapter | In-process | Development/testing only |
-
-### Standalone Workers (Go/Rust/Python)
-
-These SDKs can run as standalone NATS workers without the TypeScript runner:
-
-```go
-// Go standalone worker
-func main() {
-    registry := blok.NewNodeRegistry("1.0.0")
-    registry.Register("process-order", processOrderNode)
-
-    config := blok.LoadWorkerConfigFromEnv()
-    worker := blok.NewWorker(registry, config)
-    worker.HandleNode("orders", "process-order")
-    worker.Start(context.Background())
-}
-```
-
-```python
-# Python standalone worker
-from blok import NodeRegistry, listen_and_serve_worker
-
-registry = NodeRegistry("1.0.0")
-registry.register("process-order", process_order_node)
-listen_and_serve_worker(registry)
-```
-
-```rust
-// Rust standalone worker
-let mut registry = NodeRegistry::new("1.0.0");
-registry.register("process-order", process_order_node);
-let config = WorkerConfig::from_env();
-let mut worker = Worker::new(registry, config);
-worker.handle_node("orders", "process-order");
-worker.start().await?;
-```
-
-Worker environment variables:
-```
-NATS_SERVERS=localhost:4222
-NATS_STREAM_NAME=blok-worker
-WORKER_CONCURRENCY=1
-WORKER_MAX_RETRIES=3
-WORKER_ACK_WAIT_SECS=30
-WORKER_QUEUES=queue1,queue2
-```
+- Do not author data flow with `"js/ctx…"` strings, raw `ctx` condition strings,
+  or `$` proxies (`$` is deleted — the import does not compile).
+- Do not write `ctx.state` or `ctx.vars` inside a node.
+- Do not read an ephemeral handle.
+- Do not reuse a step id anywhere in a workflow, including across arms.
+- Do not name a `forEach` `as` key after a step id or an outer loop key.
+- Do not put an expression in `wait.for` / `wait.until` (§5.1).
+- Do not put an unprefixed expression in `idempotencyKey` / `concurrencyKey` /
+  `debounce.key` (§5.2).
+- Do not create class-based `BlokService` nodes.
+- Do not skip Zod schemas.
+- Do not use `any`.
+- Do not use a `queue` trigger; use `worker`.
+- Do not use `"*"` for the HTTP wildcard; use `"ANY"` / `http.any()`.
+- Do not edit generated `.blok/runtimes/` files.
+- Do not use ESLint or Prettier; this repo uses Biome.
 
 ---
 
-## Part 7: Trigger Types
-
-| Trigger | Key Config | Context Mapping |
-|---------|-----------|-----------------|
-| `http` | method, path, accept | `ctx.request.body`, `.query`, `.params`, `.headers` |
-| `worker` | queue, concurrency, retries | `ctx.request.body` (job payload), `.params.jobId` |
-| `cron` | schedule, timezone | `ctx.request.body` (schedule payload) |
-| `queue` | provider, topic, consumerGroup | `ctx.request.body` (message) |
-| `pubsub` | provider, topic, subscription | `ctx.request.body` (message) |
-| `grpc` | service, method, proto | `ctx.request.body` (proto message) |
-| `webhook` | source, events, secret | `ctx.request.body` (webhook payload) |
-| `websocket` | events, path | `ctx.request.body` (message data) |
-| `sse` | events, channels, path | `ctx.request.body` (event data) |
-
----
-
-## Part 8: Testing
-
-### Unit Test a Node
-
-```typescript
-import { NodeTestHarness } from "@blokjs/runner";
-import myNode from "../src/nodes/users/fetch-user/index";
-
-const harness = new NodeTestHarness(myNode);
-
-test("fetches user successfully", async () => {
-  const result = await harness.execute({ userId: "abc-123" });
-  harness.assertSuccess(result);
-  harness.assertOutput(result, { user: { id: "abc-123" } });
-});
-
-test("fails with invalid UUID", async () => {
-  const result = await harness.execute({ userId: "not-a-uuid" });
-  harness.assertError(result, /validation/i);
-});
-```
-
-### Integration Test a Workflow
-
-```typescript
-import { WorkflowTestRunner } from "@blokjs/runner";
-
-const runner = new WorkflowTestRunner({ verbose: true, mockAllNodes: true });
-
-runner.registerNode("validate", ValidateNode);
-runner.mockNode("external-api", async (input) => ({ result: "mocked" }));
-
-runner.loadWorkflow(myWorkflowDefinition);
-const result = await runner.execute({ input: "data" });
-expect(result.success).toBe(true);
-expect(result.trace).toHaveLength(2);
-```
-
----
-
-## Part 9: Complete Example — Building a Feature
-
-**Task: Build a user registration system**
-
-### Step 1: Create the Nodes (each in its own category folder)
-
-**`triggers/http/src/nodes/validation/validate-registration/index.ts`:**
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
-
-export default defineNode({
-  name: "validate-registration",
-  description: "Validates user registration data",
-  input: z.object({
-    email: z.string().email(),
-    password: z.string().min(8),
-    name: z.string().min(2),
-  }),
-  output: z.object({
-    email: z.string(),
-    password: z.string(),
-    name: z.string(),
-    valid: z.literal(true),
-  }),
-  async execute(ctx, input) {
-    return { ...input, valid: true as const };
-  },
-});
-```
-
-**`triggers/http/src/nodes/users/create-user-record/index.ts`:**
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
-
-export default defineNode({
-  name: "create-user-record",
-  description: "Creates a user record in the database",
-  input: z.object({
-    email: z.string().email(),
-    password: z.string(),
-    name: z.string(),
-  }),
-  output: z.object({
-    id: z.string(),
-    email: z.string(),
-    name: z.string(),
-    createdAt: z.string(),
-  }),
-  async execute(ctx, input) {
-    // Database call here
-    const user = { id: crypto.randomUUID(), email: input.email, name: input.name, createdAt: new Date().toISOString() };
-    return user;
-  },
-});
-```
-
-**`triggers/http/src/nodes/integrations/send-welcome-email/index.ts`:**
-```typescript
-import { defineNode } from "@blokjs/runner";
-import { z } from "zod";
-
-export default defineNode({
-  name: "send-welcome-email",
-  description: "Sends a welcome email to a new user",
-  input: z.object({
-    email: z.string().email(),
-    name: z.string(),
-  }),
-  output: z.object({
-    sent: z.boolean(),
-    messageId: z.string(),
-  }),
-  async execute(ctx, input) {
-    // Email service call here
-    return { sent: true, messageId: crypto.randomUUID() };
-  },
-});
-```
-
-### Step 2: Register Nodes in `Nodes.ts`
-
-```typescript
-import ValidateRegistration from "./nodes/validation/validate-registration/index";
-import CreateUserRecord from "./nodes/users/create-user-record/index";
-import SendWelcomeEmail from "./nodes/integrations/send-welcome-email/index";
-
-const nodes: Record<string, BlokService<unknown>> = {
-  // ... existing nodes
-  "validate-registration": ValidateRegistration,
-  "create-user-record": CreateUserRecord,
-  "send-welcome-email": SendWelcomeEmail,
-};
-```
-
-### Step 3: Create the Workflow
-
-**`triggers/http/src/workflows/users/register-user.ts`:**
-```typescript
-import { type Step, Workflow } from "@blokjs/helper";
-
-const step: Step = Workflow({
-  name: "Register User",
-  version: "1.0.0",
-  description: "Validates input, creates user, sends welcome email",
-})
-  .addTrigger("http", {
-    method: "POST",
-    path: "/users/register",
-    accept: "application/json",
-  })
-  .addStep({
-    name: "validate",
-    node: "validate-registration",
-    type: "module",
-    inputs: {
-      email: "js/ctx.request.body.email",
-      password: "js/ctx.request.body.password",
-      name: "js/ctx.request.body.name",
-    },
-  })
-  .addStep({
-    name: "create-user",
-    node: "create-user-record",
-    type: "module",
-    inputs: {
-      email: "js/ctx.response.data.email",
-      password: "js/ctx.response.data.password",
-      name: "js/ctx.response.data.name",
-    },
-  })
-  .addStep({
-    name: "welcome-email",
-    node: "send-welcome-email",
-    type: "module",
-    inputs: {
-      email: "js/ctx.response.data.email",
-      name: "js/ctx.response.data.name",
-    },
-  });
-
-export default step;
-```
-
-### Step 4: Register the Workflow
-
-```typescript
-// triggers/http/src/Workflows.ts
-import registerUser from "./workflows/users/register-user";
-
-const workflows: Workflows = {
-  // ... existing workflows
-  "register-user": registerUser,
-};
-```
-
----
-
-## Common Mistakes to Avoid
-
-### NEVER import nodes inside other nodes
-
-```typescript
-// WRONG — DO NOT DO THIS
-import FetchUser from "../users/fetch-user/index";
-
-export default defineNode({
-  name: "get-user-orders",
-  async execute(ctx, input) {
-    const user = await FetchUser.handle(ctx, { userId: input.userId }); // WRONG!
-    // ...
-  },
-});
-
-// RIGHT — Use a workflow to chain them
-// Workflow: fetch-user → get-user-orders (receives user data via ctx.response.data)
-```
-
-### NEVER forget to register nodes and workflows
-
-Every new node → add to `Nodes.ts`
-Every new workflow → add to `Workflows.ts`
-
-### NEVER assume ctx.response.data persists beyond the next step
-
-```typescript
-// WRONG — Step 3 trying to read Step 1's output via ctx.prev (only carries Step 2's)
-{ id: "step-3", use: "c", inputs: { step1Data: "js/ctx.prev" } }
-
-// RIGHT — every step default-stores at ctx.state[<id>]; reference it directly
-{ id: "step-3", use: "c", inputs: { step1Data: "js/ctx.state.step-1" } }
-```
-
-### NEVER use class-based nodes
-
-```typescript
-// WRONG
-class MyNode extends BlokService<MyInput> {
-  async handle(ctx: Context, inputs: MyInput): Promise<BlokResponse> { ... }
-}
-
-// RIGHT
-export default defineNode({
-  name: "my-node",
-  input: z.object({ ... }),
-  output: z.object({ ... }),
-  async execute(ctx, input) { ... },
-});
-```
-
-### NEVER use `any` types
-
-```typescript
-// WRONG
-input: z.object({ data: z.any() })
-
-// RIGHT
-input: z.object({ data: z.unknown() })
-// Or better yet, define the actual shape:
-input: z.object({ data: z.object({ id: z.string(), name: z.string() }) })
-```
-
-### NEVER use ESLint/Prettier
-
-This project uses **Biome** for linting and formatting. Run `bun run lint`.
-
-### NEVER edit files in `.blok/runtimes/`
-
-These are auto-generated SDK files. Your runtime nodes go in `runtimes/{language}/nodes/`.
-
----
-
-## Quick Reference: Workflow Builder API
-
-```
-Workflow({ name, version, description? })
-  .addTrigger("http", { method, path, accept, headers? })
-  .addStep({ name, node, type, inputs?, runtime? })          // Chainable
-  .addStep({ ... })                                           // Add more steps
-  .addCondition({
-    node: { name, node: "@blokjs/if-else", type: "module" },
-    conditions: () => [
-      new AddIf("js expression")
-        .addStep({ ... })
-        .build(),
-      new AddElse()
-        .addStep({ ... })
-        .build(),
-    ],
-  })
-```
-
-### Trigger Methods
-
-| Method | Description |
-|--------|-------------|
-| `"GET"` | Read resource |
-| `"POST"` | Create resource |
-| `"PUT"` | Replace resource |
-| `"PATCH"` | Update resource |
-| `"DELETE"` | Delete resource |
-| `"ANY"` | Match all methods (use `"ANY"`, not `"*"`) |
-
-### Step Types
-
-| Type | Description |
-|------|-------------|
-| `"module"` | TypeScript node registered in Nodes.ts |
-| `"local"` | TypeScript node loaded from filesystem |
-| `"runtime.go"` | Go node (port 9001) |
-| `"runtime.rust"` | Rust node (port 9002) |
-| `"runtime.java"` | Java node (port 9003) |
-| `"runtime.csharp"` | C# node (port 9004) |
-| `"runtime.php"` | PHP node (port 9005) |
-| `"runtime.ruby"` | Ruby node (port 9006) |
-| `"runtime.python3"` | Python3 node (port 9007) |
-
----
-
-## Debugging Checklist
-
-1. **"Node not found"** → Is the node registered in `Nodes.ts`?
-2. **"Validation failed"** → Check Zod schema vs actual input data
-3. **"undefined in step input"** → Are you reading `ctx.response.data` from a non-adjacent step? It's overwritten.
-4. **"Runtime execution error"** → Is the runtime process running? Check `GET http://localhost:{port}/health`
-5. **"ctx.state['X'] is undefined"** → Source step has `ephemeral: true`, OR the id doesn't match what's referenced by the handle / `js/ctx.state.<id>` (typo / id mismatch).
-6. **"set_var, which was removed in v0.5"** → Drop `set_var: true` (default-store handles it) and replace `set_var: false` with `ephemeral: true`. Run `blokctl migrate workflows` to convert v1 workflows.
-7. **No data flowing between steps** → Check `js/ctx.state.<id>` expression syntax. Common: typo in step id, or stale id from a renamed step.
-7. **Condition not matching** → Check condition string syntax. Must be valid JS with access to `ctx`.
+## 11. Debugging checklist
+
+| Symptom | Cause |
+|---|---|
+| "Node not found" | The node module was never imported, or the `use` key does not match the node's `name`. |
+| "Duplicate step id" | Footgun 3 — ids are flat, including across mutually exclusive arms. |
+| Zod validation error on a step | The producing node's output shape does not match what the consumer's `input` schema declares. |
+| `ctx.state["x"]` undefined | The step threw (a failed step writes nothing), or it is `ephemeral`, or the id is a typo. |
+| Compile error reading a handle | Footgun 1 (arm-scoped) or 2 (ephemeral). Both are deliberate. |
+| A `switch` case never matches | `when` must be a static literal — a handle there never matches. |
+| Step input arrives as the literal expression text | A mapper expression failed to resolve. `BLOK_MAPPER_MODE=strict` (the default) throws instead; `warn` logs and passes it through. |
+| Every request gets the first request's response | Constant `idempotencyKey` — §5.2. |
+| A per-tenant limit behaves globally | Constant `concurrencyKey` — §5.2. |
+| A `wait` never fires, or fires immediately | An expression in `wait.for`/`until` — §5.1. |
+| "set_var was removed in v0.5" | Drop `set_var: true`; `set_var: false` becomes `ephemeral: true`. Run `blokctl migrate workflows`. |
+| Runtime step fails to dispatch | The sidecar is not running, or `RUNTIME_<LANG>_*` env points elsewhere. |

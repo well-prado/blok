@@ -18,9 +18,17 @@ deferral instead of a mid-flight pause, see
 </Note>
 
 The `for` form takes a duration (`"500ms"`, `"30s"`, `"5m"`, `"3h"`);
-the `until` form takes an ISO timestamp expression. Either way, the
-trigger transport returns 202 to the caller — workflows don't block
-HTTP responses.
+the `until` form takes an ISO timestamp. Either way, the trigger
+transport returns 202 to the caller — workflows don't block HTTP
+responses.
+
+<Warning>
+Both fields are **literal-only**. They are parsed at workflow *load* time,
+before any request `ctx` exists, and no Mapper pass runs over them — so a
+`{$ref}`, a `tpl`, or a path string is stored verbatim and never resolves
+(issue #704). A computed delay is not expressible today; split the workflow and
+put [`delay`](/d/scheduling/delay-and-ttl) on the continuation's trigger.
+</Warning>
 
 ## Quickstart
 
@@ -38,7 +46,7 @@ HTTP responses.
 ```json
 {
   "id": "wait-for-business-hours",
-  "wait": { "until": "js/`${new Date().toISOString().slice(0,10)}T09:00:00Z`" }
+  "wait": { "until": "2026-01-01T09:00:00Z" }
 }
 ```
 
@@ -46,8 +54,8 @@ HTTP responses.
 
 | Field | Type | Notes |
 |---|---|---|
-| `for` | `string` \| `number` | Duration string (`"1h"`, `"30s"`, `"500ms"`) or milliseconds. |
-| `until` | `string` | JS expression resolving to an ISO timestamp or unix epoch millis. |
+| `for` | `string` \| `number` | Literal duration string (`"1h"`, `"30s"`, `"500ms"`) or milliseconds. |
+| `until` | `string` \| `number` | Literal ISO timestamp or unix epoch millis. |
 
 Set exactly one. The runner throws at load time if both are present.
 
