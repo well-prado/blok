@@ -40,6 +40,7 @@ const NOT_A_MODULE = /\.(json|css|txt|md|proto)$/;
 interface PackageJson {
 	name: string;
 	version: string;
+	type?: string;
 	main?: string;
 	bin?: string | Record<string, string>;
 	exports?: unknown;
@@ -83,8 +84,15 @@ function exportTarget(value: unknown): string | null {
  */
 function subpathsOf(pkg: PackageJson, installedDir: string): string[] {
 	if (pkg.exports === undefined || pkg.exports === null) {
-		// No exports map: `main` is the entire public surface.
-		return [pkg.name];
+		// No exports map: `main` is the entire public surface. A package with
+		// neither `exports` nor `main` (e.g. @blokjs/syntax — TextMate grammar
+		// JSON consumed by file path, never `import`ed) has no JS entrypoint at
+		// all, so there is nothing to import. Node's failure for that case
+		// ("Cannot find package '<abs path>/index.js'") also happens to match
+		// `isOptionalPeerMiss` below, which would otherwise silently wave the
+		// missing entrypoint through as an "optional peer not installed" skip —
+		// so this must be filtered here, before that heuristic ever sees it.
+		return pkg.main === undefined ? [] : [pkg.name];
 	}
 	const map = pkg.exports as Record<string, unknown>;
 	const out: string[] = [];
@@ -123,7 +131,47 @@ function isOptionalPeerMiss(output: string): boolean {
 	return /Cannot find package '(?!@blokjs\/)/.test(output) && !/Cannot find module '/.test(output);
 }
 
+/**
+ * The invariant this whole gate depends on (#697): every workspace package is
+ * EITHER `private: true` OR listed in `PUBLISHABLE` — never neither. A package
+ * that's `private: false`/unset and absent from `PUBLISHABLE` looks
+ * publishable (npm would happily accept `npm publish` from that directory)
+ * but this gate never packs it, never imports it under Node, never lints it —
+ * exactly how `@blokjs/browser`, `@blokjs/syntax`, `@blokjs/lsp-server`, and
+ * `blok-vscode` went unnoticed for months. Discovers workspace members the
+ * same way the package manager does: the root `package.json#workspaces`
+ * globs, not a hand-maintained list that can itself drift.
+ */
+export function checkPublishInvariant(): void {
+	const rootPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { workspaces?: string[] };
+	const publishableNames = new Set(PUBLISHABLE.map((p) => p.name));
+	const seen = new Set<string>();
+	const violations: string[] = [];
+	for (const pattern of rootPkg.workspaces ?? []) {
+		for (const rel of new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: ROOT })) {
+			if (rel.includes("node_modules/") || seen.has(rel)) continue;
+			seen.add(rel);
+			const pkg = JSON.parse(readFileSync(join(ROOT, rel), "utf8")) as { name?: string; private?: boolean };
+			if (pkg.private === true) continue;
+			if (pkg.name !== undefined && publishableNames.has(pkg.name)) continue;
+			violations.push(`${rel} (name: ${pkg.name ?? "<missing>"}) is not private:true and not in PUBLISHABLE`);
+		}
+	}
+	if (violations.length > 0) {
+		console.error(`\n\x1b[1;31m${violations.length} workspace package(s) are neither private nor publishable:\x1b[0m`);
+		for (const v of violations) console.error(`  - ${v}`);
+		console.error(
+			'\nEach one needs `"private": true` in its package.json, OR an entry in PUBLISHABLE (scripts/release.ts).',
+		);
+		process.exit(1);
+	}
+}
+
 function main(): void {
+	step("publish invariant: every workspace package is private:true or in PUBLISHABLE");
+	checkPublishInvariant();
+	console.log("  OK — no third state.");
+
 	const tmp = mkdtempSync(join(tmpdir(), "blok-packaging-"));
 	const tarballs = join(tmp, "tarballs");
 	const consumer = join(tmp, "consumer");
@@ -243,12 +291,18 @@ function main(): void {
 
 	step("@arethetypeswrong/cli");
 	for (const { pkg, tarball } of packed) {
-		// `--profile esm-only`: every publishable package is `"type": "module"`,
-		// so node10 (no exports-map support) and node16-from-CJS (`require()` of
-		// ESM) are expected-and-intended misses, not defects. What this gate is
-		// for is the third column — node16-from-ESM — where an unfollowable
-		// specifier inside a `.d.ts` shows up as an internal resolution error.
-		const r = run(bin("attw"), [tarball, "--profile", "esm-only", "--format", "table-flipped"], tmp);
+		// `--profile esm-only` applies ONLY to `"type": "module"` packages: for
+		// those, node10 (no exports-map support) and node16-from-CJS (`require()`
+		// of ESM) are expected-and-intended misses, not defects, and what this
+		// gate is for is the third column — node16-from-ESM — where an
+		// unfollowable specifier inside a `.d.ts` shows up as an internal
+		// resolution error. A genuinely CJS publishable package (#697 —
+		// @blokjs/lsp-server has no `"type"` field) gets the full default
+		// "strict" profile instead: esm-only would IGNORE its node10/node16-cjs
+		// resolutions rather than check them, which is a false pass for the exact
+		// module kind that package actually ships.
+		const profileArgs = pkg.type === "module" ? ["--profile", "esm-only"] : [];
+		const r = run(bin("attw"), [tarball, ...profileArgs, "--format", "table-flipped"], tmp);
 		if (!r.ok) {
 			lintFailed = true;
 			console.error(`\n${pkg.name}:\n${r.out}`);
