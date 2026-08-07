@@ -15,7 +15,9 @@
 			"use": "@blokjs/sse-subscribe",
 			"type": "module",
 			"inputs": {
-				"channels": ["chat:{sessionId}"]
+				"channels": [
+					"chat:{sessionId}"
+				]
 			}
 		},
 		{
@@ -23,7 +25,12 @@
 			"use": "@blokjs/sse-stream",
 			"type": "module",
 			"inputs": {
-				"source": "js/ctx.state.sub"
+				"source": {
+					"$ref": {
+						"step": "sub",
+						"path": []
+					}
+				}
 			}
 		}
 	]

@@ -45,7 +45,15 @@
 						"type": "module",
 						"maxDuration": "5s",
 						"inputs": {
-							"url": "js/ctx.request.body.url",
+							"url": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"url"
+									]
+								}
+							},
 							"method": "GET"
 						}
 					},
@@ -55,7 +63,14 @@
 						"type": "module",
 						"inputs": {
 							"values": {
-								"lastStatus": "js/ctx.state.check.status",
+								"lastStatus": {
+									"$ref": {
+										"step": "check",
+										"path": [
+											"status"
+										]
+									}
+								},
 								"attempt": "js/ctx.state.attempt + 1"
 							}
 						}
@@ -71,9 +86,24 @@
 				"status": 200,
 				"body": {
 					"ready": "js/ctx.state.lastStatus === 'ready'",
-					"attempts": "js/ctx.state.attempt",
-					"finalStatus": "js/ctx.state.lastStatus",
-					"data": "js/ctx.state.check"
+					"attempts": {
+						"$ref": {
+							"step": "attempt",
+							"path": []
+						}
+					},
+					"finalStatus": {
+						"$ref": {
+							"step": "lastStatus",
+							"path": []
+						}
+					},
+					"data": {
+						"$ref": {
+							"step": "check",
+							"path": []
+						}
+					}
 				}
 			}
 		}

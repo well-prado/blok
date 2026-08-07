@@ -12,7 +12,11 @@
 				"body": {
 					"requestId": "req-demo-001",
 					"tenant": "acme",
-					"order": { "id": "ord-42", "amount": 1999, "currency": "USD" }
+					"order": {
+						"id": "ord-42",
+						"amount": 1999,
+						"currency": "USD"
+					}
 				}
 			},
 			"concurrencyKey": "js/ctx.request.body.tenant",
@@ -53,11 +57,32 @@
 				"method": "POST",
 				"headers": {
 					"Content-Type": "application/json",
-					"X-Request-Id": "js/ctx.request.body.requestId"
+					"X-Request-Id": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"requestId"
+							]
+						}
+					}
 				},
 				"body": {
-					"order": "js/ctx.request.body.order",
-					"rates": "js/ctx.state['fetch-rates']"
+					"order": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"order"
+							]
+						}
+					},
+					"rates": {
+						"$ref": {
+							"step": "fetch-rates",
+							"path": []
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -68,10 +93,39 @@
 			"type": "module",
 			"inputs": {
 				"body": {
-					"requestId": "js/ctx.request.body.requestId",
-					"tenant": "js/ctx.request.body.tenant",
-					"order": "js/ctx.request.body.order",
-					"slip": "js/ctx.state['process-order']"
+					"requestId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"requestId"
+							]
+						}
+					},
+					"tenant": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"tenant"
+							]
+						}
+					},
+					"order": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"order"
+							]
+						}
+					},
+					"slip": {
+						"$ref": {
+							"step": "process-order",
+							"path": []
+						}
+					}
 				},
 				"status": 200
 			}

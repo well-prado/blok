@@ -17,7 +17,12 @@
 			"use": "@blokjs/jwt-verify",
 			"type": "module",
 			"inputs": {
-				"token": "js/ctx.state['extract-token']",
+				"token": {
+					"$ref": {
+						"step": "extract-token",
+						"path": []
+					}
+				},
 				"secret": "js/ctx.env.JWT_JWKS_URI ? undefined : ctx.env.JWT_SECRET",
 				"jwksUri": "js/ctx.env.JWT_JWKS_URI || undefined",
 				"issuer": "js/ctx.env.JWT_ISSUER || undefined",
@@ -33,11 +38,46 @@
 			"inputs": {
 				"name": "identity",
 				"value": {
-					"sub": "js/ctx.state.verify.subject",
-					"iss": "js/ctx.state.verify.issuer",
-					"aud": "js/ctx.state.verify.audience",
-					"exp": "js/ctx.state.verify.expiresAt",
-					"claims": "js/ctx.state.verify.claims",
+					"sub": {
+						"$ref": {
+							"step": "verify",
+							"path": [
+								"subject"
+							]
+						}
+					},
+					"iss": {
+						"$ref": {
+							"step": "verify",
+							"path": [
+								"issuer"
+							]
+						}
+					},
+					"aud": {
+						"$ref": {
+							"step": "verify",
+							"path": [
+								"audience"
+							]
+						}
+					},
+					"exp": {
+						"$ref": {
+							"step": "verify",
+							"path": [
+								"expiresAt"
+							]
+						}
+					},
+					"claims": {
+						"$ref": {
+							"step": "verify",
+							"path": [
+								"claims"
+							]
+						}
+					},
 					"via": "jwt-auth"
 				}
 			}

@@ -7,7 +7,10 @@
 			"method": "POST",
 			"path": "/orders",
 			"accept": "application/json",
-			"middleware": ["auth-check", "rate-limit"]
+			"middleware": [
+				"auth-check",
+				"rate-limit"
+			]
 		}
 	},
 	"steps": [
@@ -18,9 +21,21 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": ["type", "items", "total", "currency"]
+					"required": [
+						"type",
+						"items",
+						"total",
+						"currency"
+					]
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -29,7 +44,10 @@
 				"on": "js/ctx.request.body.type",
 				"cases": [
 					{
-						"when": ["physical", "subscription"],
+						"when": [
+							"physical",
+							"subscription"
+						],
 						"do": [
 							{
 								"id": "process-items",
@@ -44,8 +62,22 @@
 											"use": "inventory-check",
 											"type": "module",
 											"inputs": {
-												"sku": "js/ctx.state.item.sku",
-												"qty": "js/ctx.state.item.quantity"
+												"sku": {
+													"$ref": {
+														"step": "item",
+														"path": [
+															"sku"
+														]
+													}
+												},
+												"qty": {
+													"$ref": {
+														"step": "item",
+														"path": [
+															"quantity"
+														]
+													}
+												}
 											}
 										},
 										{
@@ -54,9 +86,31 @@
 											"type": "module",
 											"idempotencyKey": "js/`${ctx.request.body.id}-${ctx.state.item.sku}`",
 											"inputs": {
-												"sku": "js/ctx.state.item.sku",
-												"qty": "js/ctx.state.item.quantity",
-												"orderId": "js/ctx.request.body.id"
+												"sku": {
+													"$ref": {
+														"step": "item",
+														"path": [
+															"sku"
+														]
+													}
+												},
+												"qty": {
+													"$ref": {
+														"step": "item",
+														"path": [
+															"quantity"
+														]
+													}
+												},
+												"orderId": {
+													"$ref": {
+														"step": "@trigger",
+														"path": [
+															"body",
+															"id"
+														]
+													}
+												}
 											}
 										}
 									]
@@ -72,8 +126,23 @@
 								"use": "license-create",
 								"type": "module",
 								"inputs": {
-									"productId": "js/ctx.request.body.productId",
-									"userId": "js/ctx.state.identity.sub"
+									"productId": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"productId"
+											]
+										}
+									},
+									"userId": {
+										"$ref": {
+											"step": "identity",
+											"path": [
+												"sub"
+											]
+										}
+									}
 								}
 							}
 						]
@@ -86,7 +155,9 @@
 						"type": "module",
 						"inputs": {
 							"status": 400,
-							"body": { "error": "Unknown order type" }
+							"body": {
+								"error": "Unknown order type"
+							}
 						},
 						"stop": true
 					}
@@ -102,12 +173,39 @@
 						"use": "stripe-charge",
 						"type": "module",
 						"idempotencyKey": "js/ctx.request.body.id",
-						"retry": { "maxAttempts": 3, "minTimeoutInMs": 500, "factor": 2 },
+						"retry": {
+							"maxAttempts": 3,
+							"minTimeoutInMs": 500,
+							"factor": 2
+						},
 						"maxDuration": "10s",
 						"inputs": {
-							"amount": "js/ctx.request.body.total",
-							"currency": "js/ctx.request.body.currency",
-							"customerId": "js/ctx.state.identity.stripeCustomerId"
+							"amount": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"total"
+									]
+								}
+							},
+							"currency": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"currency"
+									]
+								}
+							},
+							"customerId": {
+								"$ref": {
+									"step": "identity",
+									"path": [
+										"stripeCustomerId"
+									]
+								}
+							}
 						}
 					}
 				],
@@ -132,7 +230,15 @@
 							"status": 402,
 							"body": {
 								"error": "Payment failed",
-								"orderId": "js/ctx.request.body.id",
+								"orderId": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"id"
+										]
+									}
+								},
 								"reason": "js/ctx.error.message"
 							}
 						},
@@ -146,9 +252,32 @@
 						"type": "module",
 						"inputs": {
 							"event": "order-fulfillment",
-							"orderId": "js/ctx.request.body.id",
-							"userId": "js/ctx.state.identity.sub",
-							"total": "js/ctx.request.body.total"
+							"orderId": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"id"
+									]
+								}
+							},
+							"userId": {
+								"$ref": {
+									"step": "identity",
+									"path": [
+										"sub"
+									]
+								}
+							},
+							"total": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"total"
+									]
+								}
+							}
 						}
 					}
 				]
@@ -161,8 +290,23 @@
 			"inputs": {
 				"status": 201,
 				"body": {
-					"orderId": "js/ctx.request.body.id",
-					"chargeId": "js/ctx.state['stripe-charge'].id"
+					"orderId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"id"
+							]
+						}
+					},
+					"chargeId": {
+						"$ref": {
+							"step": "stripe-charge",
+							"path": [
+								"id"
+							]
+						}
+					}
 				}
 			}
 		}

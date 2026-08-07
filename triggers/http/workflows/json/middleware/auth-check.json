@@ -50,7 +50,12 @@
 			"inputs": {
 				"name": "identity",
 				"value": {
-					"token": "js/ctx.state['extract-token']",
+					"token": {
+						"$ref": {
+							"step": "extract-token",
+							"path": []
+						}
+					},
 					"via": "auth-check"
 				}
 			}

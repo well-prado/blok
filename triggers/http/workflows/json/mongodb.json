@@ -16,7 +16,14 @@
 			"type": "module",
 			"inputs": {
 				"collection": "${ctx.request.params.collection}",
-				"data": "js/ctx.request.body",
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body"
+						]
+					}
+				},
 				"id": "${ctx.request.params.id}"
 			}
 		}

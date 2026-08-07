@@ -17,23 +17,14 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"rows"
-					],
+					"required": ["rows"],
 					"properties": {
 						"rows": {
 							"type": "array"
 						}
 					}
 				},
-				"data": {
-					"$ref": {
-						"step": "@trigger",
-						"path": [
-							"body"
-						]
-					}
-				}
+				"data": "js/ctx.request.body"
 			}
 		},
 		{
@@ -54,10 +45,7 @@
 									"inputs": {
 										"schema": {
 											"type": "object",
-											"required": [
-												"id",
-												"value"
-											],
+											"required": ["id", "value"],
 											"properties": {
 												"id": {
 													"type": "string"
@@ -67,12 +55,7 @@
 												}
 											}
 										},
-										"data": {
-											"$ref": {
-												"step": "row",
-												"path": []
-											}
-										}
+										"data": "js/ctx.state.row"
 									}
 								},
 								{
@@ -87,22 +70,8 @@
 											"X-Op": "insert-row"
 										},
 										"body": {
-											"rowId": {
-												"$ref": {
-													"step": "row",
-													"path": [
-														"id"
-													]
-												}
-											},
-											"value": {
-												"$ref": {
-													"step": "row",
-													"path": [
-														"value"
-													]
-												}
-											}
+											"rowId": "js/ctx.state.row.id",
+											"value": "js/ctx.state.row.value"
 										},
 										"responseType": "application/json"
 									}

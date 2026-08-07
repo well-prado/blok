@@ -17,14 +17,7 @@
 			"id": "dispatch",
 			"subworkflow": "js/ctx.request.body.type",
 			"inputs": {
-				"stripeEvent": {
-					"$ref": {
-						"step": "@trigger",
-						"path": [
-							"body"
-						]
-					}
-				}
+				"stripeEvent": "js/ctx.request.body"
 			}
 		}
 	]

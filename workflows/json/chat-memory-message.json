@@ -16,7 +16,21 @@
 			"type": "module",
 			"inputs": {
 				"action": "get",
-				"key": "js/`chat-memory:${ctx.request.params.sessionId}:history`"
+				"key": {
+					"$tpl": [
+						"chat-memory:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						":history"
+					]
+				}
 			}
 		},
 		{
@@ -24,7 +38,21 @@
 			"use": "@blokjs/llm-stream",
 			"type": "module",
 			"inputs": {
-				"channel": "js/`chat-memory:${ctx.request.params.sessionId}`",
+				"channel": {
+					"$tpl": [
+						"chat-memory:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						""
+					]
+				},
 				"apiKey": "js/process.env.OPENROUTER_API_KEY",
 				"model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
 				"messages": "js/[{ role: 'system', content: 'You are a helpful assistant chatting with the user. The conversation may span many turns — earlier messages were stored in Redis and are included below. Be concise.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]"
@@ -36,7 +64,21 @@
 			"type": "module",
 			"inputs": {
 				"action": "set",
-				"key": "js/`chat-memory:${ctx.request.params.sessionId}:history`",
+				"key": {
+					"$tpl": [
+						"chat-memory:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						":history"
+					]
+				},
 				"value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.stream.fullText }]",
 				"ttlMs": 86400000
 			},

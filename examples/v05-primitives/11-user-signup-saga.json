@@ -6,7 +6,9 @@
 		"http": {
 			"method": "POST",
 			"path": "/signup",
-			"middleware": ["rate-limit"]
+			"middleware": [
+				"rate-limit"
+			]
 		}
 	},
 	"steps": [
@@ -17,9 +19,20 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": ["email", "password", "displayName"]
+					"required": [
+						"email",
+						"password",
+						"displayName"
+					]
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -32,20 +45,54 @@
 						"type": "module",
 						"idempotencyKey": "js/`signup-${ctx.request.body.email}`",
 						"inputs": {
-							"email": "js/ctx.request.body.email",
-							"password": "js/ctx.request.body.password"
+							"email": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"email"
+									]
+								}
+							},
+							"password": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"password"
+									]
+								}
+							}
 						}
 					},
 					{
 						"id": "send-welcome",
 						"use": "email-send",
 						"type": "module",
-						"retry": { "maxAttempts": 3, "minTimeoutInMs": 500 },
+						"retry": {
+							"maxAttempts": 3,
+							"minTimeoutInMs": 500
+						},
 						"inputs": {
 							"template": "welcome",
-							"to": "js/ctx.state['create-account'].email",
+							"to": {
+								"$ref": {
+									"step": "create-account",
+									"path": [
+										"email"
+									]
+								}
+							},
 							"variables": {
-								"displayName": "js/ctx.request.body.displayName",
+								"displayName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"displayName"
+										]
+									}
+								},
 								"verifyUrl": "js/`${ctx.env.APP_URL}/verify/${ctx.state['create-account'].verificationToken}`"
 							}
 						}
@@ -55,8 +102,23 @@
 						"use": "profile-create",
 						"type": "module",
 						"inputs": {
-							"userId": "js/ctx.state['create-account'].id",
-							"displayName": "js/ctx.request.body.displayName"
+							"userId": {
+								"$ref": {
+									"step": "create-account",
+									"path": [
+										"id"
+									]
+								}
+							},
+							"displayName": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"displayName"
+									]
+								}
+							}
 						}
 					},
 					{
@@ -66,8 +128,22 @@
 						"inputs": {
 							"status": 201,
 							"body": {
-								"userId": "js/ctx.state['create-account'].id",
-								"email": "js/ctx.state['create-account'].email"
+								"userId": {
+									"$ref": {
+										"step": "create-account",
+										"path": [
+											"id"
+										]
+									}
+								},
+								"email": {
+									"$ref": {
+										"step": "create-account",
+										"path": [
+											"email"
+										]
+									}
+								}
 							}
 						}
 					}
@@ -83,7 +159,14 @@
 									"use": "user-delete",
 									"type": "module",
 									"inputs": {
-										"userId": "js/ctx.state['create-account'].id",
+										"userId": {
+											"$ref": {
+												"step": "create-account",
+												"path": [
+													"id"
+												]
+											}
+										},
 										"reason": "signup-saga-rollback"
 									}
 								}

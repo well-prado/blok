@@ -31,7 +31,15 @@
 									},
 									"body": {
 										"ack": "pong",
-										"payload": "js/ctx.request.body.payload"
+										"payload": {
+											"$ref": {
+												"step": "@trigger",
+												"path": [
+													"body",
+													"payload"
+												]
+											}
+										}
 									},
 									"responseType": "application/json"
 								}
@@ -39,7 +47,11 @@
 						]
 					},
 					{
-						"when": ["order.created", "order.paid", "order.refunded"],
+						"when": [
+							"order.created",
+							"order.paid",
+							"order.refunded"
+						],
 						"do": [
 							{
 								"id": "order-handler",
@@ -54,8 +66,24 @@
 									},
 									"body": {
 										"recorded": true,
-										"event": "js/ctx.request.body.event",
-										"payload": "js/ctx.request.body.payload"
+										"event": {
+											"$ref": {
+												"step": "@trigger",
+												"path": [
+													"body",
+													"event"
+												]
+											}
+										},
+										"payload": {
+											"$ref": {
+												"step": "@trigger",
+												"path": [
+													"body",
+													"payload"
+												]
+											}
+										}
 									},
 									"responseType": "application/json"
 								}
@@ -77,7 +105,15 @@
 							},
 							"body": {
 								"warning": "unknown event",
-								"event": "js/ctx.request.body.event"
+								"event": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"event"
+										]
+									}
+								}
 							},
 							"responseType": "application/json"
 						}

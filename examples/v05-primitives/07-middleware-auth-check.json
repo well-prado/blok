@@ -17,7 +17,12 @@
 			"use": "verify-jwt-node",
 			"type": "module",
 			"inputs": {
-				"token": "js/ctx.state['extract-token']",
+				"token": {
+					"$ref": {
+						"step": "extract-token",
+						"path": []
+					}
+				},
 				"secret": "js/ctx.env.JWT_SECRET",
 				"issuer": "js/ctx.env.JWT_ISSUER",
 				"audience": "js/ctx.env.JWT_AUDIENCE"
@@ -36,7 +41,14 @@
 							"status": 401,
 							"body": {
 								"error": "Unauthorized",
-								"reason": "js/ctx.state['verify-jwt'].reason"
+								"reason": {
+									"$ref": {
+										"step": "verify-jwt",
+										"path": [
+											"reason"
+										]
+									}
+								}
 							}
 						},
 						"stop": true
@@ -50,7 +62,14 @@
 			"type": "module",
 			"inputs": {
 				"name": "identity",
-				"value": "js/ctx.state['verify-jwt'].claims"
+				"value": {
+					"$ref": {
+						"step": "verify-jwt",
+						"path": [
+							"claims"
+						]
+					}
+				}
 			}
 		}
 	]

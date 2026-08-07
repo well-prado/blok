@@ -6,7 +6,11 @@
 		"http": {
 			"method": "DELETE",
 			"path": "/admin/users/:id",
-			"middleware": ["auth-check", "admin-only", "audit-log"]
+			"middleware": [
+				"auth-check",
+				"admin-only",
+				"audit-log"
+			]
 		}
 	},
 	"steps": [
@@ -17,8 +21,23 @@
 			"idempotencyKey": "js/`delete-user-${ctx.request.params.id}`",
 			"inputs": {
 				"action": "delete",
-				"userId": "js/ctx.request.params.id",
-				"deletedBy": "js/ctx.state.identity.sub"
+				"userId": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"params",
+							"id"
+						]
+					}
+				},
+				"deletedBy": {
+					"$ref": {
+						"step": "identity",
+						"path": [
+							"sub"
+						]
+					}
+				}
 			}
 		},
 		{

@@ -6,7 +6,9 @@
 		"http": {
 			"method": "POST",
 			"path": "/orders/process",
-			"middleware": ["auth-check"]
+			"middleware": [
+				"auth-check"
+			]
 		}
 	},
 	"steps": [
@@ -34,8 +36,22 @@
 														"use": "inventory-reserve",
 														"type": "module",
 														"inputs": {
-															"sku": "js/ctx.state.item.sku",
-															"qty": "js/ctx.state.item.qty"
+															"sku": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"sku"
+																	]
+																}
+															},
+															"qty": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"qty"
+																	]
+																}
+															}
 														}
 													},
 													{
@@ -43,8 +59,23 @@
 														"use": "shipping-schedule",
 														"type": "module",
 														"inputs": {
-															"address": "js/ctx.request.body.shipTo",
-															"sku": "js/ctx.state.item.sku"
+															"address": {
+																"$ref": {
+																	"step": "@trigger",
+																	"path": [
+																		"body",
+																		"shipTo"
+																	]
+																}
+															},
+															"sku": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"sku"
+																	]
+																}
+															}
 														}
 													}
 												]
@@ -57,8 +88,22 @@
 														"use": "license-create",
 														"type": "module",
 														"inputs": {
-															"productId": "js/ctx.state.item.productId",
-															"userId": "js/ctx.state.identity.sub"
+															"productId": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"productId"
+																	]
+																}
+															},
+															"userId": {
+																"$ref": {
+																	"step": "identity",
+																	"path": [
+																		"sub"
+																	]
+																}
+															}
 														}
 													}
 												]
@@ -71,9 +116,30 @@
 														"use": "service-schedule",
 														"type": "module",
 														"inputs": {
-															"kind": "js/ctx.state.item.serviceKind",
-															"date": "js/ctx.state.item.scheduledFor",
-															"customerId": "js/ctx.state.identity.sub"
+															"kind": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"serviceKind"
+																	]
+																}
+															},
+															"date": {
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"scheduledFor"
+																	]
+																}
+															},
+															"customerId": {
+																"$ref": {
+																	"step": "identity",
+																	"path": [
+																		"sub"
+																	]
+																}
+															}
 														}
 													}
 												]
@@ -85,7 +151,20 @@
 												"use": "throw",
 												"type": "module",
 												"inputs": {
-													"message": "js/`Unknown item type: ${ctx.state.item.type}`"
+													"message": {
+														"$tpl": [
+															"Unknown item type: ",
+															{
+																"$ref": {
+																	"step": "item",
+																	"path": [
+																		"type"
+																	]
+																}
+															},
+															""
+														]
+													}
 												}
 											}
 										]
@@ -99,7 +178,12 @@
 									"type": "module",
 									"inputs": {
 										"event": "item-process-failure",
-										"item": "js/ctx.state.item",
+										"item": {
+											"$ref": {
+												"step": "item",
+												"path": []
+											}
+										},
 										"error": "js/ctx.error.message"
 									}
 								},
@@ -143,8 +227,23 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"orderId": "js/ctx.request.body.id",
-					"itemsProcessed": "js/ctx.state['per-item-pipeline'].length"
+					"orderId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"id"
+							]
+						}
+					},
+					"itemsProcessed": {
+						"$ref": {
+							"step": "per-item-pipeline",
+							"path": [
+								"length"
+							]
+						}
+					}
 				}
 			}
 		}

@@ -42,24 +42,13 @@
 								"inputs": {
 									"action": "js/ctx.request.body.action || null",
 									"pull_request": "js/ctx.request.body.pull_request || null",
-									"eventType": {
-										"$ref": {
-											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
-										}
-									}
+									"eventType": "js/ctx.request.headers['x-github-event']"
 								}
 							}
 						]
 					},
 					{
-						"when": [
-							"issues",
-							"issue_comment"
-						],
+						"when": ["issues", "issue_comment"],
 						"do": [
 							{
 								"id": "dispatch-issues",
@@ -67,15 +56,7 @@
 								"inputs": {
 									"action": "js/ctx.request.body.action || null",
 									"issue": "js/ctx.request.body.issue || null",
-									"eventType": {
-										"$ref": {
-											"step": "@trigger",
-											"path": [
-												"headers",
-												"x-github-event"
-											]
-										}
-									}
+									"eventType": "js/ctx.request.headers['x-github-event']"
 								}
 							}
 						]

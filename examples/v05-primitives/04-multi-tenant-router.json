@@ -6,7 +6,9 @@
 		"http": {
 			"method": "POST",
 			"path": "/api/process",
-			"middleware": ["request-id"]
+			"middleware": [
+				"request-id"
+			]
 		}
 	},
 	"steps": [
@@ -22,8 +24,20 @@
 								"id": "delegate",
 								"subworkflow": "acme-process",
 								"inputs": {
-									"body": "js/ctx.request.body",
-									"requestId": "js/ctx.state.requestId"
+									"body": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									},
+									"requestId": {
+										"$ref": {
+											"step": "requestId",
+											"path": []
+										}
+									}
 								}
 							}
 						]
@@ -35,8 +49,20 @@
 								"id": "delegate",
 								"subworkflow": "globex-process",
 								"inputs": {
-									"body": "js/ctx.request.body",
-									"requestId": "js/ctx.state.requestId"
+									"body": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									},
+									"requestId": {
+										"$ref": {
+											"step": "requestId",
+											"path": []
+										}
+									}
 								}
 							}
 						]
@@ -48,8 +74,20 @@
 								"id": "delegate",
 								"subworkflow": "initech-process",
 								"inputs": {
-									"body": "js/ctx.request.body",
-									"requestId": "js/ctx.state.requestId"
+									"body": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									},
+									"requestId": {
+										"$ref": {
+											"step": "requestId",
+											"path": []
+										}
+									}
 								}
 							}
 						]
@@ -78,7 +116,12 @@
 			"type": "module",
 			"inputs": {
 				"status": 200,
-				"body": "js/ctx.state.delegate"
+				"body": {
+					"$ref": {
+						"step": "delegate",
+						"path": []
+					}
+				}
 			}
 		}
 	]

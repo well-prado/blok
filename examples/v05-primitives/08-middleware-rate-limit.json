@@ -17,7 +17,12 @@
 			"use": "token-bucket-check",
 			"type": "module",
 			"inputs": {
-				"key": "js/ctx.state['compute-key']",
+				"key": {
+					"$ref": {
+						"step": "compute-key",
+						"path": []
+					}
+				},
 				"limit": 100,
 				"windowSeconds": 60
 			}
@@ -34,14 +39,35 @@
 						"inputs": {
 							"status": 429,
 							"headers": {
-								"Retry-After": "js/ctx.state['check-bucket'].retryAfterSec",
+								"Retry-After": {
+									"$ref": {
+										"step": "check-bucket",
+										"path": [
+											"retryAfterSec"
+										]
+									}
+								},
 								"X-RateLimit-Limit": "100",
 								"X-RateLimit-Remaining": "0",
-								"X-RateLimit-Reset": "js/ctx.state['check-bucket'].resetAt"
+								"X-RateLimit-Reset": {
+									"$ref": {
+										"step": "check-bucket",
+										"path": [
+											"resetAt"
+										]
+									}
+								}
 							},
 							"body": {
 								"error": "Rate limit exceeded",
-								"retryAfterSec": "js/ctx.state['check-bucket'].retryAfterSec"
+								"retryAfterSec": {
+									"$ref": {
+										"step": "check-bucket",
+										"path": [
+											"retryAfterSec"
+										]
+									}
+								}
 							}
 						},
 						"stop": true

@@ -23,14 +23,45 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "js/ctx.state.subscriber.url",
+							"url": {
+								"$ref": {
+									"step": "subscriber",
+									"path": [
+										"url"
+									]
+								}
+							},
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
-								"X-Webhook-Subscriber": "js/ctx.state.subscriber.id",
-								"X-Event-Id": "js/ctx.request.body.event.id"
+								"X-Webhook-Subscriber": {
+									"$ref": {
+										"step": "subscriber",
+										"path": [
+											"id"
+										]
+									}
+								},
+								"X-Event-Id": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"event",
+											"id"
+										]
+									}
+								}
 							},
-							"body": "js/ctx.request.body.event",
+							"body": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"event"
+									]
+								}
+							},
 							"responseType": "application/json"
 						}
 					}

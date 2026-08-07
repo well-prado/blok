@@ -18,16 +18,67 @@
 			"inputs": {
 				"event": "fanout-job-processed",
 				"attrs": {
-					"jobId": "js/ctx.request.params.jobId",
-					"queue": "js/ctx.request.params.queue",
-					"attempt": "js/ctx.request.params.attempt",
-					"tenantId": "js/ctx.request.body.tenantId",
-					"itemIndex": "js/ctx.request.body.index",
-					"item": "js/ctx.request.body.item"
+					"jobId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"params",
+								"jobId"
+							]
+						}
+					},
+					"queue": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"params",
+								"queue"
+							]
+						}
+					},
+					"attempt": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"params",
+								"attempt"
+							]
+						}
+					},
+					"tenantId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"tenantId"
+							]
+						}
+					},
+					"itemIndex": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"index"
+							]
+						}
+					},
+					"item": {
+						"$ref": {
+							"step": "@trigger",
+							"path": [
+								"body",
+								"item"
+							]
+						}
+					}
 				}
 			},
 			"idempotencyKey": "js/ctx.request.params.jobId",
-			"retry": { "maxAttempts": 3, "minTimeoutInMs": 500 }
+			"retry": {
+				"maxAttempts": 3,
+				"minTimeoutInMs": 500
+			}
 		},
 		{
 			"id": "summary",

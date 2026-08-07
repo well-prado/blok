@@ -17,7 +17,14 @@
 			"inputs": {
 				"url": "https://httpbin.org/post",
 				"method": "POST",
-				"body": "js/ctx.request.body"
+				"body": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body"
+						]
+					}
+				}
 			}
 		}
 	]

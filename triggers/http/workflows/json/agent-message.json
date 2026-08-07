@@ -16,7 +16,21 @@
 			"type": "module",
 			"inputs": {
 				"action": "get",
-				"key": "js/`agent:${ctx.request.params.sessionId}:history`"
+				"key": {
+					"$tpl": [
+						"agent:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						":history"
+					]
+				}
 			}
 		},
 		{
@@ -24,7 +38,21 @@
 			"use": "@blokjs/llm-agent",
 			"type": "module",
 			"inputs": {
-				"channel": "js/`agent:${ctx.request.params.sessionId}`",
+				"channel": {
+					"$tpl": [
+						"agent:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						""
+					]
+				},
 				"apiKey": "js/process.env.OPENROUTER_API_KEY",
 				"model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
 				"messages": "js/[{ role: 'system', content: 'You are a helpful agent with two tools: get_weather(city) returns current weather; calculate(expression) evaluates arithmetic. Use them when the user asks weather or math questions. Be concise.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]",
@@ -40,7 +68,9 @@
 									"description": "City name, e.g. 'San Francisco'"
 								}
 							},
-							"required": ["city"]
+							"required": [
+								"city"
+							]
 						},
 						"endpoint": "http://localhost:4000/tools/weather"
 					},
@@ -55,7 +85,9 @@
 									"description": "Arithmetic expression, e.g. '17 * 23' or '(120 + 45) / 3'"
 								}
 							},
-							"required": ["expression"]
+							"required": [
+								"expression"
+							]
 						},
 						"endpoint": "http://localhost:4000/tools/calculator"
 					}
@@ -69,7 +101,21 @@
 			"type": "module",
 			"inputs": {
 				"action": "set",
-				"key": "js/`agent:${ctx.request.params.sessionId}:history`",
+				"key": {
+					"$tpl": [
+						"agent:",
+						{
+							"$ref": {
+								"step": "@trigger",
+								"path": [
+									"params",
+									"sessionId"
+								]
+							}
+						},
+						":history"
+					]
+				},
 				"value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.agent.fullText }]",
 				"ttlMs": 86400000
 			},

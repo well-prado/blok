@@ -6,7 +6,9 @@
 		"http": {
 			"method": "POST",
 			"path": "/travel/book",
-			"middleware": ["auth-check"]
+			"middleware": [
+				"auth-check"
+			]
 		}
 	},
 	"steps": [
@@ -21,10 +23,41 @@
 						"idempotencyKey": "js/`flight-${ctx.request.body.bookingId}`",
 						"inputs": {
 							"action": "book",
-							"from": "js/ctx.request.body.from",
-							"to": "js/ctx.request.body.to",
-							"date": "js/ctx.request.body.date",
-							"passenger": "js/ctx.state.identity.sub"
+							"from": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"from"
+									]
+								}
+							},
+							"to": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"to"
+									]
+								}
+							},
+							"date": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"date"
+									]
+								}
+							},
+							"passenger": {
+								"$ref": {
+									"step": "identity",
+									"path": [
+										"sub"
+									]
+								}
+							}
 						}
 					},
 					{
@@ -34,10 +67,41 @@
 						"idempotencyKey": "js/`hotel-${ctx.request.body.bookingId}`",
 						"inputs": {
 							"action": "book",
-							"city": "js/ctx.request.body.to",
-							"checkIn": "js/ctx.request.body.date",
-							"nights": "js/ctx.request.body.nights",
-							"guest": "js/ctx.state.identity.sub"
+							"city": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"to"
+									]
+								}
+							},
+							"checkIn": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"date"
+									]
+								}
+							},
+							"nights": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"nights"
+									]
+								}
+							},
+							"guest": {
+								"$ref": {
+									"step": "identity",
+									"path": [
+										"sub"
+									]
+								}
+							}
 						}
 					},
 					{
@@ -47,10 +111,57 @@
 						"idempotencyKey": "js/`car-${ctx.request.body.bookingId}`",
 						"inputs": {
 							"action": "book",
-							"city": "js/ctx.request.body.to",
-							"pickup": "js/ctx.request.body.date",
-							"return": "js/`${ctx.request.body.date} + ${ctx.request.body.nights} days`",
-							"driver": "js/ctx.state.identity.sub"
+							"city": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"to"
+									]
+								}
+							},
+							"pickup": {
+								"$ref": {
+									"step": "@trigger",
+									"path": [
+										"body",
+										"date"
+									]
+								}
+							},
+							"return": {
+								"$tpl": [
+									"",
+									{
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"date"
+											]
+										}
+									},
+									" + ",
+									{
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"nights"
+											]
+										}
+									},
+									" days"
+								]
+							},
+							"driver": {
+								"$ref": {
+									"step": "identity",
+									"path": [
+										"sub"
+									]
+								}
+							}
 						}
 					},
 					{
@@ -60,10 +171,39 @@
 						"inputs": {
 							"status": 201,
 							"body": {
-								"bookingId": "js/ctx.request.body.bookingId",
-								"flight": "js/ctx.state['book-flight'].id",
-								"hotel": "js/ctx.state['book-hotel'].id",
-								"car": "js/ctx.state['book-car'].id"
+								"bookingId": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"bookingId"
+										]
+									}
+								},
+								"flight": {
+									"$ref": {
+										"step": "book-flight",
+										"path": [
+											"id"
+										]
+									}
+								},
+								"hotel": {
+									"$ref": {
+										"step": "book-hotel",
+										"path": [
+											"id"
+										]
+									}
+								},
+								"car": {
+									"$ref": {
+										"step": "book-car",
+										"path": [
+											"id"
+										]
+									}
+								}
 							}
 						}
 					}
@@ -80,7 +220,14 @@
 									"type": "module",
 									"inputs": {
 										"action": "cancel",
-										"id": "js/ctx.state['book-car'].id",
+										"id": {
+											"$ref": {
+												"step": "book-car",
+												"path": [
+													"id"
+												]
+											}
+										},
 										"reason": "saga-rollback"
 									}
 								}
@@ -98,7 +245,14 @@
 									"type": "module",
 									"inputs": {
 										"action": "cancel",
-										"id": "js/ctx.state['book-hotel'].id",
+										"id": {
+											"$ref": {
+												"step": "book-hotel",
+												"path": [
+													"id"
+												]
+											}
+										},
 										"reason": "saga-rollback"
 									}
 								}
@@ -116,7 +270,14 @@
 									"type": "module",
 									"inputs": {
 										"action": "cancel",
-										"id": "js/ctx.state['book-flight'].id",
+										"id": {
+											"$ref": {
+												"step": "book-flight",
+												"path": [
+													"id"
+												]
+											}
+										},
 										"reason": "saga-rollback"
 									}
 								}
@@ -133,7 +294,15 @@
 								"error": "Booking saga rolled back",
 								"failedAt": "js/ctx.error.name",
 								"reason": "js/ctx.error.message",
-								"bookingId": "js/ctx.request.body.bookingId"
+								"bookingId": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body",
+											"bookingId"
+										]
+									}
+								}
 							}
 						}
 					}

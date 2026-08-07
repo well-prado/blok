@@ -16,8 +16,24 @@
 			"type": "module",
 			"inputs": {
 				"channel": "sse-demo",
-				"event": "js/ctx.request.body.event",
-				"data": "js/ctx.request.body.data"
+				"event": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body",
+							"event"
+						]
+					}
+				},
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": [
+							"body",
+							"data"
+						]
+					}
+				}
 			}
 		}
 	]

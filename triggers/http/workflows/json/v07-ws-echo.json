@@ -5,7 +5,10 @@
 	"trigger": {
 		"websocket": {
 			"path": "/ws/echo",
-			"events": ["hello", "ping"]
+			"events": [
+				"hello",
+				"ping"
+			]
 		}
 	},
 	"steps": [
@@ -18,7 +21,12 @@
 						"id": "greet",
 						"use": "@blokjs/ws-reply",
 						"type": "module",
-						"inputs": { "event": "connected", "payload": { "ok": true } }
+						"inputs": {
+							"event": "connected",
+							"payload": {
+								"ok": true
+							}
+						}
 					}
 				],
 				"else": [
@@ -28,7 +36,16 @@
 						"type": "module",
 						"inputs": {
 							"event": "echo",
-							"payload": { "original": "js/ctx.request.body" }
+							"payload": {
+								"original": {
+									"$ref": {
+										"step": "@trigger",
+										"path": [
+											"body"
+										]
+									}
+								}
+							}
 						}
 					}
 				]

@@ -21,7 +21,12 @@
 			"use": "@blokjs/browser-goto",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
 				"url": "http://127.0.0.1:4000/fixtures/login"
 			}
 		},
@@ -30,8 +35,16 @@
 			"use": "@blokjs/browser-fill",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
-				"locator": { "by": "label", "value": "Email" },
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
+				"locator": {
+					"by": "label",
+					"value": "Email"
+				},
 				"value": "js/String((ctx.request.body && ctx.request.body.email) || 'alice@example.com')"
 			}
 		},
@@ -40,8 +53,16 @@
 			"use": "@blokjs/browser-fill",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
-				"locator": { "by": "label", "value": "Password" },
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
+				"locator": {
+					"by": "label",
+					"value": "Password"
+				},
 				"value": "js/String((ctx.request.body && ctx.request.body.password) || 'hunter2')",
 				"sensitive": true
 			}
@@ -51,8 +72,17 @@
 			"use": "@blokjs/browser-click",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
-				"locator": { "by": "role", "role": "button", "name": "Sign in" }
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
+				"locator": {
+					"by": "role",
+					"role": "button",
+					"name": "Sign in"
+				}
 			}
 		},
 		{
@@ -60,7 +90,12 @@
 			"use": "@blokjs/browser-assert-url",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
 				"expected": "/fixtures/dashboard",
 				"mode": "contains"
 			}
@@ -70,8 +105,16 @@
 			"use": "@blokjs/browser-assert-text",
 			"type": "module",
 			"inputs": {
-				"session": "js/ctx.state.launch",
-				"locator": { "by": "testId", "value": "welcome" },
+				"session": {
+					"$ref": {
+						"step": "launch",
+						"path": []
+					}
+				},
+				"locator": {
+					"by": "testId",
+					"value": "welcome"
+				},
 				"expected": "Welcome",
 				"mode": "contains"
 			}
@@ -81,7 +124,14 @@
 			"use": "@blokjs/browser-close",
 			"type": "module",
 			"inputs": {
-				"sessionId": "js/ctx.state.launch.sessionId"
+				"sessionId": {
+					"$ref": {
+						"step": "launch",
+						"path": [
+							"sessionId"
+						]
+					}
+				}
 			}
 		}
 	]

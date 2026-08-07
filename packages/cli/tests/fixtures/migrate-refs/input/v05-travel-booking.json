@@ -17,11 +17,7 @@
 			"inputs": {
 				"schema": {
 					"type": "object",
-					"required": [
-						"flightUrl",
-						"hotelUrl",
-						"carUrl"
-					],
+					"required": ["flightUrl", "hotelUrl", "carUrl"],
 					"properties": {
 						"flightUrl": {
 							"type": "string"
@@ -34,14 +30,7 @@
 						}
 					}
 				},
-				"data": {
-					"$ref": {
-						"step": "@trigger",
-						"path": [
-							"body"
-						]
-					}
-				}
+				"data": "js/ctx.request.body"
 			}
 		},
 		{
@@ -53,15 +42,7 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": {
-								"$ref": {
-									"step": "@trigger",
-									"path": [
-										"body",
-										"flightUrl"
-									]
-								}
-							},
+							"url": "js/ctx.request.body.flightUrl",
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
@@ -78,15 +59,7 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": {
-								"$ref": {
-									"step": "@trigger",
-									"path": [
-										"body",
-										"hotelUrl"
-									]
-								}
-							},
+							"url": "js/ctx.request.body.hotelUrl",
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",
@@ -103,15 +76,7 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": {
-								"$ref": {
-									"step": "@trigger",
-									"path": [
-										"body",
-										"carUrl"
-									]
-								}
-							},
+							"url": "js/ctx.request.body.carUrl",
 							"method": "POST",
 							"headers": {
 								"Content-Type": "application/json",

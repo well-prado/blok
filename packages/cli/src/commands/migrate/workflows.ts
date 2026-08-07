@@ -143,7 +143,7 @@ async function migrateOne(file: string, opts: MigrationOpts): Promise<MigrationR
 	} as MigrationResult;
 }
 
-function convertToV2(wf: Record<string, unknown>): Record<string, unknown> {
+export function convertToV2(wf: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 
 	if (typeof wf.name === "string") out.name = wf.name;

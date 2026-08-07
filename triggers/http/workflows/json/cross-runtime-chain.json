@@ -21,8 +21,22 @@
 			"use": "chain-test",
 			"type": "runtime.go",
 			"inputs": {
-				"chain": "js/ctx.state['init'].chain",
-				"origin": "js/ctx.state['init'].origin"
+				"chain": {
+					"$ref": {
+						"step": "init",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "init",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -30,8 +44,22 @@
 			"use": "chain-test",
 			"type": "runtime.rust",
 			"inputs": {
-				"chain": "js/ctx.state['go'].chain",
-				"origin": "js/ctx.state['go'].origin"
+				"chain": {
+					"$ref": {
+						"step": "go",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "go",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -39,8 +67,22 @@
 			"use": "chain-test",
 			"type": "runtime.java",
 			"inputs": {
-				"chain": "js/ctx.state['rust'].chain",
-				"origin": "js/ctx.state['rust'].origin"
+				"chain": {
+					"$ref": {
+						"step": "rust",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "rust",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -48,8 +90,22 @@
 			"use": "chain-test",
 			"type": "runtime.csharp",
 			"inputs": {
-				"chain": "js/ctx.state['java'].chain",
-				"origin": "js/ctx.state['java'].origin"
+				"chain": {
+					"$ref": {
+						"step": "java",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "java",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -57,8 +113,22 @@
 			"use": "chain-test",
 			"type": "runtime.php",
 			"inputs": {
-				"chain": "js/ctx.state['csharp'].chain",
-				"origin": "js/ctx.state['csharp'].origin"
+				"chain": {
+					"$ref": {
+						"step": "csharp",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "csharp",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -66,8 +136,22 @@
 			"use": "chain-test",
 			"type": "runtime.ruby",
 			"inputs": {
-				"chain": "js/ctx.state['php'].chain",
-				"origin": "js/ctx.state['php'].origin"
+				"chain": {
+					"$ref": {
+						"step": "php",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "php",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{
@@ -75,8 +159,22 @@
 			"use": "chain-test",
 			"type": "runtime.python3",
 			"inputs": {
-				"chain": "js/ctx.state['ruby'].chain",
-				"origin": "js/ctx.state['ruby'].origin"
+				"chain": {
+					"$ref": {
+						"step": "ruby",
+						"path": [
+							"chain"
+						]
+					}
+				},
+				"origin": {
+					"$ref": {
+						"step": "ruby",
+						"path": [
+							"origin"
+						]
+					}
+				}
 			}
 		},
 		{

@@ -22,9 +22,32 @@
 								"id": "dispatch-acme",
 								"subworkflow": "v05-tenant-acme",
 								"inputs": {
-									"order": "js/ctx.request.body.order",
-									"customer": "js/ctx.request.body.customer",
-									"originalBody": "js/ctx.request.body"
+									"order": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"order"
+											]
+										}
+									},
+									"customer": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"customer"
+											]
+										}
+									},
+									"originalBody": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									}
 								}
 							}
 						]
@@ -36,9 +59,32 @@
 								"id": "dispatch-beta",
 								"subworkflow": "v05-tenant-beta",
 								"inputs": {
-									"order": "js/ctx.request.body.order",
-									"customer": "js/ctx.request.body.customer",
-									"originalBody": "js/ctx.request.body"
+									"order": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"order"
+											]
+										}
+									},
+									"customer": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"customer"
+											]
+										}
+									},
+									"originalBody": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									}
 								}
 							}
 						]
@@ -50,9 +96,32 @@
 								"id": "dispatch-gamma",
 								"subworkflow": "v05-tenant-gamma",
 								"inputs": {
-									"order": "js/ctx.request.body.order",
-									"customer": "js/ctx.request.body.customer",
-									"originalBody": "js/ctx.request.body"
+									"order": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"order"
+											]
+										}
+									},
+									"customer": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body",
+												"customer"
+											]
+										}
+									},
+									"originalBody": {
+										"$ref": {
+											"step": "@trigger",
+											"path": [
+												"body"
+											]
+										}
+									}
 								}
 							}
 						]

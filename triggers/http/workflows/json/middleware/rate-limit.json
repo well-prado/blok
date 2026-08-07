@@ -18,7 +18,18 @@
 			"type": "module",
 			"inputs": {
 				"action": "get",
-				"key": "js/`bucket:${ctx.state['compute-key']}`"
+				"key": {
+					"$tpl": [
+						"bucket:",
+						{
+							"$ref": {
+								"step": "compute-key",
+								"path": []
+							}
+						},
+						""
+					]
+				}
 			}
 		},
 		{
@@ -35,10 +46,35 @@
 			"type": "module",
 			"inputs": {
 				"action": "set",
-				"key": "js/`bucket:${ctx.state['compute-key']}`",
+				"key": {
+					"$tpl": [
+						"bucket:",
+						{
+							"$ref": {
+								"step": "compute-key",
+								"path": []
+							}
+						},
+						""
+					]
+				},
 				"value": {
-					"count": "js/ctx.state['next-state'].count",
-					"expiresAt": "js/ctx.state['next-state'].expiresAt"
+					"count": {
+						"$ref": {
+							"step": "next-state",
+							"path": [
+								"count"
+							]
+						}
+					},
+					"expiresAt": {
+						"$ref": {
+							"step": "next-state",
+							"path": [
+								"expiresAt"
+							]
+						}
+					}
 				}
 			}
 		},
@@ -59,7 +95,14 @@
 								"error": "Rate limit exceeded",
 								"limit": 5,
 								"windowSeconds": 60,
-								"retryAfterSec": "js/ctx.state['next-state'].retryAfterSec"
+								"retryAfterSec": {
+									"$ref": {
+										"step": "next-state",
+										"path": [
+											"retryAfterSec"
+										]
+									}
+								}
 							}
 						}
 					}
