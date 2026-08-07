@@ -133,6 +133,8 @@ import {
 } from "./concurrency/ConcurrencyLimitError";
 // Queue-mode TTL expiry (PR 1-5 polish · 410 Gone vs 429)
 import { QueueExpiredError, type QueueExpiredInfo, isQueueExpiredError } from "./concurrency/QueueExpiredError";
+// Resolved-key guard (#706) — expression-shaped keys never degrade to constants
+import { UnresolvableKeyExpressionError, assertResolvableKey } from "./idempotency/resolveIdempotencyKey";
 
 import {
 	CONCURRENCY_DEFAULTS,
@@ -331,6 +333,9 @@ export {
 	QueueExpiredError,
 	type QueueExpiredInfo,
 	isQueueExpiredError,
+	// Resolved-key guard (#706)
+	UnresolvableKeyExpressionError,
+	assertResolvableKey,
 	readConcurrencyConfig,
 	type NormalizedConcurrencyConfig,
 	CONCURRENCY_DEFAULTS,

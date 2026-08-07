@@ -1,6 +1,10 @@
 import type { Context } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
-import { resolveIdempotencyKey } from "../../../src/idempotency/resolveIdempotencyKey";
+import {
+	UnresolvableKeyExpressionError,
+	resolveConcurrencyKey,
+	resolveIdempotencyKey,
+} from "../../../src/idempotency/resolveIdempotencyKey";
 
 function makeCtx(overrides: Partial<Context> = {}): Context {
 	return {
@@ -77,5 +81,55 @@ describe("resolveIdempotencyKey", () => {
 
 	it("returns null on a syntactically invalid expression", () => {
 		expect(resolveIdempotencyKey("js/ctx.request.body.+", makeCtx())).toBeNull();
+	});
+});
+
+/**
+ * #706 — the resolver used to take ANY non-`js/` string as a literal key, so a
+ * mistyped expression became a CONSTANT: one idempotency-cache entry replayed to
+ * every caller for the full TTL, one concurrency bucket for every tenant. These
+ * are the shapes authors actually wrote in the shipped corpus and in the docs.
+ */
+describe("resolveIdempotencyKey — expression-shaped keys never degrade to constants (#706)", () => {
+	const shapes: Array<[label: string, key: unknown]> = [
+		["$. proxy path", "$.req.body.requestId"],
+		["bare ctx. expression", "ctx.request.body.requestId"],
+		["${…} interpolation", "order-${ctx.request.body.requestId}"],
+		["{{…}} template", "{{ctx.request.body.requestId}}"],
+		["unlowered {$ref} object", { $ref: { step: "@trigger", path: ["body", "requestId"] } }],
+		["unlowered {$tpl} object", { $tpl: ["order-", { $ref: { step: "@trigger", path: ["body", "id"] } }] }],
+	];
+
+	for (const [label, key] of shapes) {
+		it(`throws UnresolvableKeyExpressionError for ${label}`, () => {
+			expect(() => resolveIdempotencyKey(key, makeCtx())).toThrow(UnresolvableKeyExpressionError);
+		});
+	}
+
+	it("names the field, the location and the fix in the message", () => {
+		let caught: unknown;
+		try {
+			resolveIdempotencyKey("$.req.body.requestId", makeCtx(), { field: "idempotencyKey", where: 'step "charge"' });
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).toBeInstanceOf(UnresolvableKeyExpressionError);
+		const message = (caught as Error).message;
+		expect(message).toContain("idempotencyKey");
+		expect(message).toContain('step "charge"');
+		expect(message).toContain("js/");
+		expect((caught as Error).name).toBe("UnresolvableKeyExpressionError");
+	});
+
+	it("the concurrency variant throws too — one guard covers both call sites", () => {
+		expect(() => resolveConcurrencyKey("$.req.body.tenant", makeCtx())).toThrow(UnresolvableKeyExpressionError);
+	});
+
+	// The whole point of NOT rejecting every non-`js/` string: a static dedup key
+	// is a legitimate, documented use.
+	it("leaves genuine literal keys alone", () => {
+		for (const literal of ["user-123", "daily-report", "nightly:2026-08-07", "sha256$abc", "a{b}c"]) {
+			expect(resolveIdempotencyKey(literal, makeCtx())).toBe(literal);
+		}
 	});
 });

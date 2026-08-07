@@ -10,6 +10,8 @@
  * appear in {@link CONCURRENCY_TRIGGER_KEYS}.
  */
 
+import { assertResolvableKey } from "../idempotency/resolveIdempotencyKey";
+
 /** Trigger types whose schema declares the `ConcurrencyOptsFields` mixin. */
 const CONCURRENCY_TRIGGER_KEYS = ["http", "worker"] as const;
 
@@ -79,6 +81,10 @@ export function readConcurrencyConfig(
 			| undefined;
 		if (!cfg) continue;
 
+		// #706 — an expression-shaped key must never be taken as a literal, and a
+		// non-string one (an unlowered `{$ref}`) must never be coerced to `""`,
+		// which would silently disable the gate. Both throw here.
+		assertResolvableKey(cfg.concurrencyKey, "concurrencyKey", `the \`${key}\` trigger`);
 		const keyExpression = typeof cfg.concurrencyKey === "string" ? cfg.concurrencyKey.trim() : "";
 		if (!keyExpression) continue;
 

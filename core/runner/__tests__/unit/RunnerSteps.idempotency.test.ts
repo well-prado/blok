@@ -293,4 +293,19 @@ describe("RunnerSteps — idempotency cache integration", () => {
 		await runner.run(ctxWithTracing({ workflow: "wf-dyn", reqBody: { requestId: "abc" } }).ctx);
 		expect(node.runs).toBe(2);
 	});
+
+	// #706 — the whole failure this issue is about: `"$.req.body.requestId"` used
+	// to become the constant key `$.req.body.requestId`, so run #2 (a DIFFERENT
+	// caller, a DIFFERENT requestId) got run #1's cached response back.
+	it("fails the step on an expression-shaped idempotencyKey instead of replaying one cached response to everyone", async () => {
+		const node = new EchoNode("echo", { secret: "customer-1-data" });
+		node.idempotencyKey = "$.req.body.requestId";
+		const runner = new Runner([node]);
+
+		await expect(runner.run(ctxWithTracing({ workflow: "wf-706", reqBody: { requestId: "a" } }).ctx)).rejects.toThrow(
+			/idempotencyKey/,
+		);
+		// The step never ran, and nothing was cached for the next caller.
+		expect(node.runs).toBe(0);
+	});
 });

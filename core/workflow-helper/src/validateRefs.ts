@@ -33,6 +33,11 @@
  *    // ponytail: regex member-chain scan, not a JS parser. Upgrade path if a
  *    // consumer needs reads through ternaries/destructuring: parse the
  *    // expression and walk the real member-expression AST.
+ * 3. **Resolved-key fields** — `idempotencyKey`, `concurrencyKey` and
+ *    `debounce.key` are not Mapper-resolved: the runner evaluates a `js/`
+ *    string and takes ANY other string as a LITERAL key. An expression-shaped
+ *    value there is reported as `unresolvable-key` (#706), because a silent
+ *    constant key is invisible at run time and unsafe by default.
  *
  * ## Graceful degradation (hard requirement)
  *
@@ -51,6 +56,7 @@ import {
 	isStructuralTpl,
 	parseCtxExpression,
 	renderRefPath,
+	unresolvableKeyShape,
 } from "./refSyntax";
 
 // ─────────────────────────────── public types ───────────────────────────────
@@ -70,6 +76,9 @@ export type RefSeverity = "error" | "warning";
  *   proven. Warning.
  * - `unchecked-node` — the producing node advertises no output schema, so the
  *   field cannot be checked at all. Warning.
+ * - `unresolvable-key` — a resolved-key field (`idempotencyKey`,
+ *   `concurrencyKey`, `debounce.key`) holds an expression the runner cannot
+ *   evaluate, so it would be taken as a CONSTANT literal (#706).
  */
 export type RefDiagnosticCode =
 	| "dangling-step"
@@ -77,7 +86,8 @@ export type RefDiagnosticCode =
 	| "arm-escape"
 	| "unknown-field"
 	| "unprovable-field"
-	| "unchecked-node";
+	| "unchecked-node"
+	| "unresolvable-key";
 
 export interface RefDiagnostic {
 	readonly severity: RefSeverity;
@@ -559,6 +569,68 @@ function pushStructural(
 	out.push({ root, path: ref.$ref.path ?? [], docPath, readerStep: stepId, readerScope: scope });
 }
 
+// ─────────────────────────── resolved-key fields (#706) ─────────────────────
+
+/** One `idempotencyKey` / `concurrencyKey` / `debounce.key` site in a document. */
+interface KeySite {
+	readonly field: string;
+	readonly value: unknown;
+	readonly docPath: string;
+	readonly step: string;
+}
+
+/**
+ * Collect every step `idempotencyKey`, including inside nested pipelines.
+ *
+ * These fields are NOT resolved by the Mapper. The runner evaluates a `js/`
+ * expression and takes any other string as a LITERAL key, so a mistyped
+ * expression silently becomes a constant — one shared idempotency-cache entry
+ * replayed to every caller for the full TTL, or one concurrency bucket for
+ * every tenant (#706). The runner throws on these now; catching them here is
+ * the point, because the runtime symptom is otherwise invisible.
+ */
+function collectKeySites(steps: readonly unknown[], docPath: string, out: KeySite[]): void {
+	steps.forEach((raw, index) => {
+		if (!isPlainObject(raw)) return;
+		const stepPath = `${docPath}[${index}]`;
+		const stepId = asString(raw.id) ?? `<step ${index}>`;
+		if (raw.idempotencyKey !== undefined) {
+			out.push({
+				field: "idempotencyKey",
+				value: raw.idempotencyKey,
+				docPath: `${stepPath}.idempotencyKey`,
+				step: stepId,
+			});
+		}
+		for (const arm of subPipelines(raw)) collectKeySites(arm.steps, stepPath, out);
+	});
+}
+
+/** The trigger-block half: `concurrencyKey` and `debounce.key`, per trigger type. */
+function collectTriggerKeySites(trigger: unknown, out: KeySite[]): void {
+	if (!isPlainObject(trigger)) return;
+	for (const [kind, cfg] of Object.entries(trigger)) {
+		if (!isPlainObject(cfg)) continue;
+		if (cfg.concurrencyKey !== undefined) {
+			out.push({
+				field: "concurrencyKey",
+				value: cfg.concurrencyKey,
+				docPath: `trigger.${kind}.concurrencyKey`,
+				step: "<trigger>",
+			});
+		}
+		const debounce = cfg.debounce;
+		if (isPlainObject(debounce) && debounce.key !== undefined) {
+			out.push({
+				field: "debounce.key",
+				value: debounce.key,
+				docPath: `trigger.${kind}.debounce.key`,
+				step: "<trigger>",
+			});
+		}
+	}
+}
+
 // ────────────────────────────── schema walking ──────────────────────────────
 
 type WalkResult =
@@ -696,6 +768,29 @@ export function validateRefs(doc: unknown, opts: ValidateRefsOptions = {}): Vali
 		seen.add(key);
 		diagnostics.push(d);
 	};
+
+	// #706 — resolved-key fields, checked before the ref walk so a workflow whose
+	// only problem is a constant-by-accident key still fails the build.
+	const keySites: KeySite[] = [];
+	collectKeySites(steps, "steps", keySites);
+	collectTriggerKeySites(workflow.trigger, keySites);
+	for (const site of keySites) {
+		const shape = unresolvableKeyShape(site.value);
+		if (!shape) continue;
+		emit({
+			severity: "error",
+			code: "unresolvable-key",
+			path: site.docPath,
+			step: site.step,
+			producer: "",
+			refPath: "",
+			message: [
+				`\`${site.field}\` in workflow "${workflowName}" is ${shape}, which the runner cannot resolve: ${JSON.stringify(site.value)}.`,
+				"  hint: this field takes a `js/` expression or a DELIBERATE literal — nothing else is evaluated. A literal key is a CONSTANT: one idempotency-cache entry replayed to every caller, or one concurrency bucket for every tenant.",
+				"  fix: write the `js/` form (e.g. `js/ctx.request.body.requestId`), or the typed handle in the @blokjs/core DSL. If you really meant a constant, drop the expression syntax.",
+			].join("\n"),
+		});
+	}
 
 	for (const site of sites) {
 		// Written by middleware or by a node's `ctx.publish()` — outside this

@@ -8,7 +8,39 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`idempotencyKey` / `concurrencyKey` / `debounce.key` no longer degrade to
+  CONSTANTS when the expression isn't recognised** (#706). These three fields are
+  resolved by a `js/`-or-LITERAL rule, and every non-`js/` string was taken as a
+  literal — so `"idempotencyKey": "$.req.body.requestId"` became one cache entry
+  keyed on the string `$.req.body.requestId`, and the first response was replayed
+  to **every** subsequent caller for the full 24h TTL. On a payment or order step
+  that is cross-customer response bleed, not a perf regression; the
+  `concurrencyKey` equivalent collapses every tenant into one bucket, turning a
+  per-tenant limit of N into a global limit of N. It was strictly worse than the
+  documented fail-open contract, because resolution never failed — it *succeeded*
+  as a constant. Five real occurrences shipped in this repo, all written by people
+  following the docs.
+
+  Literal keys are still legal (a static dedup key is a real use case), but a value
+  that is expression-SHAPED and unresolvable — a leading `$.`, a bare `ctx.`, a
+  `${…}` interpolation, `{{…}}`, or an unlowered `{$ref}` / `{$tpl}` object — now
+  throws `UnresolvableKeyExpressionError`, naming the field, the step and the
+  correct form. The same values are reported statically by `validateRefs` /
+  `blokctl check` (new `unresolvable-key` diagnostic) and by the HTTP trigger's
+  boot-time pass, so CI catches them before a deploy does.
+
+  **Behavior change, deliberately.** A workflow that is (unknowingly) relying on a
+  constant key will now error instead of silently sharing one cache entry or one
+  concurrency bucket. That is the point: the runtime symptom was invisible. Fix by
+  writing the `js/` form (`"js/ctx.request.body.requestId"`) or, in the
+  `@blokjs/core` DSL, passing the typed handle — or drop the expression syntax if
+  you genuinely meant a constant.
+
+  Two silent-disable holes closed along the way: `readConcurrencyConfig` and
+  `readSchedulingConfig` coerced a non-string key (an unlowered `{$ref}`) to `""`,
+  which turned the concurrency gate and debounce off entirely with no signal.
 
 ## [2.0.1] — 2026-08-07
 

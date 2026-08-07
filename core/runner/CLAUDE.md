@@ -134,6 +134,21 @@ prevents collisions across workflows and across same-id steps in
 different workflows. Resolved key is either the literal string or the
 result of evaluating a `js/ctx....` expression against the live ctx.
 
+**A non-`js/` string is a LITERAL key — i.e. a CONSTANT (#706).** That
+is legal on purpose (a static dedup key is a real use case), so the
+resolver cannot simply reject everything unprefixed. What it DOES reject,
+loudly, is a value that is expression-SHAPED but unresolvable: a leading
+`$.`, a bare `ctx.`, a `${…}` interpolation, `{{…}}`, or an unlowered
+`{$ref}` / `{$tpl}` object. Those throw `UnresolvableKeyExpressionError`
+naming the field and the step. `assertResolvableKey` in
+`src/idempotency/resolveIdempotencyKey.ts` is the single guard; it runs
+inside `resolveKey` (covering step `idempotencyKey`, trigger
+`concurrencyKey`, trigger `debounce.key`) and again in the two trigger-
+config readers, which would otherwise coerce a non-string key to `""`
+and silently disable the gate. The shape rule itself is
+`unresolvableKeyShape` in `@blokjs/helper` — shared with `validateRefs`
+so `blokctl check` and the runtime cannot disagree.
+
 Cache TTL: 24h default (`DEFAULT_IDEMPOTENCY_TTL_MS`); override per
 step via `idempotencyKeyTTL: <ms>`. A TTL of 0 marks an entry as
 immediately expired (kill-switch).
@@ -430,10 +445,15 @@ resolvedKey)`. Different workflows + different keys never contend.
   throttles too (correct by design — the limit is dynamic state).
 
 **Failure modes**:
-- Key resolution fails (e.g. `js/ctx.bad.path` throws or returns
-  null/undefined) → fail-open (skip the gate, run the workflow).
-  Matches `idempotencyKey` semantics. Use `BLOK_MAPPER_MODE=strict`
-  to fail-fast in production.
+- Key resolution fails (e.g. `js/ctx.bad.path` returns null/undefined)
+  → fail-open (skip the gate, run the workflow). Matches
+  `idempotencyKey` semantics. A THROWING expression honors
+  `BLOK_MAPPER_MODE` (`strict`, the default, fails the run).
+- Key is expression-shaped but not `js/`-prefixed (`$.`, bare `ctx.`,
+  `${…}`, `{{…}}`, an unlowered `{$ref}`) → **NOT fail-open**: throws
+  `UnresolvableKeyExpressionError` (#706). Fail-open never applied here
+  historically — the value succeeded as a CONSTANT key, collapsing every
+  tenant into one bucket with no signal at all.
 - Tracker inactive (`BLOK_TRACE_ENABLED=false`) → gate disabled.
   Same store backs both. Documented trade-off.
 
@@ -598,6 +618,10 @@ which:
 - Debounce key resolution fails (`js/ctx.bad.path` throws or returns
   null) → fail-open (skip the gate). Use `BLOK_MAPPER_MODE=strict`
   for fail-fast in production.
+- Debounce key is expression-shaped but not `js/`-prefixed → throws
+  `UnresolvableKeyExpressionError` (#706), same guard as
+  `idempotencyKey` / `concurrencyKey`. Taking it as a literal would
+  coalesce every unrelated ping into one window.
 - Tracker inactive (`BLOK_TRACE_ENABLED=false`) → all gates disabled
   (deferred dispatch needs persistence to survive within-process).
 

@@ -76,12 +76,18 @@ elapsed since the first ping (whichever comes first).
 Defined in [core/workflow-helper/src/types/TriggerOpts.ts:128-163](https://github.com/deskree-inc/blok/blob/main/core/workflow-helper/src/types/TriggerOpts.ts#L128-L163).
 
 <ParamField path="key" type="string" required>
-  Debounce key — a literal string or a `js/ctx....` expression the
-  runner resolves against the live `ctx`. Pings sharing the resolved key
-  collapse. Typically derived from the request payload
+  Debounce key — a `js/ctx....` expression the runner resolves against
+  the live `ctx`, or a **deliberate** literal string. Pings sharing the
+  resolved key collapse. Typically derived from the request payload
   (`key: "js/ctx.request.params.docId"`, `key: "js/ctx.request.body.userId"`). It's a config string,
   not a handle — the debounce gate runs at run-entry, before the
   workflow body.
+
+  Anything else that *looks* like an expression — a leading `$.`, a bare
+  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
+  — fails the run with `UnresolvableKeyExpressionError` instead of being
+  taken as a literal (which would coalesce every document into one
+  window). `blokctl check` catches it statically.
 </ParamField>
 
 <ParamField path="mode" type='"leading" | "trailing"' default='"trailing"'>
@@ -189,7 +195,9 @@ same trigger.
   <Step title="Resolve key">
     The runner evaluates `debounce.key` against the live `ctx`. Failure
     to resolve (throw or `null`) is fail-open — the gate is skipped
-    and the run proceeds synchronously.
+    and the run proceeds synchronously. An expression-shaped key that is
+    not `js/`-prefixed is NOT fail-open: it is rejected outright, because
+    taking it as a literal would silently coalesce unrelated pings.
   </Step>
   <Step title="Register on coordinator">
     `DebounceCoordinator.register(...)` returns one of three outcomes:

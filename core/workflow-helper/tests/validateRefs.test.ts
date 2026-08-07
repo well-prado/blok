@@ -584,3 +584,101 @@ describe("validateRefs — published slots resolve for scoped and bare refs", ()
 		expect(codes(result)).toContain("dangling-step");
 	});
 });
+
+// ────────────── resolved-key fields: idempotency / concurrency (#706) ───────
+//
+// The runner resolves these with a `js/`-or-LITERAL rule, so an expression it
+// does not recognise becomes a CONSTANT key — one idempotency-cache entry
+// replayed to every caller for 24h, or one concurrency bucket for every tenant.
+// The shipped `v06-reliability-showcase` workflow had exactly this, in the
+// workflow whose stated purpose was demonstrating the reliability primitives.
+
+describe("validateRefs — resolved-key fields (#706)", () => {
+	const flow = (over: { idem?: unknown; conc?: unknown; debounceKey?: unknown }) => ({
+		name: "v06-reliability-showcase",
+		version: "1.0.0",
+		trigger: {
+			http: {
+				method: "POST",
+				path: "/orders",
+				...(over.conc !== undefined ? { concurrencyKey: over.conc } : {}),
+				...(over.debounceKey !== undefined ? { debounce: { key: over.debounceKey, delay: "500ms" } } : {}),
+			},
+		},
+		steps: [
+			{ id: "charge", use: "charger", inputs: {}, ...(over.idem !== undefined ? { idempotencyKey: over.idem } : {}) },
+		],
+	});
+
+	it("flags an expression-shaped step idempotencyKey", () => {
+		const result = validateRefs(flow({ idem: "$.req.body.requestId" }), { nodes: lookup({}) });
+		const bad = errors(result);
+		expect(bad).toHaveLength(1);
+		expect(bad[0]?.code).toBe("unresolvable-key");
+		expect(bad[0]?.path).toBe("steps[0].idempotencyKey");
+		expect(bad[0]?.step).toBe("charge");
+		expect(bad[0]?.message).toContain("idempotencyKey");
+		expect(bad[0]?.message).toContain("js/");
+	});
+
+	it("flags an expression-shaped trigger concurrencyKey", () => {
+		const result = validateRefs(flow({ conc: "$.req.body.tenant" }), { nodes: lookup({}) });
+		const bad = errors(result);
+		expect(bad).toHaveLength(1);
+		expect(bad[0]?.code).toBe("unresolvable-key");
+		expect(bad[0]?.path).toBe("trigger.http.concurrencyKey");
+		expect(bad[0]?.step).toBe("<trigger>");
+	});
+
+	it("flags an expression-shaped trigger debounce.key", () => {
+		const result = validateRefs(flow({ debounceKey: "ctx.request.params.docId" }), { nodes: lookup({}) });
+		expect(errors(result).map((d) => d.path)).toEqual(["trigger.http.debounce.key"]);
+	});
+
+	it("flags `${…}` and `{{…}}` forms, and an unlowered {$ref} object", () => {
+		expect(codes(validateRefs(flow({ idem: "order-${ctx.request.body.id}" }), { nodes: lookup({}) }))).toContain(
+			"unresolvable-key",
+		);
+		expect(codes(validateRefs(flow({ idem: "{{requestId}}" }), { nodes: lookup({}) }))).toContain("unresolvable-key");
+		// `lowerRefs` runs over step `inputs` only — a structural ref here never
+		// becomes a `js/` string, so it reaches the runner raw.
+		const structural = validateRefs(flow({ idem: { $ref: { step: "@trigger", path: ["body", "requestId"] } } }), {
+			nodes: lookup({}),
+		});
+		expect(codes(structural)).toContain("unresolvable-key");
+	});
+
+	it("finds the field inside a nested control-flow arm", () => {
+		const result = validateRefs(
+			{
+				name: "nested",
+				version: "1.0.0",
+				trigger: { http: { method: "POST", path: "/n" } },
+				steps: [
+					{
+						id: "guard",
+						branch: {
+							when: "ctx.request.body.big",
+							then: [{ id: "charge", use: "charger", inputs: {}, idempotencyKey: "$.req.body.requestId" }],
+						},
+					},
+				],
+			},
+			{ nodes: lookup({}) },
+		);
+		expect(errors(result).map((d) => d.code)).toEqual(["unresolvable-key"]);
+	});
+
+	it("stays silent on `js/` expressions and on deliberate literals", () => {
+		const ok = validateRefs(
+			flow({
+				idem: "js/ctx.request.body.requestId",
+				conc: "js/ctx.request.body.tenant",
+				debounceKey: "nightly-report",
+			}),
+			{ nodes: lookup({}) },
+		);
+		expect(ok.diagnostics).toEqual([]);
+		expect(ok.ok).toBe(true);
+	});
+});

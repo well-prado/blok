@@ -632,7 +632,12 @@ export default abstract class RunnerSteps {
 					const workflowName = (ctx as { workflow_name?: string }).workflow_name ?? "";
 					const cacheStore = tracker && traceRunId ? tracker.getStore() : null;
 					const resolvedIdemKey =
-						cacheStore && workflowName ? resolveIdempotencyKey((step as NodeBase).idempotencyKey, ctx) : null;
+						cacheStore && workflowName
+							? resolveIdempotencyKey((step as NodeBase).idempotencyKey, ctx, {
+									field: "idempotencyKey",
+									where: `step "${step.name}"`,
+								})
+							: null;
 
 					if (cacheStore && resolvedIdemKey && nodeRunId) {
 						const hit = cacheStore.getIdempotencyCache(workflowName, step.name, resolvedIdemKey);

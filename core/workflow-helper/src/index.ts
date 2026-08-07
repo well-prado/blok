@@ -31,6 +31,7 @@ import {
 	type WorkflowOpts as WorkflowV2Opts,
 	workflow,
 } from "./components/workflowV2";
+import { RESOLVED_KEY_FIELDS, unresolvableKeyShape } from "./refSyntax";
 import type { V2StepUi } from "./types/StepOpts";
 import type {
 	CronTriggerOpts,
@@ -117,6 +118,10 @@ export {
 	type RefSeverity,
 	type NodeSchemaLookup,
 	type CatalogNodeLike,
+	// resolved-key fields (`idempotencyKey` / `concurrencyKey` / `debounce.key`) —
+	// the ONE shape rule shared by the runner's runtime guard and `blokctl check` (#706)
+	unresolvableKeyShape,
+	RESOLVED_KEY_FIELDS,
 	// per-trigger config TYPES (each trigger package re-exports its own)
 	type HttpTriggerOpts,
 	type TriggerOpts,

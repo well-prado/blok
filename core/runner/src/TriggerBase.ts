@@ -1131,7 +1131,10 @@ export default abstract class TriggerBase extends Trigger {
 			if (traceRunId && process.env.BLOK_CONCURRENCY_DISABLED !== "1") {
 				const concCfg = readConcurrencyConfig(cfg.trigger as Record<string, unknown> | undefined);
 				if (concCfg) {
-					const { key: resolvedKey, threw } = resolveConcurrencyKey(concCfg.keyExpression, ctx);
+					const { key: resolvedKey, threw } = resolveConcurrencyKey(concCfg.keyExpression, ctx, {
+						field: "concurrencyKey",
+						where: `the trigger of workflow "${cfg.name || ctx.workflow_name || "unknown"}"`,
+					});
 					// A THROWING key expression must not silently disable the rate
 					// limit (a typo or attacker-shaped payload would bypass it). Honor
 					// BLOK_MAPPER_MODE: `strict` (default) fails the run fast, `warn`
@@ -1631,7 +1634,10 @@ export default abstract class TriggerBase extends Trigger {
 
 		// === Debounce gate (Tier 2 #7) ===
 		if (schedCfg.debounce) {
-			const resolvedKey = resolveIdempotencyKey(schedCfg.debounce.keyExpression, ctx);
+			const resolvedKey = resolveIdempotencyKey(schedCfg.debounce.keyExpression, ctx, {
+				field: "debounce.key",
+				where: `the trigger of workflow "${workflowName}"`,
+			});
 			if (resolvedKey === null) {
 				// Fail-open — same semantics as concurrency-key resolution.
 				return null;

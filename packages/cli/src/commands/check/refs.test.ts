@@ -84,6 +84,56 @@ describe("blokctl check — the field-report scenario", () => {
 	});
 });
 
+// #706 — the shipped `v06-reliability-showcase` workflow's own reliability
+// fields. Both keys were expression-shaped but not `js/`-prefixed, so the runner
+// took them as CONSTANTS: one idempotency-cache entry replayed to every caller
+// for 24h, and one concurrency bucket for every tenant. Nothing failed at run
+// time, which is why this needs a static gate.
+const reliabilityShowcaseWorkflow = {
+	name: "v06-reliability-showcase",
+	version: "1.0.0",
+	trigger: {
+		http: { method: "POST", path: "/reliability", concurrencyKey: "$.req.body.tenant", concurrencyLimit: 2 },
+	},
+	steps: [{ id: "project", use: "projector", inputs: { event: "x" }, idempotencyKey: "$.req.body.requestId" }],
+};
+
+describe("blokctl check — resolved-key fields (#706)", () => {
+	it("fails on expression-shaped idempotencyKey / concurrencyKey, with no catalog needed", async () => {
+		const dir = await project({ showcase: reliabilityShowcaseWorkflow });
+		const result = await checkWorkflowRefs(dir, null);
+
+		expect(result.errorCount).toBe(2);
+		expect(
+			errorsOf(result)
+				.map((d) => d.path)
+				.sort(),
+		).toEqual(["steps[0].idempotencyKey", "trigger.http.concurrencyKey"]);
+		expect(errorsOf(result).every((d) => d.code === "unresolvable-key")).toBe(true);
+		expect(formatRefReport(result, dir)).toContain("unresolvable-key");
+	});
+
+	it("passes once both keys are written in the `js/` form", async () => {
+		const dir = await project({
+			showcase: {
+				...reliabilityShowcaseWorkflow,
+				trigger: {
+					http: {
+						method: "POST",
+						path: "/reliability",
+						concurrencyKey: "js/ctx.request.body.tenant",
+						concurrencyLimit: 2,
+					},
+				},
+				steps: [
+					{ id: "project", use: "projector", inputs: { event: "x" }, idempotencyKey: "js/ctx.request.body.requestId" },
+				],
+			},
+		});
+		expect((await checkWorkflowRefs(dir, null)).errorCount).toBe(0);
+	});
+});
+
 describe("blokctl check — graceful degradation", () => {
 	it("reports zero errors and an unchecked count when no catalog is available", async () => {
 		const dir = await project({ ingest: fieldReportWorkflow });

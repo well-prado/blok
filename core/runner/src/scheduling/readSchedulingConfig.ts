@@ -14,6 +14,7 @@
  * validation layer, not here).
  */
 import { tryParseDuration } from "@blokjs/helper";
+import { assertResolvableKey } from "../idempotency/resolveIdempotencyKey";
 
 const SCHEDULING_TRIGGER_KEYS = ["http", "worker"] as const;
 
@@ -67,6 +68,10 @@ export function readSchedulingConfig(
 		let debounce: NormalizedDebounceConfig | undefined;
 		if (cfg.debounce && typeof cfg.debounce === "object") {
 			const d = cfg.debounce;
+			// #706 — same guard as `concurrencyKey`: an expression-shaped key would
+			// silently become a constant coalescing bucket, and a non-string one
+			// (an unlowered `{$ref}`) would silently turn debounce off entirely.
+			assertResolvableKey(d.key, "debounce.key", `the \`${triggerKey}\` trigger`);
 			const keyExpression = typeof d.key === "string" ? d.key.trim() : "";
 			const dDelayMs = d.delay !== undefined ? (tryParseDuration(d.delay) ?? undefined) : undefined;
 			if (keyExpression && dDelayMs !== undefined && dDelayMs >= 0) {

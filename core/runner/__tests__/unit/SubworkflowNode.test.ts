@@ -1082,6 +1082,36 @@ describe("SubworkflowNode — polymorphic dispatch (G3)", () => {
 		await expect(node.run(parentCtx)).rejects.toThrow(/"stripe\.invoice\.payment_failed" is not in the step's/);
 	});
 
+	// #706 audit — `subworkflow:` uses the same `js/`-or-literal convention as the
+	// key fields, so an unrecognised expression shape (`{{…}}`) falls through as a
+	// LITERAL name. Unlike a key, that is loud by construction (registry miss), and
+	// crucially it cannot route around `allowList`: the guard runs on the FINAL
+	// resolved name whether or not polymorphic resolution fired.
+	it("an unrecognised expression shape in `subworkflow:` cannot route around `allowList`", async () => {
+		WorkflowRegistry.getInstance().register({
+			name: "handler.payment",
+			source: "/handler-payment.ts",
+			workflow: makeChildWorkflowDef("handler.payment"),
+		});
+		const node = makeSubworkflowNode({
+			stepName: "dispatch",
+			subworkflowName: "{{ctx.req.body.kind}}",
+		});
+		node.allowList = Object.freeze(["handler.payment"]);
+
+		const parentCtx = makeParentCtx();
+		parentCtx.request = {
+			body: { kind: "handler.payment" },
+			headers: {},
+			params: {},
+			query: {},
+		} as unknown as Context["request"];
+		parentCtx.config = { dispatch: { inputs: {} } } as unknown as Context["config"];
+
+		// Blocked on the literal name, NOT dispatched to the allow-listed child.
+		await expect(node.run(parentCtx)).rejects.toThrow(/is not in the step's `allowList`/);
+	});
+
 	it("`allowList` also guards a literal `subworkflow:` name (defence-in-depth audit)", async () => {
 		WorkflowRegistry.getInstance().register({
 			name: "child-restricted-literal",

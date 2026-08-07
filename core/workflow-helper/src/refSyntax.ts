@@ -167,3 +167,48 @@ export function parseCtxExpression(value: string): ParsedRef[] {
 	}
 	return out;
 }
+
+/**
+ * The fields whose value is RESOLVED against the live ctx by a `js/`-or-literal
+ * rule rather than by the Mapper (#706): step `idempotencyKey`, trigger
+ * `concurrencyKey`, trigger `debounce.key`.
+ *
+ * Unlike step `inputs`, these positions are not lowered and not mapped — the
+ * runner evaluates a `js/` string and takes ANY other string as a LITERAL key.
+ * That default is backwards for a correctness-sensitive field: a mistyped
+ * expression silently becomes one constant cache/limit bucket shared by every
+ * caller. {@link unresolvableKeyShape} names the forms that must be refused.
+ */
+export const RESOLVED_KEY_FIELDS = ["idempotencyKey", "concurrencyKey", "debounce.key"] as const;
+
+/**
+ * Classify a key value that LOOKS like an expression but is not one the runner
+ * can evaluate (#706). Returns a short human description of the offending shape,
+ * or `null` when the value is legal — a `js/` expression, or a deliberate
+ * literal.
+ *
+ * The shapes refused are the ones authors actually reach for: the `$.` proxy
+ * path, a bare `ctx.` chain, a `${…}` interpolation, a `{{…}}` template, and an
+ * unlowered structural `{$ref}` / `{$tpl}` object (`lowerRefs` runs over step
+ * `inputs` only, so a structural ref in one of these fields never becomes a
+ * `js/` string).
+ *
+ * ONE rule, shared: `@blokjs/runner` imports this for its runtime guard and
+ * `validateRefs` uses it for the static `blokctl check` diagnostic, so the two
+ * can never disagree about what a legal key is.
+ */
+export function unresolvableKeyShape(value: unknown): string | null {
+	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+		if (isStructuralRef(value)) return "an unlowered structural `{$ref}` object";
+		if (isStructuralTpl(value)) return "an unlowered structural `{$tpl}` object";
+		return null;
+	}
+	if (typeof value !== "string") return null;
+	const expr = value.trim();
+	if (expr.startsWith("js/")) return null;
+	if (expr.startsWith("$.")) return "a `$.` proxy path";
+	if (expr.startsWith("ctx.")) return "a bare `ctx.` expression";
+	if (expr.includes("${")) return "a `${…}` interpolation";
+	if (expr.includes("{{")) return "a `{{…}}` template";
+	return null;
+}

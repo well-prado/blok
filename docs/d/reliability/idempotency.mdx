@@ -73,11 +73,18 @@ call and caches the response. The second request short-circuits the
 ## Field reference
 
 <ParamField path="idempotencyKey" type="string | handle">
-  Cache key — a literal string or a handle (`req.body.requestId`). The
-  runner caches the step's result against the triple `(workflowName,
-  step.id, resolvedKey)`. On a subsequent run with the same triple,
-  execution is skipped and the cached result populates state through the
-  same persistence rules (`ephemeral`, `spread`, `as`).
+  Cache key — a handle (`req.body.requestId`), a `js/ctx....` expression
+  in JSON, or a **deliberate** literal string. The runner caches the
+  step's result against the triple `(workflowName, step.id,
+  resolvedKey)`. On a subsequent run with the same triple, execution is
+  skipped and the cached result populates state through the same
+  persistence rules (`ephemeral`, `spread`, `as`).
+
+  Anything else that *looks* like an expression — a leading `$.`, a bare
+  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
+  — now fails the step with `UnresolvableKeyExpressionError` instead of
+  being taken as a literal. A literal key is a CONSTANT: every caller
+  would share one cache entry for the full TTL.
 </ParamField>
 
 <ParamField path="idempotencyKeyTTL" type="number" default="86400000">
@@ -89,7 +96,9 @@ call and caches the response. The second request short-circuits the
 The key can be a literal string (`"daily-summary"`) or a handle
 (`req.body.requestId`) the runner resolves at run time. Returning
 `null`, `undefined`, or throwing during evaluation is a cache miss —
-the step runs as if the key had not been set.
+the step runs as if the key had not been set. A mistyped *expression*
+is not a cache miss, it is an error: see the field reference above, and
+run `blokctl check` to catch it before deploy.
 
 ## How the namespace works
 

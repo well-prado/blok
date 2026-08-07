@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CONCURRENCY_DEFAULTS, readConcurrencyConfig } from "../../../src/concurrency/readConcurrencyConfig";
+import { UnresolvableKeyExpressionError } from "../../../src/idempotency/resolveIdempotencyKey";
 
 describe("readConcurrencyConfig", () => {
 	const ORIGINAL_LEASE_ENV = process.env.BLOK_CONCURRENCY_LEASE_MS;
@@ -54,14 +55,36 @@ describe("readConcurrencyConfig", () => {
 
 	it("reads concurrencyKey + concurrencyLimit from worker trigger", () => {
 		const cfg = readConcurrencyConfig({
-			worker: { queue: "renders", concurrency: 10, concurrencyKey: "$.req.body.tenantId", concurrencyLimit: 2 },
+			worker: {
+				queue: "renders",
+				concurrency: 10,
+				concurrencyKey: "js/ctx.request.body.tenantId",
+				concurrencyLimit: 2,
+			},
 		});
 		expect(cfg).toEqual({
-			keyExpression: "$.req.body.tenantId",
+			keyExpression: "js/ctx.request.body.tenantId",
 			limit: 2,
 			leaseMs: CONCURRENCY_DEFAULTS.leaseMs,
 			onLimit: "throw",
 		});
+	});
+
+	// #706 — this fixture used to read `"$.req.body.tenantId"` and assert it came
+	// back as the keyExpression, which is exactly the bug: the gate then locked
+	// every tenant into ONE bucket named `$.req.body.tenantId`.
+	it("throws on an expression-shaped concurrencyKey instead of bucketing every tenant together (#706)", () => {
+		expect(() =>
+			readConcurrencyConfig({ worker: { queue: "renders", concurrencyKey: "$.req.body.tenantId" } }),
+		).toThrow(UnresolvableKeyExpressionError);
+	});
+
+	it("throws on an unlowered {$ref} concurrencyKey instead of silently disabling the gate (#706)", () => {
+		expect(() =>
+			readConcurrencyConfig({
+				http: { method: "POST", concurrencyKey: { $ref: { step: "@trigger", path: ["body", "tenantId"] } } },
+			}),
+		).toThrow(UnresolvableKeyExpressionError);
 	});
 
 	it("prefers http over worker when both blocks declare a concurrencyKey", () => {

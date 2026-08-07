@@ -96,11 +96,18 @@ and spread into both `HttpTriggerOptsSchema` and
 `WorkerTriggerOptsSchema`.
 
 <ParamField path="concurrencyKey" type="string">
-  Per-key concurrency gate. A literal string or a `js/ctx....`
-  expression (e.g. `"js/ctx.request.body.tenantId"`) the runner resolves against the
-  live `ctx` at run-entry. When set, runs sharing the resolved key
-  contend for at most `concurrencyLimit` concurrent slots. When unset,
-  no gating applies — zero overhead.
+  Per-key concurrency gate. A `js/ctx....` expression (e.g. `"js/ctx.request.body.tenantId"`)
+  the runner resolves against the live `ctx` at run-entry, or a
+  **deliberate** literal string. When set, runs sharing the resolved key
+  contend for at most `concurrencyLimit` concurrent slots. When unset, no
+  gating applies — zero overhead.
+
+  Anything else that *looks* like an expression — a leading `$.`, a bare
+  `ctx.`, a `${…}` interpolation, `{{…}}`, or a raw `{"$ref": …}` object
+  — fails the run with `UnresolvableKeyExpressionError` instead of being
+  taken as a literal. A literal key here is a CONSTANT: every tenant
+  would collapse into one bucket, turning a per-tenant limit of N into a
+  global limit of N. `blokctl check` catches it statically.
 </ParamField>
 
 <ParamField path="concurrencyLimit" type="integer (1-10000)" default="1">
@@ -188,9 +195,12 @@ between `tracker.startRun()` and `runner.run()`:
 <Steps>
   <Step title="Resolve key">
     The runner evaluates `concurrencyKey` against the live `ctx` (a
-    `js/ctx....` expression is evaluated directly). Failure to resolve (throw or
-    `null`/`undefined`) is fail-open — the gate is skipped and the run
-    proceeds.
+    `js/ctx....` expression is evaluated directly). A resolved
+    `null`/`undefined` is fail-open — the gate is skipped and the run
+    proceeds. A THROWING expression fails the run under the default
+    `BLOK_MAPPER_MODE=strict` rather than silently dropping the limit,
+    and an expression-shaped key that is not `js/`-prefixed is rejected
+    outright (it would otherwise become one constant bucket).
   </Step>
   <Step title="Acquire slot">
     `runStore.acquireConcurrencySlot(workflow, key, limit, runId,

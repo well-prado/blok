@@ -324,6 +324,15 @@ strings in JSON: `branch.when` / `loop.while` (raw `ctx.*`, no prefix),
 DSL takes handles for all of these except trigger config, which is resolved at
 run-entry before any handle exists.
 
+The three **key** positions — step `idempotencyKey`, trigger `concurrencyKey`,
+trigger `debounce.key` — are stricter than the rest: they take a `js/…`
+expression or a **deliberate literal**, nothing else. An expression-shaped
+value that is not `js/`-prefixed (`$.…`, bare `ctx.…`, `${…}`, `{{…}}`, or a
+raw `{"$ref": …}`) fails the run with `UnresolvableKeyExpressionError` and is
+reported by `blokctl check` — a literal key is a CONSTANT, and silently turning
+a mistyped expression into one shared cache entry or one global concurrency
+bucket is the failure mode this guard exists to prevent.
+
 ## Quick reference
 
 ```txt
