@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
 	type CompletionParams,
@@ -26,6 +28,16 @@ import { getHover } from "./hover";
  * Communication: stdio (default) or TCP
  * File types: JSON files matching `**​/workflows/**​/*.json` or `blok.workflow.json`
  */
+
+// `--version` must exit before `createConnection` starts listening on stdio —
+// otherwise `blok-lsp --version` (what `npm view`/the packaging gate/a user
+// sanity-checking their install run) blocks forever waiting for LSP JSON-RPC
+// input that never arrives (#697).
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+	const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")) as { version: string };
+	console.log(pkg.version);
+	process.exit(0);
+}
 
 // Create connection and document manager
 const connection = createConnection(ProposedFeatures.all);
