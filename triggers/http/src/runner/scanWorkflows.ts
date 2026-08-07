@@ -1,5 +1,6 @@
 import { promises as fsp } from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * scanWorkflows — recursive directory scanner that discovers HTTP-triggered
@@ -60,6 +61,24 @@ export interface ScanRoot {
 	readonly kind: "ts" | "json";
 }
 
+export interface ScanOptions {
+	onLoadError?: (file: string, err: Error) => void;
+	/**
+	 * Cache-buster appended to a TS/JS dynamic import so an edited workflow
+	 * module is re-evaluated instead of served from the ESM module cache. Hot
+	 * reload passes a timestamp; boot passes nothing (one cache entry per file).
+	 */
+	cacheBust?: string;
+	/**
+	 * Restricts `cacheBust` to specific absolute file paths. Re-evaluating
+	 * EVERY workflow on every edit is pure waste: a busted module still
+	 * resolves its own imports from cache, so busting the untouched files buys
+	 * no extra freshness — it just re-runs the whole corpus per keystroke.
+	 * Unset means bust everything (used when the changed file isn't known).
+	 */
+	cacheBustOnly?: ReadonlySet<string>;
+}
+
 /**
  * Walk every root and produce a flat list of scanned workflows.
  *
@@ -67,10 +86,7 @@ export interface ScanRoot {
  * `onLoadError` callback (when supplied). The scanner never throws on
  * a single bad file — boot continues with the rest.
  */
-export async function scanWorkflows(
-	roots: readonly ScanRoot[],
-	options: { onLoadError?: (file: string, err: Error) => void } = {},
-): Promise<ScannedWorkflow[]> {
+export async function scanWorkflows(roots: readonly ScanRoot[], options: ScanOptions = {}): Promise<ScannedWorkflow[]> {
 	const out: ScannedWorkflow[] = [];
 	for (const root of roots) {
 		const exists = await dirExists(root.dir);
@@ -123,7 +139,7 @@ async function walk(
 	root: ScanRoot,
 	allowedExts: readonly string[],
 	out: ScannedWorkflow[],
-	options: { onLoadError?: (file: string, err: Error) => void },
+	options: ScanOptions,
 ): Promise<void> {
 	let entries: import("node:fs").Dirent[];
 	try {
@@ -149,7 +165,11 @@ async function walk(
 		const defaultPath = deriveUrlFromFilePath(relativePath, root.stripLeadingSegments);
 
 		try {
-			const wf = await loadOne(fullPath, root.kind);
+			const bust =
+				options.cacheBust && (!options.cacheBustOnly || options.cacheBustOnly.has(fullPath))
+					? options.cacheBust
+					: undefined;
+			const wf = await loadOne(fullPath, root.kind, bust);
 			if (wf === null) continue;
 			out.push({
 				source: fullPath,
@@ -164,13 +184,16 @@ async function walk(
 	}
 }
 
-async function loadOne(file: string, kind: "ts" | "json"): Promise<unknown> {
+async function loadOne(file: string, kind: "ts" | "json", cacheBust?: string): Promise<unknown> {
 	if (kind === "json") {
 		const text = await fsp.readFile(file, "utf8");
 		return JSON.parse(text);
 	}
-	// TS / JS — dynamic import; default export is the workflow.
-	const mod = (await import(file)) as { default?: unknown };
+	// TS / JS — dynamic import; default export is the workflow. A cache-buster
+	// needs a proper file: URL to carry the query string, so only the hot-reload
+	// path pays the conversion; boot keeps importing the bare path as before.
+	const specifier = cacheBust ? `${pathToFileURL(file).href}?blokHmr=${cacheBust}` : file;
+	const mod = (await import(specifier)) as { default?: unknown };
 	if (mod.default === undefined) return null;
 	return mod.default;
 }

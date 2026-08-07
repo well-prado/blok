@@ -101,6 +101,11 @@ export function isFileBasedRoutingEnabled(): boolean {
  * literal carries `name` on the root, while a v2 `workflow()` builder carries
  * it on the nested `_config`. Returns `undefined` when neither is a string.
  */
+/** Stable key for one route in the live table. */
+function routeKey(method: string, path: string): string {
+	return `${method.toUpperCase()} ${path}`;
+}
+
 function readWorkflowName(wf: unknown): string | undefined {
 	if (!wf || typeof wf !== "object") return undefined;
 	const w = wf as { name?: unknown; _config?: { name?: unknown } };
@@ -186,6 +191,41 @@ export default class HttpTrigger extends TriggerBase {
 	private nodeMap: GlobalOptions = <GlobalOptions>{};
 	private workflowSourcePaths = new Map<unknown, string>();
 	private server: Server | null = null;
+
+	/**
+	 * The route table as it is RIGHT NOW, keyed `"<METHOD> <path>"`.
+	 *
+	 * Every explicit route handler resolves its workflow through this map
+	 * instead of closing over the object captured at boot, so a hot reload
+	 * that re-scans the workflow directories is picked up by the already
+	 * mounted Hono routes — and a workflow that was deleted resolves to
+	 * nothing and 404s instead of serving a ghost.
+	 */
+	private liveRoutes = new Map<string, RouteEntry>();
+
+	/** Route keys mounted on the Hono app at boot (see {@link hmrOverlay}). */
+	private bootRouteKeys = new Set<string>();
+
+	/**
+	 * Routes that appeared AFTER boot, mounted on a throwaway Hono app.
+	 *
+	 * Hono freezes its router the first time it matches a request
+	 * ("Can not add a route since the matcher is already built"), so a
+	 * workflow file created while the server is running cannot be added to
+	 * the main app. It goes on a fresh overlay app instead, which a
+	 * middleware consults before the boot routes. Rebuilt from scratch on
+	 * every re-scan; `null` until the first new route shows up, so the
+	 * non-HMR path costs nothing.
+	 */
+	private hmrOverlay: Hono<AppBindings> | null = null;
+
+	/**
+	 * Every route ever mounted on an overlay, keyed the same as
+	 * {@link liveRoutes}. Accumulates: a route added by a hot reload and then
+	 * deleted stays mounted so it answers 404 from the live-table miss, instead
+	 * of falling through to the legacy catch-all.
+	 */
+	private hmrOverlayRoutes = new Map<string, { method: string; path: string }>();
 
 	/**
 	 * v0.7 — callbacks registered by sibling same-port triggers (e.g.
@@ -382,11 +422,10 @@ export default class HttpTrigger extends TriggerBase {
 		}
 	}
 
-	protected override async onHmrNodeChange(event: HMREvent): Promise<void> {
-		this.hmr?.invalidateModule(event.filePath);
-		this.loadNodes();
-		console.log(`[HMR] Node reloaded: ${event.relativePath}`);
-	}
+	// Node hot-reload lives in `TriggerBase.onHmrNodeChange`. The override that
+	// used to be here called `loadNodes()`, which re-read the SAME frozen
+	// `import nodes from "../Nodes"` binding — editing a node's `execute` never
+	// took effect. The base class now re-imports the node roots cache-busted.
 
 	getApp(): Hono<AppBindings> {
 		return this.app;
@@ -417,7 +456,9 @@ export default class HttpTrigger extends TriggerBase {
 	 * both will be removed in a future release. The boot log warns
 	 * loudly when the legacy path is active so operators notice.
 	 */
-	private async buildFileBasedRoutes(): Promise<RouteEntry[]> {
+	private async buildFileBasedRoutes(reload?: { token: string; changed?: string }): Promise<RouteEntry[]> {
+		const cacheBust = reload?.token;
+		const cacheBustOnly = reload?.changed ? new Set([reload.changed]) : undefined;
 		const enabled = isFileBasedRoutingEnabled();
 		if (!enabled) {
 			this.logger.log(
@@ -445,12 +486,16 @@ export default class HttpTrigger extends TriggerBase {
 					onLoadError: (file, err) => {
 						this.logger.error(`[blok] workflow load error in ${file}: ${err.message}`);
 					},
+					cacheBust,
+					cacheBustOnly,
 				},
 			),
 			scanWorkflows([{ dir: path.join(process.cwd(), "src", "workflows"), kind: "ts" }], {
 				onLoadError: (file, err) => {
 					this.logger.error(`[blok] workflow load error in ${file}: ${err.message}`);
 				},
+				cacheBust,
+				cacheBustOnly,
 			}),
 		]);
 
@@ -725,43 +770,100 @@ export default class HttpTrigger extends TriggerBase {
 	 */
 	private registerExplicitRoutes(routes: readonly RouteEntry[]): void {
 		for (const route of routes) {
-			const handler = async (c: HonoContext<AppBindings>): Promise<Response> => {
-				const requestId = c.req.query("requestId") || (uuid() as string);
-				const { body, rawBody } = await this.parseBody(c);
-				return this.runWorkflowExecution(c, {
-					workflowName: route.workflowKey,
-					subPath: "/",
-					body,
-					rawBody,
-					requestId,
-					explicitRoute: true,
-					preloadedWorkflow: route.workflow,
-				});
-			};
-
-			const method = route.method.toUpperCase();
-			switch (method) {
-				case "GET":
-					this.app.get(route.path, handler);
-					break;
-				case "POST":
-					this.app.post(route.path, handler);
-					break;
-				case "PUT":
-					this.app.put(route.path, handler);
-					break;
-				case "DELETE":
-					this.app.delete(route.path, handler);
-					break;
-				case "PATCH":
-					this.app.patch(route.path, handler);
-					break;
-				default:
-					// ANY (or HEAD/OPTIONS/unknown) — register on all methods.
-					this.app.all(route.path, handler);
-					break;
-			}
+			const key = routeKey(route.method, route.path);
+			this.bootRouteKeys.add(key);
+			this.mountRoute(this.app, key, route.method, route.path);
 		}
+	}
+
+	/**
+	 * Mount one route on `app`. The handler resolves the workflow from
+	 * {@link liveRoutes} at request time — that indirection is what makes an
+	 * edited or deleted workflow take effect without a restart.
+	 */
+	private mountRoute(app: Hono<AppBindings>, key: string, method: string, path: string): void {
+		const handler = async (c: HonoContext<AppBindings>): Promise<Response> => {
+			const live = this.liveRoutes.get(key);
+			// Gone: the workflow file was deleted since boot and the Hono route
+			// outlives it (Hono has no route removal). 404 is the honest answer.
+			if (!live) return c.json({ error: "Not found" }, 404);
+			const requestId = c.req.query("requestId") || (uuid() as string);
+			const { body, rawBody } = await this.parseBody(c);
+			return this.runWorkflowExecution(c, {
+				workflowName: live.workflowKey,
+				subPath: "/",
+				body,
+				rawBody,
+				requestId,
+				explicitRoute: true,
+				preloadedWorkflow: live.workflow,
+			});
+		};
+
+		switch (method.toUpperCase()) {
+			case "GET":
+				app.get(path, handler);
+				break;
+			case "POST":
+				app.post(path, handler);
+				break;
+			case "PUT":
+				app.put(path, handler);
+				break;
+			case "DELETE":
+				app.delete(path, handler);
+				break;
+			case "PATCH":
+				app.patch(path, handler);
+				break;
+			default:
+				// ANY (or HEAD/OPTIONS/unknown) — register on all methods.
+				app.all(path, handler);
+				break;
+		}
+	}
+
+	/** Replace the live route table wholesale. */
+	private setLiveRoutes(routes: readonly RouteEntry[]): void {
+		this.liveRoutes = new Map(routes.map((r) => [routeKey(r.method, r.path), r]));
+	}
+
+	/**
+	 * Re-scan the workflow directories and republish the route table — the
+	 * hot half of the dev loop.
+	 *
+	 * Covers all four shapes an author can produce: an edited workflow (the
+	 * live table now holds the new object), a deleted one (its key is gone, so
+	 * the mounted route 404s), a new one (mounted on the overlay app), and a
+	 * renamed one (delete + add). TS workflow modules are re-imported with a
+	 * fresh cache-buster; JSON is re-read from disk anyway.
+	 */
+	private async reloadRoutes(changed?: string): Promise<number> {
+		const table = await this.buildFileBasedRoutes({ token: String(Date.now()), changed });
+		this.setLiveRoutes(table);
+
+		for (const route of table) {
+			const key = routeKey(route.method, route.path);
+			if (this.bootRouteKeys.has(key)) continue;
+			this.hmrOverlayRoutes.set(key, { method: route.method, path: route.path });
+		}
+		if (this.hmrOverlayRoutes.size === 0) {
+			this.hmrOverlay = null;
+			return table.length;
+		}
+
+		const overlay = new Hono<AppBindings>();
+		for (const [key, route] of this.hmrOverlayRoutes) {
+			this.mountRoute(overlay, key, route.method, route.path);
+		}
+		overlay.notFound(() => new Response(null, { status: 404, headers: { "x-blok-hmr-miss": "1" } }));
+		this.hmrOverlay = overlay;
+		return table.length;
+	}
+
+	protected override async onHmrWorkflowChange(event: HMREvent): Promise<void> {
+		const count = await this.reloadRoutes(event.filePath);
+		this.logger.log(`[blok][hmr] route table re-scanned after ${event.relativePath} — ${count} route(s) live`);
 	}
 
 	/**
@@ -885,6 +987,7 @@ export default class HttpTrigger extends TriggerBase {
 		} catch (err) {
 			this.logger.error(`[blok] file-based routing setup failed: ${(err as Error).message}`);
 		}
+		this.setLiveRoutes(fileBasedRoutes);
 
 		// v0.5 · scan + register middleware-only workflows even when
 		// file-based routing is off (the catch-all dispatch path also
@@ -1130,6 +1233,19 @@ export default class HttpTrigger extends TriggerBase {
 			// matching requests are routed directly without filename-prefix
 			// dispatch. Empty when `BLOK_FILE_BASED_ROUTING=false` or
 			// `BLOK_ROUTING_LEGACY=1` is set.
+			// Hot-reload overlay. Sits in front of the boot-time explicit routes
+			// so a workflow file CREATED while the server is running is served
+			// without a restart — Hono freezes its router after the first match,
+			// so new paths can only be mounted on a fresh app instance. Costs a
+			// null check per request until the first new route appears.
+			this.app.use("*", async (c, next) => {
+				const overlay = this.hmrOverlay;
+				if (!overlay) return next();
+				const res = await overlay.fetch(c.req.raw, c.env);
+				if (res.headers.get("x-blok-hmr-miss") === "1") return next();
+				return res;
+			});
+
 			if (fileBasedRoutes.length > 0) this.registerExplicitRoutes(fileBasedRoutes);
 
 			// Catch-all workflow handler — legacy /<workflow-key>/<path> dispatch.
@@ -1174,7 +1290,7 @@ export default class HttpTrigger extends TriggerBase {
 			this.app.all("/:workflow{.+}/*", workflowHandler);
 			this.app.all("/:workflow{.+}", workflowHandler);
 
-			this.server = serve({ fetch: this.app.fetch, port: Number(this.port) }, () => {
+			this.server = serve({ fetch: this.app.fetch, port: Number(this.port) }, async () => {
 				this.logger.log(`Server is running at http://localhost:${this.port}`);
 
 				// v0.7 — run server hooks (sibling triggers like
@@ -1200,9 +1316,18 @@ export default class HttpTrigger extends TriggerBase {
 					}
 				}
 
-				// Enable HMR in development mode
-				if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
-					this.enableHotReload();
+				// Hot reload. `BLOK_HMR=true` alone is enough on ANY entrypoint —
+				// no CLI wrapper, no NODE_ENV heuristic. See TriggerBase.
+				//
+				// AWAITED, so `listen()` doesn't resolve until the watcher is
+				// actually established. Fire-and-forget left a window where an
+				// edit made right after boot was silently dropped.
+				if (HttpTrigger.isHotReloadEnabled()) {
+					try {
+						await this.enableHotReload();
+					} catch (err) {
+						this.logger.error(`[blok][hmr] failed to start: ${err instanceof Error ? err.message : String(err)}`);
+					}
 				}
 
 				// Tier 2 quick-wins follow-up · install process-level handlers
