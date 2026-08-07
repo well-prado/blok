@@ -25,7 +25,7 @@ main workflow.
 ```json workflows/json/auth-check.json
 {
   "name": "auth-check",
-  "_middleware": true,
+  "middleware": true,
   "version": "1.0.0",
   "steps": [
     {
@@ -50,7 +50,7 @@ main workflow.
 }
 ```
 
-The `_middleware: true` flag marks this workflow as middleware-only —
+The `middleware: true` flag marks this workflow as middleware-only —
 it's never reachable as a direct HTTP route.
 
 The same middleware in the TypeScript DSL — `middleware: true` (the
@@ -185,7 +185,7 @@ per-user bucket key is keyed on the authenticated user.
 ```json workflows/json/middleware/request-id.json
 {
   "name": "request-id",
-  "_middleware": true,
+  "middleware": true,
   "steps": [
     {
       "id": "set-id",
@@ -206,7 +206,7 @@ Every downstream step reads `ctx.state.requestId` for log correlation.
 ```json workflows/json/middleware/audit-log-middleware.json
 {
   "name": "audit-log-middleware",
-  "_middleware": true,
+  "middleware": true,
   "steps": [
     {
       "id": "audit",

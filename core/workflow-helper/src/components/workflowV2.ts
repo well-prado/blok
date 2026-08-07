@@ -70,6 +70,11 @@ export interface WorkflowOpts<
 	 * (or via `setGlobalMiddleware([...])` / `BLOK_GLOBAL_MIDDLEWARE`). Mirrors
 	 * `WorkflowV2Schema.middleware`, which already makes `trigger` optional for
 	 * middleware. Only the literal `true` is the marker.
+	 *
+	 * The JSON IR also accepts `middleware: string[]` on the root — the v0.5.2
+	 * workflow-level CHAIN, a different concept (see `WorkflowV2Schema`). This
+	 * factory deliberately exposes only the marker; TS authors declare a chain
+	 * per trigger via `trigger.<kind>.middleware: [...]`.
 	 */
 	middleware?: true;
 	/** Pipeline of steps to execute in order. At least one required. */

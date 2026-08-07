@@ -38,9 +38,10 @@ function isLegacyRoutingEnabled(): boolean {
  * root `middleware` field (JSON workflows, raw object literals, legacy
  * `Workflow()` builders that carry it on the root) AND `_config.middleware`
  * (the v2 `workflow({ middleware: true })` builder, whose flag lives on the
- * nested `_config`). Only the literal `true` is the marker — matching
- * `WorkflowV2Schema.middleware` (`z.literal(true)`) and the normalizer's
- * `=== true` check.
+ * nested `_config`). Only the literal `true` is the marker — matching the
+ * marker arm of `WorkflowV2Schema.middleware` (`true | string[]`, where the
+ * array arm is the v0.5.2 workflow-level CHAIN applied TO a workflow, not a
+ * marker) and the normalizer's `=== true` check.
  *
  * Used by {@link buildRouteTable} to exclude middleware workflows from the
  * route table (so they are never exposed as public Hono routes, even with a
