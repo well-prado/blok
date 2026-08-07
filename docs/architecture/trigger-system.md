@@ -58,11 +58,19 @@ export default class MyCustomTrigger extends TriggerBase {
 
 ### HMR Methods
 
+Gated by `TriggerBase.isHotReloadEnabled()`: `BLOK_HMR=true` enables hot reload
+on ANY TriggerBase-derived entrypoint, `BLOK_HMR=false` force-disables, and with
+neither set it follows `NODE_ENV=development`. See
+[the dev loop](../d/cli/dev.mdx) for the change-type → behavior contract.
+
 | Method | Description |
 |---|---|
+| `isHotReloadEnabled()` | Static. Whether HMR should run for this process. |
+| `resolveHmrRoots(cwd?)` | Static. Watched roots — `WORKFLOWS_PATH`/`NODES_PATH` when set, otherwise `workflows/`, `src/workflows/`, `src/nodes/`. |
 | `enableHotReload(config?)` | Start file watchers for dev-time hot reload. |
-| `onHmrNodeChange(event)` | Called when a node file changes. Override for custom behavior. |
-| `onHmrWorkflowChange(event)` | Called when a workflow file changes. |
+| `stopHotReload()` | Stop the watchers and release their handles. Idempotent. |
+| `onHmrNodeChange(event)` | Re-imports the node roots cache-busted and re-registers them with `{ replace: true }`. |
+| `onHmrWorkflowChange(event)` | Called when a workflow file changes. `HttpTrigger` re-scans and republishes the route table. |
 | `onHmrTriggerChange(event)` | Called when a trigger config changes. |
 | `getHmrStats()` | Return HMR statistics (reloads, errors, watched files). |
 | `destroyHmr()` | Stop HMR watchers and clean up. |

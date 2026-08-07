@@ -33,7 +33,19 @@ store).
 |---|---|---|
 | `BLOK_FILE_BASED_ROUTING` | `true` | **Default ON since v0.6.** Auto-discover JSON workflows under `workflows/json/` and register each at its `trigger.http.path`. Set to `false` to fall back to the legacy `/<workflow-key>/<sub>` catch-all dispatch (deprecated, will be removed). |
 | `BLOK_ROUTING_LEGACY` | unset | Full legacy escape hatch. When `=1` / `=true`, file-based routing is disabled AND workflows without an explicit `trigger.http.path` get the filename-derived URL instead of throwing `MissingExplicitPathError`. Will be removed in a future release. |
-| `BLOK_HMR` | `true` (dev) | Hot-reload workflows on file change. Triggers re-scan and `WorkflowRegistry.clear()` + `registerAll()`. |
+| `BLOK_HMR` | enabled when `NODE_ENV=development` | Hot reload for workflows **and** nodes. `BLOK_HMR=true` is sufficient on its own — it works on any trigger entrypoint (`BLOK_HMR=true bun run src/triggers/http/index.ts`), no CLI and no `NODE_ENV` required. `BLOK_HMR=false` force-disables. See [the dev loop](/d/cli/dev). |
+| `BLOK_HMR_VERBOSE` | unset | Log every file-system event the hot reloader sees. |
+| `WORKFLOWS_PATH` | `<cwd>/workflows` | Workflow root. Also one of the directories the hot reloader watches (`<cwd>/src/workflows` is always watched too). Comma-separated. |
+| `NODES_PATH` | `<cwd>/src/nodes` | Node root for local node resolution and hot reload. Comma-separated. |
+
+## Dev loop
+
+See [the dev loop](/d/cli/dev) for the full change-type → behavior table.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BLOK_DEV_WATCH_ALL` | unset | `=1` makes `blokctl dev` run every trigger under `bun --watch` — a full process restart on any source change, which preempts in-process hot reload. Escape hatch for the pre-0.8 behaviour; equivalent to `blokctl dev --watch-all`. |
+| `BLOK_DOTENV_DISABLED` | unset | `=1` skips the runner's `.env` / `.env.local` loading entirely. Loading never overwrites a variable already present in the environment, so this is only needed to opt out of file-based config completely. |
 | `BLOK_MAPPER_MODE` | `strict` | Input expression resolution failure mode. `strict` (default) throws `MapperResolutionError` on a failed expression, `warn` logs + passes the literal through (old v1 behavior), `silent` suppresses. See [debugging workflows](/d/introduction/workflows#debugging). |
 
 ## Sub-workflows

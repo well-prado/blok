@@ -28,7 +28,11 @@ live trace of every request. You'll need **Node 18+** (or Bun) and a terminal.
 </Steps>
 
 <Tip>
-Keep `blokctl dev` running in one terminal. It hot-reloads as you edit nodes and workflows.
+Keep `blokctl dev` running in one terminal. Edits to nodes and workflows are applied
+in place, in the same process — only entrypoints, `.blok/config.json` and `.env*`
+cause a restart, and the console names the file when one happens. Outside the CLI,
+`BLOK_HMR=true` gives you the same hot reload on any entrypoint. See
+[the dev loop](/d/cli/dev) for the full contract.
 </Tip>
 
 ## 2. Write a node

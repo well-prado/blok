@@ -1,0 +1,142 @@
+---
+title: "blokctl dev — the dev loop"
+description: "What hot-reloads, what restarts, and why. Plus the .env loading order and the cold-boot budget."
+icon: "refresh-cw"
+---
+
+`blokctl dev` boots your sidecar runtimes and every trigger in your project,
+then keeps the process alive while you edit. Editing a **workflow** or a
+**node** is applied in place, in the same process, in well under a second. Only
+the things a running process genuinely cannot re-derive — entrypoints, config,
+environment files — cause a restart, and when one happens the console tells you
+which file caused it and why.
+
+```bash
+blokctl dev
+blokctl dev --port 4001
+blokctl dev --watch-all       # escape hatch, see below
+```
+
+## The contract
+
+Every changed path is classified by one function
+(`classifyChange` in `@blokjs/runner`), shared by the in-process watcher and by
+`blokctl dev`'s restart watcher, so the two halves can never disagree. Every row
+below is asserted by an end-to-end test — `triggers/http/__tests__/integration/hmr-dev-loop.test.ts`
+for the hot rows, `packages/cli/tests/dev-watch.test.ts` for the restart rows.
+
+| Change | Effect | Latency | What happens |
+|---|---|---|---|
+| Edit `workflows/**/*.json` | **hot** | < 2s | Route table re-scanned; the route serves the new definition. Same PID. |
+| Edit `src/workflows/**/*.ts` | **hot** | < 2s | Module re-imported (cache-busted), route table republished. Same PID. |
+| **Add** a workflow file with an `http` trigger | **hot** | < 2s | The new route starts serving. No manual registration, no restart. |
+| **Delete** a workflow file | **hot** | < 2s | Its route returns `404`. |
+| Edit a node under `src/nodes/**` | **hot** | < 2s | Node re-imported and swapped in the registry; the **next** invocation runs the new code. |
+| Edit `src/triggers/**`, `src/index.ts` | **restart** | ~1 boot | The server object is constructed there; the process is replaced. |
+| Edit `.env`, `.env.local`, `.env.*` | **restart** | ~1 boot | `process.env` is read at boot. |
+| Edit `.blok/config.json` | **restart** | ~1 boot | Trigger/runtime topology changed. |
+| Edit `runtimes/<lang>/**` | **regen** | — | Cross-runtime stubs regenerated (`blokctl nodes sync`), no restart. |
+| `nodes-gen/**`, `.blok/runtimes/**` | **ignored** | — | Generated output — the watcher writes these itself. |
+| `**/dist/**`, `node_modules`, `*.d.ts`, `*.test.ts`, `__tests__/**` | **ignored** | — | Never a source of truth. |
+
+<Note>
+Hot reload swaps what the **next** run resolves. Runs already in flight finish
+against the code they started with — a reload never mutates a running workflow.
+</Note>
+
+Each action prints itself:
+
+```
+  [HMR] [14:02:11] hot reload · workflow change: json/orders.json — workflow source — route table re-scanned (18ms)
+  [dev] restart · .env — environment file — process env is read at boot
+  [dev] regen · runtimes/python3/nodes/score.py — sidecar node source — runtime stubs regenerated
+```
+
+## Hot reload without the CLI
+
+Hot reload is a **framework** capability, not a CLI feature. `BLOK_HMR=true` is
+the whole switch, and it works on any trigger entrypoint:
+
+```bash
+BLOK_HMR=true bun run src/triggers/http/index.ts
+```
+
+That gives you workflow edits, node edits, and workflow add/delete on a
+production-shaped entrypoint with no CLI wrapper and no `NODE_ENV`. What you
+don't get is the restart half of the loop — nothing is watching your
+entrypoint or `.env`, so restart those yourself.
+
+| Variable | Effect |
+|---|---|
+| `BLOK_HMR=true` | Enable hot reload. Sufficient on its own. |
+| `BLOK_HMR=false` | Disable, even under `NODE_ENV=development`. |
+| unset | Enabled when `NODE_ENV=development` (what `blokctl dev` sets), otherwise off. |
+| `BLOK_HMR_VERBOSE=true` | Log every file-system event the watcher sees. |
+
+Watched directories default to `workflows/`, `src/workflows/` and `src/nodes/`
+relative to the working directory. Override with `WORKFLOWS_PATH` and
+`NODES_PATH` (comma-separated).
+
+## `--watch-all`: the escape hatch
+
+Before v0.8, `blokctl dev` ran every trigger under `bun --watch`. That restarted
+the whole process on **any** source change, which meant the in-process hot
+reloader never got to run — you paid a full restart for a one-line workflow
+edit, and "no hot reload" was the reasonable conclusion.
+
+That is off by default now. If your project depends on the old
+restart-on-everything behaviour:
+
+```bash
+blokctl dev --watch-all
+# or
+BLOK_DEV_WATCH_ALL=1 blokctl dev
+```
+
+With `--watch-all`, `bun --watch` owns the loop and in-process HMR is preempted.
+
+## `.env` loading order
+
+Loading is done once, in the runner, so it behaves identically under `bun run`
+and `node dist/index.js`. Highest precedence first:
+
+1. **Variables already in the environment** — your shell, the `blokctl dev`
+   spawn env, container env. Never overwritten by a file.
+2. **`.env.local`** — machine-local overrides, git-ignored. Skipped when
+   `NODE_ENV=test`, so local credentials can't leak into a test run.
+3. **`.env`** — committed defaults.
+
+Keys are only filled in if absent, so this never fights an explicitly-set
+variable (a `PORT` passed on the command line still wins). Supported syntax:
+`KEY=value`, `export KEY=value`, `#` comments, and single- or double-quoted
+values.
+
+Opt out with `BLOK_DOTENV_DISABLED=1`.
+
+<Tip>
+Put your dev stack credentials in `.env.local` rather than exporting them in a
+shell. A restart then costs a keystroke instead of a re-provision — which is the
+whole point of making restarts cheap.
+</Tip>
+
+## Cold boot
+
+`blokctl dev` no longer blocks trigger startup on sidecar gRPC handshakes. It
+spawns the runtimes, spawns the triggers immediately, and probes the runtimes in
+the background — a Rust or Java sidecar that takes 40s to compile no longer
+delays your HTTP endpoint by 40s. Runtime adapters connect lazily on first use,
+so nothing needed the wait.
+
+If a sidecar never comes up, you get a warning naming the gRPC ports. Workflows
+built from module nodes keep serving; only `runtime.*` steps targeting a dead
+sidecar fail.
+
+Measured cold boot with no sidecars, 67 workflows, hot reload on:
+
+```
+{"level":"info","message":"Server is running at http://localhost:4599"}
+{"level":"info","message":"Server initialized in 164.01ms"}
+```
+
+Budget: **under 1s** without sidecars. If your boot exceeds that, the boot log
+lists every route and workflow it registered — that list is usually the answer.

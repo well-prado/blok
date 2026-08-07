@@ -178,6 +178,7 @@
 						"group": "CLI",
 						"pages": [
 							"d/cli/overview",
+							"d/cli/dev",
 							"d/cli/project",
 							"d/cli/runtimes",
 							"d/cli/observability",
