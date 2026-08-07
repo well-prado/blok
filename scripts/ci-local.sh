@@ -14,12 +14,17 @@
 #                    (HEAVY: builds 7 Docker images — Go/Rust/Java/C#/PHP/Ruby/Python3)
 #   fast           → no Docker: lint:check → proto:check → nx build → `bun run test`
 #                    (integration suites self-skip with no BLOK_INTEGRATION_* env)
-#   all            → integration + cross-runtime
+#   packaging      → .github/workflows/packaging.yml
+#                    build → npm pack every publishable package → import every
+#                    exports subpath under real Node → vitest consumer fixture
+#                    → publint + @arethetypeswrong/cli (#687)
+#   all            → integration + cross-runtime + packaging
 #
 # Usage:
 #   bun run ci                 # integration lane (default)
 #   bun run ci:fast            # quick, no Docker
 #   bun run ci:cross-runtime   # polyglot gRPC lane
+#   bun run ci:packaging       # packed-artifact gate, real Node
 #   bun run ci:all             # everything
 set -euo pipefail
 
@@ -32,7 +37,9 @@ step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 gates() {
   step "Lint (Biome)"; bun run lint:check
   step "Proto drift check"; bun run proto:check
-  step "Build all workspace packages (nx, cached)"; bunx nx run-many -t build
+  # `bun run build`, not bare `nx run-many -t build` — the root script appends
+  # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
+  step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build
 }
 
 run_fast() {
@@ -62,12 +69,19 @@ run_cross_runtime() {
   BLOK_E2E_REQUIRE_ALL=1 BLOK_E2E_USERNODES=1 bun "$CR/spec-b-typed-e2e.ts"
 }
 
+run_packaging() {
+  step "Build all workspace packages + Node-ESM fixups"; bun run build
+  step "Packed-artifact gate (npm pack → real Node import → vitest consumer → publint/attw)"
+  bun run check:packaging
+}
+
 case "$LANE" in
   fast)                 run_fast ;;
   integration)          run_integration ;;
   cross-runtime|cross)  run_cross_runtime ;;
-  all)                  run_integration; run_cross_runtime ;;
-  *) echo "unknown lane: '$LANE' (use: fast | integration | cross-runtime | all)" >&2; exit 2 ;;
+  packaging)            run_packaging ;;
+  all)                  run_integration; run_cross_runtime; run_packaging ;;
+  *) echo "unknown lane: '$LANE' (use: fast | integration | cross-runtime | packaging | all)" >&2; exit 2 ;;
 esac
 
 printf '\n\033[1;32m✅ CI lane '"'"'%s'"'"' passed locally.\033[0m\n' "$LANE"

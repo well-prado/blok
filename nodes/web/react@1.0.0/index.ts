@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineNode } from "@blokjs/runner";
 import type { Context } from "@blokjs/shared";
 import ejs from "ejs";
@@ -28,8 +29,11 @@ const inputSchema = z.object({
 // Output is HTML string
 const outputSchema = z.string();
 
-// Helper: Resolve path relative to node directory
-const rootDir = path.resolve(__dirname, ".");
+// Helper: Resolve path relative to node directory.
+// `__dirname` does not exist in ESM — Bun happens to provide it, Node does not,
+// so the published package threw `ReferenceError: __dirname is not defined` for
+// anyone off Bun (#687).
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 function root(relPath: string): string {
 	return path.resolve(rootDir, relPath);
 }

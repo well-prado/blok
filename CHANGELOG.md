@@ -32,6 +32,33 @@ packages on npm version independently within each release line.
 
 ### Fixed
 
+- **Every published `@blokjs/*` package was Bun-only and crashed Node's ESM
+  loader** (#687). `tsc` copies module specifiers through verbatim, so source
+  written as `import Configuration from "./Configuration"` shipped exactly that
+  in `dist/`. Bun resolves the extensionless form; Node does not. Consequence:
+  `npx blokctl` was broken, and so was every consumer on the Node loader —
+  vitest, plain `node`, `tsx`, Next.js/Vite SSR externals. Downstream projects
+  were papering over it with `server: { deps: { inline: [/@blokjs\//] } }` in
+  `vitest.config.ts`; that workaround can now be deleted.
+
+  `scripts/fix-esm-extensions.ts` runs as part of `bun run build` and rewrites
+  every emitted relative specifier to the explicit form Node needs
+  (`./Configuration.js`, `./tracing/index.js`), in `.js` and `.d.ts` alike.
+  **Always build with `bun run build`, never a bare `nx run-many -t build`** —
+  the fixup is part of the root script.
+
+  Fixed alongside it, both found by the new gate:
+  - `@blokjs/react` used `__dirname` in an ESM module. Bun provides it, Node
+    does not, so importing the published package threw `ReferenceError`.
+  - `@blokjs/runner`'s `Blok.d.ts` reached into `@blokjs/shared/dist/**` for a
+    type that already exists locally, emitting a deep specifier no
+    node16/nodenext type resolver can follow.
+
+  Sourcemaps are no longer shipped. Published packages contain `dist` only, so
+  the maps pointed at `src/` files that were never in the tarball — consumers
+  got "points to missing source files" warning spam for maps that could not
+  have worked.
+
 - **Graceful shutdown could hang forever when an OTLP collector was
   unreachable.** `TracingBootstrap`'s `shutdown()` awaited `provider.shutdown()`
   unbounded; that force-flushes queued spans through the OTLP exporter, which
@@ -40,6 +67,17 @@ packages on npm version independently within each release line.
   OpenTelemetry 2.x upgrade, but the hang was latent before it.
 
 ### Added
+
+- **Packaging gate: `bun run ci:packaging`** (#687). Nothing in this repo ever
+  loaded a published artifact the way a user does — every suite runs under Bun,
+  against the workspace, where symlinks and Bun's resolver hide packaging
+  defects. The new gate `npm pack`s all 18 publishable packages, installs the
+  tarballs into a throwaway project, and imports **every subpath of every
+  exports map** (157 today, wildcards expanded) with real Node; then runs
+  `tests/e2e/node-consumer` — vitest on Node with a deliberately empty config —
+  followed by `publint` and `@arethetypeswrong/cli`. Runs on every PR via
+  `.github/workflows/packaging.yml`. `bun run scripts/fix-esm-extensions.ts
+  --check` is the fast local signal.
 
 - **Runtime-boundary payload safety (ADR 0014).** Non-NodeJS runtime nodes now
   fail fast with a `GRPC_REQUEST_TOO_LARGE` error naming the node and a per-blob
