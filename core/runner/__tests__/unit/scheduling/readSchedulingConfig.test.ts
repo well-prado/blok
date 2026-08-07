@@ -20,8 +20,10 @@ describe("readSchedulingConfig — debounce.key (#706)", () => {
 	});
 
 	it("throws on an unlowered {$ref} key instead of silently disabling debounce", () => {
-		// `lowerRefs` runs over step `inputs` only, so a structural ref here never
-		// becomes a `js/` string — it used to be coerced to "" and drop the gate.
+		// This config is hand-built, so it BYPASSES `normalizeWorkflow` — which
+		// since #707 lowers `debounce.key` and would hand this in as a `js/`
+		// string. The raw object reaching the reader is the case this guard still
+		// owns: it used to be coerced to "" and silently drop the gate.
 		expect(() =>
 			readSchedulingConfig({
 				http: { debounce: { key: { $ref: { step: "@trigger", path: ["params", "docId"] } }, delay: "500ms" } },

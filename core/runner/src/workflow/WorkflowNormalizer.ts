@@ -1,5 +1,5 @@
 import { parseDuration } from "@blokjs/helper";
-import { lowerRefs } from "@blokjs/shared";
+import { isStructuralRef, isStructuralTpl, lowerRefs } from "@blokjs/shared";
 
 /**
  * WorkflowNormalizer — accepts v1 or v2 workflow shapes and projects both
@@ -105,6 +105,13 @@ interface InternalStep {
 	 * IR→normalize→toJson round-trip preserves it (issue #301).
 	 */
 	ui?: Record<string, unknown>;
+	/**
+	 * Optional human note on the step — accepted by all 8 v2 step schemas
+	 * (#711) and ignored by the runner, exactly like `ui`. Threaded through
+	 * normalization so a Studio open→save round-trip doesn't silently drop the
+	 * author's description (issue #713).
+	 */
+	description?: string;
 	[key: string]: unknown;
 }
 
@@ -326,17 +333,22 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 	}
 
 	// --- Carry over any v1 nodes that didn't have a matching step ---
-	// (rare, but possible for legacy workflows with helper sub-flows
-	// declared at the top level)
+	// NOT rare: in a v1 workflow every step nested inside a `conditions` arm has
+	// its config here, keyed by a name no TOP-LEVEL step carries — 10 of the 13
+	// configs in `examples/integrations/stripe-payment.json`. This loop used to
+	// copy them VERBATIM, so a structural `{$ref}` in one never reached
+	// `lowerRefs` and landed on the node as a raw `{"$ref": {...}}` object: a
+	// silent miscompile (#707). Lower here for the same reason
+	// `normalizeRegularStep` lowers a matched step's inputs.
 	for (const key of Object.keys(nodesInput)) {
 		if (internalNodes[key] !== undefined) continue;
 		const value = nodesInput[key];
 		if (isPlainObject(value)) {
-			internalNodes[key] = value as InternalNodeConfig;
+			internalNodes[key] = lowerRefs(value) as InternalNodeConfig;
 		}
 	}
 
-	return {
+	const normalized: InternalWorkflow = {
 		name,
 		version,
 		description,
@@ -349,6 +361,8 @@ export function normalizeWorkflow(raw: unknown, sourcePath?: string): InternalWo
 		...(output !== undefined ? { output } : {}),
 		...(events !== undefined ? { events } : {}),
 	};
+	assertNoUnloweredRefs(normalized, sourcePath);
+	return normalized;
 }
 
 // =============================================================================
@@ -406,7 +420,7 @@ function normalizeRegularStep(
 		as,
 		spread,
 		ephemeral,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	if (typeof step.stream_logs === "boolean") internalStep.stream_logs = step.stream_logs;
 	// Live SSE forwarding opt-in for runtime steps. `streamTo: "sse"`
@@ -418,8 +432,9 @@ function normalizeRegularStep(
 	// these in RunnerSteps to wrap step.process() with cache-check + retry-
 	// loop. They never reach PersistenceHelper.applyStepOutput; caching
 	// layers ABOVE that.
-	if (typeof step.idempotencyKey === "string" && step.idempotencyKey.length > 0) {
-		internalStep.idempotencyKey = step.idempotencyKey;
+	const idempotencyKey = pickResolvedKey(step.idempotencyKey);
+	if (idempotencyKey) {
+		internalStep.idempotencyKey = idempotencyKey;
 	}
 	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
 		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
@@ -442,6 +457,11 @@ function normalizeRegularStep(
 	// lower structural `{$ref}` handles to the `js/ctx.state...` wire strings
 	// the Mapper already resolves, at the load boundary before the runner sees
 	// them. No-op for `js/`/`$.` string inputs (no `{$ref}` to find).
+	//
+	// #707: the v1 carry-over branches lower too. A v1 step whose config is
+	// `{conditions: [...]}` (no `inputs`) took the verbatim `{...v1NodeConfig}`
+	// path, and a step with BOTH copied its non-`inputs` keys verbatim — either
+	// way a `{$ref}` nested in there survived to the node untouched.
 	let nodeConfig: InternalNodeConfig | null = null;
 	if (inputs) {
 		nodeConfig = { inputs: lowerRefs(inputs) };
@@ -450,11 +470,11 @@ function normalizeRegularStep(
 		if (v1NodeConfig) {
 			for (const k of Object.keys(v1NodeConfig)) {
 				if (k === "inputs") continue;
-				nodeConfig[k] = (v1NodeConfig as Record<string, unknown>)[k];
+				nodeConfig[k] = lowerRefs((v1NodeConfig as Record<string, unknown>)[k]);
 			}
 		}
 	} else if (v1NodeConfig) {
-		nodeConfig = { ...v1NodeConfig };
+		nodeConfig = lowerRefs({ ...v1NodeConfig });
 	}
 
 	return { internalStep, nodeConfig };
@@ -503,7 +523,7 @@ function normalizeBranchStep(
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
 		flow: true,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	const nodeConfig: InternalNodeConfig = { conditions };
 
@@ -566,11 +586,12 @@ function normalizeSubworkflowStep(
 		// Default `wait: true` when omitted. `wait: false` triggers the
 		// async dispatch branch in SubworkflowNode.run.
 		wait: step.wait === undefined ? true : Boolean(step.wait),
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 
-	if (typeof step.idempotencyKey === "string" && step.idempotencyKey.length > 0) {
-		internalStep.idempotencyKey = step.idempotencyKey;
+	const idempotencyKey = pickResolvedKey(step.idempotencyKey);
+	if (idempotencyKey) {
+		internalStep.idempotencyKey = idempotencyKey;
 	}
 	if (typeof step.idempotencyKeyTTL === "number" && Number.isFinite(step.idempotencyKeyTTL)) {
 		internalStep.idempotencyKeyTTL = step.idempotencyKeyTTL;
@@ -683,7 +704,7 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 		ephemeral,
 		waitForMs,
 		waitUntil,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 }
 
@@ -750,7 +771,7 @@ function normalizeForEachStep(
 		type: "forEach",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	// nodeConfig — top-level `steps` triggers Configuration's
 	// isFlowWithProperties path which materializes into NodeBase[].
@@ -818,7 +839,7 @@ function normalizeLoopStep(
 		type: "loop",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		while: whileExpr,
@@ -984,7 +1005,7 @@ function normalizeSwitchStep(
 		type: "switch",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		on: sw.on,
@@ -1041,7 +1062,7 @@ function normalizeTryCatchStep(
 		type: "tryCatch",
 		active: step.active === undefined ? true : Boolean(step.active),
 		stop: step.stop === true,
-		...copyUi(step),
+		...copyStepMeta(step),
 	};
 	const nodeConfig: InternalNodeConfig = {
 		try: tryBlock.innerInternal,
@@ -1056,16 +1077,42 @@ function normalizeTrigger(rawTrigger: unknown, sourcePath?: string): Record<stri
 	if (!isPlainObject(rawTrigger)) return {};
 	const out: Record<string, unknown> = {};
 	for (const [kind, cfg] of Object.entries(rawTrigger as Record<string, unknown>)) {
-		if (kind === "http" && isPlainObject(cfg)) {
-			const httpCfg = { ...(cfg as Record<string, unknown>) };
-			if (httpCfg.method === "*") {
-				httpCfg.method = "ANY";
-				warnWildcardOnce(sourcePath);
-			}
-			out[kind] = httpCfg;
-		} else {
+		if (!isPlainObject(cfg)) {
 			out[kind] = cfg;
+			continue;
 		}
+		const triggerCfg = lowerTriggerKeys(cfg as Record<string, unknown>);
+		if (kind === "http" && triggerCfg.method === "*") {
+			triggerCfg.method = "ANY";
+			warnWildcardOnce(sourcePath);
+		}
+		out[kind] = triggerCfg;
+	}
+	return out;
+}
+
+/**
+ * #707 (from #715's finding) — lower the two TRIGGER-side resolved-key
+ * positions, `concurrencyKey` and `debounce.key`.
+ *
+ * These are not Mapper-resolved: the runner evaluates a `js/` string and takes
+ * any other string as a LITERAL key. Lowering was previously applied to step
+ * `inputs` only, so a structural `{$ref}` here reached `resolveKey` as a raw
+ * object — which #706's guard now refuses loudly rather than silently
+ * collapsing every tenant into one bucket. Lowering makes the structural form
+ * WORK; the guard stays as the backstop for anything that bypasses this pass.
+ *
+ * Only these two fields are touched. A blanket `lowerRefs(cfg)` would also
+ * rewrite non-resolved positions (`path`, `middleware`, …) into `js/…` strings
+ * nothing evaluates — trading one silent miscompile for another.
+ */
+function lowerTriggerKeys(cfg: Record<string, unknown>): Record<string, unknown> {
+	const out = { ...cfg };
+	if (out.concurrencyKey !== undefined) out.concurrencyKey = lowerRefs(out.concurrencyKey);
+	if (isPlainObject(out.debounce) && (out.debounce as Record<string, unknown>).key !== undefined) {
+		const debounce = { ...(out.debounce as Record<string, unknown>) };
+		debounce.key = lowerRefs(debounce.key);
+		out.debounce = debounce;
 	}
 	return out;
 }
@@ -1103,13 +1150,96 @@ function pickString(value: unknown): string | undefined {
 }
 
 /**
- * Spread `ui` onto an InternalStep when present. The runner ignores `ui` at
- * execution — this purely preserves canvas metadata across the
- * IR→normalize→toJson round-trip (issue #301). Applied in every InternalStep
- * constructor (incl. nested inner-step builders) so `ui` survives at any depth.
+ * Spread the AUTHORING metadata an InternalStep carries but the runner never
+ * executes: `ui` (canvas position/notes, #301) and `description` (#713).
+ *
+ * Both are accepted by all 8 v2 step schemas and both are pure round-trip
+ * concerns — Studio normalizes a workflow and serializes it straight back out,
+ * so a field the normalizer drops is a field the author loses on save. Applied
+ * in every InternalStep constructor (incl. the nested inner-step builders) so
+ * they survive at any depth, in any arm.
  */
-function copyUi(step: Record<string, unknown>): { ui?: Record<string, unknown> } {
-	return isPlainObject(step.ui) ? { ui: step.ui } : {};
+function copyStepMeta(step: Record<string, unknown>): { ui?: Record<string, unknown>; description?: string } {
+	return {
+		...(isPlainObject(step.ui) ? { ui: step.ui } : {}),
+		...(typeof step.description === "string" ? { description: step.description } : {}),
+	};
+}
+
+/**
+ * Read one of the three RESOLVED-KEY positions (`idempotencyKey`,
+ * `concurrencyKey`, `debounce.key`), lowering a structural `{$ref}` / `{$tpl}`
+ * into the `js/…` string the runner evaluates first (#707).
+ *
+ * Order matters: the old code type-checked BEFORE lowering, so a structural ref
+ * here was not merely unlowered — it failed `typeof === "string"` and was
+ * DROPPED, silently disabling the idempotency cache for that step.
+ */
+function pickResolvedKey(value: unknown): string | undefined {
+	return pickString(lowerRefs(value));
+}
+
+/**
+ * #707 — the total post-normalize invariant: NO structural `{$ref}` / `{$tpl}`
+ * may reach the runner.
+ *
+ * `lowerRefs` compiles those sentinels into the wire strings the Mapper
+ * resolves (ADR 0001 Option C). Anything it misses is not an error the runtime
+ * reports — the Mapper walks INTO the plain object, string-resolves its inner
+ * `step`/`path` fields, and hands the node a raw `{"$ref": {...}}` where a
+ * value belongs. Silent miscompile, the worst class. So the load boundary
+ * asserts the absence rather than trusting every emission site to remember.
+ *
+ * It fires on two real classes:
+ *   1. a lowering site added later that forgets the pass (regression guard);
+ *   2. a ref written in a position lowering deliberately does NOT cover —
+ *      `forEach.in`, `switch.on`, a `switch` case `when`. Those take a path
+ *      STRING (the TS DSL already lowers its handles there at authoring time,
+ *      see `stepBuilder.lowerHandleToInExpr`), so a hand-written JSON `{$ref}`
+ *      there has always been broken. Now it is loud.
+ *
+ * Traversal mirrors `lowerRefs` exactly — plain objects and arrays only, so a
+ * Zod schema or any class instance is stepped over, not walked. `input` /
+ * `output` / `events` are excluded for the same reason plus one of their own:
+ * a JSON Schema legitimately contains `{"$ref": "#/definitions/…"}`, which is
+ * not a structural ref (its `$ref` is a string) but is not ours to police.
+ *
+ * `wait.for` / `wait.until` are literal positions, not ref positions (#704
+ * owns any change there); they are numbers/strings by the time they get here
+ * and the walk simply passes over them.
+ */
+function assertNoUnloweredRefs(workflow: InternalWorkflow, sourcePath?: string): void {
+	walkForUnloweredRefs(workflow.trigger, "trigger", "<trigger>", sourcePath);
+	workflow.steps.forEach((step, i) => walkForUnloweredRefs(step, `steps[${i}]`, step.name, sourcePath));
+	for (const [key, config] of Object.entries(workflow.nodes)) {
+		walkForUnloweredRefs(config, `nodes[${JSON.stringify(key)}]`, key, sourcePath);
+	}
+}
+
+function walkForUnloweredRefs(value: unknown, docPath: string, stepId: string, sourcePath?: string): void {
+	if (value === null || value === undefined || typeof value !== "object") return;
+	if (Array.isArray(value)) {
+		value.forEach((item, i) => walkForUnloweredRefs(item, `${docPath}[${i}]`, stepId, sourcePath));
+		return;
+	}
+	// Same plain-object rule `lowerRefs` uses — a class instance is opaque to
+	// the pass, so it must be opaque to the assertion too.
+	const proto = Object.getPrototypeOf(value);
+	if (proto !== null && proto !== Object.prototype) return;
+
+	if (isStructuralRef(value) || isStructuralTpl(value)) {
+		const kind = isStructuralRef(value) ? "$ref" : "$tpl";
+		const suffix = sourcePath ? ` (file: ${sourcePath})` : "";
+		throw new Error(
+			`[blok] WorkflowNormalizer: a structural \`{${kind}}\` survived normalization at ${docPath} (step "${stepId}"). Only step \`inputs\` and the resolved-key fields (\`idempotencyKey\`, \`concurrencyKey\`, \`debounce.key\`) are lowered to the \`js/…\` wire form the runtime resolves; everywhere else the Mapper would walk INTO the object and hand the node a raw \`{"${kind}": …}\` instead of the value. Control positions (\`forEach.in\`, \`switch.on\`, a \`switch\` case \`when\`, \`branch.when\`, \`loop.while\`) take a path string or a literal — write the path directly.${suffix}`,
+		);
+	}
+
+	// A nested step object re-roots the reported id (inner arms carry `name`).
+	const nestedId = typeof (value as { name?: unknown }).name === "string" ? (value as { name: string }).name : stepId;
+	for (const [key, child] of Object.entries(value)) {
+		walkForUnloweredRefs(child, `${docPath}.${key}`, nestedId, sourcePath);
+	}
 }
 
 /**

@@ -189,9 +189,12 @@ export const RESOLVED_KEY_FIELDS = ["idempotencyKey", "concurrencyKey", "debounc
  *
  * The shapes refused are the ones authors actually reach for: the `$.` proxy
  * path, a bare `ctx.` chain, a `${…}` interpolation, a `{{…}}` template, and an
- * unlowered structural `{$ref}` / `{$tpl}` object (`lowerRefs` runs over step
- * `inputs` only, so a structural ref in one of these fields never becomes a
- * `js/` string).
+ * unlowered structural `{$ref}` / `{$tpl}` object. Since #707 the normalizer
+ * DOES lower these three fields, so a ref that came through `normalizeWorkflow`
+ * arrives as a `js/` string and never reaches this rule — the `{$ref}` clause
+ * is the backstop for a config built any other way (a hand-assembled trigger
+ * block, a future emitter that skips the pass), which is exactly where the
+ * silent-constant failure would otherwise reappear.
  *
  * ONE rule, shared: `@blokjs/runner` imports this for its runtime guard and
  * `validateRefs` uses it for the static `blokctl check` diagnostic, so the two

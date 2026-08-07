@@ -80,6 +80,9 @@ describe("readConcurrencyConfig", () => {
 	});
 
 	it("throws on an unlowered {$ref} concurrencyKey instead of silently disabling the gate (#706)", () => {
+		// Hand-built config — it never went through `normalizeWorkflow`, which
+		// since #707 lowers `concurrencyKey` to a `js/` string. This asserts the
+		// backstop for every path that bypasses that pass.
 		expect(() =>
 			readConcurrencyConfig({
 				http: { method: "POST", concurrencyKey: { $ref: { step: "@trigger", path: ["body", "tenantId"] } } },
