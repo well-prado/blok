@@ -33,27 +33,50 @@
 					"type": "object",
 					"required": ["amount", "currency", "paymentMethodId", "customer"],
 					"properties": {
-						"amount": { "type": "number", "minimum": 50 },
+						"amount": {
+							"type": "number",
+							"minimum": 50
+						},
 						"currency": {
 							"type": "string",
 							"enum": ["usd", "eur", "gbp", "cad", "aud"]
 						},
-						"paymentMethodId": { "type": "string" },
+						"paymentMethodId": {
+							"type": "string"
+						},
 						"customer": {
 							"type": "object",
 							"required": ["email"],
 							"properties": {
-								"email": { "type": "string", "format": "email" },
-								"name": { "type": "string" },
-								"stripeCustomerId": { "type": "string" }
+								"email": {
+									"type": "string",
+									"format": "email"
+								},
+								"name": {
+									"type": "string"
+								},
+								"stripeCustomerId": {
+									"type": "string"
+								}
 							}
 						},
-						"description": { "type": "string" },
-						"metadata": { "type": "object" },
-						"idempotencyKey": { "type": "string" }
+						"description": {
+							"type": "string"
+						},
+						"metadata": {
+							"type": "object"
+						},
+						"idempotencyKey": {
+							"type": "string"
+						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		"resolve-customer": {
@@ -65,7 +88,18 @@
 					"Content-Type": "application/x-www-form-urlencoded"
 				},
 				"params": {
-					"query": "email:'${ctx.request.body.customer.email}'"
+					"query": {
+						"$tpl": [
+							"email:'",
+							{
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "customer", "email"]
+								}
+							},
+							"'"
+						]
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -118,7 +152,12 @@
 		"use-existing-customer": {
 			"inputs": {
 				"model": {
-					"customerId": "js/ctx.vars['resolve-customer'].data[0].id"
+					"customerId": {
+						"$ref": {
+							"step": "resolve-customer",
+							"path": ["data", 0, "id"]
+						}
+					}
 				}
 			}
 		},
@@ -131,9 +170,24 @@
 					"Content-Type": "application/x-www-form-urlencoded"
 				},
 				"body": {
-					"email": "${ctx.request.body.customer.email}",
-					"name": "${ctx.request.body.customer.name}",
-					"payment_method": "${ctx.request.body.paymentMethodId}"
+					"email": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "email"]
+						}
+					},
+					"name": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "name"]
+						}
+					},
+					"payment_method": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "paymentMethodId"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -145,16 +199,51 @@
 				"headers": {
 					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
 					"Content-Type": "application/x-www-form-urlencoded",
-					"Idempotency-Key": "${ctx.request.body.idempotencyKey}"
+					"Idempotency-Key": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "idempotencyKey"]
+						}
+					}
 				},
 				"body": {
-					"amount": "js/ctx.request.body.amount",
-					"currency": "${ctx.request.body.currency}",
-					"customer": "${ctx.vars['use-existing-customer'].customerId}",
-					"payment_method": "${ctx.request.body.paymentMethodId}",
+					"amount": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "amount"]
+						}
+					},
+					"currency": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "currency"]
+						}
+					},
+					"customer": {
+						"$ref": {
+							"step": "use-existing-customer",
+							"path": ["customerId"]
+						}
+					},
+					"payment_method": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "paymentMethodId"]
+						}
+					},
 					"confirm": "true",
-					"description": "${ctx.request.body.description}",
-					"receipt_email": "${ctx.request.body.customer.email}",
+					"description": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "description"]
+						}
+					},
+					"receipt_email": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "email"]
+						}
+					},
 					"metadata[source]": "blok_workflow",
 					"metadata[workflow]": "stripe-payment-integration"
 				},
@@ -168,16 +257,51 @@
 				"headers": {
 					"Authorization": "Bearer ${process.env.STRIPE_SECRET_KEY}",
 					"Content-Type": "application/x-www-form-urlencoded",
-					"Idempotency-Key": "${ctx.request.body.idempotencyKey}"
+					"Idempotency-Key": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "idempotencyKey"]
+						}
+					}
 				},
 				"body": {
-					"amount": "js/ctx.request.body.amount",
-					"currency": "${ctx.request.body.currency}",
-					"customer": "${ctx.vars['create-stripe-customer'].id}",
-					"payment_method": "${ctx.request.body.paymentMethodId}",
+					"amount": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "amount"]
+						}
+					},
+					"currency": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "currency"]
+						}
+					},
+					"customer": {
+						"$ref": {
+							"step": "create-stripe-customer",
+							"path": ["id"]
+						}
+					},
+					"payment_method": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "paymentMethodId"]
+						}
+					},
 					"confirm": "true",
-					"description": "${ctx.request.body.description}",
-					"receipt_email": "${ctx.request.body.customer.email}",
+					"description": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "description"]
+						}
+					},
+					"receipt_email": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "email"]
+						}
+					},
 					"metadata[source]": "blok_workflow",
 					"metadata[workflow]": "stripe-payment-integration"
 				},
@@ -238,12 +362,42 @@
 			"inputs": {
 				"model": {
 					"success": true,
-					"paymentIntentId": "${ctx.vars['create-payment-intent-existing'].id}",
-					"status": "${ctx.vars['create-payment-intent-existing'].status}",
-					"amount": "js/ctx.vars['create-payment-intent-existing'].amount",
-					"currency": "${ctx.vars['create-payment-intent-existing'].currency}",
-					"customerId": "${ctx.vars['use-existing-customer'].customerId}",
-					"receiptUrl": "${ctx.vars['create-payment-intent-existing'].charges.data[0].receipt_url}"
+					"paymentIntentId": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["id"]
+						}
+					},
+					"status": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["status"]
+						}
+					},
+					"amount": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["amount"]
+						}
+					},
+					"currency": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["currency"]
+						}
+					},
+					"customerId": {
+						"$ref": {
+							"step": "use-existing-customer",
+							"path": ["customerId"]
+						}
+					},
+					"receiptUrl": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["charges", "data", 0, "receipt_url"]
+						}
+					}
 				}
 			}
 		},
@@ -251,12 +405,42 @@
 			"inputs": {
 				"model": {
 					"success": true,
-					"paymentIntentId": "${ctx.vars['create-payment-intent-new'].id}",
-					"status": "${ctx.vars['create-payment-intent-new'].status}",
-					"amount": "js/ctx.vars['create-payment-intent-new'].amount",
-					"currency": "${ctx.vars['create-payment-intent-new'].currency}",
-					"customerId": "${ctx.vars['create-stripe-customer'].id}",
-					"receiptUrl": "${ctx.vars['create-payment-intent-new'].charges.data[0].receipt_url}"
+					"paymentIntentId": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["id"]
+						}
+					},
+					"status": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["status"]
+						}
+					},
+					"amount": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["amount"]
+						}
+					},
+					"currency": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["currency"]
+						}
+					},
+					"customerId": {
+						"$ref": {
+							"step": "create-stripe-customer",
+							"path": ["id"]
+						}
+					},
+					"receiptUrl": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["charges", "data", 0, "receipt_url"]
+						}
+					}
 				}
 			}
 		},
@@ -265,9 +449,24 @@
 				"model": {
 					"success": false,
 					"error": "PAYMENT_FAILED",
-					"paymentIntentId": "${ctx.vars['create-payment-intent-existing'].id}",
-					"status": "${ctx.vars['create-payment-intent-existing'].status}",
-					"failureMessage": "${ctx.vars['create-payment-intent-existing'].last_payment_error.message}"
+					"paymentIntentId": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["id"]
+						}
+					},
+					"status": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["status"]
+						}
+					},
+					"failureMessage": {
+						"$ref": {
+							"step": "create-payment-intent-existing",
+							"path": ["last_payment_error", "message"]
+						}
+					}
 				}
 			}
 		},
@@ -276,9 +475,24 @@
 				"model": {
 					"success": false,
 					"error": "PAYMENT_FAILED",
-					"paymentIntentId": "${ctx.vars['create-payment-intent-new'].id}",
-					"status": "${ctx.vars['create-payment-intent-new'].status}",
-					"failureMessage": "${ctx.vars['create-payment-intent-new'].last_payment_error.message}"
+					"paymentIntentId": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["id"]
+						}
+					},
+					"status": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["status"]
+						}
+					},
+					"failureMessage": {
+						"$ref": {
+							"step": "create-payment-intent-new",
+							"path": ["last_payment_error", "message"]
+						}
+					}
 				}
 			}
 		}

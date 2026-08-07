@@ -45,9 +45,17 @@
 								"type": "object",
 								"required": ["productId", "quantity", "price"],
 								"properties": {
-									"productId": { "type": "string" },
-									"quantity": { "type": "integer", "minimum": 1 },
-									"price": { "type": "number", "minimum": 0 }
+									"productId": {
+										"type": "string"
+									},
+									"quantity": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"price": {
+										"type": "number",
+										"minimum": 0
+									}
 								}
 							}
 						},
@@ -55,40 +63,82 @@
 							"type": "object",
 							"required": ["id", "email"],
 							"properties": {
-								"id": { "type": "string" },
-								"email": { "type": "string", "format": "email" }
+								"id": {
+									"type": "string"
+								},
+								"email": {
+									"type": "string",
+									"format": "email"
+								}
 							}
 						},
 						"shippingAddress": {
 							"type": "object",
 							"required": ["line1", "city", "state", "postalCode", "country"],
 							"properties": {
-								"line1": { "type": "string" },
-								"line2": { "type": "string" },
-								"city": { "type": "string" },
-								"state": { "type": "string" },
-								"postalCode": { "type": "string" },
-								"country": { "type": "string" }
+								"line1": {
+									"type": "string"
+								},
+								"line2": {
+									"type": "string"
+								},
+								"city": {
+									"type": "string"
+								},
+								"state": {
+									"type": "string"
+								},
+								"postalCode": {
+									"type": "string"
+								},
+								"country": {
+									"type": "string"
+								}
 							}
 						},
 						"paymentMethod": {
 							"type": "object",
 							"required": ["type", "token"],
 							"properties": {
-								"type": { "type": "string", "enum": ["card", "bank_transfer"] },
-								"token": { "type": "string" }
+								"type": {
+									"type": "string",
+									"enum": ["card", "bank_transfer"]
+								},
+								"token": {
+									"type": "string"
+								}
 							}
 						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		"calculate-totals": {
 			"inputs": {
-				"items": "js/ctx.request.body.items",
-				"shippingAddress": "js/ctx.request.body.shippingAddress",
-				"couponCode": "${ctx.request.body.couponCode}",
+				"items": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "items"]
+					}
+				},
+				"shippingAddress": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "shippingAddress"]
+					}
+				},
+				"couponCode": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body", "couponCode"]
+					}
+				},
 				"taxRateApiUrl": "${process.env.TAX_SERVICE_URL}/api/rates"
 			}
 		},
@@ -147,17 +197,62 @@
 				"body": {
 					"amount": "js/Math.round(ctx.vars['calculate-totals'].totalAmount * 100)",
 					"currency": "usd",
-					"payment_method": "${ctx.request.body.paymentMethod.token}",
+					"payment_method": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "paymentMethod", "token"]
+						}
+					},
 					"confirm": true,
-					"metadata[customer_id]": "${ctx.request.body.customer.id}",
+					"metadata[customer_id]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "id"]
+						}
+					},
 					"metadata[order_source]": "checkout_workflow",
-					"receipt_email": "${ctx.request.body.customer.email}",
-					"shipping[name]": "${ctx.request.body.customer.name}",
-					"shipping[address][line1]": "${ctx.request.body.shippingAddress.line1}",
-					"shipping[address][city]": "${ctx.request.body.shippingAddress.city}",
-					"shipping[address][state]": "${ctx.request.body.shippingAddress.state}",
-					"shipping[address][postal_code]": "${ctx.request.body.shippingAddress.postalCode}",
-					"shipping[address][country]": "${ctx.request.body.shippingAddress.country}"
+					"receipt_email": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "email"]
+						}
+					},
+					"shipping[name]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "name"]
+						}
+					},
+					"shipping[address][line1]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress", "line1"]
+						}
+					},
+					"shipping[address][city]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress", "city"]
+						}
+					},
+					"shipping[address][state]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress", "state"]
+						}
+					},
+					"shipping[address][postal_code]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress", "postalCode"]
+						}
+					},
+					"shipping[address][country]": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress", "country"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -213,7 +308,12 @@
 				"body": {
 					"items": "js/ctx.request.body.items.map(item => ({ productId: item.productId, quantity: item.quantity }))",
 					"reservationTtl": 3600,
-					"paymentIntentId": "${ctx.vars['process-payment'].id}"
+					"paymentIntentId": {
+						"$ref": {
+							"step": "process-payment",
+							"path": ["id"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -227,15 +327,60 @@
 					"Authorization": "Bearer ${process.env.INTERNAL_API_KEY}"
 				},
 				"body": {
-					"customerId": "${ctx.request.body.customer.id}",
-					"items": "js/ctx.request.body.items",
-					"shippingAddress": "js/ctx.request.body.shippingAddress",
-					"subtotal": "js/ctx.vars['calculate-totals'].subtotal",
-					"tax": "js/ctx.vars['calculate-totals'].tax",
-					"shipping": "js/ctx.vars['calculate-totals'].shippingCost",
-					"discount": "js/ctx.vars['calculate-totals'].discount",
-					"totalAmount": "js/ctx.vars['calculate-totals'].totalAmount",
-					"paymentIntentId": "${ctx.vars['process-payment'].id}",
+					"customerId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "customer", "id"]
+						}
+					},
+					"items": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "items"]
+						}
+					},
+					"shippingAddress": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "shippingAddress"]
+						}
+					},
+					"subtotal": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["subtotal"]
+						}
+					},
+					"tax": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["tax"]
+						}
+					},
+					"shipping": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["shippingCost"]
+						}
+					},
+					"discount": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["discount"]
+						}
+					},
+					"totalAmount": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["totalAmount"]
+						}
+					},
+					"paymentIntentId": {
+						"$ref": {
+							"step": "process-payment",
+							"path": ["id"]
+						}
+					},
 					"paymentStatus": "paid",
 					"status": "confirmed"
 				},
@@ -253,17 +398,66 @@
 				"body": {
 					"personalizations": [
 						{
-							"to": [{ "email": "${ctx.request.body.customer.email}" }],
+							"to": [
+								{
+									"email": {
+										"$ref": {
+											"step": "@trigger",
+											"path": ["body", "customer", "email"]
+										}
+									}
+								}
+							],
 							"dynamic_template_data": {
-								"orderId": "${ctx.vars['create-order'].orderId}",
-								"customerName": "${ctx.request.body.customer.name}",
-								"items": "js/ctx.request.body.items",
-								"subtotal": "js/ctx.vars['calculate-totals'].subtotal",
-								"tax": "js/ctx.vars['calculate-totals'].tax",
-								"shipping": "js/ctx.vars['calculate-totals'].shippingCost",
-								"total": "js/ctx.vars['calculate-totals'].totalAmount",
-								"shippingAddress": "js/ctx.request.body.shippingAddress",
-								"orderTrackingUrl": "${process.env.APP_URL}/orders/${ctx.vars['create-order'].orderId}"
+								"orderId": {
+									"$ref": {
+										"step": "create-order",
+										"path": ["orderId"]
+									}
+								},
+								"customerName": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "customer", "name"]
+									}
+								},
+								"items": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "items"]
+									}
+								},
+								"subtotal": {
+									"$ref": {
+										"step": "calculate-totals",
+										"path": ["subtotal"]
+									}
+								},
+								"tax": {
+									"$ref": {
+										"step": "calculate-totals",
+										"path": ["tax"]
+									}
+								},
+								"shipping": {
+									"$ref": {
+										"step": "calculate-totals",
+										"path": ["shippingCost"]
+									}
+								},
+								"total": {
+									"$ref": {
+										"step": "calculate-totals",
+										"path": ["totalAmount"]
+									}
+								},
+								"shippingAddress": {
+									"$ref": {
+										"step": "@trigger",
+										"path": ["body", "shippingAddress"]
+									}
+								},
+								"orderTrackingUrl": "js/`${process.env.APP_URL}/orders/${ctx.state['create-order'].orderId}`"
 							}
 						}
 					],
@@ -280,10 +474,20 @@
 			"inputs": {
 				"model": {
 					"success": true,
-					"orderId": "${ctx.vars['create-order'].orderId}",
+					"orderId": {
+						"$ref": {
+							"step": "create-order",
+							"path": ["orderId"]
+						}
+					},
 					"status": "confirmed",
 					"paymentStatus": "paid",
-					"total": "js/ctx.vars['calculate-totals'].totalAmount",
+					"total": {
+						"$ref": {
+							"step": "calculate-totals",
+							"path": ["totalAmount"]
+						}
+					},
 					"currency": "usd",
 					"estimatedDelivery": "js/new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]"
 				}
@@ -295,7 +499,12 @@
 					"success": false,
 					"error": "INVENTORY_UNAVAILABLE",
 					"message": "One or more items in your cart are no longer available.",
-					"unavailableItems": "js/ctx.vars['check-inventory'].unavailableItems"
+					"unavailableItems": {
+						"$ref": {
+							"step": "check-inventory",
+							"path": ["unavailableItems"]
+						}
+					}
 				}
 			}
 		},
@@ -305,7 +514,12 @@
 					"success": false,
 					"error": "PAYMENT_FAILED",
 					"message": "Payment could not be processed. Please check your payment details and try again.",
-					"paymentStatus": "${ctx.vars['process-payment'].status}"
+					"paymentStatus": {
+						"$ref": {
+							"step": "process-payment",
+							"path": ["status"]
+						}
+					}
 				}
 			}
 		}

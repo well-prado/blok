@@ -324,6 +324,12 @@ strings in JSON: `branch.when` / `loop.while` (raw `ctx.*`, no prefix),
 these except trigger config, which is resolved at run-entry before any handle
 exists.
 
+Writing a structural `{"$ref": …}` / `{"$tpl": […]}` in one of the **control**
+positions (`switch.on`, `forEach.in`, a `switch` case `when`) fails at load with
+the step id and the path. Those positions are never lowered, so before this
+check the object reached the node verbatim and the workflow ran on wrong data
+with no error at all.
+
 `wait.for` / `wait.until` are the exception to the exception: they are parsed at
 workflow **load** time, before any `ctx` exists, so they accept a literal
 duration or timestamp only. An expression there — a `{$ref}`, a `tpl`, or a

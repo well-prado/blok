@@ -49,7 +49,7 @@ import mapper from "./utils/Mapper";
 import { MapperResolutionError } from "./utils/MapperResolutionError";
 import MemoryUsage from "./utils/MemoryUsage";
 import { NamedMissingStateError } from "./utils/NamedMissingStateError";
-import { type StructuralRef, lowerRefs } from "./utils/lowerRefs";
+import { type StructuralRef, type StructuralTpl, isStructuralRef, isStructuralTpl, lowerRefs } from "./utils/lowerRefs";
 
 export {
 	NodeBase,
@@ -89,5 +89,11 @@ export {
 	MapperResolutionError,
 	NamedMissingStateError,
 	lowerRefs,
+	// The lowering pass's OWN predicates — exported so the normalizer's
+	// post-lowering total invariant (#707) tests the identical rule instead of
+	// a second hand-written copy that could drift from what `lowerRefs` lowers.
+	isStructuralRef,
+	isStructuralTpl,
 	type StructuralRef,
+	type StructuralTpl,
 };

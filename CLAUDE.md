@@ -109,7 +109,10 @@ trigger payload and `@error` for a caught error, and
 rewrites them. Control/trigger-config positions keep path strings:
 `branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
 `forEach.in`, `subworkflow`, step `idempotencyKey`, trigger `concurrencyKey` /
-`debounce.key`. The three key positions (`idempotencyKey`, `concurrencyKey`,
+`debounce.key`. A structural `{"$ref"}` / `{"$tpl"}` written in a CONTROL
+position (`switch.on`, `forEach.in`, a `switch` case `when`) now fails at load
+naming the step and the path, instead of reaching the node as a raw object
+(#707). The three key positions (`idempotencyKey`, `concurrencyKey`,
 `debounce.key`) take a `js/` expression or a DELIBERATE literal — an
 expression-shaped value that is not `js/`-prefixed now throws instead of
 becoming a constant key (#706). `wait.for` / `wait.until` are the other

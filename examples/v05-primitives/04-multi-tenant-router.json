@@ -19,7 +19,8 @@
 						"when": "acme",
 						"do": [
 							{
-								"id": "delegate",
+								"id": "delegate-acme",
+								"as": "delegate",
 								"subworkflow": "acme-process",
 								"inputs": {
 									"body": {
@@ -42,7 +43,8 @@
 						"when": "globex",
 						"do": [
 							{
-								"id": "delegate",
+								"id": "delegate-globex",
+								"as": "delegate",
 								"subworkflow": "globex-process",
 								"inputs": {
 									"body": {
@@ -65,7 +67,8 @@
 						"when": "initech",
 						"do": [
 							{
-								"id": "delegate",
+								"id": "delegate-initech",
+								"as": "delegate",
 								"subworkflow": "initech-process",
 								"inputs": {
 									"body": {

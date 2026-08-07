@@ -30,15 +30,23 @@
 					"properties": {
 						"to": {
 							"oneOf": [
-								{ "type": "string", "format": "email" },
+								{
+									"type": "string",
+									"format": "email"
+								},
 								{
 									"type": "array",
 									"items": {
 										"type": "object",
 										"required": ["email"],
 										"properties": {
-											"email": { "type": "string", "format": "email" },
-											"name": { "type": "string" }
+											"email": {
+												"type": "string",
+												"format": "email"
+											},
+											"name": {
+												"type": "string"
+											}
 										}
 									},
 									"minItems": 1,
@@ -46,23 +54,44 @@
 								}
 							]
 						},
-						"subject": { "type": "string", "minLength": 1 },
-						"templateId": { "type": "string" },
-						"templateData": { "type": "object" },
-						"htmlContent": { "type": "string" },
-						"textContent": { "type": "string" },
+						"subject": {
+							"type": "string",
+							"minLength": 1
+						},
+						"templateId": {
+							"type": "string"
+						},
+						"templateData": {
+							"type": "object"
+						},
+						"htmlContent": {
+							"type": "string"
+						},
+						"textContent": {
+							"type": "string"
+						},
 						"from": {
 							"type": "object",
 							"properties": {
-								"email": { "type": "string", "format": "email" },
-								"name": { "type": "string" }
+								"email": {
+									"type": "string",
+									"format": "email"
+								},
+								"name": {
+									"type": "string"
+								}
 							}
 						},
 						"replyTo": {
 							"type": "object",
 							"properties": {
-								"email": { "type": "string", "format": "email" },
-								"name": { "type": "string" }
+								"email": {
+									"type": "string",
+									"format": "email"
+								},
+								"name": {
+									"type": "string"
+								}
 							}
 						},
 						"cc": {
@@ -70,8 +99,13 @@
 							"items": {
 								"type": "object",
 								"properties": {
-									"email": { "type": "string", "format": "email" },
-									"name": { "type": "string" }
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"name": {
+										"type": "string"
+									}
 								}
 							}
 						},
@@ -80,8 +114,13 @@
 							"items": {
 								"type": "object",
 								"properties": {
-									"email": { "type": "string", "format": "email" },
-									"name": { "type": "string" }
+									"email": {
+										"type": "string",
+										"format": "email"
+									},
+									"name": {
+										"type": "string"
+									}
 								}
 							}
 						},
@@ -91,9 +130,15 @@
 								"type": "object",
 								"required": ["content", "filename", "type"],
 								"properties": {
-									"content": { "type": "string" },
-									"filename": { "type": "string" },
-									"type": { "type": "string" },
+									"content": {
+										"type": "string"
+									},
+									"filename": {
+										"type": "string"
+									},
+									"type": {
+										"type": "string"
+									},
 									"disposition": {
 										"type": "string",
 										"enum": ["attachment", "inline"]
@@ -103,14 +148,27 @@
 						},
 						"categories": {
 							"type": "array",
-							"items": { "type": "string" }
+							"items": {
+								"type": "string"
+							}
 						},
-						"sendAt": { "type": "integer" },
-						"trackOpens": { "type": "boolean" },
-						"trackClicks": { "type": "boolean" }
+						"sendAt": {
+							"type": "integer"
+						},
+						"trackOpens": {
+							"type": "boolean"
+						},
+						"trackClicks": {
+							"type": "boolean"
+						}
 					}
 				},
-				"data": "js/ctx.request.body"
+				"data": {
+					"$ref": {
+						"step": "@trigger",
+						"path": ["body"]
+					}
+				}
 			}
 		},
 		"route-email-mode": {
@@ -162,7 +220,12 @@
 							"to": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to : [{ email: ctx.request.body.to }]",
 							"cc": "js/ctx.request.body.cc || []",
 							"bcc": "js/ctx.request.body.bcc || []",
-							"subject": "${ctx.request.body.subject}",
+							"subject": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "subject"]
+								}
+							},
 							"dynamic_template_data": "js/ctx.request.body.templateData || {}"
 						}
 					],
@@ -171,7 +234,12 @@
 						"name": "js/ctx.request.body.from?.name || process.env.FROM_NAME"
 					},
 					"reply_to": "js/ctx.request.body.replyTo || undefined",
-					"template_id": "${ctx.request.body.templateId}",
+					"template_id": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "templateId"]
+						}
+					},
 					"attachments": "js/ctx.request.body.attachments || undefined",
 					"categories": "js/ctx.request.body.categories || ['transactional']",
 					"send_at": "js/ctx.request.body.sendAt || undefined",
@@ -201,7 +269,12 @@
 							"to": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to : [{ email: ctx.request.body.to }]",
 							"cc": "js/ctx.request.body.cc || []",
 							"bcc": "js/ctx.request.body.bcc || []",
-							"subject": "${ctx.request.body.subject}"
+							"subject": {
+								"$ref": {
+									"step": "@trigger",
+									"path": ["body", "subject"]
+								}
+							}
 						}
 					],
 					"from": {
@@ -317,9 +390,19 @@
 					"service": "email",
 					"action": "send_template_email",
 					"status": "success",
-					"templateId": "${ctx.request.body.templateId}",
+					"templateId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "templateId"]
+						}
+					},
 					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1",
-					"messageId": "${ctx.response.headers['x-message-id']}"
+					"messageId": {
+						"$ref": {
+							"step": "send-template-email",
+							"path": ["headers", "x-message-id"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -337,8 +420,18 @@
 					"service": "email",
 					"action": "send_template_email",
 					"status": "failed",
-					"templateId": "${ctx.request.body.templateId}",
-					"error": "js/ctx.response.data"
+					"templateId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "templateId"]
+						}
+					},
+					"error": {
+						"$ref": {
+							"step": "send-template-email",
+							"path": ["data"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -356,9 +449,19 @@
 					"service": "email",
 					"action": "send_custom_email",
 					"status": "success",
-					"subject": "${ctx.request.body.subject}",
+					"subject": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "subject"]
+						}
+					},
 					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1",
-					"messageId": "${ctx.response.headers['x-message-id']}"
+					"messageId": {
+						"$ref": {
+							"step": "send-custom-email",
+							"path": ["headers", "x-message-id"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -376,8 +479,18 @@
 					"service": "email",
 					"action": "send_custom_email",
 					"status": "failed",
-					"subject": "${ctx.request.body.subject}",
-					"error": "js/ctx.response.data"
+					"subject": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "subject"]
+						}
+					},
+					"error": {
+						"$ref": {
+							"step": "send-custom-email",
+							"path": ["data"]
+						}
+					}
 				},
 				"responseType": "application/json"
 			}
@@ -387,8 +500,18 @@
 				"model": {
 					"success": true,
 					"message": "Template email sent successfully.",
-					"messageId": "${ctx.response.headers['x-message-id']}",
-					"templateId": "${ctx.request.body.templateId}",
+					"messageId": {
+						"$ref": {
+							"step": "send-template-email",
+							"path": ["headers", "x-message-id"]
+						}
+					},
+					"templateId": {
+						"$ref": {
+							"step": "@trigger",
+							"path": ["body", "templateId"]
+						}
+					},
 					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1"
 				}
 			}
@@ -399,7 +522,12 @@
 					"success": false,
 					"error": "EMAIL_SEND_FAILED",
 					"message": "Failed to send template email.",
-					"details": "js/ctx.response.data"
+					"details": {
+						"$ref": {
+							"step": "send-template-email",
+							"path": ["data"]
+						}
+					}
 				}
 			}
 		},
@@ -408,7 +536,12 @@
 				"model": {
 					"success": true,
 					"message": "Email sent successfully.",
-					"messageId": "${ctx.response.headers['x-message-id']}",
+					"messageId": {
+						"$ref": {
+							"step": "send-custom-email",
+							"path": ["headers", "x-message-id"]
+						}
+					},
 					"recipientCount": "js/Array.isArray(ctx.request.body.to) ? ctx.request.body.to.length : 1"
 				}
 			}
@@ -419,7 +552,12 @@
 					"success": false,
 					"error": "EMAIL_SEND_FAILED",
 					"message": "Failed to send email.",
-					"details": "js/ctx.response.data"
+					"details": {
+						"$ref": {
+							"step": "send-custom-email",
+							"path": ["data"]
+						}
+					}
 				}
 			}
 		}

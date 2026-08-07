@@ -149,6 +149,15 @@ and silently disable the gate. The shape rule itself is
 `unresolvableKeyShape` in `@blokjs/helper` — shared with `validateRefs`
 so `blokctl check` and the runtime cannot disagree.
 
+Since #707 `WorkflowNormalizer` LOWERS all three key positions, so a
+structural `{$ref}` that arrives through `normalizeWorkflow` becomes the
+`js/…` string `resolveKey` evaluates and never reaches the guard. (It
+used to be worse than unlowered for step `idempotencyKey`: the field was
+type-checked before lowering, so a `{$ref}` there failed
+`typeof === "string"` and was DROPPED — the cache silently off.) The
+guard stays as the backstop for every config assembled without that
+pass.
+
 Cache TTL: 24h default (`DEFAULT_IDEMPOTENCY_TTL_MS`); override per
 step via `idempotencyKeyTTL: <ms>`. A TTL of 0 marks an entry as
 immediately expired (kill-switch).

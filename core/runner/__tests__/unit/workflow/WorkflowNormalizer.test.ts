@@ -776,9 +776,159 @@ describe("WorkflowNormalizer — ui round-trip (#301/#302)", () => {
 });
 
 // =============================================================================
+// Issue #713 — per-step `description` survives IR → normalize → toJson for every
+// step kind, incl. nested arms. Same defect class as `ui` (#300/#301) and
+// deliberately the same test shape: PR #711 added `description` to all 8 v2
+// step schemas, but the normalizer dropped it, so a Studio open → save lost
+// every step description the author had written.
+// =============================================================================
+
+/** Deep-walk a round-tripped workflow, collecting `description` by step name. */
+function collectDescriptionByName(node: unknown, out: Map<string, unknown>): void {
+	if (Array.isArray(node)) {
+		for (const item of node) collectDescriptionByName(item, out);
+		return;
+	}
+	if (node === null || typeof node !== "object") return;
+	const obj = node as Record<string, unknown>;
+	if (typeof obj.name === "string" && "description" in obj) out.set(obj.name, obj.description);
+	for (const value of Object.values(obj)) collectDescriptionByName(value, out);
+}
+
+describe("WorkflowNormalizer — per-step description round-trip (#713)", () => {
+	const wf = {
+		name: "Description RoundTrip",
+		version: "1.0.0",
+		description: "workflow-level description — must not be confused with a step's",
+		trigger: { http: { method: "POST", path: "/desc" } },
+		steps: [
+			{ id: "reg", use: "@blokjs/respond", inputs: {}, description: "regular step" },
+			{
+				id: "br",
+				branch: {
+					when: "ctx.req.method === 'POST'",
+					then: [{ id: "thenStep", use: "@blokjs/respond", inputs: {}, description: "then arm" }],
+					else: [
+						{
+							id: "feInBranch",
+							forEach: {
+								in: "js/ctx.state.reg",
+								as: "row",
+								do: [{ id: "deep", use: "@blokjs/respond", inputs: {}, description: "forEach inside branch" }],
+							},
+							description: "nested forEach",
+						},
+					],
+				},
+				description: "branch step",
+			},
+			{ id: "sub", subworkflow: "child", inputs: {}, description: "subworkflow step" },
+			{ id: "wait1", wait: { for: "1s" }, description: "wait step" },
+			{
+				id: "fe",
+				forEach: {
+					in: "js/ctx.state.reg",
+					as: "item",
+					do: [{ id: "feBody", use: "@blokjs/respond", inputs: {}, description: "forEach body" }],
+				},
+				description: "forEach step",
+			},
+			{
+				id: "lp",
+				loop: { while: "false", do: [{ id: "lpBody", use: "@blokjs/respond", inputs: {}, description: "loop body" }] },
+				description: "loop step",
+			},
+			{
+				id: "sw",
+				switch: {
+					on: "js/ctx.state.reg",
+					cases: [
+						{ when: "a", do: [{ id: "caseStep", use: "@blokjs/respond", inputs: {}, description: "switch case" }] },
+					],
+					default: [{ id: "defStep", use: "@blokjs/respond", inputs: {}, description: "switch default" }],
+				},
+				description: "switch step",
+			},
+			{
+				id: "tc",
+				tryCatch: {
+					try: [{ id: "tryStep", use: "@blokjs/respond", inputs: {}, description: "try arm" }],
+					catch: [{ id: "catchStep", use: "@blokjs/respond", inputs: {}, description: "catch arm" }],
+					finally: [{ id: "finallyStep", use: "@blokjs/respond", inputs: {}, description: "finally arm" }],
+				},
+				description: "tryCatch step",
+			},
+			{ id: "withAs", use: "@blokjs/respond", inputs: {}, as: "renamed", description: "with as" },
+		],
+	};
+
+	const expectedDescriptions: Record<string, string> = {
+		reg: "regular step",
+		br: "branch step",
+		thenStep: "then arm",
+		feInBranch: "nested forEach",
+		deep: "forEach inside branch",
+		sub: "subworkflow step",
+		wait1: "wait step",
+		fe: "forEach step",
+		feBody: "forEach body",
+		lp: "loop step",
+		lpBody: "loop body",
+		sw: "switch step",
+		caseStep: "switch case",
+		defStep: "switch default",
+		tc: "tryCatch step",
+		tryStep: "try arm",
+		catchStep: "catch arm",
+		finallyStep: "finally arm",
+		withAs: "with as",
+	};
+
+	it("preserves description after IR → normalize → toJson → parse for every step kind incl. nested arms", () => {
+		const normalized = normalizeWorkflow(wf, "description-roundtrip.json");
+		const roundTripped = JSON.parse(JSON.stringify(normalized));
+
+		const found = new Map<string, unknown>();
+		collectDescriptionByName(roundTripped, found);
+
+		for (const [name, description] of Object.entries(expectedDescriptions)) {
+			expect(found.has(name), `description missing for step "${name}" after round-trip`).toBe(true);
+			expect(found.get(name), `description mismatch for step "${name}"`).toBe(description);
+		}
+	});
+
+	it("keeps the workflow-level description separate from every step's", () => {
+		const out = normalizeWorkflow(wf, "description-roundtrip.json");
+		expect(out.description).toBe("workflow-level description — must not be confused with a step's");
+		expect(out.steps.find((s) => s.name === "reg")?.description).toBe("regular step");
+	});
+
+	it("omits description entirely when a step declares none", () => {
+		const out = normalizeWorkflow({
+			name: "NoDescription",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/nodesc" } },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {} }],
+		});
+		expect("description" in out.steps[0]).toBe(false);
+	});
+
+	it("ignores a non-string description rather than emitting one", () => {
+		const out = normalizeWorkflow({
+			name: "BadDescription",
+			version: "1.0.0",
+			trigger: { http: { method: "GET", path: "/bad" } },
+			steps: [{ id: "x", use: "@blokjs/respond", inputs: {}, description: { not: "a string" } }],
+		});
+		expect("description" in out.steps[0]).toBe(false);
+	});
+});
+
+// =============================================================================
 // Studio debug controls — active:false (Skip) / stop:true (Stop) survive
-// normalization. Unlike `ui` (copyUi — optional passthrough, omitted when
-// absent), active/stop are NOT optional passthrough fields: every
+// normalization. Unlike `ui` / `description` (copyStepMeta — optional
+// passthrough, omitted when absent), active/stop are NOT optional
+// passthrough fields: every
 // InternalStep constructor already stamps a default (`active: true`,
 // `stop: false`) even when the raw step declares neither — see the
 // `active: step.active === undefined ? true : Boolean(step.active)` /

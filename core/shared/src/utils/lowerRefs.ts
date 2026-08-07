@@ -14,7 +14,12 @@
  * BEFORE the Mapper, and compiles every structural `{$ref}` into EXACTLY the
  * wire string today's engine already resolves. The Mapper stays untouched.
  *
- * Scope: the STEP-INPUTS, TRIGGER-ROOT, and TPL positions.
+ * Scope: the STEP-INPUTS, TRIGGER-ROOT, and TPL positions — plus, since #707,
+ * the three RESOLVED-KEY positions (step `idempotencyKey`, trigger
+ * `concurrencyKey`, trigger `debounce.key`), which the normalizer feeds through
+ * this same encoder. The caller picks the positions; this pass is unaware of
+ * them, which is why control positions (`branch.when`, `forEach.in`,
+ * `switch.on`) are simply never handed to it.
  *   - step input value: `"js/ctx.state.<root>" + path`
  *   - `path` mapping: string segment → `.seg`, numeric → `[n]`,
  *     empty `path: []` (whole-output ref) → `"js/ctx.state.<root>"`.
@@ -47,7 +52,7 @@ export interface StructuralRef {
  * with the literal keys `step`/`path`) is NOT a ref and passes through
  * untouched. ADR 0001 confirmed no current workflow uses `$ref` as user data.
  */
-function isStructuralRef(value: object): value is StructuralRef {
+export function isStructuralRef(value: object): value is StructuralRef {
 	const keys = Object.keys(value);
 	if (keys.length !== 1 || keys[0] !== "$ref") return false;
 	const ref = (value as { $ref?: unknown }).$ref;
@@ -145,11 +150,11 @@ function lowerRef(ref: StructuralRef): string {
  * segments alternate raw strings and `{$ref}` nodes (plus the occasional literal
  * non-string interpolation). Mirrors `tpl\`...\`` in `core/runner/src/stepBuilder.ts`.
  */
-interface StructuralTpl {
+export interface StructuralTpl {
 	$tpl: unknown[];
 }
 
-function isStructuralTpl(value: object): value is StructuralTpl {
+export function isStructuralTpl(value: object): value is StructuralTpl {
 	const keys = Object.keys(value);
 	return keys.length === 1 && keys[0] === "$tpl" && Array.isArray((value as { $tpl?: unknown }).$tpl);
 }

@@ -35,9 +35,11 @@
 #   - Control / trigger-config positions, which `lowerRefs` does not cover, so
 #     a structural ref there would be walked into by the Mapper and silently do
 #     the wrong thing: branch.when, loop.while, switch.on, switch cases' when,
-#     forEach.in, wait.for/until, subworkflow, step idempotencyKey, and trigger
-#     concurrencyKey / debounce.key / idempotencyKey. Lines assigning one of
-#     those keys are filtered out below.
+#     forEach.in, wait.for/until, subworkflow. Lines assigning one of those keys
+#     are filtered out below. (The three resolved-key fields — step
+#     idempotencyKey, trigger concurrencyKey / debounce.key — ARE lowered as of
+#     #707, but a `js/` string there is still the schema-legal authoring form,
+#     so they stay filtered.)
 #
 # ponytail: textual gate. Position-aware checking of JSON workflow files is
 # possible today (`blokctl migrate refs --dry-run` reports would-change counts)
@@ -134,17 +136,12 @@ ALLOWED_DIRS=(
 	"docs/c/devtools/post-v04-roadmap.mdx"
 	"docs/c/devtools/wait-inside-primitives-design.mdx"
 	"docs/c/devtools/parallel-foreach-wait-spec.mdx"
-	# v1-shape showcase workflows (`steps[] + nodes{}` with @blokjs/if-else
-	# `conditions`). Structural refs are IMPOSSIBLE for their nested steps:
-	# WorkflowNormalizer only lowers node configs whose key matches a TOP-LEVEL
-	# step (the `nodes` carry-over loop copies the rest verbatim), so a `{$ref}`
-	# inside a conditions arm is walked into by the Mapper instead of resolved.
-	# Migrating them means either an engine change (out of scope, ADR 0001 keeps
-	# the engine byte-identical) or a v1→v2 conversion that changes normalized
-	# semantics. Tracked for a founder decision; examples/v05-primitives and
-	# examples/ts-workflows are the current, clean example sets.
-	"examples/workflows"
-	"examples/integrations"
+	# NOTE: `examples/workflows` and `examples/integrations` used to be excluded
+	# here. Structural refs were IMPOSSIBLE for their nested steps because the
+	# normalizer's v1 `nodes` carry-over loop copied those configs VERBATIM, so a
+	# `{$ref}` inside a conditions arm was walked into by the Mapper instead of
+	# resolved. #707 fixed the lowering; both directories are now migrated and
+	# gated like the rest of the authoring surface.
 )
 
 pathspec=()
