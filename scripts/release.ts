@@ -36,7 +36,7 @@ interface PackageJson {
 	peerDependencies?: Record<string, string>;
 }
 
-interface Publishable {
+export interface Publishable {
 	dir: string;
 	name: string;
 }
@@ -57,7 +57,7 @@ interface Publishable {
  * `@blokjs/lsp-server` remain off npm until they grow user-visible
  * docs (CLI / IDE support only).
  */
-const PUBLISHABLE: readonly Publishable[] = [
+export const PUBLISHABLE: readonly Publishable[] = [
 	// Foundation — no internal deps.
 	{ dir: "core/shared", name: "@blokjs/shared" },
 	{ dir: "core/workflow-helper", name: "@blokjs/helper" },

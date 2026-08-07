@@ -39,6 +39,7 @@
 		"ci": "bash scripts/ci-local.sh integration",
 		"ci:fast": "bash scripts/ci-local.sh fast",
 		"ci:cross-runtime": "bash scripts/ci-local.sh cross-runtime",
+		"ci:packaging": "bash scripts/ci-local.sh packaging",
 		"ci:all": "bash scripts/ci-local.sh all",
 		"cli:dev": "bun run --filter blokctl build:dev",
 		"cli:test:dev": "bun run --filter blokctl test:dev",
@@ -55,10 +56,12 @@
 		"sdks:build": "bash scripts/sdks-build.sh",
 		"nodes:build": "bun run --filter @blokjs/api-call --filter @blokjs/browser --filter @blokjs/if-else --filter @blokjs/react --filter @blokjs/helpers --filter node-name --filter node-ui-name build:dev",
 		"core:build:dev": "bun run --filter @blokjs/runner --filter @blokjs/shared --filter @blokjs/helper build:dev",
-		"build": "bunx nx run-many -t build",
+		"build": "bunx nx run-many -t build && bun run scripts/fix-esm-extensions.ts",
+		"check:packaging": "bun run scripts/check-packed-exports.ts",
 		"studio:cdp-spike": "bun run apps/studio/_spikes/cdp-screencast/server.ts"
 	},
 	"devDependencies": {
+		"@arethetypeswrong/cli": "0.18.5",
 		"@aws-sdk/client-sns": "^3.981.0",
 		"@aws-sdk/client-sqs": "^3.981.0",
 		"@azure/service-bus": "^7.9.5",
@@ -75,6 +78,7 @@
 		"nats": "^2.29.3",
 		"nx": "20.8.4",
 		"playwright": "^1.62.1",
+		"publint": "0.3.23",
 		"typedoc": "^0.28.16",
 		"typedoc-plugin-markdown": "^4.9.0",
 		"ws": "^8.21.0"

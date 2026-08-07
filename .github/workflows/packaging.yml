@@ -1,0 +1,74 @@
+name: Packaging (Node ESM)
+
+# The gate that makes #687 unrepresentable.
+#
+# Everything in this repo runs under Bun, whose resolver accepts specifiers
+# Node's ESM loader rejects — so `@blokjs/*` shipped for months with
+# extensionless relative imports in dist/, and NOTHING caught it: `npx blokctl`,
+# vitest, plain `node` and Next.js SSR consumers were all broken while every
+# suite stayed green.
+#
+# This job runs the ONLY check that can catch that class: pack the tarballs,
+# install them into a throwaway project, and load every exports subpath with
+# real Node. Never against the workspace — its symlinks and Bun's resolver mask
+# the failure. Mirrored locally by `bun run ci:packaging`.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'infra/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  packed-artifacts:
+    name: Packed artifacts import under Node LTS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned — keep in lock-step with integration.yml / scaffold-smoke.yml.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      # The whole point: the CONSUMER side runs on Node, not Bun.
+      - name: Set up Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # `bun run build` = nx run-many -t build + scripts/fix-esm-extensions.ts.
+      - name: Build all workspace packages
+        run: bun run build
+
+      # Fails if any emitted file still carries an extensionless relative
+      # import — a fast, precise signal ahead of the slower packed run below.
+      - name: dist/ is Node-ESM clean
+        run: bun run scripts/fix-esm-extensions.ts --check
+
+      - name: Packed-artifact gate
+        run: bun run check:packaging

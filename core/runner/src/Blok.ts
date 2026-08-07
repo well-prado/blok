@@ -1,11 +1,14 @@
 import { type ConfigContext, type Context, Metrics, NodeBase, type ResponseContext } from "@blokjs/shared";
-import type ParamsDictionary from "@blokjs/shared/dist/types/ParamsDictionary";
 import { type Counter, type Gauge, type Histogram, metrics } from "@opentelemetry/api";
 import { type Schema, type ValidationError, Validator } from "jsonschema";
 import _ from "lodash";
 import type { IBlokResponse } from "./BlokResponse";
 import type Condition from "./types/Condition";
 import type JsonLikeObject from "./types/JsonLikeObject";
+// The identical local type — reaching into `@blokjs/shared/dist/**` emitted an
+// extensionless deep specifier into `Blok.d.ts` that no node16/nodenext type
+// resolver can follow (#687).
+import type ParamsDictionary from "./types/ParamsDictionary";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 
 /**

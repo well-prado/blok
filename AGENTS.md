@@ -37,6 +37,7 @@ bun run build
 bun run test
 bun run lint
 bun run ci:fast
+bun run ci:packaging
 
 bun run runner:dev
 bun run runner:test
@@ -52,6 +53,12 @@ bun run nodes:build
 ```
 
 Use `rg` / `rg --files` for repo searches. Use Biome, not ESLint or Prettier.
+
+Always build with `bun run build`, never a bare `bunx nx run-many -t build`:
+the root script appends `scripts/fix-esm-extensions.ts`, which rewrites the
+emitted relative imports to the explicit `./x.js` form Node's ESM loader
+requires. Without it every `dist/` is Bun-only (#687). `bun run ci:packaging`
+proves the packed tarballs import under real Node.
 
 ## Authoring Surface
 

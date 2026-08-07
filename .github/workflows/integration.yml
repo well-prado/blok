@@ -84,13 +84,14 @@ jobs:
           exit 1
 
       - name: Build all workspace packages
-        # Use nx run-many -t build so every package's dist/ exists before
-        # tests run. Required because trigger-http's index.ts imports
-        # @blokjs/trigger-websocket / @blokjs/trigger-sse / @blokjs/trigger-webhook
-        # (and similar transitive imports across blokctl, nodes, etc.).
-        # Without this each downstream package fails to resolve sibling
-        # entries at test time.
-        run: bunx nx run-many -t build
+        # `bun run build` = nx run-many -t build + scripts/fix-esm-extensions.ts.
+        # nx builds every package's dist/ before tests run (trigger-http's
+        # index.ts imports @blokjs/trigger-websocket / -sse / -webhook, and
+        # blokctl/nodes have similar transitive imports, so each downstream
+        # package fails to resolve sibling entries without it). The fix step
+        # then makes those dists loadable by Node's ESM loader (#687) — always
+        # go through `bun run build`, never bare `nx run-many -t build`.
+        run: bun run build
 
       # Informational only — never gates the merge (continue-on-error). Prints
       # current coverage for the framework packages that have honest, current-
