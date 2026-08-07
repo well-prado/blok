@@ -7,6 +7,7 @@ import { SubworkflowMetrics } from "./monitoring/SubworkflowMetrics";
 import { RunTracker } from "./tracing/RunTracker";
 import type GlobalOptions from "./types/GlobalOptions";
 import { createChildContext } from "./utils/createChildContext";
+import { nearestMatches } from "./workflow/NearestMatch";
 import { applyStepOutput } from "./workflow/PersistenceHelper";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
 
@@ -174,10 +175,22 @@ export class SubworkflowNode extends RunnerNode {
 		const registry = WorkflowRegistry.getInstance();
 		const entry = registry.get(resolvedName);
 		if (!entry) {
-			const known = registry.list().map((w) => w.name);
+			const registered = registry.list();
+			const known = registered.map((w) => w.name);
 			const knownStr = known.length > 0 ? known.join(", ") : "(none registered yet)";
+			// #693 — same nearest-miss helper the HTTP trigger uses for unknown
+			// routes / RPC names, so every "not found by name" lookup path
+			// suggests the closest match instead of just dumping the full list.
+			const suggestions = nearestMatches(
+				resolvedName,
+				registered.map((w) => ({ key: w.name, label: w.name, source: w.sourcePath ?? w.source })),
+			);
+			const suggestionStr =
+				suggestions.length > 0
+					? ` Did you mean ${suggestions.map((s) => `"${s.label}"${s.source ? ` (from ${s.source})` : ""}`).join(", ")}?`
+					: "";
 			throw new Error(
-				`[blok] Sub-workflow "${resolvedName}" not found in WorkflowRegistry. Available: ${knownStr}. Workflows enter the registry from one of several paths: (a) JSON under \`WORKFLOWS_PATH/json/\` is auto-scanned by the HTTP trigger; (b) TypeScript workflows must be added to your \`src/Workflows.ts\` map; (c) worker/cron/grpc-only deployments register their nodeMap workflows at boot — if no HTTP trigger runs, register the child explicitly via \`WorkflowRegistry.getInstance().register({ name, source, workflow })\`. Verify the workflow's \`name\` matches "${resolvedName}" exactly.`,
+				`[blok] Sub-workflow "${resolvedName}" not found in WorkflowRegistry (${registered.length} registered).${suggestionStr} Available: ${knownStr}. Workflows enter the registry from one of several paths: (a) JSON under \`WORKFLOWS_PATH/json/\` is auto-scanned by the HTTP trigger; (b) TypeScript workflows must be added to your \`src/Workflows.ts\` map; (c) worker/cron/grpc-only deployments register their nodeMap workflows at boot — if no HTTP trigger runs, register the child explicitly via \`WorkflowRegistry.getInstance().register({ name, source, workflow })\`. Verify the workflow's \`name\` matches "${resolvedName}" exactly.`,
 			);
 		}
 
