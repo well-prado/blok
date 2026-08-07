@@ -45,6 +45,9 @@ gates() {
   # `bun run build`, not bare `nx run-many -t build` — the root script appends
   # scripts/fix-esm-extensions.ts, without which every dist/ is Bun-only (#687).
   step "Build all workspace packages (nx, cached) + Node-ESM fixups"; bun run build
+  # After the build on purpose: it typechecks the AI-facing skills doc's samples
+  # against the built @blokjs/core .d.ts (#708).
+  step "Skill-doc samples typecheck"; bun run check:skill-samples
 }
 
 run_fast() {

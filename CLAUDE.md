@@ -108,8 +108,10 @@ trigger payload and `@error` for a caught error, and
 (`BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` silences); `blokctl migrate refs`
 rewrites them. Control/trigger-config positions keep path strings:
 `branch.when` / `loop.while` (raw `ctx.*`, no prefix), `switch.on`,
-`forEach.in`, `wait.for`/`until`, `subworkflow`, step `idempotencyKey`,
-trigger `concurrencyKey` / `debounce.key`.
+`forEach.in`, `subworkflow`, step `idempotencyKey`, trigger `concurrencyKey` /
+`debounce.key`. `wait.for` / `wait.until` are the exception: they are parsed at
+workflow LOAD time and never see a `ctx`, so they take a literal duration or
+timestamp only — an expression there never resolves (#704).
 
 ## Do NOT
 

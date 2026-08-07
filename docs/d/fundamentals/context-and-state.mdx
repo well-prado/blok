@@ -319,10 +319,15 @@ guide.
 
 Control and trigger-config positions are **not** step inputs and keep path
 strings in JSON: `branch.when` / `loop.while` (raw `ctx.*`, no prefix),
-`switch.on`, `forEach.in`, `wait.for` / `wait.until`, `subworkflow`, step
-`idempotencyKey`, and trigger `concurrencyKey` / `debounce.key`. The callback
-DSL takes handles for all of these except trigger config, which is resolved at
-run-entry before any handle exists.
+`switch.on`, `forEach.in`, `subworkflow`, step `idempotencyKey`, and trigger
+`concurrencyKey` / `debounce.key`. The callback DSL takes handles for all of
+these except trigger config, which is resolved at run-entry before any handle
+exists.
+
+`wait.for` / `wait.until` are the exception to the exception: they are parsed at
+workflow **load** time, before any `ctx` exists, so they accept a literal
+duration or timestamp only. An expression there — a `{$ref}`, a `tpl`, or a
+path string — never resolves.
 
 ## Quick reference
 
