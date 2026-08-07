@@ -33,6 +33,7 @@ gates() {
   step "Lint (Biome)"; bun run lint:check
   step "Proto drift check"; bun run proto:check
   step "No \$ proxy check"; bun run check:no-dollar-proxy
+  step "No legacy expression strings check"; bun run check:no-legacy-expr
   step "Build all workspace packages (nx, cached)"; bunx nx run-many -t build
 }
 
