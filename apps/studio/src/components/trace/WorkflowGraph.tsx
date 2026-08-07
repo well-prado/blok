@@ -2,9 +2,11 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ActivityDrawer } from "@/components/trace/ActivityDrawer";
 import { BranchEditor, type RawBranch } from "@/components/trace/BranchEditor";
 import { BrowserPanel } from "@/components/trace/BrowserPanel";
+import { ForEachEditor, type RawForEach } from "@/components/trace/ForEachEditor";
 import { NodeLibraryDialog } from "@/components/trace/NodeLibraryDialog";
 import { SpliceContext, SpliceEdge } from "@/components/trace/SpliceEdge";
 import { StepInputsEditor } from "@/components/trace/StepInputsEditor";
+import { type RawSwitch, SwitchEditor } from "@/components/trace/SwitchEditor";
 import { TriggerEditor } from "@/components/trace/TriggerEditor";
 import { usePersistentState } from "@/hooks/usePersistentState";
 import { useRunDetail, useTraceStream } from "@/hooks/useRunDetail";
@@ -121,6 +123,9 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 	const [editingInputsStepId, setEditingInputsStepId] = useState<string | null>(null);
 	const [editingBranchStepId, setEditingBranchStepId] = useState<string | null>(null);
+	// Phase 5.3 — forEach/switch structural editors, siblings of editingBranchStepId.
+	const [editingForEachStepId, setEditingForEachStepId] = useState<string | null>(null);
+	const [editingSwitchStepId, setEditingSwitchStepId] = useState<string | null>(null);
 	const [triggerEditorOpen, setTriggerEditorOpen] = useState(false);
 	const [spliceBeforeStepId, setSpliceBeforeStepId] = useState<string | null>(null);
 	// Drag-from-socket (ATOMIC/BuildShip onConnectEnd pattern): dropping a
@@ -141,7 +146,12 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		(raw) => raw === "1",
 	);
 	const [terminalOpen, setTerminalOpen] = useState(true);
-	const catalog = useNodeCatalog(editingInputsStepId !== null || editingBranchStepId !== null);
+	const catalog = useNodeCatalog(
+		editingInputsStepId !== null ||
+			editingBranchStepId !== null ||
+			editingForEachStepId !== null ||
+			editingSwitchStepId !== null,
+	);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	// Deploy draft (feat/studio-deploy-ux): render the accumulated draft when
@@ -399,18 +409,27 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [runStatus, sendControl]);
-	// ESC closes whichever right drawer is open (trigger, step inputs, or branch condition).
+	// ESC closes whichever right drawer is open (trigger, step inputs, branch/forEach/switch).
 	useEffect(() => {
-		if (!triggerEditorOpen && editingInputsStepId === null && editingBranchStepId === null) return;
+		if (
+			!triggerEditorOpen &&
+			editingInputsStepId === null &&
+			editingBranchStepId === null &&
+			editingForEachStepId === null &&
+			editingSwitchStepId === null
+		)
+			return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
 			setTriggerEditorOpen(false);
 			setEditingInputsStepId(null);
 			setEditingBranchStepId(null);
+			setEditingForEachStepId(null);
+			setEditingSwitchStepId(null);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [triggerEditorOpen, editingInputsStepId, editingBranchStepId]);
+	}, [triggerEditorOpen, editingInputsStepId, editingBranchStepId, editingForEachStepId, editingSwitchStepId]);
 	const toggleBreakpointId = (stepId: string) => {
 		setBreakpoints((current) => {
 			const next = new Set(current);
@@ -432,6 +451,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setPaletteOpen(false);
 		setEditingInputsStepId(null);
 		setEditingBranchStepId(null);
+		setEditingForEachStepId(null);
+		setEditingSwitchStepId(null);
 		setRenamingStepId(stepId);
 		setRenameValue(stepId);
 	};
@@ -441,6 +462,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setPaletteOpen(false);
 		setRenamingStepId(null);
 		setEditingBranchStepId(null);
+		setEditingForEachStepId(null);
+		setEditingSwitchStepId(null);
 		setEditingInputsStepId(stepId);
 	};
 	// Phase 5.3 — open the structural branch condition editor for a `branch` step.
@@ -449,7 +472,29 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setPaletteOpen(false);
 		setRenamingStepId(null);
 		setEditingInputsStepId(null);
+		setEditingForEachStepId(null);
+		setEditingSwitchStepId(null);
 		setEditingBranchStepId(stepId);
+	};
+	// Phase 5.3 — open the structural forEach editor for a `forEach` step.
+	const startEditForEach = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		setRenamingStepId(null);
+		setEditingInputsStepId(null);
+		setEditingBranchStepId(null);
+		setEditingSwitchStepId(null);
+		setEditingForEachStepId(stepId);
+	};
+	// Phase 5.3 — open the structural switch editor for a `switch` step.
+	const startEditSwitch = (stepId: string) => {
+		editDefinition.reset();
+		setPaletteOpen(false);
+		setRenamingStepId(null);
+		setEditingInputsStepId(null);
+		setEditingBranchStepId(null);
+		setEditingForEachStepId(null);
+		setEditingSwitchStepId(stepId);
 	};
 	const saveInputs = (stepId: string, inputs: Record<string, unknown>) => {
 		editDefinition.mutate(
@@ -473,6 +518,30 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 				return draft;
 			},
 			{ onSuccess: () => setEditingBranchStepId(null) },
+		);
+	};
+	const saveForEach = (stepId: string, forEach: RawForEach) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				loc.step.forEach = forEach;
+				return draft;
+			},
+			{ onSuccess: () => setEditingForEachStepId(null) },
+		);
+	};
+	const saveSwitch = (stepId: string, switchConfig: RawSwitch) => {
+		editDefinition.mutate(
+			(definition) => {
+				const draft = structuredClone(definition);
+				const loc = findStepLocation(draft, stepId);
+				if (!loc) throw new Error(`Step "${stepId}" no longer exists in the workflow`);
+				loc.step.switch = switchConfig;
+				return draft;
+			},
+			{ onSuccess: () => setEditingSwitchStepId(null) },
 		);
 	};
 	// Phase 5.2 — insert the picked catalog node as a fresh step. Lands after
@@ -523,6 +592,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		setRenamingStepId(null);
 		setEditingInputsStepId(null);
 		setEditingBranchStepId(null);
+		setEditingForEachStepId(null);
+		setEditingSwitchStepId(null);
 		setTriggerEditorOpen(false);
 		setSpliceBeforeStepId(targetStepId);
 		setPaletteOpen(true);
@@ -578,10 +649,14 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		if (!stepId) return;
 		// ION/ATOMIC pattern: clicking a step opens its config drawer. A `branch`
 		// step has no `use` (no catalog schema), so it gets the structural
-		// condition editor instead of the schema-driven inputs form.
+		// condition editor instead of the schema-driven inputs form — same for
+		// `forEach`/`switch` (Phase 5.3).
 		if (definitionEditable && !runActive) {
 			const rawStep = findStepLocation(workingDefinition, stepId)?.step;
-			if (classifyStep(rawStep) === "branch") startEditBranch(stepId);
+			const kind = classifyStep(rawStep);
+			if (kind === "branch") startEditBranch(stepId);
+			else if (kind === "forEach") startEditForEach(stepId);
+			else if (kind === "switch") startEditSwitch(stepId);
 			else startEditInputs(stepId);
 		}
 		const nodeRun = [...(runQuery.data?.nodes ?? [])]
@@ -1087,6 +1162,8 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 										setRenamingStepId(null);
 										setEditingInputsStepId(null);
 										setEditingBranchStepId(null);
+										setEditingForEachStepId(null);
+										setEditingSwitchStepId(null);
 										setTriggerEditorOpen(false);
 										setSpliceBeforeStepId(null);
 										setSocketDrop({ fromStepId: result.fromStepId, position });
@@ -1151,6 +1228,50 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 								error={editDefinition.error?.message}
 								onSave={(branch) => saveBranch(editingBranchStepId, branch)}
 								onClose={() => setEditingBranchStepId(null)}
+							/>
+						</div>
+					)}
+					{editingForEachStepId && !runActive && catalog.data && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<ForEachEditor
+								key={editingForEachStepId}
+								stepId={editingForEachStepId}
+								forEach={
+									(findStepLocation(workingDefinition, editingForEachStepId)?.step.forEach as RawForEach | undefined) ??
+									{}
+								}
+								sources={upstreamSources(
+									workingDefinition,
+									editingForEachStepId,
+									catalog.data?.nodes,
+									runQuery.data?.nodes,
+								)}
+								definition={workingDefinition}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(forEach) => saveForEach(editingForEachStepId, forEach)}
+								onClose={() => setEditingForEachStepId(null)}
+							/>
+						</div>
+					)}
+					{editingSwitchStepId && !runActive && catalog.data && (
+						<div className="flex h-full w-80 shrink-0 flex-col border-l border-zinc-800 bg-[#131316]">
+							<SwitchEditor
+								key={editingSwitchStepId}
+								stepId={editingSwitchStepId}
+								switchConfig={
+									(findStepLocation(workingDefinition, editingSwitchStepId)?.step.switch as RawSwitch | undefined) ?? {}
+								}
+								sources={upstreamSources(
+									workingDefinition,
+									editingSwitchStepId,
+									catalog.data?.nodes,
+									runQuery.data?.nodes,
+								)}
+								pending={editDefinition.isPending}
+								error={editDefinition.error?.message}
+								onSave={(switchConfig) => saveSwitch(editingSwitchStepId, switchConfig)}
+								onClose={() => setEditingSwitchStepId(null)}
 							/>
 						</div>
 					)}
