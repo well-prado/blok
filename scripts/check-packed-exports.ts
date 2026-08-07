@@ -217,6 +217,16 @@ function main(): void {
 		process.exit(1);
 	}
 
+	// #688 — the SAME tests under Bun's runner. A consumer picks one runner; the
+	// framework must not care which, so both are proven on the packed artifacts.
+	step("bun test in the same consumer");
+	const bunTest = run("bun", ["test"], consumer);
+	console.log(bunTest.out);
+	if (!bunTest.ok) {
+		console.error("Consumer bun test run failed.");
+		process.exit(1);
+	}
+
 	// Both linters are pinned root devDependencies, not `npx --yes` — a gate
 	// that silently follows `latest` is a gate that changes under you.
 	const bin = (name: string): string => join(ROOT, "node_modules", ".bin", name);

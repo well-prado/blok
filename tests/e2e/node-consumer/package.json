@@ -3,8 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Minimal downstream consumer used by scripts/check-packed-exports.ts (#687). npm-installs the PACKED @blokjs tarballs and runs vitest on Node with zero resolution workarounds.",
+	"description": "Minimal downstream consumer used by scripts/check-packed-exports.ts (#687, #688). npm-installs the PACKED @blokjs tarballs and runs the same tests under vitest-on-Node AND bun test, with zero resolution workarounds.",
 	"scripts": {
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:bun": "bun test"
 	}
 }
