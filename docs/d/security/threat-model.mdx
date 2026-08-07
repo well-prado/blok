@@ -310,7 +310,7 @@ done.
 
 The operator authors workflows, but the runner serves multiple
 tenants behind a single set of routes. The concurrency gate's
-`concurrencyKey: $.req.body.tenantId` is the right tool for
+`concurrencyKey: "js/ctx.request.body.tenantId"` is the right tool for
 isolation, paired with a registry filter for sub-workflows so a
 tenant can't compose another tenant's workflow.
 

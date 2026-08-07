@@ -23,7 +23,7 @@ Today the following workflow is **accepted at load time**:
     {
       "id": "per-order",
       "forEach": {
-        "in": "$.req.body.orders",
+        "in": "js/ctx.request.body.orders",
         "as": "order",
         "mode": "sequential",
         "do": [
@@ -45,7 +45,7 @@ The intent is clear: charge each order, wait 3 days (the chargeback window), shi
 
 2. **Lost iteration state.** `ForEachNode.cloneCtxForIteration` builds a per-iteration child `ctx` with its own `state[as]`, deep-cloned config, and a fresh response slot. None of that is persisted to durable storage. When the wait fires and the inner runner throws `WaitDispatchRequest`, the iteration's child ctx is garbage-collected. Re-entry gets back a different process with no record that `order = items[2]` was the active iteration.
 
-3. **`tryCatch` steals the wait.** Inside a `tryCatch.try`, `WaitDispatchRequest` is just an exception. The current `try { ... } catch (err) { ctxAny.error = toErrorEnvelope(err); ... }` block treats it as a regular failure, fires the catch arm with `$.error.name === "WaitDispatchRequest"`, and the workflow runs to completion via the catch path — never deferring at all.
+3. **`tryCatch` steals the wait.** Inside a `tryCatch.try`, `WaitDispatchRequest` is just an exception. The current `try { ... } catch (err) { ctxAny.error = toErrorEnvelope(err); ... }` block treats it as a regular failure, fires the catch arm with `ctx.error.name === "WaitDispatchRequest"`, and the workflow runs to completion via the catch path — never deferring at all.
 
 These aren't subtle edge cases. They're the **default behaviour** of every primitive-+-wait composition, and there's no warning at load time.
 
@@ -54,7 +54,7 @@ The current shipped guidance (in [core/runner/CLAUDE.md](https://github.com/desk
 ```ts
 // Workflow A — pre-wait
 { id: "queue-continuation", subworkflow: "post-wait-half",
-  inputs: { state: $.state }, wait: false }
+  inputs: { state: "js/ctx.state" }, wait: false }
 
 // Workflow B — has delay on its trigger
 { name: "post-wait-half",
@@ -375,7 +375,7 @@ Lean toward: **transaction wraps both writes, atomic**. If either fails, the who
 These are intentionally NOT addressed:
 
 - **Top-level state durability across restart.** Pre-existing limitation; covered by prerequisite (a) above. If we fix it for phase 2, we get top-level fix for free; if we accept the limitation, top-level waits >process-lifetime continue to be best-effort.
-- **`wait.until($.req.body.scheduledAt)` resolution at re-entry.** When the deadline is computed from a workflow input that may have changed, do we re-resolve on re-entry or use the persisted deadline? Persisted is the safer default; re-resolve is a future feature.
+- **`wait.until("js/ctx.request.body.scheduledAt")` resolution at re-entry.** When the deadline is computed from a workflow input that may have changed, do we re-resolve on re-entry or use the persisted deadline? Persisted is the safer default; re-resolve is a future feature.
 - **Cancellable waits.** The `POST /__blok/runs/:runId/cancel` endpoint should cancel a delayed run. It does today (cooperative cancellation via AbortSignal). Inside-primitives waits should respect the same path.
 - **Dispatch backoff.** When a wait deadline fires but the run can't acquire its concurrency slot, the dispatch reschedules. Inside-primitives waits should behave the same way; nothing primitive-specific.
 - **Studio UI for nested wait visualization.** Mentioned as a prerequisite-adjacent concern; ship it after the core machinery works.

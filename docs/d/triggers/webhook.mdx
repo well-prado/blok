@@ -107,7 +107,7 @@ internal webhooks — anywhere a partner sends an HMAC-signed body.
 | `tolerance` | `number` (seconds) | `300` | Drift window for timestamp-based schemes. |
 | `events` | `string[]` | — | Allowlist of `eventType` values. Verified-but-out-of-scope events return 200 + `{status: "ignored"}` (no retry storm). |
 | `namespace` | `string` | — | Prefix applied to the resolved sub-workflow name. Enables polymorphic dispatch (`subworkflow("dispatch", event.body.type, ...)` + `namespace: "stripe"` → looks up `stripe.<type>`). |
-| `idempotencyKey` | `string` \| `$.path` | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
+| `idempotencyKey` | `string` (literal or `js/ctx....`) | — | Replay protection. The trigger caches the resolved value; duplicates return 200 + `{status: "duplicate"}` without re-running. |
 
 ## The `event` handle
 

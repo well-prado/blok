@@ -249,7 +249,7 @@ This is the picture an author should have. The differences between triggers are 
       "path": "/ws/chat/:roomId",
       "middleware": ["jwt-auth"],
       "events": ["message", "typing", "leave"],
-      "concurrencyKey": "$.req.params.roomId",
+      "concurrencyKey": "js/ctx.request.params.roomId",
       "concurrencyLimit": 100,
       "heartbeatInterval": 30000,
       "maxConnections": 10000,
@@ -268,9 +268,9 @@ This is the picture an author should have. The differences between triggers are 
       "id": "broadcast",
       "use": "@blokjs/ws-broadcast",
       "inputs": {
-        "channel": "$.req.params.roomId",
+        "channel": "js/ctx.request.params.roomId",
         "event": "message",
-        "payload": { "from": "$.state.identity.userId", "text": "$.req.body.text" }
+        "payload": { "from": "js/ctx.state.identity.userId", "text": "js/ctx.request.body.text" }
       }
     }
   ]
@@ -287,7 +287,7 @@ export default workflow({
       path: "/ws/chat/:roomId",
       middleware: ["jwt-auth"],
       events: ["message", "typing", "leave"],
-      concurrencyKey: $.req.params.roomId,
+      concurrencyKey: "js/ctx.request.params.roomId",
     },
   },
   steps: [
@@ -326,7 +326,7 @@ Implementation: an in-memory `WeakMap<WebSocket, unknown>` keyed by the `ws` ins
 **Helpers (new nodes to ship):**
 
 - `@blokjs/ws-broadcast` — `inputs: { channel: string, event: string, payload: unknown, exceptSelf?: boolean }`. Sends to all connections matching the channel (room) name. The `exceptSelf` flag is the canonical "send to everyone except the sender" pattern.
-- `@blokjs/ws-reply` — `inputs: { event: string, payload: unknown }`. Sends back to the connection that sent the message. Shorthand for `ws-broadcast` with `channel: $.connection.id`.
+- `@blokjs/ws-reply` — `inputs: { event: string, payload: unknown }`. Sends back to the connection that sent the message. Shorthand for `ws-broadcast` with `channel: "js/ctx.connection.id"`.
 - `@blokjs/ws-close` — `inputs: { code?: number, reason?: string }`. Closes the connection cleanly. Useful in `connect` workflows for auth failures.
 
 **Heartbeat:** built into the trigger, not the author's concern. Configured via `heartbeatInterval` (default 30s). The trigger sends WS ping frames on the interval; on missed pong (2 × interval), the trigger closes the connection with code 1011 and fires the `disconnect` workflow.
@@ -376,15 +376,15 @@ This requires a `BLOK_WS_BACKPLANE` env var pointing at a NATS / Redis instance.
       "id": "subscribe",
       "use": "@blokjs/sse-subscribe",
       "inputs": {
-        "channels": "$.trigger.channels",
-        "lastEventId": "$.req.headers['last-event-id']"
+        "channels": "js/ctx.trigger.channels",
+        "lastEventId": "js/ctx.request.headers['last-event-id']"
       }
     },
     {
       "id": "stream",
       "use": "@blokjs/sse-stream",
       "inputs": {
-        "source": "$.state.subscribe",
+        "source": "js/ctx.state.subscribe",
         "eventName": "order-update",
         "retryMs": 3000
       }
@@ -440,7 +440,7 @@ The shape is interesting because SSE is fundamentally "open a connection, then e
       "events": ["invoice.paid", "invoice.payment_failed"],
       "secretEnv": "STRIPE_WEBHOOK_SECRET",
       "tolerance": 300,
-      "idempotencyKey": "$.req.headers['stripe-signature']"
+      "idempotencyKey": "js/ctx.request.headers['stripe-signature']"
     }
   },
   "steps": [
@@ -448,14 +448,14 @@ The shape is interesting because SSE is fundamentally "open a connection, then e
       "id": "log",
       "use": "@blokjs/audit-log",
       "inputs": {
-        "event": "$.req.body.type",
-        "id": "$.req.body.id"
+        "event": "js/ctx.request.body.type",
+        "id": "js/ctx.request.body.id"
       }
     },
     {
       "id": "dispatch",
-      "subworkflow": "$.req.body.type",
-      "inputs": { "stripeEvent": "$.req.body" }
+      "subworkflow": "js/ctx.request.body.type",
+      "inputs": { "stripeEvent": "js/ctx.request.body" }
     }
   ]
 }
@@ -505,14 +505,14 @@ Webhooks usually carry an event type that dispatches to one of many handlers. Th
   "steps": [
     {
       "id": "route",
-      "subworkflow": "$.req.body.type",
-      "inputs": { "stripeEvent": "$.req.body" }
+      "subworkflow": "js/ctx.request.body.type",
+      "inputs": { "stripeEvent": "js/ctx.request.body" }
     }
   ]
 }
 ```
 
-The `subworkflow: "$.req.body.type"` field is **polymorphic** — the destination workflow name is resolved at runtime from the event type. This requires `WorkflowRegistry` to support polymorphic name resolution; today it only does static names. Adding this is in scope for the webhook trigger PR.
+The `subworkflow: "js/ctx.request.body.type"` field is **polymorphic** — the destination workflow name is resolved at runtime from the event type. This requires `WorkflowRegistry` to support polymorphic name resolution; today it only does static names. Adding this is in scope for the webhook trigger PR.
 
 Each event type gets its own workflow: `invoice.paid`, `customer.subscription.created`, etc. Each handles ONE event type, no switch statement needed. The flagship demo of "this is what Blok is for" — declarative routing all the way down.
 
@@ -560,7 +560,7 @@ The `provider` field on the trigger config picks the adapter. Per [Resolution Q7
     }
   },
   "steps": [
-    { "id": "send", "use": "@blokjs/sendgrid-send", "inputs": { "to": "$.req.body.email" } }
+    { "id": "send", "use": "@blokjs/sendgrid-send", "inputs": { "to": "js/ctx.request.body.email" } }
   ]
 }
 ```
@@ -620,7 +620,7 @@ The `provider` field on the trigger config picks the adapter. Per [Resolution Q7
   "inputs": {
     "provider": "bullmq",
     "queue": "email-jobs",
-    "payload": { "to": "$.req.body.email", "template": "welcome" },
+    "payload": { "to": "js/ctx.request.body.email", "template": "welcome" },
     "delayMs": 5000,
     "priority": 10
   }
@@ -700,7 +700,7 @@ The provider matrix is intentionally different from Queue (although some provide
     {
       "id": "log",
       "use": "@blokjs/audit-log",
-      "inputs": { "event": "$.trigger.topic", "data": "$.req.body" }
+      "inputs": { "event": "js/ctx.trigger.topic", "data": "js/ctx.request.body" }
     }
   ]
 }
@@ -783,7 +783,7 @@ Note: omitting `consumerGroup` is fan-out (every subscriber sees every message);
   "inputs": {
     "provider": "nats",
     "topic": "orders.created.us-east",
-    "payload": { "orderId": "$.state.created.id" }
+    "payload": { "orderId": "js/ctx.state.created.id" }
   }
 }
 ```
@@ -997,7 +997,7 @@ No new triggers in this PR. Just the plumbing.
 - Built-in providers: Stripe, GitHub, Slack, Shopify, Standard Webhooks (Svix).
 - Custom signature config (`signature: { scheme, header, format, secretEnv, tolerance, timestampHeader }`).
 - Replay protection via existing `idempotency_cache` table.
-- Polymorphic sub-workflow dispatch (`subworkflow: "$.req.body.type"`).
+- Polymorphic sub-workflow dispatch (`subworkflow: "js/ctx.request.body.type"`).
 - Migration: `v05-github-webhook-router.json` → uses new webhook trigger.
 - OTel counters.
 - 10-12 unit tests + 2 smoke workflows (one Stripe-like, one GitHub) + 2 smoke cases.
@@ -1179,7 +1179,7 @@ Pattern A maps cleanly onto this:
 {
   "steps": [
     { "id": "subscribe", "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["order:{orderId}"] } },
-    { "id": "stream", "use": "@blokjs/sse-stream", "inputs": { "source": "$.state.subscribe" } }
+    { "id": "stream", "use": "@blokjs/sse-stream", "inputs": { "source": "js/ctx.state.subscribe" } }
   ]
 }
 ```
@@ -1203,7 +1203,7 @@ That's a real use case but uncommon enough that opt-in is correct.
 
 ### Q4 — Webhook polymorphic sub-workflow dispatch as canonical
 
-**Recommendation:** confirm the initial spec. Polymorphic sub-workflow dispatch (`subworkflow: "$.req.body.type"`) is the **recommended canonical pattern**. Document loudly. Authors who prefer single-workflow with `switchOn` for tight-coupling event types are also supported — both shapes work.
+**Recommendation:** confirm the initial spec. Polymorphic sub-workflow dispatch (`subworkflow: "js/ctx.request.body.type"`) is the **recommended canonical pattern**. Document loudly. Authors who prefer single-workflow with `switchOn` for tight-coupling event types are also supported — both shapes work.
 
 **Reasoning:**
 
@@ -1216,12 +1216,12 @@ Webhook providers fall into two cardinality classes:
   - Sub-workflow lineage in tracing follows naturally.
 - **Low cardinality** (Slack Slash Commands: 1 event type, Custom webhooks: often 1-3 types). Single-workflow with `switchOn` is fine and avoids file fan-out.
 
-The polymorphic case is the more demanding implementation requirement (today's `subworkflow:` field only supports static string names; we need mapper-evaluated expressions like `$.req.body.type` or `js/ctx.req.body.type`). Ship that feature in PR 4 (webhook trigger).
+The polymorphic case is the more demanding implementation requirement (today's `subworkflow:` field only supports static string names; we need mapper-evaluated expressions like `js/ctx.request.body.type`). Ship that feature in PR 4 (webhook trigger).
 
 **Trade-offs:**
 
-- **Polymorphic resolution failure modes need clear errors.** If `$.req.body.type` resolves to a workflow name that doesn't exist, the runner needs a clean "unknown workflow" error with a list of registered workflows in the same provider's namespace.
-- **Workflow naming convention.** For Stripe, conventional names are `stripe.invoice.paid` — but Blok's `WorkflowRegistry` doesn't enforce namespacing today. PR 4 should add a `namespace` field (`trigger.webhook.namespace: "stripe"`) that prefixes the resolved subworkflow name, so `$.req.body.type === "invoice.paid"` resolves to workflow `stripe.invoice.paid` automatically.
+- **Polymorphic resolution failure modes need clear errors.** If `js/ctx.request.body.type` resolves to a workflow name that doesn't exist, the runner needs a clean "unknown workflow" error with a list of registered workflows in the same provider's namespace.
+- **Workflow naming convention.** For Stripe, conventional names are `stripe.invoice.paid` — but Blok's `WorkflowRegistry` doesn't enforce namespacing today. PR 4 should add a `namespace` field (`trigger.webhook.namespace: "stripe"`) that prefixes the resolved subworkflow name, so `js/ctx.request.body.type === "invoice.paid"` resolves to workflow `stripe.invoice.paid` automatically.
 
 **Implementation impact on PR 4:** scope grows slightly — add polymorphic sub-workflow resolution + the namespace field to `WorkflowRegistry`. Estimated effort goes from 5-6 days to 6-7 days. Worth it: polymorphic dispatch is the flagship demo of "Blok-as-declarative-router."
 
@@ -1237,7 +1237,7 @@ Three different concerns each get their own knob:
 
 | Concern | Knob | Semantics |
 |---|---|---|
-| Max concurrent processing per business key | `concurrencyKey: "$.req.params.roomId"` | "max 100 message-processing slots per room" (same key, same slots, just on WS as on HTTP) |
+| Max concurrent processing per business key | `concurrencyKey: "js/ctx.request.params.roomId"` | "max 100 message-processing slots per room" (same key, same slots, just on WS as on HTTP) |
 | Max total open connections (DoS protection) | `maxConnections: 10000` | "trigger refuses upgrade beyond 10K total connections" |
 | Max message rate per connection | `messageRateLimit: 100` | "drop messages above 100/sec per individual connection" |
 
@@ -1256,7 +1256,7 @@ Overloading `concurrencyKey` to ALSO mean per-connection limits would create amb
 **Reasoning:**
 
 The 95/5 rule. 95% of WS use cases (chat, notifications, real-time data, dashboards, AI streaming) are JSON over text frames. Defaulting to text:
-- Lets the workflow author use `$.req.body.foo` naturally (mapper expressions assume parsed objects).
+- Lets the workflow author use `js/ctx.request.body.foo` naturally (mapper expressions assume parsed objects).
 - Matches the HTTP trigger's body handling (which also parses JSON by default).
 - Browser clients send text by default.
 

@@ -1,6 +1,6 @@
 ---
 title: "tryCatch"
-description: "JS-like exception handling for sub-pipelines — try/catch/finally with an `$.error` proxy in the catch arm and finally semantics that match JavaScript exactly."
+description: "JS-like exception handling for sub-pipelines — try/catch/finally with a typed `error` handle in the catch arm and finally semantics that match JavaScript exactly."
 icon: "shield-halved"
 ---
 
@@ -16,7 +16,7 @@ Use it for:
 ## Authoring (TS DSL)
 
 ```ts
-import { workflow, tryCatch, $ } from "@blokjs/helper";
+import { workflow, tryCatch } from "@blokjs/helper";
 
 export default workflow({
   name: "saga",
@@ -26,7 +26,7 @@ export default workflow({
       id: "transactional-write",
       try: [
         { id: "create",   use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
-        { id: "risky",    use: "@blokjs/api-call", inputs: { url: $.req.body.url, method: "POST" } },
+        { id: "risky",    use: "@blokjs/api-call", inputs: { url: "js/ctx.request.body.url", method: "POST" } },
         { id: "finalize", use: "@blokjs/api-call", inputs: { url: "...", method: "POST" } },
       ],
       catch: [
@@ -36,7 +36,7 @@ export default workflow({
           inputs: {
             url: "...",
             method: "POST",
-            body: { reason: $.error.message, errorName: $.error.name },
+            body: { reason: "js/ctx.error.message", errorName: "js/ctx.error.name" },
           },
         },
       ],
@@ -76,27 +76,29 @@ export default workflow({
 ## Runtime contract
 
 - **`try` runs first.** If every step succeeds, `catch` is skipped and `finally` runs.
-- **On any throw**, `ctx.error` is populated and `catch` runs. `$.error` is **only** defined inside `catch` — it's `undefined` in `try` and `finally`.
+- **On any throw**, `ctx.error` is populated and `catch` runs. It's **only** defined inside `catch` — it's `undefined` in `try` and `finally`.
 - **`finally` always runs**, even when `catch` itself throws. JavaScript-style: a throw from `finally` supersedes a pending throw from `catch`.
 - **State mutations from any block** — try, catch, or finally — are visible to subsequent top-level steps. That's how saga rollback flags propagate.
 - **Catch can swallow OR rethrow.** A catch that runs to completion without throwing makes the tryCatch step "succeed" — execution continues with the next top-level step. To fail the workflow on a caught error, throw explicitly via `@blokjs/throw` (lets you set the HTTP status code and response body).
 - **An errored step does NOT write `ctx.state`.** When a step inside `try` throws, `ctx.state[<step.id>]` is left **`undefined`** — not an empty object, not a placeholder. That means `ctx.state['create-account'] !== undefined` is a truthful "did this step actually succeed?" check inside the catch arm. (Pre-v0.5.1 the runner persisted an empty envelope on error; that was a bug, since fixed.)
 
-### The `$.error` envelope
+### The error envelope (`ctx.error`)
+
+Read it as `error.<field>` via the typed-handle DSL's `catch: (error) => {...}` arm, or as a `"js/ctx.error.<field>"` string in JSON / legacy object-style workflows.
 
 | Field | Type | Source |
 |---|---|---|
-| `$.error.message` | `string` | The original error message — unwrapped through the `.cause` chain so framework wrap text doesn't leak |
-| `$.error.name` | `string` | Error class name (e.g. `"Error"`, `"UnauthorizedError"`, `"ZodError"`) |
-| `$.error.stack` | `string \| undefined` | Stack trace when the error carries one |
-| `$.error.code` | `number \| undefined` | HTTP-style status carried by `GlobalError` — set via `@blokjs/throw inputs.code`, or by the framework's ZodError → 400 mapping. Lets a catch arm re-throw with the same status, branch on 4xx vs 5xx, or include it in audit-log payloads |
-| `$.error.stepId` | `string \| undefined` | The id of the try-arm step that threw. Lets a catch arm route by failure point ("payment failed → notify billing", "inventory failed → notify warehouse") without regex-parsing the message |
+| `ctx.error.message` | `string` | The original error message — unwrapped through the `.cause` chain so framework wrap text doesn't leak |
+| `ctx.error.name` | `string` | Error class name (e.g. `"Error"`, `"UnauthorizedError"`, `"ZodError"`) |
+| `ctx.error.stack` | `string \| undefined` | Stack trace when the error carries one |
+| `ctx.error.code` | `number \| undefined` | HTTP-style status carried by `GlobalError` — set via `@blokjs/throw inputs.code`, or by the framework's ZodError → 400 mapping. Lets a catch arm re-throw with the same status, branch on 4xx vs 5xx, or include it in audit-log payloads |
+| `ctx.error.stepId` | `string \| undefined` | The id of the try-arm step that threw. Lets a catch arm route by failure point ("payment failed → notify billing", "inventory failed → notify warehouse") without regex-parsing the message |
 
-### Lifecycle — when `$.error` is in scope
+### Lifecycle — when `ctx.error` is in scope
 
-`$.error` (and the underlying `ctx.error`) is scoped to the `catch` arm only. The runner snapshots whatever `ctx.error` held when the tryCatch step entered, populates it with the caught envelope just before `catch` runs, and **restores the snapshot before `finally` runs and before downstream top-level steps execute**. This mirrors JavaScript's binding rules exactly — the catch variable falls out of scope when the catch block exits.
+`ctx.error` is scoped to the `catch` arm only. The runner snapshots whatever `ctx.error` held when the tryCatch step entered, populates it with the caught envelope just before `catch` runs, and **restores the snapshot before `finally` runs and before downstream top-level steps execute**. This mirrors JavaScript's binding rules exactly — the catch variable falls out of scope when the catch block exits.
 
-| Location | `$.error` |
+| Location | `ctx.error` |
 |---|---|
 | Step before the tryCatch | unchanged (typically `undefined`) |
 | Inside `try` | `undefined` (no error yet) |
@@ -117,9 +119,9 @@ If you need the caught error visible downstream (audit log, response shaping), c
 }
 ```
 
-Downstream steps reference it as `$.state['stash-error'].failedAt` etc. — values stored in `ctx.state` from inside the catch arm survive past the tryCatch boundary even though `ctx.error` does not. This is the same pattern the [conditional rollback example](#conditional-rollback-—-the-canonical-saga-pattern) below uses for its `outcome` / `failedAt` envelope.
+Downstream steps reference it as `ctx.state['stash-error'].failedAt` etc. — values stored in `ctx.state` from inside the catch arm survive past the tryCatch boundary even though `ctx.error` does not. This is the same pattern the [conditional rollback example](#conditional-rollback-—-the-canonical-saga-pattern) below uses for its `outcome` / `failedAt` envelope.
 
-Nested tryCatch nests the snapshots correctly: an inner catch sees the inner error, and when the inner tryCatch exits, the outer catch's `$.error` is restored (not clobbered).
+Nested tryCatch nests the snapshots correctly: an inner catch sees the inner error, and when the inner tryCatch exits, the outer catch's `ctx.error` is restored (not clobbered).
 
 ---
 
@@ -167,7 +169,7 @@ A common saga pattern: only roll back work that actually completed. Pre-v0.5.1 t
 
 If `create-account` itself fails: `ctx.state['create-account']` is `undefined`, the branch's `then` doesn't fire, no rollback is needed. The throw step still runs and emits the structured 500.
 
-If a later step (`send-welcome` or `create-profile`) fails: `ctx.state['create-account']` is set to the actual response, the branch's `then` fires, the rollback request goes out. `$.error.stepId` tells the response handler exactly which step blew up.
+If a later step (`send-welcome` or `create-profile`) fails: `ctx.state['create-account']` is set to the actual response, the branch's `then` fires, the rollback request goes out. `ctx.error.stepId` tells the response handler exactly which step blew up.
 
 ---
 

@@ -1,0 +1,137 @@
+---
+title: "$ proxy removal"
+description: "How to migrate off the deleted `$` proxy to typed handles (TS) or literal js/ctx strings (object-style / JSON)."
+icon: "ban"
+---
+
+The `$` proxy — the typed sugar that let you write `$.state.fetch`,
+`$.request.body`, `$.prev.data`, `$.error.message` — is **deleted**.
+`import { $ } from "@blokjs/core"` and `import { $ } from "@blokjs/helper"`
+are now compile errors. There is no flag to bring it back.
+
+## Why it's gone
+
+`$` compiled straight to `"js/ctx.*"` strings, bypassing everything the
+core redesign built: typed `step()` handles, the structural `{$ref}` IR,
+and `validateWorkflow`'s static ref checking. A `$.state.typo.field` was
+invisible to `tsc`, invisible to the validator, and failed only at
+run time — the exact stringly-typed failure mode the redesign exists to
+kill. It also gave AI agents and new authors two incompatible ways to
+read the same value, discovered inconsistently via autocomplete and old
+docs.
+
+Everything it did is covered by an existing, better-typed mechanism. See
+the shape-by-shape table below.
+
+## Before / after, by shape
+
+### New TypeScript workflows (typed-handle DSL, `@blokjs/core`)
+
+If you were reaching for `$` inside a typed-handle workflow, you don't
+need it — a typed handle already exists for that read.
+
+| You used to write | Write instead |
+|---|---|
+| `$.state.<id>.<path>` | The producing step's handle: `const h = step("<id>", node, {...}); ... h.<path>` |
+| `$.request.<path>` / `$.req.<path>` | The trigger entry handle: `(req) => { ... req.<path> }` (named `req`/`job`/`event`/`msg`/`tick`/`rpc`/`conn`/`stream`/`call` depending on trigger kind) |
+| `` `text ${$.state.x}` `` | `` tpl`text ${h.x}` `` |
+| `branch({ when: eq($.req.method, "POST") })` | `branch("id", eq(req.method, "POST"), { then: () => {...} })` — `eq/ne/gt/gte/lt/lte/not` from `@blokjs/core` operate on handles |
+| `$.error.message` inside `tryCatch.catch` | `tryCatch("id", { try: () => {...}, catch: (error) => { error.message } })` — a typed `ErrorHandle` scoped to the catch arm |
+| Anything non-structural (`\|\|` defaults, ternaries, arithmetic) | The `` js`...` `` tagged template (ADR 0008) |
+
+### Legacy object-style workflows (`workflow({ steps: [...] })`) and JSON
+
+These formats never used TypeScript syntax for `$` in the first place —
+`$.state.x` was always either a literal string (`"$.state.x"`, inert —
+never actually resolved by the Mapper) or, in `.ts` files, the `$` proxy
+object compiling to a `"js/ctx..."` string at definition time. Since the
+proxy is gone, write the compiled form directly — it's the same string
+the proxy always produced:
+
+| You used to write | Write instead |
+|---|---|
+| `$.state.<id>.<path>` | `"js/ctx.state.<id>.<path>"` |
+| `$.request.<path>` / `$.req.<path>` | `"js/ctx.request.<path>"` |
+| `$.prev.<path>` | `"js/ctx.response.<path>"` (canonical — `"js/ctx.prev.<path>"` also still resolves, `prev` is a real alias) |
+| `$.vars.<path>` | `"js/ctx.state.<path>"` |
+| `$.error.<path>` (inside `tryCatch.catch`) | `"js/ctx.error.<path>"` |
+| `branch({ when: $.req.method })` (bare truthiness) | `branch({ when: "ctx.request.method" })` — `when`/`while` are raw ctx strings, no `js/` prefix, evaluated directly |
+| `branch({ when: eq($.req.method, "POST") })` | `branch({ when: 'ctx.request.method === "POST"' })`, or keep `eq(...)` but pass a raw ctx-path **string** instead of a `$` value: `eq("ctx.request.method", "POST")` — a string operand starting with `ctx.` is how `eq/ne/gt/gte/lt/lte/not` (still exported from `@blokjs/helper`) now recognize "this is a path" instead of a literal |
+| `import { workflow, $ } from "@blokjs/helper"` | `import { workflow } from "@blokjs/helper"` — drop `$`; keep `branch`/`eq`/etc if you still use them |
+
+```ts
+// Before
+import { workflow, $ } from "@blokjs/helper";
+
+export default workflow({
+  name: "Process Order",
+  version: "1.0.0",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    { id: "validate", use: "order-validator", inputs: { order: $.req.body } },
+    { id: "save", use: "order-store", inputs: { data: $.state.validate } },
+  ],
+});
+
+// After
+import { workflow } from "@blokjs/helper";
+
+export default workflow({
+  name: "Process Order",
+  version: "1.0.0",
+  trigger: { http: { method: "POST" } },
+  steps: [
+    { id: "validate", use: "order-validator", inputs: { order: "js/ctx.request.body" } },
+    { id: "save", use: "order-store", inputs: { data: "js/ctx.state.validate" } },
+  ],
+});
+```
+
+JSON workflows change identically — write the `"js/ctx...."` string
+directly in the `inputs`/`when`/`in`/`on` field; there was never a `$`
+import to remove in JSON.
+
+## Codemod
+
+`blokctl migrate refs` (also runnable as the field-aware ref codemod in
+`packages/cli/src/commands/migrate/refs.ts`) rewrites both shapes above
+mechanically:
+
+```bash
+blokctl migrate refs --dry-run   # preview
+blokctl migrate refs             # apply (writes .bak backups)
+```
+
+- **Step inputs**: `$.state.<id>.<path>` and `js/ctx.state.<id>.<path>`
+  become the producing step's typed handle in TS files, or a structural
+  `{ $ref: { step, path } }` object in JSON. `$.request.<path>` /
+  `js/ctx.request.<path>` become the `@trigger` ref.
+- **`branch`/`loop` conditions**: any leftover `$`-shaped `when`/`while`
+  — a bare `$.path` value, a string containing `$.path`, or an
+  `eq($.path, literal)`-style call — is rewritten to the equivalent raw
+  `ctx.*` string. A dangling `import { $ } from "@blokjs/helper"` left
+  behind by a fully-migrated file is pruned automatically.
+- **Non-mechanical sites** (dynamic expressions the codemod can't safely
+  restructure — coalescing, arithmetic, `.filter()`/`.map()` chains) are
+  left as-is and marked with a `// blok-migrate: hand-migrate` comment
+  for manual follow-up, with a summary count printed at the end of the
+  run.
+
+Run it, review the diff, delete the `.bak` files once satisfied.
+
+## What still loads
+
+Workflows **serialized** by old versions — JSON files or already-built
+step trees containing `"js/ctx.*"` wire strings — still load and run
+unchanged. That wire format (`js/...` strings, `${...}` interpolation)
+is untouched by this change; see the separate `js/` / `${...}`
+wire-format migration guide if you're also migrating those. What's gone
+is the `$` **authoring** surface — the TypeScript proxy object itself.
+
+## Related
+
+- [Handles and footguns](/d/primitives/handles-and-footguns) — the
+  typed-handle DSL's arm-scoping and read rules.
+- [Context and state](/d/fundamentals/context-and-state) — the
+  authoring-rule reference this page's `CLAUDE.md`/`AGENTS.md`
+  counterpart stays in sync with.

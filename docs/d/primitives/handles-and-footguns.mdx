@@ -24,7 +24,7 @@ guarded by the step builder's `canRead` check at author time.
 A *handle* is a typed reference to a step's output, minted by `step()`,
 `forEach()` (the results array), or the trigger entry argument. Handles passed
 into a later `step()`'s `inputs` are lowered automatically — you never write
-`$.state.<id>` or `js/ctx…` by hand.
+`"js/ctx.state.<id>"` strings by hand.
 
 | You can read a handle… | Outcome |
 |---|---|

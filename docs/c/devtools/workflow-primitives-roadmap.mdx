@@ -56,7 +56,7 @@ branch({ id, when, then: Step[], else?: Step[] })
 { id, subworkflow: "name", inputs?, wait?, idempotencyKey? }
 
 // Wait / sleep
-{ id, wait: { for?: "1h", until?: $.req.body.at } }
+{ id, wait: { for?: "1h", until?: "js/ctx.request.body.at" } }
 ```
 
 Each compiles down at workflow-load time into the runner's `InternalStep` shape. The discriminator chain in [`WorkflowNormalizer.normalizeWorkflow`](https://github.com/deskree-inc/blok/blob/main/core/runner/src/workflow/WorkflowNormalizer.ts) checks for `step.branch`, `step.subworkflow`, `step.wait` in turn before falling through to the regular step handler.
@@ -74,12 +74,12 @@ Five new shapes, each compiling to a single internal node ref. Names chosen to r
 ```ts
 forEach({
   id: "process-orders",
-  in: $.state.orders,            // array source
-  as: "order",                   // each item lands at $.state.order
+  in: "js/ctx.state.orders",     // array source
+  as: "order",                   // each item lands at ctx.state.order
   mode: "sequential",            // default; use "parallel" for Promise.all
   do: [
     { id: "validate", use: "@blokjs/api-call", inputs: { url: "..." } },
-    { id: "charge",   use: "stripe-charge",     inputs: { amount: $.state.order.total } },
+    { id: "charge",   use: "stripe-charge",     inputs: { amount: "js/ctx.state.order.total" } },
   ],
 })
 ```
@@ -90,12 +90,12 @@ JSON form:
 {
   "id": "process-orders",
   "forEach": {
-    "in": "$.state.orders",
+    "in": "js/ctx.state.orders",
     "as": "order",
     "mode": "sequential",
     "do": [
       { "id": "validate", "use": "@blokjs/api-call", "inputs": { "url": "..." } },
-      { "id": "charge",   "use": "stripe-charge",     "inputs": { "amount": "$.state.order.total" } }
+      { "id": "charge",   "use": "stripe-charge",     "inputs": { "amount": "js/ctx.state.order.total" } }
     ]
   }
 }
@@ -122,11 +122,11 @@ JSON form:
 ```ts
 loop({
   id: "poll-job",
-  while: '$.state["check-job"].status !== "done"',
+  while: 'ctx.state["check-job"].status !== "done"',
   maxIterations: 30,
   do: [
     { id: "wait-tick", wait: { for: "2s" } },
-    { id: "check-job", use: "@blokjs/api-call", inputs: { url: "$.state.jobUrl" } },
+    { id: "check-job", use: "@blokjs/api-call", inputs: { url: "js/ctx.state.jobUrl" } },
   ],
 })
 ```
@@ -137,11 +137,11 @@ JSON form:
 {
   "id": "poll-job",
   "loop": {
-    "while": "$.state['check-job'].status !== 'done'",
+    "while": "ctx.state['check-job'].status !== 'done'",
     "maxIterations": 30,
     "do": [
       { "id": "wait-tick", "wait": { "for": "2s" } },
-      { "id": "check-job", "use": "@blokjs/api-call", "inputs": { "url": "$.state.jobUrl" } }
+      { "id": "check-job", "use": "@blokjs/api-call", "inputs": { "url": "js/ctx.state.jobUrl" } }
     ]
   }
 }
@@ -149,12 +149,12 @@ JSON form:
 
 **Semantics:**
 
-- `while` is a JS expression (or `$.<path>` proxy). Evaluated BEFORE each iteration; if falsy, the loop exits.
+- `while` is a raw JS expression evaluated against `ctx` (no `$` proxy — that was removed; write `ctx.state.foo` directly). Evaluated BEFORE each iteration; if falsy, the loop exits.
 - `maxIterations` is a hard safety cap (defaults to 1000; configurable via `BLOK_LOOP_MAX_ITERATIONS`). Hitting the cap throws `LoopMaxIterationsError`.
 - Each iteration gets `ctx.state[id + "Index"]` for the 0-based counter.
 - The final result at `ctx.state[id]` is the last iteration's `ctx.prev.data`.
 
-**Why no `count`?** A counter-based loop is `loop({ while: '$.state[id + "Index"] < 10', ... })`. Adding a separate `count: 10` field is sugar; defer until users ask. Same logic for blueprint-runner's `for` node.
+**Why no `count`?** A counter-based loop is `loop({ while: 'ctx.state[id + "Index"] < 10', ... })`. Adding a separate `count: 10` field is sugar; defer until users ask. Same logic for blueprint-runner's `for` node.
 
 **Reliability composition:**
 
@@ -168,7 +168,7 @@ JSON form:
 ```ts
 switch({
   id: "route-by-kind",
-  on: $.req.body.kind,
+  on: "js/ctx.request.body.kind",
   cases: [
     { when: "order",  do: [{ id: "process-order",  subworkflow: "process-order" }] },
     { when: "refund", do: [{ id: "process-refund", subworkflow: "process-refund" }] },
@@ -186,7 +186,7 @@ JSON form:
 {
   "id": "route-by-kind",
   "switch": {
-    "on": "$.req.body.kind",
+    "on": "js/ctx.request.body.kind",
     "cases": [
       { "when": "order",  "do": [{ "id": "process-order",  "subworkflow": "process-order" }] },
       { "when": "refund", "do": [{ "id": "process-refund", "subworkflow": "process-refund" }] },
@@ -217,15 +217,15 @@ JSON form:
 tryCatch({
   id: "send-email-safe",
   try: [
-    { id: "render", use: "render-template", inputs: { template: "welcome", data: $.state.user } },
-    { id: "send",   use: "send-email",      inputs: { to: $.state.user.email, body: $.state.render.html } },
+    { id: "render", use: "render-template", inputs: { template: "welcome", data: "js/ctx.state.user" } },
+    { id: "send",   use: "send-email",      inputs: { to: "js/ctx.state.user.email", body: "js/ctx.state.render.html" } },
   ],
   catch: [
-    { id: "log-failure", use: "@blokjs/api-call", inputs: { url: process.env.SLACK_WEBHOOK, body: { text: $.error.message } } },
+    { id: "log-failure", use: "@blokjs/api-call", inputs: { url: process.env.SLACK_WEBHOOK, body: { text: "js/ctx.error.message" } } },
     { id: "respond-202", use: "@blokjs/respond",  inputs: { status: 202, body: { queued: true } } },
   ],
   finally: [
-    { id: "metrics", use: "metrics-emit", inputs: { event: "email-attempt", outcome: $.state.send ? "ok" : "failed" } },
+    { id: "metrics", use: "metrics-emit", inputs: { event: "email-attempt", outcome: "js/ctx.state.send ? 'ok' : 'failed'" } },
   ],
 })
 ```
@@ -246,7 +246,7 @@ JSON form:
 **Semantics:**
 
 - `try[]` runs in order. If any step throws, runner catches and switches to `catch[]` immediately (skipping remaining `try` steps).
-- The thrown error is exposed as `$.error` inside `catch` — same shape as a step's `model.error` (`message`, `code`, `name`, `stack`).
+- The thrown error is exposed as `ctx.error` inside `catch` — same shape as a step's `model.error` (`message`, `code`, `name`, `stack`).
 - `finally[]` runs after `try` succeeds OR after `catch` finishes. Even runs on uncaught errors during `catch`.
 - A `tryCatch` step's own output is the last successful step's output (from `try` or `catch`).
 
@@ -277,11 +277,11 @@ export const authCheck = workflow({
     {
       id: "verify-jwt",
       use: "verify-jwt-node",
-      inputs: { token: $.req.headers.authorization },
+      inputs: { token: "js/ctx.request.headers.authorization" },
     },
     branch({
       id: "deny-if-invalid",
-      when: '!$.state["verify-jwt"].valid',
+      when: '!ctx.state["verify-jwt"].valid',
       then: [
         {
           id: "respond-401",
@@ -401,7 +401,7 @@ Single new internal node `@blokjs/switch`. Conceptually a generalisation of bran
 
 1. `tryCatch.ts` helper.
 2. `TryCatchNode.ts` — flow node OR runner-intercepted (decision: runner-intercepted is cleaner because we need to install error handlers around the `try` step list, which a flow node can't do as elegantly).
-3. New `$.error` proxy variable accessible only inside `catch[]` — extends the proxy shape in `core/workflow-helper/src/proxy/$.ts`.
+3. Authoring sugar for the caught error at `ctx.error`, accessible only inside `catch[]`. (Shipped originally as a typed proxy over that path; the proxy module was fully removed in the later core redesign — see the [$ proxy removal migration guide](/c/migration-guides/dollar-proxy-removal).)
 4. Compose with step-level `retry` — retries happen BEFORE the catch fires.
 5. Tests:
    - Try succeeds → catch never runs, finally runs.
@@ -467,11 +467,11 @@ The whole point of this work is ergonomics. A human reading a v2 workflow should
 ```ts
 forEach({
   id: "fan-out-webhooks",
-  in: $.state.webhookUrls,
+  in: "js/ctx.state.webhookUrls",
   as: "url",
   mode: "parallel",
   do: [
-    { id: "post", use: "@blokjs/api-call", inputs: { url: $.state.url, method: "POST", body: $.req.body } },
+    { id: "post", use: "@blokjs/api-call", inputs: { url: "js/ctx.state.url", method: "POST", body: "js/ctx.request.body" } },
   ],
 })
 ```
@@ -555,9 +555,9 @@ Once shipped, this primitive set lets users express patterns that are awkward to
 
 | Use case | Today | After v0.5 |
 |---|---|---|
-| Fan out N notifications | mapper node + manual NodeBase[] return | `forEach({ in: $.state.users, mode: "parallel", do: [...] })` |
-| Poll an async job | not really expressible — would need recursive sub-workflow + `wait` | `loop({ while: '$.state.status !== "done"', do: [{ wait }, { check }] })` |
-| Multi-tenant route by `kind` | nested `branch` 3 levels deep | `switch({ on: $.req.body.kind, cases: [...] })` |
+| Fan out N notifications | mapper node + manual NodeBase[] return | `forEach({ in: "js/ctx.state.users", mode: "parallel", do: [...] })` |
+| Poll an async job | not really expressible — would need recursive sub-workflow + `wait` | `loop({ while: 'ctx.state.status !== "done"', do: [{ wait }, { check }] })` |
+| Multi-tenant route by `kind` | nested `branch` 3 levels deep | `switch({ on: "js/ctx.request.body.kind", cases: [...] })` |
 | Compensating logic on multi-step flow | every step gets `retry`, hope the last error is the right one | `tryCatch({ try: [...], catch: [...] })` |
 | Auth on every route in a trigger | first-step gate copy-pasted into every workflow | `trigger.http.middleware: ["auth-check"]` once |
 | Audit log every workflow run | nothing — operator has to wrap each | `WorkflowRegistry.useGlobalMiddleware(["audit-log"])` |

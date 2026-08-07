@@ -13,7 +13,7 @@ It mirrors JavaScript's `switch` semantics: cases are matched **in order**, the 
 ## Authoring (TS DSL)
 
 ```ts
-import { workflow, switchOn, $ } from "@blokjs/helper";
+import { workflow, switchOn } from "@blokjs/helper";
 
 export default workflow({
   name: "event-router",
@@ -21,7 +21,7 @@ export default workflow({
   steps: [
     switchOn({
       id: "route",
-      on: $.req.body.event,
+      on: "js/ctx.request.body.event",
       cases: [
         {
           when: "ping",
@@ -66,7 +66,7 @@ export default workflow({
 
 ## Runtime contract
 
-- **`on` is resolved before matching.** A `$.req.body.event` proxy or `"js/ctx.request.body.event"` string evaluates against the live ctx; the resulting value is then compared against each case's `when`.
+- **`on` is resolved before matching.** A `"js/ctx.request.body.event"` string (or, in the typed-handle DSL, a step/entry handle) evaluates against the live ctx; the resulting value is then compared against each case's `when`.
 - **Match rules:**
   - `when` is a scalar (string/number/boolean) → match if `on === when`.
   - `when` is an array → match if `when.includes(on)` (any-of, useful for grouping related events).

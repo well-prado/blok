@@ -57,7 +57,7 @@ export default workflow("fetch-with-retry", { version: "1.0.0", trigger: http.ge
     {
       "id": "respond",
       "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.fetch" }
+      "inputs": { "body": "js/ctx.state.fetch" }
     }
   ]
 }

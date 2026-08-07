@@ -80,7 +80,7 @@ export default workflow("cats.facts", {
     {
       "id": "respond",
       "use": "@blokjs/respond",
-      "inputs": { "body": "$.state.fetch" }
+      "inputs": { "body": "js/ctx.state.fetch" }
     }
   ]
 }
@@ -88,7 +88,7 @@ export default workflow("cats.facts", {
 </CodeGroup>
 
 In the TypeScript version, `step("fetch", …)` returns a handle you pass straight
-into the next step (`body: fetch`) — the JSON `"$.state.fetch"` string is the
+into the next step (`body: fetch`) — the JSON `"js/ctx.state.fetch"` string is the
 same reference, just untyped.
 
 ## Trigger section
@@ -115,10 +115,10 @@ Every step in v2 has these fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `id` | yes | Stable identifier. Other steps reference output as `$.state[id]`. |
+| `id` | yes | Stable identifier. Other steps reference output as `ctx.state[id]`. |
 | `use` | yes | Node reference (e.g. `@blokjs/api-call`, `my-custom-node`). |
 | `type` | no | `"module"` or `"local"` — inferred from `use` when omitted. |
-| `inputs` | no | Inputs passed to the node. May contain `$`-proxy refs. |
+| `inputs` | no | Inputs passed to the node. May contain `"js/ctx...."` mapper expressions. |
 
 `module` is for nodes installed as dependencies or class-based nodes
 exported by `src/Nodes.ts`. `local` is for nodes living in your local
@@ -127,13 +127,13 @@ filesystem.
 ## Cross-step references
 
 Every step's output auto-stores at `ctx.state[id]`. Reference it in a
-later step's inputs as `"$.state.<id>"`:
+later step's inputs as `"js/ctx.state.<id>"`:
 
 ```json
 {
   "id": "respond",
   "use": "@blokjs/respond",
-  "inputs": { "body": "$.state.fetch" }
+  "inputs": { "body": "js/ctx.state.fetch" }
 }
 ```
 
