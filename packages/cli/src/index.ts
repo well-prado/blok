@@ -210,7 +210,10 @@ async function main() {
 
 		program
 			.command("check")
-			.description("Validate runtime version requirements")
+			.description("Validate runtime versions and workflow step-output references")
+			.option("--json", "Emit a machine-readable report (for CI)")
+			.option("--nodes <file>", "Node catalog JSON (from `blokctl nodes list --json`) to check output schemas against")
+			.option("--url <baseUrl>", "Fetch the node catalog from a running server instead of a file")
 			.action(async (options: OptionValues) => {
 				await analytics.trackCommandExecution({
 					command: "check",
