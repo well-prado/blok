@@ -20,6 +20,7 @@ import TriggerBase from "../../src/TriggerBase";
 import { DeferredDispatchSignal } from "../../src/scheduling/DeferredDispatchSignal";
 import { DeferredRunScheduler } from "../../src/scheduling/DeferredRunScheduler";
 import { RunTracker } from "../../src/tracing/RunTracker";
+import { applyStepOutput } from "../../src/workflow/PersistenceHelper";
 
 class CountingStepNode extends RunnerNode {
 	public runCount = 0;
@@ -34,9 +35,14 @@ class CountingStepNode extends RunnerNode {
 		this.lastResponse = response;
 	}
 
-	async run() {
+	async run(ctx: Context) {
 		this.runCount += 1;
-		return { success: true, data: this.lastResponse, error: null };
+		const response = { success: true, data: this.lastResponse, error: null };
+		// Persist exactly the way a real node does (`Blok.run` /
+		// `RuntimeAdapterNode.run` call this; `NodeBase.process` does not), so
+		// `ctx.state["step-a"]` is populated for the #704 reference tests below.
+		applyStepOutput(ctx, this, response);
+		return response;
 	}
 }
 
@@ -45,6 +51,9 @@ class CountingStepNode extends RunnerNode {
 class WaitPlaceholderNode extends RunnerNode {
 	public waitForMs?: number;
 	public waitUntil?: number | string;
+	/** #704 — resolved-at-dispatch halves. */
+	public waitForExpr?: string;
+	public waitUntilExpr?: string;
 
 	constructor(name: string, waitForMs?: number, waitUntil?: number | string) {
 		super();
@@ -78,8 +87,17 @@ class TestTrigger extends TriggerBase {
 	configureWait(waitForMs?: number, waitUntil?: number | string): void {
 		this.waitStep.waitForMs = waitForMs;
 		this.waitStep.waitUntil = waitUntil;
+		this.waitStep.waitForExpr = undefined;
+		this.waitStep.waitUntilExpr = undefined;
 		this.configuration.name = "wait-test-wf";
 		this.configuration.trigger = { http: { method: "POST", path: "/wait-test" } } as never;
+	}
+
+	/** #704 — configure the resolved-at-dispatch form. */
+	configureWaitExpr(opts: { forExpr?: string; untilExpr?: string }): void {
+		this.configureWait(undefined, undefined);
+		this.waitStep.waitForExpr = opts.forExpr;
+		this.waitStep.waitUntilExpr = opts.untilExpr;
 	}
 
 	async exposeDispatchDeferred(ctx: Context, runId: string): Promise<void> {
@@ -231,5 +249,142 @@ describe("PR 4 — wait.for(duration) integration", () => {
 		expect(t.stepA.runCount).toBe(1);
 		// The post-wait step never ran.
 		expect(t.stepB.runCount).toBe(0);
+	});
+});
+
+/**
+ * #704 — dynamic delays. `wait.for` / `wait.until` written as a reference are
+ * carried as a `js/` wire string by `normalizeWaitStep` and resolved against
+ * the LIVE ctx here, at the moment the wait step executes. `step-a` runs
+ * before the wait, so its output is in `ctx.state` by then.
+ */
+describe("#704 — wait.for / wait.until resolved at dispatch time", () => {
+	beforeEach(() => {
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+	});
+
+	afterEach(() => {
+		RunTracker.resetInstance();
+		DeferredRunScheduler.resetInstance();
+	});
+
+	it("wait.for resolves a ref to a NUMBER of milliseconds", async () => {
+		const t = new TestTrigger();
+		t.stepA.lastResponse = { delayMs: 5_000 };
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["step-a"].delayMs' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-1");
+		const before = Date.now();
+		await expect(t.run(ctx)).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		const run = RunTracker.getInstance().getStore().getRun(runId);
+		expect(run?.status).toBe("delayed");
+		// The deadline came from state, not from the workflow document.
+		expect(run?.scheduledAt).toBeGreaterThanOrEqual(before + 5_000);
+		expect(run?.scheduledAt).toBeLessThan(before + 5_000 + 2_000);
+		expect(t.stepB.runCount).toBe(0);
+
+		// …and the durable-scheduler + re-entry path still completes the run.
+		await t.exposeDispatchDeferred(ctx, runId);
+		expect(t.stepA.runCount).toBe(1);
+		expect(t.stepB.runCount).toBe(1);
+		expect(RunTracker.getInstance().getStore().getRun(runId)?.status).toBe("completed");
+	});
+
+	it("wait.for resolves a ref to a DURATION STRING", async () => {
+		const t = new TestTrigger();
+		t.stepA.lastResponse = { backoff: "5s" };
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["step-a"].backoff' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-2");
+		const before = Date.now();
+		await expect(t.run(ctx)).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		const run = RunTracker.getInstance().getStore().getRun(runId);
+		expect(run?.scheduledAt).toBeGreaterThanOrEqual(before + 5_000);
+		expect(DeferredRunScheduler.getInstance().has(runId)).toBe(true);
+	});
+
+	it("wait.until resolves a ref to an absolute deadline", async () => {
+		const t = new TestTrigger();
+		const futureMs = Date.now() + 5_000;
+		t.stepA.lastResponse = { scheduledAt: futureMs };
+		t.configureWaitExpr({ untilExpr: 'js/ctx.state["step-a"].scheduledAt' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-3");
+		await expect(t.run(ctx)).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		expect(RunTracker.getInstance().getStore().getRun(runId)?.scheduledAt).toBe(futureMs);
+
+		await t.exposeDispatchDeferred(ctx, runId);
+		expect(t.stepB.runCount).toBe(1);
+	});
+
+	it("a resolved delay already in the past satisfies inline (no scheduling)", async () => {
+		const t = new TestTrigger();
+		t.stepA.lastResponse = { delayMs: 0 };
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["step-a"].delayMs' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-4");
+		await t.run(ctx);
+
+		expect(t.stepB.runCount).toBe(1);
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		expect(RunTracker.getInstance().getStore().getRun(runId)?.status).toBe("completed");
+	});
+
+	it("an UNRESOLVABLE ref fails the step with an error naming the step and the field", async () => {
+		const t = new TestTrigger();
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["never-ran"].delayMs' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-5");
+
+		await expect(t.run(ctx)).rejects.toThrow(/wait\.for on step "wait-1".*never-ran/s);
+		// The failure is AT the wait step: the pre-wait step ran, the post-wait
+		// step did not, and nothing was scheduled.
+		expect(t.stepA.runCount).toBe(1);
+		expect(t.stepB.runCount).toBe(0);
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		expect(DeferredRunScheduler.getInstance().has(runId)).toBe(false);
+	});
+
+	it("a ref that resolves to a NON-duration names the step, the field and the value", async () => {
+		const t = new TestTrigger();
+		t.stepA.lastResponse = { delayMs: "half an hour" };
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["step-a"].delayMs' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-6");
+
+		await expect(t.run(ctx)).rejects.toThrow(/wait\.for on step "wait-1".*half an hour/s);
+		expect(t.stepB.runCount).toBe(0);
+	});
+
+	// Reload safety. `ctx.state` is restored from a BEST-EFFORT snapshot: the
+	// runner skips it when it fails to serialize or exceeds
+	// BLOK_STATE_SNAPSHOT_MAX_BYTES. Re-resolving the reference on re-entry
+	// would then throw and kill a run at a wait it had already served, so the
+	// runner must not re-resolve — the wait is already satisfied.
+	it("re-entry does NOT re-resolve the reference (survives a lost state snapshot)", async () => {
+		const t = new TestTrigger();
+		t.stepA.lastResponse = { delayMs: 5_000 };
+		t.configureWaitExpr({ forExpr: 'js/ctx.state["step-a"].delayMs' });
+
+		const ctx = t.createContext(undefined, "/wait-test", "wait-expr-7");
+		await expect(t.run(ctx)).rejects.toBeInstanceOf(DeferredDispatchSignal);
+
+		const runId = (ctx as unknown as Record<string, unknown>)._traceRunId as string;
+		// Simulate the cross-process restore that could not rehydrate state.
+		RunTracker.getInstance().getStore().updateRun(runId, { stateSnapshot: undefined });
+		const state = ctx.state as Record<string, unknown>;
+		for (const key of Object.keys(state)) delete state[key];
+
+		await t.exposeDispatchDeferred(ctx, runId);
+
+		expect(t.stepB.runCount).toBe(1);
+		expect(RunTracker.getInstance().getStore().getRun(runId)?.status).toBe("completed");
 	});
 });

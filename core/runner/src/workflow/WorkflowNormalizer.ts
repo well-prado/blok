@@ -1,4 +1,4 @@
-import { parseDuration } from "@blokjs/helper";
+import { parseDuration, unresolvableKeyShape } from "@blokjs/helper";
 import { lowerRefs } from "@blokjs/shared";
 
 /**
@@ -91,13 +91,23 @@ interface InternalStep {
 	 *
 	 * Discriminates by `type === "wait"` and the presence of either
 	 * `waitForMs` (numeric ms after parseDuration) or `waitUntil` (number
-	 * ms-since-epoch OR string for $-proxy / ISO).
+	 * ms-since-epoch OR ISO date string).
 	 *
 	 * `wait?: boolean` above is the sub-workflow `wait: true|false` flag
 	 * — separate concern, separate field.
 	 */
 	waitForMs?: number;
 	waitUntil?: number | string;
+	/**
+	 * #704 — the DEFERRED half of the two fields above. A `wait.for` /
+	 * `wait.until` written as a reference (a structural `{$ref}` lowered here,
+	 * or a `js/…` escape hatch) cannot be parsed at load time, so it is carried
+	 * as a wire-format expression and resolved against the live ctx by
+	 * `RunnerSteps` at the moment the wait step executes. Exactly one of
+	 * (`waitForMs` | `waitForExpr` | `waitUntil` | `waitUntilExpr`) is set.
+	 */
+	waitForExpr?: string;
+	waitUntilExpr?: string;
 	/**
 	 * Optional Studio/canvas authoring metadata (position, notes, passthrough
 	 * keys). Accepted by all 8 v2 step schemas; the runner IGNORES it at
@@ -626,9 +636,23 @@ const WAIT_NODE_REF = "@blokjs/wait";
  * a no-op placeholder. The runner reads `waitForMs` / `waitUntil` off
  * the InternalStep to decide how long to wait.
  *
- * `wait.for` (duration string or number) is parsed to milliseconds via
- * `parseDuration`. `wait.until` is left as-is — the runner resolves
- * $-proxy expressions against the live ctx at first-pass invocation.
+ * A LITERAL `wait.for` (duration string or number) is parsed to milliseconds
+ * here via `parseDuration`; a literal `wait.until` is left as-is for the
+ * runner's `Number()` / `Date.parse()` pass.
+ *
+ * #704 — either field may instead be a REFERENCE, which cannot be parsed at
+ * load time because no request `ctx` exists yet: a structural `{$ref}` /
+ * `{$tpl}` (lowered to the wire format right here — `lowerRefs` runs over step
+ * `inputs` at the shared boundary and `wait` is not an inputs position; unify
+ * the two if a third such position ever appears) or a hand-written `js/…`
+ * escape hatch. Those are carried on `waitForExpr` / `waitUntilExpr` and
+ * resolved by `RunnerSteps` when the step executes.
+ *
+ * A value that is expression-SHAPED but is neither of those (a `$.` proxy
+ * path, a bare `ctx.` chain, a `${…}` interpolation) is refused HERE rather than
+ * stored as a literal that could never parse as a duration or a date — the
+ * same rule the resolved-key fields apply, sharing `unresolvableKeyShape`
+ * (#706) so the two can never disagree.
  */
 function normalizeWaitStep(step: Record<string, unknown>, index: number): InternalStep {
 	const id = pickString(step.id);
@@ -646,28 +670,32 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 
 	let waitForMs: number | undefined;
 	let waitUntil: number | string | undefined;
+	let waitForExpr: string | undefined;
+	let waitUntilExpr: string | undefined;
 
 	if (hasFor) {
-		const raw = waitObj.for;
+		const raw = lowerWaitRef(waitObj.for, id, "wait.for");
 		if (typeof raw === "number") {
 			waitForMs = raw;
 		} else if (typeof raw === "string") {
+			if (raw.startsWith(WAIT_EXPR_PREFIX)) waitForExpr = raw;
 			// parseDuration may throw on invalid grammar — let it surface.
-			waitForMs = parseDuration(raw);
+			else waitForMs = parseDuration(raw);
 		} else {
 			throw new Error(
-				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.for\` (must be number ms or duration string).`,
+				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.for\` (must be number ms, duration string, {"$ref": …}, or a \`js/\` expression).`,
 			);
 		}
 	}
 	if (hasUntil) {
-		const raw = waitObj.until;
+		const raw = lowerWaitRef(waitObj.until, id, "wait.until");
 		if (typeof raw !== "number" && typeof raw !== "string") {
 			throw new Error(
-				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.until\` (must be number ms or string).`,
+				`[blok] WorkflowNormalizer: wait step "${id}" has invalid \`wait.until\` (must be number ms, string, {"$ref": …}, or a \`js/\` expression).`,
 			);
 		}
-		waitUntil = raw;
+		if (typeof raw === "string" && raw.startsWith(WAIT_EXPR_PREFIX)) waitUntilExpr = raw;
+		else waitUntil = raw;
 	}
 
 	const ephemeral = step.ephemeral === true;
@@ -683,8 +711,35 @@ function normalizeWaitStep(step: Record<string, unknown>, index: number): Intern
 		ephemeral,
 		waitForMs,
 		waitUntil,
+		waitForExpr,
+		waitUntilExpr,
 		...copyUi(step),
 	};
+}
+
+/** The wire-format prefix a resolved-at-dispatch wait value carries (#704). */
+const WAIT_EXPR_PREFIX = "js/";
+
+/**
+ * Lower a structural `{$ref}` / `{$tpl}` written in a wait position to the
+ * `js/…` wire string, and refuse a value that only LOOKS like an expression.
+ *
+ * Anything else (number, duration string, ISO date) passes through untouched —
+ * the literal fast path is byte-identical to pre-#704.
+ */
+function lowerWaitRef(raw: unknown, id: string, field: string): unknown {
+	const lowered = lowerRefs(raw);
+	const shape = unresolvableKeyShape(lowered);
+	if (shape) {
+		throw new Error(
+			[
+				`[blok] WorkflowNormalizer: \`${field}\` on wait step "${id}" is ${shape}, which never resolves: ${JSON.stringify(raw)}.`,
+				`  This field takes a duration/timestamp literal, a structural {"$ref": {"step", "path"}}, or a \`js/\` expression. Taken as a literal it could never parse as a duration or a date.`,
+				`  fix: {"$ref": {"step": "<producing-step>", "path": []}}, or the \`js/\` form (e.g. \`js/ctx.state.backoff\`).`,
+			].join("\n"),
+		);
+	}
+	return lowered;
 }
 
 // v0.5 forEach reference for the internal step's `node` field.

@@ -196,6 +196,11 @@ export const RESOLVED_KEY_FIELDS = ["idempotencyKey", "concurrencyKey", "debounc
  * ONE rule, shared: `@blokjs/runner` imports this for its runtime guard and
  * `validateRefs` uses it for the static `blokctl check` diagnostic, so the two
  * can never disagree about what a legal key is.
+ *
+ * `wait.for` / `wait.until` reuse this classification (#704) with one
+ * exemption applied by the caller: `normalizeWaitStep` DOES lower a structural
+ * `{$ref}` / `{$tpl}` in those two positions, so only the string shapes are
+ * refused there.
  */
 export function unresolvableKeyShape(value: unknown): string | null {
 	if (typeof value === "object" && value !== null && !Array.isArray(value)) {

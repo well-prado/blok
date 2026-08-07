@@ -165,10 +165,14 @@ wrong thing — leave them as strings:
 | `branch.when`, `loop.while` | raw `ctx.*` — **no** `js/` prefix |
 | `switch.on`, `switch.cases[].when` | `js/ctx.*` |
 | `forEach.in` | `js/ctx.*` |
-| `wait.for`, `wait.until` | `js/ctx.*` |
 | `subworkflow` (polymorphic name) | `js/ctx.*` |
 | step `idempotencyKey` | `js/ctx.*` |
 | trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
+
+`wait.for` / `wait.until` used to be on that list and no longer are: they take
+a `{"$ref"}` (lowered by the load boundary and resolved when the wait step
+runs), a `js/ctx.*` expression, or a literal duration/timestamp — see
+[`wait`](/d/primitives/wait).
 
 The `@blokjs/core` callback DSL takes handles for `branch` (via `eq`/`gt`/…),
 `forEach`, `switchOn`, `subworkflow` and step-level `idempotencyKey`, and

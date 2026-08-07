@@ -35,9 +35,13 @@
 #   - Control / trigger-config positions, which `lowerRefs` does not cover, so
 #     a structural ref there would be walked into by the Mapper and silently do
 #     the wrong thing: branch.when, loop.while, switch.on, switch cases' when,
-#     forEach.in, wait.for/until, subworkflow, step idempotencyKey, and trigger
-#     concurrencyKey / debounce.key / idempotencyKey. Lines assigning one of
-#     those keys are filtered out below.
+#     forEach.in, subworkflow, step idempotencyKey, and trigger concurrencyKey /
+#     debounce.key / idempotencyKey. Lines assigning one of those keys are
+#     filtered out below.
+#   - wait.for / wait.until. These DO take a structural ref since #704
+#     (`normalizeWaitStep` lowers it), so `{"$ref"}` is the preferred form —
+#     but a `js/` string is still the escape hatch for the non-structural
+#     cases, so the two keys stay in the skip list below.
 #
 # ponytail: textual gate. Position-aware checking of JSON workflow files is
 # possible today (`blokctl migrate refs --dry-run` reports would-change counts)

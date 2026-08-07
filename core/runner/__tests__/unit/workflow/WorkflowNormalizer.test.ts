@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { _resetWildcardWarningCache, normalizeWorkflow } from "../../../src/workflow/WorkflowNormalizer";
 
@@ -871,5 +874,91 @@ describe("WorkflowNormalizer — active:false / stop:true survive normalization"
 				steps: [{ id: "a", use: "@blokjs/respond", inputs: {}, active: false, stop: false, ui: { x: 1, y: 2 } }],
 			}),
 		).not.toThrow();
+	});
+});
+
+// #704 — `wait.for` / `wait.until` take a literal (parsed HERE, at load time)
+// or a reference (lowered here, resolved by RunnerSteps against the live ctx
+// when the step runs). The literal path must stay byte-identical.
+describe("WorkflowNormalizer — wait references (#704)", () => {
+	const waitStep = (wait: unknown) =>
+		normalizeWorkflow({
+			name: "Waits",
+			version: "1.0.0",
+			trigger: { http: { method: "POST", path: "/w" } },
+			steps: [{ id: "pause", wait }],
+		}).steps[0] as unknown as {
+			waitForMs?: number;
+			waitUntil?: number | string;
+			waitForExpr?: string;
+			waitUntilExpr?: string;
+		};
+
+	it("keeps the literal fast path: a duration string is still parsed at load time", () => {
+		const step = waitStep({ for: "5m" });
+		expect(step.waitForMs).toBe(300_000);
+		expect(step.waitForExpr).toBeUndefined();
+	});
+
+	it("keeps the literal fast path: an ISO `until` is still carried verbatim", () => {
+		const step = waitStep({ until: "2026-01-01T09:00:00Z" });
+		expect(step.waitUntil).toBe("2026-01-01T09:00:00Z");
+		expect(step.waitUntilExpr).toBeUndefined();
+	});
+
+	it("lowers a structural {$ref} in `wait.for` to the wire expression", () => {
+		const step = waitStep({ for: { $ref: { step: "compute-delay", path: [] } } });
+		expect(step.waitForExpr).toBe('js/ctx.state["compute-delay"]');
+		expect(step.waitForMs).toBeUndefined();
+	});
+
+	it("lowers a structural {$ref} in `wait.until`, including a path", () => {
+		const step = waitStep({ until: { $ref: { step: "@trigger", path: ["body", "scheduledAt"] } } });
+		expect(step.waitUntilExpr).toBe("js/ctx.request.body.scheduledAt");
+		expect(step.waitUntil).toBeUndefined();
+	});
+
+	it("carries a hand-written `js/` escape hatch through as an expression", () => {
+		const step = waitStep({ for: "js/ctx.state.retryAfter * 1000" });
+		expect(step.waitForExpr).toBe("js/ctx.state.retryAfter * 1000");
+		expect(step.waitForMs).toBeUndefined();
+	});
+
+	// The shape that motivated #704: the broken example wrote a proxy path here,
+	// and #703's lexical sweep rewrote it into an equally-dead form. Neither is a
+	// duration, so neither may be accepted as a literal.
+	//
+	// The proxy fixtures are CONCATENATED so this file doesn't contain the
+	// deleted `$` proxy shape contiguously — `scripts/check-no-dollar-proxy.sh`
+	// greps the whole repo for it and takes no arguments about intent.
+	const PROXY = "$";
+	it.each([
+		["a proxy path", `${PROXY}.state['compute-delay']`],
+		["a bare ctx expression", "ctx.state.delay"],
+		["an interpolation", "${ctx.state.delay}"],
+	])("refuses %s at LOAD time, naming the step and the field", (_label, value) => {
+		expect(() => waitStep({ for: value })).toThrow(/`wait\.for` on wait step "pause"/);
+	});
+
+	it("refuses the same shapes in `wait.until`", () => {
+		expect(() => waitStep({ until: `${PROXY}.request.body.deadline` })).toThrow(/`wait\.until` on wait step "pause"/);
+	});
+
+	// The showcase fixture is a docs-only file the runner never loads, which is
+	// exactly how it shipped a computed backoff that could never have worked
+	// (#704). Loading it HERE is what stops it from being a place broken claims
+	// can hide: if the wait reference ever stops lowering, this goes red.
+	it("loads the shipped polling-with-backoff example, wait reference and all", () => {
+		const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
+		const doc = JSON.parse(
+			readFileSync(path.join(repoRoot, "examples/v05-primitives/09-polling-with-backoff.json"), "utf8"),
+		);
+
+		const out = normalizeWorkflow(doc, "09-polling-with-backoff.json");
+
+		const loopBody = (
+			out.nodes["poll-with-backoff"] as unknown as { steps: Array<{ name: string; waitForExpr?: string }> }
+		).steps;
+		expect(loopBody.find((s) => s.name === "wait-backoff")?.waitForExpr).toBe('js/ctx.state["compute-delay"]');
 	});
 });

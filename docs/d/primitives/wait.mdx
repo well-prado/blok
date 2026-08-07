@@ -22,13 +22,10 @@ the `until` form takes an ISO timestamp. Either way, the trigger
 transport returns 202 to the caller — workflows don't block HTTP
 responses.
 
-<Warning>
-Both fields are **literal-only**. They are parsed at workflow *load* time,
-before any request `ctx` exists, and no Mapper pass runs over them — so a
-`{$ref}`, a `tpl`, or a path string is stored verbatim and never resolves
-(issue #704). A computed delay is not expressible today; split the workflow and
-put [`delay`](/d/scheduling/delay-and-ttl) on the continuation's trigger.
-</Warning>
+Both fields also take a **reference** — a `{$ref}` to an upstream step —
+resolved against the live `ctx` at the moment the wait step executes. That is
+what makes a computed delay expressible: exponential backoff, an honored
+`Retry-After`, a per-tenant pause, "wait until the timestamp in the payload".
 
 ## Quickstart
 
@@ -50,14 +47,50 @@ put [`delay`](/d/scheduling/delay-and-ttl) on the continuation's trigger.
 }
 ```
 
+### Wait for a computed duration
+
+```json
+{ "id": "compute-delay", "use": "@blokjs/expr",
+  "inputs": { "expression": "Math.pow(2, ctx.state.attempt) * 1000" } },
+{ "id": "wait-backoff",
+  "wait": { "for": { "$ref": { "step": "compute-delay", "path": [] } } } }
+```
+
+The reference resolves when the step runs, so it sees state written by every
+step before it. `examples/v05-primitives/09-polling-with-backoff.json` is the
+full working workflow.
+
 ## Config fields
 
 | Field | Type | Notes |
 |---|---|---|
-| `for` | `string` \| `number` | Literal duration string (`"1h"`, `"30s"`, `"500ms"`) or milliseconds. |
-| `until` | `string` \| `number` | Literal ISO timestamp or unix epoch millis. |
+| `for` | `string` \| `number` \| `{$ref}` | Duration string (`"1h"`, `"30s"`, `"500ms"`) or milliseconds — literal, or a reference that resolves to one. |
+| `until` | `string` \| `number` \| `{$ref}` | ISO timestamp or unix epoch millis — literal, or a reference that resolves to one. |
 
 Set exactly one. The runner throws at load time if both are present.
+
+### What a reference must resolve to
+
+A `for` reference must produce a millisecond number or a duration string
+(`"30s"`); an `until` reference must produce ms-since-epoch or a
+`Date.parse`-able string. Anything else fails the step with an error naming the
+step, the field, and the value it actually got — the wait never silently
+becomes a no-op.
+
+<Warning>
+A value that only *looks* like an expression — a `$.`-proxy path, a bare
+`"ctx.state.delay"`, a `"${…}"` interpolation — is rejected at **load** time
+(#704). Those forms are never evaluated in this position, and taking one as a
+literal would produce a duration that can never parse. Write the structural
+`{"$ref": …}`, or a `js/` expression for the non-structural cases
+(`"js/ctx.state.retryAfter * 1000"`). `blokctl check` reports the same thing
+before you deploy.
+</Warning>
+
+<Note>
+A literal is still parsed at **load** time, so a typo'd duration fails the
+build rather than the run. That fast path is unchanged.
+</Note>
 
 ## What happens when wait fires
 

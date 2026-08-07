@@ -303,23 +303,131 @@
 									"for": {
 										"anyOf": [
 											{
-												"type": "integer",
-												"minimum": 0
+												"anyOf": [
+													{
+														"type": "integer",
+														"minimum": 0
+													},
+													{
+														"type": "string",
+														"minLength": 1,
+														"pattern": "^\\d+(ms|s|m|h|d)$"
+													}
+												]
 											},
 											{
 												"type": "string",
-												"minLength": 1,
-												"pattern": "^\\d+(ms|s|m|h|d)$"
+												"pattern": "^js\\/"
+											},
+											{
+												"anyOf": [
+													{
+														"type": "object",
+														"properties": {
+															"$ref": {
+																"type": "object",
+																"properties": {
+																	"step": {
+																		"type": "string",
+																		"minLength": 1
+																	},
+																	"path": {
+																		"type": "array",
+																		"items": {
+																			"type": [
+																				"string",
+																				"number"
+																			]
+																		}
+																	}
+																},
+																"required": [
+																	"step"
+																],
+																"additionalProperties": false
+															}
+														},
+														"required": [
+															"$ref"
+														],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"$tpl": {
+																"type": "array",
+																"items": {}
+															}
+														},
+														"required": [
+															"$tpl"
+														],
+														"additionalProperties": false
+													}
+												]
 											}
 										],
-										"description": "Wait this long. Mutually exclusive with `until`. Number (ms) or duration string (`500ms`, `30s`, `5m`, `2h`, `1d`)."
+										"description": "Wait this long. Mutually exclusive with `until`. Number (ms), duration string (`500ms`, `30s`, `5m`, `2h`, `1d`), or a reference ({\"$ref\": {\"step\": …}} / `js/ctx....`) that resolves to one of those at run time."
 									},
 									"until": {
-										"type": [
-											"number",
-											"string"
+										"anyOf": [
+											{
+												"type": "number"
+											},
+											{
+												"type": "string"
+											},
+											{
+												"anyOf": [
+													{
+														"type": "object",
+														"properties": {
+															"$ref": {
+																"type": "object",
+																"properties": {
+																	"step": {
+																		"type": "string",
+																		"minLength": 1
+																	},
+																	"path": {
+																		"type": "array",
+																		"items": {
+																			"type": [
+																				"string",
+																				"number"
+																			]
+																		}
+																	}
+																},
+																"required": [
+																	"step"
+																],
+																"additionalProperties": false
+															}
+														},
+														"required": [
+															"$ref"
+														],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"$tpl": {
+																"type": "array",
+																"items": {}
+															}
+														},
+														"required": [
+															"$tpl"
+														],
+														"additionalProperties": false
+													}
+												]
+											}
 										],
-										"description": "Wait until this absolute time. Number is ms-since-epoch; string is an ISO date or a `js/ctx....` expression. Mutually exclusive with `for`."
+										"description": "Wait until this absolute time. Number is ms-since-epoch; string is an ISO date or a `js/ctx....` expression; {\"$ref\": {\"step\": …}} resolves against the live ctx at run time. Mutually exclusive with `for`."
 									}
 								},
 								"additionalProperties": false
