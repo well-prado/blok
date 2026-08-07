@@ -28,6 +28,7 @@ import {
 	toggleStepSkip,
 	toggleStepStop,
 } from "@/lib/irEditOps";
+import { type RefDiagnostic, refDiagnostics, shortMessage, suggestedFields } from "@/lib/refDiagnostics";
 import { upstreamSources } from "@/lib/upstreamSources";
 import { cn } from "@/lib/utils";
 import { type DagEdge, type DagNode, type DagNodeKind, buildWorkflowDag, classifyStep } from "@/lib/workflowDag";
@@ -146,12 +147,10 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 		(raw) => raw === "1",
 	);
 	const [terminalOpen, setTerminalOpen] = useState(true);
-	const catalog = useNodeCatalog(
-		editingInputsStepId !== null ||
-			editingBranchStepId !== null ||
-			editingForEachStepId !== null ||
-			editingSwitchStepId !== null,
-	);
+	// #691 — the catalog now also feeds live ref diagnostics, so it is fetched
+	// for the whole canvas rather than only while an editor panel is open. One
+	// session-cached query (`staleTime: 5min`), shared with the node palette.
+	const catalog = useNodeCatalog(true);
 	const runQuery = useRunDetail(activeRunId);
 	useTraceStream(activeRunId);
 	// Deploy draft (feat/studio-deploy-ux): render the accumulated draft when
@@ -164,6 +163,12 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 	const committed = useMemo(
 		() => layoutDag(workingDefinition, studioQuery.data?.config),
 		[workingDefinition, studioQuery.data?.config],
+	);
+	// Live on the DRAFT, so a bad reference surfaces while editing — not after
+	// deploy. Same pass `blokctl check` and the runner's boot path run.
+	const diagnostics = useMemo(
+		() => refDiagnostics(workingDefinition, catalog.data?.nodes),
+		[workingDefinition, catalog.data?.nodes],
 	);
 	const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(committed.nodes);
 	const [editing, setEditing] = useState(false);
@@ -1138,52 +1143,54 @@ export function WorkflowGraph({ definition, workflowName }: WorkflowGraphProps) 
 							<NodeControlsContext.Provider
 								value={definitionEditable && !runActive ? { onToggleSkip: toggleSkip, onToggleStop: toggleStop } : null}
 							>
-								<ReactFlow
-									nodes={renderedNodes}
-									edges={renderedEdges}
-									onInit={setFlowInstance}
-									onNodesChange={onNodesChange}
-									onNodeClick={(_event, node) => selectCanvasNode(node)}
-									onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
-									onNodeDragStop={(_event, node) => {
-										if (editing && flowNodeStepId(node)) setDirty(true);
-									}}
-									onConnectEnd={(event, connectionState) => {
-										if (!(definitionEditable && !runActive)) return;
-										const result = socketDropSource(connectionState);
-										if (!result) return;
-										const point = "changedTouches" in event ? event.changedTouches[0] : event;
-										if (!point) return;
-										const { clientX, clientY } = point;
-										const position = flowInstance?.screenToFlowPosition({ x: clientX, y: clientY });
-										if (!position) return;
-										// Mirror openSplice's drawer hygiene before opening the library.
-										editDefinition.reset();
-										setRenamingStepId(null);
-										setEditingInputsStepId(null);
-										setEditingBranchStepId(null);
-										setEditingForEachStepId(null);
-										setEditingSwitchStepId(null);
-										setTriggerEditorOpen(false);
-										setSpliceBeforeStepId(null);
-										setSocketDrop({ fromStepId: result.fromStepId, position });
-										setPaletteOpen(true);
-									}}
-									nodeTypes={nodeTypes}
-									edgeTypes={edgeTypes}
-									proOptions={{ hideAttribution: true }}
-									minZoom={0.1}
-									maxZoom={2}
-									nodesDraggable={editing && writable}
-									nodesConnectable={definitionEditable && !runActive}
-									elementsSelectable={true}
-								>
-									<Background color="#27272a" gap={16} size={1} />
-									<Controls
-										showInteractive={false}
-										className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
-									/>
-								</ReactFlow>
+								<RefDiagnosticsContext.Provider value={diagnostics.byStep}>
+									<ReactFlow
+										nodes={renderedNodes}
+										edges={renderedEdges}
+										onInit={setFlowInstance}
+										onNodesChange={onNodesChange}
+										onNodeClick={(_event, node) => selectCanvasNode(node)}
+										onNodeDoubleClick={(_event, node) => toggleBreakpoint(node)}
+										onNodeDragStop={(_event, node) => {
+											if (editing && flowNodeStepId(node)) setDirty(true);
+										}}
+										onConnectEnd={(event, connectionState) => {
+											if (!(definitionEditable && !runActive)) return;
+											const result = socketDropSource(connectionState);
+											if (!result) return;
+											const point = "changedTouches" in event ? event.changedTouches[0] : event;
+											if (!point) return;
+											const { clientX, clientY } = point;
+											const position = flowInstance?.screenToFlowPosition({ x: clientX, y: clientY });
+											if (!position) return;
+											// Mirror openSplice's drawer hygiene before opening the library.
+											editDefinition.reset();
+											setRenamingStepId(null);
+											setEditingInputsStepId(null);
+											setEditingBranchStepId(null);
+											setEditingForEachStepId(null);
+											setEditingSwitchStepId(null);
+											setTriggerEditorOpen(false);
+											setSpliceBeforeStepId(null);
+											setSocketDrop({ fromStepId: result.fromStepId, position });
+											setPaletteOpen(true);
+										}}
+										nodeTypes={nodeTypes}
+										edgeTypes={edgeTypes}
+										proOptions={{ hideAttribution: true }}
+										minZoom={0.1}
+										maxZoom={2}
+										nodesDraggable={editing && writable}
+										nodesConnectable={definitionEditable && !runActive}
+										elementsSelectable={true}
+									>
+										<Background color="#27272a" gap={16} size={1} />
+										<Controls
+											showInteractive={false}
+											className="bg-zinc-900! border-zinc-700! rounded-md! [&>button]:bg-zinc-800! [&>button]:border-zinc-700! [&>button]:text-zinc-400! [&>button:hover]:bg-zinc-700!"
+										/>
+									</ReactFlow>
+								</RefDiagnosticsContext.Provider>
 							</NodeControlsContext.Provider>
 						</SpliceContext.Provider>
 					</div>
@@ -1650,6 +1657,13 @@ export const NodeControlsContext = createContext<{
 	onToggleStop: (stepId: string) => void;
 } | null>(null);
 
+/**
+ * #691 — step-output reference diagnostics, keyed by the READING step's id.
+ * Set in one place (`WorkflowGraph`) and consumed in one place (`NodeShell`),
+ * so every node kind gets the marker without touching thirteen components.
+ */
+export const RefDiagnosticsContext = createContext<ReadonlyMap<string, RefDiagnostic[]>>(new Map());
+
 interface NodeShellProps {
 	icon: IconComponent;
 	iconClass: string;
@@ -1688,6 +1702,11 @@ export function NodeShell({
 }: NodeShellProps) {
 	const controls = useContext(NodeControlsContext);
 	const showControls = Boolean(controls && stepId);
+	// #691 — the canvas "squiggle": a marker on the step whose inputs carry a
+	// bad reference, with the producer's declared fields as the suggestion list.
+	const diagnostics = useContext(RefDiagnosticsContext);
+	const stepDiagnostics = stepId ? diagnostics.get(stepId) : undefined;
+	const hasRefError = stepDiagnostics?.some((d) => d.severity === "error") ?? false;
 	const hasBody = Boolean(subtitle) || (rows?.length ?? 0) > 0;
 	return (
 		<div
@@ -1706,6 +1725,7 @@ export function NodeShell({
 				status === "completed" && "border-emerald-500/60",
 				status === "failed" && "border-red-500/70",
 				status === "skipped" && "opacity-50",
+				hasRefError && "border-red-500/70",
 			)}
 		>
 			<div className={cn("flex items-center gap-2 px-3 py-2", hasBody && "border-b border-zinc-800/70")}>
@@ -1713,6 +1733,22 @@ export function NodeShell({
 					<Icon className={cn("h-3.5 w-3.5", iconClass)} />
 				</span>
 				<span className="truncate text-xs font-semibold text-zinc-100">{title}</span>
+				{stepDiagnostics && stepDiagnostics.length > 0 && (
+					<span
+						className={cn(
+							"shrink-0 rounded px-1 text-[10px] font-semibold",
+							hasRefError ? "bg-red-500/20 text-red-300" : "bg-amber-500/15 text-amber-300",
+						)}
+						title={stepDiagnostics
+							.map((d) => {
+								const fields = suggestedFields(d);
+								return fields.length > 0 ? `${shortMessage(d)}\n  available: ${fields.join(", ")}` : shortMessage(d);
+							})
+							.join("\n\n")}
+					>
+						{hasRefError ? "ref" : "?"} {stepDiagnostics.length}
+					</span>
+				)}
 				<div className="ml-auto flex shrink-0 items-center gap-1">
 					{showControls && stepId && controls && (
 						<>

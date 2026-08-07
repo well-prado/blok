@@ -619,7 +619,10 @@ function walkSchema(schema: unknown, path: readonly (string | number)[]): WalkRe
 	// Scalars carry real JS members too (`.length` on a string); never an error.
 	if (types.length > 0 && !types.includes("object")) return { kind: "free" };
 
-	if (props && typeof seg === "string" && Object.hasOwn(props, seg)) {
+	// `in` over Object.hasOwn: this module targets the Studio browser bundle too,
+	// whose lib is ES2020. Prototype keys are not a risk — these are parsed JSON
+	// Schemas, and a `properties` key named `toString` is still a declared field.
+	if (props && typeof seg === "string" && Object.prototype.hasOwnProperty.call(props, seg)) {
 		return walkSchema(props[seg], rest);
 	}
 
