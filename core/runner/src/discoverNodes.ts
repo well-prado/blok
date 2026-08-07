@@ -33,7 +33,14 @@ const looksLikeNode = (v: unknown): v is NodeBase =>
 	typeof v === "object" &&
 	typeof (v as { name?: unknown }).name === "string" &&
 	(v as { name: string }).name.length > 0;
-export async function discoverNodes(dir: string): Promise<NodeBase[]> {
+/**
+ * @param cacheBust - when set, appended as a query string to every dynamic
+ *   import so the module is re-evaluated instead of served from the ESM cache.
+ *   Hot reload passes a timestamp; boot passes nothing (one evaluation, one
+ *   cache entry). ESM exposes no cache-invalidation API, so this is the only
+ *   way to pick up an edited node without restarting the process.
+ */
+export async function discoverNodes(dir: string, cacheBust?: string): Promise<NodeBase[]> {
 	const base = isAbsolute(dir) ? dir : resolve(process.cwd(), dir);
 	if (!existsSync(base) || !statSync(base).isDirectory()) return [];
 
@@ -45,7 +52,8 @@ export async function discoverNodes(dir: string): Promise<NodeBase[]> {
 		const file = ["index.ts", "index.js", "index.mjs"].map((f) => join(sub, f)).find(existsSync);
 		if (!file) continue;
 
-		const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+		const href = pathToFileURL(file).href;
+		const mod = (await import(cacheBust ? `${href}?blokHmr=${cacheBust}` : href)) as { default?: unknown };
 		const def = mod.default;
 		if (looksLikeNode(def)) {
 			// Single node per dir — the `blokctl create node` convention.

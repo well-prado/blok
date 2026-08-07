@@ -226,3 +226,7 @@ research-notes/
 
 # cross-runtime e2e prepared build contexts (prepare-usernodes.ts)
 tests/e2e/cross-runtime/.build/
+
+# HMR dev-loop e2e scratch project (hmr-dev-loop.test.ts; removed on teardown,
+# ignored so a crashed run can't leave it staged)
+triggers/http/.hmr-e2e-tmp/

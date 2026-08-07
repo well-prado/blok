@@ -230,8 +230,9 @@ export abstract class CronTrigger extends TriggerBase {
 
 			this.logger.log(`Cron trigger started. ${this.jobs.size} job(s) scheduled`);
 
-			// Enable HMR in development mode
-			if (process.env.BLOK_HMR === "true" || process.env.NODE_ENV === "development") {
+			// Hot reload. `BLOK_HMR=true` alone is enough on any entrypoint; the
+			// gate lives in TriggerBase so every trigger answers it identically.
+			if (TriggerBase.isHotReloadEnabled()) {
 				await this.enableHotReload();
 			}
 

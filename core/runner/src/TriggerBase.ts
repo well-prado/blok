@@ -1,3 +1,5 @@
+import * as nodePath from "node:path";
+import type { NodeBase } from "@blokjs/shared";
 import { type Context, type LoggerContext, Metrics, Trigger } from "@blokjs/shared";
 import { metrics } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
@@ -10,7 +12,9 @@ import { ConcurrencyLimitError } from "./concurrency/ConcurrencyLimitError";
 import { QueueExpiredError } from "./concurrency/QueueExpiredError";
 import { readConcurrencyConfig } from "./concurrency/readConcurrencyConfig";
 import { runContextCleanups, runShutdownCleanups } from "./contextCleanup";
+import { discoverNodes } from "./discoverNodes";
 import type { HMREvent } from "./hmr/FileWatcher";
+import { HmrDevConsole } from "./hmr/HmrDevConsole";
 import { HotReloadManager, type HotReloadManagerConfig, type HotReloadStats } from "./hmr/HotReloadManager";
 import { resolveConcurrencyKey, resolveIdempotencyKey } from "./idempotency/resolveIdempotencyKey";
 import { CircuitBreaker } from "./monitoring/CircuitBreaker";
@@ -36,6 +40,7 @@ import type { IterationContext } from "./tracing/types";
 import type GlobalOptions from "./types/GlobalOptions";
 import type TriggerResponse from "./types/TriggerResponse";
 import { getEnvForCtx } from "./utils/envAllowlist";
+import { loadDotenvFiles } from "./utils/loadDotenv";
 import { WorkflowRegistry } from "./workflow/WorkflowRegistry";
 import { parseWorkflowInput, resolveDeclaredInputSchema, shouldRunInputGate } from "./workflow/validateWorkflowInput";
 
@@ -88,6 +93,13 @@ function shouldRecordSample(trigger: unknown): boolean {
 	return false;
 }
 
+// Deterministic `.env` / `.env.local` loading, applied before ANY trigger
+// subclass constructor reads `process.env` (Configuration resolves runtime
+// hosts/ports in its constructor). Module-level so the ordering holds for every
+// entrypoint — CLI-spawned or a bare `node dist/index.js`. Never overrides a
+// value already in the environment; opt out with `BLOK_DOTENV_DISABLED=1`.
+loadDotenvFiles();
+
 export default abstract class TriggerBase extends Trigger {
 	public configuration: Configuration;
 
@@ -108,6 +120,12 @@ export default abstract class TriggerBase extends Trigger {
 
 	/** Hot reload manager - null if HMR is disabled */
 	protected hmr: HotReloadManager | null = null;
+
+	/** Formatted dev console attached to `hmr` — null if HMR is disabled. */
+	protected hmrConsole: HmrDevConsole | null = null;
+
+	/** Node roots the hot reloader re-discovers from. Empty when HMR is off. */
+	protected hmrNodePaths: string[] = [];
 
 	/** Number of currently in-flight requests (for zero-downtime reload) */
 	protected inFlightRequests = 0;
@@ -618,18 +636,58 @@ export default abstract class TriggerBase extends Trigger {
 	// --- Hot Module Replacement ---
 
 	/**
-	 * Enable hot reload for this trigger. Only active in development
-	 * (NODE_ENV !== 'production') unless BLOK_HMR=true is explicitly set.
+	 * Whether hot reload should run for this process.
+	 *
+	 * `BLOK_HMR=true` is the capability switch and works on ANY
+	 * TriggerBase-derived entrypoint — `BLOK_HMR=true bun run
+	 * src/triggers/http/index.ts` is enough, no CLI and no `NODE_ENV` needed.
+	 * `NODE_ENV=development` stays as a convenience default (that's what
+	 * `blokctl dev` sets), and `BLOK_HMR=false` force-disables both.
+	 */
+	static isHotReloadEnabled(): boolean {
+		if (process.env.BLOK_HMR === "true") return true;
+		if (process.env.BLOK_HMR === "false") return false;
+		return process.env.NODE_ENV === "development";
+	}
+
+	/**
+	 * Directories the hot reloader watches, resolved absolute.
+	 *
+	 * Env overrides win (`WORKFLOWS_PATH`, `NODES_PATH`, comma-separated), but
+	 * the DEFAULTS are the whole point: before this, both lists came straight
+	 * from unset env vars, so `enableHotReload()` happily started a watcher
+	 * over ZERO directories and nothing was ever hot. The defaults mirror the
+	 * layout `blokctl create` scaffolds and `buildFileBasedRoutes` scans.
+	 */
+	static resolveHmrRoots(cwd: string = process.cwd()): { workflowPaths: string[]; nodePaths: string[] } {
+		const fromEnv = (raw: string | undefined): string[] =>
+			(raw ?? "")
+				.split(",")
+				.map((p) => p.trim())
+				.filter(Boolean)
+				.map((p) => nodePath.resolve(cwd, p));
+
+		const workflowEnv = fromEnv(process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH);
+		const nodeEnv = fromEnv(process.env.NODES_PATH);
+
+		const workflowPaths = workflowEnv.length > 0 ? workflowEnv : [nodePath.join(cwd, "workflows")];
+		// `src/workflows` holds the TS workflows `buildFileBasedRoutes` scans;
+		// it is additive to whatever WORKFLOWS_PATH points at (JSON workflows).
+		const srcWorkflows = nodePath.join(cwd, "src", "workflows");
+		if (!workflowPaths.includes(srcWorkflows)) workflowPaths.push(srcWorkflows);
+
+		const nodePaths = nodeEnv.length > 0 ? nodeEnv : [nodePath.join(cwd, "src", "nodes")];
+		return { workflowPaths, nodePaths };
+	}
+
+	/**
+	 * Enable hot reload for this trigger. Gated by {@link isHotReloadEnabled}.
 	 */
 	async enableHotReload(config?: Partial<HotReloadManagerConfig>): Promise<void> {
-		if (process.env.NODE_ENV === "production" && process.env.BLOK_HMR !== "true") {
-			return;
-		}
+		if (!TriggerBase.isHotReloadEnabled()) return;
 
-		const workflowPaths = (process.env.WORKFLOWS_PATH || process.env.VITE_WORKFLOWS_PATH || "")
-			.split(",")
-			.filter(Boolean);
-		const nodePaths = (process.env.NODES_PATH || "").split(",").filter(Boolean);
+		const { workflowPaths, nodePaths } = TriggerBase.resolveHmrRoots();
+		this.hmrNodePaths = config?.nodePaths ? [...config.nodePaths] : nodePaths;
 
 		this.hmr = new HotReloadManager({
 			workflowPaths,
@@ -662,24 +720,68 @@ export default abstract class TriggerBase extends Trigger {
 			}
 		});
 
-		this.hmr.on("log", (msg: string) => console.log(msg));
-		this.hmr.on("reload", (event: HMREvent) => {
-			const timestamp = new Date().toLocaleTimeString();
-			console.log(`[HMR] [${timestamp}] Reloaded: ${event.type} - ${event.relativePath}`);
-		});
-		this.hmr.on("reload-error", ({ event, error }: { event: HMREvent; error: Error }) => {
-			console.error(`[HMR] Reload error for ${event.relativePath}: ${error.message}`);
-		});
+		// One formatter for every HMR line — it prints the action taken and the
+		// reason, so the dev console always says WHY a change was hot-reloaded.
+		this.hmrConsole = new HmrDevConsole(this.hmr);
 
 		await this.hmr.start();
 	}
 
+	/** Stop the hot reloader and release its file watchers. Idempotent. */
+	async stopHotReload(): Promise<void> {
+		const hmr = this.hmr;
+		this.hmr = null;
+		this.hmrConsole = null;
+		await hmr?.stop();
+	}
+
 	/**
-	 * Called when a node file changes. Default: invalidates module cache.
-	 * Override in subclasses for custom behavior (e.g., re-running loadNodes).
+	 * Re-import a changed node and swap it into the live registry.
+	 *
+	 * The previous implementation only dropped the CJS `require.cache` entry —
+	 * which does nothing for an ESM project — and `HttpTrigger` "reloaded" by
+	 * re-reading its own static `import nodes from "../Nodes"` binding, i.e. the
+	 * exact same frozen object. Editing a node's `execute` never took effect.
+	 *
+	 * Re-discovery is cache-busted per reload (ESM has no cache-invalidation
+	 * API, so a fresh query string is the only way to re-evaluate a module) and
+	 * re-registers with `{ replace: true }` — the NodeMap collision guard would
+	 * otherwise reject the new instance.
+	 *
+	 * ponytail: re-discovers the whole node root rather than the single changed
+	 * file, so barrel/`index.ts` re-exports stay consistent for free. Upgrade
+	 * path if a project's node corpus makes that too slow: resolve the changed
+	 * file's owning node dir and re-import only that one.
 	 */
 	protected async onHmrNodeChange(event: HMREvent): Promise<void> {
 		this.hmr?.invalidateModule(event.filePath);
+		const registry = this.getNodeRegistry();
+		if (!registry) return;
+
+		const bust = String(Date.now());
+		for (const root of this.hmrNodePaths) {
+			if (!event.filePath.startsWith(root)) continue;
+			const discovered = await discoverNodes(root, bust);
+			if (discovered.length > 0) registry.addNodes(discovered as unknown as NodeBase[], { replace: true });
+		}
+	}
+
+	/**
+	 * The live node registry this trigger dispatches through.
+	 *
+	 * Every concrete trigger (HTTP / worker / pubsub / cron) owns a `nodeMap`
+	 * field, but they declare it independently with different visibility, so
+	 * this reads it structurally rather than forcing an identical declaration
+	 * into four classes.
+	 *
+	 * ponytail: one structural read in the base beats a `getNodeRegistry()`
+	 * override in every subclass. Promote it to an abstract member if a trigger
+	 * ever needs a registry that isn't `this.nodeMap.nodes`.
+	 */
+	protected getNodeRegistry(): { addNodes(nodes: NodeBase[], opts?: { replace?: boolean }): void } | null {
+		const map = (this as unknown as { nodeMap?: Partial<GlobalOptions> }).nodeMap;
+		const registry = map?.nodes;
+		return registry && typeof registry.addNodes === "function" ? registry : null;
 	}
 
 	/**

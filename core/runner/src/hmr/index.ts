@@ -40,3 +40,6 @@ export { HotReloadManager } from "./HotReloadManager";
 export type { HotReloadManagerConfig, HotReloadStats, ReloadHandler } from "./HotReloadManager";
 
 export { HmrDevConsole } from "./HmrDevConsole";
+
+export { classifyChange } from "./classifyChange";
+export type { ChangeAction, ChangeClassification, ClassifyRoots } from "./classifyChange";
