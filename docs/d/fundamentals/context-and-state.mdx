@@ -272,6 +272,38 @@ old code, translate it this way:
 JavaScript body the node evaluates. Write plain JavaScript there, without a
 mapper prefix.
 
+### JSON workflows read the same way
+
+A JSON workflow has no `step()` call to return a handle, so it carries the same
+reference **structurally**:
+
+```json
+"inputs": {
+  "html": { "$ref": { "step": "fetch", "path": [] } },
+  "url":  { "$ref": { "step": "@trigger", "path": ["body", "sourceUrl"] } },
+  "why":  { "$ref": { "step": "@error", "path": ["message"] } },
+  "chan": { "$tpl": ["chat:", { "$ref": { "step": "@trigger", "path": ["params", "id"] } }] }
+}
+```
+
+`path: []` is the whole output; `@trigger` is the trigger payload; `@error` is
+the caught error envelope inside a `tryCatch` catch arm. A load-boundary pass
+compiles these to the runtime wire format before the mapper ever sees them.
+
+Hand-written `"js/ctx...."` step inputs still load, but the runner logs one
+deprecation warning per workflow naming the offending steps
+(`BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1` silences it), and support is removed in
+the next major. `blokctl migrate refs` rewrites them — see the
+[legacy expression strings](/c/migration-guides/legacy-expression-strings)
+guide.
+
+Control and trigger-config positions are **not** step inputs and keep path
+strings in JSON: `branch.when` / `loop.while` (raw `ctx.*`, no prefix),
+`switch.on`, `forEach.in`, `wait.for` / `wait.until`, `subworkflow`, step
+`idempotencyKey`, and trigger `concurrencyKey` / `debounce.key`. The callback
+DSL takes handles for all of these except trigger config, which is resolved at
+run-entry before any handle exists.
+
 ## Quick reference
 
 ```txt

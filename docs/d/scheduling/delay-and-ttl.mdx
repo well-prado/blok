@@ -50,7 +50,7 @@ export default workflow(
     {
       "id": "send",
       "use": "@blokjs/sendgrid",
-      "inputs": { "to": "js/ctx.request.body.email", "body": "js/ctx.request.body.body" }
+      "inputs": { "to": { "$ref": { "step": "@trigger", "path": ["body", "email"] } }, "body": { "$ref": { "step": "@trigger", "path": ["body", "body"] } } }
     }
   ]
 }

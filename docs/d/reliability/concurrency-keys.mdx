@@ -17,7 +17,7 @@ opts)` (or `trigger.worker`). The gate runs at run-entry, before any
 step executes. Because the trigger block is plain config the runner
 resolves at run-entry (not a handle minted in the workflow body), keys
 that reference request data are written as path **strings** —
-`"js/ctx.request.body.tenantId"` — not handles.
+`concurrencyKey: "js/ctx.request.body.tenantId"` — not handles.
 
 ## Quickstart
 
@@ -61,9 +61,9 @@ export default workflow(
     }
   },
   "steps": [
-    { "id": "fetch", "use": "@blokjs/api-call", "inputs": { "url": "js/ctx.request.body.sourceUrl" } },
-    { "id": "render", "use": "@blokjs/pdf-render", "inputs": { "html": "js/ctx.state.fetch" } },
-    { "id": "upload", "use": "@blokjs/s3-upload", "inputs": { "key": "js/ctx.request.body.outputKey", "body": "js/ctx.state.render" } }
+    { "id": "fetch", "use": "@blokjs/api-call", "inputs": { "url": { "$ref": { "step": "@trigger", "path": ["body", "sourceUrl"] } } } },
+    { "id": "render", "use": "@blokjs/pdf-render", "inputs": { "html": { "$ref": { "step": "fetch", "path": [] } } } },
+    { "id": "upload", "use": "@blokjs/s3-upload", "inputs": { "key": { "$ref": { "step": "@trigger", "path": ["body", "outputKey"] } }, "body": { "$ref": { "step": "render", "path": [] } } } }
   ]
 }
 ```

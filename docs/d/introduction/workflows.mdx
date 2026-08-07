@@ -187,8 +187,9 @@ A workflow's `name` is its identity:
 
 The handle DSL compiles to the same IR as **JSON workflows** — a first-class format, ideal for
 config-driven or generated workflows. The shape mirrors the DSL one-for-one: cross-step
-references are `"js/ctx.state.<id>"` strings, evaluated by the mapper against the live `ctx`
-at run time.
+references are structural `{"$ref": {"step", "path"}}` objects, resolved against the live `ctx`
+at run time (see [the mapper reference](/d/reference/mapper) for the `"js/ctx.…"` wire form
+they compile down to).
 
 ```json
 {
@@ -198,7 +199,7 @@ at run time.
   "steps": [
     { "id": "fetch", "use": "@blokjs/api-call",
       "inputs": { "url": "https://countriesnow.space/api/v0.1/countries/capital", "method": "GET" } },
-    { "id": "respond", "use": "@blokjs/respond", "inputs": { "body": "js/ctx.state.fetch" }, "ephemeral": true }
+    { "id": "respond", "use": "@blokjs/respond", "inputs": { "body": { "$ref": { "step": "fetch", "path": [] } } }, "ephemeral": true }
   ]
 }
 ```

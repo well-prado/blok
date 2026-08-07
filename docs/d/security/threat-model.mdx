@@ -27,7 +27,7 @@ adds middleware.
 | User-authored HTTP routes | **You** | You write the workflow + trigger config; auth is your call. |
 | Trace persistence layer (sqlite, Postgres, sanitization) | **Blok** | We own the storage shape and the redaction defaults. |
 | Step business logic (the node's `execute()` body) | **You** | Your domain code. |
-| `js/...` Mapper expressions in workflows | **Both** — Blok provides the eval scope, you author the expressions | Workflow code is trusted code, deployed alongside the runner. Treat it as such. |
+| `js/...` Mapper expressions (the lowered wire form of step inputs) | **Both** — Blok provides the eval scope; the `$ref`/`$tpl` refs and `js` escape hatches you author are what get lowered into it | Workflow code is trusted code, deployed alongside the runner. Treat it as such. |
 | Default sanitize field list, scheduler payload denylist | **Blok** | Framework defaults must be safe out of the box. |
 
 Anything in the **Blok** row is our job to fix in code. Anything in the
@@ -274,19 +274,27 @@ through option 1.
 
 ### `js/...` Mapper expressions
 
-The Blueprint Mapper evaluates `js/...` expressions in step inputs
-against the live `ctx`. The eval scope is intentionally narrow —
+Step `inputs` are structural: authors write `{"$ref": {...}}` and
+`{"$tpl": [...]}` refs (or, in TypeScript, `step()` handles and `tpl`),
+plus `js` escape hatches for expressions with no structural equivalent
+(fallbacks, optional chaining, `process.env` reads). A deterministic
+load-boundary pass lowers all of that — refs, templates, and escape
+hatches alike — into `js/...` expression strings, the wire format the
+Blueprint Mapper evaluates against the live `ctx` at run time. See
+[Mapper](/d/reference/mapper) for the lowering pass and wire format.
+
+The eval scope is intentionally narrow —
 `new Function("ctx", "data", "func", "vars", ...)` — so there's no
 `require`, `process`, `child_process`, or `globalThis` reachable from
-a workflow expression. Data exfiltration through `ctx` is possible
+a lowered expression. Data exfiltration through `ctx` is possible
 within the workflow itself, but RCE is not.
 
 That said: **workflow definitions are trusted code, not user input**.
 A workflow's JSON or TypeScript file lives alongside your runner code
 and is deployed through the same release pipeline as the rest of your
 service. If you let untrusted users author workflows directly (e.g. a
-no-code builder that lets end-users write `js/...` expressions), you
-must build a high-level DSL on top of Blok and translate to vetted
+no-code builder that lets end-users write raw `js/...` expressions),
+you must build a high-level DSL on top of Blok and translate to vetted
 workflow JSON in server code — never load workflow definitions from
 end-user payloads.
 

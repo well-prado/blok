@@ -215,8 +215,8 @@ Every downstream step reads `ctx.state.requestId` for log correlation.
       "inputs": {
         "event": "request",
         "attrs": {
-          "method": "js/ctx.request.method",
-          "path": "js/ctx.request.path",
+          "method": { "$ref": { "step": "@trigger", "path": ["method"] } },
+          "path": { "$ref": { "step": "@trigger", "path": ["path"] } },
           "userId": "js/ctx.state.identity?.userId"
         }
       }

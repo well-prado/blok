@@ -42,7 +42,7 @@ export default workflow(
 ### Auth-fail close
 
 `branch` conditions are evaluated as raw `ctx.*` expressions (never
-`$.`/`js/`-prefixed), so write them as plain strings:
+`js/`-prefixed), so write them as plain strings:
 
 ```ts
 import { workflow, step, branch } from "@blokjs/core";

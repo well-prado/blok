@@ -1,38 +1,57 @@
 ---
-title: "Input mapper"
-description: "How `js/...` expression strings and `${path}` interpolation resolve against the live ctx. Configure failure mode via BLOK_MAPPER_MODE."
+title: "Input mapper (wire format)"
+description: "Internals: the js/… and ${path} strings the load-boundary lowering pass emits, and how they resolve against the live ctx. Not an authoring API."
 icon: "function-square"
 ---
 
-Every step's `inputs:` field can interpolate values from the live `ctx`
-via the `js/` prefix (full expression) or `${path}` interpolation. The
-runner's blueprint mapper resolves each expression **before** the node
-runs, so node authors see fully resolved values.
+<Warning>
+  **This is the runtime wire format emitted by the lowering pass. It is not an
+  authoring API. You never write these strings by hand.**
 
-This page documents that wire-level string syntax — the format used by
-**legacy object-style workflows** (`workflow({ steps: [...] })` from
-`@blokjs/helper`) and **JSON workflows**. New TypeScript workflows
-authored via the typed-handle DSL (`@blokjs/core`) don't write this
-syntax by hand: `step()` returns a typed handle that lowers to the
-same structural reference automatically. See
-[handles and footguns](/d/primitives/handles-and-footguns). (There
-used to be a third way to write this — a `$` proxy object, e.g.
-`$.req.body.url`, that compiled to a `"js/ctx.request.body.url"`
-string at workflow-build time. It's been removed; see the
-[`$` proxy removal](/c/migration-guides/dollar-proxy-removal) guide.)
+  You author with **typed handles** — `step()` returns a handle you pass into
+  later steps ([handles and footguns](/d/primitives/handles-and-footguns)) — or,
+  in JSON, with **structural references** (`{"$ref": {"step", "path"}}`). A
+  deterministic pass at the workflow load boundary compiles those into the
+  strings on this page, which is the only form the engine has ever resolved.
+
+  Read this page when you are **debugging a lowered workflow** — a stack trace,
+  a `MapperResolutionError`, a `.blok/` build artifact, or a Studio trace that
+  shows the resolved wire string. To write a workflow, start at
+  [workflows](/d/introduction/workflows) or the
+  [JSON workflow reference](/d/cli/workflows).
+</Warning>
+
+## Where these strings come from
+
+Blok's IR carries structural handle references. `lowerRefs`
+([`core/shared/src/utils/lowerRefs.ts`](https://github.com/deskree-inc/blok/blob/main/core/shared/src/utils/lowerRefs.ts))
+runs once at the workflow **load boundary**, before the mapper, and compiles
+every structural reference into exactly the string form documented below. The
+mapper engine itself is untouched by the typed-handle redesign — that is the
+point of the design (ADR 0001): the authoring surface changed, the runtime did
+not.
+
+| You author | Lowering emits |
+|---|---|
+| `step("fetch", …)` → handle `fetched` | `js/ctx.state.fetch` |
+| `fetched.data.items` | `js/ctx.state.fetch.data.items` |
+| the trigger entry handle, `req.body.url` | `js/ctx.request.body.url` |
+| the `error` handle in a `tryCatch` catch arm | `js/ctx.error` |
+| `` tpl`chat:${sessionId}` `` | ``js/`chat:${ctx.request.params.sessionId}` `` |
+| JSON `{"$ref": {"step": "fetch", "path": ["data"]}}` | `js/ctx.state.fetch.data` |
+| JSON `{"$tpl": ["chat:", {"$ref": …}]}` | ``js/`chat:${…}` `` |
+
+Step ids that are not valid JS identifiers are lowered with bracket notation
+(`js/ctx.state["fan-out"]`), and numeric path segments become `[0]`.
 
 ## `js/` prefix (full expression)
 
 ```json
-{
-  "id": "fetch",
-  "use": "@blokjs/api-call",
-  "inputs": { "url": "js/ctx.request.body.url", "headers": "js/ctx.request.headers" }
-}
+"inputs": { "url": "js/ctx.request.body.url", "headers": "js/ctx.request.headers" }
 ```
 
-The whole field is replaced by evaluating the JS expression (after
-stripping the `js/` prefix) against the live `ctx`.
+The whole field is replaced by evaluating the JS expression (after stripping
+the `js/` prefix) against the live `ctx`.
 
 ## What's in scope
 
@@ -47,35 +66,65 @@ The expression runs via `new Function("ctx", "data", "func", "vars",
 "\"use strict\"; return (<your expression>);")`. Standard JS is
 available (template literals, optional chaining, spread, etc.).
 
-## Common patterns
+## Shapes you will see in a lowered workflow
 
-### Reference upstream step output
+### An upstream step reference
 
 ```json
 "messages": "js/ctx.state.fetch.data.items"
 ```
 
-`ctx.state[<step-id>]` holds the upstream step's output.
+`ctx.state[<step-id>]` holds the upstream step's output. Authored as the
+handle `fetched.data.items`, or as
+`{"$ref": {"step": "fetch", "path": ["data", "items"]}}` in JSON.
 
-### Compose with template literals
+### A composed string
 
 ```json
 "channel": "js/`chat:${ctx.request.params.sessionId}`"
 ```
 
-### Default values
+Authored as `` tpl`chat:${req.params.sessionId}` ``, or as
+`{"$tpl": ["chat:", {"$ref": {"step": "@trigger", "path": ["params", "sessionId"]}}]}`.
+
+### An escape hatch
+
+Expressions with no structural equivalent — fallbacks, optional chaining,
+`.map`/`.reduce`, calls, `process.env` reads — are the sanctioned escape hatch
+(ADR 0008). They are authored with the `` js`…` `` tagged template in
+TypeScript, and stay `js/…` strings in JSON, because there is nothing to lower
+them to:
 
 ```json
 "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'"
-```
-
-### Step ids with dashes
-
-When a step id has a dash, use bracket notation:
-
-```json
 "value": "js/ctx.state['load-history']?.value || []"
 ```
+
+These are the one legitimate reason a `js/` string appears in a hand-written
+JSON workflow. Everything else should be `{"$ref"}` / `{"$tpl"}` — see the
+[legacy expression strings](/c/migration-guides/legacy-expression-strings)
+migration guide.
+
+## Positions the lowering pass does not cover
+
+`lowerRefs` is scoped to step `inputs`. These positions are resolved by the
+mapper directly and are still written as path strings, in JSON *and* in the
+object-style TS API:
+
+| Position | Form |
+|---|---|
+| `branch.when`, `loop.while` | raw `ctx.*` — **no** `js/` prefix |
+| `switch.on`, `switch.cases[].when` | `js/ctx.*` |
+| `forEach.in` | `js/ctx.*` |
+| `wait.for`, `wait.until` | `js/ctx.*` |
+| `subworkflow` (polymorphic name) | `js/ctx.*` |
+| step `idempotencyKey` | `js/ctx.*` |
+| trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
+
+The `@blokjs/core` callback DSL takes handles for `forEach`, `switchOn`,
+`subworkflow` and step-level `idempotencyKey` and lowers them itself. Trigger
+config (`concurrencyKey`, `debounce.key`) is resolved at run-entry, before any
+step handle exists, so it stays a path string in every authoring form.
 
 ## Failure mode (`BLOK_MAPPER_MODE`)
 
@@ -108,35 +157,37 @@ BLOK_MAPPER_MODE=strict bun run dist/index.js
 `MapperResolutionError` is exported from `@blokjs/shared` for
 `instanceof` checks in custom error handlers.
 
-## v1 → v2 cheat sheet
+## Legacy forms still accepted at load
 
-The v1 mapping syntax is still accepted (the runner normalizes at
-workflow load) but new workflows should use v2:
+The runner keeps accepting older wire shapes so existing workflows load
+unchanged. It logs one deprecation warning per workflow that still carries
+hand-written path strings in step inputs, naming the workflow and the offending
+steps; silence it in CI with `BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1`. Support for
+hand-written path-string inputs is removed in the next major.
 
-| v1 | v2 | Notes |
+| Legacy | Current | Notes |
 |---|---|---|
-| `js/ctx.vars['x']` | The producing step's handle (typed-handle DSL) / `js/ctx.state.x` (legacy object-style / JSON) | `ctx.vars` still works as an alias of `ctx.state`. |
-| `js/ctx.response.data` | The producing step's handle (typed-handle DSL) / `js/ctx.prev.data` (legacy object-style / JSON) | `ctx.response` still works as an alias. |
-| `js/ctx.request.body` | The trigger entry handle, e.g. `req.body` (typed-handle DSL) / `js/ctx.request.body` (legacy object-style / JSON) | `ctx.req` is a shorthand alias. |
-| `${path}` interpolation | `js/...` | The runner still parses `${path}` for back-compat but warns. |
+| `ctx.vars['x']` | `ctx.state.x` | `ctx.vars` still resolves as an alias of `ctx.state`. |
+| `ctx.response.data` / `ctx.prev.data` | `ctx.state.<producing-step>.data` | The aliases still resolve, but name the producing step — that is what a structural ref lowers to. |
+| `${path}` interpolation | a `js/` template literal | The runner still parses `${path}` for back-compat but warns. Author it as `` tpl`…` `` / `{"$tpl": […]}`. |
 
 ## Security
 
 The expression runs via `new Function()` — full JS execution. **NEVER
 build expression strings from untrusted input.** Workflow definitions
-are static / authored, so this is safe under v2. If you need to
-evaluate user-supplied expressions (e.g. an arithmetic calculator),
-use a sandboxed math parser like `mathjs` inside a node — not the
-mapper.
+are static, authored artifacts compiled at the load boundary, so this is safe
+under v2. If you need to evaluate user-supplied expressions (e.g. an arithmetic
+calculator), use a sandboxed math parser like `mathjs` inside a node — not the
+mapper. See the [threat model](/d/security/threat-model).
 
 ## Related
 
 <Columns cols={3}>
-  <Card title="@blokjs/expr" icon="function-square" href="/d/reference/helpers/expr">
-    Use the mapper's surface as a standalone step.
+  <Card title="Legacy expression strings" icon="arrow-right-left" href="/c/migration-guides/legacy-expression-strings">
+    Before/after for every legacy shape.
   </Card>
-  <Card title="v2 step shapes" icon="braces" href="/d/reference/v2-step-shapes">
-    All step-level fields.
+  <Card title="@blokjs/expr" icon="function-square" href="/d/reference/helpers/expr">
+    Evaluate a raw JS expression as a standalone step.
   </Card>
   <Card title="Env vars" icon="settings" href="/d/operations/env-vars">
     `BLOK_MAPPER_MODE` env config.

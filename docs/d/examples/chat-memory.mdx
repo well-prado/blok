@@ -110,7 +110,7 @@ The page + stream workflows are identical to the
       "type": "module",
       "inputs": {
         "action": "get",
-        "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`"
+        "key": { "$tpl": ["chat-memory:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] }
       }
     },
     {
@@ -118,7 +118,7 @@ The page + stream workflows are identical to the
       "use": "@blokjs/llm-stream",
       "type": "module",
       "inputs": {
-        "channel": "js/`chat-memory:${ctx.request.params.sessionId}`",
+        "channel": { "$tpl": ["chat-memory:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }] },
         "apiKey": "js/process.env.OPENROUTER_API_KEY",
         "model": "js/process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'",
         "messages": "js/[{ role: 'system', content: 'You are a helpful assistant chatting with the user. Earlier messages were stored in Redis and are included below.' }, ...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }]"
@@ -131,7 +131,7 @@ The page + stream workflows are identical to the
       "ephemeral": true,
       "inputs": {
         "action": "set",
-        "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`",
+        "key": { "$tpl": ["chat-memory:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] },
         "value": "js/[...(ctx.state['load-history']?.value || []), { role: 'user', content: ctx.request.body.message }, { role: 'assistant', content: ctx.state.stream.fullText }]",
         "ttlMs": 86400000
       }
@@ -153,15 +153,19 @@ Four steps, four lessons:
 <Steps>
   <Step title="load-history reads from Redis">
     [`@blokjs/redis-kv`](/d/reference/helpers/redis-kv) returns
-    `{action: "get", key, value, exists}`. The `js/` mapper expression
-    interpolates the session id at run time.
+    `{action: "get", key, value, exists}`. The `key` input is a
+    `$tpl` ref that interpolates the session id from the trigger
+    params at run time.
   </Step>
   <Step title="stream composes the full context">
-    The `messages:` field uses a JS expression to build the OpenAI
-    message array on the fly: a system prompt + prior history (via
-    spread) + the new user turn. `ctx.state['load-history']?.value`
-    is the prior array — bracket-notation because the step id contains
-    a dash.
+    `apiKey`, `model`, and `messages` have no structural ref
+    equivalent — an env read, an env read with a fallback, and a
+    spread of the loaded history — so they stay `js/` escape-hatch
+    expressions (see [Mapper](/d/reference/mapper)). The `messages`
+    expression builds the OpenAI message array on the fly: a system
+    prompt + prior history (via spread) + the new user turn.
+    `ctx.state['load-history']?.value` is the prior array —
+    bracket-notation because the step id contains a dash.
   </Step>
   <Step title="save-history persists the new turn (ephemeral)">
     Writes the appended history back with a 24h TTL. Marked
@@ -202,7 +206,15 @@ If you serve multiple tenants, prefix the key:
   "use": "@blokjs/redis-kv",
   "inputs": {
     "action": "get",
-    "key": "js/`chat-memory:${ctx.request.body.tenantId}:${ctx.request.params.sessionId}:history`"
+    "key": {
+      "$tpl": [
+        "chat-memory:",
+        { "$ref": { "step": "@trigger", "path": ["body", "tenantId"] } },
+        ":",
+        { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } },
+        ":history"
+      ]
+    }
   }
 }
 ```
@@ -238,7 +250,7 @@ Or build a dedicated reset endpoint:
   "use": "@blokjs/redis-kv",
   "inputs": {
     "action": "delete",
-    "key": "js/`chat-memory:${ctx.request.params.sessionId}:history`"
+    "key": { "$tpl": ["chat-memory:", { "$ref": { "step": "@trigger", "path": ["params", "sessionId"] } }, ":history"] }
   }
 }
 ```

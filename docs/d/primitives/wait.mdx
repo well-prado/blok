@@ -133,9 +133,10 @@ The runner doesn't yet ship a single-step primitive for very long
 pauses (multi-day). The composable pattern that works today:
 
 ```json
-// Workflow A — pre-wait step
+// Workflow A — pre-wait step. Hand the child exactly what it needs; a
+// structural ref names the producing step, so the child's inputs stay typed.
 { "id": "queue-continuation", "subworkflow": "post-wait-half",
-  "inputs": { "state": "js/ctx.state" }, "wait": false }
+  "inputs": { "order": { "$ref": { "step": "validate", "path": [] } } }, "wait": false }
 
 // Workflow B — has delay on its trigger
 { "name": "post-wait-half",

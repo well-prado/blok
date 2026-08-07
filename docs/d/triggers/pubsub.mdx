@@ -86,7 +86,7 @@ Env var: `AZURE_SERVICEBUS_CONNECTION_STRING`.
 | `topic` | `string` | Provider-specific identifier (topic name / SNS ARN / Service Bus topic). |
 | `subscription` | `string` | Provider-specific subscription (GCP subscription / SQS URL / Azure subscription). |
 | `maxMessages` | `number` | Max messages pulled per batch (GCP). |
-| `concurrencyKey` | `string` (literal or `js/ctx....`) | Per-key processing cap. |
+| `concurrencyKey` | `string` — literal, or `js/ctx....` resolved at run-entry | Trigger config resolved against the live `ctx` at run-entry, not a step input — so it's a path string, not a handle. Per-key processing cap. |
 | `concurrencyLimit` | `number` | Slot count per resolved key. |
 | `middleware` | `string[]` | Per-trigger middleware. |
 

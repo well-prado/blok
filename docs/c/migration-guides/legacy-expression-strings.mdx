@@ -1,0 +1,188 @@
+---
+title: "Legacy expression strings"
+description: "Migrate hand-written js/ctx and ${…} mapper strings to typed handles (TS) or structural {$ref}/{$tpl} references (JSON)."
+icon: "arrow-right-left"
+---
+
+`"js/ctx.state.fetch.data"` and `"${ctx.request.body.email}"` are the
+**runtime wire format**. They are what a deterministic pass emits at the
+workflow load boundary — not an authoring form. Hand-writing them is
+deprecated.
+
+## Why
+
+A wire string is invisible to everything that could have caught a mistake:
+
+> In `e2e-cadence-controls.ts` the step outputs map like
+> `"js/ctx.state.acs.readModelServed"`. I added `readModelServed` to the node's
+> output schema and to the lib — but forgot the mapping string in the workflow.
+> TypeScript couldn't see it. The 218 unit tests couldn't see it. It shipped,
+> and only a live clean-room run showed `readModelServed: null`.
+
+A typed handle is checked by `tsc`. A structural `{"$ref"}` is checked by
+`validateWorkflow`, drawn as an edge by the canvas, and understood by AI
+tooling. A string is checked by nothing until the request is in flight.
+
+## The runner still loads them
+
+Existing workflows keep working. At load, the runner logs **one** structured
+deprecation warning per workflow whose step `inputs` still carry hand-written
+path strings, naming the workflow, each offending step, and the count:
+
+```
+[blok][deprecated] workflow "render-pdf" (workflows/json/render-pdf.json) has 3
+step input(s) written as legacy `js/` expression strings across 2 step(s):
+fetch (1), render (2). …
+```
+
+Silence it in CI with `BLOK_SUPPRESS_LEGACY_EXPR_WARNING=1`. Support for
+hand-written path-string step inputs is **removed in the next major**.
+
+## The codemod does most of it
+
+```bash
+blokctl migrate refs --dry-run   # preview
+blokctl migrate refs             # apply (writes .bak backups)
+```
+
+It rewrites pure path references in step `inputs` — TS files get the producing
+step's handle, JSON files get a structural `{"$ref"}` / `{"$tpl"}` node — and
+marks the expressions it cannot safely restructure with a
+`blok-migrate: hand-migrate` note. Review the diff, then delete the `.bak`
+files.
+
+Workflows still in the v1 `{"steps": [...], "nodes": {...}}` shape need
+`blokctl migrate workflows` first; the ref codemod only reads inline
+`steps[].inputs`.
+
+## Step inputs — TypeScript
+
+<CodeGroup>
+```ts Before
+step("render", pdfRender, { html: "js/ctx.state.fetch" });
+step("upload", s3Upload, { key: "js/ctx.request.body.outputKey" });
+```
+
+```ts After
+const fetched = step("fetch", apiCall, { url: req.body.sourceUrl });
+step("render", pdfRender, { html: fetched });
+step("upload", s3Upload, { key: req.body.outputKey });
+```
+</CodeGroup>
+
+## Step inputs — JSON
+
+<CodeGroup>
+```json Before
+{
+  "steps": [
+    { "id": "fetch", "use": "@blokjs/api-call", "inputs": { "url": "js/ctx.request.body.sourceUrl" } },
+    { "id": "render", "use": "@blokjs/pdf-render", "inputs": { "html": "js/ctx.state.fetch" } }
+  ]
+}
+```
+
+```json After
+{
+  "steps": [
+    {
+      "id": "fetch",
+      "use": "@blokjs/api-call",
+      "inputs": { "url": { "$ref": { "step": "@trigger", "path": ["body", "sourceUrl"] } } }
+    },
+    {
+      "id": "render",
+      "use": "@blokjs/pdf-render",
+      "inputs": { "html": { "$ref": { "step": "fetch", "path": [] } } }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+The reference roots:
+
+| Root | Means |
+|---|---|
+| `"step": "<step-id>"` | that step's output — `path: []` is the whole output |
+| `"step": "@trigger"` | the trigger payload (`body`, `params`, `query`, `headers`) |
+| `"step": "@error"` | the caught error envelope, inside a `tryCatch` catch arm |
+
+`path` segments are strings for object keys and numbers for array indices:
+`"path": ["items", 0, "id"]`.
+
+## Shape-by-shape
+
+Every legacy shape, and what replaces it. `req` is the trigger entry handle;
+`fetched` / `history` are handles returned by `step()`.
+
+| Shape | Before | After (TypeScript) | After (JSON) |
+|---|---|---|---|
+| Step output | `"js/ctx.state.fetch"` | `fetched` | `{"$ref": {"step": "fetch", "path": []}}` |
+| Field of a step output | `"js/ctx.state.fetch.data.items"` | `fetched.data.items` | `{"$ref": {"step": "fetch", "path": ["data", "items"]}}` |
+| Trigger payload | `"js/ctx.request.body.url"` | `req.body.url` | `{"$ref": {"step": "@trigger", "path": ["body", "url"]}}` |
+| Caught error | `"js/ctx.error.message"` | the `error` handle: `error.message` | `{"$ref": {"step": "@error", "path": ["message"]}}` |
+| `vars` alias | `"js/ctx.vars['fetch']"` | `fetched` | `{"$ref": {"step": "fetch", "path": []}}` |
+| `prev` / `response` alias | `"js/ctx.prev.data"` | the producing step's handle | `{"$ref": {"step": "<producing-step>", "path": ["data"]}}` |
+| Dashed step id | `"js/ctx.state['load-history'].value"` | `loadHistory.value` | `{"$ref": {"step": "load-history", "path": ["value"]}}` |
+| String template | `` "js/`chat:${ctx.request.params.sessionId}`" `` | `` tpl`chat:${req.params.sessionId}` `` | `{"$tpl": ["chat:", {"$ref": {"step": "@trigger", "path": ["params", "sessionId"]}}]}` |
+| `${…}` interpolation | `"${ctx.request.body.email}"` | `req.body.email` (or `` tpl`…` `` if embedded in text) | `{"$ref"}` / `{"$tpl"}` as above |
+| Branch condition | `"ctx.state.order.total > 100"` | `gt(order.total, 100)` | raw `ctx.*` string — **unchanged**, see below |
+
+### Non-structural expressions — the `js` escape hatch
+
+These have no structural equivalent, by design (ADR 0008). In TypeScript use
+the `` js`…` `` tagged template so the handles inside are still typed; in JSON
+they stay `js/…` strings, and the deprecation warning does **not** fire for
+them.
+
+| Shape | Before | After (TypeScript) |
+|---|---|---|
+| default / fallback | `"js/ctx.request.body.tenantId \|\| 'default'"` | ``js`${req.body.tenantId} \|\| 'default'` `` |
+| optional / coalesce | `"js/ctx.state['load-history']?.value \|\| []"` | ``js`${history.value} \|\| []` `` |
+| collection | `"js/Array.isArray(ctx.request.body.items) ? ctx.request.body.items : []"` | ``js`Array.isArray(${req.body.items}) ? ${req.body.items} : []` `` |
+| ternary | `"js/ctx.state.rollback ? 'failed' : 'success'"` | ``js`${rollback} ? 'failed' : 'success'` `` |
+| env / time | `"js/process.env.OPENROUTER_API_KEY"`, `"js/Date.now()"` | ``js`process.env.OPENROUTER_API_KEY` `` / ``js`Date.now()` `` |
+| object / array construction | `"js/[{ role: 'system', … }, ...(ctx.state.history?.value \|\| [])]"` | ``js`[{ role: 'system', … }, ...(${history.value} \|\| [])]` `` |
+| existence check | `"js/ctx.state['cancel-flight'] !== undefined"` | ``js`${cancelFlight} !== undefined` `` |
+
+A pure string template is **not** an escape hatch — use `` tpl`…` `` /
+`{"$tpl"}`. Reach for `js` only when logic is embedded.
+
+If a JSON workflow needs a computed value often, a `@blokjs/expr` step is
+usually clearer than inlining the expression: its `expression` input is a raw
+`ctx.*` JS string (**no** `js/` prefix — prefixing double-evaluates), and later
+steps then reference it with an ordinary `{"$ref"}`.
+
+## Positions that keep path strings
+
+The lowering pass is scoped to step `inputs`. A `{"$ref"}` in any of these
+positions is walked into as plain data by the mapper and silently does the
+wrong thing — leave them as strings:
+
+| Position | Form |
+|---|---|
+| `branch.when`, `loop.while` | raw `ctx.*` — **no** `js/` prefix |
+| `switch.on`, `switch.cases[].when` | `js/ctx.*` |
+| `forEach.in` | `js/ctx.*` |
+| `wait.for`, `wait.until` | `js/ctx.*` |
+| `subworkflow` (polymorphic name) | `js/ctx.*` |
+| step `idempotencyKey` | `js/ctx.*` |
+| trigger `concurrencyKey`, `debounce.key`, `idempotencyKey` | `js/ctx.*` |
+
+The `@blokjs/core` callback DSL takes handles for `branch` (via `eq`/`gt`/…),
+`forEach`, `switchOn`, `subworkflow` and step-level `idempotencyKey`, and
+lowers them for you — so in TypeScript you never write these either. Trigger
+config is resolved at run-entry, before any step handle exists, so
+`concurrencyKey` and `debounce.key` are path strings in every authoring form.
+
+## Related
+
+- [Input mapper (wire format)](/d/reference/mapper) — what the strings mean
+  when you meet them in a trace or a build artifact.
+- [Handles and footguns](/d/primitives/handles-and-footguns) — arm scoping,
+  ephemeral steps, and the flat id namespace.
+- [`$` proxy removal](/c/migration-guides/dollar-proxy-removal) — the companion
+  removal of the `$` authoring proxy.
+- [`@blokjs/expr`](/d/reference/helpers/expr) — the one node whose input is a
+  deliberately raw JS expression.
