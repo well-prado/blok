@@ -8,6 +8,10 @@ packages on npm version independently within each release line.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.0.0] — 2026-08-07
+
 ### Security
 
 - **Scaffolded projects now audit clean (was 34 vulnerabilities: 13 high, 17
