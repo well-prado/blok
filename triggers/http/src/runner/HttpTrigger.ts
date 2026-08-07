@@ -518,6 +518,22 @@ export default class HttpTrigger extends TriggerBase {
 	 * fall back to the legacy catch-all `/<key>/<path>` scheme — and
 	 * both will be removed in a future release. The boot log warns
 	 * loudly when the legacy path is active so operators notice.
+	 *
+	 * **TS auto-routing (#695).** `src/workflows/*.ts` is scanned into the
+	 * SAME route table as `WORKFLOWS_PATH/json/` — a `.ts` file with an
+	 * `http` trigger routes itself with zero entries in `Workflows.ts`,
+	 * exactly like JSON already did. `Workflows.ts` registration is now
+	 * optional / back-compat: still consulted (so it keeps working for
+	 * workflows outside the scan root, or mid-migration), and a workflow
+	 * present in BOTH is deduped to one route (see the precedence note on
+	 * `buildRouteTable` in `WorkflowRouter.ts`) rather than reported as a
+	 * collision. The TS scan root itself stays hard-coded at
+	 * `<cwd>/src/workflows` — no env override, unlike `WORKFLOWS_PATH` for
+	 * JSON — because unlike JSON's build-output directory, TS workflow
+	 * SOURCE files always live at that convention-based path (mirroring
+	 * `src/nodes/`; `TriggerBase.resolveHmrRoots()` makes the same
+	 * assumption for the HMR watcher). Revisit only if a real deployment
+	 * needs it moved.
 	 */
 	/** #693 — legacy routing opt-outs active this boot, formatted for diagnostics. */
 	private activeLegacyFlags(): string[] {
@@ -595,10 +611,17 @@ export default class HttpTrigger extends TriggerBase {
 		// every post-v0.4 explicit path → total outage). Collisions are
 		// captured into `RoutingDiagnostics` for Studio to surface, and
 		// the offending workflow is skipped.
+		//
+		// #695 — `scannedTs` is included alongside `scannedJson` here (it used
+		// to be collected and then discarded — see #695 for the field-review
+		// history). `manual` still flows in too: a workflow present in BOTH
+		// (the common shape mid-TS-migration) is deduped to a single route
+		// by `buildRouteTable`, not reported as a collision — see the
+		// precedence note on `buildRouteTable` in `WorkflowRouter.ts`.
 		const diagnostics = RoutingDiagnostics.getInstance();
 		diagnostics.clear();
 		const collisions: RouteCollision[] = [];
-		const table = buildRouteTable(scannedJson, manual, {
+		const table = buildRouteTable([...scannedJson, ...scannedTs], manual, {
 			onWarning: (msg) => this.logger.log(`[blok] route warning: ${msg}`),
 			onCollision: (collision) => {
 				collisions.push(collision);
@@ -671,17 +694,24 @@ export default class HttpTrigger extends TriggerBase {
 			}
 		}
 
-		// #693 — a TS file under the scan root that DECLARES an http trigger but
-		// produced no route. Unlike JSON, TS workflows aren't auto-routed by
-		// file-scan alone — they still need a `src/Workflows.ts` entry (the one
-		// manual-registration step file-based routing didn't remove for TS). This
-		// answers "I created the file, where's my route?" instead of a silent 404.
+		// #695 — a TS file under the scan root that DECLARES an http trigger
+		// but still produced no route. Since #695, TS is auto-routed by
+		// file-scan exactly like JSON, so this no longer fires for the common
+		// case (a plain `.ts` workflow with an http trigger and no
+		// `Workflows.ts` entry — that's now just routed). What's left, once a
+		// middleware-flagged workflow is excluded (never a public route by
+		// design — see `readMiddlewareFlag`), is a route that was scanned but
+		// then DROPPED — almost always a route collision, already reported
+		// loudly above via `onCollision` / `GET /__blok/routing`. This line
+		// answers "I created the file, where's my route?" for that residual
+		// case instead of a silent 404.
 		if (showRouteTable) {
 			for (const sw of scannedTs) {
 				if (tsRoutedSourcePaths.has(sw.source)) continue;
 				if (!hasHttpTrigger(sw.workflow)) continue;
+				if (readMiddlewareFlag(sw.workflow)) continue;
 				this.logger.log(
-					`[blok][routing] ${sw.source} declares an HTTP trigger but produced no route — TypeScript workflows aren't auto-routed by file-scan; add it to \`src/Workflows.ts\` (see ${DOCS_ROUTING_URL}).`,
+					`[blok][routing] ${sw.source} declares an HTTP trigger but produced no route — likely dropped by a route collision (see the collision log above, or GET /__blok/routing for details). ${DOCS_ROUTING_URL}`,
 				);
 			}
 		}

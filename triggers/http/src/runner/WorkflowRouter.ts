@@ -24,6 +24,18 @@ import type { ScannedWorkflow } from "./scanWorkflows.js";
  * - Method `ANY` shadowing a more-specific method on the same path → throw.
  * - Param vs literal at the same depth → log a warning (Hono routes
  *   literals first; this is usually intended but worth surfacing).
+ *
+ * **Scan + manual precedence (#695):** `scanned` and `manual` are both
+ * scanned for `src/workflows/*.ts` by the caller (HttpTrigger includes its
+ * TS scan results in `scanned` alongside JSON), so the SAME workflow module
+ * commonly shows up in both — a file on disk under `src/workflows/` that is
+ * ALSO listed in `Workflows.ts` (the common shape mid-migration, or for a
+ * workflow that also needs registering for a non-HTTP trigger surface).
+ * That is silent-OK, not a collision: `manual` is processed after
+ * `scanned`, and when the two resolve to the literal same workflow object
+ * (`===`), the manual entry replaces the scanned one in place — same route,
+ * `Workflows.ts`'s key/label wins. Two DIFFERENT objects claiming the same
+ * `(method, path)` still hit the collision path above, same as ever.
  */
 
 const LEGACY_FLAG_ENV = "BLOK_ROUTING_LEGACY";
@@ -233,6 +245,34 @@ export function buildRouteTable(
 			kind: "ts",
 			workflow: mr.workflow,
 		};
+
+		// #695 — the same workflow module scanned from disk AND registered by
+		// hand in `Workflows.ts` is the expected shape during a TS migration,
+		// not a collision: at boot, `import()` resolves both reads to the
+		// IDENTICAL object (no cache-buster, same module-cache entry), so
+		// `===` is the ground truth for "this is one workflow, seen twice" —
+		// cheaper and more direct than threading `workflowSourcePaths`
+		// through this otherwise-pure function. Manual's entry wins the slot
+		// (keeps the `Workflows.ts` key/label — least surprise for callers
+		// already depending on it) and the scanned duplicate already in
+		// `out`/`seen` is replaced in place; no `onWarning`, no
+		// `onCollision` — this is silent-OK by design, not a dropped route.
+		// A genuinely DIFFERENT object claiming the same route falls through
+		// to the normal collision path below.
+		// ponytail: identity breaks across an HMR reload of just the edited
+		// file (a fresh cache-busted re-import gets a new object while
+		// `Workflows.ts`'s static import stays put) — a live edit to a
+		// dual-registered workflow then reports a real (harmless) collision
+		// on the next reload. Upgrade path: re-import `Workflows.ts` on HMR
+		// too; not worth it until someone hits it.
+		const existingAtKey = seen.get(routeKey(entry));
+		if (existingAtKey && existingAtKey.workflow === mr.workflow) {
+			const idx = out.indexOf(existingAtKey);
+			if (idx !== -1) out[idx] = entry;
+			seen.set(routeKey(entry), entry);
+			continue;
+		}
+
 		const collision = detectCollision(seen, entry);
 		if (handleCollision(collision, tolerant, options.onCollision)) continue;
 		out.push(entry);

@@ -70,7 +70,14 @@ describe("HttpTrigger — unknown-route diagnostics (#693)", () => {
 		// workflow above is in play.
 		process.env.WORKFLOWS_PATH = "/tmp/__blok_no_such_workflows_dir__";
 		process.env.BLOK_FILE_BASED_ROUTING = "true";
-		process.env.BLOK_HMR = "";
+		// Explicit "false" (not "") — dev mode (`NODE_ENV=development`) below
+		// would otherwise auto-enable HMR (`TriggerBase.isHotReloadEnabled()`),
+		// which tries to `fs.watch()` the nonexistent WORKFLOWS_PATH above and
+		// emits an async, unhandled 'error' that can land inside an ADJACENT
+		// test's console spy once boot (now scanning more real TS fixtures —
+		// see #695) takes long enough to shift the timing. None of these tests
+		// exercise HMR.
+		process.env.BLOK_HMR = "false";
 	});
 
 	afterEach(() => {
@@ -153,7 +160,8 @@ describe("HttpTrigger — boot-time route table (#693)", () => {
 		RoutingDiagnostics.resetInstance();
 		process.env.WORKFLOWS_PATH = "/tmp/__blok_no_such_workflows_dir__";
 		process.env.BLOK_FILE_BASED_ROUTING = "true";
-		process.env.BLOK_HMR = "";
+		// See the sibling describe block above for why this is "false", not "".
+		process.env.BLOK_HMR = "false";
 		process.env.BLOK_ROUTE_TABLE = "";
 	});
 
@@ -164,21 +172,22 @@ describe("HttpTrigger — boot-time route table (#693)", () => {
 		process.env.BLOK_ROUTE_TABLE = ORIGINAL_ROUTE_TABLE ?? "";
 	});
 
-	it("dev mode: prints the route table and the zero-route TS-file info line", async () => {
+	it("dev mode: prints the route table and auto-routes scanned TS workflows (#695)", async () => {
 		process.env.NODE_ENV = "development";
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		await bootApp();
 
 		const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-		expect(logged).toContain("file-based routing — 1 route(s) registered");
+		expect(logged).toMatch(/file-based routing — \d+ route\(s\) registered/);
 		expect(logged).toContain("GET     /orders  ←  orders");
 		// `src/workflows/countries-helper.ts` (a real fixture in this package)
-		// declares `trigger: http.get("/countries-helper")` but is NOT in the
-		// mocked `Workflows.ts` map — so it should surface as a zero-route
-		// info line instead of silently producing nothing.
-		expect(logged).toContain("declares an HTTP trigger but produced no route");
-		expect(logged).toContain("countries-helper.ts");
+		// declares `trigger: http.get("/countries-helper")` and is NOT in the
+		// mocked `Workflows.ts` map (which here only has `orders`) — #695 means
+		// it is now auto-routed by the TS scan alone, so it must NOT surface as
+		// a zero-route info line anymore.
+		expect(logged).toContain("GET     /countries-helper  ←  countries.list");
+		expect(logged).not.toContain("declares an HTTP trigger but produced no route");
 
 		logSpy.mockRestore();
 	});
@@ -203,7 +212,7 @@ describe("HttpTrigger — boot-time route table (#693)", () => {
 		await bootApp();
 
 		const logged = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
-		expect(logged).toContain("file-based routing — 1 route(s) registered");
+		expect(logged).toMatch(/file-based routing — \d+ route\(s\) registered/);
 
 		logSpy.mockRestore();
 	});
