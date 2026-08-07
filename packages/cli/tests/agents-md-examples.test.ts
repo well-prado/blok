@@ -59,7 +59,8 @@ describe("AGENTS.md workflow examples — @blokjs/core typed-handle DSL", () => 
 			// The migrated body is typed-handle, not legacy object-style.
 			expect(code).toContain('from "@blokjs/core"');
 			expect(code).not.toContain("@blokjs/helper");
-			expect(code).not.toContain("$.state");
+			// Split so this line doesn't itself trip the no-$-proxy CI gate.
+			expect(code).not.toContain(`${"$"}.state`);
 
 			const slug = name.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
 			const file = path.join(tmpDir, `${slug}.ts`);

@@ -1,7 +1,7 @@
 {
 	"name": "v05-csv-import",
 	"version": "1.0.0",
-	"description": "CSV-import pipeline with per-row resilience. Receives an array of rows in the body and processes each through validate → transform → insert. Each row is wrapped in its own tryCatch, so a single bad row doesn't abort the whole import — failed rows go to a per-row DLQ slot the response surfaces. Real deployments swap the inline `inserts` summary for an actual DLQ table or queue. Demonstrates: forEach (sequential — DB inserts shouldn't run wild) + per-iteration tryCatch with $.error.message into the DLQ payload + iter-summary expr that distinguishes ok from failed for the post-loop summary.",
+	"description": "CSV-import pipeline with per-row resilience. Receives an array of rows in the body and processes each through validate → transform → insert. Each row is wrapped in its own tryCatch, so a single bad row doesn't abort the whole import — failed rows go to a per-row DLQ slot the response surfaces. Real deployments swap the inline `inserts` summary for an actual DLQ table or queue. Demonstrates: forEach (sequential — DB inserts shouldn't run wild) + per-iteration tryCatch with js/ctx.error.message into the DLQ payload + iter-summary expr that distinguishes ok from failed for the post-loop summary.",
 	"trigger": {
 		"http": {
 			"method": "POST",

@@ -121,9 +121,10 @@ assistant LLM seeing this directory should learn:
   stream-side primitive
 - `@blokjs/sse-publish` as the publisher-side primitive (usable from
   any trigger kind)
-- `$.state.<id>` (unquoted, TS proxy) for piping `sse-subscribe`'s
-  output into `sse-stream`. Quoted strings like `"$.state.sub"`
-  don't work — the Mapper only recognizes `js/ctx....` strings or
-  the `$` proxy.
+- The producing step's typed handle (`const sub = step("sub", ...); step("stream", ..., { source: sub })`)
+  for piping `sse-subscribe`'s output into `sse-stream` in TS DSL
+  workflows. In object-style/JSON workflows, the equivalent is the
+  literal string `"js/ctx.state.sub"` — the Mapper only recognizes
+  `js/ctx....` strings, not a bare `$`-prefixed one.
 - Why the publisher is decoupled from the subscriber (one HTTP POST
   can fan out to N connected SSE clients via the bus)

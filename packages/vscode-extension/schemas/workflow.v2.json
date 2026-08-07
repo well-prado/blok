@@ -68,7 +68,7 @@
 									"when": {
 										"type": "string",
 										"minLength": 1,
-										"description": "JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. $ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true')."
+										"description": "JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. Raw `ctx.*` expression string — no `js/` prefix (e.g. ctx.request.query.kind === 'true')."
 									},
 									"then": {
 										"type": "array",
@@ -126,17 +126,17 @@
 							"id": {
 								"type": "string",
 								"minLength": 1,
-								"description": "Stable identifier. The sub-workflow's output lands on $.state[id] after the child completes. Required."
+								"description": "Stable identifier. The sub-workflow's output lands on ctx.state[id] after the child completes. Required."
 							},
 							"subworkflow": {
 								"type": "string",
 								"minLength": 1,
-								"description": "Name of the workflow to invoke. Looked up in the WorkflowRegistry at run time. **Literal names** (`\"send-receipt-email\"`) are matched directly. **Polymorphic expressions** (`\"$.req.body.kind\"`, `\"js/ctx.req.body.kind\"`) resolve against the live ctx at dispatch time — pair with `allowList` to constrain which workflows the expression may resolve to."
+								"description": "Name of the workflow to invoke. Looked up in the WorkflowRegistry at run time. **Literal names** (`\"send-receipt-email\"`) are matched directly. **Polymorphic expressions** (`\"js/ctx.req.body.kind\"`) resolve against the live ctx at dispatch time — pair with `allowList` to constrain which workflows the expression may resolve to."
 							},
 							"inputs": {
 								"type": "object",
 								"additionalProperties": {},
-								"description": "Inputs passed to the child as `ctx.request.body`. The child reads them via `$.req.body.<key>` exactly as if HTTP-triggered. May contain $ proxy refs."
+								"description": "Inputs passed to the child as `ctx.request.body`. The child reads them via `ctx.request.body.<key>` (or the trigger entry handle in the TS DSL) exactly as if HTTP-triggered. May contain `js/...` expressions."
 							},
 							"ui": {
 								"type": "object",
@@ -253,7 +253,7 @@
 									"type": "string",
 									"minLength": 1
 								},
-								"description": "Exact-match allow-list for polymorphic dispatch. When the resolved workflow name (after any `namespace` prefix is applied) is not in this array, the dispatch is rejected at run time with a structured error. Strongly recommended when `subworkflow` is an expression (`$.<path>` or `js/...`) so a malicious or buggy ctx value can't dispatch arbitrary workflows. Ignored for literal names (they don't need the guard)."
+								"description": "Exact-match allow-list for polymorphic dispatch. When the resolved workflow name (after any `namespace` prefix is applied) is not in this array, the dispatch is rejected at run time with a structured error. Strongly recommended when `subworkflow` is an expression (`js/...`) so a malicious or buggy ctx value can't dispatch arbitrary workflows. Ignored for literal names (they don't need the guard)."
 							},
 							"dispatch": {
 								"type": "string",
@@ -300,7 +300,7 @@
 											"number",
 											"string"
 										],
-										"description": "Wait until this absolute time. Number is ms-since-epoch; string is an ISO date or a $-proxy expression. Mutually exclusive with `for`."
+										"description": "Wait until this absolute time. Number is ms-since-epoch; string is an ISO date or a `js/ctx....` expression. Mutually exclusive with `for`."
 									}
 								},
 								"additionalProperties": false
@@ -373,7 +373,7 @@
 								"type": "object",
 								"properties": {
 									"in": {
-										"description": "Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."
+										"description": "Array source. Literal expression string (e.g. `'js/ctx.state.items'`)."
 									},
 									"as": {
 										"type": "string",
@@ -520,7 +520,7 @@
 								"type": "object",
 								"properties": {
 									"on": {
-										"description": "Value to match against. Literal, `$` proxy expression, or `js/...` string. Resolved by the blueprint mapper before matching."
+										"description": "Value to match against. Literal, or `js/...` string. Resolved by the blueprint mapper before matching."
 									},
 									"cases": {
 										"type": "array",
@@ -610,7 +610,7 @@
 										"type": "array",
 										"items": {},
 										"minItems": 1,
-										"description": "Sub-pipeline run when `try` throws. Has access to `$.error` (message, name, stack). Errors here propagate — they do NOT re-trigger catch."
+										"description": "Sub-pipeline run when `try` throws. Has access to `ctx.error` (message, name, stack), or the typed `error` handle in the TS DSL. Errors here propagate — they do NOT re-trigger catch."
 									},
 									"finally": {
 										"type": "array",
@@ -663,7 +663,7 @@
 							"id": {
 								"type": "string",
 								"minLength": 1,
-								"description": "Stable identifier. Other steps reference this step's output as $.state[id]. Required."
+								"description": "Stable identifier. Other steps reference this step's output as ctx.state[id]. Required."
 							},
 							"use": {
 								"type": "string",
@@ -692,7 +692,7 @@
 							"inputs": {
 								"type": "object",
 								"additionalProperties": {},
-								"description": "Inputs passed to the node. May contain $ proxy references (e.g. $.state.foo, $.req.body.id) or 'js/...' expressions for runtime evaluation."
+								"description": "Inputs passed to the node. May contain 'js/...' expressions for runtime evaluation (e.g. 'js/ctx.state.foo', 'js/ctx.request.body.id'), or typed step/trigger handles in the TS DSL."
 							},
 							"ui": {
 								"type": "object",
@@ -767,7 +767,7 @@
 							"idempotencyKey": {
 								"type": "string",
 								"minLength": 1,
-								"description": "When set, the step's result is cached against the triple (workflowName, step.id, idempotencyKey). On a subsequent run with the same triple, execution is skipped and the cached result populates state through the same persistence rules (ephemeral / spread / as). Accepts a literal string or a $ proxy expression that compiles to `js/ctx....` (e.g. $.req.body.requestId)."
+								"description": "When set, the step's result is cached against the triple (workflowName, step.id, idempotencyKey). On a subsequent run with the same triple, execution is skipped and the cached result populates state through the same persistence rules (ephemeral / spread / as). Accepts a literal string or a `js/ctx....` expression (e.g. js/ctx.request.body.requestId), or a typed handle in the TS DSL."
 							},
 							"idempotencyKeyTTL": {
 								"type": "integer",

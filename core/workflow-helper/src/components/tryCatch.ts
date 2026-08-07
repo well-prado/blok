@@ -1,4 +1,3 @@
-import { unwrapProxies } from "../proxy/$";
 import type { V2Step, V2StepUi, V2TryCatchStep } from "../types/StepOpts";
 
 /**
@@ -6,17 +5,17 @@ import type { V2Step, V2StepUi, V2TryCatchStep } from "../types/StepOpts";
  *
  * `try` and `catch` are required and non-empty; `finally` is optional.
  *
- * Inside the `catch` block, `$.error.message`, `$.error.name`, and
- * `$.error.stack` resolve at run time to the captured error info. In
- * `try` and `finally`, `$.error` is undefined (the JS-like contract).
+ * Inside the `catch` block, `ctx.error.message`, `ctx.error.name`, and
+ * `ctx.error.stack` resolve at run time to the captured error info. In
+ * `try` and `finally`, `ctx.error` is undefined (the JS-like contract).
  */
 export interface TryCatchOpts {
-	/** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+	/** Stable identifier — visible in traces, referenced as `ctx.state[id]`. */
 	id: string;
 	/** Sub-pipeline run first. If any step throws, control jumps to `catch`. */
 	try: V2Step[];
 	/**
-	 * Sub-pipeline run when `try` throws. Has access to `$.error.{message,name,stack}`.
+	 * Sub-pipeline run when `try` throws. Has access to `ctx.error.{message,name,stack}`.
 	 * Errors thrown inside `catch` propagate — they DO NOT re-trigger catch.
 	 */
 	catch: V2Step[];
@@ -47,17 +46,17 @@ export interface TryCatchOpts {
  *   tryCatch({
  *     id: "signup-saga",
  *     try: [
- *       { id: "create", use: "user-create", inputs: { email: $.req.body.email } },
- *       { id: "notify", use: "email-send", inputs: { to: $.state.create.email } },
+ *       { id: "create", use: "user-create", inputs: { email: "js/ctx.request.body.email" } },
+ *       { id: "notify", use: "email-send", inputs: { to: "js/ctx.state.create.email" } },
  *     ],
  *     catch: [
  *       branch({
  *         id: "rollback-if-needed",
- *         when: '$.state.create !== undefined',
- *         then: [{ id: "del", use: "user-delete", inputs: { userId: $.state.create.id } }],
+ *         when: "ctx.state.create !== undefined",
+ *         then: [{ id: "del", use: "user-delete", inputs: { userId: "js/ctx.state.create.id" } }],
  *       }),
  *       { id: "respond-fail", use: "@blokjs/respond",
- *         inputs: { status: 500, body: { error: $.error.message } } },
+ *         inputs: { status: 500, body: { error: "js/ctx.error.message" } } },
  *     ],
  *     finally: [
  *       { id: "metric", use: "@blokjs/metrics-emit",
@@ -84,14 +83,14 @@ export function tryCatch(opts: TryCatchOpts): V2TryCatchStep {
 		}
 	}
 
-	const tryBlock = unwrapProxies(opts.try) as V2Step[];
-	const catchBlock = unwrapProxies(opts.catch) as V2Step[];
+	const tryBlock = opts.try as V2Step[];
+	const catchBlock = opts.catch as V2Step[];
 	const result: V2TryCatchStep = {
 		id: opts.id,
 		tryCatch: {
 			try: tryBlock,
 			catch: catchBlock,
-			...(opts.finally !== undefined ? { finally: unwrapProxies(opts.finally) as V2Step[] } : {}),
+			...(opts.finally !== undefined ? { finally: opts.finally as V2Step[] } : {}),
 		},
 		...(opts.ui !== undefined ? { ui: opts.ui } : {}),
 	};

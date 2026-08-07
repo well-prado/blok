@@ -8,12 +8,12 @@
  * HANDLE-READ guard. This file fills the gaps #422 names that none of those cover:
  *
  *  1. GOLDEN-FILE — the SAME workflow authored two ways (callback `step()`/`branch`/
- *     `forEach` vs the object-style `workflow({steps:[...]})` + `$`/`branch`/`forEach`)
- *     compiles to STRUCTURALLY IDENTICAL `_config.steps` modulo ref encoding. The
- *     callback surface emits structural `{$ref}`; the object surface emits the
- *     `js/ctx...` wire strings directly. Running the REAL load-boundary `lowerRefs`
- *     over the callback steps collapses `{$ref}` → the same wire strings, so the two
- *     trees become byte-identical — same order, same nested arms.
+ *     `forEach` vs the object-style `workflow({steps:[...]})` + literal `js/ctx...`
+ *     strings + `branch`/`forEach`) compiles to STRUCTURALLY IDENTICAL `_config.steps`
+ *     modulo ref encoding. The callback surface emits structural `{$ref}`; the object
+ *     surface emits the `js/ctx...` wire strings directly. Running the REAL
+ *     load-boundary `lowerRefs` over the callback steps collapses `{$ref}` → the same
+ *     wire strings, so the two trees become byte-identical — same order, same nested arms.
  *
  *  2. CROSS-ARM DUPLICATE ID — a step id reused across a branch then/else, across a
  *     switchOn case, across a forEach body, or between an arm and the top level throws
@@ -29,7 +29,7 @@
  */
 
 // The object-style authoring surface — the OTHER way to write the same workflow.
-import { $, branch as objBranch, forEach as objForEach, workflow as objectWorkflow } from "@blokjs/helper";
+import { branch as objBranch, forEach as objForEach, workflow as objectWorkflow } from "@blokjs/helper";
 import { lowerRefs } from "@blokjs/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -87,29 +87,29 @@ describe("golden-file: callback-style IR === object-style IR (modulo ref encodin
 			},
 		);
 
-		// ── object surface — the SAME workflow, hand-authored with `$` + helpers ──
+		// ── object surface — the SAME workflow, hand-authored with literal wire strings ──
 		const obj = objectWorkflow({
 			name: "Golden",
 			version: "1.0.0",
 			trigger: { http: { method: "POST" } },
 			steps: [
-				// `$.request` (NOT `$.req`) lowers to `js/ctx.request...` — the canonical
-				// root the callback's `@trigger` handle also lowers to. (`$.req` would
-				// lower to the `ctx.req` ALIAS string — same value at runtime, different
-				// wire bytes — which is the only "modulo ref encoding" wrinkle here.)
-				{ id: "validate", use: "node", inputs: { name: $.request.body.name } },
-				{ id: "enrich", use: "node", inputs: { id: $.state.validate.orderId } },
+				// `ctx.request` (NOT `ctx.req`) is the canonical root the callback's
+				// `@trigger` handle also lowers to. (`ctx.req` is the alias string — same
+				// value at runtime, different wire bytes — which is the only "modulo ref
+				// encoding" wrinkle here.)
+				{ id: "validate", use: "node", inputs: { name: "js/ctx.request.body.name" } },
+				{ id: "enrich", use: "node", inputs: { id: "js/ctx.state.validate.orderId" } },
 				objBranch({
 					id: "route",
-					when: $.state.validate.ok,
-					then: [{ id: "ship", use: "node", inputs: { id: $.state.enrich.shipId } }],
-					else: [{ id: "hold", use: "node", inputs: { reason: $.state.validate.reason } }],
+					when: "ctx.state.validate.ok",
+					then: [{ id: "ship", use: "node", inputs: { id: "js/ctx.state.enrich.shipId" } }],
+					else: [{ id: "hold", use: "node", inputs: { reason: "js/ctx.state.validate.reason" } }],
 				}),
 				objForEach({
 					id: "itemsResults",
-					in: $.state.validate.items,
+					in: "js/ctx.state.validate.items",
 					as: "items",
-					do: [{ id: "save", use: "node", inputs: { sku: $.state.items.sku } }],
+					do: [{ id: "save", use: "node", inputs: { sku: "js/ctx.state.items.sku" } }],
 				}),
 			],
 		});
@@ -147,7 +147,7 @@ describe("golden-file: callback-style IR === object-style IR (modulo ref encodin
 		expect((lowered[0].inputs as Record<string, unknown>).name).toBe("js/ctx.request.body.name");
 		// branch.when → BARE ctx.state (ADR 0004), exactly what conditionToExpr emits.
 		expect((lowered[1].branch as { when: string }).when).toBe("ctx.state.validate.ok");
-		// forEach.in → js/ctx.state wire string, exactly what unwrapProxies emits.
+		// forEach.in → js/ctx.state wire string, the same shape lowerRefs emits.
 		expect((lowered[2].forEach as { in: string }).in).toBe("js/ctx.state.validate.items");
 	});
 });

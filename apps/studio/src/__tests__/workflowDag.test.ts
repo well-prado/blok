@@ -221,7 +221,7 @@ describe("buildWorkflowDag · stable node ids", () => {
 							{
 								id: "fan",
 								forEach: {
-									in: "$.state.items",
+									in: "js/ctx.state.items",
 									as: "item",
 									do: [
 										{
@@ -388,7 +388,7 @@ describe("buildWorkflowDag · forEach / loop", () => {
 				{
 					id: "fan-out",
 					forEach: {
-						in: "$.state.items",
+						in: "js/ctx.state.items",
 						as: "item",
 						mode: "parallel",
 						concurrency: 5,
@@ -420,7 +420,7 @@ describe("buildWorkflowDag · forEach / loop", () => {
 			steps: [
 				{
 					id: "until-empty",
-					loop: { while: "$.state.queue.length > 0", maxIterations: 100, do: [{ id: "pop", use: "n" }] },
+					loop: { while: "ctx.state.queue.length > 0", maxIterations: 100, do: [{ id: "pop", use: "n" }] },
 				},
 			],
 		});

@@ -6,8 +6,9 @@
  * persistence; steps marked `spread: true` shallow-merge their result
  * keys into state.
  *
- * Read via `ctx.state[stepId]` or `$.state[stepId]` from a workflow's
- * `inputs`. Always initialized to `{}` at run start — never undefined.
+ * Read via `ctx.state[stepId]`, or `js/ctx.state[stepId]` (a typed handle
+ * in the `@blokjs/core` DSL) from a workflow's `inputs`. Always
+ * initialized to `{}` at run start — never undefined.
  *
  * Aliased by `ctx.vars` for backward compatibility with v1 workflows.
  *

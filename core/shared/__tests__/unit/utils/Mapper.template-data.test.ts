@@ -6,8 +6,8 @@
  * This proves that is NOT how the mapper behaves:
  *   1. A `js/ctx.state.x` reference returns the resolved value VERBATIM — the
  *      mapper does NOT re-walk that value looking for `${...}`. So data carried
- *      between steps via `$.state.x` / `js/ctx.state.x` is safe even when it
- *      contains a literal `${...}`.
+ *      between steps via `js/ctx.state.x` is safe even when it contains a
+ *      literal `${...}`.
  *   2. `${...}` interpolation only fires on AUTHORED input strings. On an
  *      unresolvable one it leaves the literal in place in warn (default) mode
  *      and only throws in strict mode — matching the code's own comment.

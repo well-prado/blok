@@ -19,7 +19,7 @@
  *   },
  *   "steps": [
  *     { "id": "sub",    "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["clock-ticks"] } },
- *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "$.state.sub", "eventName": "tick" } }
+ *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "js/ctx.state.sub", "eventName": "tick" } }
  *   ]
  * }
  * ```

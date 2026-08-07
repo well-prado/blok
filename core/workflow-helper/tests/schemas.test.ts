@@ -413,7 +413,7 @@ describe("F9 — control-flow step schema strictness", () => {
 		expect(() =>
 			V2ForEachStepSchema.parse({
 				id: "fe",
-				forEach: { in: "$.state.items", as: "item", do: [{ id: "x", use: "n" }] },
+				forEach: { in: "js/ctx.state.items", as: "item", do: [{ id: "x", use: "n" }] },
 				bogus: true,
 			}),
 		).toThrow(/[Uu]nrecognized key/);
@@ -423,7 +423,13 @@ describe("F9 — control-flow step schema strictness", () => {
 		expect(() =>
 			V2ForEachStepSchema.parse({
 				id: "fe",
-				forEach: { in: "$.state.items", as: "item", mode: "parallel", concurrency: 5, do: [{ id: "x", use: "n" }] },
+				forEach: {
+					in: "js/ctx.state.items",
+					as: "item",
+					mode: "parallel",
+					concurrency: 5,
+					do: [{ id: "x", use: "n" }],
+				},
 			}),
 		).not.toThrow();
 	});

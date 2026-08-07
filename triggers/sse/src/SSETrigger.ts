@@ -21,7 +21,7 @@
  *   },
  *   "steps": [
  *     { "id": "sub",    "use": "@blokjs/sse-subscribe", "inputs": { "channels": ["order:{orderId}"] } },
- *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "$.state.sub" } }
+ *     { "id": "stream", "use": "@blokjs/sse-stream",    "inputs": { "source": "js/ctx.state.sub" } }
  *   ]
  * }
  * ```

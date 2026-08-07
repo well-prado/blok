@@ -221,10 +221,11 @@ export class SubworkflowNode extends RunnerNode {
 		// === 4. Build the child Context ===
 		// Parent step's resolved inputs (from blueprint mapper) live on
 		// `ctx.config[this.name].inputs` — the blueprint mapper has
-		// mutated the wrapper in place, so `js/...` and `$.<path>`
-		// expressions are now concrete values. These become the child's
-		// `request.body` so the child reads them via `$.req.body.<key>`
-		// exactly as if HTTP-triggered (function-call semantics).
+		// mutated the wrapper in place, so `js/...` expressions are now
+		// concrete values. These become the child's `request.body` so the
+		// child reads them via `req.body.<key>` (typed entry handle) or
+		// `ctx.request.body.<key>` exactly as if HTTP-triggered
+		// (function-call semantics).
 		const parentNodeConfig = (ctx.config as Record<string, { inputs?: unknown }> | undefined)?.[this.name];
 		const parentInputs = parentNodeConfig?.inputs ?? {};
 		const childCtx = createChildContext(ctx, {
@@ -283,8 +284,9 @@ export class SubworkflowNode extends RunnerNode {
 
 		// === 7. Apply parent persistence + return child's response ===
 		// Mirrors HTTP function-call semantics: parent reads child output
-		// at `$.state[<this.name>]`. Child author controls the shape via
-		// `@blokjs/respond` (or the last step's natural output).
+		// via the sub-workflow step's typed handle, or `js/ctx.state[<this.name>]`
+		// in JSON. Child author controls the shape via `@blokjs/respond`
+		// (or the last step's natural output).
 		//
 		// Persistence-helper call mirrors the RuntimeAdapterNode pattern
 		// (RuntimeAdapterNode.ts:100). The parent step's `as` / `spread`

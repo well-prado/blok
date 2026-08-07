@@ -6,7 +6,7 @@ import { z } from "zod";
  * published.
  *
  * Pairs nicely with @blokjs/expr for computed batches:
- *   { id: "advance", use: "@blokjs/ctx-publish-many", inputs: { values: { lastStatus: $.state.check.status, attempt: $.state.attempt + 1 } } }
+ *   { id: "advance", use: "@blokjs/ctx-publish-many", inputs: { values: { lastStatus: "js/ctx.state.check.status", attempt: "js/ctx.state.attempt + 1" } } }
  */
 export default defineNode({
 	name: "@blokjs/ctx-publish-many",

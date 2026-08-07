@@ -49,14 +49,14 @@ interface ErrorEnvelope {
 	/**
 	 * HTTP-style status code carried by `GlobalError` (set via
 	 * `@blokjs/throw` inputs.code, or by ZodError → 400 mapping in
-	 * `defineNode.mapErrorToGlobalError`). Surfaces as `$.error.code` so
+	 * `defineNode.mapErrorToGlobalError`). Surfaces as `ctx.error.code` so
 	 * a catch arm can re-throw with the same status, branch on it
 	 * (4xx vs 5xx), or include it in an audit-log payload.
 	 */
 	code?: number;
 	/**
 	 * The id of the try-arm step that threw, extracted from the wrap
-	 * `RunnerSteps` attaches at line ~465. Surfaces as `$.error.stepId`
+	 * `RunnerSteps` attaches at line ~465. Surfaces as `ctx.error.stepId`
 	 * so a catch arm can route by failure point ("payment failed → notify
 	 * billing", "inventory failed → notify warehouse") without having to
 	 * regex the framework-decorated message.
@@ -68,7 +68,7 @@ function toErrorEnvelope(err: unknown): ErrorEnvelope {
 	// RunnerSteps wraps step throws with a per-step prefix and again at
 	// the outer catch as `GlobalError`. Both layers preserve the next-
 	// level error on `.cause`. Walk the chain to bottom so author-facing
-	// `$.error.message` is the original `throw new Error("kaboom")` text,
+	// `ctx.error.message` is the original `throw new Error("kaboom")` text,
 	// not the framework's `[step N/M] <name> failed: ...` enriched prefix.
 	//
 	// While walking, harvest two cross-layer fields:
@@ -196,7 +196,7 @@ export class TryCatchNode extends RunnerNode {
 				throw err;
 			}
 			caught = toErrorEnvelope(err);
-			// Make `$.error.message` etc. resolvable by the blueprint mapper
+			// Make `ctx.error.message` etc. resolvable by the blueprint mapper
 			// inside the catch block. Mapper reads ctx.error directly.
 			ctxAny.error = caught;
 			try {
@@ -225,7 +225,7 @@ export class TryCatchNode extends RunnerNode {
 		// supersedes a catch throw).
 		if (finallyBlock && finallyBlock.length > 0) {
 			// Restore ctx.error to its state outside this tryCatch — finally
-			// runs without `$.error` (matches JS scoping: finally doesn't see
+			// runs without `ctx.error` (matches JS scoping: finally doesn't see
 			// the bound exception variable, and catch's variable is out of
 			// scope).
 			ctxAny.error = priorError;

@@ -40,7 +40,7 @@ A node at `src/nodes/<name>/index.ts` is **auto-discovered** by its `name` (the 
 ## State & persistence
 
 - Every step auto-persists to `ctx.state[id]` **on success**; reference it via the handle
-  (`h`, `h.field`) — never `$.state.id`. A step that throws writes nothing.
+  (`h`, `h.field`). A step that throws writes nothing.
 - 4th arg to `step`: `{ as: "name" }` (rename), `{ spread: true }` (flatten output keys),
   `{ ephemeral: true }` (skip persistence — handle then unreadable), plus `idempotencyKey`,
   `retry`, `maxDuration`.

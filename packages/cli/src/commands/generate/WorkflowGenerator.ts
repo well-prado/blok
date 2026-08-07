@@ -161,8 +161,8 @@ export default class WorkflowGenerator {
 			"Please fix these errors and regenerate the workflow JSON. Common fixes:",
 			"- Ensure every step has a unique `id` and a `use` (or a `branch`) — inputs live inline; there is NO `nodes` map",
 			"- Ensure the trigger has exactly one trigger type with valid configuration",
-			"- Ensure branch `when` is a raw `ctx.*` expression (never `js/` or `$.`)",
-			"- Reference earlier outputs with `$.state.<id>` and request data with `$.req.*`",
+			"- Ensure branch `when` is a raw `ctx.*` expression (never `js/`-prefixed)",
+			"- Reference earlier outputs with `js/ctx.state.<id>` and request data with `js/ctx.request.*`",
 			"- Use a single step with `branch: { when, then, else }` for conditionals (not a `conditions` array)",
 		].join("\n");
 

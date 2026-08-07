@@ -13,7 +13,7 @@
 		{
 			"id": "route-event",
 			"switch": {
-				"on": "$.req.headers['x-github-event']",
+				"on": "js/ctx.request.headers['x-github-event']",
 				"cases": [
 					{
 						"when": "push",
@@ -22,8 +22,8 @@
 								"id": "handle",
 								"subworkflow": "handle-push",
 								"inputs": {
-									"event": "$.req.body",
-									"deliveryId": "$.req.headers['x-github-delivery']"
+									"event": "js/ctx.request.body",
+									"deliveryId": "js/ctx.request.headers['x-github-delivery']"
 								}
 							}
 						]
@@ -39,8 +39,8 @@
 								"id": "handle",
 								"subworkflow": "handle-pr-event",
 								"inputs": {
-									"event": "$.req.body",
-									"action": "$.req.body.action"
+									"event": "js/ctx.request.body",
+									"action": "js/ctx.request.body.action"
 								}
 							}
 						]
@@ -52,7 +52,7 @@
 								"id": "handle",
 								"subworkflow": "handle-issue-event",
 								"inputs": {
-									"event": "$.req.body"
+									"event": "js/ctx.request.body"
 								}
 							}
 						]
@@ -64,7 +64,7 @@
 								"id": "handle",
 								"subworkflow": "handle-release",
 								"inputs": {
-									"event": "$.req.body"
+									"event": "js/ctx.request.body"
 								}
 							}
 						]
@@ -76,7 +76,7 @@
 								"id": "handle",
 								"subworkflow": "handle-workflow-run",
 								"inputs": {
-									"event": "$.req.body"
+									"event": "js/ctx.request.body"
 								}
 							}
 						]
@@ -89,8 +89,8 @@
 						"type": "module",
 						"inputs": {
 							"event": "github-webhook-unhandled",
-							"eventType": "$.req.headers['x-github-event']",
-							"deliveryId": "$.req.headers['x-github-delivery']"
+							"eventType": "js/ctx.request.headers['x-github-event']",
+							"deliveryId": "js/ctx.request.headers['x-github-delivery']"
 						}
 					}
 				]

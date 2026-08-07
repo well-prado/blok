@@ -20,13 +20,13 @@
 			"use": "expr",
 			"type": "module",
 			"inputs": {
-				"expression": "Array.from({length: Math.ceil($.state['count-users'].total / 100)}, (_, i) => i + 1)"
+				"expression": "Array.from({length: Math.ceil(ctx.state['count-users'].total / 100)}, (_, i) => i + 1)"
 			}
 		},
 		{
 			"id": "fetch-pages",
 			"forEach": {
-				"in": "$.state['build-page-list']",
+				"in": "js/ctx.state['build-page-list']",
 				"as": "page",
 				"mode": "sequential",
 				"do": [
@@ -48,10 +48,10 @@
 										"url": "https://api.example.com/users",
 										"method": "GET",
 										"headers": {
-											"Authorization": "Bearer $.env.UPSTREAM_API_TOKEN"
+											"Authorization": "js/`Bearer ${ctx.env.UPSTREAM_API_TOKEN}`"
 										},
 										"query": {
-											"page": "$.state.page",
+											"page": "js/ctx.state.page",
 											"size": 100
 										}
 									}
@@ -65,10 +65,10 @@
 									"inputs": {
 										"table": "export_failures",
 										"data": {
-											"exportId": "$.req.body.exportId",
-											"page": "$.state.page",
-											"error": "$.error.message",
-											"errorCode": "$.error.code",
+											"exportId": "js/ctx.request.body.exportId",
+											"page": "js/ctx.state.page",
+											"error": "js/ctx.error.message",
+											"errorCode": "js/ctx.error.code",
 											"failedAt": "new Date().toISOString()"
 										}
 									}
@@ -83,16 +83,16 @@
 			"id": "assemble",
 			"use": "export-assemble",
 			"type": "module",
-			"idempotencyKey": "export-$.req.body.exportId",
+			"idempotencyKey": "js/`export-${ctx.request.body.exportId}`",
 			"maxDuration": "120s",
 			"inputs": {
-				"exportId": "$.req.body.exportId",
-				"pages": "$.state['fetch-pages'].filter(p => p['fetch'] !== undefined)",
+				"exportId": "js/ctx.request.body.exportId",
+				"pages": "js/ctx.state['fetch-pages'].filter(p => p['fetch'] !== undefined)",
 				"format": "csv",
 				"destination": {
 					"type": "s3",
-					"bucket": "$.env.EXPORT_BUCKET",
-					"key": "exports/$.req.body.exportId.csv"
+					"bucket": "js/ctx.env.EXPORT_BUCKET",
+					"key": "js/`exports/${ctx.request.body.exportId}.csv`"
 				}
 			}
 		},
@@ -103,11 +103,11 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"exportId": "$.req.body.exportId",
-					"url": "$.state.assemble.s3Url",
-					"rowCount": "$.state.assemble.totalRows",
-					"failedPages": "$.state.assemble.failedPageCount",
-					"dlqUrl": "/exports/$.req.body.exportId/failures"
+					"exportId": "js/ctx.request.body.exportId",
+					"url": "js/ctx.state.assemble.s3Url",
+					"rowCount": "js/ctx.state.assemble.totalRows",
+					"failedPages": "js/ctx.state.assemble.failedPageCount",
+					"dlqUrl": "js/`/exports/${ctx.request.body.exportId}/failures`"
 				}
 			}
 		}

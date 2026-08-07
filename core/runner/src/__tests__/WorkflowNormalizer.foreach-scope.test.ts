@@ -19,7 +19,7 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 					{
 						id: "each",
 						forEach: {
-							in: "$.req.body.items",
+							in: "js/ctx.request.body.items",
 							as: "item",
 							do: [step("process")],
 						},
@@ -37,7 +37,7 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 					{
 						id: "each",
 						forEach: {
-							in: "$.req.body.items",
+							in: "js/ctx.request.body.items",
 							as: "x",
 							do: [step("process")],
 						},
@@ -55,7 +55,7 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 					{
 						id: "each",
 						forEach: {
-							in: "$.req.body.items",
+							in: "js/ctx.request.body.items",
 							as: "out",
 							do: [step("process")],
 						},
@@ -72,7 +72,7 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 				{
 					id: "each",
 					forEach: {
-						in: "$.req.body.items",
+						in: "js/ctx.request.body.items",
 						as: "item",
 						do: [step("process")],
 					},
@@ -90,13 +90,13 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 					{
 						id: "outer",
 						forEach: {
-							in: "$.req.body.rows",
+							in: "js/ctx.request.body.rows",
 							as: "row",
 							do: [
 								{
 									id: "inner",
 									forEach: {
-										in: "$.state.row.items",
+										in: "js/ctx.state.row.items",
 										as: "row",
 										do: [step("process")],
 									},
@@ -123,7 +123,7 @@ describe("WorkflowNormalizer forEach item scope guard", () => {
 								{
 									id: "each",
 									forEach: {
-										in: "$.req.body.items",
+										in: "js/ctx.request.body.items",
 										as: "handle",
 										do: [step("process")],
 									},

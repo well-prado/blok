@@ -93,7 +93,8 @@ type Context = {
 	 * Alias for `ctx.state` — same underlying object. v2 authoring
 	 * uses `state`; v1 authoring used `vars`. Both work.
 	 *
-	 * @deprecated Prefer `ctx.state` (or `$.state.<id>` from inputs).
+	 * @deprecated Prefer `ctx.state` (or `js/ctx.state.<id>` / a typed
+	 * handle from inputs).
 	 */
 	vars?: VarsContext;
 

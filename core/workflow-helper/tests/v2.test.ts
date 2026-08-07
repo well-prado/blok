@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
-	$,
 	WORKFLOW_IR_VERSION,
 	WorkflowIRSchema,
 	branch,
@@ -11,73 +10,7 @@ import {
 	tryCatch,
 	workflow,
 } from "../src/index";
-import { JS_EXPR_TAG, type V2Step, unwrapProxies } from "../src/internal";
-
-describe("v2 DSL — $ proxy", () => {
-	it("compiles property access to js/ctx.<path> via toString()", () => {
-		expect(String($.req.body.id)).toBe("js/ctx.req.body.id");
-		expect(String($.state.users)).toBe("js/ctx.state.users");
-		expect(String($.prev.data)).toBe("js/ctx.prev.data");
-	});
-
-	it("compiles bracket access for hyphenated keys", () => {
-		const expr = $.state["my-step"];
-		expect(String(expr)).toBe('js/ctx.state["my-step"]');
-	});
-
-	it("compiles numeric index access with bracket notation", () => {
-		expect(String($.state.users[0])).toBe("js/ctx.state.users[0]");
-		expect(String($.state.items[42].name)).toBe("js/ctx.state.items[42].name");
-	});
-
-	it("toJSON returns the compiled string for JSON.stringify", () => {
-		const wrapped = { url: $.req.body.url };
-		const json = JSON.parse(JSON.stringify(wrapped));
-		expect(json.url).toBe("js/ctx.req.body.url");
-	});
-
-	it("Symbol.toPrimitive returns the compiled string", () => {
-		expect(`${$.state.foo}`).toBe("js/ctx.state.foo");
-	});
-
-	it("does not pretend to be a thenable (no .then)", () => {
-		expect(($.state as unknown as { then?: unknown }).then).toBeUndefined();
-	});
-
-	it("carries the JS_EXPR_TAG symbol for unwrap detection", () => {
-		const tagged = $.state.x as unknown as { [JS_EXPR_TAG]: string };
-		expect(tagged[JS_EXPR_TAG]).toBe("ctx.state.x");
-	});
-});
-
-describe("v2 DSL — unwrapProxies", () => {
-	it("converts proxy values to js/ strings inside objects", () => {
-		const input = { url: $.req.body.url, id: $.req.params.id };
-		const out = unwrapProxies(input) as Record<string, unknown>;
-		expect(out.url).toBe("js/ctx.req.body.url");
-		expect(out.id).toBe("js/ctx.req.params.id");
-	});
-
-	it("recurses into nested objects and arrays", () => {
-		const input = {
-			a: { b: $.state.x, c: [$.state.y, "literal", { d: $.req.body.z }] },
-		};
-		const out = unwrapProxies(input) as Record<string, unknown>;
-		const a = out.a as { b: unknown; c: unknown[] };
-		expect(a.b).toBe("js/ctx.state.x");
-		expect(a.c[0]).toBe("js/ctx.state.y");
-		expect(a.c[1]).toBe("literal");
-		expect((a.c[2] as { d: unknown }).d).toBe("js/ctx.req.body.z");
-	});
-
-	it("leaves primitives untouched", () => {
-		expect(unwrapProxies("hello")).toBe("hello");
-		expect(unwrapProxies(42)).toBe(42);
-		expect(unwrapProxies(null)).toBe(null);
-		expect(unwrapProxies(undefined)).toBe(undefined);
-		expect(unwrapProxies(true)).toBe(true);
-	});
-});
+import type { V2Step } from "../src/internal";
 
 describe("v2 DSL — workflow() factory", () => {
 	it("exports the public IR schema contract", () => {
@@ -97,7 +30,7 @@ describe("v2 DSL — workflow() factory", () => {
 		expect(wf._config.steps).toHaveLength(1);
 	});
 
-	it("compiles $ proxy expressions in inputs at definition time", () => {
+	it("passes literal js/ctx expression strings through inputs unchanged", () => {
 		const wf = workflow({
 			name: "Test",
 			version: "1.0.0",
@@ -106,30 +39,30 @@ describe("v2 DSL — workflow() factory", () => {
 				{
 					id: "echo",
 					use: "@blokjs/respond",
-					inputs: { body: $.req.body, who: $.req.params.id },
+					inputs: { body: "js/ctx.request.body", who: "js/ctx.request.params.id" },
 				},
 			],
 		});
 		const step = wf._config.steps[0] as { inputs: Record<string, unknown> };
-		expect(step.inputs.body).toBe("js/ctx.req.body");
-		expect(step.inputs.who).toBe("js/ctx.req.params.id");
+		expect(step.inputs.body).toBe("js/ctx.request.body");
+		expect(step.inputs.who).toBe("js/ctx.request.params.id");
 	});
 
-	it("compiles $ proxy expressions in trigger concurrencyKey before trigger validation", () => {
+	it("passes a literal js/ctx concurrencyKey through to trigger validation", () => {
 		const wf = workflow({
 			name: "Gated",
 			version: "1.0.0",
 			trigger: {
 				http: {
 					method: "POST",
-					concurrencyKey: $.req.body.tenantId as unknown as string,
+					concurrencyKey: "js/ctx.request.body.tenantId",
 					concurrencyLimit: 2,
 				},
 			},
 			steps: [{ id: "echo", use: "@blokjs/respond", inputs: { body: "ok" } }],
 		});
 		const http = wf._config.trigger?.http as { concurrencyKey: string; concurrencyLimit: number };
-		expect(http.concurrencyKey).toBe("js/ctx.req.body.tenantId");
+		expect(http.concurrencyKey).toBe("js/ctx.request.body.tenantId");
 		expect(http.concurrencyLimit).toBe(2);
 	});
 
@@ -165,7 +98,7 @@ describe("v2 DSL — workflow() factory", () => {
 					{ id: "item", use: "@blokjs/foo", inputs: {} },
 					forEach({
 						id: "each",
-						in: "$.state.items",
+						in: "js/ctx.state.items",
 						as: "item",
 						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
 					}),
@@ -184,7 +117,7 @@ describe("v2 DSL — workflow() factory", () => {
 					{ id: "xIndex", use: "@blokjs/foo", inputs: {} },
 					forEach({
 						id: "each",
-						in: "$.state.items",
+						in: "js/ctx.state.items",
 						as: "x",
 						do: [{ id: "process", use: "@blokjs/foo", inputs: {} }],
 					}),
@@ -407,7 +340,7 @@ describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
 		expect(step.idempotencyKeyTTL).toBe(60_000);
 	});
 
-	it("compiles a $ proxy idempotencyKey to its js/ctx string at definition time", () => {
+	it("passes a literal js/ctx idempotencyKey through unchanged", () => {
 		const wf = workflow({
 			name: "Idem",
 			version: "1.0.0",
@@ -417,12 +350,12 @@ describe("v2 DSL — workflow() with idempotencyKey + retry", () => {
 					id: "fetch",
 					use: "@blokjs/api-call",
 					inputs: { url: "https://example.com" },
-					idempotencyKey: $.req.body.requestId as unknown as string,
+					idempotencyKey: "js/ctx.request.body.requestId",
 				},
 			],
 		});
 		const step = wf._config.steps[0] as { idempotencyKey: string };
-		expect(step.idempotencyKey).toBe("js/ctx.req.body.requestId");
+		expect(step.idempotencyKey).toBe("js/ctx.request.body.requestId");
 	});
 
 	it("preserves a retry block on the compiled step", () => {
@@ -490,7 +423,7 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 		expect(step.subworkflow).toBe("send-receipt");
 	});
 
-	it("compiles $ proxy expressions inside sub-workflow inputs", () => {
+	it("passes literal js/ctx expressions inside sub-workflow inputs through unchanged", () => {
 		const wf = workflow({
 			name: "Parent",
 			version: "1.0.0",
@@ -499,16 +432,16 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 				{
 					id: "notify",
 					subworkflow: "send-email",
-					inputs: { to: $.req.body.email, subject: $.state.subject },
+					inputs: { to: "js/ctx.request.body.email", subject: "js/ctx.state.subject" },
 				},
 			],
 		});
 		const step = wf._config.steps[0] as { inputs: Record<string, unknown> };
-		expect(step.inputs.to).toBe("js/ctx.req.body.email");
+		expect(step.inputs.to).toBe("js/ctx.request.body.email");
 		expect(step.inputs.subject).toBe("js/ctx.state.subject");
 	});
 
-	it("compiles a $ proxy polymorphic subworkflow name and keeps allowList", () => {
+	it("passes a literal js/ctx polymorphic subworkflow name through and keeps allowList", () => {
 		const wf = workflow({
 			name: "Router",
 			version: "1.0.0",
@@ -516,13 +449,13 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 			steps: [
 				{
 					id: "dispatch",
-					subworkflow: $.req.body.kind as unknown as string,
+					subworkflow: "js/ctx.request.body.kind",
 					allowList: ["handler.payment"],
 				},
 			],
 		});
 		const step = wf._config.steps[0] as { subworkflow: string; allowList: string[] };
-		expect(step.subworkflow).toBe("js/ctx.req.body.kind");
+		expect(step.subworkflow).toBe("js/ctx.request.body.kind");
 		expect(step.allowList).toEqual(["handler.payment"]);
 	});
 
@@ -535,8 +468,8 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 				{
 					id: "expensive",
 					subworkflow: "llm-pipeline",
-					inputs: { topic: $.req.body.topic },
-					idempotencyKey: $.req.body.requestId as unknown as string,
+					inputs: { topic: "js/ctx.request.body.topic" },
+					idempotencyKey: "js/ctx.request.body.requestId",
 					retry: { maxAttempts: 3 },
 				},
 			],
@@ -545,7 +478,7 @@ describe("v2 DSL — workflow() with sub-workflow steps", () => {
 			idempotencyKey: string;
 			retry: { maxAttempts: number };
 		};
-		expect(step.idempotencyKey).toBe("js/ctx.req.body.requestId");
+		expect(step.idempotencyKey).toBe("js/ctx.request.body.requestId");
 		expect(step.retry.maxAttempts).toBe(3);
 	});
 
@@ -586,20 +519,20 @@ describe("v2 DSL — branch() primitive", () => {
 		expect(b.branch.else).toHaveLength(1);
 	});
 
-	it("compiles a $ proxy `when` expression to a string", () => {
+	it("passes a bare ctx path when expression through as a string", () => {
 		const b = branch({
 			id: "x",
-			when: $.req.query.kind,
+			when: "ctx.request.query.kind",
 			then: [{ id: "a", use: "@blokjs/respond", inputs: {} }],
 		});
 		expect(b.branch.when).toBe("ctx.request.query.kind");
 	});
 
-	it("compiles $ proxy expressions inside nested step inputs", () => {
+	it("passes literal js/ctx expressions inside nested step inputs through unchanged", () => {
 		const b = branch({
 			id: "x",
-			when: '$.req.method === "GET"',
-			then: [{ id: "respond", use: "@blokjs/respond", inputs: { body: $.state.fetch } }],
+			when: 'ctx.request.method === "GET"',
+			then: [{ id: "respond", use: "@blokjs/respond", inputs: { body: "js/ctx.state.fetch" } }],
 		});
 		const step = b.branch.then[0] as { inputs: Record<string, unknown> };
 		expect(step.inputs.body).toBe("js/ctx.state.fetch");
@@ -629,9 +562,9 @@ describe("v2 DSL — ui metadata", () => {
 
 	it("preserves ui from control-flow helper factories", () => {
 		expect(branch({ id: "b", when: "true", then: [step], ui }).ui).toEqual(ui);
-		expect(forEach({ id: "fe", in: "$.state.items", as: "item", do: [step], ui }).ui).toEqual(ui);
+		expect(forEach({ id: "fe", in: "js/ctx.state.items", as: "item", do: [step], ui }).ui).toEqual(ui);
 		expect(loop({ id: "lp", while: "ctx.state.keepGoing", do: [step], ui }).ui).toEqual(ui);
-		expect(switchOn({ id: "sw", on: "$.state.kind", cases: [{ when: "a", do: [step] }], ui }).ui).toEqual(ui);
+		expect(switchOn({ id: "sw", on: "js/ctx.state.kind", cases: [{ when: "a", do: [step] }], ui }).ui).toEqual(ui);
 		expect(tryCatch({ id: "tc", try: [step], catch: [{ id: "c", use: "@blokjs/respond" }], ui }).ui).toEqual(ui);
 	});
 });

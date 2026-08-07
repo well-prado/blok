@@ -21,9 +21,9 @@
  *       "id": "broadcast",
  *       "use": "@blokjs/ws-broadcast",
  *       "inputs": {
- *         "room": "$.req.params.roomId",
+ *         "room": "js/ctx.request.params.roomId",
  *         "event": "message",
- *         "payload": { "from": "$.state.identity.userId", "text": "$.req.body.data.text" }
+ *         "payload": { "from": "js/ctx.state.identity.userId", "text": "js/ctx.request.body.data.text" }
  *       }
  *     }
  *   ]

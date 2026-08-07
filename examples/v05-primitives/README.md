@@ -28,7 +28,7 @@ The point is to evaluate **readability** before shipping any code. Read each fil
 
 - The `wait`, `branch`, `subworkflow`, regular step shapes — these already work today (v0.4).
 - Step-level `retry`, `idempotencyKey`, `maxDuration`, `concurrencyKey` — these already work today (Tier 1 + Tier 2).
-- The proxy expressions `$.req`, `$.state`, `$.env`, `$.error`, `$.prev` — already work today.
+- The `js/ctx....` mapper expressions and raw `ctx....` branch/loop conditions — already work today. (The old `$`-proxy shorthand for request/state/env/error/prev access has been removed; see the migration guide's "$ removal" entry.)
 
 The new shapes the examples assume:
 
@@ -38,7 +38,7 @@ The new shapes the examples assume:
 - **`tryCatch`** step shape with `{ try, catch, finally }` config
 - **`middleware: true`** flag on the workflow envelope (marks a middleware-only workflow with no trigger)
 - **`middleware: string[]`** field on `trigger.<kind>.middleware` AND on the workflow envelope
-- **`$.error`** proxy accessible inside `catch` arms (carries `message`, `code`, `name`, `stack`)
+- **`ctx.error`** accessible inside `catch` arms (carries `message`, `code`, `name`, `stack`) via `js/ctx.error.<path>`
 - A new `WorkflowRegistry.useGlobalMiddleware(names: string[])` API for process-wide middleware
 
 ## Reading order

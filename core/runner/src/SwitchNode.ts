@@ -120,7 +120,7 @@ export class SwitchNode extends RunnerNode {
 
 		if (selected === undefined || selected.length === 0) {
 			// No matching case + no default → no-op success. State
-			// entry is `null` so downstream `$.state[<id>]` reads return
+			// entry is `null` so downstream `ctx.state[<id>]` reads return
 			// null (not undefined) — keeps the persistence model uniform.
 			applyStepOutput(ctx, this, { data: null });
 			// Preserve the previous step's ctx.response so the NEXT

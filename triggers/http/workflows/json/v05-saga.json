@@ -1,7 +1,7 @@
 {
 	"name": "v05-saga",
 	"version": "1.0.0",
-	"description": "v0.5 tryCatch primitive — multi-step saga with rollback. The caller controls the middle step's URL so the same workflow exercises both the success and failure paths: pass `https://httpbin.org/post` for all-success, or `https://httpbin.org/status/500` to force a failure mid-flight. Catch arm reads `$.error.message` to record what blew up. Finally arm always runs, capturing the outcome metric. Demonstrates: tryCatch with all three arms, $.error proxy resolution inside catch, finally executing on both success and error paths.",
+	"description": "v0.5 tryCatch primitive — multi-step saga with rollback. The caller controls the middle step's URL so the same workflow exercises both the success and failure paths: pass `https://httpbin.org/post` for all-success, or `https://httpbin.org/status/500` to force a failure mid-flight. Catch arm reads `js/ctx.error.message` to record what blew up. Finally arm always runs, capturing the outcome metric. Demonstrates: tryCatch with all three arms, ctx.error resolution inside catch, finally executing on both success and error paths.",
 	"trigger": {
 		"http": {
 			"method": "POST",

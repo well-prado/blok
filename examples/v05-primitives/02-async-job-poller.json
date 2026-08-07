@@ -17,13 +17,13 @@
 			"inputs": {
 				"url": "https://api.example.com/jobs",
 				"method": "POST",
-				"body": "$.req.body"
+				"body": "js/ctx.request.body"
 			}
 		},
 		{
 			"id": "poll-until-terminal",
 			"loop": {
-				"while": "$.state['check-status'] === undefined || $.state['check-status'].status === 'pending' || $.state['check-status'].status === 'running'",
+				"while": "ctx.state['check-status'] === undefined || ctx.state['check-status'].status === 'pending' || ctx.state['check-status'].status === 'running'",
 				"maxIterations": 60,
 				"do": [
 					{
@@ -35,7 +35,7 @@
 						"use": "@blokjs/api-call",
 						"type": "module",
 						"inputs": {
-							"url": "https://api.example.com/jobs/$.state['submit-job'].id",
+							"url": "js/`https://api.example.com/jobs/${ctx.state['submit-job'].id}`",
 							"method": "GET"
 						}
 					}
@@ -45,7 +45,7 @@
 		{
 			"id": "respond-by-status",
 			"switch": {
-				"on": "$.state['check-status'].status",
+				"on": "js/ctx.state['check-status'].status",
 				"cases": [
 					{
 						"when": "done",
@@ -56,7 +56,7 @@
 								"type": "module",
 								"inputs": {
 									"status": 200,
-									"body": "$.state['check-status'].result"
+									"body": "js/ctx.state['check-status'].result"
 								}
 							}
 						]
@@ -72,7 +72,7 @@
 									"status": 502,
 									"body": {
 										"error": "Job failed",
-										"reason": "$.state['check-status'].error"
+										"reason": "js/ctx.state['check-status'].error"
 									}
 								}
 							}
@@ -88,7 +88,7 @@
 							"status": 504,
 							"body": {
 								"error": "Job poll timeout",
-								"jobId": "$.state['submit-job'].id"
+								"jobId": "js/ctx.state['submit-job'].id"
 							}
 						}
 					}

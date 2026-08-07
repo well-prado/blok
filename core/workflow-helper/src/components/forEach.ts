@@ -1,13 +1,10 @@
-import { unwrapProxies } from "../proxy/$";
 import type { V2ForEachStep, V2Step, V2StepUi } from "../types/StepOpts";
 import { assertNoForEachStateKeyCollisions } from "../utils/forEachScope";
 
 /**
  * Author-facing options for {@link forEach}.
  *
- * `in` accepts either a literal expression string (`"$.state.items"` or
- * `"js/ctx.state.items"`) or a `$` proxy expression that compiles to
- * the same string at definition time.
+ * `in` accepts a literal expression string (e.g. `"js/ctx.state.items"`).
  *
  * `as` is the per-iteration variable name. Each iteration sets
  * `ctx.state[as]` to the current item and `ctx.state[as + "Index"]`
@@ -15,9 +12,9 @@ import { assertNoForEachStateKeyCollisions } from "../utils/forEachScope";
  * any step `id` in the surrounding workflow.
  */
 export interface ForEachOpts {
-	/** Stable identifier — visible in traces, referenced as `$.state[id]`. */
+	/** Stable identifier — visible in traces, referenced as `ctx.state[id]`. */
 	id: string;
-	/** Array source. Literal expression string or `$` proxy. */
+	/** Array source. Literal expression string. */
 	in: string | unknown;
 	/**
 	 * Per-iteration variable name. Each iteration sets `ctx.state[as] = item`
@@ -47,12 +44,12 @@ export interface ForEachOpts {
  * @example
  *   forEach({
  *     id: "process-items",
- *     in: $.req.body.items,
+ *     in: "js/ctx.request.body.items",
  *     as: "item",
  *     mode: "parallel",
  *     concurrency: 5,
  *     do: [
- *       { id: "reserve", use: "inventory-reserve", inputs: { sku: $.state.item.sku } },
+ *       { id: "reserve", use: "inventory-reserve", inputs: { sku: "js/ctx.state.item.sku" } },
  *     ],
  *   })
  */
@@ -84,8 +81,8 @@ export function forEach(opts: ForEachOpts): V2ForEachStep {
 		}
 	}
 
-	const inExpr = unwrapProxies(opts.in);
-	const innerSteps = unwrapProxies(opts.do) as V2Step[];
+	const inExpr = opts.in;
+	const innerSteps = opts.do as V2Step[];
 	assertNoForEachStateKeyCollisions(
 		[{ id: opts.id, forEach: { in: inExpr, as: opts.as, do: innerSteps } }],
 		`forEach("${opts.id}")`,

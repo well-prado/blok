@@ -414,7 +414,7 @@ export default workflow("order-intake", { version: "1.0.0", trigger: http.post("
 **The entry handle** (the callback's argument) is the trigger payload — typed and conventionally named per trigger: \`http\`→\`req\`, \`webhook\`→\`event\`, \`cron\`→\`tick\`, \`worker\`→\`job\`, \`pubsub\`→\`msg\`, \`grpc\`→\`rpc\` (others get a loose handle). Read \`req.body\`, \`req.params.id\`, \`req.query.q\`, \`req.headers["x-…"]\`.
 
 **Handles & persistence:**
-- \`const h = step("id", node, inputs)\` — every step auto-persists to \`ctx.state["id"]\` on success; \`h\` / \`h.field\` is how you reference it later (never \`$.state.id\`).
+- \`const h = step("id", node, inputs)\` — every step auto-persists to \`ctx.state["id"]\` on success; \`h\` / \`h.field\` is how you reference it later (never a raw \`"js/ctx.state.id"\` string).
 - 4th arg \`opts\`: \`{ as: "name" }\` roots the handle at \`state["name"]\`; \`{ spread: true }\` flattens \`result.data\` into state (mutually exclusive with \`as\`); \`{ ephemeral: true }\` skips persistence (handle then unreadable downstream); also \`idempotencyKey\`, \`retry\`, \`maxDuration\`, \`type: "runtime.<lang>"\`.
 - \`tpl\`…\${h.field}…\`\` builds a string with embedded handle refs.
 - Comparators (typed): \`eq, ne, gt, gte, lt, lte, not\`. A bare boolean handle is a truthiness check.
@@ -757,18 +757,18 @@ The request decodes into \`ctx.request.body\`; the final step output becomes the
 
 ## 3. AUTHORING WORKFLOWS — object-style & JSON (legacy; see §0 for the canonical typed-handle DSL)
 
-§0 covers the canonical typed-handle DSL (\`workflow(name, { trigger }, (entry) => { ... })\`). This section documents the **equivalent object-style form** (\`@blokjs/helper\`, one \`workflow({...})\` object literal with \`$\` reads) and JSON — both still fully supported for migrating and maintaining existing workflows; all three compile to the same IR. The persistence knobs and control-flow semantics below apply to every form.
+§0 covers the canonical typed-handle DSL (\`workflow(name, { trigger }, (entry) => { ... })\`). This section documents the **equivalent object-style form** (\`@blokjs/helper\`, one \`workflow({...})\` object literal with plain string ctx reads) and JSON — both still fully supported for migrating and maintaining existing workflows; all three compile to the same IR. The persistence knobs and control-flow semantics below apply to every form.
 
 \`\`\`ts
-import { workflow, $ } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 
 export default workflow({
   name: "Process Order",      // >= 3 chars
   version: "1.0.0",            // semver x.x.x (>= 5 chars)
   trigger: { http: { method: "POST", path: "/orders" } },  // path optional → derived from file path
   steps: [
-    { id: "validate", use: "order-validator", inputs: { order: $.req.body } },
-    { id: "save",     use: "order-store",     inputs: { data: $.state.validate } },
+    { id: "validate", use: "order-validator", inputs: { order: "js/ctx.request.body" } },
+    { id: "save",     use: "order-store",     inputs: { data: "js/ctx.state.validate" } },
   ],
 });
 \`\`\`
@@ -779,12 +779,12 @@ A regular step is \`{ id, use, inputs }\`. \`id\` is required and unique workflo
 
 | Read | Resolves to | Scope |
 |---|---|---|
-| \`$.state.<id>\` | A prior step's stored output | Whole workflow (cross-step) |
-| \`$.prev\` | Immediately previous step's output | Adjacent only — overwritten every step |
-| \`$.req\` | Request envelope (body/headers/params/query/method/url) | Whole run |
-| \`$.error\` | Captured error inside a \`tryCatch.catch\` block | \`catch\` arm only — \`undefined\` elsewhere |
+| \`"js/ctx.state.<id>"\` | A prior step's stored output | Whole workflow (cross-step) |
+| \`"js/ctx.response.<path>"\` | Immediately previous step's output | Adjacent only — overwritten every step |
+| \`"js/ctx.request.<path>"\` | Request envelope (body/headers/params/query/method/url) | Whole run |
+| \`"js/ctx.error.<path>"\` | Captured error inside a \`tryCatch.catch\` block | \`catch\` arm only — \`undefined\` elsewhere |
 
-\`$.error\` exposes \`.message\`, \`.name\`, \`.stack\`, \`.code\` (upstream HTTP status), and \`.stepId\`. The \`$\` proxy compiles to \`"js/ctx.<path>"\` strings at definition time — in JSON workflows write those strings by hand (\`"$.state.fetch"\` or \`"js/ctx.state.fetch"\`). Legacy aliases still resolve: \`$.request\`=\`$.req\`, \`$.response\`=\`$.prev\`, \`$.vars\`=\`$.state\` — prefer the canonical four.
+\`ctx.error\` exposes \`.message\`, \`.name\`, \`.stack\`, \`.code\` (upstream HTTP status), and \`.stepId\`. Object-style and JSON workflows read context via plain strings — a \`"js/..."\` prefix evaluates the rest as a full JS expression against the live \`ctx\`; write these strings by hand (\`"js/ctx.state.fetch"\`). \`ctx.vars\` is a legacy alias for \`ctx.state\` — prefer \`ctx.state\`. (The old \`$\` proxy shorthand for these reads has been removed.)
 
 ### Persistence knobs (per-step, declarative)
 
@@ -793,17 +793,17 @@ A regular step is \`{ id, use, inputs }\`. \`id\` is required and unique workflo
 | *(none)* | Store at \`ctx.state[id]\` (the 95% case) |
 | \`as: "name"\` | Store at \`ctx.state[name]\` instead of \`ctx.state[id]\` |
 | \`spread: true\` | Shallow-merge \`result.data\`'s top-level keys into \`ctx.state\` (multi-output nodes). Mutually exclusive with \`as\` |
-| \`ephemeral: true\` | Skip storage — only \`$.prev\` carries it to the next step (logging, audit) |
+| \`ephemeral: true\` | Skip storage — only \`ctx.response\` (the previous step) carries it to the next step (logging, audit) |
 
 **Every step's output auto-persists to \`ctx.state[id]\` — but ONLY on success.** A step that throws writes nothing, so \`ctx.state[<id>] === undefined\` is a truthful "did this step succeed?" check inside a \`tryCatch.catch\` arm.
 
 ### Control-flow primitives
 
-**\`branch({when, then, else})\`** — \`when\` is a JS-expression *string* (the \`$\` proxy can't intercept \`===\`):
+**\`branch({when, then, else})\`** — \`when\` is a raw \`ctx.*\` JS-expression *string* (no \`js/\` prefix):
 
 \`\`\`ts
 branch({ id: "route",
-  when: '$.req.method === "POST"',
+  when: 'ctx.request.method === "POST"',
   then: [{ id: "create", use: "...", inputs: {...} }],
   else: [{ id: "read",   use: "...", inputs: {...} }] })
 \`\`\`
@@ -811,7 +811,7 @@ branch({ id: "route",
 **\`switchOn({id, on, cases, default?})\`** — N-way branch, first match wins. \`when\` may be a scalar (\`on === when\`) or an array (\`array.includes(on)\`):
 
 \`\`\`ts
-switchOn({ id: "route-by-event", on: $.req.headers["x-github-event"],
+switchOn({ id: "route-by-event", on: "js/ctx.request.headers['x-github-event']",
   cases: [
     { when: "push",                        do: [{ id: "h1", subworkflow: "handle-push" }] },
     { when: ["pull_request", "pr_review"], do: [{ id: "h2", subworkflow: "handle-pr" }] },
@@ -819,23 +819,23 @@ switchOn({ id: "route-by-event", on: $.req.headers["x-github-event"],
   default: [{ id: "log", use: "@blokjs/log", inputs: { message: "unknown" } }] })
 \`\`\`
 
-**\`forEach({id, in, as, do, mode?, concurrency?})\`** — iterate a collection. Each iteration sets \`ctx.state[as]\` = item and \`ctx.state[<as>Index]\` = i; the loop's own slot \`$.state[<id>]\` is the array of each iteration's last-step output. \`mode: "parallel"\` runs with bounded \`concurrency\` (default 10):
+**\`forEach({id, in, as, do, mode?, concurrency?})\`** — iterate a collection. Each iteration sets \`ctx.state[as]\` = item and \`ctx.state[<as>Index]\` = i; the loop's own slot \`ctx.state[<id>]\` is the array of each iteration's last-step output. \`mode: "parallel"\` runs with bounded \`concurrency\` (default 10):
 
 \`\`\`ts
-forEach({ id: "process-items", in: $.req.body.items, as: "item",
+forEach({ id: "process-items", in: "js/ctx.request.body.items", as: "item",
   mode: "parallel", concurrency: 5,
-  do: [{ id: "reserve", use: "inventory-reserve", inputs: { sku: $.state.item.sku } }] })
+  do: [{ id: "reserve", use: "inventory-reserve", inputs: { sku: "js/ctx.state.item.sku" } }] })
 \`\`\`
 
 **\`loop({id, while, do, maxIterations?})\`** — while-loop, hard cap default 1000.
-**\`tryCatch({id, try, catch, finally?})\`** — \`catch\` sees \`$.error\`; errors in \`catch\` propagate (don't re-trigger \`catch\`); \`finally\` runs unconditionally.
+**\`tryCatch({id, try, catch, finally?})\`** — \`catch\` sees \`ctx.error\` (via \`"js/ctx.error.<path>"\`); errors in \`catch\` propagate (don't re-trigger \`catch\`); \`finally\` runs unconditionally.
 **\`{ id, wait: { for: "3d" } | { until: <date> } }\`** — durable pause; cannot combine with \`idempotencyKey\` or \`retry\`.
 
 ### Caching, retry, sub-workflows (per-step)
 
 \`\`\`ts
 { id: "fetch", use: "@blokjs/api-call", inputs: { url: "..." },
-  idempotencyKey: $.req.body.requestId,   // cache by (workflow, step.id, key); default TTL 24h
+  idempotencyKey: "js/ctx.request.body.requestId",   // cache by (workflow, step.id, key); default TTL 24h
   retry: { maxAttempts: 3, minTimeoutInMs: 500, maxTimeoutInMs: 10000, factor: 2 },
   maxDuration: "30s" }                     // per-attempt timeout; final-attempt timeout → run "timedOut"
 \`\`\`
@@ -846,15 +846,15 @@ A cache hit replays the cached result through the same \`ephemeral\`/\`spread\`/
 
 \`\`\`ts
 { id: "send-receipt", subworkflow: "send-receipt-email",
-  inputs: { user: $.state.user },   // becomes child's ctx.request.body (read via $.req.body)
+  inputs: { user: "js/ctx.state.user" },   // becomes child's ctx.request.body (read via "js/ctx.request.body")
   wait: true }                       // default: parent blocks, child response lands at state[id]
 \`\`\`
 
-\`wait: false\` = fire-and-forget, returns \`{runId, workflowName, scheduledAt}\`. \`subworkflow:\` also accepts a \`$.<path>\`/\`js/...\` expression for polymorphic dispatch — pair with \`allowList: [...]\` whenever it depends on caller data. Recursion capped at 10 (\`BLOK_MAX_SUBWORKFLOW_DEPTH\`).
+\`wait: false\` = fire-and-forget, returns \`{runId, workflowName, scheduledAt}\`. \`subworkflow:\` also accepts a \`js/...\` expression for polymorphic dispatch — pair with \`allowList: [...]\` whenever it depends on caller data. Recursion capped at 10 (\`BLOK_MAX_SUBWORKFLOW_DEPTH\`).
 
 ### JSON workflows
 
-JSON mirrors the TS DSL one-for-one. Reference earlier outputs as \`"$.state.<id>"\` strings; use \`"ANY"\` for the wildcard method; a branch is one step with \`branch: { when, then, else }\`. JSON workflows live under \`src/workflows/json/\` (scanned recursively).
+JSON mirrors the TS DSL one-for-one. Reference earlier outputs as \`"js/ctx.state.<id>"\` strings; use \`"ANY"\` for the wildcard method; a branch is one step with \`branch: { when, then, else }\`. JSON workflows live under \`src/workflows/json/\` (scanned recursively).
 
 ---
 
@@ -866,7 +866,7 @@ These live on the **trigger config**, never on a step. They gate workflow entry.
 
 \`\`\`ts
 trigger: { http: { method: "POST", path: "/render",
-  concurrencyKey: $.req.body.tenantId, concurrencyLimit: 5, onLimit: "queue" } }
+  concurrencyKey: "js/ctx.request.body.tenantId", concurrencyLimit: 5, onLimit: "queue" } }
 \`\`\`
 
 \`concurrencyLimit\`/\`onLimit\`/\`concurrencyLeaseMs\` all require \`concurrencyKey\`. Denial → HTTP 429 + \`Retry-After\` (or 202 with \`onLimit: "queue"\`).
@@ -876,7 +876,7 @@ trigger: { http: { method: "POST", path: "/render",
 \`\`\`ts
 trigger: { http: { method: "POST", path: "/welcome", delay: "1h", ttl: "2h" } }
 trigger: { http: { method: "POST", path: "/save/:docId",
-  debounce: { key: $.req.params.docId, mode: "trailing", delay: "500ms", maxDelay: "5s" } } }
+  debounce: { key: "js/ctx.request.params.docId", mode: "trailing", delay: "500ms", maxDelay: "5s" } } }
 \`\`\`
 
 For HTTP, \`ttl\` requires \`delay\`. Debounce modes: \`trailing\` (default — fire after silence) / \`leading\` (fire first, suppress follow-ups).
@@ -947,7 +947,7 @@ The 7 non-TS runtimes run as long-lived gRPC sidecar processes; the TypeScript r
 The workflow step is identical regardless of runtime — only \`type\` changes:
 
 \`\`\`ts
-{ id: "sum", use: "add-numbers", type: "runtime.<lang>", inputs: { a: $.req.body.a, b: $.req.body.b } }
+{ id: "sum", use: "add-numbers", type: "runtime.<lang>", inputs: { a: "js/ctx.request.body.a", b: "js/ctx.request.body.b" } }
 \`\`\`
 
 #### Authoring a node in go
@@ -986,7 +986,7 @@ func main() {
 }
 \`\`\`
 
-Workflow step: \`{ id: "sum", use: "add-numbers", type: "runtime.go", inputs: { a: $.req.body.a, b: $.req.body.b } }\`. Errors: return a non-nil \`error\`, or use \`blok.NewValidationError\` / \`blok.NewError(category)...Build()\` for structured \`BlokError\`. Toolchain: Go 1.24+, \`go mod download\`, \`go run ./cmd/server\`.
+Workflow step: \`{ id: "sum", use: "add-numbers", type: "runtime.go", inputs: { a: "js/ctx.request.body.a", b: "js/ctx.request.body.b" } }\`. Errors: return a non-nil \`error\`, or use \`blok.NewValidationError\` / \`blok.NewError(category)...Build()\` for structured \`BlokError\`. Toolchain: Go 1.24+, \`go mod download\`, \`go run ./cmd/server\`.
 
 #### Authoring a node in rust
 
@@ -1250,7 +1250,7 @@ The default worker adapter is \`in-memory\` (zero infra) — only start a broker
 6. **Workflow envelope minimums:** \`name\` >= 3 chars, \`version\` >= 5 chars (semver), \`steps\` must be non-empty, and a \`trigger\` is required unless \`middleware: true\`.
 7. **Every v2 step schema is \`.strict()\`** — a misspelled or unknown field throws at load time, not silently dropped. A trigger-only field placed on a step (\`concurrencyKey\`, \`delay\`, \`ttl\`, \`debounce\`, \`concurrencyLimit\`) gets a targeted error pointing you to the trigger config.
 8. **\`as\` and \`spread\` are mutually exclusive** — pick one.
-9. **\`$.prev\` is volatile** (only the previous step). For any non-adjacent read use \`$.state.<id>\`. Reading \`$.state.<id>\` for a step that set \`ephemeral: true\` returns \`undefined\`.
+9. **\`ctx.response\` (the previous step's output) is volatile** — only the immediately-previous step. For any non-adjacent read use \`"js/ctx.state.<id>"\`. Reading \`"js/ctx.state.<id>"\` for a step that set \`ephemeral: true\` returns \`undefined\`.
 10. **Sub-workflow \`idempotencyKey\` with \`wait: true\` caches the WHOLE child result** — a cache hit means the child (and its side effects: emails, charges) never runs. Headline pattern AND primary footgun.
 
 Plus the cross-runtime rules: **the wrong input source** (typed sidecar nodes read their step \`inputs\`, NOT \`ctx.request.body\`), **registration is explicit** for every runtime (a file in \`runtimes/<lang>/nodes/\` does nothing until you register it by name), and **\`type: "runtime.<lang>"\` is required** on the step or it defaults to the in-process TS path and fails with \`Node type X not found\`.
@@ -1297,7 +1297,7 @@ expect(result.success).toBe(true);
 - Start every workflow from the **trigger decision table** in §1, not from HTTP.
 - Author with the typed-handle DSL — \`workflow(name, { version, trigger }, (entry) => { step("id", node("@pkg"), inputs) })\` from \`@blokjs/core\` (§0). Object-style \`workflow({...})\` and JSON stay valid for legacy/migration.
 - Use the typed node contract in every runtime (\`defineNode\` / \`DefineNode\` / \`TypedNode\` / \`@node\`).
-- Reference cross-step outputs via the handle \`step()\` returns (not \`$.state.<id>\`); use the 4th-arg \`as:\`/\`spread:\`/\`ephemeral:\` knobs to shape persistence.
+- Reference cross-step outputs via the handle \`step()\` returns (not a raw \`"js/ctx.state.<id>"\` string); use the 4th-arg \`as:\`/\`spread:\`/\`ephemeral:\` knobs to shape persistence.
 - Set \`type: "runtime.<lang>"\` on every sidecar step and register the node by name.
 
 **Do NOT:**
@@ -1358,14 +1358,14 @@ Tie-breakers: one-way stream → \`sse\`; two-way → \`websocket\`. In-process 
 
 **Every step's output auto-persists to \`ctx.state[id]\` — on success only.** A step that errors writes nothing, so \`ctx.state[<id>] === undefined\` is a truthful "did it succeed?" check inside a \`tryCatch.catch\` arm.
 
-**The four reads** (the \`$\` proxy compiles to \`"js/ctx.<path>"\` strings; in JSON write those strings by hand):
+**The four reads** (object-style/JSON workflows read context via plain \`"js/ctx.<path>"\` strings — write them by hand; the old \`$\` proxy shorthand has been removed):
 
 | Read | Resolves to | Scope |
 |---|---|---|
-| \`$.state.<id>\` | A prior step's stored output | Whole workflow (cross-step) |
-| \`$.prev\` | Immediately previous step's output | Adjacent only — overwritten every step |
-| \`$.req\` | Request envelope (body/headers/params/query/method) | Whole run |
-| \`$.error\` | Captured error (\`.message\`/\`.code\`/\`.stepId\`) | \`tryCatch.catch\` arm only |
+| \`"js/ctx.state.<id>"\` | A prior step's stored output | Whole workflow (cross-step) |
+| \`"js/ctx.response.<path>"\` | Immediately previous step's output | Adjacent only — overwritten every step |
+| \`"js/ctx.request.<path>"\` | Request envelope (body/headers/params/query/method) | Whole run |
+| \`"js/ctx.error.<path>"\` | Captured error (\`.message\`/\`.code\`/\`.stepId\`) | \`tryCatch.catch\` arm only |
 
 **Persistence knobs (per-step):**
 
@@ -1374,7 +1374,7 @@ Tie-breakers: one-way stream → \`sse\`; two-way → \`websocket\`. In-process 
 | *(none)* | Store at \`ctx.state[id]\` (the 95% case) |
 | \`as: "name"\` | Store at \`ctx.state[name]\` instead. Mutually exclusive with \`spread\` |
 | \`spread: true\` | Shallow-merge \`result.data\`'s keys into \`ctx.state\` (multi-output nodes) |
-| \`ephemeral: true\` | Skip storage; only \`$.prev\` carries it to the next step (logging/audit) |
+| \`ephemeral: true\` | Skip storage; only \`ctx.response\` (the previous step) carries it to the next step (logging/audit) |
 
 Per-step reliability lives on the step: \`idempotencyKey\` (cache by \`(workflow, step.id, key)\`, default 24h TTL), \`retry: { maxAttempts, minTimeoutInMs?, factor? }\`, \`maxDuration: "30s"\`. Cross-key gating + scheduling (\`concurrencyKey\`, \`onLimit\`, \`delay\`, \`ttl\`, \`debounce\`, \`middleware\`) go on the **trigger block**, never on a step.
 
@@ -1453,18 +1453,18 @@ export default workflow("Process Order", { version: "1.0.0", trigger: http.post(
 
 Control flow (all from \`@blokjs/core\`): \`branch(id, cond, {then,else?})\`, \`forEach(iterable, (item,i)=>{}, {as?,mode?})\`, \`switchOn(disc, {cases:[{when,do}],default?}, {id})\`, \`tryCatch(id, {try,catch:(err)=>{},finally?})\`; comparators \`eq/ne/gt/gte/lt/lte/not\`; \`tpl\`…\${h.x}…\`\` for strings. The **four footguns**: arm-scoped handles don't escape their arm; ephemeral handles read \`undefined\`; never reuse a step \`id\`; never name a \`forEach\` \`as:\` after an existing id. See \`docs/d/primitives/handles-and-footguns.mdx\`.
 
-**Equivalent object-style form** (\`@blokjs/helper\`, also valid; JSON mirrors it): one object literal, \`steps: [...]\`, reference outputs with \`$.state.<id>\` / \`$.req.body\`.
+**Equivalent object-style form** (\`@blokjs/helper\`, also valid; JSON mirrors it): one object literal, \`steps: [...]\`, reference outputs with \`"js/ctx.state.<id>"\` / \`"js/ctx.request.body"\`.
 
 \`\`\`typescript
-import { workflow, $ } from "@blokjs/helper";
+import { workflow } from "@blokjs/helper";
 
 export default workflow({
   name: "Process Order",
   version: "1.0.0",
   trigger: { http: { method: "POST", path: "/orders" } }, // path optional → derived from file path
   steps: [
-    { id: "validate", use: "order-validator", inputs: { order: $.req.body } },
-    { id: "save",     use: "order-store",     inputs: { data: $.state.validate } },
+    { id: "validate", use: "order-validator", inputs: { order: "js/ctx.request.body" } },
+    { id: "save",     use: "order-store",     inputs: { data: "js/ctx.state.validate" } },
   ],
 });
 \`\`\`
@@ -1485,9 +1485,9 @@ trigger: { grpc: { service: "UserService", method: "GetUser", proto: "users.prot
 **Branch:**
 
 \`\`\`typescript
-import { workflow, branch, $ } from "@blokjs/helper";
+import { workflow, branch } from "@blokjs/helper";
 branch({ id: "route",
-  when: '$.req.method === "POST"',   // when is a JS-expression STRING ($ can't intercept ===)
+  when: 'ctx.request.method === "POST"',   // when is a raw ctx JS-expression STRING (no js/ prefix)
   then: [{ id: "create", use: "...", inputs: {...} }],
   else: [{ id: "read",   use: "...", inputs: {...} }] })
 \`\`\`
@@ -1503,7 +1503,7 @@ branch({ id: "route",
 | \`Trigger kind 'queue' has no runtime\` | Used \`trigger: { queue: ... }\` | Use \`trigger: { worker: { queue: "<name>" } }\` |
 | \`Validation failed: name must be at least 3 characters\` | Workflow \`name\` < 3 chars / \`version\` < 5 chars | Lengthen name; use full semver \`x.x.x\` |
 | \`Unrecognized key(s) in object: "..."\` | Misspelled / unknown field — every v2 step schema is \`.strict()\` | Fix the spelling; trigger-only fields (\`concurrencyKey\`, \`delay\`, \`ttl\`, \`debounce\`) belong on the trigger, not a step |
-| \`ctx.state['X'] is undefined\` | Step X has \`ephemeral: true\`, or \`$.state.<id>\` references a typo'd id | Remove \`ephemeral\`, or fix the id reference |
+| \`ctx.state['X'] is undefined\` | Step X has \`ephemeral: true\`, or \`"js/ctx.state.<id>"\` references a typo'd id | Remove \`ephemeral\`, or fix the id reference |
 | \`as and spread are mutually exclusive\` | Step set both | Pick one |
 | \`branch step is missing 'when'\` | No condition string | Set \`when: "..."\` |
 | \`step "..." uses set_var\` | Legacy field (removed v0.5) | Drop \`set_var: true\`; replace \`set_var: false\` with \`ephemeral: true\` |
@@ -1519,7 +1519,7 @@ branch({ id: "route",
 - Do NOT use \`trigger: { queue: ... }\` — it has no runtime and throws. Use \`worker\`.
 - Do NOT reuse a step \`id\` anywhere — including across \`switch\`/\`branch\`/\`tryCatch\` arms (all ids share one flat map; duplicates collide silently). Use \`as:\` if two arms must write the same downstream key.
 - Do NOT write to \`ctx.state\` inside a node's \`execute()\` — return your output; use \`ctx.publish(name, value)\` for a side-channel.
-- Do NOT assume \`$.prev\` (or \`ctx.response.data\`) survives more than one step — use \`$.state.<id>\` for cross-step reads.
+- Do NOT assume \`ctx.response\` (the previous step's output) survives more than one step — use \`"js/ctx.state.<id>"\` for cross-step reads.
 - Do NOT prefix \`@blokjs/expr\`'s \`expression\` input with \`js/\` — it double-evaluates. Write plain JS: \`expression: "ctx.state.x.y"\`.
 - Do NOT use \`set_var\` — removed in v0.5, throws at load.
 - Do NOT use \`"*"\` for the wildcard HTTP method — use \`"ANY"\`.

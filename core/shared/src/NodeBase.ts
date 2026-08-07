@@ -202,7 +202,7 @@ export default abstract class NodeBase {
 
 	/**
 	 * @deprecated Read from `ctx.state[name]` directly, or reference it from
-	 * a workflow step's `inputs` as `$.state[name]` / `js/ctx.state.name`.
+	 * a workflow step's `inputs` as `js/ctx.state.name` (or a typed handle).
 	 */
 	public getVar(ctx: Context, name: string) {
 		return ctx.vars?.[name];

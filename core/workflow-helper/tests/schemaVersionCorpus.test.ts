@@ -222,7 +222,7 @@ describe("schemaVersion — TS workflow() envelopes validate (#299)", () => {
 			...base,
 			steps: [
 				{ id: "a", use: "@blokjs/api-call", inputs: { url: "https://example.com" } },
-				{ id: "b", use: "@blokjs/respond", inputs: { body: "$.state.a" } },
+				{ id: "b", use: "@blokjs/respond", inputs: { body: "js/ctx.state.a" } },
 			],
 		});
 		for (const wf of [single, multi]) {

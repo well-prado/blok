@@ -14,11 +14,11 @@
 			"id": "delete-user",
 			"use": "user-service",
 			"type": "module",
-			"idempotencyKey": "delete-user-$.req.params.id",
+			"idempotencyKey": "js/`delete-user-${ctx.request.params.id}`",
 			"inputs": {
 				"action": "delete",
-				"userId": "$.req.params.id",
-				"deletedBy": "$.state.identity.sub"
+				"userId": "js/ctx.request.params.id",
+				"deletedBy": "js/ctx.state.identity.sub"
 			}
 		},
 		{

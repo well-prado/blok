@@ -193,7 +193,7 @@ function triggerOnlyField(field: string) {
  *
  * **Identity**
  * - `id` is the step's stable identifier. Other steps reference this step's
- *   output as `$.state[id]`.
+ *   output as `ctx.state[id]`.
  * - `use` is the node reference (e.g. `@blokjs/api-call`).
  *
  * **Persistence (default-store rule)**
@@ -225,7 +225,7 @@ export const V2RegularStepSchema = z
 				invalid_type_error: "Step id must be a string",
 			})
 			.min(1)
-			.describe("Stable identifier. Other steps reference this step's output as $.state[id]. Required."),
+			.describe("Stable identifier. Other steps reference this step's output as ctx.state[id]. Required."),
 		use: z
 			.string({
 				required_error: "Step `use` is required",
@@ -244,8 +244,8 @@ export const V2RegularStepSchema = z
 			.record(z.unknown())
 			.optional()
 			.describe(
-				"Inputs passed to the node. May contain $ proxy references " +
-					"(e.g. $.state.foo, $.req.body.id) or 'js/...' expressions for runtime evaluation.",
+				"Inputs passed to the node. May contain 'js/...' expressions for runtime evaluation " +
+					"(e.g. 'js/ctx.state.foo', 'js/ctx.request.body.id'), or typed step/trigger handles in the TS DSL.",
 			),
 		ui: V2StepUiSchema,
 		as: z
@@ -307,8 +307,8 @@ export const V2RegularStepSchema = z
 					"(workflowName, step.id, idempotencyKey). On a subsequent run with the " +
 					"same triple, execution is skipped and the cached result populates state " +
 					"through the same persistence rules (ephemeral / spread / as). " +
-					"Accepts a literal string or a $ proxy expression that compiles to " +
-					"`js/ctx....` (e.g. $.req.body.requestId).",
+					"Accepts a literal string or a `js/ctx....` expression " +
+					"(e.g. js/ctx.request.body.requestId), or a typed handle in the TS DSL.",
 			),
 		idempotencyKeyTTL: z
 			.number()
@@ -363,7 +363,7 @@ export type V2RegularStep = z.infer<typeof V2RegularStepSchema>;
  *   {
  *     id: "route-by-method",
  *     branch: {
- *       when: '$.req.method === "POST"',
+ *       when: 'ctx.request.method === "POST"',
  *       then: [{ id: "create", use: "...", inputs: {...} }],
  *       else: [{ id: "read",   use: "...", inputs: {...} }]
  *     }
@@ -386,7 +386,7 @@ export const V2BranchStepSchema: z.ZodType<{
 						.min(1)
 						.describe(
 							"JavaScript expression. Truthy → run `then` branch; falsy → run `else` branch. " +
-								"$ proxy expressions compile to strings at the call site (e.g. $.req.query.kind === 'true').",
+								"Raw `ctx.*` expression string — no `js/` prefix (e.g. ctx.request.query.kind === 'true').",
 						),
 					then: z.array(z.unknown()).describe("Steps to execute when `when` is truthy."),
 					else: z.array(z.unknown()).optional().describe("Steps to execute when `when` is falsy. Optional."),
@@ -415,8 +415,8 @@ export type V2BranchStep = z.infer<typeof V2BranchStepSchema>;
  * sub-workflow looks like a function call).
  *
  * Inputs flow from parent → child as `ctx.request.body` — the child
- * reads them via `$.req.body.<key>` exactly as if it had been
- * HTTP-triggered.
+ * reads them via `ctx.request.body.<key>` (or the trigger entry handle
+ * in the TS DSL) exactly as if it had been HTTP-triggered.
  *
  * **Composition with Tier 1**:
  * - `idempotencyKey` on this step caches the entire sub-workflow's
@@ -429,9 +429,9 @@ export type V2BranchStep = z.infer<typeof V2BranchStepSchema>;
  *   {
  *     id: "send-receipt",
  *     subworkflow: "send-receipt-email",
- *     inputs: { user: $.state.user, order: $.state.order },
+ *     inputs: { user: "js/ctx.state.user", order: "js/ctx.state.order" },
  *     wait: true,           // default; `wait: false` deferred to a follow-up
- *     idempotencyKey: $.req.body.requestId,
+ *     idempotencyKey: "js/ctx.request.body.requestId",
  *   }
  */
 export const V2SubworkflowStepSchema: z.ZodType<{
@@ -464,7 +464,8 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.string()
 				.min(1)
 				.describe(
-					"Stable identifier. The sub-workflow's output lands on $.state[id] " + "after the child completes. Required.",
+					"Stable identifier. The sub-workflow's output lands on ctx.state[id] " +
+						"after the child completes. Required.",
 				),
 			subworkflow: z
 				.string()
@@ -472,8 +473,8 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.describe(
 					"Name of the workflow to invoke. Looked up in the WorkflowRegistry " +
 						'at run time. **Literal names** (`"send-receipt-email"`) are matched ' +
-						'directly. **Polymorphic expressions** (`"$.req.body.kind"`, ' +
-						'`"js/ctx.req.body.kind"`) resolve against the live ctx at dispatch ' +
+						'directly. **Polymorphic expressions** (`"js/ctx.req.body.kind"`) ' +
+						"resolve against the live ctx at dispatch " +
 						"time — pair with `allowList` to constrain which workflows the " +
 						"expression may resolve to.",
 				),
@@ -482,8 +483,8 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 				.optional()
 				.describe(
 					"Inputs passed to the child as `ctx.request.body`. The child reads " +
-						"them via `$.req.body.<key>` exactly as if HTTP-triggered. " +
-						"May contain $ proxy refs.",
+						"them via `ctx.request.body.<key>` (or the trigger entry handle in the TS DSL) " +
+						"exactly as if HTTP-triggered. May contain `js/...` expressions.",
 				),
 			ui: V2StepUiSchema,
 			wait: z
@@ -554,8 +555,8 @@ export const V2SubworkflowStepSchema: z.ZodType<{
 					"Exact-match allow-list for polymorphic dispatch. When the resolved " +
 						"workflow name (after any `namespace` prefix is applied) is not in this " +
 						"array, the dispatch is rejected at run time with a structured error. " +
-						"Strongly recommended when `subworkflow` is an expression (`$.<path>` " +
-						"or `js/...`) so a malicious or buggy ctx value can't dispatch arbitrary " +
+						"Strongly recommended when `subworkflow` is an expression (`js/...`) " +
+						"so a malicious or buggy ctx value can't dispatch arbitrary " +
 						"workflows. Ignored for literal names (they don't need the guard).",
 				),
 			dispatch: z
@@ -599,7 +600,7 @@ export type V2SubworkflowStep = z.infer<typeof V2SubworkflowStepSchema>;
  * Author surface:
  * ```ts
  * { id: "wait-3d", wait: { for: "3d" } }
- * { id: "wait-deadline", wait: { until: $.req.body.scheduledAt } }
+ * { id: "wait-deadline", wait: { until: "js/ctx.request.body.scheduledAt" } }
  * ```
  *
  * Cannot combine with `idempotencyKey` (the wait IS the checkpoint) or
@@ -619,7 +620,7 @@ export const V2WaitStepSchema = z
 					.optional()
 					.describe(
 						"Wait until this absolute time. Number is ms-since-epoch; " +
-							"string is an ISO date or a $-proxy expression. Mutually exclusive with `for`.",
+							"string is an ISO date or a `js/ctx....` expression. Mutually exclusive with `for`.",
 					),
 			})
 			.strict(),
@@ -691,12 +692,12 @@ export type V2WaitStep = z.infer<typeof V2WaitStepSchema>;
  * @example
  *   forEach({
  *     id: "process-orders",
- *     in: $.state.orders,
+ *     in: "js/ctx.state.orders",
  *     as: "order",
  *     mode: "parallel",
  *     concurrency: 5,
  *     do: [
- *       { id: "charge", use: "stripe-charge", inputs: { amount: $.state.order.total } },
+ *       { id: "charge", use: "stripe-charge", inputs: { amount: "js/ctx.state.order.total" } },
  *     ],
  *   })
  */
@@ -706,9 +707,7 @@ export const V2ForEachStepSchema = z.lazy(() =>
 			id: z.string().min(1).describe("Stable identifier for the forEach step. Visible in traces."),
 			forEach: z
 				.object({
-					in: z
-						.unknown()
-						.describe("Array source. Literal expression string (`'$.state.items'`) or `$` proxy expression."),
+					in: z.unknown().describe("Array source. Literal expression string (e.g. `'js/ctx.state.items'`)."),
 					as: z
 						.string()
 						.min(1)
@@ -749,11 +748,11 @@ export type V2ForEachStep = z.infer<typeof V2ForEachStepSchema>;
  * @example
  *   loop({
  *     id: "poll",
- *     while: '$.state["check-status"].status !== "done"',
+ *     while: 'ctx.state["check-status"].status !== "done"',
  *     maxIterations: 60,
  *     do: [
  *       { id: "wait-tick", wait: { for: "2s" } },
- *       { id: "check-status", use: "@blokjs/api-call", inputs: { url: $.state.url } },
+ *       { id: "check-status", use: "@blokjs/api-call", inputs: { url: "js/ctx.state.url" } },
  *     ],
  *   })
  */
@@ -793,8 +792,8 @@ export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
 /**
  * V2 switch step — N-way branch keyed on a value. First matching case wins.
  *
- * `on` resolves to a value at run time (literal, `$` proxy expression, or
- * `js/...` string). Each case carries a `when` and a `do` sub-pipeline:
+ * `on` resolves to a value at run time (literal, or `js/...` string).
+ * Each case carries a `when` and a `do` sub-pipeline:
  * - `when` is a literal → match if `on === when`.
  * - `when` is an array  → match if `array.includes(on)` (group related cases).
  * - `default` runs when no case matches. Optional.
@@ -802,7 +801,7 @@ export type V2LoopStep = z.infer<typeof V2LoopStepSchema>;
  * @example
  *   switchOn({
  *     id: "route-by-tenant",
- *     on: $.req.headers["x-tenant-id"],
+ *     on: "js/ctx.request.headers['x-tenant-id']",
  *     cases: [
  *       { when: "acme",   do: [{ id: "x", subworkflow: "acme-process" }] },
  *       { when: ["a","b"], do: [{ id: "y", subworkflow: "shared" }] },
@@ -820,7 +819,7 @@ export const V2SwitchStepSchema = z.lazy(() =>
 					on: z
 						.unknown()
 						.describe(
-							"Value to match against. Literal, `$` proxy expression, or `js/...` string. " +
+							"Value to match against. Literal, or `js/...` string. " +
 								"Resolved by the blueprint mapper before matching.",
 						),
 					cases: z
@@ -858,7 +857,8 @@ export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
  *
  * - `try` block runs first.
  * - On error, the `catch` block runs with `ctx.error` populated
- *   (`$.error.message`, `$.error.name`, `$.error.stack`). Errors thrown
+ *   (`ctx.error.message`, `ctx.error.name`, `ctx.error.stack`, or the typed
+ *   `error` handle in the TS DSL). Errors thrown
  *   inside `catch` propagate to the next outer handler — they DO NOT
  *   re-trigger `catch`.
  * - `finally` (if provided) runs unconditionally after try/catch — on
@@ -872,12 +872,12 @@ export type V2SwitchStep = z.infer<typeof V2SwitchStepSchema>;
  *   tryCatch({
  *     id: "saga",
  *     try: [
- *       { id: "create", use: "user-create", inputs: { email: $.req.body.email } },
- *       { id: "notify", use: "email-send", inputs: { to: $.state.create.email } },
+ *       { id: "create", use: "user-create", inputs: { email: "js/ctx.request.body.email" } },
+ *       { id: "notify", use: "email-send", inputs: { to: "js/ctx.state.create.email" } },
  *     ],
  *     catch: [
  *       { id: "rollback", use: "user-delete",
- *         inputs: { userId: $.state.create.id, reason: $.error.message } },
+ *         inputs: { userId: "js/ctx.state.create.id", reason: "js/ctx.error.message" } },
  *     ],
  *     finally: [
  *       { id: "metric", use: "@blokjs/metrics-emit", inputs: { event: "saga-attempt" } },
@@ -898,8 +898,9 @@ export const V2TryCatchStepSchema = z.lazy(() =>
 						.array(z.unknown())
 						.min(1)
 						.describe(
-							"Sub-pipeline run when `try` throws. Has access to `$.error` " +
-								"(message, name, stack). Errors here propagate — they do NOT re-trigger catch.",
+							"Sub-pipeline run when `try` throws. Has access to `ctx.error` " +
+								"(message, name, stack), or the typed `error` handle in the TS DSL. " +
+								"Errors here propagate — they do NOT re-trigger catch.",
 						),
 					finally: z
 						.array(z.unknown())

@@ -205,7 +205,7 @@ Any v2 workflow can invoke another named workflow as a step:
 {
   id: "send-receipt",
   subworkflow: "send-receipt-email",
-  inputs: { user: $.state.user, order: $.state.order },
+  inputs: { user: "js/ctx.state.user", order: "js/ctx.state.order" },
   // wait: true (default) — synchronous, parent blocks on child
   // wait: false — fire-and-forget; parent returns {runId, workflowName, scheduledAt}
 }
@@ -316,7 +316,7 @@ execution strategy:
 {
   id: "send-receipt",
   subworkflow: "send-receipt-email",
-  inputs: { user: $.state.user, order: $.state.order },
+  inputs: { user: "js/ctx.state.user", order: "js/ctx.state.order" },
   dispatch: "http-self",  // default is "in-process"
 }
 ```
@@ -761,7 +761,7 @@ Until that ships, compose the same effect with sub-workflows:
 ```ts
 // Workflow A — pre-wait
 { id: "queue-continuation", subworkflow: "post-wait-half",
-  inputs: { state: $.state }, wait: false }
+  inputs: { state: "js/ctx.state" }, wait: false }
 
 // Workflow B — has delay on its trigger
 { name: "post-wait-half",

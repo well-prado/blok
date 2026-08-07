@@ -3,8 +3,8 @@
  * during PR-50 production-readiness validation.
  *
  * Symptom (pre-fix): a workflow with a TS-module step whose `inputs`
- * referenced `js/...` expressions (e.g. `data: $.req.body`) cached
- * the FIRST request's resolved value forever. Subsequent requests
+ * referenced `js/...` expressions (e.g. `data: "js/ctx.request.body"`)
+ * cached the FIRST request's resolved value forever. Subsequent requests
  * with different bodies got the first body.
  *
  * Root cause: `Configuration.init` assigned `preloaded` directly to

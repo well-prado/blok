@@ -11,7 +11,7 @@
  * workflow's `input` Zod schema:
  *
  * ```ts
- * import { workflow, $ } from "@blokjs/helper";
+ * import { workflow } from "@blokjs/helper";
  * import { z } from "zod";
  *
  * export default workflow({
@@ -20,7 +20,7 @@
  *   input: z.object({ query: z.string() }),
  *   trigger: { mcp: { path: "/mcp", serverName: "tetrix-platform",
  *                     tool: { description: "Search the indexed codebase" } } },
- *   steps: [ { id: "s", use: "@tetrix/meili-search", inputs: { query: $.req.body.query } } ],
+ *   steps: [ { id: "s", use: "@tetrix/meili-search", inputs: { query: "js/ctx.request.body.query" } } ],
  * });
  * ```
  *

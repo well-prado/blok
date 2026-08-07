@@ -129,7 +129,7 @@ describe("RuntimeAdapterNode", () => {
 		// Regression: a `runtime.*` node's `contentType` MUST travel on the
 		// ctx side-channel, never inside the returned `data` / persisted state —
 		// otherwise it leaks a spurious `contentType` key into the HTTP body and
-		// `$.state.<id>`. See specs/blok-framework-fixes/05-cross-runtime-live-test.md
+		// `ctx.state.<id>`. See specs/blok-framework-fixes/05-cross-runtime-live-test.md
 		// Finding #2.
 		const withContentType = (data: unknown, contentType: string): ExecutionResult => ({
 			success: true,
@@ -182,7 +182,7 @@ describe("RuntimeAdapterNode", () => {
 			// object reference for a runtime step. RunnerSteps used to stamp the
 			// next step's content-type onto `ctx.response`, mutating the stored
 			// state object. The guard limits that stamp to wrapper-shaped
-			// responses, so `$.state.greet` stays the node's return verbatim.
+			// responses, so `ctx.state.greet` stays the node's return verbatim.
 			class PassThroughNode extends RunnerNode {
 				constructor(name: string) {
 					super();

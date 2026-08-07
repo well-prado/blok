@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { $, gt, loop, lt, not } from "../src/index";
+import { gt, loop, lt, not } from "../src/index";
 import { isLoopStep } from "../src/internal";
 
 describe("loop()", () => {
 	it("returns a v0.5 loop step shape", () => {
 		const step = loop({
 			id: "poll",
-			while: '$.state.status !== "done"',
+			while: 'ctx.state.status !== "done"',
 			do: [
 				{ id: "wait", wait: { for: "1s" } },
 				{ id: "check", use: "api-call" },
@@ -15,7 +15,7 @@ describe("loop()", () => {
 		expect(step).toMatchObject({
 			id: "poll",
 			loop: {
-				while: '$.state.status !== "done"',
+				while: 'ctx.state.status !== "done"',
 				do: [{ id: "wait" }, { id: "check" }],
 			},
 		});
@@ -25,27 +25,27 @@ describe("loop()", () => {
 	it("preserves maxIterations when set", () => {
 		const step = loop({
 			id: "x",
-			while: "$.state.x < 5",
+			while: "ctx.state.x < 5",
 			maxIterations: 5,
 			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.loop.maxIterations).toBe(5);
 	});
 
-	it("turns a bare $ proxy while into a raw ctx truthiness check", () => {
+	it("passes a bare ctx path while through verbatim as a raw ctx truthiness check", () => {
 		const step = loop({
 			id: "poll",
-			while: $.state.keepGoing,
+			while: "ctx.state.keepGoing",
 			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.loop.while).toBe("ctx.state.keepGoing");
 	});
 
-	it("accepts raw comparator and negated proxy while expressions", () => {
+	it("accepts raw comparator and negated while expressions", () => {
 		expect(
 			loop({
 				id: "poll",
-				while: lt($.state.pollIndex, 3),
+				while: lt("ctx.state.pollIndex", 3),
 				do: [{ id: "step1", use: "noop" }],
 			}).loop.while,
 		).toBe("ctx.state.pollIndex < 3");
@@ -53,16 +53,16 @@ describe("loop()", () => {
 		expect(
 			loop({
 				id: "until-ready",
-				while: not($.state.ready),
+				while: not("ctx.state.ready"),
 				do: [{ id: "step1", use: "noop" }],
 			}).loop.while,
 		).toBe("!(ctx.state.ready)");
 	});
 
-	it("keeps both handle operands raw in loop comparators", () => {
+	it("keeps both path operands raw in loop comparators", () => {
 		const step = loop({
 			id: "quota",
-			while: gt($.state.used, $.state.limit),
+			while: gt("ctx.state.used", "ctx.state.limit"),
 			do: [{ id: "step1", use: "noop" }],
 		});
 		expect(step.loop.while).toBe("ctx.state.used > ctx.state.limit");

@@ -11,7 +11,7 @@ import { z } from "zod";
  * {@link concurrencyRefinement} cross-field check to add concurrency-key
  * support to a trigger schema.
  *
- * Authors set `concurrencyKey` (literal or `$`-proxy expression) plus an
+ * Authors set `concurrencyKey` (literal or `js/ctx....` expression) plus an
  * optional `concurrencyLimit` (defaults to 1, matching Trigger.dev's
  * "named mutex per key" pattern). When omitted, the trigger has no
  * concurrency gate (zero-overhead default).
@@ -22,7 +22,7 @@ export const ConcurrencyOptsFields = {
 		.min(1)
 		.optional()
 		.describe(
-			"OPTIONAL. Per-key concurrency gating. Literal string or `$.<path>` proxy expression " +
+			"OPTIONAL. Per-key concurrency gating. Literal string or `js/ctx.<path>` expression " +
 				"evaluated against the live ctx at run-entry time. When set, runs sharing the resolved " +
 				"key contend for at most `concurrencyLimit` concurrent slots. When unset, no gating applies.",
 		),
@@ -187,8 +187,8 @@ export const DurationSchema = z.union([
  *   resets when `delay` ms of silence pass.
  *
  * `key` is a literal string OR a `js/...` expression that evaluates to a
- * string at run-entry time (typically derived from the request payload via
- * a `$`-proxy expression like `$.req.body.userId`).
+ * string at run-entry time (typically derived from the request payload,
+ * e.g. `js/ctx.request.body.userId`).
  */
 export const DebounceOptsSchema = z
 	.object({
@@ -722,7 +722,7 @@ export const WebhookTriggerOptsSchema = z.object({
 		.string()
 		.optional()
 		.describe(
-			"Optional prefix prepended to polymorphic sub-workflow names. Example: `namespace: 'stripe'` + `subworkflow: '$.req.body.type'` resolving to `'invoice.paid'` looks up `'stripe.invoice.paid'`.",
+			"Optional prefix prepended to polymorphic sub-workflow names. Example: `namespace: 'stripe'` + `subworkflow: 'js/ctx.request.body.type'` resolving to `'invoice.paid'` looks up `'stripe.invoice.paid'`.",
 		),
 	middleware: z
 		.array(z.string())

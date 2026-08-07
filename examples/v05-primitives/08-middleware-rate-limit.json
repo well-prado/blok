@@ -9,7 +9,7 @@
 			"use": "expr",
 			"type": "module",
 			"inputs": {
-				"expression": "$.state.identity ? `user:${$.state.identity.sub}` : `ip:${$.req.headers['x-forwarded-for'] || $.req.headers['x-real-ip']}`"
+				"expression": "ctx.state.identity ? `user:${ctx.state.identity.sub}` : `ip:${ctx.request.headers['x-forwarded-for'] || ctx.request.headers['x-real-ip']}`"
 			}
 		},
 		{
@@ -17,7 +17,7 @@
 			"use": "token-bucket-check",
 			"type": "module",
 			"inputs": {
-				"key": "$.state['compute-key']",
+				"key": "js/ctx.state['compute-key']",
 				"limit": 100,
 				"windowSeconds": 60
 			}
@@ -25,7 +25,7 @@
 		{
 			"id": "deny-if-exceeded",
 			"branch": {
-				"when": "$.state['check-bucket'].exceeded",
+				"when": "ctx.state['check-bucket'].exceeded",
 				"then": [
 					{
 						"id": "respond-429",
@@ -34,14 +34,14 @@
 						"inputs": {
 							"status": 429,
 							"headers": {
-								"Retry-After": "$.state['check-bucket'].retryAfterSec",
+								"Retry-After": "js/ctx.state['check-bucket'].retryAfterSec",
 								"X-RateLimit-Limit": "100",
 								"X-RateLimit-Remaining": "0",
-								"X-RateLimit-Reset": "$.state['check-bucket'].resetAt"
+								"X-RateLimit-Reset": "js/ctx.state['check-bucket'].resetAt"
 							},
 							"body": {
 								"error": "Rate limit exceeded",
-								"retryAfterSec": "$.state['check-bucket'].retryAfterSec"
+								"retryAfterSec": "js/ctx.state['check-bucket'].retryAfterSec"
 							}
 						},
 						"stop": true

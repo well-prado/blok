@@ -1,7 +1,7 @@
 {
 	"name": "Poll With Exponential Backoff",
 	"version": "1.0.0",
-	"description": "Polls an external service with exponentially growing wait between attempts: 1s, 2s, 4s, 8s, 16s. Stops when the response is ready OR after 5 attempts (~31s total). Demonstrates: loop with computed-from-state condition, dynamic wait duration via $.state expression (the wait primitive accepts $.state references for `for`), maxIterations as a hard safety cap mirroring the while condition.",
+	"description": "Polls an external service with exponentially growing wait between attempts: 1s, 2s, 4s, 8s, 16s. Stops when the response is ready OR after 5 attempts (~31s total). Demonstrates: loop with computed-from-state condition, dynamic wait duration via a ctx.state expression (the wait primitive accepts js/ctx.state references for `for`), maxIterations as a hard safety cap mirroring the while condition.",
 	"trigger": {
 		"http": {
 			"method": "POST",
@@ -22,7 +22,7 @@
 		{
 			"id": "poll-with-backoff",
 			"loop": {
-				"while": "$.state.lastStatus !== 'ready' && $.state.attempt < 5",
+				"while": "ctx.state.lastStatus !== 'ready' && ctx.state.attempt < 5",
 				"maxIterations": 5,
 				"do": [
 					{
@@ -30,13 +30,13 @@
 						"use": "expr",
 						"type": "module",
 						"inputs": {
-							"expression": "`${Math.pow(2, $.state.attempt)}s`"
+							"expression": "`${Math.pow(2, ctx.state.attempt)}s`"
 						}
 					},
 					{
 						"id": "wait-backoff",
 						"wait": {
-							"for": "$.state['compute-delay']"
+							"for": "js/ctx.state['compute-delay']"
 						}
 					},
 					{
@@ -45,7 +45,7 @@
 						"type": "module",
 						"maxDuration": "5s",
 						"inputs": {
-							"url": "$.req.body.url",
+							"url": "js/ctx.request.body.url",
 							"method": "GET"
 						}
 					},
@@ -55,8 +55,8 @@
 						"type": "module",
 						"inputs": {
 							"values": {
-								"lastStatus": "$.state.check.status",
-								"attempt": "$.state.attempt + 1"
+								"lastStatus": "js/ctx.state.check.status",
+								"attempt": "js/ctx.state.attempt + 1"
 							}
 						}
 					}
@@ -70,10 +70,10 @@
 			"inputs": {
 				"status": 200,
 				"body": {
-					"ready": "$.state.lastStatus === 'ready'",
-					"attempts": "$.state.attempt",
-					"finalStatus": "$.state.lastStatus",
-					"data": "$.state.check"
+					"ready": "js/ctx.state.lastStatus === 'ready'",
+					"attempts": "js/ctx.state.attempt",
+					"finalStatus": "js/ctx.state.lastStatus",
+					"data": "js/ctx.state.check"
 				}
 			}
 		}

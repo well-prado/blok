@@ -24,7 +24,7 @@ describe("forEach()", () => {
 	it("preserves mode + concurrency when set", () => {
 		const step = forEach({
 			id: "x",
-			in: "$.state.urls",
+			in: "js/ctx.state.urls",
 			as: "url",
 			mode: "parallel",
 			concurrency: 5,
@@ -37,7 +37,7 @@ describe("forEach()", () => {
 	it("omits mode + concurrency from output when unset", () => {
 		const step = forEach({
 			id: "x",
-			in: "$.state.items",
+			in: "js/ctx.state.items",
 			as: "item",
 			do: [{ id: "x", use: "noop" }],
 		});
@@ -48,7 +48,7 @@ describe("forEach()", () => {
 	it("hoists active:false to top level", () => {
 		const step = forEach({
 			id: "x",
-			in: "$.state.items",
+			in: "js/ctx.state.items",
 			as: "item",
 			active: false,
 			do: [{ id: "x", use: "noop" }],
@@ -59,7 +59,7 @@ describe("forEach()", () => {
 	it("hoists stop:true to top level", () => {
 		const step = forEach({
 			id: "x",
-			in: "$.state.items",
+			in: "js/ctx.state.items",
 			as: "item",
 			stop: true,
 			do: [{ id: "x", use: "noop" }],
@@ -118,7 +118,7 @@ describe("forEach()", () => {
 				do: [
 					forEach({
 						id: "inner",
-						in: "$.state.row.items",
+						in: "js/ctx.state.row.items",
 						as: "row",
 						do: [{ id: "read", use: "noop" }],
 					}),

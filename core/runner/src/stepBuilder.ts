@@ -513,7 +513,7 @@ export function branch(id: string, condition: unknown, arms: BranchArms): void {
 // STRING (not `{$ref}`): the normalizer does NOT run `lowerRefs` over
 // `forEach.in`, and ForEachNode reads `opts.in` only after the Mapper resolves
 // it — so `in` must already be the wire string the object-style `forEach()`
-// emits via `unwrapProxies`.
+// expects as a literal `inputs` value.
 
 /** Options for the callback-style {@link forEach}. */
 export interface ForEachOptions {
@@ -809,7 +809,7 @@ export interface TryCatchArms {
  * Callback-style `tryCatch` over handles (#317). `try`/`catch`/`finally` are
  * callbacks that push CHILD builder scopes — `step()` calls inside register into
  * that arm's pipeline, in order. The `catch` callback receives a typed `error`
- * handle modeling the runtime `$.error` envelope (`message`/`name` always present,
+ * handle modeling the runtime `ctx.error` envelope (`message`/`name` always present,
  * `stack`/`code`/`stepId` optional); it is scoped to the catch arm.
  *
  * @example
@@ -1275,7 +1275,8 @@ export async function workflowCallback<
 
 	// Delegate to the object factory so validation + envelope shape are identical.
 	// The `{$ref}` sentinels are plain objects: they pass V2RegularStepSchema's
-	// `inputs: z.record(z.unknown())` and survive `unwrapProxies` untouched.
+	// `inputs: z.record(z.unknown())` untouched — the object factory no longer
+	// deep-walks `inputs` (the `$`-proxy walk it used to do was deleted with `$`).
 	return objectWorkflow<I, O, E>({
 		...(opts as unknown as WorkflowOpts<I, O, E>),
 		name,

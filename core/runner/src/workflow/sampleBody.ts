@@ -10,8 +10,10 @@
  * Two layers (B + A in the design discussion):
  *
  *   B. Static analysis. Walk every step's inputs + control-flow
- *      expressions, collect every `ctx.request.body.<path>` and
- *      `$.req.body.<path>` reference, and build a nested object
+ *      expressions, collect every `ctx.request.body.<path>` reference
+ *      (plus the legacy `$.req.body.<path>` string spelling some
+ *      hand-written workflows still use — never Mapper-resolved, but
+ *      still worth detecting here), and build a nested object
  *      mirroring those paths. Array shapes are inferred from
  *      `forEach.in` references — if a path feeds a forEach, it's
  *      an array, and references to `ctx.state.<asVar>.<sub>` inside
@@ -84,7 +86,8 @@ const STATE_REF_RE = /(?:ctx\.state\.|\$\.state\.)([A-Za-z_]\w*)(?:\.([\w.]+))?/
 /**
  * Extract dotted paths from a single string value. Handles both the
  * `js/ctx.request.body.X.Y` form (used by JS expressions) and the
- * `$.req.body.X.Y` form (the v2 DSL). Same regex matches both.
+ * legacy `$.req.body.X.Y` string spelling (never Mapper-resolved, but
+ * some hand-written workflows still contain it). Same regex matches both.
  *
  * Also resolves `ctx.state.<asVar>.X.Y` references against the
  * current scope's `as` bindings — these come from inside a `forEach`

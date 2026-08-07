@@ -311,7 +311,7 @@ export default abstract class RunnerSteps {
 				// value VERBATIM and, crucially, the SAME object reference held
 				// in `ctx.state[<id>]`. Writing `contentType` onto it would (a)
 				// leak a spurious `contentType` key into the response body and
-				// `$.state.<id>`, and (b) throw on a primitive / frozen return.
+				// `ctx.state.<id>`, and (b) throw on a primitive / frozen return.
 				// The `"contentType" in` guard limits stamping to the wrapper
 				// shape, leaving raw payloads — and the state they're shared
 				// with — untouched. (Regression: Bug 4 + the `runtime.*`
@@ -841,7 +841,7 @@ export default abstract class RunnerSteps {
 
 								// Enrich error with step context so developers know which step failed.
 								// Attach `_blokStepId` directly on the wrap so TryCatchNode's
-								// envelope construction can surface `$.error.stepId` to authors
+								// envelope construction can surface `ctx.error.stepId` to authors
 								// without parsing the prefix back out of the message string.
 								const originalMsg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
 								const enrichedError = new Error(`${stepPrefix} failed: ${originalMsg}`);
@@ -900,7 +900,7 @@ export default abstract class RunnerSteps {
 			// unwrap past it. The wrap is the outermost layer (set inside
 			// the inner-try retry loop above); after unwrapping to the inner
 			// GlobalError this metadata would otherwise be lost. Surfaces to
-			// authors as `$.error.stepId` inside tryCatch.catch arms.
+			// authors as `ctx.error.stepId` inside tryCatch.catch arms.
 			const wrapStepId =
 				typeof e === "object" && e !== null && "_blokStepId" in e
 					? (e as { _blokStepId?: unknown })._blokStepId
@@ -955,7 +955,7 @@ export default abstract class RunnerSteps {
 	 * failed: ...` wrap), otherwise build a fresh `GlobalError` that
 	 * preserves the original chain via `.cause`, then stamp the wrap's
 	 * `_blokStepId` back on so `TryCatchNode.toErrorEnvelope` can surface
-	 * it as `$.error.stepId`. Pure — no ctx mutation. Extracted verbatim
+	 * it as `ctx.error.stepId`. Pure — no ctx mutation. Extracted verbatim
 	 * from the `runSteps` catch arm (E06-T002).
 	 */
 	private unwrapAndEnrichError(e: unknown, wrapStepId?: unknown): GlobalError {
@@ -991,7 +991,7 @@ export default abstract class RunnerSteps {
 			} else {
 				error_context = new GlobalError((e as Error).message);
 				// Preserve the original error chain so outer handlers
-				// (notably v0.5 TryCatchNode's `$.error.message` resolution)
+				// (notably v0.5 TryCatchNode's `ctx.error.message` resolution)
 				// can peel back through `.cause` to the author's original
 				// `throw new Error("...")` text instead of the runner's
 				// `[step N/M] <name> failed: ...` enriched prefix.
@@ -1000,7 +1000,7 @@ export default abstract class RunnerSteps {
 		}
 
 		// Stamp the wrap's stepId on the unwrapped error so TryCatchNode's
-		// `toErrorEnvelope` walk can surface it as `$.error.stepId`. The
+		// `toErrorEnvelope` walk can surface it as `ctx.error.stepId`. The
 		// inner-try wrap layer is gone by this point; this is the only
 		// place where the runner can identify which sub-step failed.
 		if (typeof wrapStepId === "string" && wrapStepId.length > 0) {
