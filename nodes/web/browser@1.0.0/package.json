@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/browser",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"files": ["dist"],
 	"description": "Playwright browser lifecycle nodes for BLOK workflows",
 	"type": "module",
@@ -24,8 +24,8 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
-		"@blokjs/core": "^2.0.0",
-		"@blokjs/runner": "^2.0.0",
+		"@blokjs/core": "^2.0.1",
+		"@blokjs/runner": "^2.0.1",
 		"playwright": "^1.62.1",
 		"zod": "^3.24.2"
 	},

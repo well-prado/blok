@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-mcp",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"files": ["dist"],
 	"description": "Model Context Protocol (MCP) trigger for Blok workflows \u2014 expose workflows as MCP tools over SSE + Streamable-HTTP on the shared Hono port.",
 	"type": "module",
@@ -15,9 +15,9 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^2.0.0",
-		"@blokjs/runner": "^2.0.0",
-		"@blokjs/shared": "^2.0.0",
+		"@blokjs/helper": "^2.0.1",
+		"@blokjs/runner": "^2.0.1",
+		"@blokjs/shared": "^2.0.1",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@opentelemetry/api": "^1.9.0",
 		"hono": "^4.11.7",

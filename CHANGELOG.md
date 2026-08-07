@@ -10,6 +10,23 @@ packages on npm version independently within each release line.
 
 _Nothing yet._
 
+## [2.0.1] — 2026-08-07
+
+### Fixed
+
+- **Scaffolded projects now build and run under plain Node** (#709). The v2.0.0
+  packaging fix healed every published package, but a generated project compiles
+  the copied template source with its own `tsc` — which never rewrites
+  specifiers — so `npm run build && node dist/...` (any Node container or
+  serverless deploy) failed with `ERR_MODULE_NOT_FOUND` while the Bun dev path
+  hid it. Template sources now carry explicit NodeNext specifiers, generated
+  projects get `moduleResolution: "nodenext"` (an extensionless import in YOUR
+  code is now a compile error, not a deploy-time crash), and a
+  `check:template-esm` CI gate keeps it that way.
+- **`npm run start` works on fresh scaffolds.** The inherited `start` script
+  pointed at a `dist/index.js` no project build produces; it now runs the real
+  primary-trigger entry under Node (`node dist/triggers/<kind>/index.js`).
+
 ## [2.0.0] — 2026-08-07
 
 ### Security

@@ -1,6 +1,6 @@
 {
 	"name": "@blokjs/trigger-websocket",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"files": ["dist"],
 	"description": "WebSocket trigger for Blok workflows - real-time bidirectional communication",
 	"type": "module",
@@ -15,15 +15,15 @@
 	"author": "Deskree Technologies Inc.",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@blokjs/helper": "^2.0.0",
-		"@blokjs/runner": "^2.0.0",
-		"@blokjs/shared": "^2.0.0",
+		"@blokjs/helper": "^2.0.1",
+		"@blokjs/runner": "^2.0.1",
+		"@blokjs/shared": "^2.0.1",
 		"@hono/node-ws": "^1.3.1",
 		"@opentelemetry/api": "^1.9.0",
 		"uuid": "^11.1.0"
 	},
 	"peerDependencies": {
-		"@blokjs/trigger-pubsub": "^2.0.0",
+		"@blokjs/trigger-pubsub": "^2.0.1",
 		"ws": "^8.19.0"
 	},
 	"peerDependenciesMeta": {
@@ -35,7 +35,7 @@
 		}
 	},
 	"devDependencies": {
-		"@blokjs/core": "^2.0.0",
+		"@blokjs/core": "^2.0.1",
 		"@types/node": "^22.15.21",
 		"@types/uuid": "^11.0.0",
 		"@types/ws": "^8.18.1",
