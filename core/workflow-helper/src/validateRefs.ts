@@ -324,8 +324,9 @@ function publishedKeys(step: Record<string, unknown>): string[] {
  * both — `examples/v05-primitives/09-polling-with-backoff.json` publishes
  * `attempt` via bare `ctx-publish`. Matching only the scoped form made every
  * bare-ref publish invisible, which surfaced as 8 false dangling-step errors
- * the moment #690's corpus migration turned previously-unparseable `$.state`
- * strings into structural refs this pass could finally read.
+ * the moment #690's corpus migration turned previously-unparseable
+ * dollar-prefixed state strings into structural refs this pass could
+ * finally read.
  */
 function refIs(use: string, canonical: string): boolean {
 	return use === canonical || use === canonical.replace(/^@[^/]+\//, "");

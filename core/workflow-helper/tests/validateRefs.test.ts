@@ -545,7 +545,7 @@ describe("validateRefs — graceful degradation", () => {
 // forms (`examples/v05-primitives/09-polling-with-backoff.json` publishes
 // `attempt` via bare `ctx-publish`). Regression: matching only the scoped form
 // produced 8 false dangling-step errors on the integration merge with #690's
-// corpus migration — the migration turned `$.state…` strings this pass could
+// corpus migration — the migration turned dollar-prefixed state strings this pass could
 // not parse into structural refs it suddenly could.
 
 describe("validateRefs — published slots resolve for scoped and bare refs", () => {
