@@ -19,5 +19,6 @@
 		"jsxImportSource": "react",
 		"types": ["node"]
 	},
-	"include": ["./src/**/*.ts", "./src/**/*.tsx", "./package.json"]
+	"include": ["./src/**/*.ts", "./src/**/*.tsx", "./package.json"],
+	"exclude": ["./src/**/__tests__", "./src/**/*.test.ts", "./src/**/*.test.tsx"]
 }

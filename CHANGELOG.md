@@ -41,6 +41,59 @@ packages on npm version independently within each release line.
   Two silent-disable holes closed along the way: `readConcurrencyConfig` and
   `readSchedulingConfig` coerced a non-string key (an unlowered `{$ref}`) to `""`,
   which turned the concurrency gate and debounce off entirely with no signal.
+### Changed
+
+- **Packaging gate now covers every publishable-looking package; `blokctl`'s
+  tarball no longer ships its own test suite** (#697). Follow-up to #687/#696:
+  four `private: false` packages sat outside `PUBLISHABLE` (`scripts/release.ts`)
+  and so outside the packed-artifact gate entirely.
+  - `@blokjs/syntax` and `@blokjs/lsp-server` are **added back to
+    `PUBLISHABLE`**. Both actually shipped to npm at `0.2.0`/`0.2.1` during the
+    changesets era, then fell out of the lockstep publish list without ever
+    being marked `private`. Their in-repo version kept advancing (currently
+    `0.6.0` locally vs. `0.2.1` on the registry) while `packages/lsp-server/
+    editors/*` (Neovim, Emacs, Helix, Sublime) kept telling users to
+    `npm install -g @blokjs/lsp-server` — real, already-published, stale
+    tooling with zero gate coverage. Both are bumped to `2.0.1` to rejoin
+    lockstep and will publish on the next release.
+  - `@blokjs/browser` is set **`private: true`**. It carries a lockstep-looking
+    version (`2.0.1`) but has never actually been published (`npm view
+    @blokjs/browser` 404s), has no user-facing docs instructing an install, and
+    is reached by `@blokjs/trigger-http` only via an optional `try { await
+    import(...) }` with no manifest dependency — so there was no live breakage,
+    just a misleading manifest state.
+  - `blok-vscode` is set **`private: true`** — it publishes to the VS Code
+    Marketplace via `vsce`, not npm.
+  - The packaging gate (`scripts/check-packed-exports.ts`) now fails fast if
+    any workspace package is neither `private: true` nor listed in
+    `PUBLISHABLE` — the four packages above can't silently drift out of gate
+    coverage again.
+  - `blokctl`'s published tarball no longer contains `dist/__tests__/`
+    (`packages/cli/tsconfig.json` now excludes test files from the build, same
+    pattern `core/runner` already used).
+- **TypeScript workflows are now auto-routed by file-scan, like JSON
+  already was** (#695). `HttpTrigger.buildFileBasedRoutes()` scanned
+  `src/workflows/*.ts` at boot but only used the result to build a
+  display map — the route table itself was built from JSON + the manual
+  `src/Workflows.ts` map only, so a `.ts` workflow with an `http` trigger
+  produced **zero routes** until it was ALSO hand-registered in
+  `Workflows.ts`. That made the framework's own recommended authoring
+  format the one that still needed a manual step. A workflow scanned from
+  disk AND listed in `Workflows.ts` (the common shape mid-migration)
+  resolves to exactly one route — not a collision — with a deterministic
+  winner and a boot warning if the two sources genuinely disagree.
+  `Workflows.ts` is now the back-compat / advanced path (workflows
+  outside the scan root, or a deliberate explicit map), not something new
+  workflows need — see the [HTTP trigger docs](docs/d/triggers/http.mdx#file-based-routing).
+
+  > **⚠️ Upgrade note:** if your project has `.ts` files under
+  > `src/workflows/` that declare an `http` trigger but were never added
+  > to `src/Workflows.ts` — leftover experiments, half-finished drafts,
+  > copy-pasted scaffolds — those routes were previously **silently
+  > inert**. After upgrading they **start serving traffic** at their
+  > declared (or file-derived) path. Audit `src/workflows/` before
+  > upgrading in production, or run `blokctl routes` to see the full
+  > table before deploying.
 
 ## [2.0.1] — 2026-08-07
 
