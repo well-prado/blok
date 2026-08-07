@@ -184,7 +184,14 @@
 												"path": []
 											}
 										},
-										"error": "js/ctx.error.message"
+										"error": {
+											"$ref": {
+												"step": "@error",
+												"path": [
+													"message"
+												]
+											}
+										}
 									}
 								},
 								{

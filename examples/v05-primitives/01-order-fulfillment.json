@@ -239,7 +239,14 @@
 										]
 									}
 								},
-								"reason": "js/ctx.error.message"
+								"reason": {
+									"$ref": {
+										"step": "@error",
+										"path": [
+											"message"
+										]
+									}
+								}
 							}
 						},
 						"stop": true

@@ -181,8 +181,22 @@
 							"status": 500,
 							"body": {
 								"error": "Signup failed",
-								"reason": "js/ctx.error.message",
-								"step": "js/ctx.error.name"
+								"reason": {
+									"$ref": {
+										"step": "@error",
+										"path": [
+											"message"
+										]
+									}
+								},
+								"step": {
+									"$ref": {
+										"step": "@error",
+										"path": [
+											"name"
+										]
+									}
+								}
 							}
 						}
 					}

@@ -292,8 +292,22 @@
 							"status": 502,
 							"body": {
 								"error": "Booking saga rolled back",
-								"failedAt": "js/ctx.error.name",
-								"reason": "js/ctx.error.message",
+								"failedAt": {
+									"$ref": {
+										"step": "@error",
+										"path": [
+											"name"
+										]
+									}
+								},
+								"reason": {
+									"$ref": {
+										"step": "@error",
+										"path": [
+											"message"
+										]
+									}
+								},
 								"bookingId": {
 									"$ref": {
 										"step": "@trigger",

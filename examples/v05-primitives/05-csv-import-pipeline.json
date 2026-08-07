@@ -119,8 +119,22 @@
 													"path": []
 												}
 											},
-											"error": "js/ctx.error.message",
-											"errorCode": "js/ctx.error.code",
+											"error": {
+												"$ref": {
+													"step": "@error",
+													"path": [
+														"message"
+													]
+												}
+											},
+											"errorCode": {
+												"$ref": {
+													"step": "@error",
+													"path": [
+														"code"
+													]
+												}
+											},
 											"failedAt": "new Date().toISOString()"
 										}
 									}
