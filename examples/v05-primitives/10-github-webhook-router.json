@@ -19,7 +19,8 @@
 						"when": "push",
 						"do": [
 							{
-								"id": "handle",
+								"id": "handle-push",
+								"as": "handle",
 								"subworkflow": "handle-push",
 								"inputs": {
 									"event": {
@@ -46,7 +47,8 @@
 						],
 						"do": [
 							{
-								"id": "handle",
+								"id": "handle-pr",
+								"as": "handle",
 								"subworkflow": "handle-pr-event",
 								"inputs": {
 									"event": {
@@ -69,7 +71,8 @@
 						"when": ["issues", "issue_comment"],
 						"do": [
 							{
-								"id": "handle",
+								"id": "handle-issue",
+								"as": "handle",
 								"subworkflow": "handle-issue-event",
 								"inputs": {
 									"event": {
@@ -86,7 +89,8 @@
 						"when": "release",
 						"do": [
 							{
-								"id": "handle",
+								"id": "handle-release",
+								"as": "handle",
 								"subworkflow": "handle-release",
 								"inputs": {
 									"event": {
@@ -103,7 +107,8 @@
 						"when": "workflow_run",
 						"do": [
 							{
-								"id": "handle",
+								"id": "handle-workflow-run",
+								"as": "handle",
 								"subworkflow": "handle-workflow-run",
 								"inputs": {
 									"event": {
